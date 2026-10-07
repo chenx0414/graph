@@ -216,3 +216,5 @@ main 使用 artifact_publish 的可选 graphId，在自己拥有的原生 graph 
 main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被替代或取消的精确版本；不需要再指定 graphId。宿主根据已发布产物的实际 graph 归属和本次 main 执行身份校验所有权，外部会话的读取权限不等于修改权限。撤回事件归属该 graph；重复调用不重复写事件，旧版本字节仍可按精确引用读取，其他版本不受影响。
 
 确认草稿必须声明非空 definition.acceptance，并在外层 acceptance 摘要中完整列出同一组 ID 和描述；check 的 checkNode 对应 module，review 的 checkNode 对应 node。数量、ID、描述或检查对象不一致时，validate_proposal 和 propose_graph 都会在创建草稿前拒绝，不把无法执行或与用户展示矛盾的验收留到完成时才发现。human 仍使用用户验收流程，不从路由 passed 推断人工批准。
+
+脚本化 ActionAdapter 用于无模型的确定性宿主测试，其 operation.input 来自当前已 claim 的投递 value（聊天 / 控制输入保留对应 payload），context.briefing 是该次实际组装的 prompt；不再读取旧 proposal.nodes 的 input/context。正式节点仍通过各自常驻 Pi 执行。原生节点详情的 elapsedMs / timing.totalMs 记录实际执行墙钟时间并可在重启后查看；未记录的 runMs / waitingMs 分项保持 null。

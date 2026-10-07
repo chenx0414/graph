@@ -26,10 +26,14 @@ import type { ActionAdapter } from '../../src/core/types.ts';
 test('S1/S2/S3: a v2 graph drains through a scripted action with no model configured', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-scripted-lane-'));
   let ran = 0;
+  let received: unknown;
+  let briefing: unknown;
   const work: ActionAdapter = {
     kind: 'agent',
     reserveTokens: 100,
-    prepare: async () => async () => {
+    prepare: async operation => async () => {
+      received = operation.input;
+      briefing = operation.context?.briefing;
       ran += 1;
       await writeFile(join(root, 'out.txt'), 'done\n');
       return {
@@ -81,12 +85,14 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
     const executions = store.db.prepare('SELECT node_id,state FROM kernel_executions WHERE task_id=?').all(taskId) as { node_id: string; state: string }[];
     const submissions = store.db.prepare('SELECT id FROM kernel_submissions WHERE task_id=?').all(taskId) as { id: string }[];
+    store.close();
 
+    expect(received).toEqual({ text: 'go' });
+    expect(briefing).toContain('GRAPH OVERVIEW');
     expect(dispatched).toBeGreaterThan(0);
     expect(ran).toBe(1);
     expect(executions).toEqual([{ node_id: 'work', state: 'completed' }]);
     expect(submissions.length).toBe(1);
-    store.db.close();
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });

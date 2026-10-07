@@ -601,36 +601,24 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         workspaceFor: projectRootFor(store),
         ...(options.actions && !(options.models || options.live) ? {
           scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number, workspace?: string) => {
-            // The test drives the node with its own ActionAdapter: the same one the old
-            // executor used, so a migrated test keeps the result it was written to expect.
-            // The adapter is keyed by ACTION, not by node id. The old executor looked it up
-            // the same way, and a migrated test keeps the result it was written to expect
-            // only if the lookup does too: a graph may name a node `n0` while the action it
-            // performs is `work`, and a graph-command node has no adapter at all.
+            // Scripted actions reuse the generic operation contract with native
+            // input and briefing; no legacy proposal fields participate.
             const row = store.db.prepare("SELECT spec,kind FROM kernel_nodes WHERE task_id=? AND node_id=?").get(graphId, nodeId) as { spec: string; kind: string } | undefined;
             const spec = row ? JSON.parse(row.spec) as { task?: string; recipe?: string } : undefined;
             const action = spec?.task ?? nodeId;
             const adapter = options.actions![action] ?? options.actions![nodeId];
             if (!adapter) return { missing: ['out'] };
-            // The adapter is written against the OLD executor's Operation, and reads real
-            // fields from it - `workspace` to find its own work copy, `input` for what to do.
-            // Handing it a thin object made every adapter that reads either field fail
-            // silently, which is why so many migrated graphs simply never ran.
-            //
-            // The old node's own fields live in the confirmed proposal, not in the v2
-            // definition (the definition keeps a fixed shape and drops `input`), so that is
-            // where they are read from - by node id, which is what the test named.
-            const confirmed = store.db.prepare('SELECT p.spec AS spec FROM proposals p JOIN tasks t ON t.accepted_proposal=p.version WHERE t.id=?').get(graphId) as { spec: string } | undefined;
-            const legacyNodes = confirmed ? (JSON.parse(confirmed.spec) as Proposal).nodes ?? [] : [];
-            const legacy = legacyNodes.find(node => node.id === nodeId);
+            const queued = store.db.prepare("SELECT kind,payload FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed'").get(graphId, nodeId) as { kind: string; payload: string } | undefined;
+            if (!queued) throw new RuntimeError('invalid_queue', 'Scripted execution requires its claimed input');
+            const payload = JSON.parse(queued.payload) as Json;
             const prepared = await adapter.prepare({
               id: `op-${graphId}-${nodeId}-${turn}`,
               nodeId, instanceId: (row ? (store.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined)?.instance_id : undefined) ?? nodeId,
               taskId: graphId, activationId: undefined, turn, action, attempt: turn,
               kind: adapter.kind, model: 'scripted', recipe: spec?.recipe ?? 'worker@1',
               ...(workspace ? { workspace } : {}),
-              input: (legacy?.input ?? {}) as Json,
-              ...(legacy?.context ? { context: legacy.context } : {}),
+              input: queued.kind === 'delivery' ? (payload as { value: Json }).value : payload,
+              context: { briefing: text },
               dependencySources: {}, messages: [], images: [],
             } as never);
             const result = await prepared();

@@ -629,3 +629,16 @@
 - 第六十四轮首次完整门禁为 269 文件 / 1859 用例通过，5 文件 / 7 用例失败，189.18 秒；所有失败均来自遗漏正式 criterion 或隐藏一个正式宿主检查的有效草稿夹具，不放宽生产校验。手工修订 confirm-graph / graph-auto-run / scripted-lane / v2-completion 的人工验收声明，浏览器状态合同外层补齐现有 check；保留实际执行与断言。v2-completion 明确证明成功节点不能代替用户验收，graph-auto-run 修正措辞为“队列清空”而非整个 graph 完成。5 文件 / 17 用例聚焦通过，7.17 秒。另补同一验证合同中 review 目标与摘要不一致的拒绝，未增加测试数量；完整门禁重跑待完成。
 
 - 第六十四轮修订后完整门禁通过：274 文件、1866 用例，191.30 秒；TypeScript、lint、数量基线及验收证据检查通过。生产净增加 4 行，测试净增加 21 行，未增加或删除用例。旧 SDK / 调度器退役、正式默认切换及整个 spec 仍未完成。
+
+
+## 节点详情真实 Pi 合同迁移与脚本输入旧字段退役
+
+- node-run 的实际 Pi 记录 / 重启一致性合同、实际 HTTP 详情 / 分页 / 未知节点合同仍通过旧 dependsOn 图和伪造 digest 的程序 Evidence 启动 worker。两项改为手工原生声明、显式输入和非隐式完成的 human criterion，删除对应旧节点数组及假检查适配器，不使用转换器。
+- 保留 actual read 工具调用 / 结果、assistant 回复、Pi session、权威 provider usage、条目总数、HTTP 限量分页和未知节点拒绝。原生执行采用 completed 状态、实测 elapsedMs 和总墙钟时间；runMs / waitingMs 尚无实际分项记录，明确断言 null 而非补造零。初始提示记录以实际 HTTP 请求核对，重启后完整条目、sessionId 与实测时间一致。首轮旧分类 user:briefing 断言不适用原生 message，改核对角色、graph 概述及实际发送正文，不为分类字符串改动生产代码。
+- Scripted ActionAdapter 桥仍查旧 proposal.nodes 的 input/context，原生投递反而收到 {}。扩展现有无模型实际宿主合同，捕获真实 adapter 收到的输入，修复前期望 {text:"go"} 实际 {}；删除旧 proposal 查询与字段回退，使用本节点已 claim 队列的实际 value / payload 和本次组装的 briefing。缺少 claim 时明确拒绝，仍经过原 NodeSubmitBridge / KernelStore 提交和一次完成记录。
+- 节点详情单文件 8 用例通过，5.71 秒；合并聚焦 3 文件、12 用例通过，6.08 秒。移除 pause-ledger 夹具返回的无人使用假 Evidence adapter；该独立旧暂停账本合同与旧存储投影合同仍保留，不宣称 node-run 整个文件或原生暂停计时已迁移完毕。
+- 第六十五轮完整门禁待执行。只删除原生脚本输入的旧字段兼容，其他旧 SDK / 调度器分支仍待退役；正式默认切换及整个 spec 仍未完成。
+
+- 第六十五轮初次门禁在 TypeScript 阶段发现 SDK nodeRun 返回新旧投影联合类型，测试不能直接访问仅原生具备的 elapsedMs；使用字段判别读取，并继续要求首个实测时间为正、重启后相等，不扩大生产类型或伪造旧投影字段。修正后重跑完整门禁。
+
+- 第六十五轮修订后完整门禁通过：274 文件、1866 用例，194.23 秒；TypeScript、lint、数量基线及验收证据检查通过。生产净减少 12 行，测试及支持净增加 14 行，未增删测试数量。旧 SDK / 调度器、剩余旧图测试及原生暂停计时仍待处理；正式默认切换及整个 spec 仍未完成。
