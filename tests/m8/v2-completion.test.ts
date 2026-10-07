@@ -14,6 +14,7 @@ const definition = {
     work: { recipe: 'worker@1', task: 'work', acceptance: ['ok'], inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } },
   },
   modules: {}, edges: {}, inputs: {}, outputs: {},
+  acceptance: [{ id: 'ok', description: 'ran', kind: 'human' }],
 };
 
 async function run(limitNodes = 1) {
@@ -61,11 +62,11 @@ test('C1: a v2 node that submits reads succeeded', async () => {
   expect(statuses).toEqual({ work: 'succeeded' });
 }, 30_000);
 
-test('C2: successful node status cannot replace confirmed final evidence', async () => {
+test('C2: successful node status cannot replace confirmed human acceptance', async () => {
   const { phase, statuses, acceptance } = await run(1);
   expect(statuses).toEqual({ work: 'succeeded' });
   expect(phase).toBe('blocked');
-  expect(acceptance.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'ok', status: 'missing' })]));
+  expect(acceptance.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'ok', kind: 'human', status: 'missing' })]));
 }, 30_000);
 
 test('C3: a node that cannot supply its required output stays visible as failed', async () => {

@@ -66,6 +66,7 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
           },
         },
         modules: {}, edges: {}, inputs: {}, outputs: {},
+        acceptance: [{ id: 'ok', description: 'ran', kind: 'human' }],
       },
     } as never, 'draft');
     await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });

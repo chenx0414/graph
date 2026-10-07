@@ -16,10 +16,11 @@ import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
  * and a v2 node's session comes from its recipe. §13.8 is only honestly done when the
  * RUNNING runtime does the whole thing without a test calling the graph step by step: a
  * confirmed draft becomes a v2 graph, main sends the first input, the host loop notices it has work, and the graph runs
- * to completion through real per-node processes and a real on-disk kernel.
+ * until its execution queues drain, through real per-node processes and an on-disk kernel.
+ * Final completion still requires the separately declared human acceptance.
  *
  * Failure modes first (R24):
- *   R1  a confirmed v2 draft runs to completion off the ordinary host loop
+ *   R1  a confirmed v2 draft drains off the ordinary host loop
  *   R2  a task with no v2 graph is untouched by the lane (old path unaffected)
  *   R3  the two nodes of the graph really ran, each with its own execution
  */
@@ -39,6 +40,7 @@ const DEFINITION = parseGraphDefinition({
   },
   modules: {},
   edges: { e: { from: 'a.out', to: 'b.in', enabled: true } },
+  acceptance: [{ id: 'works', description: '链跑通', kind: 'human' }],
 });
 
 async function fixture() {
@@ -60,7 +62,7 @@ function models(provider: Awaited<ReturnType<typeof openaiServer>>) {
   };
 }
 
-describe('§13.8 E2E — a confirmed v2 graph runs to completion on the host loop', () => {
+describe('§13.8 E2E — the host loop drains a confirmed v2 graph', () => {
   test('R1/R3: the ordinary host loop drains a confirmed v2 graph through real per-node processes', async () => {
     // The controlled model: a submits 42, then b submits 43, on two separate processes.
     const provider = await openaiServer([

@@ -94,7 +94,8 @@ test('the conversation page surfaces master questions, live worker status, costs
   const anchorTaskId = (await server.runtime.conversations.view(created.conversationId)).anchorTaskId;
   await server.runtime.supervisor(anchorTaskId).propose({
     requirementVersion: 1, summary: 'Independent sidebar fixture',
-    acceptance: [{ id: 'a1', description: 'Human checks final output', checkNode: 'check' }],
+    acceptance: [{ id: 'check', description: 'Host check passes', checkNode: 'check' },
+      { id: 'a1', description: 'Human checks final output', checkNode: 'check' }],
     definition: parseGraphDefinition({ schemaVersion: 2, name: 'Independent sidebar fixture', protocols: { data: { type: 'object' } },
       nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Submit the finished work', inputs: { job: { protocol: 'data' } },
         outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },

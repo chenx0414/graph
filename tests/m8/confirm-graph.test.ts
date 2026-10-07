@@ -135,7 +135,7 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
       requirementVersion: 1, summary: '两节点链',
       acceptance: [{ id: 'works', description: '链跑通', checkNode: 'b' }],
       nodes: [],
-      definition: DEFINITION,
+      definition: { ...DEFINITION, acceptance: [{ id: 'works', description: '链跑通', kind: 'human' }] },
     }, 'proposal-v2');
 
     const app = await createApp(runtime, { origin: 'http://127.0.0.1:1' });

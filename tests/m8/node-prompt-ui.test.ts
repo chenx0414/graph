@@ -61,7 +61,8 @@ test('native draft preview renders modules, named interfaces and the actual grap
     definition: parseGraphDefinition({ schemaVersion: 2, name: 'native-draft', protocols: { result: { type: 'object' } },
       nodes: { worker: { recipe: 'worker@1', task: 'Write the result', inputs: { job: { protocol: 'result' } }, outputs: { result: { protocol: 'result' } }, submission: {} } },
       modules: { gate: { type: 'router', trigger: 'once', inputs: { review: { protocol: 'result' } }, outputs: { accepted: { protocol: 'result' } }, rules: [] } },
-      edges: { review: { from: 'worker.result', to: 'gate.review', enabled: true } } }),
+      edges: { review: { from: 'worker.result', to: 'gate.review', enabled: true } },
+      acceptance: [{ id: 'reviewed', description: 'Review the result', kind: 'human' }] }),
   }, 'draft');
   const page = await launch();
   await page.goto(`${server.url}/#/conversations/${conversation.conversationId}/graph?v=1`);

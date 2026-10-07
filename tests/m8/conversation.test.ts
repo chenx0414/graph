@@ -224,6 +224,21 @@ test('Main Agent can validate a graph, inspect its state, list projects and bind
     valid: true,
     requirementVersion: conversation.requirementVersion,
   });
+  const inconsistent: ((draft: NativeProposal) => void)[] = [
+    draft => { delete draft.definition.acceptance; },
+    draft => { draft.acceptance[0]!.description = 'A different user-visible requirement'; },
+    draft => { draft.acceptance[0]!.checkNode = 'work'; },
+    draft => { draft.definition.acceptance![0] = { id: 'works', description: '检查通过', kind: 'review', node: 'work' }; },
+    draft => { draft.acceptance[0]!.id = 'another-requirement'; },
+    draft => { draft.definition.acceptance!.push({ id: 'hidden', description: 'Undisclosed manual approval', kind: 'human' }); },
+  ];
+  for (const [index, change] of inconsistent.entries()) {
+    const draft = structuredClone(validProposal); change(draft);
+    await expect(supervisor.validateProposal(draft)).rejects.toMatchObject({ code: 'invalid_proposal' });
+    await expect(supervisor.propose(draft, `inconsistent-${index}`)).rejects.toMatchObject({ code: 'invalid_proposal' });
+    expect((await runtime.conversations.view(created.conversationId)).proposal).toBeNull();
+  }
+
 
   await runtime.projects.prepare({ projectId: 'one', requestId: 'prepare-one' });
   const bound = await supervisor.bindProject({ projectId: 'one', requestId: 'bind-one' });
