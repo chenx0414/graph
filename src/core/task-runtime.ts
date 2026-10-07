@@ -1,7 +1,7 @@
 import { sendKernelMainMessage, sendKernelNodeMessage } from './kernel-node-messages.ts';
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
-import { kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse } from './kernel-views.ts';
+import { kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse, kernelConversationNodes } from './kernel-views.ts';
 import { sendNodeMessage, sendPeerMessage } from './node-messages.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -1242,7 +1242,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           targetBranch: task.target_branch, acceptedProposalVersion: task.accepted_proposal, integrationSha: task.integration_sha,
           openQuestions: openForUser.map(question => ({ id: question.id, nodeId: question.node_id, kind: question.kind, data: JSON.parse(question.data) as Json })),
           internalProblemCount: open.filter(question => question.owner === 'main').length,
-          nodes: nodes.map(row => ({ id: row.id, kind: (JSON.parse(row.spec) as NodeSpec).kind, role: (JSON.parse(row.spec) as NodeSpec).role ?? null, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget, model: row.model, definitionVersion: row.definition_version, stallCount: row.stall_count, outputVersion: row.output_version })),
+          nodes: kernel.latestRevision(task.id) ? kernelConversationNodes(kernel, task.id) : nodes.map(row => ({ id: row.id, kind: (JSON.parse(row.spec) as NodeSpec).kind, role: (JSON.parse(row.spec) as NodeSpec).role ?? null, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget, model: row.model, definitionVersion: row.definition_version, stallCount: row.stall_count, outputVersion: row.output_version })),
           cost: taskCost(task.id),
           evidence: evidence.map(item => ({ acceptanceId: item.acceptance_id, valid: Boolean(item.valid) })),
         };

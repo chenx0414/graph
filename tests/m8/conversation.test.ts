@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { Proposal, ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
+import type { Proposal, NativeProposal, ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
@@ -26,6 +26,21 @@ async function temp(name: string) {
 }
 
 const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
+
+// A hand-authored interface workflow for draft/confirmation contracts. Nothing
+// executes until the main agent delivers to work.job; check is a host module.
+function workflowDraft(requirementVersion: number, summary: string): NativeProposal {
+  return { requirementVersion, summary,
+    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'm', task: summary, inputs: { job: { protocol: 'data' } },
+        outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+      edges: { checked: { from: 'work.result', to: 'check.job', enabled: true } },
+      acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }] }) };
+}
+
 
 function scripted(handler: (operation: Operation) => Promise<OperationResult> | OperationResult): ActionAdapter {
   return { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => handler(operation) };
@@ -175,12 +190,7 @@ test('Main Agent can validate a graph, inspect its state, list projects and bind
   expect(projects.map(project => project.id)).toEqual(['one', 'two']);
   expect(projects.every(project => 'preparation' in project)).toBe(true);
 
-  const validProposal = {
-    requirementVersion: conversation.requirementVersion,
-    summary: 'Validate only.',
-    acceptance: [{ id: 'a1', description: 'Passes.', checkNode: 'check' }],
-    nodes: [{ id: 'check', kind: 'program' as const, action: 'check' }],
-  };
+  const validProposal = workflowDraft(conversation.requirementVersion, 'Validate only.');
   await expect(supervisor.validateProposal({
     ...validProposal,
     acceptance: [{ id: 'a1', description: 'Passes.', checkNode: 'missing' }],
@@ -627,14 +637,7 @@ test('drafts version on the same requirement and only the latest can be confirme
   const conversation = await runtime.conversations.view(created.conversationId);
   const anchorTaskId = conversation.anchorTaskId;
 
-  const proposal = (summary: string) => ({
-    requirementVersion: 1, summary,
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  });
+  const proposal = (summary: string) => workflowDraft(1, summary);
   await runtime.supervisor(anchorTaskId).propose(proposal('旧方案'), 'proposal-1');
   await runtime.supervisor(anchorTaskId).propose(proposal('新方案'), 'proposal-2');
   const drafted = await runtime.conversations.view(created.conversationId);
@@ -656,7 +659,14 @@ test('drafts version on the same requirement and only the latest can be confirme
   expect(after.tasks).toHaveLength(1);
   expect(after.tasks[0]!.id).toBe(confirmed.taskId);
   expect(after.tasks[0]!.phase).toBe('running');
-  expect(after.tasks[0]!.nodes.map(node => node.id)).toEqual(['work', 'check']);
+  expect(after.tasks[0]!.nodes.map(node => node.id)).toEqual(['work']);
+  expect(after.tasks[0]!.nodes[0]!.status).toBe('idle');
+  expect(runtime.kernelGraph(confirmed.taskId)).toMatchObject({ revision: 1, definition: {
+    modules: { check: { type: 'operation', operation: { action: 'workspace.command' } } },
+    edges: { checked: { from: 'work.result', to: 'check.job', enabled: true } },
+  } });
+  const queued = await runtime.supervisor(anchorTaskId).graphInspect({ graphId: confirmed.taskId, query: 'queue' }) as { items: unknown[] };
+  expect(queued.items).toEqual([]);
   expect(after.accepted.map(item => item.proposalVersion)).toEqual([2]);
   expect(after.proposalHistory.map(item => ({ version: item.version, accepted: item.accepted, stale: item.stale }))).toEqual([
     { version: 1, accepted: false, stale: true },
@@ -672,7 +682,7 @@ test('drafts version on the same requirement and only the latest can be confirme
     expect.objectContaining({
       taskId: confirmed.taskId,
       graphVersion: 1,
-      nodes: [expect.objectContaining({ id: 'work' }), expect.objectContaining({ id: 'check' })],
+      nodes: [expect.objectContaining({ id: 'work', origin: 'v2', status: 'idle' })],
     }),
   ]);
   await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-again' }))
@@ -681,84 +691,44 @@ test('drafts version on the same requirement and only the latest can be confirme
   expect((await runtime.user.list()).map(task => task.id)).toEqual([confirmed.taskId]);
 });
 
-test('a conversation master revises the feature task it created', async () => {
+test('a conversation master patches its native feature graph and reads queued status', async () => {
   const root = await temp('revise-feature');
-  const project = join(root, 'project');
-  const { mkdir, writeFile } = await import('node:fs/promises');
-  await mkdir(project, { recursive: true });
-  await writeFile(join(project, 'check.js'), 'console.log("ok");\n');
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
-    actions: {
-      master: scripted(() => ({ outcome: 'completed', output: { text: '继续交流' }, usage })),
-      work: scripted(() => ({ outcome: 'completed', output: { built: true }, usage })),
-    },
+  const project = join(root, 'project'); await mkdir(project);
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: '继续交流' }, usage })) },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
   });
   cleanup.push(() => runtime.close());
   const created = await runtime.conversations.create({ text: '先做最小可用版', requestId: 'create' });
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await runtime.supervisor(anchorTaskId).propose({
-    requirementVersion: 1, summary: '最小可用版',
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  }, 'proposal');
+  const supervisor = runtime.supervisor(anchorTaskId);
+  await supervisor.propose(workflowDraft(1, '最小可用版'), 'proposal');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
-
-  // The anchor task never holds a confirmed proposal, so the feature task is the only revision
-  // target and a revision without taskId must land on it: a model that a provider degrades has to
-  // be replaceable after confirmation.
-  const revised = await runtime.supervisor(anchorTaskId).revise({
-    baseVersion: 1,
-    reason: '把实现模型换到另一个可用模型',
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm2' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-    requestId: 'revise-feature',
-  });
-  expect(revised).toMatchObject({ taskId: confirmed.taskId, graphVersion: 2 });
-  const graphState = await runtime.supervisor(anchorTaskId).graphState() as {
-    relatedTasks: { taskId: string; graphVersion: number; nodes: { id: string; model?: string }[] }[];
-  };
-  expect(graphState.relatedTasks).toEqual([
-    expect.objectContaining({
-      taskId: confirmed.taskId,
-      graphVersion: 2,
-      nodes: [expect.objectContaining({ id: 'work', model: 'm2' }), expect.objectContaining({ id: 'check' })],
-    }),
-  ]);
-
-  // The compact status read reports the same revision, the per-node model and
-  // the node input on demand, and it blocks until a node settles (or times out).
-  const supervisor = runtime.supervisor(anchorTaskId);
-  const status = await supervisor.taskStatus({ taskId: confirmed.taskId }) as {
-    taskId: string; graphVersion: number; nodes: { id: string; status: string; model?: string; input?: unknown }[];
-  };
-  expect(status).toMatchObject({ taskId: confirmed.taskId, graphVersion: 2 });
-  expect(status.nodes.map(node => node.id)).toEqual(['work', 'check']);
-  expect(status.nodes[0]).toMatchObject({ status: 'pending', model: 'm2', kind: 'agent' });
-  expect(status.nodes[0]!.input).toBeUndefined();
-  const focused = await supervisor.taskStatus({ taskId: confirmed.taskId, nodeId: 'check' }) as {
-    nodes: { id: string; input?: { command?: string; args?: string[] } }[];
-  };
-  expect(focused.nodes).toHaveLength(1);
-  expect(focused.nodes[0]!.input).toEqual({ command: 'node', args: ['check.js'] });
-  const waited = await supervisor.taskStatus({ taskId: confirmed.taskId, waitForNode: 'work', timeoutMs: 0 }) as { reason: string };
-  expect(waited).toMatchObject({ reason: 'timeout' });
-  await expect(supervisor.taskStatus({ nodeId: 'nope' })).rejects.toMatchObject({ code: 'not_found' });
-  await expect(supervisor.taskStatus({ taskId: '0faf1367-0000-0000-0000-000000000000' }))
-    .rejects.toMatchObject({ code: 'invalid_input' });
-
-  // Another task is not reachable through this channel.
-  await expect(runtime.supervisor(anchorTaskId).revise({
-    baseVersion: 2, reason: '越界', nodes: [], requestId: 'revise-outside', taskId: '0faf1367-0000-0000-0000-000000000000',
-  })).rejects.toMatchObject({ code: 'invalid_input' });
+  const graphId = confirmed.taskId;
+  expect(await supervisor.graphPatch({ graphId, baseRevision: 1, changes: {
+    reason: '把下次实现模型换到另一个可用模型', patch: { nodes: { work: { model: 'm2' } } },
+  } })).toEqual({ revision: 2 });
+  const graphState = await supervisor.graphState() as { relatedTasks: { taskId: string; graphVersion: number; nodes: { id: string }[] }[] };
+  expect(graphState.relatedTasks).toEqual([expect.objectContaining({ taskId: graphId, graphVersion: 2,
+    nodes: [expect.objectContaining({ id: 'work', origin: 'v2', status: 'idle' })] })]);
+  const status = await supervisor.taskStatus({ taskId: graphId }) as { taskId: string; graphVersion: number; nodes: { id: string }[] };
+  expect(status).toMatchObject({ taskId: graphId, graphVersion: 2 });
+  expect(status.nodes.map(node => node.id)).toEqual(['work']);
+  const focused = await supervisor.taskStatus({ taskId: graphId, nodeId: 'work' });
+  expect(focused).toMatchObject({ nodes: [{ id: 'work', status: 'idle', kind: 'agent', configuration: {
+    model: 'm2', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+  } }] });
+  const definition = await supervisor.graphInspect({ graphId, query: 'revision' });
+  expect(definition).toMatchObject({ modules: { check: { operation: { action: 'workspace.command', command: 'node', args: ['--version'] } } } });
+  expect(await supervisor.taskStatus({ taskId: graphId, waitForNode: 'work', timeoutMs: 0 })).toMatchObject({ reason: 'settled' });
+  // Queued input is pending work even before the host starts a Pi process.
+  await supervisor.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} });
+  expect(await supervisor.taskStatus({ taskId: graphId, waitForNode: 'work', timeoutMs: 0 })).toMatchObject({ reason: 'timeout' });
+  await expect(supervisor.taskStatus({ taskId: graphId, nodeId: 'nope' })).rejects.toMatchObject({ code: 'not_found' });
+  await expect(supervisor.taskStatus({ taskId: '0faf1367-0000-0000-0000-000000000000' })).rejects.toMatchObject({ code: 'invalid_input' });
+  await expect(supervisor.graphPatch({ graphId: '0faf1367-0000-0000-0000-000000000000', baseRevision: 1,
+    changes: { reason: '越界', patch: { nodes: {} } } })).rejects.toMatchObject({ code: 'not_found' });
 });
 
 test('post-confirmation chat keeps the requirement fixed and sees real execution status', async () => {
@@ -961,7 +931,6 @@ test('a scope change after confirmation becomes a new queued task, not an edit o
     projects: [{ id: 'p', root: project }],
     actions: {
       master: scripted(() => ({ outcome: 'completed', output: { text: '这会是一个新任务。' }, usage })),
-      work: scripted(() => ({ outcome: 'completed', output: { done: true }, usage })),
     },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
   });
@@ -969,14 +938,7 @@ test('a scope change after confirmation becomes a new queued task, not an edit o
   const created = await runtime.conversations.create({ text: '先做第一版', requestId: 'create' });
   await runtime.host.runReady();
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  const proposal = (summary: string, requirementVersion: number) => ({
-    requirementVersion, summary,
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  });
+  const proposal = (summary: string, requirementVersion: number) => workflowDraft(requirementVersion, summary);
   await runtime.supervisor(anchorTaskId).propose(proposal('第一版', 1), 'draft-1');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   const first = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-1' });
@@ -1055,14 +1017,7 @@ test('rebinding a conversation invalidates drafts investigated for the previous 
   const created = await runtime.conversations.create({ projectId: 'a', text: '只改进 A', requestId: 'create' });
   await runtime.host.runReady();
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  const draft = (version: number, summary: string) => ({
-    requirementVersion: version, summary,
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  });
+  const draft = (version: number, summary: string) => workflowDraft(version, summary);
   await runtime.supervisor(anchorTaskId).propose(draft(1, '来自 A 的草稿'), 'draft-a');
   const rebound = await runtime.conversations.bind(created.conversationId, { projectId: 'b', requestId: 'rebind' });
   expect(rebound).toMatchObject({ invalidatedDrafts: true });

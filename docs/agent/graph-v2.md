@@ -201,3 +201,6 @@ SDK 的原生草稿类型是 `NativeProposal`（src/core/types.ts），必须包
 
 
 节点通过 send_to_peer 向 main 发送聊天时，消息进入顶层 graph 所属的 main 会话，并记录 graphId、nodeId 和 requestId；main 位于 graph 外部。Pi 工具和 SDK sendPeerMessage 使用同一持久回执规则：同一发送者向同一目标重放同内容只投递一次，改变内容拒绝。graph 停止或完成后不接受内部 agent 的新聊天，但旧回执可重放，main 自己的会话继续服务。graph 没有所属会话时，向 main 发送明确报错。
+
+
+main 所属会话的任务卡片包含原生 agent 节点，不再依赖旧 nodes / instances。卡片状态与累计已知用量来自原生账本，模型来自实际绑定，预算来自最近一次执行保存的额度；运行后仅修改下次额度不会改写这段执行历史。操作模块通过 graph_inspect 的定义和模块查询查看，节点列表只表示 agent。

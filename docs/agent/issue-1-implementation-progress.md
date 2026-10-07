@@ -552,3 +552,14 @@
 - 定向预算合同 2 文件、12 用例通过，7.74 秒；新增 fixture 仅提供真实 SSE 注释，不注入用量、提交回执或 Git 结果。生产改动 6 行，新增一个真实 Pi / Git 回归；第五十七轮完整门禁待执行。整个 spec、旧内核退役及默认切换仍未完成。
 
 - 第五十七轮完整门禁通过：273 文件、1864 用例，187.81 秒；TypeScript、lint、数量基线与验收证据检查通过。首次类型检查发现 nodeRun 新旧调用记录联合类型不能直接读取原生 state；测试改用公共 usageSource 并对原生记录作类型收窄后，全量通过。新增一个真实未知用量 / 冻结额度 / Git 提交 / 有限额度等待合同使基线增加 1。整个 spec 和旧内核退役仍未完成。
+
+
+## main 的原生草稿、确认、patch 与会话节点卡片
+
+- 手动迁移 conversation 主合同中的五项：草稿验证、同需求版本/历史/最新确认、主 agent 修改 feature graph、范围变更创建排队任务、重新绑定项目使旧草稿失效。共享的是手工声明的 NativeProposal，具名接口、连接及 workspace.command 模块；没有旧定义转换器。旧 revise 调用改为 graph_patch，保留 revision / 状态 / 配置 / 非法目标读取拒绝；操作模块通过 graph_inspect 查看。
+- 原生迁移后草稿确认合同真实失败：conversations.view 的 task.nodes 是 []，不是 idle 的 work。该 reader 原先只读旧 nodes 表；新增 kernelConversationNodes 从原生节点、绑定、累计用量和最新执行冻结额度批量读取卡片事实，不读取完整 prompt / 会话分页。旧分支暂留直到整体 SDK / 调度器切换，不声称旧入口已关闭。
+- 草稿历史、过期拒绝、已确认范围保持不变的原断言均保留；确认不隐含执行，原生 work 为 idle、队列为空；仅明确 graphSend 后 taskStatus 等待才超时。外部 main 仍属于会话。不存在 graph 的 graph_patch 返回 not_found，保留新 API 实际合同，不沿用旧 revise 的错误码。
+- 既有真实 Pi / main 聊天合同增加独立来源的卡片验证：三次 provider 响应各明确 7 输入 + 3 输出，卡片 used 为 30、实际 local 模型与 worker 身份、worker@1 配方及冻结不限额度均来自真实运行。随后声明下次额度为 500000，历史预算仍不限，不把新配置当作旧执行的预算。
+- 初步定向 2 文件、45 用例通过，20.21 秒；随后补充额度卡片 patch 验证。测试数量不增加，五项旧 DAG 合同在原文件内迁移，移除这些夹具里不再调用的 work adapter 和旧图输入。第五十八轮完整门禁待执行。整个 spec、旧内核退役和正式默认切换仍未完成。
+
+- 第五十八轮完整门禁通过：273 文件、1864 用例，184.73 秒；TypeScript、lint、数量基线及验收证据检查通过，测试数量不变。第一次类型检查发现手工夹具的 NativeProposal type import 未补齐，修正后最终全量通过。五项 native 草稿 / patch 合同及真实 Pi 节点卡片累计用量、绑定与冻结预算验证均通过；整个 spec、旧 SDK / 调度器退役及正式默认切换仍未完成。

@@ -115,15 +115,25 @@ test('the resident Pi peer tool publishes the same durable message arc as the SD
 
 test('resident Pi messages to main are durable once per sender request and replay through the SDK', async () => {
   const input = { to: 'main', text: 'Please clarify the acceptance criterion.', requestId: 'main-peer' };
+  const knownUsage = { prompt_tokens: 7, completion_tokens: 3 };
   const { runtime, taskId, store, mainTurns } = await setup([
-    { tools: [{ id: 'first', name: 'send_to_peer', arguments: JSON.stringify(input) }] },
-    { tools: [{ id: 'retry', name: 'send_to_peer', arguments: JSON.stringify(input) }] },
-    { text: 'Waiting for main.' },
+    { usage: knownUsage, tools: [{ id: 'first', name: 'send_to_peer', arguments: JSON.stringify(input) }] },
+    { usage: knownUsage, tools: [{ id: 'retry', name: 'send_to_peer', arguments: JSON.stringify(input) }] },
+    { usage: knownUsage, text: 'Waiting for main.' },
   ], true);
   await runtime.sendNodeMessage(taskId, 'work', { text: 'Ask main for clarification.', requestId: 'start' });
   await runtime.host.drive();
   const conversationId = store.task(taskId).conversation_id!;
   const peerMessages = async () => (await runtime.conversations.view(conversationId)).messages.filter(message => message.kind === 'peer');
+  const conversation = await runtime.conversations.view(conversationId);
+  expect(conversation.tasks.find(task => task.id === taskId)!.nodes.find(node => node.id === 'work')).toMatchObject({
+    id: 'work', status: 'succeeded', model: 'local', role: 'worker', definitionVersion: 'worker@1', used: 30, unlimited: true, budget: null,
+  });
+  await runtime.supervisor(taskId).graphPatch({ graphId: taskId, baseRevision: 1, changes: {
+    reason: 'Finite quota for the next turn', patch: { nodes: { work: { budget: { tokens: 500000 } } } },
+  } });
+  expect((await runtime.conversations.view(conversationId)).tasks.find(task => task.id === taskId)!.nodes.find(node => node.id === 'work'))
+    .toMatchObject({ used: 30, unlimited: true, budget: null });
   const messages = await peerMessages();
   expect(messages).toHaveLength(1);
   expect(messages[0]).toMatchObject({ state: 'delivered', text: `[work](graph://${taskId}/agents/work): ${input.text}`,

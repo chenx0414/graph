@@ -18,6 +18,25 @@ export function kernelGraphView(kernel: KernelStore, graphId: string) {
   };
 }
 
+/** Compact conversation cards read native node facts without loading session pages. */
+export function kernelConversationNodes(kernel: KernelStore, graphId: string) {
+  const rows = kernel.db.prepare(`SELECT n.node_id,n.spec,n.status,b.role,b.model_id,s.used,e.token_budget
+    FROM kernel_nodes n LEFT JOIN kernel_node_bindings b ON b.task_id=n.task_id AND b.node_id=n.node_id
+    LEFT JOIN kernel_node_state s ON s.task_id=n.task_id AND s.node_id=n.node_id
+    LEFT JOIN kernel_executions e ON e.rowid=(SELECT MAX(rowid) FROM kernel_executions WHERE task_id=n.task_id AND node_id=n.node_id)
+    WHERE n.task_id=? ORDER BY n.rowid`).all(graphId) as {
+      node_id: string; spec: string; status: string; role: string | null; model_id: string | null;
+      used: number | null; token_budget: string | null;
+    }[];
+  return rows.map(row => {
+    const spec = JSON.parse(row.spec) as GraphDefinition['nodes'][string];
+    const budget = row.token_budget ? JSON.parse(row.token_budget) as { budget: number; unlimited: boolean } : null;
+    return { id: row.node_id, kind: 'agent' as const, role: row.role, status: row.status, used: row.used ?? 0,
+      unlimited: budget?.unlimited ?? false, budget: budget?.unlimited ? null : budget?.budget ?? null,
+      model: row.model_id, definitionVersion: spec.recipe ?? null, stallCount: 0, outputVersion: 0 };
+  });
+}
+
 export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: string, query: { after?: number; before?: number; limit?: number }) {
   const row = kernel.listNodes(graphId).find(node => node.nodeId === nodeId);
   const definition = kernel.latestRevision(graphId)?.definition.nodes[nodeId];
