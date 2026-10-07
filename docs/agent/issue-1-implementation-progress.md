@@ -439,3 +439,13 @@
 - 定向 M7 / production / 最终 Git 验收 3 文件、14 用例，扩展工具/会话/生命周期 6 文件、63 用例及 TypeScript 通过。模型说明修复后第四十六轮完整门禁待执行。
 
 - 第四十六轮完整门禁通过：276 文件、1874 用例，170.41 秒；TypeScript、lint 与验收证据检查通过。整个 spec、SDK 切换与旧内核退役仍未完成。
+
+## M7 真实应用 production 交付合同改用原生内核
+
+- 原生 CLI 与 main 工具语法已提交为 0480a8d。继续手动迁移 tests/m7/production.test.ts，使用独立 conversation / main 与确认 graph、具名输入、宿主 workspace.command 模块和原生完成请求。未使用提升器，也未新建兼容执行路径。
+- 真实 Pi 通过 write_file 将 B站 Web 三个文件写入独立 worktree；宿主实际执行 Node Web API 测试。独立 reader 实际读取这些文件并发布绑定当前 commit 的 graph.review@1 文件，验收核对四项检查、独立审查与用户确认；确认后交付目标 main，来源仓库 HEAD 与工作树保持原样。删除本用例的假 passingReviewAction / program ActionAdapter 回执。
+- 迁移初次保留旧 write 工具名，真实工具结果为 Tool write not found，宿主检查明确报找不到测试文件，验收不通过。修正为实际 write_file 后通过。Web 检查需要本机监听与 CLI 子进程，因此测试明确配置 full access 和 sandbox:false；中途权限回调误传对象已修正，不算产品缺陷。
+- SDK 的 Proposal 类型仍要求旧 nodes，暂以类型断言传入真实原生对象；未给它添加空旧节点或转换定义。该类型及旧 SDK 执行入口仍需在整体退役阶段清理。M7 delivery / freeze / adapters 的旧合同仍待手动迁移，未声称整个 M7 或默认切换完成。
+- 此原生应用用例与 TypeScript 已通过；第四十七轮完整门禁待执行。
+
+- 第四十七轮完整门禁通过：276 文件、1874 用例，172.78 秒；TypeScript、lint 与验收证据检查通过。原生应用交付与来源仓库保护通过最终验证。
