@@ -1449,9 +1449,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         // reviewed on the confirmation card; nothing from later chat or from a
         // previous project binding can slip in.
         const decisionDigest = row.decision_snapshot;
-        store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,1,1,1,?,?,?,1,?,?)')
-          .run(taskId, conversation.project_id, proposal.summary, input.targetBranch, phase, sequence, conversationId, decisionDigest);
-        store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)').run(taskId, 1, 1, row.spec, row.decision_snapshot);
+        store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,?,1,1,?,?,?,1,?,?)')
+          .run(taskId, conversation.project_id, proposal.summary, row.requirement_version, input.targetBranch, phase, sequence, conversationId, decisionDigest);
+        store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)').run(taskId, 1, row.requirement_version, row.spec, row.decision_snapshot);
         // §13.8 switchover: a draft that carries a v2 graph definition creates a v2 graph
         // (§5 graph_create takes exactly this definition). The old declarative rows would
         // put this task on the old executor, so they are skipped entirely. The confirmed

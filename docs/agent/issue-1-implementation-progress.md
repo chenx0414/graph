@@ -458,3 +458,13 @@
 - M7 freeze / production / 跨进程 CLI 3 文件、4 用例，14.89 秒及 TypeScript 通过。未移除其他有价值的旧 Git、权限、审查或合并冲突合同；M7 仍有 delivery / adapters / proposal 一套旧入口待迁移，SDK 类型与整个旧调度器退役继续实施。第四十八轮完整门禁待执行。
 
 - 第四十八轮完整门禁通过：276 文件、1874 用例，172.13 秒；TypeScript、lint 与验收证据检查通过。原生冻结/确认及旧 SDK 拒绝均通过全量验证。下一项为 M7 多 worker delivery 的原生迁移，随后删除它独占的 adapters / proposal；不跳过独立工作副本、真实应用检查、共享审查与来源仓库保护。
+
+## M7 原生多 worker 交付与确认需求版本
+
+- 多 worker delivery 改由四个真实常驻 Pi 执行：API/UI 使用独立工作副本，测试节点读取已集成实现，独立 reviewer 读取实际文件、发布共享 Markdown 与绑定当前 commit 的正式报告。宿主执行真实 Web API 检查，用户确认后才交付同一 commit；保留原 CLI scripts、JavaScript 工具链和来源仓库保护。
+- 实测需求讨论到版本 2 后，确认创建的子 graph 需求版本仍写死为 1，导致所有检查及审查通过后仍被 requirement-version 阻塞。修复前公开交付回归失败；确认现在保存所确认草稿的实际需求版本，子 graph 的草稿/结构版本仍独立从 1 开始。未取消版本验收约束。
+- 退役候选证据：tests/m7/adapters.ts 的 mediaBookmarksActions 与 proposal.ts 的 mediaBookmarksProposal 仅互相引用，没有生产或其他测试调用；历史 f1ddaaa 为补齐 M7 独立验收而保留 scripted 夹具。迁移后的 delivery 在公开 runtime/Pi/Git 边界保护独立工作副本、集成后读取、共享审查、真实检查和来源保护，production / freeze / CLI 继续覆盖应用交付、需求冻结与跨进程恢复。删除这两个无调用的旧支持文件，不删除测试。风险是遗漏旧夹具的独立合同；通过完整 tests/m7 与全量门禁验证。
+- 本用例使用本地 HTTP 模型响应、预写应用内容和合成用户确认，不证明自主规划、真实 B站登录或付费模型 A13 验收；main 明确等待代码集成后启动测试与检查，不声称 submit 会隐含等待 Git 集成。
+- 交付/冻结/会话定向验证 4 文件、49 用例及 TypeScript 通过；删除旧支持文件后的 M7 与第四十九轮完整门禁待执行。
+
+- 第四十九轮完整门禁通过：276 文件、1874 用例，178.62 秒；TypeScript、lint 与验收证据检查通过。删除支持文件后 M7 定向 6 文件、8 用例通过；完整 spec 和旧内核退役仍在进行。

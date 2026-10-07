@@ -127,11 +127,13 @@ Standards：**2 项文档规则违反、1 项判断性建议**；最严重等级
 
 ### SP-11 · P1 · M7 当前证据不能证明 Graph 自主完成真实任务
 
-涉及 G17–G18/A13。[tests/m7/adapters.ts:34–69](../../tests/m7/adapters.ts) 使用写死的任务图和预写文件，工人把 fixtures 复制进工作副本；review 只检查源码中几个字符串；usage 为固定数字。[delivery.test.ts:71](../../tests/m7/delivery.test.ts) 由测试代替用户 acknowledge 登录，没有真实登录或页面验收。
+涉及 G17–G18/A13。[tests/m7/adapters.ts:34–69](https://github.com/chenx0414/graph/blob/d0193bbf2587093d16fdd6e97bc667bbb81b9959/tests/m7/adapters.ts#L34-L69) 使用写死的任务图和预写文件，工人把 fixtures 复制进工作副本；review 只检查源码中几个字符串；usage 为固定数字。[delivery.test.ts:71](https://github.com/chenx0414/graph/blob/d0193bbf2587093d16fdd6e97bc667bbb81b9959/tests/m7/delivery.test.ts#L71) 由测试代替用户 acknowledge 登录，没有真实登录或页面验收。
 
 这些测试证明了编排、复制、检查及合入机制，值得保留。但 G18 要求“Graph 自行拆解……实现、检查、独立审查……”，产品完成标准还要求真实任务验收。结合 SP-01 的生产路径断开，不能把此脚本视为已完成自主开发证明，也不能用同一脚本生成的用量充当真实调用记录。
 
 问题不在于使用克隆或未发布；隔离副本可以作为交付目标。缺的是生产 Agent 实际完成任务，以及已确认功能真实可用的证据。应把当前 M7 结果标为 scripted 机制演练，补齐生产路径后再执行真实任务验收。原产品范围未授权用 scripted 演练替换 A13。
+
+2026-10-07 迁移说明：M7 的交付、production、冻结与 CLI 合同已手动改用原生 Graph v2，旧 adapters / proposal 支持文件退役；上面的链接固定在当时的验收提交。当前本地 HTTP / 预写内容 / 合成用户确认的测试仍不能代替自主开发和真实登录 A13 验收。
 
 ### SP-12 · P2 · B站页面缺少登录前置与采集中进度
 
