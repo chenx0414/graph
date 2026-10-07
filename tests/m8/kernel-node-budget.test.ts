@@ -3,9 +3,10 @@ import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { expect, test } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { git } from '../../src/git/git.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { TaskStore } from '../../src/core/store.ts';
 
@@ -157,4 +158,72 @@ test('native unlimited turns estimate absent usage while finite turns retain an 
   } finally {
     await runtime?.close(); await finite.close(); await unlimited.close(); await rm(root, { recursive: true, force: true });
   }
+}, 30000);
+
+
+test('unestimatable unlimited usage permits the frozen turn and Git commit, but holds the next finite execution', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'graph-native-unknown-usage-'));
+  const root = join(parent, 'project'); await mkdir(root);
+  const checkedGit = (args: string[]) => { const result = git(root, args); if (result.code) throw new Error(result.stderr); return result.stdout.trim(); };
+  checkedGit(['init', '-b', 'main']); checkedGit(['config', 'user.name', 'Graph Test']); checkedGit(['config', 'user.email', 'graph-test@example.invalid']);
+  await writeFile(join(root, 'seed.txt'), 'baseline'); checkedGit(['add', 'seed.txt']); checkedGit(['commit', '-m', 'Baseline']);
+  let release!: () => void; let received!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const arrived = new Promise<void>(resolve => { received = resolve; });
+  const provider = await openaiServer([
+    // Large transport evidence exceeds the estimator's bounded reader. The valid
+    // SSE comment does not inflate the model transcript or invent a usage receipt.
+    { usage: null, comments: ['x'.repeat(8_000_001)], beforeReply: async () => { received(); await waiting; },
+      tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: 'result.txt', content: 'Work with unknown usage' }) }] },
+    { tools: [{ id: 'commit', name: 'workspace_commit', arguments: JSON.stringify({ paths: ['result.txt'], message: 'Publish actual work' }) }] },
+    { text: 'Committed the work.' },
+  ]);
+  let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
+  try {
+    const capabilityRoot = join(parent, 'capabilities'); await mkdir(capabilityRoot);
+    runtime = await openTaskRuntime({ stateDir: join(parent, 'state'), projects: [{ id: 'p', root }], access: () => fullAccessPolicy(),
+      catalog: { capabilityRoot, recipesPath: join(parent, 'recipes.json') },
+      models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
+        grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
+    });
+    runtime.catalog.publishDefinition('writer', { recommendedGrade: 'medium' }, 'writer');
+    const owner = await runtime.user.begin({ projectId: 'p', request: 'Unknown unlimited usage', requestId: 'begin' });
+    const main = runtime.supervisor(owner.taskId);
+    const { graphId } = await main.graphCreate({ targetBranch: 'main', definition: parseGraphDefinition({ schemaVersion: 2, name: 'unknown usage', protocols: { job: { type: 'object' } },
+      nodes: { work: { recipe: 'writer@1', model: 'local', task: 'Write result.txt, commit it and report.', inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {}, budget: { tokens: null } } },
+      modules: {}, edges: {} }) }) as { graphId: string };
+    await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} });
+    const drive = runtime.host.drive();
+    try {
+      await arrived;
+      await main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Finite budget for the next execution', patch: { nodes: { work: { budget: { tokens: 500000 } } } } } });
+    } finally { release(); await drive; }
+    expect(provider.requests).toHaveLength(3);
+    const commitReply = (provider.requests[2] as { messages: { role: string; tool_call_id?: string; content: string }[] }).messages
+      .find(message => message.role === 'tool' && message.tool_call_id === 'commit');
+    expect(commitReply).toBeDefined();
+    const toolResult = JSON.parse(commitReply!.content) as { content: { type: string; text: string }[] };
+    const committed = JSON.parse(toolResult.content.find(part => part.type === 'text')!.text) as { commit: string };
+    expect(committed).toMatchObject({ commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
+    expect(checkedGit(['show', `${committed.commit}:result.txt`])).toBe('Work with unknown usage');
+    const run = runtime.nodeRun(graphId, 'work');
+    expect(run.node.status).toBe('succeeded');
+    expect(run.invocations.filter(call => call.usageSource === 'unknown')).toMatchObject([{ usage: null, usageSource: 'unknown', cost: null }]);
+    const firstExecutions = await main.graphInspect({ graphId, query: 'executions' }) as { items: { attempt: number; tokenBudget: { budget: number; unlimited: boolean } }[] };
+    expect(firstExecutions.items[0]!.tokenBudget).toEqual({ budget: 0, unlimited: true });
+    const view = await runtime.user.task(graphId).view();
+    expect(view.integrationSha).toBeTruthy();
+    expect(checkedGit(['show', `${view.integrationSha}:result.txt`])).toBe('Work with unknown usage');
+    await runtime.sendNodeMessage(graphId, 'work', { text: 'A finite follow-up.', requestId: 'finite-next' });
+    await runtime.host.drive();
+    expect(provider.requests).toHaveLength(3);
+    const next = runtime.nodeRun(graphId, 'work');
+    expect(next.node.status).toBe('blocked');
+    const nextExecutions = await main.graphInspect({ graphId, query: 'executions' }) as { items: { attempt: number; tokenBudget: { budget: number; unlimited: boolean } }[] };
+    expect(nextExecutions.items.at(-1)).toMatchObject({ attempt: 0, tokenBudget: { budget: 500000, unlimited: false } });
+    expect(next.invocations.filter(call => 'state' in call).find(call => call.state === 'unknown')!.reserved).toBeGreaterThan(0);
+    expect(runtime.events(graphId).filter(event => event.type === 'graph.node.blocked').at(-1)!.data)
+      .toMatchObject({ reason: expect.stringMatching(/Unknown provider usage must be reconciled/) });
+    expect(next.invocations.filter(call => call.usageSource === 'unknown')).toHaveLength(1);
+  } finally { release(); await runtime?.close(); await provider.close(); await rm(parent, { recursive: true, force: true }); }
 }, 30000);

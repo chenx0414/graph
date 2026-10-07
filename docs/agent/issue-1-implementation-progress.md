@@ -541,3 +541,14 @@
 - 定向消息 / wake / conversation-queue 合同 3 文件、20 用例通过，4.10 秒；随后补充 main 在 graph 停止后继续回复的验证。第五十六轮完整门禁待执行。该轮未退役旧 SDK / 调度器，也未完成整个 spec。
 
 - 第五十六轮完整门禁通过：273 文件、1863 用例，185.30 秒；TypeScript、lint、数量基线与验收证据检查通过。新增一个 main peer owner-boundary 回归使基线增加 1；停止 graph 后外部 main 继续处理聊天也通过全量验证。整个 spec、旧内核退役和正式默认切换仍未完成。
+
+
+## 不限额度且无法估算的原生用量
+
+- graph-mvp 明确允许不限额度在无法估算时继续，原生 provider gate 和 workspace_commit 却无条件拦截 unknown。真实本地 HTTP / Pi 回归以有效 SSE 注释超过估算器的有界读取上限，响应正常、用量确实无法估算；未修复时后续实际请求只有 1 次而非 3 次。只修 provider gate 后，真实 workspace_commit 又返回 Reconcile unknown provider usage 拒绝。
+- 两个入口只依据当前执行冻结的 tokenBudget.unlimited 放行，缺失预算历史不作为不限额度。unknown 调用保持 null 用量、unknown 来源、未知费用及占位，已知调用继续记录实际用量，不把未知成本记为零。运行期间 patch 到有限额度不改变本次执行的权限。
+- owner-boundary 合同验证工具返回的实际 commit、git show 中的实际文件，以及接口任务结束后的集成 commit 文件；不以聊天触发隐含集成。下次有限额度执行保留旧 unknown 占位并等待核对。测试最初有限额度等于执行预留量，先触发已用 token 导致超额的另一层拒绝；改用有余量的 500000 后暴露了未知用量被自动重试到 failed 的真实问题。
+- NodeExecutor 在保存冻结额度后、开始 attempt 前检查既有 unknown provider 调用，有限额度按 blocked 保留输入并暂停后续队列，attempt 保持 0。该检查不依赖异常消息中的 budget 字样，不以未知用量消耗自动重试。原有限额度缺失用量、估算来源与预算耗尽合同仍保留。
+- 定向预算合同 2 文件、12 用例通过，7.74 秒；新增 fixture 仅提供真实 SSE 注释，不注入用量、提交回执或 Git 结果。生产改动 6 行，新增一个真实 Pi / Git 回归；第五十七轮完整门禁待执行。整个 spec、旧内核退役及默认切换仍未完成。
+
+- 第五十七轮完整门禁通过：273 文件、1864 用例，187.81 秒；TypeScript、lint、数量基线与验收证据检查通过。首次类型检查发现 nodeRun 新旧调用记录联合类型不能直接读取原生 state；测试改用公共 usageSource 并对原生记录作类型收窄后，全量通过。新增一个真实未知用量 / 冻结额度 / Git 提交 / 有限额度等待合同使基线增加 1。整个 spec 和旧内核退役仍未完成。

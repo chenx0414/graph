@@ -145,6 +145,10 @@ export class NodeExecutor {
       else tokenBudget = { budget: tokens ?? 0, unlimited: tokens === null };
     }
     const execution = this.kernel.startExecution(this.graphId, { executionId, nodeId, revisionVersion: latest.version, ...(refused ? {} : { tokenBudget }) });
+    if (!refused && execution.tokenBudget?.unlimited === false
+      && this.kernel.db.prepare("SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state='unknown' LIMIT 1").get(this.graphId, nodeId)) {
+      refused = 'Unknown provider usage must be reconciled before starting a finite execution';
+    }
     if (refused) {
       this.kernel.finishExecution(executionId, 'blocked');
       this.kernel.blockNode(this.graphId, nodeId, refused);

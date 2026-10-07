@@ -9,6 +9,8 @@ export interface ResponsePlan {
   /** Stream the answer as these content deltas instead of one block. */
   chunks?: string[];
   thinking?: string;
+  /** Valid SSE comments, ignored by the model client but still part of transport evidence. */
+  comments?: string[];
   tools?: { id: string; name: string; arguments: string | (() => string) }[];
   finishReason?: 'stop' | 'length' | 'tool_calls';
   usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number }; completion_tokens_details?: { reasoning_tokens: number } } | null;
@@ -54,6 +56,7 @@ export async function openaiServer(plans: ResponsePlan[]) {
       return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (const comment of plan.comments ?? []) res.write(`: ${comment}\n\n`);
     const delta: Record<string, unknown> = { role: 'assistant' };
     if (plan.thinking) delta.reasoning_content = plan.thinking;
     if (plan.tools) {

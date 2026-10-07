@@ -18,7 +18,7 @@ export function kernelProviderGate(kernel: KernelStore, graphId: string, nodeId:
         const task = kernel.store.task(graphId);
         if (state.paused || task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Provider send is paused');
         const calls = kernel.db.prepare("SELECT state,reserved FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state IN ('inflight','unknown')").all(graphId, nodeId) as { state: string; reserved: number }[];
-        if (calls.some(call => call.state === 'unknown')) throw new RuntimeError('budget', 'Reconcile unknown provider usage before another send');
+        if (frozenLimit?.unlimited !== true && calls.some(call => call.state === 'unknown')) throw new RuntimeError('budget', 'Reconcile unknown provider usage before another send');
         const reserved = calls.reduce((total, call) => total + call.reserved, 0);
         if (frozenLimit && !frozenLimit.unlimited && state.used + reserved + reservation > frozenLimit.budget) throw new RuntimeError('budget', `Token budget exhausted for node ${nodeId}`);
         kernel.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at,model) VALUES(?,?,?,?,?,?,?,?)')
