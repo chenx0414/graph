@@ -1,3 +1,4 @@
+import { sendKernelNodeMessage } from '../core/kernel-node-messages.ts';
 import { executeModuleOperation } from './kernel-operation-broker.ts';
 import { waitForKernelExecutionSlot } from './execution-slots.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
@@ -13,7 +14,6 @@ import type { Catalog } from '../catalog/catalog.ts';
 import { modelIdentity, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
 import { graphAcceptance } from '../core/graph-acceptance.ts';
-import { GraphRuntime } from '../core/graph-runtime.ts';
 import { GraphLane, type GraphLaneOptions } from '../core/graph-lane.ts';
 import type { RunnerHost } from '../core/graph-runner.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
@@ -214,7 +214,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
               if (!options.onMainMessage) throw new Error('Main agent message channel unavailable');
               return options.onMainMessage(graphId, nodeId, message.text);
             }
-            return new GraphRuntime(options.kernel, graphId).chat({ nodeId: message.to, text: `From ${nodeId}: ${message.text}` }, true);
+            return sendKernelNodeMessage(options.kernel, graphId, message.to, message, nodeId);
           },
         },
         ...(options.artifacts ? { artifacts: {

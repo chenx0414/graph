@@ -706,13 +706,8 @@ export class KernelStore {
   }
 
   enqueue(taskId: string, input: { nodeId: string; kind: string; payload: Json }): QueueRow {
-    return this.store.transaction(() => {
-      const createdAt = Date.now();
-      const result = this.store.db.prepare('INSERT INTO kernel_queue(task_id,node_id,kind,payload,state,created_at) VALUES(?,?,?,?,?,?)')
-        .run(taskId, input.nodeId, input.kind, canonicalJson(input.payload), 'queued', createdAt);
-      const seq = Number(result.lastInsertRowid);
-      return { seq, taskId, nodeId: input.nodeId, kind: input.kind, payload: input.payload, state: 'queued' as const, createdAt };
-    });
+    const append = () => this.enqueueInCurrentTransaction(taskId, input);
+    return this.store.db.isTransaction ? append() : this.store.transaction(append);
   }
 
   /** Main's recovery view: acceptance order and a cursor, including failed inputs. */

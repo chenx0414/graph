@@ -192,3 +192,6 @@ stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍�
 
 
 SDK 的原生草稿类型是 `NativeProposal`（src/core/types.ts），必须包含 `definition`，只声明 requirementVersion、summary、acceptance、decisions；不需要旧 nodes / containers / loops。`supervisor.propose` 与 `validateProposal` 接受原生对象，main 的 Pi 工具通道也使用这一类型。旧 Proposal 及旧 SDK 调用仍在退役，尚不能据此宣称旧内核已删除。
+
+
+原生节点聊天（runtime.sendNodeMessage）与内部 peer 聊天（runtime.sendPeerMessage、send_to_peer）均一次消息对应一次队列项；忙碌时排队，空闲时由宿主启动回复，保留原会话，不隐含重跑后继节点。requestId 按目标节点与发送者区分，同内容重放原 receipt，改变内容报 idempotency_conflict；已接受消息在 graph 停止后仍可重放 receipt，新消息关闭。peer 来源记入目标节点聊天记录，可视化消息弧读取该持久记录；用户消息不画成 peer 弧。跨 graph、无效发送者/目标和 self 消息拒绝。

@@ -1,69 +1,103 @@
-// The graph picture draws one arc per peer message that really happened.
-//
-// `graphMessages` is the only source of the canvas's message edges. It used to read
-// `messages.kind='agent_message'`, and when peer delivery was changed to hand the words straight to
-// the target node (steering its turn, or reactivating it), that row stopped being written - nothing
-// in the repository writes it any more. The picture then kept its shape while quietly dropping
-// facts: a real run had three peer messages between its nodes and the graph drew none of them.
-//
-// These assertions are about the same thing the canvas asks for, and the fixture is built by
-// sending a peer message through the product's own path rather than by inserting a row.
-import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import { scriptedLane } from '../fixtures/lane.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-async function setup() {
+async function setup(plans: ResponsePlan[] = [{ text: 'Peer reply' }, { text: 'User reply' }]) {
   const root = await mkdtemp(join(tmpdir(), 'graph-messages-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const lane = scriptedLane();
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], actions: {
-    work: lane.action,
-    check: { kind: 'program', prepare: async operation => async () => {
-      const path = join(root, `ok-${operation.id}.txt`); await writeFile(path, 'ok');
-      return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path, digest: createHash('sha256').update('ok').digest('hex') } }] };
-    } },
-  } });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'peer messages', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'peer messages', acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }], nodes: [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'sibling', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'sibling'] },
-  ] }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const provider = await openaiServer(plans); cleanup.push(() => provider.close());
+  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], access: () => fullAccessPolicy(),
+    catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+    models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
+      grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
+  });
+  cleanup.push(() => runtime.close()); runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
+  const parent = await runtime.user.begin({ projectId: 'p', request: 'peer messages', requestId: 'begin' });
+  const node = { recipe: 'worker@1', model: 'local', task: 'Reply to messages.', inputs: {}, outputs: {}, submission: {} };
+  const { graphId: taskId } = await runtime.supervisor(parent.taskId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2,
+    name: 'Peer messages', protocols: {}, nodes: { work: node, sibling: node }, modules: {}, edges: {} }) }) as { graphId: string };
   const store = new TaskStore(join(root, 'state/tasks.sqlite')); cleanup.push(() => store.close());
-  return { runtime, taskId, store };
+  return { runtime, taskId, store, provider };
 }
 
-test('a peer message that happened is what the graph draws, and deleting its record empties the picture', async () => {
-  const { runtime, taskId, store } = await setup();
-  await runtime.host.drive();
+test('a peer message that happened is what the native graph draws, and deleting its record empties the picture', async () => {
+  const { runtime, taskId, store, provider } = await setup();
   expect(runtime.graphMessages(taskId)).toHaveLength(0);
-
-  const delivered = await runtime.sendPeerMessage(taskId, 'work', { to: 'sibling', text: '你的诊断脚本里那段路径要 realpath 后再比', requestId: 'peer-1' });
-  expect(delivered).toMatchObject({ taskId, nodeId: 'sibling' });
-
-  // What the canvas asks for: one message, from the sender to the receiver, with the words.
+  const input = { to: 'sibling', text: '你的诊断脚本里那段路径要 realpath 后再比', requestId: 'peer-1' };
+  const delivered = await runtime.sendPeerMessage(taskId, 'work', input);
+  expect(delivered).toMatchObject({ taskId, nodeId: 'sibling', queued: true });
+  expect(await runtime.sendPeerMessage(taskId, 'work', input)).toEqual(delivered);
   const messages = runtime.graphMessages(taskId);
   expect(messages).toHaveLength(1);
-  expect(messages[0]).toMatchObject({ source: 'work', target: 'sibling', text: '你的诊断脚本里那段路径要 realpath 后再比' });
-  expect(messages[0]!.id).toBeTruthy();
-  expect(messages[0]!.createdAt).toBeGreaterThan(0);
-
-  // A user message to a node is not a peer message and must not be drawn as one.
+  expect(messages[0]).toMatchObject({ source: 'work', target: 'sibling', text: input.text });
+  expect(messages[0]!.id).toBeTruthy(); expect(messages[0]!.createdAt).toBeGreaterThan(0);
   await runtime.sendNodeMessage(taskId, 'work', { text: '用户的话', requestId: 'user-1' });
   expect(runtime.graphMessages(taskId)).toHaveLength(1);
-
-  // The picture is bound to the record, not to a cached copy: no record, no arc.
-  store.db.prepare('DELETE FROM node_entries WHERE task_id=? AND json_extract(data,\'$.peer\')=1').run(taskId);
+  await runtime.host.drive();
+  expect(runtime.nodeRun(taskId, 'sibling').node.status).toBe('succeeded');
+  const requests = JSON.stringify(provider.requests);
+  expect(requests).toContain(`From work: ${input.text}`);
+  for (const [from, to] of [['work', 'ghost'], ['ghost', 'work'], ['work', 'another-task:work'], ['work', 'work']]) {
+    await expect(runtime.sendPeerMessage(taskId, from!, { to: to!, text: '越权', requestId: `outside-${from}-${to}` }))
+      .rejects.toMatchObject({ code: 'invalid_input' });
+  }
+  expect(runtime.graphMessages(taskId)).toHaveLength(1);
+  store.db.prepare("DELETE FROM node_entries WHERE task_id=? AND json_extract(data,'$.peer')=1").run(taskId);
   expect(runtime.graphMessages(taskId)).toHaveLength(0);
 });
+
+test('busy native node chats queue once per request and rerun serially in the same conversation', async () => {
+  let release!: () => void; let received!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const arrived = new Promise<void>(resolve => { received = resolve; });
+  const { runtime, taskId, provider } = await setup([{ text: 'First reply', beforeReply: async () => { received(); await waiting; } },
+    { text: 'Peer reply' }, { text: 'Last reply' }]);
+  const instance = runtime.nodeRun(taskId, 'work').instance!.id;
+  const first = { text: 'First question', requestId: 'first' };
+  const receipt = await runtime.sendNodeMessage(taskId, 'work', first);
+  expect(await runtime.sendNodeMessage(taskId, 'work', first)).toEqual(receipt);
+  const drive = runtime.host.drive();
+  try {
+    await arrived;
+    const peer = { to: 'work', text: 'Second question', requestId: 'second' };
+    expect(await runtime.sendPeerMessage(taskId, 'sibling', peer)).toMatchObject({ queued: true });
+    await runtime.sendPeerMessage(taskId, 'sibling', peer);
+    await runtime.sendNodeMessage(taskId, 'work', { text: 'Third question', requestId: 'third' });
+    await expect(runtime.sendNodeMessage(taskId, 'work', { text: 'Changed first question', requestId: 'first' })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+    const queue = await runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'queue' }) as { items: { state: string }[] };
+    expect(queue.items.map(item => item.state)).toEqual(['claimed', 'queued', 'queued']);
+    expect(provider.requests).toHaveLength(1);
+  } finally { release(); await drive; }
+  expect(provider.requests).toHaveLength(3);
+  expect(runtime.nodeRun(taskId, 'work').instance!.id).toBe(instance);
+  const second = provider.requests[1] as { messages: { role: string; content: unknown }[] };
+  expect(JSON.stringify(second.messages)).toContain('First reply');
+  const latestUser = second.messages.filter(message => message.role === 'user').at(-1)!;
+  expect(JSON.stringify(latestUser.content)).toContain('From sibling: Second question');
+  expect(JSON.stringify(latestUser.content)).not.toContain('GRAPH OVERVIEW');
+  expect(runtime.nodeRun(taskId, 'sibling').operations).toHaveLength(0);
+  await runtime.supervisor(taskId).graphControl({ graphId: taskId, action: 'stop' });
+  await runtime.host.drive();
+  expect(await runtime.sendNodeMessage(taskId, 'work', first)).toEqual(receipt);
+  await expect(runtime.sendNodeMessage(taskId, 'work', { text: 'New work after stop', requestId: 'closed' })).rejects.toMatchObject({ code: 'stopping' });
+  expect(provider.requests).toHaveLength(3);
+}, 30000);
+
+test('the resident Pi peer tool publishes the same durable message arc as the SDK', async () => {
+  const { runtime, taskId } = await setup([{ tools: [{ id: 'peer', name: 'send_to_peer', arguments: JSON.stringify({ to: 'sibling', text: 'Review this idea', requestId: 'tool-peer' }) }] },
+    { text: 'Done' }, { text: 'Done' }]);
+  await runtime.sendNodeMessage(taskId, 'work', { text: 'Ask sibling for review.', requestId: 'start' });
+  await runtime.host.drive();
+  expect(runtime.graphMessages(taskId)).toMatchObject([{ source: 'work', target: 'sibling', text: 'Review this idea' }]);
+  expect(runtime.nodeRun(taskId, 'sibling').node.status).toBe('succeeded');
+}, 30000);

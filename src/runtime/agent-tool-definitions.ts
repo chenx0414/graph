@@ -422,7 +422,7 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     send_to_peer: {
-      name: 'send_to_peer', label: 'Send a message to a peer Agent', description: 'Send a durable message to another Agent of this graph. It is delivered like a user prompt: it steers the peer if it is running, or reactivates a finished peer so the message becomes the input of its next turn and shows up in that peer chat window. The peer does not have to be running now. A retried requestId is the same message, not a second one. Only nodes of your own graph are reachable.',
+      name: 'send_to_peer', label: 'Send a message to a peer Agent', description: 'Send a durable message to another Agent of this graph. The message triggers a reply when the peer is idle; while it is busy, the message queues for a later serial turn in the same conversation. It appears in the peer chat window. The peer does not have to be running now. A retried requestId is the same message, not a second one. Only nodes of your own graph are reachable.',
       parameters: Type.Object({
         to: Type.String(),
         text: Type.String(),

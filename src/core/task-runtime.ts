@@ -1,3 +1,4 @@
+import { sendKernelNodeMessage } from './kernel-node-messages.ts';
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
 import { kernelGraphView, kernelNodeRun, kernelNodePrompt } from './kernel-views.ts';
@@ -1700,9 +1701,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     async sendNodeMessage(taskId: string, nodeId: string, input: { text: string; requestId: string }) {
       ensureOpen();
       if (kernel.latestRevision(taskId)) {
-        const queued = new GraphRuntime(kernel, taskId).chat({ nodeId, text: input.text });
+        const receipt = sendKernelNodeMessage(kernel, taskId, nodeId, input);
         if (options.autoWake) execution.kick();
-        return { queued: true, seq: queued.seq, taskId, nodeId };
+        return receipt;
       }
       const receipt = await sendNodeMessage(store, execution, taskId, nodeId, input);
       if (options.autoWake) execution.kick();
@@ -1711,7 +1712,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     /** One Agent of a graph messaging another; delivered like a user prompt to the target node. */
     async sendPeerMessage(taskId: string, from: string, input: { to: string; text: string; requestId: string }) {
       ensureOpen();
-      const receipt = await sendPeerMessage(store, execution, taskId, from, input);
+      const receipt = kernel.latestRevision(taskId)
+        ? sendKernelNodeMessage(kernel, taskId, input.to, input, from)
+        : await sendPeerMessage(store, execution, taskId, from, input);
       if (options.autoWake) execution.kick();
       return receipt;
     },

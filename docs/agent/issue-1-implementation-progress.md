@@ -510,3 +510,13 @@
 - SDK 定向验证 5 文件、12 用例通过，5.87 秒。首次定向命令遗漏 GRAPH_MEDIABOOKMARKS_ROOT，两个 M7 用例在不存在的来源 cwd 调用 Git 报 ENOENT；补齐实际来源路径后通过，未改变产品或夹具以掩盖错误。第五十三轮完整门禁待执行。
 
 - 第五十三轮完整门禁通过：273 文件、1859 用例，176.78 秒；TypeScript、lint、数量基线与验收证据检查通过。原生 SDK 无旧 nodes 的调用已通过真实 M7、聊天界面及任务生命周期全量合同。整个 spec、默认切换及旧内核退役仍未完成。
+
+
+## 原生 SDK / 常驻 Pi 聊天入口与可视化事实
+
+- 原生 SDK 的 sendNodeMessage 原先忽略 requestId，重复请求实际创建第二条队列项；sendPeerMessage 仍读旧 nodes，拒绝真实原生节点；常驻 Pi 虽能排入 peer 输入，却不写可视化使用的来源账本。手动迁移 graph-messages 合同到真实本地 HTTP/Pi：修复前三个用例分别因上述原因失败。
+- SDK 节点/peer 及常驻 Pi 的节点间 peer 工具共用 sendKernelNodeMessage，校验同 graph 身份、消息大小和 requestId，队列/来源记录/receipt 同事务落账。命令 scope 区分目标与发送者，改变内容拒绝；内外聊天沿用已有完成/停止输入边界。enqueue 复用 enqueueInCurrentTransaction，已有事务内不二次 BEGIN，独立调用仍开启事务；未改变 TaskStore 全局事务行为。
+- 初次接入遇到 nested transaction，三个回归真实失败；上述 enqueue 修复后 3 文件、37 用例通过，4.83 秒。真实 Pi 首次回复等待期间收到 peer 和用户两条消息，队列为 claimed / queued / queued，释放后仅 3 次请求；后续请求保留旧回复但不重复注入初始 graph 概览，同一实例；发送者节点未被隐含运行。实际工具调用 send_to_peer 产生持久来源弧，用户消息不计作 peer 弧，删除来源记录即移除弧。
+- 保留 node-messages 的旧合同直至旧 SDK/调度器退役，不把旧 steering/后继失效规则迁回原生模型。main 作为 peer 目标仍沿既有 owning-conversation 通道，本轮仅统一节点间消息，没有声称验证其 requestId 幂等或整个默认切换完成。新增停止后 receipt 重放 / 新聊天关闭验证；第五十四轮完整门禁待执行。
+
+- 第五十四轮完整门禁通过：273 文件、1861 用例，177.86 秒；TypeScript、lint、数量基线与验收证据检查通过。迁移原可视化合同并新增两个独立回归，基线增加 2；停止后 replay/new-message 断言也通过最终全量。默认切换和整个 spec 仍未完成。
