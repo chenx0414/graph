@@ -7,6 +7,9 @@ import { chromium } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { evidenceDir } from '../helpers/evidence.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -34,8 +37,20 @@ test('the conversation page surfaces master questions, live worker status, costs
   let masterCalls = 0;
   let releaseWork!: () => void;
   const held = new Promise<void>(resolve => { releaseWork = resolve; });
+  let startedWork!: () => void;
+  const started = new Promise<void>(resolve => { startedWork = resolve; });
+  const provider = await openaiServer([
+    { beforeReply: async () => { startedWork(); await held; }, tools: [{ id: 'result', name: 'submit',
+      arguments: JSON.stringify({ outputs: { result: { enable: true, value: {} } } }) }] },
+    { text: 'Work submitted.' },
+  ]);
+  cleanup.push(() => provider.close());
+  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
   const server = await openGraphServer({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: join(root, 'project') }],
+    access: () => fullAccessPolicy(), catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+    models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
+      grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
     actions: {
       master: {
         kind: 'agent', reserveTokens: 100,
@@ -44,16 +59,13 @@ test('the conversation page surfaces master questions, live worker status, costs
           return { outcome: 'completed' as const, output: { text: `MASTER_REPLY_${masterCalls}` }, usage: masterCalls === 1 ? null : usage };
         },
       },
-      work: {
-        kind: 'agent', reserveTokens: 100,
-        prepare: async () => async () => { await held; return { outcome: 'completed' as const, output: { built: true }, usage }; },
-      },
     },
     master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
     autoDrive: false, webDir,
     startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
   });
   cleanup.push(() => server.close());
+  cleanup.push(() => releaseWork());
   server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
   const browser = await chromium.launch({ headless: true });
@@ -83,13 +95,20 @@ test('the conversation page surfaces master questions, live worker status, costs
   await server.runtime.supervisor(anchorTaskId).propose({
     requirementVersion: 1, summary: 'Independent sidebar fixture',
     acceptance: [{ id: 'a1', description: 'Human checks final output', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.human_check', dependsOn: ['work'] },
-    ],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Independent sidebar fixture', protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Submit the finished work', inputs: { job: { protocol: 'data' } },
+        outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+      edges: { checked: { from: 'work.result', to: 'check.job', enabled: true } },
+      acceptance: [{ id: 'check', description: 'Host check passes', kind: 'check', module: 'check' },
+        { id: 'a1', description: 'Human checks final output', kind: 'human' }] }),
   }, 'draft');
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
-  const drive = server.runtime.host.runReady();
+  await server.runtime.supervisor(anchorTaskId).graphSend({ graphId: confirmed.taskId, nodeId: 'work', input: 'job', value: {} });
+  const drive = server.runtime.host.drive();
+  await started;
+  expect(server.runtime.nodeRun(confirmed.taskId, 'work').node.status).toBe('running');
   // Node state is read where nodes now live: the task graph, opened in its own tab.
   const workerStatus = `.node-card[data-node-id="work"]`;
   await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('任务 1'));
@@ -105,6 +124,7 @@ test('the conversation page surfaces master questions, live worker status, costs
   await page.waitForFunction(selector => document.querySelector(selector)?.getAttribute('data-status') === 'running', workerStatus);
   releaseWork();
   await drive;
+  expect(provider.requests).toHaveLength(2);
   await page.waitForFunction(selector => document.querySelector(selector)?.getAttribute('data-status') === 'succeeded', workerStatus);
   const ledgerStatus = (await server.runtime.user.task(confirmed.taskId).view()).nodes.find(node => node.id === 'work')!.status;
   expect(await page.locator(workerStatus).getAttribute('data-status')).toBe(ledgerStatus);

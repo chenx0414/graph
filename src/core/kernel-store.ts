@@ -385,12 +385,15 @@ export class KernelStore {
           throw new RuntimeError('invalid_execution', 'Execution cannot be started again');
         }
         this.db.prepare("UPDATE kernel_executions SET state='running',ended_at=NULL WHERE id=?").run(input.executionId);
-        return this.execution(input.executionId)!;
+      } else {
+        const startedAt = Date.now();
+        this.store.db.prepare('INSERT INTO kernel_executions(id,task_id,node_id,revision_version,attempt,state,started_at,token_budget) VALUES(?,?,?,?,0,?,?,?)')
+          .run(input.executionId, taskId, input.nodeId, input.revisionVersion, 'running', startedAt, input.tokenBudget ? JSON.stringify(input.tokenBudget) : null);
       }
-      const startedAt = Date.now();
-      this.store.db.prepare('INSERT INTO kernel_executions(id,task_id,node_id,revision_version,attempt,state,started_at,token_budget) VALUES(?,?,?,?,0,?,?,?)')
-        .run(input.executionId, taskId, input.nodeId, input.revisionVersion, 'running', startedAt, input.tokenBudget ? JSON.stringify(input.tokenBudget) : null);
-      return this.execution(input.executionId)!;
+      const execution = this.execution(input.executionId)!;
+      this.db.prepare("UPDATE kernel_nodes SET status='running' WHERE task_id=? AND node_id=?").run(taskId, input.nodeId);
+      this.store.event(taskId, 'graph.execution.started', { executionId: input.executionId, nodeId: input.nodeId, revisionVersion: execution.revisionVersion });
+      return execution;
     });
   }
 

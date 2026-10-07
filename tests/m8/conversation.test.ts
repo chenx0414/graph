@@ -41,7 +41,7 @@ function workflowDraft(requirementVersion: number, summary: string): NativePropo
       acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }] }) };
 }
 
-async function decisionRuntime(root: string, projects: { id: string; root: string }[]) {
+async function nativeWorkerRuntime(root: string, projects: { id: string; root: string }[], onMaster?: (operation: Operation) => void) {
   const provider = await openaiServer([
     { tools: [{ id: 'result', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: {} } } }) }] },
     { text: 'Work submitted.' },
@@ -50,7 +50,7 @@ async function decisionRuntime(root: string, projects: { id: string; root: strin
   const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects, access: () => fullAccessPolicy(),
     catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
-    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })) },
+    actions: { master: scripted(operation => { onMaster?.(operation); return { outcome: 'completed', output: { text: 'ok' }, usage }; }) },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
     models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'm', provider: provider.model.provider,
       grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
@@ -759,31 +759,13 @@ test('a conversation master patches its native feature graph and reads queued st
 test('post-confirmation chat keeps the requirement fixed and sees real execution status', async () => {
   const root = await temp('post');
   const project = join(root, 'project');
-  const { mkdir, writeFile } = await import('node:fs/promises');
   await mkdir(project, { recursive: true });
-  await writeFile(join(project, 'check.js'), 'console.log("ok");\n');
   const seen: Operation[] = [];
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
-    actions: {
-      master: scripted(operation => { seen.push(operation); return { outcome: 'completed', output: { text: '继续交流' }, usage }; }),
-      work: scripted(() => ({ outcome: 'completed', output: { built: true }, usage })),
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
+  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }], operation => { seen.push(operation); });
   const created = await runtime.conversations.create({ text: '先做最小可用版', requestId: 'create' });
   await runtime.host.runReady();
   const conversation = await runtime.conversations.view(created.conversationId);
-  await runtime.supervisor(conversation.anchorTaskId).propose({
-    requirementVersion: 1, summary: '最小可用版',
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  }, 'proposal');
+  await runtime.supervisor(conversation.anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'proposal');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
   const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
   await runtime.conversations.chat(created.conversationId, { text: '现在卡在哪里？', requestId: 'ask' });
@@ -794,7 +776,18 @@ test('post-confirmation chat keeps the requirement fixed and sees real execution
   expect(briefing).toContain('现在卡在哪里？');
   expect(briefing).toContain(confirmed.taskId.slice(0, 8));
   expect(briefing).toContain('Feature task');
-  expect(briefing).toContain('work:');
+  expect(briefing).toContain('work:idle');
+  expect((await runtime.conversations.view(created.conversationId)).requirementVersion).toBe(2);
+
+  // An explicit input runs a real Pi; the next main turn must describe its
+  // recorded result rather than the idle status from the confirmation card.
+  await runWorker(confirmed.taskId);
+  seen.length = 0;
+  await runtime.conversations.chat(created.conversationId, { text: '执行完成了吗？', requestId: 'after-work' });
+  await runtime.host.runReady();
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.context.briefing).toContain('执行完成了吗？');
+  expect(seen[0]!.context.briefing).toContain('work:succeeded');
   expect((await runtime.conversations.view(created.conversationId)).requirementVersion).toBe(2);
 });
 
@@ -1081,7 +1074,7 @@ test('a confirmed task carries the conversation decisions and constraints to its
   const project = join(root, 'project');
   const { mkdir } = await import('node:fs/promises');
   await mkdir(project, { recursive: true });
-  const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'p', root: project }]);
+  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
   const created = await runtime.conversations.create({ text: '约束：预算有限，登录先不改。', requestId: 'create' });
   await runtime.host.runReady();
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
@@ -1104,7 +1097,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
     const root = await temp('choices-binding');
     await mkdir(join(root, 'a'), { recursive: true });
     await mkdir(join(root, 'b'), { recursive: true });
-    const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'a', root: join(root, 'a') }, { id: 'b', root: join(root, 'b') }]);
+    const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'a', root: join(root, 'a') }, { id: 'b', root: join(root, 'b') }]);
     const created = await runtime.conversations.create({ projectId: 'a', text: 'A_ONLY: 必须保留 A 的数据库结构。', requestId: 'create' });
     await runtime.host.runReady();
     const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
@@ -1120,7 +1113,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
   {
     const root = await temp('choices-long');
     await mkdir(join(root, 'a'), { recursive: true });
-    const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'a', root: join(root, 'a') }]);
+    const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'a', root: join(root, 'a') }]);
     const created = await runtime.conversations.create({ projectId: 'a', text: 'PERSISTENT_CONSTRAINT: 永远不要改 login.ts。', requestId: 'create' });
     await runtime.host.runReady();
     for (let index = 0; index < 10; index++) {
@@ -1139,7 +1132,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
   {
     const root = await temp('choices-after-draft');
     await mkdir(join(root, 'a'), { recursive: true });
-    const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'a', root: join(root, 'a') }]);
+    const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'a', root: join(root, 'a') }]);
     const created = await runtime.conversations.create({ projectId: 'a', text: '只调整颜色，保留登录逻辑。', requestId: 'create' });
     await runtime.host.runReady();
     const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
@@ -1158,7 +1151,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
   {
     const root = await temp('choices-curated');
     await mkdir(join(root, 'a'), { recursive: true });
-    const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'a', root: join(root, 'a') }]);
+    const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'a', root: join(root, 'a') }]);
     const created = await runtime.conversations.create({ projectId: 'a', text: '原始聊天文本不应直接当作决策。', requestId: 'create' });
     await runtime.host.runReady();
     const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
@@ -1177,7 +1170,7 @@ test('an explicit empty decisions list revokes constraints without falling back 
   const project = join(root, 'project');
   const { mkdir } = await import('node:fs/promises');
   await mkdir(project, { recursive: true });
-  const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'p', root: project }]);
+  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
   const draftOf = (requirementVersion: number, version: number, decisions?: string[]) => ({
     ...workflowDraft(requirementVersion, `draft-${version}`), ...(decisions === undefined ? {} : { decisions }),
   });
@@ -1459,7 +1452,7 @@ test('the conversation status stays with the master while the constraints still 
   const root = await temp('status-scope');
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
-  const { runtime, runWorker } = await decisionRuntime(root, [{ id: 'p', root: project }]);
+  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
   const created = await runtime.conversations.create({ text: '约束：预算有限，登录先不改。', requestId: 'create' });
   await runtime.host.runReady();
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;

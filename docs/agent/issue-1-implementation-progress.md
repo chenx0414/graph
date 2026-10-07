@@ -573,3 +573,14 @@
 - 第五十九轮完整门禁待执行。整个 spec、旧 SDK / 调度器退役与正式默认切换仍未完成。
 
 - 第五十九轮完整门禁通过：273 文件、1864 用例，188.77 秒；TypeScript、lint、数量基线及验收证据检查通过，测试数量不变。四项已迁移真实 Pi 的约束/监控隔离合同在最终全量通过。生产增加 2 行，测试及支持夹具净减少 76 行；旧 SDK / 调度器和整个 spec 仍未完成。
+
+
+## 原生执行中的节点状态与 main 监控
+
+- 手动迁移 post-confirmation chat 合同：确认只建立 idle 节点，main 初次询问读到 work:idle；明确投递后运行真实本地 HTTP / 常驻 Pi，main 后续询问读到 work:succeeded，两次聊天均不改变已确认需求版本。原生支持夹具可记录外部 main 的真实 Operation briefing，worker 不再使用旧 adapter；沿用同一份手工 NativeProposal。
+- conversation-boundaries-ui 的实时 worker 合同迁移到真实 Pi；首个 HTTP 响应通过明确 barrier 保持，确认后显式 work.job 投递。保留未刷新页面的 running → succeeded、账本一致、独立 graph tab / drawer、聊天中不混入任务卡片、未知 master 用量不阻塞、后续聊天及 210 条历史分页断言；不降低或覆盖验收截图。宿主检查为 operation 模块，human 为正式验收项，没有独立工具节点。
+- 修复前 2 文件、43 用例中浏览器 running 断言真实超时，其余 42 项通过。startExecution 仅将 execution 设为 running，kernel_nodes 始终 idle 直到结算；首次或 blocked 恢复现于同一事务更新节点运行状态，并追加 graph.execution.started 持久事件，让卡片和增量刷新读取同一事实。没有从浏览器或 provider 回调伪造节点状态。
+- 修复后 conversation / conversation-boundaries-ui / node-executor 定向 3 文件、67 用例通过，24.45 秒；随后加强等待中真实节点账本 running 验证。测试数量不变；旧 result_noncompliant 交接异常合同暂保留，其升级/用户决策/修复内容传播尚未完整迁移，不把通知唤醒视为该合同的全部替代。
+- 第六十轮完整门禁待执行。整个 spec、旧 SDK / 调度器退役及正式默认切换仍未完成。
+
+- 第六十轮完整门禁通过：273 文件、1864 用例，191.56 秒；TypeScript、lint、数量基线及验收证据检查通过。迁移后的浏览器合同在全量并行负载下 8.11 秒通过；main 的 idle / 真实执行后 succeeded 摘要和冻结需求合同也通过。生产净增加 3 行，测试及支持净增加 13 行，未新增测试数量。整个 spec、旧 SDK / 调度器退役及正式默认切换仍未完成。
