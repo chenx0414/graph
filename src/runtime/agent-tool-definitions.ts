@@ -136,8 +136,9 @@ function declarations(features: AgentToolFeatures) {
     artifact_publish: {
       name: 'artifact_publish',
       label: 'Publish shared artifact',
-      description: `Publish an immutable artifact version. Give either sourcePath or content, never both: content is the simplest when the report is text you already hold. Allowed namespaces: ${(features.artifacts?.allowedNamespaces ?? []).join(', ')}. sourcePath must name a regular file inside this operation's work copy - a report you wrote to /tmp is refused, so write the file into your work copy first and publish that path. Publishing never overwrites an earlier version; use expectedVersion for compare-and-swap. A deliverable your node declared is published for you when the node settles, so publishing those same bytes yourself adds no version.`,
+      description: `Publish an immutable artifact version. Give either sourcePath or content, never both: content is the simplest when the report is text you already hold. Allowed namespaces: ${(features.artifacts?.allowedNamespaces ?? []).join(', ')}. sourcePath must name a regular file inside this operation's work copy - a report you wrote to /tmp is refused, so write the file into your work copy first and publish that path. Publishing never overwrites an earlier version; use expectedVersion for compare-and-swap. A deliverable your node declared is published for you when the node settles, so publishing those same bytes yourself adds no version.${main ? ' Set graphId to publish or revise an artifact in a graph you own; omit it to publish in your own task. A revision keeps the same namespace and name and preserves all earlier versions.' : ''}`,
       parameters: Type.Object({
+        ...(main ? { graphId: Type.Optional(Type.String({ minLength: 1 })) } : {}),
         namespace: Type.String(),
         name: Type.String(),
         sourcePath: Type.Optional(Type.String()),

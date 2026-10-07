@@ -584,3 +584,14 @@
 - 第六十轮完整门禁待执行。整个 spec、旧 SDK / 调度器退役及正式默认切换仍未完成。
 
 - 第六十轮完整门禁通过：273 文件、1864 用例，191.56 秒；TypeScript、lint、数量基线及验收证据检查通过。迁移后的浏览器合同在全量并行负载下 8.11 秒通过；main 的 idle / 真实执行后 succeeded 摘要和冻结需求合同也通过。生产净增加 3 行，测试及支持净增加 13 行，未新增测试数量。整个 spec、旧 SDK / 调度器退役及正式默认切换仍未完成。
+
+
+## main 修改原生 graph 共享产物
+
+- artifact_publish 的 main 宿主通道始终覆盖 taskId 为外部会话的 anchor，无法修改内部 graph 的产物；ArtifactWorkspace 的 main 权限又只认 kernel_graph_owners，遗漏确认草稿创建的 graph，并只核对 operationId 未核对节点/实例/activation。新增两个真实本地 HTTP / Pi owner-boundary 回归，分别使用确认与管理创建路径；worker 真正发布 v1 后，修复前 main 修改未进入目标空间，期望 v2/master 实际仍为 v1/author。
+- main 的工具 schema/说明新增可选 graphId；宿主只允许 main 选择确实存在的原生 graph，工作目录与 producer 仍由宿主捕获。存储层按明确 owner 绑定或所属 conversation 的真实 anchor 核对 main 权限，同时匹配 actual operation/node/instance/activation；其他 conversation / 独立 owner 拒绝。不从模型参数接受 producer，不通过旧图无权限分支绕过原生检查。
+- 回归核对 v1 字节与原作者、main 实际发布 v2 的字节和修改者、同 execution 请求重放仍只有 v2、跨 owner 发布没有落入目标或偷偷落入 anchor、持有真实 main operationId 却伪造节点/实例的请求被存储拒绝。原作者在 main 修改后仍可真实发布 v3；另一个 agent 的同名修改和指定 graphId 均被拒绝，最终仅三个不可变版本。
+- 夹具首轮因真实 main 另调用 composer suggestion 消耗 worker 计划而在 v1 前失败，属于测试设置错误；给实际 suggestion 独立本地 endpoint 后，两条回归在预期 main v2 缺失处真实失败。未改变 suggestion 产品行为。修复后 owner / conversation scope / artifact workspace 3 文件、14 用例通过，6.77 秒。新增两项合同，不删除原产物隔离、版本、配额和路径安全合同。
+- 第六十一轮完整门禁待执行。main 退役产物的 Pi 入口、完整产物可见范围与 provenance 索引仍需核对；本轮只证明发布与修改版本，不宣称整个产物子系统完成。旧 SDK / 调度器退役、正式默认切换及整个 spec 仍未完成。
+
+- 第六十一轮完整门禁通过：274 文件、1866 用例，176.45 秒；TypeScript、lint、数量基线及验收证据检查通过。新增 owner-boundary 文件含确认 / 管理两项真实 Pi 合同，使基线增加 1 文件 / 2 用例；全量中两项 12.54 秒通过。生产净增加 13 行，新增测试及支持 106 行；本轮未改旧 SDK / 调度器，不宣称正式默认切换或整个 spec 完成。

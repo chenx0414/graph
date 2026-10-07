@@ -413,7 +413,14 @@ export class ArtifactWorkspace {
     if (!exists || !this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return null;
     const execution = this.store.db.prepare('SELECT e.task_id,e.node_id,n.instance_id FROM kernel_executions e JOIN kernel_nodes n ON n.task_id=e.task_id AND n.node_id=e.node_id WHERE e.id=?').get(producer.operationId) as { task_id: string; node_id: string; instance_id: string } | undefined;
     if (execution?.task_id === taskId && execution.node_id === producer.nodeId && execution.instance_id === producer.instanceId) return execution.node_id;
-    const main = this.store.db.prepare("SELECT 1 FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id JOIN kernel_graph_owners g ON g.owner_task_id=o.task_id WHERE g.task_id=? AND o.id=? AND json_extract(n.spec,'$.role')='master'").get(taskId, producer.operationId);
+    const main = this.store.db.prepare(`SELECT 1 FROM operations o
+      JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+      JOIN tasks t ON t.id=?
+      LEFT JOIN kernel_graph_owners g ON g.task_id=t.id AND g.owner_task_id=o.task_id
+      LEFT JOIN conversations c ON c.id=t.conversation_id AND c.anchor_task_id=o.task_id
+      WHERE o.id=? AND o.node_id=? AND o.instance_id=? AND o.activation_id=?
+        AND json_extract(n.spec,'$.role')='master' AND (g.task_id IS NOT NULL OR c.id IS NOT NULL)`)
+      .get(taskId, producer.operationId, producer.nodeId, producer.instanceId, producer.activationId);
     if (main) return 'main';
     throw new RuntimeError('permission', 'Artifact publisher does not match a graph execution or its main owner');
   }

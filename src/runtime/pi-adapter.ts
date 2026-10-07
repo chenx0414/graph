@@ -387,17 +387,19 @@ export function createPiAdapter(options: {
           list: (query: Parameters<ArtifactWorkspace['list']>[0]) => options.artifacts!.list({ ...query, taskId: operation.taskId }),
           get: (artifactId: string, version?: number) => options.artifacts!.get(operation.taskId, artifactId, version),
           read: (artifactId: string, version: number, maxBytes?: number) => options.artifacts!.read(operation.taskId, artifactId, version, maxBytes),
-          publish: (input: Parameters<ArtifactWorkspace['publish']>[0]) => options.artifacts!.publish({
-            ...input,
-            taskId: operation.taskId,
-            workspace,
-            producer: {
-              nodeId: operation.nodeId,
-              instanceId: operation.instanceId!,
-              operationId: operation.id,
-              activationId: operation.activationId,
-            },
-          }),
+          publish: (input: Omit<Parameters<ArtifactWorkspace['publish']>[0], 'taskId' | 'workspace' | 'producer'> & { graphId?: string }) => {
+            const { graphId, ...publication } = input;
+            if (graphId !== undefined) {
+              if (spec.role !== 'master') throw new RuntimeError('permission', 'Only main can select an artifact graph');
+              if (!options.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(graphId)) {
+                throw new RuntimeError('invalid_graph', 'Artifact target must be a native graph');
+              }
+            }
+            return options.artifacts!.publish({
+              ...publication, taskId: graphId ?? operation.taskId, workspace,
+              producer: { nodeId: operation.nodeId, instanceId: operation.instanceId!, operationId: operation.id, activationId: operation.activationId },
+            });
+          },
           retire: (artifactId: string, version: number, reason: string, requestId: string) => options.artifacts!.retire(operation.taskId, artifactId, version, reason, requestId),
           promote: (input: Parameters<ArtifactWorkspace['promote']>[0]) => options.artifacts!.promote({
             ...input,

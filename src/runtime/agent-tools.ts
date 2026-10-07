@@ -81,7 +81,7 @@ type ArtifactToolService = {
     bytes: number;
     events: { type: string; data: Json; timestamp: number }[];
   }>;
-  publish(input: Omit<PublishArtifactInput, 'taskId' | 'workspace' | 'producer'>): Promise<ArtifactRecord>;
+  publish(input: Omit<PublishArtifactInput, 'taskId' | 'workspace' | 'producer'> & { graphId?: string }): Promise<ArtifactRecord>;
   retire(artifactId: string, version: number, reason: string, requestId: string): ArtifactRecord;
   promote?(input: { artifactId: string; version: number; requestId: string }): Promise<ArtifactRecord>;
 };
@@ -310,12 +310,15 @@ export function agentTools(input: {
     },
     artifact_publish: async (_id: string, params: unknown) => {
       const body = fields(params);
+      if (body.graphId !== undefined && input.role !== 'master') throw new RuntimeError('permission', 'Only main can select an artifact graph');
+      if (body.graphId !== undefined && (typeof body.graphId !== 'string' || !body.graphId.trim())) throw new RuntimeError('invalid_input', 'graphId must be a nonempty string');
       const namespace = String(body.namespace).trim();
       if (!input.artifacts!.allowedNamespaces.includes(namespace)) throw new Error(`Namespace ${namespace} is not writable by this Agent`);
       if (body.metadata !== undefined && (!body.metadata || typeof body.metadata !== 'object' || Array.isArray(body.metadata))) throw new RuntimeError('invalid_input', 'Artifact metadata must be an object');
       const tags = Array.isArray(body.tags) ? body.tags.map(String) : undefined;
       const expectedVersion = typeof body.expectedVersion === 'number' ? body.expectedVersion : undefined;
       return text(JSON.stringify(await input.artifacts!.publish({
+        ...(typeof body.graphId === 'string' ? { graphId: body.graphId.trim() } : {}),
         namespace,
         ...(body.metadata ? { metadata: body.metadata as Record<string, unknown> } : {}),
         name: String(body.name),
