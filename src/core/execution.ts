@@ -1,3 +1,5 @@
+import { releaseTaskSlot } from './task-queue.ts';
+import { GraphRuntime } from './graph-runtime.ts';
 import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuation.ts';
 import { pendingWakes, renderWakes, wakeForTaskCompleted } from './wake-ledger.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
@@ -368,7 +370,12 @@ export class Execution {
    */
   abandon(taskId: string, reason: string | null, options: { allowMasterTurn?: boolean } = {}) {
     const task = this.store.task(taskId);
-    if (task.phase === 'completed' || task.phase === 'abandoned') throw new RuntimeError('invalid_input', `A ${task.phase} task cannot be abandoned`);
+    if (['completed', 'abandoned', 'stopped', 'stopping'].includes(task.phase)) throw new RuntimeError('invalid_input', `A ${task.phase} task cannot be abandoned`);
+    const kernel = new KernelStore(this.store);
+    if (kernel.latestRevision(taskId)) {
+      new GraphRuntime(kernel, taskId).stop();
+      return this.store.event(taskId, 'task.stop_requested', { reason });
+    }
     // The main Agent may stop the task it is serving: its own discussion turn is not
     // integration work, so only a worker lane still writing to the target holds the task
     // open. The user's own abandon keeps the stricter check.
@@ -388,19 +395,8 @@ export class Execution {
       .run(canonicalJson({ type: 'abandoned', reason }), taskId);
     this.store.db.prepare("UPDATE tasks SET phase='abandoned' WHERE id=?").run(taskId);
     const cursor = this.store.event(taskId, 'task.abandoned', { reason, resolvedQuestions: resolved.changes });
-    const { active_task } = this.store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
-    if (active_task === taskId) this.promoteNextTask();
+    releaseTaskSlot(this.store, taskId);
     return cursor;
-  }
-
-  /** The single active code slot goes to the oldest queued task, if any. */
-  private promoteNextTask() {
-    const next = this.store.db.prepare("SELECT id FROM tasks WHERE phase='queued' ORDER BY created_seq LIMIT 1").get() as { id: string } | undefined;
-    this.store.db.prepare('UPDATE runtime SET active_task=?').run(next?.id ?? null);
-    if (!next) return null;
-    this.store.db.prepare("UPDATE tasks SET phase='running' WHERE id=?").run(next.id);
-    this.store.event(next.id, 'task.started', {});
-    return next.id;
   }
 
   private block(node: ExecutionNodeRow, kind: string, data: Json, operationId: string | null = null) {
@@ -1303,7 +1299,7 @@ export class Execution {
       proposalVersion: task.accepted_proposal,
       integrationSha: task.integration_sha ?? null,
     });
-    this.promoteNextTask();
+    releaseTaskSlot(this.store, taskId);
   }
 
   private deliver(taskId: string) {

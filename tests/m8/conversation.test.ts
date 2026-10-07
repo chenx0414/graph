@@ -9,7 +9,7 @@ import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { Proposal, ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -1516,12 +1516,15 @@ test('the master can withdraw its own unconfirmed draft without losing it', asyn
   const draft = {
     requirementVersion: 1, summary: '被取代的方案',
     acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  };
-  await runtime.supervisor(anchorTaskId).propose(withLiftedDefinition(draft), 'draft-1');
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Minimal implementation', protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'm', task: 'Implement the minimal version', inputs: { job: { protocol: 'data' } },
+        outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
+      edges: { checkWork: { from: 'work.result', to: 'check.job', enabled: true } },
+      acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }] }),
+  } as Proposal;
+  await runtime.supervisor(anchorTaskId).propose(draft, 'draft-1');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
 
   // Only a draft that exists and is still the current one can be withdrawn.

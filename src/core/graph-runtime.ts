@@ -1,3 +1,4 @@
+import { releaseTaskSlot } from './task-queue.ts';
 import { wakeMaster, wakeForTaskCompleted } from './wake-ledger.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
@@ -172,6 +173,7 @@ export class GraphRuntime {
 
   private setPhase(phase: GraphPhase): void {
     this.kernel.store.db.prepare('UPDATE tasks SET phase=? WHERE id=?').run(phase, this.graphId);
+    if (phase === 'completed' || phase === 'stopped') releaseTaskSlot(this.kernel.store, this.graphId);
   }
 
   private completionRequested(): boolean {

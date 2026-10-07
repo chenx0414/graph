@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import type { ActionAdapter, OperationResult , Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -62,15 +62,14 @@ test('the fallback drops what states nothing and keeps a short constraint', asyn
   });
   seed.close();
 
-  await runtime.supervisor(created.taskId).propose(withLiftedDefinition({
-    requirementVersion: 1,
-    summary: '无声明决策',
+  await runtime.supervisor(created.taskId).propose({
+    requirementVersion: 1, summary: '无声明决策',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'master', kind: 'agent', role: 'master', action: 'master', definitionVersion: 'master@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['master'], input: { command: 'node', args: ['--version'] } },
-    ],
-  } as Proposal), 'draft');
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Constraint snapshot', protocols: { data: { type: 'object' } }, nodes: {},
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
+      acceptance: [{ id: 'ok', description: 'ok', kind: 'check', module: 'check' }] }),
+  } as Proposal, 'draft');
 
   const read = new TaskStore(join(stateDir, 'tasks.sqlite'));
   const row = read.db.prepare('SELECT decision_snapshot FROM proposals WHERE task_id=? AND version=1').get(created.taskId) as { decision_snapshot: string | null };
@@ -115,15 +114,14 @@ test('the fallback decision snapshot is bounded at both ends, not just the recen
   seed.close();
 
   // No `decisions` on the proposal: this is the compatibility fallback path.
-  await runtime.supervisor(created.taskId).propose(withLiftedDefinition({
-    requirementVersion: 1,
-    summary: '无声明决策',
+  await runtime.supervisor(created.taskId).propose({
+    requirementVersion: 1, summary: '无声明决策',
     acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'master', kind: 'agent', role: 'master', action: 'master', definitionVersion: 'master@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['master'], input: { command: 'node', args: ['--version'] } },
-    ],
-  } as Proposal), 'draft');
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Constraint snapshot', protocols: { data: { type: 'object' } }, nodes: {},
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
+      acceptance: [{ id: 'ok', description: 'ok', kind: 'check', module: 'check' }] }),
+  } as Proposal, 'draft');
 
   const read = new TaskStore(join(stateDir, 'tasks.sqlite'));
   const row = read.db.prepare('SELECT decision_snapshot FROM proposals WHERE task_id=? AND version=1').get(created.taskId) as { decision_snapshot: string | null } | undefined;

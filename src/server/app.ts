@@ -51,7 +51,7 @@ async function nativeGraphStructure(runtime: Runtime, definition: GraphDefinitio
       ...(node.recipe ? { boundDefinition: node.recipe, definitionVersion: node.recipe } : {}),
       ...(node.model ? { model: node.model } : {}),
       inputs: node.inputs, outputs: node.outputs, agent: graphAgentDetail(runtime, node.recipe) })),
-    ...Object.entries(definition.modules).map(([id, module]) => ({ id, kind: 'module', action: module.trigger === 'once' ? 'join' : 'route',
+    ...Object.entries(definition.modules).map(([id, module]) => ({ id, kind: 'module', action: module.type === 'operation' ? 'graph.command' : module.type === 'command' ? 'command' : module.trigger === 'once' ? 'join' : 'route',
       ...(containerFor(id) ? { container: containerFor(id)! } : {}),
       status: state ? state.modules.find(item => item.moduleId === id)?.triggered ? 'succeeded' : 'idle' : 'draft',
       inputs: module.inputs, outputs: module.outputs })),

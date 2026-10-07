@@ -13,7 +13,7 @@ import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
 import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { withLiftedDefinition } from '../fixtures/v2-lift.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -34,6 +34,18 @@ async function temp(name: string) {
   const dir = await mkdtemp(join(tmpdir(), `graph-app-shell-ux-${name}-`));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   return dir;
+}
+
+function workerCheckProposal(summary: string, check = 'check', criterion = 'ok'): Proposal {
+  return { requirementVersion: 1, summary, acceptance: [{ id: criterion, description: '检查通过', checkNode: check }],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the requested work', inputs: { job: { protocol: 'data' } },
+        outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+      modules: { [check]: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
+      edges: { checkWork: { from: 'work.result', to: `${check}.job`, enabled: true } },
+      acceptance: [{ id: criterion, description: '检查通过', kind: 'check', module: check }] }),
+  } as Proposal;
 }
 
 test('the shell groups conversations by project and keeps an unbound recent section', async () => {
@@ -145,26 +157,8 @@ test('the right drawer keeps proposal details and node inspection independent fr
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'app-shell-agent-detail');
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'conversation' });
   const view = await server.runtime.conversations.view(created.conversationId);
-  const firstProposal = {
-    requirementVersion: 1,
-    summary: '先做一个最小版本',
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program' as const, action: 'check', dependsOn: ['work'] },
-    ],
-  };
-  await server.runtime.supervisor(view.anchorTaskId).propose(withLiftedDefinition(firstProposal), 'draft-1');
-  await server.runtime.supervisor(view.anchorTaskId).propose({
-    requirementVersion: 1,
-    summary: '第二版增加审查',
-    acceptance: [{ id: 'reviewed', description: '独立审查通过', checkNode: 'review' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'review', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-      { id: 'human', kind: 'program', action: 'graph.human_check', dependsOn: ['review'] },
-    ],
-  }, 'draft-2');
+  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('先做一个最小版本', 'check', 'works'), 'draft-1');
+  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('第二版增加审查', 'review', 'reviewed'), 'draft-2');
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -270,13 +264,13 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await page.goto(`${server.url}/#/conversations/${created.conversationId}/graph?v=2`);
   await page.getByTestId('draft-graph-tab').waitFor();
   await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
-  await page.locator('.node-card[data-node-id="human"]').waitFor();
-  expect(await page.locator('.node-card[data-node-id="human"]').innerText()).toContain('human check');
-  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-node-type')).toBe('human');
-  // The legacy tone/status semantics survive alongside the new board state.
-  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-status')).toBe('draft');
-  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-tone')).toBe('pending');
-  expect(await page.locator('.node-card[data-node-id="human"]').getAttribute('data-board-state')).toBe('pending');
+  await page.locator('.node-card[data-node-id="review"]').waitFor();
+  expect(await page.locator('.node-card[data-node-id="review"]').innerText()).toContain('review');
+  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-node-type')).toBe('tool');
+  // An unconfirmed operation module has the same pending presentation as the draft agent.
+  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-status')).toBe('draft');
+  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-tone')).toBe('pending');
+  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-board-state')).toBe('pending');
   // The window fills the workspace the chat column filled before.
   const graphBox = await page.locator('.conversation-graph-main').boundingBox();
   expect(graphBox).not.toBeNull();
@@ -325,15 +319,7 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'agent-node-chat-definition');
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '启动节点', requestId: 'agent-node-chat-create' });
   const view = await server.runtime.conversations.view(created.conversationId);
-  await server.runtime.supervisor(view.anchorTaskId).propose({
-    requirementVersion: 1,
-    summary: '节点聊天',
-    acceptance: [{ id: 'ok', description: '完成', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.human_check', dependsOn: ['work'] },
-    ],
-  }, 'agent-node-chat-proposal');
+  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('节点聊天'), 'agent-node-chat-proposal');
   await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'agent-node-chat-prepare', initialize: true, createBaseline: true });
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
     proposalVersion: 1,
@@ -444,15 +430,7 @@ test('the task graph page keeps the permanent four-state legend', async () => {
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'task-graph-legend-definition');
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '图例任务', requestId: 'task-graph-legend-create' });
   const view = await server.runtime.conversations.view(created.conversationId);
-  await server.runtime.supervisor(view.anchorTaskId).propose({
-    requirementVersion: 1,
-    summary: '四态图例',
-    acceptance: [{ id: 'ok', description: '完成', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.human_check', dependsOn: ['work'] },
-    ],
-  }, 'task-graph-legend-proposal');
+  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('四态图例'), 'task-graph-legend-proposal');
   await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'task-graph-legend-prepare', initialize: true, createBaseline: true });
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
     proposalVersion: 1,

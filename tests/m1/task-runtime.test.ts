@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import type { Proposal } from '../../src/core/types.ts';
-import { liftDefinition as definitionFor } from '../fixtures/v2-lift.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+
+
+const checkDefinition = parseGraphDefinition({ schemaVersion: 2, name: 'Check work', protocols: { data: { type: 'object' } }, nodes: {},
+  modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+    operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+  edges: {}, acceptance: [{ id: 'works', description: 'Works', kind: 'check', module: 'check' }] });
+const checkProposal = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], definition: checkDefinition } as Proposal;
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -22,11 +29,13 @@ test('a confirmed requirement and its idempotent command receipt survive reopeni
   const proposal = await runtime.supervisor(receipt.taskId).propose({
     requirementVersion: 1, summary: 'Search existing items by title',
     acceptance: [{ id: 'search', description: 'Matching titles are returned', checkNode: 'verify' }],
-    nodes: [
-      { id: 'implement', kind: 'agent', action: 'implement', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'verify', kind: 'program', action: 'verify', dependsOn: ['implement'] },
-    ],
-  }, 'proposal-1');
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Title search', protocols: { data: { type: 'object' } },
+      nodes: { implement: { recipe: 'coder@1', task: 'Implement case-insensitive title search', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+      modules: { verify: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.mjs'], output: 'result' } } },
+      edges: { verified: { from: 'implement.result', to: 'verify.job', enabled: true } },
+      acceptance: [{ id: 'search', description: 'Matching titles are returned', kind: 'check', module: 'verify' }] }),
+  } as Proposal, 'proposal-1');
   const accepted = await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept-1' });
   const before = await task.view();
   expect(before.proposal).toMatchObject({ summary: 'Search existing items by title', acceptance: [{ id: 'search', checkNode: 'verify' }] });
@@ -51,7 +60,7 @@ test('new requirements invalidate old proposals, additional tasks queue, and eve
   await expect(runtime.user.begin({ projectId: 'project', request: 'Different content', requestId: 'begin-1' })).rejects.toMatchObject({ code: 'idempotency_conflict' });
   const task = runtime.user.task(first.taskId);
   const supervisor = runtime.supervisor(first.taskId);
-  const spec = { requirementVersion: 1, summary: 'Title search', acceptance: [{ id: 'works', description: 'Search works', checkNode: 'check' }], nodes: [{ id: 'check', kind: 'program' as const, action: 'check' }] };
+  const spec = checkProposal;
   const old = await supervisor.propose(spec, 'proposal-1');
   const before = await task.view();
   const changed = await task.say('Ignore title case', 'say-1');
@@ -82,45 +91,20 @@ test('invalid proposals cannot enter confirmed state, and confirmation freezes t
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Check work', requestId: 'begin' });
   const supervisor = runtime.supervisor(taskId);
-  const valid = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: [{ id: 'check', kind: 'program' as const, action: 'check' }] };
-  // Each case states its own definition. An earlier version rebuilt the definition from
-  // `nodes` at propose time, which silently repaired three of these - a duplicate id, a
-  // dangling port and a self-edge all became legal - so the suite went green while the
-  // cases it named were no longer being exercised at all.
-  // Each case states its own definition, and each one is a rule the v2 interface really
-  // enforces. An earlier version rebuilt the definition from `nodes` at propose time,
-  // which silently repaired three of these, so the suite went green while the cases it
-  // named were no longer being exercised. Two cases were dropped rather than faked: a
-  // duplicate node id cannot exist in a JS object literal, and a self-edge is a legal
-  // (if useless) edge - neither is an error the interface claims to catch.
-  const base = definitionFor(valid.nodes) as unknown as { nodes: Record<string, unknown> } & Record<string, unknown>;
+  const valid = checkProposal;
+  // Each malformed native definition is submitted unchanged; no converter can
+  // repair the missing port, wrong map or dangling acceptance on its way in.
+  const base = valid.definition!;
   const invalid = [
-    // a definition whose maps are not maps
-    { ...valid, definition: { ...base, nodes: [] } as never },
-    // an edge whose endpoint port does not exist
-    { ...valid, definition: { ...base, edges: { dangling: { from: 'check.nope', to: 'check.in', enabled: true } } } as never },
-    // a graph input naming a port no node declares
-    { ...valid, definition: { ...base, inputs: { task: { to: 'check.absent', protocol: 'lifted-payload' } } } as never },
-    // a blank node id
-    { ...valid, definition: { ...base, nodes: { '  ': base.nodes!['check'] } } as never },
-    // an acceptance check naming a node that is not in the graph
-    { ...valid, acceptance: [{ id: 'works', description: 'Works', checkNode: 'absent' }], definition: base as never },
+    { ...valid, definition: { ...base, nodes: [] } },
+    { ...valid, definition: { ...base, edges: { dangling: { from: 'check.nope', to: 'check.job', enabled: true } } } },
+    { ...valid, definition: { ...base, inputs: { task: { to: 'check.absent', protocol: 'data' } } } },
+    { ...valid, definition: { ...base, modules: { '  ': base.modules.check } } },
+    { ...valid, acceptance: [{ id: 'works', description: 'Works', checkNode: 'absent' }] },
   ];
-  // Deliberately NOT lifted: these cases assert that a malformed graph definition is
-  // refused (duplicate node ids, a dangling dependsOn, a self-cycle). Lifting them would
-  // make each case fail for the new "no definition" reason instead of the reason it names,
-  // so the suite would stay green while testing nothing it claims to test.
-  // The code differs by where the rule lives: a broken definition is caught by the
-  // interface parser, a broken acceptance list by the proposal validator. Under the old
-  // shape every one of these was `invalid_proposal`, because the nodes array was itself
-  // the draft. The refusal is the point of each case; the code it carries is the new one.
   const expectedCodes = ['invalid_definition', 'invalid_definition', 'invalid_definition', 'invalid_definition', 'invalid_proposal'];
-  for (const [i, proposal] of invalid.entries()) {
-    // A malformed graph definition is refused as `invalid_definition` - the interface
-    // parses the definition before the draft is read as a proposal. Under the old shape
-    // these same five mistakes surfaced as `invalid_proposal`, because the nodes array was
-    // the draft. The refusal is the point of the case; the code it carries is the new one.
-    await expect(supervisor.propose(proposal as never, `invalid-${i}`)).rejects.toMatchObject({ code: expectedCodes[i] });
+  for (const [index, proposal] of invalid.entries()) {
+    await expect(supervisor.propose(proposal as Proposal, `invalid-${index}`)).rejects.toMatchObject({ code: expectedCodes[index] });
   }
   expect((await runtime.user.task(taskId).view()).proposalVersion).toBe(0);
   const proposed = await supervisor.propose(valid, 'proposal');
@@ -145,7 +129,9 @@ test('abandoning a wedged active task hands the slot to the queued task', async 
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }] });
   cleanup.push(() => runtime.close());
-  const spec = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes: [{ id: 'check', kind: 'program' as const, action: 'check' }] };
+  const spec = { ...checkProposal, definition: parseGraphDefinition({ ...checkDefinition, nodes: {
+    waiting: { recipe: 'worker@1', task: 'Wait for an input', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} },
+  } }) } as Proposal;
   // Only a confirmed task takes the single active code slot; a second confirmed
   // task waits in the queue behind it, which is what makes abandoning matter.
   const first = await runtime.user.begin({ projectId: 'project', request: 'First', requestId: 'begin-1' });
@@ -157,12 +143,46 @@ test('abandoning a wedged active task hands the slot to the queued task', async 
   const queued = await runtime.user.task(second.taskId).view();
   expect(queued.phase).toBe('queued');
   expect(queued.queuedBehind).toMatchObject({ taskId: first.taskId, projectId: 'project', openProblems: 0 });
+  await runtime.supervisor(first.taskId).graphSend({ graphId: first.taskId, nodeId: 'waiting', input: 'job', value: { keep: 'cancel this pending work' } });
   const stream = runtime.user.task(first.taskId).watch((await runtime.user.task(first.taskId).view()).cursor);
   const receipt = await runtime.user.task(first.taskId).abandon('abandon-1', 'no path to completion');
   expect(await runtime.user.task(first.taskId).abandon('abandon-1', 'no path to completion')).toEqual(receipt);
-  expect((await runtime.user.task(first.taskId).view()).phase).toBe('abandoned');
+  expect((await runtime.user.task(first.taskId).view()).phase).toBe('stopping');
+  const queue = await runtime.supervisor(first.taskId).graphInspect({ graphId: first.taskId, query: 'queue' }) as { items: { state: string; reason: string }[] };
+  expect(queue.items).toMatchObject([{ state: 'done', reason: 'cancelled by stop' }]);
+  expect((await runtime.user.task(second.taskId).view()).phase).toBe('queued');
+  await runtime.host.drive();
+  expect((await runtime.user.task(first.taskId).view()).phase).toBe('stopped');
   expect(await runtime.user.task(second.taskId).view()).toMatchObject({ phase: 'running', queuedBehind: null });
-  expect((await stream.next()).value).toMatchObject({ type: 'task.abandoned', cursor: receipt.cursor });
+  expect((await stream.next()).value).toMatchObject({ type: 'graph.stopping' });
+  expect((await stream.next()).value).toMatchObject({ type: 'task.stop_requested', cursor: receipt.cursor });
   await stream.return();
   await expect(runtime.user.task(first.taskId).abandon('abandon-2')).rejects.toMatchObject({ code: 'invalid_input' });
+});
+
+
+test('completing a native task releases the confirmed queue without implicitly completing its successor', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-task-queue-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }] });
+  cleanup.push(() => runtime.close());
+  const first = await runtime.user.begin({ projectId: 'project', request: 'First', requestId: 'begin-1' });
+  await runtime.supervisor(first.taskId).propose(checkProposal, 'draft-1');
+  await runtime.user.task(first.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-1' });
+  const second = await runtime.user.begin({ projectId: 'project', request: 'Second', requestId: 'begin-2' });
+  await runtime.supervisor(second.taskId).propose(checkProposal, 'draft-2');
+  await runtime.user.task(second.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-2' });
+  for (const { taskId } of [first, second]) await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
+  await runtime.host.drive();
+  expect((await runtime.user.task(second.taskId).view()).phase).toBe('queued');
+  const secondMain = runtime.supervisor(second.taskId);
+  expect(await secondMain.graphInspect({ graphId: second.taskId, query: 'operations' })).toEqual([]);
+  const stream = runtime.user.task(second.taskId).watch((await runtime.user.task(second.taskId).view()).cursor);
+  await runtime.supervisor(first.taskId).graphControl({ graphId: first.taskId, action: 'complete' });
+  await runtime.host.drive();
+  expect((await runtime.user.task(first.taskId).view()).phase).toBe('completed');
+  expect(await runtime.user.task(second.taskId).view()).toMatchObject({ phase: 'running', queuedBehind: null });
+  expect((await stream.next()).value).toMatchObject({ type: 'task.started' }); await stream.return();
+  const checks = await secondMain.graphInspect({ graphId: second.taskId, query: 'operations' }) as { state: string }[];
+  expect(checks).toMatchObject([{ state: 'settled' }]);
 });
