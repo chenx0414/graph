@@ -1,5 +1,9 @@
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 import { expect, test } from 'vitest';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KernelStore } from '../../src/core/kernel-store.ts';
@@ -105,3 +109,52 @@ test('nodes meter independently of one another', async () => {
     expect(() => kernel.reserveNodeTokens('t1', 'a', budget, 200)).toThrow(/budget/i);
   });
 });
+// Native host wiring must preserve the same finite/unlimited evidence policy as
+// the existing model adapter; the provider deliberately supplies no token counts.
+test('native unlimited turns estimate absent usage while finite turns retain an unknown hold', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-missing-usage-'));
+  const plans = (path: string) => [
+    { usage: null, tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path, content: 'actual tool output' }) }] },
+    { usage: null, text: 'Finished after the file tool.' },
+  ];
+  const unlimited = await openaiServer(plans('unlimited.txt'));
+  const finite = await openaiServer(plans('finite.txt'));
+  let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
+  try {
+    const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+    runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], access: () => fullAccessPolicy(),
+      catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+      models: { apiKey: 'local-only', modelRuntime: unlimited.runtime, entries: [
+        ...([['unlimited', unlimited], ['finite', finite]] as const).map(([id, provider]) => ({ id, provider: provider.model.provider,
+          grade: 'medium' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 })),
+      ] },
+    });
+    runtime.catalog.publishDefinition('writer', { recommendedGrade: 'medium' }, 'writer');
+    const parent = await runtime.user.begin({ projectId: 'p', request: 'missing usage policy', requestId: 'begin' });
+    const main = runtime.supervisor(parent.taskId);
+    const node = (model: string, tokens: number | null) => ({ recipe: 'writer@1', model, task: 'Write a file and report completion.',
+      inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {}, budget: { tokens } });
+    const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'missing usage', protocols: { data: { type: 'object' } },
+      nodes: { unlimited: node('unlimited', null), finite: node('finite', 200000) }, modules: {}, edges: {} }) }) as { graphId: string };
+    await main.graphSend({ graphId, nodeId: 'unlimited', input: 'job', value: {} });
+    await main.graphSend({ graphId, nodeId: 'finite', input: 'job', value: {} });
+    await runtime.host.drive();
+    expect(unlimited.requests).toHaveLength(2);
+    expect(runtime.nodeRun(graphId, 'unlimited').node.status).toBe('succeeded');
+    expect(await readFile(join(root, 'unlimited.txt'), 'utf8')).toBe('actual tool output');
+    const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { nodeId: string; state: string; usage: { usageSource: string; input: number; output: number } | null }[];
+    const estimated = calls.filter(call => call.nodeId === 'unlimited');
+    expect(estimated).toHaveLength(2);
+    for (const call of estimated) {
+      expect(call.state).toBe('settled'); expect(call.usage?.usageSource).toBe('estimated');
+      expect(call.usage!.input).toBeGreaterThan(0); expect(call.usage!.output).toBeGreaterThan(0);
+    }
+    expect(finite.requests).toHaveLength(1);
+    expect(calls.filter(call => call.nodeId === 'finite')).toMatchObject([{ state: 'unknown', usage: null }]);
+    const failed = await main.graphInspect({ graphId, query: 'queue' }) as { items: { nodeId: string; state: string }[] };
+    expect(failed.items.find(item => item.nodeId === 'finite')?.state).toBe('queued');
+    expect(runtime.nodeRun(graphId, 'finite').node.status).toBe('blocked');
+  } finally {
+    await runtime?.close(); await finite.close(); await unlimited.close(); await rm(root, { recursive: true, force: true });
+  }
+}, 30000);

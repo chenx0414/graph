@@ -448,6 +448,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           } : undefined;
           try {
           const stream = await controlledOpenAIStream(observed, () => { const binding = options.credentialFor(model); if (!binding) throw new Error('Bound model credential unavailable'); return binding.apiKey; }, slot, model.api, {
+            estimateMissing: options.kernel.execution(execution.id)?.tokenBudget?.unlimited === true,
             onSend: prompt => options.kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)')
               .run(graphId, nodeId, (options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined)?.id ?? null,
                 prompt.systemPrompt ?? '', prompt.toolDeclarations ?? '[]', Date.now()),
