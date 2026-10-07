@@ -171,10 +171,19 @@ export interface ContainerSpec { id: string; parent?: string; dependsOn?: string
  * A loop with no `case` keeps the older meaning: it is driven by a verification verdict.
  */
 export interface LoopSpec { from: string; to: string; case?: string }
-export interface Proposal {
+interface ProposalScope {
   requirementVersion: number;
   summary: string;
   acceptance: { id: string; description: string; checkNode: string }[];
+  /** Main-authored decisions/constraints frozen with this draft version. */
+  decisions?: string[];
+}
+/** A declarative graph draft. Main belongs outside its definition. */
+export interface NativeProposal extends ProposalScope {
+  definition: GraphDefinition;
+}
+/** Legacy SDK shape, retained only until the remaining callers are retired. */
+export interface Proposal extends ProposalScope {
   nodes: NodeSpec[];
   /**
    * §13.8 switchover: a draft may carry a v2 graph definition (the shape §5's
@@ -186,8 +195,6 @@ export interface Proposal {
   definition?: GraphDefinition;
   containers?: ContainerSpec[];
   loops?: LoopSpec[];
-  /** Master-authored decisions/constraints frozen with this draft version. */
-  decisions?: string[];
 }
 export interface Receipt { taskId: string; cursor: number }
 export interface ProposalReceipt extends Receipt { proposalVersion: number }

@@ -7,7 +7,6 @@ import { afterEach, expect, test } from 'vitest';
 import { canonicalJson, TaskStore } from '../../src/core/store.ts';
 import { GitIntegration } from '../../src/git/integration.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { Proposal } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -137,7 +136,7 @@ test('rework restores a released integration checkout at its recorded tip withou
       modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
       acceptance: [{ id: 'ok', description: 'ok', kind: 'check', module: 'check' }] }),
-  } as Proposal, 'proposal');
+  }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
   cleanup.push(async () => store.close());

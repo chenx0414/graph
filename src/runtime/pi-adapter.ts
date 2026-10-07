@@ -14,7 +14,7 @@ import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
 import { inspectResultHandoffSubmission, laneSubmissionContext, resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
 import { WriteLedger } from '../core/write-ledger.ts';
-import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
+import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type NativeProposal } from '../core/types.ts';
 import { promptImagesFromAttachments } from '../core/attachments.ts';
 import { boundSkills, injectRequestedSkills, requestedSkillNames } from '../core/skill-invocation.ts';
 import type { TaskStore } from '../core/store.ts';
@@ -69,12 +69,12 @@ export interface PiAdapterChannels {
   /** The conversation service, as far as tools over other conversations need it. */
   conversations?: { service: ConversationToolService };
   supervisor: (taskId: string) => Partial<GraphManagement> & {
-    propose(proposal: Proposal, requestId: string): Promise<unknown>;
+    propose(proposal: NativeProposal, requestId: string): Promise<unknown>;
     withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
     revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string; taskId?: string }): Promise<unknown>;
     graphState?(): Promise<unknown>;
     taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
-    validateProposal?(proposal: Proposal): Promise<unknown>;
+    validateProposal?(proposal: NativeProposal): Promise<unknown>;
     listProjects?(): Promise<unknown>;
     bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
     listProblems(): Promise<unknown>;

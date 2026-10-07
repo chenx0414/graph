@@ -7,7 +7,6 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import type { Proposal } from '../../src/core/types.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { cloneMediaBookmarks, mediaBookmarksSource } from './clone.ts';
@@ -92,7 +91,7 @@ test('native Graph delivers the Bilibili web from independent workers after real
     edges: { checked: { from: 'check.result', to: 'review.job', enabled: true } },
     acceptance: [...checks.map(item => ({ ...item, kind: 'check', module: 'check' })), { id: 'review', description: 'Independent review of this commit', kind: 'review', node: 'review' }, { id: 'human-login', description: '使用者在独立 profile 完成 B站登录后确认', kind: 'human' }],
   });
-  const proposed = await main.propose({ requirementVersion: 2, summary: '独立 profile，禁止并发采集，不共享日常 Chrome；并行 API/UI、集成后测试与审查、人工登录确认。', definition, acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })) } as Proposal, 'plan');
+  const proposed = await main.propose({ requirementVersion: 2, summary: '独立 profile，禁止并发采集，不共享日常 Chrome；并行 API/UI、集成后测试与审查、人工登录确认。', definition, acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })) }, 'plan');
   const confirmed = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   graphId = confirmed.taskId;
   disk = new TaskStore(join(root, 'state', 'tasks.sqlite')); cleanup.push(async () => disk.close());

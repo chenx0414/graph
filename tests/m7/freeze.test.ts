@@ -5,7 +5,6 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
-import type { Proposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -67,7 +66,7 @@ test('G17 freezes Bilibili web acceptance, exclusive profile, and a human login 
         prepare: async operation => async () => {
           await runtime.supervisor(operation.taskId).propose({ requirementVersion: operation.requirementVersion, summary, definition,
             acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })),
-          } as Proposal, 'm7-plan');
+          }, 'm7-plan');
           return { outcome: 'completed', output: { planned: true }, usage };
         },
       },

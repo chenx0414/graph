@@ -12,7 +12,7 @@ import { startGraphDaemon } from '../../src/server/start.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
 import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import type { NativeProposal } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -36,7 +36,7 @@ async function temp(name: string) {
   return dir;
 }
 
-function workerCheckProposal(summary: string, check = 'check', criterion = 'ok'): Proposal {
+function workerCheckProposal(summary: string, check = 'check', criterion = 'ok'): NativeProposal {
   return { requirementVersion: 1, summary, acceptance: [{ id: criterion, description: '检查通过', checkNode: check }],
     definition: parseGraphDefinition({ schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
       nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the requested work', inputs: { job: { protocol: 'data' } },
@@ -45,7 +45,7 @@ function workerCheckProposal(summary: string, check = 'check', criterion = 'ok')
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
       edges: { checkWork: { from: 'work.result', to: `${check}.job`, enabled: true } },
       acceptance: [{ id: criterion, description: '检查通过', kind: 'check', module: check }] }),
-  } as Proposal;
+  };
 }
 
 test('the shell groups conversations by project and keeps an unbound recent section', async () => {

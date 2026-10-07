@@ -1523,7 +1523,7 @@ test('the master can withdraw its own unconfirmed draft without losing it', asyn
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
       edges: { checkWork: { from: 'work.result', to: 'check.job', enabled: true } },
       acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }] }),
-  } as Proposal;
+  };
   await runtime.supervisor(anchorTaskId).propose(draft, 'draft-1');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
 

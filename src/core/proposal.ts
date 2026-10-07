@@ -1,4 +1,4 @@
-import { RuntimeError, type Proposal } from './types.ts';
+import { RuntimeError, type Proposal, type NativeProposal } from './types.ts';
 import { GraphPlan } from './graph.ts';
 import { validateVerifierConfig } from './verification.ts';
 import { validateContextRequest } from './context.ts';
@@ -6,7 +6,7 @@ import { validatePredecessorPolicies } from './predecessor-handoff.ts';
 import { parseGraphDefinition } from './interface-spec.ts';
 
 /** Validate static structure before any node or instance is created. */
-export function validateProposal(proposal: Proposal) {
+export function validateProposal(proposal: Proposal | NativeProposal) {
   const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
   const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
   if (!Number.isSafeInteger(proposal.requirementVersion) || proposal.requirementVersion < 1 || !text(proposal.summary)) invalid('A requirement version and summary are required');
@@ -27,6 +27,12 @@ export function validateProposal(proposal: Proposal) {
     }
     return;
   }
+  validateLegacyProposal(proposal as Proposal);
+}
+
+function validateLegacyProposal(proposal: Proposal) {
+  const invalid = (reason: string): never => { throw new RuntimeError('invalid_proposal', reason); };
+  const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
   if (!Array.isArray(proposal.nodes) || !proposal.nodes.length || proposal.nodes.length > 1000) invalid('Expected 1–1000 nodes');
   const nodes = new Map(proposal.nodes.map(node => [node.id, node]));
   if (nodes.size !== proposal.nodes.length) invalid('Node IDs must be unique');

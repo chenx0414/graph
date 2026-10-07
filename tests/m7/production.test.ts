@@ -7,7 +7,6 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { git as runGit } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
@@ -89,7 +88,7 @@ test('production Pi writes the Bilibili web on a clone through workspace tools a
   });
   const proposed = await main.propose({ requirementVersion: 1, summary: definition.name, definition,
     acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })),
-  } as Proposal, 'm7-prod-plan');
+  }, 'm7-prod-plan');
   const receipt = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   graphId = receipt.taskId;
   await expect(main.revise({ taskId: graphId, baseVersion: 1, reason: 'Legacy revision must not touch a native graph', nodes: [], requestId: 'legacy-revision' })).rejects.toMatchObject({ code: 'invalid_graph' });

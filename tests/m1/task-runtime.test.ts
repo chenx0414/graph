@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import type { Proposal, NativeProposal } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 
@@ -11,7 +11,7 @@ const checkDefinition = parseGraphDefinition({ schemaVersion: 2, name: 'Check wo
   modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
     operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
   edges: {}, acceptance: [{ id: 'works', description: 'Works', kind: 'check', module: 'check' }] });
-const checkProposal = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], definition: checkDefinition } as Proposal;
+const checkProposal: NativeProposal = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }], definition: checkDefinition };
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -35,7 +35,7 @@ test('a confirmed requirement and its idempotent command receipt survive reopeni
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.mjs'], output: 'result' } } },
       edges: { verified: { from: 'implement.result', to: 'verify.job', enabled: true } },
       acceptance: [{ id: 'search', description: 'Matching titles are returned', kind: 'check', module: 'verify' }] }),
-  } as Proposal, 'proposal-1');
+  }, 'proposal-1');
   const accepted = await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept-1' });
   const before = await task.view();
   expect(before.proposal).toMatchObject({ summary: 'Search existing items by title', acceptance: [{ id: 'search', checkNode: 'verify' }] });
@@ -131,7 +131,7 @@ test('abandoning a wedged active task hands the slot to the queued task', async 
   cleanup.push(() => runtime.close());
   const spec = { ...checkProposal, definition: parseGraphDefinition({ ...checkDefinition, nodes: {
     waiting: { recipe: 'worker@1', task: 'Wait for an input', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} },
-  } }) } as Proposal;
+  } }) };
   // Only a confirmed task takes the single active code slot; a second confirmed
   // task waits in the queue behind it, which is what makes abandoning matter.
   const first = await runtime.user.begin({ projectId: 'project', request: 'First', requestId: 'begin-1' });

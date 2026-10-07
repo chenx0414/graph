@@ -68,7 +68,7 @@ import type { MergeResolverChannels } from './execution.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { RuntimeError, type AttachmentInput, type ProjectConfig, type Proposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
+import { RuntimeError, type AttachmentInput, type ProjectConfig, type Proposal, type NativeProposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
 import { cleanAttachments, isImageAttachment } from './attachments.ts';
 
 const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -2094,7 +2094,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             attestation: { actor: 'agent', onBehalfOf: 'user', instruction: input.instruction.trim() },
           });
         },
-        async propose(proposal: Proposal, requestId: string): Promise<ProposalReceipt> {
+        async propose(proposal: Proposal | NativeProposal, requestId: string): Promise<ProposalReceipt> {
           ensureOpen();
           return store.command(`supervisor:${taskId}`, requestId, { type: 'propose', proposal }, () => {
             const task = store.task(taskId);
@@ -2175,7 +2175,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             return { taskId: target, graphVersion: revised.version, cursor: revised.cursor };
           });
         },
-        async validateProposal(proposal: Proposal) {
+        async validateProposal(proposal: Proposal | NativeProposal) {
           ensureOpen();
           const task = store.task(taskId);
           if (task.requirement_version !== proposal.requirementVersion) {

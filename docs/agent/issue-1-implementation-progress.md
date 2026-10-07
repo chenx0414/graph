@@ -498,3 +498,15 @@
 - 风险是遗漏外部脚本调用或旧夹具隐含合同：仓库全量引用扫描无活跃调用，历史 handoff/独立验收文档保留当时事实，可在上述提交查看旧文件。此次基线有意从 276 文件 / 1876 用例降为 273 文件 / 1859 用例，使用 GRAPH_UPDATE_BASELINE=1 明确公告，不绕过数量门禁。第五十二轮完整门禁待执行。
 
 - 第五十二轮完整门禁通过：273 文件、1859 用例，179.21 秒；TypeScript、lint 与验收证据检查通过。基线按上述已记录的 3 文件 / 17 用例退役有意降低，数量守卫仍正常启用。
+
+
+## 原生提案 SDK 类型
+
+- 公开 M7 production 合同移除旧 Proposal 断言后，修复前 TypeScript 在 main.propose 实际报 TS2741：原生对象缺少旧 nodes 字段。新增 NativeProposal，与暂留的旧 Proposal 共用需求/验收/决策字段，原生 definition 必需；SDK propose / validateProposal 接受原生类型，main 的 Pi 工具通道及工具参数解析只声明 NativeProposal。
+- 原生校验仍先校验定义、具名验收和决策；剩余旧 SDK 校验单独放入 private validateLegacyProposal，不新增转换或兼容执行器。旧调用尚未迁移完，仍不能宣称默认切换完成。
+- M7 production / freeze / delivery、两个控制台合同、原生任务/撤回草稿/聊天浏览器夹具移除不必要的旧 Proposal 断言；非法结构的负向夹具保留类型断言，因为它们有意提交运行时非法值。未改运行图、预算、审查或 Git 行为。
+- 修复后主应用与 Web 类型检查通过；定向及第五十三轮完整门禁待执行。
+
+- SDK 定向验证 5 文件、12 用例通过，5.87 秒。首次定向命令遗漏 GRAPH_MEDIABOOKMARKS_ROOT，两个 M7 用例在不存在的来源 cwd 调用 Git 报 ENOENT；补齐实际来源路径后通过，未改变产品或夹具以掩盖错误。第五十三轮完整门禁待执行。
+
+- 第五十三轮完整门禁通过：273 文件、1859 用例，176.78 秒；TypeScript、lint、数量基线与验收证据检查通过。原生 SDK 无旧 nodes 的调用已通过真实 M7、聊天界面及任务生命周期全量合同。整个 spec、默认切换及旧内核退役仍未完成。

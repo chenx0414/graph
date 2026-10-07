@@ -189,3 +189,6 @@ stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍�
 
 
 确认任务共享项目集成的活动名额。当前任务真正 completed 或 stopped 后才释放名额，最早排队的确认任务随后进入 running；completing / stopping 期间仍保留名额。直接管理创建的 graph 不占用或释放其他确认任务的名额。用户 abandon 对原生 graph 表示停止请求，沿 stopping → stopped 取消待运行输入并等待活动工作停稳；重复 requestId 重放同一 receipt。
+
+
+SDK 的原生草稿类型是 `NativeProposal`（src/core/types.ts），必须包含 `definition`，只声明 requirementVersion、summary、acceptance、decisions；不需要旧 nodes / containers / loops。`supervisor.propose` 与 `validateProposal` 接受原生对象，main 的 Pi 工具通道也使用这一类型。旧 Proposal 及旧 SDK 调用仍在退役，尚不能据此宣称旧内核已删除。

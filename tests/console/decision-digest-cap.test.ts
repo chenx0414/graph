@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import type { ActionAdapter, OperationResult , Proposal } from '../../src/core/types.ts';
+import type { ActionAdapter, OperationResult } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -69,7 +69,7 @@ test('the fallback drops what states nothing and keeps a short constraint', asyn
       modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
       acceptance: [{ id: 'ok', description: 'ok', kind: 'check', module: 'check' }] }),
-  } as Proposal, 'draft');
+  }, 'draft');
 
   const read = new TaskStore(join(stateDir, 'tasks.sqlite'));
   const row = read.db.prepare('SELECT decision_snapshot FROM proposals WHERE task_id=? AND version=1').get(created.taskId) as { decision_snapshot: string | null };
@@ -121,7 +121,7 @@ test('the fallback decision snapshot is bounded at both ends, not just the recen
       modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
       acceptance: [{ id: 'ok', description: 'ok', kind: 'check', module: 'check' }] }),
-  } as Proposal, 'draft');
+  }, 'draft');
 
   const read = new TaskStore(join(stateDir, 'tasks.sqlite'));
   const row = read.db.prepare('SELECT decision_snapshot FROM proposals WHERE task_id=? AND version=1').get(created.taskId) as { decision_snapshot: string | null } | undefined;

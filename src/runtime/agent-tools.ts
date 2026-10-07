@@ -4,7 +4,7 @@ import { extname, isAbsolute, sep } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { CapabilityRecord, Catalog } from '../catalog/catalog.ts';
 import type { AgentCombination } from '../catalog/agent-combinations.ts';
-import { RuntimeError, type Json, type NodeSpec, type Proposal } from '../core/types.ts';
+import { RuntimeError, type Json, type NodeSpec, type NativeProposal } from '../core/types.ts';
 import { isHostRead, isHostWrite, type ResolvedAccessPolicy } from '../core/access-policy.ts';
 import type { ArtifactPage, ArtifactRecord, ArtifactTrust, PublishArtifactInput } from '../core/artifact-workspace.ts';
 import {
@@ -22,13 +22,13 @@ export interface PeerChannel {
 }
 
 type Supervisor = Partial<GraphManagement> & {
-  propose(proposal: Proposal, requestId: string): Promise<unknown>;
+  propose(proposal: NativeProposal, requestId: string): Promise<unknown>;
   withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
   confirmDraft?(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
   revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
   taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
-  validateProposal?(proposal: Proposal): Promise<unknown>;
+  validateProposal?(proposal: NativeProposal): Promise<unknown>;
   listProjects?(): Promise<unknown>;
   bindProject?(input: { projectId: string; requestId: string }): Promise<unknown>;
   listProblems?(): Promise<unknown>;
@@ -107,11 +107,11 @@ function image(data: Buffer, mimeType: string) {
   return { content: [{ type: 'image' as const, data: data.toString('base64'), mimeType }], details: {} };
 }
 
-function nativeProposal(value: unknown): Proposal {
+function nativeProposal(value: unknown): NativeProposal {
   if (!value || typeof value !== 'object' || Array.isArray(value) || !('definition' in value)) {
     throw new RuntimeError('invalid_proposal', 'Expected a native proposal object with definition; use schemaVersion:2 graph JSON');
   }
-  return value as Proposal;
+  return value as NativeProposal;
 }
 
 function fields(params: unknown) {
