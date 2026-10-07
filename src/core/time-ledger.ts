@@ -13,10 +13,12 @@ import type { TaskStore } from './store.ts';
 const TERMINAL = "('succeeded','skipped','retired','failed')";
 
 export function openPause(store: TaskStore, taskId: string, now = Date.now()) {
+  setNativePause(store, taskId, true, undefined, now);
   store.db.prepare(`UPDATE nodes SET pause_since=? WHERE task_id=? AND pause_since IS NULL AND status NOT IN ${TERMINAL}`).run(now, taskId);
 }
 
 export function closePause(store: TaskStore, taskId: string, now = Date.now()) {
+  setNativePause(store, taskId, false, undefined, now);
   store.db.prepare(`UPDATE nodes SET pause_ms=COALESCE(pause_ms,0)+(?-pause_since), pause_since=NULL
     WHERE task_id=? AND pause_since IS NOT NULL AND ? >= pause_since`).run(now, taskId, now);
 }
@@ -57,4 +59,34 @@ export function nodeTimeLedger(store: TaskStore, taskId: string, nodeId: string,
     pauseMs: pauseRecorded ? (row.pause_ms ?? 0) + live(row.pause_since) : undefined,
     userWaitMs: userRecorded ? (row.user_wait_ms ?? 0) + live(row.user_wait_since) : undefined,
   };
+}
+
+/** Explicit native graph/node pause controls share one elapsed interval. Failure
+ * queue holds are separate: they do not manufacture a user pause boundary. */
+export function setNativePause(store: TaskStore, taskId: string, paused: boolean, nodeId?: string, now = Date.now()) {
+  if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_nodes'").get()) return;
+  if (paused && ['completed', 'stopping', 'stopped'].includes(store.task(taskId).phase)) return;
+  const target = nodeId === undefined ? 'task_id=?' : 'task_id=? AND node_id=?';
+  const args = nodeId === undefined ? [taskId] : [taskId, nodeId];
+  const column = nodeId === undefined ? 'graph_paused' : 'node_paused';
+  store.db.prepare(`UPDATE kernel_nodes SET ${column}=? WHERE ${target} AND status!='retired'`).run(Number(paused), ...args);
+  store.db.prepare(`UPDATE kernel_nodes SET pause_since=? WHERE ${target} AND status!='retired'
+    AND (graph_paused=1 OR node_paused=1) AND pause_since IS NULL`).run(now, ...args);
+  store.db.prepare(`UPDATE kernel_nodes SET pause_ms=COALESCE(pause_ms,0)+MAX(0,?-pause_since),pause_since=NULL
+    WHERE ${target} AND graph_paused=0 AND node_paused=0 AND pause_since IS NOT NULL`).run(now, ...args);
+}
+
+/** Ended services cannot extend an open pause indefinitely. */
+export function finishNativePauses(store: TaskStore, taskId: string, nodeId?: string, now = Date.now()) {
+  const target = nodeId === undefined ? 'task_id=?' : 'task_id=? AND node_id=?';
+  const args = nodeId === undefined ? [taskId] : [taskId, nodeId];
+  store.db.prepare(`UPDATE kernel_nodes SET pause_ms=COALESCE(pause_ms,0)+MAX(0,?-pause_since),
+    pause_since=NULL,graph_paused=0,node_paused=0 WHERE ${target} AND pause_since IS NOT NULL`).run(now, ...args);
+}
+
+export function nativePauseMs(store: TaskStore, taskId: string, nodeId: string, now = Date.now()): number | null {
+  const row = store.db.prepare('SELECT pause_ms,pause_since FROM kernel_nodes WHERE task_id=? AND node_id=?')
+    .get(taskId, nodeId) as { pause_ms: number | null; pause_since: number | null } | undefined;
+  if (!row || (row.pause_ms === null && row.pause_since === null)) return null;
+  return (row.pause_ms ?? 0) + (row.pause_since === null ? 0 : Math.max(0, now - row.pause_since));
 }

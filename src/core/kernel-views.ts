@@ -1,3 +1,4 @@
+import { nativePauseMs } from './time-ledger.ts';
 import type { GraphDefinition } from './interface-spec.ts';
 import { usageSourceOf } from '../runtime/call-broker.ts';
 import type { KernelStore } from './kernel-store.ts';
@@ -66,7 +67,7 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
       usage: call.usage, usageSource: usageSourceOf(call.usage), cost: null, purpose: 'node',
       dispatchedAt: call.createdAt, settledAt: call.settledAt })), questions: [], evidence: [],
     timing: { totalMs: settled.length ? settled.reduce((total, item) => total + item.ended_at! - item.started_at, 0) : null,
-      runMs: null, waitingMs: null, pauseMs: null, userWaitMs: null, inProgress: executions.some(item => item.state === 'running') },
+      runMs: null, waitingMs: null, pauseMs: nativePauseMs(kernel.store, graphId, nodeId), userWaitMs: null, inProgress: executions.some(item => item.state === 'running') },
     ...listNodeEntries(kernel.store, graphId, nodeId, query), phase: kernel.store.task(graphId).phase,
   };
 }

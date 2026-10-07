@@ -1,3 +1,4 @@
+import { setNativePause } from './time-ledger.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 import { wakeMaster, wakeForBlockedNode } from './wake-ledger.ts';
 import { randomUUID } from 'node:crypto';
@@ -265,6 +266,10 @@ export class KernelStore {
     // §3: a Delivery carries an edge id OR a direct source. A module's emit is not a
     // submission, so the column becomes nullable and a `source` tells the two apart.
     // Existing databases are migrated in place rather than reset.
+    const nodeColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_nodes)').all() as { name: string }[]).map(row => row.name));
+    for (const [name, declaration] of [['pause_ms', 'INTEGER'], ['pause_since', 'INTEGER'], ['graph_paused', 'INTEGER NOT NULL DEFAULT 0'], ['node_paused', 'INTEGER NOT NULL DEFAULT 0']] as const) {
+      if (!nodeColumns.has(name)) this.db.exec(`ALTER TABLE kernel_nodes ADD COLUMN ${name} ${declaration}`);
+    }
     const executionColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_executions)').all() as { name: string }[]).map(row => row.name));
     for (const [name, declaration] of [['token_budget', 'TEXT'], ['token_reservation', 'INTEGER NOT NULL DEFAULT 0'], ['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
@@ -365,6 +370,8 @@ export class KernelStore {
     if (!node) throw new RuntimeError('invalid_definition', `Revision ${revisionVersion} has no node ${nodeId}`);
     this.store.db.prepare('INSERT INTO kernel_nodes(task_id,revision_version,node_id,instance_id,kind,spec,status) VALUES(?,?,?,?,?,?,?)')
       .run(taskId, revisionVersion, nodeId, input.instanceId, input.kind ?? 'agent', canonicalJson(node), 'idle');
+    // Inherit a recorded graph pause, not an internal workspace preparation hold.
+    if (this.db.prepare('SELECT 1 FROM kernel_nodes WHERE task_id=? AND graph_paused=1').get(taskId)) setNativePause(this.store, taskId, true);
   }
 
   admitModule(taskId: string, revisionVersion: number, moduleId: string, input: { moduleType: string; trigger: string }): void {
@@ -971,6 +978,7 @@ export class KernelStore {
     this.moduleTransaction(() => {
       this.ensureNodeState(taskId, nodeId);
       this.store.db.prepare('UPDATE kernel_node_state SET paused=? WHERE task_id=? AND node_id=?').run(paused ? 1 : 0, taskId, nodeId);
+      if (!paused) setNativePause(this.store, taskId, false, nodeId);
     });
   }
 

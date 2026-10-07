@@ -43,16 +43,11 @@ async function workerFixture(name: string, plans: Parameters<typeof openaiServer
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Node detail', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Node detail',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
+  await runtime.supervisor(taskId).propose(nativeDraft(), 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  return { options, taskId, runtime: () => runtime };
+  return { taskId, runtime: () => runtime, restart: async () => {
+    await runtime.close(); runtime = await openTaskRuntime(options);
+  } };
 }
 
 test('a worker node projects real Pi entries, its session reference and operation timing', async () => {
@@ -343,15 +338,43 @@ test('pause and user-wait accumulate only at state boundaries with recorded fact
   expect(nodeRun(store, 't', 'work').timing.userWaitMs).toBe(frozen);
 });
 
-test('the task pause boundary writes the ledger through the public API (C02)', async () => {
-  const { taskId, runtime, options } = await workerFixture('pause-ledger', [{ text: 'done' }]);
+test('native pause timing survives restart and counts overlapping graph and node pauses once (C02)', async () => {
+  const { taskId, runtime, restart } = await workerFixture('pause-ledger', [{ text: 'done' }]);
+  const detail = async () => {
+    const view = await runtime().nodeRun(taskId, 'work');
+    if (!('pauseMs' in view.timing)) throw new Error('Expected native node timing');
+    return { ...view, timing: view.timing };
+  };
+  expect((await detail()).timing.pauseMs).toBeNull();
   await runtime().user.task(taskId).pause('pause-ledger');
-  await new Promise(resolve => setTimeout(resolve, 150));
+  const start = Date.now();
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'pause', nodeId: 'work' });
+  await restart();
   await runtime().user.task(taskId).resume('resume-ledger');
-  const store = new TaskStore(join(options.stateDir, 'tasks.sqlite'));
-  cleanup.push(async () => store.close());
-  const view = nodeRun(store, taskId, 'work');
+  await new Promise(resolve => setTimeout(resolve, 150));
+  const minimum = Date.now() - start;
+  expect((await detail()).timing.pauseMs!).toBeGreaterThanOrEqual(minimum);
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'resume', nodeId: 'work' });
+  const elapsed = Date.now() - start;
+  const view = await detail();
   expect(view.timing.pauseMs).not.toBeNull();
   expect(view.timing.pauseMs!).toBeGreaterThanOrEqual(100);
+  expect(view.timing.pauseMs!).toBeLessThanOrEqual(elapsed + 100);
   expect(view.timing.userWaitMs).toBeNull();
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'resume', nodeId: 'work' });
+  await runtime().user.task(taskId).resume('resume-again');
+  await restart();
+  expect((await detail()).timing.pauseMs).toBe(view.timing.pauseMs);
+  expect((await detail()).operations).toHaveLength(0);
+  // Reverse the overlap: resuming a node must not close a graph pause.
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'pause', nodeId: 'work' });
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'pause' });
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'resume', nodeId: 'work' });
+  const held = (await detail()).timing.pauseMs!;
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect((await detail()).timing.pauseMs!).toBeGreaterThanOrEqual(held + 100);
+  await runtime().supervisor(taskId).graphControl({ graphId: taskId, action: 'stop' });
+  const stopped = (await detail()).timing.pauseMs;
+  await restart();
+  expect((await detail()).timing.pauseMs).toBe(stopped);
 });

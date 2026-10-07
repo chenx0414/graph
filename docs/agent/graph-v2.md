@@ -218,3 +218,6 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 确认草稿必须声明非空 definition.acceptance，并在外层 acceptance 摘要中完整列出同一组 ID 和描述；check 的 checkNode 对应 module，review 的 checkNode 对应 node。数量、ID、描述或检查对象不一致时，validate_proposal 和 propose_graph 都会在创建草稿前拒绝，不把无法执行或与用户展示矛盾的验收留到完成时才发现。human 仍使用用户验收流程，不从路由 passed 推断人工批准。
 
 脚本化 ActionAdapter 用于无模型的确定性宿主测试，其 operation.input 来自当前已 claim 的投递 value（聊天 / 控制输入保留对应 payload），context.briefing 是该次实际组装的 prompt；不再读取旧 proposal.nodes 的 input/context。正式节点仍通过各自常驻 Pi 执行。原生节点详情的 elapsedMs / timing.totalMs 记录实际执行墙钟时间并可在重启后查看；未记录的 runMs / waitingMs 分项保持 null。
+
+
+原生节点详情的 timing.pauseMs 来自持久暂停账本：用户 task.pause/resume 和 main 的 graph_control pause/resume 都记录实际边界。整个 graph 与单节点暂停重叠时只累计一次，恢复其中一层不会结束另一层暂停；重复操作不重复累计。记录跨后台重启保留，新增节点继承已记录的 graph 暂停。创建 worktree 的内部准备锁、执行失败后的队列保持不会被补造为用户暂停。graph 停止、完成或节点退役会关闭尚未结束的暂停区间；从未记录暂停时仍返回 null。人工等待 userWaitMs 尚无原生实际边界记录，保持 null。

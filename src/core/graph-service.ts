@@ -1,3 +1,4 @@
+import { setNativePause } from './time-ledger.ts';
 import { reconcileOperationResources } from './kernel-operation-resources.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { graphAcceptance } from './graph-acceptance.ts';
@@ -122,7 +123,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
         return new ModuleRuntime(kernel, input.graphId, kernel.latestRevision(input.graphId)!.version).reopenAfterPending(input.moduleId);
       }
       if (input.action === 'pause' || input.action === 'resume') {
-        if (input.nodeId) {
+        if (input.nodeId !== undefined) {
           if (!Object.hasOwn(kernel.latestRevision(input.graphId)!.definition.nodes, input.nodeId)) {
             throw new RuntimeError('invalid_input', 'Node control requires a node in the current graph definition');
           }
@@ -130,6 +131,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
           if (input.action === 'resume') kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'").run(input.graphId, input.nodeId);
         }
         else kernel.db.prepare('UPDATE tasks SET paused=? WHERE id=?').run(input.action === 'pause' ? 1 : 0, input.graphId);
+        setNativePause(kernel.store, input.graphId, input.action === 'pause', input.nodeId);
         return graph.state();
       }
       if (['retry', 'skip', 'cancel'].includes(input.action)) {
@@ -145,6 +147,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
           kernel.db.prepare('UPDATE kernel_queue SET state=?,reason=?,generation=generation+? WHERE task_id=? AND seq=?')
             .run(input.action === 'retry' ? 'queued' : 'done', input.action, input.action === 'retry' ? 1 : 0, input.graphId, seq);
           kernel.db.prepare('UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?').run(input.graphId, row.node_id);
+          setNativePause(kernel.store, input.graphId, false, row.node_id);
           kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status IN ('blocked','failed')").run(input.graphId, row.node_id);
           kernel.db.prepare("UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked' AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)").run(input.graphId, input.graphId);
           kernel.store.event(input.graphId, `graph.queue.${input.action}`, { seq: input.seq, nodeId: row.node_id });

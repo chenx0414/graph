@@ -1,3 +1,4 @@
+import { finishNativePauses } from './time-ledger.ts';
 import { releaseTaskSlot } from './task-queue.ts';
 import { wakeMaster, wakeForTaskCompleted } from './wake-ledger.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -158,6 +159,7 @@ export class GraphRuntime {
         else this.kernel.db.prepare('UPDATE kernel_modules SET revision_version=?,module_type=?,trigger=? WHERE task_id=? AND module_id=?')
           .run(revision.version, module.type, module.trigger, this.graphId, id);
       }
+      for (const id of removed) finishNativePauses(this.kernel.store, this.graphId, id);
       for (const id of removed) this.kernel.db.prepare("UPDATE kernel_nodes SET status='retired' WHERE task_id=? AND node_id=?").run(this.graphId, id);
       return { revision: revision.version };
     });
@@ -173,7 +175,10 @@ export class GraphRuntime {
 
   private setPhase(phase: GraphPhase): void {
     this.kernel.store.db.prepare('UPDATE tasks SET phase=? WHERE id=?').run(phase, this.graphId);
-    if (phase === 'completed' || phase === 'stopped') releaseTaskSlot(this.kernel.store, this.graphId);
+    if (phase === 'completed' || phase === 'stopped') {
+      finishNativePauses(this.kernel.store, this.graphId);
+      releaseTaskSlot(this.kernel.store, this.graphId);
+    }
   }
 
   private completionRequested(): boolean {
@@ -303,6 +308,7 @@ export class GraphRuntime {
   stop(): GraphStateRow {
     this.ensureTask();
     if (['completed', 'stopped'].includes(this.state()!.phase)) return this.state()!;
+    finishNativePauses(this.kernel.store, this.graphId);
     this.kernel.db.prepare("UPDATE tasks SET phase='stopping',paused=0 WHERE id=?").run(this.graphId);
     this.kernel.db.prepare('UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?').run(this.graphId);
     this.kernel.db.prepare('UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)').run(this.graphId);
