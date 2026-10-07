@@ -2,7 +2,7 @@
 //
 // This drives the real tool factory with a real store and real graph rows - the same code path a
 // worker's turn takes - and reads the effect back out, not out of a mock. The delivery itself is
-// proven where it happens: `node-messages.test.ts` drives the real runtime and reads the effect out
+// proven where it happens: `graph-messages.test.ts` drives resident Pi and the real runtime and reads the effect out
 // of the database, including the cross-graph refusal this file's reach assertion used to make.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -6,7 +6,7 @@
 // The addressing unit is therefore (task, node), and the reach rule is: a subagent may address any
 // node of its OWN graph, and no other graph. `send_to_peer` does not park a message in an inbox: it
 // delivers it to the target node as that node's own input, so the rule is enforced where delivery
-// happens (`node-messages.ts`, covered by `node-messages.test.ts`). What stays here is the list of
+// happens (`kernel-node-messages.ts`, covered by `graph-messages.test.ts`). What stays here is the list of
 // addresses a node may pick from, which is what this file pins down.
 //
 // 1. Peer lookup lists every node of the graph with its status, so an Agent can pick a recipient.

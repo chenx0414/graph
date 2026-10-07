@@ -92,3 +92,22 @@
 - 引用：`grep -rln "from './X.ts'"`（见 §三）。
 - 牵动面：`grep -rln "loadGraph\|GraphPlan\|NodeSpec\|graph_revisions\|predecessor-handoff\|resultHandoff" src/` = 31 个文件。
 - v2 缺口：按能力名在 v2 文件集（`kernel-*`/`graph-*`/`node-*`/`module-*`/`runtime/kernel-*`/`resident-*`）中 grep，deliverable/artifact/workcopy 均为 0。
+
+
+## 2026-10-08：旧节点消息分派实际退役
+
+- 删除模块：src/core/node-messages.ts（107 行）。旧消息通过 execution.steer 打断忙碌执行，或 reactivate / loadGraph 按 DAG 失效后继并重开已完成任务；与已确认的一次消息一次排队、graph 完成后结束内部服务契约冲突。
+- 删除前活跃调用方只有 task-runtime.ts 的 SDK 节点 / peer 消息以及旧 Pi adapter peer channel；全部改为 kernel-node-messages.ts，原生常驻 Pi lane 已直接使用该模块。复核 src/tests 无旧模块导入。保留 external main 的 execution.steer / conversation steering：它服务 main 会话，不是 graph 内部节点消息。peerNodes 的旧 adapter 地址列表仍有非测试使用者，不随消息模块删除。
+- 删除 tests/console/node-messages.test.ts（5 用例）的原因及剩余合同：
+
+| 原合同 | 删除依据 | 剩余实际边界证据 |
+| --- | --- | --- |
+| completed-node messages invalidate only descendants, preserve instance and budget, and reach the next briefing once | 旧 DAG 失效后继并重开 completed graph；自动下游失效已被显式投递替代 | graph-messages 的真实 Pi 串行三回合、同实例 / 历史 / 累计用量、无 sibling 执行；graph-runtime 的 completed / stopped 拒绝控制重开；graph-messages 的停止后新输入拒绝 |
+| live messages steer only their operation and retries do not deliver twice | 忙碌节点应排队，立即 steer 与已确认行为冲突 | graph-messages 持有真实 provider 请求时加入两条消息，三条队列中仅首条 claimed，重复请求不重复投递 |
+| a peer message to a finished node reactivates it and reaches the next briefing like a user prompt | completed graph 内服务生命周期已结束；节点一次完成后的复跑用队列处理 | 同一真实 Pi 合同证明 idle 节点沿用 session 继续执行；结束后仅回执 replay 可用 |
+| a peer message to a running node steers that operation instead of restarting it | 立即 steer 已废弃 | 同一真实 Pi 持有请求合同，busy peer 消息 queued，后续请求带前一回复及 From sibling 信息 |
+| a peer message to a node outside this graph is refused and delivers nothing | 原生公开边界已有同一 reach / self / sender 拒绝，不保留旧表驱动的重复证明 | graph-messages 首合同验证 ghost / 跨 graph / self / 假 sender 拒绝且消息图只有实际投递 |
+
+- 历史原因：旧模块由 a8e0a2f 建立以解决被动 inbox 不触发执行；测试最后经历 6c4cca4 的旧图提升和 cbb6710 的脚本适配。这些问题由正式 kernel 队列与常驻 Pi 已覆盖。
+- node-deliverable 的四个公开合同手工迁为真实 Pi / 原生草稿与显式投递，删除该文件的旧 dependsOn、program check、OperationResult 脚本 fixture；自动产物由真实文件产生，读者通过具名输入收到精确发布引用并调用 artifact_read。旧 dependencySources/path 自动交接断言按新协议退役。
+- 聚焦检查 7 文件 / 57 用例通过（9.17 秒）。预期基线 274/1866 → 273/1861，仅上述 5 个过期合同减少。全量验证与提交证据见实施进度，不据此宣布全部旧内核删除。

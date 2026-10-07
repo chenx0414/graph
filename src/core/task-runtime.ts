@@ -2,7 +2,6 @@ import { sendKernelMainMessage, sendKernelNodeMessage } from './kernel-node-mess
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
 import { kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse, kernelConversationNodes } from './kernel-views.ts';
-import { sendNodeMessage, sendPeerMessage } from './node-messages.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
@@ -535,7 +534,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         supervisor: taskId => channels.supervisor!(taskId),
         catalog,
         // A thunk: `execution` is built below this point in the same scope.
-        peers: taskId => ({ deliver: (from, input) => sendPeerMessage(store, execution, taskId, from, input) }),
+        peers: taskId => ({ deliver: async (from, input) => input.to === 'main'
+          ? sendKernelMainMessage(kernel, taskId, from, input)
+          : sendKernelNodeMessage(kernel, taskId, input.to, input, from) }),
         // Thunks, not values: the conversation service is built below this point in the same scope.
         conversations: {
           service: {
@@ -1681,23 +1682,16 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     },
     async sendNodeMessage(taskId: string, nodeId: string, input: { text: string; requestId: string }) {
       ensureOpen();
-      if (kernel.latestRevision(taskId)) {
-        const receipt = sendKernelNodeMessage(kernel, taskId, nodeId, input);
-        if (options.autoWake) execution.kick();
-        return receipt;
-      }
-      const receipt = await sendNodeMessage(store, execution, taskId, nodeId, input);
+      const receipt = sendKernelNodeMessage(kernel, taskId, nodeId, input);
       if (options.autoWake) execution.kick();
       return receipt;
     },
-    /** One Agent of a graph messaging another; delivered like a user prompt to the target node. */
+    /** One Agent's message becomes a serial turn on its peer's existing session. */
     async sendPeerMessage(taskId: string, from: string, input: { to: string; text: string; requestId: string }) {
       ensureOpen();
-      const receipt = kernel.latestRevision(taskId)
-        ? (input.to === 'main'
-          ? sendKernelMainMessage(kernel, taskId, from, input)
-          : sendKernelNodeMessage(kernel, taskId, input.to, input, from))
-        : await sendPeerMessage(store, execution, taskId, from, input);
+      const receipt = input.to === 'main'
+        ? sendKernelMainMessage(kernel, taskId, from, input)
+        : sendKernelNodeMessage(kernel, taskId, input.to, input, from);
       if (options.autoWake) execution.kick();
       return receipt;
     },
@@ -1705,7 +1699,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       ensureOpen();
       store.task(taskId);
       // A peer message is recorded where it is delivered: a chat entry on the target node carrying
-      // the sender (`node-messages.ts` writes it). Reading it here is what draws the canvas's message
+      // the sender (`kernel-node-messages.ts` writes it). Reading it here is what draws the canvas's message
       // arcs, and reading anything else would draw a picture of a mechanism that no longer exists -
       // the old `messages.kind='agent_message'` rows stopped being written when peer delivery was
       // changed to hand the words to the target node, which left this reader reporting an empty

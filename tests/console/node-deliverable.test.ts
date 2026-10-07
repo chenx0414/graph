@@ -1,170 +1,104 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
-import { TaskStore } from '../../src/core/store.ts';
-import { ArtifactWorkspace } from '../../src/core/artifact-workspace.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec, Operation, OperationResult } from '../../src/core/types.ts';
+import { installPresets } from '../../src/catalog/presets.ts';
+import { parseGraphDefinition, type NodeDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
-  for (const action of cleanup.reverse()) {
-    await Promise.race([Promise.resolve(action()).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]);
-  }
+  for (const action of cleanup.reverse()) await action();
   cleanup.length = 0;
 });
 
-const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
-
-function scripted(handler: (operation: Operation) => Promise<OperationResult> | OperationResult): ActionAdapter {
-  return { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => handler(operation) };
-}
-
-/**
- * A subagent's deliverable must not depend on the subagent remembering a tool call. In the simple
- * tier study three nodes each wrote a note and only one of them also published it, because nothing
- * in the graph had asked for an artifact: the node inputs only said "write notes/x.md". The node
- * declares the deliverable and the harness publishes it, which is where the file's existence can
- * also be enforced.
- */
-async function fixture(handler: (operation: Operation) => Promise<OperationResult> | OperationResult) {
+async function fixture(plans: ResponsePlan[], deliverable: NonNullable<NodeDefinition['deliverable']>, reader = false) {
   const root = await mkdtemp(join(tmpdir(), 'graph-node-deliverable-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer(plans);
+  cleanup.push(() => provider.close());
+  const workspace = join(root, 'project');
+  await mkdir(workspace);
   const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root }],
-    actions: { work: scripted(handler) },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], actions: {},
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
+      apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
   });
   cleanup.push(() => runtime.close());
-  return { root, runtime, stateDir: join(root, 'state') };
+  await installPresets(runtime.catalog, fileURLToPath(new URL('../../presets', import.meta.url)));
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '交回一份笔记', requestId: 'begin' });
+  await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: '发布节点声明的文件',
+    acceptance: [{ id: 'ok', description: '用户检查笔记', checkNode: 'work' }],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: '文件交付',
+      protocols: { job: { type: 'object' }, artifact: { type: 'object', required: ['artifactId', 'version'],
+        properties: { artifactId: { type: 'string' }, version: { type: 'integer' } } } },
+      nodes: {
+        work: { recipe: 'coder@1', model: 'local', task: '写入声明的文件，完成后回复。', deliverable,
+          inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} },
+        ...(reader ? { reader: { recipe: 'coder@1', model: 'local', task: '读取传入的精确产物版本并回复。',
+          inputs: { artifact: { protocol: 'artifact' } }, outputs: {}, submission: {} } } : {}),
+      }, modules: {}, edges: {}, acceptance: [{ id: 'ok', description: '用户检查笔记', kind: 'human' }] }),
+  }, 'draft');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
+  await runtime.host.drive();
+  return { runtime, taskId, provider };
 }
 
-function nodeStatus(stateDir: string, taskId: string, nodeId: string) {
-  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
-  const row = store.db.prepare('SELECT status FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as { status: string } | undefined;
-  store.close();
-  return row?.status;
-}
+const note = { path: 'notes/lane.md', namespace: 'research' as const, name: 'lane-notes', title: 'lane notes' };
+const writeNote = { tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: note.path, content: '# lane notes\n' }) }] };
 
-function graph(deliverable: NonNullable<NodeSpec['deliverable']>) {
-  return {
-    requirementVersion: 1,
-    summary: '一条车道交回一份笔记',
-    acceptance: [{ id: 'ok', description: '笔记存在', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'm', deliverable },
-      { id: 'check', kind: 'program' as const, action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--version'] } },
-    ],
-  };
-}
+test('a native node declares a file and the harness publishes the actual Pi-written bytes', async () => {
+  const { runtime, taskId } = await fixture([writeNote, { text: 'Finished writing.' }], note);
+  const published = runtime.artifacts.list(taskId).artifacts.find(item => item.name === note.name);
+  expect(published).toMatchObject({ scope: 'task', namespace: 'research', title: 'lane notes', producer: { nodeId: 'work' } });
+  expect((await runtime.artifacts.read(taskId, published!.artifactId, published!.version)).text).toBe('# lane notes\n');
+  const work = await runtime.nodeRun(taskId, 'work');
+  expect(work.node.status).toBe('succeeded');
+  expect(work.entries.find(entry => entry.role === 'tool' && entry.kind === 'call')).toMatchObject({ data: { toolName: 'write_file' } });
+}, 30_000);
 
-test('a node that declares a deliverable has it published for it, without the node asking', async () => {
-  const { root, runtime, stateDir } = await fixture(async operation => {
-    // A real subagent writes into its own workspace, which for a git-prepared project is its lane
-    // worktree rather than the project root.
-    const workspace = operation.workspace ?? root;
-    await mkdir(join(workspace, 'notes'), { recursive: true });
-    await writeFile(join(workspace, 'notes/lane.md'), '# lane notes\n');
-    return { outcome: 'completed', output: { wrote: 'notes/lane.md' }, usage };
-  });
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '调研一条车道', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(graph({ path: 'notes/lane.md', namespace: 'research', name: 'lane-notes', title: 'lane notes' }), 'draft');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+test('an explicit native input lets another node read the exact automatically published version', async () => {
+  let reference: { artifactId: string; version: number };
+  const { runtime, taskId, provider } = await fixture([writeNote, { text: 'Finished writing.' },
+    { tools: [{ id: 'read', name: 'artifact_read', arguments: () => JSON.stringify(reference) }] },
+    { text: 'Read the published lane notes.' },
+  ], note, true);
+  const published = runtime.artifacts.list(taskId).artifacts.find(item => item.name === note.name)!;
+  reference = { artifactId: published.artifactId, version: published.version };
+  expect((await runtime.nodeRun(taskId, 'reader')).operations).toHaveLength(0);
+  await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'reader', input: 'artifact', value: reference });
   await runtime.host.drive();
+  const reader = await runtime.nodeRun(taskId, 'reader');
+  expect(reader.node.status).toBe('succeeded');
+  expect(reader.entries.find(entry => entry.role === 'tool' && entry.kind === 'result')?.text).toContain('# lane notes');
+  expect(JSON.stringify(provider.requests[2])).toContain(published.artifactId);
+  expect(reader.entries[0]?.text).toContain(JSON.stringify(reference));
+}, 30_000);
 
-  const listed = await runtime.artifacts.list(taskId);
-  const published = listed.artifacts.find(item => item.name === 'lane-notes');
-  expect(published, 'the declared deliverable should have been published').toBeTruthy();
-  expect(published!.scope).toBe('task');
-  expect(published!.namespace).toBe('research');
-  expect(published!.title).toBe('lane notes');
+test('the harness does not publish a duplicate of bytes already published by the real node tool', async () => {
+  const { runtime, taskId } = await fixture([
+    { tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: 'reviews/lane.md', content: '# lane review\n' }) }] },
+    { tools: [{ id: 'publish', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'reviews', name: 'lane',
+      sourcePath: 'reviews/lane.md', title: 'lane review', requestId: 'node-publish' }) }] },
+    { text: 'Published the review.' },
+  ], { path: 'reviews/lane.md', namespace: 'reviews', name: 'lane', title: 'lane review' });
+  const all = runtime.artifacts.list(taskId, { namespace: 'reviews', latestOnly: false }).artifacts;
+  expect(all.filter(item => item.name === 'lane').map(item => item.version)).toEqual([1]);
+  expect(all[0]?.title).toBe('lane review');
+  const work = await runtime.nodeRun(taskId, 'work');
+  expect(work.node.status).toBe('succeeded');
+  expect(work.entries.find(entry => entry.role === 'tool' && entry.kind === 'result' && entry.text?.includes('artifactId'))?.text).toContain(all[0]!.artifactId);
+}, 30_000);
 
-  // The published bytes are the file the node actually wrote.
-  const read = await runtime.artifacts.read(taskId, published!.artifactId, published!.version);
-  expect(read.text).toContain('# lane notes');
-
-  // It is recorded as that node's product, so a reviewer or the main Agent can tell where it came
-  // from without opening the node.
-  expect(published!.producer?.nodeId).toBe('work');
-
-  expect(nodeStatus(stateDir, taskId, 'work')).toBe('succeeded');
-}, 90_000);
-
-test("a declared deliverable is the artifact the node's dependent receives", async () => {
-  const { root, runtime, stateDir } = await fixture(async operation => {
-    const workspace = operation.workspace ?? root;
-    await mkdir(join(workspace, 'notes'), { recursive: true });
-    await writeFile(join(workspace, 'notes/lane.md'), '# lane notes\n');
-    return { outcome: 'completed', output: { wrote: 'notes/lane.md' }, usage };
-  });
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '调研一条车道', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(graph({ path: 'notes/lane.md', namespace: 'research', name: 'lane-notes', title: 'lane notes' }), 'draft');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-
-  // What a dependent receives is the harness's own record of the node's products, and a verifier gate
-  // reads exactly this list to match a review to the work it reviewed (`subject()` in verification.ts).
-  // Publishing the file without recording it here left every source's `artifacts` empty, so no real
-  // Agent node could ever be matched by a gate (HB-205; measured on a task whose three review nodes each
-  // declared and published a report, while the node that depended on them saw an empty list).
-  const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
-  const row = store.db.prepare("SELECT spec FROM operations WHERE task_id=? AND node_id='check' ORDER BY rowid DESC LIMIT 1").get(taskId) as { spec: string };
-  store.close();
-  const sources = (JSON.parse(row.spec) as { dependencySources: Record<string, { artifacts: { id: string; path: string; digest: string; artifactId: string; version: number }[] }[]> }).dependencySources;
-  const artifacts = sources['work']![0]!.artifacts;
-  expect(artifacts).toHaveLength(1);
-  expect(artifacts[0]!.id).toBe('research/lane-notes');
-  // The path is absolute, the way every artifact reference in a result has to be.
-  expect(artifacts[0]!.path.endsWith('/notes/lane.md')).toBe(true);
-  expect(artifacts[0]!.digest).toMatch(/^[a-f0-9]{64}$/);
-  // And it points at the published version, not at a copy the dependent would have to re-read.
-  expect(artifacts[0]!.artifactId).toBeTruthy();
-  expect(artifacts[0]!.version).toBeGreaterThanOrEqual(1);
-}, 90_000);
-
-test('the same bytes are published once, not twice: the harness does not re-publish what the node already published', async () => {
-  const { root, runtime, stateDir } = await fixture(async operation => {
-    const workspace = operation.workspace ?? root;
-    await mkdir(join(workspace, 'reviews'), { recursive: true });
-    await writeFile(join(workspace, 'reviews/lane.md'), '# lane review\n\nverdict: pass\n');
-    // The node publishes its own review through the product's own write path, which is what a
-    // reviewer Agent does with the artifact_publish tool. The harness then publishes the declared
-    // deliverable too; if it does that without looking, one review becomes two identical versions.
-    const own = new TaskStore(join(stateDir, 'tasks.sqlite'));
-    const artifacts = new ArtifactWorkspace(own, join(stateDir, 'artifact-workspace'));
-    await artifacts.publish({
-      taskId: operation.taskId, workspace, namespace: 'reviews', name: 'lane',
-      sourcePath: 'reviews/lane.md', title: 'lane review', requestId: `node-publish:${operation.id}`,
-      producer: { nodeId: operation.nodeId, instanceId: operation.instanceId!, operationId: operation.id, activationId: operation.activationId },
-    });
-    own.close();
-    return { outcome: 'completed', output: { wrote: 'reviews/lane.md' }, usage };
-  });
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '调研一条车道', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(graph({ path: 'reviews/lane.md', namespace: 'reviews', name: 'lane', title: 'lane review' }), 'draft');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-
-  // Every version of that key, not just the latest: a duplicate version is the thing being ruled out.
-  const all = runtime.artifacts.list(taskId, { namespace: 'reviews', latestOnly: false });
-  const mine = all.artifacts.filter(item => item.name === 'lane');
-  expect(mine.map(item => item.version), 'identical bytes must not mint a second version').toEqual([1]);
-  expect(runtime.artifacts.list(taskId).artifacts.find(item => item.name === 'lane')!.title).toBe('lane review');
-}, 90_000);
-
-test('a declared deliverable that was never written fails the node instead of passing silently', async () => {
-  const { runtime, stateDir } = await fixture(async () => ({ outcome: 'completed', output: { wrote: 'nothing' }, usage }));
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: '调研一条车道', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose(graph({ path: 'notes/missing.md', namespace: 'research', name: 'missing-notes' }), 'draft');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-
-  // The work is not accepted: a deliverable the graph promised and nobody produced is a defect,
-  // not a pass with a missing file.
-  expect(nodeStatus(stateDir, taskId, 'work')).not.toBe('succeeded');
-
-  const listed = await runtime.artifacts.list(taskId);
-  expect(listed.artifacts.map(item => item.name)).not.toContain('missing-notes');
-}, 90_000);
+test('a missing declared file fails native execution and retains the input for main to handle', async () => {
+  const { runtime, taskId } = await fixture([{ text: 'Finished without writing.' }],
+    { path: 'notes/missing.md', namespace: 'research', name: 'missing-notes' });
+  expect((await runtime.nodeRun(taskId, 'work')).node.status).toBe('failed');
+  expect(runtime.artifacts.list(taskId).artifacts).toHaveLength(0);
+  const queue = await runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'queue' });
+  expect(queue).toMatchObject({ items: [{ nodeId: 'work', state: 'failed', reason: expect.stringMatching(/never written/i) }] });
+}, 30_000);

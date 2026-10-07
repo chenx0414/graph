@@ -221,3 +221,6 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 
 
 原生节点详情的 timing.pauseMs 来自持久暂停账本：用户 task.pause/resume 和 main 的 graph_control pause/resume 都记录实际边界。整个 graph 与单节点暂停重叠时只累计一次，恢复其中一层不会结束另一层暂停；重复操作不重复累计。记录跨后台重启保留，新增节点继承已记录的 graph 暂停。创建 worktree 的内部准备锁、执行失败后的队列保持不会被补造为用户暂停。graph 停止、完成或节点退役会关闭尚未结束的暂停区间；从未记录暂停时仍返回 null。人工等待 userWaitMs 尚无原生实际边界记录，保持 null。
+
+
+公开 sendNodeMessage / sendPeerMessage 与 Pi peer channel 已统一到原生消息队列，要求目标具有正式原生 graph 定义。graph 内忙碌节点的消息排队为下一次执行，空闲节点回复时沿用同一 session 与累计用量；不根据旧 DAG 自动失效后继，也不通过消息重开已结束 graph。旧 node-messages 分派模块已删除，main 会话自身的 steering 仍保留。声明 deliverable 的文件由执行结算自动发布；需要其他节点读取时，显式向它的具名输入投递精确 artifactId / version，接收节点使用 artifact_read，不依赖旧 dependencySources 或私有文件路径。

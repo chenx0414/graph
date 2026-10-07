@@ -72,7 +72,8 @@ test('busy native node chats queue once per request and rerun serially in the sa
   const arrived = new Promise<void>(resolve => { received = resolve; });
   const { runtime, taskId, provider } = await setup([{ text: 'First reply', beforeReply: async () => { received(); await waiting; } },
     { text: 'Peer reply' }, { text: 'Last reply' }]);
-  const instance = runtime.nodeRun(taskId, 'work').instance!.id;
+  const before = runtime.nodeRun(taskId, 'work').instance!;
+  const instance = before.id;
   const first = { text: 'First question', requestId: 'first' };
   const receipt = await runtime.sendNodeMessage(taskId, 'work', first);
   expect(await runtime.sendNodeMessage(taskId, 'work', first)).toEqual(receipt);
@@ -90,6 +91,7 @@ test('busy native node chats queue once per request and rerun serially in the sa
   } finally { release(); await drive; }
   expect(provider.requests).toHaveLength(3);
   expect(runtime.nodeRun(taskId, 'work').instance!.id).toBe(instance);
+  expect(runtime.nodeRun(taskId, 'work').instance!.used).toBeGreaterThan(before.used);
   const second = provider.requests[1] as { messages: { role: string; content: unknown }[] };
   expect(JSON.stringify(second.messages)).toContain('First reply');
   const latestUser = second.messages.filter(message => message.role === 'user').at(-1)!;

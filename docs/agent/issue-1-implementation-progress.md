@@ -654,3 +654,15 @@
 - 本轮仅补齐原生显式暂停计时及迁移该公开合同。旧 SDK / 调度器与其剩余图测试、原生等待分项、正式默认切换和完整 spec 仍未完成。
 
 - 第六十六轮修订后完整门禁通过：274 文件、1866 用例，195.59 秒；TypeScript、lint、数量基线及验收证据检查通过（/tmp/graph-v2-full-check-66-fixed.log）。生产净增加 50 行，测试净增加 23 行，未增删测试数量。正式切换及整个 spec 未完成。
+
+
+## 原生文件交付实际 Pi 合同与旧节点消息分派退役
+
+- node-deliverable 的四个公开合同原来使用旧 DAG、program check 和脚本 OperationResult，其中隐式依赖产物通过旧 dependencySources / 私有路径传递。手工改为 NativeProposal、真实 Pi / 本地 provider、显式具名输入：真实 write_file 写文件后自动发布；reader 收到精确 artifactId / version 并实际调用 artifact_read；实际 artifact_publish 与自动发布不产生重复版本；未写文件失败并保留 failed 队列原因。测试文件净减少 66 行，四个合同数量不变。
+- 迁移中的初次失败由夹具错误造成：presets 路径误写 catalog，之后把真实工具 write_file 写作 write；实际 transcript 明确报告 Tool write not found。修正夹具后四项通过（8.38 秒）；没有将这两次夹具失败写作生产回归，也没有修改工具授权来让错误工具名通过。
+- 删除 src/core/node-messages.ts（107 行）的旧 steer / DAG reactivate 实现，SDK sendNodeMessage / sendPeerMessage 及 Pi adapter peer channel 统一使用 kernel-node-messages。旧 fallback 不再存在；主会话 execution steering 保留。另保留旧 adapter peerNodes 地址列表，因为仍有非测试调用者。
+- 删除 tests/console/node-messages.test.ts 的五个已废弃合同。删除前逐项记录真实检测能力、非测试调用者、旧行为与已确认设计的冲突、历史提交和保留的真实 Pi owner-boundary 证据，见 issue-1-old-kernel-removal-audit.md 的 2026-10-08 节。旧忙碌节点 steer、DAG 后继失效和 completed graph 重开不再作为正式产品保证。
+- 扩展现有原生 graph-messages 三回合合同检查累计实际用量增加，并继续验证同实例 / 同 session 历史、幂等投递、busy 队列仅一项 claimed、无 sibling 执行、结束输入不能重试、停止后拒绝新消息及 peer sender/target 权限。聚焦 7 文件 / 57 用例通过（9.17 秒）。
+- 第六十七轮完整门禁通过，统计与基线变更见下一条。这次只退役节点消息的一条旧分派路径；LegacyProposal / 旧确认物化 / DAG 调度器及正式默认切换仍未完成，完整 spec 未完成。
+
+- 第六十七轮完整门禁通过：273 文件、1861 用例，187.25 秒；TypeScript、lint、验收证据检查通过（/tmp/graph-v2-full-check-67.log）。按已记录的五个废弃合同将基线从 274/1866 显式改为 273/1861。生产净减少 127 行，测试及支持净减少 205 行（不计基线 JSON）；未创建转换器或测试专用 seam。整个 spec 未完成。
