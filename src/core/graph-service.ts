@@ -123,6 +123,9 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
       }
       if (input.action === 'pause' || input.action === 'resume') {
         if (input.nodeId) {
+          if (!Object.hasOwn(kernel.latestRevision(input.graphId)!.definition.nodes, input.nodeId)) {
+            throw new RuntimeError('invalid_input', 'Node control requires a node in the current graph definition');
+          }
           kernel.setNodeQueuePaused(input.graphId, input.nodeId, input.action === 'pause');
           if (input.action === 'resume') kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'").run(input.graphId, input.nodeId);
         }
@@ -133,7 +136,7 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
         if (input.seq === undefined) throw new RuntimeError('invalid_input', `${input.action} requires queue seq`);
         const seq = input.seq;
         const row = kernel.db.prepare('SELECT node_id,state FROM kernel_queue WHERE task_id=? AND seq=?').get(input.graphId, seq) as { node_id: string; state: string } | undefined;
-        if (!row || row.state === 'claimed') throw new RuntimeError('invalid_queue', 'Queue item is absent or still executing');
+        if (!row || row.state === 'claimed' || row.state === 'done') throw new RuntimeError('invalid_queue', 'Queue item is absent, still executing, or already settled');
         // Stable node ids are literal text, never a wildcard expression.
         const base = `exec-${input.graphId}-${row.node_id}-${input.seq}`;
         const submitted = kernel.db.prepare('SELECT submission_id FROM kernel_executions WHERE task_id=? AND node_id=? AND submission_id IS NOT NULL AND (id=? OR instr(id,?)=1)').get(input.graphId, row.node_id, base, `${base}-`);

@@ -96,6 +96,16 @@ test('busy native node chats queue once per request and rerun serially in the sa
   expect(JSON.stringify(latestUser.content)).toContain('From sibling: Second question');
   expect(JSON.stringify(latestUser.content)).not.toContain('GRAPH OVERVIEW');
   expect(runtime.nodeRun(taskId, 'sibling').operations).toHaveLength(0);
+  const main = runtime.supervisor(taskId);
+  const finished = await main.graphInspect({ graphId: taskId, query: 'queue' }) as { items: { seq: number; state: string; generation: number }[] };
+  expect(finished.items.map(item => item.state)).toEqual(['done', 'done', 'done']);
+  for (const action of ['retry', 'skip', 'cancel']) {
+    await expect(main.graphControl({ graphId: taskId, action, seq: finished.items[0]!.seq })).rejects.toMatchObject({ code: 'invalid_queue' });
+  }
+  expect(await main.graphInspect({ graphId: taskId, query: 'queue' })).toEqual(finished);
+  await runtime.host.drive();
+  expect(provider.requests).toHaveLength(3);
+
   await runtime.supervisor(taskId).graphControl({ graphId: taskId, action: 'stop' });
   await runtime.host.drive();
   expect(await runtime.sendNodeMessage(taskId, 'work', first)).toEqual(receipt);

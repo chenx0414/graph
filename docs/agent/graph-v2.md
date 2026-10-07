@@ -143,7 +143,7 @@ budget.tokens 是该节点累计额度，非每次运行的新余额；省略继
 
 `graph_inspect({graphId,query:"queue",id:"worker",limit:100,after:0})` 按受理顺序读取队列，包含 seq、状态、原 payload、generation 和失败/取消原因。id 可省略以查看整张 graph。返回 items 和 next；next 非 null 时用它作为 after 读取下一页，limit 为 1–200。
 
-`query:"executions"` 使用同样的分页与节点过滤，返回实际执行身份、冻结 revision/预算、尝试/补交计数和 submissionId。根据队列的 seq 选择 retry/skip/cancel 前，先确认是否已经成功提交；成功提交的原输入不可重发。无效 query 或分页参数会明确报错。
+`query:"executions"` 使用同样的分页与节点过滤，返回实际执行身份、冻结 revision/预算、尝试/补交计数和 submissionId。retry/skip/cancel 只处理尚未结算的 queued 或 failed 输入；claimed 输入需先等待当前执行结束，done 输入（已回复、跳过或取消）不能重新排队或改写原因。成功提交的原输入即使随后失败也不可 retry。需要新任务时明确发送新投递或聊天。节点 pause/resume 只接受当前定义中的 agent 节点，已删除或不存在的节点会被拒绝。无效 query 或分页参数会明确报错。
 
 局部 JSON merge patch 的 null 表示删除字段；需要设置字面值 `budget.tokens:null` 时使用完整 definition。
 

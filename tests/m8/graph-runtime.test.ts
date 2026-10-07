@@ -430,12 +430,25 @@ test('main can patch named objects while preserving accepted work and enforcing 
     await expect(main.graphPatch({ graphId, baseRevision: 2, changes: retirement })).rejects.toMatchObject({ code: 'pending_work' });
     expect(kernel.latestRevision(graphId)?.version).toBe(2);
     await main.graphControl({ graphId, action: 'cancel', seq: queued.seq });
+    const cancelled = await main.graphInspect({ graphId, query: 'queue' });
+    for (const action of ['retry', 'skip', 'cancel']) {
+      await expect(main.graphControl({ graphId, action, seq: queued.seq })).rejects.toMatchObject({ code: 'invalid_queue' });
+    }
+    expect(await main.graphInspect({ graphId, query: 'queue' })).toEqual(cancelled);
     await main.graphPatch({ graphId, baseRevision: 2, changes: retirement });
     expect(kernel.latestRevision(graphId)?.version).toBe(3);
     expect(kernel.latestRevision(graphId)?.definition.nodes.b).toBeUndefined();
     expect(kernel.latestRevision(graphId)?.definition.edges.e).toBeUndefined();
     expect(kernel.revision(graphId, 1)?.definition.nodes.a?.task).toBe('a');
     expect(kernel.revision(graphId, 1)?.definition.edges.e?.enabled).toBe(true);
+    const states = kernel.db.prepare('SELECT * FROM kernel_node_state WHERE task_id=?').all(graphId);
+    for (const nodeId of ['b', 'ghost', 'constructor']) {
+      for (const action of ['pause', 'resume']) {
+        await expect(main.graphControl({ graphId, action, nodeId })).rejects.toMatchObject({ code: 'invalid_input' });
+      }
+    }
+    expect(kernel.db.prepare('SELECT * FROM kernel_node_state WHERE task_id=?').all(graphId)).toEqual(states);
+
   } finally { store.close(); }
 });
 
