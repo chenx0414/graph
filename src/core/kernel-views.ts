@@ -1,3 +1,4 @@
+import type { GraphDefinition } from './interface-spec.ts';
 import { usageSourceOf } from '../runtime/call-broker.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { NodePromptView } from './node-prompt.ts';
@@ -66,4 +67,35 @@ export function kernelNodePrompt(kernel: KernelStore, graphId: string, nodeId: s
     briefing: first ? { text: first.text, sessionFile: session?.session_file ?? '' } : null,
     notes: record ? [] : ['尚无实际模型发送记录。'],
   };
+}
+
+
+/** Config deletion guard: pending declarations and the models actual turns still use. */
+export function kernelModelsInUse(kernel: KernelStore): string[] {
+  const used = new Set<string>();
+  const revisions = new Map<string, GraphDefinition>();
+  const native = kernel.db.prepare(`SELECT n.task_id,n.node_id,n.spec,b.model_id,e.revision_version,e.state
+    FROM kernel_nodes n JOIN tasks t ON t.id=n.task_id
+    LEFT JOIN kernel_node_bindings b ON b.task_id=n.task_id AND b.node_id=n.node_id
+    LEFT JOIN kernel_executions e ON e.rowid=(SELECT MAX(x.rowid) FROM kernel_executions x WHERE x.task_id=n.task_id AND x.node_id=n.node_id)
+    WHERE n.status!='retired' AND t.phase NOT IN ('completed','stopped','abandoned')`).all() as {
+      task_id: string; node_id: string; spec: string; model_id: string | null; revision_version: number | null; state: string | null;
+    }[];
+
+  for (const row of native) {
+    const configured = JSON.parse(row.spec) as { model?: string; recipe: string };
+    if (configured.model) used.add(configured.model);
+    if (!row.model_id) continue;
+    if (row.state === 'running' || row.revision_version === null) { used.add(row.model_id); continue; }
+    const key = `${row.task_id}:${row.revision_version}`;
+    if (!revisions.has(key)) {
+      const revision = kernel.revision(row.task_id, row.revision_version);
+      if (revision) revisions.set(key, revision.definition);
+    }
+    const previous = revisions.get(key)?.nodes[row.node_id];
+    // A patch applies to the next turn. Keep the frozen active model, or the
+    // selected fallback of an unchanged declaration; not an obsolete idle binding.
+    if (!previous || configured.model === previous.model && configured.recipe === previous.recipe) used.add(row.model_id);
+  }
+  return [...used];
 }

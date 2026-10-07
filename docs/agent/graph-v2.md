@@ -195,3 +195,6 @@ SDK 的原生草稿类型是 `NativeProposal`（src/core/types.ts），必须包
 
 
 原生节点聊天（runtime.sendNodeMessage）与内部 peer 聊天（runtime.sendPeerMessage、send_to_peer）均一次消息对应一次队列项；忙碌时排队，空闲时由宿主启动回复，保留原会话，不隐含重跑后继节点。requestId 按目标节点与发送者区分，同内容重放原 receipt，改变内容报 idempotency_conflict；已接受消息在 graph 停止后仍可重放 receipt，新消息关闭。peer 来源记入目标节点聊天记录，可视化消息弧读取该持久记录；用户消息不画成 peer 弧。跨 graph、无效发送者/目标和 self 消息拒绝。
+
+
+配置保存不能移除活动 graph 声明的模型，或当前执行冻结使用的模型。热修改模型时，当前 turn 保留旧连接，下一次使用新声明；旧 turn 结束后，不再保护已过时的空闲绑定。按配方选出的实际模型也受保护，直到相应节点退役或 graph 结束。未配置的偏好 ID 不会阻止无关配置保存；“移除”只判断本次确实从当前目录删除的连接。

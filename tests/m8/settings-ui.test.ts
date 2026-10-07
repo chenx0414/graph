@@ -8,6 +8,7 @@ import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -443,27 +444,39 @@ test('removing a model bound to an unfinished task is refused and the daemon kee
   const path = await configFile(dir, stub.baseUrl);
   const daemon = await start(dir, path);
   const api = await session(daemon.url);
-  const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'sample', request: 'Keep binding', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(taskId).propose({
+  const { taskId: anchorTaskId, conversationId } = await daemon.server.runtime.conversations.create({ projectId: 'sample', text: 'Keep binding', requestId: 'begin' });
+  await daemon.server.runtime.supervisor(anchorTaskId).propose({
     requirementVersion: 1, summary: 'Keep binding',
     acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Keep binding', protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Keep the declared model', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+      edges: {}, acceptance: [{ id: 'works', description: 'Works', kind: 'check', module: 'check' }] }),
   }, 'proposal');
-  await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  expect(daemon.server.runtime.modelsInUse()).toContain('local');
+  await daemon.server.runtime.projects.prepare({ projectId: 'sample', initialize: true, createBaseline: true, requestId: 'prepare' });
+  const { taskId } = await daemon.server.runtime.conversations.confirm(conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
   const document = {
     version: 1, projects: [{ id: 'sample', root: dir }],
-    models: { entries: [] }, credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } }, limits: { credentials: { local: 1 } },
+    models: { entries: [{ id: 'replacement', provider: 'stub', grade: 'medium', api: 'openai-completions', baseUrl: stub.baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] }, credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } }, limits: { credentials: { local: 1 } },
   };
   const refused = await api.post('/api/config', { expectedRevision: 0, document });
   expect(refused.status).toBe(400);
   expect(await refused.json()).toMatchObject({ code: 'config_in_use' });
   const view = await daemon.server.runtime.user.task(taskId).view();
-  expect(view.nodes.find(node => node.id === 'work')?.selectedModel).toBe('local');
+  expect(view.nodes.find(node => node.id === 'work')?.status).toBe('idle');
+  expect(daemon.server.runtime.modelsInUse()).toContain('local');
+  const revision = await daemon.server.runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'revision' }) as { nodes: { work: { model: string } } };
+  expect(revision.nodes.work.model).toBe('local');
   expect((await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(0);
+  await daemon.server.runtime.supervisor(anchorTaskId).graphControl({ graphId: taskId, action: 'stop' });
+  await daemon.server.runtime.host.drive();
+  await daemon.server.runtime.supervisor(anchorTaskId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Unavailable preference', protocols: {},
+    nodes: { waiting: { recipe: 'coder@1', model: 'unavailable', task: 'Use a configured fallback when started', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) });
+  const saved = await api.post('/api/config', { expectedRevision: 0, document });
+  expect(saved.status).toBe(200);
+  expect((await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(1);
+
 }, 60_000);
 
 test('settings imports detected subscription credentials without exposing their values', async () => {

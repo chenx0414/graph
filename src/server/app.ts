@@ -385,7 +385,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       const current = await options.config!.store.snapshot();
       const nextModels = (body.document as { models?: { entries?: { id?: unknown }[] } })?.models?.entries;
       const nextIds = new Set(Array.isArray(nextModels) ? nextModels.map(entry => String(entry?.id ?? '')) : []);
-      const removed = runtime.modelsInUse().filter(id => !nextIds.has(id));
+      const currentIds = new Set((current.config.models?.entries ?? []).map(entry => entry.id));
+      const removed = runtime.modelsInUse().filter(id => currentIds.has(id) && !nextIds.has(id));
       if (removed.length) throw new RuntimeError('config_in_use', `Models in use by unfinished tasks cannot be removed: ${removed.join(', ')}`);
       if (options.appServices) {
         // Hot apply: persist through the same atomic store, then activate the

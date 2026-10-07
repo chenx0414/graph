@@ -520,3 +520,14 @@
 - 保留 node-messages 的旧合同直至旧 SDK/调度器退役，不把旧 steering/后继失效规则迁回原生模型。main 作为 peer 目标仍沿既有 owning-conversation 通道，本轮仅统一节点间消息，没有声称验证其 requestId 幂等或整个默认切换完成。新增停止后 receipt 重放 / 新聊天关闭验证；第五十四轮完整门禁待执行。
 
 - 第五十四轮完整门禁通过：273 文件、1861 用例，177.86 秒；TypeScript、lint、数量基线与验收证据检查通过。迁移原可视化合同并新增两个独立回归，基线增加 2；停止后 replay/new-message 断言也通过最终全量。默认切换和整个 spec 仍未完成。
+
+
+## 原生模型删除保护
+
+- modelsInUse 只查旧 nodes / instances，遗漏原生声明与实际绑定。手动迁移现有 settings HTTP 合同到 conversation 确认产生的独立 graph，排除同 task 的旧 main 记录掩盖；原来的空模型目录又触发 invalid_config，改为合法替代连接后，修复前真正 HTTP 返回 200 并删除模型，预期 config_in_use 的 400 失败。
+- 新增真实 Pi 冻结合同：旧模型 HTTP 请求被保持，运行中 patch 声明新模型；修复前 modelsInUse 返回 []，预期保护旧/新两项失败。kernelModelsInUse 读取活动节点声明、最新执行与实际绑定；执行中保护冻结模型，配置未变时保留实际选择的 fallback，配置已变且 turn 结束后释放旧绑定。按 graph / revision 在本次查询缓存定义，避免每个节点重复解析整图；退役节点和 completed / stopped graph 不占保护。
+- API 删除判定只比较当前确实存在、且候选中被移除的连接，避免未配置的偏好 ID 拦住无关保存。HTTP 验收保留合法替代配置：原生 graph 未结束时拒绝并保留 revision 0，停止后即使另一个图声明 unavailable，也可保存 revision 1。
+- 定向 2 文件、3 用例通过，9.05 秒，覆盖当前冻结、下次切换、同一实例、idle 实际 fallback、节点退役、graph 停止和 HTTP 拒绝/许可。第一次类型检查发现未配置情况下 current.config.models 可为 null，已修正为可空目录；提取只读 helper 后第五十五轮完整门禁待执行。
+- 原生模型目录守护已补齐；旧 SDK/调度器退役、正式默认切换及整个 spec 仍未完成。
+
+- 第五十五轮完整门禁通过：273 文件、1862 用例，181.83 秒；TypeScript、lint、数量基线与验收证据检查通过。新增真实冻结/配置/退役生命周期回归使基线增加 1；已迁移 HTTP 合同和实际模型历史均通过全量验证。整个 spec 与旧内核退役仍未完成。

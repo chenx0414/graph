@@ -1,7 +1,7 @@
 import { sendKernelNodeMessage } from './kernel-node-messages.ts';
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
-import { kernelGraphView, kernelNodeRun, kernelNodePrompt } from './kernel-views.ts';
+import { kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse } from './kernel-views.ts';
 import { sendNodeMessage, sendPeerMessage } from './node-messages.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -1668,8 +1668,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     /** Model ids bound to tasks that have not finished, for config deletion guards. */
     modelsInUse(): string[] {
       ensureOpen();
-      return (store.db.prepare(`SELECT DISTINCT i.model AS model FROM nodes n JOIN instances i ON i.id=n.instance_id JOIN tasks t ON t.id=n.task_id
+      const legacy = (store.db.prepare(`SELECT DISTINCT i.model AS model FROM nodes n JOIN instances i ON i.id=n.instance_id JOIN tasks t ON t.id=n.task_id
         WHERE t.phase IN ('discussing','running','queued') AND n.status NOT IN ('succeeded','skipped') AND i.model IS NOT NULL`).all() as { model: string }[]).map(row => row.model);
+      return [...new Set([...legacy, ...kernelModelsInUse(kernel)])];
     },
     user,
     /** Resolved questions across feature tasks and conversation anchors. */

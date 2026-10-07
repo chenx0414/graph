@@ -64,3 +64,56 @@ test('native review uses an independent provider model and a missing candidate b
     await rm(root, { recursive: true, force: true });
   }
 }, 30000);
+
+test('native model protection follows the frozen running turn and releases obsolete or ended bindings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-active-models-'));
+  let release!: () => void; let received!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const arrived = new Promise<void>(resolve => { received = resolve; });
+  const old = await openaiServer([{ text: 'Old turn completed', beforeReply: async () => { received(); await waiting; } }, { text: 'Fallback reply' }]);
+  const next = await openaiServer([{ text: 'New turn completed' }]);
+  let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
+  try {
+    const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+    runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+      catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+      models: { apiKey: 'local-only', modelRuntime: old.runtime, entries: ([['old', old], ['next', next]] as const).map(([id, provider]) => ({
+        id, provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256,
+      })) },
+    });
+    runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
+    const parent = await runtime.user.begin({ projectId: 'p', request: 'model lifecycle', requestId: 'parent' });
+    const main = runtime.supervisor(parent.taskId);
+    const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Model lifecycle', protocols: {},
+      nodes: { work: { recipe: 'worker@1', model: 'old', task: 'Reply to this message', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} });
+    const { graphId } = await main.graphCreate({ definition }) as { graphId: string };
+    const instance = runtime.nodeRun(graphId, 'work').instance!.id;
+    await main.graphSend({ graphId, nodeId: 'work', text: 'First message' });
+    const drive = runtime.host.drive();
+    try {
+      await arrived;
+      await main.graphPatch({ graphId, baseRevision: 1, changes: { definition: { ...definition,
+        nodes: { work: { ...definition.nodes.work!, model: 'next' } } }, reason: 'Use next model on the following turn' } });
+      expect(runtime.modelsInUse().sort()).toEqual(['next', 'old']);
+      expect(old.requests).toHaveLength(1); expect(next.requests).toHaveLength(0);
+    } finally { release(); await drive; }
+    expect(runtime.modelsInUse()).toEqual(['next']);
+    await main.graphSend({ graphId, nodeId: 'work', text: 'Second message' }); await runtime.host.drive();
+    expect(next.requests).toHaveLength(1); expect(old.requests).toHaveLength(1);
+    expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ id: instance, model: 'next' });
+    expect(runtime.modelsInUse()).toEqual(['next']);
+    await main.graphControl({ graphId, action: 'stop' }); await runtime.host.drive();
+    expect(runtime.modelsInUse()).toEqual([]);
+    const fallback = parseGraphDefinition({ ...definition, nodes: { work: {
+      recipe: 'worker@1', task: 'Choose a configured model', inputs: {}, outputs: {}, submission: {},
+    } } });
+    const { graphId: fallbackId } = await main.graphCreate({ definition: fallback }) as { graphId: string };
+    await main.graphSend({ graphId: fallbackId, nodeId: 'work', text: 'Choose a model and reply' }); await runtime.host.drive();
+    expect(old.requests).toHaveLength(2); expect(runtime.modelsInUse()).toEqual(['old']);
+    await main.graphPatch({ graphId: fallbackId, baseRevision: 1, changes: { definition: { ...fallback, nodes: {} }, retire: ['work'], reason: 'Retire the idle agent' } });
+    expect(runtime.modelsInUse()).toEqual([]);
+    await main.graphControl({ graphId: fallbackId, action: 'stop' }); await runtime.host.drive();
+  } finally {
+    release(); await runtime?.close(); await next.close(); await old.close(); await rm(root, { recursive: true, force: true });
+  }
+}, 30000);
