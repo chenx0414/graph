@@ -2170,6 +2170,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           ensureOpen();
           const target = revisionTarget(store, taskId, input.taskId);
           return store.command(`supervisor:${target}`, input.requestId, { type: 'revise', target, baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, retire: input.retire ?? [], containers: input.containers, loops: input.loops }, () => {
+            if (kernel.latestRevision(target)) throw new RuntimeError('invalid_graph', 'Native graphs use graph_patch with baseRevision; legacy revise is unavailable');
             const revised = applyRevision(store, target, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.retire ? { retire: input.retire } : {}), ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
             return { taskId: target, graphVersion: revised.version, cursor: revised.cursor };
           });

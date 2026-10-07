@@ -449,3 +449,12 @@
 - 此原生应用用例与 TypeScript 已通过；第四十七轮完整门禁待执行。
 
 - 第四十七轮完整门禁通过：276 文件、1874 用例，172.78 秒；TypeScript、lint 与验收证据检查通过。原生应用交付与来源仓库保护通过最终验证。
+
+## M7 原生需求冻结与旧修订 SDK 边界
+
+- 原生应用交付已提交为 c5ad50b。继续手动迁移 freeze.test.ts：讨论留在外部 main 的 conversation，草稿声明具名 agent / 操作模块 / 一次汇合与公开入口，四项应用检查、独立审查和 human-login 全部在原生定义中冻结。确认生成独立 graph，只有内部 agent，所有节点 idle，队列为空；不通过旧 master 依赖推断启动工作。
+- 迁移保留独立 profile、禁止并发采集、不共享日常 Chrome、实际 reviewer 配方与目标 main 的既有合同；新的 main 会话 phase 为 chatting，替换旧 discussing 夹具期望，不改变生产 phase。该用例只验证冻结与确认，不宣称验证整个多 worker 流水线执行。
+- 对真实已确认原生 graph 调用旧 SDK revise，实际进入旧 applyRevision 后读取不存在的旧 graph_revisions，抛 TypeError。现先识别原生 revision 并明确返回 invalid_graph，指向 graph_patch/baseRevision；不触碰原生定义或队列。公开 SDK 修复前真实失败、修复后原生应用继续成功交付。
+- M7 freeze / production / 跨进程 CLI 3 文件、4 用例，14.89 秒及 TypeScript 通过。未移除其他有价值的旧 Git、权限、审查或合并冲突合同；M7 仍有 delivery / adapters / proposal 一套旧入口待迁移，SDK 类型与整个旧调度器退役继续实施。第四十八轮完整门禁待执行。
+
+- 第四十八轮完整门禁通过：276 文件、1874 用例，172.13 秒；TypeScript、lint 与验收证据检查通过。原生冻结/确认及旧 SDK 拒绝均通过全量验证。下一项为 M7 多 worker delivery 的原生迁移，随后删除它独占的 adapters / proposal；不跳过独立工作副本、真实应用检查、共享审查与来源仓库保护。

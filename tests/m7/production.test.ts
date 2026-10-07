@@ -92,6 +92,7 @@ test('production Pi writes the Bilibili web on a clone through workspace tools a
   } as Proposal, 'm7-prod-plan');
   const receipt = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
   graphId = receipt.taskId;
+  await expect(main.revise({ taskId: graphId, baseVersion: 1, reason: 'Legacy revision must not touch a native graph', nodes: [], requestId: 'legacy-revision' })).rejects.toMatchObject({ code: 'invalid_graph' });
   const task = runtime.user.task(graphId);
   disk = new TaskStore(join(root, 'state', 'tasks.sqlite')); cleanup.push(async () => disk.close());
   expect((await task.view()).nodes.every(node => node.status === 'idle')).toBe(true);
