@@ -531,3 +531,13 @@
 - 原生模型目录守护已补齐；旧 SDK/调度器退役、正式默认切换及整个 spec 仍未完成。
 
 - 第五十五轮完整门禁通过：273 文件、1862 用例，181.83 秒；TypeScript、lint、数量基线与验收证据检查通过。新增真实冻结/配置/退役生命周期回归使基线增加 1；已迁移 HTTP 合同和实际模型历史均通过全量验证。整个 spec 与旧内核退役仍未完成。
+
+
+## 原生 agent 向外部 main 聊天
+
+- 常驻 Pi 的 main 分支丢弃 requestId；同一请求两次真实工具调用实际生成两条 owning-conversation 消息。SDK 的原生 peer 入口又把 main 当作内部节点而拒绝。新增 owner-boundary 回归修复前因消息数 2 而非 1 失败。
+- sendKernelMainMessage 统一 Pi / SDK 通道，按 graph、发送节点和 requestId 保存持久回执。消息、可追溯来源元数据和 main wake 在同一命令事务写入；异内容重放拒绝，来源必须是当前 graph 声明的 agent。完成/停止后拒绝新消息，旧回执仍可重放；completing 期间内部 agent 仍可与 main 协作。
+- 回归使用真实本地 HTTP / 常驻 Pi 两次 send_to_peer，外部 main 使用正常 ActionAdapter 回复。只生成一条 peer 消息和一个 peer_message wake，main 实际收到原文；SDK 重放复用同一消息 ID，异内容、未知及原型属性发送者拒绝。停止 graph 后 main 仍能处理用户新聊天。
+- 定向消息 / wake / conversation-queue 合同 3 文件、20 用例通过，4.10 秒；随后补充 main 在 graph 停止后继续回复的验证。第五十六轮完整门禁待执行。该轮未退役旧 SDK / 调度器，也未完成整个 spec。
+
+- 第五十六轮完整门禁通过：273 文件、1863 用例，185.30 秒；TypeScript、lint、数量基线与验收证据检查通过。新增一个 main peer owner-boundary 回归使基线增加 1；停止 graph 后外部 main 继续处理聊天也通过全量验证。整个 spec、旧内核退役和正式默认切换仍未完成。

@@ -5,29 +5,39 @@ import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import type { Operation } from '../../src/core/types.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-async function setup(plans: ResponsePlan[] = [{ text: 'Peer reply' }, { text: 'User reply' }]) {
+async function setup(plans: ResponsePlan[] = [{ text: 'Peer reply' }, { text: 'User reply' }], owningConversation = false) {
   const root = await mkdtemp(join(tmpdir(), 'graph-messages-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans); cleanup.push(() => provider.close());
   const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], access: () => fullAccessPolicy(),
+  const mainTurns: Operation[] = [];
+  const runtime = await openTaskRuntime({ ...(owningConversation ? {
+    master: { action: 'main', definitionVersion: 'main@1', model: 'local' },
+    actions: { main: { kind: 'agent' as const, reserveTokens: 1, prepare: async (operation: Operation) => async () => {
+      mainTurns.push(operation);
+      return { outcome: 'completed' as const, output: { text: 'Clarification from main.' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } };
+    } } },
+  } : {}), stateDir: join(root, 'state'), projects: [{ id: 'p', root }], access: () => fullAccessPolicy(),
     catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
     models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
       grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
   });
   cleanup.push(() => runtime.close()); runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
-  const parent = await runtime.user.begin({ projectId: 'p', request: 'peer messages', requestId: 'begin' });
+  const parent = owningConversation
+    ? await runtime.conversations.create({ projectId: 'p', text: 'peer messages', requestId: 'begin' })
+    : await runtime.user.begin({ projectId: 'p', request: 'peer messages', requestId: 'begin' });
   const node = { recipe: 'worker@1', model: 'local', task: 'Reply to messages.', inputs: {}, outputs: {}, submission: {} };
   const { graphId: taskId } = await runtime.supervisor(parent.taskId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2,
     name: 'Peer messages', protocols: {}, nodes: { work: node, sibling: node }, modules: {}, edges: {} }) }) as { graphId: string };
   const store = new TaskStore(join(root, 'state/tasks.sqlite')); cleanup.push(() => store.close());
-  return { runtime, taskId, store, provider };
+  return { runtime, taskId, store, provider, mainTurns };
 }
 
 test('a peer message that happened is what the native graph draws, and deleting its record empties the picture', async () => {
@@ -100,4 +110,40 @@ test('the resident Pi peer tool publishes the same durable message arc as the SD
   await runtime.host.drive();
   expect(runtime.graphMessages(taskId)).toMatchObject([{ source: 'work', target: 'sibling', text: 'Review this idea' }]);
   expect(runtime.nodeRun(taskId, 'sibling').node.status).toBe('succeeded');
+}, 30000);
+
+
+test('resident Pi messages to main are durable once per sender request and replay through the SDK', async () => {
+  const input = { to: 'main', text: 'Please clarify the acceptance criterion.', requestId: 'main-peer' };
+  const { runtime, taskId, store, mainTurns } = await setup([
+    { tools: [{ id: 'first', name: 'send_to_peer', arguments: JSON.stringify(input) }] },
+    { tools: [{ id: 'retry', name: 'send_to_peer', arguments: JSON.stringify(input) }] },
+    { text: 'Waiting for main.' },
+  ], true);
+  await runtime.sendNodeMessage(taskId, 'work', { text: 'Ask main for clarification.', requestId: 'start' });
+  await runtime.host.drive();
+  const conversationId = store.task(taskId).conversation_id!;
+  const peerMessages = async () => (await runtime.conversations.view(conversationId)).messages.filter(message => message.kind === 'peer');
+  const messages = await peerMessages();
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({ state: 'delivered', text: `[work](graph://${taskId}/agents/work): ${input.text}`,
+    data: { graphId: taskId, nodeId: 'work', requestId: input.requestId } });
+  expect(JSON.stringify(mainTurns)).toContain(input.text);
+  expect(store.db.prepare("SELECT COUNT(*) AS count FROM wake_intents WHERE kind='peer_message'").get()).toEqual({ count: 1 });
+  const replay = await runtime.sendPeerMessage(taskId, 'work', input);
+  expect(replay).toMatchObject({ id: messages[0]!.id });
+  await expect(runtime.sendPeerMessage(taskId, 'work', { ...input, text: 'Changed question' })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+  for (const from of ['ghost', 'constructor']) {
+    await expect(runtime.sendPeerMessage(taskId, from, input)).rejects.toMatchObject({ code: 'invalid_input' });
+  }
+  expect(await peerMessages()).toHaveLength(1);
+  await runtime.supervisor(taskId).graphControl({ graphId: taskId, action: 'stop' });
+  await runtime.host.drive();
+  expect(await runtime.sendPeerMessage(taskId, 'work', input)).toEqual(replay);
+  await expect(runtime.sendPeerMessage(taskId, 'work', { ...input, requestId: 'after-stop' })).rejects.toMatchObject({ code: 'stopping' });
+  const turnsBeforeChat = mainTurns.length;
+  await runtime.conversations.chat(conversationId, { text: 'Continue after the graph stopped.', requestId: 'continue-main' });
+  await runtime.host.drive();
+  expect(mainTurns.length).toBeGreaterThan(turnsBeforeChat);
+  expect(JSON.stringify(mainTurns.at(-1))).toContain('Continue after the graph stopped.');
 }, 30000);

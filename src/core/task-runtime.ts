@@ -1,4 +1,4 @@
-import { sendKernelNodeMessage } from './kernel-node-messages.ts';
+import { sendKernelMainMessage, sendKernelNodeMessage } from './kernel-node-messages.ts';
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
 import { kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse } from './kernel-views.ts';
@@ -642,15 +642,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             return { outputs: accepted ? { out: { enable: true, value } } : {}, missing: accepted ? [] : ['out'] };
           },
         } : {}),
-        onMainMessage: async (graphId, nodeId, text) => {
-          const task = store.task(graphId);
-          if (!task.conversation_id) throw new RuntimeError('invalid_input', 'Graph has no owning conversation');
-          return store.transaction(() => {
-            const message = appendMessage(store, { conversationId: task.conversation_id!, role: 'user', kind: 'peer', text: `[${nodeId}](graph://${graphId}/agents/${encodeURIComponent(nodeId)}): ${text}`, state: 'pending' });
-            wakeMaster(store, { taskId: graphId, kind: 'peer_message', dedupeKey: message.id, data: { graphId, nodeId, messageId: message.id } });
-            return message;
-          });
-        },
+        onMainMessage: async (graphId, nodeId, message) => sendKernelMainMessage(kernel, graphId, nodeId, message),
         onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
           if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
           const execution = store.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
@@ -1714,7 +1706,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     async sendPeerMessage(taskId: string, from: string, input: { to: string; text: string; requestId: string }) {
       ensureOpen();
       const receipt = kernel.latestRevision(taskId)
-        ? sendKernelNodeMessage(kernel, taskId, input.to, input, from)
+        ? (input.to === 'main'
+          ? sendKernelMainMessage(kernel, taskId, from, input)
+          : sendKernelNodeMessage(kernel, taskId, input.to, input, from))
         : await sendPeerMessage(store, execution, taskId, from, input);
       if (options.autoWake) execution.kick();
       return receipt;

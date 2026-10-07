@@ -83,7 +83,7 @@ export interface KernelGraphLaneOptions {
    * Runs a node's tool call in the host (§5, HB-262): the kernel's `submit` reaches here,
    * where the execution identity lives, so the model can never forge it.
    */
-  onMainMessage?: (graphId: string, nodeId: string, text: string) => Promise<unknown>;
+  onMainMessage?: (graphId: string, nodeId: string, message: { text: string; requestId: string }) => Promise<unknown>;
   onToolCall?: (graphId: string, nodeId: string, name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
   /**
    * A scripted stand-in for a node's real Pi process.
@@ -212,7 +212,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           send: async message => {
             if (message.to === 'main') {
               if (!options.onMainMessage) throw new Error('Main agent message channel unavailable');
-              return options.onMainMessage(graphId, nodeId, message.text);
+              return options.onMainMessage(graphId, nodeId, message);
             }
             return sendKernelNodeMessage(options.kernel, graphId, message.to, message, nodeId);
           },

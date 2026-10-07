@@ -198,3 +198,6 @@ SDK 的原生草稿类型是 `NativeProposal`（src/core/types.ts），必须包
 
 
 配置保存不能移除活动 graph 声明的模型，或当前执行冻结使用的模型。热修改模型时，当前 turn 保留旧连接，下一次使用新声明；旧 turn 结束后，不再保护已过时的空闲绑定。按配方选出的实际模型也受保护，直到相应节点退役或 graph 结束。未配置的偏好 ID 不会阻止无关配置保存；“移除”只判断本次确实从当前目录删除的连接。
+
+
+节点通过 send_to_peer 向 main 发送聊天时，消息进入顶层 graph 所属的 main 会话，并记录 graphId、nodeId 和 requestId；main 位于 graph 外部。Pi 工具和 SDK sendPeerMessage 使用同一持久回执规则：同一发送者向同一目标重放同内容只投递一次，改变内容拒绝。graph 停止或完成后不接受内部 agent 的新聊天，但旧回执可重放，main 自己的会话继续服务。graph 没有所属会话时，向 main 发送明确报错。
