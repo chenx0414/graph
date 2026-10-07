@@ -85,6 +85,7 @@ export class NodeTurnDriver {
       const definition = this.options.kernel.revision(execution.taskId, execution.revisionVersion)!.definition;
       const node = definition.nodes[this.options.nodeId];
       const prior = this.options.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND node_id=? AND id<>?').get(execution.taskId, execution.nodeId, executionId) as { n: number };
+      const decisions = prior.n === 0 ? this.options.kernel.store.task(execution.taskId).decision_digest : null;
       const previous = this.options.kernel.db.prepare('SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND id<>? ORDER BY rowid DESC LIMIT 1').get(execution.taskId, execution.nodeId, executionId) as { revision_version: number } | undefined;
       const finalReview = definition.acceptance?.filter(item => item.kind === 'review' && item.node === this.options.nodeId) ?? [];
       const reviewDelivery = finalReview.length ? `FINAL REVIEW REQUIREMENTS: ${JSON.stringify(finalReview)}. Publish immutable application/json with schema graph.review@1 and {commit,passed,reason}. commit must identify the version actually reviewed (null for a non-code result); reason must explain the verdict. Publication is separate from submit. If DELIVERABLE declares graph.review@1, write that JSON file; it is published automatically when execution finishes.` : '';
@@ -109,6 +110,7 @@ export class NodeTurnDriver {
         `GRAPH ACCEPTANCE: ${JSON.stringify((definition.acceptance ?? []).slice(0, 20).map(item => ({ ...item, description: preview(item.description) })))}`,
         'Overview previews at most 20 objects per section and 40 edges; long descriptions are abbreviated. Use read_graph for complete named objects or paged sections at this execution revision.',
         `TASK: ${node.task}`,
+        ...(decisions ? [`Decisions and constraints from the conversation:\n${decisions}`] : []),
         `ACCEPTANCE: ${JSON.stringify(node.acceptance ?? [])}`,
         ...(node.deliverable ? [`DELIVERABLE: ${JSON.stringify(node.deliverable)}`] : []),
         ...(reviewDelivery ? [reviewDelivery] : []),
