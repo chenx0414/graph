@@ -14,7 +14,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-test('a native delivery finishes when its final host check settles after a completion request', async () => {
+test.each([false, true])('native delivery drains its last check and requires current review after target movement: moved=%s', async moved => {
   const root = await mkdtemp(join(tmpdir(), 'graph-program-delivery-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
@@ -30,11 +30,12 @@ test('a native delivery finishes when its final host check settles after a compl
   cleanup.push(() => worker.close());
   let graphId = '';
   let disk: TaskStore;
-  const reviewer = await openaiServer([
+  const reviewTurn = () => [
     { tools: [{ id: 'read', name: 'read', arguments: JSON.stringify({ path: 'app.ts' }) }] },
     { tools: [{ id: 'report', name: 'write_file', arguments: () => JSON.stringify({ path: 'review.json', content: JSON.stringify({ commit: disk.task(graphId).integration_sha, passed: true, reason: 'Independently checked the implementation.' }) }) }] },
     { text: 'Review published.' },
-  ]);
+  ];
+  const reviewer = await openaiServer([...reviewTurn(), ...(moved ? reviewTurn() : [])]);
   cleanup.push(() => reviewer.close());
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
     access: () => fullAccessPolicy(), models: { apiKey: 'local-only', modelRuntime: worker.runtime,
@@ -66,10 +67,35 @@ test('a native delivery finishes when its final host check settles after a compl
   await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} }); await runtime.host.drive();
   const before = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
   expect(before.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'review', status: 'passed' }), expect.objectContaining({ id: 'ok', status: 'missing' })]));
+  const reviewedCommit = disk.task(graphId).integration_sha;
+  if (moved) expect(git(project, ['commit', '-q', '--allow-empty', '-m', 'target advances']).code).toBe(0);
+  const targetBeforeDelivery = git(project, ['rev-parse', 'main']).stdout;
   // Queue the last check before closing external inputs. It must still drain after complete.
   await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} });
   await main.graphControl({ graphId, action: 'complete' });
   expect((await runtime.user.task(taskId).view()).phase).not.toBe('completed');
+  if (moved) {
+    await expect.poll(async () => {
+      await runtime.host.pump();
+      return (await runtime.user.task(taskId).view()).phase;
+    }, { timeout: 15000, interval: 25 }).toBe('blocked');
+    const stale = await main.graphInspect({ graphId, query: 'acceptance' }) as { commit: string; items: { id: string; status: string }[] };
+    expect(stale.commit).not.toBe(reviewedCommit);
+    expect(stale.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'review', status: 'stale' }), expect.objectContaining({ id: 'ok', status: 'stale' }),
+    ]));
+    expect(git(project, ['rev-parse', 'main']).stdout).toBe(targetBeforeDelivery);
+    expect(git(project, ['show', 'main:app.ts']).stdout).toBe('export const value = 1;');
+    await expect(main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} })).rejects.toMatchObject({ code: 'completing' });
+    await main.graphControl({ graphId, action: 'withdraw_complete' });
+    await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} }); await runtime.host.drive();
+    const renewed = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
+    expect(renewed.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'review', status: 'passed' }), expect.objectContaining({ id: 'ok', status: 'stale' })]));
+    await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} });
+    await main.graphControl({ graphId, action: 'complete' });
+    expect(reviewer.requests).toHaveLength(6);
+    expect(worker.requests).toHaveLength(2);
+  }
   // Use the production host tick, without drive()'s extra completion pass.
   await expect.poll(async () => {
     await runtime.host.pump();

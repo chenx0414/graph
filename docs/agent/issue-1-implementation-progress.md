@@ -752,3 +752,12 @@
 - 旧夹具允许目标分支空提交后自动重绑旧证据，这不能代表新规格要求的精确 commit 审查；该旧断言不移植到本合同。Git 目标变动与条件更新基础设施仍由 git-baseline、merge 与 faults 的现有合同保护；原生目标变动后重新审查的完整交付仍须单独核对。数量保持 273 文件 / 1862 用例；完整 spec 和旧 SDK / DAG 退役仍未完成。
 
 - 第七十六轮完整门禁通过：273 文件 / 1862 用例，155.04 秒（/tmp/graph-v2-full-check-76.log）。TypeScript、lint、数量基线与验收证据全部通过；自检和 git diff --check 通过。生产修改 0 行，测试净减少 10 行；没有删用例、跳过或增加测试 seam。旧 SDK / DAG 调度器退役、原生目标变动后的交付核对及完整 spec 仍未完成。
+
+
+## 原生目标分支变动后的重新审查与交付
+
+- 扩展已有 program-check-delivery 主边界合同为目标不变 / 目标前进两种场景，复用真实 Pi、Git 和检查模块，不引入新的生产 seam。新增一用例独立保护 Git tryDeliver 合并目标后、新 commit 的精确版本验收与 main 恢复路径；已有纯验收判断不能证明这个实际交付生命周期。
+- 目标在旧审查后创建空提交，最后检查排队再请求完成。真实宿主 tick 将目标合入集成分支后阻塞；旧 review 和 check 均为 stale，目标仍为 value=1，不误把同内容的旧结论当作新 commit 的审查。完成意图保持关闭外部输入，graph_send 返回 completing；main 显式 withdraw_complete 后重新投递原 reviewer 与检查，所有验收 passed，目标 commit 与验收 commit 一致，最终 value=2。真实 reviewer 六次请求、worker 两次请求证明只复跑审查，没有重做实现。
+- 首次夹具误把外部输入拒绝码写成 invalid_graph，实际为明确 completing；依据现有生产协议修正断言，未修改或放宽行为。两用例聚焦通过，4.79 秒（/tmp/graph-native-target-move.log）；本组未发现生产缺陷。完整门禁待执行。旧 SDK / DAG 退役和整个 spec 仍未完成。
+
+- 第七十七轮完整门禁通过：273 文件 / 1863 用例，151.81 秒（/tmp/graph-v2-full-check-77.log）。TypeScript、lint、自动增加一用例的数量基线及验收证据全部通过；自检和 git diff --check 通过。生产修改 0 行，现有测试扩展目标变化合同；原生目标变化后的实际重新审查 / 检查 / 交付路径已核对通过。旧 SDK / DAG 退役、最终切换及完整 spec 仍未完成。
