@@ -132,6 +132,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     modelRuntime,
     stream,
     thinkingLevel: config.thinkingLevel,
+    ...(config.compaction ? { compaction: config.compaction } : {}),
     tools: forwardingTools(config, (name, args) => callHost(name, args)),
     nativeTools: config.nativeTools ?? [],
     skillPaths: config.skillPaths,

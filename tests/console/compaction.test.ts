@@ -9,11 +9,10 @@ import { afterEach, expect, test } from 'vitest';
 import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { taskGate } from '../../src/runtime/task-gate.ts';
 import { tokenUsageTotal, type TokenUsage } from '../../src/runtime/call-broker.ts';
 import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -304,65 +303,64 @@ test('the current schema tags every invocation with a purpose and keeps completi
   expect(columns.find(column => column.name === 'purpose')).toMatchObject({ dflt_value: "'completion'" });
 });
 
+async function nativeWorker(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, taskId: string) {
+  await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Compaction',
+    acceptance: [{ id: 'ok', description: 'User inspects the response', checkNode: 'work' }],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Compaction', protocols: { job: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Respond to this task.',
+        inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } }, modules: {}, edges: {},
+      acceptance: [{ id: 'ok', description: 'User inspects the response', kind: 'human' }] }),
+  }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
+}
+
 test('a real auto-compaction is booked as its own invocation and keeps the original entries', async () => {
   const root = await temp('worker');
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
-  await writeFile(join(workspace, 'check.js'), 'console.log("ok");\n');
   const provider = await compactionProvider(({ summary }) => summary
     ? { text: '## Goal\ncompacted worker context', usage: { prompt_tokens: 900, completion_tokens: 30 } }
     // The completion reports a context past the small window's threshold and
     // answers with enough real text for Pi to find a cut point.
     : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 } });
-  const runtime = await openTaskRuntime({
+  const options = {
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
-    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }] }) } },
+    actions: {},
     models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
-  });
+  };
+  let runtime = await openTaskRuntime(options);
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Compaction', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Compaction',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.runReady();
+  await nativeWorker(runtime, taskId);
+  await runtime.host.drive();
 
   const view = runtime.nodeRun(taskId, 'work');
-  const rows = purposes(root);
+  const rows = view.invocations;
   const compaction = rows.filter(row => row.purpose === 'compaction');
   expect(compaction.length).toBeGreaterThanOrEqual(1);
   expect(rows.some(row => row.purpose === 'completion')).toBe(true);
   for (const row of compaction) {
     expect(row.usage).not.toBeNull();
-    expect(JSON.parse(row.cost!).unknown).not.toBe(true);
+    expect(row.cost).toMatchObject({ amount: 930 / 1_000_000 });
     expect(row.model).toBe('local');
   }
   // Every invocation counts once into the instance total.
-  const invocationTokens = rows.reduce((sum, row) => sum + (row.usage ? tokenUsageTotal(JSON.parse(row.usage) as TokenUsage) : 0), 0);
+  const invocationTokens = rows.reduce((sum, row) => sum + (row.usage ? tokenUsageTotal(row.usage as TokenUsage) : 0), 0);
   expect(view.instance?.used).toBe(invocationTokens);
   // The summary is a separate line and the original worker entry is still there.
   expect(view.invocations.filter(invocation => invocation.purpose === 'compaction').length).toBe(compaction.length);
   expect(view.entries.some(entry => entry.kind === 'compaction')).toBe(true);
   expect(view.entries.some(entry => entry.role === 'assistant' && entry.text.includes('worker keeps going'))).toBe(true);
-  console.log(`[compaction-fixture] worker requests=${provider.requests.length} summaries=${provider.requests.filter(request => request.summary).length} purposes=${JSON.stringify(purposes(root).map(row => row.purpose))}`);
   // Pi drops nothing from the Graph ledger: history only grows.
   expect(view.entryCount).toBe(view.entries.length);
-
-  // Branch summaries share the same ledger. The product never opens the Pi
-  // branch navigator, so this asserts the contract the gate exposes for it.
-  const writer = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  cleanup.push(() => writer.close());
-  const gate = taskGate(writer, { id: view.operations[0]!.id, taskId, instanceId: view.instance!.id, nodeId: 'work' }, modelEntry(provider.baseUrl));
-  gate.setPurpose('branch_summary');
-  gate.dispatch('branch-summary-1', 0, () => undefined);
-  gate.settle('branch-summary-1', { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 });
-  expect(runtime.nodeRun(taskId, 'work').invocations.some(invocation => invocation.purpose === 'branch_summary')).toBe(true);
+  await runtime.close();
+  options.models.entries[0]!.cost = { input: 99, output: 99, cacheRead: 0, cacheWrite: 0 };
+  runtime = await openTaskRuntime(options);
+  const restored = await runtime.nodeRun(taskId, 'work');
+  expect(restored.invocations).toEqual(view.invocations);
+  expect(restored.entries).toEqual(view.entries);
 });
 
 test('a split turn books two compaction invocations and still shows both to the user', async () => {
@@ -490,7 +488,7 @@ test('a pause during auto-compaction stops the summary request through the task 
     : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 }, pause: async () => { await runtimeRef!.user.task(taskIdRef).pause('pause-during-compaction'); } });
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
-    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) } },
+    actions: {},
     models: { entries: [modelEntry(provider.baseUrl)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
   });
   cleanup.push(() => runtime.close());
@@ -498,16 +496,8 @@ test('a pause during auto-compaction stops the summary request through the task 
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Paused compaction', requestId: 'begin' });
   taskIdRef = taskId;
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Paused compaction',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.runReady();
+  await nativeWorker(runtime, taskId);
+  await runtime.host.drive();
 
   expect(provider.requests.filter(request => request.summary)).toHaveLength(0);
   expect(provider.requests).toHaveLength(1);
@@ -523,9 +513,9 @@ test('a pause during auto-compaction stops the summary request through the task 
     return usage !== null && (usage.input ?? 0) + (usage.output ?? 0) > 0;
   });
   expect(billed).toHaveLength(1);
-  // A paused task parks the node instead of blocking it on a question.
-  expect((await runtime.user.task(taskId).view()).nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending' });
-  expect(view.operations.every(operation => operation.state !== 'succeeded')).toBe(true);
+  expect(await runtime.supervisor(taskId).graphInspect({ graphId: taskId })).toMatchObject({ phase: 'paused' });
+  await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
 }, 60_000);
 
 test('post-turn compaction remains newer than the completion when the operation settles later', async () => {

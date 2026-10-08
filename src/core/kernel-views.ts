@@ -64,7 +64,7 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
       dispatchedAt: item.started_at, settledAt: item.ended_at, result: null, usage: null })), invocations: calls.map(call => ({ id: call.id, operationId: call.executionId, model: call.model?.id ?? null,
       modelIdentity: call.model?.identity ?? null, provider: call.model?.provider ?? null, state: call.state,
       reserved: ['inflight', 'unknown'].includes(call.state) ? call.reserved : 0,
-      usage: call.usage, usageSource: usageSourceOf(call.usage), cost: null, purpose: 'node',
+      usage: call.usage, usageSource: usageSourceOf(call.usage), cost: call.cost, purpose: call.purpose,
       dispatchedAt: call.createdAt, settledAt: call.settledAt })), questions: [], evidence: [],
     timing: { totalMs: settled.length ? settled.reduce((total, item) => total + item.ended_at! - item.started_at, 0) : null,
       runMs: null, waitingMs: null, pauseMs: nativePauseMs(kernel.store, graphId, nodeId), userWaitMs: null, inProgress: executions.some(item => item.state === 'running') },

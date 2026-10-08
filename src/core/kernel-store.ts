@@ -280,6 +280,8 @@ export class KernelStore {
     if (!moduleOperationColumns.has('worker_active')) this.db.exec('ALTER TABLE kernel_module_operations ADD COLUMN worker_active INTEGER NOT NULL DEFAULT 0');
     const providerColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_provider_calls)').all() as { name: string }[]).map(row => row.name));
     if (!providerColumns.has('model')) this.db.exec('ALTER TABLE kernel_provider_calls ADD COLUMN model TEXT');
+    if (!providerColumns.has('purpose')) this.db.exec("ALTER TABLE kernel_provider_calls ADD COLUMN purpose TEXT NOT NULL DEFAULT 'completion'");
+    if (!providerColumns.has('cost')) this.db.exec('ALTER TABLE kernel_provider_calls ADD COLUMN cost TEXT');
     const bindingColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_node_bindings)').all() as { name: string }[]).map(row => row.name));
     if (!bindingColumns.has('role')) this.db.exec('ALTER TABLE kernel_node_bindings ADD COLUMN role TEXT');
     const deliveryColumns = new Set(
@@ -844,15 +846,16 @@ export class KernelStore {
 
   /** Actual sends, including unknown holds; model identity is frozen at dispatch. */
   providerCalls(taskId: string, nodeId?: string) {
-    const rows = this.db.prepare(`SELECT id,node_id,execution_id,reserved,state,usage,model,created_at,settled_at
+    const rows = this.db.prepare(`SELECT id,node_id,execution_id,reserved,state,usage,model,purpose,cost,created_at,settled_at
       FROM kernel_provider_calls WHERE task_id=? ${nodeId === undefined ? '' : 'AND node_id=?'} ORDER BY rowid`)
       .all(...(nodeId === undefined ? [taskId] : [taskId, nodeId])) as {
         id: string; node_id: string; execution_id: string; reserved: number; state: string;
-        usage: string | null; model: string | null; created_at: number; settled_at: number | null;
+        usage: string | null; model: string | null; purpose: string; cost: string | null; created_at: number; settled_at: number | null;
       }[];
     return rows.map(row => ({ id: row.id, nodeId: row.node_id, executionId: row.execution_id,
       reserved: row.reserved, state: row.state, usage: row.usage ? JSON.parse(row.usage) as TokenUsage : null,
       model: row.model ? JSON.parse(row.model) as { id: string; identity: string; provider: string; api: string; baseUrl: string; recipe?: { definition: string; review: boolean } } : null,
+      purpose: row.purpose, cost: row.cost ? JSON.parse(row.cost) as Json : null,
       createdAt: row.created_at, settledAt: row.settled_at }));
   }
 

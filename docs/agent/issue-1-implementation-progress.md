@@ -666,3 +666,17 @@
 - 第六十七轮完整门禁通过，统计与基线变更见下一条。这次只退役节点消息的一条旧分派路径；LegacyProposal / 旧确认物化 / DAG 调度器及正式默认切换仍未完成，完整 spec 未完成。
 
 - 第六十七轮完整门禁通过：273 文件、1861 用例，187.25 秒；TypeScript、lint、验收证据检查通过（/tmp/graph-v2-full-check-67.log）。按已记录的五个废弃合同将基线从 274/1866 显式改为 273/1861。生产净减少 127 行，测试及支持净减少 205 行（不计基线 JSON）；未创建转换器或测试专用 seam。整个 spec 未完成。
+
+## 原生实际执行链与常驻 Pi 自动压缩（待门禁通过，未提交）
+
+- chain-depth 的两段、三段真实 HTTP / Pi 合同手工迁为 NativeProposal、具名协议与显式边；确认后不隐含启动，main 显式投递第一节点，每个实际 submit 投递下游，最终结果进入公开输出。移除旧 dependsOn、result_handoff 和伪造检查 digest。初次夹具漏写 enabled:true 导致下游 idle，修正声明后通过；生产解析器尚未拒绝缺失 enabled，记录为后续边界，不宣称本轮修复。
+- 自动压缩和暂停期间摘要请求两个实际 Pi 合同迁为原生入口。首轮真实回归为 compaction 请求数为零：常驻 worker 未收到压缩配置，openPiInstance 默认禁用；原生详情还固定 purpose / cost。接入既有模型窗口设置和事件，摘要经过同一 provider gate，保存摘要条目、实际用途、用量及费用。价格在派发时冻结，结算与未知用量核对使用冻结价格；未知费用不补零。实际重启后调整配置价格，历史详情保持一致。暂停合同验证仅已在途 completion 结算，摘要没有发送，再次 drive 也不新增请求。
+- 删除上述自动压缩合同末尾直接操作旧 taskGate 的 branch_summary 模拟片段：它没有真实 provider 请求，产品未打开 Pi branch navigator，且复用已结束 operation；不能证明用户可见分支摘要。保留旧 taskGate 的实际 main 调用方和主会话压缩合同，不删除共享基础设施。有限预算缩减、未知摘要用量及上游模型身份三个旧 worker 合同尚未迁移，不据此宣称整文件完成。
+- 聚焦 5 文件 / 31 用例通过，28.95 秒（/tmp/graph-native-compaction-focus.log）；无新增或删除用例。生产净增加 23 行，测试净减少 61 行。git diff --check 通过。
+- 第六十八轮首次完整检查 266 文件 / 1854 用例通过，7 文件 / 7 用例失败，316.81 秒；失败文件单独复跑 7 文件 / 122 用例通过，32.21 秒。重跑完整检查 271 文件 / 1851 用例通过，2 文件 / 10 用例失败，219.47 秒。失败全部在 command-module / spike-module-isolation 的 Docker 隔离执行；单独复跑仍为 10 failed / 11 passed，90.13 秒，不能算全绿。
+- 只读诊断：docker version 持续不返回；直接连接本地 Docker Unix socket 的 /_ping 在 3005ms 内收到零字节并超时。磁盘可用约 2.7 GiB。证明 Docker 服务当时无响应，尚不能证明磁盘空间是原因。原生压缩及执行链合同在第二轮完整门禁均通过，不通过扩大超时或跳过隔离测试掩盖故障。
+- 重启 Docker Desktop 会影响其他容器，已向用户请求这项操作的确认；未得到确认前不重启。当前改动未提交，必须恢复隔离服务并重新运行完整 node --run check。旧 SDK 草稿 / DAG 调度器退役、正式默认切换及整个 spec 仍未完成。
+
+- 用户已明确允许重启 Docker Desktop。正常 restart 与退出未能结束无响应后台，停止旧后台后重新启动 Desktop；/_ping 返回 OK、docker version 返回 29.4.0。上述两个隔离文件未经源码或超时修改复跑，2 文件 / 21 用例通过，7.52 秒（/tmp/graph-v2-module-restart-focus-68.log）。此轮环境故障已解除，完整门禁仍需重跑，磁盘不足是否导致原始服务故障仍未知。
+
+- Docker 恢复后第六十八轮完整门禁通过：273 文件、1861 用例，194.59 秒；TypeScript、lint、数量基线及验收证据检查全部通过（/tmp/graph-v2-full-check-68-after-docker-restart.log）。未扩大超时、跳过用例或修改数量基线。该批可以提交；整个 spec 及旧内核最终退役仍未完成。

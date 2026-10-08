@@ -1,3 +1,4 @@
+import { compactionSettings } from './compaction.ts';
 import { sendKernelNodeMessage } from '../core/kernel-node-messages.ts';
 import { executeModuleOperation } from './kernel-operation-broker.ts';
 import { waitForKernelExecutionSlot } from './execution-slots.ts';
@@ -352,6 +353,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         stateDir: session.stateDir,
         model: toPiModel(model),
         thinkingLevel: 'off',
+        compaction: compactionSettings(model),
         // §5: the node's graph output tool is `submit`. The host executes the call against the
         // real execution (HB-262), so the model can never forge an executionId.
         tools: [...(session.operation?.tools ?? []).map(tool => ({
@@ -392,6 +394,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (!session.operation) throw new Error('Resident node has no resolved capability operation');
       const model = boundModels.get(key);
       if (!model || model.id !== (config as { model: { name: string } }).model.name) throw new Error('Resident host has no prepared model connection');
+      let purpose: 'completion' | 'compaction' = 'completion';
       const host = new ResidentHost({
         launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,
           ...(options.access ? { access: options.access() } : {}) }),
@@ -407,7 +410,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
           let unknown = false;
           const gate = kernelProviderGate(options.kernel, graphId, nodeId, undefined, model,
-            { definition: session.binding.definitionVersion, review: session.role === 'reviewer' });
+            { definition: session.binding.definitionVersion, review: session.role === 'reviewer' }, purpose);
           const observed: SendGate = {
             dispatch: (id, reservation, send) => gate.dispatch(id, reservation, send),
             settle: (id, cost) => { gate?.settle(id, cost); if (cost) {
@@ -464,6 +467,19 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         onEvent: event => {
           const data = event as { type: string; message?: { role: string; content: unknown }; toolName?: string; toolCallId?: string; args?: unknown; result?: unknown; isError?: boolean; systemPrompt?: string; tools?: unknown };
           const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          if (data.type === 'compaction_start') {
+            purpose = 'compaction';
+            options.kernel.store.event(graphId, 'session.compaction_started', { nodeId, operationId: execution?.id ?? null });
+          }
+          if (data.type === 'compaction_end') {
+            purpose = 'completion';
+            const result = (event as { aborted?: boolean; result?: { summary: string; tokensBefore?: number }; errorMessage?: string });
+            if (!result.aborted && result.result) {
+              appendNodeEntry(options.kernel.store, { taskId: graphId, nodeId, operationId: execution?.id ?? null,
+                role: 'system', kind: 'compaction', text: result.result.summary });
+              options.kernel.store.event(graphId, 'session.compacted', { nodeId, operationId: execution?.id ?? null, tokensBefore: result.result.tokensBefore ?? null });
+            } else options.kernel.store.event(graphId, 'session.compaction_failed', { nodeId, operationId: execution?.id ?? null, error: result.errorMessage ?? 'compaction aborted' });
+          }
           if (data.type === 'graph_provider_prompt') {
             options.kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)')
               .run(graphId, nodeId, execution?.id ?? null, data.systemPrompt ?? '', typeof data.tools === 'string' ? data.tools : JSON.stringify(data.tools ?? []), Date.now());
