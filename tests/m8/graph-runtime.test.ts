@@ -93,6 +93,10 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
   test('G7: create is whole-or-nothing and returns the validated definition', () => {
     const { kernel } = opened();
     const runtime = new GraphRuntime(kernel, 't1');
+    const malformed = { ...twoNode(), edges: { e: { from: 'a.out', to: 'b.in', enabled: 'false' } } } as unknown as GraphDefinition;
+    expect(() => runtime.create(malformed)).toThrow(/enabled/);
+    expect(runtime.state()).toBeNull();
+    expect(kernel.latestRevision('t1')).toBeNull();
     const created = runtime.create(definition());
     expect(created.revision.version).toBe(1);
     expect(created.definition.name).toBe('g');
@@ -100,6 +104,9 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     // A second create on the same graph is refused and writes nothing new.
     expect(() => runtime.create(definition())).toThrow(/already exists/);
     expect(kernel.latestRevision('t1')!.version).toBe(1);
+    expect(() => runtime.patch({ baseRevision: 1, changes: { reason: 'invalid enablement', definition: malformed } })).toThrow(/enabled/);
+    expect(kernel.latestRevision('t1')!.version).toBe(1);
+    expect(kernel.latestRevision('t1')!.definition.edges).toEqual({});
   });
 
   test('main cannot weaken final acceptance through a local patch', () => {

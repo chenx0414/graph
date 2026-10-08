@@ -413,6 +413,7 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
 
   // Every edge connects a declared output to a declared input, with matching protocols.
   for (const [id, edge] of Object.entries(definition.edges)) {
+    if (!isRecord(edge) || typeof edge.enabled !== 'boolean') invalid(`Edge ${id} enabled must be an explicit boolean`);
     const from = endpointRef(definition, edge.from, 'output');
     const to = endpointRef(definition, edge.to, 'input');
     if (!from) invalid(`Edge ${id} names unknown output endpoint ${edge.from}`);

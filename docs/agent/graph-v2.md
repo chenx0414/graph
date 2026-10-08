@@ -226,3 +226,5 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 公开 sendNodeMessage / sendPeerMessage 与 Pi peer channel 已统一到原生消息队列，要求目标具有正式原生 graph 定义。graph 内忙碌节点的消息排队为下一次执行，空闲节点回复时沿用同一 session 与累计用量；不根据旧 DAG 自动失效后继，也不通过消息重开已结束 graph。旧 node-messages 分派模块已删除，main 会话自身的 steering 仍保留。声明 deliverable 的文件由执行结算自动发布；需要其他节点读取时，显式向它的具名输入投递精确 artifactId / version，接收节点使用 artifact_read，不依赖旧 dependencySources 或私有文件路径。
 
 原生常驻 Pi 使用模型窗口配置启用自动压缩；摘要请求同样经过宿主预算和暂停门禁。节点详情分别展示 completion / compaction 请求、实际用量和费用，摘要作为独立 compaction 条目保存，原聊天条目仍可查看。请求派发时冻结价格，重启或修改模型价格不重新计算历史费用；无法核算用量时费用保持未知。暂停后不允许发起新的摘要请求，已在途请求仍可结算。
+
+每条边必须显式声明 enabled:true 或 enabled:false；缺失、null、数字和字符串不会被当作开关。创建和局部修改在写入图版本前统一校验，因此无效声明不会留下部分 graph 或新 revision。连接启用状态仍与投递 value 中的业务 passed 判断分离。

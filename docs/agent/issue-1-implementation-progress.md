@@ -680,3 +680,11 @@
 - 用户已明确允许重启 Docker Desktop。正常 restart 与退出未能结束无响应后台，停止旧后台后重新启动 Desktop；/_ping 返回 OK、docker version 返回 29.4.0。上述两个隔离文件未经源码或超时修改复跑，2 文件 / 21 用例通过，7.52 秒（/tmp/graph-v2-module-restart-focus-68.log）。此轮环境故障已解除，完整门禁仍需重跑，磁盘不足是否导致原始服务故障仍未知。
 
 - Docker 恢复后第六十八轮完整门禁通过：273 文件、1861 用例，194.59 秒；TypeScript、lint、数量基线及验收证据检查全部通过（/tmp/graph-v2-full-check-68-after-docker-restart.log）。未扩大超时、跳过用例或修改数量基线。该批可以提交；整个 spec 及旧内核最终退役仍未完成。
+
+## 边启用声明的统一校验
+
+- 上轮真实执行链迁移暴露缺失 enabled 时静默断流：agent submit 只沿 enabled===true 的边发送，模块输出却只跳过 enabled===false；正式 JSON 解析器未检查此字段，因此同一无效声明具有两个不同含义。类型与正式 spec 明确 Edge 保存布尔 enabled，不引入隐含默认值。
+- 扩展既有公开解析合同，验证缺失、null、0/1、字符串、对象及数组均拒绝，true/false 均保留；扩展现有 G7 管理合同验证无效 create 不留下 task/revision，无效 patch 不推进版本。首轮 2 failed / 61 passed，失败分别是未拒绝解析和实际创建，属于真实产品回归。修复仅在单一 parseGraphDefinition 入口增加一行检查，不另建运行时开关路径。创建后无 revision 的夹具断言使用实际返回 null，未以扩展生产返回类型适配测试。
+- 聚焦 interface-spec / graph-runtime / kernel-store / module-router 四文件、82 用例通过，0.94 秒；无增删测试数量。生产净增加 1 行，测试净增加 19 行。git diff --check 通过。第六十九轮完整门禁待执行；旧 SDK 草稿、DAG 调度器及完整 spec 仍未完成。
+
+- 第六十九轮完整门禁通过：273 文件、1861 用例，189.73 秒；TypeScript、lint、数量基线与验收证据检查全部通过（/tmp/graph-v2-full-check-69.log）。Docker 健康接口仍正常，未修改测试超时或数量基线。旧 SDK 草稿 / DAG 调度器退役、正式默认切换及完整 spec 仍未完成。

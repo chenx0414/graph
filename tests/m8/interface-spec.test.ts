@@ -89,7 +89,19 @@ describe('parseGraphDefinition — pipeline shape', () => {
     }, 'worker.missing');
   });
 
-  test('an edge endpoint that is not declared as an output is refused', () => {
+  test('edges require explicit boolean enablement and declared endpoints', () => {
+    const valid = {
+      ...pipeline,
+      nodes: { worker: { ...pipeline.nodes.worker, inputs: {
+        ...pipeline.nodes.worker.inputs, result: { protocol: 'code-result' },
+      } } },
+    };
+    for (const enabled of [undefined, null, 0, 1, 'false', {}, []]) {
+      expectInvalid({ ...valid, edges: { link: { from: 'worker.result', to: 'worker.result', enabled } } }, 'enabled');
+    }
+    for (const enabled of [false, true]) {
+      expect(parseGraphDefinition({ ...valid, edges: { link: { from: 'worker.result', to: 'worker.result', enabled } } }).edges.link?.enabled).toBe(enabled);
+    }
     expectInvalid({
       ...pipeline,
       edges: { 'worker-review': { from: 'worker.nope', to: 'worker.task', enabled: true } },
