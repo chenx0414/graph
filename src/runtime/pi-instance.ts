@@ -67,6 +67,9 @@ export interface PiInstanceOptions {
   thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
   nativeTools?: string[];
+  /** Resident native tools must obtain host admission before their local effect. */
+  beforeNativeTool?: (call: { id: string; name: string }) => Promise<void>;
+  afterNativeTool?: (call: { id: string; name: string }) => Promise<void>;
   skillPaths?: string[];
   /** The Agent's own skills folder: the SDK loads skills from here. */
   skillFolder?: string;
@@ -377,12 +380,21 @@ export async function openPiInstance(options: PiInstanceOptions) {
   // is paired by tool-call id, so calls that run in parallel cannot be attributed to each other;
   // a start that never sees its result (an aborted turn) is dropped instead of kept forever.
   // Recording is observation, never enforcement: a throwing sink cannot fail the turn it watches.
+  const nativeAdmitted = new Set<string>();
   const toolStarted = new Map<string, number>();
   const previousBeforeToolCall = session.agent.beforeToolCall;
   session.agent.beforeToolCall = async (context, signal) => {
     if (toolStarted.size >= 32) toolStarted.clear();
     toolStarted.set(context.toolCall.id, performance.now());
-    return previousBeforeToolCall?.(context, signal);
+    const refusal = await previousBeforeToolCall?.(context, signal);
+    if (refusal?.block) return refusal;
+    if (nativeToolNames.has(context.toolCall.name) && options.beforeNativeTool) {
+      try {
+        await options.beforeNativeTool({ id: context.toolCall.id, name: context.toolCall.name });
+        nativeAdmitted.add(context.toolCall.id);
+      } catch (error) { return { block: true, reason: error instanceof Error ? error.message : String(error) }; }
+    }
+    return refusal;
   };
   const toolResultSeam = toolResultHook({
     scopeId: options.binding.instanceId,
@@ -403,6 +415,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
         // A sink is an observer of the turn, not a step in it.
       }
     }
+    if (nativeAdmitted.delete(context.toolCall.id)) await options.afterNativeTool?.({ id: context.toolCall.id, name: context.toolCall.name });
     return toolResultSeam(context);
   };
   session.agent.subscribe(event => {

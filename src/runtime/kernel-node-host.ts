@@ -47,7 +47,7 @@ export interface NodeSessionRequest {
 export interface NodeSessionOptions {
   retainCapabilities?: boolean;
   access?: ResolvedAccessPolicy;
-  bindings?: Pick<Parameters<typeof agentTools>[0], 'peers' | 'artifacts' | 'commitWorkspace'>;
+  bindings?: Pick<Parameters<typeof agentTools>[0], 'peers' | 'artifacts' | 'commitWorkspace' | 'fetch'>;
   kernel: KernelStore;
   catalog: Catalog;
   graphId: string;
@@ -105,6 +105,7 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
     workspace: options.workspace,
     scratchDir,
     action,
+    nativeTools: ['bash'], disabledTools: assembly.disabledTools,
     // A node with no gate still counts tool calls; an absent gate send is a passthrough.
     gate: options.gate ?? { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
     ...(options.access ? { access: options.access } : {}),

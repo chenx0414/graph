@@ -584,6 +584,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       graphs: () => (residentGraphLane ??= kernelGraphLane({
         access: () => resolvedAccessPolicy(),
         kernel,
+        ...(options.network ? { network: options.network } : {}),
         catalog,
         ...(options.agentContext ? { library: options.agentContext } : {}),
         // §9: a v2 node is metered like any other. Without this the ledger from HB-284

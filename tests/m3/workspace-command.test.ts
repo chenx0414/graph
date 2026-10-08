@@ -7,7 +7,8 @@ import { fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-pol
 import { git as runGit } from '../../src/git/git.ts';
 import { openWorkspaceCommandRunner, resolveNodeCommand, validateWorkspaceCommand } from '../../src/runtime/workspace-command.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { TaskStore } from '../../src/core/store.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -31,28 +32,28 @@ async function fixture(plans: Parameters<typeof openaiServer>[0]) {
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({
-      outcome: 'completed', output: null,
-      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
-    }) } },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Run the tests.', requestId: 'begin' });
   await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Run the tests',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
+    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'work' }],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Run the tests', protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Run the tests.', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
+      modules: {}, edges: {}, outputs: {}, acceptance: [{ id: 'ok', description: 'Works', kind: 'human' }],
+    }),
   }, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  return { runtime, provider, root, workspace, task: runtime.user.task(taskId) };
+  await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
+  const disk = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(async () => disk.close());
+  const toolUsage = () => (disk.db.prepare("SELECT data FROM events WHERE task_id=? AND type='graph.tool.settled'").all(taskId) as { data: string }[]).map(row => JSON.parse(row.data).usage);
+  return { runtime, provider, root, workspace, task: runtime.user.task(taskId), toolUsage };
 }
 
 test('a worker can run an allowed build/test command inside the sandbox', async () => {
-  const { runtime, provider, workspace, task } = await fixture([
+  const { runtime, provider, workspace, task, toolUsage } = await fixture([
     { tools: [{ id: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'node --test test/sample.test.js' }) }] },
     { text: 'Ran the test suite.' },
   ]);
@@ -61,9 +62,9 @@ test('a worker can run an allowed build/test command inside the sandbox', async 
   // The worker runs in its isolated work copy; the file lands there until the
   // reviewed delivery merges it into the target checkout.
   const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
-  expect(await readFile(join(workerTree, 'ran.txt'), 'utf8')).toBe('ran');
   expect(JSON.stringify(provider.requests[1])).toContain('pass 1');
-  expect(view.invocations.some(row => row.usage && row.usage.input === 0 && row.usage.output === 0)).toBe(true);
+  expect(await readFile(join(workerTree, 'ran.txt'), 'utf8')).toBe('ran');
+  expect(toolUsage()).toContainEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 });
 
 test('native bash supports shell syntax but cannot escape the workspace sandbox', async () => {
@@ -77,9 +78,25 @@ test('native bash supports shell syntax but cannot escape the workspace sandbox'
   await runtime.host.drive();
   const view = await task.view();
   const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  expect(JSON.stringify(provider.requests[1])).not.toContain('Tool bash not found');
   expect(await readFile(join(workerTree, 'shell.txt'), 'utf8')).toBe('shell-ok');
   await expect(readFile(join(workerTree, '..', 'outside.txt'), 'utf8')).rejects.toThrow();
   expect(JSON.stringify(provider.requests[1])).toContain('Operation not permitted');
+});
+
+test('a native shell tool cannot execute after the task pauses during the provider response', async () => {
+  let pause: (() => Promise<void>) | undefined;
+  const { runtime, task, toolUsage, provider } = await fixture([
+    { beforeReply: async () => { await pause?.(); }, tools: [{ id: 'write-after-pause', name: 'bash', arguments: JSON.stringify({ command: "printf 'must-not-run' > after-pause.txt" }) }] },
+  ]);
+  pause = async () => { await task.pause('pause-native-shell'); };
+  await runtime.host.drive();
+  const view = await task.view();
+  expect(view.paused).toBe(true);
+  const workerTree = view.worktrees.find(item => item.nodeId === 'work')!.path;
+  await expect(readFile(join(workerTree, 'after-pause.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(toolUsage()).toEqual([]);
+  expect(provider.requests).toHaveLength(1);
 });
 
 function git(cwd: string, args: string[]) {
@@ -141,7 +158,7 @@ test('read-only Git commands still run inside the sandbox', async () => {
   expect(await readFile(join(workspace, 'README.md'), 'utf8')).toBe('project\n');
 });
 
-test('a plain directory is prepared by the host and its graph.command check runs in the worktree', async () => {
+test('a plain directory is prepared by the host and its native command module runs in the worktree', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-command-plain-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'project');
@@ -151,34 +168,26 @@ test('a plain directory is prepared by the host and its graph.command check runs
     "import { writeFileSync } from 'node:fs';",
     "test('writes proof', () => { writeFileSync('ran-plain.txt', 'ran'); });",
   ].join('\n'));
-  const provider = await openaiServer([{ text: 'Done.' }]);
-  cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
-    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: {},
-  });
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }], actions: {} });
   cleanup.push(() => runtime.close());
-  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Run the tests.', requestId: 'begin' });
   await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Run the tests',
     acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['--test', 'test/sample.test.js'] } },
-    ],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Run the tests', protocols: { data: { type: 'object' } }, nodes: {},
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--test', 'test/sample.test.js'], output: 'result', timeoutMs: 10000 } } },
+      edges: {}, outputs: {}, acceptance: [{ id: 'ok', description: 'Works', kind: 'check', module: 'check' }],
+    }),
   }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await runtime.host.runReady();
-    const view = await task.view();
-    if (view.phase === 'completed' || view.nodes.some(node => node.id === 'check' && node.status === 'failed')) break;
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
+  const main = runtime.supervisor(taskId);
+  await main.graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
+  await runtime.host.drive();
+  const operations = await main.graphInspect({ graphId: taskId, query: 'operations' });
+  expect(operations).toMatchObject([{ module_id: 'check', state: 'settled' }]);
   const view = await task.view();
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
   // The host initialized Git for the plain directory and the program check
   // ran inside the integration work copy, not the primary checkout.
   const integrationTree = view.worktrees.find(item => item.nodeId === 'integration')!.path;

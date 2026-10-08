@@ -772,3 +772,25 @@
 - 聚焦首次误用系统 Node 26.3.0：chain-depth 两用例节点 failed、另外三用例通过（/tmp/graph-retire-stranded-focus.log），失败根因未确认，未删除失败链测试或放宽断言。改用仓库固定 Node 24.20.0 运行相同三文件 / 五用例全部通过，4.98 秒（/tmp/graph-retire-stranded-node24.log）。生产净删 29 行，旧测试删 95 行；预期全量为 272 文件 / 1861 用例，明确 GRAPH_UPDATE_BASELINE=1 记录经审计的减少。
 
 - 第七十八轮完整门禁通过：272 文件 / 1861 用例，154.65 秒（/tmp/graph-v2-full-check-78.log）。TypeScript、lint、明确审计降低的数量基线和验收证据全部通过；固定运行时下链合同也全量通过。自检与 git diff --check 通过；src/tests 中旧诊断名已无引用。仅退役无生产调用的旧诊断接口，不声称旧 SDK / DAG 或完整 spec 已完成。
+
+
+## 原生常驻 Pi 节点补齐受控网络检索
+
+- 从旧 SDK 迁移 retrieval 的七个真实 Pi 合同，去掉 dependsOn、旧独立 program 节点和编造 digest；通过具名输入显式启动，网络授权等原合同不删不放宽。RED 为五个合同失败，实际模型收到 Tool fetch not found（/tmp/graph-native-retrieval.log），证明旧路径覆盖掩盖了新节点漏配检索能力。
+- TaskRuntime 将网络授权传入原生 lane；节点装配绑定已有 createRetrievalBroker 的 fetch，用既有 agentTools 创建声明与工具执行，不新增并行检索实现。按授权域名或 unrestricted 决定暴露工具，session 配置签名包含网络授权；宿主在真实 running execution 下检查图 / 节点暂停、停止、有限预算与未核对用量。检索由宿主执行，拒绝重定向 / 非文本 / 未授权域名；零 token 用量以真实 graph.retrieval.started/settled 事件记录，不伪造成模型 provider call 或污染独立审查身份。
+- 修复后六项通过，剩余夹具把旧工具响应的单层转义当合同；改为解析实际工具结果，严格匹配 status=200 和正文。最终七用例通过，17.82 秒（/tmp/graph-native-retrieval-final.log）。暂停场景真实 provider beforeReply 后暂停，服务器零访问；未授权域名零检索结算；无授权工具不暴露。没有增删用例、跳过或新测试 seam。完整门禁待执行，旧 SDK / DAG 仍待整体退役，完整 spec 未完成。
+
+- 第七十九轮首次完整门禁在 TypeScript 发现 NodeStateRow 未暴露 used；改为读取 kernel_node_state 的实际 used/paused，不用扩充接口或绕过预算。重跑：270 文件 / 1858 用例通过，2 文件 / 3 用例失败，合计 272 文件 / 1861 用例，177.94 秒（/tmp/graph-v2-full-check-79-rerun.log）。原生检索合同通过；失败仅 peer npm 两项脚本启动超时和 pre-push stub 超时。TypeScript / lint 通过，测试未全绿，后续基线 / 验收证据步骤未执行，当前修改不得声称完整门禁通过且未提交。
+- 独立 Node24 最小 shebang probe 再次证明直接执行脚本 ETIMEDOUT，显式 /bin/sh 脚本及 /bin/sh -c 正常退出；Docker info 正常，不能把此问题归因于 Docker。与此前系统启动停滞现象一致，确切系统根因仍未知；未更改系统安全策略、未删除失败合同或放宽断言。保留当前未提交修复继续推进目标，系统门禁恢复与旧 SDK / DAG 整体退役仍待完成。
+
+
+## 原生能力命令 / shell 装配及宿主准入
+
+- 迁移 workspace-command 的实际 Pi / sandbox 合同及 plain-directory host check：移除两个旧草稿 / program 节点 / dependsOn 和伪造 check digest，按真实具名输入启动 worker 或 operation 模块。plain check 必须在集成 worktree 生成证明文件且 operation settled，不将会修改树的测试伪称为 clean commit 验收。保留 Git 元数据与路径拒绝、完整访问、Electron Node 模式及 loopback 等既有合同。
+- RED 为原生 bash 未装配，实际工具结果 Tool bash not found（/tmp/graph-native-command-red.log），不是文件系统测试偶然未写入。nodeSessionRequest 以能力库的 disabledTools 配置启用 Pi 原生 bash；保留现有 Graph 文件工具，最小新增 shell 职责。
+- 检索与能力层复用 kernelToolGate：从真实 running execution / kernel_node_state / provider calls 判断暂停、停止、有限预算、未核对用量与占位；工具开始 / 零用量结算独立于 provider 账本。原生本地 bash 通过 Pi beforeToolCall / afterToolCall 接宿主准入 IPC，宿主验证声明工具与唯一准入，拒绝结果返回模型；工作目录权限仍由现有 OS 沙箱承担。生产需要的接口回调不为测试专设。
+- 两文件 16 项既有合同聚焦通过，17.88 秒（/tmp/graph-native-tools-fixed.log）。新增一个真实暂停竞争合同：模型 response 回调暂停后返回 bash 写文件，文件必须不存在、无工具结算且仅一次模型请求。正确代码通过 12.57 秒；临时去掉宿主 beforeNativeTool 准入后负控失败，文件实际被写入（/tmp/graph-native-shell-pause-negative.log），12.47 秒，证明不是工具缺失或模型拒发造成的假通过；已恢复生产代码。TypeScript 聚焦通过。新增一项独立本地 native tool / IPC 行为，不重复检索权限检查，预期全量 272 文件 / 1862 用例。完整门禁与旧 SDK / DAG 整体退役仍待完成，本组和之前检索修复未提交。
+
+- 第八十轮完整门禁：271 文件 / 1861 用例通过、1 文件 / 1 用例失败，共 272 文件 / 1862 用例，151.09 秒（/tmp/graph-v2-full-check-80.log）。失败仅 conversation-pi 原生 worker 的过时工具清单期望 run_command；实际按既有 selectAgentToolSurface 规则由已启用 bash 替代，主流程执行成功。改该原生清单断言为 bash，保留 read/write_file/submit 及实际结果验证。此前 peer npm / pre-push 超时本轮均恢复，未更改系统策略、未删失败用例，原因仍未确认。当前仍需完整重跑，不据单次恢复推断系统根因。
+
+- 第八十轮重跑完整通过：272 文件 / 1862 用例，168.13 秒（/tmp/graph-v2-full-check-80-rerun.log）。TypeScript、lint、自动增加一项本地 native tool 准入合同的数量基线及验收证据全部通过；此前系统脚本超时本轮也通过。自检与 git diff --check 通过，临时负控已经恢复。检索 / 工作目录命令旧草稿已移除；原生 shell 与检索按宿主准入真实运行，工具零用量不冒充模型 provider 记录。旧 SDK / DAG 整体退役、正式切换和完整 spec 仍未完成。

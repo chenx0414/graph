@@ -135,6 +135,14 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     ...(config.compaction ? { compaction: config.compaction } : {}),
     tools: forwardingTools(config, (name, args) => callHost(name, args)),
     nativeTools: config.nativeTools ?? [],
+    beforeNativeTool: async call => {
+      const result = await callHost('native_tool_start', call);
+      if (!result.ok) throw new Error(result.text);
+    },
+    afterNativeTool: async call => {
+      const result = await callHost('native_tool_settle', call);
+      if (!result.ok) throw new Error(result.text);
+    },
     skillPaths: config.skillPaths,
     ...(config.skillFolder ? { skillFolder: config.skillFolder } : {}),
     piExtensionPaths: config.piExtensionPaths,

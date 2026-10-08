@@ -227,7 +227,7 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   const workerRequests = provider.requests.filter(request => request.tools.includes('submit') && !request.tools.includes('propose_graph'));
   expect(workerRequests.length).toBeGreaterThan(0);
   for (const request of workerRequests) {
-    expect(request.tools).toEqual(expect.arrayContaining(['read', 'write_file', 'run_command', 'submit']));
+    expect(request.tools).toEqual(expect.arrayContaining(['read', 'write_file', 'bash', 'submit']));
   }
   await runtime.conversations.chat(created.conversationId, { text: '节点执行结果呢？', requestId: 'result' });
   await runtime.host.runReady();

@@ -1,3 +1,5 @@
+import { kernelToolGate } from './kernel-tool-gate.ts';
+import { createRetrievalBroker } from './retrieval.ts';
 import { compactionSettings } from './compaction.ts';
 import { sendKernelNodeMessage } from '../core/kernel-node-messages.ts';
 import { executeModuleOperation } from './kernel-operation-broker.ts';
@@ -50,6 +52,7 @@ export const DEFAULT_V2_RESERVE_TOKENS = 200_000;
 export interface KernelGraphLaneOptions {
   kernel: KernelStore;
   access?: () => ResolvedAccessPolicy;
+  network?: { retrievalDomains?: string[] };
   catalog: Catalog;
   library?: AgentContextLibrary;
   /**
@@ -181,13 +184,19 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       options.library.prompt(`tools/${role}.md`), options.library.prompt('runtime/node.md'),
       options.library.agentPrompt(recipe?.split('@')[0] ?? nodeId, null),
     ]) : null;
-    const configuration = JSON.stringify({ recipe, prompts, access: options.access?.() });
+    const configuration = JSON.stringify({ recipe, prompts, access: options.access?.(), network: options.network });
     if (cached && sessionRevisions.get(key) === configuration) return cached;
     if (cached) { await hosts.get(key)?.stop(); hosts.delete(key); await cached.close(); }
     const workspace = nodeWorkspace(graphId, nodeId);
     if (!workspace) throw new Error(`graph ${graphId} node ${nodeId} has no workspace`);
+    const domains = options.network?.retrievalDomains ?? [];
+    const unrestricted = options.access?.().network === 'unrestricted';
+    const retrieval = domains.length || unrestricted ? createRetrievalBroker({ domains, unrestricted,
+      gate: kernelToolGate(options.kernel, graphId, nodeId, 'retrieval', () => closing),
+    }) : undefined;
     const session = await nodeSessionRequest({
       retainCapabilities: true,
+      gate: options.gateFor?.(graphId, nodeId) ?? kernelToolGate(options.kernel, graphId, nodeId, 'tool', () => closing),
       ...(options.access ? { access: options.access() } : {}),
       kernel: options.kernel,
       catalog: options.catalog,
@@ -197,6 +206,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       revisionVersion: revision.version,
       workspace,
       bindings: {
+        ...(retrieval ? { fetch: (url: string, signal?: AbortSignal) => retrieval.fetch(url, signal) } : {}),
         ...(options.git && options.kernel.store.task(graphId).integration_branch && role !== 'reviewer' ? {
           commitWorkspace: async (input: { paths: string[]; message: string }) => options.git!.exclusive(graphId, () => {
             const task = options.kernel.store.task(graphId);
@@ -238,7 +248,6 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         } } : {}),
       },
       instancesDir: options.instancesDir,
-      ...(options.gateFor?.(graphId, nodeId) ? { gate: options.gateFor(graphId, nodeId)! } : {}),
     });
     if (closing) { await session.close(); throw new Error('Graph runtime is closing'); }
     sessions.set(key, session);
@@ -395,6 +404,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const model = boundModels.get(key);
       if (!model || model.id !== (config as { model: { name: string } }).model.name) throw new Error('Resident host has no prepared model connection');
       let purpose: 'completion' | 'compaction' = 'completion';
+      const nativeGate = kernelToolGate(options.kernel, graphId, nodeId, 'tool', () => closing);
+      const nativeCalls = new Map<string, string>();
       const host = new ResidentHost({
         launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,
           ...(options.access ? { access: options.access() } : {}) }),
@@ -497,6 +508,24 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           }
         },
         onToolCall: async (name, args) => {
+          if (name === 'native_tool_start' || name === 'native_tool_settle') {
+            const call = args as { id?: string; name?: string };
+            if (!call || typeof call.id !== 'string' || !call.id || !session.operation?.nativeTools.includes(call.name ?? '')) return { ok: false, text: 'Unknown native tool admission' };
+            try {
+              if (name === 'native_tool_start') {
+                if (nativeCalls.has(call.id)) throw new Error('Native tool already admitted');
+                const id = randomUUID();
+                nativeGate.dispatch(id, 0, () => undefined);
+                nativeCalls.set(call.id, id);
+              } else {
+                const id = nativeCalls.get(call.id);
+                if (!id) throw new Error('Native tool has no admission');
+                nativeGate.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+                nativeCalls.delete(call.id);
+              }
+              return { ok: true, text: 'ok' };
+            } catch (error) { return { ok: false, text: error instanceof Error ? error.message : String(error) }; }
+          }
           const tool = sessions.get(key)?.operation?.tools.find(tool => tool.name === name);
           if (!tool) return options.onToolCall?.(graphId, nodeId, name, args) ?? { ok: false, text: `the host does not offer a tool named ${name}` };
           try {
