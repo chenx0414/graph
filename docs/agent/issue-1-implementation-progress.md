@@ -761,3 +761,14 @@
 - 首次夹具误把外部输入拒绝码写成 invalid_graph，实际为明确 completing；依据现有生产协议修正断言，未修改或放宽行为。两用例聚焦通过，4.79 秒（/tmp/graph-native-target-move.log）；本组未发现生产缺陷。完整门禁待执行。旧 SDK / DAG 退役和整个 spec 仍未完成。
 
 - 第七十七轮完整门禁通过：273 文件 / 1863 用例，151.81 秒（/tmp/graph-v2-full-check-77.log）。TypeScript、lint、自动增加一用例的数量基线及验收证据全部通过；自检和 git diff --check 通过。生产修改 0 行，现有测试扩展目标变化合同；原生目标变化后的实际重新审查 / 检查 / 交付路径已核对通过。旧 SDK / DAG 退役、最终切换及完整 spec 仍未完成。
+
+
+## 退役旧 DAG 专属 strandedNodes 诊断接口
+
+- 删除前只读审阅 tests/console/stranded-nodes.test.ts 完整两用例、Execution.runReady/strandedNodes/drive、SDK 转发及全仓引用；历史 5900d47 为 HB-185 引入一轮 runReady 后的 DAG pending/readiness 诊断，后续 6c4cca4/cbb6710 迁移没有消除旧路径。两个用例分别是 a single runReady pass reports the node it left stranded 与 the guard names a node that IS stranded, so a silent hang cannot pass unnoticed；后者直接改旧 nodes 表再断言 readiness 推断，不能验证接口投递。
+- 非测试引用只有 TaskRuntime.host 的转发，无生产调用；删除清单为 Execution.strandedNodes、host.strandedNodes 和该旧测试文件，不删除仍有活跃调用的 runReady / DAG 调度器。风险为删除旧 SDK 诊断方法，符合 ADR0030 的旧内核退役决定，无用户运行入口依赖。
+- 保留的更强主边界证据为 chain-depth 的真实 Pi 两级 / 三级接口链：确认不启动、main 显式投递、每节点唯一 execution、实际 prompt 含上游 value、全部 queue done 和最终公开输出正确；program-check-delivery 另保护生产 pump tick 的真正交付。无需新增替代诊断或测试 seam。聚焦链、实际 host tick 交付与 scripted-lane 后运行完整门禁；明确审计数量下降两用例 / 一文件，不为全绿删除失败测试。完整 spec 和旧 SDK / DAG 整体退役仍未完成。
+
+- 聚焦首次误用系统 Node 26.3.0：chain-depth 两用例节点 failed、另外三用例通过（/tmp/graph-retire-stranded-focus.log），失败根因未确认，未删除失败链测试或放宽断言。改用仓库固定 Node 24.20.0 运行相同三文件 / 五用例全部通过，4.98 秒（/tmp/graph-retire-stranded-node24.log）。生产净删 29 行，旧测试删 95 行；预期全量为 272 文件 / 1861 用例，明确 GRAPH_UPDATE_BASELINE=1 记录经审计的减少。
+
+- 第七十八轮完整门禁通过：272 文件 / 1861 用例，154.65 秒（/tmp/graph-v2-full-check-78.log）。TypeScript、lint、明确审计降低的数量基线和验收证据全部通过；固定运行时下链合同也全量通过。自检与 git diff --check 通过；src/tests 中旧诊断名已无引用。仅退役无生产调用的旧诊断接口，不声称旧 SDK / DAG 或完整 spec 已完成。

@@ -1915,10 +1915,6 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         return result;
       },
       async runReady() { ensureOpen(); return execution.runReady(); },
-      /** Nodes still pending although their dependencies are satisfied: a one-shot drain left work
-       * behind. The host re-scans every tick so production never strands; callers that expect the
-       * graph drained can assert this is empty instead of guessing why a node never ran. */
-      strandedNodes() { ensureOpen(); return execution.strandedNodes(); },
       /** Read-only candidate check: a hot config that moves the root of a
        * project with tasks in flight must be rejected before anything is
        * persisted or activated. */
