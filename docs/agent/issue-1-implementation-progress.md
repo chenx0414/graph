@@ -743,3 +743,12 @@
 - 删除夹具中的旧 program/check 节点、dependsOn 及伪造 /tmp/ok digest 证据。这里只验证 Git 准入和工作副本隔离，以 human 验收明确表达，不冒充自动交付验收；工作副本修改不会修改项目原文件。没有新增或删除测试，也没有改动生产路径。最初聚焦十用例通过，4.87 秒；最终修改还须完整门禁。旧 SDK / DAG 退役及完整 spec 仍未完成。
 
 - 第七十五轮完整门禁通过：273 文件 / 1862 用例，156.55 秒（/tmp/graph-v2-full-check-75.log）。TypeScript、lint、数量基线及验收证据检查全部通过；自检确认十个准入合同保留，新增显式投递前零 execution 与子目录原文件不变断言。生产修改 0 行；本组是迁移验收入口，旧 SDK / DAG 和完整 spec 仍未完成。
+
+
+## 最后一项 host check 的真实原生交付合同
+
+- program-check-delivery 原有单用例迁移到原生接口图：真实 Pi worker 写入独立 worktree，另一个实际模型和 review 配方读取集成代码并发布具体 commit 的 graph.review@1；operation 模块通过真实 node 命令检查文件，移除旧 program 节点、dependsOn、route/pass 和编造 digest。
+- 保留独立风险：审查已通过、最后的检查尚缺失时，先把检查投递排队，再请求完成关闭外部输入；检查必须继续运行，完成状态、目标分支内容与验收 commit 全部一致。仅用生产 host.pump tick 推进，不调用 host.drive 的附加收尾。最初误用只调旧 DAG 的 runReady 导致 completing；改读生产宿主实现并换为 pump，按可观察 completed 状态有界轮询，不用固定延迟或放宽断言。聚焦 1 用例通过，2.77 秒。没有发现或修改生产缺陷。
+- 旧夹具允许目标分支空提交后自动重绑旧证据，这不能代表新规格要求的精确 commit 审查；该旧断言不移植到本合同。Git 目标变动与条件更新基础设施仍由 git-baseline、merge 与 faults 的现有合同保护；原生目标变动后重新审查的完整交付仍须单独核对。数量保持 273 文件 / 1862 用例；完整 spec 和旧 SDK / DAG 退役仍未完成。
+
+- 第七十六轮完整门禁通过：273 文件 / 1862 用例，155.04 秒（/tmp/graph-v2-full-check-76.log）。TypeScript、lint、数量基线与验收证据全部通过；自检和 git diff --check 通过。生产修改 0 行，测试净减少 10 行；没有删用例、跳过或增加测试 seam。旧 SDK / DAG 调度器退役、原生目标变动后的交付核对及完整 spec 仍未完成。

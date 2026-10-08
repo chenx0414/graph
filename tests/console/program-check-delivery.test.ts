@@ -1,95 +1,85 @@
-// A delivery has to finish whichever step recorded the last acceptance.
-//
-// The completion guard runs from two places: an Agent worker reporting its result, and a settle that
-// arrives through the lifecycle (a program check, or a question a person answered). The second place
-// only handled tasks *without* an integration branch, so a git delivery whose last step was a check or
-// a human answer was never re-examined: all its nodes succeeded, every acceptance item was valid, and it
-// stayed `running` holding the one active slot - until now nothing said so (HB-201, measured on a real
-// task whose nine nodes had succeeded and whose four acceptance items were valid at its integration
-// commit, with no delivery ever attempted).
+// Completion must resume when the final host check settles after the completion request.
+// Real Pi turns, immutable review bytes and an actual command replace the old DAG's fabricated evidence.
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
+import { TaskStore } from '../../src/core/store.ts';
 import { git } from '../../src/git/git.ts';
-import type { ActionAdapter, Proposal } from '../../src/core/types.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-test('a delivery whose last acceptance comes from a program check still finishes', async () => {
+test('a native delivery finishes when its final host check settles after a completion request', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-program-delivery-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
   await writeFile(join(project, 'app.ts'), 'export const value = 1;\n');
-  git(project, ['init', '-q', '-b', 'main']);
-  git(project, ['config', 'user.email', 'g@l']);
-  git(project, ['config', 'user.name', 'G']);
-  git(project, ['add', '.']);
-  git(project, ['commit', '-q', '-m', 'base']);
-
-  const actions: Record<string, ActionAdapter> = {
-    work: {
-      kind: 'agent', reserveTokens: 100,
-      prepare: async operation => async () => {
-        if (operation.workspace) await writeFile(join(operation.workspace, 'app.ts'), 'export const value = 2;\n');
-        return { outcome: 'completed', output: { done: true } };
-      },
-    },
-    review: {
-      kind: 'agent', reserveTokens: 100,
-      prepare: async () => async () => ({ outcome: 'completed', output: { note: 'looks right' }, route: 'pass' }),
-    },
-    check: {
-      kind: 'program',
-      prepare: async () => async () => ({
-        outcome: 'completed', output: { checked: true },
-        evidence: [{ acceptanceId: 'ok', summary: 'the check ran', artifact: { path: join(project, 'ok'), digest: 'a'.repeat(64) } }],
-      }),
-    },
-  };
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], actions });
+  for (const args of [['init', '-q', '-b', 'main'], ['config', 'user.email', 'g@l'], ['config', 'user.name', 'G'], ['add', '.'], ['commit', '-q', '-m', 'base']]) {
+    expect(git(project, args).code).toBe(0);
+  }
+  const worker = await openaiServer([
+    { tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: 'app.ts', content: 'export const value = 2;\n' }) }] },
+    { text: 'Implementation complete.' },
+  ]);
+  cleanup.push(() => worker.close());
+  let graphId = '';
+  let disk: TaskStore;
+  const reviewer = await openaiServer([
+    { tools: [{ id: 'read', name: 'read', arguments: JSON.stringify({ path: 'app.ts' }) }] },
+    { tools: [{ id: 'report', name: 'write_file', arguments: () => JSON.stringify({ path: 'review.json', content: JSON.stringify({ commit: disk.task(graphId).integration_sha, passed: true, reason: 'Independently checked the implementation.' }) }) }] },
+    { text: 'Review published.' },
+  ]);
+  cleanup.push(() => reviewer.close());
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
+    access: () => fullAccessPolicy(), models: { apiKey: 'local-only', modelRuntime: worker.runtime,
+      entries: ([['writer', worker], ['reader', reviewer]] as const).map(([id, provider]) => ({ id, provider: 'graph-openai', grade: 'high' as const,
+        api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 1024 })) } });
   cleanup.push(() => runtime.close());
-  await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'deliver the lane', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'deliver',
-    acceptance: [{ id: 'ok', description: 'the check ran', checkNode: 'check' }],
-    nodes: [
-      { id: 'lane', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      // The delivery carries an independent review, the way every real delivery does: the guard that
-      // lets a finished task leave `running` reads that review before it lets the merge happen.
-      {
-        id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'm', dependsOn: ['lane'],
-        routes: ['pass', 'fail'], context: { purpose: 'review', predecessors: [{ source: 'lane', mode: 'evidence_only' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['review'] },
-    ],
-    loops: [{ from: 'review', to: 'lane', case: 'fail' }],
-  } as Proposal, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  // The target branch moves on while the delivery is still waiting its turn - a normal thing on a branch
-  // other people (or my own next commit) push to. The harness has to bring its integration up to date and
-  // then still deliver; it used to stop after the re-merge and leave the task at `running` forever, with
-  // every node succeeded and every acceptance item valid at the integration commit (HB-201: that is the
-  // state the real task sat in, and the integration branch still carries the re-merge it stopped at).
-  // The move changes no content (an empty commit - how a merge, or a metadata-only push, looks from
-  // here). The integration can absorb it without re-checking anything, so the delivery is owed right
-  // then; the harness used to re-merge and stop, never delivering, and the task kept the active slot.
-  git(project, ['commit', '-q', '--allow-empty', '-m', 'the target branch moves on']);
-  // Deliberately not `host.drive()`, whose own completion pass would hide what this test is about: the
-  // last step here is settled by the lifecycle alone (a program check), which is exactly the path that
-  // used to skip a git delivery. Each iteration also flushes the deferred delivery.
-  for (let i = 0; i < 10; i++) await runtime.host.runReady();
-
+  graphId = taskId;
+  disk = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  cleanup.push(async () => disk.close());
+  const main = runtime.supervisor(taskId);
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'delivery', protocols: { data: { type: 'object' } },
+    nodes: {
+      work: { recipe: 'coder@1', model: 'writer', task: 'Set value to 2.', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} },
+      review: { recipe: 'reviewer@1', model: 'reader', task: 'Read app.ts and publish a review of the current commit.', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {},
+        deliverable: { path: 'review.json', namespace: 'reviews', name: 'review', schema: 'graph.review@1' } },
+    },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['-e', "const fs=require('node:fs');if(fs.readFileSync('app.ts','utf8')!=='export const value = 2;\\n')process.exit(1)"], output: 'result', sandbox: false, timeoutMs: 10000 } } },
+    edges: {}, acceptance: [{ id: 'ok', description: 'Implementation contains value 2', kind: 'check', module: 'check' },
+      { id: 'review', description: 'Independent review of the current commit', kind: 'review', node: 'review' }],
+  });
+  const proposed = await main.propose({ requirementVersion: 1, summary: 'deliver', definition,
+    acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })) }, 'proposal');
+  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} }); await runtime.host.drive();
+  await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} }); await runtime.host.drive();
+  const before = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
+  expect(before.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'review', status: 'passed' }), expect.objectContaining({ id: 'ok', status: 'missing' })]));
+  // Queue the last check before closing external inputs. It must still drain after complete.
+  await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} });
+  await main.graphControl({ graphId, action: 'complete' });
+  expect((await runtime.user.task(taskId).view()).phase).not.toBe('completed');
+  // Use the production host tick, without drive()'s extra completion pass.
+  await expect.poll(async () => {
+    await runtime.host.pump();
+    return (await runtime.user.task(taskId).view()).phase;
+  }, { timeout: 15000, interval: 25 }).toBe('completed');
   const view = await runtime.user.task(taskId).view();
-  expect(view.nodes.map(node => node.status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
   expect(view.questions).toEqual([]);
-  // The delivery really happened: the target branch carries the lane's work. (`git()` trims, so the
-  // trailing newline is not part of what is compared here.)
-  expect(git(project, ['show', 'main:app.ts']).stdout).toBe('export const value = 2;');
-  // And the task says so, instead of sitting at `running` with nothing left to do.
   expect(view.phase).toBe('completed');
-});
+  expect(git(project, ['show', 'main:app.ts']).stdout).toBe('export const value = 2;');
+  const accepted = await main.graphInspect({ graphId, query: 'acceptance' }) as { commit: string; items: { status: string }[] };
+  expect(accepted.items.every(item => item.status === 'passed')).toBe(true);
+  expect(git(project, ['rev-parse', 'main']).stdout).toBe(accepted.commit);
+}, 60000);
