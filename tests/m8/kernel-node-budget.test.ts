@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { git } from '../../src/git/git.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { TaskStore } from '../../src/core/store.ts';
+import type { Receipt } from '../../src/core/types.ts';
 
 /**
  * Issue #1 HB-284: a v2 node needs a token budget of its own.
@@ -226,4 +227,81 @@ test('unestimatable unlimited usage permits the frozen turn and Git commit, but 
       .toMatchObject({ reason: expect.stringMatching(/Unknown provider usage must be reconciled/) });
     expect(next.invocations.filter(call => call.usageSource === 'unknown')).toHaveLength(1);
   } finally { release(); await runtime?.close(); await provider.close(); await rm(parent, { recursive: true, force: true }); }
+}, 30000);
+
+// The user policy entry point must not depend on legacy instances. This actual
+// provider contract owns authorization, frozen turns and durable policy together.
+test('user quota changes persist for native nodes without changing an active turn or its usage', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-user-quota-'));
+  let release!: () => void; let received!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const arrived = new Promise<void>(resolve => { received = resolve; });
+  const provider = await openaiServer([
+    { text: 'First reply.', beforeReply: async () => { received(); await waiting; } },
+    { text: 'Second reply.' }, { text: 'Unlimited reply.' },
+  ]);
+  let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
+  try {
+    const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+    const options: Parameters<typeof openTaskRuntime>[0] = { stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+      access: () => fullAccessPolicy(), limits: { defaultBudgetTokens: 200000 },
+      catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+      models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
+        grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
+    };
+    runtime = await openTaskRuntime(options);
+    runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
+    const owner = await runtime.user.begin({ projectId: 'p', request: 'User quota', requestId: 'begin' });
+    const { graphId } = await runtime.supervisor(owner.taskId).graphCreate({ definition: parseGraphDefinition({
+      schemaVersion: 2, name: 'user quota', protocols: { job: { type: 'object' } },
+      nodes: { work: { recipe: 'worker@1', model: 'local', task: 'Reply to this message.', inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } },
+      modules: {}, edges: {},
+    }) }) as { graphId: string };
+    await runtime.supervisor(owner.taskId).graphSend({ graphId, nodeId: 'work', input: 'job', value: {} });
+    const drive = runtime.host.drive();
+    let grant: Receipt | undefined;
+    try {
+      await arrived;
+      await expect(runtime.supervisor(graphId).controlTask({ action: 'set_budget', nodeId: 'work', tokens: null, requestId: 'main-cannot-grant' })).rejects.toThrow(/graph_patch/);
+      grant = await runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: 400000, requestId: 'grant' });
+      expect(await runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: 400000, requestId: 'grant' })).toEqual(grant);
+      await expect(runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: null, requestId: 'grant' })).rejects.toThrow(/different|conflict/i);
+    } finally { release(); await drive; }
+    const first = runtime.nodeRun(graphId, 'work');
+    expect(first.instance).toMatchObject({ budget: 200000, unlimited: false, authorizedBudget: { budget: 400000, unlimited: false } });
+    const used = first.instance!.used;
+    expect(used).toBeGreaterThan(0);
+    await runtime.supervisor(owner.taskId).graphPatch({ graphId, baseRevision: 1, changes: {
+      reason: 'Use the new user quota', patch: { nodes: { work: { budget: { tokens: 400000 } } } },
+    } });
+    await runtime.sendNodeMessage(graphId, 'work', { text: 'Second message.', requestId: 'second' });
+    await runtime.host.drive();
+    expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ budget: 400000, unlimited: false });
+    await runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: null, requestId: 'unlimited' });
+    await runtime.supervisor(owner.taskId).graphPatch({ graphId, baseRevision: 2, changes: {
+      reason: 'Use explicit unlimited authorization', patch: { nodes: { work: { budget: null } } },
+    } });
+    await runtime.sendNodeMessage(graphId, 'work', { text: 'Unlimited message.', requestId: 'third' });
+    await runtime.host.drive();
+    const third = runtime.nodeRun(graphId, 'work');
+    expect(third.instance).toMatchObject({ budget: null, unlimited: true, authorizedBudget: { budget: 0, unlimited: true } });
+    expect(third.instance!.used).toBeGreaterThan(used);
+    expect(provider.requests).toHaveLength(3);
+    await runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: 10, requestId: 'reduce' });
+    await expect(runtime.user.task(graphId).setBudget({ nodeId: 'ghost', tokens: 10, requestId: 'ghost' })).rejects.toThrow(/Unknown agent node/);
+    await runtime.close(); runtime = await openTaskRuntime(options);
+    expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ used: third.instance!.used, authorizedBudget: { budget: 10, unlimited: false } });
+    await runtime.supervisor(owner.taskId).graphPatch({ graphId, baseRevision: 3, changes: {
+      reason: 'A graph declaration cannot increase authorization', patch: { nodes: { work: { budget: { tokens: 1000000 } } } },
+    } });
+    await runtime.sendNodeMessage(graphId, 'work', { text: 'Must remain within authorization.', requestId: 'fourth' });
+    await runtime.host.drive();
+    expect(provider.requests).toHaveLength(3);
+    expect(runtime.nodeRun(graphId, 'work').node.status).toBe('blocked');
+    expect(runtime.events(graphId).filter(event => event.type === 'graph.node.blocked').at(-1)!.data).toMatchObject({ reason: expect.stringMatching(/user-authorized quota/) });
+    expect(runtime.nodeRun(graphId, 'work').invocations).toEqual(third.invocations);
+    await runtime.supervisor(owner.taskId).graphControl({ graphId, action: 'stop' });
+    await expect(runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: null, requestId: 'after-stop' })).rejects.toThrow(/Ended graph/);
+    expect(await runtime.user.task(graphId).setBudget({ nodeId: 'work', tokens: 400000, requestId: 'grant' })).toEqual(grant!);
+  } finally { release(); await runtime?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
 }, 30000);

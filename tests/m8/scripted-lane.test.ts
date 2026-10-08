@@ -19,22 +19,31 @@ import type { ActionAdapter } from '../../src/core/types.ts';
  *
  * Failure modes first (R24):
  *   S1  a confirmed v2 graph drains with no model, credential or Pi process
- *   S2  the scripted action really ran - once, not zero and not twice
+ *   S2  the scripted action runs under its frozen task and recipe through resubmission
  *   S3  the submission went through the real bridge and completed the execution
  */
 
-test('S1/S2/S3: a v2 graph drains through a scripted action with no model configured', async () => {
+test('S1/S2/S3: a v2 graph drains without a model and freezes its action across resubmission', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-scripted-lane-'));
   let ran = 0;
+  let changedRuns = 0;
+  const identities: { action: string; recipe: unknown }[] = [];
   let received: unknown;
-  let briefing: unknown;
+  const briefings: string[] = [];
   const work: ActionAdapter = {
     kind: 'agent',
     reserveTokens: 100,
     prepare: async operation => async () => {
       received = operation.input;
-      briefing = operation.context?.briefing;
+      briefings.push(operation.context?.briefing ?? '');
       ran += 1;
+      identities.push({ action: operation.action, recipe: 'recipe' in operation ? operation.recipe : null });
+      if (ran === 1) {
+        await runtime.supervisor(operation.taskId).graphPatch({ graphId: operation.taskId, baseRevision: 1, changes: {
+          reason: 'Apply the new action only to the next execution', patch: { nodes: { work: { task: 'modified', recipe: 'worker@2' } } },
+        } });
+        return { outcome: 'failed', output: null };
+      }
       await writeFile(join(root, 'out.txt'), 'done\n');
       return {
         outcome: 'completed',
@@ -47,7 +56,11 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root }],
-    actions: { work },
+    actions: { work, modified: { kind: 'agent', prepare: async operation => async () => {
+      changedRuns += 1;
+      identities.push({ action: operation.action, recipe: 'recipe' in operation ? operation.recipe : null });
+      return { outcome: 'completed', output: { text: 'new configuration' } };
+    } } },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
   });
 
@@ -88,11 +101,21 @@ test('S1/S2/S3: a v2 graph drains through a scripted action with no model config
     store.close();
 
     expect(received).toEqual({ text: 'go' });
-    expect(briefing).toContain('GRAPH OVERVIEW');
+    expect(briefings[0]).toContain('GRAPH OVERVIEW');
+    expect(briefings[1]).toContain('required output(s) out');
+    expect(briefings[1]).not.toContain('GRAPH OVERVIEW');
     expect(dispatched).toBeGreaterThan(0);
-    expect(ran).toBe(1);
+    expect(ran).toBe(2);
+    expect(changedRuns).toBe(0);
+    expect(identities).toEqual([{ action: 'do the work', recipe: 'worker@1' }, { action: 'do the work', recipe: 'worker@1' }]);
     expect(executions).toEqual([{ node_id: 'work', state: 'completed' }]);
     expect(submissions.length).toBe(1);
+    await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { text: 'next' } });
+    await runtime.host.drive();
+    expect(changedRuns).toBe(1);
+    expect(ran).toBe(2);
+    expect(identities.at(-1)).toEqual({ action: 'modified', recipe: 'worker@2' });
+    expect(runtime.nodeRun(taskId, 'work').operations).toHaveLength(2);
   } finally {
     await runtime.close();
     await rm(root, { recursive: true, force: true });

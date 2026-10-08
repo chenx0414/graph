@@ -209,6 +209,7 @@ test('native graph chats keep a session and expose the actual provider prompt in
   const body = provider.requests.at(-1) as { messages: { role: string; content: string }[] };
   const actual = body.messages.find(message => message.role === 'system' || message.role === 'developer')?.content;
   expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toBe(actual);
+  await server.runtime.user.task(graph.graphId).setBudget({ nodeId: 'build/worker', tokens: 2000000, requestId: 'native-ui-user-quota' });
   const page = await launch();
   await page.goto(`${server.url}/#/tasks/${graph.graphId}/graph`);
   await expect.poll(() => page.locator('.react-flow__edge').count(), { timeout: 10_000 }).toBe(1);
@@ -221,6 +222,7 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await expect.poll(() => page.getByTestId('node-prompt-sent-text').textContent()).toBe(actual);
   expect(await page.getByTestId('node-chat-tab').textContent()).toContain('native second reply');
   await expect.poll(() => page.getByTestId('node-overview').textContent()).toContain('预算 1,500,000');
+  await expect.poll(() => page.getByTestId('node-overview').textContent()).toContain('用户授权2,000,000');
   await main.graphControl({ graphId: graph.graphId, action: 'complete' });
   await server.runtime.host.drive();
   expect((await main.graphInspect({ graphId: graph.graphId })) as object).toBeTruthy();

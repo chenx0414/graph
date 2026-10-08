@@ -56,6 +56,7 @@ export function kernelNodeRun(kernel: KernelStore, graphId: string, nodeId: stri
     taskId: graphId, nodeId, context: null,
     node: { id: nodeId, kind: 'agent', action: definition.task, role: binding?.role ?? null, status: row.status, definitionVersion: definition.recipe },
     instance: { id: row.instanceId, model: binding?.model_id ?? null, definitionVersion: definition.recipe ?? null,
+      authorizedBudget: kernel.authorizedBudget(graphId, nodeId),
       used: state?.used ?? 0, budget: budget?.unlimited ? null : budget?.budget ?? null, unlimited: budget?.unlimited ?? false, reserved: state?.reserved ?? 0, modelsUsed: [...new Set(calls.flatMap(call => call.model ? [call.model.id] : []))] },
     session: session ? { sessionId: session.session_id, sessionFile: session.session_file } : null,
     capabilities: loaded?.facts ?? [], capabilityDigest: loaded?.digest ?? null, capabilityUsage: [],

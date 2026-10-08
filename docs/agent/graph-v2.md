@@ -230,3 +230,9 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 每条边必须显式声明 enabled:true 或 enabled:false；缺失、null、数字和字符串不会被当作开关。创建和局部修改在写入图版本前统一校验，因此无效声明不会留下部分 graph 或新 revision。连接启用状态仍与投递 value 中的业务 passed 判断分离。
 
 模型请求被原生宿主拒绝时，事件流保存 graph.provider.refused，包含 nodeId、callId、purpose、code 和 reason；拒绝事件不表示实际发送，也不创建计费调用。Pi 对外层错误的泛化描述不能替代这条宿主诊断。自动压缩的请求同样受冻结预算控制；有限预算的摘要用量未知时保留输入与占位，main 显式核对用量并处理队列后才继续。
+
+用户通过 task.setBudget 为原生 agent 节点设置独立授权额度（正整数，或 null 明确不限额度）。授权持久化在原生节点账本，不依赖旧 instances；没有显式授权时继承已配置默认额度。graph 的节点 / defaults budget 是使用声明，不能突破该授权。当前执行与恢复继续使用其已冻结额度，下一次新执行读取新授权；节点详情 instance.authorizedBudget 单独展示用户政策，instance.budget 仍表示最近执行的实际额度。预算调整不改写历史用量、不清除未知用量、不自动恢复或重发排队输入；需要继续时 main 显式处理队列。结束 graph 拒绝新调整，已有命令回执仍可幂等重放。
+
+main 修改原生节点预算只用 graph_patch 的节点 budget 声明，仍受用户授权约束；旧 control_task set_budget 在原生 graph 上明确拒绝并指向 graph_patch。节点窗口分别显示最近执行预算与用户授权额度，后者调整后下次执行重新校验。
+
+无模型的 ActionAdapter 宿主同样从当前 execution.revisionVersion 读取冻结任务与配方，不能在补交期间从 kernel_nodes 的最新声明切换适配器。修改任务后，当前执行仍完成旧配置，下一条输入触发的新执行才采用新配置；补交只接收缺项提示，不重复初始 graph 概述。

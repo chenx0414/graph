@@ -28,16 +28,16 @@ exit 1
   const run = (code: number) => {
     writeFileSync(state, String(code));
     try {
-      return { status: 0, stdout: execFileSync('sh', [hook], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] }), stderr: '' };
+      return { status: 0, stdout: execFileSync('sh', [hook], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 }), stderr: '' };
     } catch (error) {
-      const failure = error as { status?: number; stdout?: string; stderr?: string };
-      return { status: failure.status ?? -1, stdout: String(failure.stdout ?? ''), stderr: String(failure.stderr ?? '') };
+      const failure = error as { status?: number; stdout?: string; stderr?: string; message?: string };
+      return { status: failure.status ?? -1, stdout: String(failure.stdout ?? ''), stderr: String(failure.stderr || failure.message || '') };
     }
   };
 
   // A passing gate stays quiet: one line, so a network error stays visible.
   const passing = run(0);
-  expect(passing.status).toBe(0);
+  expect(passing.status, passing.stderr).toBe(0);
   expect(passing.stdout.trim().split('\n')).toHaveLength(1);
 
   // A failing gate shows the failing line and keeps a copy of the full log.

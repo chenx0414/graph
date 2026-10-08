@@ -32,7 +32,7 @@ interface NodePromptView {
 /** What the overview reads: enough to say who this node is and how it is doing. */
 interface NodeOverview {
   node: { kind: string; action: string; status: string; definitionVersion?: string };
-  instance: { model: string | null; used: number; budget: number | null; unlimited: boolean } | null;
+  instance: { model: string | null; used: number; budget: number | null; unlimited: boolean; authorizedBudget?: { budget: number; unlimited: boolean } | null } | null;
   timing?: { totalMs: number | null; runMs: number | null; inProgress?: boolean } | null;
   entryCount: number;
 }
@@ -175,6 +175,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
               value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
               hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算尚无记录' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
             />
+            <Stat label="用户授权" value={overview.instance?.authorizedBudget ? overview.instance.authorizedBudget.unlimited ? '不限' : overview.instance.authorizedBudget.budget.toLocaleString('en-US') : '继承默认'} hint="下次执行重新校验" />
             <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
           </div>
         </section>

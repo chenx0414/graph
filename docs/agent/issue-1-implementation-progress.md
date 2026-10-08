@@ -702,3 +702,28 @@
 - 第七十轮修订后全量为 272 文件 / 1860 用例通过、1 文件 / 1 用例失败，191.83 秒。失败是隔离模块首个普通路由返回 ok:false，其他五项隔离合同及本轮压缩合同通过；Docker /_ping 正常。单独复跑该文件六用例全部通过，7.42 秒（/tmp/graph-v2-check-70-isolation-focus.log）。原断言未展示 evaluator.error，补入既有断言的失败说明，以便全量再次失败时报告真实原因；不放宽 5s 限制，不跳过测试。此次失败原因尚未确定，完整门禁继续重跑。
 
 - 第七十轮最终完整门禁通过：273 文件、1861 用例，198.06 秒；TypeScript、lint、数量基线及验收证据全部通过（/tmp/graph-v2-full-check-70-rerun.log）。隔离文件原有失败在单独及全量重跑均未复现，不能据此推断首次失败的具体原因；保留真实错误的断言说明以利后续诊断。生产净增加 7 行、测试及支持净增加 1 行，无增删用例或放宽隔离限制。已完成自检与 git diff --check；本轮可提交。旧 SDK 草稿 / DAG 调度器退役、原生用户 setBudget 的旧实例依赖及正式默认切换仍待处理，完整 spec 未完成。
+
+## 原生用户节点预算授权入口
+
+- 公开 user.task(graphId).setBudget 仍查询旧 instances，正式原生节点没有对应行，因此用户无法修改额度。新增一个实际 HTTP / 常驻 Pi 的公开政策合同（无测试专用生产 seam）：已有 graph_patch 冻结合同守护声明变更，这个合同独立守护用户授权、命令幂等、跨重启持久性及 main 无法越权增额。首轮在实际请求等待期间调用 setBudget 报 Unknown agent node，1 failed / 8 skipped（/tmp/graph-native-user-quota-red.log）。
+- kernel_node_state 新增可空 authorized_budget，旧节点没有明确政策时继续继承全局配置，不补造授权。用户命令事务验证现有 agent 及 graph 生命周期后仅写授权；current execution / provider gate 继续使用冻结 tokenBudget。新 execution 先读取用户授权，再校验 graph 节点 / defaults 的使用声明；额度增加、显式无限和缩减都不改变累计用量、预留、旧执行或 graph 定义。
+- 节点详情新增独立 instance.authorizedBudget，原 instance.budget / unlimited 仍展示最近执行快照，不把新配置假装成已运行额度。预算调整不隐含恢复已停驻的队列，也不清除 unknown；需要执行时仍由 main 显式处理输入。老 main 会话的实例预算基础设施保留。
+- 真实首回合在 HTTP 等待期间从默认 200000 授权改为 400000，回合结算仍显示 200000；同请求重放相同 receipt、改变内容拒绝。下一回合使用 400000（超过原全局默认但在用户新授权内）；显式不限额度后再运行同 session。累计用量增加且不重置。随后缩减为 10、重启后台，main 声明 1000000 仍在模型发送前被阻止，三条实际历史调用完整保留。ghost 拒绝，停止后拒绝新授权但可重放旧 receipt。
+- 迁移中的夹具错误：JSON merge patch 中 tokens:null 表示删除字段，并非写入 null；解析器按现有契约正确拒绝缺失 tokens。改为删除节点的 budget 声明，从显式用户无限授权继承，不修改 merge patch 的既有语义。
+- 聚焦 kernel-node-budget / v2-budget-blocking / compaction / budget-ledger / unlimited 五文件、37 用例通过，22.58 秒（/tmp/graph-native-user-quota-focus.log）。新增 1 个公开政策 owner-boundary 合同，无新文件；生产净增加 25 行、测试净增加 77 行。git diff --check 通过。第七十一轮完整门禁待执行，预期数量 273 文件 / 1862 用例。旧 SDK / DAG 调度器退役、main 旧 set_budget 控制路径及正式切换仍未完成，完整 spec 未完成。
+
+- 第七十一轮完整门禁未通过：TypeScript / lint 已通过；4 用例失败，1857 用例通过，pre-push-hook 的同步子进程长期停滞后被明确终止，另记录 1 个 worker error；不能把它报告为完整通过。失败涉及 pi-extension-peers 的两次安装脚本启动与 conversation-capability-access 的两次扩展执行；本轮原生预算合同通过。日志 /tmp/graph-v2-full-check-71.log（630.92 秒）。小范围重复后脚本停滞仍出现，不是只在全量负载出现。
+- 进一步最小化到独立于 Graph 的 /tmp/graph-exec-probe.sh（仅 #!/bin/sh + echo）：Node 24、Node 26 和 Python 直接启动均超时，显式 /bin/sh 读取同一文件立即成功；采样停留在 dyld_start。去掉仅此临时文件的 provenance 属性、使用最小 PATH 环境均未解决；系统日志记录 syspolicyd 的 dispatch_mig_server / qtn_proc 错误，但具体系统原因未确定。未改变系统安全设置，未绕过扩展真实执行合同，也未扩大超时。清理仅本轮自身遗留的脚本进程。
+- 浏览器扩展既有原生独立窗口合同，真实用户授权 2000000，最近执行仍保持 1500000，同时显示两种含义。首次回归确实收到缺少用户授权的 DOM；首次聚焦因替换位置失误把授权放进另一用例，纠正夹具后真实浏览器与预算两个文件 13 用例全通过，9.68 秒（/tmp/graph-native-user-quota-final-focus.log）。新增界面用户授权一项，无新增浏览器用例或生产测试 seam。当前修改尚未提交，完整门禁仍需恢复并通过；完整 spec 仍未完成。
+
+- 第七十二轮继续：终端 / Python 最小脚本仍超时，TTY 与最小环境均未恢复；sudo 只读采样提示需要密码，未提升权限或重启系统服务。已向用户单独询问 macOS 重启，既有 Docker 授权不被扩大解释。
+- 扩展既有真实用户预算合同，main 旧 control_task set_budget 对原生节点应明确拒绝并指向 graph_patch；RED 为 Unknown agent node 而非正式指引（/tmp/graph-native-main-quota-control-red.log），增加一个入口 guard，保留旧 main 会话基础设施。原生声明只有 graph_patch 一条变更路径，不增加预算 API 别名。kernel-node-budget / node-prompt-ui / agent-control / v2-budget-blocking 四文件、21 用例通过，12.04 秒（/tmp/graph-native-main-quota-control-focus.log）。
+- pre-push-hook 测试同步 execFileSync 的无限等待会绕过 Vitest 单用例计时，导致整套门禁停滞；为测试夹具命令增加 10 秒超时，保留失败 message 并在既有断言显示。不是增加产品超时，不把系统启动失败改为通过，不更改真实 pre-push hook。完整门禁仍需重新执行，当前不提交。
+
+- 第七十二轮完整门禁正常结束：270 文件 / 1857 用例通过，3 文件 / 5 用例失败，共 273 文件 / 1862 用例，256.38 秒（/tmp/graph-v2-full-check-72.log）。全部失败仍是 pre-push / peer npm / 扩展脚本启动；新增预算合同、浏览器、main 控制及进程隔离合同通过。没有 worker 被迫终止导致的报告缺项。TypeScript / lint 通过，但后续数量基线及验收证据步骤因测试失败未执行，不声称整套门禁通过；清理仅本轮失败用例遗留进程。
+- 独立复验正确原生浏览器夹具：真实用户授权 2000000，在只去掉新增 Stat 的生产基线下断言缺少用户授权，1 failed / 3 skipped，4.39 秒（/tmp/graph-native-user-quota-ui-actual-red.log）；恢复展示后 1 passed / 3 skipped，3.34 秒（/tmp/graph-native-user-quota-ui-actual-green.log）。未保留临时基线文件。
+- 读取执行配置发现真实产品缺陷：无模型 ActionAdapter 桥每个 turn 查 kernel_nodes 最新 spec，在当前执行补交时提前采用新任务 / 配方。扩展既有 scripted-lane 实际运行合同，首回合由真实 callback 修改图后拒绝交付，第二回合应仍调用旧适配器；RED 为旧适配器只执行 1 次，预期 2 次（/tmp/graph-native-scripted-frozen-config-red.log）。读取正在执行的 kernel_executions.revision_version，再从不可变 revision 取节点定义，复用稳定 instance_id，移除最新 spec 的 JSON 解析与配方 fallback，不增加新的回调参数或测试 seam。
+- 首次修复后唯一夹具失败为最后一次提示已是合法补交 delta，不能再要求 GRAPH OVERVIEW；改为分别记录初始与补交提示，严格要求第二条包含 required output(s) out 且无重复概述。第二次运行仍为旧 task / worker@1，提交一次完成旧 execution；下一条真实 graph_send 才调用 modified / worker@2，节点累计两个 execution。五文件 / 26 用例聚焦通过，11.65 秒（/tmp/graph-native-frozen-config-focus-final.log），新增零用例。该修复在第七十二轮全量之后，当前修订还需系统恢复后的最终完整门禁。完整 spec、旧 SDK / DAG 退役与正式切换仍未完成；所有当前修改尚未提交。
+
+- 用户完成 macOS 重启后继续：独立 shebang 脚本直接启动返回 script-ok；Docker Desktop 原先未启动，按既有授权打开后 /_ping 为 OK。没有关闭系统执行检查服务或修改安全策略，具体停滞根因仍未确认；重启前后的实际启动结果可核对。
+- 第七十三轮首次门禁在 TypeScript 发现共用 Operation 类型不声明真实原生 adapter 传入的 recipe；测试改用字段存在判别，仍严格断言 worker@1 / worker@2，未增设生产字段或改变实际运行配置。第七十三轮重跑完整通过：273 文件、1862 用例，159.87 秒（/tmp/graph-v2-full-check-73-rerun.log）；此前 5 个脚本启动失败均恢复通过。TypeScript、lint、自动增加一个预算合同的数量基线、验收证据检查全部通过。自检和 git diff --check 通过；可以提交本组原生政策与执行冻结修复。完整 spec、旧 SDK / DAG 调度器退役及正式切换仍未完成。

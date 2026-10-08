@@ -271,6 +271,8 @@ export class KernelStore {
       if (!nodeColumns.has(name)) this.db.exec(`ALTER TABLE kernel_nodes ADD COLUMN ${name} ${declaration}`);
     }
     const executionColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_executions)').all() as { name: string }[]).map(row => row.name));
+    const stateColumns = new Set((this.db.prepare('PRAGMA table_info(kernel_node_state)').all() as { name: string }[]).map(row => row.name));
+    if (!stateColumns.has('authorized_budget')) this.db.exec('ALTER TABLE kernel_node_state ADD COLUMN authorized_budget TEXT');
     for (const [name, declaration] of [['token_budget', 'TEXT'], ['token_reservation', 'INTEGER NOT NULL DEFAULT 0'], ['waiting_slot', 'INTEGER NOT NULL DEFAULT 0'], ['retries_used', 'INTEGER NOT NULL DEFAULT 0'], ['resubmits_used', 'INTEGER NOT NULL DEFAULT 0'], ['pending_gap', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
       if (!executionColumns.has(name)) this.db.exec(`ALTER TABLE kernel_executions ADD COLUMN ${name} ${declaration}`);
     }
@@ -778,6 +780,23 @@ export class KernelStore {
   }
 
   // ---- metering (v2) ---------------------------------------------------------
+
+  /** Explicit user policy; absent policies inherit the configured quota. */
+  authorizedBudget(taskId: string, nodeId: string): { budget: number; unlimited: boolean } | null {
+    const row = this.db.prepare('SELECT authorized_budget FROM kernel_node_state WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { authorized_budget: string | null } | undefined;
+    return row?.authorized_budget ? JSON.parse(row.authorized_budget) : null;
+  }
+
+  /** Called inside the user command transaction. Never resumes or rewrites an execution. */
+  setAuthorizedBudget(taskId: string, nodeId: string, tokens: number | null): void {
+    if (['completed', 'stopping', 'stopped'].includes(this.store.task(taskId).phase)) throw new RuntimeError('invalid_graph', 'Ended graph cannot change budget');
+    const definition = this.latestRevision(taskId)?.definition;
+    if (!definition || !Object.hasOwn(definition.nodes, nodeId) || this.nodeStatus(taskId, nodeId) === 'retired') throw new RuntimeError('not_found', 'Unknown agent node');
+    if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
+    this.ensureNodeState(taskId, nodeId);
+    this.db.prepare('UPDATE kernel_node_state SET authorized_budget=? WHERE task_id=? AND node_id=?')
+      .run(JSON.stringify({ budget: tokens ?? 0, unlimited: tokens === null }), taskId, nodeId);
+  }
 
   /**
    * What a node has spent and what it currently holds.

@@ -136,7 +136,8 @@ export class NodeExecutor {
     const generation = (this.kernel.db.prepare('SELECT generation FROM kernel_queue WHERE seq=?').get(seq) as { generation: number }).generation;
     const executionId = `exec-${this.graphId}-${nodeId}-${seq}${generation ? `-${generation}` : ''}`;
     const previous = this.kernel.execution(executionId);
-    let tokenBudget = previous?.tokenBudget ?? (typeof this.options.tokenBudget === 'function' ? this.options.tokenBudget() : this.options.tokenBudget) ?? { budget: 0, unlimited: true };
+    let tokenBudget = previous?.tokenBudget ?? this.kernel.authorizedBudget(this.graphId, nodeId)
+      ?? (typeof this.options.tokenBudget === 'function' ? this.options.tokenBudget() : this.options.tokenBudget) ?? { budget: 0, unlimited: true };
     let refused: string | undefined = previous && !previous.tokenBudget ? 'Execution budget history is unavailable; explicitly retry with a new execution identity before spending more tokens' : undefined;
     const requested = latest.definition.nodes[nodeId]?.budget ?? latest.definition.defaults?.budget;
     if (!previous && requested) {

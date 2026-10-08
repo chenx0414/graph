@@ -604,9 +604,10 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number, workspace?: string) => {
             // Scripted actions reuse the generic operation contract with native
             // input and briefing; no legacy proposal fields participate.
-            const row = store.db.prepare("SELECT spec,kind FROM kernel_nodes WHERE task_id=? AND node_id=?").get(graphId, nodeId) as { spec: string; kind: string } | undefined;
-            const spec = row ? JSON.parse(row.spec) as { task?: string; recipe?: string } : undefined;
-            const action = spec?.task ?? nodeId;
+            const row = store.db.prepare("SELECT e.revision_version,n.instance_id FROM kernel_executions e JOIN kernel_nodes n ON n.task_id=e.task_id AND n.node_id=e.node_id WHERE e.task_id=? AND e.node_id=? AND e.state='running' ORDER BY e.rowid DESC LIMIT 1").get(graphId, nodeId) as { revision_version: number; instance_id: string } | undefined;
+            const spec = row ? kernel.revision(graphId, row.revision_version)?.definition.nodes[nodeId] : undefined;
+            if (!row || !spec) throw new RuntimeError('invalid_graph', 'Scripted execution requires its frozen node definition');
+            const action = spec.task;
             const adapter = options.actions![action] ?? options.actions![nodeId];
             if (!adapter) return { missing: ['out'] };
             const queued = store.db.prepare("SELECT kind,payload FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed'").get(graphId, nodeId) as { kind: string; payload: string } | undefined;
@@ -614,9 +615,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             const payload = JSON.parse(queued.payload) as Json;
             const prepared = await adapter.prepare({
               id: `op-${graphId}-${nodeId}-${turn}`,
-              nodeId, instanceId: (row ? (store.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined)?.instance_id : undefined) ?? nodeId,
+              nodeId, instanceId: row.instance_id,
               taskId: graphId, activationId: undefined, turn, action, attempt: turn,
-              kind: adapter.kind, model: 'scripted', recipe: spec?.recipe ?? 'worker@1',
+              kind: adapter.kind, model: 'scripted', recipe: spec.recipe,
               ...(workspace ? { workspace } : {}),
               input: queued.kind === 'delivery' ? (payload as { value: Json }).value : payload,
               context: { briefing: text },
@@ -811,6 +812,10 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           if (typeof input.nodeId !== 'string' || !input.nodeId.trim()) throw new RuntimeError('invalid_input', 'A nodeId is required');
           if (input.tokens !== null && (!Number.isSafeInteger(input.tokens) || input.tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
           const receipt = store.command('user', input.requestId, { type: 'set_budget', taskId, nodeId: input.nodeId, tokens: input.tokens }, () => {
+            if (kernel.latestRevision(taskId)) {
+              kernel.setAuthorizedBudget(taskId, input.nodeId, input.tokens);
+              return { taskId, cursor: store.event(taskId, 'instance.budget_changed', { nodeId: input.nodeId, tokens: input.tokens, nextExecution: true }) };
+            }
             const instance = store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(taskId, input.nodeId) as { id: string } | undefined;
             if (!instance) throw new RuntimeError('not_found', 'Unknown agent node');
             setBudget(store, instance.id, input.tokens);
@@ -2023,6 +2028,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             const tokens = input.tokens;
             if (tokens === undefined) throw new RuntimeError('invalid_input', 'set_budget needs tokens: a positive integer or null for unlimited');
             if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens <= 0)) throw new RuntimeError('invalid_input', 'Budget must be a positive integer or null');
+            if (kernel.latestRevision(target)) throw new RuntimeError('invalid_graph', 'Native node budgets are declared with graph_patch; only the user can change authorization');
             // A cap below what one dispatch of this node reserves is not refused - it is the caller's
             // decision - but it stops that node (the running turn too) and blocks it asking a person.
             // Nothing else in the receipt could tell the caller that it starved its own node, so name
