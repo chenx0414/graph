@@ -688,3 +688,17 @@
 - 聚焦 interface-spec / graph-runtime / kernel-store / module-router 四文件、82 用例通过，0.94 秒；无增删测试数量。生产净增加 1 行，测试净增加 19 行。git diff --check 通过。第六十九轮完整门禁待执行；旧 SDK 草稿、DAG 调度器及完整 spec 仍未完成。
 
 - 第六十九轮完整门禁通过：273 文件、1861 用例，189.73 秒；TypeScript、lint、数量基线与验收证据检查全部通过（/tmp/graph-v2-full-check-69.log）。Docker 健康接口仍正常，未修改测试超时或数量基线。旧 SDK 草稿 / DAG 调度器退役、正式默认切换及完整 spec 仍未完成。
+
+## 剩余 worker 压缩合同迁移与宿主拒绝原因
+
+- compaction.test.ts 最后三个旧 worker 合同已手工迁为原生 NativeProposal / 明确输入 / 实际常驻 Pi，不再以 dependsOn / 旧 program check 启动。该文件保留主会话和旧共享 schema 迁移合同，因为它们守护被复用的主会话与预算基础设施；不能据此删除旧账本。
+- 原有限预算测试在执行期间 setBudget 立即缩减 cap，与已确认的执行配置下次生效规则不同。改用执行前声明的 200000 quota，本地主请求实际计费 199940，留下 60 tokens；主请求实际发送并结算，摘要至少需要 256 tokens 输出预留，因此拒绝，后续聊天也不新增 provider 请求并显示 blocked。首次夹具设 100000 时被既有 200000 turn 预留先拦截，无 HTTP 请求；调整为能实际启动的额度，不放宽生产预算门禁。误用 task.events 的夹具改为真实 runtime.events API。
+- 有限预算摘要未返回 usage 时，原生节点保留 queued 输入并显示 blocked；provider_calls 保持 unknown、usage / cost 为 null，再次 drive 不发送。模型身份合同核对真实 HTTP model=original-model、历史 modelIdentity=original-model，同时 configured connection id 仍为 local，避免把连接名和上游身份混同。
+- 实际诊断缺陷：拒绝摘要的 RuntimeError 在供应商 SDK 内变为泛化 Connection error，原生事件没有保留宿主预算原因。扩展真实有限预算合同要求正式拒绝事件，修复前独立聚焦为 1 failed / 14 skipped，收到事件 []（/tmp/graph-native-compaction-refusal-red.log）。kernelProviderGate 在准入事务回滚后持久化 graph.provider.refused 的真实 code / reason / node / call / purpose，再抛出原错误；实际 send 在此捕获之外，不把供应商失败标成准入拒绝。被拒绝请求不产生 provider_calls 或费用，不改变准入结果。
+- 首次绿色阶段断言错误要求恰好一次拒绝；真实 SDK 有多个内部尝试，因此改为逐条核对真实拒绝原因且要求非空，同时仍严格断言仅一个已发送主请求、零摘要 HTTP / invocation。没有为了固定次数限制 SDK 或制造回执。聚焦四文件、29 用例通过，22.16 秒（/tmp/graph-native-compaction-remaining-focus.log）；无增删测试数量。生产净增加 7 行、测试净减少 1 行。第七十轮完整门禁待执行。旧 SDK / DAG 调度器退役与完整 spec 仍未完成。
+
+- 第七十轮首次门禁在 TypeScript 阶段发现测试 HTTP 记录的可选属性与 exactOptionalPropertyTypes 不一致，以及 nodeRun 的新旧联合类型不能直接读 modelIdentity；改用实际可缺失字段类型和字段判别，保持原生身份断言。未更改生产接口。上述测试净行数应为增加 1 行，非减少 1 行；完整门禁重跑待完成。
+
+- 第七十轮修订后全量为 272 文件 / 1860 用例通过、1 文件 / 1 用例失败，191.83 秒。失败是隔离模块首个普通路由返回 ok:false，其他五项隔离合同及本轮压缩合同通过；Docker /_ping 正常。单独复跑该文件六用例全部通过，7.42 秒（/tmp/graph-v2-check-70-isolation-focus.log）。原断言未展示 evaluator.error，补入既有断言的失败说明，以便全量再次失败时报告真实原因；不放宽 5s 限制，不跳过测试。此次失败原因尚未确定，完整门禁继续重跑。
+
+- 第七十轮最终完整门禁通过：273 文件、1861 用例，198.06 秒；TypeScript、lint、数量基线及验收证据全部通过（/tmp/graph-v2-full-check-70-rerun.log）。隔离文件原有失败在单独及全量重跑均未复现，不能据此推断首次失败的具体原因；保留真实错误的断言说明以利后续诊断。生产净增加 7 行、测试及支持净增加 1 行，无增删用例或放宽隔离限制。已完成自检与 git diff --check；本轮可提交。旧 SDK 草稿 / DAG 调度器退役、原生用户 setBudget 的旧实例依赖及正式默认切换仍待处理，完整 spec 未完成。

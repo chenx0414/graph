@@ -228,3 +228,5 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 原生常驻 Pi 使用模型窗口配置启用自动压缩；摘要请求同样经过宿主预算和暂停门禁。节点详情分别展示 completion / compaction 请求、实际用量和费用，摘要作为独立 compaction 条目保存，原聊天条目仍可查看。请求派发时冻结价格，重启或修改模型价格不重新计算历史费用；无法核算用量时费用保持未知。暂停后不允许发起新的摘要请求，已在途请求仍可结算。
 
 每条边必须显式声明 enabled:true 或 enabled:false；缺失、null、数字和字符串不会被当作开关。创建和局部修改在写入图版本前统一校验，因此无效声明不会留下部分 graph 或新 revision。连接启用状态仍与投递 value 中的业务 passed 判断分离。
+
+模型请求被原生宿主拒绝时，事件流保存 graph.provider.refused，包含 nodeId、callId、purpose、code 和 reason；拒绝事件不表示实际发送，也不创建计费调用。Pi 对外层错误的泛化描述不能替代这条宿主诊断。自动压缩的请求同样受冻结预算控制；有限预算的摘要用量未知时保留输入与占位，main 显式核对用量并处理队列后才继续。

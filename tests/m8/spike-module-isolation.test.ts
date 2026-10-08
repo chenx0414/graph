@@ -54,7 +54,7 @@ test('spike 3: a rule module evaluates isolated, and a failing review routes to 
     entry, state: null, trigger: 'each',
     inputs: { review: { passed: false, reason: 'missing handling', reviewedCommit: 'abc' } },
   });
-  expect(failing.ok).toBe(true);
+  expect(failing.ok, failing.error).toBe(true);
   expect(failing.outputs.rework).toEqual({ passed: false, reason: 'missing handling', reviewedCommit: 'abc' });
   expect(failing.state).toEqual({ triggered: true });
   expect(failing.measurement.ms).toBeLessThan(5_000);

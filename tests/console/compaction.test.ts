@@ -34,15 +34,15 @@ const LONG_TEXT = 'The worker keeps going. '.repeat(280); // ~6300 chars ≈ 150
 async function compactionProvider(plan: (input: { index: number; tools: string[]; summary: boolean }) => {
   text?: string; finish?: string; usage?: { prompt_tokens: number; completion_tokens: number } | null; pause?: () => Promise<void>;
 }) {
-  const requests: { tools: string[]; messages: { role?: string; content?: unknown }[]; summary: boolean }[] = [];
+  const requests: { model: string | undefined; tools: string[]; messages: { role?: string; content?: unknown }[]; summary: boolean }[] = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk);
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as { tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] } : {};
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as { model?: string; tools?: { function?: { name?: string } }[]; messages?: { role?: string; content?: unknown }[] } : {};
     const tools = (body.tools ?? []).map(tool => tool.function?.name ?? '');
     const summary = tools.length === 0;
     const index = requests.length;
-    requests.push({ tools, messages: body.messages ?? [], summary });
+    requests.push({ model: body.model, tools, messages: body.messages ?? [], summary });
     const step = plan({ index, tools, summary });
     await step.pause?.();
     // `undefined` means "use the default billing evidence"; explicit null means
@@ -400,62 +400,62 @@ test('a split turn books two compaction invocations and still shows both to the 
 async function workerRuntime(root: string, provider: Awaited<ReturnType<typeof compactionProvider>>, extra: { defaultBudgetTokens?: number; modelId?: string } = {}) {
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
-  await writeFile(join(workspace, 'check.js'), 'console.log("ok");\n');
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
-    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) } },
+    actions: {},
     models: { entries: [modelEntry(provider.baseUrl, extra.modelId)], apiKey: 'local-key', modelRuntime: provider.modelRuntime },
     ...(extra.defaultBudgetTokens !== undefined ? { limits: { defaultBudgetTokens: extra.defaultBudgetTokens } } : {}),
   });
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Compaction gate', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Compaction gate',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await nativeWorker(runtime, taskId);
   return { runtime, taskId };
 }
 
 test('a finite budget can refuse the summary even when the turn itself fit', async () => {
   const root = await temp('budget');
-  let runtimeRef: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
-  let taskIdRef = '';
   const provider = await compactionProvider(({ summary }) => summary
     ? { text: 'must not be sent' }
-    // The user shrinks the cap before the summary is dispatched: the turn
-    // already fit, the summary reservation no longer does.
-    : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 }, pause: async () => { await runtimeRef!.user.task(taskIdRef).setBudget({ nodeId: 'work', tokens: 2_500, requestId: 'shrink-budget' }); } });
-  const { runtime, taskId } = await workerRuntime(root, provider);
-  runtimeRef = runtime; taskIdRef = taskId;
-  await runtime.host.runReady();
+    // Billing leaves sixty tokens in the already-declared quota. The summary
+    // needs at least the model's 256-token output reservation, so it cannot fit.
+    : { text: LONG_TEXT, usage: { prompt_tokens: 199_900, completion_tokens: 40 } });
+  const { runtime, taskId } = await workerRuntime(root, provider, { defaultBudgetTokens: 200_000 });
+  await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
   expect(provider.requests.filter(request => request.summary)).toHaveLength(0);
   const view = runtime.nodeRun(taskId, 'work');
   expect(view.invocations.filter(invocation => invocation.purpose === 'compaction')).toEqual([]);
-  const questions = (await runtime.user.task(taskId).view()).questions;
-  expect(questions).toMatchObject([{ kind: 'budget', nodeId: 'work', status: 'open' }]);
+  expect(view.invocations).toMatchObject([{ purpose: 'completion', state: 'settled', usage: { input: 199_900, output: 40 } }]);
+  expect(view.instance?.used).toBe(199_940);
+  const failed = runtime.events(taskId, 0).filter(event => event.type === 'session.compaction_failed');
+  expect(failed).toMatchObject([{ data: { nodeId: 'work' } }]);
+  const refused = runtime.events(taskId, 0).filter(event => event.type === 'graph.provider.refused');
+  expect(refused.length).toBeGreaterThan(0);
+  for (const event of refused) expect(event.data).toMatchObject({ nodeId: 'work', purpose: 'compaction', code: 'budget', reason: expect.stringMatching(/budget/i) });
+  await runtime.sendNodeMessage(taskId, 'work', { text: 'Continue within the same quota.', requestId: 'follow-up' });
+  await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
+  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('blocked');
 }, 60_000);
 
-test('a summary without usage opens the unknown-usage hold like any other send', async () => {
+test('a native summary without usage keeps the input and blocks further sends', async () => {
   const root = await temp('unknown');
   const provider = await compactionProvider(({ summary }) => summary
     ? { text: '## Goal\nno usage here', usage: null }
     : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 } });
   const { runtime, taskId } = await workerRuntime(root, provider, { defaultBudgetTokens: 20_000_000 });
-  await runtime.host.runReady();
+  await runtime.host.drive();
   expect(provider.requests.filter(request => request.summary)).toHaveLength(1);
-  const rows = purposes(root).filter(row => row.purpose === 'compaction');
+  const rows = runtime.nodeRun(taskId, 'work').invocations.filter(row => row.purpose === 'compaction');
   expect(rows).toHaveLength(1);
   expect(rows[0]!.usage).toBeNull();
-  expect((await runtime.user.task(taskId).view()).questions).toMatchObject([{ kind: 'unknown_usage', nodeId: 'work' }]);
+  expect(rows[0]!.cost).toBeNull();
+  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('blocked');
+  expect(await runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'queue' })).toMatchObject({ items: [{ nodeId: 'work', state: 'queued' }] });
   // The hold stops the next send instead of letting Pi retry silently.
   const before = provider.requests.length;
-  await runtime.host.runReady();
+  await runtime.host.drive();
   expect(provider.requests.length).toBe(before);
 }, 60_000);
 
@@ -465,13 +465,14 @@ test('summary invocations keep the frozen upstream identity, not the connection 
     ? { text: '## Goal\ncompacted', usage: { prompt_tokens: 300, completion_tokens: 20 } }
     : { text: LONG_TEXT, usage: { prompt_tokens: 2_000, completion_tokens: 40 } });
   const { runtime, taskId } = await workerRuntime(root, provider, { modelId: 'original-model' });
-  await runtime.host.runReady();
-  const rows = purposes(root);
+  await runtime.host.drive();
+  const rows = runtime.nodeRun(taskId, 'work').invocations;
   expect(rows.length).toBeGreaterThanOrEqual(2);
   expect(rows.some(row => row.purpose === 'compaction')).toBe(true);
   // R08: history keeps the upstream identity even for summarization sends.
-  expect(rows.every(row => row.model === 'original-model')).toBe(true);
-  expect(runtime.nodeRun(taskId, 'work').invocations.every(invocation => invocation.model === 'original-model')).toBe(true);
+  expect(rows.every(row => 'modelIdentity' in row && row.modelIdentity === 'original-model')).toBe(true);
+  expect(rows.every(row => row.model === 'local')).toBe(true);
+  expect(provider.requests.every(request => request.model === 'original-model')).toBe(true);
 }, 60_000);
 
 test('a pause during auto-compaction stops the summary request through the task gate', async () => {

@@ -10,20 +10,27 @@ export function kernelProviderGate(kernel: KernelStore, graphId: string, nodeId:
   return {
     dispatch(id, reservation, send) {
       if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('budget', 'Invalid provider reservation');
-      kernel.store.transaction(() => {
-        const execution = kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
-        if (!execution) throw new RuntimeError('invalid_adapter', 'Provider send has no active execution');
-        const frozenLimit = kernel.execution(execution.id)?.tokenBudget ?? limit;
-        const state = kernel.db.prepare('SELECT used,paused FROM kernel_node_state WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { used: number; paused: number };
-        const task = kernel.store.task(graphId);
-        if (state.paused || task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Provider send is paused');
-        const calls = kernel.db.prepare("SELECT state,reserved FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state IN ('inflight','unknown')").all(graphId, nodeId) as { state: string; reserved: number }[];
-        if (frozenLimit?.unlimited !== true && calls.some(call => call.state === 'unknown')) throw new RuntimeError('budget', 'Reconcile unknown provider usage before another send');
-        const reserved = calls.reduce((total, call) => total + call.reserved, 0);
-        if (frozenLimit && !frozenLimit.unlimited && state.used + reserved + reservation > frozenLimit.budget) throw new RuntimeError('budget', `Token budget exhausted for node ${nodeId}`);
-        kernel.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at,model,purpose) VALUES(?,?,?,?,?,?,?,?,?)')
-          .run(id, graphId, nodeId, execution.id, reservation, 'inflight', Date.now(), model ? JSON.stringify({ id: model.id, identity: modelIdentity(model), provider: model.provider, api: model.api, baseUrl: model.baseUrl, ...(recipe ? { recipe } : {}), ...(model.cost ? { cost: model.cost } : {}), ...(model.pricing ? { pricing: model.pricing } : {}) }) : null, purpose);
-      });
+      try {
+        kernel.store.transaction(() => {
+          const execution = kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          if (!execution) throw new RuntimeError('invalid_adapter', 'Provider send has no active execution');
+          const frozenLimit = kernel.execution(execution.id)?.tokenBudget ?? limit;
+          const state = kernel.db.prepare('SELECT used,paused FROM kernel_node_state WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { used: number; paused: number };
+          const task = kernel.store.task(graphId);
+          if (state.paused || task.paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Provider send is paused');
+          const calls = kernel.db.prepare("SELECT state,reserved FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state IN ('inflight','unknown')").all(graphId, nodeId) as { state: string; reserved: number }[];
+          if (frozenLimit?.unlimited !== true && calls.some(call => call.state === 'unknown')) throw new RuntimeError('budget', 'Reconcile unknown provider usage before another send');
+          const reserved = calls.reduce((total, call) => total + call.reserved, 0);
+          if (frozenLimit && !frozenLimit.unlimited && state.used + reserved + reservation > frozenLimit.budget) throw new RuntimeError('budget', `Token budget exhausted for node ${nodeId}`);
+          kernel.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at,model,purpose) VALUES(?,?,?,?,?,?,?,?,?)')
+            .run(id, graphId, nodeId, execution.id, reservation, 'inflight', Date.now(), model ? JSON.stringify({ id: model.id, identity: modelIdentity(model), provider: model.provider, api: model.api, baseUrl: model.baseUrl, ...(recipe ? { recipe } : {}), ...(model.cost ? { cost: model.cost } : {}), ...(model.pricing ? { pricing: model.pricing } : {}) }) : null, purpose);
+        });
+      } catch (error) {
+        if (error instanceof RuntimeError) kernel.store.event(graphId, 'graph.provider.refused', {
+          nodeId, callId: id, purpose, code: error.code, reason: error.message,
+        });
+        throw error;
+      }
       return send();
     },
     settle(id, usage: TokenUsage | null) {
