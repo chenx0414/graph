@@ -93,7 +93,6 @@ describe('§13.8 E2E — the host loop drains a confirmed v2 graph', () => {
     await runtime.supervisor(anchorTaskId).propose({
       requirementVersion: 1, summary: '两节点链',
       acceptance: [{ id: 'works', description: '链跑通', checkNode: 'b' }],
-      nodes: [],
       definition: DEFINITION,
     }, 'proposal-v2');
     const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });

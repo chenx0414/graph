@@ -56,7 +56,7 @@ test('native draft preview renders modules, named interfaces and the actual grap
   cleanup.push(() => server.close());
   const conversation = await server.runtime.conversations.create({ text: 'Preview the native graph', requestId: 'create' });
   const anchor = (await server.runtime.conversations.view(conversation.conversationId)).anchorTaskId;
-  await server.runtime.supervisor(anchor).propose({ requirementVersion: 1, summary: 'Native draft preview', nodes: [],
+  await server.runtime.supervisor(anchor).propose({ requirementVersion: 1, summary: 'Native draft preview',
     acceptance: [{ id: 'reviewed', description: 'Review the result', checkNode: 'gate' }],
     definition: parseGraphDefinition({ schemaVersion: 2, name: 'native-draft', protocols: { result: { type: 'object' } },
       nodes: { worker: { recipe: 'worker@1', task: 'Write the result', inputs: { job: { protocol: 'result' } }, outputs: { result: { protocol: 'result' } }, submission: {} } },

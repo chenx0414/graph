@@ -236,3 +236,5 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 main 修改原生节点预算只用 graph_patch 的节点 budget 声明，仍受用户授权约束；旧 control_task set_budget 在原生 graph 上明确拒绝并指向 graph_patch。节点窗口分别显示最近执行预算与用户授权额度，后者调整后下次执行重新校验。
 
 无模型的 ActionAdapter 宿主同样从当前 execution.revisionVersion 读取冻结任务与配方，不能在补交期间从 kernel_nodes 的最新声明切换适配器。修改任务后，当前执行仍完成旧配置，下一条输入触发的新执行才采用新配置；补交只接收缺项提示，不重复初始 graph 概述。
+
+原生 propose 草稿的结构只放在 definition 内。顶层 nodes / loops / containers 属于旧 SDK 格式，即使是空数组或 null 也拒绝；不能与 definition 混用，否则调用者可能误以为被忽略的旧字段已生效。原生声明内部的 nodes 具名 map、模块、普通边和子图实例照常使用。

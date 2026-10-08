@@ -70,7 +70,6 @@ test('S1/S2/S3: a v2 graph drains without a model and freezes its action across 
       requirementVersion: 1,
       summary: 'one node',
       acceptance: [{ id: 'ok', description: 'ran', checkNode: 'work' }],
-      nodes: [],
       definition: {
         schemaVersion: 2,
         name: 'one',

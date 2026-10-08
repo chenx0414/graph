@@ -727,3 +727,11 @@
 
 - 用户完成 macOS 重启后继续：独立 shebang 脚本直接启动返回 script-ok；Docker Desktop 原先未启动，按既有授权打开后 /_ping 为 OK。没有关闭系统执行检查服务或修改安全策略，具体停滞根因仍未确认；重启前后的实际启动结果可核对。
 - 第七十三轮首次门禁在 TypeScript 发现共用 Operation 类型不声明真实原生 adapter 传入的 recipe；测试改用字段存在判别，仍严格断言 worker@1 / worker@2，未增设生产字段或改变实际运行配置。第七十三轮重跑完整通过：273 文件、1862 用例，159.87 秒（/tmp/graph-v2-full-check-73-rerun.log）；此前 5 个脚本启动失败均恢复通过。TypeScript、lint、自动增加一个预算合同的数量基线、验收证据检查全部通过。自检和 git diff --check 通过；可以提交本组原生政策与执行冻结修复。完整 spec、旧 SDK / DAG 调度器退役及正式切换仍未完成。
+
+## 原生草稿关闭旧式混合结构入口
+
+- 只读检查发现旧 SDK validateLegacyProposal 与 DAG 调度器仍有活跃引用，不能宣布整体退役。本组先关闭实际的新旧混合草稿缺陷：有正式 definition 时，顶层旧 nodes / loops / containers 会被静默忽略，导致所见声明与实际执行结构不一致。NativeProposal 本来只声明 definition，不为额外旧字段推断新协议或编造连接。
+- 扩展既有 task-runtime 公开草稿与确认合同，三个旧字段分别测试空数组、null 与非空数组；全部必须以 invalid_proposal 明确指出字段，且 proposalVersion 保持 0，随后纯原生草稿仍能确认。修复前第一次 nodes:[] 实际写入草稿并返回 proposalVersion:1，RED 为 1 failed / 5 skipped（/tmp/graph-native-mixed-proposal-red.log），不是无关协议拒绝。
+- validateProposal 的原生入口增加两行拒绝，不增加转换器或另建格式解释路径。手工去掉 confirm-graph / graph-auto-run-e2e / node-prompt-ui / scripted-lane / v2-completion 五个原生夹具的顶层 nodes:[]；定义内部的具名节点及原有验证保留。没有删用例、跳过或增加测试 seam。六文件 / 25 用例聚焦通过，10.01 秒（/tmp/graph-native-mixed-proposal-focus.log），TypeScript 与 git diff --check 通过。生产净增加 2 行、测试净增加 2 行；数量仍为 273 文件 / 1862 用例。第七十四轮完整门禁待执行，旧式单独 SDK 入口与 DAG 调度器仍待最终退役，完整 spec 未完成。
+
+- 第七十四轮完整门禁通过：273 文件、1862 用例，153.75 秒（/tmp/graph-v2-full-check-74.log）。TypeScript、lint、数量基线及验收证据全部通过；自检和 git diff --check 通过。没有删除用例或放宽提交、协议、完成条件。此组只关闭原生混合结构的静默丢失入口，旧 SDK 单独草稿、旧 DAG 调度器、正式切换及整个 spec 仍未完成。

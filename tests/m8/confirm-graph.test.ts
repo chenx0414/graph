@@ -134,7 +134,6 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     await runtime.supervisor(anchorTaskId).propose({
       requirementVersion: 1, summary: '两节点链',
       acceptance: [{ id: 'works', description: '链跑通', checkNode: 'b' }],
-      nodes: [],
       definition: { ...DEFINITION, acceptance: [{ id: 'works', description: '链跑通', kind: 'human' }] },
     }, 'proposal-v2');
 

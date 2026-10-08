@@ -106,6 +106,12 @@ test('invalid proposals cannot enter confirmed state, and confirmation freezes t
   for (const [index, proposal] of invalid.entries()) {
     await expect(supervisor.propose(proposal as Proposal, `invalid-${index}`)).rejects.toMatchObject({ code: expectedCodes[index] });
   }
+  for (const field of ['nodes', 'loops', 'containers']) {
+    for (const [index, value] of [[], null, [{ id: 'legacy' }]].entries()) {
+      await expect(supervisor.propose({ ...valid, [field]: value }, `mixed-${field}-${index}`))
+        .rejects.toMatchObject({ code: 'invalid_proposal', message: expect.stringContaining(field) });
+    }
+  }
   expect((await runtime.user.task(taskId).view()).proposalVersion).toBe(0);
   const proposed = await supervisor.propose(valid, 'proposal');
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });

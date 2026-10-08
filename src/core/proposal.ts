@@ -13,6 +13,8 @@ export function validateProposal(proposal: Proposal | NativeProposal) {
   // The native definition owns executable acceptance. The confirmation summary
   // must describe those same criteria, so invalid drafts fail before confirmation.
   if (proposal.definition !== undefined) {
+    const legacy = ['nodes', 'loops', 'containers'].filter(field => Object.hasOwn(proposal, field));
+    if (legacy.length) invalid(`Native drafts use definition only; remove legacy fields: ${legacy.join(', ')}`);
     const definition = parseGraphDefinition(proposal.definition);
     if (proposal.decisions !== undefined && (!Array.isArray(proposal.decisions) || proposal.decisions.length > 50
       || proposal.decisions.some(item => typeof item !== 'string' || !item.trim() || item.length > 800))) invalid('Decisions must be a bounded list of nonempty strings');

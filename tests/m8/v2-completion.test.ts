@@ -32,7 +32,6 @@ async function run(limitNodes = 1) {
   const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'finish',
     acceptance: [{ id: 'ok', description: 'ran', checkNode: 'work' }],
-    nodes: [],
     definition: limitNodes === 1 ? definition : {
       ...definition,
       nodes: { ...definition.nodes, other: { recipe: 'worker@1', task: 'other', inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
