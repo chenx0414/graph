@@ -735,3 +735,11 @@
 - validateProposal 的原生入口增加两行拒绝，不增加转换器或另建格式解释路径。手工去掉 confirm-graph / graph-auto-run-e2e / node-prompt-ui / scripted-lane / v2-completion 五个原生夹具的顶层 nodes:[]；定义内部的具名节点及原有验证保留。没有删用例、跳过或增加测试 seam。六文件 / 25 用例聚焦通过，10.01 秒（/tmp/graph-native-mixed-proposal-focus.log），TypeScript 与 git diff --check 通过。生产净增加 2 行、测试净增加 2 行；数量仍为 273 文件 / 1862 用例。第七十四轮完整门禁待执行，旧式单独 SDK 入口与 DAG 调度器仍待最终退役，完整 spec 未完成。
 
 - 第七十四轮完整门禁通过：273 文件、1862 用例，153.75 秒（/tmp/graph-v2-full-check-74.log）。TypeScript、lint、数量基线及验收证据全部通过；自检和 git diff --check 通过。没有删除用例或放宽提交、协议、完成条件。此组只关闭原生混合结构的静默丢失入口，旧 SDK 单独草稿、旧 DAG 调度器、正式切换及整个 spec 仍未完成。
+
+
+## Git 准入合同迁移到原生接口图
+
+- 保留 git-admission 的十个真实 Git 合同；正式执行夹具改用具名节点、协议和公开输出，确认图后由 main 显式 graph_send 再通过真实 host.drive 运行。确认本身没有创建 execution；脏仓库、空仓库、未知分支与项目子目录的准入边界仍实际验证。
+- 删除夹具中的旧 program/check 节点、dependsOn 及伪造 /tmp/ok digest 证据。这里只验证 Git 准入和工作副本隔离，以 human 验收明确表达，不冒充自动交付验收；工作副本修改不会修改项目原文件。没有新增或删除测试，也没有改动生产路径。最初聚焦十用例通过，4.87 秒；最终修改还须完整门禁。旧 SDK / DAG 退役及完整 spec 仍未完成。
+
+- 第七十五轮完整门禁通过：273 文件 / 1862 用例，156.55 秒（/tmp/graph-v2-full-check-75.log）。TypeScript、lint、数量基线及验收证据检查全部通过；自检确认十个准入合同保留，新增显式投递前零 execution 与子目录原文件不变断言。生产修改 0 行；本组是迁移验收入口，旧 SDK / DAG 和完整 spec 仍未完成。

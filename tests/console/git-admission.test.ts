@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
+import type { ActionAdapter } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { git as runGit } from '../../src/git/git.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -43,16 +44,25 @@ async function taskFor(runtime: Awaited<ReturnType<typeof runtimeFor>>) {
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Work', requestId: 'begin' });
   const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
+    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'work' }],
+    definition: parseGraphDefinition({
+      schemaVersion: 2, name: 'Work', protocols: { message: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', task: 'work', model: 'scripted',
+        inputs: { job: { protocol: 'message' } }, outputs: { out: { protocol: 'message' } },
+        submission: { required: ['out'] } } },
+      modules: {}, edges: {}, outputs: { result: { from: 'work.out', protocol: 'message' } },
+      acceptance: [{ id: 'ok', description: 'ok', kind: 'human' }],
+    }),
   }, 'proposal');
-  return { taskId, task: runtime.user.task(taskId), proposalVersion: proposed.proposalVersion };
+  return { taskId, task: runtime.user.task(taskId), proposalVersion: proposed.proposalVersion,
+    start: async () => {
+      const idle = await runtime.nodeRun(taskId, 'work');
+      expect(idle.operations).toHaveLength(0);
+      await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
+      await runtime.host.drive();
+      expect((await runtime.nodeRun(taskId, 'work')).node.status).toBe('succeeded');
+    } };
 }
-
-const checkAction: ActionAdapter = { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) };
 
 test('a plain directory is initialized with a local baseline and no remote', async () => {
   const { rootPath } = await project('plain');
@@ -138,11 +148,11 @@ test('a dirty repository blocks formal dispatch until an explicit baseline', asy
   await writeFile(join(rootPath, 'uncommitted.txt'), 'user work\n');
   let sends = 0;
   const work: ActionAdapter = { kind: 'agent', reserveTokens: 100, prepare: async () => async () => { sends += 1; return { outcome: 'completed', output: null, usage }; } };
-  const runtime = await runtimeFor(rootPath, { work, check: checkAction });
+  const runtime = await runtimeFor(rootPath, { work });
   const prep = await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare' });
   expect(prep.state).toBe('detected');
   expect((prep.detail as { dirty?: number }).dirty).toBeGreaterThan(0);
-  const { task, proposalVersion } = await taskFor(runtime);
+  const { task, proposalVersion, start } = await taskFor(runtime);
   await expect(task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' }))
     .rejects.toMatchObject({ code: 'project_dirty' });
   expect(sends).toBe(0);
@@ -153,7 +163,7 @@ test('a dirty repository blocks formal dispatch until an explicit baseline', asy
   expect(baseline.state).toBe('ready');
   expect(shell(rootPath, ['ls-files'])).toContain('uncommitted.txt');
   await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept-2' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  await start();
   expect(sends).toBe(1);
 }, 60_000);
 
@@ -163,13 +173,13 @@ test('a repository without HEAD gets a baseline before dispatch', async () => {
   await writeFile(join(rootPath, 'first.txt'), 'first\n');
   let workspace = '';
   const work: ActionAdapter = { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => { workspace = operation.workspace!; return { outcome: 'completed', output: null, usage }; } };
-  const runtime = await runtimeFor(rootPath, { work, check: checkAction });
+  const runtime = await runtimeFor(rootPath, { work });
   const prep = await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare' });
   expect(prep.state).toBe('ready');
   expect(shell(rootPath, ['rev-parse', 'HEAD'])).toBe(prep.baselineSha);
-  const { task, proposalVersion } = await taskFor(runtime);
+  const { task, proposalVersion, start } = await taskFor(runtime);
   await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  await start();
   expect(workspace).not.toBe(rootPath);
   expect(await readFile(join(workspace, 'first.txt'), 'utf8')).toBe('first\n');
 }, 60_000);
@@ -181,16 +191,17 @@ test('a repository subdirectory keeps its scope without creating a nested repo',
   shell(root, ['commit', '-m', 'sub']);
   let workspace = '';
   const work: ActionAdapter = { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => { workspace = operation.workspace!; await writeFile(join(workspace, 'sub.txt'), 'changed\n'); return { outcome: 'completed', output: null, usage }; } };
-  const runtime = await runtimeFor(rootPath, { work, check: checkAction });
+  const runtime = await runtimeFor(rootPath, { work });
   const prep = await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare' });
   expect(prep).toMatchObject({ state: 'ready', repoRoot: await realpath(root), projectSubdir: 'project' });
-  const { task, proposalVersion } = await taskFor(runtime);
+  const { task, proposalVersion, start } = await taskFor(runtime);
   await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  await start();
   // The worker starts inside the project subdirectory of the work copy.
   expect(relative(join(await realpath(rootPath), 'state', 'worktrees'), workspace).startsWith('..')).toBe(false);
   expect(workspace.endsWith('/project')).toBe(true);
   expect(await readFile(join(workspace, 'sub.txt'), 'utf8')).toBe('changed\n');
+  expect(await readFile(join(rootPath, 'sub.txt'), 'utf8')).toBe('sub\n');
   await expect(stat(join(rootPath, '.git'))).rejects.toMatchObject({ code: 'ENOENT' });
 }, 60_000);
 
@@ -199,12 +210,12 @@ test('direct acceptance cannot fall back to the project root without Git', async
   await writeFile(join(rootPath, 'business.txt'), 'business\n');
   let workspace = '';
   const work: ActionAdapter = { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => { workspace = operation.workspace!; await writeFile(join(workspace, 'written.txt'), 'isolated\n'); return { outcome: 'completed', output: null, usage }; } };
-  const runtime = await runtimeFor(rootPath, { work, check: checkAction });
-  const { task, proposalVersion } = await taskFor(runtime);
+  const runtime = await runtimeFor(rootPath, { work });
+  const { task, proposalVersion, start } = await taskFor(runtime);
   // No explicit prepare call: the host initializes the plain directory at the
   // formal acceptance boundary instead of silently dispatching in place.
   await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
+  await start();
   expect(workspace).not.toBe(rootPath);
   expect(workspace.startsWith(join(await realpath(rootPath), 'state', 'worktrees'))).toBe(true);
   expect(await readFile(join(workspace, 'written.txt'), 'utf8')).toBe('isolated\n');
