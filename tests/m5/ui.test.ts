@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
+import { openaiServer } from '../fixtures/openai-server.ts';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -20,32 +21,18 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(() => rm(webDir, { recursive: true, force: true }));
 
-test('the local UI shows settings, queue, graph back-edges, and does not allow editing the graph', async () => {
+test('the local UI shows native feedback, self and parallel edges with the actual grid routes and remains read-only', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-ui-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const runtimeOptions = {
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'project', root }],
-    actions: {
-      implement: { kind: 'agent' as const, reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed' as const, output: { done: true }, usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 } }) },
-      check: { kind: 'program' as const, prepare: async () => async () => ({ outcome: 'completed' as const, output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok.txt'), digest: 'a'.repeat(64) } }] }) },
-    },
-  };
-  const preview = await openTaskRuntime(runtimeOptions);
-  preview.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'pub');
-  await preview.close();
-  const server = await openGraphServer({ ...runtimeOptions, autoDrive: true, webDir });
-  cleanup.push(() => server.close());
-  const { taskId } = await server.runtime.user.begin({ projectId: 'project', request: 'Show graph', requestId: 'begin' });
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Show graph',
-    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'implement', kind: 'agent', action: 'implement', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['implement'] },
-    ],
-  }, 'proposal');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], autoDrive: false, webDir });
+  cleanup.push(() => server.close()); server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'pub');
+  const { taskId: ownerId } = await server.runtime.user.begin({ projectId: 'project', request: 'Show graph', requestId: 'begin' });
+  const data = { protocol: 'data' };
+  const { graphId: taskId } = await server.runtime.supervisor(ownerId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Native feedback and parallel routes', protocols: { data: { type: 'object' } },
+    nodes: { implement: { recipe: 'coder@1', task: 'Implement the task', inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: data }, outputs: { result: data }, operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+    edges: { forward: { from: 'implement.result', to: 'check.job', enabled: true }, parallel: { from: 'implement.result', to: 'check.job', enabled: true }, feedback: { from: 'check.result', to: 'implement.job', enabled: true }, self: { from: 'implement.result', to: 'implement.job', enabled: true } },
+  }) }) as { graphId: string };
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
@@ -67,6 +54,13 @@ test('the local UI shows settings, queue, graph back-edges, and does not allow e
   expect(await page.locator('.react-flow__edge.grid-edge').count()).toBeGreaterThan(0);
   expect(await edgePath.getAttribute('d')).not.toMatch(/[CQ]/);
   expect(await page.locator('.react-flow__background circle').count()).toBeGreaterThan(0);
+  const geometry = await page.evaluate(async id => (await fetch(`/api/tasks/${id}/graph`)).json(), taskId) as { layout: { edges: { id: string; points: { x: number; y: number }[] }[] } };
+  await expect.poll(() => page.locator('.react-flow__edge.grid-edge').count()).toBe(4);
+  for (const edge of geometry.layout.edges) {
+    const path = page.locator(`[data-testid="rf__edge-${edge.id}"] .react-flow__edge-path`);
+    await path.waitFor({ state: 'attached' });
+    expect((await path.getAttribute('d'))!.match(/-?\d+(?:\.\d+)?/g)!.map(Number), edge.id).toEqual(edge.points.flatMap(point => [point.x, point.y]));
+  }
   const implement = page.locator('.react-flow__node').filter({ hasText: 'implement' }).first();
   await implement.waitFor({ state: 'visible' });
   expect(await page.locator('.node-card[data-node-id="implement"]').innerText()).toContain('implement agent');
@@ -148,56 +142,55 @@ test('the Agent combination library renders and compiles recipes over filesystem
   await expect.poll(async () => (await page.getByTestId('toasts').innerText()).includes('已编译为 review@1')).toBe(true);
 }, 60_000);
 
-test('the graph follows runtime events and a budget question accepts a token increment', async () => {
+test('the graph follows real runtime events and a native budget answer authorizes an explicit retry', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m5-live-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
+  const provider = await openaiServer([{ text: 'Reply after the user authorized more tokens.' }]);
+  cleanup.push(() => provider.close());
   const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
-    limits: { defaultBudgetTokens: 20_000_000 },
-    actions: {
-      work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
-      expensive: { kind: 'agent', reserveTokens: 20_000_001, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
-      check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) },
-    },
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir, autoDrive: false,
+    limits: { defaultBudgetTokens: 1 },
+    models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
+      grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] },
   });
   cleanup.push(() => server.close());
-  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'UI live state', requestId: 'one' });
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Live',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'plan-one');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-one' });
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
+  server.runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
+  const owner = await server.runtime.user.begin({ projectId: 'p', request: 'Budget question', requestId: 'begin' });
+  const main = server.runtime.supervisor(owner.taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Budget UI',
+    protocols: { job: { type: 'object' } }, nodes: { work: { recipe: 'worker@1', model: 'local', task: 'Reply to the message.',
+      inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { request: 'Answer this input after quota approval.' } });
+  const browser = await chromium.launch({ headless: true }); cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
-  await page.locator('.react-flow__node').filter({ hasText: 'work' }).waitFor();
-  await page.locator('.node-card[data-node-id="work"][data-status="pending"]').waitFor();
+  await page.goto(`${server.url}/#/tasks/${graphId}/graph`);
+  await page.locator('.node-card[data-node-id="work"]').waitFor();
   await server.runtime.host.drive();
-  await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
-  const next = await server.runtime.user.begin({ projectId: 'p', request: 'Budget question', requestId: 'two' });
-  await server.runtime.supervisor(next.taskId).propose({
-    requirementVersion: 1, summary: 'Budget',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'expensive', kind: 'agent', action: 'expensive', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['expensive'] },
-    ],
-  }, 'plan-two');
-  await server.runtime.user.task(next.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-two' });
+  expect(provider.requests).toHaveLength(0);
+  await page.locator('.node-card[data-node-id="work"][data-status="blocked"]').waitFor();
+  const blocked = await server.runtime.user.task(graphId).view();
+  expect(blocked.questions.filter(question => question.kind === 'budget' && question.status === 'open')).toHaveLength(1);
   await server.runtime.host.drive();
-  // The task page is gone; a budget question is answered where questions are answered.
+  expect((await server.runtime.user.task(graphId).view()).questions.filter(question => question.kind === 'budget')).toHaveLength(1);
   await page.goto(`${server.url}/#/inbox`);
-  await page.getByTestId('budget-tokens').waitFor();
-  await page.getByTestId('budget-tokens').fill('20000000');
+  await page.getByTestId('budget-tokens').fill('200000');
   const response = page.waitForResponse(r => r.url().endsWith('/answer'));
   await page.getByRole('button', { name: '答复' }).click();
   const res = await response;
-  expect(res.status()).toBe(200);
-  expect((await server.runtime.user.task(next.taskId).view()).questions.filter(question => question.status === 'open')).toEqual([]);
+  expect(res.status(), await res.text()).toBe(200);
+  expect((await server.runtime.user.task(graphId).view()).questions.filter(question => question.status === 'open')).toEqual([]);
+  expect(server.runtime.nodeRun(graphId, 'work').instance).toMatchObject({ authorizedBudget: { budget: 200001, unlimited: false } });
+  // User authorization does not rewrite a frozen turn or replay an input by itself.
+  await server.runtime.host.drive(); expect(provider.requests).toHaveLength(0);
+  const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number }[] };
+  await main.graphControl({ graphId, action: 'retry', seq: queue.items[0]!.seq });
+  await page.goto(`${server.url}/#/tasks/${graphId}/graph`);
+  await server.runtime.host.drive();
+  await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
+  expect(provider.requests).toHaveLength(1);
+  expect(JSON.stringify(provider.requests[0])).toContain('Answer this input after quota approval.');
+  const executions = await main.graphInspect({ graphId, query: 'executions' }) as { items: { tokenBudget: { budget: number }; state: string }[] };
+  expect(executions.items.map(execution => execution.tokenBudget.budget)).toEqual([1, 200001]);
+  expect(server.runtime.nodeRun(graphId, 'work').instance!.used).toBeGreaterThan(0);
 }, 60_000);

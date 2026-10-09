@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore, SCHEMA_VERSION } from '../../src/core/store.ts';
 import { insertQuestion, isMasterParked, questionOwner, recoverMaster } from '../../src/core/question-routing.ts';
-import { resetIdleNode } from '../../src/core/graph.ts';
 import { OperationLifecycle } from '../../src/core/operation-lifecycle.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -26,19 +25,6 @@ function fixture() {
     return store;
   });
 }
-
-test('resetting a node supersedes the open questions of its retired activation', async () => {
-  const store = await fixture();
-  insertQuestion(store, {
-    taskId: 'work-task', nodeId: 'work', kind: 'human_check',
-    data: { prompt: 'A human acceptance check is required', activationId: 'w', commitSha: null },
-  });
-  const open = store.db.prepare("SELECT id FROM questions WHERE task_id='work-task' AND status='open'").get() as { id: string };
-  resetIdleNode(store, 'work-task', 'work', 2, 1, ['pending']);
-  const after = store.db.prepare('SELECT status,answer FROM questions WHERE id=?').get(open.id) as { status: string; answer: string };
-  expect(after.status).toBe('resolved');
-  expect(JSON.parse(after.answer)).toMatchObject({ type: 'superseded' });
-});
 
 test('only decisions the user alone owns are classified as direct user questions', () => {
   expect(questionOwner('permission', {})).toBe('user');
@@ -146,7 +132,7 @@ test('configuration recovery preserves user decisions and joins the surrounding 
   expect(isMasterParked(store, 'anchor', 'master')).toBe(true);
   expect(store.db.prepare('SELECT status FROM questions WHERE id=?').get(permission.id)).toEqual({ status: 'open' });
 
-  const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
+  const lifecycle = new OperationLifecycle(store);
   lifecycle.answer('anchor', permission.id, { type: 'grant', grant: 'extra' });
   expect(() => store.transaction(() => {
     expect(recoverMaster(store, 'anchor', 'configuration')).toBe(true);

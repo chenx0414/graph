@@ -1,465 +1,132 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { installPresets } from '../../src/catalog/presets.ts';
-import { RESULT_HANDOFF_SCHEMA_EXAMPLE } from '../../src/core/predecessor-handoff.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import { TaskStore } from '../../src/core/store.ts';
-import { openaiServer } from '../fixtures/openai-server.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
-const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => {
-  for (const action of cleanup.reverse()) await action();
-  cleanup.length = 0;
-});
-const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
-
-function handoff(workSummary: string, objective = 'Complete the implementation step') {
-  return {
-    schemaVersion: 1 as const,
-    objective,
-    outcome: 'completed' as const,
-    workSummary,
-    changes: [],
-    decisions: [],
-    verification: [],
-    knownLimits: [],
-    openQuestions: [],
-    nextActions: [],
+const cleanup: (() => Promise<void> | void)[] = [];
+afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+const data = { protocol: 'data' };
+const protocols = { data: { type: 'object' } };
+const handoff = (workSummary: string) => ({ objective: 'Complete the assigned work', schemaVersion: 1, workSummary });
+const submit = (value: unknown): ResponsePlan => ({ tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value } } }) }] });
+const node = (model: string, task = 'Process only the explicit input value.', output = true) => ({ recipe: 'coder@1', model, task,
+  inputs: { job: data }, outputs: output ? { result: data } : {}, submission: output ? { required: ['result'] } : {} });
+const definition = (nodes: Record<string, unknown>, edges: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ schemaVersion: 2, name: 'Explicit handoff', protocols, nodes, modules: {}, edges, ...extra });
+const lastUser = (request: unknown) => {
+  const messages = (request as { messages: { role: string; content: unknown }[] }).messages.filter(message => message.role === 'user');
+  return JSON.stringify(messages.at(-1)?.content);
+};
+async function fixture(plans: Record<string, ResponsePlan[]>) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-handoff-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project'); const capabilityRoot = join(root, 'capabilities'); await mkdir(project); await mkdir(capabilityRoot);
+  const providers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
+  for (const [id, responses] of Object.entries(plans)) { providers[id] = await openaiServer(responses); cleanup.push(() => providers[id]!.close()); }
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+    models: { apiKey: 'local-only', modelRuntime: Object.values(providers)[0]!.runtime, entries: Object.entries(providers).map(([id, provider]) => ({ id, modelId: id, provider: provider.model.provider,
+      grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 })) } });
+  cleanup.push(() => runtime.close());
+  await runtime.catalog.saveAgentCombination({ id: 'coder', name: 'Worker', description: 'Explicit interface worker', review: false, recommendedGrade: 'medium', tags: [], resources: [], systemPrompt: 'Use the named interfaces and declared protocols. Keep your own conversation.' });
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Explicit handoff contracts', requestId: 'begin' }); const main = runtime.supervisor(owner.taskId);
+  let graphId = '';
+  return { runtime, main, providers, get graphId() { return graphId; },
+    async create(raw: unknown) { graphId = ((await main.graphCreate({ definition: parseGraphDefinition(raw) })) as { graphId: string }).graphId; },
+    async send(nodeId: string, value: Record<string, string> = {}) { await main.graphSend({ graphId, nodeId, input: 'job', value }); await runtime.host.drive(); },
+    async edge(id = 'handoff') { return main.graphInspect({ graphId, query: 'edge', id }); },
   };
 }
 
-async function runtimeWithProvider(root: string, provider: Awaited<ReturnType<typeof openaiServer>>) {
-  const workspace = join(root, 'project');
-  await mkdir(workspace, { recursive: true });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: workspace }],
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed',
-          output: null,
-          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
-    models: {
-      entries: [{
-        id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
-        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
-      }],
-      apiKey: 'scripted-local-key',
-      modelRuntime: provider.runtime,
-    },
-  });
-  cleanup.push(() => runtime.close());
-  await installPresets(runtime.catalog, presetsRoot);
-  return { runtime, workspace };
-}
+test('a subgraph output delivers the actual leaf value and provenance without inheriting its private conversation', async () => {
+  const value = handoff('CONTAINER_LEAF_SUMMARY');
+  const graph = await fixture({ work: [submit(value), { text: 'PRIVATE_LEAF_TRANSCRIPT' }], next: [{ text: 'Consumed the explicit result' }] });
+  await graph.create(definition({ next: node('next', undefined, false) }, { handoff: { from: 'bundle.result', to: 'next.job', enabled: true } }, {
+    templates: { task: { version: 1, definition: definition({ leaf: node('work') }, {}, { outputs: { result: { from: 'leaf.result', protocol: 'data' } } }) } },
+    instances: { bundle: { template: 'task', version: 1 } },
+  }));
+  await graph.send('bundle/leaf');
+  expect(graph.providers.next!.requests).toHaveLength(1);
+  expect(JSON.stringify(graph.providers.next!.requests[0])).toContain('CONTAINER_LEAF_SUMMARY');
+  expect(JSON.stringify(graph.providers.next!.requests[0])).not.toContain('PRIVATE_LEAF_TRANSCRIPT');
+  expect(await graph.edge()).toMatchObject({ from: 'bundle/leaf.result', to: 'next.job', latest: value, deliveries: [{ value }] });
+  expect(graph.runtime.nodeRun(graph.graphId, 'bundle/leaf').session?.sessionId).not.toBe(graph.runtime.nodeRun(graph.graphId, 'next').session?.sessionId);
+}, 30000);
 
-test('a container result_handoff resolves to its leaf provenance for the downstream Fresh Agent', async () => {
-  const provider = await openaiServer([
-    { tools: [{ id: 'submit', name: 'submit_result', arguments: JSON.stringify({ outputJson: JSON.stringify(handoff('CONTAINER_LEAF_SUMMARY')) }) }] },
-    { text: 'CONTAINER_SOURCE_DONE' },
-    { text: 'CONTAINER_DOWNSTREAM_DONE' },
-  ]);
-  cleanup.push(() => provider.close());
-  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-container-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const { runtime } = await runtimeWithProvider(root, provider);
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'container handoff', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'A container dependency must project its leaf result handoff.',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    containers: [{ id: 'bundle', outputs: ['leaf'] }],
-    nodes: [
-      { id: 'leaf', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', container: 'bundle' },
-      {
-        id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['bundle'],
-        context: { purpose: 'implement', predecessors: [{ source: 'bundle', mode: 'result_handoff' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
+test('an explicit join combines a work summary and evidence payload while keeping each source transcript private', async () => {
+  const summary = handoff('MULTI_WORK_SUMMARY'); const evidence = { evidence: 'EXPLICIT_EVIDENCE' };
+  const graph = await fixture({ work: [submit(summary), { text: 'PRIVATE_WORK_TRANSCRIPT' }], probe: [submit(evidence), { text: 'PRIVATE_PROBE_TRANSCRIPT' }], next: [{ text: 'Joined the explicit payloads' }] });
+  await graph.create(definition({ work: node('work'), probe: node('probe'), next: node('next', undefined, false) }, {
+    workJoin: { from: 'work.result', to: 'join.work', enabled: true }, probeJoin: { from: 'probe.result', to: 'join.probe', enabled: true },
+    handoff: { from: 'join.result', to: 'next.job', enabled: true },
+  }, { modules: { join: { type: 'router', trigger: 'once', requiredInputs: ['work', 'probe'], inputs: { work: data, probe: data }, outputs: { result: data },
+    rules: [{ when: 'true', emit: { result: { summary: '$work', evidence: '$probe' } } }] } } }));
+  await graph.send('work'); expect(graph.providers.next!.requests).toHaveLength(0);
+  await graph.send('probe'); expect(graph.providers.next!.requests).toHaveLength(1);
+  const received = JSON.stringify(graph.providers.next!.requests[0]); expect(received).toContain('MULTI_WORK_SUMMARY'); expect(received).toContain('EXPLICIT_EVIDENCE');
+  expect(received).not.toContain('PRIVATE_WORK_TRANSCRIPT'); expect(received).not.toContain('PRIVATE_PROBE_TRANSCRIPT');
+  expect(await graph.edge()).toMatchObject({ latest: { summary, evidence }, deliveries: [{ value: { summary, evidence } }] });
+}, 30000);
 
-  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
-    expect.objectContaining({
-      sourceNodeId: 'leaf',
-      mode: 'result_handoff',
-      resultHandoff: expect.objectContaining({ workSummary: 'CONTAINER_LEAF_SUMMARY' }),
-    }),
-  ]);
-  expect(JSON.stringify(provider.requests[2])).toContain('CONTAINER_LEAF_SUMMARY');
-}, 120_000);
+test('a later source execution delivers its new value without rewriting the old delivery or replacing downstream history', async () => {
+  const first = handoff('WORK_SUMMARY_V1'); const second = handoff('WORK_SUMMARY_V2');
+  const graph = await fixture({ work: [submit(first), { text: 'First work complete' }, submit(second), { text: 'Second work complete' }], next: [{ text: 'FIRST_DOWNSTREAM_REPLY' }, { text: 'Second downstream reply' }] });
+  await graph.create(definition({ work: node('work'), next: node('next', undefined, false) }, { handoff: { from: 'work.result', to: 'next.job', enabled: true } }));
+  await graph.send('work'); const session = graph.runtime.nodeRun(graph.graphId, 'next').session!.sessionId;
+  await graph.send('work', { message: 'Explicit rework input' });
+  expect(await graph.edge()).toMatchObject({ latest: second, deliveries: [{ value: second }, { value: first }] });
+  expect(graph.providers.next!.requests).toHaveLength(2);
+  expect(lastUser(graph.providers.next!.requests[1])).toContain('WORK_SUMMARY_V2'); expect(lastUser(graph.providers.next!.requests[1])).not.toContain('WORK_SUMMARY_V1');
+  expect(JSON.stringify(graph.providers.next!.requests[1])).toContain('FIRST_DOWNSTREAM_REPLY');
+  expect(graph.runtime.nodeRun(graph.graphId, 'next').session!.sessionId).toBe(session);
+}, 30000);
 
-test('multiple predecessors can mix result_handoff and evidence_only projections', async () => {
-  const provider = await openaiServer([
-    { tools: [{ id: 'submit', name: 'submit_result', arguments: JSON.stringify({ outputJson: JSON.stringify(handoff('MULTI_WORK_SUMMARY')) }) }] },
-    { text: 'MULTI_SOURCE_DONE' },
-    { text: 'PROBE_FINAL_TEXT_SENTINEL' },
-    { text: 'MULTI_DOWNSTREAM_DONE' },
-  ]);
-  cleanup.push(() => provider.close());
-  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-multi-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const { runtime } = await runtimeWithProvider(root, provider);
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'mixed predecessors', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'Each predecessor edge keeps its own handoff policy.',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      {
-        id: 'probe', kind: 'agent', action: 'audit', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
-        context: { purpose: 'explore', predecessors: [{ source: 'work', mode: 'evidence_only' }] },
-      },
-      {
-        id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work', 'probe'],
-        context: { purpose: 'implement', predecessors: [
-          { source: 'work', mode: 'result_handoff' },
-          { source: 'probe', mode: 'evidence_only' },
-        ] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
+test('a missing required handoff receives one repair delta in the same execution before it can reach downstream', async () => {
+  const graph = await fixture({ work: [{ text: 'Forgot the required output' }, submit(handoff('REPAIRED_HANDOFF')), { text: 'Required output submitted' }], next: [{ text: 'Received repaired handoff' }] });
+  await graph.create(definition({ work: node('work', 'TASK_BRIEFING_SENTINEL: produce the result'), next: node('next', undefined, false) }, { handoff: { from: 'work.result', to: 'next.job', enabled: true } }));
+  await graph.send('work');
+  expect(graph.providers.work!.requests).toHaveLength(3); const delta = lastUser(graph.providers.work!.requests[1]);
+  expect(delta).toMatch(/missing|required|result/i); expect(delta).not.toContain('TASK_BRIEFING_SENTINEL');
+  expect(graph.providers.next!.requests).toHaveLength(1); expect(JSON.stringify(graph.providers.next!.requests[0])).toContain('REPAIRED_HANDOFF');
+  const executions = await graph.main.graphInspect({ graphId: graph.graphId, query: 'executions', id: 'work' });
+  expect(executions).toMatchObject({ items: [{ state: 'completed', resubmitsUsed: 1 }] });
+  expect(await graph.edge()).toMatchObject({ deliveries: [{ value: handoff('REPAIRED_HANDOFF') }] });
+}, 30000);
 
-  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
-    expect.objectContaining({ sourceNodeId: 'work', mode: 'result_handoff' }),
-    expect.objectContaining({ sourceNodeId: 'probe', mode: 'evidence_only' }),
-  ]);
-  const projections = (runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs ?? []) as { resultHandoff?: unknown }[];
-  expect(projections[0]?.resultHandoff).toBeTruthy();
-  expect(projections[1]?.resultHandoff).toBeUndefined();
-  expect(JSON.stringify(provider.requests[3])).toContain('MULTI_WORK_SUMMARY');
-  expect(JSON.stringify(provider.requests[3])).not.toContain('PROBE_FINAL_TEXT_SENTINEL');
-}, 120_000);
+test('an invalid handoff returns its field defect to the live worker and a corrected submit alone reaches downstream', async () => {
+  const graph = await fixture({ work: [submit({ schemaVersion: 1, workSummary: 'NO_OBJECTIVE' }), submit(handoff('FIXED_IN_TURN')), { text: 'Work done' }], next: [{ text: 'Downstream done' }] });
+  await graph.create(definition({ work: node('work'), next: node('next', undefined, false) }, { handoff: { from: 'work.result', to: 'next.job', enabled: true } }, {
+    protocols: { data: { type: 'object', required: ['schemaVersion', 'objective', 'workSummary'], properties: { schemaVersion: { type: 'integer' }, objective: { type: 'string' }, workSummary: { type: 'string' } } } },
+  }));
+  await expect(graph.main.graphSend({ graphId: graph.graphId, nodeId: 'work', input: 'job', value: { schemaVersion: 'invalid input must not dispatch' } })).rejects.toThrow(/work.job.*objective/);
+  expect(graph.providers.work!.requests).toHaveLength(0);
+  await graph.main.graphSend({ graphId: graph.graphId, nodeId: 'work', input: 'job', value: handoff('Start') }); await graph.runtime.host.drive();
+  expect(JSON.stringify(graph.providers.work!.requests[1])).toContain('objective'); expect(JSON.stringify(graph.providers.work!.requests[1])).toContain('output_protocol_mismatch');
+  expect(await graph.edge()).toMatchObject({ deliveries: [{ value: handoff('FIXED_IN_TURN') }] });
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').node.status).toBe('succeeded');
+  expect((await graph.runtime.user.task(graph.graphId).view()).questions).toEqual([]);
+}, 30000);
 
-test('rework invalidates the old result handoff and injects the new activation version', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-rework-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const workspace = join(root, 'project');
-  await mkdir(workspace, { recursive: true });
-  let workRuns = 0;
-  let checkRuns = 0;
-  const nextBriefings: string[] = [];
-  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: workspace }],
-    actions: {
-      work: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async () => async () => {
-          workRuns += 1;
-          return {
-            outcome: 'completed',
-            output: { version: workRuns },
-            resultHandoff: handoff(`WORK_SUMMARY_V${workRuns}`),
-            usage,
-          };
-        },
-      },
-      next: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async operation => async () => {
-          nextBriefings.push(operation.context.briefing ?? '');
-          return { outcome: 'completed', output: { version: workRuns }, usage };
-        },
-      },
-      check: {
-        kind: 'program',
-        prepare: async () => async () => {
-          checkRuns += 1;
-          if (checkRuns === 1) {
-            return {
-              outcome: 'completed',
-              output: {
-                kind: 'verification',
-                outcome: 'rework',
-                subjects: [],
-                reports: [],
-                blockers: [{ id: 'retry', reason: 'The first result needs another pass', evidence: [] }],
-              },
-            };
-          }
-          return {
-            outcome: 'completed',
-            output: { kind: 'verification', outcome: 'pass', subjects: [], reports: [], blockers: [] },
-            evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'b'.repeat(64) } }],
-          };
-        },
-      },
-    },
-  });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'rework handoff', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'Rework must not reuse the previous activation result handoff.',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    loops: [{ from: 'check', to: 'work' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      {
-        id: 'next', kind: 'agent', action: 'next', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
-        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
+test('an unsatisfied delivery requirement settles as a known failed execution and retains the input for main', async () => {
+  const graph = await fixture({ work: [{ text: 'No output on first turn' }, { text: 'Still no output after repair' }], next: [] });
+  await graph.create(definition({ work: node('work'), next: node('next', undefined, false) }, { handoff: { from: 'work.result', to: 'next.job', enabled: true } }));
+  await graph.send('work'); expect(graph.providers.work!.requests).toHaveLength(2); expect(graph.providers.next!.requests).toHaveLength(0);
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').node.status).toBe('failed');
+  expect(await graph.main.graphInspect({ graphId: graph.graphId, query: 'executions', id: 'work' })).toMatchObject({ items: [{ state: 'failed', resubmitsUsed: 1 }] });
+  expect(await graph.main.graphInspect({ graphId: graph.graphId, query: 'queue' })).toMatchObject({ items: [{ state: 'failed', reason: expect.stringContaining('required output') }] });
+  expect(await graph.edge()).toMatchObject({ deliveries: [] });
+  const calls = await graph.main.graphInspect({ graphId: graph.graphId, query: 'provider_calls' }) as { state: string }[];
+  expect(calls.map(call => call.state)).toEqual(['settled', 'settled']);
+}, 30000);
 
-  expect(workRuns).toBe(2);
-  expect(checkRuns).toBe(2);
-  expect(nextBriefings).toHaveLength(2);
-  expect(nextBriefings[0]).toContain('WORK_SUMMARY_V1');
-  expect(nextBriefings[1]).toContain('WORK_SUMMARY_V2');
-  expect(nextBriefings[1]).not.toContain('WORK_SUMMARY_V1');
-  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
-    expect.objectContaining({
-      sourceNodeId: 'work',
-      outputVersion: 2,
-      resultHandoff: expect.objectContaining({ workSummary: 'WORK_SUMMARY_V2' }),
-    }),
-  ]);
-
-  const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  cleanup.push(async () => store.close());
-  const rows = store.db.prepare("SELECT output_version,body,digest FROM result_handoffs WHERE node_id='work' ORDER BY output_version").all() as {
-    output_version: number;
-    body: string;
-    digest: string;
-  }[];
-  expect(rows.map(row => row.output_version)).toEqual([1, 2]);
-  expect(rows[0]?.digest).not.toBe(rows[1]?.digest);
-  expect(rows[0]?.body).toContain('WORK_SUMMARY_V1');
-  expect(rows[1]?.body).toContain('WORK_SUMMARY_V2');
-}, 120_000);
-
-test('retrying a failed handoff sends a repair delta instead of the full task briefing', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-retry-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const workspace = join(root, 'project');
-  await mkdir(workspace, { recursive: true });
-  const briefings: string[] = [];
-  const nextBriefings: string[] = [];
-  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: workspace }],
-    actions: {
-      work: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async operation => {
-          briefings.push(operation.context.briefing ?? '');
-          const attempt = briefings.length;
-          return async () => attempt === 1
-            // The first attempt reported completion but submitted a handoff the
-            // host cannot repair: no objective, no schema version.
-            ? { outcome: 'completed', output: { schemaVersion: 1, workSummary: 'BROKEN_SUBMISSION_SENTINEL' }, usage }
-            : { outcome: 'completed', output: handoff('REPAIRED_HANDOFF_SENTINEL'), resultHandoff: handoff('REPAIRED_HANDOFF_SENTINEL'), usage };
-        },
-      },
-      next: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async operation => {
-          nextBriefings.push(operation.context.briefing ?? '');
-          return async () => ({ outcome: 'completed', output: { text: 'downstream done' }, usage });
-        },
-      },
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed',
-          output: null,
-          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
-  });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({
-    projectId: 'p',
-    request: 'TASK_BRIEFING_SENTINEL: build the parser and hand it to the next Agent',
-    requestId: 'begin',
-  });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'Retry after an invalid handoff must reconcile, not re-implement.',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      {
-        id: 'next', kind: 'agent', action: 'next', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
-        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-
-  const failed = await runtime.user.task(taskId).view();
-  const problem = failed.questions.find(question => question.nodeId === 'work' && question.kind === 'result_noncompliant');
-  expect(problem).toBeTruthy();
-  expect(problem!.data).toMatchObject({
-    defects: expect.arrayContaining([expect.objectContaining({ path: 'objective', class: 'semantic' })]),
-  });
-  expect(briefings).toHaveLength(1);
-  expect(briefings[0]).toContain('TASK_BRIEFING_SENTINEL');
-
-  await runtime.user.task(taskId).answer(problem!.id, { type: 'retry' }, 'retry');
-  await runtime.host.drive();
-
-  expect(briefings).toHaveLength(2);
-  expect(briefings[1]).not.toContain('TASK_BRIEFING_SENTINEL');
-  expect(briefings[1]).toContain('BROKEN_SUBMISSION_SENTINEL');
-  expect(briefings[1]).toContain('result_handoff@1');
-  expect(runtime.events(taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
-  expect(nextBriefings).toEqual([expect.stringContaining('REPAIRED_HANDOFF_SENTINEL')]);
-  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
-    expect.objectContaining({
-      sourceNodeId: 'work',
-      resultHandoff: expect.objectContaining({ workSummary: 'REPAIRED_HANDOFF_SENTINEL' }),
-    }),
-  ]);
-}, 120_000);
-
-test('an unusable handoff is refused inside the worker turn with field-level defects', async () => {
-  const provider = await openaiServer([
-    {
-      tools: [{
-        id: 'bad',
-        name: 'submit_result',
-        arguments: JSON.stringify({ outputJson: JSON.stringify({ schemaVersion: 1, workSummary: 'NO_OBJECTIVE_SENTINEL' }) }),
-      }],
-    },
-    {
-      tools: [{
-        id: 'fixed',
-        name: 'submit_result',
-        arguments: JSON.stringify({ outputJson: JSON.stringify(handoff('FIXED_IN_TURN_SENTINEL')) }),
-      }],
-    },
-    { text: 'WORKER_DONE' },
-    { text: 'DOWNSTREAM_DONE' },
-  ]);
-  cleanup.push(() => provider.close());
-  const root = await mkdtemp(join(tmpdir(), 'graph-handoff-inturn-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const { runtime } = await runtimeWithProvider(root, provider);
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'in-turn handoff', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'A refused submission must come back to the worker while its turn is open.',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      {
-        id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['work'],
-        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-
-  // The retry inside the same turn carries the refusal and the exact fields.
-  const afterRefusal = JSON.stringify(provider.requests[1]);
-  expect(afterRefusal).toContain('submit_result refused');
-  expect(afterRefusal).toContain('objective');
-  expect(afterRefusal).toContain('semantic');
-  expect(afterRefusal).toContain('Do not redo or rewrite the implementation');
-  // The corrected submission settled normally, with no problem handed back up.
-  const view = await runtime.user.task(taskId).view();
-  expect(view.questions).toEqual([]);
-  expect(runtime.events(taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
-  expect(runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs).toEqual([
-    expect.objectContaining({
-      sourceNodeId: 'work',
-      resultHandoff: expect.objectContaining({ workSummary: 'FIXED_IN_TURN_SENTINEL' }),
-    }),
-  ]);
-}, 120_000);
-
-test('a result the harness refuses at settlement is a repair problem, not an unknown outcome', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-settle-defect-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const workspace = join(root, 'project');
-  await mkdir(workspace, { recursive: true });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: workspace }],
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed',
-          output: null,
-          // Unusable: an acceptance artifact path must be absolute.
-          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: 'evidence.txt', digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
-  });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'settle defect', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'A refused result stays with the work instead of becoming unknown.',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [{ id: 'check', kind: 'program', action: 'check' }],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-
-  const view = await runtime.user.task(taskId).view();
-  expect(view.questions.map(question => question.kind)).toEqual(['result_noncompliant']);
-  expect(view.questions[0]!.data).toMatchObject({
-    defects: expect.arrayContaining([expect.objectContaining({ path: '$', class: 'semantic' })]),
-  });
-  // The operation is settled with a known result, never parked as unknown.
-  const settleOperation = view.operations[0]!;
-  expect(settleOperation.state).toBe('succeeded');
-  expect(settleOperation.workerActive).toBe(false);
-  expect((settleOperation.result as { outcome?: string }).outcome).toBe('failed');
-  expect(view.nodes[0]).toMatchObject({ status: 'blocked', reserved: 0 });
-  const events = runtime.events(taskId);
-  expect(events.some(event => event.type === 'operation.unknown')).toBe(false);
-  expect(events.some(event => event.type === 'context.result_noncompliant')).toBe(true);
-}, 120_000);
-
-test('the result_handoff schema example states the element type of every field, so a model cannot guess objects for a string list', () => {
-  // The validator demands short strings for knownLimits/openQuestions/nextActions and objects for
-  // changes/decisions/verification. The example showed the three string lists as bare `[]`, so a review
-  // lane sent objects in nextActions and was refused at settle - the schema it was told and the schema
-  // it must satisfy disagreed.
-  const example = JSON.parse(RESULT_HANDOFF_SCHEMA_EXAMPLE) as Record<string, unknown>;
-  for (const key of ['knownLimits', 'openQuestions', 'nextActions']) {
-    const value = example[key];
-    expect(Array.isArray(value)).toBe(true);
-    expect(typeof (value as unknown[])[0]).toBe('string');
-  }
-  for (const key of ['changes', 'decisions', 'verification']) {
-    const value = example[key];
-    expect(Array.isArray(value)).toBe(true);
-    expect(typeof (value as unknown[])[0]).toBe('object');
-  }
-});
+test('the declared handoff protocol shown to the worker enforces string-list element types before delivery', async () => {
+  const value = { knownLimits: ['none'], changes: [{ summary: 'Updated the parser' }] };
+  const graph = await fixture({ work: [submit({ ...value, knownLimits: [{ text: 'not a string' }] }), submit(value), { text: 'Submitted typed result' }], next: [{ text: 'Received typed result' }] });
+  await graph.create(definition({ work: node('work'), next: node('next', undefined, false) }, { handoff: { from: 'work.result', to: 'next.job', enabled: true } }, {
+    protocols: { data: { type: 'object', properties: { knownLimits: { type: 'array', items: { type: 'string' } }, changes: { type: 'array', items: { type: 'object', required: ['summary'], properties: { summary: { type: 'string' } } } } } } },
+  }));
+  await graph.send('work');
+  const initial = JSON.stringify(graph.providers.work!.requests[0]); expect(initial).toContain('knownLimits'); expect(initial).toContain('string');
+  expect(JSON.stringify(graph.providers.work!.requests[1])).toContain('knownLimits'); expect(JSON.stringify(graph.providers.work!.requests[1])).toContain('output_protocol_mismatch');
+  expect(await graph.edge()).toMatchObject({ deliveries: [{ value }] }); expect(graph.providers.next!.requests).toHaveLength(1);
+}, 30000);

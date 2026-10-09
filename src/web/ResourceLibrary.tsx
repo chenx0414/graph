@@ -1,3 +1,4 @@
+import { ModelGradeOptions } from './model-grade-options.tsx';
 import { ArchitectureBoard } from './ArchitectureBoard.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -530,7 +531,7 @@ function AgentCombinationEditor(input: {
             </div>
           )}
           <div className="form-grid">
-            <label><span>模型等级</span><select value={grade} onChange={event => setGrade(event.target.value as typeof grade)}><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="highest">最高</option></select></label>
+            <label><span>模型等级</span><select value={grade} onChange={event => setGrade(event.target.value as typeof grade)}><ModelGradeOptions /></select></label>
             <label className="recipe-check"><input type="checkbox" disabled={main} checked={main ? false : review} onChange={event => setReview(event.target.checked)} /><span>作为独立审查 Agent</span></label>
           </div>
           <label><span>标签</span><input value={tags} onChange={event => setTags(event.target.value)} placeholder="编码, 实现" /></label>

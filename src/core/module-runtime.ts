@@ -127,7 +127,7 @@ export class ModuleRuntime {
       if (row?.delivered) inputs[name] = row.value;
     }
     const stateRow = this.kernel.db.prepare('SELECT state FROM kernel_modules WHERE task_id=? AND module_id=?').get(this.taskId, moduleId) as { state: string } | undefined;
-    return { inputs, state: stateRow ? JSON.parse(stateRow.state) as Json : null };
+    return { inputs, state: stateRow ? this.kernel.content.decode<Json>(stateRow.state) : null };
   }
 
   private acceptControl(moduleId: string, inputName: string, value: Json): ModuleEvaluation | undefined {
@@ -304,7 +304,7 @@ export class ModuleRuntime {
       if (row?.delivered) inputs[name] = row.value;
     }
     const stateRow = this.kernel.db.prepare('SELECT state FROM kernel_modules WHERE task_id=? AND module_id=?').get(this.taskId, moduleId) as { state: string } | undefined;
-    const state = stateRow ? JSON.parse(stateRow.state) as Json : null;
+    const state = stateRow ? this.kernel.content.decode<Json>(stateRow.state) : null;
     const held = module.trigger === 'once' && this.latch(moduleId);
     const missing = (module.requiredInputs ?? []).filter(name => !(name in inputs));
     if (held || missing.length) {

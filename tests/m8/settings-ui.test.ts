@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import type { NativeProposal } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -112,6 +112,14 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  await page.clock.install();
+  const savedDocuments: string[] = [];
+  page.on('response', response => {
+    const request = response.request();
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/config' && response.status() === 200) {
+      savedDocuments.push(JSON.stringify((request.postDataJSON() as { document: unknown }).document));
+    }
+  });
   await page.goto(`${daemon.url}/#/settings`);
   await page.getByTestId('settings-page').waitFor();
   expect(await page.getByTestId('config-revision').innerText()).toBe('0');
@@ -207,7 +215,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.getByTestId('model-1-price').innerText()).toContain('价格未知');
   await page.getByTestId('model-1-context').fill('4096');
   await page.getByTestId('model-1-maxTokens').fill('256');
-  await page.getByTestId('model-1-grade').selectOption('high');
+  await page.getByTestId('model-1-grade').selectOption('frontier');
   // ② The added id is persisted with its typed-in required fields, and it keeps
   // reporting an unknown price instead of a fake 0.
   await expect.poll(async () => ((await (await api.get('/api/config')).json() as { config: { models: { entries: { modelId?: string }[] } } }).config.models.entries.some(entry => entry.modelId === 'stub-manual')), { timeout: 10_000 }).toBe(true);
@@ -220,8 +228,53 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   await page.getByTestId(`configured-default-${manualLocalId}`).click();
   await expect.poll(async () => (await (await api.get('/api/settings')).json() as { defaultModel: string }).defaultModel, { timeout: 10_000 }).toBe(manualLocalId);
   expect(await page.getByTestId('configured-default-model').innerText()).toBe('stub-manual');
-  const savedRevision = (await (await api.get('/api/config')).json() as { revision: number }).revision;
-  await openPage('常规');
+  // Seeing the model/default does not mean the last model edit has saved.
+  // Finish the browser's writes before introducing the deliberate stale-read race.
+  await expect.poll(async () => {
+    const models = (await (await api.get('/api/config')).json() as { config: { models: { entries: { id: string; grade: string; contextWindow: number; maxTokens: number }[] } } }).config.models.entries;
+    return models.find(entry => entry.id === manualLocalId);
+  }).toMatchObject({ grade: 'frontier', tier: 'frontier', contextWindow: 4096, maxTokens: 256 });
+  await page.getByTestId('model-tier-filter').selectOption('frontier');
+  expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(1);
+  expect(await page.getByTestId(`configured-model-${manualLocalId}`).innerText()).toContain('frontier');
+  await page.getByTestId('model-tier-filter').selectOption('small');
+  expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(0);
+  await page.getByTestId('model-tier-filter').selectOption('');
+  await expect.poll(() => page.getByTestId('config-status').innerText()).toContain('已自动保存 revision');
+  // Advance the real browser's debounce timers after the save receipt, with no new edit.
+  await page.clock.fastForward(1_000);
+  await api.get('/api/config');
+  // Successful autosave must not schedule another write of the same unchanged draft.
+  expect(savedDocuments.some((document, index) => index > 0 && document === savedDocuments[index - 1])).toBe(false);
+
+  // Race the two real startup snapshots: the startup response is captured
+  // before a hot save, while the config GET is delivered after that save.
+  let releaseStartup!: () => void; let releaseConfig!: () => void; let startupCaptured!: () => void;
+  const startupGate = new Promise<void>(resolve => { releaseStartup = resolve; });
+  const configGate = new Promise<void>(resolve => { releaseConfig = resolve; });
+  const captured = new Promise<void>(resolve => { startupCaptured = resolve; });
+  cleanup.push(() => { releaseStartup(); releaseConfig(); });
+  await page.route('**/api/startup', async route => {
+    const response = await route.fetch(); startupCaptured(); await startupGate; await route.fulfill({ response });
+  });
+  await page.route('**/api/config', async route => {
+    if (route.request().method() === 'GET') await configGate;
+    await route.continue();
+  });
+  await openPage('常规'); await captured;
+  const raceDocument = JSON.parse(await readFile(path, 'utf8')) as { revision: number };
+  const beforeRace = raceDocument.revision;
+  const hotSave = await api.post('/api/config', { expectedRevision: beforeRace, document: raceDocument });
+  const hotSaveBody = await hotSave.json() as { revision: number; effectiveRevision: number };
+  expect(hotSave.status, JSON.stringify(hotSaveBody)).toBe(200);
+  const savedRevision = hotSaveBody.revision;
+  expect(savedRevision).toBeGreaterThan(beforeRace);
+  releaseConfig();
+  await expect.poll(async () => Number(await page.getByTestId('config-revision').innerText())).toBeGreaterThanOrEqual(savedRevision);
+  releaseStartup();
+  // The source card is rendered by the same handler as the delayed startup
+  // revision, so waiting for it observes that response rather than a timer.
+  await page.getByTestId('source-root').waitFor();
   // Hot apply: the running build is never behind the revision saved by the time the
   // page opened, and no restart is requested. A snapshot equality against a revision
   // read once raced with the page's own auto-save (and a substring check could pass
@@ -279,7 +332,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(persisted.credentials.local?.secretRef).toBe('GRAPH_SYNTH_KEY');
   // ② an id added without snapshot metadata is persisted as unknown, not as 0.
   const added = persisted.models.entries.find(entry => entry.modelId === 'stub-manual');
-  expect(added).toMatchObject({ contextWindow: 4096, maxTokens: 256, grade: 'high' });
+  expect(added).toMatchObject({ contextWindow: 4096, maxTokens: 256, grade: 'frontier' });
   // No price was invented: an unknown price stays absent, never a 0.
   expect(added).not.toHaveProperty('cost');
   expect(added).not.toHaveProperty('pricing');
@@ -329,8 +382,8 @@ test('configured vendor panel edits an account and removes its linked models', a
   await page.getByTestId('configured-provider-local').waitFor();
   await page.getByTestId('configured-provider-edit-local').click();
   await page.getByTestId('provider-setup').waitFor();
-  expect(await page.getByTestId('provider-credentialId').inputValue()).toBe('local');
-  expect(await page.getByTestId('provider-baseUrl').inputValue()).toBe(stub.baseUrl);
+  await expect.poll(() => page.getByTestId('provider-credentialId').inputValue()).toBe('local');
+  await expect.poll(() => page.getByTestId('provider-baseUrl').inputValue()).toBe(stub.baseUrl);
   page.once('dialog', dialog => void dialog.accept());
   await page.getByTestId('configured-provider-delete-local').click();
   await expect.poll(async () => {

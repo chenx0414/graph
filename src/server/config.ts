@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { RuntimeError } from '../core/types.ts';
 import { defaultAccessPolicy, parseAccessPolicy, type AccessPolicy } from '../core/access-policy.ts';
-import { MODEL_INPUTS, MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelInput, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
+import { MODEL_GRADES, MODEL_INPUTS, MODEL_THINKING_LEVELS, type ModelApi, type ModelCost, type ModelEntry, type ModelGrade, type ModelInput, type ModelPricing, type ModelThinkingLevel } from '../catalog/models.ts';
 import { DEFAULT_SEDIMENT_SETTINGS, type SedimentSettings } from '../runtime/sediment.ts';
 
 /** Versioned on-disk configuration. Secrets are never stored here; a credential
@@ -50,7 +50,7 @@ export interface GraphConfig {
   piExtensionAutoUpdate: boolean;
 }
 
-const GRADES: ModelGrade[] = ['low', 'medium', 'high', 'highest'];
+const GRADES = MODEL_GRADES;
 const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function emptyGraphConfig(): GraphConfig {

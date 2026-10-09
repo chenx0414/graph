@@ -31,6 +31,8 @@ test('native worker output is integrated from its own worktree and leaves the ta
     { text: 'implementation submitted' },
     { tools: [{ id: 'later-write', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'later working version\n' }) }] },
     { text: 'working file changed' },
+    { tools: [{ id: 'later-submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { summary: 'integrate later version' } } } }) }] },
+    { text: 'later version ready to integrate' },
   ]);
   cleanup.push(() => provider.close());
   const stateDir = join(root, 'state');
@@ -70,6 +72,13 @@ test('native worker output is integrated from its own worktree and leaves the ta
   await main.graphSend({ graphId: graph.graphId, nodeId: 'work', text: 'Change the working file for a later version, without publishing.' });
   await runtime.host.drive();
   expect(await readFile(join(worker.path, 'feature.txt'), 'utf8')).toBe('later working version\n');
+  const previousCommit = git(worker.path, ['rev-parse', 'HEAD']).stdout.trim();
+  await main.graphSend({ graphId: graph.graphId, nodeId: 'work', input: 'start', value: { request: 'Integrate the later working version.' } });
+  await runtime.host.drive();
+  expect(git(worker.path, ['rev-parse', 'HEAD']).stdout.trim()).not.toBe(previousCommit);
+  expect(await readFile(join(integration.path, 'feature.txt'), 'utf8')).toBe('later working version\n');
+  expect(git(worker.path, ['log', '-1', '--format=%an <%ae>|%cn <%ce>']).stdout.trim())
+    .toBe('Native <native@agents.graph.local>|Native <native@agents.graph.local>');
   expect((await runtime.artifacts.read(graph.graphId, published[0]!.artifactId, published[0]!.version)).text).toBe('implemented\n');
   await main.graphControl({ graphId: graph.graphId, action: 'complete' });
   await runtime.host.drive();

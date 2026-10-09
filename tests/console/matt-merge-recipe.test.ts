@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
@@ -72,17 +72,15 @@ test('the merge recipe compiles, and its identity really becomes the system prom
 
   // A node that cites the recipe must receive the merge identity as its system prompt.
   const { taskId } = await server.runtime.user.begin({ projectId: 'project', request: 'merge lanes', requestId: 'begin' });
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'merge lanes',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'merge-lane', kind: 'agent', action: 'work', definitionVersion: 'matt-merge@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['merge-lane'] },
-    ],
-  }, 'proposal');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await server.runtime.host.runReady();
+  const main = server.runtime.supervisor(taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({
+    schemaVersion: 2, name: 'Explicit merge service', protocols: { job: { type: 'object' } },
+    nodes: { 'merge-lane': { recipe: 'matt-merge@1', model: 'local', task: 'Explain the safe merge procedure.',
+      inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  expect(provider.requests).toHaveLength(0);
+  await main.graphSend({ graphId, nodeId: 'merge-lane', input: 'job', value: {} });
+  await server.runtime.host.drive();
 
   expect(provider.requests).toHaveLength(1);
   const sent = provider.requests[0] as { messages: { role: string; content: string }[] };

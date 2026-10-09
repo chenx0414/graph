@@ -1,149 +1,152 @@
-import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import type { EdgeExplanation } from '../../src/core/kernel-explain.ts';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, Json, Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition, type GraphDefinition, type NodeDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
+
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-
-async function setup(actions: Record<string, ActionAdapter>, proposal: Proposal) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-m2-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions };
+const data = { protocol: 'data' };
+const node = (model: string): NodeDefinition => ({ recipe: 'coder@1', model, task: 'Process the delivered task and submit its result',
+  inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } });
+const submitted = (value: unknown | (() => unknown)): ResponsePlan => ({ tools: [{ id: 'submit', name: 'submit',
+  arguments: () => JSON.stringify({ outputs: { result: { enable: true, value: typeof value === 'function' ? value() : value } } }) }] });
+async function setup(definition: GraphDefinition, plans: Record<string, ResponsePlan[]>) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-structure-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const providers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
+  for (const [id, responses] of Object.entries(plans)) { const provider = await openaiServer(responses); providers[id] = provider; cleanup.push(() => provider.close()); }
+  const options = { stateDir: join(root, 'state'), projects: [{ id: 'p', root }], models: { apiKey: 'local-only', modelRuntime: Object.values(providers)[0]!.runtime,
+    entries: Object.entries(providers).map(([id, provider]) => ({ id, provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 })) } };
   const runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: proposal.summary, requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose(proposal, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  return { root, runtime, task, taskId, options };
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  const { taskId: ownerId } = await runtime.user.begin({ projectId: 'p', request: definition.name, requestId: 'begin' });
+  const main = runtime.supervisor(ownerId);
+  const { graphId } = await main.graphCreate({ definition }) as { graphId: string };
+  return { root, runtime, main, graphId, ownerId, options, providers };
 }
-const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
 
-test('nested subgraphs route to the selected branch and export their outputs without creating container instances', async () => {
-  let rejectedBranchSends = 0;
-  let artifact = '';
-  const { root, runtime, task } = await setup({
-    route: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: { selected: 'text' }, route: 'text' }) },
-    text: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: { format: 'text' }, usage }) },
-    json: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => { rejectedBranchSends++; return { outcome: 'completed', output: { format: 'json' }, usage }; } },
-    join: { kind: 'program', prepare: async operation => async () => {
-      expect(operation.dependencies.inner).toEqual({ text: { format: 'text' }, json: null });
-      return { outcome: 'completed', output: { selected: 'text' } };
-    } },
-    check: { kind: 'program', prepare: async operation => async () => {
-      expect(operation.dependencies.outer).toEqual({ join: { selected: 'text' } });
-      await writeFile(artifact, 'text selected');
-      return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'route', summary: 'Only text branch selected', artifact: { path: artifact, digest: createHash('sha256').update(await readFile(artifact)).digest('hex') } }] };
-    } },
-  }, {
-    requirementVersion: 1, summary: 'Nested routed work', acceptance: [{ id: 'route', description: 'Select correct output', checkNode: 'check' }],
-    containers: [{ id: 'outer', outputs: ['join'] }, { id: 'inner', parent: 'outer', outputs: ['text', 'json'] }],
-    nodes: [
-      { id: 'route', kind: 'program', action: 'route', container: 'outer', routes: ['text', 'json'] },
-      { id: 'text', kind: 'agent', action: 'text', definitionVersion: 'coder@1', model: 'scripted', container: 'inner', when: { node: 'route', case: 'text' } },
-      { id: 'json', kind: 'agent', action: 'json', definitionVersion: 'coder@1', model: 'scripted', container: 'inner', when: { node: 'route', case: 'json' } },
-      { id: 'join', kind: 'program', action: 'join', container: 'outer', dependsOn: ['inner'] },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['outer'] },
-    ],
+test('nested native subgraphs route only the selected branch and export mapped outputs without container executions', async () => {
+  const inner = parseGraphDefinition({ schemaVersion: 2, name: 'Choose format', protocols: { data: { type: 'object' } }, nodes: { text: node('text'), json: node('json') },
+    modules: { route: { type: 'router', trigger: 'each', inputs: { job: data }, outputs: { text: data, json: data }, rules: [
+      { when: 'job.kind == "text"', emit: { text: '$job' } }, { when: 'job.kind == "json"', emit: { json: '$job' } },
+    ] } }, edges: { text: { from: 'route.text', to: 'text.job', enabled: true }, json: { from: 'route.json', to: 'json.job', enabled: true } },
+    inputs: { job: { to: 'route.job', protocol: 'data' } }, outputs: { result: { from: 'text.result', protocol: 'data' } } });
+  const outer = parseGraphDefinition({ schemaVersion: 2, name: 'Outer reusable graph', protocols: { data: { type: 'object' } }, nodes: {}, modules: {}, edges: {},
+    templates: { formats: { version: 1, definition: inner } }, instances: { inner: { template: 'formats', version: 1 } },
+    inputs: { job: { to: 'inner.job', protocol: 'data' } }, outputs: { result: { from: 'inner.result', protocol: 'data' } } });
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Nested native route', protocols: { data: { type: 'object' } }, nodes: {}, modules: {}, edges: {},
+    templates: { outer: { version: 1, definition: outer } }, instances: { outer: { template: 'outer', version: 1 } },
+    inputs: { job: { to: 'outer.job', protocol: 'data' } }, outputs: { result: { from: 'outer.result', protocol: 'data' } } });
+  const { runtime, main, graphId, providers } = await setup(definition, { text: [submitted({ format: 'text' }), { text: 'Text result submitted' }], json: [] });
+  await main.graphSend({ graphId, input: 'job', value: { kind: 'text' } }); await runtime.host.drive();
+  expect(providers.text!.requests).toHaveLength(2); expect(providers.json!.requests).toEqual([]);
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: { format: 'text' } }]);
+  const view = await runtime.user.task(graphId).view();
+  expect(view.phase).toBe('idle');
+  expect(new Set(view.nodes.map(item => item.id))).toEqual(new Set(['outer/inner/text', 'outer/inner/json']));
+  expect(new Set(view.nodes.map(item => item.instanceId)).size).toBe(2);
+  const history = await main.graphInspect({ graphId, query: 'executions' }) as { items: { nodeId: string; state: string }[] };
+  expect(history.items).toMatchObject([{ nodeId: 'outer/inner/text', state: 'completed' }]);
+  await expect(main.graphInspect({ graphId, query: 'module', id: 'outer/inner/route' })).resolves.toMatchObject({ transitions: [{ outputs: { text: { kind: 'text' } } }] });
+  await expect(main.graphInspect({ graphId, query: 'edge', id: 'outer/inner/json' })).resolves.toMatchObject({ deliveries: [], latest: null });
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'completed' });
+});
+
+test('native required failure holds only its join and explicit retry reuses the successful sibling while an optional failure is absent', async () => {
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Required and optional branches', protocols: { data: { type: 'object' } },
+    nodes: { work: { ...node('work'), retry: { automatic: 0, resubmit: 0 } }, sibling: node('sibling'), optional: { ...node('optional'), retry: { automatic: 0, resubmit: 0 } } },
+    modules: { join: { type: 'router', trigger: 'once', requiredInputs: ['work', 'sibling'], inputs: { work: data, sibling: data, optional: data }, outputs: { result: data },
+      rules: [{ when: 'work.passed == true && sibling.passed == true', emit: { result: { work: '$work', sibling: '$sibling' } } }] } },
+    edges: Object.fromEntries(['work', 'sibling', 'optional'].map(id => [id, { from: `${id}.result`, to: `join.${id}`, enabled: true }])),
+    outputs: { result: { from: 'join.result', protocol: 'data' } } });
+  const { runtime, main, graphId, providers } = await setup(definition, {
+    work: [{ text: 'Required source unavailable; no deliverable submitted' }, submitted({ passed: true, attempt: 2 }), { text: 'Recovered work submitted' }],
+    sibling: [submitted({ passed: true, stable: true }), { text: 'Sibling submitted' }], optional: [{ text: 'Optional source unavailable; no deliverable submitted' }],
   });
-  artifact = join(root, 'route.txt');
-  for (let step = 0; step < 4; step++) expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.nodes.find(node => node.id === 'json')).toMatchObject({ status: 'skipped', used: 0 });
-  expect(view.containers).toMatchObject([{ id: 'outer', status: 'succeeded', output: { join: { selected: 'text' } } }, { id: 'inner', status: 'succeeded' }]);
-  expect(view.nodes.filter(node => node.instanceId)).toHaveLength(2);
-  expect(rejectedBranchSends).toBe(0);
-});
-
-test('required failures block only their join, optional failures may be absent, and retry reuses the successful sibling', async () => {
-  let attempts = 0; let siblingRuns = 0; let artifact = '';
-  const { root, runtime, task } = await setup({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: ++attempts === 1 ? 'failed' : 'completed', output: { attempt: attempts }, usage }) },
-    sibling: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => { siblingRuns++; return { outcome: 'completed', output: { stable: true }, usage }; } },
-    optional: { kind: 'program', prepare: async () => async () => ({ outcome: 'failed', output: { reason: 'Optional source unavailable' } }) },
-    check: { kind: 'program', prepare: async operation => async () => {
-      expect(operation.dependencies.sibling).toEqual({ stable: true });
-      await writeFile(artifact, 'joined');
-      return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'join', summary: 'Both required branches joined', artifact: { path: artifact, digest: createHash('sha256').update(await readFile(artifact)).digest('hex') } }] };
-    } },
-  }, { requirementVersion: 1, summary: 'Join required work', acceptance: [{ id: 'join', description: 'Required work succeeds', checkNode: 'check' }], nodes: [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'sibling', kind: 'agent', action: 'sibling', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'optional', kind: 'program', action: 'optional', optional: true },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'sibling', 'optional'] },
-  ] });
-  artifact = join(root, 'joined.txt');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 3 });
-  const failed = await task.view();
-  expect(failed.questions).toMatchObject([{ nodeId: 'work', kind: 'execution_failed' }]);
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  await task.answer(failed.questions[0]!.id, { type: 'retry' }, 'retry');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const completed = await task.view();
-  expect(completed.phase).toBe('completed');
-  expect(completed.nodes[0]).toMatchObject({ instanceId: failed.nodes[0]!.instanceId, used: 100 });
-  expect(siblingRuns).toBe(1);
-});
-
-test('a downstream check receives the persisted activation and artifact versions that produced its input', async () => {
-  let artifact = ''; let producerActivation = '';
-  const { root, runtime, task, taskId, options } = await setup({
-    produce: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-      producerActivation = operation.activationId;
-      await writeFile(artifact, 'versioned result');
-      return { outcome: 'completed', output: { artifact }, usage, artifacts: [{ id: 'result', path: artifact, digest: createHash('sha256').update(await readFile(artifact)).digest('hex') }] };
-    } },
-    check: { kind: 'program', prepare: async operation => async () => {
-      expect(operation.dependencySources.produce).toMatchObject([{ activationId: producerActivation, outputVersion: 1, artifacts: [{ id: 'result', activationId: producerActivation, nodeId: 'produce', path: artifact }] }]);
-      const version = operation.dependencySources.produce![0]!.artifacts[0]!;
-      expect(version.operationId).toBe(operation.dependencySources.produce![0]!.operationId);
-      return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'version', summary: 'Checked exact producer artifact', artifact: { path: artifact, digest: version.digest } }] };
-    } },
-  }, { requirementVersion: 1, summary: 'Versioned handoff', acceptance: [{ id: 'version', description: 'Check exact input', checkNode: 'check' }], nodes: [
-    { id: 'produce', kind: 'agent', action: 'produce', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['produce'] },
-  ] });
-  artifact = join(root, 'artifact.txt');
-  await runtime.host.runReady();
-  const before = await task.view();
-  expect(before.nodes[0]).toMatchObject({ activationId: expect.any(String), outputVersion: 1 });
-  expect(before.operations[0]).toMatchObject({ activationId: before.nodes[0]!.activationId, graphVersion: 1 });
-  await runtime.close();
-  const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
-  await restored.host.runReady();
-  const completed = await restored.user.task(taskId).view();
-  expect(completed.phase).toBe('completed');
-  expect(completed.evidence[0]).toMatchObject({ activationId: completed.nodes[1]!.activationId, valid: true });
-});
-
-test('a verifier gate can sit outside a nested container and still consume descendant artifacts', async () => {
-  const config = { kind: 'multiview' as const, subjectNode: 'produce', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }] };
-  let artifact = '';
-  const { root, runtime, task } = await setup({
-    produce: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-      await writeFile(artifact, 'nested');
-      return { outcome: 'completed', output: { nested: true }, usage, artifacts: [{ id: 'result', path: artifact, digest: createHash('sha256').update('nested').digest('hex') }] };
-    } },
-    review: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-      const subject = operation.dependencySources.produce![0]!.artifacts[0]!;
-      return { outcome: 'completed', output: { schemaVersion: 1, subject, body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Nested output matches', evidence: [subject] } } } } as unknown as Json, usage };
-    } },
-  }, {
-    requirementVersion: 1, summary: 'Nested verifier',
-    acceptance: [{ id: 'version', description: 'Nested check', checkNode: 'gate' }],
-    containers: [{ id: 'inner', outputs: ['produce', 'review'] }],
-    nodes: [
-      { id: 'produce', kind: 'agent', action: 'produce', definitionVersion: 'coder@1', model: 'scripted', container: 'inner' },
-      { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'coder@1', model: 'scripted', container: 'inner', dependsOn: ['produce'] },
-      { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['produce', 'review'], verifier: config },
-    ],
-  });
-  artifact = join(root, 'artifact.txt');
+  const instanceId = runtime.nodeRun(graphId, 'work').instance!.id;
+  for (const id of ['work', 'sibling', 'optional']) await main.graphSend({ graphId, nodeId: id, input: 'job', value: {} });
   await runtime.host.drive();
-  expect((await task.view()).phase).toBe('completed');
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toEqual([]);
+  await expect(main.graphInspect({ graphId, query: 'module', id: 'join' })).resolves.toMatchObject({ triggered: false, inputs: expect.arrayContaining([
+    expect.objectContaining({ name: 'work', missing: true }), expect.objectContaining({ name: 'sibling', value: { passed: true, stable: true } }), expect.objectContaining({ name: 'optional', missing: true }),
+  ]) });
+  const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; nodeId: string; state: string }[] };
+  expect(queue.items.find(item => item.nodeId === 'work')!.state).not.toBe('done');
+  await main.graphControl({ graphId, action: 'retry', seq: queue.items.find(item => item.nodeId === 'work')!.seq }); await runtime.host.drive();
+  expect(providers.work!.requests).toHaveLength(3); expect(providers.sibling!.requests).toHaveLength(2); expect(providers.optional!.requests).toHaveLength(1);
+  expect(runtime.nodeRun(graphId, 'work').instance!.id).toBe(instanceId);
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: { work: { passed: true, attempt: 2 }, sibling: { stable: true } } }]);
+  await expect(main.graphInspect({ graphId, query: 'module', id: 'join' })).resolves.toMatchObject({ triggered: true, inputs: expect.arrayContaining([expect.objectContaining({ name: 'work', delivered: true }), expect.objectContaining({ name: 'sibling', delivered: true }), expect.objectContaining({ name: 'optional', missing: true })]) });
+  await main.graphControl({ graphId, action: 'skip', seq: queue.items.find(item => item.nodeId === 'optional')!.seq });
+
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'completed' });
+});
+
+const artifactReference = (runtime: Awaited<ReturnType<typeof openTaskRuntime>>, graphId: string) => {
+  const item = runtime.artifacts.list(graphId, { namespace: 'plans' }).artifacts[0]!;
+  return { artifactId: item.artifactId, version: item.version, digest: item.digest };
+};
+const publish: ResponsePlan = { tools: [{ id: 'publish', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'plans', name: 'candidate', mediaType: 'text/markdown', content: 'stable candidate', requestId: 'candidate' }) }] };
+
+test('a native downstream execution receives the persisted producer delivery and immutable artifact version after restart', async () => {
+  let current!: Awaited<ReturnType<typeof openTaskRuntime>>; let id = '';
+  const reference = () => artifactReference(current, id);
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Versioned native handoff', protocols: { data: { type: 'object' } }, nodes: { produce: node('produce'), check: node('check') }, modules: {},
+    edges: { handoff: { from: 'produce.result', to: 'check.job', enabled: true } }, outputs: { result: { from: 'check.result', protocol: 'data' } } });
+  const fixture = await setup(definition, { produce: [publish, submitted(() => ({ subject: reference() })), { text: 'Candidate submitted' }],
+    check: [{ tools: [{ id: 'read', name: 'artifact_read', arguments: () => JSON.stringify(reference()) }] }, submitted(() => ({ passed: true, subject: reference() })), { text: 'Stable candidate checked' }] });
+  current = fixture.runtime; id = fixture.graphId;
+  const { runtime, main, graphId, options, ownerId, providers } = fixture;
+  await main.graphControl({ graphId, nodeId: 'check', action: 'pause' });
+  await main.graphSend({ graphId, nodeId: 'produce', input: 'job', value: {} }); await runtime.host.drive();
+  const subject = reference();
+  const delivery = await main.graphInspect({ graphId, query: 'edge', id: 'handoff' }) as EdgeExplanation;
+  expect(delivery.deliveries[0]!.receiver.state).toBe('queued');
+  const producer = await main.graphInspect({ graphId, query: 'executions' });
+  expect(providers.produce!.requests).toHaveLength(3); expect(providers.check!.requests).toEqual([]);
+  await runtime.close(); current = await openTaskRuntime(options); cleanup.push(() => current.close());
+  const recovered = current.supervisor(ownerId);
+  await recovered.graphControl({ graphId, nodeId: 'check', action: 'resume' }); await current.host.drive();
+  expect(providers.produce!.requests).toHaveLength(3); expect(providers.check!.requests).toHaveLength(3);
+  expect(JSON.stringify(providers.check!.requests[0])).toContain(subject.digest);
+  expect(JSON.stringify(providers.check!.requests[1])).toContain('stable candidate');
+  const received = await recovered.graphInspect({ graphId, query: 'edge', id: 'handoff' }) as EdgeExplanation;
+  expect(received.deliveries[0]!.receiver.state).toBe('done');
+  // Only processing state evolves; immutable delivery bytes and provenance survive restart.
+  const immutable = (edge: EdgeExplanation) => ({ ...edge, deliveries: edge.deliveries.map(({ receiver: _receiver, ...record }) => record) });
+  expect(immutable(received)).toEqual(immutable(delivery));
+  const history = await recovered.graphInspect({ graphId, query: 'executions' }) as { items: { nodeId: string; state: string }[] };
+  expect(history.items).toMatchObject([{ nodeId: 'produce', state: 'completed' }, { nodeId: 'check', state: 'completed' }]);
+  expect((producer as { items: unknown[] }).items[0]).toEqual(history.items[0]);
+  await expect(recovered.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: { passed: true, subject } }]);
+  expect((await current.artifacts.read(graphId, subject.artifactId, subject.version)).text).toBe('stable candidate');
+});
+
+test('a native review gate outside a reusable subgraph consumes its explicitly exported stable artifact reference', async () => {
+  let current!: Awaited<ReturnType<typeof openTaskRuntime>>; let id = '';
+  const reference = () => artifactReference(current, id);
+  const inner = parseGraphDefinition({ schemaVersion: 2, name: 'Produce and review', protocols: { data: { type: 'object' } }, nodes: { produce: node('produce'), review: node('review') }, modules: {},
+    edges: { review: { from: 'produce.result', to: 'review.job', enabled: true } }, inputs: { job: { to: 'produce.job', protocol: 'data' } }, outputs: { result: { from: 'review.result', protocol: 'data' } } });
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'External explicit review gate', protocols: { data: { type: 'object' } }, nodes: {},
+    templates: { development: { version: 1, definition: inner } }, instances: { inner: { template: 'development', version: 1 } },
+    modules: { gate: { type: 'router', trigger: 'each', inputs: { review: data }, outputs: { passed: data }, rules: [{ when: 'review.passed == true', emit: { passed: '$review' } }] } },
+    edges: { judgment: { from: 'inner.result', to: 'gate.review', enabled: true } }, inputs: { job: { to: 'inner.job', protocol: 'data' } }, outputs: { result: { from: 'gate.passed', protocol: 'data' } } });
+  const fixture = await setup(definition, { produce: [publish, submitted(() => ({ subject: reference() })), { text: 'Nested candidate submitted' }],
+    review: [{ tools: [{ id: 'read', name: 'artifact_read', arguments: () => JSON.stringify(reference()) }] }, submitted(() => ({ passed: true, subject: reference(), dimension: 'correctness' })), { text: 'Nested candidate reviewed' }] });
+  current = fixture.runtime; id = fixture.graphId;
+  const { runtime, main, graphId, providers } = fixture;
+  await main.graphSend({ graphId, input: 'job', value: {} }); await runtime.host.drive();
+  expect(providers.produce!.requests).toHaveLength(3); expect(providers.review!.requests).toHaveLength(3);
+  expect(JSON.stringify(providers.review!.requests[1])).toContain('stable candidate');
+  const subject = reference();
+  await expect(main.graphInspect({ graphId, query: 'module', id: 'gate' })).resolves.toMatchObject({ inputs: [{ value: { subject, passed: true } }], transitions: [{ outputs: { passed: { subject, dimension: 'correctness' } } }] });
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: { passed: true, subject } }]);
+  expect((await runtime.user.task(graphId).view()).nodes).toHaveLength(2);
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'completed' });
 });

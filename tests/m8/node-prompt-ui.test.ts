@@ -9,7 +9,7 @@ import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import type { NativeProposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;

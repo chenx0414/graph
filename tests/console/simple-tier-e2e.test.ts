@@ -1,14 +1,4 @@
-// A simple-tier graph, end to end (R23).
-//
-// The tier's contract, from docs/design-graph-examples.md: "a subagent is derived by main, does one
-// self-contained job, returns a STRUCTURED result, and its session ends." This proves that whole
-// chain against a real model server, through the production create -> propose -> accept -> dispatch
-// -> settle path. Nothing about the graph machinery is stubbed; only the model's replies are
-// scripted.
-//
-// It deliberately does NOT include a master node: this is what main would derive, and the handoff
-// tests already cover master-driven graphs. That also keeps the fixture free of the master's own
-// dispatch loop, so a failure here is a failure of the tier, not of that loop.
+// Main derives a native graph, receives structured results, and explicitly ends its service lifecycle.
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +7,8 @@ import { afterEach, expect, test } from 'vitest';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { canonicalJson } from '../../src/core/store.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -26,7 +17,7 @@ afterEach(async () => {
 });
 const presetsRoot = fileURLToPath(new URL('../../presets', import.meta.url));
 
-/** A valid result_handoff@1, the structured result the tier promises. */
+/** A valid user-defined findings payload, the structured result the tier promises. */
 function handoff(objective: string, workSummary: string) {
   return {
     schemaVersion: 1 as const,
@@ -48,26 +39,15 @@ test('simple tier: a derived subagent runs, returns a structured result, and han
   const workspace = join(root, 'project');
   await mkdir(workspace, { recursive: true });
 
-  // Every agent reply submits a valid structured result. The reply is deliberately independent of
-  // which node asks or how often: an agent that keeps working must still be able to comply, and a
-  // retry must not consume a reply meant for a different node.
-  const reply = () => ({ tools: [{ id: 'submit', name: 'submit_result', arguments: JSON.stringify({ outputJson: JSON.stringify(handoff('调研一个问题', 'SIMPLE_TIER_FINDINGS')) }) }] });
-  const provider = await openaiServer([reply(), reply(), reply(), reply()]);
+  const findings = handoff('调研一个问题', 'SIMPLE_TIER_FINDINGS');
+  const result = handoff('汇总调研', 'SIMPLE_TIER_SYNTHESIS');
+  const reply = (value: ReturnType<typeof handoff>) => ({ tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value } } }) }] });
+  const provider = await openaiServer([reply(findings), { text: 'Research finished.' }, reply(result), { text: 'Synthesis finished.' }]);
   cleanup.push(() => provider.close());
 
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root: workspace }],
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed',
-          output: null,
-          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
     models: {
       entries: [{
         id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
@@ -80,54 +60,40 @@ test('simple tier: a derived subagent runs, returns a structured result, and han
   cleanup.push(() => runtime.close());
   await installPresets(runtime.catalog, presetsRoot);
 
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'simple tier', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: '派生一个自包含的子任务，拿回结构化结果。',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      // The derived subagent: a plain agent node. Its "role" is a recipe (definition), chosen by
-      // main -- not an enum value, and not a new field.
-      { id: 'research', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      // A downstream edge consumes the structured result, which is what forces the handoff contract.
-      {
-        id: 'next', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', dependsOn: ['research'],
-        context: { purpose: 'implement', predecessors: [{ source: 'research', mode: 'result_handoff' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const { taskId: ownerId } = await runtime.user.begin({ projectId: 'p', request: 'simple tier', requestId: 'begin' });
+  const main = runtime.supervisor(ownerId);
+  const node = (task: string) => ({ recipe: 'coder@1', model: 'local', task, inputs: { job: { protocol: 'handoff' } }, outputs: { result: { protocol: 'handoff' } }, submission: { required: ['result'] } });
+  const created = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'simple tier',
+    protocols: { handoff: { type: 'object', required: ['objective', 'workSummary', 'outcome'], properties: { objective: { type: 'string' }, workSummary: { type: 'string' }, outcome: { type: 'string' } } } },
+    nodes: { research: node('调研一个自包含问题'), next: node('汇总输入的结构化调研结果') },
+    modules: {}, edges: { findings: { from: 'research.result', to: 'next.job', enabled: true } },
+    outputs: { result: { from: 'next.result', protocol: 'handoff' } },
+  }) }) as { graphId: string };
+  const graphId = created.graphId;
+  expect(provider.requests).toEqual([]);
+  await main.graphSend({ graphId, nodeId: 'research', input: 'job', value: handoff('调研一个问题', 'Start research.') });
   await runtime.host.drive();
-
-  // 1. The derived subagent was offered the structured-result tool, and no master-only tool leaked.
-  const firstRequest = provider.requests[0] as { tools?: { function: { name: string } }[] } | undefined;
-  const researchTools = firstRequest?.tools?.map(tool => tool.function.name) ?? [];
-  expect(researchTools).toContain('submit_result');
+  const firstRequest = provider.requests[0] as { tools?: { function: { name: string } }[] };
+  const researchTools = firstRequest.tools!.map(tool => tool.function.name);
+  expect(researchTools).toContain('submit');
+  expect(researchTools).not.toContain('propose_graph');
   expect(researchTools).not.toContain('artifact_promote');
-
-  // 2. Its structured result really reached the downstream node.
-  const downstream = runtime.nodeRun(taskId, 'next').context?.predecessorHandoffs;
-  expect(downstream).toEqual([
-    expect.objectContaining({
-      sourceNodeId: 'research',
-      mode: 'result_handoff',
-      resultHandoff: expect.objectContaining({ workSummary: 'SIMPLE_TIER_FINDINGS' }),
-    }),
-  ]);
-
-  // 3. Every node finished: the subagent's session ended, and the graph drained in one pass.
-  const view = await runtime.user.task(taskId).view();
-  const statuses = Object.fromEntries(view.nodes.map(node => [node.id, node.status]));
-  expect(statuses['research']).toBe('succeeded');
-  expect(statuses['next']).toBe('succeeded');
-  expect(statuses['check']).toBe('succeeded');
-
-  // 4. Each agent node dispatched exactly once: two agents, two operations. A re-dispatch would
-  //    inflate this, and it is a node fact rather than a reply-count guess.
-  const { TaskStore } = await import('../../src/core/store.ts');
-  const probe = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  const dispatched = probe.db.prepare("SELECT COUNT(*) AS n FROM operations WHERE task_id=? AND node_id IN ('research','next')").get(taskId) as { n: number };
-  probe.close();
-  expect(dispatched.n).toBe(2);
+  const downstream = await runtime.nodeRun(graphId, 'next');
+  expect(downstream.entries[0]?.text).toContain(canonicalJson(findings));
+  expect(JSON.stringify(provider.requests[2])).toContain('SIMPLE_TIER_FINDINGS');
+  for (const id of ['research', 'next']) {
+    const run = await runtime.nodeRun(graphId, id);
+    expect(run.node.status).toBe('succeeded');
+    expect(run.operations).toHaveLength(1);
+  }
+  expect(provider.requests).toHaveLength(4);
+  expect(await main.graphInspect({ graphId, query: 'queue' })).toMatchObject({ items: [{ nodeId: 'research', state: 'done' }, { nodeId: 'next', state: 'done' }] });
+  expect(await main.graphInspect({ graphId, query: 'results' })).toMatchObject([{ value: result }]);
+  expect((await runtime.user.task(graphId).view()).phase).not.toBe('completed');
+  await main.graphControl({ graphId, action: 'complete' });
+  await runtime.host.drive();
+  expect((await runtime.user.task(graphId).view()).phase).toBe('completed');
+  expect((await runtime.user.task(ownerId).view()).phase).toBe('discussing');
+  await expect(main.graphSend({ graphId, nodeId: 'research', input: 'job', value: findings })).rejects.toMatchObject({ code: 'completing' });
+  expect(provider.requests).toHaveLength(4);
 }, 120_000);

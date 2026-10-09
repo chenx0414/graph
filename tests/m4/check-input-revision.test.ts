@@ -1,69 +1,45 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
-import { applyRevision } from '../../src/core/revision.ts';
-import { TaskStore } from '../../src/core/store.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { expect, test } from 'vitest';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { git } from '../../src/git/git.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
-const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-
-// The smallest graph that carries an acceptance item backed by a program check:
-// one agent lane and one graph.command check that runs a test file.
-function proposal(checkArgs: string[]): Proposal {
-  return {
-    requirementVersion: 1,
-    summary: 'HB-26 fixture: a confirmed acceptance check that cannot run.',
-    acceptance: [{ id: 'suite-runs', description: 'The suite runs', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: checkArgs } },
-    ],
-  };
-}
-
-/** A store holding one task whose proposal is confirmed, so a revision is allowed to touch it. */
-async function confirmed(input: { proved: boolean }) {
-  const dir = await mkdtemp(join(tmpdir(), 'graph-check-input-'));
-  cleanup.push(() => rm(dir, { recursive: true, force: true }));
-  const store = new TaskStore(join(dir, 'state.sqlite'));
-  const spec = proposal(['--test', 'tests/m1/execution.test.ts']);
-  store.db.prepare('INSERT INTO projects(id, root, grants) VALUES(?,?,?)').run('p', dir, '[]');
-  store.db.prepare('INSERT INTO tasks(id, project_id, request, requirement_version, latest_proposal, accepted_proposal, target_branch, phase, created_seq, graph_version) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run('t', 'p', 'make the check runnable', 1, 1, 1, 'main', 'executing', 1, 1);
-  store.db.prepare('INSERT INTO proposals(task_id, version, requirement_version, spec) VALUES(?,?,?,?)').run('t', 1, 1, JSON.stringify(spec));
-  store.db.prepare('INSERT INTO graph_revisions(task_id, version, spec, reason) VALUES(?,?,?,?)').run('t', 1, JSON.stringify(spec), 'initial graph');
-  for (const node of spec.nodes) {
-    store.db.prepare('INSERT INTO nodes(task_id, id, spec, status) VALUES(?,?,?,?)').run('t', node.id, JSON.stringify(node), 'succeeded');
-  }
-  if (input.proved) {
-    // The check ran and its evidence for the acceptance item is valid, so it has
-    // proved the behaviour: its input must stay frozen from here on.
-    store.db.prepare('INSERT INTO operations(id, task_id, node_id, generation, spec, state, reserved) VALUES(?,?,?,?,?,?,?)')
-      .run('op', 't', 'check', 1, '{}', 'settled', 0);
-    store.db.prepare('INSERT INTO evidence(id, task_id, node_id, operation_id, acceptance_id, proposal_version, requirement_version, data, valid) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run('e', 't', 'check', 'op', 'suite-runs', 1, 1, '{}', 1);
-  }
-  return store;
-}
-
-function revision(store: TaskStore, args: string[]) {
-  return () => applyRevision(store, 't', {
-    baseVersion: 1,
-    reason: 'the check could not execute at all: the sandbox denied its temporary repository, so re-point it at a suite that runs',
-    nodes: proposal(args).nodes,
+// A declared acceptance check is frozen even before it has produced evidence.
+// Otherwise a main agent could replace the required test with a version probe.
+for (const ran of [false, true]) {
+  test(`native acceptance check inputs remain frozen ${ran ? 'after a real host check' : 'before the first check'}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'graph-check-input-'));
+    const project = join(root, 'project'); await mkdir(project);
+    git(project, ['init', '-b', 'main']);
+    await writeFile(join(project, 'README.md'), 'check fixture\n');
+    git(project, ['add', '.']); git(project, ['commit', '-m', 'initial']);
+    const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], access: () => fullAccessPolicy() });
+    try {
+      const parent = await runtime.user.begin({ projectId: 'p', request: 'Freeze the required check', requestId: 'begin' });
+      const main = runtime.supervisor(parent.taskId);
+      const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Required check', protocols: { data: { type: 'object' } }, nodes: {},
+        modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+          operation: { action: 'workspace.command', version: 1, command: 'node', args: ['-e', 'if (2 + 2 !== 4) process.exit(1)'], output: 'result', sandbox: false } } },
+        edges: {}, acceptance: [{ id: 'suite-runs', description: 'Required assertion passes', kind: 'check', module: 'check' }] });
+      const { graphId } = await main.graphCreate({ definition }) as { graphId: string };
+      if (ran) {
+        await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} });
+        await runtime.host.drive();
+        const acceptance = await main.graphInspect({ graphId, query: 'acceptance' }) as { ready: boolean; items: { status: string }[] };
+        expect(acceptance.items).toMatchObject([{ status: 'passed' }]);
+        expect(acceptance.ready).toBe(true);
+      }
+      await expect(main.graphPatch({ graphId, baseRevision: 1, changes: {
+        reason: 'Replace the required assertion with a version probe', patch: { modules: { check: { operation: { args: ['--version'] } } } },
+      } })).rejects.toMatchObject({ code: 'invalid_input', message: expect.stringContaining('acceptance check') });
+      const revision = await main.graphInspect({ graphId, query: 'revision' }) as typeof definition;
+      await expect(main.graphInspect({ graphId })).resolves.toMatchObject({ revision: 1 });
+      expect(revision.modules.check!.operation!.args).toEqual(['-e', 'if (2 + 2 !== 4) process.exit(1)']);
+      await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Rename the graph without weakening its check', patch: { name: 'Renamed check' } } }))
+        .resolves.toMatchObject({ revision: 2 });
+    } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
   });
 }
-
-test('a check that never produced valid evidence may be re-pointed with a reason', async () => {
-  const store = await confirmed({ proved: false });
-  expect(revision(store, ['--test', 'tests/m4/check-input-revision.test.ts'])).not.toThrow();
-  const stored = JSON.parse((store.db.prepare('SELECT spec FROM graph_revisions WHERE task_id=? AND version=?').get('t', 2) as { spec: string }).spec) as { nodes: { id: string; input?: { args?: string[] } }[] };
-  expect(stored.nodes.find(node => node.id === 'check')?.input?.args).toEqual(['--test', 'tests/m4/check-input-revision.test.ts']);
-});
-
-test('a check that proved its acceptance item keeps its confirmed input', async () => {
-  const store = await confirmed({ proved: true });
-  expect(revision(store, ['--test', 'tests/m4/check-input-revision.test.ts'])).toThrow(/confirmed input of an acceptance check/);
-});

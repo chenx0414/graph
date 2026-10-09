@@ -5,9 +5,10 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { RuntimeError, type AttachmentInput } from '../core/types.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';
-import { layoutGraph } from './layout.ts';
+import { layoutGraph, type GraphLayout, type LayoutInput } from './layout.ts';
 import { parseGraphDefinition, type GraphDefinition } from '../core/interface-spec.ts';
-const graphLayouts = new Map<string, Awaited<ReturnType<typeof layoutGraph>>>();
+const graphLayouts = new Map<string, GraphLayout>();
+const pendingLayouts = new WeakMap<Runtime, Map<string, Promise<GraphLayout>>>();
 
 import type { AppServices, StartupInfo } from './host.ts';
 import { sanitizeConfig, type ConfigStore } from './config-service.ts';
@@ -35,13 +36,16 @@ import type { AgentContextLibrary, AgentPromptKey } from '../runtime/agent-conte
 type Runtime = Awaited<ReturnType<typeof openTaskRuntime>>;
 /** Drafts and running graphs share topology; execution state never determines layout. */
 async function nativeGraphStructure(runtime: Runtime, definition: GraphDefinition, state?: {
+  graphId: string; revision: number;
   nodes: { nodeId: string; status: string }[];
   modules: { moduleId: string; triggered: boolean }[];
 }) {
   const groups = Object.keys(definition.subgraphInstances ?? {});
   const containerFor = (id: string) => groups.filter(group => id.startsWith(`${group}/`)).sort((a, b) => b.length - a.length)[0];
   const containers = groups.map(id => ({ id,
-    outputs: Object.values(definition.subgraphInstances![id]!.outputs).map(io => io.from.split('.')[0]!),
+    ...(containerFor(id) ? { parent: containerFor(id)! } : {}),
+    template: definition.subgraphInstances![id]!.template, version: definition.subgraphInstances![id]!.version,
+    inputs: definition.subgraphInstances![id]!.inputs, outputs: definition.subgraphInstances![id]!.outputs,
     nodes: Object.keys(definition.nodes).filter(node => node.startsWith(`${id}/`)),
   }));
   const nodes = [
@@ -57,13 +61,37 @@ async function nativeGraphStructure(runtime: Runtime, definition: GraphDefinitio
       inputs: module.inputs, outputs: module.outputs })),
   ];
   const edges = Object.entries(definition.edges).map(([id, edge]) => ({ id, source: edge.from.split('.')[0]!, target: edge.to.split('.')[0]! }));
-  const key = JSON.stringify({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind, action: node.kind === 'module' ? node.action : undefined, container: node.container })), edges, containers });
-  let layout = graphLayouts.get(key);
-  if (!layout) {
-    layout = await layoutGraph({ nodes: nodes.map(node => ({ id: node.id, kind: node.kind === 'agent' ? 'agent' as const : 'program' as const,
-      action: node.kind === 'agent' ? 'work' : node.action, ...(node.container ? { container: node.container } : {}) })), edges, containers });
-    if (graphLayouts.size >= 100) graphLayouts.delete(graphLayouts.keys().next().value!);
-    graphLayouts.set(key, layout);
+  const input: LayoutInput = { nodes: nodes.map(node => ({ id: node.id, kind: node.kind,
+    action: node.kind === 'agent' ? 'work' : node.action, ...(node.container ? { container: node.container } : {}) })),
+    edges, containers: containers.map(({ id, parent }) => ({ id, ...(parent ? { parent } : {}) })) };
+  const key = JSON.stringify(input);
+  const fresh = async () => {
+    let layout = graphLayouts.get(key);
+    if (!layout) {
+      layout = await layoutGraph(input);
+      if (graphLayouts.size >= 100) graphLayouts.delete(graphLayouts.keys().next().value!);
+      graphLayouts.set(key, layout);
+    }
+    return layout;
+  };
+  let layout: GraphLayout;
+  if (!state) layout = await fresh();
+  else {
+    let pending = pendingLayouts.get(runtime);
+    if (!pending) { pending = new Map(); pendingLayouts.set(runtime, pending); }
+    const previous = pending.get(state.graphId);
+    const calculation = (async () => {
+      await previous?.catch(() => undefined);
+      while (true) {
+        const { epoch, snapshot } = runtime.graphLayout(state.graphId, state.revision);
+        if (snapshot?.topology === key) return snapshot.layout as GraphLayout;
+        const result = snapshot ? await layoutGraph(input, { input: JSON.parse(snapshot.topology) as LayoutInput, layout: snapshot.layout as GraphLayout }) : await fresh();
+        if (runtime.saveGraphLayout(state.graphId, state.revision, key, result, epoch)) return result;
+      }
+    })();
+    pending.set(state.graphId, calculation);
+    try { layout = await calculation; }
+    finally { if (pending.get(state.graphId) === calculation) pending.delete(state.graphId); }
   }
   return { nodes, containers, loops: [], layout };
 }
@@ -527,27 +555,7 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
       });
       return { ...structure, interfaces };
     }
-    const layout = await layoutGraph({ nodes: spec.nodes, containers: spec.containers ?? [], loops: spec.loops ?? [] });
-    return {
-      nodes: spec.nodes.map(node => {
-        const fork = Boolean(node.context?.sourceNode)
-          || Boolean(node.context?.requiredFacts?.some(fact => fact.kind === 'transcript_range' || fact.kind === 'tool_call'));
-        return {
-          id: node.id,
-          kind: node.kind,
-          status: 'draft',
-          container: node.container,
-          action: node.action,
-          definitionVersion: node.definitionVersion,
-          model: node.model,
-          dependsOn: node.dependsOn ?? [],
-          context: node.context ?? null,
-          contextMode: node.kind === 'agent' ? (fork ? 'fork' : 'fresh') : null,
-          agent: node.kind === 'agent' ? graphAgentDetail(runtime, node.definitionVersion) : null,
-        };
-      }),
-      containers: spec.containers ?? [], loops: spec.loops ?? [], layout,
-    };
+    throw new RuntimeError('invalid_proposal', 'A native graph definition is required');
   });
   app.get('/api/conversations/:conversationId/proposals/:version', async request => {
     const params = request.params as { conversationId: string; version: string };
@@ -716,10 +724,11 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.get('/api/tasks/:taskId/nodes/:nodeId/run', async request => {
     const params = request.params as { taskId: string; nodeId: string };
-    const query = request.query as { after?: string; before?: string; limit?: string };
+    const query = request.query as { after?: string; before?: string; limit?: string; entryId?: string };
     return runtime.nodeRun(params.taskId, params.nodeId, {
       ...(query.after !== undefined ? { after: Number(query.after) } : {}),
       ...(query.before !== undefined ? { before: Number(query.before) } : {}),
+      ...(query.entryId !== undefined ? { entryId: query.entryId } : {}),
       ...(query.limit ? { limit: Number(query.limit) } : {}),
     });
   });
@@ -740,24 +749,41 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
     const { taskId } = request.params as { taskId: string };
     return runtime.controlGraph(taskId, request.body as { action: string; nodeId?: string; moduleId?: string; seq?: number });
   });
+  app.get('/api/tasks/:taskId/graph/modules/:moduleId', async request => {
+    const { taskId, moduleId } = request.params as { taskId: string; moduleId: string };
+    const query = request.query as { after?: string; limit?: string };
+    return runtime.graphModule(taskId, moduleId, { ...(query.after === undefined ? {} : { after: Number(query.after) }),
+      ...(query.limit === undefined ? {} : { limit: Number(query.limit) }) });
+  });
+  app.get('/api/tasks/:taskId/graph/modules/:moduleId/values', async request => {
+    const { taskId, moduleId } = request.params as { taskId: string; moduleId: string };
+    return runtime.graphModule(taskId, moduleId, { fullValues: true, includeTransitions: false });
+  });
+  app.get('/api/tasks/:taskId/graph/modules/:moduleId/transitions/:transitionId', async request => {
+    const { taskId, moduleId, transitionId } = request.params as { taskId: string; moduleId: string; transitionId: string };
+    return runtime.graphModule(taskId, moduleId, { transitionId, limit: 1 }).transitions[0];
+  });
+  app.get('/api/tasks/:taskId/graph/edges/:edgeId', async request => {
+    const { taskId, edgeId } = request.params as { taskId: string; edgeId: string };
+    const query = request.query as { before?: string; limit?: string };
+    return runtime.graphEdge(taskId, edgeId, {
+      ...(query.before === undefined ? {} : { before: Number(query.before) }),
+      ...(query.limit === undefined ? {} : { limit: Number(query.limit) }),
+    });
+  });
+  app.get('/api/tasks/:taskId/graph/edges/:edgeId/deliveries/:deliveryId', async request => {
+    const { taskId, edgeId, deliveryId } = request.params as { taskId: string; edgeId: string; deliveryId: string };
+    return runtime.graphEdge(taskId, edgeId, { deliveryId, fullValue: true, limit: 1 }).deliveries[0];
+  });
   app.get('/api/tasks/:taskId/graph', async request => {
     const params = request.params as { taskId: string };
     const view = await runtime.user.task(params.taskId).view();
     const native = runtime.kernelGraph(params.taskId);
     if (native) {
       return { ...await nativeGraphStructure(runtime, native.definition, native), revisions: [{ version: native.revision, reason: 'graph definition' }], cost: view.cost,
-        interfaces: native.edges, modules: native.modules, messages: [], handoffs: [] };
+        interfaces: native.edges, modules: native.modules, messages: runtime.graphMessages(params.taskId) };
     }
-    const layout = await layoutGraph({ nodes: view.nodes, containers: view.containers, loops: view.loops });
-    return {
-      nodes: view.nodes.map(node => ({
-        ...node,
-        agent: graphAgentDetail(runtime, node.boundDefinition),
-      })),
-      containers: view.containers, loops: view.loops, revisions: view.revisions, layout, cost: view.cost,
-      messages: runtime.graphMessages(params.taskId),
-      handoffs: runtime.graphHandoffs(params.taskId),
-    };
+    return { nodes: [], containers: [], loops: [], revisions: [], layout: { positions: {}, edges: [] }, cost: view.cost, interfaces: [], modules: [], messages: [] };
   });
   app.get('/api/tasks/:taskId/artifacts', async request => {
     const { taskId } = request.params as { taskId: string };

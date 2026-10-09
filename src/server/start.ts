@@ -7,7 +7,7 @@ import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
 import { emptyGraphConfig, loadGraphConfig, parseGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
-import { modelRequestHeaders } from '../catalog/models.ts';
+import { modelTier, modelRequestHeaders } from '../catalog/models.ts';
 import { openConfigStore } from './config-service.ts';
 import { createLiveConfig, type LiveConfig } from './live-config.ts';
 import { createConfigWatch, type ConfigWatch } from './config-watch.ts';
@@ -328,6 +328,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       provider: entry.provider,
       modelId: entry.modelId ?? entry.id,
       grade: entry.grade,
+      tier: modelTier(entry.grade),
       reasoning: entry.reasoning !== false,
       ...(entry.defaultThinkingLevel ? { defaultThinkingLevel: entry.defaultThinkingLevel } : {}),
       contextWindow: entry.contextWindow,

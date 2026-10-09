@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
-import { GitIntegration, outOfScopePaths, rechecksAfterIntegrationChange, staleRecheckTargets } from '../../src/git/integration.ts';
-import type { NodeSpec, Operation } from '../../src/core/types.ts';
+import { GitIntegration } from '../../src/git/integration.ts';
+import { nativeGitConflict } from '../fixtures/native-git-conflict.ts';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -204,59 +206,12 @@ test('a judging node re-reads the current integration instead of its stale work 
   expect(existsSync(join(laneAgain!, 'own.txt'))).toBe(true);
 }, 30_000);
 
-test('only program checks and judging agent nodes re-run when the integration moves', () => {
-  const spec = (kind: string, action: string) => ({ kind, action } as unknown as NodeSpec);
-  expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'succeeded')).toBe(true);
-  // A review read the integration sha it judged; after a lane rework its verdict is about old code.
-  expect(rechecksAfterIntegrationChange(spec('agent', 'review'), 'succeeded')).toBe(true);
-  // A work lane keeps its own commits, and a node that never finished has nothing to invalidate.
-  expect(rechecksAfterIntegrationChange(spec('agent', 'work'), 'succeeded')).toBe(false);
-  expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'running')).toBe(false);
-  expect(rechecksAfterIntegrationChange(spec('program', 'graph.command'), 'blocked')).toBe(false);
-});
-
-// HB-209 is about WHICH of those re-check: an advance that only touches a sibling lane must not reset a
-// review that judged a different lane. These are the failure modes, written before the implementation.
-test('a review whose lane the advance did not touch is not re-checked (HB-209)', () => {
-  const changed = ['scripts/diag-b.mjs'];
-  const stale = staleRecheckTargets({
-    changedPaths: changed,
-    candidates: [
-      { id: 'review-a', closurePaths: ['scripts/diag-a.mjs'] },
-      { id: 'review-b', closurePaths: ['scripts/diag-b.mjs'] },
-    ],
-  });
-  expect(stale.has('review-b')).toBe(true);
-  expect(stale.has('review-a')).toBe(false);
-});
-
-test('an unknown changed-path set re-checks everyone rather than risk a stale verdict (HB-209)', () => {
-  const stale = staleRecheckTargets({
-    changedPaths: null,
-    candidates: [{ id: 'review-a', closurePaths: ['scripts/diag-a.mjs'] }, { id: 'review-b', closurePaths: [] }],
-  });
-  expect(stale.has('review-a')).toBe(true);
-  expect(stale.has('review-b')).toBe(true);
-});
-
-test('a node with no known output re-checks: its closure cannot be proven unaffected (HB-209)', () => {
-  const stale = staleRecheckTargets({ changedPaths: ['scripts/diag-b.mjs'], candidates: [{ id: 'gate', closurePaths: [] }] });
-  expect(stale.has('gate')).toBe(true);
-});
-
-test('a change under a directory a node produced touches that node (HB-209)', () => {
-  const stale = staleRecheckTargets({
-    changedPaths: ['reviews/review-a.md'],
-    candidates: [{ id: 'x', closurePaths: ['reviews/'] }, { id: 'y', closurePaths: ['scripts/'] }],
-  });
-  expect(stale.has('x')).toBe(true);
-  expect(stale.has('y')).toBe(false);
-});
-
-test('an empty diff reset nothing: the advance landed identical content (HB-209)', () => {
-  const stale = staleRecheckTargets({ changedPaths: [], candidates: [{ id: 'review-a', closurePaths: ['scripts/diag-a.mjs'] }] });
-  expect(stale.size).toBe(0);
-});
+// Exact commit receipts replace dependency-closure guesses. Git can update integration,
+// but only an explicit module input authorizes another check execution.
+test.each(['owned-file', 'unrelated-file', 'directory', 'deletion', 'empty-commit', 'unchanged'] as const)(
+  'native acceptance retains its exact check receipt when the target advances: %s', async change => {
+    await nativeTargetAdvance(change);
+  }, 30000);
 
 test('a terminal task releases its working copies but keeps its integration branch', async () => {
   const root = await temp('release');
@@ -291,80 +246,66 @@ test('a terminal task releases its working copies but keeps its integration bran
   expect(integration.sweepTerminalWorkcopies()).toBe(0);
 }, 30_000);
 
-test('an identical tree keeps the acceptance while a content change re-checks it', async () => {
-  const root = await temp('retarget');
-  const state = join(root, '.state');
+test('a target already containing the verified commit preserves dirty files without rewriting the checkout', async () => {
+  await nativeTargetAdvance('dirty');
+}, 30000);
+
+async function nativeTargetAdvance(change: 'owned-file' | 'unrelated-file' | 'directory' | 'deletion' | 'empty-commit' | 'unchanged' | 'dirty') {
+  const root = await temp('native-target'); const stateDir = join(root, '.state');
   git(root, ['init', '-q', '-b', 'main']);
   await writeFile(join(root, 'app.txt'), 'base\n');
-  git(root, ['add', 'app.txt']);
-  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'init']);
-  const { db, integration } = await makeProject(root, state);
-  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
-  db.db.prepare("INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES('t','p','同树前进',1,0,'running',0,1)").run();
-  integration.prepareTask('t', 'main');
-  const accepted = git(root, ['rev-parse', 'HEAD']);
-  // The fixture writes an evidence row directly; its operation reference has no matching row in this
-  // throwaway database, so foreign keys are off for this test only.
-  db.db.exec('PRAGMA foreign_keys = OFF');
-  db.db.prepare("INSERT INTO evidence(id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,commit_sha,valid) VALUES('e','t','human-accept','op','acceptance',1,1,'{}',?,1)").run(accepted);
-
-  // A commit that does not change the tree: the acceptance still describes the current content, so
-  // the evidence is re-bound instead of forcing the user through the same acceptance again.
-  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '--allow-empty', '-m', 'delivery fast-forward']);
-  const identical = git(root, ['rev-parse', 'HEAD']);
-  expect(integration.retargetEvidence('t', accepted, identical)).toBe(true);
-  expect(db.db.prepare("SELECT commit_sha FROM evidence WHERE id='e'").get()).toEqual({ commit_sha: identical });
-  const rebound = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.evidence.retargeted'").get() as { data: string };
-  expect(rebound.data).toContain(identical);
-
-  // A real content change must still invalidate the acceptance.
-  await writeFile(join(root, 'app.txt'), 'changed\n');
-  git(root, ['add', 'app.txt']);
-  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'content change']);
-  const changed = git(root, ['rev-parse', 'HEAD']);
-  expect(integration.retargetEvidence('t', identical, changed)).toBe(false);
-  expect(db.db.prepare("SELECT commit_sha FROM evidence WHERE id='e'").get()).toEqual({ commit_sha: identical });
-}, 30_000);
-
-test('a lane that carries a sibling lane file is restored to its own scope before merging', async () => {
-  // A file scope may name a file or a directory prefix; everything else belongs to a sibling lane,
-  // except the node's own evidence directory, which is its submission material.
-  expect(outOfScopePaths(['src/a.txt', 'src/b.txt', 'docs/x.md'], ['src/a.txt'])).toEqual(['src/b.txt', 'docs/x.md']);
-  expect(outOfScopePaths(['src/a/x.ts', 'src/ab/x.ts'], ['src/a/'])).toEqual(['src/ab/x.ts']);
-  expect(outOfScopePaths(['evidence/shot.png', 'src/b.txt'], ['src/a.txt'])).toEqual(['src/b.txt']);
-
-  const root = await temp('scope');
-  const state = join(root, '.state');
-  git(root, ['init', '-q', '-b', 'main']);
-  await mkdir(join(root, 'src'), { recursive: true });
-  await writeFile(join(root, 'src', 'a.txt'), 'a\n');
-  await writeFile(join(root, 'src', 'b.txt'), 'b\n');
-  git(root, ['add', 'src']);
-  git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '-m', 'init']);
-  const { db, integration } = await makeProject(root, state);
-  expect(integration.prepareProject('p', { createBaseline: true }).state).toBe('ready');
-  db.db.prepare("INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES('t','p','车道越界',1,0,'running',0,1)").run();
-  integration.prepareTask('t', 'main');
-  for (const [id, file] of [['impl-a', 'src/a.txt'], ['impl-b', 'src/b.txt']] as const) {
-    db.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)')
-      .run('t', id, JSON.stringify({ id, kind: 'agent', action: 'work', input: { files: [file] } }), `inst-${id}`);
+  await writeFile(join(root, 'check.cjs'), "if(require('fs').readFileSync('app.txt','utf8')!=='base\\n')process.exit(1)");
+  git(root, ['add', 'app.txt', 'check.cjs']);
+  const commit = (message: string) => git(root, ['-c', 'user.name=Graph', '-c', 'user.email=graph@local', 'commit', '-q', '--allow-empty', '-m', message]);
+  commit('baseline'); const baseline = git(root, ['rev-parse', 'HEAD']);
+  const capabilityRoot = join(stateDir, 'capabilities'); await mkdir(capabilityRoot, { recursive: true });
+  const runtime = await openTaskRuntime({ stateDir, projects: [{ id: 'p', root }], catalog: { capabilityRoot, recipesPath: join(stateDir, 'recipes.json') } });
+  cleanup.push(() => runtime.close());
+  await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare', createBaseline: true });
+  const parent = await runtime.user.begin({ projectId: 'p', request: 'Verify the exact integration version', requestId: 'begin' });
+  const main = runtime.supervisor(parent.taskId); const data = { protocol: 'data' };
+  const { graphId } = await main.graphCreate({ targetBranch: 'main', definition: parseGraphDefinition({ schemaVersion: 2, name: 'Exact receipt', protocols: { data: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: data }, outputs: { result: data }, operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.cjs'], output: 'result' } } }, edges: {},
+    acceptance: [{ id: 'works', description: 'The current integrated application contains the expected bytes', kind: 'check', module: 'check' }] }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+  const inspect = () => main.graphInspect({ graphId, query: 'acceptance' }) as Promise<{ items: { id: string; status: string; source: { id: string; commit?: string } }[] }>;
+  const prior = (await inspect()).items.find(item => item.id === 'works')!;
+  expect(prior, JSON.stringify(runtime.events(graphId).filter(event => event.type.includes('operation') || event.type.includes('failed')))).toMatchObject({ status: 'passed', source: { commit: baseline } });
+  const disk = new TaskStore(join(stateDir, 'tasks.sqlite')); cleanup.push(async () => disk.close());
+  const integration = new GitIntegration(disk, stateDir);
+  if (change === 'owned-file' || change === 'dirty') await writeFile(join(root, 'app.txt'), 'changed\n');
+  if (change === 'unrelated-file') await writeFile(join(root, 'other.txt'), 'unrelated\n');
+  if (change === 'directory') { await mkdir(join(root, 'nested')); await writeFile(join(root, 'nested', 'item.txt'), 'nested\n'); }
+  if (change === 'deletion') await rm(join(root, 'app.txt'));
+  if (!['dirty', 'unchanged'].includes(change)) { git(root, ['add', '-u']); if (change === 'unrelated-file') git(root, ['add', 'other.txt']); if (change === 'directory') git(root, ['add', 'nested']); commit(change); }
+  const target = git(root, ['rev-parse', 'HEAD']);
+  const delivered = integration.tryDeliver(graphId, baseline);
+  expect(delivered.status).toBe(change === 'dirty' ? 'merged' : change === 'unchanged' ? 'merged' : 'recheck');
+  // No delivery is necessary when target already names the verified commit. Dirty bytes stay intact.
+  if (change === 'dirty') expect(await readFile(join(root, 'app.txt'), 'utf8')).toBe('changed\n');
+  const now = (await inspect()).items.find(item => item.id === 'works')!;
+  expect(now.status).toBe(['dirty', 'unchanged'].includes(change) ? 'passed' : 'stale');
+  expect(now.source.id).toBe(prior.source.id);
+  const receipt = disk.db.prepare('SELECT request,result FROM kernel_module_operations WHERE id=?').get(prior.source.id) as { request: string; result: string };
+  expect(JSON.parse(receipt.result).outputs.result.verifiedCommit).toBe(baseline);
+  expect(disk.db.prepare('SELECT COUNT(*) AS n FROM kernel_module_operations WHERE task_id=?').get(graphId)).toEqual({ n: 1 });
+  expect(disk.task(graphId).integration_sha).toBe(target);
+  if (!['dirty', 'unchanged'].includes(change)) {
+    await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+    const updated = (await inspect()).items.find(item => item.id === 'works')!;
+    expect(updated.source.id).not.toBe(prior.source.id);
+    expect(updated.status).toBe(['owned-file', 'deletion'].includes(change) ? 'failed' : 'passed');
+    if (updated.status === 'passed') expect(updated.source.commit).toBe(target);
   }
-  const lane = integration.workspace('t', 'inst-impl-a', 'impl-a', 'agent', 'work')!;
-  // The lane edits its own file and, by mistake, the sibling's.
-  await writeFile(join(lane, 'src', 'a.txt'), 'a fixed\n');
-  await writeFile(join(lane, 'src', 'b.txt'), 'b rewritten by the wrong lane\n');
-  const operation = { id: 'op-a', taskId: 't', instanceId: 'inst-impl-a', nodeId: 'impl-a', kind: 'agent' } as unknown as Operation;
-  expect(integration.integrate(operation)).toMatchObject({ ok: true });
-  const integrationPath = (db.db.prepare("SELECT path FROM worktrees WHERE instance_id='integration:t'").get() as { path: string }).path;
-  // The lane's own work landed; the sibling file never did, and the recovery is recorded.
-  expect(git(integrationPath, ['show', 'HEAD:src/a.txt'])).toBe('a fixed');
-  expect(git(integrationPath, ['show', 'HEAD:src/b.txt'])).toBe('b');
-  const event = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.out-of-scope.restored'").get() as { data: string } | undefined;
-  expect(event?.data).toContain('src/b.txt');
-  // A file the lane created outside its scope is reported, never deleted.
-  await writeFile(join(lane, 'src', 'created-by-lane.txt'), 'new\n');
-  expect(integration.integrate({ ...operation, id: 'op-b' } as unknown as Operation)).toMatchObject({ ok: true });
-  expect(existsSync(join(lane, 'src', 'created-by-lane.txt'))).toBe(true);
-  const reported = db.db.prepare("SELECT data FROM events WHERE task_id='t' AND type='git.out-of-scope.restored' ORDER BY rowid DESC LIMIT 1").get() as { data: string };
-  expect(reported.data).toContain('created-by-lane.txt');
-}, 30_000);
+}
+
+test('a native code publication cannot commit a sibling worktree through the current node binding', async () => {
+  const graph = await nativeGitConflict(cleanup);
+  await writeFile(join(graph.trees.b, 'other.txt'), 'sibling private edit\n');
+  const first = git(graph.trees.a, ['rev-parse', 'HEAD']); const sibling = git(graph.trees.b, ['rev-parse', 'HEAD']);
+  expect(() => graph.integration.commitWorkspace({ id: 'foreign-worktree', taskId: graph.graphId, nodeId: 'a', instanceId: graph.instance('a'), recipe: 'coder@1',
+    workspace: graph.trees.b, paths: ['other.txt'], message: 'Must refuse the sibling worktree' })).toThrow(/admitted node worktree/);
+  expect(git(graph.trees.a, ['rev-parse', 'HEAD'])).toBe(first); expect(git(graph.trees.b, ['rev-parse', 'HEAD'])).toBe(sibling);
+  expect(await readFile(join(graph.trees.b, 'other.txt'), 'utf8')).toBe('sibling private edit\n');
+  expect(git(graph.project, ['rev-parse', 'HEAD'])).toBe(graph.baseline);
+}, 30000);

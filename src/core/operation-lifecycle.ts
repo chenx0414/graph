@@ -1,11 +1,9 @@
+import { KernelStore } from './kernel-store.ts';
 import { pendingRsiContinuation, releaseRsiContinuation } from './rsi-continuation.ts';
 import { consumeWakes, releaseWakes, pendingWakes, wakeForAnswer } from './wake-ledger.ts';
 import { retryDecision, MAX_TRANSIENT_RETRIES } from './transient-retry.ts';
-import { resolveRouteCase } from './router-action.ts';
-import { backEdges, routeSourceOf } from './legacy-routing.ts';
-import { randomUUID, createHash } from 'node:crypto';
-import { isAbsolute, resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { isAbsolute } from 'node:path';
 import { estimateCost, type ModelEntry } from '../catalog/models.ts';
 import {
   addBudget,
@@ -23,11 +21,8 @@ import {
   recordConversationOutput,
   releaseMessages,
 } from './conversation.ts';
-import { loadGraph, reactivate } from './graph.ts';
-import { requiresResultHandoff, resultHandoffDependents, settleResultHandoff, submissionDefect } from './predecessor-handoff.ts';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { closeUserWait, closeUserWaitForOperation } from './time-ledger.ts';
-import { isReworkDecision, type VerificationDecision } from './verification.ts';
 import { assertQuestionAnswer, insertQuestion } from './question-routing.ts';
 import { isFullAccess } from './access-policy.ts';
 import {
@@ -44,7 +39,6 @@ import {
   type NodeSpec,
   type Operation,
   type OperationResult,
-  type Proposal,
   type Reconciliation,
   type TokenUsage,
 } from './types.ts';
@@ -138,7 +132,6 @@ export interface OperationRun {
 }
 
 export interface OperationLifecycleHooks {
-  advance(taskId: string): void;
   canReplayBeforeSend?(operation: Operation): boolean;
 }
 
@@ -194,7 +187,7 @@ export class OperationLifecycle {
   private readonly store: TaskStore;
   private readonly hooks: OperationLifecycleHooks;
 
-  constructor(store: TaskStore, hooks: OperationLifecycleHooks) {
+  constructor(store: TaskStore, hooks: OperationLifecycleHooks = {}) {
     this.store = store;
     this.hooks = hooks;
   }
@@ -568,13 +561,11 @@ export class OperationLifecycle {
       if (error.code === 'budget') {
         this.block(operation.taskId, operation.nodeId, 'budget', { reason: error.message, requested: reservation }, operation.id);
       } else if (error.code === 'context_rejected') {
-        const node = this.nodeRow(operation.taskId, operation.nodeId);
-        const spec = JSON.parse(node.spec) as NodeSpec;
         const data = {
           reason: error.message,
           code: error.code,
-          requiredFacts: (spec.context?.requiredFacts ?? []) as unknown as Json,
-          policy: spec.context?.independence ?? 'none',
+          requiredFacts: [] as Json,
+          policy: 'none',
         };
         this.store.event(operation.taskId, 'context.rejected', { nodeId: operation.nodeId, operationId: operation.id, ...data });
         this.block(operation.taskId, operation.nodeId, 'context_rejected', data, operation.id);
@@ -678,9 +669,24 @@ export class OperationLifecycle {
         if (!Number.isSafeInteger(answer.tokens) || answer.tokens <= 0) {
           throw new RuntimeError('invalid_answer', 'A positive token increment is required');
         }
-        const instance = this.store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?')
-          .get(taskId, question.node_id) as { id: string };
-        addBudget(this.store, instance.id, answer.tokens);
+        const kernel = new KernelStore(this.store);
+        if (kernel.latestRevision(taskId)) {
+          const data = JSON.parse(question.data) as { executionId?: string };
+          const execution = data.executionId ? kernel.execution(data.executionId) : null;
+          if (!execution || execution.taskId !== taskId || execution.nodeId !== question.node_id || !execution.tokenBudget) {
+            throw new RuntimeError('invalid_answer', 'Budget question has no frozen execution quota');
+          }
+          const quota = kernel.authorizedBudget(taskId, question.node_id) ?? execution.tokenBudget;
+          if (quota.unlimited || !Number.isSafeInteger(quota.budget + answer.tokens)) {
+            throw new RuntimeError('invalid_answer', 'Budget increment requires a finite quota within the safe integer range');
+          }
+          kernel.setAuthorizedBudget(taskId, question.node_id, quota.budget + answer.tokens);
+          this.store.event(taskId, 'instance.budget_changed', { nodeId: question.node_id, tokens: quota.budget + answer.tokens, nextExecution: true });
+        } else {
+          const instance = this.store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?')
+            .get(taskId, question.node_id) as { id: string };
+          addBudget(this.store, instance.id, answer.tokens);
+        }
       } else if (question.kind === 'unknown_usage' && (answer.type === 'usage' || answer.type === 'reconcile_usage')) {
         this.answerUnknownUsage(question.operation_id!, answer, models);
       } else if (question.kind === 'permission' && answer.type === 'grant') {
@@ -732,7 +738,6 @@ export class OperationLifecycle {
         const open = this.store.db.prepare("SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1").get(taskId);
         if (!open) this.store.db.prepare(`UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked'
           AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)`).run(taskId, taskId);
-        this.hooks.advance(taskId);
         return;
       }
       if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'").get(taskId, question.node_id)) {
@@ -748,19 +753,10 @@ export class OperationLifecycle {
         const conversation = spec.role === 'master' ? conversationForTask(this.store, taskId) : undefined;
         const queued = conversation ? pendingMessages(this.store, conversation.id, 1).length : 0;
         const rejected = question.kind === 'human_check' && answer.type === 'reject';
-        if (!['rework', 'stalled'].includes(question.kind)) {
-          this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?')
-            .run(rejected ? 'blocked' : question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
-        }
+        this.store.db.prepare('UPDATE nodes SET status=? WHERE task_id=? AND id=?')
+          .run(rejected ? 'blocked' : question.kind === 'system_change' || !completed || queued ? 'pending' : 'succeeded', taskId, question.node_id);
       }
-      if (['rework', 'stalled'].includes(question.kind) && (answer.type === 'retry' || answer.type === 'respond')) {
-        const resume = (JSON.parse(question.data) as { resume?: string[] }).resume ?? [];
-        for (const id of [question.node_id, ...resume]) {
-          this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(taskId, id);
-        }
-        if (resume.length) reactivate(this.store, taskId, resume);
-      }
-      this.hooks.advance(taskId);
+
     });
   }
 
@@ -802,29 +798,6 @@ export class OperationLifecycle {
    * Resolve the `context_rejected` problems an earlier handoff failure created
    * on the dependents of this node, once the handoff they were missing exists.
    */
-  private clearStaleHandoffRejections(operation: Operation, proposal: Proposal) {
-    for (const target of resultHandoffDependents(proposal, operation.nodeId)) {
-      const rows = this.store.db.prepare(`SELECT id,data FROM questions
-        WHERE task_id=? AND node_id=? AND kind='context_rejected' AND status='open'`)
-        .all(operation.taskId, target) as { id: string; data: string }[];
-      for (const row of rows) {
-        const data = JSON.parse(row.data) as { sourceNodeId?: string; policy?: string };
-        if (data.sourceNodeId !== operation.nodeId || data.policy !== 'result_handoff') continue;
-        this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE id=?")
-          .run(canonicalJson({ type: 'handoff_repaired', operationId: operation.id }), row.id);
-        this.store.event(operation.taskId, 'context.handoff_repaired', {
-          nodeId: target,
-          sourceNodeId: operation.nodeId,
-          sourceOperationId: operation.id,
-        });
-        if (!this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'")
-          .get(operation.taskId, target)) {
-          this.store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id=? AND id=?").run(operation.taskId, target);
-        }
-      }
-    }
-  }
-
   private answerUnknownUsage(
     operationId: string,
     answer: { type: 'usage'; usage: TokenUsage; proof: string } | { type: 'reconcile_usage'; proof: string },
@@ -900,58 +873,6 @@ export class OperationLifecycle {
     });
   }
 
-  private handleRework(operation: Operation, result: OperationResult) {
-    const loops = backEdges(this.store, operation.taskId, operation.nodeId);
-    const decision = result.output as unknown as VerificationDecision;
-    const requestedTargets = loops.length ? loops : decision.subjects.map(subject => subject.nodeId);
-    const targets = [...new Set(requestedTargets.length ? requestedTargets : [operation.nodeId])];
-    let halt = false;
-    for (const target of targets) {
-      const previous = this.store.db.prepare(`SELECT result FROM operations
-        WHERE task_id=? AND node_id=? AND state='succeeded' AND id!=? ORDER BY rowid DESC LIMIT 1`)
-        .get(operation.taskId, operation.nodeId, operation.id) as { result: string } | undefined;
-      const previousOutput = previous ? JSON.parse(previous.result) as OperationResult : undefined;
-      const previousIds = new Set(isReworkDecision(previousOutput?.output ?? null)
-        ? (previousOutput!.output as unknown as VerificationDecision).blockers.map(item => item.id)
-        : []);
-      const currentIds = new Set(decision.blockers.map(item => item.id));
-      const progress = !currentIds.has('invalid_evidence') && [...previousIds].some(id => !currentIds.has(id));
-      if (progress) {
-        this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, target);
-      } else {
-        this.store.db.prepare('UPDATE nodes SET stall_count=stall_count+1 WHERE task_id=? AND id=?').run(operation.taskId, target);
-      }
-      const { stall_count } = this.store.db.prepare('SELECT stall_count FROM nodes WHERE task_id=? AND id=?')
-        .get(operation.taskId, target) as { stall_count: number };
-      if (stall_count >= 3) halt = true;
-    }
-    if (halt) {
-      const attempts = this.store.db.prepare('SELECT node_id,round,state FROM activations WHERE task_id=? AND node_id IN ('
-        + targets.map(() => '?').join(',') + ') ORDER BY round,rowid')
-        .all(operation.taskId, ...targets) as { node_id: string; round: number; state: string }[];
-      this.block(operation.taskId, operation.nodeId, 'stalled', {
-        reason: 'Three consecutive rounds made no substantial progress',
-        resume: targets,
-        blockers: decision.blockers,
-        attempts,
-        evidence: decision.blockers.flatMap(item => item.evidence),
-      }, operation.id);
-      return;
-    }
-    if (!loops.length) {
-      this.block(operation.taskId, operation.nodeId, 'rework', {
-        output: result.output,
-        resume: targets,
-      }, operation.id);
-      return;
-    }
-    reactivate(this.store, operation.taskId, loops);
-    this.store.event(operation.taskId, 'graph.rework', {
-      from: operation.nodeId,
-      to: loops,
-    });
-  }
-
   private settle(operation: Operation, result: OperationResult, options: { reconciled?: boolean } = {}) {
     if (!result || !['completed', 'continue', 'waiting', 'failed', 'skipped'].includes(result.outcome)) {
       throw new RuntimeError('invalid_result', 'Unexpected operation outcome');
@@ -988,9 +909,7 @@ export class OperationLifecycle {
     // about 101 of them a blip. `stall_count` is the per-node attempt counter a manual retry already
     // clears, so this reuses it instead of adding a column.
     if (result.outcome === 'failed') {
-      const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
-        .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
-      if (!nodeSpec.optional && !this.store.db.prepare('SELECT id FROM questions WHERE task_id=? AND node_id=? AND status=\'open\'')
+      if (!this.store.db.prepare('SELECT id FROM questions WHERE task_id=? AND node_id=? AND status=\'open\'')
         .get(operation.taskId, operation.nodeId)) {
         const attempt = (this.store.db.prepare('SELECT stall_count FROM nodes WHERE task_id=? AND id=?')
           .get(operation.taskId, operation.nodeId) as { stall_count: number } | undefined)?.stall_count ?? 0;
@@ -1060,11 +979,6 @@ export class OperationLifecycle {
     if (usage && (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total))) {
       throw new RuntimeError('invalid_usage', 'Invalid disjoint token counts');
     }
-    const proposalRow = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?')
-      .get(operation.taskId, operation.proposalVersion) as { spec: string } | undefined;
-    const proposal = proposalRow
-      ? JSON.parse(proposalRow.spec) as Proposal
-      : { requirementVersion: 1, summary: '', acceptance: [] as Proposal['acceptance'], nodes: [] as Proposal['nodes'] };
     const nodeSpec = JSON.parse((this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
       .get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
     if (new Set(result.artifacts?.map(artifact => artifact.id)).size !== (result.artifacts?.length ?? 0)
@@ -1073,122 +987,8 @@ export class OperationLifecycle {
         || (artifact.artifactId !== undefined && (!artifact.artifactId.trim() || typeof artifact.version !== 'number' || !Number.isSafeInteger(artifact.version) || artifact.version < 1)))) {
       throw new RuntimeError('invalid_evidence', 'Artifacts require unique IDs, absolute paths and SHA-256 digests');
     }
-    if (result.outcome === 'skipped' && !nodeSpec.optional) {
-      throw new RuntimeError('invalid_result', 'Only a predeclared optional node may skip work');
-    }
-    // A router decides its branch from its own result: a tool node maps its status (or a declared
-    // field of its output), an agent node declares the case itself. Before this, nothing could ever
-    // produce a case, so `readiness` skipped EVERY branch of a real router graph.
-    if (nodeSpec.routes?.length && result.route === undefined) {
-      const source = routeSourceOf(nodeSpec);
-      if (source) {
-        const decision = resolveRouteCase({
-          nodeId: operation.nodeId, routes: nodeSpec.routes, status: result.outcome, output: result.output, source,
-        });
-        if ('case' in decision) result = { ...result, route: decision.case };
-        else throw new RuntimeError('invalid_result', decision.refusal);
-      } else if (result.outcome === 'completed') {
-        // A router that declares branches but no way to choose among them is a graph defect. A
-        // FAILED router is different: it never reached a verdict, so it routes nothing and the
-        // failure is reported as itself.
-        throw new RuntimeError('invalid_result', `节点 ${operation.nodeId} 声明了分支 ${nodeSpec.routes.join(', ')}，但没有声明如何选择（input.route）。`);
-      }
-    }
-    if ((nodeSpec.routes && result.outcome === 'completed' && !nodeSpec.routes.includes(result.route!))
-      || (result.route !== undefined && !nodeSpec.routes?.includes(result.route))) {
-      throw new RuntimeError('invalid_result', 'Router must return a declared case');
-    }
-    const rework = result.outcome === 'completed' && isReworkDecision(result.output);
-    // A router asks for rework with its route, not with a verification verdict: the graph says which
-    // branch means "go back" by giving the loop that case. Reaching here with that case means the
-    // reviewer judged the work not done, so the loop target runs again and this review does not.
-    const routed = result.outcome === 'completed' && result.route !== undefined
-      ? backEdges(this.store, operation.taskId, operation.nodeId, result.route)
-      : [];
-    const agentRouter = operation.kind === 'agent' && Boolean(nodeSpec.routes?.length);
-    // An Agent router bound to an acceptance item: its verdict IS the acceptance, so the harness
-    // records the evidence instead of demanding it. The durable record is the review the graph made
-    // it write: the declared deliverable, pinned by its exact bytes. A router that just sent the work
-    // back (a routed loop) proved nothing yet, so it records nothing. A program check proves the same
-    // item with the evidence objects it submits, which the loop below validates either way.
-    //
-    // This runs BEFORE the handoff is settled, and that order is load-bearing: the handoff stores a
-    // digest of the result it was settled over, so settling first and adding evidence afterwards
-    // records a digest the store no longer holds and every downstream read fails as a mismatch.
-    if (agentRouter && !rework && !routed.length && result.outcome === 'completed'
-      && !result.evidence?.length && proposal.acceptance.some(item => item.checkNode === operation.nodeId)) {
-      const deliverable = nodeSpec.deliverable;
-      if (!deliverable) throw new RuntimeError('invalid_evidence', 'An Agent router bound to an acceptance item must declare a deliverable: the review it writes is the evidence');
-      const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(this.store.task(operation.taskId).project_id) as { root: string } | undefined;
-      const workspace = operation.workspace ?? project?.root;
-      const path = workspace ? resolve(workspace, deliverable.path) : undefined;
-      const body = path ? readFileSync(path) : undefined;
-      if (!path || !body || !body.length) throw new RuntimeError('invalid_evidence', `The review ${deliverable.path} is the acceptance evidence but was not written`);
-      const note = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
-        ? (result.output as Record<string, unknown>)['note'] : undefined;
-      const summary = typeof note === 'string' && note.trim() ? note.trim().slice(0, 800) : `${operation.nodeId} passed its own review`;
-      result = { ...result, evidence: proposal.acceptance
-        .filter(item => item.checkNode === operation.nodeId)
-        .map(item => ({ acceptanceId: item.id, summary, artifact: { path, digest: createHash('sha256').update(body).digest('hex') } })) };
-    }
-    result = settleResultHandoff(this.store, operation, proposal, result);
-    const handoffFailure = submissionDefect(result);
-    // Hoisted: the problem must be opened after the operation's own questions are
-    // reconciled below, or that reconciliation would close it in the same settle.
-    const handoffData = handoffFailure ? {
-      reason: handoffFailure.reason,
-      defects: handoffFailure.defects as unknown as Json,
-      sourceNodeId: operation.nodeId,
-      sourceOperationId: operation.id,
-      policy: handoffFailure.policy,
-      resume: (handoffFailure.policy === 'result_handoff'
-        ? resultHandoffDependents(proposal, operation.nodeId)
-        : []) as unknown as Json,
-    } : undefined;
-    if (handoffFailure) {
-      // The work itself is intact; only the submitted document is unusable. That
-      // is one problem for the main Agent to repair or escalate, never a failed
-      // operation plus one rejection per dependent. Dependents stay unready on
-      // their own because this node never reached succeeded.
-      this.store.event(operation.taskId, 'context.result_noncompliant', { nodeId: operation.nodeId, operationId: operation.id, ...handoffData });
-    } else if (result.outcome === 'completed' && requiresResultHandoff(proposal, operation.nodeId)) {
-      // A handoff that now validates proves the earlier rejections wrong. Clear
-      // the stale downstream blocks instead of making the main Agent retry every
-      // dependent problem after its cause is already gone.
-      this.clearStaleHandoffRejections(operation, proposal);
-    }
-    if (result.outcome === 'completed' && !rework && !routed.length && proposal.acceptance.some(item =>
-      item.checkNode === operation.nodeId && !result.evidence?.some(evidence => evidence.acceptanceId === item.id))) {
-      throw new RuntimeError('invalid_evidence', 'Completed check is missing required acceptance evidence');
-    }
-    if (rework && result.evidence?.length) throw new RuntimeError('invalid_evidence', 'Rework cannot carry acceptance evidence');
-    if (result.evidence?.length && result.outcome !== 'completed') {
-      throw new RuntimeError('invalid_evidence', 'Only a completed check may produce acceptance evidence');
-    }
-    for (const evidence of result.evidence ?? []) {
-      if ((operation.kind !== 'program' && !agentRouter)
-        || !proposal.acceptance.some(item => item.id === evidence.acceptanceId && item.checkNode === operation.nodeId)) {
-        throw new RuntimeError('invalid_evidence', 'Evidence must come from the assigned program check or Agent router');
-      }
-      if (!evidence.summary.trim() || !isAbsolute(evidence.artifact.path) || !/^[a-f0-9]{64}$/.test(evidence.artifact.digest)
-        || ((evidence.artifact.artifactId === undefined) !== (evidence.artifact.version === undefined))
-        || (evidence.artifact.artifactId !== undefined && (!evidence.artifact.artifactId.trim() || typeof evidence.artifact.version !== 'number' || !Number.isSafeInteger(evidence.artifact.version) || evidence.artifact.version < 1))) {
-        throw new RuntimeError('invalid_evidence', 'Evidence requires a summary, absolute artifact path and SHA-256 digest');
-      }
-      this.store.db.prepare(`INSERT INTO evidence(
-        id,task_id,node_id,operation_id,acceptance_id,proposal_version,requirement_version,data,activation_id,commit_sha
-      ) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(
-        randomUUID(),
-        operation.taskId,
-        operation.nodeId,
-        operation.id,
-        evidence.acceptanceId,
-        operation.proposalVersion,
-        operation.requirementVersion,
-        canonicalJson(evidence),
-        operation.activationId,
-        this.store.task(operation.taskId).integration_sha,
-      );
+    if (result.outcome === 'skipped') {
+      throw new RuntimeError('invalid_result', 'Main execution cannot skip work');
     }
     this.store.db.prepare(`UPDATE operations
       SET state='succeeded',worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?)
@@ -1234,18 +1034,15 @@ export class OperationLifecycle {
           ? 'pending'
           : result.outcome;
     this.store.db.prepare(`UPDATE nodes
-      SET status=?,output=?,route=?,output_version=output_version+1,output_operation=?
+      SET status=?,output=?,route=NULL,output_version=output_version+1,output_operation=?
       WHERE task_id=? AND id=?`).run(
       nextStatus,
       canonicalJson(result.output),
-      result.route ?? null,
       operation.id,
       operation.taskId,
       operation.nodeId,
     );
-    if (handoffData) {
-      this.block(operation.taskId, operation.nodeId, 'result_noncompliant', handoffData, operation.id);
-    } else if (result.outcome === 'failed' && !nodeSpec.optional) {
+    if (result.outcome === 'failed') {
       // The retry decision was already made above (before usage accounting). Reaching here means
       // the failure is main's: either a verdict, an unexplained failure, or an exhausted bound -
       // and the problem says which, so main is not handed a bare failure.
@@ -1267,24 +1064,7 @@ export class OperationLifecycle {
     this.store.event(operation.taskId, 'operation.result', { operationId: operation.id, result });
     this.store.db.prepare('UPDATE activations SET state=(SELECT status FROM nodes WHERE task_id=? AND id=?) WHERE id=?')
       .run(operation.taskId, operation.nodeId, operation.activationId);
-    if (rework) {
-      this.handleRework(operation, result);
-    } else if (routed.length) {
-      // The reviewer said the work is not done, and the graph said which branch means that. Send the
-      // implementer back and let the reviewer run again; nothing downstream of a failed review may.
-      reactivate(this.store, operation.taskId, routed);
-      this.store.event(operation.taskId, 'graph.rework', {
-        from: operation.nodeId,
-        to: routed,
-        via: 'route',
-        route: result.route,
-      });
-    } else if (result.outcome === 'completed' && proposal.acceptance.some(item => item.checkNode === operation.nodeId)) {
-      for (const target of backEdges(this.store, operation.taskId, operation.nodeId)) {
-        this.store.db.prepare('UPDATE nodes SET stall_count=0 WHERE task_id=? AND id=?').run(operation.taskId, target);
-      }
-    }
-    this.hooks.advance(operation.taskId);
+
   }
 
   /**

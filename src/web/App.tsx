@@ -56,10 +56,7 @@ type TaskView = {
   operations: { nodeId: string; state: string; result?: { output?: unknown } | null }[];
   cost: { unknown?: boolean; amount?: number | null; amounts?: Record<string, number> };
   integrationSha: string | null;
-  proposal: {
-    summary?: string; acceptance: { id: string; description: string; checkNode: string }[];
-    nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[] }[];
-  } | null;
+  proposal: import('../core/types.ts').NativeProposal | null;
 };
 type NodeView = {
   id: string; kind: string; status: string; container?: string; used?: number | null; budget?: number | null; unlimited?: boolean;
@@ -68,11 +65,6 @@ type NodeView = {
   context?: {
     purpose?: string; sourceNode?: string; requiredFacts?: { kind: string }[]; independence?: string;
     predecessors?: { source?: string; mode?: string }[];
-    predecessorHandoffs?: {
-      sourceNodeId?: string;
-      mode?: string;
-      resultHandoff?: { workSummary?: string } | null;
-    }[];
     handoffSummary?: string | null;
   };
   agent?: GraphAgentDetail | null;
@@ -362,12 +354,12 @@ export function App() {
           <Activity key={tab.id} mode={tab.id === visibleTabId ? 'visible' : 'hidden'}>
             <WorkspacePage path={tab.id === visibleTabId ? path : tab.hash.slice(1)}
               active={tab.id === visibleTabId} settings={settings} startup={startup} tasks={tasks} conversations={conversations ?? []}
-              reloadConversations={reloadConversations} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
+              reloadConversations={reloadConversations} refreshTasks={refreshTasks} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
               retitleWorkspaceTab={retitleWorkspaceTab} />
           </Activity>
         ))}
         {pathname === '/' && <WorkspacePage path={path} active settings={settings} startup={startup} tasks={tasks} conversations={conversations ?? []}
-          reloadConversations={reloadConversations} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
+          reloadConversations={reloadConversations} refreshTasks={refreshTasks} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
           retitleWorkspaceTab={retitleWorkspaceTab} />}
 
       </main>
@@ -386,9 +378,9 @@ export function App() {
   );
 }
 
-function WorkspacePage({ path, active, settings, startup, tasks, conversations, reloadConversations, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
+function WorkspacePage({ path, active, settings, startup, tasks, conversations, reloadConversations, refreshTasks, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
   path: string; active: boolean; settings: Settings_ | null; startup: Startup | null; tasks: TaskSummary[]; conversations: ConversationSummary[];
-  reloadConversations: () => void; detailOpen: boolean; setDetailOpen: (open: boolean) => void;
+  refreshTasks: () => Promise<void>; reloadConversations: () => void; detailOpen: boolean; setDetailOpen: (open: boolean) => void;
   retitleWorkspaceTab: (kind: WorkspaceTabKind, key: string, title: string) => void;
 }) {
   const [pathname, query = ''] = path.split('?');
@@ -405,7 +397,7 @@ function WorkspacePage({ path, active, settings, startup, tasks, conversations, 
     <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`}>
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
-            {pathname === '/inbox' && <Inbox tasks={tasks} />}
+            {pathname === '/inbox' && <Inbox tasks={tasks} onAnswered={() => void refreshTasks().catch(() => undefined)} />}
             {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
             {pathname === '/usage' && <UsagePage />}
             {pathname === '/tools' && <ToolStatsPage />}
@@ -715,11 +707,11 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
   );
 }
 
-function Inbox({ tasks }: { tasks: TaskSummary[] }) {
+function Inbox({ tasks, onAnswered }: { tasks: TaskSummary[]; onAnswered: () => void }) {
   const pending = tasks.filter(task => (task.openQuestions ?? 0) > 0);
   const [views, setViews] = useState<Record<string, TaskView>>({});
   const [error, setError] = useState('');
-  const { data: inbox, error: historyError, loading: historyLoading } = useAsync(() => api<{
+  const { data: inbox, error: historyError, loading: historyLoading, reload: reloadHistory } = useAsync(() => api<{
     history: {
       id: string; taskId: string; nodeId: string; kind: string; status: string;
       data: Record<string, unknown>; answer: Record<string, unknown> | null;
@@ -753,7 +745,7 @@ function Inbox({ tasks }: { tasks: TaskSummary[] }) {
           title={<a href={`#/tasks/${task.id}/graph`}>{task.request.slice(0, 70)}</a>}
           subtitle={`${task.projectId} · ${task.openQuestions} 个待处理问题`}>
           <ul className="list">{(views[task.id]?.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user').map(question => (
-            <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => void load()} />
+            <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => { void load(); void reloadHistory(); onAnswered(); }} />
           ))}</ul>
         </Card>
       ))}
@@ -828,9 +820,12 @@ function GraphPanel({ id, settings, startup }: { id: string; settings: Settings_
         </div>
       </Card>
 
-      <Card title="任务图" icon="graph" subtitle={graph.nodes.length ? `${graph.nodes.length} 个节点` : undefined}>
-        {!graph.nodes.length && <Empty icon="graph" title="任务图为空" hint={<span data-testid="graph-empty">尚未确认提案，任务图为空。</span>} />}
-        <GraphCanvas graph={graph} collapsed={collapsed} onSelect={openNode} selected={selected} onReopen={moduleId => {
+      <Card title="任务图" icon="graph" subtitle={graph.nodes.length ? `${graph.nodes.length} 个节点` : undefined}
+        actions={graph.nodes.length ? <Button size="sm" onClick={() => {
+          void api(`/api/tasks/${id}/graph/control`, { method: 'POST', body: JSON.stringify({ action: 'relayout' }) }).then(refreshAll).catch(reason => toast(String(reason), 'danger'));
+        }}>重新布局</Button> : undefined}>
+        {!graph.nodes.length && <Empty icon="graph" title="任务图为空" hint={<span data-testid="graph-empty">尚无 graph 内部节点。</span>} />}
+        <GraphCanvas taskId={id} graph={graph} collapsed={collapsed} onSelect={openNode} selected={selected} onReopen={moduleId => {
           void api(`/api/tasks/${id}/graph/control`, { method: 'POST', body: JSON.stringify({ action: 'reopen', moduleId }) }).then(refreshAll).catch(reason => toast(String(reason), 'danger'));
         }} />
       </Card>

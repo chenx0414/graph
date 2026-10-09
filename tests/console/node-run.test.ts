@@ -88,12 +88,17 @@ test('a worker node projects real Pi entries, its session reference and operatio
   expect(roles).toContain('assistant:message');
   expect(first.entries.find(entry => entry.role === 'tool' && entry.kind === 'call')?.data).toMatchObject({ toolName: 'read' });
   expect(first.entries.find(entry => entry.role === 'assistant')?.text).toContain('Read the note');
-  // Elapsed execution time is recorded; unmeasured run/wait components stay unknown.
+  // Work time is measured from actual execution boundaries, not fabricated
+  // from provider usage or the latest chat timestamp.
   expect(first.operations.length).toBeGreaterThanOrEqual(1);
-  expect(first.operations[0]).toMatchObject({ state: 'completed', waitingMs: null, runMs: null });
+  expect(first.operations[0]).toMatchObject({ state: 'completed', waitingMs: 0 });
+  expect(first.operations[0]!.runMs).toBeGreaterThan(0);
   const elapsed = first.operations.map(operation => 'elapsedMs' in operation ? operation.elapsedMs : null);
   expect(elapsed[0]).toBeGreaterThan(0);
   expect(first.timing.totalMs).toBe(elapsed[0]);
+  expect(first.timing.runMs).toBe(first.operations[0]!.runMs);
+  expect(first.timing.waitingMs).toBe(0);
+  expect(first.operations[0]!.runMs).toBeLessThanOrEqual(elapsed[0]!);
   expect(first.invocations.length).toBeGreaterThanOrEqual(2);
   expect(first.invocations.every(invocation => invocation.usageSource === 'authoritative')).toBe(true);
   expect(first.entryCount).toBe(first.entries.length);
@@ -106,6 +111,7 @@ test('a worker node projects real Pi entries, its session reference and operatio
   expect(restored.entries).toEqual(first.entries);
   expect(restored.session?.sessionId).toBe(first.session?.sessionId);
   expect(restored.operations.map(operation => 'elapsedMs' in operation ? operation.elapsedMs : null)).toEqual(elapsed);
+  expect(restored.timing).toEqual(first.timing);
 }, 120_000);
 
 test('entry pagination stays stable when two nodes interleave more than 500 records', async () => {
@@ -154,9 +160,14 @@ test('entry pagination stays stable when two nodes interleave more than 500 reco
 test('a credential slot wait is recorded apart from the run duration', async () => {
   let releaseFirst!: () => void;
   const firstReleased = new Promise<void>(resolve => { releaseFirst = resolve; });
+  let releaseNative!: () => void;
+  const nativeReleased = new Promise<void>(resolve => { releaseNative = resolve; });
   const provider = await openaiServer([
     { text: 'first done', beforeReply: () => firstReleased },
     { text: 'second done' },
+    { text: 'native first done', beforeReply: () => nativeReleased },
+    { text: 'native second done' },
+    { text: 'native next execution done' },
   ]);
   cleanup.push(() => provider.close());
   const root = await mkdtemp(join(tmpdir(), 'graph-node-run-wait-'));
@@ -177,7 +188,7 @@ test('a credential slot wait is recorded apart from the run duration', async () 
     },
     master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
   });
-  cleanup.push(async () => { releaseFirst(); await runtime.close(); });
+  cleanup.push(async () => { releaseFirst(); releaseNative(); await runtime.close(); });
   await installPresets(runtime.catalog, presetsRoot);
   const first = await runtime.conversations.create({ text: '第一个会话。', requestId: 'conv-one' });
   const second = await runtime.conversations.create({ text: '第二个会话。', requestId: 'conv-two' });
@@ -201,6 +212,38 @@ test('a credential slot wait is recorded apart from the run duration', async () 
   expect(detail.operations.length).toBeGreaterThanOrEqual(1);
   expect(detail.operations[0]!.runMs).not.toBeNull();
   expect(detail.operations[0]!.waitingMs).toBeGreaterThanOrEqual(0);
+
+  const main = runtime.supervisor(first.taskId);
+  const node = { recipe: 'coder@1', model: 'local', task: 'Reply to the input', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} };
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Native measured waits',
+    protocols: { data: { type: 'object' } }, nodes: { a: node, b: node }, modules: {}, edges: {} }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'a', input: 'job', value: {} });
+  await main.graphSend({ graphId, nodeId: 'b', input: 'job', value: {} });
+  const nativeDriving = runtime.host.drive();
+  let waitingNode!: string;
+  await expect.poll(() => {
+    waitingNode = ['a', 'b'].find(id => runtime.nodeRun(graphId, id).operations.some(operation => operation.waitingSlot)) ?? '';
+    return waitingNode && runtime.nodeRun(graphId, waitingNode).timing.waitingMs;
+  }, { timeout: 10_000 }).toBeGreaterThan(0);
+  const held = runtime.nodeRun(graphId, waitingNode);
+  expect(held.timing).toMatchObject({ inProgress: true });
+  expect(held.timing.runMs).toBeGreaterThan(0);
+  expect(runtime.nodeRun(graphId, waitingNode).timing.runMs).toBe(held.timing.runMs);
+  releaseNative();
+  await nativeDriving;
+  const finished = runtime.nodeRun(graphId, waitingNode);
+  expect(finished.timing).toMatchObject({ inProgress: false });
+  expect(finished.timing.waitingMs).toBeGreaterThanOrEqual(held.timing.waitingMs!);
+  expect(finished.timing.runMs).toBeGreaterThan(held.timing.runMs!);
+  expect(finished.timing.runMs! + finished.timing.waitingMs!).toBe(finished.timing.totalMs);
+
+  // Idle time between deliveries is not work; each execution contributes once.
+  await main.graphSend({ graphId, nodeId: waitingNode, input: 'job', value: {} });
+  await runtime.host.drive();
+  const rerun = runtime.nodeRun(graphId, waitingNode);
+  expect(rerun.operations).toHaveLength(2);
+  expect(rerun.timing.runMs).toBe(rerun.operations.reduce((total, operation) => total + operation.runMs!, 0));
+  expect(rerun.timing.waitingMs).toBe(rerun.operations.reduce((total, operation) => total + operation.waitingMs!, 0));
 }, 120_000);
 
 test('the node detail API serves the projection over HTTP', async () => {

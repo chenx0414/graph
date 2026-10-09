@@ -1,131 +1,115 @@
-// End-to-end: a REAL router graph routes a branch, through the real lifecycle (R23).
-//
-// This is the proof that was missing. Before this change a live router graph skipped EVERY branch
-// (readiness[json] = skip, readiness[text] = skip) because nothing could produce a case. Here a real
-// store, real graph revision and the real OperationLifecycle settle a routing node, and the branch
-// that matches goes ready while the other is skipped.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { OperationLifecycle, type OperationIntent } from '../../src/core/operation-lifecycle.ts';
-import { TaskStore, canonicalJson } from '../../src/core/store.ts';
-import { loadGraph } from '../../src/core/graph.ts';
-import { fullAccessPolicy, resolveAccessPolicy } from '../../src/core/access-policy.ts';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { parseGraphDefinition, type ModuleRule } from '../../src/core/interface-spec.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); });
 
-/**
- * router -> (pass) ship | (fail) fix, with the router a plain program node whose branch comes from
- * its own status. Exactly the "tool node" case the user described.
- */
-async function fixture(routeInput: unknown, options: { optional?: boolean } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-router-e2e-'));
+/** Real command/agent outputs reach an explicit router, then only the chosen agent executes. */
+async function fixture(options: { command?: string[]; value?: unknown; rules?: ModuleRule[]; strictProtocol?: boolean } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-router-e2e-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const store = new TaskStore(join(root, 'tasks.sqlite'));
-  cleanup.push(async () => store.close());
-  const nodes = [
-    { id: 'gate', kind: 'program' as const, action: 'graph.command', routes: ['pass', 'fail'], input: routeInput, ...(options.optional ? { optional: true } : {}) },
-    { id: 'ship', kind: 'program' as const, action: 'graph.command', dependsOn: ['gate'], when: { node: 'gate', case: 'pass' } },
-    { id: 'fix', kind: 'program' as const, action: 'graph.command', dependsOn: ['gate'], when: { node: 'gate', case: 'fail' } },
-  ];
-  store.transaction(() => {
-    store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
-    store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase,graph_version) VALUES('t','p','router',1,'running',1)").run();
-    for (const node of nodes) {
-      // Node first, then its instance: the instance row references the node, and instance_id is
-      // unique so each node owns exactly one.
-      store.db.prepare("INSERT INTO nodes(task_id,id,spec,status,activation_id) VALUES('t',?,?,'pending','a')")
-        .run(node.id, canonicalJson(node));
-      store.db.prepare("INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES(?,?,?,'coder@1','m')")
-        .run(`i-${node.id}`, 't', node.id);
-      store.db.prepare("UPDATE nodes SET instance_id=? WHERE task_id='t' AND id=?").run(`i-${node.id}`, node.id);
-      // An operation references its activation, and settle refuses an operation whose activation is
-      // no longer the node's current one, so the node has to point at it.
-      store.db.prepare("INSERT INTO activations(id,task_id,node_id,graph_version,round,state,input_versions) VALUES(?,?,?,1,1,'pending','{}')")
-        .run(`a-${node.id}`, 't', node.id);
-      store.db.prepare("UPDATE nodes SET activation_id=? WHERE task_id='t' AND id=?").run(`a-${node.id}`, node.id);
-    }
-    store.db.prepare("INSERT INTO graph_revisions(task_id,version,spec,reason) VALUES('t',1,?,'test')")
-      .run(canonicalJson({ nodes, containers: [], loops: [] }));
-    store.db.prepare("INSERT INTO proposals(task_id,version,requirement_version,spec) VALUES('t',1,1,?)")
-      .run(canonicalJson({ requirementVersion: 1, summary: '', acceptance: [], nodes, containers: [], loops: [] }));
+  const provider = await openaiServer([
+    ...(!options.command ? [
+      { tools: [{ id: 'review', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: options.value ?? { passed: false, reason: 'Revise the label' } } } }) }] },
+      { text: 'Reviewer finished' },
+    ] : []),
+    { text: 'Chosen branch finished' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
+    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl,
+      contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-only', modelRuntime: provider.runtime },
   });
-  const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
-  lifecycle.recover();
-  return { store, lifecycle };
-}
-
-function intent(attempt: number): OperationIntent {
-  return {
-    taskId: 't', nodeId: 'gate', instanceId: 'i-gate', kind: 'program', action: 'graph.command',
-    input: { attempt }, dependencies: {}, proposalVersion: 1, requirementVersion: 1,
-    context: { previousOutput: null, answers: [] }, grants: [], activationId: 'a-gate', graphVersion: 1,
-    dependencySources: {}, inputVersions: {}, accessPolicy: resolveAccessPolicy(fullAccessPolicy()),
-  };
-}
-
-function settleRouter(lifecycle: OperationLifecycle, outcome: 'completed' | 'failed', output?: unknown) {
-  const operation = lifecycle.admit({ node: { id: 'gate', taskId: 't', activationId: 'a-gate' }, reservation: 0, prepare: intent });
-  lifecycle.dispatch(operation);
-  lifecycle.report(operation.id, operation.generation, {
-    outcome,
-    output: (output ?? (outcome === 'failed' ? { code: 1, stderr: 'boom' } : { code: 0 })) as never,
+  cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Route explicitly', requestId: 'begin' });
+  const main = runtime.supervisor(taskId); const data = { protocol: 'data' };
+  const branch = (task: string) => ({ recipe: 'worker@1', model: 'local', task, inputs: { job: data }, outputs: {}, submission: {} });
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Explicit route', protocols: { data: { type: 'object', ...(options.strictProtocol ? { required: ['passed'], properties: { passed: { type: 'boolean' } } } : {}) } },
+    nodes: { ship: branch('SHIP_BRANCH'), fix: branch('FIX_BRANCH'), ...(!options.command ? {
+      review: { ...branch('Submit the review verdict'), outputs: { result: data }, submission: { required: ['result'] } },
+    } : {}) },
+    modules: { route: { type: 'router', trigger: 'each', inputs: { review: data }, outputs: { approved: data, rework: data },
+      rules: options.rules ?? [{ when: 'review.passed == true', emit: { approved: '$review' } }, { when: 'review.passed == false', emit: { rework: '$review' } }] },
+      ...(options.command ? { check: { type: 'operation', trigger: 'each', inputs: { job: data }, outputs: { result: data },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: options.command, output: 'result' } } } : {}),
+    }, edges: { source: { from: options.command ? 'check.result' : 'review.result', to: 'route.review', enabled: true },
+      approved: { from: 'route.approved', to: 'ship.job', enabled: true }, rework: { from: 'route.rework', to: 'fix.job', enabled: true } },
   });
+  const { graphId } = await main.graphCreate({ definition }) as { graphId: string };
+  return { runtime, main, graphId, provider, async run() {
+    await main.graphSend({ graphId, nodeId: options.command ? 'check' : 'review', input: 'job', value: {} });
+    await runtime.host.drive();
+  }, async route() { return main.graphInspect({ graphId, query: 'module', id: 'route' }); } };
 }
 
-test('a router maps its own status to a case and the matching branch goes ready', async () => {
-  const { store, lifecycle } = await fixture({ route: { byStatus: { completed: 'pass', failed: 'fail' } } });
-  settleRouter(lifecycle, 'completed');
-  const graph = loadGraph(store, 't');
-  expect(store.db.prepare("SELECT route FROM nodes WHERE task_id='t' AND id='gate'").get()).toEqual({ route: 'pass' });
-  expect(graph.readiness('ship')).toBe('ready');
-  expect(graph.readiness('fix')).toBe('skip');
+function requestText(body: unknown) {
+  const request = body as { messages: { content: string | { text?: string }[] }[] };
+  return request.messages.map(({ content }) => typeof content === 'string'
+    ? content : content.map(part => part.text ?? '').join('\n')).join('\n');
+}
+
+test('a real successful command result selects only the approved branch', async () => {
+  const graph = await fixture({ command: ['--version'] }); await graph.run();
+  expect(graph.runtime.nodeRun(graph.graphId, 'ship').node.status).toBe('succeeded');
+  expect(graph.runtime.nodeRun(graph.graphId, 'fix').operations).toHaveLength(0);
+  expect(graph.provider.requests).toHaveLength(1);
+  expect(requestText(graph.provider.requests[0])).toContain('SHIP_BRANCH');
+  const operations = await graph.main.graphInspect({ graphId: graph.graphId, query: 'operations' });
+  expect(operations).toMatchObject([{ state: 'settled', result: { outputs: { result: { passed: true, code: 0 } } } }]);
 });
 
-test('a gate reports its verdict through its output, not through failing', async () => {
-  // This is the shape the system actually wants, and it comes from its own semantics: a FAILED
-  // non-optional node blocks the graph, and `readiness` accepts only `succeeded` as a condition.
-  // So a routing check must COMPLETE and state its verdict — exactly what `graph.verify` does
-  // (`outcome: 'pass' | 'rework'`). `byStatus` is for a gate whose failure is optional.
-  const { store, lifecycle } = await fixture({ route: { byField: { path: 'verdict', values: { rework: 'fail', pass: 'pass' } } } });
-  settleRouter(lifecycle, 'completed', { code: 0, verdict: 'rework' });
-  const graph = loadGraph(store, 't');
-  expect(store.db.prepare("SELECT route FROM nodes WHERE task_id='t' AND id='gate'").get()).toEqual({ route: 'fail' });
-  expect(graph.readiness('fix')).toBe('ready');
-  expect(graph.readiness('ship')).toBe('skip');
+test('a completed reviewer submits a failing business verdict and its reason reaches the rework branch', async () => {
+  const graph = await fixture(); await graph.run();
+  expect(graph.runtime.nodeRun(graph.graphId, 'review').node.status).toBe('succeeded');
+  expect(graph.runtime.nodeRun(graph.graphId, 'fix').node.status).toBe('succeeded');
+  expect(graph.runtime.nodeRun(graph.graphId, 'ship').operations).toHaveLength(0);
+  expect(graph.provider.requests).toHaveLength(3);
+  expect(requestText(graph.provider.requests[2])).toContain('Revise the label');
+  expect(requestText(graph.provider.requests[2])).toContain('FIX_BRANCH');
 });
 
-test('an optional gate that fails routes nothing and does not crash the settle', async () => {
-  // `optional` is the existing way to say "this node's failure is not fatal". A failed router never
-  // reached a verdict, so it routes no branch: the failure is reported as itself, and because the
-  // node is optional the graph is not blocked by it either.
-  const { store, lifecycle } = await fixture({ route: { byStatus: { completed: 'pass', failed: 'fail' } } }, { optional: true });
-  settleRouter(lifecycle, 'failed');
-  // The verdict IS knowable even when the node is optional, so it routes the failure branch - the
-  // optional flag decides whether the graph is blocked by the failure, not whether it was routed.
-  expect(store.db.prepare("SELECT route FROM nodes WHERE task_id='t' AND id='gate'").get()).toEqual({ route: 'fail' });
+test('a real command with a nonzero exit routes its failed result without failing the router evaluation', async () => {
+  const graph = await fixture({ command: ['--test', 'missing.test.js'] }); await graph.run();
+  expect(graph.runtime.nodeRun(graph.graphId, 'fix').node.status).toBe('succeeded');
+  expect(graph.runtime.nodeRun(graph.graphId, 'ship').operations).toHaveLength(0);
+  const operations = await graph.main.graphInspect({ graphId: graph.graphId, query: 'operations' });
+  expect(operations).toMatchObject([{ state: 'settled', result: { outputs: { result: { passed: false, code: 1 } } } }]);
+  expect(requestText(graph.provider.requests[0])).toContain('"passed":false');
 });
 
-test('a router that declares branches but no way to choose is refused as a graph defect', async () => {
-  const { store, lifecycle } = await fixture({});
-  expect(() => settleRouter(lifecycle, 'completed')).toThrow(/没有声明如何选择/);
-  // The refused settle leaves the router unrouted, so neither branch can be chosen: they wait on it
-  // rather than pretending a branch was taken.
-  const graph = loadGraph(store, 't');
-  expect(graph.readiness('ship')).toBe('waiting');
-  expect(graph.readiness('fix')).toBe('waiting');
+test('a valid input that matches no explicit rule is held without inventing a branch', async () => {
+  const graph = await fixture({ value: { passed: null, reason: 'Decision pending' } }); await graph.run();
+  expect(graph.runtime.nodeRun(graph.graphId, 'review').node.status).toBe('succeeded');
+  expect(graph.provider.requests).toHaveLength(2);
+  expect(graph.runtime.nodeRun(graph.graphId, 'ship').operations).toHaveLength(0);
+  expect(graph.runtime.nodeRun(graph.graphId, 'fix').operations).toHaveLength(0);
+  expect(await graph.route()).toMatchObject({ inputs: [{ name: 'review', missing: false, value: { passed: null } }], transitions: [{ outputs: {} }] });
 });
 
-test('a declared field that is missing refuses loudly instead of picking a branch', async () => {
-  const { store, lifecycle } = await fixture({ route: { byField: { path: 'outcome', values: { rework: 'fail', pass: 'pass' } } } });
-  expect(() => settleRouter(lifecycle, 'completed')).toThrow(/没有 outcome/);
-  expect(store.db.prepare("SELECT route FROM nodes WHERE task_id='t' AND id='gate'").get()).toEqual({ route: null });
+test('an input protocol requiring the verdict refuses a missing field before judgment or branch activation', async () => {
+  const graph = await fixture({ strictProtocol: true });
+  await expect(graph.main.graphSend({ graphId: graph.graphId, nodeId: 'route', input: 'review', value: { reason: 'Verdict missing' } }))
+    .rejects.toMatchObject({ code: 'invalid_input' });
+  expect(graph.provider.requests).toHaveLength(0);
+  expect(graph.runtime.nodeRun(graph.graphId, 'ship').operations).toHaveLength(0);
+  expect(graph.runtime.nodeRun(graph.graphId, 'fix').operations).toHaveLength(0);
+  expect(await graph.route()).toMatchObject({ inputs: [{ name: 'review', missing: true }], transitions: [] });
 });
 
-test('a case the router never declared is refused, and no branch is activated', async () => {
-  const { store, lifecycle } = await fixture({ route: { byStatus: { completed: 'maybe' } } });
-  expect(() => settleRouter(lifecycle, 'completed')).toThrow(/没有声明这个分支/);
-  expect(store.db.prepare("SELECT route FROM nodes WHERE task_id='t' AND id='gate'").get()).toEqual({ route: null });
+test('an output not declared by the router is refused atomically before it can select any branch', async () => {
+  const graph = await fixture();
+  await expect(graph.main.graphPatch({ graphId: graph.graphId, baseRevision: 1, changes: { reason: 'Invalid branch', patch: {
+    modules: { route: { rules: [{ when: 'review.passed == true', emit: { maybe: '$review' } }] } },
+  } } })).rejects.toMatchObject({ code: 'invalid_definition' });
+  expect(await graph.main.graphInspect({ graphId: graph.graphId })).toMatchObject({ revision: 1 });
+  expect(graph.provider.requests).toHaveLength(0);
+  expect(graph.runtime.nodeRun(graph.graphId, 'ship').operations).toHaveLength(0);
+  expect(graph.runtime.nodeRun(graph.graphId, 'fix').operations).toHaveLength(0);
 });

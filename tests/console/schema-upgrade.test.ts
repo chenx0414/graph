@@ -9,7 +9,7 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { installPresets } from '../../src/catalog/presets.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -27,6 +27,13 @@ async function prepare(fixture: string, name: string) {
   // running any migration here (raw SQLite, so phase A still upgrades).
   const raw = new DatabaseSync(join(stateDir, 'tasks.sqlite'));
   raw.exec(`UPDATE projects SET root='${projectRoot.replace(/'/g, "''")}' WHERE id='legacy'`);
+  // A retired graph may have lost its nodes/proposals while retaining history.
+  // It is still a DAG graph, not an external main conversation anchor.
+  raw.exec(`INSERT INTO tasks(id,project_id,request,graph_version,created_seq)
+    VALUES('history-only-task','legacy','Archived DAG',1,2);
+    INSERT INTO graph_revisions(task_id,version,spec,reason)
+    VALUES('history-only-task',1,'{"requirementVersion":1,"summary":"Archived DAG","nodes":[],"acceptance":[]}',
+      'Retained history');`);
   raw.close();
   await mkdir(projectRoot, { recursive: true });
   await writeFile(join(projectRoot, 'legacy.txt'), 'legacy workspace file\n');
@@ -58,8 +65,11 @@ async function inspect(dbPath: string) {
 }
 
 for (const fixture of ['v13', 'v17'] as const) {
-  test(`a real ${fixture} state directory upgrades in place and runs the full chain (C03)`, async () => {
-    const provider = await openaiServer([{ text: 'legacy upgrade worker finished' }]);
+  test(`a real ${fixture} state directory discards old graphs, preserves configuration and runs a native graph in the same database (C03)`, async () => {
+    const provider = await openaiServer([
+      { tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { upgraded: true } } } }) }] },
+      { text: 'Native upgrade worker finished' },
+    ]);
     cleanup.push(() => provider.close());
     const { stateDir, projectRoot, web, dbPath } = await prepare(fixture, fixture);
     const inodeBefore = (await stat(dbPath)).ino;
@@ -70,24 +80,27 @@ for (const fixture of ['v13', 'v17'] as const) {
       projects: [{ id: 'legacy', root: projectRoot }],
       models: { entries: [
         { id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' },
-        // The unfinished legacy task still references its historical model; the
-        // live config must keep binding it or the save is correctly rejected.
-        { id: 'legacy-model', provider: 'graph-openai', grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' },
         ...(extraModel ? [{ id: 'local-2', provider: 'graph-openai', grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] : []),
       ] },
       credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
     });
     await writeFile(configPath, JSON.stringify(document(0, false), null, 2));
 
-    // Phase A: daemon opens the legacy database, serves the legacy task view
-    // and applies a hot configuration change on the same file.
+    // Startup retires the old graph before serving requests or binding models.
     const daemon = await startGraphDaemon({ configPath, stateDir, webDir: web, port: 0, mode: 'execute', dynamic: true, env: { GRAPH_LOCAL_KEY: 'synthetic' }, log: () => undefined });
+    let daemonClosed = false;
+    cleanup.push(async () => { if (!daemonClosed) await daemon.close(); });
     const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
     const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
     const taskView = await fetch(`${daemon.url}/api/tasks/legacy-task`, { headers });
-    expect(taskView.status).toBe(200);
-    const view = await taskView.json() as { id: string; nodes?: unknown[] };
-    expect(view.id).toBe('legacy-task');
+    expect(taskView.status).toBe(400);
+    expect(await taskView.json()).toMatchObject({ code: 'not_found' });
+    const tasks = await (await fetch(`${daemon.url}/api/tasks`, { headers })).json() as { id: string }[];
+    expect(tasks.map(task => task.id)).not.toContain('legacy-task');
+    expect(tasks.map(task => task.id)).not.toContain('history-only-task');
+    const historyView = await fetch(`${daemon.url}/api/tasks/history-only-task`, { headers });
+    expect(historyView.status).toBe(400);
+    expect(await historyView.json()).toMatchObject({ code: 'not_found' });
     const configBefore = await (await fetch(`${daemon.url}/api/config`, { headers })).json() as { revision: number };
     const saveResponse = await fetch(`${daemon.url}/api/config`, { method: 'POST', headers, body: JSON.stringify({ expectedRevision: configBefore.revision, document: document(configBefore.revision, true) }) });
     expect(saveResponse.status).toBe(200);
@@ -96,12 +109,12 @@ for (const fixture of ['v13', 'v17'] as const) {
     const configAfter = await (await fetch(`${daemon.url}/api/config`, { headers })).json() as { revision: number; config: { models: { entries: { id: string }[] } } };
     expect(configAfter.revision).toBeGreaterThan(configBefore.revision);
     expect(configAfter.config.models.entries.map(entry => entry.id)).toContain('local-2');
-    await daemon.close();
+    await daemon.close(); daemonClosed = true;
 
     const upgraded = await inspect(dbPath);
     expect(upgraded.version).toBe(SCHEMA_VERSION);
-    expect(upgraded.instance).toMatchObject({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
-    expect(JSON.parse(upgraded.cost.cost)).toEqual({ amount: 0.001, currency: 'USD' });
+    expect(upgraded.instance).toBeUndefined();
+    expect(upgraded.cost).toBeUndefined();
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
     expect(upgraded.conversationColumns).toEqual(expect.arrayContaining(['archived_at', 'thinking_level']));
     expect(upgraded.bindingColumns).toEqual(expect.arrayContaining(['model_policy_digest', 'tool_policy_digest']));
@@ -115,33 +128,50 @@ for (const fixture of ['v13', 'v17'] as const) {
       'artifact_id', 'version', 'scope', 'namespace', 'digest', 'object_path', 'producer_operation_id',
     ]));
 
-    // Phase B: the same file runs a scripted worker through Git preparation.
-    const runtime = await openTaskRuntime({
+    // The upgraded infrastructure admits native interface delivery, not a DAG conversion.
+    const runtimeOptions = {
       stateDir, projects: [{ id: 'legacy', root: projectRoot }],
-      actions: { check: { kind: 'program' as const, prepare: async () => async () => ({ outcome: 'completed' as const, output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(projectRoot, 'ok.txt'), digest: 'a'.repeat(64) } }] }) } },
       models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'synthetic', modelRuntime: provider.runtime },
       limits: { defaultBudgetTokens: 20_000_000 },
-    });
+    } satisfies Parameters<typeof openTaskRuntime>[0];
+    let runtime = await openTaskRuntime(runtimeOptions);
     cleanup.push(() => runtime.close());
     await installPresets(runtime.catalog, presetsRoot);
     const { taskId } = await runtime.user.begin({ projectId: 'legacy', request: 'Upgrade chain worker', requestId: 'upgrade-begin' });
-    await runtime.supervisor(taskId).propose({
-      requirementVersion: 1, summary: 'Upgrade chain',
-      acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-      nodes: [
-        { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-        { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-      ],
-    }, 'upgrade-propose');
-    await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'upgrade-accept' });
-    await runtime.host.runReady();
+    const main = runtime.supervisor(taskId);
+    const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Native upgrade',
+      protocols: { data: { type: 'object', required: ['upgraded'], properties: { upgraded: { type: 'boolean' } } } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Submit the upgrade result', inputs: { job: { protocol: 'data' } },
+        outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } }, modules: {}, edges: {},
+      outputs: { result: { from: 'work.result', protocol: 'data' } },
+    }) }) as { graphId: string };
+    await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { upgraded: true } });
+    await runtime.host.drive();
+    const executions = await main.graphInspect({ graphId, query: 'executions' }) as { items: { state: string }[] };
+    expect(executions.items).toEqual([expect.objectContaining({ state: 'completed' })]);
+    expect(provider.requests).toHaveLength(2);
+    const results = await main.graphInspect({ graphId, query: 'results' }) as { value: unknown }[];
+    expect(results).toEqual([expect.objectContaining({ value: { upgraded: true } })]);
     const after = await inspect(dbPath);
-    expect(after.preparation?.state).toBe('ready');
-    expect(after.preparation?.baseline_sha).toMatch(/^[0-9a-f]{40}$/);
+
     expect(after.newNodes.count).toBeGreaterThan(0);
     // Same file throughout: no delete-and-recreate migration.
     expect((await stat(dbPath)).ino).toBe(inodeBefore);
-    expect(upgraded.instance.budget).toBe(20_000_000);
+    expect(after.instance).toBeUndefined();
+    await runtime.close();
+    runtime = await openTaskRuntime(runtimeOptions);
+    await runtime.host.drive();
+    const reopened = runtime.supervisor(taskId);
+    expect(await reopened.graphInspect({ graphId, query: 'results' })).toEqual(results);
+    expect(await reopened.graphInspect({ graphId, query: 'executions' })).toEqual(executions);
+    expect(provider.requests).toHaveLength(2);
+    const disk = new TaskStore(dbPath);
+    try {
+      expect(disk.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(disk.db.prepare("SELECT id FROM tasks WHERE id='legacy-task'").get()).toBeUndefined();
+      expect(disk.db.prepare("SELECT id FROM tasks WHERE id='history-only-task'").get()).toBeUndefined();
+      expect(disk.db.prepare("SELECT task_id FROM graph_revisions WHERE task_id='history-only-task'").all()).toEqual([]);
+    } finally { disk.close(); }
   }, 120_000);
 }
 

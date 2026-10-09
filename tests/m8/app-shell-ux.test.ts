@@ -281,10 +281,17 @@ test('the right drawer keeps proposal details and node inspection independent fr
   await nodeDetail.waitFor();
   expect(await nodeDetail.innerText()).toContain('work');
   expect(await nodeDetail.innerText()).toContain('coder@1');
-  expect(await nodeDetail.innerText()).toContain('Fresh');
+  expect(await nodeDetail.innerText()).toContain('独立会话');
+  expect(await nodeDetail.innerText()).not.toContain('Fresh');
+  expect(await nodeDetail.locator('dt').allTextContents()).not.toContain('依赖');
   expect(await nodeDetail.innerText()).toContain('工作经历');
   expect(await nodeDetail.innerText()).toContain('灌输的指令');
-  expect(await nodeDetail.innerText()).toMatch(/传递的 handoff/i);
+  const interfaces = await nodeDetail.innerText();
+  expect(interfaces).toContain('传入接口');
+  expect(interfaces).toContain('传出接口');
+  expect(interfaces).toContain('\"job\"');
+  expect(interfaces).toContain('\"result\"');
+  expect(interfaces).toContain('\"protocol\": \"data\"');
 
   // The chat tab stayed mounted and interactive while the graph window was in front.
   await page.locator('.tab[data-kind="conversation"]').first().click();

@@ -196,45 +196,29 @@ test('unknown usage on a production request blocks the next provider call', asyn
   expect(provider.requests).toHaveLength(1);
 });
 
-test('reconciling unknown usage accumulates the known calls and applies the result once', async () => {
+test('native reconciliation accounts known and missing calls once and keeps the input blocked until main handles it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-reconcile-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, 'package.json'), '{}\n');
   const provider = await openaiServer([
     { tools: [{ id: 'read-1', name: 'read', arguments: '{"path":"package.json"}' }], usage: { prompt_tokens: 40, completion_tokens: 10 } },
     { text: 'Implementation done.', usage: null },
   ]);
   cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }) } },
-    limits: { defaultBudgetTokens: 20_000_000 },
-  });
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl)], apiKey: 'local-only', modelRuntime: provider.runtime }, limits: { defaultBudgetTokens: 20000000 } });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.runReady();
-  const blocked = await runtime.user.task(taskId).view();
-  expect(blocked.questions.map(question => question.kind)).toContain('unknown_usage');
-  await runtime.user.task(taskId).answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no usage for the failed call' }, 'reconcile');
-  const after = await runtime.user.task(taskId).view();
-  const work = after.nodes.find(node => node.id === 'work')!;
-  expect(work).toMatchObject({ status: 'succeeded', used: 50, outputVersion: 1 });
-  const unknown = after.invocations.filter(invocation => invocation.usage === null);
-  expect(unknown).toHaveLength(1);
-  expect(unknown[0]!.cost).toEqual({ unknown: true });
-  // A second reconcile cannot double count: the question is already resolved.
-  await expect(runtime.user.task(taskId).answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'again' }, 'again')).rejects.toMatchObject({ code: 'invalid_question' });
-  expect((await runtime.user.task(taskId).view()).nodes.find(node => node.id === 'work')!.used).toBe(50);
+  const { graphId, main } = await runNativeWorker(runtime);
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; state: string; usage: unknown }[];
+  expect(calls).toHaveLength(2); expect(calls[0]).toMatchObject({ state: 'settled' }); expect(calls[1]).toMatchObject({ state: 'unknown', usage: null });
+  expect(runtime.nodeRun(graphId, 'work').instance!.used).toBe(50);
+  const reconcile = { graphId, action: 'reconcile_usage', callId: calls[1]!.id, usage: { input: 15, output: 5, cacheRead: 0, cacheWrite: 0 } };
+  await main.graphControl(reconcile); await main.graphControl(reconcile);
+  expect(runtime.nodeRun(graphId, 'work')).toMatchObject({ node: { status: 'blocked' }, instance: { used: 70, reserved: 0 } });
+  await expect(main.graphControl({ ...reconcile, usage: { input: 16, output: 5, cacheRead: 0, cacheWrite: 0 } })).rejects.toThrow(/different|conflict|already/);
+  expect(runtime.nodeRun(graphId, 'work').instance!.used).toBe(70);
+  await runtime.host.drive(); expect(provider.requests).toHaveLength(2);
 });
 
 test('a production request that exceeds the budget cannot send a follow-up call', async () => {
@@ -317,45 +301,35 @@ test('a native production worker receives the graph check command and acceptance
   expect(next).toMatchObject({ revision: 2, items: [{ id: 'side-59', value: { task: 'NEXT EXECUTION CONFIGURATION' } }] });
 });
 
-test('a production reviewer receives the independent review report schema', async () => {
+test('a native production reviewer receives and publishes the versioned independent review schema', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m3-prod-review-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  await writeFile(join(root, 'package.json'), '{}\n');
   const provider = await openaiServer([
-    { tools: [{ id: 'w1', name: 'write', arguments: JSON.stringify({ path: 'feature.txt', content: 'x' }) }] },
-    { text: 'Wrote the feature.' },
-    { text: 'Review submitted.' },
+    { text: 'Implementation of the assigned non-code task.' },
+    { tools: [{ id: 'report', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'reviews', name: 'review', schema: 'graph.review@1',
+      mediaType: 'application/json', requestId: 'review-report', content: JSON.stringify({ commit: null, passed: true, reason: 'Independently inspected the non-code result.' }) }) }] },
+    { text: 'Review published.' },
   ]);
   cleanup.push(() => provider.close());
-  const reader = { ...provider.model, id: 'reader' };
-  provider.runtime.registerProvider('graph-openai-reader', { baseUrl: provider.model.baseUrl, api: 'openai-completions', apiKey: 'scripted-local-key', models: [reader] });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    models: { entries: [entry(provider.model.baseUrl), { id: 'reader', provider: 'graph-openai-reader', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: { kind: 'program', prepare: async () => async () => ({
-      outcome: 'completed', output: null,
-      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
-    }) } },
-  });
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    models: { entries: [entry(provider.model.baseUrl), entry(provider.model.baseUrl, 'reader')], apiKey: 'local-only', modelRuntime: provider.runtime } });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Implement', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-      { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'reader', dependsOn: ['check'] },
-      { id: 'review-gate', kind: 'program', action: 'graph.verify', dependsOn: ['review'], verifier: { kind: 'independent', reportNodes: ['review'] } },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-  const reviewRequest = provider.requests.map(request => JSON.stringify(request)).find(text => text.includes('graph.verify independent gate'));
-  expect(reviewRequest).toBeDefined();
-  expect(reviewRequest).toContain('sha256');
+  const parent = await runtime.user.begin({ projectId: 'p', request: 'Review a non-code task', requestId: 'begin' });
+  const main = runtime.supervisor(parent.taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Independent review', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Produce a non-code result', inputs: {}, outputs: { result: { protocol: 'data' } }, submission: {} },
+      review: { recipe: 'reviewer@1', model: 'reader', task: 'Inspect the result independently', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
+    modules: {}, edges: { review: { from: 'work.result', to: 'review.job', enabled: true } },
+    acceptance: [{ id: 'reviewed', description: 'Independent review passes', kind: 'review', node: 'review' }],
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Produce the result' }); await runtime.host.drive();
+  await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: { text: 'Review the assigned result' } }); await runtime.host.drive();
+  const prompt = JSON.stringify(provider.requests[1]);
+  expect(prompt).toContain('FINAL REVIEW REQUIREMENTS'); expect(prompt).toContain('graph.review@1'); expect(prompt).toContain('commit,passed,reason');
+  expect(runtime.nodeRun(graphId, 'review').node.status).toBe('succeeded');
+  await expect(main.graphInspect({ graphId, query: 'acceptance' })).resolves.toMatchObject({ ready: true, items: [{ id: 'reviewed', status: 'passed' }] });
 });
 
 test('a native production worker writes only its own isolated work copy through host tools', async () => {

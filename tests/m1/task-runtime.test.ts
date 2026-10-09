@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { Proposal, NativeProposal } from '../../src/core/types.ts';
+import type { NativeProposal } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 
@@ -104,8 +104,12 @@ test('invalid proposals cannot enter confirmed state, and confirmation freezes t
   ];
   const expectedCodes = ['invalid_definition', 'invalid_definition', 'invalid_definition', 'invalid_definition', 'invalid_proposal'];
   for (const [index, proposal] of invalid.entries()) {
-    await expect(supervisor.propose(proposal as Proposal, `invalid-${index}`)).rejects.toMatchObject({ code: expectedCodes[index] });
+    await expect(supervisor.propose(proposal as unknown as NativeProposal, `invalid-${index}`)).rejects.toMatchObject({ code: expectedCodes[index] });
   }
+  await expect(supervisor.propose({ requirementVersion: 1, summary: 'Retired DAG',
+    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
+    nodes: [{ id: 'check', kind: 'program', action: 'check' }],
+  } as unknown as NativeProposal, 'legacy-draft')).rejects.toMatchObject({ code: 'invalid_proposal', message: expect.stringContaining('definition') });
   for (const field of ['nodes', 'loops', 'containers']) {
     for (const [index, value] of [[], null, [{ id: 'legacy' }]].entries()) {
       await expect(supervisor.propose({ ...valid, [field]: value }, `mixed-${field}-${index}`))
@@ -187,7 +191,7 @@ test('completing a native task releases the confirmed queue without implicitly c
   await runtime.supervisor(first.taskId).graphControl({ graphId: first.taskId, action: 'complete' });
   await runtime.host.drive();
   expect((await runtime.user.task(first.taskId).view()).phase).toBe('completed');
-  expect(await runtime.user.task(second.taskId).view()).toMatchObject({ phase: 'running', queuedBehind: null });
+  expect(await runtime.user.task(second.taskId).view()).toMatchObject({ phase: 'idle', queuedBehind: null });
   expect((await stream.next()).value).toMatchObject({ type: 'task.started' }); await stream.return();
   const checks = await secondMain.graphInspect({ graphId: second.taskId, query: 'operations' }) as { state: string }[];
   expect(checks).toMatchObject([{ state: 'settled' }]);

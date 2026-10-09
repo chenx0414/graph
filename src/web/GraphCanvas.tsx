@@ -1,5 +1,9 @@
-import { useState } from 'react';
-import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type EdgeProps, type NodeProps } from '@xyflow/react';
+import { orthogonalRoutes } from '../core/orthogonal-routes.ts';
+import type { GraphIo, GraphOutput } from '../core/interface-spec.ts';
+import type { ModuleExplanation } from '../core/kernel-explain.ts';
+import { api } from './api.ts';
+import { useEffect, useState } from 'react';
+import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type Edge, type EdgeProps, type NodeProps } from '@xyflow/react';
 import { graphNodeLabel, graphNodeVisualKind, type GraphNodeVisualKind } from '../core/graph-presentation.ts';
 import {
   BOARD_STATE_META,
@@ -14,31 +18,21 @@ import {
   type NodeTone,
 } from './insights.ts';
 
-import { loopChannels } from './graph-edges.ts';
 
 const GRID = 16;
 const align = (value: number) => Math.round(value / GRID) * GRID;
 
 type GraphPayload = {
-  interfaces?: { edgeId: string; from: string; to: string; enabled: boolean; protocol: string | null; latest: unknown; deliveries: { id: string; value: unknown; protocol: string; revisionVersion: number; createdAt: number }[] }[];
-  modules?: { moduleId: string; trigger: string; triggered: boolean; state: unknown; inputs: unknown[]; transitions: unknown[]; definition?: { rules?: unknown[] } }[];
+  interfaces?: { edgeId: string; from: string; to: string; enabled: boolean; protocol: string | null; latest: unknown; nextBefore?: number | null; deliveries: { id: string; value: unknown; seq?: number; valueTruncated?: boolean; valueBytes?: number; valuePreview?: string | null; protocol: string; revisionVersion: number; createdAt: number; source?: string; sourceExecutionId?: string | null; artifacts?: { taskId: string; artifactId: string; version: number; digest: string | null }[]; receiver?: { kind: string; state: string; operationId: string | null; reason: string | null } }[] }[];
+  modules?: (ModuleExplanation & { definition?: { rules?: unknown[] } })[];
   messages?: { id: string; source: string; target: string; text: string; createdAt: number }[];
-  handoffs?: { id: string; source: string; target: string; mode: string; text: string; createdAt: number }[];
   nodes: {
     id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null;
-    context?: {
-      purpose?: string;
-      sourceNode?: string;
-      requiredFacts?: { kind?: string }[];
-      independence?: string;
-      predecessors?: { source?: string; mode?: string }[];
-    } | null;
   }[];
-  containers: { id: string; parent?: string }[];
+  containers: { id: string; parent?: string; template?: string; version?: number; inputs?: Record<string, GraphIo>; outputs?: Record<string, GraphOutput> }[];
   layout: {
     positions: Record<string, { x: number; y: number; width: number; height: number }>;
     edges: { id: string; source: string; target: string; points?: { x: number; y: number }[] }[];
-    branches?: { id: string; source: string; target: string; case: string }[];
   };
 };
 
@@ -73,7 +67,6 @@ function GraphNode({ data, selected }: NodeProps) {
     <div className="node-card" data-node-id={info.id} data-node-type={info.nodeType} data-status={info.status} data-tone={info.tone} data-board-state={info.boardState} data-selected={selected ? 'true' : 'false'}>
       <Handle id="target-top" type="target" position={Position.Top} style={handleStyle} />
       <Handle id="target-left" type="target" position={Position.Left} style={handleStyle} />
-      <Handle id="target-right" type="target" position={Position.Right} style={handleStyle} />
       <div className="node-head">
         <span className="node-dot" style={{ background: NODE_TONE_COLOR[info.tone] }} />
         <span className="node-kind" title={info.nodeType}>{NODE_TYPE_LABEL[info.nodeType]}</span>
@@ -90,17 +83,27 @@ function GraphNode({ data, selected }: NodeProps) {
         <span className="node-label">{info.label}</span>
       </div>
       <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
-      <Handle id="source-left" type="source" position={Position.Left} style={handleStyle} />
       <Handle id="source-right" type="source" position={Position.Right} style={handleStyle} />
     </div>
   );
 }
 
 function GraphContainer({ data }: NodeProps) {
+  const group = data as unknown as GraphPayload['containers'][number] & { label: string; collapsed: boolean };
   return <>
     <Handle id="target-top" type="target" position={Position.Top} style={handleStyle} />
-    <span>{String(data.label)}</span>
+    <Handle id="target-left" type="target" position={Position.Left} style={handleStyle} />
+    <span>{group.label} {group.template && <small>{group.template}@{group.version}</small>}</span>
+    {group.collapsed && <div className="subgraph-ports" data-testid={`subgraph-ports-${group.id}`}>
+      <strong>输入</strong>
+      {Object.entries(group.inputs ?? {}).map(([name, port]) => <div key={`in:${name}`} title={`传入 ${port.to}`}><code>{name}</code> · {port.protocol}@{port.version ?? 1} → {port.to}</div>)}
+      {!Object.keys(group.inputs ?? {}).length && <div>无公开输入</div>}
+      <strong>输出</strong>
+      {Object.entries(group.outputs ?? {}).map(([name, port]) => <div key={`out:${name}`} title={`传出 ${port.from}`}><code>{name}</code> · {port.protocol}@{port.version ?? 1} ← {port.from}</div>)}
+      {!Object.keys(group.outputs ?? {}).length && <div>无公开输出</div>}
+    </div>}
     <Handle id="source-bottom" type="source" position={Position.Bottom} style={handleStyle} />
+    <Handle id="source-right" type="source" position={Position.Right} style={handleStyle} />
   </>;
 }
 
@@ -111,7 +114,7 @@ const nodeTypes = { graphNode: GraphNode, graphContainer: GraphContainer };
  *
  * React Flow only renders `label` for its built-in edges; these edges are custom, so a label passed
  * in options was silently dropped — which is how the existing "结果交接" text never appeared either.
- * Drawing it here is what makes a branch edge readable as `case: pass` rather than an anonymous line.
+ * Drawing it here keeps named interface connections and peer messages readable.
  */
 function EdgeLabel({ text, x, y, color }: { text: string; x: number; y: number; color: string }) {
   const width = text.length * 6.2 + 10;
@@ -143,26 +146,6 @@ function GridEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, in
   );
 }
 
-function GridLoopEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
-  const explicitLeft = (data as { leftX?: number } | undefined)?.leftX;
-  const label = (data as { edgeLabel?: string } | undefined)?.edgeLabel;
-  const lane = (data as { lane?: number } | undefined)?.lane
-    ?? 40 + (id.split('').reduce((sum, value) => sum + value.charCodeAt(0), 0) % 3) * GRID;
-  const left = explicitLeft ?? Math.min(sourceX, targetX) - lane;
-  const path = [
-    `M ${sourceX} ${sourceY}`,
-    `L ${left} ${sourceY}`,
-    `L ${left} ${targetY}`,
-    `L ${targetX} ${targetY}`,
-  ].join(' ');
-  return (
-    <>
-      <BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} {...(style ? { style } : {})} {...(interactionWidth !== undefined ? { interactionWidth } : {})} />
-      {label ? <EdgeLabel text={label} x={left + 30} y={Math.min(sourceY, targetY) - 14} color="#d97706" /> : null}
-    </>
-  );
-}
-
 function MessageEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, interactionWidth, data }: EdgeProps) {
   const bend = Math.max(70, Math.abs(targetX - sourceX) * 0.35);
   const path = `M ${sourceX} ${sourceY} C ${sourceX + bend} ${sourceY - 48}, ${targetX - bend} ${targetY - 48}, ${targetX} ${targetY}`;
@@ -172,9 +155,133 @@ function MessageEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style,
   </>;
 }
 
-const edgeTypes = { grid: GridEdge, gridLoop: GridLoopEdge, message: MessageEdge };
+const edgeTypes = { grid: GridEdge, message: MessageEdge };
 
-export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: {
+type InterfaceView = NonNullable<GraphPayload['interfaces']>[number];
+
+function EdgeHistory({ taskId, summary }: { taskId: string | null; summary: InterfaceView }) {
+  const [page, setPage] = useState(summary);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [loadingValue, setLoadingValue] = useState<string | null>(null);
+  const path = taskId ? `/api/tasks/${encodeURIComponent(taskId)}/graph/edges/${encodeURIComponent(summary.edgeId)}` : null;
+  const newest = summary.deliveries[0];
+  useEffect(() => {
+    if (!path) return;
+    const controller = new AbortController();
+    setLoading(true); setError('');
+    void api<InterfaceView>(`${path}?limit=20`, { signal: controller.signal }).then(setPage)
+      .catch(reason => { if (!controller.signal.aborted) setError(String(reason)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [path, newest?.id, newest?.receiver?.state]);
+  async function more() {
+    if (!path || !page.nextBefore || loading) return;
+    setLoading(true); setError('');
+    try {
+      const next = await api<InterfaceView>(`${path}?before=${page.nextBefore}&limit=20`);
+      setPage(current => ({ ...current, nextBefore: next.nextBefore ?? null,
+        deliveries: [...current.deliveries, ...next.deliveries.filter(item => !current.deliveries.some(known => known.id === item.id))] }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setLoading(false); }
+  }
+  async function fullValue(id: string) {
+    if (!path || loadingValue) return;
+    setLoadingValue(id); setError('');
+    try {
+      const delivery = await api<InterfaceView['deliveries'][number]>(`${path}/deliveries/${encodeURIComponent(id)}`);
+      setPage(current => ({ ...current, deliveries: current.deliveries.map(item => item.id === id ? delivery : item) }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setLoadingValue(null); }
+  }
+  return <>
+    {error && <p role="alert">{error}</p>}
+    {loading && <p>正在读取投递历史…</p>}
+    {page.deliveries.length ? <ol>{page.deliveries.map(delivery => <li key={delivery.id}>
+      <time>{new Date(delivery.createdAt).toLocaleString()} · v{delivery.revisionVersion}</time>
+      <p>来源：{delivery.source ?? '未记录'} · 执行：{delivery.sourceExecutionId ?? '无 agent 执行'}</p>
+      <p>接收状态：{delivery.receiver?.state ?? '未记录'}{delivery.receiver?.operationId ? ` · ${delivery.receiver.operationId}` : ''}</p>
+      {delivery.receiver?.reason && <p>{delivery.receiver.reason}</p>}
+      {delivery.artifacts?.map(artifact => <p key={`${artifact.artifactId}:${artifact.version}`}>
+        <a href={`#/tasks/${encodeURIComponent(artifact.taskId)}/artifacts/${encodeURIComponent(artifact.artifactId)}?v=${artifact.version}`}>产物 {artifact.artifactId} · v{artifact.version}</a>
+        {artifact.digest && <span className="mono"> · {artifact.digest}</span>}
+      </p>)}
+      {delivery.valueTruncated ? <>
+        <p>value 尚未完整加载 · {delivery.valueBytes} bytes</p><pre>{delivery.valuePreview}</pre>
+        {path && <button type="button" disabled={loadingValue !== null} onClick={() => void fullValue(delivery.id)}>读取完整 value</button>}
+      </> : <pre>{JSON.stringify(delivery.value, null, 2)}</pre>}
+    </li>)}</ol> : !loading && <p>尚无投递</p>}
+    {page.nextBefore && path && <button type="button" disabled={loading} onClick={() => void more()}>加载更早投递</button>}
+  </>;
+}
+
+type ModuleView = NonNullable<GraphPayload['modules']>[number];
+
+function ModuleHistory({ taskId, summary, onReopen }: { taskId: string | null; summary: ModuleView; onReopen?: (id: string) => void }) {
+  const [page, setPage] = useState(summary);
+  const [loading, setLoading] = useState(false);
+  const [reading, setReading] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const inputsRevision = JSON.stringify(summary.inputs);
+  const path = taskId ? `/api/tasks/${encodeURIComponent(taskId)}/graph/modules/${encodeURIComponent(summary.moduleId)}` : null;
+  useEffect(() => {
+    if (!path) return;
+    const controller = new AbortController(); setLoading(true); setError('');
+    void api<ModuleView>(`${path}?limit=20`, { signal: controller.signal }).then(result => setPage({ ...summary, ...result }))
+      .catch(reason => { if (!controller.signal.aborted) setError(String(reason)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [path, summary.latestTransition, summary.ruleVersion, summary.triggered, inputsRevision]);
+  async function more() {
+    if (!path || !page.nextAfter || loading) return;
+    setLoading(true); setError('');
+    try {
+      const result = await api<ModuleView>(`${path}?after=${page.nextAfter}&limit=20`);
+      setPage(current => ({ ...current, nextAfter: result.nextAfter,
+        transitions: [...current.transitions, ...result.transitions.filter(item => !current.transitions.some(known => known.id === item.id))] }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setLoading(false); }
+  }
+  async function readValues() {
+    if (!path || reading) return;
+    setReading('values'); setError('');
+    try {
+      const result = await api<ModuleView>(`${path}/values`);
+      setPage(current => ({ ...current, inputs: result.inputs, state: result.state,
+        stateTruncated: result.stateTruncated, stateBytes: result.stateBytes, statePreview: result.statePreview }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setReading(null); }
+  }
+  async function readTransition(id: string) {
+    if (!path || reading) return;
+    setReading(id); setError('');
+    try {
+      const result = await api<ModuleView['transitions'][number]>(`${path}/transitions/${encodeURIComponent(id)}`);
+      setPage(current => ({ ...current, transitions: current.transitions.map(item => item.id === id ? result : item) }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setReading(null); }
+  }
+  return <>
+    <strong>{page.moduleId} · {page.trigger === 'once' ? '一次汇合' : '每次判断'}</strong>
+    <p>{page.triggered ? '已触发，等待显式重开' : '等待输入与条件满足'}</p>
+    {error && <p role="alert">{error}</p>}{loading && <p>正在读取判断历史…</p>}
+    <h4>规则</h4><pre>{JSON.stringify(summary.definition?.rules ?? [], null, 2)}</pre>
+    <h4>输入状态</h4><pre data-testid="module-inputs">{JSON.stringify(page.inputs, null, 2)}</pre>
+    <h4>持久状态</h4>{page.stateTruncated ? <><p>状态尚未完整加载 · {page.stateBytes} bytes</p><pre>{page.statePreview}</pre></> : <pre>{JSON.stringify(page.state, null, 2)}</pre>}
+    {path && (page.stateTruncated || page.inputs.some(input => input.valueTruncated)) && <button type="button" disabled={reading !== null} onClick={() => void readValues()}>读取完整输入与状态</button>}
+    <h4>判断记录</h4><ol>{page.transitions.map(transition => <li key={transition.id} data-testid="module-transition">
+      <time>{new Date(transition.createdAt).toLocaleString()}</time>
+      <pre>{JSON.stringify(transition, null, 2)}</pre>
+      {transition.payloadTruncated && path && <><p>判断内容尚未完整加载 · {transition.payloadBytes} bytes</p><button type="button" disabled={reading !== null} onClick={() => void readTransition(transition.id)}>读取完整判断记录</button></>}
+    </li>)}</ol>
+    {!page.transitions.length && !loading && <p>尚无判断记录</p>}
+    {page.nextAfter && path && <button type="button" disabled={loading} onClick={() => void more()}>加载更多判断记录</button>}
+    {onReopen && <button type="button" onClick={() => onReopen(page.moduleId)}>重开</button>}
+  </>;
+}
+
+export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onReopen }: {
+  taskId?: string | null;
   graph: GraphPayload;
   collapsed: Record<string, boolean>;
   onSelect: (id: string) => void;
@@ -184,12 +291,6 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const containerById = new Map(graph.containers.map(container => [container.id, container]));
   const nodeContainer = new Map(graph.nodes.map(node => [node.id, node.container]));
-  const edgePolicy = new Map<string, string>();
-  for (const node of graph.nodes) {
-    for (const policy of node.context?.predecessors ?? []) {
-      if (policy.source && policy.mode) edgePolicy.set(`${policy.source}:${node.id}`, policy.mode);
-    }
-  }
   const relativePosition = (id: string, fallback: { x: number; y: number; width: number; height: number }) => {
     const position = graph.layout.positions[id] ?? fallback;
     const parentId = containerById.get(id)?.parent ?? nodeContainer.get(id);
@@ -205,23 +306,12 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
   };
   for (const [id, closed] of Object.entries(collapsed)) if (closed) walk(id);
   const hidden = new Set(graph.nodes.filter(node => node.container && hiddenContainers.has(node.container)).map(node => node.id));
-  const nodePositions = graph.nodes
-    .map(node => graph.layout.positions[node.id])
-    .filter((position): position is NonNullable<typeof position> => Boolean(position));
-  const minNodeLeft = Math.min(0, ...nodePositions.map(position => position.x));
-  // A rework back-edge leaves on its own lane's near side, so lanes side by side do not stack their
-  // arcs on the far-left gutter or travel across the lanes in between (see graph-edges.ts).
-  const loopEdges = graph.layout.edges.filter(edge => edge.id.startsWith('loop:'));
-  const loopChannelX = loopChannels(
-    loopEdges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target })),
-    graph.layout.positions,
-  );
   const nodes = [
     ...graph.containers.filter(container => !container.parent || !hiddenContainers.has(container.parent)).map(container => {
       const position = graph.layout.positions[container.id] ?? { x: 0, y: 0, width: 240, height: 120 };
       return {
         id: container.id, type: 'graphContainer', position: relativePosition(container.id, position),
-        data: { label: `${container.id}` }, className: 'container-card',
+        data: { ...container, label: container.id, collapsed: collapsed[container.id] === true }, className: 'container-card',
         measured: { width: position.width, height: position.height },
         style: { width: position.width, height: position.height, zIndex: -1 },
         ...(container.parent ? { parentId: container.parent } : {}),
@@ -251,59 +341,47 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
     }
     return visible;
   };
-  const edges = graph.layout.edges.map(edge => {
+  const projectedEdges = graph.layout.edges.map(edge => {
     const source = representative(edge.source), target = representative(edge.target);
-    return source === edge.source && target === edge.target ? edge : { ...edge, source, target, points: [] };
-  }).filter(edge => edge.source !== edge.target)
-    // A branch edge says "runs when this case was chosen", which no dependency arrow can express.
-    // It is drawn as its own kind, labelled with the case, so the picture shows what the runtime
-    // actually branches on instead of only who waits for whom.
-    .concat((graph.layout.branches ?? []).filter(branch => !hidden.has(branch.source) && !hidden.has(branch.target))
-      .map(branch => ({ id: branch.id, source: branch.source, target: branch.target, branchCase: branch.case })))
-    .map(edge => {
-      const loop = edge.id.startsWith('loop:');
-      const branch = 'branchCase' in edge ? (edge as { branchCase: string }).branchCase : null;
-      const sourceIsNode = graph.nodes.some(node => node.id === edge.source);
-      const targetIsNode = graph.nodes.some(node => node.id === edge.target);
-      const policy = edgePolicy.get(`${edge.source}:${edge.target}`);
-      const resultHandoff = policy === 'result_handoff';
+    return { ...edge, source, target, folded: source !== edge.source || target !== edge.target };
+  }).filter(edge => edge.source !== edge.target || (!edge.folded && Boolean(edge.points?.length)));
+  const foldedRoutes = projectedEdges.some(edge => edge.folded) ? orthogonalRoutes(projectedEdges, graph.layout.positions, [
+    ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => node.id),
+    ...graph.containers.filter(group => collapsed[group.id] && (!group.parent || !hiddenContainers.has(group.parent))).map(group => group.id),
+  ]) : null;
+  const publicEndpoint = (owner: string, endpoint: string, direction: 'input' | 'output') => {
+    const group = containerById.get(owner);
+    if (!group || !collapsed[owner]) return endpoint;
+    const ports = direction === 'input' ? group.inputs ?? {} : group.outputs ?? {};
+    const mapped = Object.entries(ports).filter(([, port]) => ('to' in port ? port.to : port.from) === endpoint).map(([name]) => name);
+    // An explicit connection to an internal port is still shown as internal;
+    // no public interface may be inferred merely because its node was hidden.
+    return mapped.length ? `${owner}.${mapped.join(' / ')}` : endpoint;
+  };
+  const edges: Edge[] = projectedEdges.map(edge => {
       const connection = graph.interfaces?.find(item => item.edgeId === edge.id);
+      const from = connection ? publicEndpoint(edge.source, connection.from, 'output') : '';
+      const to = connection ? publicEndpoint(edge.target, connection.to, 'input') : '';
+      const points = edge.folded ? foldedRoutes?.get(edge.id) : edge.points;
       const edgeData = {
-        ...(connection ? { edgeLabel: `${connection.from.split('.').slice(1).join('.')} → ${connection.to.split('.').slice(1).join('.')}${connection.enabled ? '' : '（禁用）'}` } : {}),
-        ...(loop
-          ? { leftX: loopChannelX[edge.id] ?? minNodeLeft - 64 }
-          : edge.points?.length ? { points: edge.points } : {}),
-        ...(policy ? { edgeLabel: resultHandoff ? '结果交接' : '仅证据交接', edgeLabelColor: resultHandoff ? '#b45309' : '#475569' } : {}),
-        ...(branch ? { edgeLabel: `case: ${branch}`, edgeLabelColor: '#0f766e' } : {}),
+        ...(connection ? { edgeLabel: `${from.split('.').slice(1).join('.')} → ${to.split('.').slice(1).join('.')}${connection.enabled ? '' : '（禁用）'}` } : {}),
+        ...(points?.length ? { points } : {}),
       };
       return {
-        id: edge.id, source: edge.source, target: edge.target, type: loop ? 'gridLoop' : 'grid',
-        ...(loop
-          ? {
-              sourceHandle: sourceIsNode ? 'source-left' : 'source-bottom',
-              targetHandle: targetIsNode ? 'target-left' : 'target-top',
-            }
-          : {
-              sourceHandle: 'source-bottom',
-              targetHandle: 'target-top',
-            }),
-        className: loop ? 'grid-edge grid-loop-edge' : 'grid-edge',
+        id: edge.id, source: edge.source, target: edge.target, type: 'grid',
+        sourceHandle: 'source-bottom',
+        targetHandle: 'target-top',
+        className: 'grid-edge',
         data: edgeData,
-        ...(branch ? {
-          animated: false,
-          style: { stroke: '#0f766e', strokeDasharray: '2 3' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#0f766e' },
-        } : {}),
-        ...(loop
-          ? { animated: true, style: { stroke: '#d97706', strokeDasharray: '5 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#d97706' } }
-          : branch ? {} : { style: { stroke: resultHandoff ? '#d97706' : '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: resultHandoff ? '#d97706' : '#7c8aa5' } }),
+        style: { stroke: '#7c8aa5' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#7c8aa5' },
       };
     });
   const messageGroups = new Map<string, NonNullable<GraphPayload['messages']>>();
   for (const message of graph.messages ?? []) {
-    if (hidden.has(message.source) || hidden.has(message.target)) continue;
     if (!graph.nodes.some(node => node.id === message.source) || !graph.nodes.some(node => node.id === message.target)) continue;
-    const key = `${message.source}\u0000${message.target}`;
+    const source = representative(message.source), target = representative(message.target);
+    if (source === target) continue;
+    const key = `${source}\u0000${target}`;
     messageGroups.set(key, [...(messageGroups.get(key) ?? []), message]);
   }
   for (const [key, messages] of messageGroups) {
@@ -320,8 +398,6 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
   const currentEdge = edges.find(edge => edge.id === selectedEdge);
   const currentMessages = currentEdge?.id.startsWith('message:')
     ? messageGroups.get(`${currentEdge.source}\u0000${currentEdge.target}`) ?? [] : [];
-  const currentHandoffs = currentEdge && !currentEdge.id.startsWith('message:')
-    ? (graph.handoffs ?? []).filter(item => item.source === currentEdge.source && item.target === currentEdge.target) : [];
   // The four-state legend is rendered here so every view that draws a task
   // graph (task page and conversation drawer) shows the same permanent legend.
   const statuses = graph.nodes.map(node => node.status);
@@ -342,7 +418,7 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={false} nodesConnectable={false} elementsSelectable
         edgeTypes={edgeTypes}
         onEdgeClick={(_event, edge) => setSelectedEdge(edge.id)}
-        onNodeClick={(_event, node) => onSelect(node.id)} fitView fitViewOptions={{ padding: 0.18 }}
+        onNodeClick={(_event, node) => { setSelectedEdge(null); onSelect(node.id); }} fitView fitViewOptions={{ padding: 0.18 }}
         snapToGrid snapGrid={[GRID, GRID]} proOptions={{ hideAttribution: false }}>
         <Background variant={BackgroundVariant.Dots} gap={GRID} size={1.5} color="#b8c1cc" style={{ opacity: 0.52 }} />
         <Controls showInteractive={false} />
@@ -356,24 +432,19 @@ export function GraphCanvas({ graph, collapsed, onSelect, selected, onReopen }: 
           }}
         />
       </ReactFlow>
-      {selectedModule && <aside className="graph-edge-inspector" data-testid="graph-module-inspector">
-        <strong>{selectedModule.moduleId} · {selectedModule.trigger === 'once' ? '一次汇合' : '每次判断'}</strong>
-        <p>{selectedModule.triggered ? '已触发，等待显式重开' : '等待输入与条件满足'}</p>
-        <h4>规则</h4><pre>{JSON.stringify(selectedModule.definition?.rules ?? [], null, 2)}</pre>
-        <h4>输入状态</h4><pre>{JSON.stringify(selectedModule.inputs, null, 2)}</pre>
-        <h4>持久状态</h4><pre>{JSON.stringify(selectedModule.state, null, 2)}</pre>
-        <h4>判断记录</h4><pre>{JSON.stringify(selectedModule.transitions, null, 2)}</pre>
-        {onReopen && <button type="button" onClick={() => onReopen(selectedModule.moduleId)}>重开</button>}
+      {selectedModule && !selectedEdge && <aside className="graph-edge-inspector" data-testid="graph-module-inspector">
+        <ModuleHistory key={`${taskId}:${selectedModule.moduleId}`} taskId={taskId ?? null} summary={selectedModule} {...(onReopen ? { onReopen } : {})} />
       </aside>}
       {currentEdge && <aside className="graph-edge-inspector" data-testid="graph-edge-inspector">
         <button type="button" aria-label="关闭边详情" onClick={() => setSelectedEdge(null)}>×</button>
         <strong>{currentEdge.source} → {currentEdge.target}</strong>
         {selectedInterface ? <>
+          {(currentEdge.source !== selectedInterface.from.split('.')[0] || currentEdge.target !== selectedInterface.to.split('.')[0]) &&
+            <p>折叠连接：{publicEndpoint(currentEdge.source, selectedInterface.from, 'output')} → {publicEndpoint(currentEdge.target, selectedInterface.to, 'input')}</p>}
           <p>{selectedInterface.from} → {selectedInterface.to} · {selectedInterface.protocol} · {selectedInterface.enabled ? '启用' : '禁用'}</p>
-          {selectedInterface.deliveries.length ? <ol>{selectedInterface.deliveries.map(delivery => <li key={delivery.id}><time>{new Date(delivery.createdAt).toLocaleString()} · v{delivery.revisionVersion}</time><pre>{JSON.stringify(delivery.value, null, 2)}</pre></li>)}</ol> : <p>尚无投递</p>}
-        </> : currentMessages.length ? <ol>{currentMessages.map(message => <li key={message.id}><time>{new Date(message.createdAt).toLocaleString()}</time><p>{message.text}</p></li>)}</ol>
-          : currentHandoffs.length ? <ol>{currentHandoffs.map(handoff => <li key={handoff.id}><time>{new Date(handoff.createdAt).toLocaleString()} · {handoff.mode === 'result_handoff' ? '结果交接' : '证据交接'}</time><pre>{handoff.text}</pre></li>)}</ol>
-            : <p>{currentEdge.id.startsWith('message:') ? '尚无消息' : '目标节点尚未接收这条边的交接内容。'}</p>}
+          <EdgeHistory key={`${taskId}:${selectedInterface.edgeId}`} taskId={taskId ?? null} summary={selectedInterface} />
+        </> : currentMessages.length ? <ol>{currentMessages.map(message => <li key={message.id}><small>{message.source} → {message.target}</small><time>{new Date(message.createdAt).toLocaleString()}</time><p>{message.text}</p></li>)}</ol>
+          : <p>尚无投递</p>}
       </aside>}
     </div>
   );

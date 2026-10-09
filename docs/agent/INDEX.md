@@ -4,7 +4,7 @@
 
 ## 阅读规则
 
-- 只在用户询问 Graph 自身、Agent 上下文、工具为何不可用、任务为何阻塞、执行恢复或系统配置时读取这些文档。
+- 构建或修改 graph、处理运行失败，或配置模型与能力时，先读对应主题；解释系统事实时也使用这些文档。
 - 主题路径始终相对本文件所在目录解析，不相对业务仓库或 Agent worktree 解析。
 - 先读本索引，再读与问题直接相关的主题文件；跨文件引用必须继续跟随。
 - 完成相关 Markdown 文件后再下结论，不要只根据文件名或本索引猜测。
@@ -18,7 +18,8 @@
 | `README.md` | 需要了解文档范围、源码布局和推荐阅读顺序 |
 | `graph-overview.md` | 需要理解 Graph 是什么、有哪些角色和核心术语 |
 | `../design-graph-examples.md` | 需要设计（或改动）一张任务图时：先判档（简单/中等/复杂），再照对应档的范例写 |
-| `execution-model.md` | 需要理解任务图、operation、激活、回环、并发和恢复 |
+| `graph-v2.md` | 创建、投递、局部修改、控制 graph 或查看边/模块历史 |
+| `execution-model.md` | 需要理解接口投递、串行队列、常驻会话、模块和恢复 |
 | `capabilities.md` | 需要判断 Skill、MCP、extension、工具如何发现、绑定和注入 |
 | `permissions-and-recovery.md` | 需要解释权限、预算、暂停、用量、问题所有权和未知结果 |
 | `artifacts-and-git.md` | 需要理解 worktree、handoff、artifact、evidence、integration 和 merge |

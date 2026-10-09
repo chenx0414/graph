@@ -17,7 +17,7 @@ import { RuntimeError, type Json } from './types.ts';
 export interface GraphManagement {
   graphCreate(input: { definition: GraphDefinition; targetBranch?: string; requestId?: string }): Promise<unknown>;
   graphPatch(input: { graphId: string; baseRevision: number; changes: PatchChange }): Promise<unknown>;
-  graphInspect(input: { graphId: string; query?: string; id?: string; after?: number; limit?: number }): Promise<unknown>;
+  graphInspect(input: { graphId: string; query?: string; id?: string; deliveryId?: string; transitionId?: string; after?: number; limit?: number }): Promise<unknown>;
   graphControl(input: { graphId: string; action: string; nodeId?: string; moduleId?: string; seq?: number; operationId?: string; callId?: string; usage?: TokenUsage }): Promise<unknown>;
   graphSend(input: { graphId: string; nodeId?: string; input?: string; value?: Json; text?: string }): Promise<unknown>;
 }
@@ -82,10 +82,19 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
       if (input.query === 'executions') return kernel.executionHistory(input.graphId, historyQuery);
       if (input.query === 'acceptance') return graphAcceptance(kernel, input.graphId, artifacts);
       if (input.query === 'provider_calls') return kernel.providerCalls(input.graphId, input.id);
-      if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,worker_active,record_digest,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: JSON.parse(row.request), result: row.result ? JSON.parse(row.result) : null }));
-      if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!);
-      if (input.query === 'module') return explainModule(kernel, input.graphId, input.id!);
-      if (input.query === 'results') return (kernel.db.prepare('SELECT * FROM kernel_graph_results WHERE task_id=? ORDER BY rowid').all(input.graphId) as { value: string }[]).map(row => ({ ...row, value: JSON.parse(row.value) }));
+      if (input.query === 'operations') return (kernel.db.prepare('SELECT id,module_id,delivery_id,revision_version,request,state,result,error,worker_active,record_digest,created_at,started_at,ended_at FROM kernel_module_operations WHERE task_id=? ORDER BY created_at').all(input.graphId) as { request: string; result: string | null }[]).map(row => ({ ...row, request: kernel.content.decode<Json>(row.request), result: row.result ? kernel.content.decode<Json>(row.result) : null }));
+      if (input.query === 'edge_delivery') {
+        if (!input.id || !input.deliveryId) throw new RuntimeError('invalid_query', 'edge_delivery requires edge id and deliveryId');
+        return explainEdge(kernel, input.graphId, input.id, undefined, { deliveryId: input.deliveryId, fullValue: true, limit: 1 }).deliveries[0];
+      }
+      if (input.query === 'edge') return explainEdge(kernel, input.graphId, input.id!, undefined, { ...(input.after === undefined ? {} : { before: input.after }), ...(input.limit === undefined ? {} : { limit: input.limit }) });
+      if (input.query === 'module_values') return explainModule(kernel, input.graphId, input.id!, { fullValues: true, includeTransitions: false });
+      if (input.query === 'module_transition') {
+        if (!input.id || !input.transitionId) throw new RuntimeError('invalid_query', 'module_transition requires module id and transitionId');
+        return explainModule(kernel, input.graphId, input.id, { transitionId: input.transitionId, limit: 1 }).transitions[0];
+      }
+      if (input.query === 'module') return explainModule(kernel, input.graphId, input.id!, { ...(input.after === undefined ? {} : { after: input.after }), ...(input.limit === undefined ? {} : { limit: input.limit }) });
+      if (input.query === 'results') return (kernel.db.prepare('SELECT * FROM kernel_graph_results WHERE task_id=? ORDER BY rowid').all(input.graphId) as { value: string }[]).map(row => ({ ...row, value: kernel.content.decode<Json>(row.value) }));
       if (input.query && !['summary', 'revision', 'nodes'].includes(input.query)) throw new RuntimeError('invalid_query', `Unknown graph query ${input.query}`);
       return graph.inspect({ kind: input.query === 'revision' ? 'revision' : input.query === 'nodes' ? 'nodes' : 'summary' });
     },
@@ -94,6 +103,11 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
       if (['pause', 'resume', 'reopen', 'retry', 'skip', 'cancel'].includes(input.action)
         && ['completed', 'stopping', 'stopped'].includes(graph.state()!.phase)) {
         throw new RuntimeError('invalid_graph', 'Ended graph cannot change its execution controls');
+      }
+      if (input.action === 'relayout') {
+        kernel.db.prepare('DELETE FROM kernel_graph_layouts WHERE task_id=?').run(input.graphId);
+        kernel.store.event(input.graphId, 'graph.layout_reset', {});
+        return { state: 'layout_reset' };
       }
       if (input.action === 'cancel_operation') {
         const owned = kernel.db.prepare('SELECT id FROM kernel_module_operations WHERE task_id=? AND id=?').get(input.graphId, input.operationId ?? '');
@@ -123,15 +137,20 @@ export function graphManagement(kernel: KernelStore, ownerTaskId: string, prepar
         return new ModuleRuntime(kernel, input.graphId, kernel.latestRevision(input.graphId)!.version).reopenAfterPending(input.moduleId);
       }
       if (input.action === 'pause' || input.action === 'resume') {
-        if (input.nodeId !== undefined) {
-          if (!Object.hasOwn(kernel.latestRevision(input.graphId)!.definition.nodes, input.nodeId)) {
-            throw new RuntimeError('invalid_input', 'Node control requires a node in the current graph definition');
+        if (input.nodeId !== undefined && input.moduleId !== undefined) {
+          throw new RuntimeError('invalid_input', 'Pause/resume accepts either nodeId or moduleId');
+        }
+        const target = input.moduleId ?? input.nodeId;
+        if (target !== undefined) {
+          const definition = kernel.latestRevision(input.graphId)!.definition;
+          if (!Object.hasOwn(input.moduleId !== undefined ? definition.modules : definition.nodes, target)) {
+            throw new RuntimeError('invalid_input', 'Pause/resume requires a target in the current graph definition');
           }
-          kernel.setNodeQueuePaused(input.graphId, input.nodeId, input.action === 'pause');
-          if (input.action === 'resume') kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'").run(input.graphId, input.nodeId);
+          kernel.setNodeQueuePaused(input.graphId, target, input.action === 'pause');
+          if (input.action === 'resume') kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'").run(input.graphId, target);
         }
         else kernel.db.prepare('UPDATE tasks SET paused=? WHERE id=?').run(input.action === 'pause' ? 1 : 0, input.graphId);
-        setNativePause(kernel.store, input.graphId, input.action === 'pause', input.nodeId);
+        setNativePause(kernel.store, input.graphId, input.action === 'pause', target);
         return graph.state();
       }
       if (['retry', 'skip', 'cancel'].includes(input.action)) {

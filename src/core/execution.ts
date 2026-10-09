@@ -1,34 +1,25 @@
 import { releaseTaskSlot } from './task-queue.ts';
 import { GraphRuntime } from './graph-runtime.ts';
 import { pendingRsiContinuation, consumeRsiContinuation } from './rsi-continuation.ts';
-import { pendingWakes, renderWakes, wakeForTaskCompleted } from './wake-ledger.ts';
+import { pendingWakes, renderWakes } from './wake-ledger.ts';
 import { pendingPauseContinuation, consumePauseContinuation } from './pause-continuation.ts';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { canonicalJson, type TaskStore } from './store.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { assertWithinBudget, recordModelUse } from './budget-ledger.ts';
 import { conversationDigest, conversationForTask, deliverMessages, pendingMessages } from './conversation.ts';
 import { isSummaryLeakRetry } from '../runtime/compaction.ts';
 import { digest, freezeContextHandoff, handoffConstraintsDigest, resolveAgentContext } from './context.ts';
-import { loadGraph } from './graph.ts';
 import { KernelStore } from './kernel-store.ts';
-import { independentReviewReady, implementerModels, isReviewer, pickModel } from './model-selection.ts';
-import { graphVerifier, humanCheckNode, workspaceCommandNode } from './program-adapters.ts';
+import { pickModel } from './model-selection.ts';
 import { OperationLifecycle, type OperationIntent } from './operation-lifecycle.ts';
 import { insertQuestion, isMasterParked } from './question-routing.ts';
-import { isReworkDecision } from './verification.ts';
-import { buildPredecessorHandoffs, nonCompliantResult, outputSchemaForNode, renderPredecessorHandoffs, renderResultHandoffRepair, requiresResultHandoff, RESULT_HANDOFF_SCHEMA_EXAMPLE, resultHandoffRepair } from './predecessor-handoff.ts';
-import { briefing, nodeContract, nodesReading, REWORK_OUTPUT_LIMIT, reworkBriefing } from '../catalog/briefing.ts';
+import { briefing } from '../catalog/briefing.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import type { ModelEntry } from '../catalog/models.ts';
 import type { GitIntegration } from '../git/integration.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
-import { attemptConflictMerge } from '../git/conflict-merge.ts';
 import { executionLimit, occupiedSlots } from '../runtime/execution-slots.ts';
-import { RuntimeError, type ActionAdapter, type Answer, type AttachmentInput, type ContextHandoffPackage, type Json, type NodeSpec, type Operation, type OperationResult, type Proposal } from './types.ts';
+import { RuntimeError, type ActionAdapter, type Answer, type AttachmentInput, type ContextHandoffPackage, type Json, type NodeSpec, type Operation, type OperationResult, type NativeProposal } from './types.ts';
 
 type ExecutionNodeRow = { id: string; task_id: string; spec: string; instance_id: string | null; status: string; output: string | null; activation_id: string };
 
@@ -39,87 +30,13 @@ type ExecutionNodeRow = { id: string; task_id: string; spec: string; instance_id
  */
 const SUBMISSION_DEFECT_CODES = new Set(['invalid_result', 'invalid_evidence']);
 
-/**
- * The rework briefing for a retry in the same session: the evidence this node's output feeds that did not
- * succeed, the acceptance that evidence blocks, and a file holding every whole output. A retry whose
- * session is gone never reaches here, because re-sending a delta would assume a briefing nobody still has.
- */
-function reworkDelta(input: { store: TaskStore; graph: readonly NodeSpec[]; proposal?: Proposal; own: string; attempt: number; instanceId: string; taskId: string }) {
-  const readers = new Set(nodesReading(input.own, input.graph).map(node => node.id));
-  // The verdict lives in the ledger, not in the node row: the loop resets every node after the loop point
-  // (including the check that asked for the rework) before it admits this round, so reading the node state
-  // here would find nothing exactly when a rework was requested. The last settled operation of each reader
-  // is the durable evidence, and a reader that failed or asked for a rework both count.
-  const failed = input.graph.filter(node => readers.has(node.id)).flatMap(node => {
-    const last = input.store.db.prepare('SELECT state,result FROM operations WHERE task_id=? AND node_id=? AND result IS NOT NULL ORDER BY rowid DESC LIMIT 1')
-      .get(input.taskId, node.id) as { state: string; result: string } | undefined;
-    if (!last) return [];
-    const settled = JSON.parse(last.result) as { outcome?: string; output?: Json; route?: string };
-    const output = settled.output ?? null;
-    const rework = isReworkDecision(output);
-    // A review router asks for rework with its route, and its output is an ordinary note rather than a
-    // verification verdict — so a routed round is read the same way, from the loop the graph declared.
-    const routed = settled.route !== undefined
-      && (input.proposal?.loops ?? []).some(loop => loop.from === node.id && loop.to === input.own && loop.case === settled.route);
-    if (!rework && !routed && last.state !== 'failed' && last.state !== 'blocked') return [];
-    return [{
-      id: node.id,
-      label: `${node.kind} ${node.action}`,
-      status: rework ? `${last.state}, verdict rework` : routed ? `${last.state}, routed ${settled.route}` : last.state,
-      output: output === null ? '(no output recorded)' : JSON.stringify(output, null, 2),
-    }];
-  });
-  const oversized = failed.some(item => item.output.length > REWORK_OUTPUT_LIMIT);
-  const handlePath = join(dirname(input.store.path), 'instances', input.instanceId, 'rework', `${input.own}-attempt-${input.attempt}.txt`);
-  if (oversized) {
-    // Beside the instance's own state, so it is reclaimed with that instance instead of piling up.
-    mkdirSync(dirname(handlePath), { recursive: true, mode: 0o700 });
-    writeFileSync(handlePath, `${failed.map(item => `== ${item.id} (${item.label}, ${item.status})\n${item.output}\n`).join('\n')}`, { mode: 0o600 });
-  }
-  return reworkBriefing({
-    attempt: input.attempt,
-    evidence: failed,
-    acceptance: input.proposal?.acceptance ?? [],
-    contract: nodeContract(input.graph.find(node => node.id === input.own)),
-    ...(oversized ? { handlePath } : {}),
-  });
-}
-
-/** Private execution state machine. Every mutation shares the task command/event transaction. */
-/**
- * How a collision between two lanes is handed to an Agent.
- *
- * The harness owns every decision about whether a resolution is acceptable; the Agent only
- * produces candidate file content. That split is what keeps "never let a model improvise a
- * rewrite" true even while an Agent is involved.
- */
-/** What a merge turn cost, as the resolver reports it. */
-export interface MergeUsage {
-  model: string;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  total: number;
-}
-
-export interface MergeResolverChannels {
-  /**
-   * Run one merge Agent turn in the integration worktree and report what it cost.
-   *
-   * The turn is not an operation, so its usage is not charged to the task's cap; returning it lets
-   * the caller record the spend on the task instead of letting it disappear.
-   */
-  resolve(input: { taskId: string; nodeId: string; prompt: string; workspace: string }): Promise<MergeUsage | null>;
-}
-
+/** Main execution state machine; graph agents run through the native lane. */
 export class Execution {
   private readonly pending = new Set<Promise<unknown>>();
   private driveActive = 0;
   private stopping = false;
   private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
-  private mergeResolvers?: MergeResolverChannels;
   /**
    * §13.8: the v2 graph lane. A task on the v2 kernel has no `nodes` rows, so the old scan
    * can never see it and its queues stay inert. This hook names the v2 graphs that
@@ -135,9 +52,6 @@ export class Execution {
   private readonly models?: () => ModelEntry[];
   private readonly preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined);
   private readonly git?: GitIntegration;
-  private readonly artifacts?: ArtifactWorkspace;
-  private readonly scratchRoot?: string;
-  private readonly program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   private readonly systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean };
   private readonly access?: () => ResolvedAccessPolicy;
   private readonly dispatchAllowed?: () => boolean;
@@ -146,27 +60,22 @@ export class Execution {
   private readonly lifecycle: OperationLifecycle;
   private readonly unsubscribeStore: () => void;
   private pumping = false;
-  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; scratchRoot?: string; program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string }; autoWake?: boolean; dispatchAllowed?: () => boolean; graphs?: () => { taskId: string; run: () => Promise<{ drained: boolean }> }[]; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; mergeResolvers?: MergeResolverChannels; artifacts?: ArtifactWorkspace } = {}) {
+  constructor(store: TaskStore, actions: Record<string, ActionAdapter>, extras: { fallback?: ActionAdapter; catalog?: Catalog; models?: () => ModelEntry[]; preferences?: Partial<Record<ModelEntry['grade'], string[]>> | (() => Partial<Record<ModelEntry['grade'], string[]>> | undefined); git?: GitIntegration; autoWake?: boolean; dispatchAllowed?: () => boolean; graphs?: () => { taskId: string; run: () => Promise<{ drained: boolean }> }[]; systemContext?: { resources?: boolean; agentCombinations?: boolean; systemSummary?: boolean }; access?: () => ResolvedAccessPolicy; artifacts?: ArtifactWorkspace } = {}) {
     this.store = store; this.actions = actions;
     if (extras.fallback) this.fallback = extras.fallback;
     if (extras.catalog) this.catalog = extras.catalog;
     if (extras.models) this.models = extras.models;
     if (extras.preferences) this.preferences = extras.preferences;
     if (extras.git) this.git = extras.git;
-    if (extras.artifacts) this.artifacts = extras.artifacts;
-    if (extras.scratchRoot) this.scratchRoot = extras.scratchRoot;
-    if (extras.program) this.program = extras.program;
     if (extras.systemContext) this.systemContext = extras.systemContext;
     if (extras.access) this.access = extras.access;
     if (extras.dispatchAllowed) this.dispatchAllowed = extras.dispatchAllowed;
-    if (extras.mergeResolvers) this.mergeResolvers = extras.mergeResolvers;
     if (extras.graphs) this.graphs = extras.graphs;
     this.autoWake = Boolean(extras.autoWake);
     this.unsubscribeStore = store.onEvent(type => {
       if (this.autoWake && type === 'problem.routed') queueMicrotask(() => this.kick());
     });
     this.lifecycle = new OperationLifecycle(store, {
-      advance: taskId => this.advance(taskId),
       canReplayBeforeSend: operation => {
         const adapter = Object.hasOwn(this.actions, operation.action) ? this.actions[operation.action] : this.fallback;
         return adapter?.canReplayBeforeSend?.(operation) === true;
@@ -176,7 +85,6 @@ export class Execution {
     const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
     if (active_task && this.git) {
       this.git.restore(active_task);
-      this.deliver(active_task);
     }
   }
 
@@ -209,8 +117,7 @@ export class Execution {
   }
 
   report(id: string, generation: number, result: OperationResult) {
-    const taskId = this.lifecycle.report(id, generation, result);
-    this.deliver(taskId);
+    this.lifecycle.report(id, generation, result);
     if (this.autoWake) this.kick();
   }
 
@@ -221,87 +128,10 @@ export class Execution {
       if (initial.state !== 'unknown') return;
       const adapter = Object.hasOwn(this.actions, initial.operation.action) ? this.actions[initial.operation.action] : undefined;
       if (!adapter?.reconcile) throw new RuntimeError('reconciliation_unavailable', 'No external reconciliation adapter is registered');
-      const taskId = await this.lifecycle.reconcile(id, operation => adapter.reconcile!(operation), {
-        integrate: async operation => {
-          if (!this.git) return;
-          const merged = await this.git.exclusive(operation.taskId, () => this.git!.integrate(operation));
-          if (merged && !merged.ok) {
-            throw new RuntimeError('git_conflict', `Merge conflicts in ${merged.conflicts.join(', ')}. Inside that lane work copy restore those paths to the integration tip (git checkout <integration sha> -- <paths>) and commit, then retry; never adopt the conflicted content.`);
-          }
-        },
-      });
-      if (taskId) this.deliver(taskId);
+      await this.lifecycle.reconcile(id, operation => adapter.reconcile!(operation));
     })();
     this.pending.add(work);
     try { await work; } finally { this.pending.delete(work); }
-  }
-
-  /**
-   * One bounded attempt at resolving a lane collision.
-   *
-   * The prompt hands the Agent both sides and their common ancestor, and the harness - not the
-   * Agent - decides whether the result is a real merge. A missing resolver, a missing integration
-   * worktree, or a rejected resolution all return false, which leaves the caller's existing block
-   * unchanged.
-   */
-  private async attemptConflictResolution(operation: Operation): Promise<boolean> {
-    if (!this.git || !this.mergeResolvers) return false;
-    const task = this.store.task(operation.taskId);
-    if (!task.integration_branch) return false;
-    const tree = this.store.db.prepare('SELECT branch FROM worktrees WHERE instance_id=?').get(operation.instanceId) as { branch: string } | undefined;
-    const integration = this.store.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${operation.taskId}`) as { path: string } | undefined;
-    if (!tree || !integration) return false;
-    // A holder rather than a plain `let`: the value is assigned inside the resolver callback, and
-    // control-flow analysis would otherwise narrow the variable to `null` at the read below.
-    const usage: { current: MergeUsage | null } = { current: null };
-    const attempt = await attemptConflictMerge({
-      integrationPath: integration.path,
-      laneRef: tree.branch,
-      prompt: sides => [
-        'Two lanes of this task changed the same lines. Produce the merge of both sides.',
-        'Every change either side made must survive: dropping a side is not a resolution.',
-        'Edit only the conflicted paths listed below, leave no conflict markers, and do not touch any other file.',
-        ...sides.ours.map((ours, index) => [
-          `\n## ${ours.path}`,
-          'Common ancestor:',
-          '```',
-          sides.base[index]?.content ?? '(did not exist)',
-          '```',
-          'This task integration branch (ours):',
-          '```',
-          ours.content ?? '(deleted)',
-          '```',
-          'The lane being merged (theirs):',
-          '```',
-          sides.theirs[index]?.content ?? '(deleted)',
-          '```',
-        ].join('\n')),
-      ].join('\n'),
-      run: async (prompt, workspace) => {
-        usage.current = await this.mergeResolvers!.resolve({
-          taskId: operation.taskId, nodeId: operation.nodeId, prompt, workspace,
-        });
-      },
-    });
-    if (usage.current) {
-      // Recorded whatever the verdict: the model was paid either way, and a spend that leaves no
-      // trace is exactly the defect this event exists to prevent.
-      this.store.event(operation.taskId, 'git.conflict.merge_attempt_usage', {
-        nodeId: operation.nodeId, ...usage.current,
-      });
-    }
-    if (attempt.status !== 'merged') {
-      this.store.event(operation.taskId, 'git.conflict.merge_attempt_refused', {
-        nodeId: operation.nodeId, reason: attempt.reason ?? 'unknown', conflicts: attempt.conflicts ?? [],
-      });
-      return false;
-    }
-    this.store.transaction(() => {
-      this.store.db.prepare('UPDATE tasks SET integration_sha=? WHERE id=?').run(attempt.sha!, operation.taskId);
-      this.store.db.prepare('INSERT INTO git_commits VALUES(?,?,?,?,?)').run(attempt.sha!, operation.taskId, operation.nodeId, operation.id, 'merge-agent');
-    });
-    this.store.event(operation.taskId, 'git.conflict.merge_attempt_merged', { nodeId: operation.nodeId, sha: attempt.sha! });
-    return true;
   }
 
   /**
@@ -359,8 +189,6 @@ export class Execution {
     this.lifecycle.escalate(taskId, questionId, prompt);
     if (this.autoWake) this.kick();
   }
-
-  finish(taskId: string) { this.deliver(taskId); }
 
   /**
    * Operator stop. A task can end up with no path to completion - blocked
@@ -437,7 +265,9 @@ export class Execution {
           work.finally(() => running.delete(work));
         }
         dispatched += started.length;
-        if (running.size === 0 && this.activeGraphs.size === 0) break;
+        // pump() may already have started a conversation turn. Completion must
+        // drain host-owned work as well as work started by this drive call.
+        if (running.size === 0 && this.pending.size === 0 && this.activeGraphs.size === 0) break;
         if (started.length < ready.length) {
           // The execution cap was hit; some operations may now be parked waiting
           // for a credential slot. Re-scan shortly so a node on a free credential
@@ -445,7 +275,7 @@ export class Execution {
           await new Promise(resolve => setTimeout(resolve, 20));
           continue;
         }
-        await Promise.race([...running, ...this.activeGraphs.values(), new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
+        await Promise.race([...running, ...this.pending, ...this.activeGraphs.values(), new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
       }
       return { dispatched };
     } finally {
@@ -557,9 +387,8 @@ export class Execution {
   }
 
   /**
-   * Every Agent node follows the latest definition of its own recipe, so editing
-   * a recipe takes effect on that node's next dispatch. A node keeps its model,
-   * its work copy and its position; only the definition version moves.
+   * The external main follows the latest version of its own recipe on its next
+   * dispatch. Graph nodes use their explicitly declared frozen recipe instead.
    */
   private refreshDefinition(node: ExecutionNodeRow): ExecutionNodeRow {
     const spec = JSON.parse(node.spec) as NodeSpec;
@@ -603,136 +432,15 @@ export class Execution {
       return masters.filter(node => !isMasterParked(this.store, taskId, node.id)
         && !(task.paused && pendingRsiContinuation(this.store, taskId, node.id)));
     }
-    if (task.phase === 'discussing') return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
-    if (task.phase !== 'running') return [];
-    // §13.8: a task on the v2 kernel has a kernel revision and no old graph rows, so the old
-    // scan must leave it alone - the v2 lane owns it. Trying to load an old graph here would
-    // throw and take down the whole host tick.
-    if (this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return [];
-    let nodes: ExecutionNodeRow[];
-    let graph: ReturnType<typeof loadGraph>;
-    while (true) {
-      nodes = this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' ORDER BY rowid").all(taskId) as ExecutionNodeRow[];
-      graph = loadGraph(this.store, taskId);
-      // The discussion-only master node is not part of the confirmed graph.
-      nodes = nodes.filter(node => graph.plan.nodes.has(node.id));
-      const skipped = nodes.filter(node => graph.readiness(node.id) === 'skip');
-      if (!skipped.length) break;
-      this.store.transaction(() => {
-        for (const node of skipped) {
-          this.store.db.prepare("UPDATE nodes SET status='skipped',output=NULL WHERE task_id=? AND id=?").run(taskId, node.id);
-          this.store.db.prepare("UPDATE activations SET state='skipped' WHERE id=?").run(node.activation_id);
-          this.store.event(taskId, 'node.skipped', { nodeId: node.id, reason: 'inactive_route' });
-        }
-      });
-    }
-    return nodes.filter(node => graph.readiness(node.id) === 'ready');
+    if (task.phase !== 'discussing') return [];
+    return this.store.db.prepare("SELECT * FROM nodes WHERE task_id=? AND status='pending' AND json_extract(spec,'$.role')='master' ORDER BY rowid")
+      .all(taskId) as ExecutionNodeRow[];
   }
 
   private async run(node: ExecutionNodeRow): Promise<boolean> {
     const work = this.execute(node);
     this.pending.add(work);
     try { return await work; } finally { this.pending.delete(work); this.wakeDrive(); }
-  }
-
-  private declaredDeliverable(operation: Operation): NodeSpec['deliverable'] {
-    const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?')
-      .get(operation.taskId, operation.nodeId) as { spec: string } | undefined;
-    return row ? (JSON.parse(row.spec) as NodeSpec).deliverable : undefined;
-  }
-
-  /**
-   * Publish the deliverable a node declared, or refuse the result.
-   *
-   * The declaration is the graph's promise that this file will exist, so the node does not have to
-   * remember a tool call for it: in the simple tier study three lanes each wrote a note and only one
-   * of them also published it, because nothing in the graph had asked. A file that was never written,
-   * or is empty, is a defect in the work rather than a pass with a hole in it, so the settle does not
-   * go through and the node is not reported succeeded.
-   *
-   * The promise is that the file is published, not that it is published twice: when the newest
-   * version of that name already holds these exact bytes - because the node published its own review
-   * with the artifact tool - there is nothing new to publish and no version is minted. Measured
-   * 2026-09-30 on task 68543fed: every node declaring a deliverable produced two byte-identical
-   * versions, once from the node and once from here.
-   *
-   * Reading stays in ArtifactWorkspace.publish, which is where the workspace containment, symlink and
-   * size rules already live; this only decides whether there is anything to publish at all.
-   *
-   * Only a node that declared a deliverable reaches this: the caller resolves the declaration first,
-   * so the common settle path gains no await and no read.
-   */
-  private async publishDeliverable(
-    operation: Operation,
-    deliverable: NonNullable<NodeSpec['deliverable']>,
-    result: OperationResult,
-  ): Promise<OperationResult> {
-    const refused = (reason: string): OperationResult => ({
-      ...result,
-      outcome: 'failed',
-      output: { deliverable: `${deliverable.path} ${reason}` },
-    });
-    const project = this.store.db.prepare('SELECT root FROM projects WHERE id=?').get(this.store.task(operation.taskId).project_id) as { root: string } | undefined;
-    const workspace = operation.workspace ?? project?.root;
-    if (!workspace) return refused('was declared as this node deliverable but the task has no workspace');
-    const info = await stat(resolve(workspace, deliverable.path)).catch(() => undefined);
-    if (!info?.isFile()) return refused('was declared as this node deliverable but was never written');
-    if (info.size === 0) return refused('was declared as this node deliverable but is empty');
-    const artifacts = this.artifacts;
-    if (!artifacts) return result;
-    // Same bytes as the newest version of this name, whoever published them: nothing changed, so a
-    // new version would say something false about the work. Read through the same path the publish
-    // itself would, so the comparison is over the bytes that would have been stored.
-    const head = artifacts.head(operation.taskId, `${deliverable.namespace}/${deliverable.name}`);
-    if (head) {
-      const body = await readFile(resolve(workspace, deliverable.path));
-      if (createHash('sha256').update(body).digest('hex') === head.digest) {
-        return this.withDeliverableArtifact(result, deliverable, head, resolve(workspace, deliverable.path));
-      }
-    }
-    const published = await artifacts.publish({
-      taskId: operation.taskId,
-      workspace,
-      namespace: deliverable.namespace,
-      name: deliverable.name,
-      sourcePath: deliverable.path,
-      ...(deliverable.title ? { title: deliverable.title } : {}),
-      ...(deliverable.summary ? { summary: deliverable.summary } : {}),
-      producer: {
-        nodeId: operation.nodeId,
-        instanceId: operation.instanceId!,
-        operationId: operation.id,
-        activationId: operation.activationId,
-      },
-      requestId: `node-deliverable:${operation.id}`,
-    });
-    return this.withDeliverableArtifact(result, deliverable, published, resolve(workspace, deliverable.path));
-  }
-
-  /**
-   * Record a node's declared deliverable as that node's product, which is how its dependents receive it.
-   *
-   * Publishing the file is only half the record: a verifier gate matches a review to the artifact it
-   * reviewed by reading `dependencySources[<node>].artifacts` (`subject()` in verification.ts), so a
-   * deliverable that was published but never appended here left every dependent with an empty list and
-   * no real Agent node could be matched by a gate at all (HB-205).
-   */
-  private withDeliverableArtifact(
-    result: OperationResult,
-    deliverable: NonNullable<NodeSpec['deliverable']>,
-    artifact: { artifactId: string; version: number; digest: string },
-    path: string,
-  ): OperationResult {
-    return {
-      ...result,
-      artifacts: [...(result.artifacts ?? []), {
-        id: `${deliverable.namespace}/${deliverable.name}`,
-        path,
-        digest: artifact.digest,
-        artifactId: artifact.artifactId,
-        version: artifact.version,
-      }],
-    };
   }
 
   private async execute(node: ExecutionNodeRow): Promise<boolean> {
@@ -745,39 +453,13 @@ export class Execution {
       if (!conversation || conversation.archived_at !== null) return false;
     }
     const spec = JSON.parse(this.refreshDefinition(node).spec) as NodeSpec;
-    const adapter = spec.action === 'graph.verify'
-      ? graphVerifier(this.store, spec)
-      : spec.action === 'graph.human_check'
-        ? humanCheckNode(this.store)
-        : spec.action === 'graph.command'
-          ? workspaceCommandNode({
-              store: this.store,
-              spec,
-              ...(this.git ? { git: this.git } : {}),
-              ...(this.scratchRoot ? { scratchRoot: this.scratchRoot } : {}),
-              ...(this.program ? { program: this.program } : {}),
-              stopped: () => this.stopping,
-            })
-          : Object.hasOwn(this.actions, spec.action)
-            ? this.actions[spec.action]
-            : spec.kind === 'agent'
-              ? this.fallback
-              : undefined;
+    if (spec.role !== 'master' || spec.kind !== 'agent') throw new RuntimeError('invalid_node', 'External main executor only accepts the main agent');
+    const adapter = spec.kind === 'agent'
+      ? Object.hasOwn(this.actions, spec.action) ? this.actions[spec.action] : this.fallback
+      : undefined;
     if (!adapter || adapter.kind !== spec.kind) {
       this.store.transaction(() => this.block(node, 'adapter_error', { reason: `No ${spec.kind} adapter for ${spec.action}` }));
       return false;
-    }
-    if (spec.action === 'graph.human_check') {
-      const task = this.store.task(node.task_id);
-      const resolved = this.store.db.prepare("SELECT data FROM questions WHERE task_id=? AND node_id=? AND kind='human_check' AND status='resolved'").all(node.task_id, node.id) as { data: string }[];
-      const bound = resolved.some(row => {
-        const data = JSON.parse(row.data) as { activationId?: string; commitSha?: string | null };
-        return data.activationId === node.activation_id && (data.commitSha ?? null) === (task.integration_sha ?? null);
-      });
-      if (!bound) {
-        this.store.transaction(() => this.block(node, 'human_check', { prompt: 'A human acceptance check is required', activationId: node.activation_id, commitSha: task.integration_sha ?? null }));
-        return false;
-      }
     }
     if (spec.kind === 'agent' && this.models && node.instance_id) {
       const preferences = typeof this.preferences === 'function' ? this.preferences() : this.preferences;
@@ -847,7 +529,6 @@ export class Execution {
     let handoffPackage: ContextHandoffPackage | undefined;
     let conversation: ReturnType<typeof conversationForTask>;
     let chatMessages: ReturnType<typeof pendingMessages> = [];
-    let reviewNode = false;
     try {
       operation = this.lifecycle.admit({
         node: {
@@ -863,13 +544,6 @@ export class Execution {
           const rsiContinuation = conversation ? pendingRsiContinuation(this.store, node.task_id, node.id) : undefined;
           const pauseContinuation = conversation ? pendingPauseContinuation(this.store, node.task_id, node.id) : undefined;
           const wakes = conversation ? pendingWakes(this.store, node.task_id, node.id) : [];
-          const graph = task.phase === 'discussing' || task.phase === 'chatting' ? undefined : loadGraph(this.store, node.task_id);
-          const dependencies = graph ? graph.inputs(node.id) : {};
-          const dependencySources = graph ? graph.sources(node.id) : {};
-          const inputVersions = Object.fromEntries(Object.entries(dependencySources).map(([id, sources]) => [
-            id,
-            sources.map(source => ({ activationId: source.activationId, outputVersion: source.outputVersion })),
-          ]));
           const answers = (this.store.db.prepare("SELECT id,answer FROM questions WHERE task_id=? AND node_id=? AND kind IN ('waiting','system_change') AND status='resolved' ORDER BY rowid")
             .all(node.task_id, node.id) as { id: string; answer: string }[])
             .map(row => ({ questionId: row.id, value: (JSON.parse(row.answer) as { value: Json }).value }));
@@ -890,15 +564,12 @@ export class Execution {
               .map(message => ({ text: message.text ?? message.request!, requirementVersion: message.requirementVersion ?? 1 }));
           const latest = this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?')
             .get(node.task_id, task.latest_proposal) as { spec: string } | undefined;
-          const proposal = latest ? JSON.parse(latest.spec) as Proposal : undefined;
-          reviewNode = spec.kind === 'agent' && isReviewer(spec, this.catalog);
+          const proposal = latest ? JSON.parse(latest.spec) as NativeProposal : undefined;
           const agentContext = spec.kind === 'agent'
             ? resolveAgentContext(this.store, {
                 taskId: node.task_id,
                 nodeId: node.id,
                 spec,
-                review: reviewNode,
-                excludedModels: reviewNode ? implementerModels(this.store, spec, node) : [],
               })
             : undefined;
           const intent: OperationIntent = {
@@ -908,7 +579,7 @@ export class Execution {
             kind: spec.kind,
             action: spec.action,
             input: spec.input ?? null,
-            dependencies,
+            dependencies: {},
             proposalVersion: task.accepted_proposal ?? 0,
             requirementVersion: task.requirement_version,
             context: {
@@ -923,16 +594,10 @@ export class Execution {
             accessPolicy,
             activationId: node.activation_id,
             graphVersion: task.graph_version,
-            dependencySources,
-            inputVersions,
+            dependencySources: {},
+            inputVersions: {},
             ...(workspace ? { workspace } : {}),
           };
-          const graphBriefing = task.accepted_proposal !== null && spec.kind === 'agent'
-            ? [...loadGraph(this.store, node.task_id).plan.nodes.values()]
-            : undefined;
-          const verifier = graphBriefing?.find(candidate =>
-            candidate.action === 'graph.verify' && candidate.verifier?.reportNodes.includes(spec.id));
-          const review = verifier?.verifier ? [{ kind: verifier.verifier.kind }] : undefined;
           const conversationStatus = conversation ? conversationDigest(this.store, conversation.id) : undefined;
           if (this.catalog) {
             let capabilities: { id: string; version: string }[] | undefined;
@@ -945,10 +610,6 @@ export class Execution {
               ...(proposal?.summary ? { summary: proposal.summary } : {}),
               acceptance: proposal?.acceptance ?? [],
               ...(capabilities?.length ? { capabilities } : {}),
-              ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
-              // A graph node reads its own view: its node and the checks that read it, not every lane.
-              ...(graphBriefing?.length && spec.role !== 'master' ? { focus: spec.id } : {}),
-              ...(review ? { review } : {}),
               ...(conversationStatus ? { conversation: conversationStatus } : {}),
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
               ...(spec.role === 'master' ? {
@@ -972,10 +633,6 @@ export class Execution {
               request: task.request,
               ...(proposal?.summary ? { summary: proposal.summary } : {}),
               acceptance: proposal?.acceptance ?? [],
-              ...(graphBriefing?.length ? { graph: graphBriefing } : {}),
-              // A graph node reads its own view: its node and the checks that read it, not every lane.
-              ...(graphBriefing?.length && spec.role !== 'master' ? { focus: spec.id } : {}),
-              ...(review ? { review } : {}),
               ...(conversationStatus ? { conversation: conversationStatus } : {}),
               ...(task.decision_digest ? { decisions: task.decision_digest } : {}),
               ...(spec.role === 'master' && this.systemContext ? {
@@ -985,47 +642,8 @@ export class Execution {
               } : {}),
             });
           }
-          // A retry in the same session already holds its briefing and its work copy, so re-sending the
-          // whole briefing would only repeat what that session has. The evidence that failed is what is new.
-          if (graphBriefing?.length && graph && attempt > 1 && spec.role !== 'master' && node.instance_id
-            && this.store.db.prepare('SELECT session_id FROM node_sessions WHERE instance_id=?').get(node.instance_id)) {
-            intent.context.briefing = reworkDelta({
-              store: this.store, graph: graphBriefing,
-              ...(proposal ? { proposal } : {}), own: spec.id, attempt, instanceId: node.instance_id, taskId: node.task_id,
-            });
-          }
-          // A master turn is not part of the task's graph, so the graph has no entry for
-          // its node and asking for its sources would throw. Its context is the conversation,
-          // not predecessor handoffs, so it simply has none.
-          const predecessor = spec.kind === 'agent' && agentContext?.mode === 'fresh' && graph
-            && graph.plan.nodes.has(spec.id)
-            ? buildPredecessorHandoffs(this.store, graph, spec)
-            : { policies: [], projections: [] };
-          const legacyNodeProposal = spec.role !== 'master' && !proposal?.definition ? proposal : undefined;
-          const resultHandoffRequired = legacyNodeProposal ? requiresResultHandoff(legacyNodeProposal, node.id) : false;
-          const outputSchema = reviewNode
-            ? { kind: 'independent_review', version: 1 } as const
-            : legacyNodeProposal ? outputSchemaForNode(legacyNodeProposal, node.id) : { kind: 'agent_result', version: 1 } as const;
+          const outputSchema = { kind: 'agent_result', version: 1 } as const;
           intent.context.outputSchema = outputSchema;
-          const schemaInstruction = resultHandoffRequired
-            ? [
-                reviewNode
-                  ? 'This independent review also feeds a downstream Fresh Agent through a result_handoff edge.'
-                  : 'A downstream Fresh Agent requires a result_handoff@1.',
-                reviewNode
-                  ? 'Submit the normal independent_review JSON with an additional top-level "resultHandoff" object shaped as:'
-                  : 'Call submit_result with outputJson exactly shaped as:',
-                RESULT_HANDOFF_SCHEMA_EXAMPLE,
-                'The host checks every file change against the bytes in your work copy, so name the files you actually wrote; keep every top-level field even when its list is empty. Do not include hidden chain-of-thought, transcript, or tool history. Put large content in artifacts and reference exact paths and digests.',
-              ].join('\n')
-            : '';
-          // A retry whose previous attempt already landed the work is a handoff
-          // repair, not a second run of the task: send the failure and the prior
-          // submission so the worker reconciles instead of re-implementing.
-          const repair = spec.kind === 'agent'
-            ? resultHandoffRepair(this.store, { taskId: node.task_id, nodeId: node.id, activationId: node.activation_id })
-            : undefined;
-          if (repair) intent.context.briefing = renderResultHandoffRepair(repair, { decisions: answers });
           const userRework = this.store.db.prepare("SELECT text,data FROM node_entries WHERE task_id=? AND node_id=? AND json_extract(data,'$.reworkActivation')=? ORDER BY seq")
             .all(node.task_id, node.id, node.activation_id) as { text: string; data: string | null }[];
           intent.context.briefing = [
@@ -1042,41 +660,22 @@ export class Execution {
             wakes.length ? renderWakes(wakes) : '',
             rsiContinuation ? `RSI reload confirmed for ${rsiContinuation.commit} (request ${rsiContinuation.requestId}). Resume the unfinished user request from operation ${rsiContinuation.operationId} using the existing session. Completed changes and tool results remain valid. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
             pauseContinuation ? `The user paused this task and has now resumed it (request ${pauseContinuation.requestId}). Continue the exact turn that was soft-stopped at operation ${pauseContinuation.operationId} using the existing session: the in-flight tool call finished, so do not repeat completed tool calls or restart the request. Follow any newer user message first; if the goal is already complete, report completion and stop. This is a host continuation, not a new user request.` : '',
-            renderPredecessorHandoffs(predecessor.projections),
-            schemaInstruction,
           ].filter(Boolean).join('\n\n');
-          // The briefing already handed this node its dependencies' artifacts; record the reader so the
-          // artifact-to-reader edge is observable without asking the node to read them again through a tool.
-          this.artifacts?.recordReferences({
-            taskId: node.task_id,
-            nodeId: node.id,
-            artifacts: Object.values(dependencySources).flatMap(sources => sources.flatMap(source => source.artifacts
-              .filter(artifact => artifact.artifactId && artifact.version !== undefined)
-              .map(artifact => ({ artifactId: artifact.artifactId!, version: artifact.version! })))),
-          });
           if (agentContext) {
-            if (reviewNode && (agentContext.mode !== 'fresh' || !agentContext.reviewPolicy
-              || !agentContext.reviewPolicy.freshRequired || !agentContext.reviewPolicy.evidenceOnly)) {
-              throw new RuntimeError('context_rejected', 'Independent review requires a fresh evidence-only handoff');
-            }
-            const artifactRefs = Object.values(dependencySources).flatMap(sources =>
-              sources.flatMap(source => source.artifacts.map(artifact => ({ path: artifact.path, digest: artifact.digest }))));
             handoffPackage = {
               mode: agentContext.mode,
               purpose: agentContext.purpose,
               independence: agentContext.independence,
               requestedFacts: agentContext.requestedFacts,
               reasonCode: agentContext.reasonCode,
-              sourceNodeId: agentContext.sourceNodeId ?? null,
-              sourceInstanceId: agentContext.sourceInstanceId ?? null,
-              sourceSessionId: agentContext.sourceSessionId ?? null,
+              sourceNodeId: null,
+              sourceInstanceId: null,
+              sourceSessionId: null,
               sourceLeafId: agentContext.sourceLeafId ?? null,
               summary: proposal?.summary ?? task.request,
               decisions: proposal?.decisions ?? (task.decision_digest ? [task.decision_digest] : []),
               acceptance: proposal?.acceptance ?? [],
-              artifactRefs,
-              predecessorPolicies: predecessor.policies,
-              predecessorHandoffs: predecessor.projections,
+              artifactRefs: [],
               outputSchema,
               briefing: intent.context.briefing ?? '',
             };
@@ -1103,28 +702,15 @@ export class Execution {
               operationId: admitted.id,
               purpose: agentContext.purpose,
               independence: agentContext.independence,
-              sourceNodeId: agentContext.sourceNodeId ?? null,
+              sourceNodeId: null,
             });
             this.store.event(admitted.taskId, 'context.mode_selected', {
               nodeId: admitted.nodeId,
               operationId: admitted.id,
               mode: agentContext.mode,
               reasonCode: agentContext.reasonCode,
-              sourceInstanceId: agentContext.sourceInstanceId ?? null,
+              sourceInstanceId: null,
             });
-            this.store.event(admitted.taskId, 'context.handoff_policy_selected', {
-              nodeId: admitted.nodeId,
-              operationId: admitted.id,
-              applicable: agentContext.mode === 'fresh',
-              policies: handoffPackage.predecessorPolicies as unknown as Json,
-            });
-            if (agentContext.mode === 'fresh' && handoffPackage.predecessorPolicies.some(policy => policy.mode === 'evidence_only')) {
-              this.store.event(admitted.taskId, 'context.evidence_only_frozen', {
-                nodeId: admitted.nodeId,
-                operationId: admitted.id,
-                policies: handoffPackage.predecessorPolicies as unknown as Json,
-              });
-            }
             this.store.event(admitted.taskId, 'context.handoff_frozen', {
               nodeId: admitted.nodeId,
               operationId: admitted.id,
@@ -1132,18 +718,7 @@ export class Execution {
               digest: agentContext.handoffDigest,
               constraintsDigest: agentContext.constraintsDigest,
             });
-            if (reviewNode) {
-              this.store.event(admitted.taskId, 'review.independence_checked', {
-                nodeId: admitted.nodeId,
-                operationId: admitted.id,
-                handoffDigest: agentContext.handoffDigest,
-                constraintsDigest: agentContext.constraintsDigest,
-                transcriptIncluded: false,
-                independence: agentContext.independence,
-                policy: agentContext.reviewPolicy,
-                policyDigest: digest(agentContext.reviewPolicy),
-              });
-            }
+
           }
           if (conversation && chatMessages.length) {
             deliverMessages(this.store, admitted.id, admitted.attempt, chatMessages);
@@ -1156,8 +731,8 @@ export class Execution {
           const data = {
             reason: error.message,
             code: error.code,
-            requiredFacts: (spec.context?.requiredFacts ?? []) as unknown as Json,
-            policy: spec.context?.independence ?? 'none',
+            requiredFacts: [] as Json,
+            policy: 'none',
           };
           this.store.event(node.task_id, 'context.rejected', { nodeId: node.id, ...data });
           this.block(node, 'context_rejected', data);
@@ -1183,32 +758,8 @@ export class Execution {
     this.lifecycle.dispatch(operation);
     let quiescent = false;
     try {
-      const usesGit = Boolean(this.git && this.store.task(node.task_id).integration_branch);
-      let result: OperationResult;
-      if (usesGit && this.git && this.locksIntegration(spec, node.task_id)) {
-        result = await this.git.exclusive(node.task_id, dispatch);
-        quiescent = true;
-      } else {
-        result = await dispatch();
-        quiescent = true;
-      }
-      if (usesGit && this.git && spec.kind === 'agent' && result.outcome === 'completed') {
-        const merged = await this.git.exclusive(node.task_id, () => this.git!.integrate(operation));
-        if (merged && !merged.ok) {
-          // Two lanes touched the same lines. Before the task stops, give one bounded merge Agent
-          // the two sides: it must produce a resolution Git accepts, both sides must survive, and
-          // it may change nothing outside the conflict. Anything less and the task blocks exactly
-          // as it did before, because a merge nobody can verify is worse than an honest stop.
-          const resolved = await this.attemptConflictResolution(operation);
-          if (resolved) result = { ...result, output: { mergedAfterConflict: true } };
-          else result = { ...result, outcome: 'failed', output: { conflicts: merged.conflicts } };
-        }
-      }
-      // A deliverable the graph declared is published here, before the result is settled: a file
-      // nobody wrote must not be reported as a passed node. The declaration is resolved first so a
-      // node that declares nothing keeps settling exactly as it did, without a new await.
-      const declared = result.outcome === 'completed' && this.artifacts ? this.declaredDeliverable(operation) : undefined;
-      if (declared) result = await this.publishDeliverable(operation, declared, result);
+      const result = await dispatch();
+      quiescent = true;
       try {
         this.report(operation.id, operation.generation, result);
       } catch (error) {
@@ -1217,9 +768,10 @@ export class Execution {
         // hand the defects to whoever owns execution instead of parking the node
         // as unknown and re-running the implementation.
         if (!(error instanceof RuntimeError) || !SUBMISSION_DEFECT_CODES.has(error.code)) throw error;
-        this.report(operation.id, operation.generation, nonCompliantResult(result, error.message, [{
-          path: '$', class: 'semantic', expected: 'a result the harness can settle', got: error.message,
-        }]));
+        this.report(operation.id, operation.generation, {
+          ...result, outcome: 'failed',
+          output: { error: { code: 'result_noncompliant', reason: error.message }, previousOutput: result.output },
+        });
       }
     } catch (error) {
       // A gate refusal means the refused send never happened. With no prior
@@ -1234,95 +786,4 @@ export class Execution {
     return true;
   }
 
-  private locksIntegration(spec: NodeSpec, taskId: string) {
-    if (spec.kind === 'program') return true;
-    return (spec.dependsOn ?? []).some(id => {
-      const row = this.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(taskId, id) as { spec: string } | undefined;
-      return !!row && (JSON.parse(row.spec) as NodeSpec).kind === 'program';
-    });
-  }
-
-  private readyToComplete(taskId: string) {
-    const task = this.store.task(taskId);
-    if (task.phase !== 'running' || !task.accepted_proposal) return false;
-    if (this.store.db.prepare('SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1').get(taskId)) return false; // Native completion belongs to GraphRuntime's explicit intent and evidence gate.
-    const graph = loadGraph(this.store, taskId);
-    if ([...graph.plan.nodes.keys()].some(id => !['succeeded', 'skipped'].includes(graph.status(id)))) return false;
-    if (this.store.db.prepare("SELECT id FROM questions WHERE task_id=? AND status='open'").get(taskId)) return false;
-    const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal) as { spec: string }).spec) as Proposal;
-    const evidence = this.store.db.prepare('SELECT acceptance_id,commit_sha FROM evidence WHERE task_id=? AND proposal_version=? AND requirement_version=? AND valid=1').all(taskId, task.accepted_proposal, task.requirement_version) as { acceptance_id: string; commit_sha: string | null }[];
-    const sha = task.integration_sha;
-    if (!proposal.acceptance.every(item => evidence.some(row => row.acceptance_id === item.id && (!sha || row.commit_sha === sha)))) return false;
-    if (task.integration_branch && !independentReviewReady(this.store, taskId, this.catalog)) {
-      // Independent review guards a real code delivery. When the integrated
-      // tree is identical to the recorded target there is nothing to merge,
-      // so a no-op delivery does not need a reviewer; the acceptance evidence
-      // and node completion checks above still apply.
-      if (!task.integration_sha || task.integration_sha !== task.target_sha) return false;
-    }
-    return true;
-  }
-
-  private completeTask(taskId: string) {
-    const task = this.store.task(taskId);
-    this.store.db.prepare("UPDATE tasks SET phase='completed' WHERE id=?").run(taskId);
-    this.store.event(taskId, 'task.completed', { proposalVersion: task.accepted_proposal });
-    // A finished graph is the case that used to end with nobody watching: the task was
-    // done and the conversation's master was never told. Wake it here, once per fact,
-    // so it can read the outcome and report it.
-    wakeForTaskCompleted(this.store, taskId, {
-      proposalVersion: task.accepted_proposal,
-      integrationSha: task.integration_sha ?? null,
-    });
-    releaseTaskSlot(this.store, taskId);
-  }
-
-  private deliver(taskId: string) {
-    for (let pass = 0; pass < 2; pass += 1) {
-      if (!this.readyToComplete(taskId)) return;
-      if (!this.git) break;
-      const recovered = this.git.restore(taskId);
-      if (!this.store.task(taskId).integration_branch) break;
-      const result = recovered?.status === 'merged' ? recovered : this.git.tryDeliver(taskId);
-      if (result.status === 'recheck') {
-        // The target branch had moved, so this pass only brought the integration up to date; when the
-        // trees stayed identical the evidence was re-bound and the delivery is owed right now. Looking
-        // again is what turns that into a delivery - stopping here left a task whose target keeps moving
-        // re-merging and re-checking forever, never delivering, holding the active slot (HB-201: the real
-        // task's events are a run of `git.recheck` and nothing else, with every node succeeded and every
-        // acceptance item valid). Only one retry: a second move means the target moves faster than this.
-        if (pass === 0) continue;
-        return;
-      }
-      if (result.status === 'blocked') {
-        // A blocked delivery used to block the acceptance check's node - a row a v2 task does
-        // not have, so the lookup returned undefined and the blocking was silently lost: the
-        // task neither completed nor said why. On the v2 path the node the graph named is
-        // parked instead, with the reason on the timeline (HB-295).
-        const task = this.store.task(taskId);
-        const proposal = JSON.parse((this.store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.accepted_proposal!) as { spec: string }).spec) as Proposal;
-        const reason = String((result.data as { kind?: string })?.kind ?? 'git_conflict');
-        const detail = (result.data ?? { reason: 'Git delivery blocked' }) as Json;
-        const checkNode = proposal.acceptance[0]?.checkNode;
-        const legacy = checkNode
-          ? this.store.db.prepare('SELECT * FROM nodes WHERE task_id=? AND id=?').get(taskId, checkNode) as ExecutionNodeRow | undefined
-          : undefined;
-        this.store.transaction(() => {
-          if (legacy) this.block(legacy, reason, detail);
-          else if (checkNode) new KernelStore(this.store).blockNode(taskId, checkNode, `${reason}: ${JSON.stringify(detail)}`);
-          else this.store.event(taskId, 'graph.delivery.blocked', { reason, ...(detail as object) });
-        });
-        return;
-      }
-      if (result.status !== 'merged' && result.status !== 'skip') return;
-      break;
-    }
-    this.store.transaction(() => this.completeTask(taskId));
-  }
-
-  private advance(taskId: string) {
-    if (this.store.task(taskId).integration_branch) return;
-    if (!this.readyToComplete(taskId)) return;
-    this.completeTask(taskId);
-  }
 }

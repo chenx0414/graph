@@ -53,14 +53,15 @@ const workerRecipe = (overrides: Partial<AgentCombination> = {}): AgentCombinati
 
 test('saving a non-main recipe compiles it immediately and publishes a definition', async () => {
   const { catalog } = await catalogFixture('recipe-compile');
-  const result = await catalog.saveAgentCombination(workerRecipe());
+  const result = await catalog.saveAgentCombination(workerRecipe({ recommendedGrade: 'frontier' }));
 
-  expect(result.combination).toMatchObject({ id: 'worker', status: 'valid' });
+  expect(result.combination).toMatchObject({ id: 'worker', status: 'valid', recommendedGrade: 'frontier' });
   expect(result.combination.mode).toBeUndefined();
   expect(result.compileError).toBeUndefined();
   expect(result.definition?.definitionVersion).toBe('worker@1');
   expect(catalog.definition('worker@1')).toMatchObject({
     id: 'worker',
+    recommendedGrade: 'frontier',
     version: 1,
     capabilities: [{ id: 'research', version: '1.0.0' }],
   });

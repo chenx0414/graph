@@ -12,7 +12,6 @@ import { modelRequestHeaders, type ModelApi, type ModelEntry } from '../catalog/
 import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
-import { inspectResultHandoffSubmission, laneSubmissionContext, resultHandoffFromSubmission } from '../core/predecessor-handoff.ts';
 import { WriteLedger } from '../core/write-ledger.ts';
 import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type NativeProposal } from '../core/types.ts';
 import { promptImagesFromAttachments } from '../core/attachments.ts';
@@ -24,14 +23,6 @@ import { isFullAccess } from '../core/access-policy.ts';
 import { openConversationTools, type ConversationToolService } from './conversation-tools.ts';
 import { peerNodes } from './agent-messaging.ts';
 
-/**
- * The branch an agent router declared in its submitted result, or undefined when it declared none.
- * A non-string `route` is ignored rather than coerced: a router must say which branch in words. */
-function declaredRouteCase(submitted: Json | undefined): string | undefined {
-  if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) return undefined;
-  const value = (submitted as Record<string, unknown>)['route'];
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
 import { agentTools } from './agent-tools.ts';
 import { appendMessage, conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
@@ -71,7 +62,6 @@ export interface PiAdapterChannels {
   supervisor: (taskId: string) => Partial<GraphManagement> & {
     propose(proposal: NativeProposal, requestId: string): Promise<unknown>;
     withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
-    revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string; taskId?: string }): Promise<unknown>;
     graphState?(): Promise<unknown>;
     taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
     validateProposal?(proposal: NativeProposal): Promise<unknown>;
@@ -160,7 +150,6 @@ function summarizeToolCall(name: string, args: unknown) {
               : name === 'get_task_status' ? 'task status'
               : name === 'bind_project' ? target('projectId') ?? name
                 : name.startsWith('git_') ? [name, target('path') ?? target('ref') ?? ''].filter(Boolean).join(' ')
-                  : name === 'submit_result' ? 'structured result'
                     : name === 'apply_rsi_change' ? target('title') ?? 'self-improvement'
                       : name === 'inspect_rsi_status' ? 'self-improvement status'
                     : name;
@@ -363,7 +352,6 @@ export function createPiAdapter(options: {
         const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
         const conversation = task.phase === 'chatting' ? conversationForTask(options.store, operation.taskId) : undefined;
         const workspace = await realpath(operation.workspace ?? project.root);
-        let submitted: Json | undefined;
         let permissionRequest: CapabilityPermissionRequest | undefined;
         // The agent's own question to the user, asked through ask_user; it turns the turn
         // into a waiting turn once the loop stops.
@@ -695,16 +683,7 @@ export function createPiAdapter(options: {
                   } : {}),
                 },
               } : {}),
-              onSubmit: output => { submitted = output; },
-              ...(operation.context.outputSchema?.kind === 'result_handoff' ? {
-                validateSubmission: (output: Json) => {
-                  const inspection = inspectResultHandoffSubmission(
-                    output,
-                    laneSubmissionContext(options.store, { taskId: operation.taskId, nodeId: operation.nodeId, workspace }),
-                  );
-                  return inspection.draft ? { ok: true as const } : { ok: false as const, defects: inspection.defects };
-                },
-              } : {}),
+
             }),
           });
         } catch (error) {
@@ -732,29 +711,6 @@ export function createPiAdapter(options: {
         const definitionVersion = instance.definition_version ?? 'unknown@1';
         const composedPrompt = contextAssembly.forOperation(capabilityOperation).composed;
         const agentContext = operation.context.agentContext;
-        if (agentContext?.mode === 'fork') {
-          if (!agentContext.sourceSessionFile) throw new RuntimeError('context_rejected', 'Fork context is missing its source session file');
-          const sourceBinding = options.store.db.prepare(`SELECT capability_digest,model_policy_digest,tool_policy_digest
-            FROM agent_context_bindings WHERE instance_id=?`).get(agentContext.sourceInstanceId!) as {
-              capability_digest: string | null;
-              model_policy_digest: string | null;
-              tool_policy_digest: string | null;
-            } | undefined;
-          if (!agentContext.rebrand) {
-            if (!sourceBinding?.capability_digest || !sourceBinding.model_policy_digest || !sourceBinding.tool_policy_digest) {
-              throw new RuntimeError('context_rejected', 'Fork source has no complete policy digest; set context.rebrand=true to allow it');
-            }
-            if (sourceBinding.capability_digest !== capabilityOperation.bundleDigest) {
-              throw new RuntimeError('context_rejected', 'Fork context changes the capability bundle; set context.rebrand=true to allow it');
-            }
-            if (sourceBinding.model_policy_digest !== modelPolicyDigest) {
-              throw new RuntimeError('context_rejected', 'Fork context changes the model policy; set context.rebrand=true to allow it');
-            }
-            if (sourceBinding.tool_policy_digest !== toolPolicyDigest) {
-              throw new RuntimeError('context_rejected', 'Fork context changes the tool policy; set context.rebrand=true to allow it');
-            }
-          }
-        }
         // Record what was actually loaded for this operation so the node
         // projection cannot later guess from catalog status.
         recordCapabilityLoad(options.store, {
@@ -1068,9 +1024,6 @@ export function createPiAdapter(options: {
             toolPolicyDigest: capabilityOperation.toolPolicyDigest,
             runtimePolicyDigest: capabilityOperation.runtimePolicyDigest,
             ...(agentContext?.reviewPolicy ? { freshSession: true } : {}),
-            ...(agentContext?.mode === 'fork' && agentContext.sourceSessionFile
-              ? { forkFrom: { sessionFile: agentContext.sourceSessionFile, ...(agentContext.sourceLeafId ? { leafId: agentContext.sourceLeafId } : {}) } }
-              : {}),
             broker: gate,
             nativeTools: [...capabilityOperation.nativeTools],
             ...(conversation ? { allowWorkspaceChange: true } : {}),
@@ -1393,21 +1346,13 @@ export function createPiAdapter(options: {
                 usage: gate.total(),
               };
             }
-            // The conversation output always carries the visible reply; worker
-            // output keeps its existing submitted-or-text shape.
+            // External main returns its visible reply and recorded conversation activity.
             const output: Json = conversation
-              ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}), ...(submitted !== undefined ? { submitted } : {}) }
-              : (submitted ?? { text });
-            const resultHandoff = resultHandoffFromSubmission(submitted);
-            // An agent router declares its own branch: the case it names in the submitted result.
-            // The graph then refuses any case the node never declared, so this is a choice among
-            // announced branches, not a free ticket to invent one.
-            const declaredCase = declaredRouteCase(submitted);
+              ? { text: reply, ...(suggestedPrompt ? { suggestedPrompt } : {}), ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}), ...(activity.length ? { activity: activity as unknown as Json } : {}) }
+              : { text };
             return {
               outcome: 'completed',
               output,
-              ...(resultHandoff ? { resultHandoff } : {}),
-              ...(declaredCase !== undefined ? { route: declaredCase } : {}),
               usage: combineKnownUsage(gate.total(), suggestionUsage),
             };
           } finally {

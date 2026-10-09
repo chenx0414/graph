@@ -2,6 +2,8 @@
 
 日期：2026-10-01。状态：产品契约及第 15 节九项选择已由用户逐项确认；实施方案由 main agent 按本规格细化。本文供 main agent 进行 RSI 构建，不代表已实施或已验证。正式规格在 GitHub Issue 管理，本文件为可阅读的工作副本。
 
+切换决策补充：使用者随后确认丢弃旧内核及旧 graph，不保留转换器或旧历史 reader，见 [ADR 0030](../adr/0030-graph-v2-interface-delivery-kernel.md)。以下第 11、13 节按此决策更新；基础设施与外部 main 会话继续保留。
+
 ## 1. 指导思想
 
 Graph 是 main agent 创建、拥有和管理的协作运行空间。main agent 位于 graph 外部，可以管理多个 graph；完成 graph 不结束 main agent 会话。
@@ -40,6 +42,10 @@ Graph 是 main agent 创建、拥有和管理的协作运行空间。main agent 
 - 必需输出由节点配置声明；缺失时自动报错补交，仍失败则标记未满足交付要求。
 - graph idle 不等于 completed。main agent 显式完成或完成出口提出请求，等待执行和队列清空；stop 明确取消剩余工作。
 - 每个 agent 可独立打开聊天窗口；system prompt 完整透明可见。
+
+### 节点工作环境的声明格式
+
+节点可选 workspace:{base:"auto"|"project"|"worktree",path?:string} 与 access（现有 AccessPolicy，mode 必需，其他字段按模式补默认值）。默认自动选择已准备的私有 worktree，否则项目根；显式 worktree 要求 targetBranch。path 是已存在的根内相对目录，禁止词法及符号链接越界。实际权限不得超过宿主授权，受保护路径继续适用。执行与补交冻结环境，修改在下一执行生效；重绑保留身份、历史、预算，运行快照公开实际工作位置和权限。配置拒绝保留本次输入并暂停节点，不盲目自动重试。
 
 ## 3. 正式对象与身份
 
@@ -200,7 +206,7 @@ graph 状态区分 running、idle、paused、completing、completed、stopping�
 
 | 位置 | 当前机制 | 处理方向 |
 | --- | --- | --- |
-| src/core/types.ts | NodeSpec.dependsOn/routes/when、ContainerSpec、LoopSpec | 新声明式 interface，旧字段仅归入历史读取 |
+| src/core/types.ts | NodeSpec.dependsOn/routes/when、ContainerSpec、LoopSpec | 新声明式 interface；退役旧 graph 字段，不保留旧图历史读取 |
 | src/core/graph.ts | GraphPlan DAG 校验，GraphState 按成功状态计算 readiness/inputs | 替换为显式连接、Delivery、队列和模块状态 |
 | src/core/router-action.ts | 单 case 的状态/字段/agent 自述路由 | 替换为多输入、多输出、触发策略与可解释 transition |
 | src/core/revision.ts | 完整节点列表修订、验收锁定 | 保留修订和校验思想，提供局部 patch 和新版本生效规则 |
@@ -234,9 +240,9 @@ ADR 0004 的节点/实例一一对应及返工保留身份继续适用；ADR 001
 5. main 工具、声明式定义、局部修改、公开输出与完成/停止；子 graph 展开与复用。
 6. 产物归属和 commit 审查引用；保留原 Git 验收门。
 7. 图布局、边 value/历史、模块解释、独立聊天与 prompt 透明展示。
-8. 切换新建 graph 至新内核，清除新路径上的旧 DAG/特殊 loop 调度；旧历史只读兼容。更新架构/术语/ADR/使用 docs。
+8. 按 ADR 0030 将所有 graph 入口统一切换到新内核，整体退役旧 DAG/特殊 loop 调度、转换器与旧图历史 reader；启动时丢弃旧 graph 记录。更新架构/术语/ADR/使用 docs，并验证实际默认应用交付。
 
-旧数据库不破坏性重置。旧运行默认由旧内核运行至停稳，再归档或显式转换；不得同时用两套调度器消费同一运行。长期只保留新执行路径和必要历史 reader。无法等价转换的旧图出具报告，不能猜测协议或重放已发生副作用。
+同一 SQLite 数据库中的能力/配方、模型配置、外部 main 会话、预算与调用基础设施继续复用，不删除重建整个数据库。旧 graph 与其任务归属历史按 ADR 0030 整体丢弃，不等待旧内核运行、不归档转换、不保留历史 reader，也不重放已发生副作用。切换前列出删除模块及活跃引用，切换后以真实启动、原生 graph 执行与默认应用验证单一执行路径。
 
 ## 14. 验收与证据
 

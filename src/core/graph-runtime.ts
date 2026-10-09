@@ -130,6 +130,12 @@ export class GraphRuntime {
     if (latest.definition.acceptance?.length && canonicalJson(parsed.acceptance ?? []) !== canonicalJson(latest.definition.acceptance)) {
       throw new RuntimeError('invalid_input', 'Patch cannot change declared final acceptance');
     }
+    for (const criterion of latest.definition.acceptance ?? []) {
+      if (criterion.kind === 'check' && canonicalJson(parsed.modules[criterion.module]!.operation)
+        !== canonicalJson(latest.definition.modules[criterion.module]!.operation)) {
+        throw new RuntimeError('invalid_input', `Patch cannot change declared acceptance check ${criterion.module}`);
+      }
+    }
     if (input.changes.retire?.length) {
       for (const id of input.changes.retire) {
         if (!latest.definition.nodes[id] && !latest.definition.modules[id]) {
@@ -161,6 +167,7 @@ export class GraphRuntime {
       }
       for (const id of removed) finishNativePauses(this.kernel.store, this.graphId, id);
       for (const id of removed) this.kernel.db.prepare("UPDATE kernel_nodes SET status='retired' WHERE task_id=? AND node_id=?").run(this.graphId, id);
+      this.kernel.store.event(this.graphId, 'graph.patched', { revision: revision.version, previousRevision: latest.version, reason: input.changes.reason });
       return { revision: revision.version };
     });
   }
@@ -251,7 +258,10 @@ export class GraphRuntime {
 
     const queued = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')").get(this.graphId) as { n: number };
     const running = this.kernel.db.prepare("SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state='running'").get(this.graphId) as { n: number };
-    const pausedOrFailed = this.kernel.db.prepare('SELECT COUNT(*) AS n FROM kernel_node_state WHERE task_id=? AND paused=1').get(this.graphId) as { n: number };
+    const pausedOrFailed = this.kernel.db.prepare(`SELECT COUNT(*) AS n FROM (
+      SELECT node_id FROM kernel_node_state WHERE task_id=? AND paused=1
+      UNION SELECT node_id FROM kernel_nodes WHERE task_id=? AND status IN ('blocked','failed')
+    )`).get(this.graphId, this.graphId) as { n: number };
     const failedInputs = this.kernel.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND state='failed' LIMIT 1").get(this.graphId);
     // Failed deliveries need an explicit retry/skip even if the node's later queue was resumed.
     // A human approval applies to the exact integration version it was raised for.

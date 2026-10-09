@@ -88,8 +88,8 @@ export interface PiInstanceOptions {
   broker?: SendGate;
   compaction?: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };
   retry?: RetrySettings;
-  /** A conversation master may bind a project after its first turn; the
-   * session keeps its identity while the workspace moves to the project. */
+  /** The trusted host may rebind an idle instance to its next declared workspace.
+   * Node/instance identity and history remain; an active turn never changes cwd. */
   allowWorkspaceChange?: boolean;
   /** Create a new persistent session file from an immutable source leaf. */
   forkFrom?: {

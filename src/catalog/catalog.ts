@@ -1,6 +1,6 @@
 import { canonicalJson, type TaskStore } from '../core/store.ts';
 import { RuntimeError, type Json } from '../core/types.ts';
-import { parseDefinitionVersion } from './models.ts';
+import { MODEL_GRADES, parseDefinitionVersion } from './models.ts';
 import { CapabilityLibrary, type CapabilityBinding, type CapabilityBundleInput, type CapabilityRecord, type CapabilitySearchInput, type DefinitionSpec } from './capability-library.ts';
 import type { AgentCombination, AgentCombinationView } from './agent-combinations.ts';
 
@@ -57,7 +57,7 @@ export class Catalog {
 
   publishDefinition(id: string, spec: DefinitionSpec) {
     if (!id.trim()) throw new RuntimeError('invalid_input', 'A definition id is required');
-    if (!['low', 'medium', 'high', 'highest'].includes(spec.recommendedGrade)) throw new RuntimeError('invalid_input', 'A recommended model grade is required');
+    if (!MODEL_GRADES.includes(spec.recommendedGrade)) throw new RuntimeError('invalid_input', 'A recommended model grade is required');
     for (const binding of spec.capabilities ?? []) this.assertBinding('Capability binding', binding);
     this.assertBinding('Agent prompt binding', spec.prompts?.agent);
     this.assertBinding('Tool prompt binding', spec.prompts?.tool);
@@ -84,6 +84,11 @@ export class Catalog {
       return { id, version: latest.version, key: `${id}@${latest.version}` };
     }
     return this.publishDefinition(id, spec);
+  }
+
+  hasDefinition(key: string): boolean {
+    const { id, version } = parseDefinitionVersion(key);
+    return Boolean(this.store.db.prepare('SELECT 1 FROM definitions WHERE id=? AND version=?').get(id, version));
   }
 
   definition(key: string): DefinitionSpec & { id: string; version: number } {

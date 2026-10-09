@@ -4,26 +4,27 @@ import { compactionSettings } from './compaction.ts';
 import { sendKernelNodeMessage } from '../core/kernel-node-messages.ts';
 import { executeModuleOperation } from './kernel-operation-broker.ts';
 import { waitForKernelExecutionSlot } from './execution-slots.ts';
+import { setNativeExecutionWaiting } from '../core/time-ledger.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { RuntimeError } from '../core/types.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentContextLibrary } from './agent-context.ts';
-import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
-import { join } from 'node:path';
+import { nodeAccessPolicy, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from '../core/access-policy.ts';
+import { join, resolve, relative } from 'node:path';
+import { realpathSync, statSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
-import { modelIdentity, type ModelEntry } from '../catalog/models.ts';
+import { selectModel, modelIdentity, type ModelEntry } from '../catalog/models.ts';
 import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
 import { graphAcceptance } from '../core/graph-acceptance.ts';
 import { GraphLane, type GraphLaneOptions } from '../core/graph-lane.ts';
-import type { RunnerHost } from '../core/graph-runner.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
 import { residentLauncher } from './resident-launcher.ts';
 import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
-import { toPiModel } from './pi-adapter.ts';
+import { toPiModel, toolResultText } from './pi-adapter.ts';
 import { kernelProviderGate } from './kernel-provider-gate.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import { encodeAssistantStream } from './assistant-stream-frames.ts';
@@ -53,6 +54,7 @@ export interface KernelGraphLaneOptions {
   kernel: KernelStore;
   access?: () => ResolvedAccessPolicy;
   network?: { retrievalDomains?: string[] };
+  program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   catalog: Catalog;
   library?: AgentContextLibrary;
   /**
@@ -64,6 +66,7 @@ export interface KernelGraphLaneOptions {
   reserveTokens?: number;
   /** The models the runtime is configured with. */
   directory: () => ModelEntry[];
+  preferences?: () => Partial<Record<ModelEntry['grade'], string[]>>;
   /** Resolve the credential for a model entry; undefined means the node cannot run. */
   scheduler?: ModelScheduler;
   credentialFor: (entry: ModelEntry) => { apiKey: string; credentialId?: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
@@ -71,6 +74,7 @@ export interface KernelGraphLaneOptions {
   instancesDir: string;
   /** The state root; worker configs are written beneath it. */
   stateDir: string;
+  graphHome?: string;
   /** The project workspace for a graph, resolved from its task row. */
   workspaceFor: (graphId: string) => string | undefined;
   /**
@@ -89,22 +93,7 @@ export interface KernelGraphLaneOptions {
    */
   onMainMessage?: (graphId: string, nodeId: string, message: { text: string; requestId: string }) => Promise<unknown>;
   onToolCall?: (graphId: string, nodeId: string, name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
-  /**
-   * A scripted stand-in for a node's real Pi process.
-   *
-   * §7's lane is otherwise unreachable without a configured model and credential: `config`
-   * resolves a real session and `host` starts a real resident process. That is right in
-   * production and useless in a test - most of the suite drives nodes through a scripted
-   * ActionAdapter and configures no model at all, so a v2 graph could be created but never
-   * ran. This seam lets a test run a v2 graph end to end without inventing a provider.
-   *
-   * It is deliberately NOT a second execution path: the scripted host submits through the
-   * same `onToolCall` and the same NodeSubmitBridge, so the kernel settles the submission,
-   * checks the required outputs and advances the graph exactly as a real turn would. Only
-   * the process that produces the tool call is replaced.
-   */
-  scriptedTurn?: (graphId: string, nodeId: string, text: string, turn: number, workspace?: string) =>
-    { outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] } | Promise<{ outputs?: Record<string, { enable?: boolean; value?: unknown }>; missing?: string[] }>;
+
 }
 
 /** Select against immutable implementer history, including aliases and routing cycles. */
@@ -144,7 +133,7 @@ export function modelFor(options: KernelGraphLaneOptions, recipe: string,
   const directory = options.directory().filter(model => !excluded.has(model.id) && !excluded.has(modelIdentity(model)));
   const definition = context && options.kernel.revision(context.graphId, context.revisionVersion)?.definition;
   const requested = context && definition ? (definition.nodes[context.nodeId]?.model ?? definition.defaults?.model)?.trim() : undefined;
-  return directory.find(model => model.id === requested) ?? directory.find(model => model.grade === entry.recommendedGrade) ?? directory[0];
+  return selectModel({ ...(requested ? { requested } : {}), grade: entry.recommendedGrade, directory, ...(options.preferences ? { preferences: options.preferences() } : {}) }) ?? directory[0];
 }
 
 /**
@@ -159,17 +148,38 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const hostConfigs = new Map<string, string>();
   const boundModels = new Map<string, ModelEntry>();
 
-  /** The workspace a node works in: its own work copy when Git can provide one. */
-  const nodeWorkspace = (graphId: string, nodeId: string): string | undefined => {
-    const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined;
-    // A work copy is keyed by the node's admitted instance, which is stable for the life of
-    // the node, so a rework keeps the commits the node already made.
-    if (options.git && admitted?.instance_id) {
-      const copy = options.git.workspace(graphId, admitted.instance_id, nodeId, 'agent', 'work');
-      if (copy) return copy;
-    }
-    return options.workspaceFor(graphId);
+  const nodeDefinition = (graphId: string, nodeId: string, revisionVersion?: number) => {
+    const active = options.kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1")
+      .get(graphId, nodeId) as { revision_version: number } | undefined;
+    const revision = revisionVersion ?? active?.revision_version;
+    return (revision === undefined ? options.kernel.latestRevision(graphId) : options.kernel.revision(graphId, revision))?.definition.nodes[nodeId];
   };
+  /** Use the execution's frozen location, including publication during a concurrent patch. */
+  const nodeLocation = (graphId: string, nodeId: string, revisionVersion?: number): { workspace: string; base: 'project' | 'worktree' } | undefined => {
+    const node = nodeDefinition(graphId, nodeId, revisionVersion);
+    const selected = node?.workspace?.base ?? 'auto';
+    const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined;
+    const copy = selected !== 'project' && options.git && admitted?.instance_id
+      ? options.git.workspace(graphId, admitted.instance_id, nodeId, 'agent', 'work') : undefined;
+    if (selected === 'worktree' && !copy) throw new RuntimeError('invalid_workspace', 'Node requests a worktree; prepare this graph with a targetBranch first');
+    const base = copy ?? options.workspaceFor(graphId);
+    if (!base) return undefined;
+    try {
+      const root = realpathSync(base); const workspace = realpathSync(resolve(root, node?.workspace?.path ?? '.'));
+      const within = relative(root, workspace);
+      if (within === '..' || within.startsWith('../') || within.startsWith('/')) throw new RuntimeError('permission', 'Node workspace path escapes its declared base');
+      if (!statSync(workspace).isDirectory()) throw new RuntimeError('invalid_workspace', 'Node workspace path must be an existing directory');
+      return { workspace, base: copy ? 'worktree' : 'project' };
+    } catch (error) {
+      if (error instanceof RuntimeError) throw error;
+      throw new RuntimeError('invalid_workspace', `Node workspace cannot be opened: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const nodeWorkspace = (graphId: string, nodeId: string, revisionVersion?: number) => nodeLocation(graphId, nodeId, revisionVersion)?.workspace;
+  const nodeAccess = (graphId: string, nodeId: string, revisionVersion: number) => nodeAccessPolicy(
+    nodeDefinition(graphId, nodeId, revisionVersion)?.access,
+    options.access?.() ?? resolveAccessPolicy(standardAccessPolicy(), { stateDir: options.stateDir, ...(options.graphHome ? { graphHome: options.graphHome } : {}) }),
+    { stateDir: options.stateDir, ...(options.graphHome ? { graphHome: options.graphHome } : {}) });
 
   const sessionFor = async (graphId: string, nodeId: string, revisionVersion: number): Promise<NodeSessionRequest> => {
     if (closing) throw new Error('Graph runtime is closing');
@@ -184,20 +194,22 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       options.library.prompt(`tools/${role}.md`), options.library.prompt('runtime/node.md'),
       options.library.agentPrompt(recipe?.split('@')[0] ?? nodeId, null),
     ]) : null;
-    const configuration = JSON.stringify({ recipe, prompts, access: options.access?.(), network: options.network });
+    const location = nodeLocation(graphId, nodeId, revisionVersion);
+    const workspace = location?.workspace;
+    if (!workspace) throw new RuntimeError('invalid_workspace', `graph ${graphId} node ${nodeId} has no workspace`);
+    const access = nodeAccess(graphId, nodeId, revisionVersion);
+    const configuration = JSON.stringify({ recipe, prompts, workspace, access, network: options.network });
     if (cached && sessionRevisions.get(key) === configuration) return cached;
     if (cached) { await hosts.get(key)?.stop(); hosts.delete(key); await cached.close(); }
-    const workspace = nodeWorkspace(graphId, nodeId);
-    if (!workspace) throw new Error(`graph ${graphId} node ${nodeId} has no workspace`);
     const domains = options.network?.retrievalDomains ?? [];
-    const unrestricted = options.access?.().network === 'unrestricted';
+    const unrestricted = access.network === 'unrestricted';
     const retrieval = domains.length || unrestricted ? createRetrievalBroker({ domains, unrestricted,
       gate: kernelToolGate(options.kernel, graphId, nodeId, 'retrieval', () => closing),
     }) : undefined;
     const session = await nodeSessionRequest({
       retainCapabilities: true,
       gate: options.gateFor?.(graphId, nodeId) ?? kernelToolGate(options.kernel, graphId, nodeId, 'tool', () => closing),
-      ...(options.access ? { access: options.access() } : {}),
+      access,
       kernel: options.kernel,
       catalog: options.catalog,
       ...(options.library ? { library: options.library } : {}),
@@ -207,7 +219,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       workspace,
       bindings: {
         ...(retrieval ? { fetch: (url: string, signal?: AbortSignal) => retrieval.fetch(url, signal) } : {}),
-        ...(options.git && options.kernel.store.task(graphId).integration_branch && role !== 'reviewer' ? {
+        ...(options.git && options.kernel.store.task(graphId).integration_branch && location?.base === 'worktree' && role !== 'reviewer' ? {
           commitWorkspace: async (input: { paths: string[]; message: string }) => options.git!.exclusive(graphId, () => {
             const task = options.kernel.store.task(graphId);
             const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
@@ -250,36 +262,18 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       instancesDir: options.instancesDir,
     });
     if (closing) { await session.close(); throw new Error('Graph runtime is closing'); }
+    session.environment = { revision: revisionVersion, workspace, base: location!.base, access };
+    session.systemPrompt += `\n\nNODE WORKING ENVIRONMENT\n${JSON.stringify({ workspace, base: session.environment.base, access })}`;
+    if (cached) options.kernel.store.event(graphId, 'graph.node.rebound', { nodeId, revision: revisionVersion,
+      previousRecipe: cached.binding.definitionVersion, recipe: session.binding.definitionVersion,
+      previousWorkspace: cached.environment?.workspace ?? null, workspace,
+      previousAccessDigest: cached.environment?.access.digest ?? null, accessDigest: access.digest });
     sessions.set(key, session);
     sessionRevisions.set(key, configuration);
     if (session.operation) recordCapabilityLoad(options.kernel.store, { taskId: graphId, nodeId, instanceId: session.binding.instanceId,
       readOnly: false, report: session.operation.report, digest: session.bundleDigest, toolPolicyDigest: session.toolPolicyDigest, runtimePolicyDigest: session.runtimePolicyDigest });
     return session;
   };
-
-  const turns = new Map<string, number>();
-  const scriptedHost = (graphId: string, nodeId: string): RunnerHost => ({
-    start: async () => ({ processId: 0 }),
-    alive: () => true,
-    turn: async (text: string) => {
-      const key = `${graphId}/${nodeId}`;
-      const turn = (turns.get(key) ?? 0) + 1;
-      turns.set(key, turn);
-      const scripted = await options.scriptedTurn!(graphId, nodeId, text, turn, nodeWorkspace(graphId, nodeId));
-      // The submission travels the real path: onToolCall -> NodeSubmitBridge -> kernel.
-      const result = options.onToolCall
-        ? await options.onToolCall(graphId, nodeId, 'submit', { outputs: scripted.outputs ?? {} })
-        : { ok: false, text: 'the lane has no tool channel' };
-      // A scripted turn still costs something, and must say so: HB-289 holds a metered turn
-      // that reports no usage, so a scripted host that stayed silent would park every node
-      // it was meant to drive. Zero is the honest figure - the script spends no tokens.
-      return {
-        turnId: `scripted-${nodeId}-${turn}`,
-        inspect: { ...result, missing: scripted.missing ?? [] },
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      };
-    },
-  });
 
   return new GraphLane({
     finalize: async graphId => {
@@ -301,12 +295,12 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (!execution || !options.git || !options.kernel.store.task(execution.taskId).integration_branch) return;
       if (closing || ['stopping', 'stopped'].includes(options.kernel.store.task(execution.taskId).phase)) throw new RuntimeError('paused', 'Git integration is closed');
       const node = options.kernel.revision(execution.taskId, execution.revisionVersion)!.definition.nodes[execution.nodeId]!;
-      const known = options.catalog.listDefinitions().some(recipe => `${recipe.id}@${recipe.version}` === node.recipe);
+      const known = options.catalog.hasDefinition(node.recipe);
       // Reviewer reports are shared artifacts; they must not become implementation changes.
       if (known && options.catalog.definition(node.recipe!).review === true) return;
       const admitted = options.kernel.listNodes(execution.taskId).find(candidate => candidate.nodeId === execution.nodeId)!;
       const result = await options.git.exclusive(execution.taskId, () => options.git!.integrate({
-        id: execution.id, taskId: execution.taskId, nodeId: execution.nodeId, instanceId: admitted.instanceId, kind: 'agent',
+        id: execution.id, taskId: execution.taskId, nodeId: execution.nodeId, instanceId: admitted.instanceId, kind: 'agent', recipe: node.recipe,
       }));
       if (result && !result.ok) throw new RuntimeError('git_conflict', `Git integration refused: ${result.conflicts.join(', ')}. Inspect the worktree and integration tip before retrying.`);
     },
@@ -315,6 +309,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         const workspace = options.git?.workspace(graphId, null, request.moduleId, 'program', 'graph.command') ?? options.workspaceFor(graphId);
         if (!workspace) throw new Error('Operation module has no workspace');
         return executeModuleOperation({ ...request, graphId, kernel: options.kernel, workspace, scratchRoot: options.stateDir,
+          program: { ...options.program, nodeModulesPath: options.program?.nodeModulesPath
+            ?? join(options.workspaceFor(graphId) ?? workspace, 'node_modules') },
           ...(options.access ? { access: options.access() } : {}) });
       };
       // A check observes one integration tip; managed merges cannot race its receipt.
@@ -353,11 +349,12 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       boundModels.set(`${graphId}/${nodeId}`, structuredClone(model));
       const credential = options.credentialFor(model);
       if (!credential) throw new Error(`no credential bound for model ${model.id}`);
-      const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
-      options.kernel.db.prepare('INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir,role) VALUES(?,?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir,role=excluded.role')
-        .run(graphId, nodeId, model.id, session.systemPrompt, JSON.stringify(session.allowedToolNames), session.stateDir, session.role);
+      const workspace = session.environment!.workspace;
+      options.kernel.db.prepare('INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir,role,environment) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir,role=excluded.role,environment=excluded.environment')
+        .run(graphId, nodeId, model.id, session.systemPrompt, JSON.stringify(session.allowedToolNames), session.stateDir, session.role, JSON.stringify({ ...session.environment, revision: revisionVersion }));
       return {
         binding: session.binding,
+        allowWorkspaceChange: true,
         workspace,
         stateDir: session.stateDir,
         model: toPiModel(model),
@@ -395,10 +392,10 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (cached && hostConfigs.get(key) === signature) return cached;
       if (cached) await cached.stop();
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
-      const workspace = nodeWorkspace(graphId, nodeId) ?? options.stateDir;
       const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`);
       const session = sessions.get(key);
       if (!session) throw new Error('Resident host has no prepared session');
+      const workspace = session.environment!.workspace;
       if (closing) throw new Error('Graph runtime is closing');
       if (!session.operation) throw new Error('Resident node has no resolved capability operation');
       const model = boundModels.get(key);
@@ -408,7 +405,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       const nativeCalls = new Map<string, string>();
       const host = new ResidentHost({
         launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,
-          ...(options.access ? { access: options.access() } : {}) }),
+          access: session.environment!.access }),
         workerEntry,
         cwd: workspace,
         configPath,
@@ -420,10 +417,17 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           if (!context || !Array.isArray(context.messages)) throw new Error('Invalid model context');
           let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
           let unknown = false;
+          let refusal: RuntimeError | undefined;
           const gate = kernelProviderGate(options.kernel, graphId, nodeId, undefined, model,
             { definition: session.binding.definitionVersion, review: session.role === 'reviewer' }, purpose);
           const observed: SendGate = {
-            dispatch: (id, reservation, send) => gate.dispatch(id, reservation, send),
+            dispatch: (id, reservation, send) => {
+              try { return gate.dispatch(id, reservation, send); }
+              catch (error) {
+                if (error instanceof RuntimeError && (error.code === 'paused' || error.code === 'budget')) refusal = error;
+                throw error;
+              }
+            },
             settle: (id, cost) => { gate?.settle(id, cost); if (cost) {
               for (const name of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) usage[name] += cost[name];
             } else unknown = true; },
@@ -436,7 +440,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           const unsubscribe = options.kernel.store.onEvent(() => { if (options.kernel.store.task(graphId).phase === 'stopping') abort.abort(); });
           const slot = options.scheduler && (credential.limit !== undefined || credential.groupLimit !== undefined) ? {
             acquire: async (signal?: AbortSignal) => {
-              options.kernel.db.prepare('UPDATE kernel_executions SET waiting_slot=1 WHERE id=?').run(execution.id);
+              setNativeExecutionWaiting(options.kernel.store, execution.id, true);
               let release: (() => void) | undefined;
               try {
                 const request = () => {
@@ -455,7 +459,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
                 return release!;
               } catch (error) {
                 release?.();
-                options.kernel.db.prepare('UPDATE kernel_executions SET waiting_slot=0 WHERE id=?').run(execution.id);
+                setNativeExecutionWaiting(options.kernel.store, execution.id, false);
                 throw error;
               }
             },
@@ -469,6 +473,9 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           })(toPiModel(model), normalizeContext(context), { signal: abort.signal });
           const frames = await encodeAssistantStream(stream);
           const settlement = await stream.result();
+          // Provider SDKs wrap gate refusals as connection errors. Preserve the
+          // host's control reason so pause cannot consume automatic retries.
+          if (refusal && settlement.stopReason === 'error') settlement.errorMessage = refusal.message;
           return { frames, settlement, ...(!unknown ? { usage: { ...usage, total: tokenUsageTotal(usage), accounted: true } } : {}) };
           } finally { unsubscribe(); hostSignal.removeEventListener('abort', cancel); }
         },
@@ -502,9 +509,10 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           }
           if (data.type === 'tool_execution_start' || data.type === 'tool_execution_end') {
             const call = data.type === 'tool_execution_start';
+            const reason = !call && data.isError ? toolResultText(data.result) : '';
             appendNodeEntry(options.kernel.store, { taskId: graphId, nodeId, operationId: execution?.id ?? null, role: 'tool', kind: call ? 'call' : 'result',
-              text: JSON.stringify(call ? { name: data.toolName, args: data.args } : data.result),
-              data: { toolName: data.toolName ?? '', toolCallId: data.toolCallId ?? '', isError: data.isError ?? false } });
+              text: reason ? `工具执行失败：${reason.slice(0, 400)}` : JSON.stringify(call ? { name: data.toolName, args: data.args } : data.result),
+              data: { toolName: data.toolName ?? '', toolCallId: data.toolCallId ?? '', isError: data.isError ?? false, ...(reason ? { message: reason } : {}) } });
           }
         },
         onToolCall: async (name, args) => {
@@ -529,7 +537,11 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           const tool = sessions.get(key)?.operation?.tools.find(tool => tool.name === name);
           if (!tool) return options.onToolCall?.(graphId, nodeId, name, args) ?? { ok: false, text: `the host does not offer a tool named ${name}` };
           try {
-            const result = await tool.execute(randomUUID(), args as never, new AbortController().signal, undefined, undefined as never);
+            const id = randomUUID();
+            const result = await nativeGate.dispatch(id, 0, async () => {
+              try { return await tool.execute(id, args as never, new AbortController().signal, undefined, undefined as never); }
+              finally { nativeGate.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
+            });
             return { ok: !('isError' in result && result.isError), text: JSON.stringify(result) };
           } catch (error) { return { ok: false, text: error instanceof Error ? error.message : String(error) }; }
         },
@@ -538,12 +550,6 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       hostConfigs.set(key, signature);
       return host;
     },
-    // The scripted stand-ins go LAST so they win: `config` above resolves a real session
-    // and throws without a configured model, which is exactly what a scripted node must
-    // not need. Spreading them earlier would be silently overridden by the real ones.
-    ...(options.scriptedTurn ? {
-      host: (graphId: string, nodeId: string) => scriptedHost(graphId, nodeId),
-      config: (graphId: string, nodeId: string) => ({ nodeId, graphId, scripted: true }),
-    } : {}),
+
   });
 }

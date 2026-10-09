@@ -1,11 +1,10 @@
-import { chmod, copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { NodeSpec , Proposal } from '../../src/core/types.ts';
-import { scriptedLane, settle } from '../fixtures/lane.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -276,12 +275,19 @@ test('an unbound Main Agent can inspect the running Graph source read-only', asy
   expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('Graph source read completed');
 }, 120_000);
 
-test('a worker Agent can inspect the Graph source tree with the native read tool', async () => {
+test('a worker Agent can inspect Graph source through a declared read-only capability', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-worker-source-read-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'project');
   await mkdir(workspace);
   const graphRoot = await realpath(fileURLToPath(new URL('../../', import.meta.url)));
+  const capabilityRoot = join(root, 'graph', 'capabilities');
+  const sourceReader = join(capabilityRoot, 'source-reader');
+  await mkdir(sourceReader, { recursive: true });
+  await writeFile(join(sourceReader, 'index.mjs'), 'export default () => {};\n');
+  await writeFile(join(sourceReader, 'capability.json'), JSON.stringify({ id: 'source-reader', kind: 'pi-extension', version: '1.0.0', name: 'Read Graph source',
+    entry: './index.mjs', tools: [], runtime: { readPaths: [graphRoot] },
+  }));
 
   const provider = await openaiServer([
     { tools: [{ id: 'read-source', name: 'read', arguments: JSON.stringify({ path: join(graphRoot, 'package.json') }) }] },
@@ -291,7 +297,7 @@ test('a worker Agent can inspect the Graph source tree with the native read tool
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'p', root: workspace }],
-    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
+    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
     models: {
       entries: [{
         id: 'local',
@@ -305,36 +311,24 @@ test('a worker Agent can inspect the Graph source tree with the native read tool
       apiKey: 'scripted-local-key',
       modelRuntime: provider.runtime,
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed' as const,
-          output: null,
-          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
+
   });
   cleanup.push(() => runtime.close());
-  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'source-reader', version: '1.0.0' }] }, 'coder');
 
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Read a file.', requestId: 'worker-source-read-begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1,
-    summary: 'Read a file',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'worker-source-read-proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'worker-source-read-accept' });
+  const main = runtime.supervisor(taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Read Graph source', protocols: {},
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Read the Graph source without modifying it', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Inspect the Graph package metadata' });
   await runtime.host.drive();
 
   const toolResult = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
     ?.find(message => message.role === 'tool')?.content ?? '';
-  expect(toolResult).toContain('"name": "graph"');
+  const result = JSON.parse(toolResult) as { content: { type: string; text?: string }[] };
+  const packageText = result.content.filter(part => part.type === 'text').map(part => part.text ?? '').join('');
+  expect(JSON.parse(packageText)).toMatchObject({ name: 'graph' });
 }, 120_000);
 
 test('an unrestricted Pi extension does not deadlock a bound MCP call in the same Main Agent turn', async () => {
@@ -657,7 +651,7 @@ test('a conversation master follows the latest definition of its recipe on the n
   expect(toolNames(provider.requests[1])).not.toContain('mcp_github_search_repositories');
 }, 120_000);
 
-test('a task node follows the latest definition of its own recipe on its next dispatch', async () => {
+test('native nodes retain their recipe version and explicitly rebind capability tools for the next dispatch', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-lane-definition-reload-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const capabilityRoot = join(root, 'graph', 'capabilities');
@@ -669,13 +663,22 @@ test('a task node follows the latest definition of its own recipe on its next di
     command: 'node', args: ['./server.mjs'], networkDomains: ['github.com'],
   }, null, 2));
 
-  const lane = scriptedLane();
-  const provider = await openaiServer([{ text: '主 Agent 回合。' }, { text: '第一个 worker 完成。' }, { text: '第二个 worker 完成。' }]);
+  let releaseReply!: () => void;
+  let replyArrived!: () => void;
+  const heldReply = new Promise<void>(resolve => { releaseReply = resolve; });
+  const replyStarted = new Promise<void>(resolve => { replyArrived = resolve; });
+  const provider = await openaiServer([
+    { text: '主 Agent 回合。' },
+    { tools: [{ id: 'first-search', name: 'mcp_github_search_repositories', arguments: JSON.stringify({ query: 'first' }) }] },
+    { text: '第一个 worker 完成。' },
+    { tools: [{ id: 'second-search', name: 'mcp_github_search_repositories', arguments: JSON.stringify({ query: 'second' }) }] },
+    { text: '第二个 worker 完成。', beforeReply: async () => { replyArrived(); await heldReply; } },
+    { text: '显式升级后的回合完成。' },
+  ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
     projects: [{ id: 'project', root }],
-    actions: { worker: lane.action },
     catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
     models: {
       entries: [{
@@ -691,30 +694,49 @@ test('a task node follows the latest definition of its own recipe on its next di
   runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [{ id: 'github', version: '1.0.0' }] }, 'worker-v1');
 
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: '两个 worker', requestId: 'lane-begin' });
-  const task = runtime.user.task(taskId);
-  const nodes: NodeSpec[] = [
-    { id: 'worker-a', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1' },
-    { id: 'worker-b', kind: 'agent', action: 'worker', role: 'worker', model: 'local', definitionVersion: 'worker@1', dependsOn: ['worker-a'] },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['worker-a', 'worker-b'] },
-  ];
-  const proposal = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: '两个 worker',
-    acceptance: [{ id: 'works', description: '两项工作都完成', checkNode: 'check' }],
-    nodes,
-  }, 'lane-proposal');
-  await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'lane-accept' });
+  await runtime.host.runReady();
+  const main = runtime.supervisor(taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Two workers', protocols: {},
+    nodes: Object.fromEntries(['worker-a', 'worker-b'].map(id => [id, { recipe: 'worker@1', model: 'local', task: 'Inspect the bound capability', inputs: {}, outputs: {}, submission: {} }])),
+    modules: {}, edges: {},
+  }) }) as { graphId: string };
+  const tools = (index: number) => (provider.requests[index] as { tools?: { function?: { name?: string } }[] }).tools?.map(tool => tool.function?.name) ?? [];
+  await main.graphSend({ graphId, nodeId: 'worker-a', text: 'Search the first repository' }); await runtime.host.drive();
+  expect(tools(1)).toContain('mcp_github_search_repositories');
+  expect(JSON.stringify(provider.requests[2])).toContain('repositories:first');
 
-  await settle(() => lane.briefings.length >= 1, () => runtime.host.runReady());
-  // worker-a ran at its pinned definition, so its briefing listed the MCP.
-  expect(lane.briefings).toHaveLength(1);
-  expect(lane.briefings[0]).toContain('github@1.0.0');
-
-  // The recipe is edited while the task is still running: the next lane to be
-  // dispatched follows it.
   runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high', capabilities: [] }, 'worker-v2');
-  await settle(() => lane.briefings.length >= 2, () => runtime.host.runReady());
-
-  expect(lane.briefings).toHaveLength(2);
-  expect(lane.briefings[1]).not.toContain('github@1.0.0');
-  expect((await task.view()).nodes.find(node => node.id === 'worker-b')?.definitionVersion).toBe('worker@2');
+  await main.graphSend({ graphId, nodeId: 'worker-b', text: 'Search the second repository' });
+  const activeTurn = runtime.host.drive();
+  await replyStarted;
+  const before = runtime.nodeRun(graphId, 'worker-b');
+  try {
+    expect(tools(3)).toContain('mcp_github_search_repositories');
+    expect(JSON.stringify(provider.requests[4])).toContain('repositories:second');
+    await main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Explicitly remove the bound capability on the next turn', patch: { nodes: { 'worker-b': { recipe: 'worker@2' } } } } });
+    const running = runtime.nodeRun(graphId, 'worker-b');
+    expect(running.instance).toMatchObject({ definitionVersion: 'worker@1' });
+    const prompt = runtime.nodePrompt(graphId, 'worker-b');
+    expect(prompt.definitionVersion).toBe('worker@1');
+    expect(prompt).toMatchObject({ configurations: {
+      current: { revision: 1, definition: { recipe: 'worker@1' } },
+      next: { revision: 2, definition: { recipe: 'worker@2' } }, pending: true,
+    } });
+    expect(prompt.recorded?.tools).toContain('mcp_github_search_repositories');
+  } finally {
+    releaseReply();
+    await activeTurn;
+  }
+  await main.graphSend({ graphId, nodeId: 'worker-b', text: 'Continue with the new capability configuration' }); await runtime.host.drive();
+  expect(tools(5)).not.toContain('mcp_github_search_repositories');
+  expect(JSON.stringify(provider.requests[5])).toContain('第二个 worker 完成。');
+  const after = runtime.nodeRun(graphId, 'worker-b');
+  expect(after.node).toMatchObject({ definitionVersion: 'worker@2' });
+  expect(runtime.nodePrompt(graphId, 'worker-b')).toMatchObject({ definitionVersion: 'worker@2', configurations: { current: { revision: 2 }, next: { revision: 2 }, pending: false } });
+  expect(after.instance!.id).toBe(before.instance!.id);
+  // ADR 0011: a changed bundle branches the session, retaining its transcript
+  // and the immutable previous file, rather than reusing its old tool binding.
+  expect(after.session!.sessionId).not.toBe(before.session!.sessionId);
+  expect(await readFile(before.session!.sessionFile!, 'utf8')).toContain('第二个 worker 完成。');
+  expect(provider.requests).toHaveLength(6);
 }, 120_000);

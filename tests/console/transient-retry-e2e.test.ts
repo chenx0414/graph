@@ -27,7 +27,7 @@ async function fixture() {
     store.db.prepare("INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES('i','t','work','coder@1','m')").run();
     store.db.prepare("INSERT INTO activations(id,task_id,node_id,graph_version,round,state,input_versions) VALUES('a','t','work',1,1,'pending','{}')").run();
   });
-  const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
+  const lifecycle = new OperationLifecycle(store);
   lifecycle.recover();
   return { store, lifecycle };
 }

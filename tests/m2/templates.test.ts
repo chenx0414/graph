@@ -1,161 +1,124 @@
-import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import * as templates from '../../src/core/templates.ts';
-import type { ActionAdapter, Json, Proposal } from '../../src/core/types.ts';
-import type { ReviewReport, VerifierConfig } from '../../src/core/verification.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import type { PublishedSubject } from '../../src/core/review-policy.ts';
+import { nativeReviewPattern } from '../fixtures/native-patterns.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-const usage = { input: 20, output: 10, cacheRead: 0, cacheWrite: 0 };
-const json = (value: unknown): Json => value as Json;
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
-async function run(create: (root: string) => { actions: Record<string, ActionAdapter>; graph: Pick<Proposal, 'nodes' | 'containers' | 'loops'>; acceptance?: Proposal['acceptance'] }) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-template-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const fixture = create(root);
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: fixture.actions });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Template', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Template',
-    acceptance: fixture.acceptance ?? [{ id: 'works', description: 'Works', checkNode: fixture.graph.nodes.find(node => node.kind === 'program' && node.action !== 'route' && node.action !== 'join')?.id ?? 'check' }],
-    ...fixture.graph,
-  }, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+test('pipeline, fan-out, router and supervisor-worker definitions execute through real Pi and host operations', async () => {
+  for (const name of ['pipeline', 'fanout', 'router', 'supervisor-workers']) {
+    const root = await mkdtemp(join(tmpdir(), 'graph-native-template-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const definition = parseGraphDefinition(JSON.parse(await readFile(join(process.cwd(), 'examples/graphs', `${name}.json`), 'utf8')));
+    const providers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
+    for (const id of ['work', 'left', 'right', 'text', 'json']) {
+      const provider = await openaiServer([
+        { tools: [{ id: `submit-${id}`, name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { passed: true, branch: id } } } }) }] },
+        { text: `Branch ${id} submitted` },
+      ]); providers[id] = provider; cleanup.push(() => provider.close());
+    }
+    const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], models: { apiKey: 'local-only', modelRuntime: providers.work!.runtime,
+      entries: Object.entries(providers).map(([id, provider]) => ({ id, provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 })) } });
+    cleanup.push(() => runtime.close()); runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+    const { taskId: ownerId } = await runtime.user.begin({ projectId: 'p', request: definition.name, requestId: 'begin' }); const main = runtime.supervisor(ownerId);
+    const { graphId } = await main.graphCreate({ definition }) as { graphId: string };
+    await main.graphSend({ graphId, input: 'job', value: { kind: 'text', goal: 'Execute the example' } }); await runtime.host.drive();
+    const results = await main.graphInspect({ graphId, query: 'results' }) as { value: { passed: boolean; record: string } }[];
+    expect(results, name).toHaveLength(1); expect(results[0]!.value.passed).toBe(true);
+    const record = JSON.parse(await readFile(results[0]!.value.record, 'utf8')) as { code: number; stdout: string };
+    expect(record.code).toBe(0); expect(record.stdout).toMatch(/^v24\./);
+    const executions = await main.graphInspect({ graphId, query: 'executions' }) as { items: { nodeId: string; state: string }[] };
+    expect(executions.items).toHaveLength(name === 'fanout' || name === 'supervisor-workers' ? 2 : 1);
+    expect(executions.items.every(item => item.state === 'completed')).toBe(true);
+    expect(Object.values(providers).flatMap(provider => provider.requests)).toHaveLength(executions.items.length * 2);
+    if (name === 'router') {
+      expect(executions.items[0]!.nodeId).toBe('outer/inner/text');
+      await expect(main.graphInspect({ graphId, query: 'edge', id: 'outer/json' })).resolves.toMatchObject({ latest: null, deliveries: [] });
+      expect(runtime.nodeRun(graphId, 'outer/inner/json').instance).toBeDefined();
+    }
+    if (name === 'fanout' || name === 'supervisor-workers') {
+      await expect(main.graphInspect({ graphId, query: 'module', id: 'join' })).resolves.toMatchObject({ triggered: true, transitions: expect.arrayContaining([expect.objectContaining({ outputs: { result: { left: { passed: true }, right: { passed: true } } } })]) });
+      expect(new Set((await runtime.user.task(graphId).view()).nodes.map(item => item.instanceId)).size).toBe(2);
+      expect(executions.items.some(item => item.nodeId === 'master')).toBe(false);
+    }
+    expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'idle' });
+    await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+    expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'completed' });
+    expect((await runtime.user.task(ownerId).view()).phase).not.toBe('completed');
+  }
+});
+
+/** Exercise review patterns as ordinary native definitions, not legacy template adapters. */
+async function reviewPattern(kind: 'optimize' | 'adversarial' | 'multiview' | 'jury') {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-review-pattern-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const jury = kind === 'jury';
+  let runtime!: Awaited<ReturnType<typeof openTaskRuntime>>; let graphId = '';
+  const ref = (name: string, version?: number): PublishedSubject => {
+    const artifact = runtime.artifacts.list(graphId, { namespace: 'plans', latestOnly: version === undefined }).artifacts.find(item => item.name === name && (version === undefined || item.version === version))!;
+    return { artifactId: artifact.artifactId, version: artifact.version, digest: artifact.digest };
+  };
+  const submitted = (value: () => unknown): ResponsePlan => ({ tools: [{ id: 'submit', name: 'submit', arguments: () => JSON.stringify({ outputs: { result: { enable: true, value: value() } } }) }] });
+  const published = (name: string, round: number): ResponsePlan => ({ tools: [{ id: `publish-${round}`, name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'plans', name, mediaType: 'text/markdown', content: `${name} version ${round}`, requestId: `${name}-${round}` }) }] });
+  const read = (name: string, version?: number): ResponsePlan => ({ tools: [{ id: `read-${name}`, name: 'artifact_read', arguments: () => JSON.stringify(ref(name, version)) }] });
+  const judged = (subject: PublishedSubject, passed = true) => ({ verdict: passed ? 'pass' : 'fail', reason: passed ? 'Current version works' : 'First version needs correction', evidence: [subject] });
+  const candidate = (id: string, artifact: PublishedSubject, quality: number) => ({ id, artifact, hard: { builds: judged(artifact) }, scores: { quality: { value: quality, reason: 'Observed quality', evidence: [artifact] } } });
+  const report = (round: number) => {
+    if (jury) return { schemaVersion: 1, body: { kind: 'jury', candidates: [candidate('a', ref('a'), 9), candidate('b', ref('b'), 4)] } };
+    const subject = ref('candidate', round);
+    return { schemaVersion: 1, subject, body: kind === 'adversarial' ? { kind: 'adversarial', checks: { works: judged(subject) }, counterexamples: [{ id: 'old', acceptanceId: 'works', validity: 'invalid', impactsAcceptance: true, resolution: 'resolved', judgment: judged(subject) }] }
+      : { kind: 'multiview', dimensions: { correctness: judged(subject, kind !== 'optimize' || round === 2) } } };
+  };
+  const rounds = kind === 'optimize' ? [1, 2] : [1];
+  const plans: Record<string, ResponsePlan[]> = jury ? {
+    a: [published('a', 1), submitted(() => ref('a')), { text: 'Candidate a published' }],
+    b: [published('b', 1), submitted(() => ref('b')), { text: 'Candidate b published' }],
+    review: [read('a'), read('b'), submitted(() => report(1)), { text: 'Candidates ranked' }],
+    absorb: [read('a'), read('b'), published('absorbed', 1), submitted(() => ref('absorbed')), { text: 'Combined result published' }],
+    finalreview: [read('absorbed'), submitted(() => ({ schemaVersion: 1, body: { kind: 'jury', candidates: [candidate('absorbed', ref('absorbed'), 9)] } })), { text: 'Combined result independently revalidated' }],
+  } : {
+    work: rounds.flatMap(round => [published('candidate', round), submitted(() => ref('candidate', round)), { text: `Candidate ${round} published` }]),
+    review: rounds.flatMap(round => [read('candidate', round), submitted(() => report(round)), { text: `Candidate ${round} reviewed` }]),
+  };
+  const providers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
+  for (const [id, responses] of Object.entries(plans)) { const provider = await openaiServer(responses); providers[id] = provider; cleanup.push(() => provider.close()); }
+  runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], models: { apiKey: 'local-only', modelRuntime: Object.values(providers)[0]!.runtime,
+    entries: Object.entries(providers).map(([id, provider]) => ({ id, provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 })) } });
+  cleanup.push(() => runtime.close()); runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder'); runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  const definition = await nativeReviewPattern(root, kind);
+  const { taskId: ownerId } = await runtime.user.begin({ projectId: 'p', request: definition.name, requestId: 'begin' }); const main = runtime.supervisor(ownerId);
+  graphId = ((await main.graphCreate({ definition })) as { graphId: string }).graphId;
+  for (const nodeId of jury ? ['a', 'b'] : ['work']) await main.graphSend({ graphId, nodeId, input: 'job', value: { goal: 'Build a reviewed result' } });
   await runtime.host.drive();
-  return { root, task, view: await task.view() };
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: { passed: true } }]);
+  expect(runtime.events(graphId, 0).filter(event => event.type === 'graph.module.failed' || event.type === 'graph.node.failed')).toEqual([]);
+  const gate = await main.graphInspect({ graphId, query: 'module', id: 'gate' }) as { state: { decision: { outcome: string; winner?: string } }; transitions: { outputs: Record<string, unknown>; stateBefore: unknown; stateAfter: unknown; reason: string }[] };
+  expect(gate.state.decision.outcome).toBe('pass');
+  if (kind === 'optimize') {
+    expect(providers.work!.requests).toHaveLength(6); expect(providers.review!.requests).toHaveLength(6);
+    expect(gate.transitions.filter(item => Object.keys(item.outputs).length).map(item => Object.keys(item.outputs))).toEqual([['rework'], ['approved']]);
+    const waiting = gate.transitions.find(item => JSON.stringify(item).includes('Waiting for review'))!;
+    expect(waiting).toBeDefined(); expect(waiting.outputs).toEqual({}); expect(waiting.stateAfter).toEqual(waiting.stateBefore);
+    expect(JSON.stringify(providers.work!.requests[3])).toContain('First version needs correction');
+    expect((await runtime.artifacts.read(graphId, ref('candidate', 1).artifactId, 1)).text).toBe('candidate version 1');
+    expect((await runtime.artifacts.read(graphId, ref('candidate', 2).artifactId, 2)).text).toBe('candidate version 2');
+  } else if (jury) {
+    expect(gate.state.decision.winner).toBe('a');
+    expect(JSON.stringify(providers.absorb!.requests[0])).toContain(ref('a').digest); expect(JSON.stringify(providers.absorb!.requests[0])).toContain(ref('b').digest);
+    expect(JSON.stringify(providers.absorb!.requests[0])).toContain('"winner":"a"'.replaceAll('"', '\\"'));
+    expect(providers.absorb!.requests).toHaveLength(5); expect(providers.finalreview!.requests).toHaveLength(3);
+    await expect(main.graphInspect({ graphId, query: 'module', id: 'final' })).resolves.toMatchObject({ state: { decision: { outcome: 'pass', winner: 'absorbed', subjects: [ref('absorbed')] } } });
+    expect(JSON.stringify(providers.finalreview!.requests[1])).toContain('absorbed version 1');
+  } else { expect(providers.work!.requests).toHaveLength(3); expect(providers.review!.requests).toHaveLength(3); }
+  expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'idle' });
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  expect(await runtime.user.task(graphId).view()).toMatchObject({ phase: 'completed' });
 }
 
-const programCheck = (root: string, name = 'check'): ActionAdapter => ({ kind: 'program', prepare: async () => async () => {
-  const path = join(root, `${name}.txt`); await writeFile(path, 'ok');
-  return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'works', summary: 'Checked', artifact: { path, digest: digest('ok') } }] };
-} });
-
-test('pipeline, fan-out, router and supervisor-worker templates complete on the shared scheduler', async () => {
-  const agent = (output: Json): ActionAdapter => ({ kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output, usage }) });
-  const pipeline = await run(root => ({ actions: { implement: agent({ done: true }), check: programCheck(root, 'pipeline') }, graph: templates.pipeline() }));
-  expect(pipeline.view.phase).toBe('completed');
-  const fanout = await run(root => ({ actions: { left: agent({ left: true }), right: agent({ right: true }), check: programCheck(root, 'fanout') }, graph: templates.fanout() }));
-  expect(fanout.view.phase).toBe('completed');
-  const routed = await run(root => ({ actions: {
-    route: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: { selected: 'text' }, route: 'text' }) },
-    text: agent({ format: 'text' }),
-    json: agent({ format: 'json' }),
-    join: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: { selected: 'text' } }) },
-    check: programCheck(root, 'router'),
-  }, graph: templates.router() }));
-  expect(routed.view.phase).toBe('completed');
-  expect(routed.view.nodes.find(node => node.id === 'json')?.status).toBe('skipped');
-  const supervised = await run(root => ({ actions: { master: agent({ plan: true }), worker: agent({ done: true }), check: programCheck(root, 'supervisor') }, graph: templates.supervisorWorkers(2) }));
-  expect(supervised.view.phase).toBe('completed');
-  expect(supervised.view.nodes.filter(node => node.role === 'worker')).toHaveLength(2);
-});
-
-test('evaluate-optimize and the three verifier templates enforce their rules on nested ordinary nodes', async () => {
-  const proof = (root: string, name: string, body: string) => ({ id: name, path: join(root, `${name}.txt`), digest: digest(body) });
-  let optimizeAttempts = 0;
-  const optimize: VerifierConfig = { kind: 'multiview', subjectNode: 'implement', reportNodes: ['review'], dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }] };
-  const optimized = await run(root => ({
-    actions: {
-      implement: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-        optimizeAttempts++;
-        const artifact = proof(root, 'opt', `v${optimizeAttempts}`);
-        await writeFile(artifact.path, `v${optimizeAttempts}`);
-        return { outcome: 'completed', output: { version: optimizeAttempts }, usage, artifacts: [artifact] };
-      } },
-      review: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const artifact = operation.dependencySources.implement![0]!.artifacts[0]!;
-        const report: ReviewReport = { schemaVersion: 1, subject: artifact, body: { kind: 'multiview', dimensions: {
-          correctness: { verdict: (operation.dependencies.implement as { version: number }).version === 1 ? 'fail' : 'pass', reason: 'Optimize', evidence: [artifact] },
-        } } };
-        return { outcome: 'completed', output: json(report), usage };
-      } },
-    },
-    graph: templates.evaluateOptimize(optimize),
-    acceptance: [{ id: 'works', description: 'Optimized', checkNode: 'gate' }],
-  }));
-  expect(optimized.view.phase).toBe('completed');
-  expect(optimizeAttempts).toBe(2);
-
-  const criticCfg: Extract<VerifierConfig, { kind: 'adversarial' }> = { kind: 'adversarial', subjectNode: 'implement', reportNodes: ['critic'], acceptanceCriteria: ['works'] };
-  const adversarial = await run(root => ({
-    actions: {
-      implement: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-        const artifact = proof(root, 'impl', 'ok'); await writeFile(artifact.path, 'ok');
-        return { outcome: 'completed', output: null, usage, artifacts: [artifact] };
-      } },
-      critic: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const artifact = operation.dependencySources.implement![0]!.artifacts[0]!;
-        const report: ReviewReport = { schemaVersion: 1, subject: artifact, body: { kind: 'adversarial',
-          checks: { works: { verdict: 'pass', reason: 'Holds', evidence: [artifact] } },
-          counterexamples: [{ id: 'old', acceptanceId: 'works', validity: 'invalid', impactsAcceptance: true, resolution: 'resolved',
-            judgment: { verdict: 'pass', reason: 'Rebutted with evidence', evidence: [artifact] } }] } };
-        return { outcome: 'completed', output: json(report), usage };
-      } },
-    },
-    graph: templates.adversarial(criticCfg),
-    acceptance: [{ id: 'works', description: 'Holds', checkNode: 'gate' }],
-  }));
-  expect(adversarial.view.phase).toBe('completed');
-
-  const viewCfg: Extract<VerifierConfig, { kind: 'multiview' }> = { kind: 'multiview', subjectNode: 'implement', reportNodes: ['review'], dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }] };
-  const viewed = await run(root => ({
-    actions: {
-      implement: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-        const artifact = proof(root, 'impl', 'ok'); await writeFile(artifact.path, 'ok');
-        return { outcome: 'completed', output: null, usage, artifacts: [artifact] };
-      } },
-      review: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const artifact = operation.dependencySources.implement![0]!.artifacts[0]!;
-        const report: ReviewReport = { schemaVersion: 1, subject: artifact, body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Required dimension passed', evidence: [artifact] } } } };
-        return { outcome: 'completed', output: json(report), usage };
-      } },
-    },
-    graph: templates.multiview(viewCfg),
-    acceptance: [{ id: 'works', description: 'Viewed', checkNode: 'gate' }],
-  }));
-  expect(viewed.view.phase).toBe('completed');
-
-  const ranking = [{ id: 'quality', weight: 1, min: 0, max: 10 }];
-  const select: Extract<VerifierConfig, { kind: 'jury' }> = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['compiles'], ranking, tieOrder: ['quality'],
-    candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
-  const final: Extract<VerifierConfig, { kind: 'jury' }> = { ...select, reportNodes: ['final-review'], candidates: [{ id: 'absorbed', node: 'absorb' }],
-    revalidate: { selectionNode: 'select', subjectNode: 'absorb' } };
-  const jury = await run(root => ({
-    actions: {
-      candidate: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const artifact = proof(root, operation.nodeId, operation.nodeId);
-        await writeFile(artifact.path, operation.nodeId);
-        return { outcome: 'completed', output: { id: operation.nodeId }, usage, artifacts: [{ id: operation.nodeId, path: artifact.path, digest: artifact.digest }] };
-      } },
-      jury: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const a = operation.dependencySources['candidate-a']![0]!.artifacts[0]!;
-        const b = operation.dependencySources['candidate-b']![0]!.artifacts[0]!;
-        const entry = (artifact: typeof a, quality: number) => ({ id: artifact.nodeId === 'candidate-a' ? 'a' : 'b', artifact, hard: { compiles: { verdict: 'pass' as const, reason: 'Builds', evidence: [artifact] } }, scores: { quality: { value: quality, reason: 'Rank', evidence: [artifact] } } });
-        const report: ReviewReport = { schemaVersion: 1, body: { kind: 'jury', candidates: [entry(a, 9), entry(b, 4)] } };
-        return { outcome: 'completed', output: json(report), usage };
-      } },
-      absorb: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const artifact = proof(root, 'absorbed', 'merged');
-        await writeFile(artifact.path, 'merged');
-        expect(operation.dependencies.select).toMatchObject({ winner: 'a' });
-        return { outcome: 'completed', output: { merged: true }, usage, artifacts: [{ id: 'absorbed', path: artifact.path, digest: artifact.digest }] };
-      } },
-      'final-review': { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-        const artifact = operation.dependencySources.absorb![0]!.artifacts[0]!;
-        const report: ReviewReport = { schemaVersion: 1, body: { kind: 'jury', candidates: [{ id: 'absorbed', artifact, hard: { compiles: { verdict: 'pass', reason: 'Absorbed build', evidence: [artifact] } }, scores: { quality: { value: 9, reason: 'Still ranked', evidence: [artifact] } } }] } };
-        return { outcome: 'completed', output: json(report), usage };
-      } },
-    },
-    graph: templates.jury({ select, final }),
-    acceptance: [{ id: 'works', description: 'Jury', checkNode: 'final' }],
-  }));
-  expect(jury.view.phase).toBe('completed');
-  expect(jury.view.evidence[0]?.artifact.digest).toBe(digest('merged'));
-});
-
+test('evaluate-optimize and the three native review patterns enforce explicit versions and joins', async () => {
+  for (const kind of ['optimize', 'adversarial', 'multiview', 'jury'] as const) await reviewPattern(kind);
+}, 60_000);

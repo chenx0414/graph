@@ -1,7 +1,23 @@
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { TokenUsage } from '../runtime/call-broker.ts';
 
-export type ModelGrade = 'low' | 'medium' | 'high' | 'highest';
+export const MODEL_TIERS = ['small', 'medium', 'frontier'] as const;
+export type ModelTier = (typeof MODEL_TIERS)[number];
+/** Historical grades remain explicit selectors; existing recipes are never rewritten. */
+export const MODEL_GRADES = [...MODEL_TIERS, 'low', 'high', 'highest'] as const;
+export type ModelGrade = (typeof MODEL_GRADES)[number];
+const GRADE_ALIASES: Record<ModelGrade, readonly ModelGrade[]> = {
+  small: ['small', 'low'], medium: ['medium'], frontier: ['frontier', 'highest', 'high'],
+  low: ['low', 'small'], high: ['high', 'frontier'], highest: ['highest', 'frontier'],
+};
+export function modelTier(grade: ModelGrade): ModelTier {
+  return grade === 'low' || grade === 'small' ? 'small' : grade === 'medium' ? 'medium' : 'frontier';
+}
+export function modelGradeMatches(requested: ModelGrade, candidate: ModelGrade): boolean {
+  return GRADE_ALIASES[requested].includes(candidate);
+}
+/** Auxiliary reviewers preserve the old cheap-first order while including new tier names. */
+export const MODEL_GRADE_ORDER: readonly ModelGrade[] = ['low', 'small', 'medium', 'high', 'highest', 'frontier'];
 export const MODEL_INPUTS = ['text', 'image'] as const;
 export type ModelInput = (typeof MODEL_INPUTS)[number];
 /** Transports Graph has actually verified against a provider contract. */
@@ -56,7 +72,7 @@ export interface ModelEntry {
 /** A configured model as the console reads it: the stored entry plus the
  * thinking strengths this model accepts. View-only: the field is derived, never
  * written back into the config document. */
-export type ModelEntryView = ModelEntry & { thinkingOptions: ModelThinkingOption[] };
+export type ModelEntryView = ModelEntry & { tier: ModelTier; thinkingOptions: ModelThinkingOption[] };
 
 /** The default thinking strength a model uses when the config names none: the
  * second strongest level the model accepts. One rule for the server, the
@@ -169,7 +185,14 @@ export function selectModel(input: {
   const usable = input.directory.filter(model => !blocked.has(modelIdentity(model)) && !blocked.has(model.id));
   const requested = input.requested ? usable.find(model => model.id === input.requested) : undefined;
   if (requested) return requested;
-  const preferred = (input.preferences?.[input.grade] ?? []).map(id => usable.find(model => model.id === id)).find(model => model);
-  if (preferred) return preferred;
-  return usable.find(model => model.grade === input.grade);
+  const preferenceGrades = input.grade === 'small' || input.grade === 'frontier' ? GRADE_ALIASES[input.grade] : [input.grade];
+  for (const grade of preferenceGrades) {
+    const preferred = (input.preferences?.[grade] ?? []).map(id => usable.find(model => model.id === id)).find(model => model);
+    if (preferred) return preferred;
+  }
+  for (const grade of GRADE_ALIASES[input.grade]) {
+    const candidate = usable.find(model => model.grade === grade);
+    if (candidate) return candidate;
+  }
+  return undefined;
 }

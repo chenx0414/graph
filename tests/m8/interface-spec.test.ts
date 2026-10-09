@@ -82,11 +82,20 @@ describe('parseGraphDefinition — pipeline shape', () => {
     expectInvalid({ ...pipeline, nodes: { worker: { ...pipeline.nodes.worker, ...fields } } }, 'operation module');
   });
 
-  test('unknown named node input is refused with the exact path', () => {
+  test('unknown inputs and malformed node environments are refused with exact paths', () => {
     expectInvalid({
       ...pipeline,
       inputs: { task: { to: 'worker.missing', protocol: 'implementation-request' } },
     }, 'worker.missing');
+    for (const [fields, message] of [
+      [{ workspace: { base: 'project', path: '../outside' } }, 'workspace.path'],
+      [{ workspace: { base: 'project', path: '/absolute' } }, 'workspace.path'],
+      [{ workspace: { base: 'project', path: 'some\\path' } }, 'workspace.path'],
+      [{ workspace: { base: 'elsewhere' } }, 'workspace requires base'],
+      [{ access: { mode: 'standard', commands: 'shell' } }, 'access.commands'],
+      [{ access: { mode: 'standard', filesystem: { unknown: true } } }, 'access.filesystem'],
+      [{ access: { filesystem: { read: 'host' } } }, 'access requires mode'],
+    ] as const) expectInvalid({ ...pipeline, nodes: { worker: { ...pipeline.nodes.worker, ...fields } } }, message);
   });
 
   test('edges require explicit boolean enablement and declared endpoints', () => {

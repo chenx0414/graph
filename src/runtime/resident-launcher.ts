@@ -30,14 +30,16 @@ export function residentLauncher(options: {
     const scratch = join(config.stateDir, 'process-scratch');
     await mkdir(scratch, { recursive: true, mode: 0o700 });
     const runtime = graphNodeRuntime();
+    // Capture the approved directory once; cwd must use the same pinned spelling as its grants.
+    const workspace = await realpath(config.workspace);
     const extensions = await Promise.all(config.piExtensionPaths.map(extensionRoot));
     const reads = await Promise.all([
-      graphApplicationRoot(), config.workspace, config.stateDir, options.configPath,
+      graphApplicationRoot(), workspace, config.stateDir, options.configPath,
       ...config.skillPaths, ...(config.skillFolder ? [config.skillFolder] : []),
       ...extensions, ...operation.readRoots, ...operation.writeRoots,
       ...operation.unixSockets, ...nodeReadPaths(runtime.execPath, runtime.electron),
     ].map(path => realpath(path)));
-    const writes = await Promise.all([config.workspace, config.stateDir, ...operation.writeRoots,
+    const writes = await Promise.all([workspace, config.stateDir, ...operation.writeRoots,
       ...operation.unixSockets].map(path => realpath(path)));
     const env: Record<string, string> = { ...operation.env, ...(runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) };
     if (env.PATH) env.PATH = developerPath([dirname(runtime.execPath), ...env.PATH.split(':'), '/usr/bin', '/bin'].join(':'));
@@ -46,7 +48,7 @@ export function residentLauncher(options: {
     const started = Promise.withResolvers<Awaited<ReturnType<NonNullable<ResidentHostOptions['launch']>>>['control']>();
     const exited = acquired.executor.run({
       broker: { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
-      cwd: config.workspace, scratchDir: await realpath(scratch), executable: runtime.execPath,
+      cwd: workspace, scratchDir: await realpath(scratch), executable: runtime.execPath,
       args: [options.workerEntry, options.configPath], readPaths: [...new Set(reads)], writePaths: [...new Set(writes)],
       ...(access?.filesystem.read === 'host' ? { filesystem: 'host', unsandboxed: true,
         protectedPathExceptions: [config.stateDir], protectedReadPathExceptions: [...config.skillPaths, ...extensions] } : {}),

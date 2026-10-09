@@ -320,7 +320,9 @@ test.each(['throw', 'unknown-result'])('a submitted execution with %s and unknow
     expect(kernel.budgetState('submitted', 'n1', { budget: 1000, unlimited: false }).reserved).toBe(100);
     const overview = kernelNodeRun(kernel, 'submitted', 'n1', {});
     expect(overview.instance).toMatchObject({ budget: 1000, unlimited: false, reserved: 100 });
-    expect(overview.operations[0]).toMatchObject({ reserved: 100, waitingMs: null, runMs: null });
+    expect(overview.operations[0]).toMatchObject({ reserved: 100, waitingMs: 0 });
+    // Usage may be unknown even though the host observed the execution's end.
+    expect(overview.operations[0]!.runMs).toBeGreaterThanOrEqual(0);
     expect(overview.invocations[0]).toMatchObject({ reserved: 50, state: 'unknown' });
     expect(kernel.execution(executionIdOf(kernel, 'submitted'))).toMatchObject({ tokenBudget: { budget: 1000, unlimited: false } });
     const main = graphManagement(kernel, 'submitted');

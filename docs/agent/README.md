@@ -15,6 +15,7 @@ Topic bodies stay out of the prompt and are read on demand.
 
 - [Index and reading protocol](INDEX.md)
 - [Graph overview](graph-overview.md)
+- [Graph management API](graph-v2.md)
 - [Execution model](execution-model.md)
 - [Capabilities and tools](capabilities.md)
 - [Permissions and recovery](permissions-and-recovery.md)

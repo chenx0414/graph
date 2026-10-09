@@ -1,3 +1,4 @@
+import { MODEL_GRADES, type ModelGrade } from '../catalog/models.ts';
 import type { GraphManagement } from '../core/graph-service.ts';
 import { realpathSync } from 'node:fs';
 import { extname, isAbsolute, sep } from 'node:path';
@@ -25,7 +26,6 @@ type Supervisor = Partial<GraphManagement> & {
   propose(proposal: NativeProposal, requestId: string): Promise<unknown>;
   withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
   confirmDraft?(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
-  revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
   taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
   validateProposal?(proposal: NativeProposal): Promise<unknown>;
@@ -180,7 +180,6 @@ export function agentTools(input: {
     rsiStatus?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
     rsiApply?: (input: unknown) => Promise<Record<string, unknown>>;
   };
-  onSubmit?: (output: Json) => void;
   /**
    * Where a write is recorded: the ledger needs the lane, the turn and the tool call so the
    * change set of one turn stays one lane's own evidence.
@@ -192,12 +191,6 @@ export function agentTools(input: {
     instanceId: string | null;
     turnId: string;
   };
-  /**
-   * Reject a submission the harness cannot use, in the worker's own field
-   * coordinates, so it can be corrected inside the same turn instead of being
-   * discovered after the operation ended.
-   */
-  validateSubmission?: (output: Json) => { ok: true } | { ok: false; defects: { path: string; class: string; expected: string; got: string }[] };
 }): ToolDefinition[] {
   const root = realpathSync(input.workspace);
   const readRoots = (input.readRoots ?? []).map(item => realpathSync(item));
@@ -349,19 +342,6 @@ export function agentTools(input: {
         version: Number(body.version),
         requestId: String(body.requestId),
       })));
-    },
-    submit_result: async (_id, params) => {
-      const output = JSON.parse(String(fields(params).outputJson)) as Json;
-      const verdict = input.validateSubmission?.(output);
-      if (verdict && !verdict.ok) {
-        throw new Error([
-          'submit_result refused: the harness cannot use this result yet.',
-          ...verdict.defects.map(defect => `- ${defect.path} (${defect.class}): expected ${defect.expected}; got ${defect.got}`),
-          'Correct these fields and call submit_result again with the same work. Do not redo or rewrite the implementation; whatever you already wrote stays in place.',
-        ].join('\n'));
-      }
-      input.onSubmit?.(output);
-      return text('Recorded structured result');
     },
     run_command: async (_id, params, signal) => {
       const body = fields(params);
@@ -642,11 +622,11 @@ export function agentTools(input: {
       const query = typeof body.query === 'string' ? body.query.trim().toLowerCase() : '';
       if (query.length > 200) throw new Error('Agent combination query must be at most 200 characters');
       const grade = typeof body.grade === 'string' ? body.grade.trim() : '';
-      if (grade && !['low', 'medium', 'high', 'highest'].includes(grade)) throw new Error('Unsupported model grade');
+      if (grade && !MODEL_GRADES.includes(grade as ModelGrade)) throw new Error('Unsupported model grade');
       const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 30;
       return text(JSON.stringify(input.catalog!.searchAgentCombinations({
         ...(query ? { query } : {}),
-        ...(grade ? { grade: grade as 'low' | 'medium' | 'high' | 'highest' } : {}),
+        ...(grade ? { grade: grade as ModelGrade } : {}),
         limit,
       })));
     },

@@ -1,36 +1,18 @@
 # Artifacts, Handoff and Git
 
-## Worktree
+## 工作位置与代码交付
 
-每个 Agent instance 使用独立 Git worktree。代码修改在自己的 worktree 中产生，不能直接写另一个 Agent 的目录或共同 Git metadata。
+节点 workspace 决定使用项目目录还是已准备的私有 worktree，具体声明与权限见 [graph-v2.md](graph-v2.md#节点工作目录与权限)。system prompt 和运行快照显示本次实际位置；相对路径以它为基准。普通节点不能写另一节点工作目录或共同 Git metadata。
 
-任务 integration branch 汇集所有实例的修改。最终通过整体检查和独立审查后，才合入用户确认的目标分支。
+代码产物通过 workspace_commit 保存真实 commit；worktree 路径只提供访问位置。显式 Git 集成汇集到 integration branch，最终检查、独立审查与用户确认均绑定精确提交。路由保留的旧通过状态不能证明后来的代码版本。
 
-Graph 的 host 路径因任务和 Agent 不同。System prompt 的 `<cwd>` section 给出当前 operation 的实际 worktree；相对路径以该目录为基准。
+## 输出与审查引用
 
-## Result Handoff
-
-正常实现交接使用结构化 `result_handoff@1`，至少包含：
-
-- objective；
-- outcome；
-- work summary；
-- changes；
-- decisions；
-- verification；
-- known limits；
-- open questions；
-- next actions。
-
-下游 Fresh Agent 默认只读取直接依赖的 handoff，不继承前驱 transcript。
-
-## Evidence Only
-
-独立审查和验证使用 `evidence_only`：只读取 acceptance、evidence、artifact 和精确版本，不读取前驱自由文本、transcript 或隐藏推理。
+节点调用 submit 的具名输出承载工作摘要、结论及精确产物引用。接收者按自己的输入协议读取；内容需要稳定版本时先发布产物再发送引用。独立审查读取明确的任务、验收及实际审查版本；节点不从另一节点 transcript 自动继承历史。审查模型独立性和最终验收由宿主核实。
 
 ## Shared Artifact Workspace
 
-Artifact 是任务级、发布式、不可变版本。正式引用使用：
+Artifact 属于顶层 graph，发布版本不可变；普通节点只能修订自己的成果，main 可修订所有自己管理的成果。修订保留原作者并记录修改者，产生新版本。正式引用使用：
 
 ```text
 artifactId + version + digest
@@ -50,7 +32,7 @@ tag 是标签而非路径：任意文种都可以（例如 `编码`、`已知问
 
 容量：单个逻辑制品最多 1,000 版（按版本号算，退役不释放，超限报 `artifact_quota`），单次操作最多发布 32 个制品；真正的容量闸门是任务级字节配额（256 MiB，内容按 digest 去重）。所以「长期演进的一份文档」是合法用法：同一 `namespace/name` 持续发新版即可，引用时带上 `version`。
 
-### 节点声明的交付物（`NodeSpec.deliverable`）
+### 节点声明的交付物（`NodeDefinition.deliverable`）
 
 节点可以在规格里**声明它要产出的文件**，由 harness 在**节点成功结算时**发布成 task 级制品（`producer` = 该节点）：
 
@@ -68,11 +50,11 @@ tag 是标签而非路径：任意文种都可以（例如 `编码`、`已知问
 
 ### 谁能看见一份制品
 
-- **task 级**：发布它的那个任务，**以及同一会话内所有任务**。所以派发子任务的 main agent **不需要晋升**就能读到子任务交回的制品。
+- **graph 级**：内部节点共享顶层 graph 的产物空间；main 可读取自己拥有的 graph，其他拥有者不能借用身份访问。子 graph 的成果记录发布节点和所属子 graph。
 - **project 级**（晋升后）：本项目**未来的任务**也能发现它。
 - **不跨越会话**：没有显式晋升，什么都不会跨出会话边界。
 
-`artifact_promote` 只对 master 开放，且只能晋升**调用方自己任务工作区**里能看见的制品。**不要给每个子任务的产物都晋升**：晋升是把一份制品变成项目级共享知识，会给之后所有图看见，应当是「这份结论值得成为项目记忆」的显式判断。
+`artifact_promote` 只对 master 开放，且只能晋升**调用方有权管理的 graph 工作区**里能看见的制品。**不要给每个子任务的产物都晋升**：晋升是把一份制品变成项目级共享知识，会给之后所有图看见，应当是「这份结论值得成为项目记忆」的显式判断。
 
 ### 重新发布一份已有制品
 

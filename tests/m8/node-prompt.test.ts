@@ -5,10 +5,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
-afterEach(async () => { for (const action of cleanup.splice(0)) await action(); });
+afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); });
 
 async function temp(name: string) {
   return mkdtemp(join(tmpdir(), `graph-${name}-`));
@@ -40,29 +40,18 @@ test('a subagent node reports the system prompt and briefing it really sent', as
       apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
       credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key' }),
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed', output: { passed: true },
-          evidence: [{ acceptanceId: 'ok', summary: 'synthetic observing check', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
+
   });
   cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const begun = await server.runtime.user.begin({ projectId: 'p', request: '看清 subagent 读到的提示词', requestId: 'begin' });
-  const userTask = server.runtime.user.task(begun.taskId);
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: 'node prompt',
-    acceptance: [{ id: 'ok', description: '有产出', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', input: { files: ['src/a.ts'], focus: '写下结果' } },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const main = server.runtime.supervisor(begun.taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Node prompt', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: '写下结果', acceptance: ['有产出'], inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { files: ['src/a.ts'], focus: '写下结果' } });
   await server.runtime.host.drive();
   await waitFor(() => provider.requests.length >= 1, 30_000);
 
@@ -75,7 +64,7 @@ test('a subagent node reports the system prompt and briefing it really sent', as
   // The console API is same-origin and cookie-scoped, exactly as the page calls it.
   const home = await fetch(server.url, { headers: { origin: server.url } });
   const headers = { origin: server.url, cookie: home.headers.get('set-cookie') ?? '' };
-  const response = await fetch(`${server.url}/api/tasks/${begun.taskId}/nodes/work/prompt`, { headers });
+  const response = await fetch(`${server.url}/api/tasks/${graphId}/nodes/work/prompt`, { headers });
   expect(response.status).toBe(200);
   const view = await response.json() as {
     role: string | null; definitionVersion: string | null; kind: string; notes: string[];
@@ -106,15 +95,15 @@ test('a subagent node reports the system prompt and briefing it really sent', as
     : (content as { text?: string }[] | undefined ?? []).map(part => part.text ?? '').join('');
   expect(text.length).toBeGreaterThan(0);
   expect(view.briefing?.text).toBe(text);
-  expect(view.briefing?.text).toContain('Your node: work (agent work)');
+  expect(view.briefing?.text).toContain('写下结果');
+  expect(view.briefing?.text).toContain('src/a.ts');
 
-  // A program node is never sent a prompt, and the panel says so rather than guessing.
-  const program = await (await fetch(`${server.url}/api/tasks/${begun.taskId}/nodes/check/prompt`, { headers })).json() as { recorded: unknown; role: unknown; notes: string[] };
-  expect(program.recorded).toBeNull();
-  expect(program.role).toBeNull();
-  expect(program.notes.join(' ')).toContain('程序节点');
+  // A host module has no Agent session; the Agent prompt endpoint refuses it.
+  const module = await fetch(`${server.url}/api/tasks/${graphId}/nodes/check/prompt`, { headers });
+  expect(module.status).toBeGreaterThanOrEqual(400);
+  expect(await module.json()).toMatchObject({ code: 'not_found' });
 
   // Unknown nodes are a not_found, not an empty panel.
-  const missing = await fetch(`${server.url}/api/tasks/${begun.taskId}/nodes/nope/prompt`, { headers });
+  const missing = await fetch(`${server.url}/api/tasks/${graphId}/nodes/nope/prompt`, { headers });
   expect(missing.status).toBeGreaterThanOrEqual(400);
 }, 120_000);

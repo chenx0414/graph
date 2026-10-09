@@ -1,6 +1,20 @@
 import { readFileSync } from 'node:fs';
+import type { NodeDefinition, GraphDefinition } from './interface-spec.ts';
 import type { TaskStore } from './store.ts';
 import { RuntimeError, type NodeSpec } from './types.ts';
+
+/** Declared configuration frozen for a turn, separate from the next declaration. */
+export interface NodeConfigurationSnapshot {
+  revision: number;
+  definition: NodeDefinition;
+  defaults: GraphDefinition['defaults'];
+}
+
+export interface NodeConfigurations {
+  current: NodeConfigurationSnapshot | null;
+  next: NodeConfigurationSnapshot | null;
+  pending: boolean;
+}
 
 /** One send's own record: the system prompt and tool declarations the model really received. */
 export interface RecordedPrompt {
@@ -25,6 +39,7 @@ export interface NodePromptView {
   definitionVersion: string | null;
   model: string | null;
   status: string;
+  configurations?: NodeConfigurations;
   recorded: RecordedPrompt | null;
   briefing: NodeBriefing | null;
   /**

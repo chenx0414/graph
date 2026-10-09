@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { CapabilityRecord, DefinitionSpec } from './capability-library.ts';
 import { selectCapabilityRecord } from './capability-select.ts';
-import type { ModelGrade } from './models.ts';
+import { MODEL_GRADES, type ModelGrade } from './models.ts';
 
 export type AgentCombinationResourceRole = 'identity' | 'tool' | 'skill' | 'mcp' | 'pi-extension' | 'extension';
 export type AgentCombinationMode = 'main' | 'subagent';
@@ -49,7 +49,7 @@ export interface AgentCombinationDocument {
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const GRADES = new Set<ModelGrade>(['low', 'medium', 'high', 'highest']);
+const GRADES = new Set<ModelGrade>(MODEL_GRADES);
 const ROLES = new Set<AgentCombinationResourceRole>(['identity', 'tool', 'skill', 'mcp', 'pi-extension', 'extension']);
 const MODES = new Set<AgentCombinationMode>(['main', 'subagent']);
 

@@ -9,6 +9,36 @@
  */
 import type { TaskStore } from './store.ts';
 
+/** Credential and execution-capacity waits yield the same native work segment.
+ * Nullable counters preserve the unknown duration of pre-ledger executions. */
+export function setNativeExecutionWaiting(store: TaskStore, executionId: string, waiting: boolean, now = Date.now()) {
+  const update = () => {
+    const changed = waiting
+      ? store.db.prepare(`UPDATE kernel_executions SET
+          run_ms=run_ms+CASE WHEN run_since IS NULL THEN 0 ELSE MAX(0,?-run_since) END,
+          run_since=NULL,waiting_since=?,waiting_slot=1
+          WHERE id=? AND state='running' AND waiting_slot=0`).run(now, now, executionId)
+      : store.db.prepare(`UPDATE kernel_executions SET
+          waiting_ms=waiting_ms+CASE WHEN waiting_since IS NULL THEN 0 ELSE MAX(0,?-waiting_since) END,
+          waiting_since=NULL,run_since=?,waiting_slot=0
+          WHERE id=? AND state='running' AND waiting_slot=1`).run(now, now, executionId);
+    if (changed.changes) {
+      const row = store.db.prepare('SELECT task_id,node_id FROM kernel_executions WHERE id=?').get(executionId) as { task_id: string; node_id: string };
+      store.event(row.task_id, 'graph.execution.waiting', { executionId, nodeId: row.node_id, waiting });
+    }
+  };
+  if (store.db.isTransaction) update();
+  else store.transaction(update);
+}
+
+/** End a measured segment at its actual terminal/control boundary. */
+export function closeNativeExecutionTiming(store: TaskStore, executionId: string, now = Date.now()) {
+  store.db.prepare(`UPDATE kernel_executions SET
+    run_ms=run_ms+CASE WHEN run_since IS NULL THEN 0 ELSE MAX(0,?-run_since) END,
+    waiting_ms=waiting_ms+CASE WHEN waiting_since IS NULL THEN 0 ELSE MAX(0,?-waiting_since) END,
+    run_since=NULL,waiting_since=NULL,waiting_slot=0 WHERE id=?`).run(now, now, executionId);
+}
+
 /** Terminal nodes never open a new pause/wait segment. */
 const TERMINAL = "('succeeded','skipped','retired','failed')";
 

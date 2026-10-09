@@ -105,7 +105,7 @@ export function wakeForBlockedNode(store: TaskStore, taskId: string, block: { no
     // in one conversation can both own a node called "build", and "waiting for a
     // permission" is a different thing to act on than "failed to execute".
     dedupeKey: `${taskId}:${block.nodeId}:${block.incidentId ?? block.reason}`,
-    data: block,
+    data: { ...block, graphId: taskId },
   });
 }
 
@@ -189,7 +189,7 @@ export function renderWakes(wakes: PendingWake[]): string {
     }
     if (wake.kind === 'task_stopped') return `- Graph ${String(data.graphId)} stopped; its remaining work was cancelled.`;
     if (wake.kind === 'node_blocked') {
-      return `- Node ${String(data.nodeId ?? wake.dedupeKey)} needs your intervention (${String(data.reason ?? 'blocked')}). Inspect its execution and decide whether to retry, skip, or change configuration; escalate only decisions that require the user.`;
+      return `- Node ${String(data.nodeId ?? wake.dedupeKey)}${data.graphId ? ` in graph ${String(data.graphId)}` : ''} needs your intervention (${String(data.reason ?? 'blocked')}). Inspect its execution and decide whether to retry, skip, or change configuration; escalate only decisions that require the user.`;
     }
     if (wake.kind === 'answer') {
       return `- The user answered ${String(data.kind ?? 'a question')} on node ${String(data.nodeId ?? '?')}. Act on it so the graph can move on.`;

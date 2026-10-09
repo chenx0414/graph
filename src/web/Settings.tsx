@@ -1,3 +1,4 @@
+import { ModelGradeOptions } from './model-grade-options.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { usePreferences } from './preferences.ts';
@@ -5,7 +6,7 @@ import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
 import { STANDARD_ACCESS } from './access-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
-import { modelRequestHeaders, type ModelInput } from '../catalog/models.ts';
+import { MODEL_TIERS, MODEL_GRADES, modelTier, modelRequestHeaders, type ModelGrade, type ModelTier, type ModelInput } from '../catalog/models.ts';
 import { defaultThinkingLevelFor } from '../catalog/models.ts';
 import { nearestLevel, thinkingOptionLabel } from './thinking-levels.ts';
 import {
@@ -71,6 +72,7 @@ type RawModel = {
   id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
   contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
   /** Per-model strengths the server adds to the view; stripped before saving. */
+  tier?: ModelTier;
   thinkingOptions?: { level: string; label: string }[];
   input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
@@ -80,12 +82,12 @@ type RawCredential = { secretRef: string; displayName?: string; sharedLimitGroup
 type RawConfig = {
   version: 1;
   projects?: { id: string; root: string; grants?: string[] }[];
-  models?: { entries: RawModel[]; preferences?: Partial<Record<'low' | 'medium' | 'high' | 'highest', string[]>> };
+  models?: { entries: RawModel[]; preferences?: Partial<Record<ModelGrade, string[]>> };
   credentials?: Record<string, RawCredential>;
   limits?: { credentials?: Record<string, number>; sharedGroups?: Record<string, number> };
   access?: AccessPolicy;
 };
-type ConfigResponse = { revision: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
+type ConfigResponse = { revision: number; effectiveRevision?: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
 type Startup = {
   effectiveRevision?: number;
   /**
@@ -96,7 +98,7 @@ type Startup = {
 };
 type ApiError = Error & { code?: string; field?: string };
 
-const GRADES = ['low', 'medium', 'high', 'highest'];
+const GRADES = MODEL_GRADES;
 type CcSwitchPrice = {
   modelId: string;
   displayName: string;
@@ -160,7 +162,7 @@ function toDocument(draft: RawConfig): RawConfig {
   if (!draft.models) return draft;
   return {
     ...draft,
-    models: { ...draft.models, entries: draft.models.entries.map(({ thinkingOptions: _derived, ...entry }) => entry) },
+    models: { ...draft.models, entries: draft.models.entries.map(({ thinkingOptions: _derived, tier: _tier, ...entry }) => entry) },
   };
 }
 
@@ -406,10 +408,11 @@ function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage, onEdi
   onEdit: (credentialId: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [tierFilter, setTierFilter] = useState<ModelTier | ''>('');
   const entries = draft.models?.entries ?? [];
   const available = entries.filter(entry => credentialState[entry.credentialId] && hasRequiredModelFields(entry));
   const defaultId = available[0]?.id;
-  const matches = entries.filter(entry => `${entry.id} ${entry.modelId ?? ''} ${entry.provider} ${draft.credentials?.[entry.credentialId]?.displayName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const matches = entries.filter(entry => (!tierFilter || (entry.grade && modelTier(entry.grade as ModelGrade) === tierFilter)) && `${entry.id} ${entry.modelId ?? ''} ${entry.provider} ${draft.credentials?.[entry.credentialId]?.displayName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <Card title={`已配置模型 · ${entries.length}`} icon="bolt" subtitle="所有厂商的模型集中在这里；可搜索、查看连接状态，并选择新对话的默认模型"
       testid="configured-models"
@@ -426,6 +429,11 @@ function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage, onEdi
           <span className="muted">切换默认只影响新对话；已有会话的模型保持原样。</span>
         </div>
         <label className="configured-models-search"><Icon name="search" size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索模型或厂商" aria-label="搜索已配置模型" /></label>
+        <label className="row" style={{ marginBottom: 8 }}>模型分层
+          <select className="select" aria-label="筛选模型分层" data-testid="model-tier-filter" value={tierFilter} onChange={event => setTierFilter(event.target.value as ModelTier | '')}>
+            <option value="">全部</option>{MODEL_TIERS.map(tier => <option key={tier} value={tier}>{tier}</option>)}
+          </select>
+        </label>
         <div className="configured-models-list">
           {matches.map(entry => {
             const connected = Boolean(credentialState[entry.credentialId]);
@@ -435,7 +443,7 @@ function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage, onEdi
               <div className="configured-model-main"><strong>{entry.modelId ?? entry.id}</strong><span className="muted">{draft.credentials?.[entry.credentialId]?.displayName ?? entry.provider} · {entry.id}</span></div>
               <div className="configured-model-meta">
                 <Pill tone={connected && complete ? 'success' : 'warn'}>{!connected ? '凭据缺失' : complete ? '凭据就绪' : '待补全'}</Pill>
-                {entry.grade && <Pill>{entry.grade}</Pill>}
+                {entry.grade && <Pill>{modelTier(entry.grade as ModelGrade)}</Pill>}
                 {isDefault && <Pill tone="info">新对话默认</Pill>}
               </div>
               <div className="configured-model-actions">
@@ -1016,7 +1024,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
                     <Field label="模型等级" error={fieldIssues.grade}>
                       <select className="select" style={{ width: 130 }} data-testid={`model-${index}-grade`} data-invalid={fieldIssues.grade ? 'true' : undefined} value={entry.grade ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.grade = event.target.value; else delete target.grade; })}>
                         <option value="">请选择</option>
-                        {GRADES.map(grade => <option key={grade} value={grade}>{grade}</option>)}
+                        <ModelGradeOptions />
                       </select>
                     </Field>
                     <Field label="默认思考强度">
@@ -1178,7 +1186,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
         }));
       }
       clearTimeout(saveTimer.current);
-      editVersion.current = merged.changed ? 1 : 0;
+      editVersion.current = merged.changed || pricingChanged ? 1 : 0;
       savePending.current = false;
       latestDraft.current = next;
       latestRevision.current = response.revision;
@@ -1189,6 +1197,10 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
         ...Object.fromEntries(Object.keys(detected).map(id => [id, true])),
       });
       setRevision(response.revision);
+      // The config response carries the saved/effective pair from one read.
+      // A delayed startup snapshot must not replace a newer known revision.
+      setEffectiveRevision(current => response.effectiveRevision === undefined ? current
+        : Math.max(current ?? response.effectiveRevision, response.effectiveRevision));
       setDirty(merged.changed || pricingChanged);
       setError(null);
       setStatus(merged.changed
@@ -1216,7 +1228,8 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
   }, []);
   useEffect(() => {
     void api<Startup>('/api/startup').then(startup => {
-      setEffectiveRevision(startup.effectiveRevision ?? null);
+      setEffectiveRevision(current => startup.effectiveRevision === undefined ? current
+        : Math.max(current ?? startup.effectiveRevision, startup.effectiveRevision));
       setRunningSource(startup.source);
     }).catch(() => undefined);
   }, []);
@@ -1234,6 +1247,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     saveTimer.current = setTimeout(() => void persistDraft(editVersion.current), delay);
   }
   async function persistDraft(version: number) {
+    if (version === 0) return;
     if (saveInFlight.current) {
       savePending.current = true;
       return;
@@ -1269,7 +1283,8 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
       });
       latestRevision.current = response.revision;
       setRevision(response.revision);
-      setEffectiveRevision(response.effectiveRevision ?? response.revision);
+      const appliedRevision = response.effectiveRevision ?? response.revision;
+      setEffectiveRevision(current => Math.max(current ?? appliedRevision, appliedRevision));
       const pending = response.applied === false;
       setStatus(`已自动保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
       if (!pending) window.dispatchEvent(new Event('graph:settings-changed'));
@@ -1286,7 +1301,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
     } finally {
       saveInFlight.current = false;
       setSaving(false);
-      if (savePending.current || editVersion.current !== version) {
+      if (editVersion.current > 0 && (savePending.current || editVersion.current !== version)) {
         savePending.current = false;
         scheduleSave(120);
       }
@@ -1359,7 +1374,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
           if (next.models) {
             next.models.entries = next.models.entries.filter(entry => entry.credentialId !== credentialId);
             const remaining = new Set(next.models.entries.map(entry => entry.id));
-            for (const grade of GRADES as (keyof NonNullable<NonNullable<RawConfig['models']>['preferences']>)[]) {
+            for (const grade of GRADES) {
               const preferences = next.models.preferences;
               if (preferences?.[grade]) preferences[grade] = preferences[grade]!.filter(id => remaining.has(id));
             }

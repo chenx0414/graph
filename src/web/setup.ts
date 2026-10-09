@@ -1,3 +1,4 @@
+import type { ModelGrade } from '../catalog/models.ts';
 /** First-run wizard logic; the component in Setup.tsx stays presentational. */
 
 export type SetupTemplate = 'local' | 'custom';
@@ -9,7 +10,7 @@ export interface SetupForm {
   modelId: string;
   provider: string;
   baseUrl: string;
-  grade: 'low' | 'medium' | 'high' | 'highest';
+  grade: ModelGrade;
   contextWindow: number;
   maxTokens: number;
   credentialId: string;
@@ -107,7 +108,7 @@ export function buildConfigDocument(existing: unknown, form: SetupForm): Record<
   return document;
 }
 
-export interface TemplateSetupModel { id: string; grade: 'low' | 'medium' | 'high' | 'highest'; contextWindow: number; maxTokens: number }
+export interface TemplateSetupModel { id: string; grade: ModelGrade; contextWindow: number; maxTokens: number }
 export interface TemplateSetupInput {
   providerId: string;
   api: 'openai-completions' | 'anthropic-messages';

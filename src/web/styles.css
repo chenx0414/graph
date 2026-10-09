@@ -3699,3 +3699,6 @@ html[data-drawer-expanded="true"] .app-shell { width:var(--drawer-base-width); m
 .window-drawer-layer { padding-top: 44px; }
 .window-drawer-layer .detail-drawer .drawer-inner { padding-top: 0; }
 .node-chat-composer { flex: 0 0 auto; }
+
+.subgraph-ports { max-height: calc(100% - 32px); box-sizing: border-box; overflow: auto; padding: 20px 16px; font-weight: 400; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.subgraph-ports strong { display: block; margin-top: 8px; }

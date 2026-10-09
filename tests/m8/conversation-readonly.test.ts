@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY } from '../../src/runtime/agent-context.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -65,17 +66,22 @@ test('a bound extension can write inside the workspace during discussion and a w
   const toolResult = view.messages.filter(message => message.role === 'tool').map(message => message.text).join('\n');
   expect(toolResult).toContain('mcp_ext_write_proof');
 
-  // Positive control: the same capability bound to a confirmed worker writes.
-  await runtime.supervisor(created.taskId).propose({
-    requirementVersion: 1, summary: '验证能力边界',
+  // Positive control: confirmation retains the capability, and execution starts
+  // only after an explicit delivery to the native worker's input.
+  const main = runtime.supervisor(created.taskId);
+  await main.propose({ requirementVersion: 1, summary: '验证能力边界',
     acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
-    ],
+    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Capability boundary', protocols: { data: { type: 'object' } },
+      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Exercise the bound extension', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
+      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } }, edges: {},
+      acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }],
+    }),
   }, 'draft');
-  await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
-  await runtime.host.runReady();
+  const receipt = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  expect(provider.requests).toHaveLength(2);
+  await main.graphSend({ graphId: receipt.taskId, nodeId: 'work', input: 'job', value: {} });
+  await runtime.host.drive();
   const confirmed = await runtime.conversations.view(created.conversationId);
   const feature = confirmed.tasks[0]!;
   const taskView = await runtime.user.task(feature.id).view();

@@ -12,7 +12,11 @@ import { useTranscriptFollow } from './use-transcript-follow.ts';
 
 function mergeEntries(current: Entry[], incoming: Entry[]) {
   const merged = new Map(current.map(entry => [entry.id, entry]));
-  for (const entry of incoming) merged.set(entry.id, entry);
+  for (const entry of incoming) {
+    const previous = merged.get(entry.id);
+    if (previous?.contentTruncated === false && entry.contentTruncated === true) continue;
+    merged.set(entry.id, entry);
+  }
   return [...merged.values()].sort((left, right) => left.seq - right.seq);
 }
 
@@ -42,6 +46,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const [loading, setLoading] = useState(Boolean(taskId));
   const [error, setError] = useState('');
   const [olderLoading, setOlderLoading] = useState(false);
+  const [loadingEntry, setLoadingEntry] = useState<string | null>(null);
   const [olderExhausted, setOlderExhausted] = useState(false);
   const olderPending = useRef(false);
   const historyAnchor = useRef<{ top: number; height: number } | null>(null);
@@ -105,7 +110,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }, [pump, scope, taskId, nodeId]);
 
   const connected = useTaskStream(taskId, event => {
-    if (!event.type.startsWith('node.') && !event.type.startsWith('operation.')) return;
+    if (!event.type.startsWith('node.') && !event.type.startsWith('operation.') && !event.type.startsWith('graph.')) return;
     const eventNode = eventNodeId(event);
     if (eventNode && eventNode !== nodeId) return;
     clearTimeout(refreshTimer.current);
@@ -121,6 +126,14 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     streaming: [],
     busy: Boolean(busy),
   }), [entries, data?.operations, busy]);
+  // Expanding a saved answer is a history attachment, not a provider delta.
+  // Remount that answer once so the transcript starts with its entire loaded text.
+  const expandedAnswers = new Set<string>();
+  const lastAnswers = new Map<string, Entry>();
+  for (const entry of entries) if (entry.role === 'assistant' && entry.operationId) lastAnswers.set(entry.operationId, entry);
+  for (const [operationId, entry] of lastAnswers) {
+    if (entry.contentTruncated === false && (entry.contentBytes ?? 0) > 4096) expandedAnswers.add(operationId);
+  }
   const hasOlder = Boolean(data && data.entryCount > entries.length && !olderExhausted && (entries[0]?.seq ?? 0) > 1);
 
   useLayoutEffect(() => {
@@ -147,7 +160,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       allowAttachments={false} projectId={null} placeholder={busy ? `向 ${agentName} 发送补充说明…` : `向 ${agentName} 发送返工要求…`}
       onSend={() => void send()} sendDisabled={sending || !taskId || data?.node.kind !== 'agent' || !text.trim()}
       inputTestId="node-chat-input" sendTestId="node-chat-send" history={entries.filter(entry => entry.role === 'user' && entry.kind === 'chat').map(entry => entry.text)} />
-    <div className="composer-footer"><span className="muted">{busy ? 'Enter 发送到当前节点 · Shift + Enter 换行' : '发送将返工此节点及其后续依赖 · Shift + Enter 换行'}</span></div>
+    <div className="composer-footer"><span className="muted">{busy ? 'Enter 发送到当前节点 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span></div>
   </div>;
   const onScroll = () => {
     transcriptFollow.onScroll();
@@ -177,6 +190,18 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     }
   }
 
+  async function readEntry(entryId: string) {
+    if (!taskId || loadingEntry) return;
+    const generation = generationRef.current;
+    setLoadingEntry(entryId);
+    try {
+      const result = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run?entryId=${encodeURIComponent(entryId)}`);
+      if (generation === generationRef.current) setEntries(current => mergeEntries(current, result.entries));
+    } catch (reason) {
+      if (generation === generationRef.current) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally { setLoadingEntry(null); }
+  }
+
   const status = data?.node.status ?? 'draft';
   // The rows are the same rows the main chat renders; only the frame differs.
   const entriesView = (
@@ -197,9 +222,17 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       {taskId && data && !rows.length && (
         <Empty title="暂无对话记录" hint="节点还没有产生任务说明、工具调用或回复。" />
       )}
+      {entries.filter(entry => entry.contentTruncated).map(entry => (
+        <div className="node-long-entry" key={`long-${entry.id}`}>
+          <span className="muted">长记录 · {entry.role === 'tool' ? '工具' : entry.role === 'assistant' ? '回复' : '任务说明'} · {entry.contentBytes?.toLocaleString()} 字节</span>
+          <Button size="sm" data-testid={`node-read-entry-${entry.id}`} disabled={loadingEntry !== null} onClick={() => void readEntry(entry.id)}>
+            {loadingEntry === entry.id ? '读取中…' : '读取完整记录'}
+          </Button>
+        </div>
+      ))}
       {taskId && rows.map(row => (
         <TranscriptRowView
-          key={row.id}
+          key={`${row.id}:${row.kind === 'assistant' && expandedAnswers.has(row.operationId) ? 'expanded' : 'initial'}`}
           row={row}
           assistantAuthor={`${agentName} · 回复`}
           userAuthor="任务说明"

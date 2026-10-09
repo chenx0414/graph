@@ -28,6 +28,7 @@ import { type SendGate } from './controlled-openai.ts';
  */
 
 export interface NodeSessionRequest {
+  environment?: { revision: number; workspace: string; base: string; access: ResolvedAccessPolicy };
   role: 'worker' | 'reviewer';
   operation?: CapabilityOperation;
   close(): Promise<void>;
@@ -82,7 +83,7 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
   const { kernel, catalog, graphId, nodeId } = options;
   const recipe = recipeFor(kernel, graphId, nodeId, options.revisionVersion);
 
-  const known = catalog.listDefinitions().some(item => `${item.id}@${item.version}` === recipe);
+  const known = catalog.hasDefinition(recipe);
   if (!known) throw new Error(`node ${nodeId} names recipe ${recipe}, which the catalog does not hold`);
 
   const action = catalog.definition(recipe).review === true ? 'review' : 'work';
@@ -131,7 +132,7 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
       },
       ...(options.access ? { access: options.access } : {}),
       run: (command, args, signal) => commands.run(command, args, signal),
-    }).filter(tool => tool.name !== 'submit_result'),
+    }),
   });
 
   const composed = assembly.forOperation(operation).composed;

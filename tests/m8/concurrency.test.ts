@@ -12,7 +12,7 @@ import { createModelScheduler, type SlotRequest } from '../../src/runtime/model-
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import type { SendGate } from '../../src/runtime/controlled-openai.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -205,39 +205,31 @@ test('a queued runtime send re-checks the pause gate and releases the slot witho
       credentialFor: () => ({ credentialId: 'cred', apiKey: 'key', limit: 1 }),
       modelScheduler: scheduler,
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
-      },
-    },
+
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Queued send', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Queued send',
-    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const main = runtime.supervisor(taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Queued send', protocols: {},
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Wait for provider admission', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Do not bypass the credential slot' });
 
   const held = await scheduler.acquire({ credentialId: 'cred', limit: 1 });
   const driving = runtime.host.drive();
   await waitFor(() => scheduler.queued() === 1);
   // A waiting slot must not block user-facing queries.
-  const view = await runtime.user.task(taskId).view();
+  const view = await runtime.user.task(graphId).view();
   expect(view.nodes.find(node => node.id === 'work')).toBeDefined();
-  await runtime.user.task(taskId).pause('pause-queued');
+  await runtime.user.task(graphId).pause('pause-queued');
   held();
   await driving;
   await waitFor(() => scheduler.active('cred') === 0);
   expect(providerFixture.requests).toHaveLength(0);
-  const paused = await runtime.user.task(taskId).view();
+  const paused = await runtime.user.task(graphId).view();
   // Nothing was sent and nothing was billed for the queued operation.
   expect(paused.invocations).toHaveLength(0);
-  expect(paused.operations.every(operation => !operation.workerActive)).toBe(true);
+  expect(runtime.nodeRun(graphId, 'work').operations.every(operation => !operation.workerActive)).toBe(true);
+  expect(runtime.nodeRun(graphId, 'work').instance!.used).toBe(0);
 });

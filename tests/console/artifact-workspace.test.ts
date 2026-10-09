@@ -3,9 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { ArtifactWorkspace } from '../../src/core/artifact-workspace.ts';
-import { settleResultHandoff } from '../../src/core/predecessor-handoff.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import type { Operation, Proposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -214,71 +212,6 @@ test('a dependency reference is recorded so the artifact-to-reader edge is obser
   const referenced = rows.find(row => row.type === 'artifact.referenced');
   expect(referenced).toBeTruthy();
   expect(JSON.parse(referenced!.data)).toMatchObject({ nodeId: 'review-b', relation: 'briefed' });
-});
-
-test('result handoffs can freeze an exact published artifact version without relying on its private path', async () => {
-  const { store, workspace, artifacts } = await fixture();
-  const source = join(workspace, 'report.md');
-  await writeFile(source, 'review body');
-  const published = await artifacts.publish({
-    taskId: 't1', workspace, namespace: 'reviews', name: 'report', sourcePath: source,
-    mediaType: 'text/markdown', producer: producer(), requestId: 'publish-review',
-  });
-  store.db.exec(`
-    INSERT INTO nodes(task_id,id,spec,instance_id,activation_id,output_version)
-      VALUES('t1','review','{}','instance-1','activation-1',0);
-    INSERT INTO instances(id,task_id,node_id) VALUES('instance-1','t1','review');
-    INSERT INTO operations(id,task_id,node_id,instance_id,generation,spec,state,reserved,worker_active)
-      VALUES('operation-1','t1','review','instance-1',1,'{}','dispatched',100,1);
-  `);
-  const proposal = {
-    requirementVersion: 1,
-    summary: 'review handoff',
-    acceptance: [],
-    nodes: [
-      { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'review-model' },
-      {
-        id: 'rework',
-        kind: 'agent',
-        action: 'work',
-        definitionVersion: 'coder@1',
-        model: 'work-model',
-        dependsOn: ['review'],
-        context: { purpose: 'rework', predecessors: [{ source: 'review', mode: 'result_handoff' }] },
-      },
-    ],
-  } as Proposal;
-  const result = settleResultHandoff(
-    store,
-    { id: 'operation-1', taskId: 't1', nodeId: 'review', activationId: 'activation-1' } as Operation,
-    proposal,
-    {
-      outcome: 'completed',
-      output: null,
-      resultHandoff: {
-        schemaVersion: 1,
-        objective: 'Review the implementation',
-        outcome: 'completed',
-        workSummary: 'The review report is published.',
-        changes: [{
-          kind: 'artifact',
-          artifactId: published.artifactId,
-          version: published.version,
-          uri: published.uri,
-          summary: 'Published review report',
-        }],
-        decisions: [],
-        verification: [],
-        knownLimits: [],
-        openQuestions: [],
-        nextActions: [],
-      },
-    },
-  );
-  expect(result.outcome).toBe('completed');
-  expect(store.db.prepare("SELECT body FROM result_handoffs WHERE node_id='review'").get()).toMatchObject({
-    body: expect.stringContaining(published.uri),
-  });
 });
 
 test('a long-lived document keeps publishing past its hundredth version', async () => {

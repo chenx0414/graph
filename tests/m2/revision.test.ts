@@ -1,131 +1,100 @@
-import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec, Proposal } from '../../src/core/types.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
-const coder = { definitionVersion: 'coder@1', model: 'scripted' };
 
-async function setup(actions: Record<string, ActionAdapter>, nodes: NodeSpec[], extra: Partial<Proposal> = {}) {
+async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'graph-revision-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, limits: { defaultBudgetTokens: 20_000_000 } };
-  const runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Revise the graph', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Revise the graph',
-    acceptance: extra.acceptance ?? [{ id: 'works', description: 'Works', checkNode: 'check' }], nodes, ...extra,
-  }, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  return { root, runtime, task, taskId, options, supervisor: runtime.supervisor(taskId) };
+  const provider = await openaiServer([
+    { tools: [{ id: 'output', name: 'submit', arguments: JSON.stringify({ outputs: { out: { enable: true, value: { text: 'Finished' } } } }) }] },
+    { text: 'Finished' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    limits: { defaultBudgetTokens: 20_000_000 },
+    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl,
+      contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-only', modelRuntime: provider.runtime } });
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
+  cleanup.push(() => runtime.close());
+  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Revise the graph', requestId: 'begin' });
+  const main = runtime.supervisor(taskId);
+  const node = { recipe: 'coder@1', model: 'local', task: 'work', inputs: { job: { protocol: 'data' } }, outputs: { out: { protocol: 'data' } }, submission: { required: ['out'] } };
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Revision', protocols: { data: { type: 'object' } },
+    nodes: { work: node, extra: node }, modules: {}, edges: {},
+  });
+  const { graphId } = await main.graphCreate({ definition }) as { graphId: string };
+  return { runtime, main, graphId, definition };
 }
 
-test('a supervisor revision keeps instances, rejects a stale base, and cannot weaken required work', async () => {
-  const { runtime, task, supervisor, root } = await setup({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: { ready: true }, usage }) },
-    extra: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: { extra: true }, usage }) },
-    check: { kind: 'program', prepare: async () => async () => {
-      const path = join(root, 'ok.txt'); await writeFile(path, 'ok');
-      return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'Checked', artifact: { path, digest: createHash('sha256').update('ok').digest('hex') } }] };
-    } },
-  }, [
-    { id: 'work', kind: 'agent', action: 'work', ...coder },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  await runtime.host.drive();
-  expect((await task.view()).phase).toBe('completed');
-  const before = await task.view();
-  const nodes: NodeSpec[] = [
-    { id: 'work', kind: 'agent', action: 'work', ...coder },
-    { id: 'extra', kind: 'agent', action: 'extra', ...coder },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work', 'extra'] },
-  ];
-  await expect(supervisor.revise({ baseVersion: 0, reason: 'Stale', nodes, requestId: 'stale' })).rejects.toMatchObject({ code: 'stale_graph' });
-  await expect(supervisor.revise({ baseVersion: 1, reason: 'Weaken', nodes: [{ id: 'work', kind: 'agent', action: 'work', ...coder, optional: true }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] }], requestId: 'optional' })).rejects.toMatchObject({ code: 'invalid_proposal' });
-  const revised = await supervisor.revise({ baseVersion: 1, reason: 'Add a sibling after the first branch finished', nodes, requestId: 'add' });
-  expect(revised.graphVersion).toBe(2);
-  const mid = await task.view();
-  expect(mid.graphVersion).toBe(2);
-  expect(mid.phase).toBe('running');
-  expect(mid.nodes.find(node => node.id === 'work')).toMatchObject({ instanceId: before.nodes.find(node => node.id === 'work')?.instanceId, status: 'succeeded' });
-  expect(mid.nodes.find(node => node.id === 'check')?.status).toBe('pending');
-  expect(mid.evidence.some(item => !item.valid)).toBe(true);
-  await runtime.host.drive();
-  expect((await task.view()).phase).toBe('completed');
-  expect((await task.view()).nodes.find(node => node.id === 'extra')?.status).toBe('succeeded');
-  expect((await task.view()).evidence.filter(item => item.valid)).toHaveLength(1);
+test('native revision preserves the finished instance, rejects a stale base, and cannot reopen a completed graph', async () => {
+  const { runtime, main, graphId } = await setup();
+  const instance = runtime.nodeRun(graphId, 'work').instance!.id;
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} }); await runtime.host.drive();
+  expect(runtime.nodeRun(graphId, 'work').node.status).toBe('succeeded');
+  const used = runtime.nodeRun(graphId, 'work').instance!.used;
+  await expect(main.graphPatch({ graphId, baseRevision: 0, changes: { reason: 'Stale', patch: { name: 'stale' } } }))
+    .rejects.toMatchObject({ code: 'stale_revision' });
+  await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Update the next task', patch: { nodes: { work: { task: 'Next assignment' } } } } }))
+    .resolves.toMatchObject({ revision: 2 });
+  expect(runtime.nodeRun(graphId, 'work')).toMatchObject({ instance: { id: instance, used }, node: { status: 'succeeded' } });
+  expect(runtime.nodeRun(graphId, 'work').operations).toHaveLength(1);
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  await expect(main.graphInspect({ graphId })).resolves.toMatchObject({ phase: 'completed', revision: 2 });
+  await expect(main.graphPatch({ graphId, baseRevision: 2, changes: { reason: 'Reopen', patch: { name: 'reopened' } } }))
+    .rejects.toMatchObject({ code: 'invalid_graph' });
 });
 
-test('a revision cannot weaken a confirmed required verification dimension', async () => {
-  const verifier = { kind: 'multiview' as const, subjectNode: 'work', reportNodes: ['review'], dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }] };
-  const nodes: NodeSpec[] = [
-    { id: 'work', kind: 'agent', action: 'work', ...coder },
-    { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'scripted', dependsOn: ['work'] },
-    { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['work', 'review'], verifier },
-  ];
-  const { supervisor } = await setup({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
-    review: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
-  }, nodes, { acceptance: [{ id: 'works', description: 'Required correctness passes', checkNode: 'gate' }] });
-  const weakened = nodes.map(node => node.id === 'gate'
-    ? { ...node, verifier: { ...verifier, dimensions: [{ id: 'correctness', required: false, reportNode: 'review' }] } }
-    : node);
-  await expect(supervisor.revise({ baseVersion: 1, reason: 'Treat correctness as a suggestion', nodes: weakened, requestId: 'weaken' }))
-    .rejects.toMatchObject({ code: 'invalid_proposal' });
+test('native revision cannot weaken declared final acceptance', async () => {
+  const { main, graphId } = await setup();
+  await main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Declare the user gate', patch: {
+    acceptance: [{ id: 'correctness', description: 'User accepts the result', kind: 'human' }],
+  } } });
+  await expect(main.graphPatch({ graphId, baseRevision: 2, changes: { reason: 'Drop the user gate', patch: { acceptance: [] } } }))
+    .rejects.toMatchObject({ code: 'invalid_input' });
+  const definition = await main.graphInspect({ graphId, query: 'revision' });
+  expect(definition).toMatchObject({ acceptance: [{ id: 'correctness', description: 'User accepts the result', kind: 'human' }] });
+  await expect(main.graphInspect({ graphId })).resolves.toMatchObject({ revision: 2 });
 });
 
-test('exhausted incomplete work cannot disappear by deletion or a new instance', async () => {
-  const { runtime, task, supervisor } = await setup({
-    work: { kind: 'agent', reserveTokens: 20_000_000, prepare: async () => async () => ({ outcome: 'continue', output: null, usage: { input: 19_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 } }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
-  }, [
-    { id: 'work', kind: 'agent', action: 'work', ...coder },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  await runtime.host.runReady();
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  const blocked = await task.view();
-  expect(blocked.questions).toMatchObject([{ kind: 'budget' }]);
-  await expect(supervisor.revise({
-    baseVersion: 1, reason: 'Drop exhausted work', requestId: 'drop', retire: ['work'],
-    nodes: [{ id: 'replacement', kind: 'agent', action: 'work', ...coder }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['replacement'] }],
-  })).rejects.toMatchObject({ code: 'invalid_proposal' });
-  expect((await task.view()).nodes.find(node => node.id === 'work')).toMatchObject({ instanceId: blocked.nodes[0]!.instanceId, used: 20_000_000, status: 'blocked' });
-  await expect(task.resume('resume')).resolves.toMatchObject({ taskId: blocked.id });
-  expect((await task.view()).questions.some(question => question.kind === 'budget' && question.status === 'open')).toBe(true);
+test('native revision cannot discard queued work by replacing its node', async () => {
+  const { runtime, main, graphId, definition } = await setup();
+  const instance = runtime.nodeRun(graphId, 'work').instance!.id;
+  const receipt = await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { text: 'Keep this input' } }) as { queue: { seq: number } };
+  const replacement = parseGraphDefinition({ ...definition, nodes: { extra: definition.nodes.extra!, replacement: definition.nodes.work! } });
+  await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Replace unfinished work', definition: replacement, retire: ['work'] } }))
+    .rejects.toMatchObject({ code: 'pending_work' });
+  expect(runtime.nodeRun(graphId, 'work').instance!.id).toBe(instance);
+  const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; state: string }[] };
+  expect(queue.items).toMatchObject([{ seq: receipt.queue.seq, state: 'queued' }]);
+  await main.graphControl({ graphId, action: 'cancel', seq: receipt.queue.seq });
+  await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Retire explicitly cancelled work', definition: replacement, retire: ['work'] } }))
+    .resolves.toMatchObject({ revision: 2 });
+  expect(runtime.nodeRun(graphId, 'work').node.status).toBe('retired');
+  expect(runtime.nodeRun(graphId, 'replacement').instance!.id).not.toBe(instance);
 });
 
-test('a revision must name every node it retires instead of dropping it silently', async () => {
-  const { supervisor, task } = await setup({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
-    extra: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null }) },
-  }, [
-    { id: 'work', kind: 'agent', action: 'work', ...coder },
-    { id: 'extra', kind: 'agent', action: 'extra', ...coder },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  const base = (await task.view()).graphVersion;
-  const surviving: NodeSpec[] = [
-    { id: 'work', kind: 'agent', action: 'work', ...coder },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ];
-  // An incomplete list is refused and reports the ids it is missing, so nothing disappears by accident.
-  await expect(supervisor.revise({ baseVersion: base, reason: 'Forget a node', nodes: surviving, requestId: 'silent' }))
-    .rejects.toThrow(/must name every node it retires.*extra/);
-  // A typo in retire cannot silently retire nothing either.
-  await expect(supervisor.revise({ baseVersion: base, reason: 'Typo', nodes: surviving, retire: ['extras'], requestId: 'typo' }))
-    .rejects.toMatchObject({ code: 'invalid_proposal' });
-  // Naming it applies the retirement on purpose.
-  const revised = await supervisor.revise({ baseVersion: base, reason: 'Drop the sibling', nodes: surviving, retire: ['extra'], requestId: 'declared' });
-  expect(revised.graphVersion).toBe(base + 1);
-  const view = await task.view();
-  expect(view.nodes.find(node => node.id === 'extra')?.status).toBe('retired');
-  expect(view.nodes.map(node => node.id).sort()).toEqual(['check', 'extra', 'work']);
+test('native revision must explicitly name every retired node and preserves its history', async () => {
+  const { runtime, main, graphId, definition } = await setup();
+  await main.graphSend({ graphId, nodeId: 'extra', input: 'job', value: {} }); await runtime.host.drive();
+  const before = runtime.nodeRun(graphId, 'extra');
+  const surviving = parseGraphDefinition({ ...definition, nodes: { work: definition.nodes.work! } });
+  await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Omitted node', definition: surviving } }))
+    .rejects.toMatchObject({ code: 'invalid_graph' });
+  await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Typo', definition: surviving, retire: ['extras'] } }))
+    .rejects.toMatchObject({ code: 'invalid_graph' });
+  await expect(main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Retire the idle sibling', definition: surviving, retire: ['extra'] } }))
+    .resolves.toMatchObject({ revision: 2 });
+  const retired = runtime.nodeRun(graphId, 'extra');
+  expect(retired).toMatchObject({ node: { status: 'retired' }, instance: { id: before.instance!.id, used: before.instance!.used } });
+  expect(retired.operations).toEqual(before.operations);
+  expect(retired.entries).toEqual(before.entries);
+  expect(runtime.nodePrompt(graphId, 'extra')).toMatchObject({ status: 'retired', definitionVersion: 'coder@1', action: 'work' });
+  await expect(main.graphSend({ graphId, nodeId: 'extra', text: 'New work' })).rejects.toMatchObject({ code: 'invalid_input' });
 });

@@ -1,150 +1,60 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { attemptConflictMerge, contributions } from '../../src/git/conflict-merge.ts';
-import { git } from '../../src/git/git.ts';
+import { combined, git, nativeGitConflict } from '../fixtures/native-git-conflict.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+const fixture = () => nativeGitConflict(cleanup);
 
-/** A repository with a task branch (ours) and a lane branch (theirs) that collide on one line. */
-async function colliding(files: Record<string, string> = { 'shared.ts': 'a\nb\nc\n' }) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-conflict-merge-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const work = join(root, 'integration');
-  await mkdir(work, { recursive: true });
-  git(work, ['init', '-q', '-b', 'main']);
-  git(work, ['config', 'user.email', 'g@l']);
-  git(work, ['config', 'user.name', 'G']);
-  for (const [path, content] of Object.entries(files)) await writeFile(join(work, path), content);
-  git(work, ['add', '.']);
-  git(work, ['commit', '-q', '-m', 'base']);
-  // Theirs changes the middle line, ours changes it differently: a same-line collision.
-  git(work, ['checkout', '-q', '-b', 'lane']);
-  await writeFile(join(work, 'shared.ts'), files['shared.ts']!.replace('b', 'from-lane'));
-  git(work, ['commit', '-aqm', 'lane']);
-  git(work, ['checkout', '-q', 'main']);
-  await writeFile(join(work, 'shared.ts'), files['shared.ts']!.replace('b', 'from-main'));
-  git(work, ['commit', '-aqm', 'main']);
-  return { root, work };
-}
+test('an explicit two-parent conflict resolution passes the declared native check and delivers both contributions', async () => {
+  const graph = await fixture(); await graph.collide(); const sha = await graph.resolve(combined);
+  const parents = git(graph.project, ['rev-list', '--parents', '-n', '1', sha]).split(/\s+/); expect(parents).toHaveLength(3);
+  expect(await graph.check()).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: 'preserved', status: 'passed', source: expect.objectContaining({ commit: sha }) })]) });
+  await graph.review(); expect((await graph.finish()).phase).toBe('completed'); expect(git(graph.project, ['rev-parse', 'HEAD'])).toBe(sha);
+  expect(await readFile(join(graph.project, 'shared.txt'), 'utf8')).toBe(combined);
+}, 30000);
 
-const prompt = (input: { ours: { path: string; content: string | null }[]; theirs: { path: string; content: string | null }[] }) =>
-  `resolve ${input.ours.map(side => side.path).join(', ')}`;
+for (const candidate of [
+  { name: 'drops one contribution', content: 'a\nfrom-main\nc\n' },
+  { name: 'changes an unrelated file', content: combined, other: 'unapproved rewrite\n' },
+  { name: 'leaves conflict markers', content: 'a\n<<<<<<< HEAD\nfrom-main\n=======\nfrom-lane\n>>>>>>> lane\nc\n' },
+]) test(`a committed resolution that ${candidate.name} fails its native acceptance check and cannot reach target`, async () => {
+  const graph = await fixture(); await graph.collide(); const sha = await graph.resolve(candidate.content, candidate.other);
+  expect(git(graph.integrationTree, ['rev-parse', 'HEAD'])).toBe(sha);
+  expect(await graph.check()).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: 'preserved', status: 'failed' })]) });
+  expect((await graph.finish()).phase).toBe('blocked'); expect(git(graph.project, ['rev-parse', 'HEAD'])).toBe(graph.baseline);
+  // Keep the rejected committed candidate for main to inspect; do not pretend it never existed.
+  expect(git(graph.trees.b, ['show', `${sha}:shared.txt`])).toBe(candidate.content.trim());
+}, 30000);
 
-test('a real merge that keeps both sides is committed, and it is a merge of the two branches', async () => {
-  const { work } = await colliding();
-  const result = await attemptConflictMerge({
-    integrationPath: work,
-    laneRef: 'lane',
-    prompt,
-    // The agent writes a resolution that carries both lanes' text.
-    run: async (_prompt, workspace) => { await writeFile(join(workspace, 'shared.ts'), 'a\nfrom-main\nfrom-lane\nc\n'); },
-  });
-  expect(result.status).toBe('merged');
-  expect(git(work, ['show', 'HEAD:shared.ts']).stdout).toBe('a\nfrom-main\nfrom-lane\nc');
-  // The commit is a real merge: it has exactly two parents, ours and the lane's tip.
-  const parents = git(work, ['rev-list', '--parents', '-n', '1', 'HEAD']).stdout.trim().split(/\s+/);
-  expect(parents).toHaveLength(3);
-  expect(parents).toContain(git(work, ['rev-parse', 'lane']).stdout.trim());
-  expect(git(work, ['status', '--porcelain']).stdout).toBe('');
-});
+test('a missing lane ref fails Git integration without modifying the previous integration commit or target', async () => {
+  const graph = await fixture(); await graph.collide(); const before = git(graph.integrationTree, ['rev-parse', 'HEAD']);
+  // An external Git action changes a real ref, not a fabricated database result.
+  git(graph.trees.b, ['branch', '-m', 'renamed-by-main']);
+  expect(graph.integrate('b')).toMatchObject({ ok: false });
+  expect(git(graph.integrationTree, ['rev-parse', 'HEAD'])).toBe(before);
+  expect(git(graph.integrationTree, ['status', '--porcelain'])).toBe('');
+  expect(git(graph.project, ['rev-parse', 'HEAD'])).toBe(graph.baseline);
+}, 30000);
 
-test('a resolution that silently drops one lane is refused and the merge is aborted', async () => {
-  const { work } = await colliding();
-  const before = git(work, ['rev-parse', 'HEAD']).stdout.trim();
-  const result = await attemptConflictMerge({
-    integrationPath: work,
-    laneRef: 'lane',
-    prompt,
-    // The agent overwrites with only its own side: exactly the "model improvises a rewrite" case.
-    run: async (_prompt, workspace) => { await writeFile(join(workspace, 'shared.ts'), 'a\nfrom-main\nc\n'); },
-  });
-  expect(result.status).toBe('blocked');
-  expect(result.reason).toMatch(/dropped/i);
-  expect(git(work, ['rev-parse', 'HEAD']).stdout.trim()).toBe(before);
-  expect(git(work, ['status', '--porcelain']).stdout).toBe('');
-});
+test('noncolliding lanes integrate without a resolver and leave a genuine clean two-parent merge', async () => {
+  const graph = await fixture(); await writeFile(join(graph.trees.a, 'a.txt'), 'left\n'); await writeFile(join(graph.trees.b, 'b.txt'), 'right\n');
+  expect(graph.integrate('a')?.ok).toBe(true); expect(graph.integrate('b')?.ok).toBe(true);
+  expect(git(graph.integrationTree, ['show', 'HEAD:a.txt'])).toBe('left'); expect(git(graph.integrationTree, ['show', 'HEAD:b.txt'])).toBe('right');
+  expect(git(graph.integrationTree, ['rev-list', '--parents', '-n', '1', 'HEAD']).split(/\s+/)).toHaveLength(3);
+  expect(git(graph.integrationTree, ['status', '--porcelain'])).toBe('');
+  expect(graph.runtime.events(graph.graphId).filter(event => event.type.startsWith('git.conflict.merge_attempt'))).toHaveLength(0);
+}, 30000);
 
-test('an agent that edits a path outside the conflict is refused', async () => {
-  const { work } = await colliding({ 'shared.ts': 'a\nb\nc\n', 'other.ts': 'untouched\n' });
-  const before = git(work, ['rev-parse', 'HEAD']).stdout.trim();
-  const result = await attemptConflictMerge({
-    integrationPath: work,
-    laneRef: 'lane',
-    prompt,
-    run: async (_prompt, workspace) => {
-      await writeFile(join(workspace, 'shared.ts'), 'a\nfrom-main\nfrom-lane\nc\n');
-      await writeFile(join(workspace, 'other.ts'), 'sneaky change\n');
-    },
-  });
-  expect(result.status).toBe('blocked');
-  expect(result.reason).toMatch(/outside the conflict/i);
-  expect(git(work, ['rev-parse', 'HEAD']).stdout.trim()).toBe(before);
-  expect(git(work, ['show', 'HEAD:other.ts']).stdout).toBe('untouched');
-});
-
-test('an agent that leaves the conflict markers in place is refused', async () => {
-  const { work } = await colliding();
-  const before = git(work, ['rev-parse', 'HEAD']).stdout.trim();
-  const result = await attemptConflictMerge({
-    integrationPath: work,
-    laneRef: 'lane',
-    prompt,
-    // Writes an "I give up" file that still holds both markers rather than resolving them.
-    run: async (_prompt, workspace) => { await writeFile(join(workspace, 'shared.ts'), 'a\n<<<<<<< HEAD\nfrom-main\n=======\nfrom-lane\n>>>>>>> lane\nc\n'); },
-  });
-  expect(result.status).toBe('blocked');
-  expect(git(work, ['rev-parse', 'HEAD']).stdout.trim()).toBe(before);
-});
-
-test('an agent that fails leaves the integration branch untouched', async () => {
-  const { work } = await colliding();
-  const before = git(work, ['rev-parse', 'HEAD']).stdout.trim();
-  const result = await attemptConflictMerge({
-    integrationPath: work,
-    laneRef: 'lane',
-    prompt,
-    run: async () => { throw new Error('provider exploded'); },
-  });
-  expect(result.status).toBe('blocked');
-  expect(result.reason).toMatch(/merge Agent failed/i);
-  expect(git(work, ['rev-parse', 'HEAD']).stdout.trim()).toBe(before);
-  expect(git(work, ['status', '--porcelain']).stdout).toBe('');
-});
-
-test('two lanes that do not collide never reach the agent at all', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-conflict-clean-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const work = join(root, 'integration');
-  await mkdir(work, { recursive: true });
-  git(work, ['init', '-q', '-b', 'main']);
-  git(work, ['config', 'user.email', 'g@l']);
-  git(work, ['config', 'user.name', 'G']);
-  await writeFile(join(work, 'a.ts'), 'a\n');
-  git(work, ['add', '.']);
-  git(work, ['commit', '-q', '-m', 'base']);
-  git(work, ['checkout', '-q', '-b', 'lane']);
-  await writeFile(join(work, 'b.ts'), 'b\n');
-  git(work, ['add', '.']);
-  git(work, ['commit', '-qm', 'lane']);
-  git(work, ['checkout', '-q', 'main']);
-
-  let agentRan = false;
-  const result = await attemptConflictMerge({
-    integrationPath: work,
-    laneRef: 'lane',
-    prompt,
-    run: async () => { agentRan = true; },
-  });
-  expect(result.status).toBe('merged');
-  expect(agentRan).toBe(false);
-  expect(git(work, ['show', 'HEAD:b.ts']).stdout).toBe('b');
-});
-
-test('the contributed lines of both sides are what the resolution must preserve', () => {
-  expect(contributions('a\nb\nc\n', 'a\nX\nc\n', null).sort()).toEqual(['X', 'b']);
-  expect(contributions(null, 'a\nb\n', null)).toEqual(['a', 'b']);
-  expect(contributions('same\n', 'same\n', null)).toEqual([]);
-});
+test('changing a verified conflict resolution commit makes the previous native receipt stale until an explicit new check', async () => {
+  const graph = await fixture(); await graph.collide(); const reviewed = await graph.resolve(combined); await graph.check();
+  await writeFile(join(graph.trees.b, 'shared.txt'), 'a\nfrom-main\nc\n'); expect(graph.integrate('b')?.ok).toBe(true);
+  const current = graph.disk.task(graph.graphId).integration_sha; expect(current).not.toBe(reviewed);
+  expect(await graph.main.graphInspect({ graphId: graph.graphId, query: 'acceptance' })).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: 'preserved', status: 'stale' })]) });
+  const operations = await graph.main.graphInspect({ graphId: graph.graphId, query: 'operations' }) as { result: { outputs: { result: { verifiedCommit: string } } } }[];
+  expect(operations).toHaveLength(1); expect(operations[0]!.result.outputs.result.verifiedCommit).toBe(reviewed);
+  expect((await graph.finish()).phase).toBe('blocked'); expect(git(graph.project, ['rev-parse', 'HEAD'])).toBe(graph.baseline);
+  await graph.main.graphControl({ graphId: graph.graphId, action: 'withdraw_complete' });
+  expect(await graph.check()).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: 'preserved', status: 'failed' })]) });
+}, 30000);

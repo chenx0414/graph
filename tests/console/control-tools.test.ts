@@ -48,7 +48,7 @@ test('the master tool inventory carries the two control tools and workers do not
   expect(action.enum ?? (action.anyOf ?? []).map(item => item.const))
     .toEqual(['pause', 'resume', 'abandon', 'set_budget', 'steer']);
 
-  // A worker keeps its own surface: it reports through submit_result and never controls a task.
+  // The shared worker surface never grants task control.
   const worker = describeAgentTools({ role: 'worker', run: true }).map(tool => tool.name);
   expect(worker).not.toContain('ask_user');
   expect(worker).not.toContain('control_task');
@@ -58,7 +58,7 @@ test('the master tool inventory carries the two control tools and workers do not
 test('ask_user keeps bounded choices and multiple selection in its durable question', async () => {
   const asked: { prompt: string; why: string; options: string[]; multiple: boolean }[] = [];
   const tools = agentTools({ workspace: '/tmp', role: 'master', onAskUser: question => { asked.push(question); },
-    supervisor: { propose: async () => ({}), revise: async () => ({}), controlTask: async () => ({ ok: true }) },
+    supervisor: { propose: async () => ({}), controlTask: async () => ({ ok: true }) },
   });
   const ask = tools.find(tool => tool.name === 'ask_user')!;
   const execute = ask.execute as unknown as (id: string, params: unknown) => Promise<unknown>;
@@ -84,7 +84,6 @@ test('the control tools refuse an unknown action, a missing steering target and 
     role: 'master',
     supervisor: {
       propose: async () => ({}),
-      revise: async () => ({}),
       controlTask: async input => { calls.push(input); return { ok: true }; },
     },
   });

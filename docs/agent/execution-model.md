@@ -1,61 +1,40 @@
 # Graph Execution Model
 
-## 图与版本
+当前 graph 由接口投递驱动。构建、投递、patch 和控制的准确参数见 [graph-v2.md](graph-v2.md)；可运行设计范例见 [design-graph-examples.md](../design-graph-examples.md)。本文说明执行与恢复，不把历史 DAG 当作当前调用格式。
 
-任务图由 proposal 创建，用户确认后成为正式图版本。图可以包含：
+## 定义、实例与修订
 
-- Agent node；
-- Program node；
-- 子图/container；
-- 顺序和依赖边；
-- 条件路由；
-- fan-out / fan-in；
-- 主管-工人等待与唤醒；
-- 回到原节点和原 instance 的返工回环。
+main 位于 graph 外部，可创建多个 graph。配方提供身份、规则和能力；节点提供任务、验收、具名接口和运行配置。定义包含 agent、模块、边及子 graph；子 graph 精确引用模板版本，公开输入输出显式映射，每次使用生成独立实例。
 
-原生图修订使用 graph_patch 的 graphId 与 baseRevision，发布新版本，不覆盖历史；当前执行继续使用已冻结配置。已确认的 acceptance 不能在修订通道中静默改变。主 agent 的旧 revise_graph 工具已移除；原生图的正式构建、投递和恢复说明见 [graph-v2.md](graph-v2.md)。下文旧 DAG 车道与证据合同仍是尚未退役代码的背景，不能作为原生图的调用方式。
+graph_create 整体验证并创建空闲节点，graph_send 启动工作。用户确认草稿的路径使用 propose_graph/confirm，再显式发送初始输入。运行中 graph_patch 要求 baseRevision；当前执行配置不变，下一次执行使用新修订。节点引用精确配方版本，发布新的配方不会自动改写现存节点。
 
-## Agent Instance
+## 投递、执行与提交
 
-一个 Agent node 对应一个 Agent instance。Instance 拥有：
+边保存连接，Delivery 保存一次实际发送。一次有效投递触发一次 execution；聊天也进入同一队列，忙时等待，空闲时开始。聊天默认只回复。每个节点同时最多一次 execution，不在忙碌 turn 中注入聊天。
 
-- 稳定 instance id；
-- Agent definition version；
-- session；
-- Git worktree；
-- 预算作用域和累计 usage；
-- activation history；
-- 可恢复的 context binding。
+一次 execution 至多一次有效 submit；可同时提交多个具名输出，缺省输出 disable。宿主整体校验所有目标，再原子写入提交、投递与队列。提交失败可以修正；成功后下游立即可以执行，无需等待发送者结束。同内容重放返回原回执，异内容拒绝。提交不可撤回。
 
-返工、恢复和模型切换保持 instance 身份；新 Fork 或 Fresh 执行创建新的 node/instance 关系。
+必需输出由 submission.required/requiredAnyOf 声明；缺项补交沿用当前 execution 和会话。默认异常重试 2 次、缺项补交 1 次，分别计数并跨重启保留。已提交执行不重发原输入；失败保留输入并暂停自身队列，其他节点可继续。
 
-每个 Agent node 在**每次派发**时都跟随它自己那份配方的最新 definition 版本：配方一改，下一次派发即生效。节点保留自己的模型、工作副本和位置，只有 definition version 前移；已完成的节点不会因此重跑。
+## 常驻会话与配置
 
-## Operation
+每个节点拥有独立常驻 Pi 进程及自己的历史。首次 prompt 包含 graph 概述、任务、验收、接口、输入与提交要求；后续只发送新输入和必要变化。工作位置由 workspace 与宿主准备结果决定，实际权限不能超过授权上限。执行、补交冻结环境；配置变化在 turn 之间重绑，保留实例、自己的历史与预算。
 
-所有真实外部动作都先写 operation intent，再派发，再结算。实际动作包括：
+进程空闲释放全局执行名额。main 与多个 graph 共用名额及调用门；预算、凭据并发与权限在实际调用前检查。工具次数按实际启动事件累计，有限预算不把未知 usage 当零。
 
-- 模型请求；
-- 工具调用；
-- 命令执行；
-- MCP 调用；
-- extension 请求；
-- provider retry、compact 和 summary；
-- Git 写入；
-- 共享 artifact 发布。
+## 路由、汇合与返工
 
-Operation 通过调用门执行。暂停、预算、权限、并发和恢复规则在真实派发前检查，而不是只在 agent turn 开始时检查。
+router 保留每个输入最近一次有效 value；未收到与收到 false/null 分别记录。each 每次输入到达判断；once 条件满足触发一次，之后仍更新输入。reopen 保留输入、解除锁存，等下一次投递再判断。需要汇合时显式声明 requiredInputs。
 
-## 激活与循环
+返工是一条普通边，返回原节点并沿用身份和会话。路由可保留旧通过状态，但审查产物仍绑定实际 commit；最终验收核对精确版本。自定义判断代码与宿主命令操作的边界见 [graph-v2.md](graph-v2.md#自定义模块运行环境)。
 
-Activation 区分同一节点的新一轮执行。回环返回到原节点时：
+## 完成、停止与恢复
 
-- 不创建新的 Agent 身份；
-- 保留 session、worktree 和累计预算；
-- 使用新的 activation id；
-- 旧轮次 evidence 不能验证新输入。
+空闲不是完成。complete 关闭外部新输入及执行型聊天，允许内部后继排空；失败待处理、执行、队列或模块待处理 transition 未清空时不完成。main 可以处理失败、撤销完成请求或 stop。stop 显式取消剩余工作，停稳后结束内部进程；聊天和成果仍可查看。
 
-汇合节点绑定本轮分支集合、activation 和输入版本。旧轮次成功不能错误满足新轮次。
+重启恢复正式队列、execution、提交与模块 outbox，不重复已成功提交。外部命令先写 operation intent，记录 dispatched/settled 等边界。结果明确可复用；未知副作用保持 uncertain，交 main 核查。权限、预算和未知结果不能靠盲重试绕过。
+
+业务输出通过 graph 公开接口交给 main；错误、介入、完成和停止使用独立去重通知。排查时读取 graph_inspect 对应 queue/executions/module/operations 与节点记录，按精确 ID 处理。完整日志与大 value 按需读取，摘要不作为完整验收证据。
 
 ## 工具返回与大结果
 
@@ -78,47 +57,3 @@ find "<stateDir>/instances" -path '*tool-results*' -name '*.txt' -exec stat -f '
 ```
 
 实测（2026-09-27，本机保留窗口内——`state-retention` 会裁旧实例，所以这是一段窗口而非长期均值）：**5 个 / 0.3 MiB**，最大一个 233 KiB（正好是 master 读自己整段转录那次，218,978 字符），最小 5.3 KiB。最小那个只比阈值高一点，说明 `TOOL_RESULT_LIMIT = 4,000` 正好落在拐点附近：**不调**。
-
-## 并发
-
-整个任务图共享 Agent 并发名额，Main Agent 也计入。等待依赖或用户时会释放名额；恢复执行前重新获取。Program node 不占 Agent 名额，但工具进程仍可受宿主资源控制。对话阶段的主管在会话未归档时，由待处理消息、显式恢复、问题答复或执行续轮触发调度。消息已消费且队列为空的异常回合不会自动重试；空队列不阻止显式恢复或答复后的继续执行。
-
-一个项目同一时刻只有一个活跃代码任务：新任务按 `created_seq` 排队，只有活跃任务走到终态时名额才交给队首。任务也可能永久停住（节点 blocked、问题无人可答，谁都无法推进），因此队列不能只依赖完成来推进：`abandon`（任务页「终止」按钮，或 `POST /api/tasks/:id/abandon`）把任务置为 `abandoned`、以 `{type:abandoned}` 解答它剩下的开放问题，并立即把名额交给队首；任务还有在飞操作时先暂停再终止。排队中的任务在视图里带 `queuedBehind`（占着名额的任务、项目与它的开放问题数），排队不再是无法解释的等待。
-
-## 返工与独立性
-
-- 实现节点和其直接后继默认使用 `result_handoff`。
-- Fresh 审查与验证只读取 acceptance、evidence、artifact 和冻结事实，使用 `evidence_only`。
-- 独立审查默认排除本轮实现使用过的模型集合。
-- Fork 只用于必须继承精确 transcript/tool-call 事实的情况，不用于普通探索。
-
-## 检查节点与车道边界
-
-- `graph.command` 检查在宿主沙箱里跑，所以为它写的测试必须是纯逻辑：不要 playwright/jsdom、不要监听端口、不要派生子进程。DOM 与浏览器行为只能由人工验收覆盖，永远不要塞进检查测试。
-- 车道的文件所有权必须互斥，并写进 `input.files`；未声明 `input.files` 的节点不检查。合并前闸门会把清单外**已存在**的路径回退到集成 tip（外来改动永不落地），清单外**新建**的文件保留不删、只记 `git.out-of-scope.restored` 事件上报。别把修复放进兄弟车道的文件。
-- 需要兄弟车道产物的车道要排在它之后；共享契约（一个类型、一个 API 形状、一个共享模块或共享文件）的车道必须串行，否则并行车道会漂移（`name` 与 `label`、丢字段），闸门随后就卡在漂移上。
-
-## 修订、阻塞与证据
-
-- 原生图修改使用 graph_patch；删除节点必须显式 retire，且先处理该节点运行、排队和失败待处理工作。修改不会自动触发复跑，需要 graph_send 投递。
-- review-gate 的 blocker 是粘滞的：输入不变时重跑验证器返回同一个 blocker digest，所以单靠 `resolve_problem(retry)` 无法让车道返工。先在集成代码里自己核对该 blocker 是否成立，原生图则修正 graph_patch 配置并明确 graph_send；旧 DAG 的依赖推断不适用。
-- `stalled` 与 `rework` 可以答 `retry` / `respond` / `escalate`（escalate 会把决定连同你的说明交给用户）。blocker 真实存在时不要只 retry，要改节点 spec。
-- 证据的 `valid` 按**集成 sha** 计算（`src/core/execution.ts` 的完成判定要求 `evidence.commit_sha` 等于集成 sha）。因此不要在任务的集成分支上手工提交：那会让已有证据全部失效却不会触发重跑。修复放应用线，并在报告里说明证据对应哪个 sha。
-- 同一节点连续三轮无进展就是本地 stall（不是整任务失败）：按 R14 停止循环并由你接手收口——修产品缺陷、修 harness 根因、过完整门禁、合入应用线、推送、激活重载、现场自验，再交人工验收。
-
-## 恢复
-
-后台重启或 worker 消失后，Graph 先核查：
-
-- operation 是否已派发；
-- 外部动作是否留下可识别结果；
-- worker/session 是否仍存在；
-- Git、artifact 或命令是否已经产生副作用。
-
-结果明确时补记；确认没有发生且可以重做时才 retry；结果不明时阻塞并生成由 Main Agent 处理的 recovery problem。不能承诺任意外部操作 exactly-once。
-
-## 进度判断
-
-监控执行中的任务时优先用 `get_task_status`：返回紧凑的节点状态（含实际选中并执行的模型）、未决的用户问题与内部问题、以及每条 acceptance 当前有效的证据，体积远小于 `get_graph_state`。带 `nodeId` 时额外返回该节点的 `input`（修订前核对归属与自检命令用）；`waitForNode` + `timeoutMs` 可以阻塞等待该节点 settle，或在出现需要你处理的问题时立即返回，不必自己轮询。
-
-有证据关闭问题、通过此前失败的检查、产生合法 artifact/result handoff 才算进展。重复改写说明、重复启动同一失败动作或跳过检查不算进展。连续多轮无进展应升级给用户。

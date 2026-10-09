@@ -1,151 +1,136 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter , Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-async function setup(actions: Record<string, ActionAdapter>, limits?: { defaultBudgetTokens?: number | null }) {
+async function setup(plans: ResponsePlan[], tokens?: number | null, contextWindow = 32000) {
   const root = await mkdtemp(join(tmpdir(), 'graph-unlimited-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'p', root }], actions, ...(limits ? { limits } : {}) };
-  const runtime = await openTaskRuntime(options);
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Unlimited work', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Unlimited',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  return { root, options, runtime, taskId, task: runtime.user.task(taskId) };
+  const provider = await openaiServer(plans); cleanup.push(() => provider.close());
+  const options: Parameters<typeof openTaskRuntime>[0] = { stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    ...(tokens !== undefined ? { limits: { defaultBudgetTokens: tokens } } : {}),
+    models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider,
+      grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow, maxTokens: 256 }] },
+  };
+  let runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Unlimited work', requestId: 'begin' });
+  const { graphId } = await runtime.supervisor(owner.taskId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2,
+    name: 'Native quota', protocols: { job: { type: 'object' } }, nodes: { work: { recipe: 'worker@1', model: 'local',
+      task: 'Reply to this input.', inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  return {
+    get runtime() { return runtime; }, provider, graphId,
+    async send(value: string) {
+      await runtime.supervisor(owner.taskId).graphSend({ graphId, nodeId: 'work', input: 'job', value: { message: value } });
+      await runtime.host.drive();
+    },
+    async retry() {
+      const main = runtime.supervisor(owner.taskId);
+      const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; state: string }[] };
+      const pending = queue.items.find(item => item.state !== 'done')!;
+      await main.graphControl({ graphId, action: 'retry', seq: pending.seq }); await runtime.host.drive();
+    },
+    async complete() {
+      await runtime.supervisor(owner.taskId).graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+      return runtime.user.task(graphId).view();
+    },
+    async reopen() { await runtime.close(); runtime = await openTaskRuntime(options); },
+  };
 }
 
-test('a new instance is unlimited and keeps running past the legacy 20M threshold', async () => {
-  let sends = 0;
-  const { runtime, task } = await setup({
-    work: { kind: 'agent', reserveTokens: 20_000_100, prepare: async () => async () => {
-      sends += 1;
-      // The same instance crosses the old default on its first call; the
-      // follow-up round must still be dispatched.
-      return { outcome: sends === 1 ? 'continue' : 'completed', output: null, usage: { input: 20_000_001, output: 0, cacheRead: 0, cacheWrite: 0 } };
-    } },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) },
-  });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const afterFirst = (await task.view()).nodes.find(node => node.id === 'work')!;
-  expect(afterFirst).toMatchObject({ used: 20_000_001, budget: null, unlimited: true });
-  // The old 20,000,000 cap must not block the same instance's next round.
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(sends).toBe(2);
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const view = await task.view();
-  expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ used: 40_000_002, budget: null, unlimited: true, status: 'succeeded' });
+test('a new native instance is unlimited and keeps running past the legacy 20M threshold', async () => {
+  const usage = { prompt_tokens: 20000001, completion_tokens: 0 };
+  const graph = await setup([{ text: 'First reply.', usage }, { text: 'Second reply.', usage }], undefined, 100000000);
+  await graph.send('First input');
+  const first = graph.runtime.nodeRun(graph.graphId, 'work').instance!;
+  expect(first).toMatchObject({ used: 20000001, budget: null, unlimited: true });
+  await graph.send('Second input');
+  expect(graph.provider.requests).toHaveLength(2);
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ id: first.id, used: 40000002, budget: null, unlimited: true });
+  const view = await graph.complete(); expect(view.phase).toBe('completed');
   expect(view.questions.filter(question => question.kind === 'budget')).toHaveLength(0);
-  expect(view.phase).toBe('completed');
-}, 60_000);
+}, 30000);
 
-test('a configured finite default still blocks, and an explicit policy change resumes', async () => {
-  let sends = 0;
-  const { runtime, task } = await setup({
-    work: { kind: 'agent', reserveTokens: 1_000, prepare: async () => async () => {
-      sends += 1;
-      return { outcome: sends === 1 ? 'continue' : 'completed', output: null, usage: { input: 1_000, output: 0, cacheRead: 0, cacheWrite: 0 } };
-    } },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) },
-  }, { defaultBudgetTokens: 1_000 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  const blocked = await task.view();
-  expect(blocked.nodes.find(node => node.id === 'work')).toMatchObject({ budget: 1_000, unlimited: false, status: 'blocked' });
-  expect(blocked.questions).toMatchObject([{ kind: 'budget', nodeId: 'work', status: 'open' }]);
-
+test('a finite native default blocks and an explicit user policy change closes its budget question without replay', async () => {
+  const graph = await setup([{ text: 'Authorized reply.' }], 1);
+  await graph.send('Retained budget input');
+  expect(graph.provider.requests).toHaveLength(0);
+  const task = graph.runtime.user.task(graph.graphId);
+  expect((await task.view()).questions).toMatchObject([{ kind: 'budget', nodeId: 'work', status: 'open' }]);
   const receipt = await task.setBudget({ nodeId: 'work', tokens: null, requestId: 'unlimited-work' });
   expect(await task.setBudget({ nodeId: 'work', tokens: null, requestId: 'unlimited-work' })).toEqual(receipt);
-  const converted = await task.view();
-  expect(converted.questions.filter(question => question.kind === 'budget' && question.status === 'open')).toHaveLength(0);
-  expect(converted.nodes.find(node => node.id === 'work')).toMatchObject({ budget: null, unlimited: true, status: 'pending' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(sends).toBe(2);
-}, 60_000);
+  expect((await task.view()).questions.filter(question => question.status === 'open')).toEqual([]);
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ budget: 1, unlimited: false, authorizedBudget: { unlimited: true } });
+  await graph.runtime.host.drive(); expect(graph.provider.requests).toHaveLength(0);
+  await graph.retry();
+  expect(graph.provider.requests).toHaveLength(1);
+  expect(JSON.stringify(graph.provider.requests[0])).toContain('Retained budget input');
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ budget: null, unlimited: true });
+  expect((await graph.complete()).phase).toBe('completed');
+}, 30000);
 
-test('the v14 migration keeps existing finite instances finite and untouched', async () => {
-  const { root, options, runtime } = await setup({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) },
-  });
-  await runtime.close();
-  // Rewind the database to the v13 shape with a finite instance carrying usage.
-  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
-  db.exec('DROP TABLE IF EXISTS result_handoffs; DROP TABLE IF EXISTS context_resolutions; DROP TABLE IF EXISTS context_handoffs; DROP TABLE IF EXISTS agent_context_bindings; DROP TABLE IF EXISTS budget_scopes; ALTER TABLE instances DROP COLUMN parent_instance_id; ALTER TABLE instances DROP COLUMN budget_scope_id; ALTER TABLE instances DROP COLUMN unlimited; DROP TABLE project_preparation; DROP TABLE presets; DROP TABLE node_entries; DROP TABLE node_sessions; DROP TABLE node_capabilities; ALTER TABLE operations DROP COLUMN dispatched_at; ALTER TABLE operations DROP COLUMN settled_at; ALTER TABLE operations DROP COLUMN waiting_since; ALTER TABLE operations DROP COLUMN waiting_ms; ALTER TABLE operations DROP COLUMN system_prompt; ALTER TABLE operations DROP COLUMN tool_declarations; ALTER TABLE nodes DROP COLUMN pause_ms; ALTER TABLE nodes DROP COLUMN pause_since; ALTER TABLE nodes DROP COLUMN user_wait_ms; ALTER TABLE nodes DROP COLUMN user_wait_since; ALTER TABLE invocations DROP COLUMN purpose; DROP INDEX IF EXISTS conversations_archived; ALTER TABLE conversations DROP COLUMN archived_at; ALTER TABLE conversations DROP COLUMN thinking_level; DROP INDEX IF EXISTS questions_task_status; DROP INDEX IF EXISTS questions_owner_status; ALTER TABLE questions DROP COLUMN owner; PRAGMA user_version=13;');
-  db.prepare('UPDATE instances SET budget=20000000, used=17').run();
-  db.close();
+test('restart preserves a native finite authorization, its instance, session and cumulative usage', async () => {
+  const graph = await setup([{ text: 'Before restart.' }, { text: 'After restart.' }], 300000);
+  await graph.send('First input');
+  const before = graph.runtime.nodeRun(graph.graphId, 'work');
+  expect(before.node.status).toBe('succeeded'); expect(before.session).not.toBeNull();
+  await graph.runtime.user.task(graph.graphId).setBudget({ nodeId: 'work', tokens: 400000, requestId: 'authorize' });
+  await graph.reopen();
+  const reopened = graph.runtime.nodeRun(graph.graphId, 'work');
+  expect(reopened.instance).toMatchObject({ id: before.instance!.id, used: before.instance!.used, budget: 300000, unlimited: false, authorizedBudget: { budget: 400000, unlimited: false } });
+  await graph.send('Second input');
+  const after = graph.runtime.nodeRun(graph.graphId, 'work');
+  expect(after.instance).toMatchObject({ id: before.instance!.id, budget: 400000, unlimited: false });
+  expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.instance!.used).toBe(before.instance!.used + 50);
+  expect(JSON.stringify(graph.provider.requests[1])).toContain('Before restart.');
+  expect((await graph.complete()).phase).toBe('completed');
+}, 30000);
 
-  const migrated = await openTaskRuntime(options);
-  cleanup.push(() => migrated.close());
-  const reopened = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
-  const row = reopened.prepare('SELECT budget,used,unlimited FROM instances LIMIT 1').get() as { budget: number; used: number; unlimited: number };
-  reopened.close();
-  expect(row).toEqual({ budget: 20_000_000, used: 17, unlimited: 0 });
-}, 60_000);
+test('unlimited native instances estimate missing provider usage and complete without a budget question', async () => {
+  const graph = await setup([{ text: 'Reply without provider usage.', usage: null }]);
+  await graph.send('Missing usage');
+  const run = graph.runtime.nodeRun(graph.graphId, 'work');
+  expect(run.node.status).toBe('succeeded'); expect(run.instance!.used).toBeGreaterThan(0);
+  expect(run.invocations).toMatchObject([{ usageSource: 'estimated' }]);
+  expect((await graph.complete()).phase).toBe('completed');
+  expect((await graph.runtime.user.task(graph.graphId).view()).questions).toEqual([]);
+}, 30000);
 
-test('unlimited worker instances continue when usage is missing', async () => {
-  const { runtime, task } = await setup({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage: null }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }] }) },
-  });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const view = await task.view();
-  expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'work')).toMatchObject({ unlimited: true, budget: null, status: 'succeeded' });
-  // There is no finite cap to protect, so the dependent check can run.
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect((await task.view()).phase).toBe('completed');
-}, 60_000);
-
-test('unlimited instances accept estimated usage while finite budgets fail closed', async () => {
-  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0, usageSource: 'estimated' as const };
-  const action = {
-    kind: 'agent' as const,
-    reserveTokens: 100,
-    prepare: async () => async () => ({ outcome: 'completed' as const, output: null, usage }),
-  };
-  const unlimited = await setup({ work: action, check: {
-    kind: 'program',
-    prepare: async () => async () => ({
-      outcome: 'completed' as const,
-      output: null,
-      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: '/tmp/ok', digest: 'a'.repeat(64) } }],
-    }),
-  } });
-  expect(await unlimited.runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect((await unlimited.task.view()).nodes.find(node => node.id === 'work'))
-    .toMatchObject({ status: 'succeeded', used: 50, unlimited: true });
-
-  const finite = await setup({ work: action, check: {
-    kind: 'program',
-    prepare: async () => async () => ({ outcome: 'completed' as const, output: null }),
-  } }, { defaultBudgetTokens: 1_000 });
-  expect(await finite.runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const blocked = await finite.task.view();
-  expect(blocked.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'blocked', used: 0, unlimited: false });
-  expect(blocked.questions).toMatchObject([{ kind: 'unknown_usage', nodeId: 'work', status: 'open' }]);
-  expect(blocked.questions[0]!.data).toMatchObject({ usageSource: 'estimated' });
-}, 60_000);
+test('a finite native missing-usage hold survives restart and policy changes until explicit reconciliation', async () => {
+  const graph = await setup([{ text: 'Unmetered reply.', usage: null }, { text: 'After reconciliation.' }], 300000);
+  await graph.send('Missing finite usage');
+  expect(graph.provider.requests).toHaveLength(1);
+  const before = graph.runtime.nodeRun(graph.graphId, 'work');
+  expect(before.node.status).toBe('blocked'); expect(before.instance!.used).toBe(0);
+  if (!before.instance || !('reserved' in before.instance)) throw new Error('Native budget ledger is missing');
+  const held = before.instance.reserved; expect(held).toBeGreaterThan(0);
+  await graph.reopen();
+  await graph.runtime.user.task(graph.graphId).setBudget({ nodeId: 'work', tokens: 600000, requestId: 'more-quota' });
+  await graph.retry();
+  expect(graph.provider.requests).toHaveLength(1);
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ reserved: held });
+  const main = graph.runtime.supervisor(graph.graphId);
+  const calls = await main.graphInspect({ graphId: graph.graphId, query: 'provider_calls' }) as { id: string; state: string; usage: unknown }[];
+  expect(calls).toMatchObject([{ state: 'unknown', usage: null }]);
+  await main.graphControl({ graphId: graph.graphId, action: 'reconcile_usage', callId: calls[0]!.id,
+    usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  await graph.retry();
+  expect(graph.provider.requests).toHaveLength(2);
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ used: 100, reserved: 0 });
+  expect((await graph.complete()).phase).toBe('completed');
+}, 30000);
 
 test('an invalid default budget is rejected instead of guessed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-unlimited-invalid-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  await expect(openTaskRuntime({ stateDir: join(root, 'state'), actions: {}, limits: { defaultBudgetTokens: 0 } }))
-    .rejects.toMatchObject({ code: 'invalid_input' });
-  await expect(openTaskRuntime({ stateDir: join(root, 'state'), actions: {}, limits: { defaultBudgetTokens: -1 } }))
-    .rejects.toMatchObject({ code: 'invalid_input' });
-}, 30_000);
+  await expect(openTaskRuntime({ stateDir: join(root, 'state'), limits: { defaultBudgetTokens: 0 } })).rejects.toMatchObject({ code: 'invalid_input' });
+  await expect(openTaskRuntime({ stateDir: join(root, 'state'), limits: { defaultBudgetTokens: -1 } })).rejects.toMatchObject({ code: 'invalid_input' });
+}, 30000);

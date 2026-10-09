@@ -1,4 +1,5 @@
 import { Ajv, type ValidateFunction } from 'ajv';
+import { parseAccessPolicy, fullAccessPolicy, type AccessPolicy } from './access-policy.ts';
 import { expandSubgraph } from './subgraph.ts';
 import { RuntimeError } from './types.ts';
 import type { Json } from './types.ts';
@@ -11,9 +12,9 @@ import type { Json } from './types.ts';
  * import path. A definition is parsed whole — any defect refuses the whole
  * definition so a partially accepted graph can never exist (§15.9, "禁止部分创建成功").
  *
- * Kept deliberately separate from the legacy `Proposal`/`NodeSpec` shape in
- * `types.ts`: the old DAG fields (dependsOn/when/loops) stay readable for history
- * only and are never mixed into this structure.
+ * Kept deliberately separate from the external main `NodeSpec` record in
+ * `types.ts`: old DAG fields and context-inheritance settings are retired and
+ * cannot be mixed into this structure.
  */
 
 export const INTERFACE_SCHEMA_VERSION = 2;
@@ -49,10 +50,19 @@ export interface ExecutionSettings {
   budget?: { tokens: number | null };
 }
 
+export type NodeAccessPolicy = Partial<Omit<AccessPolicy, 'autoApprove' | 'filesystem' | 'piExtensions'>> & {
+  mode: AccessPolicy['mode']; autoApprove?: Partial<AccessPolicy['autoApprove']>;
+  filesystem?: Partial<AccessPolicy['filesystem']>; piExtensions?: Partial<AccessPolicy['piExtensions']>;
+};
+
 export interface NodeDefinition extends NodeInterface, ExecutionSettings {
   /** Every node is an agent bound to a versioned recipe; host commands are operation modules. */
   recipe: string;
   task: string;
+  /** Omitted preserves automatic private worktree/project selection. Path is relative to that base. */
+  workspace?: { base: 'auto' | 'project' | 'worktree'; path?: string };
+  /** Explicit node policy, bounded by the host's authorization; omitted inherits the host. */
+  access?: NodeAccessPolicy;
   acceptance?: string[];
   /** Required outputs a submission must enable:true (§4). */
   submission: { required?: string[]; requiredAnyOf?: string[] };
@@ -220,10 +230,39 @@ function validateExecutionSettings(scope: string, settings: ExecutionSettings): 
 function validateNode(definition: GraphDefinition, id: string, node: NodeDefinition): void {
   if (!node || typeof node !== 'object') invalid(`Node ${id} must be an object`);
   if (Object.hasOwn(node, 'command')) invalid(`Node ${id} is an agent; declare host commands in an operation module`);
+  for (const key of Object.keys(node)) {
+    if (!['recipe', 'task', 'acceptance', 'inputs', 'outputs', 'submission', 'model', 'retry', 'budget', 'deliverable', 'workspace', 'access'].includes(key)) {
+      invalid(`Node ${id} has unsupported field ${key}; use named interfaces and explicit edges for graph execution`);
+    }
+  }
   const hasRecipe = typeof node.recipe === 'string' && node.recipe.trim().length > 0;
   if (!hasRecipe) invalid(`Node ${id} requires an agent recipe`);
   if (typeof node.task !== 'string' || !node.task.trim()) invalid(`Node ${id} requires a task`);
   validateExecutionSettings(`Node ${id}`, node);
+  if (node.workspace !== undefined) {
+    const workspace = node.workspace;
+    if (!isRecord(workspace) || Object.keys(workspace).some(key => !['base', 'path'].includes(key))
+      || !['auto', 'project', 'worktree'].includes(workspace.base)) invalid(`Node ${id} workspace requires base:auto|project|worktree`);
+    if (workspace.path !== undefined && (typeof workspace.path !== 'string' || !workspace.path.trim()
+      || workspace.path.startsWith('/') || /[\\\0]/.test(workspace.path) || workspace.path.split('/').some(part => part === '..' || !part))) {
+      invalid(`Node ${id} workspace.path must remain relative to its declared base`);
+    }
+  }
+  if (node.access !== undefined) {
+    const strict = (value: unknown, shape: object, path: string) => {
+      if (!isRecord(value)) invalid(`${path} must be an object`);
+      for (const key of Object.keys(value as object)) {
+        if (!Object.hasOwn(shape, key)) invalid(`${path} has unsupported field ${key}`);
+        const sample = (shape as Record<string, unknown>)[key];
+        if (sample && typeof sample === 'object') strict((value as Record<string, unknown>)[key], sample, `${path}.${key}`);
+      }
+    };
+    strict(node.access, fullAccessPolicy(), `Node ${id} access`);
+    if (!['standard', 'full'].includes(node.access.mode)) invalid(`Node ${id} access requires mode:standard|full`);
+    try { parseAccessPolicy(node.access, `Node ${id} access`); }
+    catch (error) { invalid(error instanceof Error ? error.message : String(error)); }
+  }
+
   for (const [port, ref] of Object.entries(node.inputs ?? {})) {
     assertDeclaredProtocol(definition, ref, `Node ${id} input ${port}`);
   }
@@ -263,6 +302,9 @@ function validateModule(definition: GraphDefinition, id: string, module: ModuleD
     if (!operation || operation.action !== 'workspace.command' || !Number.isSafeInteger(operation.version) || operation.version < 1
       || typeof operation.command !== 'string' || !operation.command.trim() || !Array.isArray(operation.args)
       || operation.args.some(arg => typeof arg !== 'string') || !module.outputs?.[operation.output]) invalid(`Module ${id} requires a versioned workspace.command operation and declared output`);
+    for (const key of Object.keys(operation!)) {
+      if (!['action', 'version', 'command', 'args', 'output', 'timeoutMs', 'sandbox'].includes(key)) invalid(`Module ${id} has unsupported operation field ${key}`);
+    }
     if (operation!.timeoutMs !== undefined && (!Number.isSafeInteger(operation!.timeoutMs) || operation!.timeoutMs < 1 || operation!.timeoutMs > 86400000)) invalid(`Module ${id} has invalid operation timeout`);
     if (operation!.sandbox !== undefined && typeof operation!.sandbox !== 'boolean') invalid(`Module ${id} sandbox must be boolean`);
     if (module.code || module.rules?.length) invalid(`Module ${id} operation cannot also declare code or rules`);

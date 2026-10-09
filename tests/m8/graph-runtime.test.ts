@@ -192,7 +192,7 @@ describe('GraphRuntime — lifecycle and control (§5, §8)', () => {
     runtime.complete();
     expect.soft(runtime.settleCompletion()).toBe('blocked');
     expect.soft(() => runtime.chat({ nodeId: 'a', text: 'new work' })).toThrow(/completing/);
-    const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
+    const lifecycle = new OperationLifecycle(store);
     expect.soft(() => lifecycle.answer('t1', question.id, { type: answer })).not.toThrow();
     expect(store.db.prepare('SELECT status FROM questions WHERE id=?').get(question.id)).toEqual({ status: 'resolved' });
     expect(runtime.state()?.phase).toBe(answer === 'acknowledge' ? 'completing' : 'blocked');

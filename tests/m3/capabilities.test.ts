@@ -14,7 +14,7 @@ import { git as runGit } from '../../src/git/git.ts';
 import { capabilityConfigViews } from '../../src/catalog/capability-config.ts';
 import { loadCapabilities } from '../../src/runtime/capabilities.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -107,28 +107,14 @@ async function installCapability(
   return destination;
 }
 
-async function checkedTask(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, workspace: string) {
-  const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Use the bound capability.', requestId: 'begin' });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Use the bound capability',
-    acceptance: [{ id: 'ok', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  return runtime.user.task(taskId);
-}
-
-function checkAction(workspace: string) {
-  return {
-    kind: 'program' as const,
-    prepare: async () => async () => ({
-      outcome: 'completed' as const, output: null,
-      evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(workspace, 'ok.txt'), digest: 'a'.repeat(64) } }],
-    }),
-  };
+async function boundTask(runtime: Awaited<ReturnType<typeof openTaskRuntime>>) {
+  const parent = await runtime.user.begin({ projectId: 'p', request: 'Use the bound capability', requestId: 'begin' });
+  const main = runtime.supervisor(parent.taskId);
+  const { graphId } = await main.graphCreate({ targetBranch: 'main', definition: parseGraphDefinition({ schemaVersion: 2, name: 'Bound capability', protocols: {},
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Use the bound capability', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Call the bound extension' });
+  return runtime.user.task(graphId);
 }
 
 test('a definition-bound extension loads in the restricted worker and its tool is callable and metered', async () => {
@@ -148,13 +134,12 @@ test('a definition-bound extension loads in the restricted worker and its tool i
     stateDir: join(root, 'state'), projects: [{ id: 'p', root: workspace }],
     ...catalogOptions(root),
     models: { entries: [entry(provider.model.baseUrl)], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    actions: { check: checkAction(workspace) },
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high', capabilities: [{ id: 'ext', version: '1.0.0' }] }, 'coder');
   await installCapability(runtime, root, { id: 'ext', kind: 'extension', source: extension, version: '1.0.0' });
 
-  const task = await checkedTask(runtime, workspace);
+  const task = await boundTask(runtime);
   await runtime.host.drive();
 
   const view = await task.view();
@@ -163,8 +148,13 @@ test('a definition-bound extension loads in the restricted worker and its tool i
   expect(await readFile(outside, 'utf8')).toBe('formal');
   expect(JSON.stringify(provider.requests[1])).toContain('outsideDenied');
   expect(view.questions).toEqual([]);
-  const measurements = view.invocations.filter(row => row.usage && row.usage.input === 0 && row.usage.output === 0);
-  expect(measurements.length).toBeGreaterThanOrEqual(2); // one tools/list plus one tools/call
+  const disk = new TaskStore(join(root, 'state', 'tasks.sqlite'));
+  try {
+    const measurements = disk.db.prepare("SELECT data FROM events WHERE task_id=? AND type='graph.tool.settled'").all(view.id) as { data: string }[];
+    expect(measurements.length).toBeGreaterThanOrEqual(2); // Actual capability discovery and call, separate from model usage.
+    expect(view.invocations).toHaveLength(2);
+    expect(view.invocations.every(row => row.usage !== null && row.usage.input > 0)).toBe(true);
+  } finally { disk.close(); }
 });
 
 test('a packaged Electron runtime grants its own bundle frameworks to sandboxed helpers', async () => {

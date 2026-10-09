@@ -1,10 +1,10 @@
 # Graph v2 管理入口
 
-本页描述正在接入产品的新内核 API。正式切换和旧内核退役尚未完成；不要把本文当作 Issue #1 已验收的证明。完整契约见 [已确认规格](../specs/graph-rebuild-v2.md)。
+本页描述当前源码中的原生内核 API。源码入口已统一采用该内核；默认桌面启动已独立核对当前源码和原用户状态，完整证据见 [逐项验收对应](issue-1-spec-acceptance-matrix.md)。完整契约见 [已确认规格](../specs/graph-rebuild-v2.md)。
 
 ## 创建与启动
 
-需要用户确认的草稿使用 `propose_graph({proposal:{requirementVersion,summary,definition,acceptance,decisions?},requestId})`。definition 使用本文同一 JSON 格式；无需旧 nodes 数组。外层 acceptance 暂用 `{id,description,checkNode}`，指向定义中的实际节点或模块；定义同时声明正式 acceptance 时，两者需一致。main 位于定义外部。确认后收到 graph_ready 通知，再显式 graph_send，不自动运行根节点。主 agent 的 propose_graph 只接收此结构化对象，已关闭旧 proposalJson 字符串别名；运行中修改使用 graph_patch，旧 revise_graph 工具已移除。SDK 的 legacy revise 对原生 graph 也明确拒绝，避免进入旧修订器。SDK 与旧内核的完整退役仍在实施，尚未完成默认切换。
+需要用户确认的草稿使用 `propose_graph({proposal:{requirementVersion,summary,definition,acceptance,decisions?},requestId})`。definition 使用本文同一 JSON 格式；无需旧 nodes 数组。外层 acceptance 暂用 `{id,description,checkNode}`，指向定义中的实际节点或模块；定义同时声明正式 acceptance 时，两者需一致。main 位于定义外部。确认后收到 graph_ready 通知，再显式 graph_send，不自动运行根节点。主 agent 的 propose_graph 只接收此结构化对象，已关闭旧 proposalJson 字符串别名；运行中修改使用 graph_patch，旧 revise_graph 工具已移除。SDK 也要求原生 definition；旧 revise SDK 方法也已删除，使用 graph_patch 修订。正式 SDK 草稿只接收 NativeProposal，definition 必需；不再暴露旧 nodes/containers/loops 草稿类型。旧节点上下文继承、依赖调度和草稿格式不再是正式 SDK；默认应用切换证据见实施进度。
 
 提交草稿前可调用 `validate_proposal({proposal})`，传入与 `propose_graph` 完全相同的原生对象；返回 `valid:true` 或 `valid:false` 与错误，不创建草稿、不启动节点。预检不接收旧 `proposalJson` 字符串。
 
@@ -16,19 +16,35 @@
 
 `graph_send({graphId,nodeId,text})` 发送直接聊天。聊天与接口投递共用节点的串行队列；聊天可以只回复，不提交工作流输出。
 
+## 节点工作目录与权限
+
+节点可选声明 `workspace:{base:"auto"|"project"|"worktree",path?:"相对目录"}` 与 `access:{mode:"standard"|"full",...}`。省略时沿用宿主权限，工作目录在已准备 Git 的 graph 中使用节点自己的 worktree，否则使用项目目录。`project` 明确选择项目；`worktree` 要求创建 graph 时已指定 targetBranch。path 必须是所选根下已存在的目录，禁止绝对路径、父目录越界与指向根外的符号链接。
+
+例如 `workspace:{base:"worktree",path:"packages/api"},access:{mode:"standard",network:"declared"}`。access 复用现有 AccessPolicy 的字段与默认值，不允许超过宿主已经授权的范围；protectedPaths 继续保留。受理定义不等于权限已经获准：启动时校验实际宿主授权，拒绝时保留输入、暂停节点并通知 main，不消耗自动重试次数。
+
+执行及缺项补交使用启动时冻结的环境。main 修改 workspace/access 后，下一次执行才重绑，保留实例身份、聊天历史和累计预算；成功重绑记录 graph.node.rebound。节点的 system prompt、node_run 与独立聊天窗口显示实际规范工作目录、实际 project/worktree 基础及已解析权限快照，不把下一版本配置当作当前执行环境。选择项目目录的节点不获得只适用于私有 worktree 的 workspace_commit 工具。
+
+node_run 的 toolCallCount 是节点所有执行累计的实际工具启动次数，包含失败调用；不受聊天记录分页影响。按真实 Pi 工具启动事件计数；供应商复用工具调用 ID 仍计为新调用，工具返回记录不增加次数。节点概览同步显示累计次数。
+
 ## 修改与观察
 
 `graph_patch({graphId,baseRevision,changes:{definition,reason,retire?}})` 发布新 revision。baseRevision 过期时不写入。删除节点必须明确列在 retire 中；存在运行、排队或失败待处理工作时，先处理工作。当前执行保留原配置，后续 submit 使用届时的连接。
 
 局部修改使用 `changes:{reason,patch,retire?}`，与 definition 二选一。例如 `patch:{nodes:{work:{task:"处理新增边界"}},edges:{review:{enabled:false}}}`。对象字段递归合并，数组整体替换，null 删除字段；未指定内容保留。结果仍按同一正式 graph 定义整体验证，不增加第二套 graph 格式。删除节点仍要显式 retire 并先处理待办工作；有连接时同时在 patch 中删除对应边。
 
-`graph_inspect({graphId,query,id?})` 支持 summary（默认）、revision、nodes、results、edge、module、operations、provider_calls。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
+`graph_inspect({graphId,query,id?,after?,limit?,deliveryId?})` 支持 summary（默认）、revision、nodes、results、edge、edge_delivery、module、module_values、module_transition、operations、provider_calls、queue、executions。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
+
+edge 历史按新到旧分页，默认20条，limit范围1–200；返回nextBefore，下一页将它作为after传入。图概览每条边只带最新1条摘要。超过4096 bytes的value返回valueTruncated=true、valueBytes与短预览，value=null表示尚未加载；latestTruncated同样区分最新值未加载与真实null。精确读取使用 `graph_inspect({graphId,query:"edge_delivery",id:"边ID",deliveryId:"投递ID"})`，只返回属于该graph和该边的一条完整记录。来源execution、接收处理状态、版本、时间与具名端点保留；接收状态会随处理变化，不是不可变投递value的一部分。
+
+用户界面选中边按需读取历史，「加载更早投递」翻页，「读取完整 value」明确获取完整值；artifactId+version引用连接到精确版本页面。HTTP对应GET `/api/tasks/:taskId/graph/edges/:edgeId?before=&limit=` 与 `/api/tasks/:taskId/graph/edges/:edgeId/deliveries/:deliveryId`。
+
+module 判断历史按发生顺序分页，默认20条，上限200；下一页将 nextAfter 作为 after。图概览提供输入、state摘要和latestTransition，不加载判断历史；选中模块后开始读取。超过4096 bytes的输入/state标记valueTruncated/stateTruncated；transition中任一JSON字段过大标记payloadTruncated，未加载不能当作业务null或空输出。`graph_inspect({graphId,query:"module_values",id:"模块ID"})` 明确读取完整当前输入与状态；`graph_inspect({graphId,query:"module_transition",id:"模块ID",transitionId:"记录ID"})` 读取一条完整判断。输入、state和历史相互独立，读取当前状态不会重跑模块。HTTP入口为 `/api/tasks/:taskId/graph/modules/:moduleId?after=&limit=`、其 `/values` 和 `/transitions/:transitionId`。
 
 ## 控制
 
 `graph_control({graphId,action,nodeId?,moduleId?,seq?,operationId?})`：
 
-- pause/resume：有 nodeId 时控制该节点队列，否则控制整个 graph 的派发。
+- pause/resume：nodeId 控制 agent 队列，moduleId 控制模块待处理输入；两者只能指定一个。都不指定时控制整个 graph 的派发。局部恢复不会解除 graph 的暂停。
 - retry/skip/cancel：指定 seq 处理待执行队列项。仍在运行的项不能被这些操作重新领取；已成功提交的原输入不能重发。
 - cancel_operation：指定 operationId，取消 uncertain/failed 操作的原输入；不撤销已产生的副作用，也不生成成功结果。dispatched 操作必须先停止。取消可以重放；恢复后如需重做，由 main 显式重新投递。
 - reopen：指定 moduleId，等待已经开始的模块判断结束后清除一次汇合的触发锁存，保留输入，等待下一次投递再判断。
@@ -47,6 +63,38 @@
 启动 Docker 后预先准备固定镜像：`docker pull node:24.20.0-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e`。无法启动或镜像不存在时，模块保留输入并报告错误，等待 main 处理。进程级内存限制已用 64 MiB cgroup + 200 MiB Buffer 分配验证，内核终止、退出 137、OOMKilled=true。
 
 
+## 按需生成审查模块
+
+需要多视角、对抗式或评委式判断时，main 可在 Graph 源码目录运行 `node scripts/create-review-module.ts <policy.json> <新的-entry.mjs> [version] [protocol]`。这不是常驻工具或另一种 graph 格式：命令生成纯判断代码，并把普通 command 模块 JSON 写到 stdout；将该对象放入 definition.modules，连接显式输入即可。代码文件不能覆盖，修订用新路径和版本。默认 version=1、各接口 protocol=data；graph 必须声明该协议。连接到已有不同协议的端点时，按端点的协议 ID/版本调整生成对象中的接口声明，或显式映射；不绕过连接校验。
+
+例如 policy.json：
+
+```json
+{
+  "kind": "multiview",
+  "subject": "implementation",
+  "reports": ["review"],
+  "dimensions": [{"id": "correctness", "required": true, "report": "review"}],
+  "owned": ["src/"]
+}
+```
+
+subject/reports 是模块输入名，不是隐式节点依赖。subject 输入值为 `{artifactId,version,digest}`；review 输入为 `{schemaVersion:1,subject:{artifactId,version,digest},body:{kind:"multiview",dimensions:{correctness:{verdict:"pass",reason:"实测理由",evidence:[{artifactId,version,digest}],files:["src/example.ts"]}}}}`。verdict 可为 pass/fail/unresolved，理由与已发布证据必需；files 可省略。所有声明的 subject 和 report 输入收齐后才判断。必需维度全部通过；建议维度可缺席、不阻止通过。owned 是 main 显式配置的文件范围，仅用于报告未被覆盖的返工文件。
+
+adversarial 使用 `{kind:"adversarial",subject,reports,criteria:["验收项ID"]}`。报告 body 包含 checks 和 counterexamples。每个反例声明 id、acceptanceId、validity=valid/invalid/unresolved、impactsAcceptance、resolution=open/resolved 与 judgment；有验收影响的有效或未解决反例仍 open 时必须返工，不能用其他通过结论抵消。
+
+jury 使用 `{kind:"jury",reports,candidates:[{id,subject}],hard:["builds"],ranking:[{id,weight,min,max}],tieOrder:["排名维度ID"]}`。每个 candidate 的 subject 对应自己的模块输入；报告 body.candidates 逐项包含 id、artifact、hard 判断和 scores（value、reason、evidence）。先检查所有硬性条件，再按归一化加权得分排名，平分按 tieOrder 的原始得分及候选 ID 顺序决定；全部不合格时输出返工，不产生 winner。吸收其他候选之后，另一个模块用相同规则检查新产物：将候选 subject 显式连到新产物，旧胜者引用不能证明新产物。
+
+模块在 approved 或 rework 具名输出传递 decision（subjects、reports、blockers、reviewText，评委式另有 ranking/winner），并把最后 decision 保存为可解释状态。业务返工正常结束判断，不伪装成进程错误；格式或版本不符输出 invalid_evidence 返工。代码仍在上述 Docker 隔离与资源上限中运行。此配方比较输入中的内容与精确版本；引用对应的发布是否存在、内容是否真实，由宿主产物接口及最终验收核实。它不替代宿主检查、独立模型证明、人类验收或 Git 最终完成门；这些继续由正式 acceptance 声明验证。
+
+返工环可显式配置 `staleReview: "wait"`：如果当前 subject 与暂存报告引用同一 artifactId，但报告版本更旧，模块保留上一判断状态、记录等待诊断，不发送 approved/rework；下一条有效投递再判断。默认 `staleReview: "rework"`，旧版本报告仍输出 invalid_evidence。不同产物 ID、同版本不同 digest、格式错误仍返工。这个选择属于所生成审查规则，不改变通用路由保留最新输入、通过状态或 once 锁存的语义。最终验收始终核对实际版本。
+
+## 原生定义示例
+
+需要流水线、分支汇合、嵌套路由或 main 派发 worker 时，读取 Graph 源码 `examples/graphs/{pipeline,fanout,router,supervisor-workers}.json`。文件就是正式 JSON definition，不需要旧模板函数或转换器。使用前替换节点的 coder@1 配方与 work/left/right/text/json 模型连接 ID，并按任务明确填写 task、acceptance、协议及输出要求；再把完整对象交给 graph_create。首次工作由 main 向公开 job 输入投递，完成由 main 显式请求。
+
+示例 check 仅运行 node --version 来展示宿主命令连接，不能证明项目验收；实际任务必须换成项目检查并声明正式 acceptance。fanout 和 supervisor-workers 的 join 明确等待 left/right，成功后锁存一次；下一批工作需要显式重开 join。supervisor-workers 中的 main 位于图外，没有内部 master 节点。router 用两层子 graph 的公开映射连出两个分支，仅选中的接口投递，下游 check 每次收到一个结果就执行，不隐含等待另一个分支。
+
 ## 子 graph 定义与实例
 
 JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `instances: {first: {template: "build", version: 7}, second: {template: "build", version: 7}}`。父级连接和公开接口可引用 `first.job`、`second.result` 等子 graph 公开接口。系统将它们展开成 `first/work` 等稳定路径，并固定模板版本、隔离节点配置和内部边 ID。实例仅组织和复用结构，不增加执行或等待。
@@ -54,6 +102,10 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 模块可声明 `control: {reopen: "control"}`，control 必须是已声明输入，且不属于 requiredInputs。该入口的一次有效投递只清除锁存，不替换审查输入，也不立即触发。
 
 模块可在 limits 中显式配置 timeoutMs、memoryMb、inputBytes、outputBytes、stateBytes；修改经 graph_patch 产生可追溯 revision。memoryMb 在 64–16384 范围内。
+
+## 图的端点与路线
+
+原生图的节点位置、尺寸、端点和边折点使用统一 16px 格点。具名逻辑接口在概览上汇为顶部入口、底部出口；前向边、反馈边和自回边都来自正式连接，并使用正交路线避开节点。多条同端点连接只在视觉端点附近共享短线段，之后使用不同通道。运行投递和状态更新沿用同一结构的布局；选中边查看实际具名接口、协议和投递，不根据画面位置推断执行顺序。
 
 ## Provider 用量与恢复
 
@@ -81,7 +133,7 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 }
 ```
 
-结果包含 passed、code、commit、operationId、record、stdout/stderr 摘要和耗时；record 指向完整命令记录。非零退出码产生 passed:false。commit 记录实际派发前的 HEAD。verifiedCommit 只在退出码为零、派发前与结束后工作树均干净且 HEAD 相同时记录；完整结果文件包含 commitAfter、cleanBefore、cleanAfter。宿主检查与受管理的 Git 集成共用排他锁。该记录不替代审查、human acceptance 或最终交付条件，也不声称任意外部程序的副作用恰好一次。sandbox 默认启用；sandbox:false 仅允许 full access。
+结果包含 passed、code、commit、operationId、record、stdout/stderr 摘要和耗时；record 指向完整命令记录。非零退出码产生 passed:false。commit 记录实际派发前的 HEAD。verifiedCommit 只在退出码为零、派发前与结束后工作树均干净且 HEAD 相同时记录；完整结果文件包含 commitAfter、cleanBefore、cleanAfter。宿主检查与受管理的 Git 集成共用排他锁。该记录不替代审查、human acceptance 或最终交付条件，也不声称任意外部程序的副作用恰好一次。sandbox 默认启用；sandbox:false 仅允许 full access。宿主 program 配置提供环境和依赖目录，未指定时使用项目自身 node_modules；沙箱检查允许受限回环测试，非回环监听仍被拒绝。最终验收检查的 operation 配置不可通过 graph_patch 修改。
 
 `graph_inspect({graphId,query:"operations"})` 查看持久操作记录。已保存结果在恢复时用于继续投递，不重新执行命令；派发后中断且没有可靠结果的操作标记 uncertain，暂停模块等待 main 检查。停止会终止命令进程组。
 
@@ -96,6 +148,10 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 ## 节点身份与可编辑提示
 
 recipe 的 review 标记决定审查身份及规则；节点名称和任务文字不参与身份推断。节点运行指导使用可编辑的 runtime/node.md，描述实际 submit、具名输出、聊天和稳定产物引用，不注入旧 submit_result 指令。
+
+配方引用绑定明确版本；发布新版不会自动替换现有节点。升级时用 graph_patch 修改 recipe，下一次执行采用新版并保留历史。
+
+工具失败保留可读原因和结构化 message；失败工具调用可在同一轮继续修正。图请求暂停后，尚有 Agent 执行或宿主命令时显示暂停中，停止后才显示已暂停。
 
 身份、通用规则、相应角色规则/工具指导及节点运行指导修改后，从下一次执行生效；受控重绑保留原会话历史。节点视图显示实际绑定角色，尚未绑定时保持未知。
 
@@ -143,7 +199,7 @@ budget.tokens 是该节点累计额度，非每次运行的新余额；省略继
 
 `graph_inspect({graphId,query:"queue",id:"worker",limit:100,after:0})` 按受理顺序读取队列，包含 seq、状态、原 payload、generation 和失败/取消原因。id 可省略以查看整张 graph。返回 items 和 next；next 非 null 时用它作为 after 读取下一页，limit 为 1–200。
 
-`query:"executions"` 使用同样的分页与节点过滤，返回实际执行身份、冻结 revision/预算、尝试/补交计数和 submissionId。retry/skip/cancel 只处理尚未结算的 queued 或 failed 输入；claimed 输入需先等待当前执行结束，done 输入（已回复、跳过或取消）不能重新排队或改写原因。成功提交的原输入即使随后失败也不可 retry。需要新任务时明确发送新投递或聊天。节点 pause/resume 只接受当前定义中的 agent 节点，已删除或不存在的节点会被拒绝。无效 query 或分页参数会明确报错。
+`query:"executions"` 使用同样的分页与节点过滤，返回实际执行身份、冻结 revision/预算、尝试/补交计数和 submissionId。retry/skip/cancel 只处理尚未结算的 queued 或 failed 输入；claimed 输入需先等待当前执行结束，done 输入（已回复、跳过或取消）不能重新排队或改写原因。成功提交的原输入即使随后失败也不可 retry。需要新任务时明确发送新投递或聊天。nodeId 的 pause/resume 只接受当前定义中的 agent 节点，moduleId 只接受当前模块；两者不能同时指定，已删除或不存在的目标会被拒绝。模块发生异常后输入保留，修复配置后显式 resume(moduleId) 才重新处理；该操作保留模块输入与成功状态，不清除业务计数或 once latch，graph 暂停仍独立生效。无效 query 或分页参数会明确报错。
 
 局部 JSON merge patch 的 null 表示删除字段；需要设置字面值 `budget.tokens:null` 时使用完整 definition。
 
@@ -175,7 +231,7 @@ query:"acceptance" 返回各验收项的实际状态、原因和来源，以及�
 
 stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍返回原 receipt，不撤回旧投递、不重复发送。complete 请求期间仍允许内部输出流动并清空工作。
 
-宿主 operation 与其他程序执行共用全局 4 个程序名额。等待名额的 operation 保持 prepared；名额取得后才允许跨越 dispatched 边界，实际 runner 结束后释放。operations 检查中的 worker_active 表示资源占位，不能据此声称 PID 存活或副作用已完成。等待期间 stop 不派发命令、不留下占位。恢复只自动释放未派发 prepared 的占位；已派发且不确定的占位保留，未核实终止前拒绝 cancel_operation。硬崩溃后的进程身份核查与安全释放仍待接通。
+宿主 operation 与其他程序执行共用全局 4 个程序名额。等待名额的 operation 保持 prepared；名额取得后才允许跨越 dispatched 边界，实际 runner 结束后释放。operations 检查中的 worker_active 表示资源占位，不能据此声称 PID 存活或副作用已完成。等待期间 stop 不派发命令、不留下占位。恢复只自动释放未派发 prepared 的占位；已派发且不确定的占位保留，未核实终止前拒绝 cancel_operation。硬崩溃后的资源凭证核查见下一节；没有可验证凭证时保留未知占位。
 
 ## 宿主命令崩溃后的资源占位
 
@@ -233,8 +289,37 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 
 用户通过 task.setBudget 为原生 agent 节点设置独立授权额度（正整数，或 null 明确不限额度）。授权持久化在原生节点账本，不依赖旧 instances；没有显式授权时继承已配置默认额度。graph 的节点 / defaults budget 是使用声明，不能突破该授权。当前执行与恢复继续使用其已冻结额度，下一次新执行读取新授权；节点详情 instance.authorizedBudget 单独展示用户政策，instance.budget 仍表示最近执行的实际额度。预算调整不改写历史用量、不清除未知用量、不自动恢复或重发排队输入；需要继续时 main 显式处理队列。结束 graph 拒绝新调整，已有命令回执仍可幂等重放。
 
+实际有限额度预留不足会生成一条用户预算问题，inbox 可用 add_budget 追加正整数；重复观察同一阻塞不会产生重复问题。答复增加当前用户授权，保留原执行冻结额度与原输入；main 用 graph_control retry 显式开始下一执行。已有 submit 的输入禁止重放，未知用量仍须独立核对。有显式节点预算声明时，授权增额不自动更改声明，main 需要按新授权调整声明。追加拒绝整数溢出或没有合法冻结执行来源的问题。
+
+用户直接 setBudget 的明确政策变更也会关闭该节点已有的预算问题，保留当前 execution 的冻结额度和队列暂停。未知 usage 的 hold 与其他类型问题继续保留；节点恢复仍由 main 显式 retry。inbox 答复后同时刷新导航待办数量与已处理历史。
+
 main 修改原生节点预算只用 graph_patch 的节点 budget 声明，仍受用户授权约束；旧 control_task set_budget 在原生 graph 上明确拒绝并指向 graph_patch。节点窗口分别显示最近执行预算与用户授权额度，后者调整后下次执行重新校验。
 
-无模型的 ActionAdapter 宿主同样从当前 execution.revisionVersion 读取冻结任务与配方，不能在补交期间从 kernel_nodes 的最新声明切换适配器。修改任务后，当前执行仍完成旧配置，下一条输入触发的新执行才采用新配置；补交只接收缺项提示，不重复初始 graph 概述。
+agent 节点必须使用配置的模型与自身常驻 Pi 进程；无模型的旧 ActionAdapter / scriptedTurn 执行替身已移除。操作模块仍可不依赖模型运行。修改任务后，当前执行及补交继续采用 execution.revisionVersion 冻结的配置，下一条输入触发的新执行才采用新配置；补交只接收缺项提示，不重复初始 graph 概述。
 
 原生 propose 草稿的结构只放在 definition 内。顶层 nodes / loops / containers 属于旧 SDK 格式，即使是空数组或 null 也拒绝；不能与 definition 混用，否则调用者可能误以为被忽略的旧字段已生效。原生声明内部的 nodes 具名 map、模块、普通边和子图实例照常使用。
+
+Git 冲突由 main 明确处理：系统保留双方私有 commit/工作副本和失败输入，不隐式创建合并 Agent，也不依据旧 input.files 自动改写 commit。可声明普通合并辅助节点；其模型、权限、名额和用量走正常原生准入。解决后的 commit 仍需要声明的检查与独立审查；跳过失败输入本身不提供验收证据。
+
+
+#### 上下文与生效版本的本轮验证（2026-10-09）
+
+原生接口 value 原样传递，不自动补 digest/私有绝对路径或产生隐式 artifact。需要共享文件时由实际发布工具创建稳定版本，投递明确的 artifactId/version/digest；接收者读取该版本，不继承发布者私聊。证据过滤由显式 router 字段映射表达，无 context.predecessors/evidence_only 依赖推断。具名输入与聊天沿同一节点私有会话；普通复跑/重启继续原历史，配方/能力重绑沿已确认机制保留实例和聊天历史、分支新 session 文件，不与另一节点共享 session。
+
+graph 使用自己的常驻会话；外部 main 的 operation context 账本继续用于自身 fresh/continue 恢复。旧 graph 继承声明、DAG 调度、前驱 parser 和提交入口已退役。设置页从真实 config response 同时读取保存与生效版本，不允许晚到 startup snapshot 回退已知生效版本。最新源码与默认桌面交付证据见 [逐项验收对应](issue-1-spec-acceptance-matrix.md)。
+
+
+#### 当前执行与下一次配置
+
+原生节点 run/prompt 的 configurations.current 来自最近执行的冻结 revision，configurations.next 来自最新声明；尚未执行时 current 为空，节点退休后 next 为空。pending 比较节点声明与 defaults，不单凭 revision 数字判断。prompt 的配方/任务标识对应实际发送记录所属执行，模型对应实际 provider call；不重组或预先展示下一次执行的 system prompt。节点独立聊天窗口继续接收 graph 原生事件并更新当前/下一次配置，实际发送内容仍可查看。
+
+#### 节点运行时间
+
+运行时间累计节点实际执行时段（准备、Pi turn、重试/补交与结算），等待凭据和重新取得全局执行名额时单独累计“等待名额”。已阻塞或空闲期间不增加工作时间；同节点下一次投递累加新执行，重启保留已记录计量。总历时为已结算执行的历时之和，与工作时间分开。旧记录没有时间边界、或硬崩溃缺少可信结束边界时，完整执行计量保持“未记录”；恢复剩余工作不会把未知时间补成0或将宿主离线时间算作工作。
+
+运行中局部修改结构会保留未受影响对象的位置，新增对象和发生碰撞的相邻对象自动避让；边按更新后的坐标重新走线。布局按 graph 修订持久化，重启不会重新排列。`graph_control({ graphId, action: "relayout" })` 或画面上的“重新布局”按钮明确丢弃保存的位置，重新排列当前结构；不改变队列、执行或路由状态。
+
+
+## 模型分层
+
+节点 model 指具体已配置连接 ID；配方 recommendedGrade 使用 small/medium/frontier 分层，已有low/high/highest保留。新frontier选择依次匹配frontier、highest、high；旧high仍优先high且不扩成highest。目录视图公开只读tier，设置页可按三层筛选。main发现配方时可使用 list_agent_combinations({grade:"frontier"})。厂商与模型配置按需读取 [模型配置说明](models-and-providers.md)，不增加常驻配置工具。

@@ -33,7 +33,9 @@ export function appendNodeEntry(store: TaskStore, input: NodeEntryInput) {
   if (store.db.isTransaction) insert();
   else store.transaction(insert);
   const row = store.db.prepare('SELECT seq FROM node_entries WHERE id=?').get(id) as { seq: number };
-  store.event(input.taskId, 'node.entry', { nodeId: input.nodeId, seq: row.seq, role: input.role, kind: input.kind, text: input.text });
+  const textBytes = Buffer.byteLength(input.text);
+  store.event(input.taskId, 'node.entry', { nodeId: input.nodeId, id, seq: row.seq, role: input.role, kind: input.kind,
+    text: textBytes > 4096 ? input.text.slice(0, 512) : input.text, textBytes, contentTruncated: textBytes > 4096 });
   return row.seq;
 }
 
@@ -145,31 +147,51 @@ export function recordNodeSession(store: TaskStore, instanceId: string, sessionI
   store.db.prepare('INSERT OR REPLACE INTO node_sessions VALUES(?,?,?,?)').run(instanceId, sessionId, sessionFile, Date.now());
 }
 
-/** Stable forward/backward pagination over a single node's entries. */
-export function listNodeEntries(store: TaskStore, taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+export interface NodeEntryQuery { after?: number; before?: number; limit?: number; entryId?: string }
+
+/** Stable forward/backward pagination; large records are fetched individually. */
+export function listNodeEntries(store: TaskStore, taskId: string, nodeId: string, query: NodeEntryQuery = {}) {
   const limit = Number.isSafeInteger(query.limit) && (query.limit ?? 0) > 0 ? Math.min(query.limit!, 500) : 100;
   const entryCount = (store.db.prepare('SELECT COUNT(*) AS count FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { count: number }).count;
-  const map = (rows: { seq: number; id: string; role: string; kind: string; text: string; data: string | null; operation_id: string | null; created_at: number }[]) => rows.map(row => ({
+  const full = query.entryId !== undefined;
+  const columns = `seq,id,role,kind,operation_id,created_at,
+    length(CAST(text AS BLOB)) AS text_bytes,COALESCE(length(CAST(data AS BLOB)),0) AS data_bytes,
+    CASE WHEN ${full ? 1 : 0} OR length(CAST(text AS BLOB))<=4096 THEN text ELSE substr(text,1,512) END AS text,
+    CASE WHEN ${full ? 1 : 0} OR length(CAST(data AS BLOB))<=4096 OR data IS NULL THEN data ELSE
+      json_object('toolName',substr(json_extract(data,'$.toolName'),1,128),
+        'toolCallId',substr(json_extract(data,'$.toolCallId'),1,256),
+        'from',substr(json_extract(data,'$.from'),1,128),
+        'peer',json(CASE WHEN json_extract(data,'$.peer')=1 THEN 'true' ELSE 'false' END),
+        'isError',json(CASE WHEN json_extract(data,'$.isError')=1 OR json_extract(data,'$.error')=1 THEN 'true' ELSE 'false' END),
+        'ordinal',json_extract(data,'$.ordinal')) END AS data`;
+  const map = (rows: { seq: number; id: string; role: string; kind: string; text: string; data: string | null; operation_id: string | null; created_at: number; text_bytes: number; data_bytes: number }[]) => rows.map(row => ({
     seq: row.seq, id: row.id, role: row.role, kind: row.kind, text: row.text,
     data: row.data ? JSON.parse(row.data) as Json : null, operationId: row.operation_id, createdAt: row.created_at,
+    contentTruncated: !full && (row.text_bytes > 4096 || row.data_bytes > 4096), contentBytes: row.text_bytes + row.data_bytes,
   }));
+  if (full) {
+    const rows = store.db.prepare(`SELECT ${columns} FROM node_entries WHERE task_id=? AND node_id=? AND id=?`)
+      .all(taskId, nodeId, query.entryId!) as Parameters<typeof map>[0];
+    if (!rows.length) throw new RuntimeError('not_found', 'Entry does not belong to this node');
+    return { entries: map(rows), entryCount, limit: 1, hasOlder: false, hasNewer: false };
+  }
   if (query.before !== undefined) {
     // Backward page: the entries directly before the cursor, oldest-first.
-    const rows = store.db.prepare(`SELECT seq,id,role,kind,text,data,operation_id,created_at FROM node_entries
+    const rows = store.db.prepare(`SELECT ${columns} FROM node_entries
       WHERE task_id=? AND node_id=? AND seq<? ORDER BY seq DESC LIMIT ?`).all(taskId, nodeId, query.before, limit) as Parameters<typeof map>[0];
     return { entries: map(rows.reverse()), entryCount, limit, hasOlder: true, hasNewer: false };
   }
   if (query.after !== undefined) {
     // Forward page from a known cursor.
     const after = Number.isSafeInteger(query.after) && query.after >= 0 ? query.after : 0;
-    const rows = store.db.prepare(`SELECT seq,id,role,kind,text,data,operation_id,created_at FROM node_entries
+    const rows = store.db.prepare(`SELECT ${columns} FROM node_entries
       WHERE task_id=? AND node_id=? AND seq>? ORDER BY seq LIMIT ?`).all(taskId, nodeId, after, limit) as Parameters<typeof map>[0];
     const hasNewer = rows.length === limit && entryCount > 0 && rows[rows.length - 1]!.seq < (store.db.prepare('SELECT MAX(seq) AS seq FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { seq: number | null }).seq!;
     return { entries: map(rows), entryCount, limit, hasOlder: true, hasNewer };
   }
   // No cursor: the newest page. The initial view must show the live tail; the
   // UI then pages backward with `before` until it reaches the first entry.
-  const rows = store.db.prepare(`SELECT seq,id,role,kind,text,data,operation_id,created_at FROM node_entries
+  const rows = store.db.prepare(`SELECT ${columns} FROM node_entries
     WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT ?`).all(taskId, nodeId, limit) as Parameters<typeof map>[0];
   const oldest = rows.length ? rows[rows.length - 1]!.seq : 0;
   const first = (store.db.prepare('SELECT MIN(seq) AS seq FROM node_entries WHERE task_id=? AND node_id=?').get(taskId, nodeId) as { seq: number | null }).seq;
@@ -178,7 +200,7 @@ export function listNodeEntries(store: TaskStore, taskId: string, nodeId: string
 
 /** Read-only node detail: definition identity, session reference, entries and
  * per-operation timing where credential waiting is separated from run time. */
-export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+export function nodeRun(store: TaskStore, taskId: string, nodeId: string, query: NodeEntryQuery = {}) {
   const task = store.task(taskId);
   const node = store.db.prepare('SELECT id,spec,instance_id,status,activation_id,output_version,stall_count FROM nodes WHERE task_id=? AND id=?').get(taskId, nodeId) as
     { id: string; spec: string; instance_id: string | null; status: string; activation_id: string; output_version: number; stall_count: number } | undefined;

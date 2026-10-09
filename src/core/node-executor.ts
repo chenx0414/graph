@@ -188,6 +188,7 @@ export class NodeExecutor {
           if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
           this.kernel.finishExecution(executionId, 'blocked');
           this.kernel.blockNode(this.graphId, nodeId, error.message);
+          this.kernel.requestBudget(this.graphId, nodeId, executionId, error.message);
           this.kernel.setNodeQueuePaused(this.graphId, nodeId, true);
           this.queue.complete(seq, { kind: 'blocked', reason: error.message });
           return 'blocked';
@@ -219,7 +220,7 @@ export class NodeExecutor {
           if (!metering || !turnStarted) releaseHold();
           return this.fail(executionId, nodeId, seq, `Execution failed after submit: ${error instanceof Error ? error.message : String(error)}`);
         }
-        if (!turnStarted && error instanceof RuntimeError && error.code === 'model_selection') {
+        if (!turnStarted && error instanceof RuntimeError && ['model_selection', 'permission', 'invalid_workspace'].includes(error.code)) {
           releaseHold();
           this.kernel.finishExecution(executionId, 'blocked');
           this.kernel.blockNode(this.graphId, nodeId, error.message);
@@ -263,6 +264,23 @@ export class NodeExecutor {
       releaseHold();
 
       if (report?.error) {
+        if (!this.hasValidSubmission(executionId) && /Token budget exhausted/.test(report.error)) {
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.blockNode(this.graphId, nodeId, report.error);
+          this.kernel.requestBudget(this.graphId, nodeId, executionId, report.error);
+          this.kernel.setNodeQueuePaused(this.graphId, nodeId, true);
+          this.queue.complete(seq, { kind: 'blocked', reason: report.error });
+          return 'blocked';
+        }
+        // A known-usage pause is a control boundary, not a failed attempt. Keep
+        // the input and execution identity so ordinary resume can continue it.
+        if (!this.hasValidSubmission(executionId) && /paused/i.test(report.error)
+          && (this.kernel.store.task(this.graphId).paused || this.kernel.nodeState(this.graphId, nodeId).paused)) {
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?").run(this.graphId, nodeId);
+          this.queue.complete(seq, { kind: 'blocked', reason: report.error });
+          return 'blocked';
+        }
         if (this.hasValidSubmission(executionId) || /budget|permission|paused|credential unavailable/i.test(report.error) || retriesUsed >= budget.retriesAllowed) {
           return this.fail(executionId, nodeId, seq, report.error);
         }

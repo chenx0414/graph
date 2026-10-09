@@ -11,7 +11,7 @@ import { materializeGraph } from '../../src/core/confirm-graph.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { createApp } from '../../src/server/app.ts';
-import type { ActionAdapter, Operation, OperationResult , Proposal } from '../../src/core/types.ts';
+import type { ActionAdapter, Operation, OperationResult, NativeProposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -29,7 +29,7 @@ const scripted = (handler: (operation: Operation) => Promise<OperationResult> | 
  *
  * Confirmation establishes structure, not work. The main agent explicitly delivers
  * the first input through the same validated queue used for subsequent executions.
- * Legacy confirmation remains a separate path until final retirement.
+ * Drafts without a native definition are rejected before feature creation.
  *
  * Failure modes first (R24):
  *   W1  a v2 definition materialises as revision 1, with every node and module admitted
@@ -141,6 +141,10 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     cleanup.push(() => app.close());
     const home = await app.inject({ method: 'GET', url: '/' });
     const headers = { cookie: String(home.headers['set-cookie'] ?? '') };
+    const ownerGraphResponse = await app.inject({ method: 'GET', url: `/api/tasks/${anchorTaskId}/graph`, headers });
+    expect(ownerGraphResponse.statusCode).toBe(200);
+    expect(ownerGraphResponse.json()).toMatchObject({ nodes: [], containers: [], layout: { positions: {}, edges: [] } });
+
     const draftResponse = await app.inject({ method: 'GET', url: `/api/conversations/${created.conversationId}/draft-graph`, headers });
     expect(draftResponse.statusCode).toBe(200);
     const draft = draftResponse.json();
@@ -188,10 +192,7 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     store.db.close();
   });
 
-  // NOTE: this case still describes the OLD behaviour on purpose. It is rewritten in the
-  // same commit that makes `definition` required; until that switch lands, asserting the
-  // refusal here would leave the branch red for a promise the product has not made yet.
-  test('W6: a draft without a definition still confirms the old way (no regression)', async () => {
+  test('W6: a legacy draft cannot create a feature through conversation confirmation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'confirm-graph-old-'));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const project = join(root, 'project');
@@ -207,23 +208,20 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     await runtime.host.runReady();
     const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
     await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-    // Deliberately NOT lifted: this case is about the old shape reaching the old tables,
-    // so the draft must stay old-shaped. Once `definition` becomes required this case is
-    // rewritten to assert the refusal instead.
-    const proposed2 = await runtime.supervisor(anchorTaskId).propose({
+    await expect(runtime.supervisor(anchorTaskId).propose({
       requirementVersion: 1, summary: '旧方案',
       acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
       nodes: [
         { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
         { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
       ],
-    } as Proposal, 'proposal-old');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    } as unknown as NativeProposal, 'proposal-old')).rejects.toMatchObject({ code: 'invalid_proposal' });
+    await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' }))
+      .rejects.toMatchObject({ code: 'stale_proposal' });
+    expect((await runtime.conversations.view(created.conversationId)).tasks).toEqual([]);
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-    const oldNodes = store.db.prepare('SELECT COUNT(*) AS n FROM nodes WHERE task_id=?').get(confirmed.taskId) as { n: number };
-    expect(oldNodes.n).toBe(2);
-    const kernel = new KernelStore(store);
-    expect(kernel.latestRevision(confirmed.taskId)).toBeNull();
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM graph_revisions').get()).toEqual({ n: 0 });
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM kernel_graph_owners').get()).toEqual({ n: 0 });
     store.db.close();
   });
 });

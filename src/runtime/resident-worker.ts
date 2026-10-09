@@ -127,6 +127,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   const session = await openPiInstance({
     binding: config.binding,
     workspace: config.workspace,
+    ...(config.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
     stateDir: config.stateDir,
     model: config.model as Model<Api>,
     modelRuntime,
@@ -283,9 +284,10 @@ function forwardingTools(
       parameters: tool.parameters as never,
       async execute(_toolCallId: string, params: unknown) {
         const answer = await callHost(tool.name, params);
-        // A refusal is returned as the tool's result so the model can correct itself
-        // rather than losing the turn to an exception (§5).
-        return { content: [{ type: 'text' as const, text: answer.text }], details: {}, ...(answer.ok ? {} : { isError: true }) };
+        // Pi catches tool exceptions and emits an error result without ending the
+        // turn. Returning an isError property alone is treated as a successful call.
+        if (!answer.ok) throw new Error(answer.text);
+        return { content: [{ type: 'text' as const, text: answer.text }], details: {} };
       },
     }));
 }

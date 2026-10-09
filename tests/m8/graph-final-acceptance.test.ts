@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { KernelStore } from '../../src/core/kernel-store.ts';
+import { executeModuleOperation } from '../../src/runtime/kernel-operation-broker.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { git } from '../../src/git/git.ts';
@@ -12,7 +14,7 @@ test('native final acceptance binds real checks, independent published review an
   const root = await mkdtemp(join(tmpdir(), 'graph-final-acceptance-'));
   const project = join(root, 'project'); await mkdir(project);
   await writeFile(join(project, 'feature.txt'), 'before\n');
-  await writeFile(join(project, 'check.cjs'), "if(require('fs').readFileSync('feature.txt','utf8')!=='implemented\\n')process.exit(1)");
+  await writeFile(join(project, 'check.cjs'), "if(require('fs').readFileSync('feature.txt','utf8')!=='implemented\\n')process.exit(1);console.log('CHECK_DETAIL_'.repeat(1000)+'CHECK_DETAIL_END')");
   git(project, ['init', '-q', '-b', 'main']); git(project, ['add', '.']);
   git(project, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local', 'commit', '-qm', 'baseline']);
   const baseline = git(project, ['rev-parse', 'HEAD']).stdout.trim();
@@ -54,7 +56,7 @@ test('native final acceptance binds real checks, independent published review an
       work: { recipe: 'implementer@1', task: 'implement feature.txt', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } },
       review: { recipe: 'reviewer@1', task: 'review the published implementation and publish graph.review@1', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} },
     }, modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
-      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.cjs'], output: 'result' } } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.cjs', 'CHECK_ARGUMENT_'.repeat(1000)], output: 'result' } } },
     edges: { relation: { from: 'work.result', to: 'review.job', enabled: false } }, acceptance: [
       { id: 'behavior', description: 'feature contains implemented', kind: 'check', module: 'check' },
       { id: 'review', description: 'independent review of this commit', kind: 'review', node: 'review' },
@@ -68,6 +70,22 @@ test('native final acceptance binds real checks, independent published review an
     expect(disk.db.prepare("SELECT id FROM questions WHERE task_id=? AND kind='human_check'").get(graphId)).toBeUndefined();
     await main.graphControl({ graphId, action: 'withdraw_complete' });
     await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+    const checkRow = disk.db.prepare('SELECT delivery_id,length(request) AS requestBytes,length(result) AS resultBytes FROM kernel_module_operations WHERE task_id=? AND module_id=?').get(graphId, 'check') as { delivery_id: string; requestBytes: number; resultBytes: number };
+    expect(checkRow.requestBytes).toBeLessThan(256);
+    expect(checkRow.resultBytes).toBeLessThan(256);
+    const inspected = await main.graphInspect({ graphId, query: 'operations' }) as { request: { operation: { args: string[] } }; result: { outputs: { result: { stdout: string } } } }[];
+    expect(inspected[0]!.request.operation.args[1]).toBe('CHECK_ARGUMENT_'.repeat(1000));
+    expect(inspected[0]!.result.outputs.result.stdout).toBe('CHECK_DETAIL_'.repeat(1000) + 'CHECK_DETAIL_END\n');
+    const reopened = new TaskStore(join(stateDir, 'tasks.sqlite'));
+    try {
+      const checkWorkspace = (reopened.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${graphId}`) as { path: string }).path;
+      const replay = await executeModuleOperation({ kernel: new KernelStore(reopened), graphId, moduleId: 'check', deliveryId: checkRow.delivery_id,
+        revisionVersion: 1, operation: definition.modules.check!.operation!, workspace: checkWorkspace,
+        scratchRoot: stateDir, state: null, inputs: { job: {} } });
+      expect(replay.outputs.result).toMatchObject({ passed: true, stdout: 'CHECK_DETAIL_'.repeat(1000) + 'CHECK_DETAIL_END\n' });
+      expect(reopened.db.prepare("SELECT COUNT(*) AS n FROM events WHERE task_id=? AND type='graph.operation.dispatched'").get(graphId)).toEqual({ n: 1 });
+    } finally { reopened.close(); }
+
     await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} }); await runtime.host.drive();
     const stale = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
     expect(stale.items.find(item => item.id === 'review')?.status).toBe('stale');

@@ -14,6 +14,7 @@
  * never sends a request and never resolves an API key.
  */
 import {
+  MODEL_GRADES,
   MODEL_THINKING_LEVELS,
   type ModelApi,
   type ModelCost,
@@ -71,7 +72,7 @@ export const FALLBACK_PLATFORMS: readonly PlatformPreset[] = [
 ];
 
 const COMPATIBILITIES = new Set<string>(PROVIDER_COMPATIBILITIES.map(item => item.id));
-const GRADES = new Set<string>(['low', 'medium', 'high', 'highest']);
+const GRADES = new Set<string>(MODEL_GRADES);
 const THINKING = new Set<string>(MODEL_THINKING_LEVELS);
 const CREDENTIAL_ID = /^[a-z0-9][a-z0-9-_]*$/;
 const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;

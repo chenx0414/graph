@@ -1,5 +1,5 @@
 import type { ConversationMessage } from '../core/conversation-projection.ts';
-export interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number }
+export interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number; contentTruncated?: boolean; contentBytes?: number }
 
 /** Session assistant messages include intermediate narration. Only the last
  * assistant record of a settled operation is its final answer. */

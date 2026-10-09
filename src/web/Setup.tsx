@@ -1,10 +1,10 @@
+import { ModelGradeOptions } from './model-grade-options.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.ts';
 import { PROVIDER_TEMPLATES, providerTemplate, type ProviderTemplate } from '../catalog/providers.ts';
 import { buildTemplateConfigDocument, type TemplateSetupModel } from './setup.ts';
 import { Button, Card, Field, Pill, toast } from './ui.tsx';
 
-const GRADES: TemplateSetupModel['grade'][] = ['low', 'medium', 'high', 'highest'];
 const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 interface Status {
@@ -221,7 +221,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
           <div className="list-item" key={index} data-testid={`setup-custom-model-${index}`}>
             <input className="input" style={{ width: 200 }} value={model.id} onChange={event => setCustomModels(current => current.map((item, position) => position === index ? { ...item, id: event.target.value } : item))} />
             <select className="select" value={model.grade} onChange={event => setCustomModels(current => current.map((item, position) => position === index ? { ...item, grade: event.target.value as TemplateSetupModel['grade'] } : item))}>
-              {GRADES.map(grade => <option key={grade} value={grade}>{grade}</option>)}
+              <ModelGradeOptions />
             </select>
             <Button size="sm" variant="danger" onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>删除</Button>
           </div>

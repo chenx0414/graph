@@ -31,7 +31,7 @@ async function fixture() {
     store.db.prepare("INSERT INTO instances(id,task_id,node_id,definition_version,model) VALUES('i','t','work','coder@1','m')").run();
     store.db.prepare("INSERT INTO activations(id,task_id,node_id,graph_version,round,state,input_versions) VALUES('a','t','work',1,1,'pending','{}')").run();
   });
-  const lifecycle = new OperationLifecycle(store, { advance: () => undefined });
+  const lifecycle = new OperationLifecycle(store);
   lifecycle.recover();
   return { store, lifecycle };
 }
@@ -66,7 +66,7 @@ test('intent recovery is conservative and attempt identity stays behind the life
   expect(operation.attempt).toBe(1);
   expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'intent', reserved: 100 }]);
 
-  const recovered = new OperationLifecycle(store, { advance: () => undefined });
+  const recovered = new OperationLifecycle(store);
   recovered.recover();
   expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'not_sent', reserved: 0 }]);
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'pending' });
@@ -88,7 +88,7 @@ test.each([false, true])('full access restart only retries an uncertain chatting
   lifecycle.dispatch(operation);
   if (queued) appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'next', state: 'queued' });
 
-  new OperationLifecycle(store, { advance: () => undefined }).recover();
+  new OperationLifecycle(store).recover();
   expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'not_sent', reserved: 0, workerActive: false }]);
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get())
     .toEqual({ status: queued ? 'pending' : 'failed' });
@@ -177,29 +177,25 @@ test('dispatch, unknown usage, and a human answer compose in one lifecycle trans
 });
 
 
-test('a third rework without subjects or loops settles as stalled with the gate attempt evidence', async () => {
+test('the external main can return structured review content without triggering an implicit graph rework loop', async () => {
   const { store, lifecycle } = await fixture();
-  const node = { id: 'work', kind: 'program', action: 'graph.verify' };
-  const proposal = { requirementVersion: 1, summary: 'Independent review', nodes: [node], acceptance: [] };
-  store.db.prepare("UPDATE tasks SET graph_version=1 WHERE id='t'").run();
-  store.db.prepare("UPDATE nodes SET spec=?,stall_count=2 WHERE task_id='t' AND id='work'").run(canonicalJson(node));
-  store.db.prepare("INSERT INTO graph_revisions(task_id,version,spec,reason) VALUES('t',1,?,'review')").run(canonicalJson(proposal));
+  store.db.prepare("UPDATE nodes SET spec=?,stall_count=2 WHERE task_id='t' AND id='work'")
+    .run(canonicalJson({ id: 'work', kind: 'agent', action: 'master', role: 'master' }));
   const operation = lifecycle.admit({
-    node: { id: 'work', taskId: 't', activationId: 'a' }, reservation: 0,
-    prepare: attempt => ({ ...intent(attempt), kind: 'program', action: 'graph.verify', instanceId: null }),
+    node: { id: 'work', taskId: 't', activationId: 'a' }, reservation: 100,
+    prepare: attempt => ({ ...intent(attempt), action: 'master' }),
   });
   lifecycle.dispatch(operation);
+  const output = { kind: 'verification', outcome: 'rework', subjects: [], reports: [],
+    blockers: [{ id: 'review', reason: 'Price is incorrectly stored as zero', evidence: [] }] };
   lifecycle.report(operation.id, operation.generation, {
-    outcome: 'completed',
-    output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [],
-      blockers: [{ id: 'review', reason: 'Price is incorrectly stored as zero', evidence: [] }] },
+    outcome: 'completed', output,
+    usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 },
   });
-  expect(lifecycle.get(operation.id)?.state).toBe('succeeded');
+  expect(lifecycle.get(operation.id)).toMatchObject({ state: 'succeeded', result: { output } });
   expect(store.db.prepare("SELECT status,stall_count FROM nodes WHERE id='work'").get())
-    .toEqual({ status: 'blocked', stall_count: 3 });
-  const question = store.db.prepare("SELECT kind,data FROM questions WHERE status='open'").get() as { kind: string; data: string };
-  expect(question.kind).toBe('stalled');
-  expect(JSON.parse(question.data)).toMatchObject({ attempts: [{ node_id: 'work', round: 1 }], resume: ['work'] });
+    .toEqual({ status: 'succeeded', stall_count: 2 });
+  expect(store.db.prepare("SELECT kind FROM questions WHERE status='open'").all()).toEqual([]);
 });
 
 
@@ -217,10 +213,10 @@ test.each(['intent', 'dispatched', 'not_sent'])('restart restores delivered mess
   if (stage !== 'intent') lifecycle.dispatch(operation);
   if (stage === 'not_sent') {
     // State left by the older full-access startup recovery, before it released messages.
-    new OperationLifecycle(store, { advance: () => undefined }).recover();
+    new OperationLifecycle(store).recover();
   }
   appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'and recent work', state: 'queued' });
-  const restored = new OperationLifecycle(store, { advance: () => undefined, canReplayBeforeSend: () => true });
+  const restored = new OperationLifecycle(store, { canReplayBeforeSend: () => true });
   restored.recover();
   expect(pendingMessages(store, 'c').map(message => message.text)).toEqual(['show status', 'and recent work']);
   expect(store.db.prepare("SELECT status FROM nodes WHERE id='work'").get()).toEqual({ status: 'pending' });
@@ -243,11 +239,10 @@ test('legacy unsent messages stay parked if a later turn may already have acted 
       afterIntent: current => deliverMessages(store, current.id, current.attempt, pendingMessages(store, 'c')),
     });
     lifecycle.dispatch(op);
-    new OperationLifecycle(store, { advance: () => undefined }).recover();
+    new OperationLifecycle(store).recover();
     operations.push(op);
   }
   new OperationLifecycle(store, {
-    advance: () => undefined,
     canReplayBeforeSend: op => op.id === operations[0]!.id,
   }).recover();
   expect(pendingMessages(store, 'c')).toEqual([]);

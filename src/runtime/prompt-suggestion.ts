@@ -1,10 +1,10 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Context, Model } from '@earendil-works/pi-ai';
-import { modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';
+import { MODEL_GRADE_ORDER, modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { DEFAULT_PROMPT_SUGGESTION_PROMPT } from './agent-context.ts';
 
-const GRADE_ORDER: ModelEntry['grade'][] = ['low', 'medium', 'high', 'highest'];
+const GRADE_ORDER = MODEL_GRADE_ORDER;
 
 /** Pick a separate, preferably cheaper model for the composer-only suggestion. */
 export function selectPromptSuggestionModel(main: ModelEntry, directory: ModelEntry[]) {

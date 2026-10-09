@@ -10,7 +10,7 @@ import { join, resolve, sep } from 'node:path';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Context, Model } from '@earendil-works/pi-ai';
-import { modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';
+import { MODEL_GRADE_ORDER, modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';
 import { DEFAULT_SEDIMENT_PROMPT } from './agent-context.ts';
 
 /** The shape of one write, kept in step with `scripts/skills-lint.mjs` (that linter is the outside check). */
@@ -97,7 +97,7 @@ export function shouldSediment(gate: SedimentGate): boolean {
     && gate.toolCalls >= gate.threshold;
 }
 
-const GRADE_ORDER: ModelEntry['grade'][] = ['low', 'medium', 'high', 'highest'];
+const GRADE_ORDER = MODEL_GRADE_ORDER;
 
 /** How many models one review may ask before it gives up on an operation. */
 export const SEDIMENT_ATTEMPT_LIMIT = 2;
@@ -129,7 +129,7 @@ export function selectSedimentModel(main: ModelEntry, directory: ModelEntry[], p
   }
   const mainIdentity = modelIdentity(main);
   const candidates = directory.filter(model => model.id !== main.id && modelIdentity(model) !== mainIdentity);
-  for (const grade of ['low', 'medium', 'high', 'highest'] as const) {
+  for (const grade of MODEL_GRADE_ORDER) {
     const candidate = candidates.find(model => model.grade === grade);
     if (candidate) return candidate;
   }

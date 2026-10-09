@@ -101,18 +101,12 @@ export type GraphAgentDetail = {
 export type DraftGraph = {
   nodes: {
     id: string; kind: string; status: string; container?: string;
-    action?: string; definitionVersion?: string; model?: string; dependsOn?: string[];
-    context?: {
-      purpose?: string; sourceNode?: string; independence?: string; reason?: string;
-      requiredFacts?: { kind?: string }[];
-      predecessors?: { source?: string; mode?: string }[];
-    } | null;
-    contextMode?: 'fresh' | 'fork' | null;
+    action?: string; definitionVersion?: string; model?: string;
     agent?: GraphAgentDetail | null;
     inputs?: Record<string, ProtocolRef>;
     outputs?: Record<string, ProtocolRef>;
   }[];
-  interfaces?: { edgeId: string; from: string; to: string; enabled: boolean; protocol: string | null; latest: unknown; deliveries: { id: string; value: unknown; protocol: string; revisionVersion: number; createdAt: number }[] }[];
+  interfaces?: { edgeId: string; from: string; to: string; enabled: boolean; protocol: string | null; latest: unknown; deliveries: { id: string; value: unknown; protocol: string; revisionVersion: number; createdAt: number; source?: string; sourceExecutionId?: string | null; artifacts?: { taskId: string; artifactId: string; version: number; digest: string | null }[]; receiver?: { kind: string; state: string; operationId: string | null; reason: string | null } }[] }[];
   containers: { id: string; parent?: string }[];
   loops: { from: string; to: string }[];
   layout: { positions: Record<string, { x: number; y: number; width: number; height: number }>; edges: { id: string; source: string; target: string }[]; branches?: { id: string; source: string; target: string; case: string }[] };
@@ -122,13 +116,7 @@ export type ProposalDetail = {
   requirementVersion: number;
   stale: boolean;
   decisions: string | null;
-  spec: {
-    summary: string;
-    definition?: GraphDefinition;
-    acceptance: { id: string; description: string; checkNode: string }[];
-    nodes: { id: string; kind: string; action?: string; definitionVersion?: string; model?: string; dependsOn?: string[]; container?: string; input?: unknown }[];
-    loops?: { from: string; to: string }[];
-  };
+  spec: import('../core/types.ts').NativeProposal;
 };
 type ProposalVersion = {
   version: number;
@@ -284,7 +272,7 @@ export function ConversationGraphBoard({
           <h2 data-testid="conversation-graph-title">{proposal.spec.summary}</h2>
           <div className="conversation-graph-meta">
             <span>v{proposal.version}</span>
-            <span>{graph?.nodes.length ?? (proposal.spec.definition ? Object.keys(proposal.spec.definition.nodes).length + Object.keys(proposal.spec.definition.modules).length : proposal.spec.nodes.length)} 个节点</span>
+            <span>{graph?.nodes.length ?? (Object.keys(proposal.spec.definition.nodes).length + Object.keys(proposal.spec.definition.modules).length)} 个节点</span>
             <span>{proposal.spec.acceptance.length} 个验收项</span>
             {proposal.stale && <Pill tone="warn">需求已变化</Pill>}
           </div>
@@ -294,7 +282,7 @@ export function ConversationGraphBoard({
         <aside
           className="graph-state-summary"
           data-testid="graph-state-summary"
-          title="任务级权威状态保存在 SQLite 账本中；节点通过依赖输入获取状态快照，不共享可变对象。"
+          title="任务级权威状态保存在 SQLite 账本中；节点通过具名接口接收投递，共享产物按已发布版本读取。"
         >
           <span className="graph-state-symbol">S</span>
           <div className="graph-state-copy">
@@ -309,6 +297,7 @@ export function ConversationGraphBoard({
         {!graphLoading && graph && graph.nodes.length > 0 && (
           <div className="conversation-graph-canvas" data-testid="draft-graph-detail">
             <GraphCanvas
+              taskId={runtimeTaskId}
               graph={{ nodes: graph.nodes, containers: graph.containers, layout: graph.layout, ...(graph.interfaces ? { interfaces: graph.interfaces } : {}) }}
               collapsed={{}}
               selected={selectedNodeId}
@@ -353,7 +342,7 @@ export function ConversationGraphBoard({
             {selectedNode.kind === 'agent' && selectedNode.agent ? (
               <>
                 <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-                  <Pill tone={selectedNode.contextMode === 'fork' ? 'warn' : 'accent'}>{selectedNode.contextMode === 'fork' ? 'Fork' : 'Fresh'}</Pill>
+                  <Pill tone="accent">独立会话</Pill>
                   <Pill tone="neutral">{selectedNode.agent.recommendedGrade}</Pill>
                   {selectedNode.agent.review && <Pill tone="warn">独立审查</Pill>}
                 </div>
@@ -362,7 +351,6 @@ export function ConversationGraphBoard({
                   <dt>动作</dt><dd className="mono">{selectedNode.action ?? '—'}</dd>
                   <dt>模型</dt><dd className="mono">{selectedNode.model ?? '—'}</dd>
                   <dt>容器</dt><dd className="mono">{selectedNode.container ?? '—'}</dd>
-                  <dt>依赖</dt><dd className="mono">{selectedNode.dependsOn?.join(', ') || '—'}</dd>
                 </dl>
                 <section className="graph-agent-detail-section" data-testid="graph-agent-capabilities">
                   <h4>能力</h4>
@@ -405,27 +393,11 @@ export function ConversationGraphBoard({
                 </section>
                 <section className="graph-agent-detail-section" data-testid="graph-agent-instructions">
                   <h4>灌输的指令</h4>
-                  <p className="muted">
-                    用途 {selectedNode.context?.purpose ?? '未指定'}
-                    {selectedNode.context?.independence ? ` · 独立性 ${selectedNode.context.independence}` : ''}
-                    {selectedNode.context?.sourceNode ? ` · 来源 ${selectedNode.context.sourceNode}` : ''}
-                  </p>
-                  {selectedNode.context?.requiredFacts?.length
-                    ? <p className="muted">继承事实：{selectedNode.context.requiredFacts.map(fact => fact.kind ?? '未知').join('、')}</p>
-                    : <p className="muted">默认 Fresh 指令；不复制前驱 transcript。</p>}
+                  <p>{selectedNode.action}</p>
+                  <p className="muted">节点首次接收输入时开始执行；后续投递排队执行，沿用自己的聊天历史。</p>
                   {selectedNode.agent.capabilities.filter(item => item.role === 'agent' || item.role === 'tool').length > 0 && (
                     <p className="muted">Prompt：{selectedNode.agent.capabilities.filter(item => item.role === 'agent' || item.role === 'tool').map(item => item.name).join('、')}</p>
                   )}
-                </section>
-                <section className="graph-agent-detail-section" data-testid="graph-agent-handoff">
-                  <h4>传递的 handoff</h4>
-                  {selectedNode.context?.predecessors?.length
-                    ? selectedNode.context.predecessors.map(policy => (
-                      <p className="muted" key={`${policy.source}:${policy.mode}`}>
-                        {policy.source ?? '—'} · {policy.mode === 'result_handoff' ? '结果交接' : '仅证据交接'}
-                      </p>
-                    ))
-                    : <p className="muted">没有声明前驱交接边。</p>}
                 </section>
               </>
             ) : (
@@ -436,7 +408,6 @@ export function ConversationGraphBoard({
                   <dt>定义</dt><dd className="mono">{selectedNode.definitionVersion ?? '—'}</dd>
                   <dt>模型</dt><dd className="mono">{selectedNode.model ?? '—'}</dd>
                   <dt>容器</dt><dd className="mono">{selectedNode.container ?? '—'}</dd>
-                  <dt>依赖</dt><dd className="mono">{selectedNode.dependsOn?.join(', ') || '—'}</dd>
                 </dl>
               </>
             )}

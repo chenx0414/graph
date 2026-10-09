@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 2,
+  "name": "Nested route",
+  "protocols": {
+    "data": {
+      "type": "object"
+    }
+  },
+  "nodes": {},
+  "modules": {
+    "check": {
+      "type": "operation",
+      "trigger": "each",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "operation": {
+        "action": "workspace.command",
+        "version": 1,
+        "command": "node",
+        "args": [
+          "--version"
+        ],
+        "output": "result"
+      }
+    }
+  },
+  "edges": {
+    "text": {
+      "from": "outer.text",
+      "to": "check.job",
+      "enabled": true
+    },
+    "json": {
+      "from": "outer.json",
+      "to": "check.job",
+      "enabled": true
+    }
+  },
+  "inputs": {
+    "job": {
+      "to": "outer.job",
+      "protocol": "data"
+    }
+  },
+  "outputs": {
+    "result": {
+      "from": "check.result",
+      "protocol": "data"
+    }
+  },
+  "templates": {
+    "branches": {
+      "version": 1,
+      "definition": {
+        "schemaVersion": 2,
+        "name": "Reusable branch router",
+        "protocols": {
+          "data": {
+            "type": "object"
+          }
+        },
+        "nodes": {},
+        "modules": {
+          "route": {
+            "type": "router",
+            "trigger": "each",
+            "inputs": {
+              "job": {
+                "protocol": "data"
+              }
+            },
+            "outputs": {
+              "text": {
+                "protocol": "data"
+              },
+              "json": {
+                "protocol": "data"
+              }
+            },
+            "rules": [
+              {
+                "when": "job.kind == \"text\"",
+                "emit": {
+                  "text": "$job"
+                }
+              },
+              {
+                "when": "job.kind == \"json\"",
+                "emit": {
+                  "json": "$job"
+                }
+              }
+            ]
+          }
+        },
+        "edges": {
+          "text": {
+            "from": "route.text",
+            "to": "inner.text",
+            "enabled": true
+          },
+          "json": {
+            "from": "route.json",
+            "to": "inner.json",
+            "enabled": true
+          }
+        },
+        "templates": {
+          "workers": {
+            "version": 1,
+            "definition": {
+              "schemaVersion": 2,
+              "name": "Format workers",
+              "protocols": {
+                "data": {
+                  "type": "object"
+                }
+              },
+              "nodes": {
+                "text": {
+                  "recipe": "coder@1",
+                  "model": "text",
+                  "task": "Process the delivered job and submit the result",
+                  "inputs": {
+                    "job": {
+                      "protocol": "data"
+                    }
+                  },
+                  "outputs": {
+                    "result": {
+                      "protocol": "data"
+                    }
+                  },
+                  "submission": {
+                    "required": [
+                      "result"
+                    ]
+                  }
+                },
+                "json": {
+                  "recipe": "coder@1",
+                  "model": "json",
+                  "task": "Process the delivered job and submit the result",
+                  "inputs": {
+                    "job": {
+                      "protocol": "data"
+                    }
+                  },
+                  "outputs": {
+                    "result": {
+                      "protocol": "data"
+                    }
+                  },
+                  "submission": {
+                    "required": [
+                      "result"
+                    ]
+                  }
+                }
+              },
+              "modules": {},
+              "edges": {},
+              "inputs": {
+                "text": {
+                  "to": "text.job",
+                  "protocol": "data"
+                },
+                "json": {
+                  "to": "json.job",
+                  "protocol": "data"
+                }
+              },
+              "outputs": {
+                "text": {
+                  "from": "text.result",
+                  "protocol": "data"
+                },
+                "json": {
+                  "from": "json.result",
+                  "protocol": "data"
+                }
+              }
+            }
+          }
+        },
+        "instances": {
+          "inner": {
+            "template": "workers",
+            "version": 1
+          }
+        },
+        "inputs": {
+          "job": {
+            "to": "route.job",
+            "protocol": "data"
+          }
+        },
+        "outputs": {
+          "text": {
+            "from": "inner.text",
+            "protocol": "data"
+          },
+          "json": {
+            "from": "inner.json",
+            "protocol": "data"
+          }
+        }
+      }
+    }
+  },
+  "instances": {
+    "outer": {
+      "template": "branches",
+      "version": 1
+    }
+  }
+}

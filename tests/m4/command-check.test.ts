@@ -1,16 +1,16 @@
-import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 import { git as runGit } from '../../src/git/git.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
+const write = (path: string, content: string): ResponsePlan => ({ tools: [{ id: path.replaceAll('/', '-'), name: 'write_file', arguments: JSON.stringify({ path, content }) }] });
 
 function git(cwd: string, args: string[]) {
   const result = runGit(cwd, args);
@@ -28,104 +28,124 @@ async function repo() {
   return root;
 }
 
-async function start(root: string, actions: Record<string, ActionAdapter>, nodes: NodeSpec[], input: unknown, options: { program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions, ...options });
+async function start(root: string, plans: ResponsePlan[], input: { command: string; args: string[] }, options: { program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string } } = {}) {
+  const provider = await openaiServer([...plans,
+    { tools: [{ id: 'output', name: 'submit', arguments: JSON.stringify({ outputs: { out: { enable: true, value: {} } } }) }] }, { text: 'Files written' },
+  ]);
+  cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], ...options,
+    limits: { defaultBudgetTokens: 20_000_000 },
+    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl,
+      contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-only', modelRuntime: provider.runtime } });
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
   cleanup.push(() => runtime.close());
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Run the check',
-    acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
-    nodes: nodes.map(node => node.id === 'check' ? { ...node, ...(input === undefined ? {} : { input: input as import('../../src/core/types.ts').Json }) } : node),
-  }, 'proposal');
+  const main = runtime.supervisor(taskId);
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Run the check', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'work', inputs: { job: { protocol: 'data' } }, outputs: { out: { protocol: 'data' } }, submission: { required: ['out'] } } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, ...input, output: 'result' } } },
+    edges: { checked: { from: 'work.out', to: 'check.job', enabled: false } },
+    acceptance: [{ id: 'tests', description: 'Tests pass', kind: 'check', module: 'check' }],
+  });
+  const proposed = await main.propose({ requirementVersion: 1, summary: 'Run the check',
+    acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }], definition }, 'proposal');
   const task = runtime.user.task(taskId);
   await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  return { runtime, task };
+  await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
+  await runtime.host.drive();
+  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('succeeded');
+  // A submitted value is immediately routed; integration settles after the turn.
+  // Explicitly start the integration check after that settlement.
+  await main.graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
+  return { runtime, task, main };
 }
 
-const workAction: ActionAdapter = {
-  kind: 'agent', reserveTokens: 100,
-  prepare: async operation => async () => {
-    await mkdir(join(operation.workspace!, 'test'), { recursive: true });
-    await writeFile(join(operation.workspace!, 'test', 'ok.test.js'), [
+async function operations(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, graphId: string) {
+  expect(runtime.nodeRun(graphId, 'work').entries.filter(entry => entry.kind === 'result' && entry.data !== null && typeof entry.data === 'object' && 'isError' in entry.data && entry.data.isError)).toEqual([]);
+  return runtime.supervisor(graphId).graphInspect({ graphId, query: 'operations' }) as Promise<{
+    module_id: string; state: string; result: { outputs: { result: { passed: boolean; record: string; verifiedCommit: string } } } | null;
+  }[]>;
+}
+
+async function checkStatus(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, graphId: string) {
+  const check = (await operations(runtime, graphId)).find(item => item.module_id === 'check');
+  return { state: check?.state, passed: check?.result?.outputs.result.passed };
+}
+
+async function checkRecord(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, graphId: string) {
+  const check = (await operations(runtime, graphId)).find(item => item.module_id === 'check')!;
+  return JSON.parse(await readFile(check.result!.outputs.result.record, 'utf8')) as { code: number; stdout: string; verifiedCommit: string };
+}
+
+const workAction: ResponsePlan[] = [
+  write('test/ok.test.js', [
       "import { test } from 'node:test';",
       "import assert from 'node:assert';",
       "test('ok', () => assert.equal(1, 1));",
-    ].join('\n'));
-    return { outcome: 'completed', output: null, usage };
-  },
-};
-
-const nodes: NodeSpec[] = [
-  { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-  { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'] },
+    ].join('\n'))
 ];
 
-test('a graph.command program node runs an allowed check on the integration copy and emits bound evidence', async () => {
+test('a native command module runs an allowed check on the integration copy and emits bound evidence', async () => {
   const root = await repo();
-  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'node', args: ['--test'] });
+  const { runtime, task } = await start(root, workAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
-  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
-  expect(evidence).toMatchObject({ valid: true, nodeId: 'check', commitSha: view.integrationSha });
-  const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string };
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: true });
+  const acceptance = await runtime.supervisor(view.id).graphInspect({ graphId: view.id, query: 'acceptance' });
+  expect(acceptance).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: 'tests', status: 'passed', source: expect.objectContaining({ commit: view.integrationSha }) })]) });
+  const body = await checkRecord(runtime, view.id);
+  expect(body.verifiedCommit).toBe(view.integrationSha);
   expect(body.code).toBe(0);
   expect(body.stdout).toContain('pass');
 });
 
-test('a graph.command node that fails its check does not produce acceptance evidence', async () => {
+test('a native command module that fails its check does not produce acceptance evidence', async () => {
   const root = await repo();
-  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'node', args: ['--test', 'test/missing.test.js'] });
+  const { runtime, task } = await start(root, workAction, { command: 'node', args: ['--test', 'test/missing.test.js'] });
   await runtime.host.drive();
   const view = await task.view();
-  expect(view.evidence.some(item => item.acceptanceId === 'tests')).toBe(false);
-  expect(view.questions.map(question => question.kind)).toContain('execution_failed');
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: false });
+  await expect(runtime.supervisor(view.id).graphInspect({ graphId: view.id, query: 'acceptance' })).resolves.toMatchObject({ ready: false, items: expect.arrayContaining([expect.objectContaining({ id: 'tests', status: 'failed' })]) });
 });
 
-test('a graph.command node refuses an unallowed command instead of running it', async () => {
+test('a native command module refuses an unallowed command instead of running it', async () => {
   const root = await repo();
-  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'sh', args: ['-c', 'touch proof.txt'] });
+  const { runtime, task } = await start(root, workAction, { command: 'sh', args: ['-c', 'touch proof.txt'] });
   await runtime.host.drive();
   const view = await task.view();
-  expect(view.questions.map(question => question.kind)).toContain('adapter_error');
-  const hash = createHash('sha256').update('absent').digest('hex');
-  expect(view.evidence.every(item => item.artifact.digest !== hash)).toBe(true);
+  await expect(checkStatus(runtime, view.id)).resolves.toMatchObject({ state: 'failed' });
+  const integration = view.worktrees.find(item => item.nodeId === 'integration')!;
+  await expect(readFile(join(integration.path, 'proof.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
-test('a graph.command check can write inside its own TMPDIR', async () => {
+test('a native command module can write inside its own TMPDIR', async () => {
   const root = await repo();
   // The check runs in the OS sandbox, which grants writes only under the
   // workspace and the check's own scratch directory. A check whose TMPDIR points
   // at the host temporary directory cannot create a file at all, which is exactly
   // what broke a real check that ran the m1 suite (git init writes .git/config
   // inside its temporary repository).
-  const probe: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async operation => async () => {
-      await writeFile(join(operation.workspace!, 'tmpdir-probe.js'), [
+  const probe: ResponsePlan[] = [
+    write('tmpdir-probe.js', [
         "import { writeFileSync } from 'node:fs';",
         "import { join } from 'node:path';",
         "writeFileSync(join(process.env.TMPDIR, 'probe.txt'), 'ok');",
         "console.log('wrote', process.env.TMPDIR);",
-      ].join('\n'));
-      return { outcome: 'completed', output: null, usage };
-    },
-  };
-  const { runtime, task } = await start(root, { work: probe }, nodes, { command: 'node', args: ['tmpdir-probe.js'] });
+      ].join('\n'))
+  ];
+  const { runtime, task } = await start(root, probe, { command: 'node', args: ['tmpdir-probe.js'] });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  expect(await checkStatus(runtime, view.id), JSON.stringify(await checkRecord(runtime, view.id))).toEqual({ state: 'settled', passed: true });
 });
 
-test('a graph.command check can bind loopback for a local application test', async () => {
+test('a native command module can bind loopback for a local application test', async () => {
   const root = await repo();
-  const localAction: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async operation => async () => {
-      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
-      await writeFile(join(operation.workspace!, 'test', 'local.test.js'), [
+  const localAction: ResponsePlan[] = [
+    write('test/local.test.js', [
         "import { test } from 'node:test';",
         "import assert from 'node:assert';",
         "import { createServer } from 'node:http';",
@@ -136,30 +156,24 @@ test('a graph.command check can bind loopback for a local application test', asy
         "  assert.equal(await response.text(), 'local-ok');",
         "  await new Promise(resolve => server.close(resolve));",
         "});",
-      ].join('\n'));
-      return { outcome: 'completed', output: null, usage };
-    },
-  };
-  const { runtime, task } = await start(root, { work: localAction }, nodes, { command: 'node', args: ['--test'] });
+      ].join('\n'))
+  ];
+  const { runtime, task } = await start(root, localAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: true });
 });
 
-test('a graph.command check may bind loopback but not a non-loopback interface', async () => {
+test('a native command module may bind loopback but not a non-loopback interface', async () => {
   const root = await repo();
-  const networkAction: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async operation => async () => {
-      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
-      await mkdir(join(operation.workspace!, 'support'), { recursive: true });
-      await writeFile(join(operation.workspace!, 'support', 'net-child.cjs'), [
+  const networkAction: ResponsePlan[] = [
+    write('support/net-child.cjs', [
         "const { createServer } = require('node:http');",
         "const attempt = host => new Promise(resolve => { const server = createServer(); server.on('error', error => resolve(error.code || String(error))); server.listen(0, host, () => { server.close(); resolve('LISTENED'); }); });",
         "(async () => { console.log(JSON.stringify({ wildcard: await attempt('0.0.0.0'), loopback: await attempt('127.0.0.1') })); })();",
-      ].join('\n'));
-      await writeFile(join(operation.workspace!, 'test', 'network.test.js'), [
+      ].join('\n')),
+    write('test/network.test.js', [
         "import { test } from 'node:test';",
         "import assert from 'node:assert';",
         "import { createServer } from 'node:http';",
@@ -176,24 +190,19 @@ test('a graph.command check may bind loopback but not a non-loopback interface',
         "  assert.equal(child.status, 0, child.stderr);",
         "  assert.deepEqual(JSON.parse(child.stdout), { wildcard: 'EPERM', loopback: 'EPERM' });",
         "});",
-      ].join('\n'));
-      return { outcome: 'completed', output: null, usage };
-    },
-  };
-  const { runtime, task } = await start(root, { work: networkAction }, nodes, { command: 'node', args: ['--test'] });
+      ].join('\n'))
+  ];
+  const { runtime, task } = await start(root, networkAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: true });
 });
 
-test('a graph.command check keeps fixed loopback ports, concurrent listeners and cancellation', async () => {
+test('a native command module keeps fixed loopback ports, concurrent listeners and cancellation', async () => {
   const root = await repo();
-  const listenAction: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async operation => async () => {
-      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
-      await writeFile(join(operation.workspace!, 'test', 'listen.test.js'), [
+  const listenAction: ResponsePlan[] = [
+    write('test/listen.test.js', [
         "import { test } from 'node:test';",
         "import assert from 'node:assert';",
         "import { createServer } from 'node:http';",
@@ -297,18 +306,16 @@ test('a graph.command check keeps fixed loopback ports, concurrent listeners and
         "  assert.equal(ready, true);",
         "  await new Promise(resolve => server.close(resolve));",
         "});",
-      ].join('\n'));
-      return { outcome: 'completed', output: null, usage };
-    },
-  };
-  const { runtime, task } = await start(root, { work: listenAction }, nodes, { command: 'node', args: ['--test'] });
+      ].join('\n'))
+  ];
+  const { runtime, task } = await start(root, listenAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: true });
 });
 
-test('a graph.command check resolves host-provided dependencies and environment', async () => {
+test('a native command module resolves host-provided dependencies and environment', async () => {
   const root = await repo();
   // Host-provided dependencies live outside the tracked project tree so the
   // project stays clean for Git admission.
@@ -317,11 +324,8 @@ test('a graph.command check resolves host-provided dependencies and environment'
   await writeFile(join(modules, 'probe', 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', type: 'module', exports: './index.js' }));
   await writeFile(join(modules, 'probe', 'index.js'), 'export const value = "probe-dependency";\n');
   const env = { GRAPH_CHECK_PROBE: 'host-env' };
-  const dependencyAction: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async operation => async () => {
-      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
-      await writeFile(join(operation.workspace!, 'test', 'deps.test.js'), [
+  const dependencyAction: ResponsePlan[] = [
+    write('test/deps.test.js', [
         "import { test } from 'node:test';",
         "import assert from 'node:assert';",
         "import { value } from 'probe';",
@@ -329,21 +333,18 @@ test('a graph.command check resolves host-provided dependencies and environment'
         "  assert.equal(value, 'probe-dependency');",
         "  assert.equal(process.env.GRAPH_CHECK_PROBE, 'host-env');",
         "});",
-      ].join('\n'));
-      return { outcome: 'completed', output: null, usage };
-    },
-  };
-  const { runtime, task } = await start(root, { work: dependencyAction }, nodes, { command: 'node', args: ['--test'] }, { program: { readPaths: [modules], env, nodeModulesPath: modules } });
+      ].join('\n'))
+  ];
+  const { runtime, task } = await start(root, dependencyAction, { command: 'node', args: ['--test'] }, { program: { readPaths: [modules], env, nodeModulesPath: modules } });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
-  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
-  const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string };
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: true });
+  const body = await checkRecord(runtime, view.id);
   expect(body.stdout).toContain('pass');
 });
 
-test('a graph.command check resolves the project-owned dependencies without a host grant', async () => {
+test('a native command module resolves the project-owned dependencies without a host grant', async () => {
   const root = await repo();
   // Dependencies installed in the project itself are host configuration; the
   // check must find them even though the host named no grant.
@@ -351,26 +352,20 @@ test('a graph.command check resolves the project-owned dependencies without a ho
   await mkdir(join(modules, 'probe'), { recursive: true });
   await writeFile(join(modules, 'probe', 'package.json'), JSON.stringify({ name: 'probe', version: '1.0.0', type: 'module', exports: './index.js' }));
   await writeFile(join(modules, 'probe', 'index.js'), 'export const value = "project-dependency";\n');
-  const dependencyAction: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async operation => async () => {
-      await mkdir(join(operation.workspace!, 'test'), { recursive: true });
-      await writeFile(join(operation.workspace!, 'test', 'project-deps.test.js'), [
+  const dependencyAction: ResponsePlan[] = [
+    write('test/project-deps.test.js', [
         "import { test } from 'node:test';",
         "import assert from 'node:assert';",
         "import { value } from 'probe';",
         "test('project dependencies', () => assert.equal(value, 'project-dependency'));",
-      ].join('\n'));
-      return { outcome: 'completed', output: null, usage };
-    },
-  };
-  const { runtime, task } = await start(root, { work: dependencyAction }, nodes, { command: 'node', args: ['--test'] });
+      ].join('\n'))
+  ];
+  const { runtime, task } = await start(root, dependencyAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const view = await task.view();
   expect(view.questions).toEqual([]);
-  expect(view.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
-  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
-  const body = JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { code: number; stdout: string };
+  await expect(checkStatus(runtime, view.id)).resolves.toEqual({ state: 'settled', passed: true });
+  const body = await checkRecord(runtime, view.id);
   expect(body.code).toBe(0);
   expect(body.stdout).toContain('pass');
   // The check gets a host-owned link; the project's own directory is untouched.
@@ -386,38 +381,37 @@ test('a graph.command check resolves the project-owned dependencies without a ho
   expect(lstatSync(modules).isSymbolicLink()).toBe(false);
 });
 
-test('a graph revision cannot weaken the confirmed command of an acceptance check', async () => {
+test('native revision cannot replace a confirmed integration check with a version probe', async () => {
   const root = await repo();
-  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'node', args: ['--test'] });
+  const { runtime, task, main } = await start(root, workAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const before = await task.view();
-  expect(before.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
-  const weakened = nodes.map(node => node.id === 'check' ? { ...node, input: { command: 'node', args: ['--version'] } } : node);
-  await expect(runtime.supervisor(before.id).revise({
-    baseVersion: before.graphVersion, reason: 'Skip the required test', nodes: weakened, requestId: 'weaken',
-  })).rejects.toMatchObject({ code: 'invalid_proposal' });
-  const after = await task.view();
-  expect(after.graphVersion).toBe(before.graphVersion);
-  expect(after.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
-  expect(after.nodes.find(node => node.id === 'check')?.input).toEqual({ command: 'node', args: ['--test'] });
-  expect(after.evidence.find(item => item.acceptanceId === 'tests')?.valid).toBe(true);
+  await expect(checkStatus(runtime, before.id)).resolves.toEqual({ state: 'settled', passed: true });
+  await expect(main.graphPatch({ graphId: before.id, baseRevision: 1, changes: {
+    reason: 'Skip the required test', patch: { modules: { check: { operation: { args: ['--version'] } } } },
+  } })).rejects.toMatchObject({ code: 'invalid_input' });
+  await expect(main.graphInspect({ graphId: before.id })).resolves.toMatchObject({ revision: 1 });
+  const body = await checkRecord(runtime, before.id);
+  expect(body.verifiedCommit).toBe(before.integrationSha);
 });
 
-test('a graph revision that keeps confirmed check inputs intact still applies', async () => {
+test('native revision can add and explicitly run a probe without rerunning the confirmed check', async () => {
   const root = await repo();
-  const { runtime, task } = await start(root, { work: workAction }, nodes, { command: 'node', args: ['--test'] });
+  const { runtime, task, main } = await start(root, workAction, { command: 'node', args: ['--test'] });
   await runtime.host.drive();
   const before = await task.view();
-  const extra: NodeSpec = { id: 'extra', kind: 'program', action: 'graph.command', dependsOn: ['check'], input: { command: 'node', args: ['--version'] } };
-  const confirmed = nodes.map(node => node.id === 'check' ? { ...node, input: { command: 'node', args: ['--test'] } } : node);
-  const revised = await runtime.supervisor(before.id).revise({
-    baseVersion: before.graphVersion, reason: 'Add an environment probe', nodes: [...confirmed, extra], requestId: 'add-probe',
-  });
-  expect(revised.graphVersion).toBe(before.graphVersion + 1);
-  await runtime.host.drive();
-  const after = await task.view();
-  expect(after.nodes.find(node => node.id === 'extra')?.status).toBe('succeeded');
-  expect(after.nodes.find(node => node.id === 'check')?.status).toBe('succeeded');
+  await expect(main.graphPatch({ graphId: before.id, baseRevision: 1, changes: {
+    reason: 'Add an environment probe', patch: { modules: { probe: { type: 'operation', trigger: 'each',
+      inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' },
+    } } },
+  } })).resolves.toMatchObject({ revision: 2 });
+  expect(await operations(runtime, before.id)).toHaveLength(1);
+  await main.graphSend({ graphId: before.id, nodeId: 'probe', input: 'job', value: {} }); await runtime.host.drive();
+  const results = await operations(runtime, before.id);
+  expect(results).toHaveLength(2);
+  expect(results.find(item => item.module_id === 'probe')).toMatchObject({ state: 'settled', result: { outputs: { result: { passed: true } } } });
+  await expect(checkStatus(runtime, before.id)).resolves.toEqual({ state: 'settled', passed: true });
 });
 
 test('a packaged app routes sandboxed helpers to the bundled node runtime', async () => {

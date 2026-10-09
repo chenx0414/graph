@@ -2,6 +2,7 @@
 
 These source examples demonstrate Graph's runtime contracts. `m7-acceptance.ts` uses the providers explicitly configured by the user; its automated regression tests use local HTTP providers and disposable repositories.
 
+- `graphs/*.json`: native pipeline, fan-out, nested routing and external-main worker definitions. Bind the declared recipe/model IDs before graph_create; main starts public job and requests completion. The node --version operation demonstrates wiring only; replace it and declare acceptance for project verification. Fan-out joins latch once and need explicit reopening for another batch.
 - `m1-demo.ts`: persistent task state, an Agent action, a program check, evidence, and delivery across two Node processes.
 - `m7-acceptance.ts`: the native M7 acceptance entry. One conversation owns a separately confirmed graph; main starts named inputs and requests completion. Version-2 `run.json` resumes the same identities; legacy runs require a fresh directory. Exact draft versions and current commit-bound human questions must be confirmed explicitly.
 - `m7-contract.ts`: graph-to-delivery contract checks.

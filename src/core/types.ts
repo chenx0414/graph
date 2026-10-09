@@ -1,4 +1,3 @@
-import type { VerifierConfig } from './verification.ts';
 import type { GraphDefinition } from './interface-spec.ts';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -13,83 +12,7 @@ export interface ContextFactRef {
   from?: string;
   to?: string;
 }
-export type PredecessorHandoffMode = 'evidence_only' | 'result_handoff';
-export interface PredecessorHandoffPolicy {
-  /** A direct dependency entry on the receiving Agent node. */
-  source: string;
-  mode: PredecessorHandoffMode;
-  /** Required result schema for result_handoff; defaults to result_handoff@1. */
-  resultSchema?: { kind: string; version: number };
-  /** Upper bound applied to the model-visible predecessor summary. */
-  maxSummaryChars?: number;
-}
-export interface ContextRequest {
-  purpose?: ContextPurpose;
-  /** Another Agent node in the same graph whose transcript may be required. */
-  sourceNode?: string;
-  /** Optional immutable entry id; omitted means the source's current leaf. */
-  sourceLeafId?: string;
-  requiredFacts?: ContextFactRef[];
-  /** Incoming edge policy for Fresh context assembly. Omitted edges use result_handoff except for independent review/verification, which use evidence_only. */
-  predecessors?: PredecessorHandoffPolicy[];
-  independence?: ContextIndependence;
-  /** Explicitly allow a fork to use a different model, definition or capability bundle. */
-  rebrand?: boolean;
-  reason?: string;
-}
-export type AgentContextMode = 'continue' | 'fresh' | 'fork';
-export interface ResultHandoffDraft {
-  schemaVersion: 1;
-  objective: string;
-  outcome: 'completed' | 'partial' | 'blocked';
-  workSummary: string;
-  changes: {
-    kind: 'file' | 'artifact' | 'external';
-    path?: string;
-    digest?: string;
-    artifactId?: string;
-    version?: number;
-    uri?: string;
-    summary: string;
-  }[];
-  decisions: {
-    decision: string;
-    rationale: string;
-    evidenceRefs: string[];
-  }[];
-  verification: {
-    summary: string;
-    result: 'pass' | 'fail' | 'unknown';
-    evidenceRefs: string[];
-  }[];
-  knownLimits: string[];
-  openQuestions: string[];
-  nextActions: string[];
-}
-export interface ResultHandoff extends ResultHandoffDraft {
-  source: {
-    nodeId: string;
-    instanceId: string;
-    operationId: string;
-    activationId: string;
-    outputVersion: number;
-    operationResultDigest: string;
-  };
-}
-export interface PredecessorHandoffProjection {
-  sourceNodeId: string;
-  sourceInstanceId: string | null;
-  sourceOperationId: string;
-  sourceActivationId: string;
-  outputVersion: number;
-  mode: PredecessorHandoffMode;
-  artifactRefs: { path: string; digest: string; artifactId?: string; version?: number; uri?: string }[];
-  evidenceRefs: { acceptanceId: string; summary: string; path: string; digest: string }[];
-  resultHandoff?: ResultHandoff;
-  resultHandoffDigest?: string;
-  resultHandoffSchema?: { kind: string; version: number };
-  resultHandoffBytes?: number;
-}
+export type AgentContextMode = 'continue' | 'fresh';
 export interface ReviewIndependencePolicy {
   freshRequired: true;
   evidenceOnly: true;
@@ -111,8 +34,6 @@ export interface ContextHandoffPackage {
   decisions: string[];
   acceptance: { id: string; description: string; checkNode: string }[];
   artifactRefs: { path: string; digest: string; artifactId?: string; version?: number; uri?: string }[];
-  predecessorPolicies: PredecessorHandoffPolicy[];
-  predecessorHandoffs: PredecessorHandoffProjection[];
   outputSchema: { kind: string; version: number };
   briefing: string;
 }
@@ -131,46 +52,18 @@ export interface ResolvedAgentContext {
   modelPolicyDigest?: string;
   toolPolicyDigest?: string;
   reviewPolicy?: ReviewIndependencePolicy;
-  sourceNodeId?: string;
-  sourceInstanceId?: string;
-  sourceSessionId?: string;
-  sourceSessionFile?: string;
   sourceLeafId?: string;
-  rebrand?: boolean;
 }
+/** Internal record for main; graph declarations use NodeDefinition. */
 export interface NodeSpec {
   id: string;
   kind: 'agent' | 'program';
   action: string;
-  dependsOn?: string[];
   input?: Json;
   definitionVersion?: string;
   model?: string;
   role?: 'master' | 'worker';
-  container?: string;
-  routes?: string[];
-  when?: { node: string; case: string };
-  optional?: boolean;
-  /**
-   * A file this node promises to produce. The harness publishes it as a task-scope artifact when the
-   * node settles, so a deliverable does not depend on the node remembering a tool call, and a
-   * declared file that was never written fails the node instead of passing silently.
-   */
-  deliverable?: { path: string; namespace: string; name: string; title?: string; summary?: string };
-  verifier?: VerifierConfig;
-  replaces?: string;
-  context?: ContextRequest;
 }
-export interface ContainerSpec { id: string; parent?: string; dependsOn?: string[]; when?: { node: string; case: string }; outputs: string[] }
-/**
- * A loop returns work to an upstream node.
- *
- * `case` is how a ROUTER asks for that return: when the router settles with this route, the work
- * goes back to `to` instead of downstream. It is the same word as `when.case` on purpose — a graph
- * already names its branches, so "which branch means rework" is a declaration, never a magic string.
- * A loop with no `case` keeps the older meaning: it is driven by a verification verdict.
- */
-export interface LoopSpec { from: string; to: string; case?: string }
 interface ProposalScope {
   requirementVersion: number;
   summary: string;
@@ -181,20 +74,6 @@ interface ProposalScope {
 /** A declarative graph draft. Main belongs outside its definition. */
 export interface NativeProposal extends ProposalScope {
   definition: GraphDefinition;
-}
-/** Legacy SDK shape, retained only until the remaining callers are retired. */
-export interface Proposal extends ProposalScope {
-  nodes: NodeSpec[];
-  /**
-   * §13.8 switchover: a draft may carry a v2 graph definition (the shape §5's
-   * `graph_create(definition)` takes). When present, confirmation materialises a v2
-   * graph instead of the old declarative rows, and the task runs on the new kernel.
-   * A draft without it keeps the old path, so the two can exist side by side while the
-   * switchover lands.
-   */
-  definition?: GraphDefinition;
-  containers?: ContainerSpec[];
-  loops?: LoopSpec[];
 }
 export interface Receipt { taskId: string; cursor: number }
 export interface ProposalReceipt extends Receipt { proposalVersion: number }
@@ -245,7 +124,7 @@ export interface Operation {
     briefing?: string;
     agentContext?: ResolvedAgentContext;
     /** Structured result this operation must submit, so tools can validate in-turn. */
-    outputSchema?: { kind: 'agent_result' | 'result_handoff' | 'independent_review'; version: number };
+    outputSchema?: { kind: 'agent_result'; version: number };
   };
   grants: string[];
   /** Effective access policy frozen when this operation was admitted. */
@@ -262,10 +141,7 @@ export interface Operation {
 export interface AttachmentInput { name: string; type: string; size: number; text: string; data?: string }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];
-  /** Structured work-result handoff submitted by an Agent when a downstream edge requires it. */
-  resultHandoff?: ResultHandoffDraft;
   question?: { prompt: string; grant?: string; data?: Json };
-  route?: string;
   artifacts?: ArtifactInput[];
 }
 export type Answer = { type: 'add_budget'; tokens: number } | { type: 'respond'; value: Json } | { type: 'retry' } | { type: 'grant'; grant: string } | { type: 'acknowledge' }

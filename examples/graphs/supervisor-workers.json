@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "name": "External main and workers",
+  "protocols": {
+    "data": {
+      "type": "object"
+    }
+  },
+  "nodes": {
+    "left": {
+      "recipe": "coder@1",
+      "model": "left",
+      "task": "Execute the left subtask assigned by external main",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "submission": {
+        "required": [
+          "result"
+        ]
+      }
+    },
+    "right": {
+      "recipe": "coder@1",
+      "model": "right",
+      "task": "Execute the right subtask assigned by external main",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "submission": {
+        "required": [
+          "result"
+        ]
+      }
+    }
+  },
+  "modules": {
+    "dispatch": {
+      "type": "router",
+      "trigger": "each",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "left": {
+          "protocol": "data"
+        },
+        "right": {
+          "protocol": "data"
+        }
+      },
+      "rules": [
+        {
+          "when": "true",
+          "emit": {
+            "left": "$job",
+            "right": "$job"
+          }
+        }
+      ]
+    },
+    "join": {
+      "type": "router",
+      "trigger": "once",
+      "requiredInputs": [
+        "left",
+        "right"
+      ],
+      "inputs": {
+        "left": {
+          "protocol": "data"
+        },
+        "right": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "rules": [
+        {
+          "when": "true",
+          "emit": {
+            "result": {
+              "left": "$left",
+              "right": "$right"
+            }
+          }
+        }
+      ]
+    },
+    "check": {
+      "type": "operation",
+      "trigger": "each",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "operation": {
+        "action": "workspace.command",
+        "version": 1,
+        "command": "node",
+        "args": [
+          "--version"
+        ],
+        "output": "result"
+      }
+    }
+  },
+  "edges": {
+    "start-left": {
+      "from": "dispatch.left",
+      "to": "left.job",
+      "enabled": true
+    },
+    "start-right": {
+      "from": "dispatch.right",
+      "to": "right.job",
+      "enabled": true
+    },
+    "left-result": {
+      "from": "left.result",
+      "to": "join.left",
+      "enabled": true
+    },
+    "right-result": {
+      "from": "right.result",
+      "to": "join.right",
+      "enabled": true
+    },
+    "checked": {
+      "from": "join.result",
+      "to": "check.job",
+      "enabled": true
+    }
+  },
+  "inputs": {
+    "job": {
+      "to": "dispatch.job",
+      "protocol": "data"
+    }
+  },
+  "outputs": {
+    "result": {
+      "from": "check.result",
+      "protocol": "data"
+    }
+  }
+}

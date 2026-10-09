@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,51 +7,90 @@ import { TaskStore } from '../../src/core/store.ts';
 import { taskGate } from '../../src/runtime/task-gate.ts';
 import { fullAccessPolicy, standardAccessPolicy, type AccessPolicy } from '../../src/core/access-policy.ts';
 import { RuntimeError, type ActionAdapter } from '../../src/core/types.ts';
+import { createModelScheduler } from '../../src/runtime/model-scheduler.ts';
+import { parseGraphDefinition, type GraphDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-test('confirmed work reaches a program check after restart and retains delivery evidence without repeating the Agent', async () => {
+test('confirmed native output survives restart and reaches a real host check without repeating the Agent', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-delivery-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  let builds = 0;
-  const artifact = join(root, 'result.txt');
-  const actions: Record<string, ActionAdapter> = {
-    build: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-      builds++;
-      await writeFile(artifact, 'Implemented title search');
-      return { outcome: 'completed', output: { artifact }, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
-    } },
-    verify: { kind: 'program', prepare: async () => async () => {
-      const content = await readFile(artifact, 'utf8');
-      if (content !== 'Implemented title search') throw new Error('Invalid implementation');
-      return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'search', summary: 'Verified exact artifact content', artifact: { path: artifact, digest: createHash('sha256').update(content).digest('hex') } }] };
-    } },
-  };
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions };
-  let runtime = await openTaskRuntime(options);
-  cleanup.push(async () => runtime.close());
+  const arrived = deferred<void>(); const finish = deferred<void>();
+  const provider = await openaiServer([
+    { tools: [{ id: 'publish', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'plans', name: 'result', mediaType: 'text/markdown', content: 'Implemented title search', requestId: 'publish-result' }) }] },
+    { tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { report: 'Implemented title search' } } } }) }] },
+    { text: 'Result published.', beforeReply: async () => { arrived.resolve(); await finish.promise; } },
+  ]);
+  cleanup.push(() => provider.close());
+  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], models: {
+    entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }],
+    apiKey: 'local-only', modelRuntime: provider.runtime,
+  } };
+  let runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close()); cleanup.push(async () => finish.resolve());
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high' }, 'worker');
   const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Implement title search', requestId: 'begin' });
-  const task = runtime.user.task(taskId);
-  const proposal = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Title search', acceptance: [{ id: 'search', description: 'Search works', checkNode: 'verify' }],
-    nodes: [{ id: 'build', kind: 'agent', action: 'build', definitionVersion: 'coder@1', model: 'scripted' }, { id: 'verify', kind: 'program', action: 'verify', dependsOn: ['build'] }],
-  }, 'proposal');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const before = await task.view();
-  expect(before.phase).toBe('running');
-  await runtime.close();
-  runtime = await openTaskRuntime(options);
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const delivered = await runtime.user.task(taskId).view();
-  expect(delivered.phase).toBe('completed');
-  expect(delivered.evidence).toMatchObject([{ acceptanceId: 'search', nodeId: 'verify', proposalVersion: proposal.proposalVersion, requirementVersion: 1 }]);
-  expect(delivered.nodes[0]).toMatchObject({ instanceId: before.nodes[0]!.instanceId, used: 50, status: 'succeeded' });
-  expect(builds).toBe(1);
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-});
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Title search', protocols: { data: { type: 'object' } },
+    nodes: { build: { recipe: 'worker@1', model: 'local', task: 'Publish the stable plan and submit the report', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+    modules: { verify: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+    edges: { checked: { from: 'build.result', to: 'verify.job', enabled: true } },
+    outputs: { result: { from: 'build.result', protocol: 'data' } }, acceptance: [{ id: 'host', description: 'Host runtime responds', kind: 'check', module: 'verify' }] });
+  const main = runtime.supervisor(taskId); const task = runtime.user.task(taskId);
+  const proposed = await main.propose({ requirementVersion: 1, summary: 'Title search', definition, acceptance: [{ id: 'host', description: 'Host runtime responds', checkNode: 'verify' }] }, 'proposal');
+  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await runtime.host.drive(); expect(provider.requests).toHaveLength(0);
+  await main.graphSend({ graphId: taskId, nodeId: 'build', input: 'job', value: { objective: 'Title search' } });
+  const driving = runtime.host.drive(); await arrived.promise;
+  const paused = await task.pause('pause-before-check');
+  const events = task.watch(paused.cursor - 1); const pauseEvent = (await events.next()).value!; await events.return();
+  finish.resolve(); await driving;
+  const before = runtime.nodeRun(taskId, 'build');
+  expect(before.node.status).toBe('succeeded'); expect(before.instance!.used).toBe(150);
+  const prepared = await main.graphInspect({ graphId: taskId, query: 'operations' }) as { id: string; state: string; started_at: number | null; worker_active: number }[];
+  // submit immediately activates downstream work. A check sent before pause
+  // may finish; a check not yet sent must retain its preparation and input.
+  for (const operation of prepared) {
+    expect(operation.worker_active).toBe(0);
+    expect(['prepared', 'settled']).toContain(operation.state);
+    if (operation.state === 'prepared') expect(operation.started_at).toBeNull();
+    else expect(operation.started_at!).toBeLessThanOrEqual(pauseEvent.timestamp);
+  }
+  const published = runtime.artifacts.list(taskId).artifacts;
+  expect(published).toHaveLength(1);
+  const version = published[0]!;
+  await expect(runtime.artifacts.read(taskId, version.artifactId, version.version)).resolves.toMatchObject({ text: 'Implemented title search' });
+  await runtime.close(); runtime = await openTaskRuntime(options);
+  const recovered = runtime.user.task(taskId); const recoveredMain = runtime.supervisor(taskId);
+  await recovered.resume('resume'); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(3);
+  expect(runtime.nodeRun(taskId, 'build').instance).toMatchObject({ id: before.instance!.id, used: 150 });
+  await expect(recoveredMain.graphInspect({ graphId: taskId, query: 'results' })).resolves.toMatchObject([{ value: { report: 'Implemented title search' } }]);
+  await expect(runtime.artifacts.read(taskId, version.artifactId, version.version)).resolves.toMatchObject({ text: 'Implemented title search' });
+  await expect(recoveredMain.graphInspect({ graphId: taskId, query: 'operations' })).resolves.toMatchObject([{ ...(prepared[0] ? { id: prepared[0].id } : {}), state: 'settled', module_id: 'verify' }]);
+  expect((await recovered.view()).phase).toBe('idle');
+  await recoveredMain.graphControl({ graphId: taskId, action: 'complete' }); await runtime.host.drive();
+  expect((await recovered.view()).phase).toBe('completed');
+}, 30000);
+
+async function nativeAgent(plans: ResponsePlan[], configuration: { access?: () => AccessPolicy; scheduler?: ReturnType<typeof createModelScheduler>; definition?: GraphDefinition; credential?: () => boolean; conversation?: boolean } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-execution-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const provider = await openaiServer(plans); cleanup.push(() => provider.close());
+  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], limits: { defaultBudgetTokens: 20000000 }, ...(configuration.access ? { access: configuration.access } : {}),
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }], ...(configuration.credential ? {} : { apiKey: 'local-only' }), modelRuntime: provider.runtime, ...(configuration.scheduler ? { modelScheduler: configuration.scheduler, credentialFor: () => ({ credentialId: 'credential', apiKey: 'local-only', limit: 1 }) } : {}), ...(configuration.credential ? { credentialFor: () => configuration.credential!() ? { credentialId: 'credential', apiKey: 'local-only' } : undefined } : {}) } };
+  const runtime = await openTaskRuntime(options); cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high' }, 'worker');
+  const parent = configuration.conversation
+    ? await runtime.conversations.create({ projectId: 'project', text: 'Work', requestId: 'begin' })
+    : await runtime.user.begin({ projectId: 'project', request: 'Work', requestId: 'begin' });
+  const ownerId = parent.taskId;
+  const conversationId = 'conversationId' in parent && typeof parent.conversationId === 'string' ? parent.conversationId : undefined;
+  const main = runtime.supervisor(ownerId);
+  const { graphId } = await main.graphCreate({ definition: configuration.definition ?? parseGraphDefinition({ schemaVersion: 2, name: 'Work', protocols: {},
+    nodes: { work: { recipe: 'worker@1', model: 'local', task: 'Respond to the assigned message', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) }) as { graphId: string };
+  return { root, runtime, provider, main, graphId, ownerId, conversationId, options, task: runtime.user.task(graphId) };
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -60,415 +98,321 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function singleAgent(actions: Record<string, ActionAdapter>, access?: () => AccessPolicy) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-execution-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  // This suite verifies the finite-budget acceptance path; new instances are
-  // unlimited by default, so pin the legacy cap explicitly.
-  const options = {
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'project', root }],
-    actions,
-    limits: { defaultBudgetTokens: 20_000_000 },
-    ...(access ? { access } : {}),
-  };
-  const runtime = await openTaskRuntime(options);
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Work', requestId: 'begin' });
-  const task = runtime.user.task(taskId);
-  const proposal = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Work',
-    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [{ id: 'work', kind: 'agent', action: 'work', model: 'scripted', definitionVersion: 'worker@1' }, { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] }],
-  }, 'proposal');
-  await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  return { runtime, task, options, taskId };
-}
-
-test('pause during preparation prevents the send, and a running worker drains instead of being soft-stopped', async () => {
-  const preparing = deferred<void>();
-  const prepared = deferred<void>();
-  const sent = deferred<void>();
-  const finish = deferred<void>();
-  let sends = 0;
-  let stopCalls = 0;
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    stop: async () => { stopCalls += 1; },
-    prepare: async () => { preparing.resolve(); await prepared.promise; return async () => {
-      sends++; sent.resolve(); await finish.promise;
-      return { outcome: 'continue', output: null, usage: { input: 20, output: 10, cacheRead: 0, cacheWrite: 0 } };
-    }; },
-  } });
-  cleanup.push(async () => { prepared.resolve(); finish.resolve(); });
-  const first = runtime.host.runReady();
-  await preparing.promise;
-  const pause = await task.pause('pause-1');
-  expect(await task.pause('pause-1')).toEqual(pause);
-  prepared.resolve();
-  expect(await first).toEqual({ dispatched: 0 });
-  expect(sends).toBe(0);
-  expect(await task.view()).toMatchObject({ status: 'paused', nodes: [{ reserved: 0, used: 0 }, {}] });
-  await task.resume('resume-1');
-  const second = runtime.host.runReady();
-  await sent.promise;
-  await task.pause('pause-2');
-  // Soft stop is reserved for the conversation master turn; a worker turn is an
-  // independent unit that drains untouched, so pause blocks new dispatch but
-  // does not interrupt it (stop is never asked).
-  expect(stopCalls).toBe(0);
-  expect(await task.view()).toMatchObject({ status: 'pausing' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  finish.resolve();
-  expect(await second).toEqual({ dispatched: 1 });
-  expect(await task.view()).toMatchObject({ status: 'paused', nodes: [{ used: 30, reserved: 0 }, {}] });
-  expect(sends).toBe(1);
-});
-
-test('unknown usage retains the reservation and blocks replay until a deduplicated result settles it', async () => {
-  let sends = 0;
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    prepare: async () => async () => { sends++; return { outcome: 'continue', output: { draft: true } }; },
-  } });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const unknown = await task.view();
-  expect(unknown).toMatchObject({ status: 'blocked', nodes: [{ used: 0, reserved: 100, status: 'blocked' }, {}], questions: [{ kind: 'unknown_usage', status: 'open' }] });
-  await task.resume('resume');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(sends).toBe(1);
-  const operation = unknown.operations[0]!;
-  const result = { outcome: 'continue' as const, output: { draft: true }, usage: { input: 30, output: 10, cacheRead: 5, cacheWrite: 5 } };
-  await runtime.host.report(operation.id, operation.generation, result);
-  await runtime.host.report(operation.id, operation.generation, result);
-  expect(await task.view()).toMatchObject({ status: 'running', nodes: [{ used: 50, reserved: 0, status: 'pending' }, {}], questions: [{ status: 'resolved' }] });
-  await expect(runtime.host.report(operation.id, operation.generation, { ...result, usage: { ...result.usage, output: 11 } })).rejects.toMatchObject({ code: 'result_conflict' });
-});
-
-test('a host can reconcile unavailable unknown usage without recording it as zero', async () => {
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    prepare: async () => async () => ({ outcome: 'continue', output: { draft: true } }),
-  } });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const blocked = await task.view();
-  expect(blocked).toMatchObject({ status: 'blocked', nodes: [{ used: 0, reserved: 100, status: 'blocked' }, {}], questions: [{ kind: 'unknown_usage', status: 'open' }] });
-  await expect(task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: '   ' }, 'no-proof')).rejects.toMatchObject({ code: 'invalid_answer' });
-  await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no per-request usage for the failed call' }, 'reconcile');
-  const after = await task.view();
-  // The result proceeds through the normal settlement path: output and version
-  // are recorded for successors, while the unaccounted call is not counted.
-  expect(after).toMatchObject({ status: 'running', nodes: [{ used: 0, reserved: 0, status: 'pending' }, {}], questions: [{ status: 'resolved' }], operations: [{ state: 'succeeded' }] });
-  expect(after.nodes[0]).toMatchObject({ outputVersion: 1 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-});
-
-test('a reconciled result is delivered to successors', async () => {
-  const seen: unknown[] = [];
-  const { runtime, task } = await singleAgent({
-    work: { kind: 'agent', reserveTokens: 100,
-      prepare: async () => async () => ({ outcome: 'completed', output: { answer: 42 } }),
-    },
-    check: { kind: 'program',
-      prepare: async operation => async () => {
-        seen.push(operation.dependencies.work);
-        return { outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: operation.workspace ?? '/', digest: 'a'.repeat(64) } }] };
-      },
-    },
-  });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const blocked = await task.view();
-  await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no usage for the failed call' }, 'reconcile');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(seen).toEqual([{ answer: 42 }]);
-  expect((await task.view()).evidence.some(item => item.acceptanceId === 'works' && item.valid)).toBe(true);
-});
-
-test('a reconciled waiting result keeps its waiting question instead of re-running', async () => {
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    prepare: async () => async () => ({ outcome: 'waiting', output: null, question: { prompt: 'Provide the missing source' } }),
-  } });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const blocked = await task.view();
-  expect(blocked.questions.map(question => question.kind)).toEqual(['unknown_usage']);
-  await task.answer(blocked.questions[0]!.id, { type: 'reconcile_usage', proof: 'Provider exposes no usage for the failed call' }, 'reconcile');
-  const after = await task.view();
-  expect(after.questions).toMatchObject([
-    { kind: 'unknown_usage', status: 'resolved' },
-    { kind: 'waiting', status: 'open', data: { prompt: 'Provide the missing source' } },
-  ]);
-  expect(after.nodes[0]).toMatchObject({ status: 'waiting' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  await task.answer(after.questions[1]!.id, { type: 'respond', value: 'done' }, 'respond');
-  expect((await task.view()).nodes[0]).toMatchObject({ status: 'pending' });
-});
-
-test('the cumulative instance budget survives restart and only a scoped user answer permits more work', async () => {
-  let sends = 0;
-  const { runtime, task, options, taskId } = await singleAgent({ work: { kind: 'agent', reserveTokens: 20_000_000,
-    prepare: async () => async () => { sends++; return { outcome: 'continue', output: null, usage: { input: 19_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 } }; },
-  } });
-  await runtime.host.runReady();
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  const blocked = await task.view();
-  expect(blocked.nodes[0]).toMatchObject({ budget: 20_000_000, used: 20_000_000, reserved: 0, status: 'blocked' });
-  expect(blocked.questions[0]).toMatchObject({ kind: 'budget', nodeId: 'work', status: 'open' });
-  await runtime.close();
-  const restored = await openTaskRuntime(options);
-  cleanup.push(() => restored.close());
-  const recovered = restored.user.task(taskId);
-  await recovered.resume('resume');
-  expect(await restored.host.runReady()).toEqual({ dispatched: 0 });
-  const answer = { type: 'add_budget' as const, tokens: 20_000_000 };
-  const receipt = await recovered.answer(blocked.questions[0]!.id, answer, 'budget');
-  expect(await recovered.answer(blocked.questions[0]!.id, answer, 'budget')).toEqual(receipt);
-  expect((await recovered.view()).nodes[0]).toMatchObject({ instanceId: blocked.nodes[0]!.instanceId, budget: 40_000_000, used: 20_000_000 });
-  expect(await restored.host.runReady()).toEqual({ dispatched: 1 });
-  expect((await recovered.view()).nodes[0]).toMatchObject({ budget: 40_000_000, used: 40_000_000 });
-  expect(sends).toBe(2);
-});
-
-test.each(['prepare', 'dispatch'])('%s failure becomes a durable problem and only proven unsent work is retried', async stage => {
-  let fail = true; let sends = 0;
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    prepare: async () => {
-      if (stage === 'prepare' && fail) { fail = false; throw new Error('Preparation unavailable'); }
-      return async () => {
-        sends++;
-        if (fail) { fail = false; throw new Error('Transport lost before result'); }
-        return { outcome: 'continue', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
-      };
-    },
-    reconcile: async () => ({ state: 'not_started', quiescent: true, proof: 'Scripted service confirms no request was accepted and worker is stopped' }),
-  } });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: stage === 'dispatch' ? 1 : 0 });
-  const blocked = await task.view();
-  expect(blocked.status).toBe('blocked');
-  expect(blocked.operations[0]!.state).toBe(stage === 'dispatch' ? 'unknown' : 'not_sent');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  if (stage === 'prepare') await task.answer(blocked.questions[0]!.id, { type: 'retry' }, 'retry');
-  else await runtime.host.reconcile(blocked.operations[0]!.id);
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect((await task.view()).nodes[0]).toMatchObject({ instanceId: blocked.nodes[0]!.instanceId, used: 50, reserved: 0 });
-  expect(sends).toBe(stage === 'dispatch' ? 2 : 1);
-});
-
-test('new capability grants require a scoped user answer, persist, and do not clear manual pause', async () => {
-  let sends = 0;
-  const { runtime, task, taskId, options } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100, grant: 'artifact:write',
-    prepare: async operation => async () => { sends++; expect(operation.grants).toContain('artifact:write'); return { outcome: 'continue', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } }; },
-  } });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  const blocked = await task.view();
-  expect(blocked.questions[0]).toMatchObject({ kind: 'permission', data: { grant: 'artifact:write' } });
-  expect(blocked.operations).toHaveLength(0);
-  const question = blocked.questions[0]!.id;
-  const other = await runtime.user.begin({ projectId: 'project', request: 'Another feature', requestId: 'other' });
-  await expect(runtime.user.task(other.taskId).answer(question, { type: 'grant', grant: 'artifact:write' }, 'wrong-task')).rejects.toMatchObject({ code: 'invalid_question' });
-  await expect(task.answer(question, { type: 'grant', grant: 'publish' }, 'wrong-grant')).rejects.toMatchObject({ code: 'invalid_answer' });
-  await task.pause('pause');
-  await task.answer(question, { type: 'grant', grant: 'artifact:write' }, 'grant');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  await runtime.close();
-  const restored = await openTaskRuntime(options);
-  cleanup.push(() => restored.close());
-  expect((await restored.user.task(taskId).view()).status).toBe('paused');
-  await restored.user.task(taskId).resume('resume');
-  expect(await restored.host.runReady()).toEqual({ dispatched: 1 });
-  expect(sends).toBe(1);
-});
-
-test('full access auto-approves a required grant and freezes its policy on the operation', async () => {
-  let seen: unknown;
-  let policy: AccessPolicy = fullAccessPolicy();
-  let grant = 'artifact:write';
-  const { runtime, task } = await singleAgent({
-    work: {
-      kind: 'agent',
-      reserveTokens: 100,
-      get grant() { return grant; },
-      prepare: async operation => async () => {
-        seen = operation.accessPolicy;
-        expect(operation.grants).toContain('artifact:write');
-        return { outcome: 'continue', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
-      },
-    },
-  }, () => policy);
-
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const view = await task.view();
-  expect(view.questions).toEqual([
-    expect.objectContaining({
-      kind: 'permission',
-      status: 'resolved',
-      answer: expect.objectContaining({ type: 'grant', grant: 'artifact:write' }),
-    }),
-  ]);
-  expect(seen).toMatchObject({
-    mode: 'full',
-    authorization: 'bypass',
-    digest: expect.stringMatching(/^[a-f0-9]{64}$/),
-  });
-
-  policy = standardAccessPolicy();
-  grant = 'publish';
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect((await task.view()).questions).toEqual(expect.arrayContaining([
-    expect.objectContaining({ kind: 'permission', status: 'open', data: { grant: 'publish' } }),
-  ]));
-});
-
-test('full access auto-approves a grant requested by an operation result and retries the node', async () => {
-  let sends = 0;
-  const { runtime, task } = await singleAgent({
-    work: {
-      kind: 'agent',
-      reserveTokens: 100,
-      prepare: async () => async () => {
-        sends += 1;
-        if (sends === 1) {
-          return {
-            outcome: 'waiting',
-            output: null,
-            question: { prompt: 'Remote MCP needs a grant', grant: 'mcp:remote:echo' },
-            usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 },
-          };
-        }
-        return { outcome: 'continue', output: { granted: true }, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } };
-      },
-    },
-  }, () => fullAccessPolicy());
-
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const afterGrant = await task.view();
-  expect(afterGrant.questions).toEqual([
-    expect.objectContaining({ kind: 'permission', status: 'resolved', answer: { type: 'grant', grant: 'mcp:remote:echo' } }),
-  ]);
-  expect(afterGrant.nodes[0]).toMatchObject({ status: 'pending' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(sends).toBe(2);
-});
-
-test('full access no longer bypasses pause, but still bypasses budget and unknown usage', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-execution-full-pause-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const artifact = join(root, 'artifact.txt');
-  let sends = 0;
-  const { runtime, task } = await singleAgent({
-    work: {
-      kind: 'agent',
-      reserveTokens: 20_000_001,
-      prepare: async () => async () => {
-        sends += 1;
-        await writeFile(artifact, 'full access result');
-        return { outcome: 'completed', output: { artifact } };
-      },
-    },
-    check: {
-      kind: 'program',
-      prepare: async () => async () => ({
-        outcome: 'completed',
-        output: { passed: true },
-        evidence: [{
-          acceptanceId: 'works',
-          summary: 'Full access bypassed the budget and usage gates',
-          artifact: { path: artifact, digest: createHash('sha256').update('full access result').digest('hex') },
-        }],
-      }),
-    },
-  }, () => fullAccessPolicy());
-
-  await task.pause('pause-full-access');
-  // The pause now applies in full access too: nothing new is dispatched until
-  // resume, even for a worker node.
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(sends).toBe(0);
+test('native pause before credential admission prevents sends, and an in-flight worker response drains before paused is shown', async () => {
+  const arrived = deferred<void>(); const finish = deferred<void>(); const scheduler = createModelScheduler();
+  const fixture = await nativeAgent([{ text: 'Completed the in-flight response', beforeReply: async () => { arrived.resolve(); await finish.promise; } }], { scheduler });
+  const { runtime, main, graphId, provider, task } = fixture;
+  const held = await scheduler.acquire({ credentialId: 'credential', limit: 1 });
+  cleanup.push(async () => { held(); finish.resolve(); });
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Do the assigned work' });
+  const preparing = runtime.host.drive();
+  await expect.poll(() => scheduler.queued(), { timeout: 15000 }).toBe(1);
+  const pause = await task.pause('pause-before-send'); expect(await task.pause('pause-before-send')).toEqual(pause);
+  held(); await preparing;
+  expect(provider.requests).toHaveLength(0);
   expect(await task.view()).toMatchObject({ status: 'paused' });
+  expect(runtime.nodeRun(graphId, 'work').node.status).toBe('idle');
+  await expect(main.graphInspect({ graphId, query: 'executions' })).resolves.toMatchObject({ items: [{ retriesUsed: 0, state: 'blocked' }] });
+  await expect(main.graphInspect({ graphId, query: 'queue' })).resolves.toMatchObject({ items: [{ state: 'queued' }] });
+  expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ used: 0, reserved: 0 });
+  await task.resume('resume-task');
+  const driving = runtime.host.drive(); await arrived.promise;
+  await task.pause('pause-inflight'); expect(await task.view()).toMatchObject({ status: 'pausing' });
+  finish.resolve(); await driving;
+  expect(provider.requests).toHaveLength(1);
+  expect(await task.view()).toMatchObject({ status: 'paused' });
+  expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ used: 50, reserved: 0 });
+}, 30000);
 
-  await task.resume('resume-full-access');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.questions).toEqual([]);
-  expect(view.operations).toHaveLength(2);
-  // Budget and unknown-usage automatic gates stay bypassed under full access:
-  // the reservation exceeds the cap yet the operation still succeeded.
-  expect(view.nodes[0]).toMatchObject({ used: 0, reserved: 0, status: 'succeeded' });
-  expect(sends).toBe(1);
+test('unknown native usage retains its hold and queued input until main reconciles and explicitly resumes', async () => {
+  const { runtime, provider, main, graphId } = await nativeAgent([{ text: 'Draft response', usage: null }, { text: 'Original input recovered' }, { text: 'A follow-up response' }]);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Prepare a draft' }); await runtime.host.drive();
+  const before = runtime.nodeRun(graphId, 'work');
+  expect(before.node.status).toBe('blocked'); expect(before.instance!.used).toBe(0);
+  const unknown = (await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; state: string; usage: unknown; reserved: number }[])[0]!;
+  expect(unknown).toMatchObject({ state: 'unknown', usage: null }); expect(unknown.reserved).toBeGreaterThan(0);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Queued follow-up' }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
+  const usage = { input: 30, output: 10, cacheRead: 5, cacheWrite: 5 };
+  await main.graphControl({ graphId, action: 'reconcile_usage', callId: unknown.id, usage });
+  await main.graphControl({ graphId, action: 'reconcile_usage', callId: unknown.id, usage });
+  expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ used: 50, reserved: 0 });
+  await runtime.host.drive(); expect(provider.requests).toHaveLength(1);
+  await main.graphControl({ graphId, action: 'resume', nodeId: 'work' }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(3);
+  expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, used: 150, reserved: 0 });
+  expect(JSON.stringify(provider.requests[2])).toContain('Queued follow-up');
+  expect(JSON.stringify(provider.requests[1])).toContain('Draft response');
 });
 
-test('usage above the reservation is counted once but requires acknowledgement before further dispatch', async () => {
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 40,
-    prepare: async () => async () => ({ outcome: 'continue', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } }),
-  } });
-  await runtime.host.runReady();
-  const overrun = await task.view();
-  expect(overrun.nodes[0]).toMatchObject({ used: 50, reserved: 0, status: 'blocked' });
-  expect(overrun.questions[0]).toMatchObject({ kind: 'reservation_exceeded' });
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  await task.answer(overrun.questions[0]!.id, { type: 'acknowledge' }, 'acknowledge');
-  expect((await task.view()).nodes[0]).toMatchObject({ used: 50, status: 'pending' });
+test('unavailable native usage cannot be released as zero or resolved by a proof string alone', async () => {
+  const { runtime, provider, main, graphId, task } = await nativeAgent([{ text: 'Usage unavailable', usage: null }]);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Produce a result' }); await runtime.host.drive();
+  const [unknown] = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string }[];
+  await expect(main.graphControl({ graphId, action: 'reconcile_usage', callId: unknown!.id })).rejects.toMatchObject({ code: 'invalid_input' });
+  await expect(main.graphControl({ graphId, action: 'reconcile_usage', callId: unknown!.id, usage: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0 } })).rejects.toMatchObject({ code: 'invalid_input' });
+  await task.resume('resume-task'); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
+  await expect(main.graphInspect({ graphId, query: 'provider_calls' })).resolves.toMatchObject([{ state: 'unknown', usage: null, cost: null }]);
+  const after = runtime.nodeRun(graphId, 'work'); expect(after.node.status).toBe('blocked'); expect(after.instance).toMatchObject({ used: 0, reserved: expect.any(Number) });
+  expect(after.instance && 'reserved' in after.instance ? after.instance.reserved : undefined).toBeGreaterThan(0);
 });
 
-test('a program result without its required acceptance evidence is blocked instead of silently succeeding', async () => {
-  const { runtime, task } = await singleAgent({
-    work: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } }) },
-    check: { kind: 'program', prepare: async () => async () => ({ outcome: 'completed', output: { passed: true } }) },
-  });
-  await runtime.host.runReady();
-  await runtime.host.runReady();
-  const result = await task.view();
-  // A check that produced no usable evidence is a refused document, not an
-  // unobservable external outcome: it becomes a repair problem for the owner.
-  expect(result).toMatchObject({ phase: 'running', status: 'blocked', evidence: [], questions: [{ kind: 'result_noncompliant' }] });
-  expect(result.nodes[1]!.status).toBe('blocked');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
+test('native submit with unresolved usage delivers once to its successor and reconciliation never replays the committed output', async () => {
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Retained submit', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'worker@1', model: 'local', task: 'Submit the answer', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } },
+      successor: { recipe: 'worker@1', model: 'local', task: 'Read the actual incoming answer', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
+    modules: {}, edges: { result: { from: 'work.result', to: 'successor.job', enabled: true } }, outputs: { result: { from: 'work.result', protocol: 'data' } } });
+  const { runtime, main, graphId, provider } = await nativeAgent([
+    { usage: null, tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { answer: 42 } } } }) }] },
+    { text: 'Received the answer.' },
+  ], { definition });
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(2);
+  const request = provider.requests[1] as { messages: { content: string | { type: string; text?: string }[] }[] };
+  const text = request.messages.flatMap(message => typeof message.content === 'string' ? [message.content] : message.content.map(part => part.text ?? '')).join('\n');
+  expect(text).toMatch(/"answer"\s*:\s*42/);
+  expect(runtime.nodeRun(graphId, 'successor').node.status).toBe('succeeded');
+  const outputs = await main.graphInspect({ graphId, query: 'results' }); expect(outputs).toMatchObject([{ value: { answer: 42 } }]);
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; nodeId: string; state: string }[];
+  const unknown = calls.find(call => call.state === 'unknown')!;
+  const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { nodeId: string; seq: number }[] };
+  await main.graphControl({ graphId, action: 'reconcile_usage', callId: unknown.id, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  await expect(main.graphControl({ graphId, action: 'retry', seq: queue.items.find(item => item.nodeId === 'work')!.seq })).rejects.toMatchObject({ code: 'invalid_queue' });
+  await main.graphControl({ graphId, nodeId: 'work', action: 'resume' }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(2);
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toEqual(outputs);
 });
 
-test('a user can reconcile known output with evidenced usage after restart without clearing other questions', async () => {
-  const { runtime, task, taskId, options } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    prepare: async () => async () => ({ outcome: 'waiting', output: { draft: true }, question: { prompt: 'Choose format' } }),
-  } });
-  await runtime.host.runReady();
-  const unknown = await task.view();
-  await runtime.close();
-  const restored = await openTaskRuntime(options);
-  cleanup.push(() => restored.close());
-  const recovered = restored.user.task(taskId);
-  await recovered.answer(unknown.questions[0]!.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'Provider request receipt shows 40 input and 10 output tokens' }, 'usage');
-  const known = await recovered.view();
-  expect(known.nodes[0]).toMatchObject({ used: 50, reserved: 0, status: 'waiting' });
-  expect(known.questions).toMatchObject([{ kind: 'unknown_usage', status: 'resolved' }, { kind: 'waiting', status: 'open' }]);
-  await recovered.resume('resume');
-  expect(await restored.host.runReady()).toEqual({ dispatched: 0 });
+test('native usage reconciliation preserves the clarification sent to main and does not resume an explicitly paused input', async () => {
+  const fixture = await nativeAgent([
+    { tools: [{ id: 'clarify', name: 'send_to_peer', arguments: JSON.stringify({ to: 'main', text: 'Provide the missing source', requestId: 'source-question' }) }] },
+    { text: 'Awaiting the source', usage: null },
+    { text: 'Continue after usage reconciliation' }, { text: 'The provided source is sufficient' },
+  ], { conversation: true });
+  const { runtime, main, graphId, provider, conversationId } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Work on the missing source' }); await runtime.host.drive();
+  const messages = (await runtime.conversations.view(conversationId!)).messages.filter(message => message.kind === 'peer');
+  expect(messages).toMatchObject([{ state: 'pending', text: expect.stringContaining('Provide the missing source') }]);
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; state: string }[];
+  await main.graphControl({ graphId, action: 'pause', nodeId: 'work' });
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Source: verified input supplied by main' });
+  await main.graphControl({ graphId, action: 'reconcile_usage', callId: calls.find(call => call.state === 'unknown')!.id, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  await runtime.host.drive(); expect(provider.requests).toHaveLength(2);
+  expect((await runtime.conversations.view(conversationId!)).messages.filter(message => message.kind === 'peer')).toEqual(messages);
+  await expect(main.graphInspect({ graphId, query: 'queue' })).resolves.toMatchObject({ items: [{ state: 'queued' }, { state: 'queued' }] });
+  await main.graphControl({ graphId, action: 'resume', nodeId: 'work' }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(4);
+  expect(JSON.stringify(provider.requests[3])).toContain('Source: verified input supplied by main');
+  expect((await runtime.conversations.view(conversationId!)).messages.filter(message => message.kind === 'peer')).toEqual(messages);
 });
 
-test('a late conflicting callback cannot undo an already settled worker report or charge it again', async () => {
-  const sent = deferred<void>(); const finish = deferred<void>();
-  const { runtime, task } = await singleAgent({ work: { kind: 'agent', reserveTokens: 100,
-    prepare: async () => async () => { sent.resolve(); await finish.promise; return { outcome: 'continue', output: null, usage: { input: 40, output: 20, cacheRead: 0, cacheWrite: 0 } }; },
-  } });
-  cleanup.push(async () => finish.resolve());
-  const pending = runtime.host.runReady(); await sent.promise;
-  const operation = (await task.view()).operations[0]!;
-  await runtime.host.report(operation.id, operation.generation, { outcome: 'continue', output: null, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
-  finish.resolve(); await pending;
-  const view = await task.view();
-  expect(view).toMatchObject({ nodes: [{ used: 50, reserved: 0, status: 'pending' }, {}], questions: [] });
-  expect(view.operations[0]!.state).toBe('succeeded');
+test('the native cumulative budget survives restart and only an authorized next-execution budget permits more work', async () => {
+  const fixture = await nativeAgent([{ text: 'Quota consumed', usage: { prompt_tokens: 19000000, completion_tokens: 1000000 } }, { text: 'Work after the authorized increase' }]);
+  const { runtime, main, graphId, provider, options } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Use the assigned quota' }); await runtime.host.drive();
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Continue the original assignment' }); await runtime.host.drive();
+  const before = runtime.nodeRun(graphId, 'work');
+  expect(before.node.status).toBe('blocked'); expect(before.instance).toMatchObject({ budget: 20000000, used: 20000000, reserved: 0 });
+  await runtime.close(); const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
+  const recovered = restored.supervisor(fixture.ownerId); const task = restored.user.task(graphId);
+  await task.resume('resume-task'); await restored.host.drive(); expect(provider.requests).toHaveLength(1);
+  await expect(task.setBudget({ nodeId: 'absent', tokens: 40000000, requestId: 'wrong-node' })).rejects.toMatchObject({ code: 'not_found' });
+  const receipt = await task.setBudget({ nodeId: 'work', tokens: 40000000, requestId: 'increase-quota' });
+  expect(await task.setBudget({ nodeId: 'work', tokens: 40000000, requestId: 'increase-quota' })).toEqual(receipt);
+  await recovered.graphControl({ graphId, nodeId: 'work', action: 'resume' }); await restored.host.drive();
+  expect(provider.requests).toHaveLength(1); // The interrupted execution retains its frozen cap.
+  const queue = await recovered.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; state: string }[] };
+  const pending = queue.items.find(item => item.state === 'queued')!;
+  await recovered.graphControl({ graphId, action: 'retry', seq: pending.seq }); await restored.host.drive();
+  expect(provider.requests).toHaveLength(2);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, budget: 40000000, used: 20000050, reserved: 0 });
+  expect(JSON.stringify(provider.requests[1])).toContain('Quota consumed');
+}, 30000);
+
+test.each(['prepare', 'dispatch'])('native %s failure survives restart and cannot silently release input or unknown usage', async stage => {
+  let available = stage !== 'prepare';
+  const fixture = await nativeAgent([
+    ...(stage === 'dispatch' ? [{ status: 500, error: 'Provider failed without usage', usage: null }] : []),
+    { text: 'Recovered the original assignment' }, { text: 'Completed the queued follow-up' },
+  ], { credential: () => available });
+  const { runtime, main, graphId, ownerId, options, provider } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Original assignment' }); await runtime.host.drive();
+  const before = runtime.nodeRun(graphId, 'work');
+  expect(before.node.status).toBe(stage === 'prepare' ? 'failed' : 'blocked');
+  expect(provider.requests).toHaveLength(stage === 'prepare' ? 0 : 1);
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; state: string; usage: unknown }[];
+  if (stage === 'prepare') expect(calls).toEqual([]);
+  else expect(calls).toMatchObject([{ state: 'unknown', usage: null }]);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Queued follow-up' }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(stage === 'prepare' ? 0 : 1);
+  await runtime.close(); available = true;
+  const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
+  const recovered = restored.supervisor(ownerId);
+  await restored.host.drive(); expect(provider.requests).toHaveLength(stage === 'prepare' ? 0 : 1);
+  if (stage === 'prepare') {
+    const queue = await recovered.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; state: string }[] };
+    await recovered.graphControl({ graphId, action: 'retry', seq: queue.items.find(item => item.state === 'failed')!.seq });
+  } else {
+    await recovered.graphControl({ graphId, action: 'resume', nodeId: 'work' }); await restored.host.drive();
+    expect(provider.requests).toHaveLength(1);
+    await recovered.graphControl({ graphId, action: 'reconcile_usage', callId: calls[0]!.id, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+    await restored.host.drive(); expect(provider.requests).toHaveLength(1);
+    await recovered.graphControl({ graphId, action: 'resume', nodeId: 'work' });
+  }
+  await restored.host.drive();
+  expect(provider.requests).toHaveLength(stage === 'prepare' ? 2 : 3);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, used: stage === 'prepare' ? 100 : 150, reserved: 0 });
+  expect(JSON.stringify(provider.requests.at(-1))).toContain('Queued follow-up');
+  await expect(recovered.graphInspect({ graphId, query: 'queue' })).resolves.toMatchObject({ items: [{ state: 'done' }, { state: 'done' }] });
 });
 
-test('exactly exhausted quota blocks even a zero-reservation call after restart', async () => {
-  const { runtime, taskId, options } = await singleAgent({ work: { kind: 'agent', reserveTokens: 20_000_000,
-    prepare: async () => async () => ({ outcome: 'continue', output: null, usage: { input: 19_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 } }),
-  } });
-  await runtime.host.runReady(); await runtime.close();
-  let sends = 0;
-  const restored = await openTaskRuntime({ ...options, actions: { work: { kind: 'agent', reserveTokens: 0,
-    prepare: async () => async () => { sends++; return { outcome: 'continue', output: null, usage: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 } }; },
-  } } });
-  cleanup.push(() => restored.close());
-  expect(await restored.host.runReady()).toEqual({ dispatched: 0 });
-  expect(sends).toBe(0);
-  expect((await restored.user.task(taskId).view()).nodes[0]).toMatchObject({ used: 20_000_000, budget: 20_000_000, status: 'blocked' });
+test.each([
+  { before: 'standard', after: 'full', changeInFlight: false },
+  { before: 'full', after: 'standard', changeInFlight: true },
+  { before: 'standard', after: 'full', changeInFlight: true },
+] as const)('native $before to $after permission changes freeze the active turn and preserve pause across restart (in flight: $changeInFlight)', async configuration => {
+  const outside = await mkdtemp(join(tmpdir(), 'graph-external-write-')); cleanup.push(() => rm(outside, { recursive: true, force: true }));
+  const path = join(outside, 'result.txt');
+  let policy: AccessPolicy = configuration.before === 'full' ? fullAccessPolicy() : standardAccessPolicy();
+  const next = () => configuration.after === 'full' ? fullAccessPolicy() : standardAccessPolicy();
+  const fixture = await nativeAgent([
+    { tools: [{ id: 'first-write', name: 'write_file', arguments: JSON.stringify({ path, content: 'first' }) }],
+      beforeReply: () => { if (configuration.changeInFlight) policy = next(); } },
+    { text: 'First attempt finished' },
+    { tools: [{ id: 'next-write', name: 'write_file', arguments: JSON.stringify({ path, content: 'second' }) }] },
+    { text: 'Next attempt finished' },
+  ], { access: () => policy });
+  const { runtime, main, graphId, task, provider, ownerId, options } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Write first to the requested external location' }); await runtime.host.drive();
+  if (configuration.before === 'full') expect(await readFile(path, 'utf8')).toBe('first');
+  else await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(provider.requests).toHaveLength(2);
+  const instance = runtime.nodeRun(graphId, 'work').instance!.id;
+  expect((await task.view()).questions.filter(question => question.kind === 'permission')).toEqual([]);
+  await task.pause('manual-pause'); policy = next();
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Write second under the new policy' });
+  await runtime.host.drive(); expect(provider.requests).toHaveLength(2);
+  await runtime.close(); const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
+  const recovered = restored.supervisor(ownerId);
+  await restored.host.drive(); expect(provider.requests).toHaveLength(2);
+  expect(await restored.user.task(graphId).view()).toMatchObject({ status: 'paused' });
+  await expect(recovered.graphInspect({ graphId, query: 'queue' })).resolves.toMatchObject({ items: [{ state: 'done' }, { state: 'queued' }] });
+  await restored.user.task(graphId).resume('resume-new-policy'); await restored.host.drive();
+  expect(provider.requests).toHaveLength(4);
+  expect(await readFile(path, 'utf8')).toBe(configuration.after === 'full' ? 'second' : 'first');
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: instance, used: 200, reserved: 0 });
+  const deniedRequest = provider.requests[configuration.before === 'standard' ? 1 : 3];
+  expect(JSON.stringify(deniedRequest)).toMatch(/outside|workspace|permission|路径/i);
+});
+
+test('native full access preserves manual pause, unknown usage and finite budget admission', async () => {
+  const { runtime, main, graphId, provider, task } = await nativeAgent([{ text: 'Usage unavailable', usage: null }], { access: () => fullAccessPolicy() });
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Work under the declared budget' });
+  await task.pause('pause-full'); await runtime.host.drive(); expect(provider.requests).toHaveLength(0);
+  await task.resume('resume-full'); await runtime.host.drive(); expect(provider.requests).toHaveLength(1);
+  expect(runtime.nodeRun(graphId, 'work').node.status).toBe('blocked');
+  const [call] = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; state: string }[];
+  expect(call!.state).toBe('unknown');
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Do not bypass the unresolved usage' }); await runtime.host.drive(); expect(provider.requests).toHaveLength(1);
+  await main.graphControl({ graphId, action: 'reconcile_usage', callId: call!.id, usage: { input: 19000000, output: 1000000, cacheRead: 0, cacheWrite: 0 } });
+  await main.graphControl({ graphId, nodeId: 'work', action: 'resume' }); await runtime.host.drive();
+  expect(provider.requests).toHaveLength(1);
+  expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ used: 20000000, budget: 20000000, reserved: 0 });
+});
+
+test('native usage above a turn reservation is counted once across restart and does not exhaust a larger cumulative budget', async () => {
+  const fixture = await nativeAgent([{ text: 'Large completed turn', usage: { prompt_tokens: 300000, completion_tokens: 5 } }, { text: 'Next turn' }]);
+  const { runtime, main, graphId, provider, options } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Perform the large turn' }); await runtime.host.drive();
+  const before = runtime.nodeRun(graphId, 'work');
+  expect(before.node.status).toBe('succeeded'); expect(before.instance).toMatchObject({ used: 300005, reserved: 0 });
+  expect(before.invocations).toHaveLength(1);
+  await runtime.close(); const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
+  await restored.host.drive(); expect(provider.requests).toHaveLength(1);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, used: 300005 });
+  await restored.supervisor(fixture.ownerId).graphSend({ graphId, nodeId: 'work', text: 'Continue within the remaining quota' }); await restored.host.drive();
+  expect(provider.requests).toHaveLength(2);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ used: 300055, reserved: 0 });
+});
+
+test('native business passed output cannot substitute for the declared real host acceptance check', async () => {
+  const fixture = await nativeAgent([
+    { tools: [{ id: 'result', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { passed: true } } } }) }] },
+    { text: 'Business result submitted' },
+  ], { definition: parseGraphDefinition({ schemaVersion: 2, name: 'Evidence required', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'worker@1', model: 'local', task: 'Submit the business result', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
+    outputs: { result: { from: 'work.result', protocol: 'data' } }, acceptance: [{ id: 'host', description: 'The real host command must pass', kind: 'check', module: 'check' }] }) });
+  const { runtime, main, graphId, provider, task } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} }); await runtime.host.drive();
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: { passed: true } }]);
+  await expect(main.graphInspect({ graphId, query: 'operations' })).resolves.toEqual([]);
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  expect(await task.view()).toMatchObject({ phase: 'blocked' });
+  await expect(main.graphInspect({ graphId, query: 'acceptance' })).resolves.toMatchObject({ ready: false, items: [{ id: 'host', status: 'missing' }] });
+  await main.graphControl({ graphId, action: 'withdraw_complete' });
+  await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+  await expect(main.graphInspect({ graphId, query: 'operations' })).resolves.toMatchObject([{ state: 'settled', result: { outputs: { result: { passed: true } } } }]);
+  await expect(main.graphInspect({ graphId, query: 'acceptance' })).resolves.toMatchObject({ ready: true, items: [{ id: 'host', status: 'passed' }] });
+  await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
+  expect(await task.view()).toMatchObject({ phase: 'completed' });
+  expect(provider.requests).toHaveLength(2);
+});
+
+test('native draft publication and an outstanding message to main survive usage reconciliation and restart without duplication', async () => {
+  const fixture = await nativeAgent([
+    { tools: [{ id: 'draft', name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'plans', name: 'draft', mediaType: 'text/markdown', content: 'Stable draft awaiting format', requestId: 'draft' }) }] },
+    { tools: [{ id: 'format', name: 'send_to_peer', arguments: JSON.stringify({ to: 'main', text: 'Choose the final format', requestId: 'format-question' }) }] },
+    { text: 'Waiting for the final format', usage: null },
+  ], { conversation: true });
+  const { runtime, main, graphId, provider, options, ownerId, conversationId } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Publish the draft and ask main about its format' }); await runtime.host.drive();
+  const publications = runtime.artifacts.list(graphId); expect(publications.artifacts).toHaveLength(1);
+  const draft = publications.artifacts[0]!;
+  const content = await runtime.artifacts.read(graphId, draft.artifactId, draft.version);
+  expect(content.text).toBe('Stable draft awaiting format');
+  const messages = (await runtime.conversations.view(conversationId!)).messages.filter(message => message.kind === 'peer');
+  expect(messages).toMatchObject([{ state: 'pending', text: expect.stringContaining('Choose the final format') }]);
+  const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string; state: string }[];
+  const instance = runtime.nodeRun(graphId, 'work').instance!.id;
+  await main.graphControl({ graphId, action: 'pause', nodeId: 'work' }); await runtime.close();
+  const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
+  const recovered = restored.supervisor(ownerId);
+  await recovered.graphControl({ graphId, action: 'reconcile_usage', callId: calls.find(call => call.state === 'unknown')!.id, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  await restored.user.task(graphId).resume('resume-task'); await restored.host.drive();
+  expect(provider.requests).toHaveLength(3);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: instance, used: 150, reserved: 0 });
+  expect(restored.artifacts.list(graphId)).toEqual(publications);
+  expect(await restored.artifacts.read(graphId, draft.artifactId, draft.version)).toMatchObject({ record: content.record, text: content.text });
+  expect((await restored.conversations.view(conversationId!)).messages.filter(message => message.kind === 'peer')).toEqual(messages);
+});
+
+test('a conflicting late native usage reconciliation cannot overwrite the settled call or charge again', async () => {
+  const { runtime, main, graphId, provider } = await nativeAgent([{ text: 'Result with delayed billing', usage: null }]);
+  await main.graphSend({ graphId, nodeId: 'work', text: 'Produce a result' }); await runtime.host.drive();
+  const [call] = await main.graphInspect({ graphId, query: 'provider_calls' }) as { id: string }[];
+  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
+  await main.graphControl({ graphId, action: 'reconcile_usage', callId: call!.id, usage });
+  await expect(main.graphControl({ graphId, action: 'reconcile_usage', callId: call!.id, usage: { ...usage, output: 20 } })).rejects.toMatchObject({ code: 'invalid_input' });
+  await expect(main.graphInspect({ graphId, query: 'provider_calls' })).resolves.toMatchObject([{ id: call!.id, state: 'reconciled', usage }]);
+  expect(runtime.nodeRun(graphId, 'work').instance).toMatchObject({ used: 50, reserved: 0 });
+  await runtime.host.drive(); expect(provider.requests).toHaveLength(1);
+});
+
+test('an exactly exhausted native quota refuses zero-reservation tools and stays exhausted after restart', async () => {
+  const fixture = await nativeAgent([{ usage: { prompt_tokens: 19000000, completion_tokens: 1000000 },
+    tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: 'unauthorized.txt', content: 'must not be written' }) }] }]);
+  const { runtime, main, graphId, options, provider, root } = fixture;
+  await main.graphSend({ graphId, nodeId: 'work', text: 'The zero-token tool cannot exceed the budget' }); await runtime.host.drive();
+  await expect(readFile(join(root, 'unauthorized.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  const before = runtime.nodeRun(graphId, 'work'); expect(before.instance).toMatchObject({ used: 20000000, reserved: 0 });
+  await runtime.close(); const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
+  await restored.user.task(graphId).resume('resume-task'); await restored.host.drive();
+  expect(provider.requests).toHaveLength(1);
+  await expect(readFile(join(root, 'unauthorized.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, used: 20000000, budget: 20000000 });
 });
 
 test.each(['standard', 'full'] as const)('pause soft-stops the running master turn and a single resume continues it (%s access)', async mode => {

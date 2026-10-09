@@ -1,152 +1,94 @@
-// Why a check that runs the project's own command needs a prepared copy, pinned as behaviour.
-//
-// Failure mode this file exists for: `node --run check` is the project's own suite, and it is not
-// location independent. Run under the host's state directory it cannot pass - the suite reads sibling
-// repositories next to the project root, and it hands `node_modules` to the sandbox as a grant, which
-// the sandbox refuses while that path is a link. Measured on this repository at 56cd786: 127 of 1480
-// tests failed under the state directory and 0 failed in a copy beside the project root. A check that
-// declares `copy: 'project'` therefore runs in a prepared worktree beside the project root, with the
-// one install hardlinked in.
-
 import { lstatSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, NodeSpec , Proposal } from '../../src/core/types.ts';
-import { git as runGit, revParse } from '../../src/git/git.ts';
-import { prepareProjectCopy, projectCopyPath } from '../../src/runtime/program-copy.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { TaskStore } from '../../src/core/store.ts';
+import { GitIntegration } from '../../src/git/integration.ts';
+import { git as runGit } from '../../src/git/git.ts';
 
-const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-
+const cleanup: (() => void | Promise<void>)[] = [];
+afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 function git(cwd: string, args: string[]) {
-  const result = runGit(cwd, args);
-  if (result.code !== 0) throw new Error(result.stderr);
-  return result.stdout;
+  const result = runGit(cwd, args); if (result.code !== 0) throw new Error(result.stderr); return result.stdout.trim();
 }
-
-/** Reports what only the run's own location can tell: where it ran, and what it can reach from there. */
-const PROBE = [
-  "import { existsSync, lstatSync } from 'node:fs';",
-  "import { join } from 'node:path';",
-  'console.log(JSON.stringify({',
-  '  cwd: process.cwd(),',
-  "  nodes: lstatSync('node_modules').isSymbolicLink() ? 'link' : 'files',",
-  "  sibling: existsSync(join('..', 'sibling-repo', 'marker.txt')),",
-  '}));',
-  '',
-].join('\n');
-
-const checkNode: NodeSpec = { id: 'check', kind: 'program', action: 'graph.command' };
-const noActions: Record<string, ActionAdapter> = {};
-
-/** A project whose parent holds a sibling repository, exactly as the real workspace does. */
-async function workspace() {
-  const parent = await mkdtemp(join(tmpdir(), 'graph-program-copy-'));
-  cleanup.push(() => rm(parent, { recursive: true, force: true }));
-  const root = join(parent, 'project');
-  await mkdir(join(root, 'scripts'), { recursive: true });
-  await mkdir(join(parent, 'sibling-repo'), { recursive: true });
-  await writeFile(join(parent, 'sibling-repo', 'marker.txt'), 'sibling\n');
-  await writeFile(join(root, 'scripts', 'probe.mjs'), PROBE);
-  // The one install the project has, so a copy has something to hardlink.
-  await mkdir(join(root, 'node_modules', 'pkg'), { recursive: true });
-  await writeFile(join(root, 'node_modules', 'pkg', 'index.js'), 'export default 1;\n');
-  git(root, ['init', '-b', 'main']);
-  git(root, ['add', '.']);
-  git(root, ['commit', '-m', 'init']);
+const commit = (root: string, message: string) => git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local', 'commit', '-qm', message]);
+async function workspace(committed = true) {
+  const parent = await mkdtemp(join(tmpdir(), 'graph-native-command-copy-')); cleanup.push(() => rm(parent, { recursive: true, force: true }));
+  const root = join(parent, 'project'); await mkdir(join(root, 'node_modules', 'pkg'), { recursive: true });
+  await writeFile(join(root, 'node_modules', 'pkg', 'index.js'), "module.exports='installed dependency';\n");
+  await writeFile(join(root, '.gitignore'), 'node_modules/\nstate/\n'); await writeFile(join(root, 'version.txt'), 'v1');
+  await writeFile(join(root, 'probe.cjs'), "const fs=require('fs');console.log(JSON.stringify({cwd:process.cwd(),nodes:fs.lstatSync('node_modules').isSymbolicLink(),dependency:require('pkg'),version:fs.readFileSync('version.txt','utf8')}));\n");
+  git(root, ['init', '-q', '-b', 'main']);
+  if (committed) { git(root, ['add', '.']); commit(root, 'baseline'); }
   return { parent, root };
 }
-
-async function run(root: string, input: unknown) {
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: noActions });
+async function run(root: string, extra: Record<string, unknown> = {}) {
+  const data = { protocol: 'data' };
+  const definition = parseGraphDefinition({ schemaVersion: 2, name: 'Native command workspace', protocols: { data: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: data }, outputs: { result: data }, operation: { action: 'workspace.command', version: 1, command: 'node', args: ['probe.cjs'], output: 'result', ...extra } } },
+    edges: {}, acceptance: [{ id: 'tests', description: 'Project command can read the installed dependency and committed version', kind: 'check', module: 'check' }] });
+  const stateDir = join(root, 'state'); const capabilityRoot = join(stateDir, 'capabilities'); await mkdir(capabilityRoot, { recursive: true });
+  const runtime = await openTaskRuntime({ stateDir, projects: [{ id: 'p', root }], catalog: { capabilityRoot, recipesPath: join(stateDir, 'recipes.json') } });
   cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Run the check', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'Run the check',
-    acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }],
-    nodes: [{ ...checkNode, input: input as import('../../src/core/types.ts').Json }],
-  }, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  await runtime.host.drive();
-  return task.view();
+  await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare' });
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Run the formal host check', requestId: 'begin' }); const main = runtime.supervisor(owner.taskId);
+  const { graphId } = await main.graphCreate({ targetBranch: 'main', definition }) as { graphId: string };
+  const disk = new TaskStore(join(stateDir, 'tasks.sqlite')); cleanup.push(() => disk.close());
+  return { runtime, main, graphId, disk, async check() {
+    await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+    const row = disk.db.prepare('SELECT id,result FROM kernel_module_operations WHERE task_id=? ORDER BY rowid DESC LIMIT 1').get(graphId) as { id: string; result: string };
+    const result = JSON.parse(row.result).outputs.result as { passed: boolean; stdout: string; stderr: string; verifiedCommit: string };
+    expect(result.passed, result.stderr).toBe(true);
+    const probe = JSON.parse(result.stdout) as { cwd: string; nodes: boolean; dependency: string; version: string };
+    await expect(main.graphInspect({ graphId, query: 'acceptance' })).resolves.toMatchObject({ items: [{ id: 'tests', status: 'passed', source: { id: row.id, commit: result.verifiedCommit } }] });
+    return { id: row.id, result, probe };
+  } };
 }
 
-test('a check that asks for the project copy runs beside the project root, on real dependencies', async () => {
-  const { parent, root } = await workspace();
-  const view = await run(root, { command: 'node', args: ['scripts/probe.mjs'], copy: 'project' });
-  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
-  expect(evidence).toMatchObject({ valid: true, nodeId: 'check' });
-  const probe = JSON.parse((JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { stdout: string }).stdout) as {
-    cwd: string; nodes: string; sibling: boolean;
-  };
-  // Beside the project root, not under the host's state directory: that is what lets the project's
-  // own suite reach the sibling repositories it reads. Both sides are resolved, because a temporary
-  // directory on this platform is reached through a symlinked prefix.
-  expect(probe.cwd).toBe(await realpath(join(parent, '.graph-check-project-check')));
-  expect(probe.sibling).toBe(true);
-  // Ordinary files, not a link: the sandbox refuses a grant whose path is not already canonical, and
-  // a linked node_modules reads back as a different path.
-  expect(probe.nodes).toBe('files');
-  expect(lstatSync(join(probe.cwd, 'node_modules')).isSymbolicLink()).toBe(false);
+test('a native host check resolves the actual installed dependency from the integration worktree', async () => {
+  const { root } = await workspace(); const graph = await run(root); const { probe } = await graph.check();
+  const integration = graph.disk.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${graph.graphId}`) as { path: string };
+  expect(probe.cwd).toBe(await realpath(integration.path));
+  expect(probe.nodes).toBe(true); expect(probe.dependency).toBe('installed dependency');
+  expect(await realpath(join(probe.cwd, 'node_modules'))).toBe(await realpath(join(root, 'node_modules')));
 });
 
-test('the copy is a working space beside the project, and the project keeps its own dependencies', async () => {
+test('native command dependency linking preserves the project installation and checkout', async () => {
+  const { root } = await workspace(); const original = git(root, ['rev-parse', 'HEAD']); const graph = await run(root); await graph.check();
+  expect(lstatSync(join(root, 'node_modules')).isSymbolicLink()).toBe(false);
+  expect(await readFile(join(root, 'node_modules', 'pkg', 'index.js'), 'utf8')).toBe("module.exports='installed dependency';\n");
+  expect(git(root, ['rev-parse', 'HEAD'])).toBe(original); expect(git(root, ['status', '--porcelain'])).toBe('');
+});
+
+test('the formal check receipt names the exact integration commit it executed', async () => {
+  const { root } = await workspace(); const graph = await run(root); const { result, probe } = await graph.check();
+  expect(result.verifiedCommit).toBe(graph.disk.task(graph.graphId).integration_sha);
+  expect(git(probe.cwd, ['rev-parse', 'HEAD'])).toBe(result.verifiedCommit); expect(probe.version).toBe('v1');
+});
+
+test('legacy copy declarations are rejected rather than silently accepted by a native operation', async () => {
   const { root } = await workspace();
-  await run(root, { command: 'node', args: ['scripts/probe.mjs'], copy: 'project' });
-  // The install the project owns is untouched: a hardlinked copy shares files, it does not move them.
-  expect(lstatSync(join(root, 'node_modules', 'pkg', 'index.js')).isSymbolicLink()).toBe(false);
-  expect(await readFile(join(root, 'node_modules', 'pkg', 'index.js'), 'utf8')).toContain('export default');
-  // And the project's own checkout was not turned into a worktree of itself.
-  expect(lstatSync(join(root, 'node_modules')).isDirectory()).toBe(true);
+  for (const copy of ['project', 'somewhere']) await expect(run(root, { copy })).rejects.toThrow(/unsupported operation field copy/);
 });
 
-test('without the declaration the check still runs in the node own work copy', async () => {
-  const { root } = await workspace();
-  const view = await run(root, { command: 'node', args: ['scripts/probe.mjs'] });
-  const evidence = view.evidence.find(item => item.acceptanceId === 'tests');
-  const probe = JSON.parse((JSON.parse(await readFile(evidence!.artifact.path, 'utf8')) as { stdout: string }).stdout) as {
-    cwd: string; sibling: boolean;
-  };
-  expect(probe.cwd).toContain('worktrees');
-  expect(probe.cwd.startsWith(await realpath(root))).toBe(true);
+test('repeated native checks reuse the workspace and read an advanced integration version after explicit input', async () => {
+  const { root } = await workspace(); const graph = await run(root); const first = await graph.check(); const second = await graph.check();
+  expect(second.probe.cwd).toBe(first.probe.cwd); expect(second.result.verifiedCommit).toBe(first.result.verifiedCommit); expect(second.id).not.toBe(first.id);
+  await writeFile(join(root, 'version.txt'), 'v2'); git(root, ['add', 'version.txt']); commit(root, 'advance target');
+  const moved = new GitIntegration(graph.disk, join(root, 'state')).tryDeliver(graph.graphId, first.result.verifiedCommit);
+  expect(moved.status).toBe('recheck');
+  const third = await graph.check(); expect(third.probe.cwd).toBe(first.probe.cwd); expect(third.probe.version).toBe('v2');
+  expect(third.result.verifiedCommit).toBe(git(root, ['rev-parse', 'HEAD'])); expect(third.result.verifiedCommit).not.toBe(first.result.verifiedCommit);
 });
 
-test('a copy declaration the harness does not know is refused rather than ignored', async () => {
-  const { root } = await workspace();
-  const view = await run(root, { command: 'node', args: ['scripts/probe.mjs'], copy: 'somewhere' });
-  expect(view.nodes.find(node => node.id === 'check')?.status).not.toBe('succeeded');
-});
-
-test('the copy is reused while its commit is unchanged, and rebuilt when it moves', async () => {
-  // The copy is keyed on the committed state it was made from, so a retry of the same gate does not
-  // pay to rebuild it, and a new integration commit never checks out the previous one by accident.
-  const { root } = await workspace();
-  const source = revParse(root, 'HEAD')!;
-  const first = await prepareProjectCopy({ projectRoot: root, source: root, label: 'check' });
-  expect(first).toBe(projectCopyPath(root, 'check'));
-  const marker = join(first!, 'left-behind.txt');
-  await writeFile(marker, 'kept\n');
-  const again = await prepareProjectCopy({ projectRoot: root, source: root, label: 'check' });
-  expect(await readFile(join(again!, 'left-behind.txt'), 'utf8')).toBe('kept\n');
-  await writeFile(join(root, 'second.txt'), 'second\n');
-  git(root, ['add', '.']);
-  git(root, ['commit', '-m', 'second']);
-  expect(revParse(root, 'HEAD')).not.toBe(source);
-  const moved = await prepareProjectCopy({ projectRoot: root, source: root, label: 'check' });
-  expect(moved).toBe(first);
-  await expect(readFile(join(moved!, 'left-behind.txt'), 'utf8')).rejects.toThrow();
-  expect(await readFile(join(moved!, 'second.txt'), 'utf8')).toBe('second\n');
-});
-
-test('a work copy with nothing committed has no version to check out elsewhere', async () => {
-  const parent = await mkdtemp(join(tmpdir(), 'graph-program-copy-empty-'));
-  cleanup.push(() => rm(parent, { recursive: true, force: true }));
-  const bare = join(parent, 'project');
-  await mkdir(bare, { recursive: true });
-  git(bare, ['init', '-b', 'main']);
-  expect(await prepareProjectCopy({ projectRoot: bare, source: bare, label: 'check' })).toBeUndefined();
+test('formal preparation creates a committed baseline before checking previously uncommitted files', async () => {
+  const { root } = await workspace(false);
+  expect(runGit(root, ['rev-parse', '--verify', 'HEAD']).code).not.toBe(0);
+  const graph = await run(root); const { result, probe } = await graph.check();
+  expect(result.verifiedCommit).toBe(git(root, ['rev-parse', 'HEAD'])); expect(probe.version).toBe('v1');
+  expect(git(root, ['ls-tree', '-r', '--name-only', 'HEAD'])).toContain('probe.cjs');
+  expect(git(root, ['ls-tree', '-r', '--name-only', 'HEAD'])).not.toContain('node_modules');
 });

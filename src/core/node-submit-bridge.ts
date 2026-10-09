@@ -4,7 +4,7 @@ import { RuntimeError } from './types.ts';
 /**
  * The node's submit surface, bound to one execution (Issue #1 §5, §6; backlog HB-257).
  *
- * A node's `submit_result` call has to land in the kernel as a real Submission plus its
+ * A node's `submit` call has to land in the kernel as a real Submission plus its
  * Deliveries, and a refusal has to reach the model as the field-level correction §5 asks
  * for — without burning the single valid submission the execution is allowed. The kernel
  * remains the only authority on validity: this bridge never re-implements the checks, it

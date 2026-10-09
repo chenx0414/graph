@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter } from '../../src/core/types.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 /** Native public lifecycle: successful node status, explicit completion and confirmed evidence stay distinct. */
 
@@ -11,7 +11,7 @@ const definition = {
   schemaVersion: 2, name: 'finishes',
   protocols: { out: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } } },
   nodes: {
-    work: { recipe: 'worker@1', task: 'work', acceptance: ['ok'], inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } },
+    work: { recipe: 'worker@1', model: 'local', task: 'work', acceptance: ['ok'], inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } },
   },
   modules: {}, edges: {}, inputs: {}, outputs: {},
   acceptance: [{ id: 'ok', description: 'ran', kind: 'human' }],
@@ -20,21 +20,24 @@ const definition = {
 async function run(limitNodes = 1) {
   const root = await mkdtemp(join(tmpdir(), 'graph-v2-complete-'));
   await mkdir(join(root, 'state'), { recursive: true });
-  const work: ActionAdapter = {
-    kind: 'agent', reserveTokens: 100,
-    prepare: async () => async () => ({ outcome: 'completed', output: { text: 'done' }, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } }),
-  };
+  const provider = await openaiServer([
+    { tools: [{ id: 'output', name: 'submit', arguments: JSON.stringify({ outputs: { out: { enable: true, value: { text: 'done' } } } }) }] },
+    { text: 'Work complete' },
+    { text: 'Missing the required output' }, { text: 'Still missing the required output' },
+  ]);
   const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], actions: { work },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+    stateDir: join(root, 'state'), projects: [{ id: 'p', root }], limits: { defaultBudgetTokens: 20_000_000 },
+    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl,
+      contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-only', modelRuntime: provider.runtime },
   });
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'medium' }, 'worker');
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'go', requestId: 'b' });
   const proposed = await runtime.supervisor(taskId).propose({
     requirementVersion: 1, summary: 'finish',
     acceptance: [{ id: 'ok', description: 'ran', checkNode: 'work' }],
     definition: limitNodes === 1 ? definition : {
       ...definition,
-      nodes: { ...definition.nodes, other: { recipe: 'worker@1', task: 'other', inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
+      nodes: { ...definition.nodes, other: { recipe: 'worker@1', model: 'local', task: 'other', inputs: { job: { protocol: 'out' } }, outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } },
     },
   } as never, 'draft');
   // No Git is configured, so there is no integration branch and no delivery to wait for:
@@ -42,6 +45,8 @@ async function run(limitNodes = 1) {
   await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
   const main = runtime.supervisor(taskId);
   await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { text: 'go' } });
+  await runtime.host.drive();
+  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('succeeded');
   if (limitNodes > 1) await main.graphSend({ graphId: taskId, nodeId: 'other', input: 'job', value: { text: 'go' } });
   for (let i = 0; i < 5; i += 1) await runtime.host.drive();
   const idle = await runtime.user.task(taskId).view();
@@ -52,6 +57,7 @@ async function run(limitNodes = 1) {
   const acceptance = await runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'acceptance' }) as { items: { id: string; status: string }[] };
   const nodes = (view as unknown as { nodes: { id: string; status: string }[] }).nodes;
   await runtime.close();
+  await provider.close();
   await rm(root, { recursive: true, force: true });
   return { phase: view.phase, acceptance, statuses: Object.fromEntries(nodes.filter(n => n.id !== 'master').map(n => [n.id, n.status])) };
 }

@@ -10,7 +10,7 @@ import { openConfigStore, sanitizeConfig } from '../../src/server/config-service
 import { loadGraphConfig } from '../../src/server/config.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 import type { ModelEntry } from '../../src/catalog/models.ts';
-import type { Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -29,31 +29,15 @@ function entry(id: string, provider: string, baseUrl: string): ModelEntry {
   return { id, provider, grade: 'high', api: 'openai-completions', baseUrl, contextWindow: 32_000, maxTokens: 256 };
 }
 
-const checkAction = (root: string) => ({
-  check: {
-    kind: 'program' as const,
-    prepare: async () => async () => ({
-      outcome: 'completed' as const,
-      output: null,
-      evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok.txt'), digest: 'a'.repeat(64) } }],
-    }),
-  },
-});
-
 async function runOneTask(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, model: string, request: string) {
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request, requestId: `begin-${request}` });
-  await runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: request,
-    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, `proposal-${request}`);
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: `accept-${request}` });
-  await runtime.host.runReady();
-  await runtime.host.runReady();
-  return taskId;
+  const parent = await runtime.user.begin({ projectId: 'project', request, requestId: `begin-${request}` });
+  const main = runtime.supervisor(parent.taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: request, protocols: {},
+    nodes: { work: { recipe: 'coder@1', model, task: request, inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {},
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', text: request });
+  await runtime.host.drive();
+  return graphId;
 }
 
 test('two local endpoints receive their own credentials and a model switch cannot cross keys', async () => {
@@ -76,7 +60,6 @@ test('two local endpoints receive their own credentials and a model switch canno
       modelRuntime,
       credentialFor: model => model.id === 'alpha' ? { credentialId: 'cred-alpha', apiKey: 'key-alpha' } : { credentialId: 'cred-beta', apiKey: 'key-beta' },
     },
-    actions: checkAction(root),
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
@@ -96,7 +79,6 @@ test('a model without a resolvable credential is refused before any provider req
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'), projects: [{ id: 'project', root }],
     models: { entries: [entry('bound', 'graph-alpha', bound.baseUrl)], modelRuntime, credentialFor: () => undefined },
-    actions: checkAction(root),
   });
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
@@ -104,8 +86,9 @@ test('a model without a resolvable credential is refused before any provider req
   expect(provider.requests).toHaveLength(0);
   const view = await runtime.user.task(taskId).view();
   const node = view.nodes.find(candidate => candidate.id === 'work');
-  expect(node?.status).not.toBe('completed');
-  expect(JSON.stringify(view)).toContain('No credential bound');
+  expect(node?.status).toBe('failed');
+  expect(runtime.events(taskId, 0).find(event => event.type === 'graph.node.failed')?.data)
+    .toMatchObject({ nodeId: 'work', reason: expect.stringMatching(/no credential bound/i) });
 });
 
 test('config saves are atomic, versioned and never leak secrets', async () => {

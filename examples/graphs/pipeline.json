@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "name": "Pipeline",
+  "protocols": {
+    "data": {
+      "type": "object"
+    }
+  },
+  "nodes": {
+    "work": {
+      "recipe": "coder@1",
+      "model": "work",
+      "task": "Process the delivered job and submit the result",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "submission": {
+        "required": [
+          "result"
+        ]
+      }
+    }
+  },
+  "modules": {
+    "check": {
+      "type": "operation",
+      "trigger": "each",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "operation": {
+        "action": "workspace.command",
+        "version": 1,
+        "command": "node",
+        "args": [
+          "--version"
+        ],
+        "output": "result"
+      }
+    }
+  },
+  "edges": {
+    "checked": {
+      "from": "work.result",
+      "to": "check.job",
+      "enabled": true
+    }
+  },
+  "inputs": {
+    "job": {
+      "to": "work.job",
+      "protocol": "data"
+    }
+  },
+  "outputs": {
+    "result": {
+      "from": "check.result",
+      "protocol": "data"
+    }
+  }
+}

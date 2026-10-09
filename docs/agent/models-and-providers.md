@@ -67,6 +67,15 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 - 顶层：`version: 1`、`revision`（每次保存 +1）、`projects`、`models`、`credentials`、`limits`、`access`。
 - **密钥永不出现在这个文件里**：只存 `secretRef`（一个环境变量名）。
 
+### 模型分层与历史等级
+
+当前目录按 `small / medium / frontier` 分层。配置条目和配方的 recommendedGrade 可直接使用这些名称；同一字段仍接受历史 low/high/highest，不重写已有配置或已发布配方。
+
+- small 对应 low；medium 保持原含义；frontier 包含 highest 与 high。
+- 选模先匹配显式模型 ID（仍受独立审查排除约束），再按配置偏好与配方等级选择。新 frontier 配方依次匹配 frontier、highest、high；small 依次匹配 small、low。旧 high 配方仍先匹配 high，不自动扩大为 highest；旧 highest 仍先匹配 highest。新同组名称仅作为已有精确等级之后的别名候选。
+- `/api/settings`、`/api/config` 和 read_system_capabilities 的模型视图公开派生 tier。tier 是只读分组，不保存到配置；grade 保留实际选择。设置页可按三层筛选，配置与配方选择器将新分层和历史等级分开显示。显示顺序或分组不改变新对话的默认模型顺序。
+- main 通过 list_agent_combinations 的 grade 筛选配方；frontier 能找到历史 high/highest 配方。配置厂商和模型仍通过本文 HTTP 流程，无新增常驻配置工具。
+
 ### `credentials.<id>`
 
 | 字段 | 必填 | 说明 |
@@ -104,7 +113,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | --- | --- | --- |
 | `id` | 是 | 本配置内的唯一标识（Graph 侧身份） |
 | `provider` | 是 | 厂商/平台名（用于展示与分组） |
-| `grade` | 是 | `low` / `medium` / `high` / `highest` |
+| `grade` | 是 | `small` / `medium` / `frontier`；历史 `low` / `high` / `highest` 仍可用 |
 | `api` | 是 | `openai-completions` 或 `anthropic-messages` |
 | `baseUrl` | 是 | 端点基址 |
 | `contextWindow` | 是 | 正整数 |

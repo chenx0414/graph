@@ -12,8 +12,9 @@ import { openGraphServer } from '../../src/server/host.ts';
 import { createModelScheduler } from '../../src/runtime/model-scheduler.ts';
 import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
 import { git } from '../../src/git/git.ts';
-import { openaiServer } from '../fixtures/openai-server.ts';
-import type { NodeSpec } from '../../src/core/types.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -76,8 +77,19 @@ async function gitProject(root: string) {
   return project;
 }
 
-function checkNode(dependsOn: string[]): NodeSpec {
-  return { id: 'check', kind: 'program', action: 'graph.command', dependsOn, input: { command: 'node', args: ['test/check.js'] } };
+/** Use main's native interface path, without inferred dependencies or fabricated check evidence. */
+async function startWorkers(runtime: Awaited<ReturnType<typeof openTaskRuntime>>, projectId: string, models: Record<string, string>, onOwner?: (id: string) => void) {
+  const owner = await runtime.user.begin({ projectId, request: 'Provider admission contracts', requestId: 'begin' });
+  onOwner?.(owner.taskId);
+  const main = runtime.supervisor(owner.taskId);
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({
+    schemaVersion: 2, name: 'Provider admission', protocols: { job: { type: 'object' } },
+    nodes: Object.fromEntries(Object.entries(models).map(([id, model]) => [id, {
+      recipe: 'coder@1', model, task: 'Reply to the explicit input.', inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {},
+    }])), modules: {}, edges: {},
+  }) }) as { graphId: string };
+  for (const nodeId of Object.keys(models)) await main.graphSend({ graphId, nodeId, input: 'job', value: { request: nodeId } });
+  return graphId;
 }
 
 test('credential aliases resolving to the same actual key share one limit', async () => {
@@ -109,27 +121,15 @@ test('credential aliases resolving to the same actual key share one limit', asyn
       env: { KEY_A: 'one-actual-key', KEY_B: 'one-actual-key' }, log: () => undefined,
     });
     cleanup.push(() => daemon.close());
-    const { taskId } = await daemon.server.runtime.user.begin({ projectId: 'p', request: `alias ${aliasing}`, requestId: 'begin' });
-    // Complete the discussion-only master node the same way a real confirmation would.
+    const graphId = await startWorkers(daemon.server.runtime, 'p', { workA: 'alpha', workB: 'beta' });
     await daemon.server.runtime.host.drive();
-    await daemon.server.runtime.supervisor(taskId).propose({
-      requirementVersion: 1, summary: 'aliases',
-      acceptance: [{ id: 'works', description: 'works', checkNode: 'check' }],
-      nodes: [
-        { id: 'workA', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'alpha' },
-        { id: 'workB', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'beta' },
-        checkNode(['workA', 'workB']),
-      ],
-    }, 'proposal');
-    await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-    await daemon.server.runtime.host.drive();
-    await waitFor(() => provider.state.requests.length === 3, 15_000);
     expect(provider.state.requests).toHaveLength(3);
     expect(provider.state.requests.every(request => request.authorization === 'Bearer one-actual-key')).toBe(true);
     expect(provider.state.maxInFlight).toBe(1);
-    const view = await daemon.server.runtime.user.task(taskId).view();
-    expect(view.nodes.filter(node => ['workA', 'workB', 'check'].includes(node.id)).map(node => node.status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
-    expect(view.evidence.filter(evidence => evidence.acceptanceId === 'works' && evidence.valid)).toHaveLength(1);
+    const view = await daemon.server.runtime.user.task(graphId).view();
+    expect(view.nodes.map(node => node.status)).toEqual(['succeeded', 'succeeded']);
+    expect(daemon.server.runtime.nodeRun(graphId, 'workA').instance!.used).toBe(12);
+    expect(daemon.server.runtime.nodeRun(graphId, 'workB').instance!.used).toBe(12);
     const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
     const startup = await (await fetch(`${daemon.url}/api/startup`, { headers: { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '' } })).json() as { limitAliases?: Record<string, string> };
     expect(JSON.stringify(startup)).not.toContain('one-actual-key');
@@ -159,27 +159,11 @@ test('ten waiters on key A do not block an independent key B', async () => {
         ? { credentialId: 'cred-a', apiKey: 'key-a', limit: 1 }
         : { credentialId: 'cred-b', apiKey: 'key-b' },
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'c'.repeat(64) } }] }),
-      },
-    },
+
   });
   cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'waiters', requestId: 'begin' });
-  const nodes: NodeSpec[] = [
-    ...Array.from({ length: 10 }, (_unused, index) => ({ id: `a${index}`, kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'a' })),
-    { id: 'b', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'b' },
-    checkNode([...Array.from({ length: 10 }, (_unused, index) => `a${index}`), 'b']),
-  ];
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'waiters',
-    acceptance: [{ id: 'works', description: 'works', checkNode: 'check' }],
-    nodes,
-  }, 'proposal');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const graphId = await startWorkers(server.runtime, 'p', { ...Object.fromEntries(Array.from({ length: 10 }, (_unused, index) => [`a${index}`, 'a'])), b: 'b' });
 
   const held = await scheduler.acquire({ credentialId: 'cred-a', limit: 1 });
   const driving = server.runtime.host.drive();
@@ -187,8 +171,8 @@ test('ten waiters on key A do not block an independent key B', async () => {
   // The independent key must send while A is still fully queued.
   await waitFor(() => provider.state.requests.some(request => request.authorization === 'Bearer key-b'), 15_000);
   expect(provider.state.requests.some(request => request.authorization === 'Bearer key-a')).toBe(false);
-  await waitFor(async () => (await server.runtime.user.task(taskId).view()).nodes.find(node => node.id === 'b')?.status === 'succeeded', 15_000);
-  await server.runtime.user.task(taskId).pause('pause-waiters');
+  await waitFor(async () => (await server.runtime.user.task(graphId).view()).nodes.find(node => node.id === 'b')?.status === 'succeeded', 15_000);
+  await server.runtime.user.task(graphId).pause('pause-waiters');
   held();
   await driving;
   expect(scheduler.active()).toBe(0);
@@ -297,26 +281,11 @@ test('resumed waiters re-acquire the global Agent execution slot', async () => {
       apiKey: 'unused', modelRuntime, modelScheduler: scheduler,
       credentialFor: () => ({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 }),
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'd'.repeat(64) } }] }),
-      },
-    },
+
   });
   cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'resume cap', requestId: 'begin' });
-  const nodes: NodeSpec[] = [
-    ...Array.from({ length: 20 }, (_unused, index) => ({ id: `a${index}`, kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'a' })),
-    checkNode(Array.from({ length: 20 }, (_unused, index) => `a${index}`)),
-  ];
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'resume cap',
-    acceptance: [{ id: 'works', description: 'works', checkNode: 'check' }],
-    nodes,
-  }, 'proposal');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const graphId = await startWorkers(server.runtime, 'p', Object.fromEntries(Array.from({ length: 20 }, (_unused, index) => [`a${index}`, 'a'])));
 
   const holds = await Promise.all(Array.from({ length: 20 }, () => scheduler.acquire({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 })));
   const driving = server.runtime.host.drive();
@@ -327,7 +296,7 @@ test('resumed waiters re-acquire the global Agent execution slot', async () => {
   // The key may run 20 in flight, but the global Agent limit is independent.
   expect(provider.state.maxInFlight).toBeLessThanOrEqual(10);
   await driving;
-  const view = await server.runtime.user.task(taskId).view();
+  const view = await server.runtime.user.task(graphId).view();
   expect(view.nodes.filter(node => node.id.startsWith('a')).every(node => node.status === 'succeeded')).toBe(true);
   expect(scheduler.active()).toBe(0);
 }, 180_000);
@@ -399,437 +368,199 @@ test('a paused pre-send refusal is not a success and the nodes run after resume'
       apiKey: 'unused', modelRuntime, modelScheduler: scheduler,
       credentialFor: () => ({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 }),
     },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'works', summary: 'ok', artifact: { path: join(root, 'ok'), digest: 'e'.repeat(64) } }] }),
-      },
-    },
+
   });
   cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
   server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'pause refusal', requestId: 'begin' });
-  const nodes: NodeSpec[] = [
-    ...Array.from({ length: 20 }, (_unused, index) => ({ id: `a${index}`, kind: 'agent' as const, action: 'work', definitionVersion: 'coder@1', model: 'a' })),
-    { id: 'check', kind: 'program', action: 'check', dependsOn: Array.from({ length: 20 }, (_unused, index) => `a${index}`) },
-  ];
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: 'pause refusal',
-    acceptance: [{ id: 'works', description: 'works', checkNode: 'check' }],
-    nodes,
-  }, 'proposal');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const graphId = await startWorkers(server.runtime, 'p', Object.fromEntries(Array.from({ length: 20 }, (_unused, index) => [`a${index}`, 'a'])));
 
   const holds = await Promise.all(Array.from({ length: 20 }, () => scheduler.acquire({ credentialId: 'cred-a', apiKey: 'key-a', limit: 20 })));
   const driving = server.runtime.host.drive();
   await waitFor(() => scheduler.queued() === 20, 30_000);
-  await server.runtime.user.task(taskId).pause('pause-queued');
+  await server.runtime.user.task(graphId).pause('pause-queued');
   for (const release of holds) release();
   await driving;
   await waitFor(() => scheduler.active() === 0 && scheduler.queued() === 0, 15_000);
-  const paused = await server.runtime.user.task(taskId).view();
+  const paused = await server.runtime.user.task(graphId).view();
   expect(provider.state.requests).toHaveLength(0);
   expect(paused.nodes.filter(node => node.id.startsWith('a')).every(node => node.status !== 'succeeded')).toBe(true);
-  expect(paused.nodes.find(node => node.id === 'check')?.status).toBe('pending');
-  expect(paused.operations.filter(operation => operation.nodeId.startsWith('a')).every(operation => operation.state === 'not_sent')).toBe(true);
+  expect(paused.invocations).toHaveLength(0);
+  for (const node of paused.nodes) {
+    const run = server.runtime.nodeRun(graphId, node.id);
+    expect(run.instance!.used).toBe(0);
+    expect(run.operations).toHaveLength(1);
+    expect(run.operations[0]).toMatchObject({ state: 'blocked', retries_used: 0, workerActive: false, reserved: 0 });
+  }
 
-  await server.runtime.user.task(taskId).resume('resume-queued');
+  await server.runtime.user.task(graphId).resume('resume-queued');
   await server.runtime.host.drive();
   await waitFor(() => provider.state.requests.length === 20, 60_000);
   await waitFor(async () => {
-    const view = await server.runtime.user.task(taskId).view();
+    const view = await server.runtime.user.task(graphId).view();
     return view.nodes.every(node => node.status === 'succeeded');
   }, 60_000);
   expect(provider.state.maxInFlight).toBeLessThanOrEqual(10);
   expect(scheduler.active()).toBe(0);
 }, 180_000);
 
-test('a pause after partial work keeps the operation interrupted and resumable', async () => {
-  const root = await temp('partial-pause');
-  let task: { pause(requestId: string): Promise<unknown> } | undefined;
-  const provider = await openaiServer([
-    { tools: [{ id: 'write-1', name: 'write', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
-    { text: 'Work complete after resume' },
-  ]);
-  cleanup.push(() => provider.close());
-  // Pause before the second model send, after the tool effect has happened.
-  const baseScheduler = createModelScheduler();
-  let acquisitions = 0;
-  const modelScheduler = {
-    ...baseScheduler,
-    acquire: async (request: Parameters<typeof baseScheduler.acquire>[0], signal?: AbortSignal) => {
-      acquisitions += 1;
-      if (acquisitions === 2) await task!.pause('pause-after-tool-effect');
-      return baseScheduler.acquire(request, signal);
-    },
+const write = (path: string, content: string, unknown = false): ResponsePlan => ({
+  ...(unknown ? { usage: null } : {}), tools: [{ id: path, name: 'write_file', arguments: JSON.stringify({ path, content }) }],
+});
+
+async function partialWork(plans: ResponsePlan[], pauseAfterWrite = false) {
+  const root = await temp('native-partial'); const project = join(root, 'project'); await mkdir(project);
+  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+  const provider = await openaiServer(plans); cleanup.push(() => provider.close());
+  const baseScheduler = createModelScheduler(); let acquisitions = 0; let graphId = '';
+  let runtime!: Awaited<ReturnType<typeof openTaskRuntime>>;
+  const modelScheduler = { ...baseScheduler, acquire: async (request: Parameters<typeof baseScheduler.acquire>[0], signal?: AbortSignal) => {
+    if (++acquisitions === 2 && pauseAfterWrite) await runtime.user.task(graphId).pause('pause-after-write');
+    return baseScheduler.acquire(request, signal);
+  } };
+  runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
+    limits: { defaultBudgetTokens: 20000000 }, catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }],
+      apiKey: 'local-only', modelRuntime: provider.runtime, modelScheduler, credentialFor: () => ({ credentialId: 'cred', apiKey: 'local-only', limit: 2 }) },
+  }); cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  let ownerId = '';
+  graphId = await startWorkers(runtime, 'p', { work: 'local' }, id => { ownerId = id; });
+  const main = runtime.supervisor(ownerId);
+  return { runtime, provider, project, graphId, main, task: runtime.user.task(graphId),
+    run: () => runtime.nodeRun(graphId, 'work'), calls: () => main.graphInspect({ graphId, query: 'provider_calls' }),
+    queue: () => main.graphInspect({ graphId, query: 'queue' }),
   };
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    models: {
-      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
-      apiKey: 'scripted-local-key', modelRuntime: provider.runtime, modelScheduler,
-      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
-    },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'synthetic', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
-      },
-    },
-  });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const begun = await server.runtime.user.begin({ projectId: 'p', request: 'partial pause', requestId: 'begin' });
-  const userTask = server.runtime.user.task(begun.taskId);
-  task = userTask;
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: 'partial pause',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await server.runtime.host.drive();
-  await waitFor(async () => (await userTask.view()).operations[0]?.state === 'interrupted', 15_000);
-
-  const paused = await userTask.view();
-  expect(provider.requests).toHaveLength(1);
-  expect(paused.operations[0]).toMatchObject({ state: 'interrupted', workerActive: false, result: null, reserved: 0 });
-  expect(paused.invocations[0]?.usage).toMatchObject({ input: 25, output: 10, cacheRead: 15 });
-  expect(paused.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', used: 50 });
-  expect(paused.nodes.find(node => node.id === 'check')?.status).toBe('pending');
-  expect(paused.questions).toEqual([]);
-  const partialTree = paused.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
-  expect(await readFile(join(partialTree, 'partial.txt'), 'utf8')).toBe('partial output');
-
-  await userTask.resume('resume-partial');
-  await server.runtime.host.drive();
-  const completed = await userTask.view();
-  expect(provider.requests).toHaveLength(2);
-  expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
-  // Two real calls (first tool turn + resumed turn), each counted exactly once.
-  expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(100);
-  const completedTree = completed.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
-  expect(await readFile(join(completedTree, 'partial.txt'), 'utf8')).toBe('partial output');
-}, 90_000);
-
-async function interruptedUnknown(check: 'usage' | 'reconcile') {
-  const root = await temp(`unknown-${check}`);
-  const provider = await openaiServer([
-    { usage: null, tools: [{ id: 'write-1', name: 'write', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
-    { text: 'Work complete after release' },
-  ]);
-  cleanup.push(() => provider.close());
-  let task: { pause(requestId: string): Promise<unknown> } | undefined;
-  const baseScheduler = createModelScheduler();
-  let acquisitions = 0;
-  const modelScheduler = {
-    ...baseScheduler,
-    acquire: async (request: Parameters<typeof baseScheduler.acquire>[0], signal?: AbortSignal) => {
-      acquisitions += 1;
-      if (acquisitions === 2) await task!.pause('pause-unknown-after-effect');
-      return baseScheduler.acquire(request, signal);
-    },
-  };
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    limits: { defaultBudgetTokens: 20_000_000 },
-    models: {
-      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
-      apiKey: 'scripted-local-key', modelRuntime: provider.runtime, modelScheduler,
-      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
-    },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'synthetic', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
-      },
-    },
-  });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const begun = await server.runtime.user.begin({ projectId: 'p', request: `unknown ${check}`, requestId: 'begin' });
-  const userTask = server.runtime.user.task(begun.taskId);
-  task = userTask;
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: 'unknown usage pause',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await server.runtime.host.drive();
-  await waitFor(async () => {
-    const view = await userTask.view();
-    return view.operations[0]?.state === 'interrupted' && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
-  }, 15_000);
-  const question = (await userTask.view()).questions.find(item => item.kind === 'unknown_usage' && item.status === 'open')!;
-  if (check === 'usage') {
-    await userTask.answer(question.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'synthetic provider bill' }, 'answer-usage');
-  } else {
-    await userTask.answer(question.id, { type: 'reconcile_usage', proof: 'provider exposes no usage' }, 'answer-reconcile');
-  }
-  const answered = await userTask.view();
-  expect(answered.questions.filter(item => item.status === 'open')).toEqual([]);
-  expect(answered.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', used: check === 'usage' ? 50 : 0 });
-  await expect(userTask.answer(question.id, { type: 'reconcile_usage', proof: 'duplicate' }, 'answer-again')).rejects.toMatchObject({ code: 'invalid_question' });
-
-  await userTask.resume('resume-after-answer');
-  await server.runtime.host.drive();
-  const completed = await userTask.view();
-  expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
-  expect(provider.requests).toHaveLength(2);
-  // The unknown invocation is either recorded (50) or kept unknown; the resumed
-  // call adds its own 50 exactly once.
-  expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 100 : 50);
 }
 
-test('interrupted unknown usage can be recorded or released and then resumes', async () => {
-  await interruptedUnknown('usage');
-  await interruptedUnknown('reconcile');
-}, 120_000);
+test('a pause after partial work preserves the real file and continues the same execution and session', async () => {
+  const f = await partialWork([write('partial.txt', 'partial output'), { text: 'Work complete after resume' }], true);
+  await f.runtime.host.drive(); const before = f.run();
+  expect(f.provider.requests).toHaveLength(1);
+  expect(before.node.status).toBe('idle'); expect(before.instance!.used).toBe(50);
+  expect(before.operations).toHaveLength(1);
+  expect(before.operations[0]).toMatchObject({ state: 'blocked', workerActive: false, reserved: 0, retries_used: 0 });
+  expect(before.invocations[0]!.usage).toMatchObject({ input: 25, output: 10, cacheRead: 15 });
+  expect(await readFile(join(f.project, 'partial.txt'), 'utf8')).toBe('partial output');
+  await f.task.resume('resume-partial'); await f.runtime.host.drive(); const after = f.run();
+  expect(f.provider.requests).toHaveLength(2); expect(after.node.status).toBe('succeeded');
+  expect(after.instance).toMatchObject({ id: before.instance!.id, used: 100 });
+  expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.operations).toMatchObject([{ id: before.operations[0]!.id, state: 'completed', retries_used: 0 }]);
+  expect(await readFile(join(f.project, 'partial.txt'), 'utf8')).toBe('partial output');
+  expect(JSON.stringify(f.provider.requests[1])).toContain('write_file');
+}, 60000);
 
-async function interruptedMixed(check: 'usage' | 'reconcile') {
-  const root = await temp(`mixed-${check}`);
-  const provider = await openaiServer([
-    { tools: [{ id: 'write-1', name: 'write', arguments: JSON.stringify({ path: 'partial.txt', content: 'partial output' }) }] },
-    { usage: null, tools: [{ id: 'write-2', name: 'write', arguments: JSON.stringify({ path: 'second.txt', content: 'second turn' }) }] },
-    { text: 'Work complete after release' },
-  ]);
-  cleanup.push(() => provider.close());
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    limits: { defaultBudgetTokens: 20_000_000 },
-    models: {
-      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
-      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
-      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
-    },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({ outcome: 'completed', output: null, evidence: [{ acceptanceId: 'ok', summary: 'synthetic', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] }),
-      },
-    },
-  });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const begun = await server.runtime.user.begin({ projectId: 'p', request: `mixed ${check}`, requestId: 'begin' });
-  const userTask = server.runtime.user.task(begun.taskId);
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: 'mixed usage pause',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await server.runtime.host.drive();
-  await waitFor(async () => {
-    const view = await userTask.view();
-    return view.operations[0]?.state === 'interrupted' && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
-  }, 20_000);
-  const before = await userTask.view();
-  const partialTree = before.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
-  expect(await readFile(join(partialTree, 'partial.txt'), 'utf8')).toBe('partial output');
-  expect(before.invocations.filter(invocation => invocation.usage === null)).toHaveLength(1);
-  // The known model call is preserved; the zero-usage tool invocation adds nothing.
-  expect(before.invocations.some(invocation => invocation.usage !== null && invocation.usage.input > 0)).toBe(true);
-  expect(before.nodes.find(node => node.id === 'work')?.used).toBe(0);
-  const question = before.questions.find(item => item.kind === 'unknown_usage' && item.status === 'open')!;
-  if (check === 'usage') {
-    await userTask.answer(question.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'synthetic provider bill' }, 'mixed-usage');
-  } else {
-    await userTask.answer(question.id, { type: 'reconcile_usage', proof: 'provider exposes no usage' }, 'mixed-reconcile');
-  }
-  const answered = await userTask.view();
-  expect(answered.questions.filter(item => item.status === 'open')).toEqual([]);
-  // Known invocations are applied once; the unknown one is either recorded or kept unknown.
-  expect(answered.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 100 : 50);
-  await server.runtime.host.drive();
-  const completed = await userTask.view();
-  expect(completed.nodes.every(node => node.status === 'succeeded')).toBe(true);
-  expect(completed.nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 150 : 100);
-  const completedTree = completed.operations.filter(operation => operation.nodeId === 'work').at(-1)!.workspace!;
-  expect(await readFile(join(completedTree, 'partial.txt'), 'utf8')).toBe('partial output');
+test('unknown usage after a partial write keeps its hold through resume until main records the exact call usage', async () => {
+  const f = await partialWork([write('partial.txt', 'partial output'), write('unmetered.txt', 'must wait', true), { text: 'Work complete after reconciliation' }]);
+  await f.runtime.host.drive(); const before = f.run();
+  expect(f.provider.requests).toHaveLength(2); expect(before.node.status).toBe('blocked');
+  expect(before.instance!.used).toBe(50); expect(before.operations[0]!.reserved).toBeGreaterThan(0);
+  expect(await readFile(join(f.project, 'partial.txt'), 'utf8')).toBe('partial output');
+  const calls = await f.calls() as { id: string; state: string; usage: unknown }[];
+  expect(calls).toMatchObject([{ state: 'settled' }, { state: 'unknown', usage: null }]);
+  await expect(readFile(join(f.project, 'unmetered.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(f.main.graphControl({ graphId: f.graphId, action: 'reconcile_usage', callId: calls[1]!.id })).rejects.toMatchObject({ code: 'invalid_input' });
+  await f.task.resume('resume-without-usage'); await f.runtime.host.drive();
+  expect(f.provider.requests).toHaveLength(2); expect(f.run().operations[0]!.reserved).toBeGreaterThan(0);
+  const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
+  await f.main.graphControl({ graphId: f.graphId, action: 'reconcile_usage', callId: calls[1]!.id, usage });
+  await f.main.graphControl({ graphId: f.graphId, action: 'reconcile_usage', callId: calls[1]!.id, usage });
+  expect(f.run().instance!.used).toBe(100);
+  await f.main.graphControl({ graphId: f.graphId, nodeId: 'work', action: 'resume' }); await f.runtime.host.drive();
+  const after = f.run(); expect(after.node.status).toBe('succeeded'); expect(after.instance!.used).toBe(150);
+  expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.operations[0]!.id).toBe(before.operations[0]!.id);
+  expect(f.provider.requests).toHaveLength(3);
+  expect(await readFile(join(f.project, 'partial.txt'), 'utf8')).toBe('partial output');
+}, 60000);
+
+test('mixed known and unknown usage preserves both real writes and counts each provider call once on continuation', async () => {
+  const f = await partialWork([write('partial.txt', 'first output'), write('second.txt', 'second output'), { text: 'Stopped before final confirmation', usage: null }, { text: 'Complete after reconciliation' }]);
+  await f.runtime.host.drive(); const before = f.run();
+  expect(f.provider.requests).toHaveLength(3); expect(before.instance!.used).toBe(100);
+  expect(before.operations[0]!.reserved).toBeGreaterThan(0);
+  expect(await readFile(join(f.project, 'partial.txt'), 'utf8')).toBe('first output');
+  expect(await readFile(join(f.project, 'second.txt'), 'utf8')).toBe('second output');
+  const calls = await f.calls() as { id: string; state: string }[];
+  expect(calls.map(call => call.state)).toEqual(['settled', 'settled', 'unknown']);
+  await f.main.graphControl({ graphId: f.graphId, action: 'reconcile_usage', callId: calls[2]!.id, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  expect(f.run().instance!.used).toBe(150);
+  await f.main.graphControl({ graphId: f.graphId, nodeId: 'work', action: 'resume' }); await f.runtime.host.drive();
+  const after = f.run(); expect(after.node.status).toBe('succeeded'); expect(after.instance!.used).toBe(200);
+  expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.operations[0]!.id).toBe(before.operations[0]!.id);
+  expect(f.provider.requests).toHaveLength(4);
+  expect(await readFile(join(f.project, 'partial.txt'), 'utf8')).toBe('first output');
+  expect(await readFile(join(f.project, 'second.txt'), 'utf8')).toBe('second output');
+}, 60000);
+
+const result = (value: unknown): ResponsePlan => ({ tools: [{ id: 'result', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value } } }) }] });
+const lastUser = (request: unknown) => JSON.stringify((request as { messages: { role: string; content: unknown }[] }).messages.filter(message => message.role === 'user').at(-1)?.content);
+
+async function reworkGraph(unknown = false) {
+  const root = await temp('native-rework'); const project = join(root, 'project'); await mkdir(project);
+  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+  const first = { implementation: 'FIRST_IMPLEMENTATION' }; const second = { implementation: 'SECOND_IMPLEMENTATION' };
+  const failed = { passed: false, reason: 'typecheck-failed: two type errors in src/a.ts' };
+  const passed = { passed: true, reason: 'Second implementation reviewed' };
+  const worker = await openaiServer([result(first), { text: 'PRIVATE_FIRST_WORKER_REPLY' },
+    ...(unknown ? [write('fix.txt', 'real second round fix'), { text: 'Waiting for usage reconciliation', usage: null } as ResponsePlan] : []),
+    result(second), { text: 'Second implementation submitted' }]); cleanup.push(() => worker.close());
+  const reviewer = await openaiServer([result(failed), { text: 'PRIVATE_FIRST_REVIEW_REPLY' }, result(passed), { text: 'Second review complete' }]); cleanup.push(() => reviewer.close());
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
+    limits: { defaultBudgetTokens: 20000000 }, catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+    models: { apiKey: 'local-only', modelRuntime: worker.runtime, entries: [['worker', worker], ['reviewer', reviewer]].map(([id, provider]) => {
+      const server = provider as typeof worker; return { id: id as string, modelId: id as string, provider: server.model.provider, grade: 'high', api: 'openai-completions', baseUrl: server.model.baseUrl, contextWindow: 32000, maxTokens: 256 };
+    }) } }); cleanup.push(() => runtime.close());
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
+  runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Repair type errors', requestId: 'begin' }); const main = runtime.supervisor(owner.taskId);
+  const data = { protocol: 'data' };
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Explicit rework', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'worker', task: 'Repair the type errors in src/a.ts using the explicit feedback.', acceptance: ['Types compile'], inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } },
+      review: { recipe: 'reviewer@1', model: 'reviewer', task: 'Review the current implementation', inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } } },
+    modules: { route: { type: 'router', trigger: 'each', inputs: { review: data }, outputs: { rework: data, approved: data }, rules: [
+      { when: 'review.passed == false', emit: { rework: '$review' } }, { when: 'review.passed == true', emit: { approved: '$review' } },
+    ] } }, edges: { workReview: { from: 'work.result', to: 'review.job', enabled: true }, reviewRoute: { from: 'review.result', to: 'route.review', enabled: true },
+      feedback: { from: 'route.rework', to: 'work.job', enabled: true } }, outputs: { approved: { from: 'route.approved', protocol: 'data' } },
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { request: 'INITIAL_WORK_REQUEST' } });
+  return { runtime, main, graphId, worker, reviewer, project, first, second, failed, passed,
+    run: () => runtime.nodeRun(graphId, 'work'), results: () => main.graphInspect({ graphId, query: 'results' }) };
 }
 
-test('mixed known and unknown usage can be reconciled and continue', async () => {
-  await interruptedMixed('usage');
-  await interruptedMixed('reconcile');
-}, 120_000);
+test('the second round of explicit rework reads the failure delta and preserves its actual original conversation', async () => {
+  const f = await reworkGraph(); await f.runtime.host.drive();
+  expect(f.worker.requests).toHaveLength(4); expect(f.reviewer.requests).toHaveLength(4);
+  const initial = lastUser(f.worker.requests[0]); const feedback = lastUser(f.worker.requests[2]);
+  expect(initial).toContain('INITIAL_WORK_REQUEST'); expect(initial).toContain('Repair the type errors in src/a.ts');
+  expect(feedback).toContain('typecheck-failed'); expect(feedback).toContain('two type errors in src/a.ts');
+  expect(feedback).not.toContain('INITIAL_WORK_REQUEST'); expect(feedback).not.toContain('Repair the type errors in src/a.ts');
+  expect(JSON.stringify(f.worker.requests[2])).toContain('PRIVATE_FIRST_WORKER_REPLY');
+  expect(JSON.stringify(f.worker.requests[2])).not.toContain('PRIVATE_FIRST_REVIEW_REPLY');
+  const run = f.run(); expect(run.operations).toHaveLength(2);
+  expect(run.operations.map(item => item.state)).toEqual(['completed', 'completed']); expect(run.instance!.used).toBe(200);
+  const edge = await f.main.graphInspect({ graphId: f.graphId, query: 'edge', id: 'workReview' });
+  expect(edge).toMatchObject({ deliveries: [{ value: f.second }, { value: f.first }] });
+  await expect(f.results()).resolves.toMatchObject([{ value: f.passed }]);
+}, 60000);
 
-async function interruptedRework(check: 'usage' | 'reconcile') {
-  const root = await temp(`rework-${check}`);
-  const provider = await openaiServer([
-    { text: 'first incomplete implementation' },
-    { usage: null, tools: [{ id: 'fix-1', name: 'write', arguments: JSON.stringify({ path: 'fix.txt', content: 'fix' }) }] },
-    { text: 'real second round completion' },
-  ]);
-  cleanup.push(() => provider.close());
-  let checks = 0;
-  const successorInputs: { dependencies: unknown; inputVersions: unknown }[] = [];
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    limits: { defaultBudgetTokens: 20_000_000 },
-    models: {
-      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
-      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
-      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key', limit: 2 }),
-    },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async operation => async () => {
-          checks += 1;
-          if (checks === 1) return { outcome: 'completed', output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [], blockers: [{ id: 'needs-fix', reason: 'synthetic rework required', evidence: [] }] } };
-          successorInputs.push({ dependencies: operation.dependencies, inputVersions: operation.inputVersions });
-          return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'ok', summary: 'synthetic observing check', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] };
-        },
-      },
-    },
-  });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const begun = await server.runtime.user.begin({ projectId: 'p', request: `rework ${check}`, requestId: 'begin' });
-  const userTask = server.runtime.user.task(begun.taskId);
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: 'rework interrupted usage',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    loops: [{ from: 'check', to: 'work' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local' },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await server.runtime.host.drive();
-  await waitFor(async () => {
-    const view = await userTask.view();
-    return view.operations.some(operation => operation.state === 'interrupted') && view.questions.some(question => question.kind === 'unknown_usage' && question.status === 'open');
-  }, 20_000);
-  const before = await userTask.view();
-  const roundOne = before.operations.find(operation => operation.nodeId === 'work' && operation.state === 'succeeded')!;
-  const roundTwo = before.operations.find(operation => operation.nodeId === 'work' && operation.state === 'interrupted')!;
-  const work = before.nodes.find(node => node.id === 'work')!;
-  expect(roundOne.activationId).not.toBe(roundTwo.activationId);
-  expect(roundOne.result).toMatchObject({ outcome: 'completed', output: { text: 'first incomplete implementation' } });
-  expect(roundTwo.result).toBeNull();
-  expect(work.status).toBe('blocked');
-  expect(work.outputVersion).toBe(1);
-  expect(checks).toBe(1);
-  const question = before.questions.find(item => item.kind === 'unknown_usage' && item.status === 'open')!;
-  if (check === 'usage') {
-    await userTask.answer(question.id, { type: 'usage', usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 }, proof: 'synthetic provider bill' }, 'rework-usage');
-  } else {
-    await userTask.answer(question.id, { type: 'reconcile_usage', proof: 'provider exposes no usage' }, 'rework-reconcile');
-  }
-  const answered = await userTask.view();
-  // The interrupted round must stay pending for its own activation: the first
-  // round's success is history and cannot satisfy the waiting dependency.
-  expect(answered.questions.filter(item => item.status === 'open')).toEqual([]);
-  expect(answered.phase).toBe('running');
-  expect(answered.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'pending', instanceId: work.instanceId, activationId: roundTwo.activationId, outputVersion: 1, used: check === 'usage' ? 100 : 50 });
-  expect(answered.nodes.find(node => node.id === 'check')?.status).toBe('pending');
-  expect(checks).toBe(1);
-  await expect(userTask.answer(question.id, { type: 'reconcile_usage', proof: 'duplicate' }, 'rework-again')).rejects.toMatchObject({ code: 'invalid_question' });
-  expect((await userTask.view()).nodes.find(node => node.id === 'work')?.used).toBe(check === 'usage' ? 100 : 50);
-
-  await server.runtime.host.drive();
-  const completed = await userTask.view();
-  expect(completed.phase).toBe('completed');
-  expect(provider.requests).toHaveLength(3);
-  expect(checks).toBe(2);
-  expect(successorInputs).toHaveLength(1);
-  expect(successorInputs[0]!.dependencies).toMatchObject({ work: { text: 'real second round completion' } });
-  expect(successorInputs[0]!.inputVersions).toMatchObject({ work: [{ activationId: roundTwo.activationId, outputVersion: 2 }] });
-  expect(completed.nodes.find(node => node.id === 'work')).toMatchObject({ status: 'succeeded', instanceId: work.instanceId, outputVersion: 2, used: check === 'usage' ? 150 : 100 });
-  expect(completed.invocations.filter(invocation => invocation.operationId === roundTwo.id && invocation.usage === null)).toHaveLength(check === 'usage' ? 0 : 1);
-  expect(completed.operations.some(operation => operation.id === roundOne.id && operation.state === 'succeeded')).toBe(true);
-}
-
-test('the second round of a rework reads the failure, not the briefing its session already holds', async () => {
-  const root = await temp('rework-briefing');
-  const provider = await openaiServer([
-    { text: 'first attempt done' },
-    { text: 'second attempt done' },
-    { text: 'extra' },
-  ]);
-  cleanup.push(() => provider.close());
-  let checks = 0;
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
-    limits: { defaultBudgetTokens: 20_000_000 },
-    models: {
-      entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }],
-      apiKey: 'scripted-local-key', modelRuntime: provider.runtime,
-      credentialFor: () => ({ credentialId: 'cred', apiKey: 'scripted-local-key' }),
-    },
-    actions: {
-      check: {
-        kind: 'program',
-        prepare: async () => async () => {
-          checks += 1;
-          if (checks === 1) {
-            return { outcome: 'completed', output: { kind: 'verification', outcome: 'rework', subjects: [], reports: [], blockers: [{ id: 'typecheck-failed', reason: 'two type errors in src/a.ts', evidence: [] }] } };
-          }
-          return { outcome: 'completed', output: { passed: true }, evidence: [{ acceptanceId: 'ok', summary: 'synthetic observing check', artifact: { path: join(root, 'ok'), digest: 'a'.repeat(64) } }] };
-        },
-      },
-    },
-  });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'coder');
-  const begun = await server.runtime.user.begin({ projectId: 'p', request: '修掉类型错误', requestId: 'begin' });
-  const userTask = server.runtime.user.task(begun.taskId);
-  await server.runtime.supervisor(begun.taskId).propose({
-    requirementVersion: 1, summary: 'rework briefing',
-    acceptance: [{ id: 'ok', description: '类型检查通过', checkNode: 'check' }],
-    loops: [{ from: 'check', to: 'work' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'local', input: { files: ['src/a.ts'], focus: '修掉类型错误' } },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-    ],
-  }, 'proposal');
-  await userTask.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
-  await server.runtime.host.drive();
-  // The loop sends the node back after the first check asks for a rework, so two worker operations exist and
-  // the second one is a retry in the same session (a loop keeps the node's instance and its session row).
-  await waitFor(async () => checks >= 2, 30_000);
-
-  // Both rounds run in the worker's own session, and the session keeps its history: what a round reads is
-  // its newest user message, so that is what these assertions look at. The first round was briefed in full;
-  // the second one only reads what failed.
-  const latest = (request: unknown) => {
-    const messages = (request as { messages?: { role?: string; content?: unknown }[] }).messages ?? [];
-    const message = messages.filter(candidate => candidate.role === 'user').at(-1);
-    // A user message carries either a string or content blocks; read whichever this transport used.
-    return typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? '');
-  };
-  const messagesOf = (request: unknown) => JSON.stringify((request as { messages?: unknown }).messages ?? '');
-  const briefed = provider.requests.filter(request => messagesOf(request).includes('Your node: work (agent work)'));
-  const reworked = provider.requests.filter(request => messagesOf(request).includes('Rework (attempt 2, same session)'));
-  expect(briefed.length).toBeGreaterThan(0);
-  expect(reworked.length).toBeGreaterThan(0);
-  expect(latest(briefed[0]!)).toContain('Your node: work (agent work)');
-  expect(latest(briefed[0]!)).toContain('files: src/a.ts');
-  expect(latest(briefed[0]!)).toContain('Request: 修掉类型错误');
-  const rework = latest(reworked[0]!);
-  expect(rework).toContain('Rework (attempt 2, same session)');
-  expect(rework).toContain('typecheck-failed');
-  expect(rework).toContain('two type errors in src/a.ts');
-  expect(rework).not.toContain('Your node: work');
-  expect(rework).not.toContain('Task graph');
-  expect(rework).not.toContain('Request:');
-  expect(rework).toContain('Your node, its file list and every confirmed check input are unchanged.');
-}, 120_000);
-
-test('a rework round interrupted for unknown usage continues instead of reusing the previous success', async () => {
-  await interruptedRework('usage');
-  await interruptedRework('reconcile');
-}, 180_000);
+test('unknown usage in a rework round cannot reuse the first submission and resumes the same pending execution after reconciliation', async () => {
+  const f = await reworkGraph(true); await f.runtime.host.drive(); const before = f.run();
+  expect(f.worker.requests).toHaveLength(4); expect(f.reviewer.requests).toHaveLength(2);
+  expect(before.node.status).toBe('blocked'); expect(before.operations).toHaveLength(2);
+  expect(before.operations.map(item => item.state)).toEqual(['completed', 'blocked']);
+  expect(before.instance!.used).toBe(150); expect(before.operations[1]!.reserved).toBeGreaterThan(0);
+  expect(await readFile(join(f.project, 'fix.txt'), 'utf8')).toBe('real second round fix');
+  await expect(f.results()).resolves.toEqual([]);
+  await expect(f.main.graphInspect({ graphId: f.graphId, query: 'edge', id: 'workReview' })).resolves.toMatchObject({ deliveries: [{ value: f.first }] });
+  const calls = await f.main.graphInspect({ graphId: f.graphId, query: 'provider_calls', id: 'work' }) as { id: string; state: string }[];
+  await f.main.graphControl({ graphId: f.graphId, action: 'reconcile_usage', callId: calls.find(call => call.state === 'unknown')!.id, usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  await f.main.graphControl({ graphId: f.graphId, nodeId: 'work', action: 'resume' }); await f.runtime.host.drive();
+  const after = f.run(); expect(after.node.status).toBe('succeeded'); expect(after.instance).toMatchObject({ id: before.instance!.id, used: 300 });
+  expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.operations).toMatchObject([{ id: before.operations[0]!.id, state: 'completed' }, { id: before.operations[1]!.id, state: 'completed' }]);
+  expect(f.worker.requests).toHaveLength(6); expect(f.reviewer.requests).toHaveLength(4);
+  await expect(f.main.graphInspect({ graphId: f.graphId, query: 'edge', id: 'workReview' })).resolves.toMatchObject({ deliveries: [{ value: f.second }, { value: f.first }] });
+  await expect(f.results()).resolves.toMatchObject([{ value: f.passed }]);
+}, 60000);

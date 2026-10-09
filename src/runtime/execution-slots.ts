@@ -1,5 +1,7 @@
 import type { TaskStore } from '../core/store.ts';
+import { RuntimeError } from '../core/types.ts';
 import { clearOperationCredentialWait } from '../core/operation-lifecycle.ts';
+import { setNativeExecutionWaiting } from '../core/time-ledger.ts';
 
 /** Local execution capacity. Credential waits are not execution work: an
  * operation parked on a credential slot sets waiting_slot=1 and stops counting
@@ -50,7 +52,7 @@ export async function waitForKernelExecutionSlot(store: TaskStore, executionId: 
       const row = store.db.prepare('SELECT e.state,t.phase FROM kernel_executions e JOIN tasks t ON t.id=e.task_id WHERE e.id=?').get(executionId) as { state: string; phase: string } | undefined;
       if (!row || row.state !== 'running' || ['stopping', 'stopped', 'completed'].includes(row.phase)) throw aborted();
       if (occupiedSlots(store, 'agent') >= AGENT_EXECUTION_LIMIT) return false;
-      store.db.prepare('UPDATE kernel_executions SET waiting_slot=0 WHERE id=?').run(executionId);
+      setNativeExecutionWaiting(store, executionId, false);
       return true;
     });
     if (admitted) return;
@@ -68,7 +70,8 @@ export async function waitForKernelProgramExecutionSlot(store: TaskStore, operat
         { state: string; task_id: string; module_id: string; phase: string; paused: number } | undefined;
       if (!row || row.state !== 'prepared' || ['stopping', 'stopped', 'completed'].includes(row.phase)) throw aborted();
       const paused = store.db.prepare('SELECT paused FROM kernel_node_state WHERE task_id=? AND node_id=?').get(row.task_id, row.module_id) as { paused: number } | undefined;
-      if (row.paused || paused?.paused || occupiedSlots(store, 'program') >= PROGRAM_EXECUTION_LIMIT) return false;
+      if (row.paused || paused?.paused) throw new RuntimeError('paused', 'Program execution slot wait is paused');
+      if (occupiedSlots(store, 'program') >= PROGRAM_EXECUTION_LIMIT) return false;
       store.db.prepare('UPDATE kernel_module_operations SET worker_active=1 WHERE id=?').run(operationId);
       return true;
     });

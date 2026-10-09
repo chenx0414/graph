@@ -1,3 +1,4 @@
+import { modelTier } from '../catalog/models.ts';
 import { open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { RuntimeError } from '../core/types.ts';
@@ -19,7 +20,7 @@ export function sanitizeConfig(config: GraphConfig, env: Record<string, string |
     piExtensionAutoUpdate: config.piExtensionAutoUpdate,
     projects: config.projects,
     models: config.models
-      ? { ...config.models, entries: config.models.entries.map(entry => ({ ...entry, thinkingOptions: thinkingOptionsFor(entry) })) }
+      ? { ...config.models, entries: config.models.entries.map(entry => ({ ...entry, tier: modelTier(entry.grade), thinkingOptions: thinkingOptionsFor(entry) })) }
       : config.models,
     credentials: Object.fromEntries(Object.entries(config.credentials).map(([id, credential]) => [id, {
       secretRef: credential.secretRef,

@@ -1,7 +1,9 @@
+import { explainEdge, explainModule, type ModuleHistoryQuery } from './kernel-explain.ts';
+import { retireLegacyGraphs } from './retire-legacy-graphs.ts';
 import { sendKernelMainMessage, sendKernelNodeMessage } from './kernel-node-messages.ts';
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
-import { kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse, kernelConversationNodes } from './kernel-views.ts';
+import { kernelHasActiveWork, kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse, kernelConversationNodes } from './kernel-views.ts';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
@@ -23,7 +25,6 @@ import {
   type MessageRow,
 } from './conversation.ts';
 import { Execution } from './execution.ts';
-import { createMergeResolver } from './merge-resolver.ts';
 import { isFullAccess, resolveAccessPolicy, standardAccessPolicy, type AccessPolicy, type ResolvedAccessPolicy } from './access-policy.ts';
 import { contextView } from './context.ts';
 import { setBudget } from './budget-ledger.ts';
@@ -37,11 +38,9 @@ import { parseGraphDefinition } from './interface-spec.ts';
 import { DEFAULT_V2_RESERVE_TOKENS, kernelGraphLane } from '../runtime/kernel-graph-lane.ts';
 import { NodeSubmitBridge } from './node-submit-bridge.ts';
 import { validateProposal } from './proposal.ts';
-import { createActivation, hasLockedQuestion, loadGraph } from './graph.ts';
-import { applyRevision } from './revision.ts';
+import { createActivation, hasLockedQuestion } from './main-node-state.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
 import { nodePromptView } from './node-prompt.ts';
-import { renderPredecessorHandoffs } from './predecessor-handoff.ts';
 import { operationSnapshots } from './operation-lifecycle.ts';
 import { clearToolCallSpools, ingestToolCallSpools } from '../runtime/tool-call-spool.ts';
 import { skillUsage } from '../runtime/skill-usage.ts';
@@ -52,7 +51,7 @@ import { syncCapabilityVersion, piExtensionCacheDir } from '../runtime/capabilit
 import { approveHumanCheck, humanCheckPreReview, insertQuestion, pendingHumanChecks, problemActions, questionSummary, recoverMaster } from './question-routing.ts';
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
-import { mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
+import { modelTier, mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
@@ -64,11 +63,10 @@ import { openAgentContextAssembly } from '../runtime/agent-context-assembly.ts';
 import { agentSkillOwnedRoots, agentSkillsDir } from '../runtime/agent-skills.ts';
 import { agentArtifactAccess } from '../runtime/agent-tool-definitions.ts';
 import type { RsiChangeInput, RsiService } from '../runtime/rsi.ts';
-import type { MergeResolverChannels } from './execution.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { RuntimeError, type AttachmentInput, type ProjectConfig, type Proposal, type NativeProposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
+import { RuntimeError, type AttachmentInput, type ProjectConfig, type NativeProposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
 import { cleanAttachments, isImageAttachment } from './attachments.ts';
 
 const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -162,18 +160,6 @@ function conversationTarget(store: TaskStore, supervisorTaskId: string, requeste
   return requested;
 }
 
-function revisionTarget(store: TaskStore, supervisorTaskId: string, requested: string | undefined) {
-  if (requested !== undefined) return conversationTarget(store, supervisorTaskId, requested, 'A revision');
-  // Without taskId the default is the supervisor's own (anchor) task, which can never be revised -
-  // it has no confirmed proposal - so the call failed with a message about requirements. When this
-  // conversation has exactly one live feature task, that is plainly the target; anything else stays
-  // ambiguous and keeps the old default rather than guessing.
-  const live = store.db.prepare(`SELECT id FROM tasks
-    WHERE conversation_id=(SELECT conversation_id FROM tasks WHERE id=?) AND id<>? AND phase IN ('running','queued')`)
-    .all(supervisorTaskId, supervisorTaskId) as { id: string }[];
-  return live.length === 1 ? live[0]!.id : supervisorTaskId;
-}
-
 // A compact projection of one task: which node runs what, what still runs, what needs the user and
 // which acceptance evidence is currently valid. `graphState` carries the same information at roughly
 // ten times the size, so this is the read to poll with.
@@ -211,7 +197,7 @@ function taskStatusView(store: TaskStore, kernel: KernelStore, taskId: string, n
   return {
     taskId,
     phase: task.phase,
-    status: task.paused ? 'paused' : userQuestions.length ? 'blocked' : task.phase,
+    status: task.paused ? (native && kernelHasActiveWork(kernel, taskId) ? 'pausing' : 'paused') : userQuestions.length ? 'blocked' : task.phase,
     graphVersion: native?.version ?? task.graph_version,
     proposalVersion: task.latest_proposal,
     acceptedProposalVersion: task.accepted_proposal,
@@ -245,7 +231,7 @@ function conversationProposal(store: TaskStore, taskId: string, version: number,
     version: row.version,
     requirementVersion: row.requirement_version,
     stale: row.requirement_version !== currentRequirementVersion,
-    spec: JSON.parse(row.spec) as Proposal,
+    spec: JSON.parse(row.spec) as NativeProposal,
     decisions: row.decision_snapshot,
   };
 }
@@ -307,7 +293,6 @@ export async function openTaskRuntime(options: {
    * the resolution is acceptable; this only supplies the turn that proposes one. Omitting it
    * keeps the previous behaviour, which is to block the task with `git_conflict`.
    */
-  mergeResolvers?: MergeResolverChannels;
   /** User-owned capability and recipe files. The desktop daemon passes ~/.graph. */
   catalog?: {
     capabilityRoot?: string;
@@ -356,7 +341,7 @@ export async function openTaskRuntime(options: {
   const allowedProjects = () => new Set((configuredProjects() ?? []).map(project => project.id));
   // Live getters: hot configuration changes must affect the next use without
   // reopening the runtime; static options remain for unit tests.
-  /** The one effective access policy: dispatch and the merge turn must never disagree about it. */
+  /** The effective policy frozen for each admitted execution. */
   const resolvedAccessPolicy = () => resolveAccessPolicy(options.access?.() ?? standardAccessPolicy(), {
     home: homedir(),
     stateDir,
@@ -367,10 +352,10 @@ export async function openTaskRuntime(options: {
   // runtime opens - the host loop queries them every tick, and an older database is
   // migrated here rather than by the first graph that happens to run.
   const kernel = new KernelStore(store);
-  recoverKernelExecutions(kernel);
+  try { retireLegacyGraphs(store); recoverKernelExecutions(kernel); }
+  catch (error) { try { store.close(); } finally { releaseOwner(); } throw error; }
   /**
-   * The merge Agent's own credential binding, taken from the same live configuration the
-   * dispatcher uses, so a merge turn never borrows a key from an unrelated model.
+   * The credential binding shared by main dispatch and native node admission.
    */
   const liveCredentialFor = (entry: ModelEntry) => options.live
     ? options.live.credentialFor(entry)
@@ -378,46 +363,6 @@ export async function openTaskRuntime(options: {
     // A static model configuration carries one key for every entry rather than a resolver;
     // the v2 lane needs the same key the old adapter uses, or no node could run.
     ?? (options.models?.apiKey ? { apiKey: options.models.apiKey } : undefined);
-  /**
-   * Resolve a lane collision with a real merge Agent turn.
-   *
-   * The turn runs at the recipe's medium grade, under full access and with no budget cap - the
-   * user's explicit choice. It is not an operation, so it takes no execution slot and writes no
-   * budget row; that gap is recorded in the harness backlog rather than hidden.
-   */
-  const mergeResolverChannel = () => {
-    // Without the prompt library the identity cannot be resolved, and a merge turn that runs
-    // without its discipline is worse than a blocked task: it is the one place a model is asked
-    // to decide what "both sides" means.
-    const library = options.agentContext;
-    if (!library) {
-      return {
-        resolve: async () => {
-          throw new RuntimeError('invalid_config', 'The merge Agent needs the Agent context library to resolve its identity');
-        },
-      };
-    }
-    const runtime = options.live ? undefined : options.models?.modelRuntime;
-    if (!runtime) {
-      // A live-config host supplies the runtime per entry; without one the turn cannot be sent.
-      return {
-        resolve: async () => {
-          throw new RuntimeError('model_unavailable', 'The merge Agent needs a model runtime, which this runtime does not have');
-        },
-      };
-    }
-    const resolve = createMergeResolver({
-      store,
-      catalog,
-      instancesDir: join(stateDir, 'instances'),
-      directory: liveEntries,
-      modelRuntime: runtime,
-      access: () => resolvedAccessPolicy(),
-      apiKeyFor: entry => liveCredentialFor(entry)?.apiKey ?? options.models?.apiKey ?? '',
-      library,
-    });
-    return { resolve };
-  };
   const livePreferences = (): Partial<Record<ModelEntry['grade'], string[]>> | undefined =>
     options.live ? options.live.preferences() : options.models?.preferences;
   // `null` is the legitimate unlimited default: it must never fall back to a
@@ -575,16 +520,14 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       catalog,
       git,
       artifacts,
-      // §13.8: a confirmed v2 graph runs here. The lane names the v2 graphs with queued work
-      // and drains each through the real kernel, a per-node resident host and the node's own
-      // recipe-defined session. It exists when models are configured - without a model a
-      // node cannot run - or when the caller supplied scripted actions, which stand in for
-      // the node's process (see `scriptedTurn`). The scripted path still submits through
-      // the real bridge and kernel, so it exercises settlement rather than faking it.
+      // Native graphs run through one resident Pi host per node. Host command
+      // modules remain usable without a model; agent nodes require a configured model.
       graphs: () => (residentGraphLane ??= kernelGraphLane({
+        graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
         access: () => resolvedAccessPolicy(),
         kernel,
         ...(options.network ? { network: options.network } : {}),
+        ...(options.program ? { program: options.program } : {}),
         catalog,
         ...(options.agentContext ? { library: options.agentContext } : {}),
         // §9: a v2 node is metered like any other. Without this the ledger from HB-284
@@ -592,47 +535,14 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         tokenBudget: () => { const budget = liveBudget(); return { budget: budget ?? 0, unlimited: budget === null }; },
         reserveTokens: DEFAULT_V2_RESERVE_TOKENS,
         directory: liveEntries,
+        preferences: () => livePreferences() ?? {},
         credentialFor: liveCredentialFor,
         scheduler: modelScheduler,
         instancesDir: join(stateDir, 'instances'),
         stateDir,
         git,
         artifacts,
-        // The scripted turn needs the same workspace the lane gives a node, so it is named
-        // here rather than inlined twice.
         workspaceFor: projectRootFor(store),
-        ...(options.actions && !(options.models || options.live) ? {
-          scriptedTurn: async (graphId: string, nodeId: string, text: string, turn: number, workspace?: string) => {
-            // Scripted actions reuse the generic operation contract with native
-            // input and briefing; no legacy proposal fields participate.
-            const row = store.db.prepare("SELECT e.revision_version,n.instance_id FROM kernel_executions e JOIN kernel_nodes n ON n.task_id=e.task_id AND n.node_id=e.node_id WHERE e.task_id=? AND e.node_id=? AND e.state='running' ORDER BY e.rowid DESC LIMIT 1").get(graphId, nodeId) as { revision_version: number; instance_id: string } | undefined;
-            const spec = row ? kernel.revision(graphId, row.revision_version)?.definition.nodes[nodeId] : undefined;
-            if (!row || !spec) throw new RuntimeError('invalid_graph', 'Scripted execution requires its frozen node definition');
-            const action = spec.task;
-            const adapter = options.actions![action] ?? options.actions![nodeId];
-            if (!adapter) return { missing: ['out'] };
-            const queued = store.db.prepare("SELECT kind,payload FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed'").get(graphId, nodeId) as { kind: string; payload: string } | undefined;
-            if (!queued) throw new RuntimeError('invalid_queue', 'Scripted execution requires its claimed input');
-            const payload = JSON.parse(queued.payload) as Json;
-            const prepared = await adapter.prepare({
-              id: `op-${graphId}-${nodeId}-${turn}`,
-              nodeId, instanceId: row.instance_id,
-              taskId: graphId, activationId: undefined, turn, action, attempt: turn,
-              kind: adapter.kind, model: 'scripted', recipe: spec.recipe,
-              ...(workspace ? { workspace } : {}),
-              input: queued.kind === 'delivery' ? (payload as { value: Json }).value : payload,
-              context: { briefing: text },
-              dependencySources: {}, messages: [], images: [],
-            } as never);
-            const result = await prepared();
-            const output = (result as { output?: unknown }).output;
-            const value = output === null || output === undefined
-              ? { text: `${nodeId} done` }
-              : (typeof output === 'object' ? output as Record<string, unknown> : { text: String(output) });
-            const accepted = result.outcome === 'completed';
-            return { outputs: accepted ? { out: { enable: true, value } } : {}, missing: accepted ? [] : ['out'] };
-          },
-        } : {}),
         onMainMessage: async (graphId, nodeId, message) => sendKernelMainMessage(kernel, graphId, nodeId, message),
         onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
           if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
@@ -646,10 +556,8 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             : { ok: false, text: bridge.refusalMessage(receipt) };
         },
       })).runnable(),
-      scratchRoot: stateDir,
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
-      ...(options.program ? { program: options.program } : {}),
       access: () => resolvedAccessPolicy(),
       ...(options.systemContext ? {
         systemContext: {
@@ -660,13 +568,6 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       } : {}),
       autoWake: Boolean(options.autoWake),
       ...(options.rsi ? { dispatchAllowed: () => !options.rsi!.hasPendingRestart() } : {}),
-      // A lane collision is resolved by a real merge Agent turn whenever models are configured.
-      // An explicit channel still wins: a test or a host may supply its own resolver.
-      ...(options.mergeResolvers
-        ? { mergeResolvers: options.mergeResolvers }
-        : options.models || options.live
-          ? { mergeResolvers: mergeResolverChannel() }
-          : {}),
     });
     // Tasks and conversations created while dispatch was disabled carry no
     // master node. Once a master binding exists they get one and become
@@ -815,6 +716,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           const receipt = store.command('user', input.requestId, { type: 'set_budget', taskId, nodeId: input.nodeId, tokens: input.tokens }, () => {
             if (kernel.latestRevision(taskId)) {
               kernel.setAuthorizedBudget(taskId, input.nodeId, input.tokens);
+              const resolved = store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'")
+                .run(canonicalJson({ type: 'set_budget', tokens: input.tokens }), taskId, input.nodeId);
+              if (resolved.changes) closeUserWait(store, taskId, input.nodeId);
               return { taskId, cursor: store.event(taskId, 'instance.budget_changed', { nodeId: input.nodeId, tokens: input.tokens, nextExecution: true }) };
             }
             const instance = store.db.prepare('SELECT id FROM instances WHERE task_id=? AND node_id=?').get(taskId, input.nodeId) as { id: string } | undefined;
@@ -831,7 +735,6 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             }
             return { taskId, cursor: store.event(taskId, 'instance.budget_changed', { nodeId: input.nodeId, tokens: input.tokens }) };
           });
-          execution.finish(taskId);
           return receipt;
         },
         async answer(questionId: string, answer: Answer, requestId: string): Promise<Receipt> {
@@ -840,7 +743,6 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             execution.answer(taskId, questionId, answer);
             return { taskId, cursor: store.event(taskId, 'question.answered', { questionId, answer }) };
           });
-          execution.finish(taskId);
           return receipt;
         },
         async say(text: string, requestId: string): Promise<Receipt> {
@@ -873,27 +775,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             if (!row || task.latest_proposal !== input.proposalVersion || row.requirement_version !== task.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current requirement proposal can be accepted');
             if (task.accepted_proposal !== null) throw new RuntimeError('already_accepted', 'Task already has confirmed requirements');
             if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
-            const proposal = JSON.parse(row.spec) as Proposal;
-            // §13.8 switchover: a draft carrying a v2 graph definition creates a v2 graph.
-            // Only the conversation confirm path did this, so a task confirmed through this
-            // entry point - which is what the HTTP API uses - wrote old declarative rows even
-            // for a v2 draft, and the graph never reached the kernel.
-            if (proposal.definition) {
-              materializeGraph(new KernelStore(store), taskId, parseGraphDefinition(proposal.definition), 'Confirmed task graph');
-            } else {
-            store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,?,?,?,?)').run(taskId, 1, row.spec, 'Confirmed task graph', 0);
-            for (const node of proposal.nodes) {
-              const existing = store.db.prepare('SELECT instance_id FROM nodes WHERE task_id=? AND id=?').get(taskId, node.id) as { instance_id: string | null } | undefined;
-              if (existing) {
-                store.db.prepare('UPDATE nodes SET spec=?,status=? WHERE task_id=? AND id=?').run(canonicalJson(node), node.kind === 'agent' ? 'pending' : 'pending', taskId, node.id);
-                continue;
-              }
-              const instanceId = node.kind === 'agent' ? randomUUID() : null;
-              store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
-              if (instanceId) insertInstance(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
-              createActivation(store, taskId, node.id, 1);
-            }
-            }
+            const proposal = JSON.parse(row.spec) as NativeProposal;
+            validateProposal(proposal);
+            materializeGraph(kernel, taskId, parseGraphDefinition(proposal.definition), 'Confirmed task graph');
             const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
             const phase = !active_task || active_task === taskId ? 'running' : 'queued';
             store.db.prepare('UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=?,graph_version=1 WHERE id=?')
@@ -941,21 +825,12 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             id: task.id, conversationId: task.conversation_id, projectId: task.project_id, request: task.request, requirementVersion: task.requirement_version,
             proposalVersion: task.latest_proposal, acceptedProposalVersion: task.accepted_proposal,
             graphVersion: nativeRevision?.version ?? task.graph_version,
-            proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null, messages,
-            ...(() => {
-              // Native subgraphs are declared in the definition, not legacy containers or loops.
-              let graph: ReturnType<typeof loadGraph> | undefined;
-              if (task.accepted_proposal && !nativeRevision) {
-                try { graph = loadGraph(store, taskId); } catch { graph = undefined; }
-              }
-              return { containers: graph ? graph.containers() : [], loops: graph ? graph.plan.loops : [] };
-            })(),
-            revisions: (store.db.prepare(nativeRevision
-              ? 'SELECT version,reason,version-1 AS base_version FROM kernel_revisions WHERE task_id=? ORDER BY version'
-              : 'SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]),
+            proposal: proposal ? JSON.parse(proposal.spec) as NativeProposal : null, messages,
+            containers: [], loops: [],
+            revisions: nativeRevision ? (store.db.prepare('SELECT version,reason,version-1 AS base_version FROM kernel_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]) : [],
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused), queuedBehind,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
-            status: task.paused ? (operationTotals.some(row => row.active) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
+            status: task.paused ? ((nativeRevision ? kernelHasActiveWork(kernel, taskId) : operationTotals.some(row => row.active)) ? 'pausing' : 'paused') : userQuestions.some(q => q.status === 'open') ? 'blocked' : task.phase,
             operationHistory: { total: operationCount, limit: 50, hasOlder: operationCount > operations.length, oldestId: operations[0]?.id ?? null },
             operations: operations.map(row => ({ ...row.operation, state: row.state, reserved: row.reserved, workerActive: row.workerActive, result: row.result })),
             questions: questions.map(row => ({ id: row.id, nodeId: row.node_id, operationId: row.operation_id, kind: row.kind, status: row.status, owner: row.owner, data: JSON.parse(row.data) as Json, answer: row.answer ? JSON.parse(row.answer) as Json : null })),
@@ -963,13 +838,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             worktrees: (store.db.prepare('SELECT instance_id,node_id,path,branch FROM worktrees WHERE task_id=?').all(taskId) as { instance_id: string; node_id: string; path: string; branch: string }[])
               .map(row => ({ instanceId: row.instance_id, nodeId: row.node_id, path: row.path, branch: row.branch })),
             integrationSha: task.integration_sha,
-            // A v2 graph's nodes live in `kernel_nodes`, not `nodes`. They are merged in so
-            // a user opening a v2 task sees the graph at all, and so a node parked on an
-            // exhausted budget reads as `blocked` instead of vanishing. They carry the same
-            // keys the legacy rows do - empty where a v2 node has no such thing - because a
-            // missing key breaks every consumer that reads it.
+            // Native graphs contain only declared agents; their main remains external.
             nodes: [
-              ...rows.map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
+              ...(nativeRevision ? [] : rows).map(row => ({ ...JSON.parse(row.spec) as NodeSpec, instanceId: row.instance_id, activationId: row.activation_id, outputVersion: row.output_version, stallCount: row.stall_count, status: row.status, used: row.used, unlimited: Boolean(row.unlimited), budget: row.unlimited ? null : row.budget,
               ...(row.model ? { selectedModel: row.model } : {}), ...(row.definition_version ? { boundDefinition: row.definition_version } : {}),
               reserved: operationTotals.find(total => total.node_id === row.id)?.reserved ?? 0 })),
               ...kernel.listNodes(taskId).map(node => {
@@ -1204,7 +1075,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         return { conversationId, model: entry.id, thinkingLevel, changed };
       });
     },
-    async view(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+    async view(conversationId: string, query: import('./node-run.ts').NodeEntryQuery = {}) {
       ensureOpen();
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
@@ -1216,7 +1087,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         ? conversationProposal(store, anchor.id, anchor.latest_proposal, anchor.requirement_version)
         : null;
       const proposalHistory = proposalRows.map(row => {
-        const spec = JSON.parse(row.spec) as Proposal;
+        const spec = JSON.parse(row.spec) as NativeProposal;
         return {
           version: row.version,
           requirementVersion: row.requirement_version,
@@ -1428,7 +1299,8 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         const row = store.db.prepare('SELECT requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { requirement_version: number; spec: string; decision_snapshot: string | null } | undefined;
         if (!row || anchor.latest_proposal !== input.proposalVersion || row.requirement_version !== anchor.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current draft on the current requirement can be confirmed');
         if (store.db.prepare('SELECT proposal_version FROM conversation_acceptances WHERE conversation_id=? AND proposal_version=?').get(conversationId, input.proposalVersion)) throw new RuntimeError('already_accepted', 'This draft was already confirmed');
-        const proposal = JSON.parse(row.spec) as Proposal;
+        const proposal = JSON.parse(row.spec) as NativeProposal;
+        validateProposal(proposal);
         const taskId = randomUUID();
         const sequence = (store.db.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count + 1;
         const { active_task } = store.db.prepare('SELECT active_task FROM runtime').get() as { active_task: string | null };
@@ -1440,27 +1312,13 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,?,1,1,?,?,?,1,?,?)')
           .run(taskId, conversation.project_id, proposal.summary, row.requirement_version, input.targetBranch, phase, sequence, conversationId, decisionDigest);
         store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)').run(taskId, 1, row.requirement_version, row.spec, row.decision_snapshot);
-        // §13.8 switchover: a draft that carries a v2 graph definition creates a v2 graph
-        // (§5 graph_create takes exactly this definition). The old declarative rows would
-        // put this task on the old executor, so they are skipped entirely. The confirmed
-        // record above is shared by both paths - it is the confirmation, not the run.
-        if (proposal.definition) {
-          materializeGraph(new KernelStore(store), taskId, parseGraphDefinition(proposal.definition), 'Confirmed conversation draft');
-        } else {
-        store.db.prepare('INSERT INTO graph_revisions(task_id,version,spec,reason,base_version) VALUES(?,1,?,?,0)').run(taskId, row.spec, 'Confirmed conversation draft');
-        for (const node of proposal.nodes) {
-          const instanceId = node.kind === 'agent' ? randomUUID() : null;
-          store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)').run(taskId, node.id, canonicalJson(node), instanceId);
-          if (instanceId) insertInstance(instanceId, taskId, node.id, node.definitionVersion ?? null, node.model ?? null);
-          createActivation(store, taskId, node.id, 1);
-        }
-        }
+        materializeGraph(kernel, taskId, parseGraphDefinition(proposal.definition), 'Confirmed conversation draft');
         if (phase === 'running') store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
         // The anchor requirement advances on confirmation only: chat never
         // bumps it, and old drafts become unconfirmable immediately.
         store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(anchor.id);
         store.db.prepare('INSERT INTO conversation_acceptances VALUES(?,?,?,?,?)').run(conversationId, input.proposalVersion, taskId, input.targetBranch, Date.now());
-        appendMessage(store, { conversationId, role: 'system', kind: 'confirmed', text: `已确认草稿 v${input.proposalVersion}，创建功能任务，${proposal.definition ? '等待 main 投递输入' : phase === 'running' ? '开始执行' : '排队'}（目标分支 ${input.targetBranch}）`, data: { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch } });
+        appendMessage(store, { conversationId, role: 'system', kind: 'confirmed', text: `已确认草稿 v${input.proposalVersion}，创建功能任务，等待 main 投递输入（目标分支 ${input.targetBranch}）`, data: { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch } });
         store.event(taskId, 'task.created', { request: proposal.summary, conversationId, configRevision: options.live?.revision() ?? options.config?.revision() ?? null });
         return { conversationId, taskId, targetBranch: input.targetBranch, cursor: store.event(anchor.id, 'conversation.confirmed', { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
       });
@@ -1544,7 +1402,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       }
       return { type: String(attachment.type), bytes: Buffer.from(attachment.data, 'base64') };
     },
-    history(conversationId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+    history(conversationId: string, query: import('./node-run.ts').NodeEntryQuery = {}) {
       ensureOpen();
       conversationRow(store, conversationId);
       return { messages: listMessages(store, conversationId, query) };
@@ -1716,22 +1574,29 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           id: string; source: string; target: string; text: string; createdAt: number;
         }[]);
     },
-    graphHandoffs(taskId: string) {
-      ensureOpen();
-      store.task(taskId);
-      const rows = store.db.prepare(`SELECT r.node_id AS target,r.operation_id AS operationId,h.package,h.created_at AS createdAt
-        FROM context_handoffs h JOIN context_resolutions r ON r.handoff_id=h.id
-        WHERE h.task_id=? ORDER BY h.created_at,r.rowid`).all(taskId) as {
-          target: string; operationId: string; package: string; createdAt: number;
-        }[];
-      return rows.flatMap(row => {
-        const parsed = JSON.parse(row.package) as { predecessorHandoffs?: import('./types.ts').PredecessorHandoffProjection[] };
-        return (parsed.predecessorHandoffs ?? []).map(projection => ({
-          id: `${projection.sourceOperationId}:${row.operationId}`,
-          source: projection.sourceNodeId, target: row.target, mode: projection.mode,
-          text: renderPredecessorHandoffs([projection]), createdAt: row.createdAt,
-        }));
-      });
+    graphLayout(taskId: string, revision: number) {
+      ensureOpen(); store.task(taskId);
+      const epoch = (kernel.db.prepare("SELECT COALESCE(MAX(cursor),0) AS epoch FROM events WHERE task_id=? AND type='graph.layout_reset'").get(taskId) as { epoch: number }).epoch;
+      const row = kernel.db.prepare('SELECT topology,layout FROM kernel_graph_layouts WHERE task_id=? AND revision_version<=? ORDER BY revision_version DESC LIMIT 1')
+        .get(taskId, revision) as { topology: string; layout: string } | undefined;
+      return { epoch, snapshot: row ? { topology: row.topology, layout: JSON.parse(row.layout) as Json } : null };
+    },
+    saveGraphLayout(taskId: string, revision: number, topology: string, layout: Json, epoch: number) {
+      ensureOpen(); store.task(taskId);
+      // ELK is asynchronous. An explicit reset during calculation must win over its stale result.
+      const current = (kernel.db.prepare("SELECT COALESCE(MAX(cursor),0) AS epoch FROM events WHERE task_id=? AND type='graph.layout_reset'").get(taskId) as { epoch: number }).epoch;
+      if (current !== epoch) return false;
+      kernel.db.prepare('INSERT OR IGNORE INTO kernel_graph_layouts(task_id,revision_version,topology,layout) VALUES(?,?,?,?)')
+        .run(taskId, revision, topology, canonicalJson(layout));
+      return true;
+    },
+    graphModule(taskId: string, moduleId: string, query: ModuleHistoryQuery = {}) {
+      ensureOpen(); store.task(taskId);
+      return explainModule(kernel, taskId, moduleId, query);
+    },
+    graphEdge(taskId: string, edgeId: string, query: { before?: number; limit?: number; deliveryId?: string; fullValue?: boolean } = {}) {
+      ensureOpen(); store.task(taskId);
+      return explainEdge(kernel, taskId, edgeId, undefined, query);
     },
     kernelGraph(taskId: string) { ensureOpen(); return kernelGraphView(kernel, taskId); },
     async controlGraph(taskId: string, input: { action: string; nodeId?: string; moduleId?: string; seq?: number }) {
@@ -1741,43 +1606,10 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       return result;
     },
     /** Read-only node detail: real session entries, operations and usage. */
-    nodeRun(taskId: string, nodeId: string, query: { after?: number; before?: number; limit?: number } = {}) {
+    nodeRun(taskId: string, nodeId: string, query: import('./node-run.ts').NodeEntryQuery = {}) {
       ensureOpen();
       if (kernel.latestRevision(taskId)) return kernelNodeRun(kernel, taskId, nodeId, query);
-      try {
-        return nodeRunView(store, taskId, nodeId, query);
-      } catch (error) {
-        if (!(error instanceof RuntimeError) || error.code !== 'not_found') throw error;
-        // A container has no instance of its own: summarize its children so the
-        // graph view can drill into the group without a dead route. A task without a graph has
-        // no containers either - the original not_found is the honest answer, and asking
-        // loadGraph about a draft-less task used to throw a TypeError instead.
-        let graph: ReturnType<typeof loadGraph>;
-        try {
-          graph = loadGraph(store, taskId);
-        } catch {
-          throw error;
-        }
-        if (!graph.containers().some(item => item.id === nodeId)) throw error;
-        const container = graph.containers().find(item => item.id === nodeId)!;
-        const rows = store.db.prepare('SELECT id,spec,status FROM nodes WHERE task_id=?').all(taskId) as { id: string; spec: string; status: string }[];
-        const children = rows.map(row => ({ id: row.id, status: row.status, spec: JSON.parse(row.spec) as { container?: string } }))
-          .filter(row => row.spec.container === nodeId)
-          .map(row => ({ id: row.id, status: row.status }));
-        const childIds = new Set(children.map(child => child.id));
-        for (const nested of graph.containers()) if (nested.parent === nodeId) childIds.add(nested.id);
-        return {
-          taskId, nodeId,
-          node: { id: nodeId, kind: 'container', action: 'container', role: null, status: children.every(child => child.status === 'succeeded') ? 'succeeded' : 'running', activationId: '', outputVersion: 0, stallCount: 0 },
-          instance: null, session: null, context: null, capabilities: [], capabilityUsage: [],
-          operations: [], invocations: [], questions: [], evidence: [],
-          entries: [], entryCount: 0, hasOlder: false, hasNewer: false,
-          childContainers: [...childIds], children,
-          timing: { totalMs: null, runMs: null, waitingMs: 0 },
-          phase: store.task(taskId).phase,
-          container: { id: container.id, parent: container.parent ?? null, outputs: container.outputs },
-        };
-      }
+      return nodeRunView(store, taskId, nodeId, query);
     },
     /** What one node really sent: the recorded system prompt, its tools and its briefing. */
     nodePrompt(taskId: string, nodeId: string) {
@@ -2077,7 +1909,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             attestation: { actor: 'agent', onBehalfOf: 'user', instruction: input.instruction.trim() },
           });
         },
-        async propose(proposal: Proposal | NativeProposal, requestId: string): Promise<ProposalReceipt> {
+        async propose(proposal: NativeProposal, requestId: string): Promise<ProposalReceipt> {
           ensureOpen();
           return store.command(`supervisor:${taskId}`, requestId, { type: 'propose', proposal }, () => {
             const task = store.task(taskId);
@@ -2149,16 +1981,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             return { taskId, withdrawnVersion: input.proposalVersion, nextProposalVersion: next, cursor: store.event(taskId, 'proposal.withdrawn', { proposalVersion: input.proposalVersion, reason }) };
           });
         },
-        async revise(input: { baseVersion: number; reason: string; nodes: NodeSpec[]; retire?: string[]; containers?: Proposal['containers']; loops?: Proposal['loops']; requestId: string; taskId?: string }) {
-          ensureOpen();
-          const target = revisionTarget(store, taskId, input.taskId);
-          return store.command(`supervisor:${target}`, input.requestId, { type: 'revise', target, baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, retire: input.retire ?? [], containers: input.containers, loops: input.loops }, () => {
-            if (kernel.latestRevision(target)) throw new RuntimeError('invalid_graph', 'Native graphs use graph_patch with baseRevision; legacy revise is unavailable');
-            const revised = applyRevision(store, target, { baseVersion: input.baseVersion, reason: input.reason, nodes: input.nodes, newInstanceBudget: defaultBudgetTokens, ...(input.retire ? { retire: input.retire } : {}), ...(input.containers ? { containers: input.containers } : {}), ...(input.loops ? { loops: input.loops } : {}) });
-            return { taskId: target, graphVersion: revised.version, cursor: revised.cursor };
-          });
-        },
-        async validateProposal(proposal: Proposal | NativeProposal) {
+        async validateProposal(proposal: NativeProposal) {
           ensureOpen();
           const task = store.task(taskId);
           if (task.requirement_version !== proposal.requirementVersion) {
@@ -2223,10 +2046,6 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             activation_id: string; valid: number; commit_sha: string | null;
           }[];
           const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
-          const graphRevision = task.graph_version
-            ? store.db.prepare('SELECT spec FROM graph_revisions WHERE task_id=? AND version=?').get(taskId, task.graph_version) as { spec: string } | undefined
-            : undefined;
-          const graph = task.accepted_proposal ? loadGraph(store, taskId) : undefined;
           return {
             taskId,
             conversationId: task.conversation_id,
@@ -2243,13 +2062,8 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             integrationSha: task.integration_sha,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events WHERE task_id=?').get(taskId) as { cursor: number }).cursor,
-            proposal: proposal ? JSON.parse(proposal.spec) as Proposal : null,
-            graph: graphRevision ? JSON.parse(graphRevision.spec) as Proposal : null,
-            containers: graph ? graph.containers() : [],
-            loops: graph ? graph.plan.loops : [],
-            revisions: (store.db.prepare('SELECT version,reason,base_version FROM graph_revisions WHERE task_id=? ORDER BY version').all(taskId) as {
-              version: number; reason: string; base_version: number;
-            }[]).map(row => ({ version: row.version, reason: row.reason, baseVersion: row.base_version })),
+            proposal: proposal ? JSON.parse(proposal.spec) as NativeProposal : null,
+            graph: null, containers: [], loops: [], revisions: [],
             nodes: nodes.map(row => ({
               ...JSON.parse(row.spec) as NodeSpec,
               instanceId: row.instance_id,
@@ -2495,7 +2309,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       // would keep offering models the user already removed. Each entry carries
       // the thinking strengths that model accepts, so no console control has to
       // keep a level list of its own.
-      return liveEntries().map(entry => ({ ...entry, thinkingOptions: thinkingOptionsFor(entry) }));
+      return liveEntries().map(entry => ({ ...entry, tier: modelTier(entry.grade), thinkingOptions: thinkingOptionsFor(entry) }));
     },
     /** The model a new conversation would use before any per-chat override. */
     defaultModel() {

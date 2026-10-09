@@ -39,7 +39,7 @@ git config core.hooksPath .githooks
 
 ## 测试夹具
 
-驱动真实任务图的测试不要重新发明夹具：`tests/fixtures/lane.ts` 提供脚本化车道（记录每条车道收到的 briefing 与工作副本、返回合规的 `result_handoff@1` 结果）与 `settle(...)` 派发轮询。三个坑写在文件头部：`user.begin` 需要 `projects`；worker 结果不合 `result_handoff@1` 会被 block 且下游永不派发；节点完成是异步结算的。
+驱动 graph 行为时复用 `tests/fixtures/native-worktree-graph.ts` 的真实 Pi/Git 环境，或 `native-patterns.ts` 的正式定义；对应 owner 测试提供受控 provider。节点输出通过真实 `submit` 写入投递，完成与提交分开；初始输入显式发送，队列串行。旧脚本化 DAG lane 夹具已无调用并移除。
 
 ## 在 Git 工作树里验证
 

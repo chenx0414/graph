@@ -2,7 +2,7 @@ import { wakeForBlockedNode } from './wake-ledger.ts';
 import { occupiedSlots, executionLimit } from '../runtime/execution-slots.ts';
 import { evaluateModule } from '../runtime/module-evaluator.ts';
 import type { ModuleDefinition } from './interface-spec.ts';
-import type { Json } from './types.ts';
+import { RuntimeError, type Json } from './types.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import { NodeExecutor, type ExecutorHost, type NodeExecutorOptions } from './node-executor.ts';
@@ -210,31 +210,36 @@ export class GraphRunner {
     const pending = kernel.db.prepare(`SELECT t.id,t.module_id,t.outputs FROM kernel_transition_outbox o
       JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0 ORDER BY t.rowid`).all(graphId) as { id: string; module_id: string; outputs: string }[];
     for (const transition of pending) {
+      if (kernel.store.task(graphId).paused || this.options.signal?.aborted) return;
       routeModuleOutputs(kernel, modules, graphId, transition.module_id, {
         transitionId: transition.id, emitted: true, waiting: false, triggered: false,
-        outputs: JSON.parse(transition.outputs), reasons: [],
+        outputs: kernel.content.decode<Record<string, Json>>(transition.outputs), reasons: [],
       }, 0, true);
     }
     const rows = kernel.db.prepare(`SELECT d.id,d.to_endpoint,d.value,i.module_id FROM kernel_module_inbox i
       JOIN kernel_deliveries d ON d.id=i.delivery_id WHERE i.task_id=? AND i.processed=0 ORDER BY d.seq`).all(graphId) as { id: string; to_endpoint: string; value: string; module_id: string }[];
     for (const row of rows) {
+      if (kernel.store.task(graphId).paused || this.options.signal?.aborted) return;
       if (kernel.nodeState(graphId, row.module_id).paused) continue;
       const input = row.to_endpoint.slice(row.to_endpoint.indexOf('.') + 1);
       try {
         // Judgment and input consumption commit together; broadcasts recover via the outbox.
         const definition = kernel.revision(graphId, modules.revisionVersion)!.definition.modules[row.module_id]!;
         const evaluation = definition.type === 'operation'
-          ? await modules.deliverOperation(row.module_id, input, JSON.parse(row.value), environment => {
+          ? await modules.deliverOperation(row.module_id, input, kernel.content.decode<Json>(row.value), environment => {
             if (!this.options.operation) throw new Error('Host operation broker is unavailable');
             return this.options.operation({ moduleId: row.module_id, deliveryId: row.id, revisionVersion: modules.revisionVersion,
               operation: definition.operation!, inputs: environment.inputs, state: environment.state,
               ...(this.options.signal ? { signal: this.options.signal } : {}) });
           }, row.id)
           : definition.type === 'command'
-            ? await modules.deliverCustom(row.module_id, input, JSON.parse(row.value), evaluateModule, row.id)
-            : modules.consumeDelivery(row.module_id, input, JSON.parse(row.value), row.id);
+            ? await modules.deliverCustom(row.module_id, input, kernel.content.decode<Json>(row.value), evaluateModule, row.id)
+            : modules.consumeDelivery(row.module_id, input, kernel.content.decode<Json>(row.value), row.id);
         routeModuleOutputs(kernel, modules, graphId, row.module_id, evaluation, 0, true);
       } catch (error) {
+        // A pause before the broker sends keeps this delivery pending. It is
+        // control flow, not a module defect requiring an operator repair.
+        if (error instanceof RuntimeError && error.code === 'paused') continue;
         kernel.setNodeQueuePaused(graphId, row.module_id, true);
         const reason = error instanceof Error ? error.message : String(error);
         kernel.store.transaction(() => {

@@ -112,6 +112,7 @@ export class GraphLane {
     const kernel = this.options.kernel;
     const revision = kernel.latestRevision(graphId);
     if (!revision) return { drained: true, executions: 0, blockedNodes: [] };
+    kernel.db.prepare("UPDATE tasks SET phase='running' WHERE id=? AND phase='idle'").run(graphId);
     const runner = new GraphRunner({
       kernel,
       graphId, signal: this.shutdown.signal,
@@ -144,6 +145,9 @@ export class GraphLane {
       if (!['stopping', 'stopped'].includes(runtime.state()!.phase)) runtime.settleCompletion();
     }
     if (['completed', 'stopped'].includes(runtime.state()!.phase)) await this.options.closeGraph?.(graphId);
+    else if (!intent && result.drained) {
+      kernel.db.prepare("UPDATE tasks SET phase='idle' WHERE id=? AND phase='running'").run(graphId);
+    }
     return result;
   }
 }

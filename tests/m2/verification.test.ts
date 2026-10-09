@@ -1,464 +1,176 @@
-import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, Json, NodeSpec, Proposal } from '../../src/core/types.ts';
-import type { ReviewReport, VerifierConfig } from '../../src/core/verification.ts';
+import { parseGraphDefinition, type ModuleDefinition } from '../../src/core/interface-spec.ts';
+import { reviewPolicyCode, reviewPolicyInputs, type PublishedSubject, type ReviewDecision, type ReviewPolicy } from '../../src/core/review-policy.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
-const json = (value: unknown): Json => value as Json;
+const multiview = (): Extract<ReviewPolicy, { kind: 'multiview' }> => ({ kind: 'multiview', subject: 'implementation', reports: ['review'],
+  dimensions: [{ id: 'correctness', required: true, report: 'review' }] });
+const judged = (subject: PublishedSubject, verdict: 'pass' | 'fail' | 'unresolved' = 'pass', reason = 'Observed the required result', files?: string[]) => ({ verdict, reason, evidence: [subject], ...(files ? { files } : {}) });
+const submit = (value: () => unknown): ResponsePlan => ({ tools: [{ id: 'submit', name: 'submit', arguments: () => JSON.stringify({ outputs: { result: { enable: true, value: value() } } }) }] });
+const publish = (name: string, content = `stable ${name} content`, requestId = name): ResponsePlan => ({ tools: [{ id: `publish-${name}`, name: 'artifact_publish', arguments: JSON.stringify({ namespace: 'plans', name, mediaType: 'text/markdown', content, requestId }) }] });
 
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const coder = { definitionVersion: 'coder@1', model: 'scripted' };
-async function setup(create: (root: string) => { actions: Record<string, ActionAdapter>; nodes: NodeSpec[]; acceptance?: Proposal['acceptance']; loops?: Proposal['loops'] }) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-verification-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const fixture = create(root);
-  const options = { stateDir: join(root, 'state'), projects: [{ id: 'project', root }], actions: fixture.actions };
-  const runtime = await openTaskRuntime(options);
+/** Exercise generated production policy through the normal isolated module and real Pi submissions. */
+async function setup(config: ReviewPolicy, report: (refs: Record<string, PublishedSubject>) => Record<string, unknown>, options: { legacyOverride?: boolean; priorCandidate?: boolean; repeatSubject?: boolean; reviseSubject?: boolean } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-native-review-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const entry = join(root, 'review-policy.mjs'); const configuration = join(root, 'review-policy.json'); await writeFile(configuration, JSON.stringify(config));
+  const generated = await promisify(execFile)(process.execPath, [join(process.cwd(), 'scripts/create-review-module.ts'), configuration, entry]);
+  const module = JSON.parse(generated.stdout) as ModuleDefinition;
+  let runtime!: Awaited<ReturnType<typeof openTaskRuntime>>; let graphId = '';
+  const subjects = config.kind === 'jury' ? config.candidates.map(item => item.subject) : [config.subject];
+  const refs = (): Record<string, PublishedSubject> => {
+    const current = Object.fromEntries(runtime.artifacts.list(graphId, { namespace: 'plans' }).artifacts.map(item => [item.name, { artifactId: item.artifactId, version: item.version, digest: item.digest }]));
+    const old = runtime.artifacts.list(graphId, { namespace: 'plans', latestOnly: false }).artifacts.find(item => item.name === 'implementation' && item.version === 1);
+    return { ...current, ...(old ? { previous: { artifactId: old.artifactId, version: old.version, digest: old.digest } } : {}) };
+  };
+  const providers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
+  for (const port of [...subjects, ...config.reports]) {
+    const plans: ResponsePlan[] = subjects.includes(port) ? [
+      ...(options.priorCandidate ? [publish('original')] : []), publish(port), ...(options.reviseSubject ? [publish(port, `revised ${port} content`, `${port}-revision`)] : []), submit(() => refs()[port]!), { text: `Published ${port}` },
+      ...(options.repeatSubject ? [{ tools: [{ id: 'reuse', name: 'artifact_read', arguments: () => JSON.stringify(refs()[port]!) }] }, submit(() => refs()[port]!), { text: 'Reused the stable published subject' }] : []),
+    ] : [
+      ...subjects.map(subject => ({ tools: [{ id: `read-${subject}`, name: 'artifact_read', arguments: () => JSON.stringify(refs()[subject]!) }] })),
+      submit(() => report(refs())[port]), { text: `Reviewed ${port}` },
+    ];
+    const provider = await openaiServer(plans); providers[port] = provider; cleanup.push(() => provider.close());
+  }
+  let overrideCalls = 0;
+  runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+    ...(options.legacyOverride ? { actions: { 'graph.verify': { kind: 'program' as const, prepare: async () => async () => { overrideCalls++; return { outcome: 'completed' as const, output: { hijacked: true } }; } } } } : {}),
+    models: { apiKey: 'local-only', modelRuntime: Object.values(providers)[0]!.runtime, entries: Object.entries(providers).map(([id, provider]) => ({ id, provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const, baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 })) } });
   cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Verify the exact implementation', requestId: 'begin' });
-  const proposed = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: 'Verify the exact implementation',
-    acceptance: fixture.acceptance ?? [{ id: 'works', description: 'Required review checks pass', checkNode: 'gate' }], nodes: fixture.nodes,
-    ...(fixture.loops ? { loops: fixture.loops } : {}),
-  }, 'proposal');
-  const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
-  return { root, runtime, task, taskId, options };
+  runtime.catalog.publishDefinition('worker', { recommendedGrade: 'high' }, 'worker'); runtime.catalog.publishDefinition('reviewer', { recommendedGrade: 'high', review: true }, 'reviewer');
+  const { taskId: ownerId } = await runtime.user.begin({ projectId: 'p', request: `Review ${config.kind}`, requestId: 'begin' }); const main = runtime.supervisor(ownerId);
+  const data = { protocol: 'data' }; const inputs = reviewPolicyInputs(config);
+  graphId = ((await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: `Native ${config.kind}`, protocols: { data: { type: 'object' } },
+    nodes: Object.fromEntries(inputs.map(port => [`agent-${port}`, { recipe: `${subjects.includes(port) ? 'worker' : 'reviewer'}@1`, model: port, task: subjects.includes(port) ? 'Publish and submit the stable subject' : 'Read the exact subject and submit a structured review', inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } }])),
+    modules: { gate: module },
+    edges: Object.fromEntries(inputs.map(port => [port, { from: `agent-${port}.result`, to: `gate.${port}`, enabled: true }])),
+    outputs: { approved: { from: 'gate.approved', protocol: 'data' }, rework: { from: 'gate.rework', protocol: 'data' } } }) })) as { graphId: string }).graphId;
+  for (const port of subjects) await main.graphSend({ graphId, nodeId: `agent-${port}`, input: 'job', value: {} }); await runtime.host.drive();
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toEqual([]);
+  for (const port of config.reports) await main.graphSend({ graphId, nodeId: `agent-${port}`, input: 'job', value: { subjects: refs() } }); await runtime.host.drive();
+  const gate = await main.graphInspect({ graphId, query: 'module', id: 'gate' }) as { state: { decision: ReviewDecision }; transitions: { outputs: Record<string, ReviewDecision> }[] };
+  const decision = gate.state.decision;
+  expect(runtime.events(graphId, 0).filter(item => item.type === 'graph.module.failed')).toEqual([]);
+  expect(gate.transitions.filter(item => Object.keys(item.outputs).length)).toHaveLength(1);
+  await expect(main.graphInspect({ graphId, query: 'results' })).resolves.toMatchObject([{ value: decision }]);
+  expect((await runtime.user.task(graphId).view()).phase).toBe('idle');
+  return { root, runtime, main, graphId, refs: refs(), decision, providers, gate, overrideCalls };
 }
-function implementReviewGate(root: string, config: VerifierConfig, review: (operation: import('../../src/core/types.ts').Operation) => ReviewReport, extra: Partial<ActionAdapter> = {}) {
-  const artifact = { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one') };
-  return {
-    artifact,
-    actions: {
-      implement: { kind: 'agent' as const, reserveTokens: 100, prepare: async () => async () => {
-        await writeFile(artifact.path, 'version one');
-        return { outcome: 'completed' as const, output: { version: 1 }, artifacts: [artifact], usage };
-      } },
-      review: { kind: 'agent' as const, reserveTokens: 100, ...extra, prepare: async (operation: import('../../src/core/types.ts').Operation) => async () => ({ outcome: 'completed' as const, output: json(review(operation)), usage }) },
-      'graph.verify': { kind: 'program' as const, prepare: async () => async () => ({ outcome: 'completed' as const, output: { hijacked: true } }) },
-    },
-    nodes: [
-      { id: 'implementation', kind: 'agent' as const, action: 'implement', ...coder },
-      { id: 'review', kind: 'agent' as const, action: 'review', definitionVersion: 'reviewer@1', model: 'scripted-review', dependsOn: ['implementation'] },
-      { id: 'gate', kind: 'program' as const, action: 'graph.verify', dependsOn: ['implementation', 'review'], verifier: config },
-    ],
-  };
-}
+const viewReport = (subject: PublishedSubject, dimensions: Record<string, unknown>) => ({ review: { schemaVersion: 1, subject, body: { kind: 'multiview', dimensions } } });
 
-test('a failing judgment names the files the fix must touch, and the gate marks the unowned ones', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const { runtime, task } = await setup(root => {
-    const artifact = { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one') };
-    return {
-      actions: {
-        implement: { kind: 'agent' as const, reserveTokens: 100, prepare: async () => async () => {
-          await writeFile(artifact.path, 'version one');
-          return { outcome: 'completed' as const, output: { version: 1 }, artifacts: [artifact], usage };
-        } },
-        review: { kind: 'agent' as const, reserveTokens: 100, prepare: async operation => async () => ({
-          outcome: 'completed' as const, usage,
-          output: json({ schemaVersion: 1, subject: operation.dependencySources.implementation![0]!.artifacts[0]!,
-            body: { kind: 'multiview', dimensions: { correctness: { verdict: 'fail', reason: 'The legend is not persistent', evidence: [artifact], files: ['src/web/App.tsx', 'docs/legend.md'] } } } }),
-        }) },
-      },
-      nodes: [
-        { id: 'implementation', kind: 'agent' as const, action: 'implement', ...coder, input: { files: ['src/web/GraphCanvas.tsx'] } },
-        { id: 'review', kind: 'agent' as const, action: 'review', definitionVersion: 'reviewer@1', model: 'scripted-review', dependsOn: ['implementation'] },
-        { id: 'gate', kind: 'program' as const, action: 'graph.verify', dependsOn: ['implementation', 'review'], verifier: config },
-      ],
-    };
-  });
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const output = (await task.view()).operations.find(operation => operation.nodeId === 'gate')?.result?.output;
-  // The blocker names the files; the gate also reports which of them no node's scope covers, so the
-  // main Agent can extend exactly those in one revision.
-  expect(output).toMatchObject({
-    outcome: 'rework',
-    blockers: [{ id: 'correctness', files: ['src/web/App.tsx', 'docs/legend.md'] }],
-    unowned: ['src/web/App.tsx', 'docs/legend.md'],
-  });
+test('a native failing judgment preserves the files to fix and explicitly configured unowned scopes', async () => {
+  const config = { ...multiview(), owned: ['src/web/GraphCanvas.tsx'] };
+  const { decision } = await setup(config, refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!, 'fail', 'The legend is not persistent', ['src/web/App.tsx', 'docs/legend.md']) }));
+  expect(decision).toMatchObject({ outcome: 'rework', blockers: [{ id: 'correctness', files: ['src/web/App.tsx', 'docs/legend.md'] }], unowned: ['src/web/App.tsx', 'docs/legend.md'] });
 });
 
-test('a built-in multiview gate delivers evidence for the exact artifact checked by its required reviewer', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const { runtime, task, root } = await setup(root => {
-    const artifact = { id: 'implementation', path: join(root, 'implementation.txt'), digest: createHash('sha256').update('version one').digest('hex') };
-    return {
-      actions: {
-        implement: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-          await writeFile(artifact.path, 'version one');
-          return { outcome: 'completed', output: { version: 1 }, artifacts: [artifact], usage };
-        } },
-        review: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const report: ReviewReport = { schemaVersion: 1, subject: operation.dependencySources.implementation![0]!.artifacts[0]!,
-            body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Observed the required result', evidence: [artifact] } } },
-          };
-          return { outcome: 'completed', output: json(report), usage };
-        } },
-      },
-      nodes: [
-        { id: 'implementation', kind: 'agent', action: 'implement', definitionVersion: 'coder@1', model: 'scripted' },
-        { id: 'review', kind: 'agent', action: 'review', definitionVersion: 'reviewer@1', model: 'scripted-review', dependsOn: ['implementation'] },
-        { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['implementation', 'review'], verifier: config },
-      ],
-    };
-  });
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.evidence).toMatchObject([{ acceptanceId: 'works', nodeId: 'gate', artifact: { path: join(root, 'implementation.txt'), digest: createHash('sha256').update('version one').digest('hex') } }]);
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ kind: 'verification', outcome: 'pass', reports: [{ nodeId: 'review' }] });
+test('a native multiview module approves the exact published artifact actually read by its required reviewer', async () => {
+  const { decision, refs, providers, runtime, graphId } = await setup(multiview(), refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!) }));
+  expect(decision).toMatchObject({ outcome: 'pass', subjects: [refs.implementation], reports: ['review'], blockers: [] });
+  expect(providers.implementation!.requests).toHaveLength(3); expect(providers.review!.requests).toHaveLength(3);
+  expect(JSON.stringify(providers.review!.requests[1])).toContain('stable implementation content');
+  expect((await runtime.artifacts.read(graphId, refs.implementation!.artifactId, refs.implementation!.version)).text).toBe('stable implementation content');
 });
 
-test('a registered graph.verify adapter cannot replace the built-in gate', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const { runtime, task } = await setup(root => {
-    const fixture = implementReviewGate(root, config, operation => ({ schemaVersion: 1, subject: operation.dependencySources.implementation![0]!.artifacts[0]!,
-      body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Observed the required result', evidence: [operation.dependencySources.implementation![0]!.artifacts[0]!] } } } }));
-    return fixture;
-  });
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ kind: 'verification', outcome: 'pass' });
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).not.toMatchObject({ hijacked: true });
+test('a legacy graph.verify adapter cannot hijack a declared native isolated review module', async () => {
+  const { decision, overrideCalls } = await setup(multiview(), refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!) }), { legacyOverride: true });
+  expect(overrideCalls).toBe(0); expect(decision.outcome).toBe('pass'); expect(decision).not.toHaveProperty('hijacked');
 });
 
-test('a required dimension failure is completed rework without acceptance evidence or an unknown result', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }, { id: 'style', required: false, reportNode: 'review' }],
-  };
-  const { runtime, task } = await setup(root => implementReviewGate(root, config, operation => {
-    const artifact = operation.dependencySources.implementation![0]!.artifacts[0]!;
-    return { schemaVersion: 1, subject: artifact, body: { kind: 'multiview', dimensions: {
-      correctness: { verdict: 'fail', reason: 'Missing the required result', evidence: [artifact] },
-      style: { verdict: 'pass', reason: 'Formatting is fine', evidence: [artifact] },
-    } } };
-  }));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('running');
-  expect(view.evidence).toEqual([]);
-  expect(view.questions).toMatchObject([{ kind: 'rework', nodeId: 'gate', status: 'open' }]);
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result).toMatchObject({ outcome: 'completed', output: { kind: 'verification', outcome: 'rework' } });
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.state).toBe('succeeded');
+test('a native required dimension failure is a completed business rework transition and does not become final acceptance evidence', async () => {
+  const { decision, gate, runtime, graphId } = await setup(multiview(), refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!, 'fail', 'Missing the required result') }));
+  expect(decision).toMatchObject({ outcome: 'rework', blockers: [{ id: 'correctness', reason: 'Missing the required result' }] });
+  expect(gate.transitions.at(-1)!.outputs).toHaveProperty('rework');
+  expect((await runtime.user.task(graphId).view()).evidence).toEqual([]);
 });
 
-test('a missing suggested dimension does not block a required pass', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }, { id: 'style', required: false, reportNode: 'review' }],
-  };
-  const { runtime, task } = await setup(root => implementReviewGate(root, config, operation => {
-    const artifact = operation.dependencySources.implementation![0]!.artifacts[0]!;
-    return { schemaVersion: 1, subject: artifact, body: { kind: 'multiview', dimensions: {
-      correctness: { verdict: 'pass', reason: 'Required behavior holds', evidence: [artifact] },
-    } } };
-  }));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  expect((await task.view()).phase).toBe('completed');
+test('a missing suggested native dimension does not block a required pass', async () => {
+  const config = multiview(); config.dimensions.push({ id: 'style', required: false, report: 'review' });
+  const { decision } = await setup(config, refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!) }));
+  expect(decision.outcome).toBe('pass');
 });
 
-test('a suggested dimension failure does not block a required pass', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }, { id: 'style', required: false, reportNode: 'review' }],
-  };
-  const { runtime, task } = await setup(root => implementReviewGate(root, config, operation => {
-    const artifact = operation.dependencySources.implementation![0]!.artifacts[0]!;
-    return { schemaVersion: 1, subject: artifact, body: { kind: 'multiview', dimensions: {
-      correctness: { verdict: 'pass', reason: 'Required behavior holds', evidence: [artifact] },
-      style: { verdict: 'fail', reason: 'Optional style note', evidence: [artifact] },
-    } } };
-  }));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  expect((await task.view()).phase).toBe('completed');
+test('a suggested native dimension failure does not block a required pass', async () => {
+  const config = multiview(); config.dimensions.push({ id: 'style', required: false, report: 'review' });
+  const { decision } = await setup(config, refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!), style: judged(refs.implementation!, 'fail', 'Optional style note') }));
+  expect(decision.outcome).toBe('pass'); expect(decision.blockers).toEqual([]);
 });
 
-test('an old artifact version cannot satisfy the current gate', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const { runtime, task, root } = await setup(root => implementReviewGate(root, config, () => ({
-    schemaVersion: 1,
-    subject: { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('stale'), nodeId: 'implementation', operationId: 'old', activationId: 'old' },
-    body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Reviewed a previous file', evidence: [{ path: join(root, 'implementation.txt'), digest: digest('stale') }] } } },
-  })));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('running');
-  expect(view.questions).toMatchObject([{ kind: 'rework' }]);
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'rework' });
+test('a stale published version cannot satisfy the current native review policy', async () => {
+  const { decision } = await setup(multiview(), refs => viewReport(refs.previous!, { correctness: judged(refs.previous!) }), { reviseSubject: true });
+  expect(decision).toMatchObject({ outcome: 'rework', blockers: [{ id: 'invalid_evidence', reason: 'Review does not apply to the current published artifact version' }] });
 });
 
-test('a review of the same content under a new activation still satisfies the gate', async () => {
-  // The lane was re-activated without changing the subject's bytes (the digest and path are the
-  // same). The gate must key on content identity, not on operation/activation identity, or a passing
-  // review turns into a bogus rework the moment its subject is re-run.
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const { runtime, task, root } = await setup(root => implementReviewGate(root, config, () => ({
-    schemaVersion: 1,
-    subject: { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one'), nodeId: 'implementation', operationId: 'an-older-operation', activationId: 'an-older-activation' },
-    body: { kind: 'multiview', dimensions: { correctness: { verdict: 'pass', reason: 'Content is unchanged and correct', evidence: [{ path: join(root, 'implementation.txt'), digest: digest('version one') }] } } },
-  })));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.questions).toEqual([]);
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'pass' });
+test('a stable published subject can be reused by a later native execution without depending on activation identity', async () => {
+  const fixture = await setup(multiview(), refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!) }), { repeatSubject: true });
+  const { runtime, main, graphId, refs, providers } = fixture;
+  const original = fixture.decision;
+  await main.graphSend({ graphId, nodeId: 'agent-implementation', input: 'job', value: { reusePublishedSubject: refs.implementation! } }); await runtime.host.drive();
+  const updated = await main.graphInspect({ graphId, query: 'module', id: 'gate' }) as { state: { decision: ReviewDecision }; transitions: { outputs: Record<string, unknown> }[] };
+  expect(updated.state.decision).toEqual(original); expect(updated.transitions.filter(item => Object.keys(item.outputs).length)).toHaveLength(2);
+  expect(providers.implementation!.requests).toHaveLength(6); expect(providers.review!.requests).toHaveLength(3);
+  const executions = await main.graphInspect({ graphId, query: 'executions', id: 'agent-implementation' }) as { items: unknown[] }; expect(executions.items).toHaveLength(2);
 });
 
-test('a rework carries what the reviewer actually said, not only the verdict', async () => {
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const { runtime, task, root } = await setup(root => implementReviewGate(root, config, () => ({
-    schemaVersion: 1,
-    subject: { id: 'implementation', path: join(root, 'implementation.txt'), digest: digest('version one'), nodeId: 'implementation', operationId: 'old', activationId: 'old' },
-    body: { kind: 'multiview', dimensions: { correctness: { verdict: 'fail', reason: 'The digest is reported but never verified against the file on disk', files: ['scripts/diag-a.mjs'], evidence: [{ path: join(root, 'implementation.txt'), digest: digest('version one') }] } } },
-  })));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.questions).toMatchObject([{ kind: 'rework' }]);
-  const output = view.operations.find(operation => operation.nodeId === 'gate')?.result?.output as { reviewText?: unknown } | undefined;
-  expect(output?.reviewText).toMatchObject([{ node: 'review', verdict: 'fail', reason: 'The digest is reported but never verified against the file on disk', files: ['scripts/diag-a.mjs'] }]);
+test('native rework carries the reviewer words and touched files rather than only its verdict', async () => {
+  const reason = 'The digest is reported but never verified against the published content';
+  const { decision } = await setup(multiview(), refs => viewReport(refs.implementation!, { correctness: judged(refs.implementation!, 'fail', reason, ['scripts/diag-a.mjs']) }));
+  expect(decision.reviewText).toMatchObject([{ report: 'review', verdict: 'fail', reason, files: ['scripts/diag-a.mjs'] }]);
 });
 
-test('invalid verifier placement and duplicate dimension IDs are rejected before confirmation', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-verifier-invalid-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'project', root }] });
-  cleanup.push(() => runtime.close());
-  const { taskId } = await runtime.user.begin({ projectId: 'project', request: 'Check', requestId: 'begin' });
-  const supervisor = runtime.supervisor(taskId);
-  const config: VerifierConfig = { kind: 'multiview', subjectNode: 'implementation', reportNodes: ['review'],
-    dimensions: [{ id: 'correctness', required: true, reportNode: 'review' }],
-  };
-  const nodes: NodeSpec[] = [
-    { id: 'implementation', kind: 'agent', action: 'implement', ...coder },
-    { id: 'review', kind: 'agent', action: 'review', ...coder, dependsOn: ['implementation'] },
-    { id: 'gate', kind: 'program', action: 'check', dependsOn: ['implementation', 'review'], verifier: config },
-  ];
-  const valid = { requirementVersion: 1, summary: 'Check', acceptance: [{ id: 'works', description: 'Works', checkNode: 'gate' }], nodes };
-  await expect(supervisor.propose(valid, 'wrong-action')).rejects.toMatchObject({ code: 'invalid_proposal' });
-  await expect(supervisor.propose({ ...valid, nodes: [...nodes.slice(0, 2), { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['implementation', 'review'] }] }, 'missing-config')).rejects.toMatchObject({ code: 'invalid_proposal' });
-  await expect(supervisor.propose({ ...valid, nodes: [...nodes.slice(0, 2), { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['implementation', 'review'],
-    verifier: { ...config, dimensions: [...config.dimensions, { id: 'correctness', required: false, reportNode: 'review' }] } }] }, 'duplicate')).rejects.toMatchObject({ code: 'invalid_proposal' });
+test('native review configuration rejects duplicate dimensions and invalid module placement before creation', async () => {
+  const config = multiview(); config.dimensions.push({ id: 'correctness', required: false, report: 'review' });
+  expect(() => reviewPolicyCode(config)).toThrow(/Dimension IDs/);
+  expect(() => parseGraphDefinition({ schemaVersion: 2, name: 'Invalid placement', protocols: { data: { type: 'object' } }, nodes: {}, modules: { gate: { type: 'operation', trigger: 'each', inputs: {}, outputs: { result: { protocol: 'data' } }, operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' }, code: { entry: '/tmp/gate.mjs', version: 1 } } }, edges: {} })).toThrow(/cannot also declare code/);
 });
 
-test('a valid open counterexample cannot be outvoted by passing checks', async () => {
-  const config: VerifierConfig = { kind: 'adversarial', subjectNode: 'implementation', reportNodes: ['review'], acceptanceCriteria: ['works'] };
-  const { runtime, task } = await setup(root => implementReviewGate(root, config, operation => {
-    const artifact = operation.dependencySources.implementation![0]!.artifacts[0]!;
-    return { schemaVersion: 1, subject: artifact, body: { kind: 'adversarial', checks: { works: { verdict: 'pass', reason: 'Looks fine', evidence: [artifact] } },
-      counterexamples: [{ id: 'broken-search', acceptanceId: 'works', validity: 'valid', impactsAcceptance: true, resolution: 'open',
-        judgment: { verdict: 'fail', reason: 'Title search misses case folding', evidence: [artifact] } }] } };
-  }));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('running');
-  expect(view.evidence).toEqual([]);
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'rework', blockers: [{ id: 'broken-search' }] });
+const adversarial = (): Extract<ReviewPolicy, { kind: 'adversarial' }> => ({ kind: 'adversarial', subject: 'implementation', reports: ['review'], criteria: ['works'] });
+const adversarialReport = (subject: PublishedSubject, resolved: boolean) => ({ review: { schemaVersion: 1, subject, body: { kind: 'adversarial', checks: { works: judged(subject) },
+  counterexamples: [{ id: 'broken-search', acceptanceId: 'works', validity: resolved ? 'invalid' : 'valid', impactsAcceptance: true, resolution: resolved ? 'resolved' : 'open', judgment: judged(subject, resolved ? 'pass' : 'fail', resolved ? 'The miss no longer reproduces' : 'Title search misses case folding') }] } } });
+
+test('a valid open native counterexample cannot be outvoted by passing checks', async () => {
+  const { decision } = await setup(adversarial(), refs => adversarialReport(refs.implementation!, false));
+  expect(decision).toMatchObject({ outcome: 'rework', blockers: [{ id: 'broken-search', reason: 'Title search misses case folding' }] });
 });
 
-test('a resolved counterexample with evidence allows the adversarial gate to pass', async () => {
-  const config: VerifierConfig = { kind: 'adversarial', subjectNode: 'implementation', reportNodes: ['review'], acceptanceCriteria: ['works'] };
-  const { runtime, task } = await setup(root => implementReviewGate(root, config, operation => {
-    const artifact = operation.dependencySources.implementation![0]!.artifacts[0]!;
-    return { schemaVersion: 1, subject: artifact, body: { kind: 'adversarial', checks: { works: { verdict: 'pass', reason: 'Case folding covered', evidence: [artifact] } },
-      counterexamples: [{ id: 'broken-search', acceptanceId: 'works', validity: 'invalid', impactsAcceptance: true, resolution: 'resolved',
-        judgment: { verdict: 'pass', reason: 'The reported miss no longer reproduces', evidence: [artifact] } }] } };
-  }));
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  expect((await task.view()).phase).toBe('completed');
+test('a resolved native counterexample with published evidence permits the adversarial module to pass', async () => {
+  const { decision } = await setup(adversarial(), refs => adversarialReport(refs.implementation!, true)); expect(decision.outcome).toBe('pass');
 });
 
-test('a jury ranks eligible candidates by weight and a deterministic tie-break', async () => {
-  const ranking = [{ id: 'quality', weight: 1, min: 0, max: 10 }, { id: 'clarity', weight: 0, min: 0, max: 10 }];
-  const config: VerifierConfig = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['compiles'], ranking, tieOrder: ['clarity', 'quality'],
-    candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
-  const { runtime, task, root } = await setup(root => {
-    const artifactA = { id: 'a', path: join(root, 'a.txt'), digest: digest('alpha') };
-    const artifactB = { id: 'b', path: join(root, 'b.txt'), digest: digest('beta') };
-    const judged = (artifact: { id: string; path: string; digest: string; nodeId: string; operationId: string; activationId: string }, quality: number, clarity: number) => ({
-      artifact, hard: { compiles: { verdict: 'pass' as const, reason: 'Builds', evidence: [artifact] } },
-      scores: { quality: { value: quality, reason: 'Quality', evidence: [artifact] }, clarity: { value: clarity, reason: 'Clarity', evidence: [artifact] } },
-    });
-    return {
-      actions: {
-        candidate: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const artifact = operation.nodeId === 'candidate-a' ? artifactA : artifactB;
-          await writeFile(artifact.path, operation.nodeId);
-          return { outcome: 'completed', output: { id: operation.nodeId }, artifacts: [artifact], usage };
-        } },
-        jury: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const a = operation.dependencySources['candidate-a']![0]!.artifacts[0]!;
-          const b = operation.dependencySources['candidate-b']![0]!.artifacts[0]!;
-          const report: ReviewReport = { schemaVersion: 1, body: { kind: 'jury', candidates: [{ id: 'a', ...judged(a, 8, 9) }, { id: 'b', ...judged(b, 8, 4) }] } };
-          return { outcome: 'completed', output: json(report), usage };
-        } },
-      },
-      nodes: [
-        { id: 'candidate-a', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'candidate-b', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'jury', kind: 'agent', action: 'jury', ...coder, dependsOn: ['candidate-a', 'candidate-b'] },
-        { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['candidate-a', 'candidate-b', 'jury'], verifier: config },
-      ],
-    };
-  });
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ winner: 'a', outcome: 'pass' });
-  expect(view.evidence[0]?.artifact).toMatchObject({ path: join(root, 'a.txt'), digest: digest('alpha') });
+const jury = (): Extract<ReviewPolicy, { kind: 'jury' }> => ({ kind: 'jury', reports: ['jury'], hard: ['builds'], candidates: [{ id: 'a', subject: 'candidatea' }, { id: 'b', subject: 'candidateb' }],
+  ranking: [{ id: 'quality', weight: 1, min: 0, max: 10 }, { id: 'clarity', weight: 0, min: 0, max: 10 }], tieOrder: ['clarity', 'quality'] });
+const candidate = (id: string, artifact: PublishedSubject, builds: boolean, quality: number, clarity: number) => ({ id, artifact, hard: { builds: judged(artifact, builds ? 'pass' : 'fail', builds ? 'Builds' : 'Does not build') },
+  scores: { quality: { value: quality, reason: 'Quality', evidence: [artifact] }, clarity: { value: clarity, reason: 'Clarity', evidence: [artifact] } } });
+const juryReport = (refs: Record<string, PublishedSubject>, buildsA: boolean, buildsB: boolean, qualityA = 8, qualityB = 8) => ({ jury: { schemaVersion: 1, body: { kind: 'jury', candidates: [candidate('a', refs.candidatea!, buildsA, qualityA, 9), candidate('b', refs.candidateb!, buildsB, qualityB, 4)] } } });
+
+test('a native jury ranks eligible candidates by weight then deterministic declared tie order', async () => {
+  const { decision, refs } = await setup(jury(), refs => juryReport(refs, true, true));
+  expect(decision).toMatchObject({ outcome: 'pass', winner: 'a', subjects: [refs.candidatea], ranking: [{ candidateId: 'a', score: 0.8, eligible: true }, { candidateId: 'b', score: 0.8, eligible: true }] });
 });
 
-test('a jury with no eligible candidate returns rework instead of picking a majority', async () => {
-  const config: VerifierConfig = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['compiles'],
-    ranking: [{ id: 'quality', weight: 1, min: 0, max: 10 }], tieOrder: ['quality'],
-    candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
-  const { runtime, task } = await setup(root => {
-    const artifactA = { id: 'a', path: join(root, 'a.txt'), digest: digest('alpha') };
-    const artifactB = { id: 'b', path: join(root, 'b.txt'), digest: digest('beta') };
-    const failed = (artifact: { id: string; path: string; digest: string; nodeId: string; operationId: string; activationId: string }) => ({
-      artifact, hard: { compiles: { verdict: 'fail' as const, reason: 'Does not build', evidence: [artifact] } },
-      scores: { quality: { value: 9, reason: 'Looks polished', evidence: [artifact] } },
-    });
-    return {
-      actions: {
-        candidate: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const artifact = operation.nodeId === 'candidate-a' ? artifactA : artifactB;
-          await writeFile(artifact.path, operation.nodeId);
-          return { outcome: 'completed', output: null, artifacts: [artifact], usage };
-        } },
-        jury: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const report: ReviewReport = { schemaVersion: 1, body: { kind: 'jury', candidates: [
-            { id: 'a', ...failed(operation.dependencySources['candidate-a']![0]!.artifacts[0]!) },
-            { id: 'b', ...failed(operation.dependencySources['candidate-b']![0]!.artifacts[0]!) },
-          ] } };
-          return { outcome: 'completed', output: json(report), usage };
-        } },
-      },
-      nodes: [
-        { id: 'candidate-a', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'candidate-b', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'jury', kind: 'agent', action: 'jury', ...coder, dependsOn: ['candidate-a', 'candidate-b'] },
-        { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['candidate-a', 'candidate-b', 'jury'], verifier: config },
-      ],
-    };
-  });
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('running');
-  expect(view.evidence).toEqual([]);
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'rework' });
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).not.toHaveProperty('winner');
+test('a native jury with no eligible candidate emits rework without a majority winner', async () => {
+  const { decision } = await setup(jury(), refs => juryReport(refs, false, false));
+  expect(decision).toMatchObject({ outcome: 'rework', blockers: [{ id: 'winner' }] }); expect(decision).not.toHaveProperty('winner');
 });
 
-test('a jury keeps an eligible winner when another candidate fails a hard criterion', async () => {
-  const config: VerifierConfig = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['builds'],
-    ranking: [{ id: 'quality', weight: 1, min: 0, max: 10 }], tieOrder: ['quality'],
-    candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
-  const { runtime, task, root } = await setup(root => {
-    const artifactA = { id: 'a', path: join(root, 'a.txt'), digest: digest('a') };
-    const artifactB = { id: 'b', path: join(root, 'b.txt'), digest: digest('b') };
-    return {
-      actions: {
-        candidate: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const artifact = operation.nodeId === 'candidate-a' ? artifactA : artifactB;
-          await writeFile(artifact.path, operation.nodeId === 'candidate-a' ? 'a' : 'b');
-          return { outcome: 'completed', output: null, artifacts: [artifact], usage };
-        } },
-        jury: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const a = operation.dependencySources['candidate-a']![0]!.artifacts[0]!;
-          const b = operation.dependencySources['candidate-b']![0]!.artifacts[0]!;
-          const report: ReviewReport = { schemaVersion: 1, body: { kind: 'jury', candidates: [
-            { id: 'a', artifact: a, hard: { builds: { verdict: 'pass', reason: 'Builds', evidence: [a] } }, scores: { quality: { value: 9, reason: 'quality', evidence: [a] } } },
-            { id: 'b', artifact: b, hard: { builds: { verdict: 'fail', reason: 'Does not build', evidence: [b] } }, scores: { quality: { value: 9, reason: 'quality', evidence: [b] } } },
-          ] } };
-          return { outcome: 'completed', output: json(report), usage };
-        } },
-      },
-      nodes: [
-        { id: 'candidate-a', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'candidate-b', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'jury', kind: 'agent', action: 'jury', ...coder, dependsOn: ['candidate-a', 'candidate-b'] },
-        { id: 'gate', kind: 'program', action: 'graph.verify', dependsOn: ['candidate-a', 'candidate-b', 'jury'], verifier: config },
-      ],
-    };
-  });
-  for (let i = 0; i < 3; i++) await runtime.host.runReady();
-  const view = await task.view();
-  expect(view.phase).toBe('completed');
-  expect(view.operations.find(operation => operation.nodeId === 'gate')?.result?.output).toMatchObject({ outcome: 'pass', winner: 'a' });
-  expect(view.evidence[0]?.artifact).toMatchObject({ path: join(root, 'a.txt'), digest: digest('a') });
+test('a native jury retains the eligible winner even when an ineligible candidate has a higher score', async () => {
+  const { decision, refs } = await setup(jury(), refs => juryReport(refs, true, false, 8, 10));
+  expect(decision).toMatchObject({ outcome: 'pass', winner: 'a', subjects: [refs.candidatea], ranking: [{ eligible: true }, { eligible: false }] });
 });
 
-test('revalidation cannot accept a pre-absorption candidate artifact as the current winner', async () => {
-  const ranking = [{ id: 'quality', weight: 1, min: 0, max: 10 }];
-  const select: Extract<VerifierConfig, { kind: 'jury' }> = { kind: 'jury', reportNodes: ['jury'], hardCriteria: ['compiles'], ranking, tieOrder: ['quality'],
-    candidates: [{ id: 'a', node: 'candidate-a' }, { id: 'b', node: 'candidate-b' }] };
-  const final: Extract<VerifierConfig, { kind: 'jury' }> = { ...select, reportNodes: ['final-review'], candidates: [{ id: 'absorbed', node: 'absorb' }],
-    revalidate: { selectionNode: 'select', subjectNode: 'absorb' } };
-  const { runtime, task, root } = await setup(root => {
-    const artifactA = { id: 'a', path: join(root, 'a.txt'), digest: digest('alpha') };
-    const artifactB = { id: 'b', path: join(root, 'b.txt'), digest: digest('beta') };
-    return {
-      actions: {
-        candidate: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const artifact = operation.nodeId === 'candidate-a' ? artifactA : artifactB;
-          await writeFile(artifact.path, operation.nodeId);
-          return { outcome: 'completed', output: { id: operation.nodeId }, artifacts: [artifact], usage };
-        } },
-        jury: { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const a = operation.dependencySources['candidate-a']![0]!.artifacts[0]!;
-          const b = operation.dependencySources['candidate-b']![0]!.artifacts[0]!;
-          const entry = (id: string, artifact: typeof a, quality: number) => ({ id, artifact, hard: { compiles: { verdict: 'pass' as const, reason: 'Builds', evidence: [artifact] } }, scores: { quality: { value: quality, reason: 'Rank', evidence: [artifact] } } });
-          return { outcome: 'completed', output: json({ schemaVersion: 1, body: { kind: 'jury', candidates: [entry('a', a, 9), entry('b', b, 2)] } }), usage };
-        } },
-        absorb: { kind: 'agent', reserveTokens: 100, prepare: async () => async () => {
-          const artifact = { id: 'absorbed', path: join(root, 'merged.txt'), digest: digest('merged') };
-          await writeFile(artifact.path, 'merged');
-          return { outcome: 'completed', output: { merged: true }, artifacts: [artifact], usage };
-        } },
-        'final-review': { kind: 'agent', reserveTokens: 100, prepare: async operation => async () => {
-          const artifact = operation.dependencySources.absorb![0]!.artifacts[0]!;
-          return { outcome: 'completed', output: json({ schemaVersion: 1, body: { kind: 'jury', candidates: [{ id: 'absorbed', artifact: { ...artifact, digest: digest('alpha'), path: join(root, 'a.txt') }, hard: { compiles: { verdict: 'pass', reason: 'Old winner', evidence: [artifact] } }, scores: { quality: { value: 9, reason: 'Old', evidence: [artifact] } } }] } }), usage };
-        } },
-      },
-      acceptance: [{ id: 'works', description: 'Revalidated', checkNode: 'final' }],
-      nodes: [
-        { id: 'candidate-a', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'candidate-b', kind: 'agent', action: 'candidate', ...coder },
-        { id: 'jury', kind: 'agent', action: 'jury', ...coder, dependsOn: ['candidate-a', 'candidate-b'] },
-        { id: 'select', kind: 'program', action: 'graph.verify', dependsOn: ['candidate-a', 'candidate-b', 'jury'], verifier: select },
-        {
-          id: 'absorb', kind: 'agent', action: 'absorb', ...coder,
-          dependsOn: ['select', 'candidate-a', 'candidate-b'],
-          context: { predecessors: [
-            { source: 'candidate-a', mode: 'evidence_only' },
-            { source: 'candidate-b', mode: 'evidence_only' },
-          ] },
-        },
-        { id: 'final-review', kind: 'agent', action: 'final-review', ...coder, dependsOn: ['absorb'] },
-        { id: 'final', kind: 'program', action: 'graph.verify', dependsOn: ['select', 'absorb', 'final-review'], verifier: final },
-      ],
-    };
-  });
-  await runtime.host.drive();
-  const view = await task.view();
-  expect(view.phase).toBe('running');
-  expect(view.evidence.filter(item => item.valid)).toEqual([]);
-  expect(view.operations.find(operation => operation.nodeId === 'final')?.result?.output).toMatchObject({ outcome: 'rework' });
+test('native revalidation refuses a real pre-absorption publication as the current absorbed winner', async () => {
+  const config = { ...jury(), candidates: [{ id: 'absorbed', subject: 'absorbed' }] };
+  const { decision, refs, runtime, graphId } = await setup(config, refs => ({ jury: { schemaVersion: 1, body: { kind: 'jury', candidates: [candidate('absorbed', refs.original!, true, 9, 9)] } } }), { priorCandidate: true });
+  expect((await runtime.artifacts.read(graphId, refs.original!.artifactId, refs.original!.version)).text).toBe('stable original content');
+  expect((await runtime.artifacts.read(graphId, refs.absorbed!.artifactId, refs.absorbed!.version)).text).toBe('stable absorbed content');
+  expect(decision).toMatchObject({ outcome: 'rework', blockers: [{ id: 'invalid_evidence' }] }); expect(decision).not.toHaveProperty('winner');
 });

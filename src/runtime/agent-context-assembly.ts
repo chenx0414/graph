@@ -129,8 +129,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   const workspace = input.workspace ? await realpath(input.workspace) : null;
   const role = input.role === 'master' ? 'main' : input.action.toLowerCase().includes('review') ? 'reviewer' : 'worker';
   const definitionId = input.definitionVersion?.split('@')[0];
-  const definitionExists = input.definitionVersion && input.catalog.listDefinitions()
-    .some(item => `${item.id}@${item.version}` === input.definitionVersion);
+  const definitionExists = input.definitionVersion && input.catalog.hasDefinition(input.definitionVersion);
   const inlinePrompt = definitionExists ? input.catalog.definition(input.definitionVersion!).systemPrompt : undefined;
   const identityOverride = !inlinePrompt && input.library && definitionId
     ? await input.library.agentPrompt(definitionId, input.bootstrap?.agent ?? null) : undefined;

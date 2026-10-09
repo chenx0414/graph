@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { Proposal, NativeProposal, ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
+import type { NativeProposal, ActionAdapter, Operation, OperationResult } from '../../src/core/types.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
@@ -1248,117 +1248,63 @@ test('message state changes are published so incremental caches stay in sync', a
   expect(updates(retriedId)).toContain('pending');
 });
 
-test('a worker result the harness cannot use is routed to the main Agent and escalatable to the user', async () => {
-  const root = await temp('noncompliant');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  const seen: Operation[] = [];
-  let runs = 0;
-  const handoff = (workSummary: string) => ({
-    schemaVersion: 1 as const,
-    objective: 'Escalated handoff',
-    outcome: 'completed' as const,
-    workSummary,
-    changes: [],
-    decisions: [],
-    verification: [],
-    knownLimits: [],
-    openQuestions: [],
-    nextActions: [],
-  });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
-    actions: {
-      master: scripted(() => ({ outcome: 'completed', output: { text: '已经处理。' }, usage })),
-      work: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async operation => {
-          seen.push(operation);
-          runs += 1;
-          return async () => runs === 1
-            // Finished the work but submitted a document the harness cannot use.
-            ? { outcome: 'completed', output: { schemaVersion: 1, workSummary: 'BROKEN_HANDOFF_SENTINEL' }, usage }
-            : { outcome: 'completed', output: handoff('FIXED_AFTER_ESCALATION'), resultHandoff: handoff('FIXED_AFTER_ESCALATION'), usage };
-        },
-      },
-      next: scripted(() => ({ outcome: 'completed', output: { text: '下游完成' }, usage })),
-      check: {
-        kind: 'program',
-        prepare: async () => async () => ({
-          outcome: 'completed',
-          output: null,
-          evidence: [{ acceptanceId: 'ok', summary: 'ok', artifact: { path: join(project, 'ok.txt'), digest: 'a'.repeat(64) } }],
-        }),
-      },
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
-  const created = await runtime.conversations.create({ text: 'TASK_REQUEST_SENTINEL：实现并交接', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await runtime.supervisor(anchor).propose({
-    requirementVersion: 1,
-    summary: '交接文档不合规时只修复文档',
-    acceptance: [{ id: 'ok', description: 'ok', checkNode: 'check' }],
-    nodes: [
-      { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'm' },
-      {
-        id: 'next', kind: 'agent', action: 'next', definitionVersion: 'coder@1', model: 'm', dependsOn: ['work'],
-        context: { purpose: 'implement', predecessors: [{ source: 'work', mode: 'result_handoff' }] },
-      },
-      { id: 'check', kind: 'program', action: 'check', dependsOn: ['next'] },
-    ],
-  }, 'proposal');
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
-  await runtime.host.drive();
-
-  // The main Agent owns the problem, and it carries the exact defective fields.
-  const problems = await runtime.supervisor(anchor).listProblems() as {
-    id: string; kind: string; data: { defects?: { path: string; class: string }[] };
-  }[];
-  expect(problems.map(problem => problem.kind)).toEqual(['result_noncompliant']);
-  expect(problems[0]!.data.defects).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'objective', class: 'semantic' })]));
-  // Nothing reached the user yet, and the worker was not re-run.
-  const beforeEscalation = await runtime.conversations.view(created.conversationId);
-  expect(beforeEscalation.messages.filter(message => message.role === 'user')).toHaveLength(1);
-  expect(seen).toHaveLength(1);
-
-  // The main Agent cannot judge the gap, so it escalates with its own explanation.
-  await runtime.supervisor(anchor).resolveProblem({
-    questionId: problems[0]!.id,
-    action: 'escalate',
-    response: '交接文档缺少 objective，需要你确认目标表述后再继续。',
-    requestId: 'escalate',
-  });
-  const escalated = await runtime.conversations.view(created.conversationId);
-  const decision = escalated.tasks.find(task => task.id === confirmed.taskId)!.openQuestions.find(question => question.kind === 'waiting');
-  expect(decision?.data).toMatchObject({
-    requestType: 'noncompliance_decision',
-    prompt: expect.stringContaining('需要你确认目标表述'),
-    defects: expect.arrayContaining([expect.objectContaining({ path: 'objective' })]),
-  });
-
-  // The user decides, and that decision reaches the worker's repair attempt.
-  await runtime.user.task(confirmed.taskId).answer(
-    decision!.id,
-    { type: 'respond', value: 'USER_DECISION_SENTINEL：目标按交付页描述。' },
-    'answer',
-  );
-  await runtime.host.drive();
-  expect(seen).toHaveLength(2);
-  expect(seen[1]!.context.briefing).toContain('USER_DECISION_SENTINEL');
-  expect(seen[1]!.context.briefing).not.toContain('TASK_REQUEST_SENTINEL');
-  expect(seen[1]!.context.briefing).toContain('BROKEN_HANDOFF_SENTINEL');
-  expect(runtime.events(confirmed.taskId).some(event => event.type === 'context.result_handoff_frozen')).toBe(true);
-  expect(runtime.graphHandoffs(confirmed.taskId)).toEqual(expect.arrayContaining([
-    expect.objectContaining({ source: 'work', target: 'next', mode: 'result_handoff', text: expect.stringContaining('FIXED_AFTER_ESCALATION') }),
-  ]));
-}, 120_000);
-
+test('a native delivery failure notifies main and the user decision reaches a new explicit input without leaking a defective output', async () => {
+  const root = await temp('native-noncompliant'); const project = join(root, 'project'); await mkdir(project);
+  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
+  const fixed = { objective: 'Escalated handoff', workSummary: 'FIXED_AFTER_ESCALATION' };
+  const mainProvider = await openaiServer([{ text: 'Ready to coordinate' }, { text: '交接文档缺少 objective，需要你确认目标表述后再继续。' }, { text: '已记录用户决定。' }]);
+  const worker = await openaiServer([
+    { tools: [{ id: 'invalid', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { workSummary: 'BROKEN_HANDOFF_SENTINEL' } } } }) }] },
+    { text: 'Forgot the required valid result' }, { text: 'Still missing the required result' },
+    { tools: [{ id: 'fixed', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: fixed } } }) }] }, { text: 'Fixed after user decision' },
+  ]);
+  const suggestion = await openaiServer(Array.from({ length: 4 }, () => ({ text: 'none' })));
+  const next = await openaiServer([{ text: 'Received the valid handoff' }]);
+  for (const provider of [mainProvider, worker, next, suggestion]) cleanup.push(() => provider.close());
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
+    catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+    master: { action: 'master', definitionVersion: 'main@1', model: 'main' },
+    models: { apiKey: 'local-only', modelRuntime: mainProvider.runtime, entries: ([['main', mainProvider], ['worker', worker], ['next', next], ['suggestion', suggestion]] as const).map(([id, provider]) => ({
+      id, modelId: id, provider: provider.model.provider, grade: id === 'suggestion' ? 'low' : 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256,
+    })) } }); cleanup.push(() => runtime.close());
+  await installPresets(runtime.catalog, fileURLToPath(new URL('../../presets', import.meta.url)));
+  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
+  const created = await runtime.conversations.create({ projectId: 'p', text: 'TASK_REQUEST_SENTINEL：实现并交接', requestId: 'create' }); await runtime.host.drive();
+  const main = runtime.supervisor(created.taskId); const data = { protocol: 'handoff' };
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Explicit repair',
+    protocols: { handoff: { type: 'object', required: ['objective'], properties: { objective: { type: 'string', minLength: 1 }, workSummary: { type: 'string' } } } },
+    nodes: { work: { recipe: 'coder@1', model: 'worker', task: 'Submit a valid result satisfying the handoff protocol', inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } },
+      next: { recipe: 'coder@1', model: 'next', task: 'Read the valid result', inputs: { job: data }, outputs: {}, submission: {} } },
+    modules: {}, edges: { handoff: { from: 'work.result', to: 'next.job', enabled: true } },
+  }) }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { objective: 'INITIAL_WORK_OBJECTIVE' } }); await runtime.host.drive();
+  const before = runtime.nodeRun(graphId, 'work'); expect(before.node.status).toBe('failed');
+  expect(before.operations).toMatchObject([{ state: 'failed', resubmits_used: 1 }]);
+  expect(worker.requests).toHaveLength(3); expect(next.requests).toHaveLength(0);
+  const refusal = (worker.requests[1] as { messages: { role: string; content: unknown }[] }).messages.filter(message => message.role === 'tool');
+  expect(JSON.stringify(refusal)).toContain('output_protocol_mismatch'); expect(JSON.stringify(refusal)).toContain('objective');
+  await expect(main.graphInspect({ graphId, query: 'edge', id: 'handoff' })).resolves.toMatchObject({ deliveries: [] });
+  expect(mainProvider.requests).toHaveLength(2);
+  expect(JSON.stringify(mainProvider.requests[1])).toContain(graphId);
+  expect(JSON.stringify(mainProvider.requests[1])).toMatch(/work.*required|Missing required|missing required/i);
+  const visible = await runtime.conversations.view(created.conversationId);
+  expect(visible.messages.filter(message => message.role === 'user')).toHaveLength(1);
+  expect(visible.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('需要你确认目标表述');
+  const decision = 'USER_DECISION_SENTINEL：目标按交付页描述。';
+  await runtime.conversations.chat(created.conversationId, { text: decision, requestId: 'user-decision' }); await runtime.host.drive();
+  expect(mainProvider.requests).toHaveLength(3); expect(JSON.stringify(mainProvider.requests[2])).toContain(decision);
+  const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; state: string }[] };
+  await main.graphControl({ graphId, action: 'skip', seq: queue.items[0]!.seq });
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { objective: decision, workSummary: 'Repair BROKEN_HANDOFF_SENTINEL' } }); await runtime.host.drive();
+  const after = runtime.nodeRun(graphId, 'work'); expect(after.node.status).toBe('succeeded');
+  expect(after.instance!.id).toBe(before.instance!.id); expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.operations).toHaveLength(2); expect(worker.requests).toHaveLength(5); expect(next.requests).toHaveLength(1);
+  const newestUser = (worker.requests[3] as { messages: { role: string; content: unknown }[] }).messages.filter(message => message.role === 'user').at(-1);
+  expect(JSON.stringify(newestUser)).toContain(decision); expect(JSON.stringify(newestUser)).toContain('BROKEN_HANDOFF_SENTINEL');
+  expect(JSON.stringify(newestUser)).not.toContain('TASK_REQUEST_SENTINEL');
+  expect(JSON.stringify(next.requests[0])).toContain('FIXED_AFTER_ESCALATION'); expect(JSON.stringify(next.requests[0])).not.toContain('BROKEN_HANDOFF_SENTINEL');
+  await expect(main.graphInspect({ graphId, query: 'edge', id: 'handoff' })).resolves.toMatchObject({ deliveries: [{ value: fixed }] });
+}, 60000);
 
 test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes only a proven unsent Pi conversation (%s)', async stage => {
   const root = await temp(`restart-${stage}`);

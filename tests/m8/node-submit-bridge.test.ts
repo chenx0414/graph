@@ -10,7 +10,7 @@ import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 /**
  * Issue #1 §5, §6 + backlog HB-257 — the node's submit surface, bound to one execution.
  *
- * This is the leg that was missing: a node's `submit_result` call has to land as a real
+ * This is the leg that was missing: a node's native `submit` call has to land as a real
  * Submission plus Deliveries in the kernel, and a refusal has to come back to the model
  * as the field-level correction the spec asks for, WITHOUT burning the one valid
  * submission the execution is allowed.

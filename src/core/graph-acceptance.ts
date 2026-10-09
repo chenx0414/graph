@@ -2,7 +2,7 @@ import type { ArtifactWorkspace } from './artifact-workspace.ts';
 import type { KernelStore } from './kernel-store.ts';
 import type { AcceptanceCriterion } from './interface-spec.ts';
 import { canonicalJson } from './store.ts';
-import type { Proposal } from './types.ts';
+import type { NativeProposal } from './types.ts';
 
 export interface AcceptanceStatus {
   id: string;
@@ -46,7 +46,7 @@ export function graphAcceptance(kernel: KernelStore, graphId: string, artifacts?
     const row = kernel.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(graphId, task.accepted_proposal) as { spec: string } | undefined;
     if (!row) fail('confirmed-acceptance', 'Confirmed requirements are unavailable');
     else {
-      const confirmed = JSON.parse(row.spec) as Proposal;
+      const confirmed = JSON.parse(row.spec) as NativeProposal;
       if (confirmed.requirementVersion !== task.requirement_version) fail('requirement-version', 'Confirmed requirements no longer match this task version');
       for (const required of confirmed.acceptance) {
         const declared = criteria.find(item => item.id === required.id);
@@ -70,10 +70,10 @@ export function graphAcceptance(kernel: KernelStore, graphId: string, artifacts?
         result.source = { id: row.id };
         if (row.state !== 'settled' || !row.result) result.reason = `Host check is ${row.state}`;
         else {
-          const evaluated = JSON.parse(row.result) as { outputs: Record<string, Record<string, unknown>> };
+          const evaluated = kernel.content.decode<{ outputs: Record<string, Record<string, unknown>> }>(row.result);
           const operation = definition.modules[criterion.module]!.operation!;
           const output = evaluated.outputs[operation.output];
-          const recorded = JSON.parse(row.request) as { operation: unknown };
+          const recorded = kernel.content.decode<{ operation: unknown }>(row.request);
           if (canonicalJson(recorded.operation) !== canonicalJson(operation)) { result.status = 'stale'; result.reason = 'Host check used another operation configuration'; }
           else if (output?.passed !== true) { result.status = 'failed'; result.reason = 'Host check did not pass'; }
           else if (commit && output.verifiedCommit !== commit) { result.status = 'stale'; result.reason = 'Host check does not verify the current clean commit'; }

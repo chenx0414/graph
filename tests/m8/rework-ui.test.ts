@@ -5,7 +5,8 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { openGraphServer } from '../../src/server/host.ts';
-import type { NodeSpec , Proposal } from '../../src/core/types.ts';
+import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -21,25 +22,10 @@ afterEach(async () => {
 });
 afterAll(() => rm(webDir, { recursive: true, force: true }));
 
-const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
-
 async function temp(name: string) {
   const dir = await mkdtemp(join(tmpdir(), `graph-m8-rework-ui-${name}-`));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   return dir;
-}
-
-function actions(root: string) {
-  return {
-    work: { kind: 'agent' as const, reserveTokens: 100, prepare: async () => async () => ({ outcome: 'completed' as const, output: { done: true }, usage }) },
-    check: {
-      kind: 'program' as const,
-      prepare: async () => async () => ({
-        outcome: 'completed' as const, output: { passed: true },
-        evidence: [{ acceptanceId: 'works', summary: '检查通过', artifact: { path: join(root, 'ok.txt'), digest: 'a'.repeat(64) } }],
-      }),
-    },
-  };
 }
 
 async function launch(): Promise<Page> {
@@ -48,35 +34,33 @@ async function launch(): Promise<Page> {
   return browser.newPage();
 }
 
-async function propose(server: Awaited<ReturnType<typeof openGraphServer>>, taskId: string, nodes: NodeSpec[]) {
-  await server.runtime.supervisor(taskId).propose({
-    requirementVersion: 1, summary: '实时记录',
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    nodes,
-  }, `proposal-${taskId}`);
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: `accept-${taskId}` });
-}
-
-test('the graph refreshes node state from task events without leaving the page or clicking more', async () => {
+test('the graph refreshes native Agent and module state from task events without navigation', async () => {
   const root = await temp('live');
-  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir, actions: actions(root) });
-  cleanup.push(async () => { await Promise.race([server.close().catch(() => undefined), new Promise(resolve => setTimeout(resolve, 8_000))]); });
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
-  const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: '实时记录', requestId: 'begin' });
-  await propose(server, taskId, [
-    { id: 'work', kind: 'agent', action: 'work', definitionVersion: 'coder@1', model: 'scripted' },
-    { id: 'check', kind: 'program', action: 'check', dependsOn: ['work'] },
-  ]);
-  const page = await launch();
-  await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
-  await page.getByTestId('graph').waitFor();
-  // Clicking a node opens its own tab now, so the live refresh is observed where it belongs:
-  // the graph's node cards follow the event stream with no navigation and no "load more".
+  const provider = await openaiServer([
+    { tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { report: 'LIVE_RESULT_VALUE' } } } }) }] },
+    { text: 'Work finished' },
+  ]); cleanup.push(() => provider.close());
+  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], webDir,
+    models: { apiKey: 'local-only', modelRuntime: provider.runtime, entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }] } });
+  cleanup.push(() => server.close()); server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
+  const owner = await server.runtime.user.begin({ projectId: 'p', request: '实时记录', requestId: 'begin' }); const main = server.runtime.supervisor(owner.taskId);
+  const data = { protocol: 'data' };
+  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: '实时记录', protocols: { data: { type: 'object' } },
+    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Submit the current result', inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } } },
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: data }, outputs: { result: data },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
+    edges: { checked: { from: 'work.result', to: 'check.job', enabled: true } },
+  }) }) as { graphId: string };
+  const page = await launch(); await page.goto(`${server.url}/#/tasks/${graphId}/graph`); await page.getByTestId('graph').waitFor();
+  const initialUrl = page.url();
   await page.locator('.node-card[data-node-id="work"]').waitFor();
-  expect(await page.locator('.node-card[data-node-id="work"]').getAttribute('data-status')).not.toBe('succeeded');
-
-  await server.runtime.host.runReady();
-  await server.runtime.host.runReady();
+  expect(await page.locator('.node-card[data-node-id="work"]').getAttribute('data-status')).toBe('idle');
+  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { request: 'Publish the live result' } });
+  await server.runtime.host.drive();
   await page.locator('.node-card[data-node-id="work"][data-status="succeeded"]').waitFor();
   await page.locator('.node-card[data-node-id="check"][data-status="succeeded"]').waitFor();
-}, 90_000);
+  expect(page.url()).toBe(initialUrl); expect(provider.requests).toHaveLength(2);
+  const edge = await main.graphInspect({ graphId, query: 'edge', id: 'checked' });
+  expect(edge).toMatchObject({ latest: { report: 'LIVE_RESULT_VALUE' }, deliveries: [{ value: { report: 'LIVE_RESULT_VALUE' } }] });
+  await expect(main.graphInspect({ graphId, query: 'operations' })).resolves.toMatchObject([{ state: 'settled', result: { ok: true, outputs: { result: { code: 0, passed: true } } } }]);
+}, 90000);

@@ -261,7 +261,7 @@ test('the main Agent cannot author composer suggestions as part of its reply', a
   const tools = agentTools({
     workspace: root,
     role: 'master',
-    supervisor: { propose: async () => ({}), revise: async () => ({}) },
+    supervisor: { propose: async () => ({}) },
   });
   expect(tools.map(tool => tool.name)).not.toContain('suggest_prompt');
 });
@@ -277,7 +277,6 @@ test('only a master with the supervisor channel can withdraw a draft', async () 
     role: 'master',
     supervisor: {
       propose: async () => ({}),
-      revise: async () => ({}),
       withdrawDraft: async input => { calls.push(input); return { withdrawnVersion: input.proposalVersion, nextProposalVersion: input.proposalVersion + 1 }; },
     },
   });
@@ -289,7 +288,7 @@ test('only a master with the supervisor channel can withdraw a draft', async () 
 
   const worker = agentTools({ workspace: root, role: 'worker' });
   expect(worker.map(item => item.name)).not.toContain('withdraw_draft');
-  const bare = agentTools({ workspace: root, role: 'master', supervisor: { propose: async () => ({}), revise: async () => ({}) } });
+  const bare = agentTools({ workspace: root, role: 'master', supervisor: { propose: async () => ({}) } });
   expect(bare.map(item => item.name)).not.toContain('withdraw_draft');
 });
 
@@ -320,7 +319,6 @@ test('only the master receives read-only resource and system inventory tools', a
     role: 'master',
     supervisor: {
       propose: async () => ({}),
-      revise: async () => ({}),
       graphState: async () => ({ phase: 'chatting' }),
       validateProposal: async proposal => {
         if (!proposal.summary.trim()) {
@@ -347,7 +345,7 @@ test('only the master receives read-only resource and system inventory tools', a
     'artifact_get', 'compile_agent_combination', 'submit_result',
   ]));
   const execute = (name: string) => masterTools.find(tool => tool.name === name)!.execute as unknown as (id: string, params: unknown) => Promise<{ content: { text?: string }[] }>;
-  const search = JSON.parse((await execute('search_resources')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
+  const search = JSON.parse((await execute('search_resources')('probe', { query: '审查', grade: 'frontier' })).content[0]!.text!) as { items: { id: string }[] };
   expect(search.items).toEqual([expect.objectContaining({ id: 'reviewer' })]);
   const detail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer' })).content[0]!.text!) as { grantsNoPermission: boolean };
   expect(detail.grantsNoPermission).toBe(true);
@@ -357,7 +355,7 @@ test('only the master receives read-only resource and system inventory tools', a
   expect(invalidProposal).toMatchObject({ valid: false, error: { code: 'invalid_proposal' } });
   const versionedDetail = JSON.parse((await execute('get_resource')('probe', { id: 'reviewer@1.0.0' })).content[0]!.text!) as { id: string; version: string };
   expect(versionedDetail).toMatchObject({ id: 'reviewer', version: '1.0.0' });
-  const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '审查' })).content[0]!.text!) as { items: { id: string }[] };
+  const combinations = JSON.parse((await execute('list_agent_combinations')('probe', { query: '审查', grade: 'frontier' })).content[0]!.text!) as { items: { id: string }[] };
   expect(combinations.items).toEqual([expect.objectContaining({ id: 'review' })]);
   const combination = JSON.parse((await execute('get_agent_combination')('probe', { id: 'review' })).content[0]!.text!) as { resolved: { resourceId: string; version: string }[] };
   expect(combination.resolved[0]).toMatchObject({ resourceId: 'reviewer', version: '1.0.0' });
@@ -368,7 +366,7 @@ test('only the master receives read-only resource and system inventory tools', a
   expect(workerTools.map(tool => tool.name)).not.toContain('search_resources');
   expect(workerTools.map(tool => tool.name)).not.toContain('list_agent_combinations');
   expect(workerTools.map(tool => tool.name)).not.toContain('read_system_capabilities');
-  expect(workerTools.map(tool => tool.name)).toContain('submit_result');
+  expect(workerTools.map(tool => tool.name)).not.toContain('submit_result');
 });
 
 test('self-improvement tools are exposed to the Main Agent only', async () => {
