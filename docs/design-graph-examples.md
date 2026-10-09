@@ -312,7 +312,7 @@ nodes:
 
 | 事实 | 后果 |
 |---|---|
-| 只有 ` ```json ` **整图**受测；下面「`graph.verify` 旧形状」里那段是 ` ```jsonc ` **片段**，**不被测** | 改 jsonc 片段**不会红**——它不是门，别拿它的绿当保证 |
+| 本页所有 ```json **整图**（含「`graph.verify` 机械判定」那张）都受测；本页已无不受测的 `jsonc` 片段 | 改任何一张整图**都会红**——门就是 `tests/console/design-examples.test.ts` |
 | 块内的 `<模型 id>` 会被替换成 `example:model` 再验 | 文档可以写占位模型，验的是**结构**不是模型 |
 | 第二个用例另外检查 `acceptance[].checkNode` 与 `loops[].from/to` 都必须是图里存在的节点 | 指向不存在节点的「照抄件」也会红 |
 
@@ -491,22 +491,73 @@ v40 之前，这一档还有一张**同样合法、但机制完全不同**的图
 
 复杂档还有另一种合法画法：**一个执行者 + N 个视角评审 + 一处机械判定**。它的判定节点是 `program` + `action: "graph.verify"`，用 `verifier.multiview` 把多份评审的维度汇成一处结论（`outcome: 'pass' | 'rework'`），再由 `input.route.byField` 把结论变成分支。
 
-```jsonc
-// 判定节点的关键两处：verifier（怎么算结论）+ input.route（结论怎么变成分支）
-{ "id": "pass", "kind": "program", "action": "graph.verify",
-  "dependsOn": ["worker", "reviewer-1", "reviewer-2"],
-  "routes": ["yes", "no"],
-  "verifier": {
-    "kind": "multiview", "subjectNode": "worker", "reportNodes": ["reviewer-1", "reviewer-2"],
-    "dimensions": [
-      { "id": "correctness", "required": true, "reportNode": "reviewer-1" },
-      { "id": "fidelity",    "required": true, "reportNode": "reviewer-2" }
-    ]
-  },
-  "input": { "route": { "byField": { "path": "outcome", "values": { "pass": "yes", "rework": "no" } } } } }
+```json
+{
+  "requirementVersion": 1,
+  "summary": "复杂档机械判定：planner 出计划、plan-reviewer 并列评审（不过就返工 planner）；一个 worker 实现，三个视角评审；pass 用 graph.verify + multiview 把三份评审汇成一处结论，再由 byField 变成 yes/no；yes 才进 haiku 与人工验收，no 回到 worker",
+  "decisions": [
+    "判定用 graph.verify 的 multiview：三个视角的必过维度全过才算 pass，结论由维度规则算出而不是某个 agent 拍板",
+    "结论经 input.route.byField 读判定节点自己产物里的 outcome（pass→yes / rework→no）；不要用 byStatus，那会把返工分支变成死代码",
+    "计划评审是并列车道：plan-reviewer 判 replan 只返工 planner，不挡 worker 开工（worker 上没有指向 plan-reviewer 的 when）",
+    "验收只绑 deliver（graph.human_check）：机械判定保证维度，人负责最终接受"
+  ],
+  "acceptance": [
+    { "id": "human-accept", "description": "使用者确认整份交付可接受", "checkNode": "deliver" }
+  ],
+  "loops": [
+    { "from": "pass", "to": "worker", "case": "no" },
+    { "from": "plan-reviewer", "to": "planner", "case": "replan" }
+  ],
+  "nodes": [
+    { "id": "planner", "kind": "agent", "action": "plan", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "deliverable": { "path": "plans/plan.md", "namespace": "plans", "name": "plan", "title": "执行计划" },
+      "input": { "focus": "把任务拆成可执行计划，写入 plans/plan.md" } },
+    { "id": "plan-reviewer", "kind": "agent", "action": "plan-review", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["planner"], "routes": ["accept", "replan"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "planner", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/plan-review.md", "namespace": "reviews", "name": "plan-review", "title": "计划评审报告" },
+      "input": { "focus": "审查计划是否可行；通过则放行，不通过则要求返工", "route": { "declared": null } } },
+    { "id": "worker", "kind": "agent", "action": "implement", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "dependsOn": ["planner"],
+      "context": { "purpose": "implement", "predecessors": [{ "source": "planner", "mode": "evidence_only" }] },
+      "deliverable": { "path": "deliverables/implementation.md", "namespace": "deliverables", "name": "implementation", "title": "实现说明" },
+      "input": { "focus": "按计划完成实现，并写 deliverables/implementation.md" } },
+    { "id": "reviewer-1", "kind": "agent", "action": "review-correctness", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-1.md", "namespace": "reviews", "name": "reviewer-1", "title": "视角 1：正确性" },
+      "input": { "focus": "只评 worker 的成果是否真的成立，主动找反例" } },
+    { "id": "reviewer-2", "kind": "agent", "action": "review-fidelity", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-2.md", "namespace": "reviews", "name": "reviewer-2", "title": "视角 2：规格符合性" },
+      "input": { "focus": "逐条对照需求与验收点，找漏项与假绿" } },
+    { "id": "reviewer-3", "kind": "agent", "action": "review-reproducibility", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-3.md", "namespace": "reviews", "name": "reviewer-3", "title": "视角 3：可复核性" },
+      "input": { "focus": "自己把交付物跑一遍，检查证据是否可复现" } },
+    { "id": "pass", "kind": "program", "action": "graph.verify",
+      "dependsOn": ["worker", "reviewer-1", "reviewer-2", "reviewer-3"], "routes": ["yes", "no"],
+      "verifier": {
+        "kind": "multiview", "subjectNode": "worker",
+        "reportNodes": ["reviewer-1", "reviewer-2", "reviewer-3"],
+        "dimensions": [
+          { "id": "correctness", "required": true, "reportNode": "reviewer-1" },
+          { "id": "fidelity", "required": true, "reportNode": "reviewer-2" },
+          { "id": "reproducibility", "required": true, "reportNode": "reviewer-3" }
+        ]
+      },
+      "input": { "route": { "byField": { "path": "outcome", "values": { "pass": "yes", "rework": "no" } } } } },
+    { "id": "haiku", "kind": "agent", "action": "summarize", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "dependsOn": ["pass"], "when": { "node": "pass", "case": "yes" },
+      "input": { "focus": "把通过机械判定的交付总结成一段给使用者的汇报" } },
+    { "id": "deliver", "kind": "program", "action": "graph.human_check", "dependsOn": ["haiku"], "input": {} }
+  ]
+}
 ```
 
-> 这段是 **jsonc 片段，不是整图**，所以**不受测**（本页只测含 `"nodes"` 的 ` ```json ` 整图）。它保留下来的作用是让人看懂机制，不是当照抄件——要照抄这张形状，请把上面 v40 那张整图的 `synth` 换成「`program` + `graph.verify` + 一个 `multiview` 配置」。
+> 这是**整图**：`tests/console/design-examples.test.ts` 会把它原样喂给产品自己的 `validateProposal`，所以它既是机制说明，也是一份**照抄件**（照抄件的定义就是「能被 validator 接受」）。它和 v40 的差别不在「能不能跑」，而在仲裁者是谁：这里由 `multiview` 的维度规则算结论，v40 由 agent 自己判。
 
 **什么时候仍然选它**：维度判定**本来就有客观标准**（例如「正确性维度必须全过」），你希望结论由**维度规则**算出来，而不是由某个 agent 读一遍报告后拍板。代价是多一层实体与一份 `verifier` 配置。
 
@@ -539,7 +590,7 @@ v40 之前，这一档还有一张**同样合法、但机制完全不同**的图
 | 同一 `from`+`case` 的多条 loop 一起触发（整批返工） | `src/core/operation-lifecycle.ts:1114-1116`、`:1281-1289` | **守不住**——`validateProposal` 只查端点合法 |
 | `declared: null` 才是自判；写死=固定路由 | `src/core/router-action.ts:56-63`、`:91-98` | **守不住**——写成 `"pass"` 一样能过校验 |
 | `review_human_check` 存在、且它不是验收 | `src/runtime/agent-tool-definitions.ts:261`、`src/runtime/agent-tools.ts:438` | **守不住** |
-| `graph.verify` 旧形状的 `byField` / `byStatus` 行为 | `src/core/router-action.ts:65-81` | **守不住**——而且它那段是 `jsonc`，本来就不受测 |
+| `graph.verify` 旧形状的 `byField` / `byStatus` 行为 | `src/core/router-action.ts:65-81` | **守得住**——那段现在是受测整图，`byField`/`byStatus` 的行为由 `tests/console/design-examples.test.ts` 的新用例钉住（同一份 `outcome: 'rework'`：`byStatus`→`yes` 是死写法、`byField`→`no`） |
 
 > 「守不住」不是缺陷，是这道门的边界：它只保证**这份照抄件能被产品接受**，不保证**每句机制说法都被测过**。**更值得记住的是「部分守得住」那一类**——它比「守不住」更危险：它让你以为某个洞有门，实际只挡住了一半。删掉整个 `when`、漏写 `loops[].case` 都是这一类。
 

@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { validateProposal } from '../../src/core/proposal.ts';
+import { resolveRouteCase } from '../../src/core/router-action.ts';
 import type { Proposal } from '../../src/core/types.ts';
 
 const document = readFileSync(join(import.meta.dirname, '..', '..', 'docs', 'design-graph-examples.md'), 'utf8');
@@ -57,4 +58,59 @@ test('each example names the checks its acceptance items point at', () => {
       if (loop.to) expect(ids.has(loop.to), `example #${index}: loop to ${loop.to}`).toBe(true);
     }
   }
+});
+
+/**
+ * The mechanical-judgement graph - the one example whose arbitration is a `program` node with a
+ * `pass` diamond (`graph.verify` + `multiview`). Selecting by that node is what makes the test below
+ * fail loudly when the example is missing, instead of silently asserting nothing.
+ */
+function mechanicalJudgementGraph(): { index: number; proposal: Proposal } {
+  const found = examples().find(example => example.proposal.nodes.some(node => node.id === 'pass'));
+  expect(found, 'the document should carry the graph.verify example, the one with a `pass` node').toBeDefined();
+  if (!found) throw new Error('unreachable: the example was asserted to exist above');
+  return found;
+}
+
+test('the graph.verify example pins the arrows that differ from the v40 shape', () => {
+  const { proposal } = mechanicalJudgementGraph();
+  const byId = new Map(proposal.nodes.map(node => [node.id, node]));
+  const node = (id: string) => {
+    const found = byId.get(id);
+    expect(found, `the example should carry node ${id}`).toBeDefined();
+    if (!found) throw new Error(`unreachable: node ${id} was asserted to exist above`);
+    return found;
+  };
+  const loops = proposal.loops ?? [];
+
+  // 1. The rework edge returns to the worker, and only to the worker. A second `pass` loop, or one
+  //    pointing at another node, is the batch-rework shape leaking in from v40.
+  expect(loops.filter(loop => loop.from === 'pass')).toEqual([{ from: 'pass', to: 'worker', case: 'no' }]);
+
+  // 2. The plan lane is parallel: the worker starts from the plan alone and never waits on the plan
+  //    review (v40 upgrades it to a `when` gate). The replan edge still exists, on its own lane.
+  const worker = node('worker');
+  expect(worker.when).toBeUndefined();
+  expect(worker.dependsOn ?? []).not.toContain('plan-reviewer');
+  expect(loops).toContainEqual({ from: 'plan-reviewer', to: 'planner', case: 'replan' });
+
+  // 3. The verdict travels through `byField`, read from the judge's own output. `byStatus` cannot
+  //    produce the rework branch at all: a node that has a verdict has completed, so it always maps
+  //    to the same case and the loop below becomes dead code.
+  const pass = node('pass');
+  expect(pass.routes).toEqual(['yes', 'no']);
+  expect((pass.input as Record<string, unknown> | undefined)?.['route'])
+    .toEqual({ byField: { path: 'outcome', values: { pass: 'yes', rework: 'no' } } });
+  expect(resolveRouteCase({
+    nodeId: 'pass', routes: ['yes', 'no'], status: 'completed', output: { outcome: 'rework' },
+    source: { byStatus: { completed: 'yes' } },
+  })).toEqual({ case: 'yes' });
+  expect(resolveRouteCase({
+    nodeId: 'pass', routes: ['yes', 'no'], status: 'completed', output: { outcome: 'rework' },
+    source: { byField: { path: 'outcome', values: { pass: 'yes', rework: 'no' } } },
+  })).toEqual({ case: 'no' });
+
+  // 4. Only a passing verdict reaches the summary, and the last gate is the human one.
+  expect(node('haiku').when).toEqual({ node: 'pass', case: 'yes' });
+  expect(node('deliver').action).toBe('graph.human_check');
 });
