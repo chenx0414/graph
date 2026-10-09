@@ -1,176 +1,209 @@
-# 复杂档 v40：三车道执行计划
+# 执行计划：把「一个执行者 + N 个视角评审 + 一处机械判定」落成可照抄、可机械校验的整图
 
-**本文件是 planner 节点（`plans/plan.md`）的交付物，由 plan-reviewer 审。**
-
----
-
-## 0. 一句话说清这轮要交付什么
-
-任务 `4c251059` 自己这张图**就是**复杂档 v40 的范例（proposal 已被运行时接受，节点正在跑）。
-所以这轮的交付不是「再画一张图」，而是**把 v40 这张图在仓库里落成三样可复核的东西**：
-
-1. 一份**可执行的形状**（E2E 真跑运行时，钉住 v40 与旧形状不同的那几条箭头）；
-2. 一份**可照抄的文档**（`docs/design-graph-examples.md` 里 validator 接受的 v40 JSON + 规则）；
-3. 一份**机制对照**（每一句需求 → 图里哪个字段 → 运行时哪一行强制 → 哪个测试钉住）。
-
-三条互不重叠、可以真并行；最后由 synth 收三份评审汇成 `summaries/synthesis.md`。
+**本文件是 planner 节点的交付物（`plans/plan.md`），交给 plan-reviewer 审，并由 worker 节点按它执行。**
+目标分支：`main`（基线 `201458e`，含 `2f5c5cd`）。
 
 ---
 
-## 1. 已核实的事实（写计划前先查过，plan-reviewer 可按此复核）
+## 0. 目标与范围（先划清边界，再看步骤）
 
-| 事实 | 证据 |
+**目标**：把使用者的复杂档「一个执行者 + N 个视角评审 + 一处机械判定」那张图，落成 main 上**可照抄**（文档里一份能通过产品自己 validator 的 ` ```json ` 整图）且**可机械校验**（一条测试钉住它与 v40 不同的箭头 + 一条宿主门命令）的东西。
+
+**本节点只允许动这三个文件**（worker 的文件清单）：
+
+| 文件 | 动作 |
 |---|---|
-| `when: {node, case}` 是受支持的节点门：它给节点加一条对条件节点的依赖，并要求该 case 是路由器 `routes` 里声明过的分支 | `src/core/graph.ts:33-45` |
-| 一个路由器同一个 case 挂**多条**回边会**一起**触发：`routed` 是 `filter`（不是 `find`），按 `from + case` 取全部 loop | `src/core/operation-lifecycle.ts:1114-1116` |
-| 批量返工真的会重跑全部目标：`reactivate(routed.map(loop => loop.to))` + 事件 `graph.rework { from, to: [...] }` | `src/core/operation-lifecycle.ts:1281-1289` |
-| agent 节点可以当路由器：判据是 `kind === 'agent' && nodeSpec.routes?.length` | `src/core/operation-lifecycle.ts:1118` |
-| `review_human_check` 工具已存在（主 Agent 先审证据、用户自己点通过） | `src/runtime/agent-tool-definitions.ts:261`、`src/runtime/agent-tools.ts:438` |
-| 文档里**每一个含 `"nodes"` 的 ```json 代码块**都会被喂给产品自己的 `validateProposal`，被拒即测试红 | `tests/console/design-examples.test.ts:18-45` |
-| 仓库已有复杂档 E2E，但它测的是**另一种形状**（1 个 worker + 2 个 reviewer + `graph.verify` 的 `Pass?`），**没有**测 v40 的三个新东西 | `tests/console/complex-tier-shape.test.ts`（b876e08） |
-| 跑真实任务图的测试有现成夹具与三个已知坑（`user.begin` 需要已知项目；worker 结果必须合 `result_handoff@1`；节点结算异步要用 `settle(...)` 轮询） | `tests/fixtures/lane.ts` 文件头 |
-| 提交/推送前必须 `node --run check`；在 Graph 工作树里跑它要先 `cp -al <主仓>/node_modules <工作树>/node_modules`（不要手工软链） | `docs/agents/checks.md` |
+| `docs/design-graph-examples.md` | 把「旧形状（`graph.verify` 机械判定）」一节里的 ` ```jsonc ` 片段，**换成一份完整的 ` ```json ` 整图**；并修掉因此变假的两处「不受测」说法 |
+| `tests/console/design-examples.test.ts` | **新增**一个用例，钉住这张图与 v40 不同的三条箭头 |
+| `package.json` | 新增脚本 `"test:design-examples": "vitest run tests/console/design-examples.test.ts"`（宿主门用） |
 
-### v40 与已发布形状的差异（本轮真正的新东西）
+**明确不做**：
 
-| 维度 | 已发布（b876e08） | v40（本轮） |
-|---|---|---|
-| 执行者 | 1 个 worker | 3 个 worker，一一对应 3 个评审 |
-| 仲裁节点 | `Pass?`（program，`graph.verify` + `multiview`） | `synth`（**agent** 路由器，`synthesizer@1`，自己写汇总、自判 pass/fail） |
-| 计划与执行的关系 | 计划评审是**并列**的第二条回路 | 计划评审**放行后才开工**（`when: {node:'plan-reviewer', case:'accept'}`） |
-| 返工 | 一条回边只打回 worker | `fail` 时**三条**回边一起返工（整批重做，不按名单） |
-| 验收 | 绑在判定节点上 | 只绑 `deliver`（`graph.human_check`），机械门与主 Agent 验收不重复 |
+- 不改 `src/**`（`resolveRouteCase`、`validateProposal` 只**被引用**，不被修改）。
+- 不改文档里 v40 那一节的主体（v40 的整图 JSON、机制点、真跑回执、五条硬规则都原样保留）。
+- 不改简单档、中等档两节；不改 `tests/console/complex-tier-shape.test.ts`（那是另一张图的可执行版本）。
+- 不删除 `design-examples.test.ts` 现有的两个用例。
+
+> **一处必须动的、看起来像「v40 那一节」的行**：文档第 315 行「本页 JSON 的受测范围」表里有一行写「下面『`graph.verify` 旧形状』里那段是 ` ```jsonc ` **片段**，**不被测**」。把 jsonc 换成整图之后这句话**变成假的**，必须同步改。它属于**全页**受测说明，不属于 v40 的图/机制内容，所以是允许且必要的一处；审查时按「文档自洽」验收，不要按「越界改 v40」判。
 
 ---
 
-## 2. 三条车道（互斥文件，可真并行）
+## 1. 已核实的事实（写计划前实测过，plan-reviewer 可按此复核）
 
-### 车道 1 — worker-1：可执行的 v40 形状（先写失败模式，再写用例）
+| # | 事实 | 证据（本轮实测） |
+|---|---|---|
+| F1 | 本计划 §3 那张候选整图**被产品自己的 `validateProposal` 接受** | 用 `src/core/proposal.ts` 的 `validateProposal` 直接跑候选图，输出 `ACCEPTED`（候选图与 §3 逐字相同，仅 `model` 占位符替换规则同测试） |
+| F2 | 宿主门当前**在工作副本里可跑通**，基线是 **2 passed (2)** | `./node_modules/.bin/vitest run tests/console/design-examples.test.ts` → `Test Files 1 passed (1) / Tests 2 passed (2)`，125ms |
+| F3 | 工作副本的依赖需要先链接，否则 vitest 不可用；本副本已按 `docs/agents/checks.md` 用**硬链**链接 | `cp -al /Users/macmini/workspace/13-Graph/node_modules node_modules` 已执行；`node_modules/` 被 `.gitignore` 忽略，`git status` 干净 |
+| F4 | 文档里**每一个**「` ```json ` 开头且正文含 `"nodes"`」的整图都会被原样喂给 `validateProposal`，被拒即红 | `tests/console/design-examples.test.ts:18-45`（`examples()`） |
+| F5 | 第二个用例另外要求 `acceptance[].checkNode` 与 `loops[].from/to` 都必须是图里存在的节点 | `tests/console/design-examples.test.ts` 第二个 `test` |
+| F6 | 待替换的 jsonc 片段在 `docs/design-graph-examples.md:494`；「不受测」的说法还在第 315、509、542 行 | `grep -n 'jsonc' docs/design-graph-examples.md` |
+| F7 | `multiview` 的 `reportNodes` 必须是判定节点的**可达依赖**，每个 `dimensions[].reportNode` 必须列在 `reportNodes` 里 | `src/core/verification.ts` 的 `validateVerifierConfig` |
+| F8 | `loops[].case` 必须写，且必须是 `from` 路由器 `routes` 里声明过的分支；否则整张提案被拒 | `src/core/graph.ts:71-76`（`A loop case must name a branch the router declared`） |
+| F9 | `byField` 读**路由器自己**产物里的字段；`byStatus` 把「有结论=completed」的判定节点永远映射到同一个分支，**返工分支是死代码** | `src/core/router-action.ts:56-81`；`tests/console/complex-tier-shape.test.ts` 最后一个用例已实证（`byStatus` → `{case:'yes'}`，`byField` → `{case:'no'}`） |
+| F10 | `when: {node, case}` 会把条件节点追加成依赖并挡下游；`plan-reviewer` 车道**并列**时不写 `when` 在 worker 上，worker 就只等 `planner` | `src/core/graph.ts:33-47`、`:127-136` |
+| F11 | 本仓库完整门 `node --run check` 在 Graph 工作副本里跑不过（实测 main `2f5c5cd`：127 failed / 1541）；所以宿主门**只用** scoped 命令 | `docs/adr/0027-work-copy-dependency-link.md` 追加节 + job 约束 |
+| F12 | 目标分支 `main` = `201458e`，与工作副本 HEAD 相同；`plans/plan.md` 是 tracked 文件（上一轮任务提交过） | `git rev-parse --show-toplevel`、`git log -- plans/plan.md` |
 
-**独占文件**：`tests/console/complex-tier-v40.test.ts`、`deliverables/v40-shape-e2e.md`
+---
 
-**目标**：把 v40 的 proposal 规格原样喂给真实运行时（`TaskStore` + `openTaskRuntime` + `tests/fixtures/lane.ts` 的脚本化车道），逐条钉住上面表格里 v40 那四行差异。
+## 2. 步骤（每步：交付物 / 验收点 / 命令）
 
-**先写失败模式（写代码前把这四条落到用例文件头的注释里）**：
+顺序按 R22：**先让新用例红，再改文档让它绿**。
 
-| # | 失败模式 | 用例断言 | 阴性对照（证明用例不是套套逻辑） |
+### 步骤 A — 先加宿主门脚本（让门命令存在）
+
+**交付物**：`package.json` 新增 `"test:design-examples": "vitest run tests/console/design-examples.test.ts"`（放在 `test:m0` 一带）。
+
+**验收点**：
+- `node --run test:design-examples` 能识别脚本（当前**必然红**，因为新用例还没写，只有现有 2 个用例——这一步只需确认命令能跑起来）。
+- 除这一行外 `package.json` 无其它 diff。
+
+**命令**：`node --run test:design-examples`
+
+### 步骤 B — 先写会红的用例（R22：先看它因正确原因失败）
+
+**交付物**：`tests/console/design-examples.test.ts` 新增一个 `test`，**复用文件里已有的 `examples()`**，按「图里有节点 `pass`」选出这张机械判定图，断言：
+
+1. **回边只回 worker**：`proposal.loops.filter(l => l.from === 'pass')` 恰好是 `[{ to: 'worker', case: 'no' }]`（不是三条、不是指别人）。
+2. **计划车道并列、不挡 worker 开工**：`worker.when === undefined` 且 `worker.dependsOn` **不含** `plan-reviewer`；同时存在 `{ from: 'plan-reviewer', to: 'planner', case: 'replan' }`。
+3. **判定节点的结论经 `byField` 变成 yes/no，而 `byStatus` 是死写法**：
+   - `pass.routes` 恰为 `['yes','no']`；`pass.input.route` 恰为 `{ byField: { path: 'outcome', values: { pass: 'yes', rework: 'no' } } }`；
+   - 用 `resolveRouteCase`（从 `src/core/router-action.ts` 引入）证明：同一份 `output:{outcome:'rework'}` 下，`byStatus:{completed:'yes'}` → `{case:'yes'}`（**死写法**），`byField:{path:'outcome',values:{pass:'yes',rework:'no'}}` → `{case:'no'}`。
+4. **`when` 门指向 `pass=yes`**：`haiku.when` 恰为 `{ node:'pass', case:'yes' }`，且 `deliver.action === 'graph.human_check'`。
+
+实现注意（避免用例写不出来的坑）：
+- `NodeSpec.input` 的类型是 `Json`，取 `pass.input.route` 需要一次窄化（如 `(pass.input as Record<string, Json> | undefined)?.route`）；**不要**为了好写而 `as any` 掉断言强度。
+- 选图时若找不到 `pass` 节点，用 `expect(found, '…').toBeDefined()` 给出**可读原因**，而不是 `!` 硬取。
+- 现有两个 `test` 一字不改。
+
+**验收点（这一步的关键）**：跑新用例时**必须红，且红的原因**是「文档里还没有含 `pass` 节点的 ` ```json ` 整图」——即 `examples()` 找不到该图。若它因为 `JSON.parse` 语法错、导入错或别的原因红，不算通过本步。
+
+**命令**：`node --run test:design-examples`（期望：新用例失败，现有 2 个仍绿）
+
+### 步骤 C — 改文档：jsonc 片段 → 完整整图
+
+**交付物**：
+1. 把 `docs/design-graph-examples.md:494` 的 ` ```jsonc ` 片段整段替换成 §3 给出的**完整 ` ```json ` 整图**（逐字使用；`model` 写 `<模型 id>`，测试会替换成 `example:model`）。
+2. 修掉因替换而变假的三处说法：
+   - 第 315 行（全页受测范围表）：改为「本页所有 ` ```json ` 整图（含机械判定那张）都受测；本页已无不受测的 jsonc 片段」。
+   - 第 509 行 blockquote：改为「这是**整图**，会被 `design-examples.test.ts` 原样喂给 `validateProposal`」，并保留「什么时候仍选它 / 两条仍有效的规则（`multiview` 必过维度、**不要用 `byStatus`**）」。
+   - 第 542 行（本节说法出处表）：把「那段是 jsonc，本来就不受测」改成「那段现在是受测整图，`byField`/`byStatus` 行为由 `tests/console/design-examples.test.ts` 的新用例钉住」。
+3. 小节标题与首句按需微调（它不再只是「旧形状、不受测」，而是一张**可照抄的整图**），但**不删**「旧形状保留、仍然合法」的定位与适用场景说明。
+
+**验收点**：
+- `node --run test:design-examples` **exit 0**（这同时证明新整图被 `validateProposal` 接受 + 新用例的断言全部成立 + 现有 2 个用例仍绿）。
+- `git diff --stat` 只出现 `docs/design-graph-examples.md`、`tests/console/design-examples.test.ts`、`package.json` 三个文件。
+- 文档里 `grep -n 'jsonc' docs/design-graph-examples.md` 不再出现「不受测/不被测」的断言（若有 jsonc 字样，必须是在说「不再有 jsonc」）。
+
+**命令**：`node --run test:design-examples`、`git diff --stat`
+
+### 步骤 D — 收尾证据（写进 worker 的 `result` 摘要）
+
+**交付物**：worker 在 `result` 输出里贴：产物引用（文件路径 + commit）、`node --run test:design-examples` 的**完整输出尾部**（`Test Files` / `Tests` 计数与 exit code）、`git diff --stat`。
+
+**验收点**：证据里三条命令的结果都是**原文**，不是「已通过」一句话；失败就贴失败输出。
+
+**命令**：`node --run test:design-examples; echo "exit=$?"`、`git diff --stat`
+
+---
+
+## 3. 步骤 C 要插入的整图（候选图已被 `validateProposal` 实测接受，见 F1）
+
+```json
+{
+  "requirementVersion": 1,
+  "summary": "复杂档机械判定：planner 出计划、plan-reviewer 并列评审（不过就返工 planner）；一个 worker 实现，三个视角评审；pass 用 graph.verify + multiview 把三份评审汇成一处结论，再由 byField 变成 yes/no；yes 才进 haiku 与人工验收，no 回到 worker",
+  "decisions": [
+    "判定用 graph.verify 的 multiview：三个视角的必过维度全过才算 pass，结论由维度规则算出而不是某个 agent 拍板",
+    "结论经 input.route.byField 读判定节点自己产物里的 outcome（pass→yes / rework→no）；不要用 byStatus，那会把返工分支变成死代码",
+    "计划评审是并列车道：plan-reviewer 判 replan 只返工 planner，不挡 worker 开工（worker 上没有指向 plan-reviewer 的 when）",
+    "验收只绑 deliver（graph.human_check）：机械判定保证维度，人负责最终接受"
+  ],
+  "acceptance": [
+    { "id": "human-accept", "description": "使用者确认整份交付可接受", "checkNode": "deliver" }
+  ],
+  "loops": [
+    { "from": "pass", "to": "worker", "case": "no" },
+    { "from": "plan-reviewer", "to": "planner", "case": "replan" }
+  ],
+  "nodes": [
+    { "id": "planner", "kind": "agent", "action": "plan", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "deliverable": { "path": "plans/plan.md", "namespace": "plans", "name": "plan", "title": "执行计划" },
+      "input": { "focus": "把任务拆成可执行计划，写入 plans/plan.md" } },
+    { "id": "plan-reviewer", "kind": "agent", "action": "plan-review", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["planner"], "routes": ["accept", "replan"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "planner", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/plan-review.md", "namespace": "reviews", "name": "plan-review", "title": "计划评审报告" },
+      "input": { "focus": "审查计划是否可行；通过则放行，不通过则要求返工", "route": { "declared": null } } },
+    { "id": "worker", "kind": "agent", "action": "implement", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "dependsOn": ["planner"],
+      "context": { "purpose": "implement", "predecessors": [{ "source": "planner", "mode": "evidence_only" }] },
+      "deliverable": { "path": "deliverables/implementation.md", "namespace": "deliverables", "name": "implementation", "title": "实现说明" },
+      "input": { "focus": "按计划完成实现，并写 deliverables/implementation.md" } },
+    { "id": "reviewer-1", "kind": "agent", "action": "review-correctness", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-1.md", "namespace": "reviews", "name": "reviewer-1", "title": "视角 1：正确性" },
+      "input": { "focus": "只评 worker 的成果是否真的成立，主动找反例" } },
+    { "id": "reviewer-2", "kind": "agent", "action": "review-fidelity", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-2.md", "namespace": "reviews", "name": "reviewer-2", "title": "视角 2：规格符合性" },
+      "input": { "focus": "逐条对照需求与验收点，找漏项与假绿" } },
+    { "id": "reviewer-3", "kind": "agent", "action": "review-reproducibility", "definitionVersion": "reviewer@8", "model": "<模型 id>",
+      "dependsOn": ["worker"],
+      "context": { "purpose": "review", "predecessors": [{ "source": "worker", "mode": "evidence_only" }] },
+      "deliverable": { "path": "reviews/reviewer-3.md", "namespace": "reviews", "name": "reviewer-3", "title": "视角 3：可复核性" },
+      "input": { "focus": "自己把交付物跑一遍，检查证据是否可复现" } },
+    { "id": "pass", "kind": "program", "action": "graph.verify",
+      "dependsOn": ["worker", "reviewer-1", "reviewer-2", "reviewer-3"], "routes": ["yes", "no"],
+      "verifier": {
+        "kind": "multiview", "subjectNode": "worker",
+        "reportNodes": ["reviewer-1", "reviewer-2", "reviewer-3"],
+        "dimensions": [
+          { "id": "correctness", "required": true, "reportNode": "reviewer-1" },
+          { "id": "fidelity", "required": true, "reportNode": "reviewer-2" },
+          { "id": "reproducibility", "required": true, "reportNode": "reviewer-3" }
+        ]
+      },
+      "input": { "route": { "byField": { "path": "outcome", "values": { "pass": "yes", "rework": "no" } } } } },
+    { "id": "haiku", "kind": "agent", "action": "summarize", "definitionVersion": "coder@10", "model": "<模型 id>",
+      "dependsOn": ["pass"], "when": { "node": "pass", "case": "yes" },
+      "input": { "focus": "把通过机械判定的交付总结成一段给使用者的汇报" } },
+    { "id": "deliver", "kind": "program", "action": "graph.human_check", "dependsOn": ["haiku"], "input": {} }
+  ]
+}
+```
+
+> 若最终插入的 JSON 与上面有任何字符差异（例如 `model` 不是 `<模型 id>`、`loops` 端点被改名），步骤 C 的验收（`node --run test:design-examples` 绿）**必须重跑**；这张候选图的 `ACCEPTED` 结论只对**逐字相同**的这份负责。
+
+---
+
+## 4. 风险与回退
+
+| # | 风险 | 触发信号 | 回退 / 预案 |
 |---|---|---|---|
-| FM1 | 计划门形同虚设：plan-reviewer 判 `replan` 后，三个 worker 仍被派发 | replan 轮次里 `briefings` 中不含任何 `worker-N`；planner 被重新激活且只被激活 | 把 worker 规格里的 `when` 字段删掉，同一断言必须**失败** |
-| FM2 | synth 的 `fail` 落进死写法：路由没生效或被 `invalid_result` 挡下 | 事件流出现 `graph.rework { from: 'synth', to: ['worker-1','worker-2','worker-3'] }`，三个 worker 的 `briefings` 各自 +1 | 把 case 从 `'fail'` 改成未声明的 `'nope'`，必须被拒（`Router must return a declared case`） |
-| FM3 | 批量返工退化成单点返工：只重跑被判不合格的那一条 | 同上 `to` 数组恰好三条、顺序稳定 | 只留一条 `loops` 条目，断言必须失败 |
-| FM4 | 人工验收门被绕过：synth 判 fail 后 `deliver` 仍 ready/被派发 | fail 轮次后 `deliver` 的派发次数为 0；只有 synth 判 pass 之后才出现一次 | 把 acceptance 的 `checkNode` 从 `deliver` 摘掉，验收项不再成立（用例会红） |
+| R1 | `multiview` 配置与依赖不匹配（`dimensions[].reportNode` 不在 `reportNodes`、或 report 节点不是 `pass` 的可达依赖） | `validateProposal` 抛 `invalid_proposal`：`Dimension reportNode must be listed in reportNodes` / `Verifier reports must be current dependencies` | 直接对照 §3 的 `pass` 节点逐字恢复（候选图已实测 ACCEPTED）；不要自己发明依赖结构 |
+| R2 | `loops[].case` 写错或漏写：写错 → 整张提案被拒；漏写 → 校验期合法但运行时**死边** | 前者报 `A loop case must name a branch the router declared`；后者只有新用例会红 | 恢复 `pass` 的 `routes: ['yes','no']` 与两条 `case`（`'no'` / `'replan'`）；新用例第 1、2 条断言就是防这个 |
+| R3 | 把 worker 写成 v40 那样 `when: {node:'plan-reviewer', case:'accept'}`（计划放行才开工） | 新用例第 2 条断言红（`worker.when` 应为 `undefined`） | 删掉 worker 的 `when`；本图要的是**并列**车道，不是放行门 |
+| R4 | 判定节点写成 `byStatus`（validator 不会拒，但返工分支是死代码） | 新用例第 3 条断言红（`pass.input.route` 不等于 `byField`） | 改回 `byField: { path: 'outcome', values: { pass:'yes', rework:'no' } }` |
+| R5 | 文档改了整图却留下「这段不受测」的旧说法 | 第 315/509/542 行的 `grep` 仍命中「不受测/不被测」 | 按步骤 C.2 的三处逐条改；这是 reviewer-2 的规格符合性验收点 |
+| R6 | 新用例因环境（依赖没链接 / vitest 找不到）而红，被误当成「先红后绿」的合法红 | 报错是模块解析或 `vitest: not found` | 先 `cp -al /Users/macmini/workspace/13-Graph/node_modules node_modules`（F3），确认基线 `2 passed` 后再进入步骤 B |
+| R7 | 顺手把完整门 `node --run check` 当验收门 | 出现 127 failed / 1541 一类的环境失败 | **门只认** `node --run test:design-examples`（F11）；完整门在本工作副本里本来就不成立，不要为它改别人的测试 |
+| R8 | 越界改动（`src/**`、v40 整图、简单/中等档、`complex-tier-shape.test.ts`） | `git diff --stat` 出现第四个文件 | 立刻 `git checkout HEAD -- <越界文件>`；越界改动不会落地，且会被 reviewer 判不通过 |
 
-**步骤**
-
-1. 照 `tests/console/complex-tier-shape.test.ts` 的骨架搭夹具：`mkdtemp` 工作副本、`projects: [{ id, root }]`、`user.begin` 提交 v40 规格。
-2. 用 `tests/fixtures/lane.ts` 的脚本化车道替换真实模型：planner / plan-reviewer / worker-1..3 / review-1..3 / synth 各自返回合规的 `result_handoff@1`；`plan-reviewer` 与 `synth` 按用例给定的 `route` 序列返回分支。
-3. **先只写 FM1**，跑它，确认它**因为 worker 真的被派发而红**（不是因为别的错）；再补 FM2/FM3/FM4，同样逐个先红后绿。
-4. 每条断言都配上面那一列阴性对照，全部保留在同一个用例文件里。
-5. 用 `settle(...)` 轮询结算；不要用固定 sleep。
-
-**验证命令**
-
-```sh
-cp -al "<主仓>/node_modules" node_modules        # 仅当本车道工作树还没有 node_modules
-node --run typecheck && node --run lint
-node --run test -- tests/console/complex-tier-v40.test.ts     # 目标用例
-node --run check                                              # 收尾一次，exit 0
-```
-
-**完成判据**：`node --run check` exit 0；四条 FM 各自有「红→绿」两段记录；阴性对照全在文件里且注释说明了它们各自防住哪种退化。
-
-**明确不做**：不改 `src/**`。若 FM 撞出真实运行时缺陷（断言红了且原因不在用例写法），**不要自行改 src**——把红测试、最小定位（文件:行）、修法建议写进报告，由 synth 判 fail 触发返工或由主 Agent 决定是否扩大范围。
+**统一回退方式**：本轮改动只落在 3 个文件、且是**加性**的（新增一段整图 + 新增一个用例 + 新增一行脚本）。任一步走坏，`git checkout HEAD -- docs/design-graph-examples.md tests/console/design-examples.test.ts package.json` 即回到基线 `201458e`（F12），不会牵连别的车道。
 
 ---
 
-### 车道 2 — worker-2：可照抄的文档（复杂档章节改写为 v40）
+## 5. 交付物与证据清单（worker 提交 `result` 时按这张表收）
 
-**独占文件**：`docs/design-graph-examples.md`、`deliverables/v40-doc-notes.md`
-
-**目标**：让 main agent 照着这一节就能画出 v40 这张图，而且**这段 JSON 一定能被 validator 接受**。
-
-**步骤**
-
-1. 在 `docs/design-graph-examples.md` 的复杂档一节里，把「完整初稿」换成 **v40 的 JSON**（照本任务 proposal 的形状：planner / plan-reviewer(routes accept|replan) / worker-1..3(各自 `when:{node:'plan-reviewer',case:'accept'}`) / review-1..3 / synth(agent 路由器，`route.declared: null`) / deliver(`graph.human_check`)；`loops` 四条：`plan-reviewer--replan-->planner` 与 `synth--fail-->worker-1/2/3`；`acceptance` 只绑 `deliver`）。
-2. 加一张「**和 `graph.verify` 形状差在哪**」的表（就是本文件 §1 那张的精简版），点明：**多个回边打同一个 case 就是批量返工**；`when` 才是「计划放行才开工」；验收只挂人工门时，主 Agent 的 `review_human_check` 是唯一的前置审查。
-3. 硬规则一节补三条（每条都要有一句「不这么写会怎样」）：
-   - agent 路由器自判分支要写 `input.route.declared: null`，写死等于固定路由；
-   - 跨 agent 的边必须在 `context.predecessors` 声明 `mode`；
-   - `when` 引用的 case 必须是那个路由器 `routes` 里声明过的，否则整个提案被拒。
-4. **保留**旧的 `graph.verify` 写法一小段并注明适用场景（多视角 + 一个机械判定节点），不要删——那是另一种合法形状。
-5. 同步更新文档开头的档位一句话说明（如有需要），但**不要**动简单档与中等档两节。
-
-**验证命令**
-
-```sh
-node --run test -- tests/console/design-examples.test.ts     # 每个 JSON 块都要被 validateProposal 接受
-node --run typecheck && node --run lint
-node --run check                                              # 收尾一次，exit 0
-```
-
-**完成判据**：`design-examples.test.ts` 全绿（这等于「新 JSON 被产品自己的 validator 接受」）；文档里每条机制说法都能指回 §1 表中的证据或车道 3 的对照件；`git diff --stat` 显示只动了这一个文档。
-
-**明确不做**：不改测试文件；不删 `tests/console/complex-tier-shape.test.ts`（它是旧形状的对照，别人的车道文件）；不改 `package.json` 与 `docs/architecture.md`。
-
----
-
-### 车道 3 — worker-3：机制对照与证据表（让文档的每句话都可核）
-
-**独占文件**：`notes/complex-tier-v40-mechanisms.md`、`deliverables/v40-mechanisms-report.md`
-
-**目标**：一张表，把**使用者的需求原文**逐句映射到「图里的字段 → 运行时强制它的代码位置 → 哪个测试钉住它」，并诚实标出**哪些箭头目前还没有独立证据**。
-
-**步骤**
-
-1. 逐句拆需求（planner 出计划 / 审不过返工 / 放行才分发 / 三个 worker 各一成果各一评审 / synth 收齐三评审写汇总自判 / fail 三条回边全部返工 / 通过后人工验收先主 Agent 审证据 / 全节点 space-bunny-free），每句一行：
-
-   | 需求原句 | 图里的字段 | 运行时强制点 | 钉住它的测试 | 证据强度 |
-   |---|---|---|---|---|
-
-2. 「证据强度」只用三档：**实测**（有绿测试）/ **静态**（只有代码路径，未有测试）/ **未覆盖**（没有强制点，或强制点与需求不符）。**不许把「静态」写成「实测」**。
-3. 专门用一节写 **v40 相对旧形状新引入的三个机制点**及各自的坑：
-   - `when` 门加的是依赖不是阻断（`src/core/graph.ts:33-45`）；
-   - 同 `from` 同 `case` 的多条 loop 是**同时**触发的（`operation-lifecycle.ts:1114` 的 `filter`）；
-   - 验收只绑 `graph.human_check` 时，主 Agent 的 `review_human_check` 是唯一的前置审查（`agent-tool-definitions.ts:261`）。
-4. 结尾给「**本次交付之后仍然未覆盖的**」清单，每条写清楚补它需要哪个测试。
-5. 报告 `deliverables/v40-mechanisms-report.md`：表格摘要 + 未覆盖清单 + 本车道跑过的命令与 exit code。
-
-**验证命令**
-
-```sh
-node --run typecheck && node --run lint
-node --run check                                              # 收尾一次，exit 0
-```
-
-**完成判据**：表里每一行的「运行时强制点」都能在仓库里 grep 到；「钉住它的测试」列若写「无」，必须与第 4 节的未覆盖清单一致（两处对不上就是缺陷）；全表零处把静态证据写成实测。
-
-**明确不做**：不改任何 `src/**` 或 `tests/**`；不改文档（车道 2 的文件）。
-
----
-
-## 3. 三条车道共享的约定
-
-- **仓库规则**：改代码前先读 `docs/architecture.md`、`docs/implementation-plan.md`、`docs/graph-mvp.md`；提交前必须 `node --run check` 绿（`docs/agents/checks.md`）。
-- **测试纪律**（R22/R24）：先写会失败的用例，看它**因为正确的原因**失败，再写实现/夹具；一车道只跑一次全量 `check`，其余用定向 vitest。
-- **测试层级**（R27）：优先 E2E/黑盒，每条断言都从公开行为（事件流、派发记录、节点状态）看，**不断言私有变量或内部函数**；阴性对照必须留在文件里。
-- **隔离**：每条车道只许动自己那两三个文件。碰到别人的文件就写进报告，不要替对方改。
-- **工作树依赖**：本车道工作树若没有 `node_modules`，先 `cp -al "<主仓>/node_modules" node_modules`（硬链接），**不要手工软链**。
-- **证据**：`node --run check` 的 exit code 与 `Test Files` / `Tests` 计数原文贴进自己的报告；失败就贴失败输出，不要只写一句「有红」。
-- **截图类证据**：本轮不更新 `docs/planning/acceptance-evidence/`，不要跑 `GRAPH_UPDATE_EVIDENCE=1`。
-
-## 4. 风险与预案
-
-| 风险 | 预案 |
-|---|---|
-| 车道 1 撞出运行时缺陷（如 `when` 不阻断下游、批量回边只触发一条） | 车道 1 不改 src；写红测试 + 定位 + 修法建议进报告，交给 synth 判 fail 返工或主 Agent 定夺 |
-| 车道 2 改文档时把 JSON 写成 validator 不接受的样子 | `design-examples.test.ts` 就是这道机械门，改完必须跑；红了就按拒绝信息改 |
-| 三条车道结论互相矛盾（例如车道 2 写了机制、车道 3 说未覆盖） | synth 的职责就是把三份评审对齐；矛盾必须显式列出，不许含糊过去 |
-| 全量 check 在工作树里因环境红 | 记下原始失败文件清单，证明**加自己的文件前后一致**（这是本仓已有的标准做法），不要为了变绿去改别人的测试 |
-
-## 5. 交付物清单（synth 汇总时按这张表收）
-
-| 车道 | 主文件 | 报告 |
+| 交付物 | 路径 | 验收点 |
 |---|---|---|
-| worker-1 | `tests/console/complex-tier-v40.test.ts` | `deliverables/v40-shape-e2e.md` |
-| worker-2 | `docs/design-graph-examples.md` | `deliverables/v40-doc-notes.md` |
-| worker-3 | `notes/complex-tier-v40-mechanisms.md` | `deliverables/v40-mechanisms-report.md` |
+| 文档整图 | `docs/design-graph-examples.md` | `node --run test:design-examples` exit 0；`grep -n jsonc` 无「不受测」断言 |
+| 钉箭头的用例 | `tests/console/design-examples.test.ts` | 新用例先红（找不到 `pass` 整图）后绿；现有 2 个用例仍绿 |
+| 宿主门脚本 | `package.json` | `node --run test:design-examples` 可执行 |
+| 证据 | worker `result` 摘要 | 三条命令原文 + exit code + `git diff --stat` |
+
+**给三个视角评审的对照物**：本计划 §1 的事实表、§3 的候选整图、§4 的风险表，分别是「正确性」「规格符合性」「可复核性」三份评审各自该独立复核的靶子——reviewer-3 尤其要**自己重跑** `node --run test:design-examples`，不要引用 worker 的输出当自己的证据。
