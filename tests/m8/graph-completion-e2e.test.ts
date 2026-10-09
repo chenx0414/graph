@@ -54,9 +54,13 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
   test('a submits, the delivery queues b, b submits by its own real process, and the graph drains', async () => {
     // The controlled model serves both nodes in order: a submits 42, then b submits 43.
     const provider = await openaiServer([
-      { tools: [{ id: 'c1', name: 'submit', arguments: JSON.stringify({ outputs: { out: { enable: true, value: { n: 42 } } } }) }], finishReason: 'tool_calls' },
+      // a's first call puts its output somewhere other than `outputs` — the exact shape a real
+      // node repeated 493 times on 2026-09-27. The refusal has to name the argument, because a
+      // model that reads "out was not enabled" believes it already enabled out and repeats.
+      { tools: [{ id: 'c1', name: 'submit', arguments: JSON.stringify({ verdict: { outputs: { out: { enable: true, value: { n: 42 } } } } }) }], finishReason: 'tool_calls' },
+      { tools: [{ id: 'c2', name: 'submit', arguments: JSON.stringify({ outputs: { out: { enable: true, value: { n: 42 } } } }) }], finishReason: 'tool_calls' },
       { text: 'a done.' },
-      { tools: [{ id: 'c2', name: 'submit', arguments: JSON.stringify({ outputs: { done: { enable: true, value: { n: 43 } } } }) }], finishReason: 'tool_calls' },
+      { tools: [{ id: 'c3', name: 'submit', arguments: JSON.stringify({ outputs: { done: { enable: true, value: { n: 43 } } } }) }], finishReason: 'tool_calls' },
       { text: 'b done.' },
     ]);
     cleanup.push(() => provider.close());
@@ -83,6 +87,8 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
 
     // One real host per node, exactly as §7 requires: the lane asks for a host per node, and
     // this spawns a real resident worker whose submit crosses the process boundary.
+    // Every tool result the nodes saw, so the refusal's own words can be asserted.
+    const seen: { node: string; text: string }[] = [];
     const hosts = new Map<string, ResidentHost>();
     const hostFor = (nodeId: string) => {
       const host = new ResidentHost({
@@ -109,9 +115,11 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
           const bridge = new NodeSubmitBridge(kernel, execution.id);
           const request = args as { outputs: Record<string, { enable?: boolean; value?: unknown }> };
           const receipt = bridge.submit({ outputs: request.outputs, submissionId: `s-${execution.id}` });
-          return receipt.accepted
+          const result = receipt.accepted
             ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
             : { ok: false, text: bridge.refusalMessage(receipt) };
+          seen.push({ node: nodeId, text: result.text });
+          return result;
         },
       });
       cleanup.push(() => host.stop());
@@ -153,5 +161,17 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
 
     // 4. Real model turns crossed the HTTP boundary, for both nodes.
     expect(provider.requests.length).toBeGreaterThanOrEqual(2);
+
+    // 5. A call that carries no `outputs` object is refused for its ARGUMENT SHAPE, not told
+    // that its output was not enabled. A model can only correct what the refusal names, and
+    // "out (missing_required_output): expected enable:true" reads as "enable out" to a model
+    // that already believes it did — that misreading is what repeated 493 times.
+    const first = seen.find(entry => entry.node === 'a')!;
+    expect(first.text).toContain('submit refused');
+    expect(first.text).toContain('outputs');
+    expect(first.text).not.toContain('missing_required_output');
+
+    // 6. The malformed call did not consume the one valid submission: a still submitted 42.
+    expect(seen.filter(entry => entry.node === 'a' && entry.text.includes('"accepted":true')).length).toBe(1);
   }, 60_000);
 });
