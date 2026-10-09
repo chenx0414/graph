@@ -98,6 +98,64 @@ function classify(error: RuntimeError): { defects: SubmitDefect[]; missingRequir
   return { defects: [{ code: error.code, path: '(submission)', expected: 'a valid submission', got: message }], missingRequired: [] };
 }
 
+/**
+ * The §5 refusal text: short, field-level, and explicit that the work already done stands
+ * (§5, §7 — do not redo the implementation for a bad field). One place, because a node's
+ * ability to correct itself depends on this wording.
+ */
+export function refusalText(defects: SubmitDefect[]): string {
+  return [
+    'submit refused: the kernel cannot accept this submission yet.',
+    ...defects.map(d => `- ${d.path} (${d.code}): expected ${d.expected}; got ${d.got}`),
+    'Correct these fields and submit again with the same work. Do not redo or rewrite the implementation; whatever you already wrote stays in place.',
+  ].join('\n');
+}
+
+/**
+ * The argument contract of the `submit` tool: exactly `{"outputs": {...}}`.
+ *
+ * Reading the arguments is the host's job and it must not be forgiving here. `args.outputs ?? {}`
+ * turns a call that put its outputs under some other key into an empty submission, and the kernel's
+ * honest reply to that is "required output not enabled" — which reads to a model that believes it
+ * enabled the output as "enable it", so it repeats the identical call. Observed live on 2026-09-27:
+ * 493 provider calls on one execution before the node was paused by hand. Naming the argument is
+ * what makes the correction possible in one round.
+ */
+export function readSubmitCall(args: unknown): { outputs: SubmitOutputSet } | { defect: SubmitDefect } {
+  const record = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
+  const outputs = record.outputs;
+  if (outputs === undefined || outputs === null || typeof outputs !== 'object' || Array.isArray(outputs)) {
+    const sent = Object.keys(record);
+    return {
+      defect: {
+        code: 'malformed_arguments',
+        path: sent.length > 0 ? sent.join(', ') : 'submit',
+        expected: '{"outputs":{"<output name>":{"enable":true,"value":<value>}}}',
+        got: outputs === undefined ? 'a call with no outputs key' : `outputs of type ${Array.isArray(outputs) ? 'array' : typeof outputs}`,
+      },
+    };
+  }
+  return { outputs: outputs as SubmitOutputSet };
+}
+
+/**
+ * The whole host side of one `submit` tool call, in one place so a caller cannot drift from
+ * production — the E2E fixture did exactly that (its copy read `args.outputs` while production
+ * read `args.outputs ?? {}`), which is why the defect above was never covered by a test.
+ */
+export function hostSubmitCall(kernel: KernelStore, taskId: string, nodeId: string, args: unknown): { ok: boolean; text: string } {
+  const execution = kernel.db
+    .prepare('SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1')
+    .get(taskId, nodeId) as { id: string } | undefined;
+  if (!execution) return { ok: false, text: 'no execution is running for this node' };
+  const call = readSubmitCall(args);
+  if ('defect' in call) return { ok: false, text: refusalText([call.defect]) };
+  const receipt = new NodeSubmitBridge(kernel, execution.id).submit({ outputs: call.outputs, submissionId: `v2-${execution.id}` });
+  return receipt.accepted
+    ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
+    : { ok: false, text: refusalText(receipt.defects) };
+}
+
 export class NodeSubmitBridge {
   readonly executionId: string;
   readonly nodeId: string;
@@ -155,10 +213,6 @@ export class NodeSubmitBridge {
    */
   refusalMessage(receipt: BridgeReceipt): string {
     if (receipt.accepted) throw new RuntimeError('invalid_submit', 'There is no refusal to describe');
-    return [
-      'submit refused: the kernel cannot accept this submission yet.',
-      ...receipt.defects.map(d => `- ${d.path} (${d.code}): expected ${d.expected}; got ${d.got}`),
-      'Correct these fields and submit again with the same work. Do not redo or rewrite the implementation; whatever you already wrote stays in place.',
-    ].join('\n');
+    return refusalText(receipt.defects);
   }
 }

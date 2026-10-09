@@ -8,7 +8,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { KernelStore } from '../../src/core/kernel-store.ts';
 import { NodeQueue } from '../../src/core/node-queue.ts';
-import { NodeSubmitBridge } from '../../src/core/node-submit-bridge.ts';
+import { hostSubmitCall } from '../../src/core/node-submit-bridge.ts';
 import { GraphLane } from '../../src/core/graph-lane.ts';
 import { ResidentHost } from '../../src/runtime/resident-host.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
@@ -107,17 +107,12 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
           allowedToolNames: ['submit'],
           bundleDigest: 'e2e-bundle', toolPolicyDigest: 'e2e-tools', runtimePolicyDigest: 'e2e-runtime',
         },
-        // The host owns the submit: it binds the real execution and writes the real kernel.
+        // The host owns the submit: it runs the production path itself, not a copy of it. The copy
+        // that used to live here drifted (it read `args.outputs` while production read
+        // `args.outputs ?? {}`), and that drift is why the malformed-argument defect had no test.
         onToolCall: (name, args) => {
           if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
-          const execution = kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id='g1' AND node_id=? ORDER BY rowid DESC LIMIT 1").get(nodeId) as { id: string } | undefined;
-          if (!execution) return { ok: false, text: 'no execution is running for this node' };
-          const bridge = new NodeSubmitBridge(kernel, execution.id);
-          const request = args as { outputs: Record<string, { enable?: boolean; value?: unknown }> };
-          const receipt = bridge.submit({ outputs: request.outputs, submissionId: `s-${execution.id}` });
-          const result = receipt.accepted
-            ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
-            : { ok: false, text: bridge.refusalMessage(receipt) };
+          const result = hostSubmitCall(kernel, 'g1', nodeId, args);
           seen.push({ node: nodeId, text: result.text });
           return result;
         },

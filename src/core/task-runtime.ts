@@ -36,7 +36,7 @@ import { graphManagement } from './graph-service.ts';
 import { KernelStore } from './kernel-store.ts';
 import { parseGraphDefinition } from './interface-spec.ts';
 import { DEFAULT_V2_RESERVE_TOKENS, kernelGraphLane } from '../runtime/kernel-graph-lane.ts';
-import { NodeSubmitBridge } from './node-submit-bridge.ts';
+import { hostSubmitCall } from './node-submit-bridge.ts';
 import { validateProposal } from './proposal.ts';
 import { createActivation, hasLockedQuestion } from './main-node-state.ts';
 import { nodeRun as nodeRunView } from './node-run.ts';
@@ -544,17 +544,10 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         artifacts,
         workspaceFor: projectRootFor(store),
         onMainMessage: async (graphId, nodeId, message) => sendKernelMainMessage(kernel, graphId, nodeId, message),
-        onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) => {
-          if (name !== 'submit') return { ok: false, text: `the host does not offer a tool named ${name}` };
-          const execution = store.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
-          if (!execution) return { ok: false, text: 'no execution is running for this node' };
-          const bridge = new NodeSubmitBridge(kernel, execution.id);
-          const request = args as { outputs: Record<string, { enable?: boolean; value?: unknown }> };
-          const receipt = bridge.submit({ outputs: request.outputs ?? {}, submissionId: `v2-${execution.id}` });
-          return receipt.accepted
-            ? { ok: true, text: JSON.stringify({ accepted: true, deliveries: receipt.deliveries.length }) }
-            : { ok: false, text: bridge.refusalMessage(receipt) };
-        },
+        onToolCall: (graphId: string, nodeId: string, name: string, args: unknown) =>
+          name !== 'submit'
+            ? { ok: false, text: `the host does not offer a tool named ${name}` }
+            : hostSubmitCall(kernel, graphId, nodeId, args),
       })).runnable(),
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),

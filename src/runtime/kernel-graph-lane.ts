@@ -366,8 +366,24 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters,
         })), {
           name: 'submit', label: 'Submit',
-          description: 'Submit this node required outputs through the graph kernel.',
-          parameters: { type: 'object' } as never,
+          // The argument shape is part of the contract, not a detail the model has to guess: a
+          // call that puts its outputs anywhere else is refused by name (HB-324).
+          description: 'Submit this node\'s required outputs to the graph kernel. Call it as {"outputs":{"<output name>":{"enable":true,"value":<value>}}}; every required output must appear with enable:true.',
+          parameters: {
+            type: 'object',
+            properties: {
+              outputs: {
+                type: 'object',
+                description: 'One entry per output this node declares; enable:true for the required ones.',
+                additionalProperties: {
+                  type: 'object',
+                  properties: { enable: { type: 'boolean' }, value: {} },
+                  required: ['enable'],
+                },
+              },
+            },
+            required: ['outputs'],
+          } as never,
         }],
         nativeTools: [...(session.operation?.nativeTools ?? [])],
         skillPaths: [...(session.operation?.skillPaths ?? [])],
