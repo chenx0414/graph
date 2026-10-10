@@ -164,12 +164,11 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
     // A finite node still holds, and an inflight call always does.
     store.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at) VALUES(?,?,?,?,?,?,?)')
       .run('call-unknown', 'g1', 'a', 'exec-gone', 1000, 'unknown', Date.now());
+    // A node with an explicit budget keeps the call as a real hold.
+    store.db.prepare("UPDATE kernel_node_state SET authorized_budget=1000000 WHERE task_id='g1' AND node_id='a'").run();
     expect(graphAcceptance(kernel, 'g1').drained).toBe(false);
-    // The instance row is synthetic: instances also references the legacy nodes table, which this
-    // kernel never uses, so foreign keys are off for this one fixture row only.
-    store.db.exec('PRAGMA foreign_keys=OFF;');
-    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,definition_version,model,models_used,unlimited) VALUES('i-a','g1','a',0,0,'a@1','m','[]',1)").run();
-    store.db.exec('PRAGMA foreign_keys=ON;');
+    // No explicit cap (the native default) means the documented rule: keep usage null, do not hold.
+    store.db.prepare("UPDATE kernel_node_state SET authorized_budget=NULL WHERE task_id='g1' AND node_id='a'").run();
     expect(graphAcceptance(kernel, 'g1').drained).toBe(true);
     store.db.prepare("UPDATE kernel_provider_calls SET state='inflight' WHERE id='call-unknown'").run();
     expect(graphAcceptance(kernel, 'g1').drained).toBe(false);

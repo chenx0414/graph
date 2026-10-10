@@ -120,17 +120,18 @@ export function graphAcceptance(kernel: KernelStore, graphId: string, artifacts?
     EXISTS(SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND processed=0) OR
     EXISTS(SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0) OR
     EXISTS(SELECT 1 FROM questions WHERE task_id=? AND status='open') OR
-    -- An unknown provider call is a hold only where it really is one. For a node with no token
-    -- cap the documented rule is the opposite: keep usage null and the unknown cost, and still
-    -- allow later requests and workspace_commit (docs/agent/graph-v2.md, unknownUsageIsNonBlocking).
-    -- Counting those as pending pins such a graph in blocked forever: on 2026-09-27 an accepted
-    -- graph whose only debt was 40 interrupted calls could never be delivered, while the harness
-    -- raised no unknown_usage question for any of them, proof it never treated them as a hold.
-    -- Inflight still blocks: a model call that is really running is not a drained graph.
+    -- An unknown provider call is a hold only where it really is one. For a native node with no
+    -- authorized budget the documented rule is the opposite: keep usage null and the unknown cost,
+    -- and still allow later requests and workspace_commit (docs/agent/graph-v2.md). Counting those
+    -- as pending pins such a graph in blocked forever: on 2026-09-27 an accepted graph whose only
+    -- debt was 40 interrupted calls could never be delivered, while the harness raised no
+    -- unknown_usage question for any of them, proof it never treated them as a hold. The native
+    -- ledger is kernel_node_state.authorized_budget (null or 0 = no explicit cap = unlimited), not
+    -- the legacy instances table, which holds master instances only. Inflight still blocks: a model
+    -- call that is really running is not a drained graph.
     EXISTS(SELECT 1 FROM kernel_provider_calls c
-             LEFT JOIN kernel_nodes n ON n.task_id=c.task_id AND n.node_id=c.node_id
-             LEFT JOIN instances i ON i.id=n.instance_id
-            WHERE c.task_id=? AND (c.state='inflight' OR (c.state='unknown' AND COALESCE(i.unlimited,0)=0)))`)
+             LEFT JOIN kernel_node_state s ON s.task_id=c.task_id AND s.node_id=c.node_id
+            WHERE c.task_id=? AND (c.state='inflight' OR (c.state='unknown' AND COALESCE(s.authorized_budget,0) <> 0)))`)
     .get(graphId, graphId, graphId, graphId, graphId, graphId, graphId);
   const drained = !pending;
   const receipt = kernel.db.prepare('SELECT commit_sha FROM kernel_completion_delivery WHERE task_id=?').get(graphId) as { commit_sha: string } | undefined;
