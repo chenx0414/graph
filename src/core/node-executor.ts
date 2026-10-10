@@ -298,7 +298,11 @@ export class NodeExecutor {
         // node here rather than let it pass with the work missing.
         const settled = item.kind === 'chat' ? { ok: true as const } : await this.settleDeliverable(executionId, nodeId);
         if (!settled.ok) { releaseHold(); return this.fail(executionId, nodeId, seq, settled.reason); }
-        if (item.kind !== 'chat' && this.options.settleWorkspace) {
+        // A chat execution is not a delivery, so its DELIVERABLE stays unsettled (HB-322), and a chat turn
+        // that only edited the working tree must not push that draft into the integration (kernel-git-integration
+        // asserts exactly that). But a chat item declares no required outputs, so a node CAN submit there:
+        // once it really submitted, that commit is work it believes it delivered, and dropping it loses it.
+        if (this.options.settleWorkspace && (item.kind !== 'chat' || this.hasValidSubmission(executionId))) {
           try { await this.options.settleWorkspace(executionId); }
           catch (error) { return this.fail(executionId, nodeId, seq, error instanceof Error ? error.message : String(error)); }
         }
