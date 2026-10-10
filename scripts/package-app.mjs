@@ -43,6 +43,17 @@ await writeFile(join(stage, 'package.json'), `${JSON.stringify({
 }, null, 2)}\n`);
 
 for (const [from, to] of [
+  ['AGENTS.md', 'AGENTS.md'],
+  ['.agents/skills', '.agents/skills'],
+  ['.agents/matt-skills-lock.json', '.agents/matt-skills-lock.json'],
+  ['.agents/matt-skills-LICENSE', '.agents/matt-skills-LICENSE'],
+  ['CODING_STANDARDS.md', 'CODING_STANDARDS.md'],
+  ['CONTEXT.md', 'CONTEXT.md'],
+  ['docs/agents', 'docs/agents'],
+  ['docs/adr', 'docs/adr'],
+  ['docs/architecture.md', 'docs/architecture.md'],
+  ['docs/implementation-plan.md', 'docs/implementation-plan.md'],
+  ['docs/graph-mvp.md', 'docs/graph-mvp.md'],
   ['docs/agent', 'docs/agent'],
   ['docs/design-graph-examples.md', 'docs/design-graph-examples.md'],
   ['docs/specs/graph-rebuild-v2.md', 'docs/specs/graph-rebuild-v2.md'],

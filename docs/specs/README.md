@@ -8,6 +8,6 @@
 - 之后：`/to-tickets` 把规格拆成 GitHub Issues，**每条 issue 都要指回这份规格**
   （正文里写 `docs/specs/<slug>.md` 或 slug）并带上分诊标签。
 - 校验：`node scripts/matt-flow.mjs <slug> --stage spec|tickets|implement|review`
-  （契约见 `docs/agents/matt-flow.md`）。
+  （阶段用途与限制见 [Matt 流程](../agents/matt-flow.md#阶段用途与派发)）。
 
-规格是从想法到任务之间的**唯一交接物**：换 Agent、换会话，都只读这份文件，不靠上下文记忆。
+跨会话交接时提供规格、关联任务及已有实现提交；规格描述产品契约，任务描述执行与阻塞关系，提交提供实际改动。

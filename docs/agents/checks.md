@@ -1,21 +1,10 @@
-# 仓库检查
+# 检查操作指南
 
-提交或推送前运行：
-
-```sh
-node --run check
-```
-
-该命令依次执行：
-
-1. 主应用与 Web 的 TypeScript 检查。
-2. `expect(...).resolves` / `expect(...).rejects` 必须 `await` 的机械检查。
-3. 全量 Vitest。
-4. 验收截图等 `docs/planning/acceptance-evidence/` 内容是否被普通测试改写。
+提交、推送与证据保护规则见 [工程规范：验证与交付](../../CODING_STANDARDS.md#验证与交付)。以下操作按需读取。
 
 ## 验收证据
 
-普通测试把截图写到测试临时目录，不覆盖 tracked evidence。只有明确要更新交付截图时才运行：
+明确要更新交付截图时运行：
 
 ```sh
 GRAPH_UPDATE_EVIDENCE=1 node --run test
@@ -39,7 +28,7 @@ git config core.hooksPath .githooks
 
 ## 测试夹具
 
-驱动 graph 行为时复用 `tests/fixtures/native-worktree-graph.ts` 的真实 Pi/Git 环境，或 `native-patterns.ts` 的正式定义；对应 owner 测试提供受控 provider。节点输出通过真实 `submit` 写入投递，完成与提交分开；初始输入显式发送，队列串行。旧脚本化 DAG lane 夹具已无调用并移除。
+编写任务图测试前读取并复用 [原生图工作副本夹具](../../tests/fixtures/native-worktree-graph.ts)与 [图模式定义](../../tests/fixtures/native-patterns.ts)的接口与文件头约束。
 
 ## 在 Git 工作树里验证
 
@@ -50,8 +39,6 @@ cp -al <主仓库>/node_modules <工作树>/node_modules
 ```
 
 硬链接是工作树内的真实条目，不会越出工作树。不要手工 `ln -s` 指向主仓库的 `node_modules`：Graph 自己的工作副本由宿主建立链接，并把解析后的真实路径作为沙箱读取授权交给 Agent（见 ADR 0027）；手工链接没有这份授权，沙箱内的 Agent 子进程会以模块解析失败告终。
-
-全量检查不依赖预先构建的 `dist/web`：需要页面的用例在 `beforeAll` 里把 Web 构建到临时目录，只起守护进程的用例写一个桩 `index.html`（`tests/console/daemon-console.test.ts` 守住这条）。
 
 ## 会话回溯
 

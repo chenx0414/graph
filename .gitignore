@@ -31,7 +31,10 @@ __pycache__/
 .playwright-mcp/
 skills-lock.json
 .worktrees/
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/matt-skills-lock.json
+!.agents/matt-skills-LICENSE
 
 # App packaging staging
 .stage/

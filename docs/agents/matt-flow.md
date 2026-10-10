@@ -1,11 +1,10 @@
 # Matt 流程（文档驱动）
 
-这条流程把「对齐想法 → 定稿设计 → 拆任务 → 实现 → 审查」变成**一串文件**，而不是一串会话记忆：
-换 Agent、换会话、换模型，都只读这些文件。前三步（grill / spec / tickets）由 **main Agent** 做，
-后两步（implement / review）由**独立 Agent** 做（本文件的「谁来跑」一节）。
-当两条车道撞在同一处时，**合流 Agent** 只做「把两侧合成一份」这一件事。
+这份文档定义本项目规格、任务、实现与审查的文件契约。选择技能先使用 `/ask-matt`；工程规则读取 [CODING_STANDARDS.md](../../CODING_STANDARDS.md)，技能来源与本地适配见 [harness 维护](harness.md)。
 
-三个 Agent（控制台里可见，可被我当 subagent 调用）：
+首次构建由 main 整理规格与任务，再派发实现和独立审查。跨会话使用规格、关联任务与提交作为交接依据；合流仅处理实际发生的冲突。
+
+项目使用的三个 Agent 配方如下；派发前在运行应用的配方库中核对其实际发布版本与能力绑定：
 
 | 配方 | 名字 | 身份 | 绑定 | grade / 审查 |
 | --- | --- | --- | --- | --- |
@@ -19,7 +18,7 @@
 | --- | --- | --- |
 | `/grill-with-docs` | 共识与术语（懒创建） | 根 `CONTEXT.md`、`docs/adr/` |
 | `/to-spec` | 规格 | **`docs/specs/<slug>.md`**（必填：`# 标题`、≥1 个 `## 小节`、正文 ≥ 200 字符） |
-| `/to-tickets` | 任务 | **GitHub Issues**（`chenx0414/graph`），每条 issue 正文必须指回 `docs/specs/<slug>.md` 或 slug，并带分诊标签（见 `triage-labels.md`） |
+| `/to-tickets` | 任务 | **GitHub Issues**（`chenx0414/graph`），每条 issue 正文必须指回 `docs/specs/<slug>.md` 或 slug，并带分诊标签（见 [标签映射](triage-labels.md)） |
 | `/implement-spec` | 实现 | 该 slug 的提交/改动，**commit message 里引用 task 号 `(#<n>)`** |
 | `/code-review` | 审查 | 对照规格与任务审查变更（前提：上面三者齐备） |
 | 无 slug | 合流 | 两条车道的冲突与**两边都活着的**合并结果（前提：真的有一处冲突） |
@@ -32,7 +31,7 @@
 node scripts/matt-flow.mjs <slug> --stage spec        # 只查规格
 node scripts/matt-flow.mjs <slug> --stage tickets     # 规格 + 任务
 node scripts/matt-flow.mjs <slug> --stage implement   # 规格 + 任务 + 实现（默认）
-node scripts/matt-flow.mjs <slug> --stage review      # 四者齐备才放行
+node scripts/matt-flow.mjs <slug> --stage review      # 规格、任务、实现齐备才放行
 node scripts/matt-flow.mjs <slug> --json              # 机器可读
 node scripts/matt-flow.mjs --stage merge <ours> <ref> # 两侧真的相撞才放行
 node scripts/matt-flow.mjs --stage merge              # 看当前工作树里未完成的合并
@@ -47,25 +46,29 @@ node scripts/matt-flow.mjs --stage merge              # 看当前工作树里未
 - 离线或测试时用 `--tickets <json>` 喂一份 `gh issue list --json number,title,body,labels` 的输出，
   解析路径与线上完全一致。`gh` 不可用或未登录时**明确失败**，不会静默通过。
 
-## 谁来跑（同一份实现，三处引用）
+## 阶段用途与派发
 
-1. **main 派发前**：`node scripts/matt-flow.mjs <slug> --stage implement`；没过就先回去补 spec/tickets，
-   不要用「心里有数」替代文件。
-2. **三个 subagent 身份的第一步**：`matt-implement` 跑 `--stage implement`，`matt-review` 跑 `--stage review`，
-   `matt-merge` 跑 `--stage merge <ours> <theirs>`；没过就**拒绝开工**并说明缺哪一环。
-3. **任务图里的检查节点**（`graph.command`）：把同一命令挂成节点，让图自己拦住没有前置产物的实现：
+| 时机 | 检查 | 完成条件 |
+| --- | --- | --- |
+| 规格写完 | `--stage spec` | 规格文件满足格式要求 |
+| 首次派发实现前 | `--stage tickets` | 规格与关联任务存在 |
+| 实现产生提交后 | `--stage implement` | 规格、任务和引用任务号的实现记录可对应 |
+| 派发独立审查前 | `--stage review` | 规格、任务、实现三者齐备 |
+| 处理合并冲突前 | `--stage merge <ours> <theirs>` | 两侧确实存在冲突 |
 
-```json
-{ "id": "check-flow", "kind": "program", "action": "graph.command",
-  "dependsOn": ["impl-spec"], "input": { "command": "node", "args": ["scripts/matt-flow.mjs", "<slug>", "--stage", "implement"] } }
-```
+`implement` 已包含实现记录检查，不能用它作为首次实现的前置条件。某个已发布 Agent 配方若仍要求开工前执行该阶段，应核对并更新其身份提示；文档更新不会自动修改已发布配方。
 
-注意：检查节点在工作副本里跑，`git` 与 `gh` 都可用；若该节点需要联网读 issue，
-它属于「需要网络」的那类检查，按 `docs/agent/permissions-and-recovery.md` 的既有规则处理。
+脚本检查产物的存在与关联，不能证明任务分诊已就绪、阻塞关系已解除、实现符合规格或审查已经通过。派发 main 仍须根据 [任务平台约定](issue-tracker.md)读取任务及其阻塞关系；审查者实际运行 `/code-review`。
 
-## 不要宣称
+## Graph 中的检查
 
-- 不要说「规格已经在对话里对齐了」而不落文件——**文件不存在就是没有**。
-- 不要把 task 号只写在分支名或提交摘要里却不写进 commit message：闸门查的就是 commit message 与改动里的 `#<n>`。
+同一阶段命令可以作为 graph 的显式检查。v2 使用命令模块，声明方式读取 [Graph v2 规格](../specs/graph-rebuild-v2.md)及正在运行的应用所提供的接口文档。旧 `kind: program`、`dependsOn`、`graph.command` 示例属于旧内核格式。
+
+检查使用实际工作副本；需要读取 GitHub 时，核对该执行的 `gh`、凭据与网络能力，按 [权限与恢复](../agent/permissions-and-recovery.md)处理。
+
+## 交付证据
+
+- 共识落在规格文件中，才能作为跨会话交接依据。
+- 实现提交的 commit message 引用任务号 `#<n>`，供闸门关联任务。
 - 合流 Agent 不说「我合并好了」就算数：判定看的是 Git 里的合并提交本身，
   丢掉任何一侧、留下冲突标记、或动了冲突之外的文件，都会让合并被 `--abort` 并照旧 block。

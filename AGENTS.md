@@ -1,21 +1,5 @@
-## Agent skills
+# Agent instructions
 
-### Issue tracker
-
-任务与规格使用 GitHub Issues；操作前读取 `docs/agents/issue-tracker.md`。
-
-### Triage labels
-
-采用五个默认分诊标签；分诊前读取 `docs/agents/triage-labels.md`。
-
-### Domain docs
-
-采用 single-context 布局；探索代码前读取 `docs/agents/domain.md`。
-
-### Implementation
-
-实施功能前读取 `docs/architecture.md` 和 `docs/implementation-plan.md`；产品范围与执行规则以 `docs/graph-mvp.md` 为准。
-
-### Checks
-
-提交或推送前运行 `node --run check`；证据与 pre-push 规则见 `docs/agents/checks.md`。
+- 探索、设计、修改或审查代码，以及提交或推送前，读取 [CODING_STANDARDS.md](CODING_STANDARDS.md)，按当前工作阶段执行。
+- 操作 GitHub Issues、Pull Requests 或辨认 `#编号` 前，读取 [任务平台约定](docs/agents/issue-tracker.md)。
+- 分诊或调整分诊标签前，读取 [标签映射](docs/agents/triage-labels.md)。
