@@ -6,6 +6,9 @@
 
 ## 从这里开始
 
+- [工程规范](CODING_STANDARDS.md)：探索、实施、审查与交付的读取规则。
+- [Matt harness 维护](docs/agents/harness.md)：项目技能、工作流与本地适配的维护入口。
+
 - [Agent 文档入口](docs/agent/README.md)：源码内只读文档，覆盖 Graph 角色、执行模型、能力、恢复、Git 与自配置；运行时 Prompt 只注入入口、索引和阅读协议。
 - [使用文档](docs/usage.md)：启动、配置、数据目录、停止与排障。
 - [产品化交付报告](docs/planning/productization-reports.md)：T01–T06 的逐项验收与证据。

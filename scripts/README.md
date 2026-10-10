@@ -1,4 +1,11 @@
-# scripts/ 只读诊断脚本（diag-a / diag-b / diag-c）
+# scripts/ 诊断与维护
+
+- 提交与推送规则：[工程规范](../CODING_STANDARDS.md#验证与交付)。
+- 测试环境和依赖准备：[检查操作指南](../docs/agents/checks.md)。
+- Matt 阶段校验：[工作流契约](../docs/agents/matt-flow.md#阶段用途与派发)。
+- 技能来源与本地适配：[harness 维护](../docs/agents/harness.md)。
+
+## 只读诊断脚本（diag-a / diag-b / diag-c）
 
 三个互不依赖的诊断脚本，回答三类互不相同的问题。共同契约：
 
@@ -99,7 +106,9 @@ OK: every referenced subcommand, file path and script chain resolves.
 
 ---
 
-## 已知基线问题：`node --run test` 在工作树里红
+## 历史环境证据：66c23ef 的工作树依赖问题
+
+以下记录保留当时的实验和计数。当前环境准备以 [检查操作指南](../docs/agents/checks.md#在-git-工作树里验证)为准，不能用这份历史记录推断所有工作副本的现状。
 
 **与这三个脚本无关，是集成/工作副本的环境问题，不要当成整合质量问题。**
 

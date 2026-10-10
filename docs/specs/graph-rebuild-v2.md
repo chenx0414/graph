@@ -254,7 +254,7 @@ ADR 0004 的节点/实例一一对应及返工保留身份继续适用；ADR 001
 - 自动布局包含流水线、扇出、汇合、返工、嵌套、多同端点边；节点/折点格点对齐且边不穿节点；运行更新位置不变。
 - 边可查看历史value；模块显示等待/判断/触发/重开；多聊天窗口独立且关闭不停止进程；system prompt与实际运行一致。
 
-以公开 interface 验证行为；磁盘 SQLite、真实临时 Git、受控模型与实际 Pi 进程分别证明对应契约。截图只证明布局，不能证明调度。实施中写测试遵循 test-audit；提交或推送前必须 node --run check，并按 docs/agents/checks.md 保存证据。
+以公开 interface 验证行为；磁盘 SQLite、真实临时 Git、受控模型与实际 Pi 进程分别证明对应契约。截图只证明布局，不能证明调度。实施中写测试遵循 test-audit；提交或推送前必须 node --run check，工程与证据规则见 [CODING_STANDARDS.md](../../CODING_STANDARDS.md#验证与交付)，检查操作见 [检查指南](../agents/checks.md)。
 
 ## 15. 已确认的九项选择与实施权限
 
