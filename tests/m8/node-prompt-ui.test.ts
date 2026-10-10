@@ -1,5 +1,6 @@
 import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { TaskStore } from '../../src/core/store.ts';
+import { appendNodeEntry } from '../../src/core/node-run.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { mkdir, mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -54,7 +55,7 @@ test('native draft preview renders modules, named interfaces and the actual grap
     master: { action: 'master', definitionVersion: 'master@1', model: 'scripted' },
   });
   cleanup.push(() => server.close());
-  const conversation = await server.runtime.conversations.create({ text: 'Preview the native graph', requestId: 'create' });
+  const conversation = await server.runtime.conversations.create({ projectId: 'p', text: 'Preview the native graph', requestId: 'create' });
   const anchor = (await server.runtime.conversations.view(conversation.conversationId)).anchorTaskId;
   await server.runtime.supervisor(anchor).propose({ requirementVersion: 1, summary: 'Native draft preview',
     acceptance: [{ id: 'reviewed', description: 'Review the result', checkNode: 'gate' }],
@@ -76,6 +77,45 @@ test('native draft preview renders modules, named interfaces and the actual grap
   await expect.poll(() => page.getByTestId('graph-edge-inspector').textContent()).toContain('worker.result');
   expect(await page.getByTestId('graph-edge-inspector').textContent()).toContain('gate.review');
   expect(await page.getByTestId('graph-edge-inspector').textContent()).toContain('尚无投递');
+  const confirmed = await server.runtime.conversations.confirm(conversation.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  // The already-open draft window must become the actual runtime view, including patches.
+  await page.getByTestId('graph').waitFor();
+  await server.runtime.supervisor(confirmed.taskId).graphPatch({ graphId: confirmed.taskId, baseRevision: 1,
+    changes: { reason: 'rename interface connection', patch: { edges: { review: { enabled: false } } } } });
+  await expect.poll(() => page.getByTestId('revisions').textContent()).toContain('v2');
+  const runtimeGraph = await (await page.request.get(`${server.url}/api/tasks/${confirmed.taskId}/graph`)).json();
+  expect(runtimeGraph.interfaces[0].enabled).toBe(false);
+  await page.goto(`${server.url}/#/tasks/${confirmed.taskId}/graph`);
+  await page.locator('[data-testid="graph"]:visible').waitFor();
+  expect(await page.locator('[data-testid="revisions"]:visible').textContent()).toContain('v2');
+}, 30_000);
+
+test('a node automatically fills short collapsed history with older messages and tools', async () => {
+  const root = await temp('history');
+  const stateDir = join(root, 'state');
+  const server = await openGraphServer({ stateDir, projects: [{ id: 'p', root }], webDir, autoDrive: false });
+  cleanup.push(() => server.close());
+  const owner = await server.runtime.user.begin({ projectId: 'p', request: 'history', requestId: 'begin' });
+  const graph = await server.runtime.supervisor(owner.taskId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'history', protocols: {},
+    nodes: { work: { recipe: 'worker@1', task: 'history', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) }) as { graphId: string };
+  const disk = new TaskStore(join(stateDir, 'tasks.sqlite'));
+  try {
+    appendNodeEntry(disk, { taskId: graph.graphId, nodeId: 'work', role: 'user', kind: 'chat', text: 'Earliest node message', operationId: 'history' });
+    for (let n = 0; n < 130; n++) {
+      const data = { toolName: 'read', toolCallId: `history-${n}` };
+      appendNodeEntry(disk, { taskId: graph.graphId, nodeId: 'work', operationId: 'history', role: 'tool', kind: 'call', text: JSON.stringify({ name: 'read', args: { path: `file-${n}` } }), data });
+      appendNodeEntry(disk, { taskId: graph.graphId, nodeId: 'work', operationId: 'history', role: 'tool', kind: 'result', text: `RESULT_${n}`, data });
+    }
+    appendNodeEntry(disk, { taskId: graph.graphId, nodeId: 'work', role: 'assistant', kind: 'message', text: 'Latest history reply', operationId: 'history' });
+  } finally { disk.close(); }
+  const page = await launch();
+  await page.goto(`${server.url}/#/tasks/${graph.graphId}/nodes/work`);
+  await page.getByText('Latest history reply', { exact: true }).waitFor();
+  await expect.poll(() => page.getByTestId('node-message-list').textContent()).toContain('Earliest node message');
+  expect(await page.getByTestId('node-load-older').count()).toBe(0);
+  await page.getByRole('button', { name: '展开这一轮的思考与工具调用', exact: true }).click();
+  await page.getByRole('button', { name: '展开工具活动', exact: true }).click();
+  await page.getByText('RESULT_0', { exact: true }).waitFor({ state: 'visible' });
 }, 30_000);
 
 /**

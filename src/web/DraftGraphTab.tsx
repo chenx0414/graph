@@ -1,15 +1,11 @@
-/**
- * A draft's task graph, opened in its own window.
- *
- * The drawer used to host this board; a draft that has been confirmed has a runtime task whose
- * graph is already a tab, and a draft that has not is still worth looking at full width. This page
- * fetches the same proposal and draft-graph the drawer read, so there is one source of truth.
- */
-import { useCallback, useEffect, useState } from 'react';
+/** Unconfirmed versions preview the proposal. Once accepted, this same window
+ * shows the runtime GraphPanel and follows its revisions through completion. */
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { ConversationGraphBoard, type DraftGraph, type ProposalDetail } from './Conversation.tsx';
-import { ErrorBox, useAsync } from './shared.tsx';
+import { ErrorBox, useAsync, useEventStream } from './shared.tsx';
 import { Card, Spinner } from './ui.tsx';
+import { GraphPanel } from './GraphPanel.tsx';
 
 type ConversationView = {
   id: string;
@@ -28,6 +24,12 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
   // The window names its own version, so it reads that version's proposal rather than whichever
   // one the conversation last drafted.
   const [chosen, setChosen] = useState<ProposalDetail | null>(null);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEventStream(`/api/conversations/${conversationId}/events/stream`, () => {
+    clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(reload, 150);
+  });
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
 
   const latest = view?.proposal ?? null;
   const selected = version ?? latest?.version ?? null;
@@ -44,17 +46,19 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
   // If this draft has already been accepted, the board reads that task's live node states.
   const acceptedTaskId = view?.accepted?.find(item => item.proposalVersion === selected)?.taskId ?? null;
   const load = useCallback(async () => {
+    if (acceptedTaskId) { setGraph(null); setGraphLoading(false); return; }
     if (selected === null) { setGraph(null); setGraphLoading(false); return; }
     setGraphLoading(true);
     try {
       const payload = await api<DraftGraph>(`/api/conversations/${conversationId}/draft-graph?version=${selected}`);
       setGraph(payload);
     } catch { setGraph(null); } finally { setGraphLoading(false); }
-  }, [conversationId, selected]);
+  }, [conversationId, selected, acceptedTaskId]);
   useEffect(() => { void load(); }, [load]);
 
   if (error) return <ErrorBox message={error} onRetry={reload} />;
   if (!view) return <Card><Spinner label="正在读取草稿…" /></Card>;
+  if (acceptedTaskId) return <GraphPanel id={acceptedTaskId} />;
   if (!proposal) {
     return (
       <Card title="任务图" icon="graph">

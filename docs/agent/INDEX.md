@@ -6,10 +6,11 @@
 
 - 构建或修改 graph、处理运行失败，或配置模型与能力时，先读对应主题；解释系统事实时也使用这些文档。
 - 主题路径始终相对本文件所在目录解析，不相对业务仓库或 Agent worktree 解析。
-- 先读本索引，再读与问题直接相关的主题文件；跨文件引用必须继续跟随。
+- 建图先读 `graph-v2.md`，选择结构时读 `../design-graph-examples.md`；其他操作按下表读取直接相关主题。只继续读取解决当前操作所需的引用，不递归展开所有文档。
 - 完成相关 Markdown 文件后再下结论，不要只根据文件名或本索引猜测。
 - 本文档描述行为契约。实时状态必须通过 `read_system_capabilities`、`inspect_graph_system`、`list_problems` 和节点记录确认。
 - 不要从 `~/.graph/prompts/docs` 读取旧副本；源码内的 `docs/agent` 是唯一 Agent 文档来源。
+- system prompt 中的绝对路径来自运行中应用。业务仓库中的 Graph 文档可能属于旧版本，只用于理解被修改的项目，不能覆盖宿主的 schemaVersion:2 API。
 
 ## 主题
 

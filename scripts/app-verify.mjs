@@ -43,6 +43,11 @@ if (!roots.length) {
 const root = roots[0];
 
 let failures = 0;
+for (const path of ['docs/agent/README.md', 'docs/agent/graph-v2.md', 'docs/design-graph-examples.md', 'docs/specs/graph-rebuild-v2.md']) {
+  const present = existsSync(join(root, path)) && readFileSync(join(root, path), 'utf8').length > 0;
+  if (!present) failures += 1;
+  console.log(`${present ? 'ok  ' : 'FAIL'} running documentation ${path}`);
+}
 for (const [marker, why] of MARKERS) {
   const hits = grepTree(root, marker);
   if (!hits.length) failures += 1;

@@ -258,6 +258,17 @@ async function writeCounts(spillDir: string, file: CountsFile): Promise<void> {
 
 /** One tracker per scope, in recency order. */
 const scopes = new Map<string, { tracker: ToolResultTracker; spillDir: string }>();
+// Parallel Pi calls can share a spill directory. Serialize the complete read/record/write
+// cycle, including tracker initialization, so neither counters nor rename targets race.
+const directoryWrites = new Map<string, Promise<unknown>>();
+
+async function inSpillDirectory<T>(directory: string, action: () => Promise<T>): Promise<T> {
+  const previous = directoryWrites.get(directory) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(action);
+  directoryWrites.set(directory, next);
+  try { return await next; }
+  finally { if (directoryWrites.get(directory) === next) directoryWrites.delete(directory); }
+}
 
 async function trackerFor(scopeId: string, spillDir: string): Promise<ToolResultTracker> {
   const existing = scopes.get(scopeId);
@@ -311,32 +322,34 @@ export function toolResultHook(input: { scopeId: string; spillDir: string; maxSp
     const ceiling = TOOL_TEXT_LIMITS[name];
     const limit = ceiling !== undefined && text.length > ceiling ? ceiling : undefined;
     if (limit === undefined && text.length <= TOOL_RESULT_LIMIT) return undefined;
-    const tracker = await trackerFor(input.scopeId, input.spillDir);
-    const rendered = await renderToolResult({
-      text,
-      conversationId: input.scopeId,
-      tool: name,
-      params: context.args,
-      spillDir: input.spillDir,
-      tracker,
-      ...(limit === undefined ? {} : { limit }),
-      ...(input.maxSpillFiles === undefined ? {} : { maxSpillFiles: input.maxSpillFiles }),
-    });
-    // Only the lazy path advances a count, so only it needs to be durable.
-    if (limit === undefined) await persistScope(input.scopeId, tracker);
-    // Still a full view: leave the tool's own result object completely untouched.
-    if (rendered === text) return undefined;
-    const content: ContentPart[] = [];
-    let summarised = false;
-    for (const part of parts) {
-      if (part.type !== 'text') {
-        content.push(part as ContentPart);
-        continue;
+    return inSpillDirectory(input.spillDir, async () => {
+      const tracker = await trackerFor(input.scopeId, input.spillDir);
+      const rendered = await renderToolResult({
+        text,
+        conversationId: input.scopeId,
+        tool: name,
+        params: context.args,
+        spillDir: input.spillDir,
+        tracker,
+        ...(limit === undefined ? {} : { limit }),
+        ...(input.maxSpillFiles === undefined ? {} : { maxSpillFiles: input.maxSpillFiles }),
+      });
+      // Only the lazy path advances a count, so only it needs to be durable.
+      if (limit === undefined) await persistScope(input.scopeId, tracker);
+      // Still a full view: leave the tool's own result object completely untouched.
+      if (rendered === text) return undefined;
+      const content: ContentPart[] = [];
+      let summarised = false;
+      for (const part of parts) {
+        if (part.type !== 'text') {
+          content.push(part as ContentPart);
+          continue;
+        }
+        if (summarised) continue;
+        content.push({ type: 'text', text: rendered });
+        summarised = true;
       }
-      if (summarised) continue;
-      content.push({ type: 'text', text: rendered });
-      summarised = true;
-    }
-    return { content };
+      return { content };
+    });
   };
 }

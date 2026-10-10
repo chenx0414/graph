@@ -286,6 +286,17 @@ test('the counts file records the scope so a reopened instance keeps its count',
   expect(Object.values(saved.scopes['conv-counts'] ?? {})).toEqual([2]);
 });
 
+test('concurrent large tool results retain every occurrence and scope without breaking the result', async () => {
+  const spillDir = await scratch();
+  const prefix = `concurrent-${spillDir}`;
+  const hooks = [0, 1].map(n => toolResultHook({ scopeId: `${prefix}-${n}`, spillDir }));
+  const settled = await Promise.allSettled(Array.from({ length: 24 }, (_, n) =>
+    hooks[n % 2]!(context('c'.repeat(TOOL_RESULT_LIMIT + 3), { path: `file-${n}.md` }))));
+  expect(settled.every(result => result.status === 'fulfilled')).toBe(true);
+  const saved = JSON.parse(await readFile(join(spillDir, 'counts.json'), 'utf8')) as { scopes: Record<string, Record<string, number>> };
+  for (const n of [0, 1]) expect(Object.values(saved.scopes[`${prefix}-${n}`] ?? {})).toEqual(Array(12).fill(1));
+});
+
 test('the spill directory keeps only the newest files', async () => {
   const spillDir = await scratch();
   const hook = toolResultHook({ scopeId: 'conv-spill-cap', spillDir, maxSpillFiles: 2 });

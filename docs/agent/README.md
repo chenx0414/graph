@@ -29,7 +29,8 @@ Topic bodies stay out of the prompt and are read on demand.
 
 - Read this README or `INDEX.md` before explaining Graph internals.
 - Resolve topic links relative to this directory, not the business worktree.
-- Follow Markdown cross-references and read the complete topic before changing behavior.
+- For graph construction, start with [the running API](graph-v2.md) and [native examples](../design-graph-examples.md). These paths belong to the running application; a business checkout's older Graph documentation does not define this host's API.
+- Read the complete relevant topic and follow references needed for the current operation. Historical reports and the full spec are optional investigation material.
 - Treat live host facts as authoritative. Read `read_system_capabilities`, `inspect_graph_system`, `list_problems`, and node runs when the question concerns current state.
 - Keep this tree read-only from the Agent's perspective. User-editable identity, tool guidance, and rules remain under `~/.graph/prompts`.
 

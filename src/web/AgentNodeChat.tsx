@@ -136,6 +136,15 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }
   const hasOlder = Boolean(data && data.entryCount > entries.length && !olderExhausted && (entries[0]?.seq ?? 0) > 1);
 
+  // Collapsed tool batches may make a 200-entry page shorter than the viewport:
+  // there is then no scroll event to request history. Fill that viewport, and continue
+  // loading while a reader remains near the top after prepending a short page.
+  useEffect(() => {
+    const thread = transcriptFollow.threadRef.current;
+    if (!thread || !hasOlder || olderLoading || error) return;
+    if (thread.scrollHeight <= thread.clientHeight + 160 || (thread.scrollTop < 160 && !transcriptFollow.isPinned())) void loadOlder();
+  }, [hasOlder, olderLoading, entries, transcriptFollow.pinned, error]);
+
   useLayoutEffect(() => {
     const anchor = historyAnchor.current;
     const thread = transcriptFollow.threadRef.current;
