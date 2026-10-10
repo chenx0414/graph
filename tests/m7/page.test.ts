@@ -1,4 +1,5 @@
 import { mediaBookmarksSource } from './clone.ts';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, copyFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,14 +10,19 @@ import { chromium } from 'playwright';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
 
-test('B站 page requires login, shows live collect progress, and lets the user read notes', async () => {
+// The page under test is the sibling MediaBookmarks project's own file. When that checkout has
+// moved on (or is absent), this test cannot run: skipping names the real reason instead of failing
+// the whole activation gate on a fact about another repository.
+const configSource = join(mediaBookmarksSource(), 'src', 'config.js');
+
+test.skipIf(!existsSync(configSource))('B站 page requires login, shows live collect progress, and lets the user read notes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m7-page-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const prior = process.cwd();
   await mkdir(join(root, 'src', 'web'), { recursive: true });
   await mkdir(join(root, 'output', 'bilibili-notes'), { recursive: true });
   await writeFile(join(root, 'package.json'), '{"type":"module"}');
-  await copyFile(join(mediaBookmarksSource(), 'src', 'config.js'), join(root, 'src', 'config.js'));
+  await copyFile(configSource, join(root, 'src', 'config.js'));
   await copyFile(new URL('../fixtures/m7/web-server.js', import.meta.url), join(root, 'src', 'web-server.js'));
   await copyFile(new URL('../fixtures/m7/index.html', import.meta.url), join(root, 'src', 'web', 'index.html'));
   await writeFile(join(root, 'src', 'cli.js'), 'process.stdout.write("1/3\\n"); setTimeout(() => process.exit(0), 1200);');

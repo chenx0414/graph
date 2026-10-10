@@ -22,7 +22,11 @@ function git(cwd: string, args: string[]) {
   return result.stdout;
 }
 
-test('production Pi writes the Bilibili web on a clone through workspace tools and merges after review', async () => {
+// Same as tests/m7/delivery.test.ts: the fixture comes from the sibling MediaBookmarks checkout,
+// and without that checkout the test cannot run.
+const sourceAvailable = existsSync(join(mediaBookmarksSource(), '.git'));
+
+test.skipIf(!sourceAvailable)('production Pi writes the Bilibili web on a clone through workspace tools and merges after review', async () => {
   const source = mediaBookmarksSource();
   const sourceHead = git(source, ['rev-parse', 'HEAD']);
   const sourceStatus = git(source, ['status', '--porcelain']);

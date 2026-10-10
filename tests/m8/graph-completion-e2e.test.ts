@@ -12,6 +12,7 @@ import { hostSubmitCall } from '../../src/core/node-submit-bridge.ts';
 import { GraphLane } from '../../src/core/graph-lane.ts';
 import { ResidentHost } from '../../src/runtime/resident-host.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { graphAcceptance } from '../../src/core/graph-acceptance.ts';
 
 /**
  * Issue #1 §14 — "a real graph runs to completion", through the public interface, with the
@@ -156,6 +157,22 @@ describe('§14 E2E — a real v2 graph runs to completion through the lane', () 
 
     // 4. Real model turns crossed the HTTP boundary, for both nodes.
     expect(provider.requests.length).toBeGreaterThanOrEqual(2);
+
+    // 5. An interrupted provider call is a hold only where it really is one. A node with no token
+    // cap keeps usage:null / 'unknown' by design and may still commit, so such a call must not pin
+    // the graph as undrained — that is what made an accepted graph undeliverable on 2026-09-27.
+    // A finite node still holds, and an inflight call always does.
+    store.db.prepare('INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at) VALUES(?,?,?,?,?,?,?)')
+      .run('call-unknown', 'g1', 'a', 'exec-gone', 1000, 'unknown', Date.now());
+    expect(graphAcceptance(kernel, 'g1').drained).toBe(false);
+    // The instance row is synthetic: instances also references the legacy nodes table, which this
+    // kernel never uses, so foreign keys are off for this one fixture row only.
+    store.db.exec('PRAGMA foreign_keys=OFF;');
+    store.db.prepare("INSERT INTO instances(id,task_id,node_id,budget,used,definition_version,model,models_used,unlimited) VALUES('i-a','g1','a',0,0,'a@1','m','[]',1)").run();
+    store.db.exec('PRAGMA foreign_keys=ON;');
+    expect(graphAcceptance(kernel, 'g1').drained).toBe(true);
+    store.db.prepare("UPDATE kernel_provider_calls SET state='inflight' WHERE id='call-unknown'").run();
+    expect(graphAcceptance(kernel, 'g1').drained).toBe(false);
 
     // 5. A call that carries no `outputs` object is refused for its ARGUMENT SHAPE, not told
     // that its output was not enabled. A model can only correct what the refusal names, and
