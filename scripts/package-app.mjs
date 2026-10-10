@@ -80,7 +80,7 @@ await writeFile(join(stage, 'electron-builder.json'), `${JSON.stringify({
   appId: 'dev.graph.console',
   productName: 'Graph',
   directories: { output: join(root, 'dist/app'), buildResources: 'build' },
-  files: ['docs/agent/**/*', 'docs/design-graph-examples.md', 'docs/specs/graph-rebuild-v2.md', 'examples/**/*', 'desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
+  files: ['AGENTS.md', 'CODING_STANDARDS.md', 'CONTEXT.md', '.agents/**/*', 'docs/agents/**/*', 'docs/adr/**/*', 'docs/architecture.md', 'docs/implementation-plan.md', 'docs/graph-mvp.md', 'docs/agent/**/*', 'docs/design-graph-examples.md', 'docs/specs/graph-rebuild-v2.md', 'examples/**/*', 'desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
   asar: false,
   npmRebuild: false,
   electronVersion: repo.devDependencies.electron,
