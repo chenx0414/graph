@@ -322,7 +322,7 @@ export class NodeExecutor {
         }
         // The gap was never filled and there is no resubmit left.
         releaseHold();
-        return this.fail(executionId, nodeId, seq, `required output(s) still missing: ${report.missing.join(', ')}`);
+        return this.fail(executionId, nodeId, seq, `required output(s) still missing: ${report.missing.join(', ')} — all ${budget.resubmitsAllowed} resubmit(s) were used and the node never enabled them`);
       }
 
       // No submission and no gap: a RETRY, up to the retry budget.

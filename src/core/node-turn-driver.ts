@@ -75,7 +75,7 @@ export class NodeTurnDriver {
     if (injection && injection.missing.length > 0) {
       return [
         `Your previous submission was refused: the required output(s) ${injection.missing.join(', ')} were not enabled.`,
-        'Enable those outputs with the correct values and submit again.',
+        `Submit exactly this shape: {"outputs":{${injection.missing.map(name => `"${name}":{"enable":true,"value":<value>}`).join(',')}}} — every required output must appear with enable:true.`,
         'Do not redo or rewrite the implementation; whatever you already wrote stays in place.',
         ...(this.options.turnText ? ['', this.options.turnText(injection)] : []),
       ].join('\n');

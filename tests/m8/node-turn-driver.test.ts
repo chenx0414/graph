@@ -169,6 +169,10 @@ describe('NodeTurnDriver — prompt, submit, read back (HB-257)', () => {
     // The injected turn names the gap and says the existing work stands (§7).
     expect(host.seen[0]).toContain('out');
     expect(host.seen[0]).toMatch(/do not redo|stays in place|already/i);
+    // Naming the gap is not enough: a node that does not know the accepted argument shape
+    // guesses, and a pure-forwarding node burned its whole resubmit budget guessing.
+    expect(host.seen[0]).toContain('"outputs"');
+    expect(host.seen[0]).toContain('"out":{"enable":true');
   });
 
   test('D5: a rebuilt process is started before the turn and the same execution continues', async () => {
