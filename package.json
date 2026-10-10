@@ -22,6 +22,7 @@
     "skills:lint": "node scripts/skills-lint.mjs",
     "test": "vitest run",
     "test:design-examples": "vitest run tests/console/design-examples.test.ts",
+    "test:graph-revision": "node scripts/check-graph-revision.mjs",
     "test:m0": "vitest run tests/m0",
     "test:m1": "vitest run tests/m1",
     "test:m2": "vitest run tests/m2",
