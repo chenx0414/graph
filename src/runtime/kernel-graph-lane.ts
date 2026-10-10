@@ -309,6 +309,17 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         const workspace = options.git?.workspace(graphId, null, request.moduleId, 'program', 'graph.command') ?? options.workspaceFor(graphId);
         if (!workspace) throw new Error('Operation module has no workspace');
         return executeModuleOperation({ ...request, graphId, kernel: options.kernel, workspace, scratchRoot: options.stateDir,
+          // The same facts settleWorkspace uses decide whether this delivery's source owes the
+          // integration branch a commit, so a check never waits on a source that never integrates.
+          integratesSource: executionId => {
+            const execution = options.kernel.execution(executionId);
+            if (!execution) return false;
+            const node = options.kernel.revision(execution.taskId, execution.revisionVersion)?.definition.nodes[execution.nodeId];
+            if (!node) return false;
+            if (options.catalog.hasDefinition(node.recipe) && options.catalog.definition(node.recipe!).review === true) return false;
+            const admitted = options.kernel.listNodes(execution.taskId).find(candidate => candidate.nodeId === execution.nodeId);
+            return Boolean(admitted?.instanceId);
+          },
           program: { ...options.program, nodeModulesPath: options.program?.nodeModulesPath
             ?? join(options.workspaceFor(graphId) ?? workspace, 'node_modules') },
           ...(options.access ? { access: options.access() } : {}) });

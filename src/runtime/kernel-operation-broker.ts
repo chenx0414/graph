@@ -1,7 +1,7 @@
 import { waitForKernelProgramExecutionSlot } from './execution-slots.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { canonicalJson } from '../core/store.ts';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { ModuleDefinition } from '../core/interface-spec.ts';
@@ -12,10 +12,52 @@ import { openWorkspaceCommandRunner, resolveUnsandboxedCommand } from './workspa
 import { checkEnvironment, runHostCommand } from './host-command.ts';
 import { linkProjectDependencies } from './project-dependencies.ts';
 
+/**
+ * A `workspace.command` operation reads code out of the integration worktree, so it may only be
+ * admitted once the delivery's causal commit is really in that tree. An execution being `completed`
+ * is not that fact: a source that submitted and then failed to merge has an output but no
+ * integration, and a source that is still running has not merged yet.
+ *
+ * Only this action is gated, and only in the integration copy: agents, ordinary modules, `each`
+ * routers, immediate delivery and graphs without Git keep their own timing. Nothing is inferred
+ * into the protocol value — the delivery keeps exactly the value its producer emitted, and the
+ * operation's own receipt still names the commit it read.
+ */
+function admitSource(options: { kernel: KernelStore; graphId: string; deliveryId: string; workspace: string; operation: NonNullable<ModuleDefinition['operation']>; integratesSource?: (executionId: string) => boolean }): void {
+  const { kernel, graphId, deliveryId, workspace, operation } = options;
+  if (operation.action !== 'workspace.command') return;
+  if (!kernel.store.task(graphId).integration_branch) return;
+  const integration = kernel.db.prepare('SELECT path FROM worktrees WHERE instance_id=?').get(`integration:${graphId}`) as { path: string } | undefined;
+  if (!integration || resolve(integration.path) !== resolve(workspace)) return;
+  const source = kernel.db.prepare(`SELECT s.execution_id AS execution,e.state AS state FROM kernel_deliveries d
+    LEFT JOIN kernel_submissions s ON s.id=d.submission_id LEFT JOIN kernel_executions e ON e.id=s.execution_id
+    WHERE d.id=?`).get(deliveryId) as { execution: string | null; state: string | null } | undefined;
+  // Main-delivered and module-to-module input has no causal producer to wait for.
+  if (!source?.execution) return;
+  // Whether this source owes the integration branch a commit is a production fact (its frozen recipe,
+  // its admitted work location), not the absence of a commit row — a node may submit first and be
+  // committed automatically at settle. The host answers it; a commit row cannot.
+  const integrates = options.integratesSource
+    ? options.integratesSource(source.execution)
+    : Boolean(kernel.db.prepare("SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='instance'").get(graphId, source.execution));
+  if (!integrates) return;
+  const merged = kernel.db.prepare("SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='integration'").get(graphId, source.execution) as { sha: string } | undefined;
+  if (!merged) {
+    // A short wait, not a repair: the delivery stays pending and the same one is retried.
+    if (source.state === 'running') throw new RuntimeError('paused', `Delivery source ${source.execution} has not been integrated yet`);
+    throw new RuntimeError('integration_blocked', `Delivery source ${source.execution} did not reach the integration branch`);
+  }
+  const produced = kernel.db.prepare("SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='instance'").get(graphId, source.execution) as { sha: string } | undefined;
+  if (produced && git(workspace, ['merge-base', '--is-ancestor', produced.sha, 'HEAD']).code !== 0) {
+    throw new RuntimeError('integration_blocked', `Delivery source ${source.execution} produced ${produced.sha}, which the integration worktree does not contain`);
+  }
+}
+
 /** Host operations keep a durable send boundary; replaying a result never re-runs its command. */
 export async function executeModuleOperation(options: {
   kernel: KernelStore; graphId: string; moduleId: string; deliveryId: string; revisionVersion: number;
   operation: NonNullable<ModuleDefinition['operation']>; workspace: string; scratchRoot: string;
+  integratesSource?: (executionId: string) => boolean;
   state: Json; inputs: Record<string, Json>; access?: ResolvedAccessPolicy; signal?: AbortSignal;
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
 }): Promise<{ ok: boolean; state: Json; outputs: Record<string, Json>; diagnostics: string[] }> {
@@ -41,6 +83,7 @@ export async function executeModuleOperation(options: {
     const task = kernel.store.task(graphId);
     if (task.paused || options.signal?.aborted || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Graph operation dispatch is closed');
     if (kernel.nodeState(graphId, moduleId).paused) throw new RuntimeError('paused', 'Module is paused');
+    admitSource({ kernel, graphId, deliveryId, workspace, operation, ...(options.integratesSource ? { integratesSource: options.integratesSource } : {}) });
     commit = revParse(workspace, 'HEAD') ?? null;
     cleanBefore = commit !== null && cleanTree();
     const changed = kernel.db.prepare("UPDATE kernel_module_operations SET state='dispatched',started_at=? WHERE id=? AND state='prepared'").run(Date.now(), id);
