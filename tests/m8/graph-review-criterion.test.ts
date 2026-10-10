@@ -9,11 +9,12 @@ import { git } from '../../src/git/git.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 /**
- * A confirmed acceptance cannot be amended, so "code changed but no review criterion was declared"
- * must reach the user as a human criterion. Reported as a non-human constraint it deadlocks: the
- * item can never pass, and the human gate only opens once every non-human item has passed.
+ * Code changes still require a declared independent review (tests/m4/acceptance.test.ts holds that
+ * invariant), but a graph whose CONFIRMED acceptance declares none can never satisfy it, because a
+ * confirmed acceptance cannot be amended. The refusal has to name that, or the author is left
+ * staring at an unsatisfiable 'missing' with no way forward.
  */
-test('a code change without a declared review criterion asks the user instead of deadlocking the graph', async () => {
+test('a code change with no declared review criterion is refused with the reason the graph cannot repair itself', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-review-criterion-'));
   const project = join(root, 'project'); await mkdir(project);
   await writeFile(join(project, 'feature.txt'), 'before\n');
@@ -48,9 +49,12 @@ test('a code change without a declared review criterion asks the user instead of
     const task = disk.task(graphId);
     expect(task.integration_sha).toBeTruthy();
     expect(task.integration_sha).not.toBe(task.target_sha);
-    const assessment = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[]; human: { id: string }[] };
-    expect(assessment.items.find(item => item.id === 'independent-review')).toBeUndefined();
-    expect(assessment.human.map(item => item.id)).toContain('independent-review');
-    expect(assessment.human.map(item => item.id)).toContain('human');
+    const assessment = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; kind: string; status: string; reason: string }[]; human: { id: string }[] };
+    const item = assessment.items.find(entry => entry.id === 'independent-review');
+    expect(item).toMatchObject({ kind: 'constraint', status: 'missing' });
+    // The refusal must name the fact the author cannot discover from the graph: a confirmed acceptance is frozen.
+    expect(item!.reason).toContain('cannot be amended');
+    expect(item!.reason).toContain('review criterion');
+    expect(assessment.human.map(entry => entry.id)).not.toContain('independent-review');
   } finally { await runtime?.close(); disk?.close(); await worker.close(); await rm(root, { recursive: true, force: true }); }
 }, 30000);

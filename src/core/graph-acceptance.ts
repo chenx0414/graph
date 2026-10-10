@@ -41,9 +41,9 @@ export function graphAcceptance(kernel: KernelStore, graphId: string, artifacts?
   if (task.integration_branch && !criteria.some(item => item.kind === 'check')) fail('host-check', 'Git delivery requires declared host checks');
   if (task.integration_branch && !commit) fail('integration-version', 'Current integration commit is unavailable');
   const changed = Boolean(task.integration_branch && commit !== task.target_sha);
-  // The acceptance is frozen once confirmed, so a missing review criterion cannot be repaired later. The host
-  // cannot prove independence either: ask the user instead of failing a constraint nobody can satisfy.
-  if (changed && !criteria.some(item => item.kind === 'review')) human.push({ id: 'independent-review', description: 'Code changes require declared independent review', kind: 'human' });
+  // A confirmed acceptance cannot be amended later, so a graph that declares no review criterion can never
+  // satisfy this. Keep it a hard constraint (code must not ship unreviewed) but say what is actually wrong.
+  if (changed && !criteria.some(item => item.kind === 'review')) fail('independent-review', 'Code changes require declared independent review, and this confirmed acceptance declares none: a confirmed acceptance cannot be amended, so add a review criterion and re-confirm before delivering code');
   if (task.accepted_proposal) {
     const row = kernel.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(graphId, task.accepted_proposal) as { spec: string } | undefined;
     if (!row) fail('confirmed-acceptance', 'Confirmed requirements are unavailable');
