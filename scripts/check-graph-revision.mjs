@@ -75,13 +75,24 @@ function firstFailureOutput(db, taskId) {
   return null;
 }
 
-const failureKeyLines = text =>
-  [...new Set(text.split(/\r?\n/).map(line => line.trim())
-    .filter(line => line.startsWith(`${MARKER} (`) && line.includes(') FAIL:')))];
+/** The first non-empty line of a failure output: the key line to quote verbatim. */
+function firstFailureLine(text) {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
 
 function nodeStatus(db, taskId, nodeId) {
   const row = db.prepare('SELECT status FROM kernel_nodes WHERE task_id=? AND node_id=?').get(taskId, nodeId);
   return row?.status ?? 'absent';
+}
+
+/** A node counts as succeeded when the kernel says so, or when it has a completed run. */
+function nodeSucceeded(db, taskId, nodeId) {
+  if (nodeStatus(db, taskId, nodeId) === 'succeeded') return true;
+  return !!db.prepare("SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='completed' LIMIT 1").get(taskId, nodeId);
 }
 
 function revisionNodeIds(db, taskId, version) {
@@ -123,16 +134,13 @@ function main() {
       if (!first) {
         problems.push({ key: 'a', detail: 'no recorded first gate failure output yet' });
       } else {
-        const keys = failureKeyLines(`${first.stdout}\n${first.stderr}`);
-        if (keys.length === 0) {
-          problems.push({ key: 'a', detail: 'recorded first gate failure output has no key lines' });
+        const keyLine = firstFailureLine(`${first.stdout}\n${first.stderr}`);
+        if (keyLine.length < 20) {
+          problems.push({ key: 'a', detail: `recorded first gate failure output has no quotable key line (${JSON.stringify(keyLine)})` });
+        } else if (!doc.includes(keyLine)) {
+          problems.push({ key: 'a', detail: `${DOC_REL} does not quote the first failure verbatim: ${keyLine}` });
         } else {
-          const missing = keys.filter(key => !doc.includes(key));
-          if (missing.length) {
-            problems.push({ key: 'a', detail: `${DOC_REL} does not quote the first failure verbatim: ${missing.join(' | ')}` });
-          } else {
-            notes.push(`first failure quoted verbatim (${keys.length} key line(s))`);
-          }
+          notes.push(`first failure quoted verbatim: ${keyLine}`);
         }
       }
     }
@@ -155,35 +163,38 @@ function main() {
 
     // (d) main's mid-run revision took effect.
     const versions = db.prepare('SELECT version FROM kernel_revisions WHERE task_id=? ORDER BY version').all(taskId).map(row => row.version);
-    const newest = versions.length ? Math.max(...versions) : 0;
     const baseNodes = revisionNodeIds(db, taskId, 1);
-    if (newest <= 1 || !baseNodes) {
-      problems.push({ key: 'd', detail: `no revision>1 (latest=${newest})` });
+    const candidates = versions.filter(version => version > 1);
+    if (!baseNodes || candidates.length === 0) {
+      problems.push({ key: 'd', detail: `no revision>1 (latest=${versions.at(-1) ?? 0})` });
     } else {
-      const currentNodes = revisionNodeIds(db, taskId, newest);
-      const added = currentNodes.filter(node => !baseNodes.includes(node));
-      const retired = baseNodes.filter(node => !currentNodes.includes(node));
-      if (added.length === 0) {
-        problems.push({ key: 'd', detail: `revision ${newest} added no node` });
-      } else if (retired.length === 0) {
-        problems.push({ key: 'd', detail: `revision ${newest} retired no node (notes should be retired)` });
-      } else {
-        const notSucceeded = added.filter(node => {
-          const completed = db.prepare(
-            "SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='completed' LIMIT 1",
-          ).get(taskId, node);
-          return nodeStatus(db, taskId, node) !== 'succeeded' && !completed;
-        });
-        const executedRetired = retired.filter(node =>
-          db.prepare('SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? LIMIT 1').get(taskId, node));
+      const failures = [];
+      let satisfied = null;
+      for (const version of candidates) {
+        const currentNodes = revisionNodeIds(db, taskId, version);
+        const added = currentNodes.filter(node => !baseNodes.includes(node));
+        const retired = baseNodes.filter(node => !currentNodes.includes(node));
+        if (added.length === 0) { failures.push(`revision ${version}: added no node`); continue; }
+        if (retired.length === 0) { failures.push(`revision ${version}: retired no node (notes should be retired)`); continue; }
+        const notSucceeded = added.filter(node => !nodeSucceeded(db, taskId, node));
         if (notSucceeded.length) {
           const detail = notSucceeded.map(node => `${node} status=${nodeStatus(db, taskId, node)}`).join(', ');
-          problems.push({ key: 'd', detail: `revision ${newest} added node ${detail}, need succeeded` });
-        } else if (executedRetired.length) {
-          problems.push({ key: 'd', detail: `retired node ${executedRetired.join(', ')} has executions` });
-        } else {
-          notes.push(`revision ${newest}: added ${added.join(', ')} succeeded; retired ${retired.join(', ')} never ran`);
+          failures.push(`revision ${version}: added node ${detail}, need succeeded`);
+          continue;
         }
+        const executedRetired = retired.filter(node =>
+          db.prepare('SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? LIMIT 1').get(taskId, node));
+        if (executedRetired.length) {
+          failures.push(`revision ${version}: retired node ${executedRetired.join(', ')} has executions`);
+          continue;
+        }
+        satisfied = { version, added, retired };
+        break;
+      }
+      if (satisfied) {
+        notes.push(`revision ${satisfied.version}: added ${satisfied.added.join(', ')} succeeded; retired ${satisfied.retired.join(', ')} never ran`);
+      } else {
+        problems.push({ key: 'd', detail: failures.join('; ') });
       }
     }
 
