@@ -14,7 +14,7 @@ import { RuntimeError, type Json } from '../core/types.ts';
 import { environmentValues, headerValues } from './mcp-adapter-server.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
-import { allowedDomain, normalizeDomains } from './domains.ts';
+import { allowedDomain, normalizeDomains } from '../core/domains.ts';
 import { externallyGated } from './pi-instance.ts';
 import { resolvePiExtensionSource } from './pi-extension-source.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';

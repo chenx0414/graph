@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { api } from './api.ts';
-import { FULL_ACCESS, STANDARD_ACCESS } from './access-presets.ts';
+import { fullAccessPolicy, standardAccessPolicy } from '../core/access-policy-presets.ts';
 import { Icon, toast } from './ui.tsx';
 
 type ConfigPayload = {
@@ -28,7 +28,7 @@ function configDocument(config: ConfigPayload) {
     ...(config.models ? { models: config.models } : {}),
     credentials,
     limits: config.limits ?? {},
-    access: config.access ?? STANDARD_ACCESS,
+    access: config.access ?? standardAccessPolicy(),
   };
 }
 
@@ -59,7 +59,7 @@ export function FullAccessToggle() {
       const current = await api<ConfigResponse>('/api/config');
       const next = current.config.access?.mode !== 'full';
       const document = configDocument(current.config);
-      document.access = next ? FULL_ACCESS : STANDARD_ACCESS;
+      document.access = next ? fullAccessPolicy() : standardAccessPolicy();
       const saved = await api<SaveResponse>('/api/config', {
         method: 'POST',
         body: JSON.stringify({ expectedRevision: current.revision, document }),

@@ -12,14 +12,13 @@
 // 1. Peer lookup lists every node of the graph with its status, so an Agent can pick a recipient.
 // 2. A node of another graph is never in that list - the constraint that replaces the removed
 //    chain/ceiling guards.
-// 3. The rendered list names the peers, and says so when there are none.
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { TaskStore } from '../../src/core/store.ts';
-import { peerNodes, renderPeers } from '../../src/runtime/agent-messaging.ts';
+import { peerNodes } from '../../src/runtime/agent-messaging.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -57,12 +56,4 @@ test('a node of another graph is not an address this node may pick', async () =>
   expect(peerNodes(store, 'graphA').map(peer => peer.id)).not.toContain('graphB');
   // The other graph has its own build node, and this graph's node cannot see it.
   expect(peerNodes(store, 'graphB').map(peer => peer.id)).toEqual(['build']);
-});
-
-test('the rendered peer list names the others and leaves the node itself out', async () => {
-  const store = await fixture();
-  const rendered = renderPeers(peerNodes(store, 'graphA'), 'build');
-  expect(rendered).toContain('check');
-  expect(rendered).not.toContain('build（');
-  expect(renderPeers(peerNodes(store, 'graphA'), 'build')).not.toContain('graphB');
 });

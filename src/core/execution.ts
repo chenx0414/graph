@@ -464,9 +464,7 @@ export class Execution {
     if (spec.kind === 'agent' && this.models && node.instance_id) {
       const preferences = typeof this.preferences === 'function' ? this.preferences() : this.preferences;
       const selected = pickModel({
-        store: this.store,
         spec,
-        node,
         models: this.models,
         ...(this.catalog ? { catalog: this.catalog } : {}),
         ...(preferences ? { preferences } : {}),

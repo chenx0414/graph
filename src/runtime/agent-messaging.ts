@@ -18,10 +18,3 @@ export function peerNodes(store: TaskStore, taskId: string): PeerNode[] {
     .all(taskId) as { id: string; status: string; role: string | null }[];
   return rows.map(row => ({ id: row.id, status: row.status, role: row.role }));
 }
-
-/** How to describe a peer to the model, so it knows what it may address. */
-export function renderPeers(peers: PeerNode[], self: string): string {
-  const others = peers.filter(peer => peer.id !== self);
-  if (others.length === 0) return '这张图里目前只有你自己。';
-  return others.map(peer => `${peer.id}（${peer.role ?? 'agent'}，${peer.status}）`).join('、');
-}

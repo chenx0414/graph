@@ -4,7 +4,7 @@ import { api } from './api.ts';
 import { usePreferences } from './preferences.ts';
 import { Setup } from './Setup.tsx';
 import { Button, Card, Field, Icon, Pill, Spinner, toast } from './ui.tsx';
-import { STANDARD_ACCESS } from './access-presets.ts';
+import { standardAccessPolicy } from '../core/access-policy-presets.ts';
 import type { AccessPolicy } from '../core/access-policy.ts';
 import { MODEL_TIERS, MODEL_GRADES, modelTier, modelRequestHeaders, type ModelGrade, type ModelTier, type ModelInput } from '../catalog/models.ts';
 import { defaultThinkingLevelFor } from '../catalog/models.ts';
@@ -151,7 +151,7 @@ function toDraft(config: ConfigResponse['config']): RawConfig {
     ...(config.models ? { models: { ...config.models, entries: config.models.entries } } : {}),
     credentials,
     limits: config.limits ?? {},
-    access: config.access ?? STANDARD_ACCESS,
+    access: config.access ?? standardAccessPolicy(),
   };
 }
 

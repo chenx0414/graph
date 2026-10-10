@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { RuntimeError } from '../core/types.ts';
-import { allowedDomain, normalizeDomains } from './domains.ts';
+import { allowedDomain, normalizeDomains } from '../core/domains.ts';
 import type { RestrictedGate } from './restricted-process.ts';
 
 export interface RetrievalResult {
