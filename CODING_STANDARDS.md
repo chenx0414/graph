@@ -12,7 +12,7 @@
 
 ## 验证与交付
 
-提交或推送前运行 `node --run check`；通过完整检查后再交付。
+提交或推送前运行 `node --run check`，检查全部通过后继续。
 
 普通测试的截图写入临时目录，保持 [验收证据](docs/planning/acceptance-evidence/) 不变。明确要更新交付证据时，按 [检查操作指南](docs/agents/checks.md#验收证据)执行并审阅证据差异。
 
