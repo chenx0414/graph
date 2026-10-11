@@ -18,6 +18,7 @@ import { KernelStore } from '../../src/core/kernel-store.ts';
 import { GraphRuntime } from '../../src/core/graph-runtime.ts';
 import { GraphLane } from '../../src/core/graph-lane.ts';
 import { Execution } from '../../src/core/execution.ts';
+import type { ActionAdapter } from '../../src/core/types.ts';
 import { RuntimeError } from '../../src/core/types.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
@@ -57,10 +58,10 @@ const lane = new GraphLane({ kernel, config: () => ({}), host: async () => { thr
     if (waiting) throw new RuntimeError('paused', 'Waiting before dispatch');
     return { ok: true, state: null, outputs: { result: { passed: true } }, diagnostics: [] };
   } });
-const holdActions = { hold: { kind: 'agent' as const, reserveTokens: 0, prepare: async () => async () => {
+const holdActions: Record<string, ActionAdapter> = { hold: { kind: 'agent', reserveTokens: 0, prepare: async () => async () => {
   process.stdout.write('MAIN_STARTED\n');
   await new Promise(resolve => setTimeout(resolve, 400));
-  return { outcome: 'completed' as const, output: { text: 'main done' }, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  return { outcome: 'completed', output: { text: 'main done' }, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 } } };
 const execution = new Execution(store, withMain ? holdActions : {}, { graphs: () => lane.runnable() });
 
