@@ -23,13 +23,14 @@ test.each(['confirmed', 'managed'] as const)('main revises %s graph artifacts wi
   const mainPlans: ResponsePlan[] = [{ text: 'Ready to coordinate.' }];
   const mainProvider = await openaiServer(mainPlans);
   const suggestionProvider = await openaiServer([{ text: '' }, { text: '' }, { text: '' }]);
-  const workerProvider = await openaiServer([
+  const workerPlans: ResponsePlan[] = [
     publish('worker-v1', 'Worker original'), { text: 'Original published.' },
     publish('worker-v3', 'Worker revision'), { text: 'Revision published.' },
     publish('intruder', 'Unauthorized replacement'),
     { tools: [{ id: 'scope', name: 'artifact_publish', arguments: () => JSON.stringify({ graphId, namespace: 'plans', name: 'redirected', content: 'Unauthorized target', requestId: 'scope' }) }] },
     { text: 'Publication attempts finished.' },
-  ]);
+  ];
+  const workerProvider = await openaiServer(workerPlans);
   let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
   let disk: TaskStore | undefined;
   try {
@@ -113,6 +114,30 @@ test.each(['confirmed', 'managed'] as const)('main revises %s graph artifacts wi
     expect(runtime.artifacts.get(graphId, first.artifactId)).toMatchObject({ version: 3, state: 'published' });
     const withdrawals = disk.db.prepare("SELECT task_id FROM events WHERE type='artifact.retired'").all();
     expect(withdrawals).toEqual([{ task_id: graphId }]);
+
+    // Project knowledge remains available to main, but graph nodes discover
+    // only their own shared workspace, including artifacts by other nodes.
+    const promoted = await runtime.artifacts.promote({ taskId: graphId, artifactId: first.artifactId, version: 3, requestId: 'promote-plan' });
+    mainPlans.push({ tools: [{ id: 'main-list', name: 'artifact_list', arguments: '{}' }] }, { text: 'Project knowledge discovered.' });
+    await runtime.conversations.chat(created.conversationId, { text: 'List shared artifacts', requestId: 'list-main' });
+    await runtime.host.runReady();
+    const mainMessages = (mainProvider.requests.at(-1) as { messages: { tool_call_id?: string; content: string }[] }).messages;
+    const mainPage = JSON.parse(mainMessages.find(message => message.tool_call_id === 'main-list')!.content);
+    expect(mainPage.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({ artifactId: promoted.artifactId, scope: 'project' })]));
+
+    workerPlans.push({ tools: [{ id: 'node-list', name: 'artifact_list', arguments: JSON.stringify({ latestOnly: false, includeRetired: true, limit: 2 }) }] },
+      { tools: [{ id: 'node-next', name: 'artifact_list', arguments: JSON.stringify({ latestOnly: false, includeRetired: true, limit: 2, cursor: '2' }) }] },
+      { text: 'Graph workspace discovered.' });
+    await main.graphSend({ graphId, nodeId: 'other', input: 'job', value: {} }); await runtime.host.drive();
+    const nodeMessages = (workerProvider.requests.at(-1) as { messages: { tool_call_id?: string; content: string }[] }).messages;
+    const page = JSON.parse(JSON.parse(nodeMessages.find(message => message.tool_call_id === 'node-list')!.content).content[0].text);
+    const next = JSON.parse(JSON.parse(nodeMessages.find(message => message.tool_call_id === 'node-next')!.content).content[0].text);
+    expect(page).toMatchObject({ total: 3, nextCursor: '2' });
+    expect(next).toMatchObject({ total: 3, nextCursor: null });
+    expect([...page.artifacts, ...next.artifacts]).toEqual(expect.arrayContaining([1, 2, 3].map(version => expect.objectContaining({
+      artifactId: first.artifactId, scope: 'task', ownerId: graphId, version,
+    }))));
+    expect([...page.artifacts, ...next.artifacts]).toHaveLength(3);
   } finally {
     await runtime?.close(); disk?.close(); await workerProvider.close(); await mainProvider.close(); await suggestionProvider.close();
     await rm(root, { recursive: true, force: true });

@@ -106,7 +106,7 @@ function declarations(features: AgentToolFeatures) {
     artifact_list: {
       name: 'artifact_list',
       label: 'List shared artifacts',
-      description: 'List published task artifacts. This is the discovery surface for literature sets, plans, review reports and deliverables; it returns metadata only. Use artifact_read for bounded content.',
+      description: `${main ? 'List published task artifacts and shared project knowledge.' : 'List only shared artifacts owned by your current graph; subgraph nodes share the top-level graph workspace.'} This is the discovery surface for literature sets, plans, review reports and deliverables; it returns metadata only. Use artifact_read for bounded content.`,
       parameters: Type.Object({
         namespace: Type.Optional(Type.String()),
         prefix: Type.Optional(Type.String()),

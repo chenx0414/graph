@@ -576,6 +576,12 @@ export class ArtifactWorkspace {
     return this.page(conditions, params, input);
   }
 
+  /** Graph nodes discover only the shared workspace owned by their top-level graph. */
+  listGraph(graphId: string, input: Omit<ArtifactQuery, 'taskId'> = {}): ArtifactPage {
+    this.store.task(graphId);
+    return this.page(["scope='task' AND owner_id=?"], [graphId], input);
+  }
+
   private page(conditions: string[], params: unknown[], input: ProjectArtifactQuery): ArtifactPage {
     if (input.artifactId) { conditions.push('artifact_id=?'); params.push(input.artifactId); }
     if (input.namespace) { conditions.push('namespace=?'); params.push(slug(input.namespace, 'namespace')); }

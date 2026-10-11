@@ -242,7 +242,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         },
         ...(options.artifacts ? { artifacts: {
           allowedNamespaces: ['plans', 'research', 'reviews', 'deliverables', 'summaries'], canPromote: false,
-          list: query => options.artifacts!.list({ taskId: graphId, ...query }),
+          list: query => options.artifacts!.listGraph(graphId, query),
           get: (id, version) => options.artifacts!.get(graphId, id, version),
           read: (id, version, maxBytes) => options.artifacts!.read(graphId, id, version, maxBytes),
           retire: (id, version, reason, requestId) => {
