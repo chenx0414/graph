@@ -476,13 +476,19 @@ export function conversationDigest(store: TaskStore, conversationId: string) {
   const master = store.db.prepare("SELECT n.id,n.status,n.output,i.used,i.budget,i.model FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(anchor.id) as { status: string; used: number | null; budget: number | null; model: string | null } | undefined;
   const lines = [projectLine(store, conversation.project_id)];
   const proposal = anchor.latest_proposal
-    ? store.db.prepare('SELECT version,requirement_version,spec FROM proposals WHERE task_id=? AND version=?').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; spec: string } | undefined
+    ? store.db.prepare('SELECT version,requirement_version,draft_revision,spec FROM proposals WHERE task_id=? AND version=? AND archived_at IS NULL AND deleted_at IS NULL').get(anchor.id, anchor.latest_proposal) as { version: number; requirement_version: number; draft_revision: number; spec: string } | undefined
     : undefined;
   if (proposal) {
     const spec = JSON.parse(proposal.spec) as { summary?: string };
     const stale = proposal.requirement_version !== anchor.requirement_version ? ' (stale: requirement changed)' : '';
-    lines.push(`Draft: v${proposal.version} on requirement v${proposal.requirement_version}${stale} — ${spec.summary ?? '(no summary)'}`);
+    lines.push(`Draft: v${proposal.version} (draftRevision ${proposal.draft_revision}) on requirement v${proposal.requirement_version}${stale} — ${spec.summary ?? '(no summary)'}`);
   } else lines.push('Draft: none yet');
+  // Archived and deleted cards are not the current draft, but main must still know
+  // they exist so it can restore or delete one by version when the user asks.
+  const cards = store.db.prepare('SELECT version,archived_at,draft_revision FROM proposals WHERE task_id=? AND deleted_at IS NULL ORDER BY version').all(anchor.id) as { version: number; archived_at: number | null; draft_revision: number }[];
+  // A single archived card must be discoverable too: main sees "Draft: none yet"
+  // otherwise and never learns the user can restore it.
+  if (cards.length > 1 || cards.some(card => card.archived_at !== null)) lines.push(`Draft cards: ${cards.map(card => `v${card.version}${card.archived_at === null ? '' : ' (archived)'} rev${card.draft_revision}`).join(', ')} — archive_draft, restore_draft and delete_draft act on one version`);
   if (master) lines.push(`Master: ${master.status}, model ${master.model ?? 'unknown'}, used ${master.used ?? 0}/${master.budget ?? 0} tokens`);
   const mainProblems = store.db.prepare(`SELECT q.id,q.task_id,q.node_id,q.kind,q.data
     FROM questions q JOIN tasks t ON t.id=q.task_id

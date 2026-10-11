@@ -62,7 +62,7 @@ test.each([false, true])('native delivery drains its last check and requires cur
   });
   const proposed = await main.propose({ requirementVersion: 1, summary: 'deliver', definition,
     acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })) }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: {} }); await runtime.host.drive();
   await main.graphSend({ graphId, nodeId: 'review', input: 'job', value: {} }); await runtime.host.drive();
   const before = await main.graphInspect({ graphId, query: 'acceptance' }) as { items: { id: string; status: string }[] };

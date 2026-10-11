@@ -44,7 +44,7 @@ async function workerFixture(name: string, plans: Parameters<typeof openaiServer
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Node detail', requestId: 'begin' });
   await runtime.supervisor(taskId).propose(nativeDraft(), 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   return { taskId, runtime: () => runtime, restart: async () => {
     await runtime.close(); runtime = await openTaskRuntime(options);
   } };
@@ -71,7 +71,7 @@ test('a worker node projects real Pi entries, its session reference and operatio
   await installPresets(runtime.catalog, presetsRoot);
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: 'Node detail', requestId: 'begin' });
   await runtime.supervisor(taskId).propose(nativeDraft(), 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
   await runtime.host.drive();
 
@@ -262,7 +262,7 @@ test('the node detail API serves the projection over HTTP', async () => {
   await installPresets(server.runtime.catalog, presetsRoot);
   const { taskId } = await server.runtime.user.begin({ projectId: 'p', request: 'Node HTTP', requestId: 'begin' });
   await server.runtime.supervisor(taskId).propose(nativeDraft(), 'proposal');
-  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await server.runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await server.runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
   await server.runtime.host.drive();
   const home = await fetch(server.url, { headers: { origin: server.url } });

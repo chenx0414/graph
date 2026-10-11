@@ -105,7 +105,7 @@ test('the conversation page surfaces master questions, live worker status, costs
       acceptance: [{ id: 'check', description: 'Host check passes', kind: 'check', module: 'check' },
         { id: 'a1', description: 'Human checks final output', kind: 'human' }] }),
   }, 'draft');
-  const confirmed = await server.runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await server.runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   await server.runtime.supervisor(anchorTaskId).graphSend({ graphId: confirmed.taskId, nodeId: 'work', input: 'job', value: {} });
   const drive = server.runtime.host.drive();
   await started;

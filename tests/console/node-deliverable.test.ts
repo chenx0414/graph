@@ -42,7 +42,7 @@ async function fixture(plans: ResponsePlan[], deliverable: NonNullable<NodeDefin
           inputs: { artifact: { protocol: 'artifact' } }, outputs: {}, submission: {} } } : {}),
       }, modules: {}, edges: {}, acceptance: [{ id: 'ok', description: '用户检查笔记', kind: 'human' }] }),
   }, 'draft');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
   await runtime.host.drive();
   return { runtime, taskId, provider };

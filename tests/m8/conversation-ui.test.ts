@@ -254,13 +254,19 @@ test('a first-time user chats, drafts, confirms, keeps talking, and recovers aft
     await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
   }
 
-  // 3. Overturn the draft before confirming; the new draft replaces it.
+  // 3. Overturn the draft before confirming; the new draft replaces it in place,
+  // so the version number stays and only the content changes.
   await page.getByTestId('chat-input').fill('刚才那个方案先不要，改成先验证性能瓶颈。');
   await page.getByTestId('chat-send').click();
-  await page.waitForFunction(() => document.querySelector('[data-testid="drawer-entry-label"]')?.textContent?.includes('草稿 v2'));
+  // Close the drawer deterministically first, then open it on the draft page.
+  if (await page.getByTestId('detail-drawer').isVisible().catch(() => false)) {
+    await page.getByTestId('drawer-entry').click();
+    await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
+  }
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('proposal-draft').waitFor();
-  expect(await page.getByTestId('proposal-draft').innerText()).toContain('先验证性能瓶颈');
+  await expect.poll(async () => page.getByTestId('proposal-draft').innerText(), { timeout: 30_000 }).toContain('先验证性能瓶颈');
+  expect(await page.locator('.drawer-draft-title').innerText()).toContain('v1');
 
   // 4. Confirmation creates a feature graph, awaiting an explicit input.
   await page.getByTestId('accept-branch').fill('main');

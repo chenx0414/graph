@@ -23,9 +23,12 @@ export interface PeerChannel {
 }
 
 type Supervisor = Partial<GraphManagement> & {
-  propose(proposal: NativeProposal, requestId: string): Promise<unknown>;
+  propose(proposal: NativeProposal, requestId: string, options?: { newVersion?: boolean }): Promise<unknown>;
   withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
-  confirmDraft?(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
+  confirmDraft?(input: { proposalVersion: number; draftRevision: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
+  archiveDraft?(input: { proposalVersion: number; requestId: string }): Promise<unknown>;
+  restoreDraft?(input: { proposalVersion: number; requestId: string }): Promise<unknown>;
+  deleteDraft?(input: { proposalVersion: number; requestId: string }): Promise<unknown>;
   graphState?(): Promise<unknown>;
   taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
   validateProposal?(proposal: NativeProposal): Promise<unknown>;
@@ -368,7 +371,10 @@ export function agentTools(input: {
     propose_graph: async (_id: string, params: unknown) => {
       const body = fields(params);
       const proposal = nativeProposal(body.proposal);
-      const receipt = await input.supervisor!.propose(proposal, String(body.requestId));
+      // A version number is a place in the user's history: the default is an
+      // in-place edit of the current unconfirmed draft, and only newVersion keeps
+      // a separate version.
+      const receipt = await input.supervisor!.propose(proposal, String(body.requestId), { newVersion: body.newVersion === true });
       return text(JSON.stringify(receipt));
     },
     withdraw_draft: async (_id: string, params: unknown) => {
@@ -389,8 +395,33 @@ export function agentTools(input: {
       if (!instruction) throw new RuntimeError('invalid_input', 'An instruction is required: record the words that authorised this confirmation');
       const receipt = await input.supervisor!.confirmDraft!({
         proposalVersion: Number(body.proposalVersion),
+        draftRevision: Number(body.draftRevision),
         targetBranch: String(body.targetBranch ?? ''),
         instruction,
+        requestId: String(body.requestId),
+      });
+      return text(JSON.stringify(receipt));
+    },
+    archive_draft: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      const receipt = await input.supervisor!.archiveDraft!({
+        proposalVersion: Number(body.proposalVersion),
+        requestId: String(body.requestId),
+      });
+      return text(JSON.stringify(receipt));
+    },
+    restore_draft: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      const receipt = await input.supervisor!.restoreDraft!({
+        proposalVersion: Number(body.proposalVersion),
+        requestId: String(body.requestId),
+      });
+      return text(JSON.stringify(receipt));
+    },
+    delete_draft: async (_id: string, params: unknown) => {
+      const body = fields(params);
+      const receipt = await input.supervisor!.deleteDraft!({
+        proposalVersion: Number(body.proposalVersion),
         requestId: String(body.requestId),
       });
       return text(JSON.stringify(receipt));
@@ -660,6 +691,9 @@ export function agentTools(input: {
       bindProject: Boolean(input.supervisor.bindProject),
       withdrawDraft: Boolean(input.supervisor.withdrawDraft),
       confirmDraft: Boolean(input.supervisor.confirmDraft),
+      archiveDraft: Boolean(input.supervisor.archiveDraft),
+      restoreDraft: Boolean(input.supervisor.restoreDraft),
+      deleteDraft: Boolean(input.supervisor.deleteDraft),
       listProblems: Boolean(input.supervisor.listProblems),
       resolveProblem: Boolean(input.supervisor.resolveProblem),
       pendingHumanChecks: Boolean(input.supervisor.pendingHumanChecks && input.supervisor.reviewHumanCheck),

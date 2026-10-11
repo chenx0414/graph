@@ -153,7 +153,7 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     expect(draft.layout.edges).toMatchObject([{ id: 'ab', source: 'a', target: 'b' }]);
     expect(draft.interfaces).toMatchObject([{ edgeId: 'ab', from: 'a.out', to: 'b.in', protocol: 'ping', latest: null, deliveries: [] }]);
 
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
 
     const runningResponse = await app.inject({ method: 'GET', url: `/api/tasks/${confirmed.taskId}/graph`, headers });
     expect(runningResponse.statusCode).toBe(200);
@@ -172,7 +172,7 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
     expect(briefings.join('\n')).toContain('graph_send');
     // Replaying confirmation must not wake main twice.
     const count = briefings.length;
-    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
     await runtime.host.drive();
     expect(briefings).toHaveLength(count);
 
@@ -216,7 +216,7 @@ describe('materializeGraph — the v2 half of the §13.8 switchover', () => {
         { id: 'check', kind: 'program', action: 'graph.command', dependsOn: ['work'], input: { command: 'node', args: ['check.js'] } },
       ],
     } as unknown as NativeProposal, 'proposal-old')).rejects.toMatchObject({ code: 'invalid_proposal' });
-    await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' }))
+    await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' }))
       .rejects.toMatchObject({ code: 'stale_proposal' });
     expect((await runtime.conversations.view(created.conversationId)).tasks).toEqual([]);
     const store = new TaskStore(join(root, 'state', 'tasks.sqlite'));

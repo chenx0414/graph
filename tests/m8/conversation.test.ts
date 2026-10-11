@@ -660,7 +660,7 @@ test('queued messages can steer the active master turn', async () => {
   expect(completed.messages.at(-1)?.text).toBe('已根据引导继续完成。');
 });
 
-test('drafts version on the same requirement and only the latest can be confirmed', async () => {
+test('explicit newVersion keeps draft history and only the latest can be confirmed', async () => {
   const root = await temp('draft');
   const project = join(root, 'project');
   const { mkdir } = await import('node:fs/promises');
@@ -679,7 +679,8 @@ test('drafts version on the same requirement and only the latest can be confirme
 
   const proposal = (summary: string) => workflowDraft(1, summary);
   await runtime.supervisor(anchorTaskId).propose(proposal('旧方案'), 'proposal-1');
-  await runtime.supervisor(anchorTaskId).propose(proposal('新方案'), 'proposal-2');
+  // Version history is now opt-in: without newVersion the current draft is edited in place.
+  await runtime.supervisor(anchorTaskId).propose(proposal('新方案'), 'proposal-2', { newVersion: true });
   const drafted = await runtime.conversations.view(created.conversationId);
   expect(drafted.proposal?.version).toBe(2);
   expect(drafted.proposal?.spec.summary).toBe('新方案');
@@ -691,9 +692,9 @@ test('drafts version on the same requirement and only the latest can be confirme
   await expect(runtime.conversations.proposal(created.conversationId, 99)).rejects.toMatchObject({ code: 'not_found' });
 
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-old' }))
+  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-old' }))
     .rejects.toMatchObject({ code: 'stale_proposal' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-new' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-new' });
   const after = await runtime.conversations.view(created.conversationId);
   expect(after.requirementVersion).toBe(2);
   expect(after.tasks).toHaveLength(1);
@@ -725,10 +726,238 @@ test('drafts version on the same requirement and only the latest can be confirme
       nodes: [expect.objectContaining({ id: 'work', origin: 'v2', status: 'idle' })],
     }),
   ]);
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-again' }))
+  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-again' }))
     .rejects.toMatchObject({ code: 'stale_proposal' });
   // The feature task is visible as a normal task; the anchor is not.
   expect((await runtime.user.list()).map(task => task.id)).toEqual([confirmed.taskId]);
+});
+
+// The draft-lifecycle contract: editing a draft in place must not pile up versions,
+// a credential taken from replaced content must never confirm the replacement, and
+// archive/delete are per-version tombstones that leave a started graph untouched.
+async function draftFixture(name: string) {
+  const root = await temp(name);
+  const project = join(root, 'project');
+  const second = join(root, 'second');
+  await mkdir(project, { recursive: true });
+  await mkdir(second, { recursive: true });
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    projects: [{ id: 'p', root: project }, { id: 'q', root: second }],
+    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'draft ready' }, usage })) },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
+  await runtime.host.runReady();
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  return { runtime, conversationId: created.conversationId, anchorTaskId, proposal: (summary: string) => workflowDraft(1, summary) };
+}
+
+test('editing a draft in place replaces its content without stacking versions', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('in-place');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
+  const first = await runtime.conversations.view(conversationId);
+  expect(first.proposal?.version).toBe(1);
+  const firstRevision = first.proposal!.draftRevision;
+  expect(typeof firstRevision).toBe('number');
+  const firstDigest = first.proposal!.draftDigest;
+
+  await runtime.supervisor(anchorTaskId).propose(proposal('改过的方案'), 'p2');
+  const edited = await runtime.conversations.view(conversationId);
+  // Same version, same draft identity, new content and a new credential.
+  expect(edited.proposal?.version).toBe(1);
+  expect(edited.proposal?.spec.summary).toBe('改过的方案');
+  expect(edited.proposal!.draftRevision).toBeGreaterThan(firstRevision);
+  expect(edited.proposal!.draftDigest).not.toBe(firstDigest);
+  expect(edited.proposalHistory.map(item => item.version)).toEqual([1]);
+  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('改过的方案');
+});
+
+test('a confirmation credential from replaced draft content is refused', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('stale-credential');
+  await runtime.supervisor(anchorTaskId).propose(proposal('原始内容'), 'p1');
+  const stale = (await runtime.conversations.view(conversationId)).proposal!.draftRevision;
+  await runtime.supervisor(anchorTaskId).propose(proposal('被替换的内容'), 'p2');
+  await expect(runtime.conversations.confirm(conversationId, {
+    proposalVersion: 1, draftRevision: stale, targetBranch: 'main', requestId: 'confirm-stale',
+  })).rejects.toMatchObject({ code: 'stale_proposal' });
+  const current = await runtime.conversations.view(conversationId);
+  const confirmed = await runtime.conversations.confirm(conversationId, {
+    proposalVersion: 1, draftRevision: current.proposal!.draftRevision, targetBranch: 'main', requestId: 'confirm-current',
+  });
+  expect(confirmed.taskId).toBeTruthy();
+  const after = await runtime.conversations.view(conversationId);
+  expect(after.tasks).toHaveLength(1);
+  expect(after.tasks[0]!.id).toBe(confirmed.taskId);
+  // The acceptance records the exact content that was confirmed, not just a version.
+  expect(after.accepted.map(item => ({ version: item.proposalVersion, revision: item.draftRevision })))
+    .toEqual([{ version: 1, revision: current.proposal!.draftRevision }]);
+});
+
+test('archive hides a draft from the active list and restore brings it back', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('archive');
+  await runtime.supervisor(anchorTaskId).propose(proposal('待归档方案'), 'p1');
+  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 1, requestId: 'archive-1' });
+  const archived = await runtime.conversations.view(conversationId);
+  expect(archived.proposal).toBeNull();
+  // Archiving is not deletion: the content is still readable by version, and the
+  // card is gone from the active list rather than flagged in it.
+  expect(archived.proposalHistory).toEqual([]);
+  expect(archived.archivedProposals.map(item => item.version)).toEqual([1]);
+  const mainView = await runtime.supervisor(anchorTaskId).graphState();
+  expect(mainView.proposal).toBeNull();
+  expect(mainView.archivedProposals?.map(item => item.version)).toEqual([1]);
+  expect((await runtime.user.task(anchorTaskId).view()).proposal).toBeNull();
+  // Archiving is not deletion: the content is still readable by version.
+  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('待归档方案');
+  await expect(runtime.conversations.confirm(conversationId, {
+    proposalVersion: 1, draftRevision: archived.archivedProposals[0]!.draftRevision, targetBranch: 'main', requestId: 'confirm-archived',
+  })).rejects.toMatchObject({ code: 'stale_proposal' });
+
+  await runtime.conversations.restoreDraft(conversationId, { proposalVersion: 1, requestId: 'restore-1' });
+  const restored = await runtime.conversations.view(conversationId);
+  expect(restored.proposal?.version).toBe(1);
+  expect(restored.proposal?.spec.summary).toBe('待归档方案');
+  expect(restored.archivedProposals).toEqual([]);
+});
+
+test('deleting a draft hides it but never removes the graph it started', async () => {
+  const root = await temp('delete');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  // A real Pi run (work -> check) so there is real evidence, a real session and a
+  // real graph revision that deletion is forbidden to touch.
+  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
+  const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
+  await runtime.host.runReady();
+  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
+  await runtime.supervisor(anchorTaskId).propose(workflowDraft(1, '会被确认的方案'), 'p1');
+  const current = await runtime.conversations.view(created.conversationId);
+  const confirmed = await runtime.conversations.confirm(created.conversationId, {
+    proposalVersion: 1, draftRevision: current.proposal!.draftRevision, targetBranch: 'main', requestId: 'confirm-1',
+  });
+  const taskId = confirmed.taskId;
+  const session = await runWorker(taskId);
+  const before = await runtime.conversations.view(created.conversationId);
+  const messagesBefore = before.messages.length;
+  // The run itself: node entries, the graph's acceptance record and the proposal
+  // copy the confirmed task owns.
+  const entriesBefore = runtime.nodeRun(taskId, 'work').entries.length;
+  const acceptanceBefore = (await runtime.supervisor(anchorTaskId).graphInspect({ graphId: taskId, query: 'acceptance' }) as { items: unknown[] }).items.length;
+  expect(entriesBefore).toBeGreaterThan(0);
+  expect(acceptanceBefore).toBeGreaterThan(0);
+
+  // The confirmed card can be cleared out of the draft lists, and doing so must not
+  // touch the started graph, its chat, its evidence or the frozen acceptance.
+  await runtime.conversations.deleteDraft(created.conversationId, { proposalVersion: 1, requestId: 'delete-1' });
+  const after = await runtime.conversations.view(created.conversationId);
+  expect(after.proposal).toBeNull();
+  expect(after.proposalHistory).toEqual([]);
+  expect(after.archivedProposals).toEqual([]);
+  await expect(runtime.conversations.proposal(created.conversationId, 1)).rejects.toMatchObject({ code: 'not_found' });
+  expect(after.messages.length).toBe(messagesBefore);
+  expect(after.tasks.map(task => task.id)).toEqual([taskId]);
+  expect(after.tasks[0]!.acceptedProposalVersion).toBe(1);
+  expect(runtime.nodeRun(taskId, 'work').entries.length).toBe(entriesBefore);
+  expect((await runtime.supervisor(anchorTaskId).graphInspect({ graphId: taskId, query: 'acceptance' }) as { items: unknown[] }).items.length).toBe(acceptanceBefore);
+  expect((await runtime.user.list()).map(task => task.id)).toEqual([taskId]);
+  expect(runtime.kernelGraph(taskId)).toMatchObject({ revision: 1, definition: { nodes: { work: expect.anything() } } });
+  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('succeeded');
+  expect(session).toContain('work');
+});
+
+test('a confirmed draft is never overwritten by a later task or a rebinding', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('immutable-after-confirm');
+  await runtime.supervisor(anchorTaskId).propose(proposal('会被确认的方案'), 'p1');
+  const before = await runtime.conversations.view(conversationId);
+  const confirmed = await runtime.conversations.confirm(conversationId, {
+    proposalVersion: 1, draftRevision: before.proposal!.draftRevision, targetBranch: 'main', requestId: 'confirm-1',
+  });
+  // Confirmation advances the anchor requirement, so the confirmed card can no
+  // longer be edited in place: the next draft is a new version.
+  expect((await runtime.conversations.view(conversationId)).requirementVersion).toBe(2);
+  await runtime.supervisor(anchorTaskId).propose(workflowDraft(2, '第二个方案'), 'p2');
+  expect((await runtime.conversations.view(conversationId)).proposal?.version).toBe(2);
+  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('会被确认的方案');
+  expect(runtime.kernelGraph(confirmed.taskId)).toMatchObject({ revision: 1, definition: { nodes: { work: expect.anything() } } });
+
+  // Rebinding the conversation to another project invalidates drafts the same way.
+  await runtime.conversations.bind(conversationId, { projectId: 'q', requestId: 'rebind' });
+  expect((await runtime.conversations.view(conversationId)).requirementVersion).toBe(3);
+  await runtime.supervisor(anchorTaskId).propose(workflowDraft(3, '第三个方案'), 'p3');
+  expect((await runtime.conversations.view(conversationId)).proposal?.version).toBe(3);
+  expect((await runtime.conversations.proposal(conversationId, 2)).spec.summary).toBe('第二个方案');
+  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('会被确认的方案');
+});
+
+test('a deleted or archived version is never handed out again', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('tombstone-high-water');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第二版'), 'p2', { newVersion: true });
+  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 2, requestId: 'archive-2' });
+  await runtime.conversations.restoreDraft(conversationId, { proposalVersion: 1, requestId: 'restore-1' });
+  // The archived v2 still holds its number, so the next explicit version is 3.
+  await runtime.supervisor(anchorTaskId).propose(proposal('第三版'), 'p3', { newVersion: true });
+  const view = await runtime.conversations.view(conversationId);
+  expect(view.proposal?.version).toBe(3);
+  expect(view.proposalHistory.map(item => item.version)).toEqual([1, 3]);
+  expect(view.archivedProposals.map(item => item.version)).toEqual([2]);
+  // Archiving is not deletion: the archived content is still readable by version.
+  expect((await runtime.conversations.proposal(conversationId, 2)).spec.summary).toBe('第二版');
+  // A delete leaves a tombstone, so the version after it is still fresh ground.
+  await runtime.conversations.deleteDraft(conversationId, { proposalVersion: 3, requestId: 'delete-3' });
+  await runtime.supervisor(anchorTaskId).propose(proposal('第四版'), 'p4', { newVersion: true });
+  const later = await runtime.conversations.view(conversationId);
+  expect(later.proposal?.version).toBe(4);
+  expect(later.proposalHistory.map(item => item.version)).toEqual([1, 4]);
+});
+
+test('a deleted draft version is never handed out again', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('high-water');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
+  await runtime.conversations.deleteDraft(conversationId, { proposalVersion: 1, requestId: 'delete-1' });
+  await runtime.supervisor(anchorTaskId).propose(proposal('删除之后的新草稿'), 'p2');
+  const view = await runtime.conversations.view(conversationId);
+  expect(view.proposal?.version).toBe(2);
+  expect(view.proposal?.spec.summary).toBe('删除之后的新草稿');
+  expect(view.proposalHistory.map(item => item.version)).toEqual([2]);
+});
+
+test('restoring an archived draft makes it current again without stacking versions', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('restore-current');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第二版'), 'p2', { newVersion: true });
+  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 1, requestId: 'archive-1' });
+  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 2, requestId: 'archive-2' });
+  const archived = await runtime.conversations.view(conversationId);
+  expect(archived.proposal).toBeNull();
+  expect(archived.proposalHistory).toEqual([]);
+  expect(archived.archivedProposals.map(item => item.version)).toEqual([1, 2]);
+  // An explicit by-version read still shows archived content, marked archived.
+  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('第一版');
+  expect((await runtime.conversations.proposal(conversationId, 1)).archived).toBe(true);
+
+  await runtime.conversations.restoreDraft(conversationId, { proposalVersion: 1, requestId: 'restore-1' });
+  const restored = await runtime.conversations.view(conversationId);
+  // Restored v1 is the current draft again, so a default edit stays on v1 instead
+  // of piling up another version.
+  expect(restored.proposal?.version).toBe(1);
+  expect(restored.proposal?.spec.summary).toBe('第一版');
+  await runtime.supervisor(anchorTaskId).propose(proposal('第一版改过'), 'p3');
+  const edited = await runtime.conversations.view(conversationId);
+  expect(edited.proposal?.version).toBe(1);
+  expect(edited.proposal?.spec.summary).toBe('第一版改过');
+  expect(edited.proposal!.draftRevision).toBe(2);
+  expect(edited.proposalHistory.map(item => item.version)).toEqual([1]);
+  // The archived v2 is still archived and still holds its number.
+  expect(edited.archivedProposals.map(item => item.version)).toEqual([2]);
+  await runtime.supervisor(anchorTaskId).propose(proposal('第三版'), 'p4', { newVersion: true });
+  const later = await runtime.conversations.view(conversationId);
+  expect(later.proposal?.version).toBe(3);
+  expect(later.proposalHistory.map(item => item.version)).toEqual([1, 3]);
 });
 
 test('a conversation master patches its native feature graph and reads queued status', async () => {
@@ -744,7 +973,7 @@ test('a conversation master patches its native feature graph and reads queued st
   const supervisor = runtime.supervisor(anchorTaskId);
   await supervisor.propose(workflowDraft(1, '最小可用版'), 'proposal');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   const graphId = confirmed.taskId;
   expect(await supervisor.graphPatch({ graphId, baseRevision: 1, changes: {
     reason: '把下次实现模型换到另一个可用模型', patch: { nodes: { work: { model: 'm2' } } },
@@ -782,7 +1011,7 @@ test('post-confirmation chat keeps the requirement fixed and sees real execution
   const conversation = await runtime.conversations.view(created.conversationId);
   await runtime.supervisor(conversation.anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'proposal');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   await runtime.conversations.chat(created.conversationId, { text: '现在卡在哪里？', requestId: 'ask' });
   seen.length = 0;
   await runtime.host.runReady();
@@ -974,7 +1203,7 @@ test('a scope change after confirmation becomes a new queued task, not an edit o
   const proposal = (summary: string, requirementVersion: number) => workflowDraft(requirementVersion, summary);
   await runtime.supervisor(anchorTaskId).propose(proposal('第一版', 1), 'draft-1');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const first = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-1' });
+  const first = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-1' });
   const firstTask = await runtime.user.task(first.taskId).view();
   expect(firstTask.phase).toBe('running');
 
@@ -982,7 +1211,7 @@ test('a scope change after confirmation becomes a new queued task, not an edit o
   await runtime.conversations.chat(created.conversationId, { text: '顺便加上另一平台。', requestId: 'scope' });
   await runtime.host.runReady();
   await runtime.supervisor(anchorTaskId).propose(proposal('另一平台', 2), 'draft-2');
-  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-2' });
+  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-2' });
   expect(second.taskId).not.toBe(first.taskId);
   const view = await runtime.conversations.view(created.conversationId);
   expect(view.tasks.map(task => task.id)).toEqual([first.taskId, second.taskId]);
@@ -1058,11 +1287,11 @@ test('rebinding a conversation invalidates drafts investigated for the previous 
   expect(afterBind.projectId).toBe('b');
   expect(afterBind.requirementVersion).toBe(2);
   expect(afterBind.proposal?.stale).toBe(true);
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-old' }))
+  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-old' }))
     .rejects.toMatchObject({ code: 'stale_proposal' });
   // A draft made after the rebind can be confirmed for the new project.
   await runtime.supervisor(anchorTaskId).propose(draft(2, '来自 B 的草稿'), 'draft-b');
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm-new' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-new' });
   expect((await runtime.user.task(confirmed.taskId).view()).projectId).toBe('b');
 });
 
@@ -1095,7 +1324,7 @@ test('a confirmed task carries the conversation decisions and constraints to its
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
   await runtime.supervisor(anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'draft');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   const briefing = await runWorker(confirmed.taskId);
   expect(briefing).toContain('Decisions and constraints from the conversation');
   expect(briefing).toContain('预算有限，登录先不改');
@@ -1119,7 +1348,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
     await runtime.supervisor(anchor).propose(proposalOf(1, 'Only A maintenance'), 'draft-a');
     await runtime.conversations.bind(created.conversationId, { projectId: 'b', requestId: 'rebind' });
     await runtime.supervisor(anchor).propose(proposalOf(2, 'Only B CSS colors'), 'draft-b');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm' });
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
     const briefing = await runWorker(confirmed.taskId);
     expect(briefing).not.toContain('A_ONLY');
   }
@@ -1137,7 +1366,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
     }
     const anchor = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
     await runtime.supervisor(anchor).propose(proposalOf(1, '改进仪表盘'), 'draft');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
     const briefing = await runWorker(confirmed.taskId);
     expect(briefing).toContain('PERSISTENT_CONSTRAINT');
   }
@@ -1156,7 +1385,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
     const draft = await runtime.conversations.view(created.conversationId);
     expect(draft.messages.at(-1)!.state).toBe('pending');
     expect(draft.proposal?.decisions).not.toContain('UNREVIEWED_NEXT_TASK');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
     const briefing = await runWorker(confirmed.taskId);
     expect(briefing).toContain('只调整颜色，保留登录逻辑');
     expect(briefing).not.toContain('UNREVIEWED_NEXT_TASK');
@@ -1173,7 +1402,7 @@ test('decision snapshots are frozen with the draft and scoped to the project bin
     await runtime.supervisor(anchor).propose(proposalOf(1, 'Curated', ['不要修改 login.ts']), 'draft');
     const draft = await runtime.conversations.view(created.conversationId);
     expect(draft.proposal?.decisions).toBe('- 不要修改 login.ts');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
     const briefing = await runWorker(confirmed.taskId);
     expect(briefing).toContain('不要修改 login.ts');
     expect(briefing).not.toContain('原始聊天文本不应直接当作决策');
@@ -1196,18 +1425,18 @@ test('an explicit empty decisions list revokes constraints without falling back 
   await runtime.supervisor(anchor).propose(draftOf(1, 1, ['不要修改 login.ts']), 'draft-1');
   await runtime.conversations.chat(created.conversationId, { text: '撤销该约束；修订后的提案没有绑定约束。', requestId: 'revoke' });
   await runtime.host.runReady();
-  await runtime.supervisor(anchor).propose(draftOf(1, 2, []), 'draft-2');
+  await runtime.supervisor(anchor).propose(draftOf(1, 2, []), 'draft-2', { newVersion: true });
   const drafted = await runtime.conversations.view(created.conversationId);
   expect(drafted.proposal?.version).toBe(2);
   expect(drafted.proposal?.decisions).toBe('');
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   const briefing = await runWorker(confirmed.taskId);
   expect(briefing).not.toContain('OLD_CONSTRAINT');
   expect(briefing).not.toContain('不要修改 login.ts');
   // A later feature in the same conversation that declares no constraints
   // freezes its own empty snapshot instead of inheriting the previous task's.
   await runtime.supervisor(anchor).propose(draftOf(2, 3, []), 'draft-3');
-  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 3, targetBranch: 'main', requestId: 'confirm-2' });
+  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 3, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-2' });
   expect((await runtime.user.task(second.taskId).view()).request).toBe('draft-3');
   expect((await runtime.conversations.view(created.conversationId)).proposal?.decisions).toBe('');
 });
@@ -1396,7 +1625,7 @@ test('the master can withdraw its own unconfirmed draft without losing it', asyn
   expect(view.proposal).toBeNull();
   expect(view.proposalHistory.map(item => item.version)).toContain(1);
   expect(view.messages.some(message => message.role === 'system' && message.text.includes('已作废：方向已变'))).toBe(true);
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm-withdrawn' }))
+  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-withdrawn' }))
     .rejects.toMatchObject({ code: 'stale_proposal' });
 
   // Withdrawing again is refused, and the next draft keeps a monotonic version: the withdrawn
@@ -1419,11 +1648,52 @@ test('the conversation status stays with the master while the constraints still 
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
   await runtime.supervisor(anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'draft');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   const briefing = await runWorker(confirmed.taskId);
   // The constraint the user stated is what this node has to obey.
   expect(briefing).toContain('Decisions and constraints from the conversation');
   expect(briefing).toContain('预算有限，登录先不改');
   // The master's monitoring picture is not this node's business.
   expect(briefing).not.toContain('Conversation and execution status');
+});
+
+test('accepting a draft needs the credential of the revision that was reviewed', async () => {
+  const { runtime, proposal } = await draftFixture('accept-credential');
+  const { taskId: anchorTaskId } = await runtime.user.begin({ projectId: 'p', request: 'Formal feature', requestId: 'begin' });
+  await runtime.supervisor(anchorTaskId).propose(proposal('方案一'), 'p1');
+  // The credential is discoverable from the formal task view, not only from the
+  // database: a caller reads it here and carries it back to accept.
+  const view = await runtime.user.task(anchorTaskId).view();
+  expect(view.proposalVersion).toBe(1);
+  expect(view.draftRevision).toBe(1);
+  // An in-place edit keeps the version number but changes the credential.
+  await runtime.supervisor(anchorTaskId).propose(proposal('方案一改'), 'p2');
+  const edited = await runtime.user.task(anchorTaskId).view();
+  expect(edited.proposalVersion).toBe(1);
+  expect(edited.draftRevision).toBe(2);
+  await expect(runtime.user.task(anchorTaskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept-old' }))
+    .rejects.toThrow(/changed after it was reviewed/);
+  const receipt = await runtime.user.task(anchorTaskId).accept({ proposalVersion: 1, draftRevision: 2, targetBranch: 'main', requestId: 'accept-new' });
+  expect(receipt).toMatchObject({ proposalVersion: 1, draftRevision: 2 });
+  // Replaying the same request returns the recorded receipt without applying twice.
+  const replay = await runtime.user.task(anchorTaskId).accept({ proposalVersion: 1, draftRevision: 2, targetBranch: 'main', requestId: 'accept-new' });
+  expect(replay).toMatchObject({ proposalVersion: 1, draftRevision: 2 });
+  expect((await runtime.user.task(anchorTaskId).view()).acceptedProposalVersion).toBe(1);
+});
+
+test('draft cards belong to their own conversation and never leak across', async () => {
+  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('card-isolation');
+  const other = await runtime.conversations.create({ text: '另一个会话', requestId: 'other-create' });
+  await runtime.host.runReady();
+  const otherAnchor = (await runtime.conversations.view(other.conversationId)).anchorTaskId;
+  await runtime.conversations.bind(other.conversationId, { projectId: 'p', requestId: 'other-bind' });
+  await runtime.supervisor(anchorTaskId).propose(proposal('甲会话草稿'), 'p1');
+  await runtime.supervisor(otherAnchor).propose(workflowDraft(1, '乙会话草稿'), 'p2');
+  await runtime.conversations.archiveDraft(other.conversationId, { proposalVersion: 1, requestId: 'archive-other' });
+  const mine = await runtime.conversations.view(conversationId);
+  expect(mine.proposal?.spec.summary).toBe('甲会话草稿');
+  expect(mine.archivedProposals).toEqual([]);
+  const theirs = await runtime.conversations.view(other.conversationId);
+  expect(theirs.proposal).toBeNull();
+  expect(theirs.archivedProposals.map(item => item.version)).toEqual([1]);
 });

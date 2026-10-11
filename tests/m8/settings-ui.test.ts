@@ -508,7 +508,7 @@ test('removing a model bound to an unfinished task is refused and the daemon kee
       edges: {}, acceptance: [{ id: 'works', description: 'Works', kind: 'check', module: 'check' }] }),
   }, 'proposal');
   await daemon.server.runtime.projects.prepare({ projectId: 'sample', initialize: true, createBaseline: true, requestId: 'prepare' });
-  const { taskId } = await daemon.server.runtime.conversations.confirm(conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  const { taskId } = await daemon.server.runtime.conversations.confirm(conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   const document = {
     version: 1, projects: [{ id: 'sample', root: dir }],
     models: { entries: [{ id: 'replacement', provider: 'stub', grade: 'medium', api: 'openai-completions', baseUrl: stub.baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] }, credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } }, limits: { credentials: { local: 1 } },

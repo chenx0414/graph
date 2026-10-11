@@ -5,7 +5,7 @@ import { RuntimeError } from './types.ts';
 /** Latest schema version this runtime writes. The startup guard and every version
  * assertion refer to it, so adding a migration is one edit instead of five — a
  * mismatch here once rejected the database the same process had just created. */
-export const SCHEMA_VERSION = 41;
+export const SCHEMA_VERSION = 42;
 
 export function canonicalJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
@@ -675,6 +675,21 @@ export class TaskStore {
         CREATE INDEX IF NOT EXISTS messages_to_node ON messages(conversation_id,to_node_id,seq);
         CREATE UNIQUE INDEX IF NOT EXISTS messages_request ON messages(conversation_id,request_id) WHERE request_id IS NOT NULL;`);
       this.db.exec('PRAGMA user_version=41;');
+    });
+    if (version < 42) this.transaction(() => {
+      // A draft card is edited in place, so a version number alone no longer
+      // identifies the content a user reviewed: every draft carries a revision
+      // counter and a content digest as its confirmation credential. Archive and
+      // delete are tombstones - the row stays for audit while the card leaves the
+      // lists - and deleting a draft never touches a started graph, its chat, its
+      // evidence or its frozen acceptance.
+      this.db.exec(`
+        ALTER TABLE proposals ADD COLUMN draft_revision INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE proposals ADD COLUMN draft_digest TEXT;
+        ALTER TABLE proposals ADD COLUMN archived_at INTEGER;
+        ALTER TABLE proposals ADD COLUMN deleted_at INTEGER;
+        ALTER TABLE conversation_acceptances ADD COLUMN draft_revision INTEGER;
+        PRAGMA user_version=42;`);
     });
   }
 

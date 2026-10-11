@@ -6,6 +6,12 @@
 
 需要用户确认的草稿使用 `propose_graph({proposal:{requirementVersion,summary,definition,acceptance,decisions?},requestId})`。definition 使用本文同一 JSON 格式；无需旧 nodes 数组。外层 acceptance 暂用 `{id,description,checkNode}`，指向定义中的实际节点或模块；定义同时声明正式 acceptance 时，两者需一致。main 位于定义外部。确认后收到 graph_ready 通知，再显式 graph_send，不自动运行根节点。主 agent 的 propose_graph 只接收此结构化对象，已关闭旧 proposalJson 字符串别名；运行中修改使用 graph_patch，旧 revise_graph 工具已移除。SDK 也要求原生 definition；旧 revise SDK 方法也已删除，使用 graph_patch 修订。正式 SDK 草稿只接收 NativeProposal，definition 必需；不再暴露旧 nodes/containers/loops 草稿类型。旧节点上下文继承、依赖调度和草稿格式不再是正式 SDK；默认应用切换证据见实施进度。
 
+同一个功能任务沿用同一个 graph。`propose_graph` 默认原地更新当前需求下尚未确认的草稿，保持 `proposalVersion`，并返回新的 `draftRevision`。main 自行决定是否另存里程碑或比较版本：需要时传 `newVersion:true`，无需为是否另存版本请求用户许可。已确认的任务继续用 `graph_patch` 修改原 graph；另一个任务才另建 graph。执行内核的 revision 审计与用户看到的草稿版本分开。
+
+确认前重新读取草稿。`confirm_draft({proposalVersion,draftRevision,targetBranch,instruction,requestId})` 必须携带当前内容的 `draftRevision`，由 briefing 或会话视图取得，并遵守用户明确授权确认与指定目标分支的要求。原地修改后，旧修订标识会被拒绝；不得替用户确认尚未查看的新内容。直接任务 accept 接口也要求此标识，可从任务视图或提案回执读取。
+
+main 使用 `archive_draft({proposalVersion,requestId})`、`restore_draft({proposalVersion,requestId})`、`delete_draft({proposalVersion,requestId})` 管理本会话中的指定草稿版本。会话视图的 `proposalHistory` 只列未归档、未删除的卡片，`archivedProposals` 列归档卡片。归档版本可按版本读取、恢复或删除；删除版本不能读取或恢复，版本号不复用。归档或删除已确认的源草稿不会删除正式 graph、任务、聊天、执行记录或验收事实；不要自动批量清理用户的历史草稿。
+
 提交草稿前可调用 `validate_proposal({proposal})`，传入与 `propose_graph` 完全相同的原生对象；返回 `valid:true` 或 `valid:false` 与错误，不创建草稿、不启动节点。预检不接收旧 `proposalJson` 字符串。
 
 `graph_create({definition,targetBranch?})` 接收完整 JSON 定义，返回 graphId、验证后的定义和 revision。节点等待投递；创建不自动执行根节点。targetBranch 用于需要 Git 工作副本与交付合并的任务。graph 由当前 main agent 拥有。

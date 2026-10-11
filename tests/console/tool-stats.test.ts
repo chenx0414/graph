@@ -70,7 +70,15 @@ test('adds the table to a database that predates it', () => {
   store.db.close();
 
   const raw = new DatabaseSync(path);
-  raw.exec('DROP TABLE tool_calls; PRAGMA user_version=35;');
+  raw.exec(`
+    DROP TABLE tool_calls;
+    ALTER TABLE proposals DROP COLUMN draft_revision;
+    ALTER TABLE proposals DROP COLUMN draft_digest;
+    ALTER TABLE proposals DROP COLUMN archived_at;
+    ALTER TABLE proposals DROP COLUMN deleted_at;
+    ALTER TABLE conversation_acceptances DROP COLUMN draft_revision;
+    PRAGMA user_version=35;
+  `);
   raw.close();
 
   const upgraded = new TaskStore(path);

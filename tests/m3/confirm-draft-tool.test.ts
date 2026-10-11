@@ -33,7 +33,7 @@ async function fixture() {
 
 test('confirm_draft refuses to confirm without the user words that authorised it', async () => {
   const { seen, call } = await fixture();
-  await expect(call('confirm_draft', { proposalVersion: 3, targetBranch: 'main', instruction: '   ', requestId: 'r1' }))
+  await expect(call('confirm_draft', { proposalVersion: 3, draftRevision: 1, targetBranch: 'main', instruction: '   ', requestId: 'r1' }))
     .rejects.toThrow(/instruction/i);
   expect(seen).toEqual([]);
 });
@@ -41,7 +41,7 @@ test('confirm_draft refuses to confirm without the user words that authorised it
 test('confirm_draft passes the user words through to the runtime verbatim', async () => {
   const { seen, call } = await fixture();
   const instruction = '已确认草稿！main agent 可以代替用户点击确认草稿';
-  const result = await call('confirm_draft', { proposalVersion: 3, targetBranch: 'main', instruction, requestId: 'r2' });
-  expect(seen).toEqual([{ proposalVersion: 3, targetBranch: 'main', instruction, requestId: 'r2' }]);
+  const result = await call('confirm_draft', { proposalVersion: 3, draftRevision: 1, targetBranch: 'main', instruction, requestId: 'r2' });
+  expect(seen).toEqual([{ proposalVersion: 3, draftRevision: 1, targetBranch: 'main', instruction, requestId: 'r2' }]);
   expect(JSON.stringify(result)).toContain('taskId');
 });

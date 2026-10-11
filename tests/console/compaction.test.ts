@@ -311,7 +311,7 @@ async function nativeWorker(runtime: Awaited<ReturnType<typeof openTaskRuntime>>
         inputs: { job: { protocol: 'job' } }, outputs: {}, submission: {} } }, modules: {}, edges: {},
       acceptance: [{ id: 'ok', description: 'User inspects the response', kind: 'human' }] }),
   }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
 }
 

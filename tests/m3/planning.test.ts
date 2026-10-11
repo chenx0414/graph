@@ -47,7 +47,7 @@ test('main proposes a native graph and workers receive an explicit task without 
   await expect(main.propose({ requirementVersion: 1, summary: 'Bad', definition,
     acceptance: [{ id: 'works', description: 'Search ignores case', checkNode: 'missing' }],
   }, 'bad')).rejects.toMatchObject({ code: 'invalid_proposal' });
-  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive();
   expect(provider.requests).toHaveLength(2);
   expect(JSON.stringify(provider.requests[0])).toContain('USER_PRIVATE_MARKER');
@@ -81,7 +81,7 @@ test('a separately confirmed native feature stays queued until the original grap
     const proposed = await main.propose({ requirementVersion: 1, summary: request, definition: checkDefinition,
       acceptance: [{ id: 'works', description: 'Host runtime responds', checkNode: 'check' }], decisions: [],
     }, 'proposal');
-    await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: `accept-${request}` });
+    await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: `accept-${request}` });
     await main.graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
     return { taskId, main, task: runtime.user.task(taskId) };
   };

@@ -93,7 +93,7 @@ test.skipIf(!sourceAvailable)('production Pi writes the Bilibili web on a clone 
   const proposed = await main.propose({ requirementVersion: 1, summary: definition.name, definition,
     acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })),
   }, 'm7-prod-plan');
-  const receipt = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  const receipt = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   graphId = receipt.taskId;
   expect(main).not.toHaveProperty('revise');
   const task = runtime.user.task(graphId);

@@ -117,6 +117,9 @@ export type ProposalDetail = {
   stale: boolean;
   decisions: string | null;
   spec: import('../core/types.ts').NativeProposal;
+  draftRevision?: number;
+  draftDigest?: string;
+  archived?: boolean;
 };
 type ProposalVersion = {
   version: number;
@@ -124,6 +127,8 @@ type ProposalVersion = {
   stale: boolean;
   summary: string;
   accepted: boolean;
+  draftRevision?: number;
+  archived?: boolean;
 };
 type DrawerPage = ConversationDrawerPage;
 
@@ -145,6 +150,7 @@ type ConversationView = {
   questions: AnchorQuestion[];
   proposal: ProposalDetail | null;
   proposalHistory: ProposalVersion[];
+  archivedProposals: ProposalVersion[];
   accepted: { proposalVersion: number; taskId: string; targetBranch: string; acceptedAt: number }[];
   master: { nodeId: string; status: string; model: string | null; used: number | null; budget: number | null; unlimited?: boolean; definitionVersion: string | null; cost: { unknown?: boolean; amount?: number } } | null;
   cost: { unknown?: boolean; amount?: number };
@@ -197,7 +203,7 @@ function sentUserPrompts(messages: ConversationMessage[]): string[] {
 
 function DraftVersionToc({ history, selectedVersion, onSelectVersion }: {
   history: ProposalVersion[];
-  selectedVersion: number;
+  selectedVersion: number | null;
   onSelectVersion: (version: number) => void;
 }) {
   if (history.length <= 1) return null;
@@ -443,13 +449,15 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
     () => selectedProposalVersion
       ? api<ProposalDetail>(`/api/conversations/${id}/proposals/${selectedProposalVersion}`)
       : Promise.resolve(null),
-    [id, selectedProposalVersion],
+    // The credential is part of the identity of a draft: editing the same version
+    // in place must re-read the preview instead of showing the previous content.
+    [id, selectedProposalVersion, view?.proposal?.draftRevision, view?.proposal?.draftDigest],
   );
   const { data: draftGraph, loading: draftGraphLoading } = useAsync(
     () => selectedProposalVersion
       ? api<DraftGraph>(`/api/conversations/${id}/draft-graph?version=${selectedProposalVersion}`)
       : Promise.resolve(null),
-    [id, selectedProposalVersion],
+    [id, selectedProposalVersion, view?.proposal?.draftRevision, view?.proposal?.draftDigest],
   );
   const [text, setText] = useState(() => readComposerDraft(composerStorage(), id));
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -528,20 +536,36 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
     if (view && pausedOverride !== null && view.paused === pausedOverride) setPausedOverride(null);
   }, [view, pausedOverride]);
   useEffect(() => {
-    if (view?.proposal) setSelectedProposalVersion(view.proposal.version);
-  }, [view?.proposal?.version]);
+    // Selecting a card that is no longer active (archived or deleted) must not
+    // survive a reload: fall back to the current draft, then to the newest active
+    // card.
+    const active = view?.proposalHistory ?? [];
+    setSelectedProposalVersion(current => {
+      if (current !== null && active.some(item => item.version === current)) return current;
+      return view?.proposal?.version ?? active[0]?.version ?? null;
+    });
+  }, [view?.proposal?.version, view?.proposal?.draftRevision, view?.proposalHistory]);
   useEffect(() => {
     setSelectedGraphNodeId(null);
   }, [selectedProposalVersion]);
   useEffect(() => {
     if (!view || !drawerOpen) return;
+    // The draft page owns its cards whether they are active or archived, so only
+    // an empty draft page falls back to the task section. A page that still has
+    // something to manage stays where the user put it.
+    const activeDraft = Boolean(view.proposal && !view.accepted.some(item => item.proposalVersion === view.proposal!.version));
+    const draftCards = activeDraft || (view.archivedProposals ?? []).length > 0;
     const resolved = resolveDrawerSection({
       current: drawerSection,
       selectedTaskId,
       taskIds: view.tasks.map(task => task.id),
-      hasProposal: Boolean(view.proposal && !view.accepted.some(item => item.proposalVersion === view.proposal!.version)),
+      hasProposal: draftCards,
     });
-    resolved.section = view.proposal && !view.accepted.some(item => item.proposalVersion === view.proposal!.version) ? 'draft' : 'task';
+    // A live draft always surfaces, so an overturned draft replaces the old one on
+    // screen. Archived-only content must not hijack the task section (the entry
+    // point for it is openDrawerRoot), and nothing else overrides the user choice.
+    if (activeDraft) resolved.section = 'draft';
+    else if (!draftCards) resolved.section = 'task';
     if (resolved.section !== drawerSection) setDrawerSection(resolved.section);
     if (resolved.taskId !== selectedTaskId) setSelectedTaskId(resolved.taskId);
   }, [view, drawerOpen, drawerSection, selectedTaskId]);
@@ -800,7 +824,9 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
         ? 'accepted'
         : 'pending';
   const confirmableForActive = Boolean(activeProposal && proposal && activeProposal.version === proposal.version && confirmable);
-  const hasDrawerContent = drawerSection === 'draft' ? Boolean(activeProposal) : Boolean(detailTask);
+  const hasDrawerContent = drawerSection === 'draft'
+    ? Boolean(activeProposal) || (view.archivedProposals ?? []).length > 0
+    : Boolean(detailTask);
   const activeProposalVersion = selectedProposalVersion ?? activeProposal?.version ?? null;
   const graphRuntimeTaskId = activeProposalVersion === null
     ? null
@@ -816,7 +842,11 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
   /** The header entry: one click opens the drawer on the draft, or on the first
    * task when there is no draft to show. */
   function openDrawerRoot() {
-    if (proposal && !acceptedVersions.has(proposal.version)) {
+    // The draft page owns the draft cards, including the archived ones: with every
+    // card archived there is still something to see and restore, so the task
+    // section must not swallow it.
+    const archived = (view?.archivedProposals ?? []).length > 0;
+    if (archived || (proposal && !acceptedVersions.has(proposal.version))) {
       setDrawerSection('draft');
     } else {
       // No draft to show: the drawer opens on the task section, which always has something to
@@ -1070,11 +1100,14 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                             <span className="muted">目标分支</span>
                             <input className="input" style={{ width: 150, maxWidth: 150 }} data-testid="accept-branch" data-resident={residentFlag('accept-branch')} value={branch} onChange={event => setBranch(event.target.value)} />
                           </label>
-                          <Button variant="primary" icon="check" data-testid="confirm-draft" data-resident={residentFlag('confirm-draft')} onClick={() => void act(() => api(`/api/conversations/${id}/confirm`, { method: 'POST', body: JSON.stringify({ proposalVersion: activeProposal.version, targetBranch: branch, requestId: `confirm-${crypto.randomUUID()}` }) }))}>确认草稿并开始执行</Button>
+                          <Button variant="primary" icon="check" data-testid="confirm-draft" data-resident={residentFlag('confirm-draft')} onClick={() => void act(() => api(`/api/conversations/${id}/confirm`, { method: 'POST', body: JSON.stringify({ proposalVersion: activeProposal.version, draftRevision: activeProposal.draftRevision, targetBranch: branch, requestId: `confirm-${crypto.randomUUID()}` }) }))}>确认草稿并开始执行</Button>
                         </div>
                       </>
                     )}
-                <DraftVersionToc history={proposalHistory} selectedVersion={selectedProposalVersion ?? activeProposal.version} onSelectVersion={setSelectedProposalVersion} />
+                <div className="row">
+                  <Button size="sm" data-testid="archive-draft" onClick={() => void act(() => api(`/api/conversations/${id}/drafts/archive`, { method: 'POST', body: JSON.stringify({ proposalVersion: activeProposal.version, requestId: `archive-${crypto.randomUUID()}` }) }), () => setSelectedProposalVersion(null))}>归档草稿</Button>
+                  <Button size="sm" variant="danger" data-testid="delete-draft" onClick={() => void act(() => api(`/api/conversations/${id}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: activeProposal.version, requestId: `delete-${crypto.randomUUID()}` }) }), () => setSelectedProposalVersion(null))}>删除草稿</Button>
+                </div>
                 {/* The drawer names the windows; it does not render them. */}
                 <div className="drawer-entry-links" data-testid="drawer-entry-links">
                   {DRAWER_ENTRY_LINKS.map(entry => (
@@ -1091,6 +1124,23 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                     </a>
                   ))}
                 </div>
+              </section>
+            )}
+            {drawerOpen && drawerSection === 'draft' && (proposalHistory.length > 0 || (view.archivedProposals ?? []).length > 0) && (
+              <section className="drawer-section" data-testid="draft-cards">
+                {proposalHistory.length > 0 && <DraftVersionToc history={proposalHistory} selectedVersion={selectedProposalVersion ?? proposal?.version ?? null} onSelectVersion={setSelectedProposalVersion} />}
+                {(view.archivedProposals ?? []).length > 0 && (
+                  <div data-testid="archived-drafts">
+                    <p className="muted">已归档草稿（默认列表不显示）</p>
+                    {(view.archivedProposals ?? []).map(item => (
+                      <div key={item.version} className="row" data-testid={`archived-draft-${item.version}`}>
+                        <span className="grow">{`v${item.version} · ${item.summary}`}</span>
+                        <Button size="sm" data-testid={`restore-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/restore`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `restore-${crypto.randomUUID()}` }) }))}>恢复</Button>
+                        <Button size="sm" variant="danger" data-testid={`delete-archived-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `delete-${crypto.randomUUID()}` }) }))}>删除</Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
             {drawerOpen && drawerSection === 'draft' && drawerLoading && (

@@ -57,7 +57,7 @@ test.each(['confirmed', 'managed'] as const)('main revises %s graph artifacts wi
     if (mode === 'confirmed') {
       await main.propose({ requirementVersion: 1, summary: definition.name, definition,
         acceptance: [{ id: 'checked', description: 'Host check succeeds', checkNode: 'check' }] }, 'draft');
-      graphId = (await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' })).taskId;
+      graphId = (await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' })).taskId;
       mainPlans.push({ text: 'Graph ready.' });
       await runtime.host.runReady();
     } else graphId = ((await main.graphCreate({ definition })) as { graphId: string }).graphId;

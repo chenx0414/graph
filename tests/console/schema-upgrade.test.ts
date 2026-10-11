@@ -183,6 +183,8 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
   raw.exec(`
     CREATE TABLE tasks(id TEXT PRIMARY KEY,conversation_id TEXT);
     CREATE TABLE conversations(id TEXT PRIMARY KEY,anchor_task_id TEXT);
+    CREATE TABLE proposals(task_id TEXT,version INTEGER,requirement_version INTEGER,spec TEXT,decision_snapshot TEXT);
+    CREATE TABLE conversation_acceptances(conversation_id TEXT,proposal_version INTEGER,task_id TEXT,target_branch TEXT,accepted_at INTEGER);
     CREATE TABLE nodes(task_id TEXT,spec TEXT);
     CREATE TABLE events(cursor INTEGER PRIMARY KEY,task_id TEXT,type TEXT,data TEXT,timestamp INTEGER);
     CREATE TABLE operations(id TEXT PRIMARY KEY,task_id TEXT,node_id TEXT,state TEXT);
@@ -217,5 +219,47 @@ test('v23 renumbers legacy handoffs before enforcing one version per task', asyn
       .toEqual([{ id: 'h1', version: 1 }, { id: 'h2', version: 2 }, { id: 'h3', version: 3 }]);
   } finally {
     store.close();
+  }
+});
+
+test('v41 drafts and confirmation provenance survive migration and reopen', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-upgrade-draft-v41-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const dbPath = join(root, 'tasks.sqlite');
+  const original = new TaskStore(dbPath);
+  original.db.exec(`
+    INSERT INTO projects(id,root,grants) VALUES('p','/legacy/project','[]');
+    INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('anchor','p','Discuss',1,'chatting');
+    INSERT INTO tasks(id,project_id,request,created_seq,phase) VALUES('feature','p','Confirmed task',2,'running');
+    INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at)
+      VALUES('c','p','anchor','Draft conversation',1,100);
+    INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot)
+      VALUES('anchor',1,1,'{"summary":"Original draft"}','Keep existing behavior');
+    INSERT INTO conversation_acceptances(conversation_id,proposal_version,task_id,target_branch,accepted_at)
+      VALUES('c',1,'feature','main',123);
+    ALTER TABLE proposals DROP COLUMN draft_revision;
+    ALTER TABLE proposals DROP COLUMN draft_digest;
+    ALTER TABLE proposals DROP COLUMN archived_at;
+    ALTER TABLE proposals DROP COLUMN deleted_at;
+    ALTER TABLE conversation_acceptances DROP COLUMN draft_revision;
+    PRAGMA user_version=41;
+  `);
+  original.close();
+
+  // Open twice: the first startup upgrades, the second must accept the schema it wrote.
+  for (let open = 0; open < 2; open += 1) {
+    const upgraded = new TaskStore(dbPath);
+    try {
+      expect(upgraded.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+      expect(upgraded.db.prepare('SELECT * FROM proposals').all()).toEqual([{
+        task_id: 'anchor', version: 1, requirement_version: 1,
+        spec: '{"summary":"Original draft"}', decision_snapshot: 'Keep existing behavior',
+        draft_revision: 1, draft_digest: null, archived_at: null, deleted_at: null,
+      }]);
+      expect(upgraded.db.prepare('SELECT * FROM conversation_acceptances').all()).toEqual([{
+        conversation_id: 'c', proposal_version: 1, task_id: 'feature', target_branch: 'main',
+        accepted_at: 123, draft_revision: null,
+      }]);
+    } finally { upgraded.close(); }
   }
 });

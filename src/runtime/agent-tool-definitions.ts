@@ -13,7 +13,7 @@ export interface AgentToolFeatures {
   fetch?: boolean;
   catalog?: boolean;
   artifacts?: { allowedNamespaces: readonly string[]; canPromote: boolean };
-  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'controlTask' | 'pendingHumanChecks' | 'reviewHumanCheck', boolean>>;
+  supervisor?: Partial<Record<'validateProposal' | 'graphState' | 'taskStatus' | 'listProjects' | 'bindProject' | 'listProblems' | 'resolveProblem' | 'withdrawDraft' | 'confirmDraft' | 'archiveDraft' | 'restoreDraft' | 'deleteDraft' | 'controlTask' | 'pendingHumanChecks' | 'reviewHumanCheck', boolean>>;
   systemContext?: Partial<Record<'systemSummary' | 'systemDiagnostics' | 'proposeSystemChange' | 'applySystemChange', boolean>>;
   rsi?: Partial<Record<'status' | 'apply', boolean>>;
   /** Channels to other conversations, when this session has them. */
@@ -194,15 +194,33 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: true,
     },
     propose_graph: {
-      name: 'propose_graph', label: 'Propose graph', description: 'Submit a native graph draft for user confirmation: proposal {requirementVersion, summary, definition: {schemaVersion:2, name, protocols, nodes, modules, edges, inputs, outputs, acceptance}, acceptance:[{id,description,checkNode}], decisions?}. Read graph-v2.md in the Graph documentation directory for the complete JSON format. Nodes are named agent objects with recipe, task and interfaces; commands belong to operation modules. Keep main outside the definition. Outer acceptance must list every definition acceptance criterion with the same ID and description; check/review targets must match its module/node. Confirmation creates structure; graph_send explicitly starts work. Pass the structured proposal object.',
-      parameters: Type.Object({ proposal: nativeProposal, requestId: Type.String() }),
+      name: 'propose_graph', label: 'Propose graph', description: 'Submit a native graph draft for user confirmation: proposal {requirementVersion, summary, definition: {schemaVersion:2, name, protocols, nodes, modules, edges, inputs, outputs, acceptance}, acceptance:[{id,description,checkNode}], decisions?}. Read graph-v2.md in the Graph documentation directory for the complete JSON format. Nodes are named agent objects with recipe, task and interfaces; commands belong to operation modules. Keep main outside the definition. Outer acceptance must list every definition acceptance criterion with the same ID and description; check/review targets must match its module/node. Confirmation creates structure; graph_send explicitly starts work. Pass the structured proposal object. By default this edits the current unconfirmed draft in place and keeps its version number; set newVersion:true on your own judgement when a version is worth keeping as a milestone or for comparison - that is your decision as main, do not stop to ask the user for permission to version. If the task already has a confirmed graph, revise it in place with graph_patch instead of proposing a new draft.',
+      parameters: Type.Object({ proposal: nativeProposal, newVersion: Type.Optional(Type.Boolean()), requestId: Type.String() }),
       available: main && Boolean(features.supervisor),
       externallyGated: false,
     },
     confirm_draft: {
-      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf, exactly like the confirmation card. A native graph is created awaiting explicit graph_send input; main receives its graph_ready notification. Call it only when the user explicitly asked you to confirm, and pass their words verbatim as instruction. targetBranch is required and must be the branch the user named.',
-      parameters: Type.Object({ proposalVersion: Type.Number(), targetBranch: Type.String(), instruction: Type.String(), requestId: Type.String() }),
+      name: 'confirm_draft', label: 'Confirm draft', description: 'Confirm the current conversation draft on the user behalf, exactly like the confirmation card. A native graph is created awaiting explicit graph_send input; main receives its graph_ready notification. Call it only when the user explicitly asked you to confirm, and pass their words verbatim as instruction. targetBranch is required and must be the branch the user named. draftRevision is the concurrency credential of the draft you are confirming (read it from the briefing or conversations view): if the user edited the draft after you read it, the confirmation is refused so a newer draft is never confirmed by accident.',
+      parameters: Type.Object({ proposalVersion: Type.Number(), draftRevision: Type.Number(), targetBranch: Type.String(), instruction: Type.String(), requestId: Type.String() }),
       available: main && Boolean(features.supervisor?.confirmDraft),
+      externallyGated: false,
+    },
+    archive_draft: {
+      name: 'archive_draft', label: 'Archive draft', description: 'Archive one draft card of this conversation by version, so it leaves the active list while staying readable by version and restorable. Use it when the user wants a draft out of the way but kept. It never touches a graph that was already started from that version: the graph, its tasks, chats, evidence and frozen acceptance stay exactly as they are.',
+      parameters: Type.Object({ proposalVersion: Type.Number(), requestId: Type.String() }),
+      available: main && Boolean(features.supervisor?.archiveDraft),
+      externallyGated: false,
+    },
+    restore_draft: {
+      name: 'restore_draft', label: 'Restore draft', description: 'Restore an archived draft card of this conversation by version, so it returns to the active list. When nothing newer is live and it still belongs to the current requirement it becomes the current draft again, so a following in-place edit keeps its version number instead of stacking a new one.',
+      parameters: Type.Object({ proposalVersion: Type.Number(), requestId: Type.String() }),
+      available: main && Boolean(features.supervisor?.restoreDraft),
+      externallyGated: false,
+    },
+    delete_draft: {
+      name: 'delete_draft', label: 'Delete draft', description: 'Delete one draft card of this conversation by version, at the user explicit request. It disappears from the active and archived lists and can no longer be read by version; an invisible tombstone keeps the audit trail and the version number is never handed out again. A graph already started from that version keeps its tasks, chats, evidence and frozen acceptance - this removes the card, never the work.',
+      parameters: Type.Object({ proposalVersion: Type.Number(), requestId: Type.String() }),
+      available: main && Boolean(features.supervisor?.deleteDraft),
       externallyGated: false,
     },
     withdraw_draft: {

@@ -97,7 +97,7 @@ test.skipIf(!sourceAvailable)('native Graph delivers the Bilibili web from indep
     acceptance: [...checks.map(item => ({ ...item, kind: 'check', module: 'check' })), { id: 'review', description: 'Independent review of this commit', kind: 'review', node: 'review' }, { id: 'human-login', description: '使用者在独立 profile 完成 B站登录后确认', kind: 'human' }],
   });
   const proposed = await main.propose({ requirementVersion: 2, summary: '独立 profile，禁止并发采集，不共享日常 Chrome；并行 API/UI、集成后测试与审查、人工登录确认。', definition, acceptance: definition.acceptance!.map(item => ({ id: item.id, description: item.description, checkNode: item.kind === 'check' ? 'check' : 'review' })) }, 'plan');
-  const confirmed = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  const confirmed = await runtime.conversations.confirm(conversationId, { proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   graphId = confirmed.taskId;
   disk = new TaskStore(join(root, 'state', 'tasks.sqlite')); cleanup.push(async () => disk.close());
   const task = runtime.user.task(graphId);

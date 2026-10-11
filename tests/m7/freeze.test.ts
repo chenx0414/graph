@@ -99,7 +99,7 @@ test('G17 freezes Bilibili web acceptance, exclusive profile, and a human login 
   expect(view.proposal?.definition?.inputs).toEqual({ api: { to: 'web-api.job', protocol: 'data' }, ui: { to: 'web-ui.job', protocol: 'data' } });
   expect(view.proposal?.definition?.modules.join).toMatchObject({ trigger: 'once', requiredInputs: ['api', 'ui'] });
   expect(view.proposal?.definition?.nodes.review?.recipe).toBe('reviewer@1');
-  const receipt = await runtime.conversations.confirm(conversationId, { proposalVersion: view.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  const receipt = await runtime.conversations.confirm(conversationId, { proposalVersion: view.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   expect(receipt.taskId).not.toBe(taskId);
   const confirmed = await runtime.user.task(receipt.taskId).view();
   expect(confirmed.targetBranch).toBe('main');

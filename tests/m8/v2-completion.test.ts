@@ -42,7 +42,7 @@ async function run(limitNodes = 1) {
   } as never, 'draft');
   // No Git is configured, so there is no integration branch and no delivery to wait for:
   // this run is about the completion decision itself, not about merging into a branch.
-  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'a' });
+  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'a' });
   const main = runtime.supervisor(taskId);
   await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { text: 'go' } });
   await runtime.host.drive();

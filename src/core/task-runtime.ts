@@ -5,6 +5,7 @@ import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
 import { kernelHasActiveWork, kernelGraphView, kernelNodeRun, kernelNodePrompt, kernelModelsInUse, kernelConversationNodes } from './kernel-views.ts';
 import { randomUUID } from 'node:crypto';
+import { contentDigest } from './kernel-content.ts';
 import { homedir } from 'node:os';
 import { closePause, closeUserWait, openPause } from './time-ledger.ts';
 import { activeOperationForNode } from './control-targets.ts';
@@ -145,6 +146,10 @@ interface ProposalRow {
   requirement_version: number;
   spec: string;
   decision_snapshot: string | null;
+  draft_revision: number;
+  draft_digest: string | null;
+  archived_at: number | null;
+  deleted_at: number | null;
 }
 
 /** A revision names its target explicitly. Without one it revises this
@@ -223,16 +228,53 @@ function taskStatusView(store: TaskStore, kernel: KernelStore, taskId: string, n
   };
 }
 
-function conversationProposal(store: TaskStore, taskId: string, version: number, currentRequirementVersion: number) {
-  const row = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?')
+/**
+ * The draft projection every formal read path shares: the current draft card plus
+ * the management metadata main needs (history, archived cards, revision). A
+ * tombstoned card is never handed out, an archived one is not the current draft
+ * but stays readable by version, and the formal copy of a proposal the task has
+ * already accepted survives every card operation - deleting a card must never
+ * remove the graph's own proposal.
+ */
+function draftProjection(store: TaskStore, taskId: string, task: { requirement_version: number; latest_proposal: number; accepted_proposal: number | null }) {
+  const rows = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot,draft_revision,draft_digest,archived_at,deleted_at FROM proposals WHERE task_id=? ORDER BY version').all(taskId) as unknown as ProposalRow[];
+  const formal = (row: ProposalRow) => row.version === task.accepted_proposal;
+  const live = (row: ProposalRow) => formal(row) || (row.deleted_at === null && row.archived_at === null);
+  const summary = (row: ProposalRow) => ({
+    version: row.version,
+    requirementVersion: row.requirement_version,
+    stale: row.requirement_version !== task.requirement_version,
+    summary: (JSON.parse(row.spec) as { summary?: string }).summary ?? '',
+    accepted: formal(row),
+    draftRevision: row.draft_revision,
+    draftDigest: row.draft_digest ?? contentDigest(row.spec),
+    archived: row.archived_at !== null,
+  });
+  const current = rows.find(row => row.version === task.latest_proposal && live(row)) ?? null;
+  return {
+    current: current ? { ...summary(current), spec: JSON.parse(current.spec) as NativeProposal, decisions: current.decision_snapshot } : null,
+    proposalHistory: rows.filter(row => live(row) && !formal(row)).map(summary),
+    archivedProposals: rows.filter(row => row.archived_at !== null && row.deleted_at === null && !formal(row)).map(summary),
+  };
+}
+
+function conversationProposal(store: TaskStore, taskId: string, version: number, currentRequirementVersion: number, options?: { includeArchived?: boolean }) {
+  const row = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot,draft_revision,draft_digest,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?')
     .get(taskId, version) as ProposalRow | undefined;
-  if (!row) return null;
+  // A tombstoned draft is gone for good. An archived one is not the current
+  // draft, but an explicit by-version read may still show it (marked archived, so
+  // it is refused for confirmation) - that is what the archive view uses.
+  if (!row || row.deleted_at !== null) return null;
+  if (row.archived_at !== null && !options?.includeArchived) return null;
   return {
     version: row.version,
     requirementVersion: row.requirement_version,
     stale: row.requirement_version !== currentRequirementVersion,
     spec: JSON.parse(row.spec) as NativeProposal,
     decisions: row.decision_snapshot,
+    draftRevision: row.draft_revision,
+    draftDigest: row.draft_digest ?? contentDigest(row.spec),
+    archived: row.archived_at !== null,
   };
 }
 
@@ -756,16 +798,19 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             return { taskId, cursor: store.event(taskId, 'requirement.changed', { text, requirementVersion: task.requirement_version + 1 }) };
           });
         },
-        async accept(input: { proposalVersion: number; targetBranch: string; requestId: string }): Promise<Receipt> {
+        async accept(input: { proposalVersion: number; draftRevision: number; targetBranch: string; requestId: string }): Promise<Receipt> {
           ensureOpen();
           // Formal acceptance requires a ready Git project and an existing
           // target branch; this fails before any official state is written.
           git.requireTargetBranch(store.task(taskId).project_id, input.targetBranch);
-          const receipt = store.command('user', input.requestId, { type: 'accept', taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }, () => {
+          const receipt = store.command('user', input.requestId, { type: 'accept', taskId, proposalVersion: input.proposalVersion, draftRevision: input.draftRevision, targetBranch: input.targetBranch }, () => {
             const task = store.task(taskId);
-            const row = store.db.prepare('SELECT requirement_version,spec FROM proposals WHERE task_id=? AND version=?')
-              .get(taskId, input.proposalVersion) as { requirement_version: number; spec: string } | undefined;
-            if (!row || task.latest_proposal !== input.proposalVersion || row.requirement_version !== task.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current requirement proposal can be accepted');
+            const row = store.db.prepare('SELECT requirement_version,spec,draft_revision,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?')
+              .get(taskId, input.proposalVersion) as { requirement_version: number; spec: string; draft_revision: number; archived_at: number | null; deleted_at: number | null } | undefined;
+            if (!row || row.deleted_at !== null || row.archived_at !== null || task.latest_proposal !== input.proposalVersion || row.requirement_version !== task.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current requirement proposal can be accepted');
+            // The same credential as conversation confirmation: an in-place edit after
+            // the user read the draft must not be accepted by the old card.
+            if (input.draftRevision !== row.draft_revision) throw new RuntimeError('stale_proposal', 'This draft changed after it was reviewed; read it again before accepting');
             if (task.accepted_proposal !== null) throw new RuntimeError('already_accepted', 'Task already has confirmed requirements');
             if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
             const proposal = JSON.parse(row.spec) as NativeProposal;
@@ -776,7 +821,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             store.db.prepare('UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=?,graph_version=1 WHERE id=?')
               .run(input.proposalVersion, input.targetBranch, phase, taskId);
             if (!active_task || active_task === taskId) store.db.prepare('UPDATE runtime SET active_task=?').run(taskId);
-            return { taskId, cursor: store.event(taskId, 'task.accepted', { proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
+            return { taskId, proposalVersion: input.proposalVersion, draftRevision: row.draft_revision, cursor: store.event(taskId, 'task.accepted', { proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
           });
           git.prepareTask(taskId, input.targetBranch);
           if (new KernelStore(store).latestRevision(taskId)) wakeMaster(store, {
@@ -802,7 +847,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           const operationCount = operationTotals.reduce((sum, row) => sum + row.total, 0);
           const questions = store.db.prepare('SELECT * FROM questions WHERE task_id=? ORDER BY rowid').all(taskId) as { id: string; node_id: string; operation_id: string | null; kind: string; status: string; data: string; answer: string | null; owner: string }[];
           const userQuestions = questions.filter(question => question.owner === 'user');
-          const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
+          const drafts = draftProjection(store, taskId, task);
           // A queued task is invisible work: name the task holding the single
           // active slot and how many problems it is stuck on, so a wedged queue
           // is diagnosable from the task view instead of from the database.
@@ -817,8 +862,13 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           return {
             id: task.id, conversationId: task.conversation_id, projectId: task.project_id, request: task.request, requirementVersion: task.requirement_version,
             proposalVersion: task.latest_proposal, acceptedProposalVersion: task.accepted_proposal,
+            // The concurrency credential of the current draft: whoever accepts must
+            // carry it back, so it is discoverable from the formal view instead of
+            // only from inside the database.
+            draftRevision: drafts.current?.draftRevision ?? null,
+            draftDigest: drafts.current?.draftDigest ?? null,
             graphVersion: nativeRevision?.version ?? task.graph_version,
-            proposal: proposal ? JSON.parse(proposal.spec) as NativeProposal : null, messages,
+            proposal: drafts.current ? drafts.current.spec : null, messages,
             containers: [], loops: [],
             revisions: nativeRevision ? (store.db.prepare('SELECT version,reason,version-1 AS base_version FROM kernel_revisions WHERE task_id=? ORDER BY version').all(taskId) as { version: number; reason: string; base_version: number }[]) : [],
             targetBranch: task.target_branch, phase: task.phase, paused: Boolean(task.paused), queuedBehind,
@@ -1073,13 +1123,16 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
       const master = store.db.prepare("SELECT n.status,i.used,i.budget,i.unlimited,COALESCE(i.model,json_extract(n.spec,'$.model')) AS model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'").get(conversation.anchor_task_id) as { status: string; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null } | undefined;
-      const accepted = store.db.prepare('SELECT proposal_version,task_id,target_branch,accepted_at FROM conversation_acceptances WHERE conversation_id=? ORDER BY accepted_at').all(conversationId) as { proposal_version: number; task_id: string; target_branch: string; accepted_at: number }[];
+      const accepted = store.db.prepare('SELECT proposal_version,task_id,target_branch,accepted_at,draft_revision FROM conversation_acceptances WHERE conversation_id=? ORDER BY accepted_at').all(conversationId) as { proposal_version: number; task_id: string; target_branch: string; accepted_at: number; draft_revision: number | null }[];
       const acceptedVersions = new Set(accepted.map(row => row.proposal_version));
-      const proposalRows = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? ORDER BY version').all(anchor.id) as unknown as ProposalRow[];
+      const proposalRows = store.db.prepare('SELECT version,requirement_version,spec,decision_snapshot,draft_revision,draft_digest,archived_at,deleted_at FROM proposals WHERE task_id=? ORDER BY version').all(anchor.id) as unknown as ProposalRow[];
       const proposal = anchor.latest_proposal
         ? conversationProposal(store, anchor.id, anchor.latest_proposal, anchor.requirement_version)
         : null;
-      const proposalHistory = proposalRows.map(row => {
+      // Deleted drafts are tombstones: the row stays for audit, but the card leaves
+      // both lists and the by-version read. Archived drafts leave the active list
+      // only, and can be listed and restored from the archive view.
+      const draftCard = (row: ProposalRow) => {
         const spec = JSON.parse(row.spec) as NativeProposal;
         return {
           version: row.version,
@@ -1087,8 +1140,13 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           stale: row.requirement_version !== anchor.requirement_version,
           summary: spec.summary,
           accepted: acceptedVersions.has(row.version),
+          draftRevision: row.draft_revision,
+          draftDigest: row.draft_digest ?? contentDigest(row.spec),
         };
-      });
+      };
+      const liveDrafts = proposalRows.filter(row => row.deleted_at === null);
+      const proposalHistory = liveDrafts.filter(row => row.archived_at === null).map(draftCard);
+      const archivedProposals = liveDrafts.filter(row => row.archived_at !== null).map(draftCard);
       const tasks = (store.db.prepare("SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha,(SELECT MIN(timestamp) FROM events WHERE task_id=tasks.id) AS createdAt FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq").all(conversationId) as { id: string; request: string; phase: string; paused: number; target_branch: string | null; accepted_proposal: number | null; integration_sha: string | null; createdAt: number }[]).map(task => {
         const nodes = store.db.prepare('SELECT n.id,n.spec,n.status,n.stall_count,n.output_version,i.used,i.budget,i.unlimited,i.model,i.definition_version FROM nodes n LEFT JOIN instances i ON i.id=n.instance_id WHERE n.task_id=? ORDER BY n.rowid').all(task.id) as { id: string; spec: string; status: string; stall_count: number; output_version: number; used: number | null; budget: number | null; unlimited: number | null; model: string | null; definition_version: string | null }[];
         const questions = store.db.prepare('SELECT id,node_id,kind,status,data,owner FROM questions WHERE task_id=? ORDER BY rowid').all(task.id) as { id: string; node_id: string; kind: string; status: string; data: string; owner: string }[];
@@ -1141,7 +1199,8 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         questions: anchorQuestions,
         proposal,
         proposalHistory,
-        accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at })),
+        archivedProposals,
+        accepted: accepted.map(row => ({ proposalVersion: row.proposal_version, taskId: row.task_id, targetBranch: row.target_branch, acceptedAt: row.accepted_at, draftRevision: row.draft_revision })),
         master: master ? { nodeId: 'master', status: master.status, model: master.model, used: master.used, unlimited: Boolean(master.unlimited), budget: master.unlimited ? null : master.budget, definitionVersion: master.definition_version, cost: masterCost, questions: anchorQuestions.filter(question => question.status === 'open' && question.owner === 'user') } : null,
         telemetry: {
           model: master?.model ?? null,
@@ -1163,7 +1222,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       if (!Number.isSafeInteger(version) || version < 1) throw new RuntimeError('invalid_input', 'A positive proposal version is required');
       const conversation = conversationRow(store, conversationId);
       const anchor = store.task(conversation.anchor_task_id);
-      const proposal = conversationProposal(store, anchor.id, version, anchor.requirement_version);
+      const proposal = conversationProposal(store, anchor.id, version, anchor.requirement_version, { includeArchived: true });
       if (!proposal) throw new RuntimeError('not_found', `Proposal v${version} was not found`);
       return proposal;
     },
@@ -1278,19 +1337,23 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         return { conversationId, taskId: conversation.anchor_task_id, changed: true, invalidatedDrafts: invalidated, cursor: store.event(conversation.anchor_task_id, 'conversation.bound', { projectId: input.projectId, previous }) };
       });
     },
-    async confirm(conversationId: string, input: { proposalVersion: number; targetBranch: string; requestId: string; attestation?: { actor: 'agent'; onBehalfOf: 'user'; instruction: string } }) {
+    async confirm(conversationId: string, input: { proposalVersion: number; draftRevision: number; targetBranch: string; requestId: string; attestation?: { actor: 'agent'; onBehalfOf: 'user'; instruction: string } }) {
       ensureOpen();
       const bound = conversationRow(store, conversationId);
       if (!bound.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
       if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
       git.requireTargetBranch(bound.project_id, input.targetBranch);
-      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, targetBranch: input.targetBranch, ...(input.attestation ? { actor: input.attestation.actor, onBehalfOf: input.attestation.onBehalfOf, instruction: input.attestation.instruction } : {}) }, () => {
+      const receipt = store.command(`conversation:${conversationId}`, input.requestId, { type: 'confirm', proposalVersion: input.proposalVersion, draftRevision: input.draftRevision, targetBranch: input.targetBranch, ...(input.attestation ? { actor: input.attestation.actor, onBehalfOf: input.attestation.onBehalfOf, instruction: input.attestation.instruction } : {}) }, () => {
         const conversation = conversationRow(store, conversationId);
         if (!conversation.project_id) throw new RuntimeError('invalid_input', 'Bind a project before confirming a draft');
         if (!input.targetBranch.trim()) throw new RuntimeError('invalid_input', 'A target branch is required');
         const anchor = store.task(conversation.anchor_task_id);
-        const row = store.db.prepare('SELECT requirement_version,spec,decision_snapshot FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { requirement_version: number; spec: string; decision_snapshot: string | null } | undefined;
-        if (!row || anchor.latest_proposal !== input.proposalVersion || row.requirement_version !== anchor.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current draft on the current requirement can be confirmed');
+        const row = store.db.prepare('SELECT requirement_version,spec,decision_snapshot,draft_revision,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { requirement_version: number; spec: string; decision_snapshot: string | null; draft_revision: number; archived_at: number | null; deleted_at: number | null } | undefined;
+        if (!row || row.deleted_at !== null || row.archived_at !== null || anchor.latest_proposal !== input.proposalVersion || row.requirement_version !== anchor.requirement_version) throw new RuntimeError('stale_proposal', 'Only the current draft on the current requirement can be confirmed');
+        // A version number is not a credential: the draft may have been edited in
+        // place after the user read it, so the exact revision they reviewed must
+        // match, or an old confirmation card would confirm new content.
+        if (input.draftRevision !== row.draft_revision) throw new RuntimeError('stale_proposal', 'This draft changed after it was reviewed; read it again before confirming');
         if (store.db.prepare('SELECT proposal_version FROM conversation_acceptances WHERE conversation_id=? AND proposal_version=?').get(conversationId, input.proposalVersion)) throw new RuntimeError('already_accepted', 'This draft was already confirmed');
         const proposal = JSON.parse(row.spec) as NativeProposal;
         validateProposal(proposal);
@@ -1310,16 +1373,71 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         // The anchor requirement advances on confirmation only: chat never
         // bumps it, and old drafts become unconfirmable immediately.
         store.db.prepare('UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?').run(anchor.id);
-        store.db.prepare('INSERT INTO conversation_acceptances VALUES(?,?,?,?,?)').run(conversationId, input.proposalVersion, taskId, input.targetBranch, Date.now());
+        store.db.prepare('INSERT INTO conversation_acceptances(conversation_id,proposal_version,task_id,target_branch,accepted_at,draft_revision) VALUES(?,?,?,?,?,?)').run(conversationId, input.proposalVersion, taskId, input.targetBranch, Date.now(), row.draft_revision);
         appendMessage(store, { conversationId, role: 'system', kind: 'confirmed', text: `已确认草稿 v${input.proposalVersion}，创建功能任务，等待 main 投递输入（目标分支 ${input.targetBranch}）`, data: { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch } });
         store.event(taskId, 'task.created', { request: proposal.summary, conversationId, configRevision: options.live?.revision() ?? options.config?.revision() ?? null });
-        return { conversationId, taskId, targetBranch: input.targetBranch, cursor: store.event(anchor.id, 'conversation.confirmed', { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
+        return { conversationId, taskId, targetBranch: input.targetBranch, proposalVersion: input.proposalVersion, draftRevision: row.draft_revision, cursor: store.event(anchor.id, 'conversation.confirmed', { taskId, proposalVersion: input.proposalVersion, targetBranch: input.targetBranch }) };
       });
       git.prepareTask(receipt.taskId, input.targetBranch);
       if (new KernelStore(store).latestRevision(receipt.taskId)) wakeMaster(store, {
         taskId: receipt.taskId, kind: 'graph_ready', dedupeKey: `${receipt.taskId}:ready`, data: { graphId: receipt.taskId },
       });
       return receipt;
+    },
+    /**
+     * Archive one draft version. The card leaves the active list and is listed by
+     * the archive view, from which it can be restored. Archiving is not deletion:
+     * the content stays readable by version, and nothing a draft started is touched.
+     */
+    async archiveDraft(conversationId: string, input: { proposalVersion: number; requestId: string }) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      return store.command(`conversation:${conversationId}`, input.requestId, { type: 'archive_draft', proposalVersion: input.proposalVersion }, () => {
+        const anchor = store.task(conversation.anchor_task_id);
+        const row = store.db.prepare('SELECT version,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { version: number; archived_at: number | null; deleted_at: number | null } | undefined;
+        if (!row || row.deleted_at !== null) throw new RuntimeError('not_found', `Proposal v${input.proposalVersion} was not found`);
+        if (row.archived_at === null) store.db.prepare('UPDATE proposals SET archived_at=? WHERE task_id=? AND version=?').run(Date.now(), anchor.id, input.proposalVersion);
+        // The pointer is left alone: an archived row is not handed out as the
+        // current draft, and faking a jump would skip a version number.
+        return { conversationId, proposalVersion: input.proposalVersion, archived: true, cursor: store.event(anchor.id, 'proposal.archived', { proposalVersion: input.proposalVersion }) };
+      });
+    },
+    async restoreDraft(conversationId: string, input: { proposalVersion: number; requestId: string }) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      return store.command(`conversation:${conversationId}`, input.requestId, { type: 'restore_draft', proposalVersion: input.proposalVersion }, () => {
+        const anchor = store.task(conversation.anchor_task_id);
+        const row = store.db.prepare('SELECT version,requirement_version,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { version: number; requirement_version: number; archived_at: number | null; deleted_at: number | null } | undefined;
+        if (!row || row.deleted_at !== null) throw new RuntimeError('not_found', `Proposal v${input.proposalVersion} was not found`);
+        store.db.prepare('UPDATE proposals SET archived_at=NULL WHERE task_id=? AND version=?').run(anchor.id, input.proposalVersion);
+        // Restoring puts the card back in the active list, and makes it the current
+        // draft again when nothing newer is live and it still belongs to the current
+        // requirement. Moving the pointer is safe: allocation uses the version
+        // high-water, so a rewound pointer never reuses a number.
+        const newer = store.db.prepare('SELECT COUNT(*) AS n FROM proposals WHERE task_id=? AND version>? AND deleted_at IS NULL AND archived_at IS NULL').get(anchor.id, input.proposalVersion) as { n: number };
+        if (newer.n === 0 && row.requirement_version === anchor.requirement_version) store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(input.proposalVersion, anchor.id);
+        return { conversationId, proposalVersion: input.proposalVersion, restored: true, cursor: store.event(anchor.id, 'proposal.restored', { proposalVersion: input.proposalVersion }) };
+      });
+    },
+    /**
+     * Delete one draft version. It leaves both lists and the by-version read, while
+     * the row stays as an invisible tombstone so the version number is never reused
+     * and the audit keeps its record. Nothing a draft started is removed: the
+     * confirmed graph, its chat, its evidence and its frozen acceptance are
+     * separate rows and stay exactly as they were.
+     */
+    async deleteDraft(conversationId: string, input: { proposalVersion: number; requestId: string }) {
+      ensureOpen();
+      const conversation = conversationRow(store, conversationId);
+      return store.command(`conversation:${conversationId}`, input.requestId, { type: 'delete_draft', proposalVersion: input.proposalVersion }, () => {
+        const anchor = store.task(conversation.anchor_task_id);
+        const row = store.db.prepare('SELECT version,deleted_at FROM proposals WHERE task_id=? AND version=?').get(anchor.id, input.proposalVersion) as { version: number; deleted_at: number | null } | undefined;
+        if (!row) throw new RuntimeError('not_found', `Proposal v${input.proposalVersion} was not found`);
+        if (row.deleted_at === null) store.db.prepare('UPDATE proposals SET deleted_at=? WHERE task_id=? AND version=?').run(Date.now(), anchor.id, input.proposalVersion);
+        // No pointer jump: the tombstone itself is what hides the card, and the
+        // version stays spent.
+        return { conversationId, proposalVersion: input.proposalVersion, deleted: true, cursor: store.event(anchor.id, 'proposal.deleted', { proposalVersion: input.proposalVersion }) };
+      });
     },
     pause(conversationId: string, requestId: string) {
       ensureOpen();
@@ -1466,6 +1584,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         supervisor: {
           validateProposal: true, graphState: true, taskStatus: true, listProjects: true,
           bindProject: true, listProblems: true, resolveProblem: true, withdrawDraft: true, confirmDraft: true,
+          archiveDraft: true, restoreDraft: true, deleteDraft: true,
           pendingHumanChecks: true, reviewHumanCheck: true,
           controlTask: true,
         },
@@ -1890,26 +2009,71 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         /** The user asked in chat for this confirmation, so the record must show who
          * really acted and carry their words: the console click and this call stay
          * distinguishable in the command log. */
-        async confirmDraft(input: { proposalVersion: number; targetBranch: string; instruction: string; requestId: string }) {
+        async confirmDraft(input: { proposalVersion: number; draftRevision: number; targetBranch: string; instruction: string; requestId: string }) {
           ensureOpen();
           if (!input.instruction.trim()) throw new RuntimeError('invalid_input', 'An instruction is required: record the words that authorised this confirmation');
           const conversationId = store.task(taskId).conversation_id;
           if (!conversationId) throw new RuntimeError('invalid_input', 'This task has no conversation to confirm');
           return runtime.conversations.confirm(conversationId, {
             proposalVersion: input.proposalVersion,
+            draftRevision: input.draftRevision,
             targetBranch: input.targetBranch,
             requestId: input.requestId,
             attestation: { actor: 'agent', onBehalfOf: 'user', instruction: input.instruction.trim() },
           });
         },
-        async propose(proposal: NativeProposal, requestId: string): Promise<ProposalReceipt> {
+        async archiveDraft(input: { proposalVersion: number; requestId: string }) {
           ensureOpen();
-          return store.command(`supervisor:${taskId}`, requestId, { type: 'propose', proposal }, () => {
+          const conversationId = store.task(taskId).conversation_id;
+          if (!conversationId) throw new RuntimeError('invalid_input', 'This task has no conversation to archive a draft in');
+          return runtime.conversations.archiveDraft(conversationId, input);
+        },
+        async restoreDraft(input: { proposalVersion: number; requestId: string }) {
+          ensureOpen();
+          const conversationId = store.task(taskId).conversation_id;
+          if (!conversationId) throw new RuntimeError('invalid_input', 'This task has no conversation to restore a draft in');
+          return runtime.conversations.restoreDraft(conversationId, input);
+        },
+        async deleteDraft(input: { proposalVersion: number; requestId: string }) {
+          ensureOpen();
+          const conversationId = store.task(taskId).conversation_id;
+          if (!conversationId) throw new RuntimeError('invalid_input', 'This task has no conversation to delete a draft from');
+          return runtime.conversations.deleteDraft(conversationId, input);
+        },
+        async propose(proposal: NativeProposal, requestId: string, options?: { newVersion?: boolean }): Promise<ProposalReceipt> {
+          ensureOpen();
+          const newVersion = Boolean(options?.newVersion);
+          return store.command(`supervisor:${taskId}`, requestId, { type: 'propose', proposal, newVersion }, () => {
             const task = store.task(taskId);
-            if (task.accepted_proposal !== null) throw new RuntimeError('requirements_locked', 'Confirmed task scope is immutable in M1');
+            if (task.accepted_proposal !== null) throw new RuntimeError('requirements_locked', 'This task already has a confirmed graph: revise the running graph with graph_patch instead of proposing a new draft');
             if (task.requirement_version !== proposal.requirementVersion) throw new RuntimeError('stale_requirement', 'Proposal uses an old requirement version');
             validateProposal(proposal);
-            const version = task.latest_proposal + 1;
+            const spec = canonicalJson(proposal);
+            const digest = contentDigest(spec);
+            // The default is an in-place edit of the current unconfirmed draft: a
+            // version number is a place in the user's history, not a counter that
+            // grows with every edit. Only newVersion:true keeps a separate version.
+            const anchoredConversation = conversationForTask(store, taskId);
+            const current = task.latest_proposal
+              ? store.db.prepare('SELECT version,requirement_version,draft_revision,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?')
+                .get(taskId, task.latest_proposal) as { version: number; requirement_version: number; draft_revision: number; archived_at: number | null; deleted_at: number | null } | undefined
+              : undefined;
+            // In-place editing is only safe for the same requirement and an
+            // unconfirmed card. Confirming advances the anchor requirement, and a
+            // rebinding changes it too, so an older draft stays immutable rather
+            // than being overwritten by a later task or a different project.
+            const confirmed = current && anchoredConversation
+              ? Boolean(store.db.prepare('SELECT proposal_version FROM conversation_acceptances WHERE conversation_id=? AND proposal_version=?').get(anchoredConversation.id, current.version))
+              : false;
+            const inPlace = Boolean(current) && !newVersion && !confirmed
+              && current!.requirement_version === proposal.requirementVersion
+              && current!.archived_at === null && current!.deleted_at === null;
+            // Version numbers are monotonic over every row that ever existed,
+            // including tombstones: a deleted or archived version is never handed
+            // out again, and the pointer is not advanced to hide a card.
+            const highWater = (store.db.prepare('SELECT COALESCE(MAX(version),0) AS max FROM proposals WHERE task_id=?').get(taskId) as { max: number }).max;
+            const version = inPlace ? current!.version : Math.max(task.latest_proposal, highWater) + 1;
+            const draftRevision = inPlace ? current!.draft_revision + 1 : 1;
             // Freeze what the user will review: master-authored decisions when
             // present, otherwise the consumed user messages of this project
             // binding (delivered only, so unreviewed pending chat stays out).
@@ -1936,10 +2100,15 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
               while (lines.length > 1 && lines.join('\n').length > DECISION_DIGEST_MAX_CHARS) lines.splice(Math.floor((lines.length - 1) / 2), 1);
               if (lines.length) snapshot = lines.join('\n');
             }
-            store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)')
-              .run(taskId, version, proposal.requirementVersion, canonicalJson(proposal), snapshot);
-            store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(version, taskId);
-            return { taskId, proposalVersion: version, cursor: store.event(taskId, 'proposal.created', { proposalVersion: version }) };
+            if (inPlace) {
+              store.db.prepare('UPDATE proposals SET requirement_version=?,spec=?,decision_snapshot=?,draft_revision=?,draft_digest=? WHERE task_id=? AND version=?')
+                .run(proposal.requirementVersion, spec, snapshot, draftRevision, digest, taskId, version);
+            } else {
+              store.db.prepare('INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot,draft_revision,draft_digest) VALUES(?,?,?,?,?,?,?)')
+                .run(taskId, version, proposal.requirementVersion, spec, snapshot, draftRevision, digest);
+            }
+            if (task.latest_proposal !== version) store.db.prepare('UPDATE tasks SET latest_proposal=? WHERE id=?').run(version, taskId);
+            return { taskId, proposalVersion: version, draftRevision, cursor: store.event(taskId, inPlace ? 'proposal.edited' : 'proposal.created', { proposalVersion: version, draftRevision }) };
           });
         },
         /**
@@ -2038,7 +2207,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             node_id: string; operation_id: string; proposal_version: number; requirement_version: number; data: string;
             activation_id: string; valid: number; commit_sha: string | null;
           }[];
-          const proposal = store.db.prepare('SELECT spec FROM proposals WHERE task_id=? AND version=?').get(taskId, task.latest_proposal) as { spec: string } | undefined;
+          const drafts = draftProjection(store, taskId, task);
           return {
             taskId,
             conversationId: task.conversation_id,
@@ -2055,7 +2224,11 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
             integrationSha: task.integration_sha,
             updatedAt: (store.db.prepare('SELECT MAX(timestamp) AS updatedAt FROM events WHERE task_id=?').get(taskId) as { updatedAt: number | null }).updatedAt,
             cursor: (store.db.prepare('SELECT COALESCE(MAX(cursor),0) AS cursor FROM events WHERE task_id=?').get(taskId) as { cursor: number }).cursor,
-            proposal: proposal ? JSON.parse(proposal.spec) as NativeProposal : null,
+            proposal: drafts.current ? drafts.current.spec : null,
+            draftRevision: drafts.current?.draftRevision ?? null,
+            draftDigest: drafts.current?.draftDigest ?? null,
+            proposalHistory: drafts.proposalHistory,
+            archivedProposals: drafts.archivedProposals,
             graph: null, containers: [], loops: [], revisions: [],
             nodes: nodes.map(row => ({
               ...JSON.parse(row.spec) as NodeSpec,

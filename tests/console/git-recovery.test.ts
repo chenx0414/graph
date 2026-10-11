@@ -137,7 +137,7 @@ test('rework restores a released integration checkout at its recorded tip withou
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } }, edges: {},
       acceptance: [{ id: 'ok', description: 'ok', kind: 'check', module: 'check' }] }),
   }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
   cleanup.push(async () => store.close());
   const integration = new GitIntegration(store, stateDir);

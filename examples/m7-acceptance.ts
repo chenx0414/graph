@@ -172,7 +172,7 @@ async function runSession(runtime: Runtime, state: RunState, paths: HarnessPaths
     if (!draft) return finish('awaiting-proposal', 1, 'Main has not submitted a draft.');
     if (!draft.spec.definition) return finish('invalid-draft', 1, 'M7 requires a native schemaVersion:2 definition.');
     if (process.env.GRAPH_M7_ACCEPT?.trim() !== String(draft.version)) return finish('awaiting-confirmation', 1, 'Only the exact current proposal version can be confirmed.');
-    const receipt = await runtime.conversations.confirm(state.conversationId, { proposalVersion: draft.version, targetBranch, requestId: `m7-accept-${draft.version}` });
+    const receipt = await runtime.conversations.confirm(state.conversationId, { proposalVersion: draft.version, draftRevision: draft.draftRevision, targetBranch, requestId: `m7-accept-${draft.version}` });
     state.graphId = receipt.taskId; state.acceptedProposalVersion = draft.version; state.targetBranch = targetBranch; state.requirementVersion = draft.requirementVersion;
     await saveState(paths.runFile, state);
   }

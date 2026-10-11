@@ -48,6 +48,60 @@ function workerCheckProposal(summary: string, check = 'check', criterion = 'ok')
   };
 }
 
+test('a draft window refreshes in place and the only archived card remains manageable', async () => {
+  const root = await temp('draft-card-lifecycle');
+  const server = await openGraphServer({
+    stateDir: join(root, 'state'), projects: [{ id: 'alpha', root }], webDir,
+    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
+  });
+  cleanup.push(() => server.close());
+  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'draft-card-coder');
+  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '整理当前方案', requestId: 'create' });
+  const anchor = (await server.runtime.conversations.view(created.conversationId)).anchorTaskId;
+  await server.runtime.supervisor(anchor).propose(workerCheckProposal('原方案'), 'draft');
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('drawer-entry-graph').click();
+  await page.locator('.node-card[data-node-id="check"]').waitFor();
+
+  // This tab still names v1: the changed module proves the diagram, not just
+  // the conversation summary, refreshes when that version is edited in place.
+  await server.runtime.supervisor(anchor).propose(workerCheckProposal('修订方案', 'review', 'reviewed'), 'edit');
+  await page.locator('.node-card[data-node-id="review"]').waitFor();
+  expect(await page.locator('.node-card[data-node-id="check"]').count()).toBe(0);
+  expect((await server.runtime.conversations.view(created.conversationId)).proposalHistory.map(item => item.version)).toEqual([1]);
+  await page.getByTestId('window-archive-draft').click();
+  await page.getByTestId('window-restore-draft').waitFor();
+  await page.getByTestId('window-restore-draft').click();
+  await page.getByTestId('window-archive-draft').waitFor();
+  await page.getByTestId('window-archive-draft').click();
+  await page.getByTestId('window-restore-draft').waitFor();
+
+  // Reopening the conversation drawer after its sole card was archived must
+  // still offer the archive; no active proposal exists to carry that entry.
+  await page.locator('.tab[data-kind="conversation"]').first().click();
+  if (await page.getByTestId('detail-drawer').isVisible().catch(() => false)) {
+    await page.getByTestId('drawer-entry').click();
+    await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
+  }
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('archived-draft-1').waitFor();
+  await page.getByTestId('restore-draft-1').click();
+  await expect.poll(() => page.getByTestId('drawer-draft-summary').innerText()).toBe('修订方案');
+  expect(await page.locator('.drawer-draft-title').innerText()).toBe('草稿 v1');
+  await page.getByTestId('delete-draft').click();
+  await expect.poll(async () => {
+    const view = await server.runtime.conversations.view(created.conversationId);
+    return { current: view.proposal, active: view.proposalHistory, archived: view.archivedProposals };
+  }).toEqual({ current: null, active: [], archived: [] });
+  await page.getByTestId('proposal-draft').waitFor({ state: 'hidden' });
+  const status = await page.evaluate(async id => (await fetch(`/api/conversations/${id}/proposals/1`)).status, created.conversationId);
+  expect(status).toBe(400);
+}, 60_000);
+
 test('the shell groups conversations by project and keeps an unbound recent section', async () => {
   const root = await temp('sidebar');
   const server = await openGraphServer({
@@ -158,7 +212,7 @@ test('the right drawer keeps proposal details and node inspection independent fr
   const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'conversation' });
   const view = await server.runtime.conversations.view(created.conversationId);
   await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('先做一个最小版本', 'check', 'works'), 'draft-1');
-  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('第二版增加审查', 'review', 'reviewed'), 'draft-2');
+  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('第二版增加审查', 'review', 'reviewed'), 'draft-2', { newVersion: true });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -199,16 +253,21 @@ test('the right drawer keeps proposal details and node inspection independent fr
   // The draft card lays its own content out inside its box: an unconfirmed draft
   // used to squeeze the card to its flex basis, so the version list and the two
   // window links spilled out over the task navigation (measured: card 78..164,
-  // version list at 298, links at 349, task section from 176). Every part of the
-  // card must sit inside it, and the task navigation must start below it.
+  // version list at 298, links at 349, task section from 176). The card keeps its
+  // own parts inside it, and the version list is now its own section: it must sit
+  // below the card and above the task navigation instead of overlapping either.
   await expect.poll(async () => {
     const card = await page.getByTestId('proposal-draft').boundingBox();
     const toc = await page.getByTestId('drawer-draft-toc').boundingBox();
     const links = await page.locator('[data-testid=proposal-draft] [data-testid=drawer-entry-links]').boundingBox();
     const tasks = await page.getByTestId('conversation-tasks').boundingBox();
     if (!card || !toc || !links || !tasks) return null;
-    return { tocInside: toc.y + toc.height <= card.y + card.height + 1, linksInside: links.y + links.height <= card.y + card.height + 1, tasksBelow: tasks.y >= card.y + card.height - 1 };
-  }).toEqual({ tocInside: true, linksInside: true, tasksBelow: true });
+    return {
+      linksInside: links.y + links.height <= card.y + card.height + 1,
+      tocBelowCard: toc.y >= card.y + card.height - 1,
+      tasksBelowToc: tasks.y >= toc.y + toc.height - 1,
+    };
+  }).toEqual({ linksInside: true, tocBelowCard: true, tasksBelowToc: true });
   await page.waitForTimeout(260);
   await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
     .toBe(beforeMain!.width);
@@ -329,7 +388,7 @@ test('a graph agent node opens the same chat transcript used by the main agent',
   await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('节点聊天'), 'agent-node-chat-proposal');
   await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'agent-node-chat-prepare', initialize: true, createBaseline: true });
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
-    proposalVersion: 1,
+    proposalVersion: 1, draftRevision: 1,
     targetBranch: 'main',
     requestId: 'agent-node-chat-confirm',
   });
@@ -440,7 +499,7 @@ test('the task graph page keeps the permanent four-state legend', async () => {
   await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('四态图例'), 'task-graph-legend-proposal');
   await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'task-graph-legend-prepare', initialize: true, createBaseline: true });
   const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
-    proposalVersion: 1,
+    proposalVersion: 1, draftRevision: 1,
     targetBranch: 'main',
     requestId: 'task-graph-legend-confirm',
   });

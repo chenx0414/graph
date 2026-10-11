@@ -78,7 +78,7 @@ test('a bound extension can write inside the workspace during discussion and a w
       acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }],
     }),
   }, 'draft');
-  const receipt = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const receipt = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   expect(provider.requests).toHaveLength(2);
   await main.graphSend({ graphId: receipt.taskId, nodeId: 'work', input: 'job', value: {} });
   await runtime.host.drive();

@@ -60,8 +60,12 @@ export interface PiAdapterChannels {
   /** The conversation service, as far as tools over other conversations need it. */
   conversations?: { service: ConversationToolService };
   supervisor: (taskId: string) => Partial<GraphManagement> & {
-    propose(proposal: NativeProposal, requestId: string): Promise<unknown>;
+    propose(proposal: NativeProposal, requestId: string, options?: { newVersion?: boolean }): Promise<unknown>;
     withdrawDraft?(input: { proposalVersion: number; reason?: string; requestId: string }): Promise<unknown>;
+    confirmDraft?(input: { proposalVersion: number; draftRevision: number; targetBranch: string; instruction: string; requestId: string }): Promise<unknown>;
+    archiveDraft?(input: { proposalVersion: number; requestId: string }): Promise<unknown>;
+    restoreDraft?(input: { proposalVersion: number; requestId: string }): Promise<unknown>;
+    deleteDraft?(input: { proposalVersion: number; requestId: string }): Promise<unknown>;
     graphState?(): Promise<unknown>;
     taskStatus?(input: { taskId?: string; nodeId?: string; waitForNode?: string; timeoutMs?: number }): Promise<unknown>;
     validateProposal?(proposal: NativeProposal): Promise<unknown>;

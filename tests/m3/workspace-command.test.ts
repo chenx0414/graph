@@ -44,7 +44,7 @@ async function fixture(plans: Parameters<typeof openaiServer>[0]) {
       modules: {}, edges: {}, outputs: {}, acceptance: [{ id: 'ok', description: 'Works', kind: 'human' }],
     }),
   }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
   const disk = new TaskStore(join(root, 'state', 'tasks.sqlite'));
   cleanup.push(async () => disk.close());
@@ -181,7 +181,7 @@ test('a plain directory is prepared by the host and its native command module ru
     }),
   }, 'proposal');
   const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   const main = runtime.supervisor(taskId);
   await main.graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
   await runtime.host.drive();

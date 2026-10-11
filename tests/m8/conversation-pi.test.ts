@@ -75,6 +75,19 @@ async function conversationProvider() {
       end('stop');
       return;
     }
+    const prompt = JSON.stringify((body.messages ?? []).at(-1)?.content);
+    const action = [
+      { marker: 'draft-lifecycle-edit', name: 'propose_graph', args: { proposal: { ...proposal, summary: '原地修改的方案' }, requestId: 'pi-edit' } },
+      { marker: 'draft-lifecycle-milestone', name: 'propose_graph', args: { proposal: { ...proposal, summary: '保留的里程碑' }, newVersion: true, requestId: 'pi-milestone' } },
+      { marker: 'draft-lifecycle-delete', name: 'delete_draft', args: { proposalVersion: 1, requestId: 'pi-delete' } },
+      { marker: 'draft-lifecycle-archive', name: 'archive_draft', args: { proposalVersion: 2, requestId: 'pi-archive' } },
+      { marker: 'draft-lifecycle-restore', name: 'restore_draft', args: { proposalVersion: 2, requestId: 'pi-restore' } },
+    ].find(item => prompt.includes(item.marker));
+    if (action) {
+      chunk({ role: 'assistant', tool_calls: [{ index: 0, id: action.args.requestId, type: 'function', function: { name: action.name, arguments: JSON.stringify(action.args) } }] }, null);
+      end('tool_calls');
+      return;
+    }
     if (!listed) {
       listed = true;
       chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'call-ls', type: 'function', function: { name: 'ls', arguments: JSON.stringify({ path: '.' }) } }] }, null);
@@ -192,8 +205,29 @@ test('the real Pi master investigates, drafts, and keeps answering after confirm
   expect(view.messages.some(message => message.role === 'system' && message.kind === 'project')).toBe(true);
   expect(view.messages.some(message => message.role === 'assistant' && message.text === '草稿已经生成，等待你确认。')).toBe(true);
 
+  // Run the new controls through the real resident Pi main and its HTTP
+  // provider, so missing declarations or lost arguments cannot pass via SDK calls.
+  async function mainAction(text: string) {
+    await runtime.conversations.chat(created.conversationId, { text, requestId: text });
+    await runtime.host.runReady();
+    return runtime.conversations.view(created.conversationId);
+  }
+  view = await mainAction('draft-lifecycle-edit');
+  expect(view.proposal).toMatchObject({ version: 1, draftRevision: 2, spec: { summary: '原地修改的方案' } });
+  view = await mainAction('draft-lifecycle-milestone');
+  expect(view.proposal).toMatchObject({ version: 2, draftRevision: 1, spec: { summary: '保留的里程碑' } });
+  view = await mainAction('draft-lifecycle-delete');
+  expect(view.proposalHistory.map(item => item.version)).toEqual([2]);
+  view = await mainAction('draft-lifecycle-archive');
+  expect(view.proposal).toBeNull();
+  expect(view.proposalHistory).toEqual([]);
+  expect(view.archivedProposals.map(item => item.version)).toEqual([2]);
+  view = await mainAction('draft-lifecycle-restore');
+  expect(view.proposal?.version).toBe(2);
+  expect(view.archivedProposals).toEqual([]);
+
   // 3. Confirm and keep talking while the feature task exists.
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   await runtime.conversations.chat(created.conversationId, { text: '现在卡在哪里？', requestId: 'ask' });
   await runtime.host.runReady();
   view = await runtime.conversations.view(created.conversationId);

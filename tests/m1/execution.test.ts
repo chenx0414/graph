@@ -39,7 +39,7 @@ test('confirmed native output survives restart and reaches a real host check wit
     outputs: { result: { from: 'build.result', protocol: 'data' } }, acceptance: [{ id: 'host', description: 'Host runtime responds', kind: 'check', module: 'verify' }] });
   const main = runtime.supervisor(taskId); const task = runtime.user.task(taskId);
   const proposed = await main.propose({ requirementVersion: 1, summary: 'Title search', definition, acceptance: [{ id: 'host', description: 'Host runtime responds', checkNode: 'verify' }] }, 'proposal');
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.host.drive(); expect(provider.requests).toHaveLength(0);
   await main.graphSend({ graphId: taskId, nodeId: 'build', input: 'job', value: { objective: 'Title search' } });
   const driving = runtime.host.drive(); await arrived.promise;

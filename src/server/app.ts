@@ -611,8 +611,23 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.post('/api/conversations/:conversationId/confirm', async request => {
     const params = request.params as { conversationId: string };
-    const body = request.body as { proposalVersion: number; targetBranch: string; requestId: string };
-    return runtime.conversations.confirm(params.conversationId, { proposalVersion: body.proposalVersion, targetBranch: body.targetBranch, requestId: body.requestId });
+    const body = request.body as { proposalVersion: number; draftRevision: number; targetBranch: string; requestId: string };
+    return runtime.conversations.confirm(params.conversationId, { proposalVersion: body.proposalVersion, draftRevision: body.draftRevision, targetBranch: body.targetBranch, requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/drafts/archive', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { proposalVersion: number; requestId: string };
+    return runtime.conversations.archiveDraft(params.conversationId, { proposalVersion: body.proposalVersion, requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/drafts/restore', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { proposalVersion: number; requestId: string };
+    return runtime.conversations.restoreDraft(params.conversationId, { proposalVersion: body.proposalVersion, requestId: body.requestId });
+  });
+  app.post('/api/conversations/:conversationId/drafts/delete', async request => {
+    const params = request.params as { conversationId: string };
+    const body = request.body as { proposalVersion: number; requestId: string };
+    return runtime.conversations.deleteDraft(params.conversationId, { proposalVersion: body.proposalVersion, requestId: body.requestId });
   });
   app.post('/api/conversations/:conversationId/pause', async request => {
     const params = request.params as { conversationId: string };
@@ -667,8 +682,8 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
   app.post('/api/tasks/:taskId/accept', async request => {
     const params = request.params as { taskId: string };
-    const body = request.body as { proposalVersion: number; targetBranch: string; requestId: string };
-    return runtime.user.task(params.taskId).accept({ proposalVersion: body.proposalVersion, targetBranch: body.targetBranch, requestId: body.requestId });
+    const body = request.body as { proposalVersion: number; draftRevision: number; targetBranch: string; requestId: string };
+    return runtime.user.task(params.taskId).accept({ proposalVersion: body.proposalVersion, draftRevision: body.draftRevision, targetBranch: body.targetBranch, requestId: body.requestId });
   });
   app.post('/api/tasks/:taskId/abandon', async request => {
     const params = request.params as { taskId: string };

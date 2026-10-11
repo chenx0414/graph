@@ -160,7 +160,7 @@ test('a dirty repository blocks formal dispatch until an explicit baseline', asy
   expect(prep.state).toBe('detected');
   expect((prep.detail as { dirty?: number }).dirty).toBeGreaterThan(0);
   const { task, proposalVersion, start } = await taskFor(runtime);
-  await expect(task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' }))
+  await expect(task.accept({ proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' }))
     .rejects.toMatchObject({ code: 'project_dirty' });
   expect(providers.get(runtime)!.requests).toHaveLength(0);
   expect(await readFile(join(rootPath, 'uncommitted.txt'), 'utf8')).toBe('user work\n');
@@ -169,7 +169,7 @@ test('a dirty repository blocks formal dispatch until an explicit baseline', asy
   const baseline = await runtime.projects.prepare({ projectId: 'p', requestId: 'baseline', createBaseline: true });
   expect(baseline.state).toBe('ready');
   expect(shell(rootPath, ['ls-files'])).toContain('uncommitted.txt');
-  await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept-2' });
+  await task.accept({ proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-2' });
   await start();
   expect(providers.get(runtime)!.requests).toHaveLength(2);
 }, 60_000);
@@ -183,7 +183,7 @@ test('a repository without HEAD gets a baseline before dispatch', async () => {
   expect(prep.state).toBe('ready');
   expect(shell(rootPath, ['rev-parse', 'HEAD'])).toBe(prep.baselineSha);
   const { task, proposalVersion, start } = await taskFor(runtime);
-  await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await start();
   const workspace = (await task.view()).worktrees.find(item => item.nodeId === 'work')!.path;
   expect(workspace).not.toBe(rootPath);
@@ -199,7 +199,7 @@ test('a repository subdirectory keeps its scope without creating a nested repo',
   const prep = await runtime.projects.prepare({ projectId: 'p', requestId: 'prepare' });
   expect(prep).toMatchObject({ state: 'ready', repoRoot: await realpath(root), projectSubdir: 'project' });
   const { task, proposalVersion, start } = await taskFor(runtime);
-  await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await start();
   const workspace = join((await task.view()).worktrees.find(item => item.nodeId === 'work')!.path, 'project');
   // The worker starts inside the project subdirectory of the work copy.
@@ -217,7 +217,7 @@ test('direct acceptance cannot fall back to the project root without Git', async
   const { task, proposalVersion, start } = await taskFor(runtime);
   // No explicit prepare call: the host initializes the plain directory at the
   // formal acceptance boundary instead of silently dispatching in place.
-  await task.accept({ proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await start();
   const workspace = (await task.view()).worktrees.find(item => item.nodeId === 'work')!.path;
   expect(workspace).not.toBe(rootPath);
@@ -231,7 +231,7 @@ test('an unknown target branch fails before acceptance without touching the proj
   const before = shell(rootPath, ['rev-parse', 'HEAD']);
   const runtime = await runtimeFor(rootPath);
   const { task, proposalVersion } = await taskFor(runtime);
-  await expect(task.accept({ proposalVersion, targetBranch: 'missing-branch', requestId: 'accept' }))
+  await expect(task.accept({ proposalVersion, draftRevision: 1, targetBranch: 'missing-branch', requestId: 'accept' }))
     .rejects.toMatchObject({ code: 'invalid_input' });
   const view = await task.view();
   expect(view.acceptedProposalVersion).toBeNull();

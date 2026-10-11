@@ -63,7 +63,7 @@ async function subagentRun(name: string, plans: ResponsePlan[]) {
       acceptance: [{ id: 'works', description: 'Failure remains diagnosable', kind: 'human' }],
     }),
   }, 'proposal-tool-failure');
-  await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await daemon.server.runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await main.graphSend({ graphId: taskId, nodeId: 'work', text: 'Read the lane notes' });
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await daemon.server.runtime.host.runReady();

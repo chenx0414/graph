@@ -76,7 +76,7 @@ export interface NativeProposal extends ProposalScope {
   definition: GraphDefinition;
 }
 export interface Receipt { taskId: string; cursor: number }
-export interface ProposalReceipt extends Receipt { proposalVersion: number }
+export interface ProposalReceipt extends Receipt { proposalVersion: number; draftRevision: number }
 export interface TaskUpdate { cursor: number; taskId: string; type: string; data: Json; timestamp: number }
 export interface TaskWatch extends AsyncIterableIterator<TaskUpdate> { return(): Promise<IteratorResult<TaskUpdate>> }
 

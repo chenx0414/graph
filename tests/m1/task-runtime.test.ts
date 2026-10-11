@@ -36,7 +36,7 @@ test('a confirmed requirement and its idempotent command receipt survive reopeni
       edges: { verified: { from: 'implement.result', to: 'verify.job', enabled: true } },
       acceptance: [{ id: 'search', description: 'Matching titles are returned', kind: 'check', module: 'verify' }] }),
   }, 'proposal-1');
-  const accepted = await task.accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept-1' });
+  const accepted = await task.accept({ proposalVersion: proposal.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-1' });
   const before = await task.view();
   expect(before.proposal).toMatchObject({ summary: 'Search existing items by title', acceptance: [{ id: 'search', checkNode: 'verify' }] });
   await runtime.close();
@@ -44,10 +44,10 @@ test('a confirmed requirement and its idempotent command receipt survive reopeni
   expect(await runtime.user.begin(request)).toEqual(receipt);
   expect(await runtime.user.task(receipt.taskId).view()).toMatchObject({
     id: receipt.taskId, phase: 'running', requirementVersion: 1,
-    acceptedProposalVersion: proposal.proposalVersion, targetBranch: 'main',
+    acceptedProposalVersion: proposal.proposalVersion, draftRevision: 1, targetBranch: 'main',
     nodes: before.nodes,
   });
-  expect(await runtime.user.task(receipt.taskId).accept({ proposalVersion: proposal.proposalVersion, targetBranch: 'main', requestId: 'accept-1' })).toEqual(accepted);
+  expect(await runtime.user.task(receipt.taskId).accept({ proposalVersion: proposal.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-1' })).toEqual(accepted);
   expect(await runtime.user.list()).toHaveLength(1);
 });
 
@@ -65,19 +65,19 @@ test('new requirements invalidate old proposals, additional tasks queue, and eve
   const before = await task.view();
   const changed = await task.say('Ignore title case', 'say-1');
   expect(await task.say('Ignore title case', 'say-1')).toEqual(changed);
-  await expect(task.accept({ proposalVersion: old.proposalVersion, targetBranch: 'main', requestId: 'old-accept' })).rejects.toMatchObject({ code: 'stale_proposal' });
+  await expect(task.accept({ proposalVersion: old.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'old-accept' })).rejects.toMatchObject({ code: 'stale_proposal' });
   const stream = task.watch(before.cursor);
   expect((await stream.next()).value).toMatchObject({ cursor: changed.cursor, type: 'requirement.changed' });
   await stream.return();
   const current = await supervisor.propose({ ...spec, requirementVersion: 2 }, 'proposal-2');
   expect((await task.view()).messages).toMatchObject([{ text: 'Title search' }, { text: 'Ignore title case', requirementVersion: 2 }]);
-  const accepted = await task.accept({ proposalVersion: current.proposalVersion, targetBranch: 'main', requestId: 'accept-1' });
+  const accepted = await task.accept({ proposalVersion: current.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-1' });
   const reconnect = task.watch(current.cursor);
   expect((await reconnect.next()).value).toMatchObject({ cursor: accepted.cursor, type: 'task.accepted' });
   await reconnect.return();
   const second = await runtime.user.begin({ projectId: 'project', request: 'Search note bodies too', requestId: 'begin-2' });
   const next = await runtime.supervisor(second.taskId).propose(spec, 'proposal-1');
-  await runtime.user.task(second.taskId).accept({ proposalVersion: next.proposalVersion, targetBranch: 'main', requestId: 'accept-2' });
+  await runtime.user.task(second.taskId).accept({ proposalVersion: next.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-2' });
   expect(await task.view()).toMatchObject({ phase: 'running', requirementVersion: 2, request: 'Title search' });
   expect(await runtime.user.task(second.taskId).view()).toMatchObject({ phase: 'queued', request: 'Search note bodies too' });
   expect(supervisor).not.toHaveProperty('accept');
@@ -118,7 +118,7 @@ test('invalid proposals cannot enter confirmed state, and confirmation freezes t
   }
   expect((await runtime.user.task(taskId).view()).proposalVersion).toBe(0);
   const proposed = await supervisor.propose(valid, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await expect(supervisor.propose(valid, 'change-confirmed')).rejects.toMatchObject({ code: 'requirements_locked' });
 });
 
@@ -146,10 +146,10 @@ test('abandoning a wedged active task hands the slot to the queued task', async 
   // task waits in the queue behind it, which is what makes abandoning matter.
   const first = await runtime.user.begin({ projectId: 'project', request: 'First', requestId: 'begin-1' });
   const firstProposal = await runtime.supervisor(first.taskId).propose(spec, 'proposal-1');
-  await runtime.user.task(first.taskId).accept({ proposalVersion: firstProposal.proposalVersion, targetBranch: 'main', requestId: 'accept-1' });
+  await runtime.user.task(first.taskId).accept({ proposalVersion: firstProposal.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-1' });
   const second = await runtime.user.begin({ projectId: 'project', request: 'Second', requestId: 'begin-2' });
   const secondProposal = await runtime.supervisor(second.taskId).propose(spec, 'proposal-2');
-  await runtime.user.task(second.taskId).accept({ proposalVersion: secondProposal.proposalVersion, targetBranch: 'main', requestId: 'accept-2' });
+  await runtime.user.task(second.taskId).accept({ proposalVersion: secondProposal.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept-2' });
   const queued = await runtime.user.task(second.taskId).view();
   expect(queued.phase).toBe('queued');
   expect(queued.queuedBehind).toMatchObject({ taskId: first.taskId, projectId: 'project', openProblems: 0 });
@@ -178,10 +178,10 @@ test('completing a native task releases the confirmed queue without implicitly c
   cleanup.push(() => runtime.close());
   const first = await runtime.user.begin({ projectId: 'project', request: 'First', requestId: 'begin-1' });
   await runtime.supervisor(first.taskId).propose(checkProposal, 'draft-1');
-  await runtime.user.task(first.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-1' });
+  await runtime.user.task(first.taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept-1' });
   const second = await runtime.user.begin({ projectId: 'project', request: 'Second', requestId: 'begin-2' });
   await runtime.supervisor(second.taskId).propose(checkProposal, 'draft-2');
-  await runtime.user.task(second.taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept-2' });
+  await runtime.user.task(second.taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept-2' });
   for (const { taskId } of [first, second]) await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
   await runtime.host.drive();
   expect((await runtime.user.task(second.taskId).view()).phase).toBe('queued');

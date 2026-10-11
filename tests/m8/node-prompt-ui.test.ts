@@ -77,7 +77,7 @@ test('native draft preview renders modules, named interfaces and the actual grap
   await expect.poll(() => page.getByTestId('graph-edge-inspector').textContent()).toContain('worker.result');
   expect(await page.getByTestId('graph-edge-inspector').textContent()).toContain('gate.review');
   expect(await page.getByTestId('graph-edge-inspector').textContent()).toContain('尚无投递');
-  const confirmed = await server.runtime.conversations.confirm(conversation.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+  const confirmed = await server.runtime.conversations.confirm(conversation.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
   // The already-open draft window must become the actual runtime view, including patches.
   await page.getByTestId('graph').waitFor();
   await server.runtime.supervisor(confirmed.taskId).graphPatch({ graphId: confirmed.taskId, baseRevision: 1,

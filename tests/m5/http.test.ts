@@ -63,11 +63,11 @@ test('HTTP session can begin a task, talk to the master channel, confirm require
   const begun = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Add search', requestId: 'begin' })).body);
   await post(`/api/tasks/${begun.taskId}/say`, { text: 'Case insensitive', requestId: 'say' });
   const proposed = await runtime.supervisor(begun.taskId).propose(draft(2, 'Search'), 'proposal');
-  const accepted = await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  const accepted = await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   expect(accepted.statusCode).toBe(200);
   const queued = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Second feature', requestId: 'begin-2' })).body);
   await runtime.supervisor(queued.taskId).propose(draft(1, 'Second'), 'proposal');
-  await post(`/api/tasks/${queued.taskId}/accept`, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept-2' });
+  await post(`/api/tasks/${queued.taskId}/accept`, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept-2' });
   const list = JSON.parse((await get('/api/tasks')).body);
   expect(list).toMatchObject([{ phase: 'running' }, { phase: 'queued' }]);
   const view = JSON.parse((await get(`/api/tasks/${begun.taskId}`)).body);
@@ -87,7 +87,7 @@ test('pause over HTTP shows pausing then paused, and answering one question leav
   const begun = JSON.parse((await post('/api/tasks', { projectId: 'project', request: 'Work', requestId: 'begin' })).body);
   const main = runtime.supervisor(begun.taskId);
   await main.propose(draft(1, 'Work', true, true), 'proposal');
-  await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await main.graphSend({ graphId: begun.taskId, nodeId: 'work', input: 'job', value: {} });
   const running = runtime.host.drive();
   await sent.promise;
@@ -139,7 +139,7 @@ test('event cursor reconnects after the HTTP client disconnects while the host k
   const first = JSON.parse((await get(`/api/tasks/${begun.taskId}/events?after=0`)).body) as { cursor: number; type: string }[];
   expect(first.some(event => event.type === 'task.created')).toBe(true);
   const cursor = first[first.length - 1]!.cursor;
-  await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await post(`/api/tasks/${begun.taskId}/accept`, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await main.graphSend({ graphId: begun.taskId, nodeId: 'check', input: 'job', value: {} });
   await main.graphControl({ graphId: begun.taskId, action: 'complete' });
   await runtime.host.drive();

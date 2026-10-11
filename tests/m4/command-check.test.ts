@@ -51,7 +51,7 @@ async function start(root: string, plans: ResponsePlan[], input: { command: stri
   const proposed = await main.propose({ requirementVersion: 1, summary: 'Run the check',
     acceptance: [{ id: 'tests', description: 'Tests pass', checkNode: 'check' }], definition }, 'proposal');
   const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
   await runtime.host.drive();
   expect(runtime.nodeRun(taskId, 'work').node.status).toBe('succeeded');

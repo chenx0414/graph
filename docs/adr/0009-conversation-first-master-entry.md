@@ -22,7 +22,11 @@
 
 ### 3. 草稿到执行的确认边界
 
-主管的 `propose_graph` 只生成版本化草稿（`proposals`，绑定当前需求版本），确认前不创建图节点、不派发工人。`confirm` 只接受当前最新草稿：校验会话已绑定项目、草稿版本与需求版本一致、同一版本未被确认过；成功后创建独立功能任务（`tasks.conversation_id` 关联、复制提案为 v1、实例化节点、入队/激活），`git.prepareTask` 走既有路径；anchor 的 `requirement_version+1` 使旧草稿全部失效，并写 `conversation_acceptances` 溯源。确认后 anchor 保持 `chatting`，主管继续可对话；范围变更必须形成新任务或走执行中问题流程，聊天不能静默修改。
+主管的 `propose_graph` 只写草稿（`proposals`，绑定当前需求版本），确认前不创建图节点、不派发工人。`confirm` 只接受当前最新草稿：校验会话已绑定项目、草稿版本与需求版本一致、同一版本未被确认过；成功后创建独立功能任务（`tasks.conversation_id` 关联、复制提案为 v1、实例化节点、入队/激活），`git.prepareTask` 走既有路径；anchor 的 `requirement_version+1` 使旧草稿全部失效，并写 `conversation_acceptances` 溯源。确认后 anchor 保持 `chatting`，主管继续可对话；聊天不能静默修改正式任务。
+
+2026-10-11 按使用者要求修订草稿版本策略：同一任务的当前未确认草稿默认原地修改，保留可见版本；是否通过 `newVersion:true` 另存版本由 main 判断。这样日常调整不会堆积草稿卡片，同时允许保留有意义的里程碑。原地修改递增独立的 `draftRevision` 并更新内容摘要；确认命令必须携带读取时的修订标识，幂等命令载荷也包含该标识，过期内容不能确认。确认溯源保留源草稿修订。
+
+用户与 main 可按版本归档、恢复或删除源草稿。归档隐藏默认列表但保留显式读取与恢复；删除使用不可恢复的隐藏标记，保留版本高水位而不复用编号。两者都不修改已确认任务的提案副本、graph 执行修订、聊天或验收事实，不自动清理既有草稿。此策略替代本节原先自动生成草稿版本的约定；同一已确认任务的返工与动态调整沿用同一 graph，按 [ADR 0030](0030-graph-v2-interface-delivery-kernel.md) 使用 `graph_patch`，新的功能任务才创建另一个 graph。
 
 ### 4. 主管轮次的只读讨论边界
 

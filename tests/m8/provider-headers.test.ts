@@ -27,7 +27,7 @@ async function dispatchWorker(runtime: Awaited<ReturnType<typeof startGraphDaemo
       acceptance: [{ id: 'works', description: 'Provider receives the task', kind: 'human' }],
     }),
   }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await main.graphSend({ graphId: taskId, nodeId: 'work', text: request });
   return taskId;
 }

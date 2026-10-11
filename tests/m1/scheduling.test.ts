@@ -72,7 +72,7 @@ test('resolving the final native completion blocker durably advances the task qu
     const proposed = await runtime.supervisor(taskId).propose({ requirementVersion: 1, summary: request, definition,
       acceptance: [{ id: 'works', description: 'The user accepts the result', checkNode: 'check' },
         { id: 'host', description: 'Host runtime responds', checkNode: 'check' }] }, 'proposal');
-    await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, targetBranch: 'main', requestId: `accept-${request}` });
+    await runtime.user.task(taskId).accept({ proposalVersion: proposed.proposalVersion, draftRevision: 1, targetBranch: 'main', requestId: `accept-${request}` });
     await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'check', input: 'job', value: {} });
     return taskId;
   };

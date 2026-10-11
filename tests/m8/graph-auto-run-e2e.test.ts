@@ -95,7 +95,7 @@ describe('§13.8 E2E — the host loop drains a confirmed v2 graph', () => {
       acceptance: [{ id: 'works', description: '链跑通', checkNode: 'b' }],
       definition: DEFINITION,
     }, 'proposal-v2');
-    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, targetBranch: 'main', requestId: 'confirm' });
+    const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
 
     // Seed the first node's work, exactly as an external input would, then let the ORDINARY
     // host loop run: nothing here calls the graph lane directly.

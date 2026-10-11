@@ -169,7 +169,14 @@ test('upgrading reclassifies legacy internal questions so they leave the user in
     // ... ADD COLUMN, so a re-run would abort with "duplicate column name" and strand the
     // database, turning the assertion below into a test of that abort instead of the
     // reclassification it exists to prove.
-    store.db.exec('PRAGMA user_version=24;');
+    store.db.exec(`
+      ALTER TABLE proposals DROP COLUMN draft_revision;
+      ALTER TABLE proposals DROP COLUMN draft_digest;
+      ALTER TABLE proposals DROP COLUMN archived_at;
+      ALTER TABLE proposals DROP COLUMN deleted_at;
+      ALTER TABLE conversation_acceptances DROP COLUMN draft_revision;
+      PRAGMA user_version=24;
+    `);
     store.db.prepare('INSERT INTO projects(id,root,grants) VALUES(?,?,?)').run('p', root, '[]');
     store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq,phase,conversation_id) VALUES('anchor','p','chat',1,'chatting','c')").run();
     store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','anchor','chat',1,1)").run();

@@ -73,7 +73,7 @@ async function retrievalTask(plans: ResponsePlan[], network: { retrievalDomains?
     }),
   }, 'proposal');
   const task = runtime.user.task(taskId);
-  await task.accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await task.accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   await runtime.supervisor(taskId).graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: {} });
   const disk = new TaskStore(join(root, 'state', 'tasks.sqlite'));
   cleanup.push(async () => disk.close());

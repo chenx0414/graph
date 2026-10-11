@@ -45,7 +45,7 @@ async function runChain(links: number) {
       outputs: { result: { from: `${ids.at(-1)}.result`, protocol: 'step' } },
       acceptance: [{ id: 'ok', description: 'User inspects the final result', kind: 'human' }] }),
   }, 'proposal');
-  await runtime.user.task(taskId).accept({ proposalVersion: 1, targetBranch: 'main', requestId: 'accept' });
+  await runtime.user.task(taskId).accept({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
   expect(providers.every(provider => provider.requests.length === 0)).toBe(true);
   await main.graphSend({ graphId: taskId, nodeId: 'n0', input: 'job', value: value(-1) });
   await runtime.host.drive();
