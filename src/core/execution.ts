@@ -276,6 +276,16 @@ export class Execution {
           continue;
         }
         await Promise.race([...running, ...this.pending, ...this.activeGraphs.values(), new Promise<void>(resolve => this.driveWaiters.push(resolve))]);
+        // A round can end on work that was already settled: a runnable graph keeps re-proposing an
+        // input it cannot dispatch yet (a legal pre-send wait), and its run resolves immediately, so
+        // the race is decided by settled work and the loop only ever yields to microtasks. Two
+        // narrower fixes were falsified by the regression — keying on pumpGraphs() returning 0 (it
+        // counts dispatch attempts, and this case returns 1 every round) and yielding only when no
+        // real work is outstanding (main or a provider waiting keeps that non-empty while the settled
+        // graph work still wins). The loop therefore hops to a real macrotask every round, which is
+        // what lets timers, HTTP and signal handlers run. It adds no query, counts no event, keeps the
+        // pending input and pauses nothing.
+        await new Promise<void>(resolve => setImmediate(resolve));
       }
       return { dispatched };
     } finally {
