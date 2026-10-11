@@ -10,7 +10,7 @@ import { GraphPanel } from './GraphPanel.tsx';
 type ConversationView = {
   id: string;
   proposal: ProposalDetail | null;
-  proposalHistory?: { version: number; summary: string; draftRevision?: number; draftDigest?: string }[];
+  proposalHistory?: { version: number; summary: string; accepted?: boolean; draftRevision?: number; draftDigest?: string }[];
   tasks: { id: string; status: string; used?: number | null; budget?: number | null; openQuestions?: unknown[] }[];
   evidence?: unknown[];
   accepted?: { proposalVersion: number; taskId: string }[];
@@ -62,6 +62,9 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
   }, [conversationId, selected, latest, chosenCard, view]);
   const proposal = chosen;
   const archivedCards = view?.archivedProposals ?? [];
+  // Confirmed cards that are still live: the board shows one of them (the accepted
+  // source), but every other confirmed version stays manageable from here too.
+  const historyCards = view?.proposalHistory ?? [];
   // If this draft has already been accepted, the board reads that task's live node states.
   const acceptedTaskId = view?.accepted?.find(item => item.proposalVersion === selected)?.taskId ?? null;
   const load = useCallback(async () => {
@@ -93,6 +96,13 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
             <Button size="sm" data-testid={`window-restore-draft-${proposal.version}`} onClick={() => void act(() => api(`/api/conversations/${conversationId}/drafts/restore`, { method: 'POST', body: JSON.stringify({ proposalVersion: proposal.version, requestId: `restore-${crypto.randomUUID()}` }) }))}>恢复源草稿</Button>
           )}
           <Button size="sm" variant="danger" data-testid={`window-delete-draft-${proposal.version}`} onClick={() => void act(() => api(`/api/conversations/${conversationId}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: proposal.version, requestId: `delete-${crypto.randomUUID()}` }) }))}>删除源草稿</Button>
+          {historyCards.filter(item => item.version !== proposal.version).map(item => (
+            <span key={item.version} className="row" data-testid={`window-history-draft-${item.version}`}>
+              <span className="muted">{`v${item.version}${item.accepted ? ' 已确认' : ' 未确认'} · ${item.summary}`}</span>
+              <Button size="sm" data-testid={`window-archive-history-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${conversationId}/drafts/archive`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `archive-${crypto.randomUUID()}` }) }))}>归档</Button>
+              <Button size="sm" variant="danger" data-testid={`window-delete-history-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${conversationId}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `delete-${crypto.randomUUID()}` }) }))}>删除</Button>
+            </span>
+          ))}
           {archivedCards.filter(item => item.version !== proposal.version).map(item => (
             <span key={item.version} className="row" data-testid={`window-archived-draft-${item.version}`}>
               <span className="muted">{`v${item.version} 已归档`}</span>

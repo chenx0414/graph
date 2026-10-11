@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
@@ -36,6 +37,21 @@ async function temp(name: string) {
   return dir;
 }
 
+/** A real Git project: confirming a draft requires the target branch to exist. */
+function git(cwd: string, args: string[]) {
+  execFileSync('git', args, { cwd, stdio: 'pipe' });
+}
+
+async function gitProject(dir: string) {
+  await writeFile(join(dir, 'check.js'), 'console.log("check passed");\n');
+  git(dir, ['init', '-q', '-b', 'main']);
+  git(dir, ['config', 'user.email', 'graph@example.invalid']);
+  git(dir, ['config', 'user.name', 'Graph Test']);
+  git(dir, ['add', '.']);
+  git(dir, ['commit', '-q', '-m', 'init']);
+  return dir;
+}
+
 function workerCheckProposal(summary: string, check = 'check', criterion = 'ok'): NativeProposal {
   return { requirementVersion: 1, summary, acceptance: [{ id: criterion, description: '检查通过', checkNode: check }],
     definition: parseGraphDefinition({ schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
@@ -50,8 +66,11 @@ function workerCheckProposal(summary: string, check = 'check', criterion = 'ok')
 
 test('a draft window refreshes in place and the only archived card remains manageable', async () => {
   const root = await temp('draft-card-lifecycle');
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await gitProject(project);
   const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'alpha', root }], webDir,
+    stateDir: join(root, 'state'), projects: [{ id: 'alpha', root: project }], webDir,
     startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
   });
   cleanup.push(() => server.close());
@@ -92,14 +111,59 @@ test('a draft window refreshes in place and the only archived card remains manag
   await page.getByTestId('restore-draft-1').click();
   await expect.poll(() => page.getByTestId('drawer-draft-summary').innerText()).toBe('修订方案');
   expect(await page.locator('.drawer-draft-title').innerText()).toBe('草稿 v1');
+
+  // A confirmed card is confirmed, not stale. Confirming advances the anchor's
+  // requirement, so this card is stale by construction: the UI must still read it as
+  // confirmed (no re-discuss prompt, which would invite a second graph for a task
+  // that already has one) and keep it manageable, while the formal task and its
+  // graph survive every card operation.
+  await page.getByTestId('accept-branch').fill('main');
+  await page.getByTestId('confirm-draft').click();
+  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).accepted.length).toBe(1);
+  const taskId = (await server.runtime.conversations.view(created.conversationId)).accepted[0]?.taskId ?? '';
+  expect(taskId).not.toBe('');
+  await expect.poll(() => page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('草稿 v1 · 已确认');
+  // Close and reopen the drawer: the confirmed card is still listed for management.
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('active-draft-1').waitFor();
+  expect(await page.getByTestId('active-draft-1').innerText()).toContain('已确认');
+  expect(await page.getByTestId('draft-stale').count()).toBe(0);
+  await page.getByTestId(`task-graph-tab-${taskId}`).waitFor();
+
+  // A draft for another task in the same conversation leaves the first graph's
+  // confirmed source card manageable; choosing it must still show confirmation.
+  await server.runtime.supervisor(anchor).propose({ ...workerCheckProposal('后续任务方案'), requirementVersion: 2 }, 'later');
+  await page.getByTestId('drawer-draft-version-1').waitFor();
+  await page.getByTestId('drawer-draft-version-1').click();
+  await page.getByTestId('draft-accepted').waitFor();
+  expect(await page.getByTestId('draft-stale').count()).toBe(0);
+  expect(await page.getByTestId('proposal-draft').innerText()).toContain('已确认草稿 v1');
+
+  // The confirmed source card archives, restores and deletes like any other card.
+  await page.getByTestId('archive-draft').click();
+  await page.getByTestId('archived-draft-1').waitFor();
+  await page.getByTestId('restore-draft-1').click();
+  await page.getByTestId('drawer-draft-version-1').click();
+  await expect.poll(() => page.locator('.drawer-draft-title').innerText()).toBe('草稿 v1');
   await page.getByTestId('delete-draft').click();
   await expect.poll(async () => {
     const view = await server.runtime.conversations.view(created.conversationId);
-    return { current: view.proposal, active: view.proposalHistory, archived: view.archivedProposals };
-  }).toEqual({ current: null, active: [], archived: [] });
-  await page.getByTestId('proposal-draft').waitFor({ state: 'hidden' });
-  const status = await page.evaluate(async id => (await fetch(`/api/conversations/${id}/proposals/1`)).status, created.conversationId);
-  expect(status).toBe(400);
+    return { current: view.proposal?.version ?? null, active: view.proposalHistory.map(item => item.version), archived: view.archivedProposals.map(item => item.version) };
+  }).toEqual({ current: 2, active: [2], archived: [] });
+  // The formal proposal copy and the graph it started are untouched.
+  const task = await server.runtime.user.task(taskId).view();
+  expect(task.acceptedProposalVersion).toBe(1);
+  expect(task.proposal?.summary).toBe('修订方案');
+  await page.getByTestId(`task-graph-tab-${taskId}`).waitFor();
+  const deleted = await page.evaluate(async id => (await fetch(`/api/conversations/${id}/proposals/1`)).status, created.conversationId);
+  expect(deleted).toBe(400);
+  const later = await page.evaluate(async id => (await fetch(`/api/conversations/${id}/proposals/2`)).status, created.conversationId);
+  expect(later).toBe(200);
+  await page.getByTestId(`task-graph-tab-${taskId}`).click();
+  await page.getByTestId('graph').waitFor();
+  await page.locator('.node-card[data-node-id="review"]').waitFor();
 }, 60_000);
 
 test('the shell groups conversations by project and keeps an unbound recent section', async () => {

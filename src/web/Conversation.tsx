@@ -818,12 +818,19 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
   const drawerLoading = drawerSection === 'draft' && Boolean(proposal || activeProposalSummary) && !activeProposal;
   const draftStatus: DraftStatus = !proposal
     ? 'none'
-    : proposal.stale
-      ? 'stale'
-      : acceptedVersions.has(proposal.version)
-        ? 'accepted'
+    : acceptedVersions.has(proposal.version)
+      ? 'accepted'
+      : proposal.stale
+        ? 'stale'
         : 'pending';
   const confirmableForActive = Boolean(activeProposal && proposal && activeProposal.version === proposal.version && confirmable);
+  // A confirmed card is confirmed, not stale. Confirming advances the anchor's
+  // requirement, so the source card is stale by construction afterwards; reading
+  // staleness first would label it "re-discuss" and invite a second graph for a task
+  // that already has one. Execution changes go to the original graph instead.
+  const activeAccepted = Boolean(activeProposal && acceptedVersions.has(activeProposal.version));
+  const activeStale = Boolean(activeProposal && activeProposal.stale && !activeAccepted);
+  const managementCards = proposalHistory.filter(item => !(drawerSection === 'draft' && item.version === activeProposal?.version));
   const hasDrawerContent = drawerSection === 'draft'
     ? Boolean(activeProposal) || (view.archivedProposals ?? []).length > 0
     : Boolean(detailTask);
@@ -1083,12 +1090,12 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                         <div className="drawer-draft-title">草稿 v{activeProposal.version}</div>
                         <div className="drawer-draft-summary" data-testid="drawer-draft-summary">{activeProposal.spec.summary}</div>
                       </div>
-                      <Pill tone={activeProposal.stale ? 'warn' : acceptedVersions.has(activeProposal.version) ? 'success' : 'info'}>
-                        {activeProposal.stale ? '需重新讨论' : acceptedVersions.has(activeProposal.version) ? `已确认草稿 v${activeProposal.version}` : '待确认'}
+                      <Pill tone={activeStale ? 'warn' : activeAccepted ? 'success' : 'info'}>
+                        {activeAccepted ? `已确认草稿 v${activeProposal.version}` : activeStale ? '需重新讨论' : '待确认'}
                       </Pill>
                     </div>
-                    {activeProposal.stale && <p data-testid="draft-stale" className="muted">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
-                    {acceptedVersions.has(activeProposal.version) && <p data-testid="draft-accepted" className="muted">已确认草稿 v{activeProposal.version}，执行状态见任务导航。</p>}
+                    {activeStale && <p data-testid="draft-stale" className="muted">需求已变化，这个草稿不能执行；请让主 Agent 针对最新需求重新提案。</p>}
+                    {activeAccepted && <p data-testid="draft-accepted" className="muted">已确认草稿 v{activeProposal.version}，执行状态见任务导航。</p>}
                     {confirmableForActive && !view.projectId && <p data-testid="draft-needs-project" className="muted">确认前需要先绑定项目。</p>}
                     {confirmableForActive && view.projectId && (
                       <>
@@ -1126,9 +1133,25 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
                 </div>
               </section>
             )}
-            {drawerOpen && drawerSection === 'draft' && (proposalHistory.length > 0 || (view.archivedProposals ?? []).length > 0) && (
+            {drawerOpen && (proposalHistory.length > 0 || (view.archivedProposals ?? []).length > 0) && (
               <section className="drawer-section" data-testid="draft-cards">
                 {proposalHistory.length > 0 && <DraftVersionToc history={proposalHistory} selectedVersion={selectedProposalVersion ?? proposal?.version ?? null} onSelectVersion={setSelectedProposalVersion} />}
+                {/* The confirmed history is managed here, not only on the draft page:
+                    a conversation whose every card is confirmed has no draft page to
+                    open, so this list is the entry that keeps those cards manageable
+                    without touching the task or its graph. The card already managed
+                    above (the active draft) is left out to avoid two copies. */}
+                {managementCards.length > 0 && (
+                  <div data-testid="active-drafts">
+                    {managementCards.map(item => (
+                      <div key={item.version} className="row" data-testid={`active-draft-${item.version}`}>
+                        <span className="grow">{`v${item.version}${item.accepted ? ' 已确认' : ' 待确认'} · ${item.summary}`}</span>
+                        <Button size="sm" data-testid={`archive-active-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/archive`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `archive-${crypto.randomUUID()}` }) }))}>归档</Button>
+                        <Button size="sm" variant="danger" data-testid={`delete-active-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `delete-${crypto.randomUUID()}` }) }))}>删除</Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {(view.archivedProposals ?? []).length > 0 && (
                   <div data-testid="archived-drafts">
                     <p className="muted">已归档草稿（默认列表不显示）</p>
