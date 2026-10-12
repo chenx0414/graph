@@ -43,14 +43,14 @@ test('a native Pi node freezes its task and recipe across resubmission, then ado
     const main = runtime.supervisor(taskId);
     const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Frozen repair',
       protocols: { out: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } } },
-      nodes: { work: { recipe: 'worker@1', model: 'local', task: 'ORIGINAL_TASK', inputs: { job: { protocol: 'out' } },
+      nodes: { work: { recipe: 'worker@1', model: 'local', task: 'ORIGINAL_TASK', instructions: 'Read planner plan artifact. Use tdd for construction.\n' + 'Complete every acceptance item. '.repeat(30) + 'FULL_INSTRUCTION_END', inputs: { job: { protocol: 'out' } },
         workspace: { base: 'project', path: 'original' }, access: { mode: 'standard' },
         outputs: { out: { protocol: 'out' } }, submission: { required: ['out'] } } }, modules: {}, edges: {},
       outputs: { result: { from: 'work.out', protocol: 'out' } },
     }) }) as { graphId: string };
     patchDuringReply = async () => {
       await main.graphPatch({ graphId, baseRevision: 1, changes: { reason: 'Apply replacement only to the next execution',
-        patch: { nodes: { work: { task: 'REPLACEMENT_TASK', recipe: 'worker@2', workspace: { base: 'project', path: 'next' }, access: { mode: 'full' } } } } } });
+        patch: { nodes: { work: { task: 'REPLACEMENT_TASK', instructions: 'Read revised planner plan. Use diagnosing-bugs for the requested repair.', recipe: 'worker@2', workspace: { base: 'project', path: 'next' }, access: { mode: 'full' } } } } } });
     };
     await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { text: 'go' } });
     await runtime.host.drive();
@@ -60,6 +60,8 @@ test('a native Pi node freezes its task and recipe across resubmission, then ado
     expect(identity(0)).toContain('Original worker identity');
     expect(identity(1)).toBe(identity(0));
     expect(JSON.stringify(messages(0).at(-1))).toContain('ORIGINAL_TASK');
+    expect(JSON.stringify(messages(0).at(-1))).toContain('Read planner plan artifact. Use tdd for construction.');
+    expect(JSON.stringify(messages(0).at(-1))).toContain('FULL_INSTRUCTION_END');
     expect(JSON.stringify(messages(0).at(-1))).toContain('GRAPH OVERVIEW');
     expect(JSON.stringify(messages(0).at(-1))).toContain('go');
     expect(JSON.stringify(messages(1))).toContain('ORIGINAL_DIRECTORY');
@@ -67,6 +69,11 @@ test('a native Pi node freezes its task and recipe across resubmission, then ado
     expect(JSON.stringify(messages(2).at(-1))).toContain('required output(s) out');
     expect(JSON.stringify(messages(1).at(-1))).not.toContain('GRAPH OVERVIEW');
     expect(JSON.stringify(messages(1))).not.toContain('REPLACEMENT_TASK');
+    expect(JSON.stringify(messages(2))).not.toContain('Read revised planner plan.');
+    expect(runtime.nodePrompt(graphId, 'work')).toMatchObject({ configurations: {
+      current: { revision: 1, definition: { instructions: expect.stringContaining('FULL_INSTRUCTION_END') } },
+      next: { revision: 2, definition: { instructions: 'Read revised planner plan. Use diagnosing-bugs for the requested repair.' } }, pending: true,
+    }, briefing: { text: expect.stringContaining('FULL_INSTRUCTION_END') } });
     const before = runtime.nodeRun(graphId, 'work');
     expect(before.operations).toMatchObject([{ state: 'completed', resubmits_used: 1, retries_used: 0 }]);
     expect(await main.graphInspect({ graphId, query: 'results' })).toMatchObject([{ value: { text: 'work done' } }]);
@@ -78,6 +85,9 @@ test('a native Pi node freezes its task and recipe across resubmission, then ado
     expect(provider.requests, JSON.stringify(await main.graphInspect({ graphId, query: 'queue' }))).toHaveLength(7);
     expect(identity(4)).toContain('Replacement worker identity');
     expect(JSON.stringify(messages(4))).toContain('REPLACEMENT_TASK');
+    expect(JSON.stringify(messages(4).at(-1))).toContain('Read revised planner plan. Use diagnosing-bugs for the requested repair.');
+    expect(runtime.nodePrompt(graphId, 'work')).toMatchObject({ configurations: { current: { revision: 2 }, next: { revision: 2 }, pending: false },
+      briefing: { text: expect.stringContaining('FULL_INSTRUCTION_END') } });
     const after = runtime.nodeRun(graphId, 'work');
     expect(after.instance).toMatchObject({ id: before.instance!.id, used: 350, definitionVersion: 'worker@2' });
     expect(JSON.stringify(messages(5))).toContain('NEXT_DIRECTORY');

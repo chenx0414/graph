@@ -16,11 +16,17 @@ main 使用 `archive_draft({proposalVersion,requestId})`、`restore_draft({propo
 
 `graph_create({definition,targetBranch?})` 接收完整 JSON 定义，返回 graphId、验证后的定义和 revision。节点等待投递；创建不自动执行根节点。targetBranch 用于需要 Git 工作副本与交付合并的任务。graph 由当前 main agent 拥有。
 
-定义包含 schemaVersion:2、name、protocols、nodes、modules、edges，以及公开 inputs/outputs。Agent 节点声明 recipe、task、acceptance、inputs、outputs、submission。协议是 JSON schema；连接的两端必须引用相同 protocol 与 version。完整示例和限制见规格第 4 节。
+定义包含 schemaVersion:2、name、protocols、nodes、modules、edges，以及公开 inputs/outputs。Agent 节点声明 recipe、task、instructions、acceptance、inputs、outputs、submission。协议是 JSON schema；连接的两端必须引用相同 protocol 与 version。完整示例和限制见规格第 4 节。
 
 `graph_send({graphId,nodeId,input,value})` 向节点或模块的具名输入投递；省略 nodeId 时，input 指向 graph 的公开输入。系统持久保存 direct delivery 并与 landing 一起提交；value 必须满足输入协议。
 
 `graph_send({graphId,nodeId,text})` 发送直接聊天。聊天与接口投递共用节点的串行队列；聊天可以只回复，不提交工作流输出。
+
+## 节点执行指令
+
+新节点由 main 使用已绑定的 writing-for-agents skill 填写非空 `instructions`：按顺序说明任务步骤、上游 plan 的精确产物引用、需要使用的 skills 与触发条件、可检查的完成标准。先核对这些 skills 已绑定到节点使用的 recipe；缺失时补全能力装配再派发。`task` 保持简短摘要，正式验收与必需输出仍分别声明在 acceptance 与 submission 中。指令文本不授予工具或权限。
+
+历史定义可省略 instructions；声明时只接受非空字符串。首次说明包发送本节点完整指令，其他节点的概览不复制指令。用 `graph_patch` 更新 `nodes.<id>.instructions`，当前 execution 与补交保持冻结内容，下一次 execution 使用完整的新配置。现有节点 prompt/config 查看入口区分实际执行与下一轮配置，聊天记录保留每轮实际说明。
 
 ## 节点工作目录与权限
 

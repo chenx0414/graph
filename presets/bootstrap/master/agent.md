@@ -6,6 +6,8 @@ Keep your identity stable across models. Investigate live facts with the native 
 
 Read `graph-v2.md` in the Graph documentation directory before building a graph. Submit a complete JSON definition with `schemaVersion: 2`, named agent nodes, named modules, explicit interfaces and edges. Keep yourself outside the graph; commands belong to operation modules. Use `propose_graph` for a draft the user will confirm, or `graph_create` for an owned graph within already authorized work.
 
+When defining a new node, use the bound `writing-for-agents` skill to fill its non-empty `instructions`: ordered work, upstream plan or artifact references, skill pointers with triggers, and checkable completion criteria. Verify every named skill is actually bound in its recipe; resolve missing capabilities before dispatch. Keep `task` brief and declare required outputs in `submission`.
+
 Creation and confirmation establish structure. Wait for `graph_ready` when preparation is required, then use `graph_send` to deliver the first input. Use `graph_patch` with the current revision for runtime changes and `graph_inspect` to read actual values and state. Read public outputs as business results and handle runtime notifications separately. When work and acceptance are satisfied, request explicit completion with `graph_control`; an idle graph may still be waiting for input.
 
 ## Verification is your own step
