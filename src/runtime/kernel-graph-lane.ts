@@ -147,6 +147,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const sessionRevisions = new Map<string, string>();
   const hostConfigs = new Map<string, string>();
   const boundModels = new Map<string, ModelEntry>();
+  const preparedReviewExecutions = new Map<string, string>();
 
   const nodeDefinition = (graphId: string, nodeId: string, revisionVersion?: number) => {
     const active = options.kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1")
@@ -155,12 +156,22 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     return (revision === undefined ? options.kernel.latestRevision(graphId) : options.kernel.revision(graphId, revision))?.definition.nodes[nodeId];
   };
   /** Use the execution's frozen location, including publication during a concurrent patch. */
-  const nodeLocation = (graphId: string, nodeId: string, revisionVersion?: number): { workspace: string; base: 'project' | 'worktree' } | undefined => {
+  const nodeLocation = (graphId: string, nodeId: string, revisionVersion?: number, prepare = false): { workspace: string; base: 'project' | 'worktree' } | undefined => {
     const node = nodeDefinition(graphId, nodeId, revisionVersion);
     const selected = node?.workspace?.base ?? 'auto';
     const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined;
+    const key = `${graphId}/${nodeId}`;
+    const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1")
+      .get(graphId, nodeId) as { id: string } | undefined;
+    // Prepare each new review against the current integration. Retries, recovery
+    // after a provider call, and settlement retain the tree already observed.
+    const reseed = prepare && execution && node?.recipe && options.catalog.hasDefinition(node.recipe)
+      && options.catalog.definition(node.recipe).review === true
+      && preparedReviewExecutions.get(key) !== execution.id
+      && !options.kernel.db.prepare('SELECT 1 FROM kernel_provider_calls WHERE execution_id=? LIMIT 1').get(execution.id);
     const copy = selected !== 'project' && options.git && admitted?.instance_id
-      ? options.git.workspace(graphId, admitted.instance_id, nodeId, 'agent', 'work') : undefined;
+      ? options.git.workspace(graphId, admitted.instance_id, nodeId, 'agent', reseed ? 'review' : 'work') : undefined;
+    if (copy && reseed) preparedReviewExecutions.set(key, execution!.id);
     if (selected === 'worktree' && !copy) throw new RuntimeError('invalid_workspace', 'Node requests a worktree; prepare this graph with a targetBranch first');
     const base = copy ?? options.workspaceFor(graphId);
     if (!base) return undefined;
@@ -194,7 +205,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       options.library.prompt(`tools/${role}.md`), options.library.prompt('runtime/node.md'),
       options.library.agentPrompt(recipe?.split('@')[0] ?? nodeId, null),
     ]) : null;
-    const location = nodeLocation(graphId, nodeId, revisionVersion);
+    const location = nodeLocation(graphId, nodeId, revisionVersion, true);
     const workspace = location?.workspace;
     if (!workspace) throw new RuntimeError('invalid_workspace', `graph ${graphId} node ${nodeId} has no workspace`);
     const access = nodeAccess(graphId, nodeId, revisionVersion);
@@ -330,7 +341,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     closeGraph: async graphId => {
       for (const key of [...hosts.keys()]) {
         if (!key.startsWith(`${graphId}/`)) continue;
-        await hosts.get(key)!.dispose(); hosts.delete(key); hostConfigs.delete(key); boundModels.delete(key);
+        await hosts.get(key)!.dispose(); hosts.delete(key); hostConfigs.delete(key); boundModels.delete(key); preparedReviewExecutions.delete(key);
         await sessions.get(key)?.close(); sessions.delete(key); sessionRevisions.delete(key);
       }
     },

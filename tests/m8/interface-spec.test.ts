@@ -237,7 +237,7 @@ test('protocols enforce enum, additionalProperties and nested constraints withou
 
 
 test.each([{ model: '' }, { model: 7 }, { retry: { automatic: -1 } }, { retry: { resubmit: 0.5 } },
-  { retry: [] }, { retry: { unknown: 1 } }])('node configuration rejects invalid model or retry declaration: %j', configuration => {
+  { retry: [] }, { retry: { unknown: 1 } }, { instructions: '' }, { instructions: ' \n\t' }, { instructions: 7 }, { instructions: null }])('node configuration rejects invalid model, retry or instructions declaration: %j', configuration => {
   expect(() => parseGraphDefinition({ ...pipeline, nodes: { worker: { ...pipeline.nodes.worker, ...configuration } } })).toThrow(RuntimeError);
 });
 

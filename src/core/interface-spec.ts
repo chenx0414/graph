@@ -59,6 +59,8 @@ export interface NodeDefinition extends NodeInterface, ExecutionSettings {
   /** Every node is an agent bound to a versioned recipe; host commands are operation modules. */
   recipe: string;
   task: string;
+  /** Complete task guidance; omitted by historical graphs. Does not grant capabilities. */
+  instructions?: string;
   /** Omitted preserves automatic private worktree/project selection. Path is relative to that base. */
   workspace?: { base: 'auto' | 'project' | 'worktree'; path?: string };
   /** Explicit node policy, bounded by the host's authorization; omitted inherits the host. */
@@ -231,13 +233,14 @@ function validateNode(definition: GraphDefinition, id: string, node: NodeDefinit
   if (!node || typeof node !== 'object') invalid(`Node ${id} must be an object`);
   if (Object.hasOwn(node, 'command')) invalid(`Node ${id} is an agent; declare host commands in an operation module`);
   for (const key of Object.keys(node)) {
-    if (!['recipe', 'task', 'acceptance', 'inputs', 'outputs', 'submission', 'model', 'retry', 'budget', 'deliverable', 'workspace', 'access'].includes(key)) {
+    if (!['recipe', 'task', 'instructions', 'acceptance', 'inputs', 'outputs', 'submission', 'model', 'retry', 'budget', 'deliverable', 'workspace', 'access'].includes(key)) {
       invalid(`Node ${id} has unsupported field ${key}; use named interfaces and explicit edges for graph execution`);
     }
   }
   const hasRecipe = typeof node.recipe === 'string' && node.recipe.trim().length > 0;
   if (!hasRecipe) invalid(`Node ${id} requires an agent recipe`);
   if (typeof node.task !== 'string' || !node.task.trim()) invalid(`Node ${id} requires a task`);
+  if (node.instructions !== undefined && (typeof node.instructions !== 'string' || !node.instructions.trim())) invalid(`Node ${id} instructions must be a non-empty string`);
   validateExecutionSettings(`Node ${id}`, node);
   if (node.workspace !== undefined) {
     const workspace = node.workspace;

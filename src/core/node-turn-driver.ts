@@ -119,7 +119,8 @@ export class NodeTurnDriver {
         `PROTOCOLS: ${JSON.stringify(Object.fromEntries(Object.entries(definition.protocols).filter(([id]) => ownProtocols.has(id))))}`,
         `SUBMIT: ${JSON.stringify(node.submission)}. At most one valid submit per execution. Chat may reply without submit.`,
       ].join('\n') : '');
-      return [context, updated, input ? `NEW ${input.kind.toUpperCase()}: ${JSON.stringify(input.payload)}` : this.options.turnText?.(undefined) ?? ''].filter(Boolean).join('\n\n');
+      const instructions = prior.n === 0 && node?.instructions ? `INSTRUCTIONS:\n${node.instructions}` : '';
+      return [context, instructions, updated, input ? `NEW ${input.kind.toUpperCase()}: ${JSON.stringify(input.payload)}` : this.options.turnText?.(undefined) ?? ''].filter(Boolean).join('\n\n');
     }
     // A later attempt is a continuation: it must not repeat the whole briefing (§7).
     return [

@@ -276,7 +276,7 @@ test('a native production worker receives the graph check command and acceptance
     patched = true;
   };
   const { main, graphId } = await runNativeWorker(runtime, parseGraphDefinition({ schemaVersion: 2, name: 'Work', protocols: { data: { type: 'object' }, unrelated: { type: 'string', description: 'UNRELATED-PROTOCOL-' + 'x'.repeat(20000) } },
-    nodes: { ...Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`side-${i}`, { recipe: 'coder@1', task: i === 59 ? detail : 'Other task ' + 'x'.repeat(1500), inputs: {}, outputs: {}, submission: {} }])), work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', acceptance: ['Read assigned checks'], inputs: {}, outputs: {}, submission: {} } },
+    nodes: { ...Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`side-${i}`, { recipe: 'coder@1', task: i === 59 ? detail : 'Other task ' + 'x'.repeat(1500), instructions: 'OTHER_NODE_PRIVATE_GUIDANCE ' + 'x'.repeat(1500), inputs: {}, outputs: {}, submission: {} }])), work: { recipe: 'coder@1', model: 'local', task: 'Implement the request', acceptance: ['Read assigned checks'], inputs: {}, outputs: {}, submission: {} } },
     modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
       operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--test', 'test/specific.test.js'], output: 'result' } } },
     edges: {}, acceptance: [{ id: 'ok', description: 'Specific command is successful', kind: 'check', module: 'check' }],
@@ -287,11 +287,12 @@ test('a native production worker receives the graph check command and acceptance
   expect(prompt).toContain('Read assigned checks');
   expect.soft(prompt).not.toContain('UNRELATED-PROTOCOL-');
   expect.soft(prompt).not.toContain(detail);
+  expect(prompt).not.toContain('OTHER_NODE_PRIVATE_GUIDANCE');
   expect.soft(prompt.length).toBeLessThan(32000);
   const request = provider.requests[1] as { messages: { role: string; tool_call_id?: string; content: string }[] };
   expect(patched).toBe(true);
   const result = (id: string) => JSON.parse(JSON.parse(request.messages.find(message => message.role === 'tool' && message.tool_call_id === id)!.content).content[0].text);
-  expect(result('read-graph')).toMatchObject({ revision: 1, section: 'nodes', items: [{ id: 'side-59', value: { task: detail } }] });
+  expect(result('read-graph')).toMatchObject({ revision: 1, section: 'nodes', items: [{ id: 'side-59', value: { task: detail, instructions: expect.stringContaining('OTHER_NODE_PRIVATE_GUIDANCE') } }] });
   expect(result('page-graph')).toMatchObject({ revision: 1, total: 61, nextAfter: 57 });
   expect(result('page-graph').items.map((item: { id: string }) => item.id)).toEqual(['side-54', 'side-55', 'side-56', 'side-57', 'side-58', 'side-59', 'side-6']);
   await main.graphSend({ graphId, nodeId: 'work', text: 'Inspect the updated definition' });

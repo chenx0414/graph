@@ -16,11 +16,17 @@ main 使用 `archive_draft({proposalVersion,requestId})`、`restore_draft({propo
 
 `graph_create({definition,targetBranch?})` 接收完整 JSON 定义，返回 graphId、验证后的定义和 revision。节点等待投递；创建不自动执行根节点。targetBranch 用于需要 Git 工作副本与交付合并的任务。graph 由当前 main agent 拥有。
 
-定义包含 schemaVersion:2、name、protocols、nodes、modules、edges，以及公开 inputs/outputs。Agent 节点声明 recipe、task、acceptance、inputs、outputs、submission。协议是 JSON schema；连接的两端必须引用相同 protocol 与 version。完整示例和限制见规格第 4 节。
+定义包含 schemaVersion:2、name、protocols、nodes、modules、edges，以及公开 inputs/outputs。Agent 节点声明 recipe、task、instructions、acceptance、inputs、outputs、submission。协议是 JSON schema；连接的两端必须引用相同 protocol 与 version。完整示例和限制见规格第 4 节。
 
 `graph_send({graphId,nodeId,input,value})` 向节点或模块的具名输入投递；省略 nodeId 时，input 指向 graph 的公开输入。系统持久保存 direct delivery 并与 landing 一起提交；value 必须满足输入协议。
 
 `graph_send({graphId,nodeId,text})` 发送直接聊天。聊天与接口投递共用节点的串行队列；聊天可以只回复，不提交工作流输出。
+
+## 节点执行指令
+
+新节点由 main 使用已绑定的 writing-for-agents skill 填写非空 `instructions`：按顺序说明任务步骤、上游 plan 的精确产物引用、需要使用的 skills 与触发条件、可检查的完成标准。先核对这些 skills 已绑定到节点使用的 recipe；缺失时补全能力装配再派发。`task` 保持简短摘要，正式验收与必需输出仍分别声明在 acceptance 与 submission 中。指令文本不授予工具或权限。
+
+历史定义可省略 instructions；声明时只接受非空字符串。首次说明包发送本节点完整指令，其他节点的概览不复制指令。用 `graph_patch` 更新 `nodes.<id>.instructions`，当前 execution 与补交保持冻结内容，下一次 execution 使用完整的新配置。现有节点 prompt/config 查看入口区分实际执行与下一轮配置，聊天记录保留每轮实际说明。
 
 ## 节点工作目录与权限
 
@@ -100,6 +106,8 @@ jury 使用 `{kind:"jury",reports,candidates:[{id,subject}],hard:["builds"],rank
 需要流水线、分支汇合、嵌套路由或 main 派发 worker 时，读取 Graph 源码 `examples/graphs/{pipeline,fanout,router,supervisor-workers}.json`。文件就是正式 JSON definition，不需要旧模板函数或转换器。使用前替换节点的 coder@1 配方与 work/left/right/text/json 模型连接 ID，并按任务明确填写 task、acceptance、协议及输出要求；再把完整对象交给 graph_create。首次工作由 main 向公开 job 输入投递，完成由 main 显式请求。
 
 示例 check 仅运行 node --version 来展示宿主命令连接，不能证明项目验收；实际任务必须换成项目检查并声明正式 acceptance。fanout 和 supervisor-workers 的 join 明确等待 left/right，成功后锁存一次；下一批工作需要显式重开 join。supervisor-workers 中的 main 位于图外，没有内部 master 节点。router 用两层子 graph 的公开映射连出两个分支，仅选中的接口投递，下游 check 每次收到一个结果就执行，不隐含等待另一个分支。
+
+需要按 ask-matt 复用规划、实现、双轴审查与原节点返工团队时，读取 [Matt 团队装配](matt-team.md)。装配入口写出实际编译配方版本的普通 JSON definition，可保存或作为下述子 graph 模板使用。
 
 ## 子 graph 定义与实例
 
