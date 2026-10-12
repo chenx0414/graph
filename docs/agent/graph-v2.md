@@ -107,6 +107,8 @@ jury 使用 `{kind:"jury",reports,candidates:[{id,subject}],hard:["builds"],rank
 
 示例 check 仅运行 node --version 来展示宿主命令连接，不能证明项目验收；实际任务必须换成项目检查并声明正式 acceptance。fanout 和 supervisor-workers 的 join 明确等待 left/right，成功后锁存一次；下一批工作需要显式重开 join。supervisor-workers 中的 main 位于图外，没有内部 master 节点。router 用两层子 graph 的公开映射连出两个分支，仅选中的接口投递，下游 check 每次收到一个结果就执行，不隐含等待另一个分支。
 
+需要按 ask-matt 复用规划、实现、双轴审查与原节点返工团队时，读取 [Matt 团队装配](matt-team.md)。装配入口写出实际编译配方版本的普通 JSON definition，可保存或作为下述子 graph 模板使用。
+
 ## 子 graph 定义与实例
 
 JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `instances: {first: {template: "build", version: 7}, second: {template: "build", version: 7}}`。父级连接和公开接口可引用 `first.job`、`second.result` 等子 graph 公开接口。系统将它们展开成 `first/work` 等稳定路径，并固定模板版本、隔离节点配置和内部边 ID。实例仅组织和复用结构，不增加执行或等待。

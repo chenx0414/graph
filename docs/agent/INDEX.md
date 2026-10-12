@@ -26,6 +26,7 @@
 | `artifacts-and-git.md` | 需要理解 worktree、handoff、artifact、evidence、integration 和 merge |
 | `self-configuration.md` | 需要查看或修改 Agent prompt、工具选择和系统能力 |
 | `models-and-providers.md` | 需要配置模型厂商/订阅凭据、新增或调整模型及其参数、排查模型不可用 |
+| `matt-team.md` | 按 ask-matt 装配、保存、复用 Matt 团队，传递精确 plan 并处理双轴审查与原节点返工 |
 | `agent-recipes.md` | 需要新建/改描述/删除子 Agent 配方，或核对配方编译结果 |
 | `troubleshooting.md` | 任务卡住、工具失败、模型不可用、恢复不确定或用户报告异常 |
 

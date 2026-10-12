@@ -23,6 +23,7 @@ Topic bodies stay out of the prompt and are read on demand.
 - [Self configuration](self-configuration.md)
 - [Models and providers](models-and-providers.md)
 - [Agent recipes](agent-recipes.md)
+- [Reusable Matt team](matt-team.md)
 - [Troubleshooting](troubleshooting.md)
 
 ## Reading Rules
