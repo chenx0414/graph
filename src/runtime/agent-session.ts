@@ -58,6 +58,8 @@ export interface AgentSessionTurn {
 }
 
 export interface AgentSessionRequest {
+  /** Stable admitted execution identity, used for durable input idempotency. */
+  executionId?: string;
   binding: AgentSessionBinding;
   /** Reporting sink for executed tool calls; the in-process transport forwards it to the instance. */
   onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;

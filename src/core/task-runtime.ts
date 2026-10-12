@@ -53,6 +53,7 @@ import { approveHumanCheck, humanCheckPreReview, insertQuestion, pendingHumanChe
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { modelTier, mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
+import type { AgentSessionTransport } from '../runtime/agent-session.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
@@ -282,6 +283,8 @@ export async function openTaskRuntime(options: {
   stateDir: string;
   projects?: ProjectConfig[];
   actions?: Record<string, ActionAdapter>;
+  /** Internal execution transport seam; shared storage ownership remains with the runtime. */
+  sessionTransport?: (store: TaskStore) => Promise<AgentSessionTransport & { close(): Promise<void> }>;
   models?: {
     entries: ModelEntry[];
     preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
@@ -478,6 +481,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     });
   };
 
+  let sessionTransport: (AgentSessionTransport & { close(): Promise<void> }) | undefined;
   try {
     if (defaultBudgetTokens !== null && (!Number.isSafeInteger(defaultBudgetTokens) || defaultBudgetTokens <= 0)) {
       throw new RuntimeError('invalid_input', 'limits.defaultBudgetTokens must be a positive integer or null');
@@ -508,8 +512,10 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
       });
     }
+    sessionTransport = await options.sessionTransport?.(store);
     const fallback = options.models || options.live ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: liveEntries, artifacts,
+      ...(sessionTransport ? { transport: sessionTransport } : {}),
       apiKey: options.models?.apiKey ?? '', modelRuntime: options.models!.modelRuntime,
       ...(options.models?.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
       ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
@@ -658,6 +664,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       }
     }
   } catch (error) {
+    await sessionTransport?.close().catch(() => undefined);
     try { store.close(); } finally { releaseOwner(); }
     throw error;
   }
@@ -2602,7 +2609,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     close() {
       if (!closing) {
         closed = true;
-        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); await execution.settleGraphShutdown(); try { store.close(); } finally { releaseOwner(); } })();
+        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); await execution.settleGraphShutdown(); try { await sessionTransport?.close(); } finally { try { store.close(); } finally { releaseOwner(); } } })();
       }
       return closing;
     },
