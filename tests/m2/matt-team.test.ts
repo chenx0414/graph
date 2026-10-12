@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createApp } from '../../src/server/app.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
@@ -61,6 +62,7 @@ test('Matt plan drives implementation, two independent axes return rework to the
   const root = await mkdtemp(join(tmpdir(), 'graph-matt-execution-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project'); await mkdir(project);
   await writeFile(join(project, 'README.md'), 'Approved feature\n');
+  await writeFile(join(project, 'feature.txt'), 'incomplete');
   await writeFile(join(project, 'check.cjs'), "if(require('fs').readFileSync('feature.txt','utf8')!=='done')process.exit(1)");
   git(project, ['init', '-q', '-b', 'main']); git(project, ['add', '.']); git(project, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local', 'commit', '-qm', 'baseline']);
   const baseline = git(project, ['rev-parse', 'HEAD']);
@@ -88,24 +90,40 @@ test('Matt plan drives implementation, two independent axes return rework to the
     submit(() => ({ plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', round) })), { text: `Implementation ${round} published.` },
   ]));
   const reviewers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
+  const observed: Record<string, { commit: string; content: string }[]> = { standards: [], spec: [] };
   for (const axis of ['standards', 'spec']) {
-    let actualCommit = baseline;
+    let actualCommit = ''; let actualContent = ''; let reviewedContent = '';
+    const toolText = (name: string): string => {
+      const request = JSON.parse(JSON.stringify(reviewers[axis]!.requests.at(-1)));
+      const message = request.messages.filter((item: { role: string; tool_call_id?: string }) => item.role === 'tool' && item.tool_call_id === name).at(-1);
+      try { return JSON.parse(message.content).content.map((item: { text?: string }) => item.text ?? '').join(''); }
+      catch { return message.content; }
+    };
     reviewers[axis] = await openaiServer([1, 2, 3].flatMap(round => [
       tool('read', () => ({ path: skillPath('code-review') })),
       tool('artifact_read', () => reference('plans', 'plan')),
       tool('artifact_read', () => reference('deliverables', 'implementation', Math.min(round, 2))),
+      tool('bash', () => ({ command: 'git rev-parse HEAD && cat feature.txt' })),
       { ...tool('artifact_publish', () => ({ namespace: 'reviews', name: axis, schema: 'graph.review@1', mediaType: 'application/json',
         content: JSON.stringify({ plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', Math.min(round, 2)), axis,
-          commit: round === 3 ? actualCommit : baseline, passed: round !== 1, reason: round === 1 ? `${axis}: feature is incomplete` : `${axis}: exact implementation contains done` }), requestId: `${axis}-${round}` })),
-        beforeReply: async () => { actualCommit = (await runtime.user.task(graphId).view()).integrationSha!; } },
+          commit: round === 3 ? actualCommit : baseline, passed: reviewedContent === 'done', reason: reviewedContent === 'done' ? `${axis}: exact implementation contains done` : `${axis}: feature is incomplete` }), requestId: `${axis}-${round}` })),
+        beforeReply: () => {
+          const inspected = toolText('bash').trim();
+          actualCommit = inspected.match(/[a-f0-9]{40}/)?.[0] ?? '';
+          actualContent = inspected.match(/(?:incomplete|done)$/)?.[0] ?? inspected;
+          // Immediate review can read the published code before its source is
+          // integrated. Final review must also read the settled worktree.
+          reviewedContent = round === 3 ? actualContent : JSON.parse(toolText('artifact_read')).text;
+          observed[axis]!.push({ commit: actualCommit, content: actualContent });
+        } },
       submit(() => ({ plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', Math.min(round, 2)), report: reference('reviews', axis, round),
-        commit: round === 3 ? actualCommit : baseline, passed: round !== 1, reason: round === 1 ? `${axis}: feature is incomplete` : `${axis}: exact implementation contains done` })),
+        commit: round === 3 ? actualCommit : baseline, passed: reviewedContent === 'done', reason: reviewedContent === 'done' ? `${axis}: exact implementation contains done` : `${axis}: feature is incomplete` })),
       { text: `${axis} review ${round} published.` },
     ]));
   }
   for (const provider of [planner, worker, ...Object.values(reviewers)]) cleanup.push(() => provider.close());
   const providers = { planner, worker, ...reviewers };
-  runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+  runtime = await openTaskRuntime({ access: () => fullAccessPolicy(), stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
     models: { apiKey: 'local-only', modelRuntime: worker.runtime, entries: Object.entries(providers).map(([id, provider]) => ({
       id, modelId: id, provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 128_000, maxTokens: 256,
     })) } });
@@ -134,8 +152,16 @@ test('Matt plan drives implementation, two independent axes return rework to the
   await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
   expect((await runtime.user.task(graphId).view()).phase).toBe('blocked');
   await main.graphControl({ graphId, action: 'withdraw_complete' });
+  // Main pauses and queues the final review after the source has settled;
+  // resuming must refresh these same reviewers' existing private copies.
+  for (const nodeId of ['standards', 'spec']) await main.graphControl({ graphId, nodeId, action: 'pause' });
   for (const nodeId of ['standards', 'spec']) await main.graphSend({ graphId, nodeId, input: 'job', value: { plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', 2) } });
   await runtime.host.drive();
+  for (const nodeId of ['standards', 'spec']) await main.graphControl({ graphId, nodeId, action: 'resume' });
+  await runtime.host.drive();
+  for (const axis of ['standards', 'spec']) {
+    expect(observed[axis]!.at(-1)).toEqual({ commit: (await runtime.user.task(graphId).view()).integrationSha, content: 'done' });
+  }
   await expect(main.graphInspect({ graphId, query: 'acceptance' })).resolves.toMatchObject({ ready: true, items: [{ status: 'passed' }, { status: 'passed' }, { status: 'passed' }] });
   await main.graphControl({ graphId, action: 'complete' }); await runtime.host.drive();
   expect((await runtime.user.task(graphId).view()).phase).toBe('completed');

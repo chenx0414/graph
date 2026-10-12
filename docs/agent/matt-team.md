@@ -50,5 +50,5 @@ instructions 可省略以取得职责完整的默认指令；实际任务应审�
 3. standards、spec 读取同一精确 plan/subject，各自独立、只读检查实际集成工作副本，发布 `graph.review@1` 报告（commit/passed/reason 加上 plan/subject/axis/evidence），通过 result 提交精确报告引用。private source commit 仅是实现来源；正式报告 commit 必须是实际审查的 integration SHA。
 4. decision 模块只有在两份报告的 plan、subject 的 ID/version/digest 与 commit 完全相同时才判断。任一轴失败沿普通 rework 边回原 worker，并携带两个报告；worker 读取精确报告后在原会话返工。两轴通过时公开 result 返回 main。旧版通过与新版报告混合时不会输出结果。
 5. **result 通过后仍未完成正式验收。** main 等 graph 空闲，显式 `graph_send({graphId,input:"check",value:{}})`；等宿主 operation 结算，再调用 `graph_inspect({graphId,query:"acceptance"})` 核对 check 和两个 review 都验证当前干净 integration commit。检查没有传出公开业务 result；完整记录通过 operations/acceptance 查看。
-6. 报告 SHA 陈旧或未实际验证当前集成时，向原 standards/spec 的 job 重新投递同一精确 plan/subject 与当前集成要求，等实际审查发布新报告，再核对正式验收。若曾提出 complete，则先 withdraw_complete 恢复输入。不能伪造通过产物、弱化 acceptance 或仅凭 decision.approved 请求最终交付。
+6. 接口在 submit 后立即投递，早到审查可能仍看到上一个已集成版本；main 必须等 worker 结算集成后核对并完成当前 commit 的最终审查。报告 SHA 陈旧或未实际验证当前集成时，向原 standards/spec 的 job 重新投递同一精确 plan/subject 与当前集成要求，等实际审查发布新报告，再核对正式验收。若曾提出 complete，则先 withdraw_complete 恢复输入。不能伪造通过产物、弱化 acceptance 或仅凭 decision.approved 请求最终交付。
 7. 验收全部有效后由 main 请求 complete，已有工作排空后完成 Git 交付；需要人类验收时在确认草稿阶段另外声明 human 条件。真的出现 Git 冲突才派合流角色，之后重新检查和审查。graph 空闲、节点回复“完成”或普通 passed 投递均不是正式完成证明。
