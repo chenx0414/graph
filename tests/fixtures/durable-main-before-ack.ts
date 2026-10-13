@@ -29,6 +29,6 @@ const runtime = await openTaskRuntime({
   },
 });
 created = await runtime.conversations.create({ text: 'Preserve my completed answer exactly once.', requestId: 'original-completed' });
-process.on('message', message => { if (message === 'steer') void (async () => { await runtime.conversations.chat(created.conversationId, { text: 'Latest clarification before the crash.', requestId: 'latest-clarification' }); await runtime.conversations.steer(created.conversationId, { requestId: 'crash-boundary-steering' }); })().catch(error => process.send?.({ error: String(error) })); });
+process.on('message', message => { if (message === 'steer') void (async () => { await runtime.conversations.chat(created.conversationId, { text: 'Latest clarification before the crash.', requestId: 'latest-clarification' }); await runtime.conversations.steer(created.conversationId, { requestId: 'crash-boundary-steering' }); process.send?.({ stage: 'steered' }); })().catch(error => process.send?.({ error: String(error) })); });
 await runtime.host.runReady();
 throw new Error('The terminal receipt crash fixture must be killed before Graph receives its result');

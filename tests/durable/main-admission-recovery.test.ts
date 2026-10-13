@@ -105,17 +105,18 @@ test('hard-killed unsent main admissions keep their original configuration and i
 
 // Different failure boundary: the provider and SDK succeeded but the Graph
 // result was never acknowledged. Recovery must settle rather than call again.
-test.each([false, true])('a completed durable main receipt survives death before Graph acknowledgement without another provider call (steering=%s)', async steering => {
+test.each([false, 'steer', 'unknown-steer'])('a completed durable main receipt survives death before Graph acknowledgement without another provider call (steering=%s)', async steering => {
   const root = await mkdtemp(join(tmpdir(), 'graph-durable-before-ack-'));
-  const provider = await openaiServer([...(steering ? [{ tools: [{ id: 'wait-for-clarification', name: 'bash', arguments: JSON.stringify({ command: 'sleep 5' }) }] }] : []), { text: 'Already completed before the crash.' }]);
+  const releaseUnknown = Promise.withResolvers<void>();
+  const provider = await openaiServer([...(steering === 'unknown-steer' ? [{ beforeReply: async () => { child!.send('steer'); await releaseUnknown.promise; }, text: 'Superseded response.' }] : steering ? [{ tools: [{ id: 'wait-for-clarification', name: 'bash', arguments: JSON.stringify({ command: 'sleep 5' }) }] }] : []), { text: 'Already completed before the crash.' }]);
   let child: ReturnType<typeof fork> | undefined;
   let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
   try {
-    child = fork(fileURLToPath(new URL('../fixtures/durable-main-before-ack.ts', import.meta.url)), [root, provider.model.baseUrl, ...(steering ? ['steer'] : [])], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    child = fork(fileURLToPath(new URL('../fixtures/durable-main-before-ack.ts', import.meta.url)), [root, provider.model.baseUrl, ...(typeof steering === 'string' ? [steering] : [])], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     let stderr = '';
     child.stderr!.on('data', data => { stderr += data; });
     const completed = await new Promise<{ conversationId: string; taskId: string }>((resolve, reject) => {
-      child!.on('message', message => { const value = JSON.parse(JSON.stringify(message)); if (value.error) reject(new Error(value.error)); else if (value.stage === 'steer-ready') child!.send('steer'); else if (value.stage === 'completed') resolve(value); });
+      child!.on('message', message => { const value = JSON.parse(JSON.stringify(message)); if (value.error) reject(new Error(value.error)); else if (value.stage === 'steer-ready') child!.send('steer'); else if (value.stage === 'steered') releaseUnknown.resolve(); else if (value.stage === 'completed') resolve(value); });
       child!.once('error', reject);
       child!.once('exit', code => reject(new Error(`Terminal fixture exited ${code}: ${stderr}`)));
     });
@@ -136,7 +137,8 @@ test.each([false, true])('a completed durable main receipt survives death before
     expect(recovered.messages.filter(message => message.role === 'user')).toHaveLength(steering ? 2 : 1);
     expect(recovered.messages.filter(message => message.role === 'assistant').map(message => message.text)).toEqual(['Already completed before the crash.']);
     expect(recovered.questions.filter(question => question.status === 'open')).toEqual([]);
-    expect(recovered.master?.used).toBeGreaterThan(0);
+    expect(recovered.master?.used).toBe(steering === 'unknown-steer' ? 50 : steering ? 100 : 50);
+    if (steering === 'unknown-steer') expect(recovered.master?.cost.unknown).toBe(true);
     expect(provider.requests).toHaveLength(steering ? 2 : 1);
     await runtime.close();
     runtime = await openTaskRuntime(options);

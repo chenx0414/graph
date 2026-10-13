@@ -234,6 +234,7 @@ test('consecutive public main steering waits for the latest replacement input', 
     expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text)).toContain('Latest replacement completed.');
     expect(view.messages.filter(message => message.role === 'user').map(message => message.text)).toEqual(['Original task.', 'First clarification.', 'Latest clarification.']);
     expect(provider.requests).toHaveLength(3);
+    expect(view.master?.used).toBe(50);
     expect(JSON.stringify(provider.requests[2])).toContain('Latest clarification.');
     expect(view.questions.filter(question => question.status === 'open')).toEqual([]);
   } finally { releaseFirst.resolve(); releaseSecond.resolve(); await runtime?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }

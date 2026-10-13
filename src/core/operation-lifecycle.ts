@@ -163,7 +163,7 @@ function sumKnownUsage(rows: { usage: string | null }[]) {
   const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let source: UsageSource | undefined;
   for (const row of rows) {
-    if (!row.usage) continue;
+    if (!row.usage) { source = source ? mergeUsageSource(source, 'unknown') : 'unknown'; continue; }
     const usage = JSON.parse(row.usage) as TokenUsage;
     total.input += usage.input;
     total.output += usage.output;
@@ -420,7 +420,7 @@ export class OperationLifecycle {
       const row = this.operationRow(id);
       const original = operationFrom(row);
       const calls = (this.store.db.prepare('SELECT id,usage FROM invocations WHERE operation_id=?').all(id) as { id: string; usage: string | null }[]).filter(call => !preAdmissionInvocationIds.includes(call.id));
-      if (completed ? calls.some(call => !call.usage || usageSourceOf(JSON.parse(call.usage) as TokenUsage) !== 'authoritative') : calls.length > 0) {
+      if (!completed && calls.length > 0) {
         throw new RuntimeError('invalid_reconciliation', 'Durable admission has unresolved dispatch evidence');
       }
       if (inputRequestId !== `${id}:attempt:${original.attempt}` || original.kind !== 'agent'
@@ -430,7 +430,7 @@ export class OperationLifecycle {
       if (row.state !== 'unknown' && row.state !== 'dispatched') throw new RuntimeError('invalid_operation', 'Durable admission is no longer pending');
       this.store.db.prepare("UPDATE operations SET state='dispatched',worker_active=1,waiting_slot=0 WHERE id=?").run(id);
       this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND kind='recovery' AND status='open'")
-        .run(canonicalJson({ proof: completed ? 'Original durable input has its completed SDK receipt and authoritative dispatch evidence' : 'Original durable input is admitted without a provider dispatch', inputRequestId }), id);
+        .run(canonicalJson({ proof: completed ? 'Original durable input has its completed SDK receipt; unresolved usage remains unknown' : 'Original durable input is admitted without a provider dispatch', inputRequestId }), id);
       closeUserWaitForOperation(this.store, id);
       this.store.db.prepare("UPDATE nodes SET status='running' WHERE task_id=? AND id=? AND activation_id=?").run(original.taskId, original.nodeId, original.activationId);
       this.store.db.prepare("UPDATE activations SET state='running' WHERE id=?").run(original.activationId);
@@ -979,7 +979,7 @@ export class OperationLifecycle {
         usageSource: source,
       });
     }
-    const usage = missingUsage ? null : normalizedUsage;
+    const usage = normalizedUsage;
     const values = usage ? [usage.input, usage.output, usage.cacheRead, usage.cacheWrite] : [];
     const total = values.reduce((sum, value) => sum + value, 0);
     if (usage && (values.some(value => !Number.isSafeInteger(value) || value < 0) || !Number.isSafeInteger(total))) {
