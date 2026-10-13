@@ -110,12 +110,14 @@ test('public durable main uses the published MCP gateway with real history hooks
   const adapter = fileURLToPath(import.meta.resolve('pi-mcp-adapter'));
   await writeFile(join(plugin, 'index.mjs'), `
     import {createMcpAdapter} from ${JSON.stringify(adapter)};
-    import {dirname,join} from 'node:path'; import {fileURLToPath} from 'node:url';
+    import {dirname,join} from 'node:path'; import {fileURLToPath} from 'node:url'; import {writeFile} from 'node:fs/promises';
     export default pi => {
       createMcpAdapter({config:{mcpServers:{},settings:{scriptMode:false}}})(pi);
       pi.registerTool({name:'undeclared_extra',label:'Extra',description:'Unbound plugin registration',parameters:{type:'object',properties:{}},execute:async()=>({content:[{type:'text',text:'must not be offered'}]})});
       pi.on('resources_discover', () => ({skillPaths:[join(dirname(fileURLToPath(import.meta.url)), 'skills')]}));
-      pi.on('input', (event,ctx) => { if (!ctx.sessionManager.getSessionId()) throw new Error('Missing durable identity'); return {action:'continue'}; });
+      pi.on('session_checkpoint', () => { throw new Error('Retired resident sleep hook must never execute'); });
+      pi.on('session_shutdown', async (event,ctx) => { await writeFile(join(ctx.cwd, 'gateway-shutdown.txt'), 'real shutdown'); });
+      pi.on('input', (event,ctx) => { ctx.ui.notify('Headless plugin notice', 'info'); if (!ctx.sessionManager.getSessionId()) throw new Error('Missing durable identity'); return {action:'continue'}; });
       pi.on('tool_call', (event,ctx) => { if (!ctx.sessionManager.getBranch().some(entry=>entry.message?.role==='user')) throw new Error('Missing actual durable user history'); });
     };
   `);
@@ -139,6 +141,7 @@ test('public durable main uses the published MCP gateway with real history hooks
     await runtime.host.runReady();
     expect(await readFile(join(workspace, 'gateway-effect.txt'), 'utf8')).toBe('public durable gateway effect');
     expect(methods).toContain('initialize'); expect(methods).toContain('tools/call');
+    expect(await readFile(join(workspace, 'gateway-shutdown.txt'), 'utf8')).toBe('real shutdown');
     const declaredTools = (provider.requests[0] as { tools: { function: { name: string } }[] }).tools.map(tool => tool.function.name);
     expect(declaredTools).toContain('mcp');
     expect(declaredTools).not.toContain('undeclared_extra');

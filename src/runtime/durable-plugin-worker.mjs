@@ -50,8 +50,11 @@ if (config.resourcePaths?.length) {
   }
 } else Object.assign(loaded, await loadExtensions(config.paths, config.workspace, bus, runtime));
 const supported = new Set(['resources_discover', 'session_tree', 'input', 'session_start', 'session_shutdown', 'before_agent_start', 'agent_start', 'agent_end', 'turn_start', 'turn_end', 'message_start', 'message_update', 'message_end', 'tool_call', 'tool_result']);
+// The fork-only resident sleep hook may be registered by existing plugins.
+// Durable never enters that lifecycle or interprets its sleepReady verdict.
+const registrationOnlyLegacyHooks = new Set(['session_checkpoint']);
 for (const extension of loaded.extensions) {
-  for (const name of extension.handlers.keys()) if (!supported.has(name)) loaded.errors.push({ path: extension.path, error: `capability_unsupported: hook ${name}` });
+  for (const name of extension.handlers.keys()) if (!supported.has(name) && !registrationOnlyLegacyHooks.has(name)) loaded.errors.push({ path: extension.path, error: `capability_unsupported: hook ${name}` });
   for (const [name, registered] of extension.tools) {
     if (tools.has(name)) loaded.errors.push({ path: extension.path, error: `Duplicate plugin tool ${name}` });
     else tools.set(name, registered);
@@ -71,7 +74,7 @@ const modelRegistry = new Proxy(Object.freeze({
 }), { get: (target, name) => Reflect.get(target, name) ?? (() => unsupported(`modelRegistry.${String(name)}`)) });
 // Status text is presentation-only. Headless durable sessions have no terminal
 // footer; support the SDK's headless no-op without enabling interactive APIs.
-const headlessUi = new Proxy(Object.freeze({ theme: undefined, setStatus: () => {} }), {
+const headlessUi = new Proxy(Object.freeze({ theme: undefined, setStatus: () => {}, notify: () => {} }), {
   get: (target, name) => Reflect.has(target, name) ? Reflect.get(target, name) : () => unsupported(`ui.${String(name)}`),
 });
 const context = (signal) => ({
