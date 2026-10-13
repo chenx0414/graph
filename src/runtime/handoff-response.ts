@@ -1,4 +1,4 @@
-import type { StreamFn } from '@earendil-works/pi-agent-core';
+import type { ControlledStream as StreamFn } from './controlled-openai.ts';
 import { AssistantMessageFrameEncoder, createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageFrame, type SystemMessage } from '@earendil-works/pi-ai';
 import { replayAssistantStream } from './assistant-stream-frames.ts';
 import { hasUnexecutedToolCall, withoutUnexecutedToolCall } from './unexecuted-tool-call.ts';

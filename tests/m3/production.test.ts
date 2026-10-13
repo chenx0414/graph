@@ -146,6 +146,7 @@ test('a production Pi session may exceed a single-call reservation without block
   const provider = await openaiServer([
     { tools: [{ id: 'w1', name: 'write_file', arguments: JSON.stringify({ path: 'feature.txt', content: 'done' }) }], usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
     { text: 'Wrote the feature.', usage: { prompt_tokens: 60_000, completion_tokens: 5 } },
+    { text: '## Goal\nFeature written', usage: { prompt_tokens: 40, completion_tokens: 10 } },
   ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
@@ -156,12 +157,12 @@ test('a production Pi session may exceed a single-call reservation without block
   cleanup.push(() => runtime.close());
   runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'def');
   const { main, graphId, run } = await runNativeWorker(runtime);
-  expect(provider.requests).toHaveLength(2);
+  expect(provider.requests).toHaveLength(3);
   expect(run.node.status).toBe('succeeded');
-  expect(run.instance?.used).toBe(120_010);
-  expect(run.invocations).toHaveLength(2);
+  expect(run.instance?.used).toBe(120_060);
+  expect(run.invocations).toMatchObject([{ purpose: 'completion' }, { purpose: 'completion' }, { purpose: 'compaction', usage: { input: 40, output: 10 } }]);
   const view = await runtime.user.task(graphId).view();
-  expect.soft(view.invocations).toHaveLength(2);
+  expect.soft(view.invocations).toHaveLength(3);
   expect(view.cost).toEqual({ unknown: true });
   const calls = await main.graphInspect({ graphId, query: 'provider_calls' }) as { state: string }[];
   expect(calls.every(call => call.state === 'settled')).toBe(true);
@@ -291,14 +292,14 @@ test('a native production worker receives the graph check command and acceptance
   expect.soft(prompt.length).toBeLessThan(32000);
   const request = provider.requests[1] as { messages: { role: string; tool_call_id?: string; content: string }[] };
   expect(patched).toBe(true);
-  const result = (id: string) => JSON.parse(JSON.parse(request.messages.find(message => message.role === 'tool' && message.tool_call_id === id)!.content).content[0].text);
+  const result = (id: string) => JSON.parse(request.messages.find(message => message.role === 'tool' && message.tool_call_id === id)!.content);
   expect(result('read-graph')).toMatchObject({ revision: 1, section: 'nodes', items: [{ id: 'side-59', value: { task: detail, instructions: expect.stringContaining('OTHER_NODE_PRIVATE_GUIDANCE') } }] });
   expect(result('page-graph')).toMatchObject({ revision: 1, total: 61, nextAfter: 57 });
   expect(result('page-graph').items.map((item: { id: string }) => item.id)).toEqual(['side-54', 'side-55', 'side-56', 'side-57', 'side-58', 'side-59', 'side-6']);
   await main.graphSend({ graphId, nodeId: 'work', text: 'Inspect the updated definition' });
   await runtime.host.drive();
   const nextRequest = provider.requests[3] as { messages: { role: string; tool_call_id?: string; content: string }[] };
-  const next = JSON.parse(JSON.parse(nextRequest.messages.find(message => message.role === 'tool' && message.tool_call_id === 'read-next-graph')!.content).content[0].text);
+  const next = JSON.parse(nextRequest.messages.find(message => message.role === 'tool' && message.tool_call_id === 'read-next-graph')!.content);
   expect(next).toMatchObject({ revision: 2, items: [{ id: 'side-59', value: { task: 'NEXT EXECUTION CONFIGURATION' } }] });
 });
 

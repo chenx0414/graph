@@ -8,6 +8,7 @@ import { createApp } from '../../src/server/app.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { afterEach, expect, test } from 'vitest';
+import { createDurableSessionTransport } from '../../src/runtime/durable-session.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { assembleMattTeam } from '../../src/catalog/matt-team.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
@@ -80,6 +81,10 @@ test('Matt plan drives implementation, two independent axes return rework to the
     tool('artifact_publish', () => ({ namespace: 'plans', name: 'plan', mediaType: 'text/markdown', content: 'Plan: feature.txt must contain done; test the check.cjs seam; use tdd.', requestId: 'plan' })),
     submit(() => ({ plan: reference('plans', 'plan'), spec: options.spec, ticket: 5, baseRef: baseline })), { text: 'Plan published.' },
   ]);
+  let releaseWorker!: () => void;
+  const workerHeld = new Promise<void>(resolve => { releaseWorker = resolve; });
+  let workerSubmitted!: () => void;
+  const submitted = new Promise<void>(resolve => { workerSubmitted = resolve; });
   const worker = await openaiServer([1, 2].flatMap(round => [
     tool('read', () => ({ path: skillPath('tdd') })),
     tool('artifact_read', () => reference('plans', 'plan')),
@@ -87,7 +92,8 @@ test('Matt plan drives implementation, two independent axes return rework to the
     tool('write_file', () => ({ path: 'feature.txt', content: round === 1 ? 'incomplete' : 'done' })),
     tool('workspace_commit', () => ({ paths: ['feature.txt'], message: `Implement round ${round} (#5)` })),
     tool('artifact_publish', () => ({ namespace: 'deliverables', name: 'implementation', sourcePath: 'feature.txt', metadata: { kind: 'code' }, requestId: `implementation-${round}` })),
-    submit(() => ({ plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', round) })), { text: `Implementation ${round} published.` },
+    submit(() => ({ plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', round) })),
+    { text: `Implementation ${round} published.`, ...(round === 1 ? { beforeReply: async () => { workerSubmitted(); await workerHeld; } } : {}) },
   ]));
   const reviewers: Record<string, Awaited<ReturnType<typeof openaiServer>>> = {};
   const observed: Record<string, { commit: string; content: string }[]> = { standards: [], spec: [] };
@@ -103,7 +109,7 @@ test('Matt plan drives implementation, two independent axes return rework to the
       tool('read', () => ({ path: skillPath('code-review') })),
       tool('artifact_read', () => reference('plans', 'plan')),
       tool('artifact_read', () => reference('deliverables', 'implementation', Math.min(round, 2))),
-      tool('bash', () => ({ command: 'git rev-parse HEAD && cat feature.txt' })),
+      tool('bash', () => ({ command: 'if printf UNAUTHORIZED_WRITE 2>/dev/null > feature.txt; then echo UNAUTHORIZED_WRITE; else git rev-parse HEAD && cat feature.txt; fi' })),
       { ...tool('artifact_publish', () => ({ namespace: 'reviews', name: axis, schema: 'graph.review@1', mediaType: 'application/json',
         content: JSON.stringify({ plan: reference('plans', 'plan'), subject: reference('deliverables', 'implementation', Math.min(round, 2)), axis,
           commit: round === 3 ? actualCommit : baseline, passed: reviewedContent === 'done', reason: reviewedContent === 'done' ? `${axis}: exact implementation contains done` : `${axis}: feature is incomplete` }), requestId: `${axis}-${round}` })),
@@ -123,7 +129,7 @@ test('Matt plan drives implementation, two independent axes return rework to the
   }
   for (const provider of [planner, worker, ...Object.values(reviewers)]) cleanup.push(() => provider.close());
   const providers = { planner, worker, ...reviewers };
-  runtime = await openTaskRuntime({ access: () => fullAccessPolicy(), stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
+  runtime = await openTaskRuntime({ sessionTransport: createDurableSessionTransport, access: () => fullAccessPolicy(), stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }], catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
     models: { apiKey: 'local-only', modelRuntime: worker.runtime, entries: Object.entries(providers).map(([id, provider]) => ({
       id, modelId: id, provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 128_000, maxTokens: 256,
     })) } });
@@ -133,9 +139,32 @@ test('Matt plan drives implementation, two independent axes return rework to the
   const { taskId } = await runtime.user.begin({ projectId: 'p', request: options.task, requestId: 'begin' }); const main = runtime.supervisor(taskId);
   graphId = ((await main.graphCreate({ definition, targetBranch: 'main' })) as { graphId: string }).graphId;
   const workerInstance = runtime.nodeRun(graphId, 'worker').instance!.id;
-  await main.graphSend({ graphId, input: 'job', value: { goal: options.task } }); await runtime.host.drive();
+  await main.graphSend({ graphId, input: 'job', value: { goal: options.task } });
+  const firstDrive = runtime.host.drive();
+  cleanup.push(async () => { releaseWorker(); await firstDrive; });
+  await submitted;
+  type ReviewExecution = { id: string; nodeId: string; state: string; attempt: number; retriesUsed: number };
+  let preparing!: ReviewExecution;
+  await expect.poll(async () => {
+    const history = await main.graphInspect({ graphId, query: 'executions' }) as { items: ReviewExecution[] };
+    preparing = history.items.find(item => item.nodeId === 'standards')!;
+    return preparing?.state;
+  }).toBe('running');
+  // A reviewer waiting for its producer has not called the model. Pausing that
+  // preparation must retain its delivery and must not spend an automatic retry.
+  await main.graphControl({ graphId, nodeId: 'standards', action: 'pause' });
+  releaseWorker(); await firstDrive;
+  const paused = await main.graphInspect({ graphId, query: 'executions' }) as { items: ReviewExecution[] };
+  expect(paused.items.find(item => item.id === preparing.id)).toMatchObject({ state: 'blocked', attempt: 0, retriesUsed: 0 });
+  expect(reviewers.standards!.requests).toHaveLength(0);
+  await main.graphControl({ graphId, nodeId: 'standards', action: 'resume' });
+  await runtime.host.drive();
+  const resumed = await main.graphInspect({ graphId, query: 'executions' }) as { items: ReviewExecution[] };
+  expect(resumed.items.find(item => item.id === preparing.id)).toMatchObject({ state: 'completed', attempt: 1, retriesUsed: 0 });
   const results = await main.graphInspect({ graphId, query: 'results' }) as { value: { subject: { artifactId: string; version: number; digest: string }; plan: { digest: string }; passed: boolean } }[];
   expect(results).toMatchObject([{ value: { passed: true, subject: reference('deliverables', 'implementation', 2), plan: reference('plans', 'plan') } }]);
+  expect(runtime.nodeRun(graphId, 'worker').session?.sessionFile).toMatch(/^durable:/);
+  for (const axis of ['standards', 'spec']) expect(observed[axis]!.map(item => item.content)).toEqual(['incomplete', 'done']);
   expect(runtime.nodeRun(graphId, 'worker').instance).toMatchObject({ id: workerInstance });
   expect(runtime.nodeRun(graphId, 'worker').instance!.used).toBeGreaterThan(0);
   const history = await main.graphInspect({ graphId, query: 'executions' }) as { items: { nodeId: string; state: string }[] };

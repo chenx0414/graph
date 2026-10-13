@@ -5,7 +5,7 @@ import {
   type AssistantMessage,
   type Model,
 } from '@earendil-works/pi-ai';
-import type { StreamFn } from '@earendil-works/pi-agent-core';
+import type { ControlledStream as StreamFn } from '../../src/runtime/controlled-openai.ts';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 
 export const modelA: Model<Api> = {

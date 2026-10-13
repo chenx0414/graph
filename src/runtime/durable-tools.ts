@@ -1,13 +1,15 @@
+import { toolResultHook } from './tool-results.ts';
 import { createBashToolDefinition, createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createLsToolDefinition, createFindToolDefinition, createGrepToolDefinition, loadSkills, formatSkillsForPrompt, type GrepToolInput, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { ToolRegistration } from '@earendil-works/pi-durable';
 import { mkdir, stat, realpath } from 'node:fs/promises';
-import { join, resolve, relative, sep, matchesGlob } from 'node:path';
+import { dirname, join, resolve, relative, sep, matchesGlob } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentSessionRequest } from './agent-session.ts';
-import { isExternallyGated } from './pi-instance.ts';
+import { isExternallyGated } from './tool-gating.ts';
 import { listBounded, listHost, readBoundedBytes, readHostBytes, writeBounded, writeHost, resolveBounded } from './bounded-path.ts';
 import { acquireRestrictedExecutor } from './restricted-process.ts';
 import { developerPath } from './developer-path.ts';
+import { graphNodeRuntime } from './workspace-command.ts';
 import { openDurablePlugins, type DurablePluginContext } from './durable-plugin.ts';
 import { selectAgentToolSurface } from './pi-native-tools.ts';
 
@@ -23,9 +25,11 @@ export async function openDurableTools(request: AgentSessionRequest, options: { 
     return root;
   };
   const checkWrite = () => { if (request.readOnly) throw new Error('This agent workspace is read-only'); };
-  const read = async (path: string) => request.filesystemAccess === 'host' ? readHostBytes(path, pathOptions) : readBoundedBytes(boundedRoot(path), relative(boundedRoot(path), path) || '.');
+  const frozenPath = (path: string) => { const source = request.frozenResourcePaths?.find(item => path === item.source || path.startsWith(item.source + sep)); return source ? source.target + path.slice(source.source.length) : path; };
+  const read = async (path: string) => { const target = frozenPath(path); return request.filesystemAccess === 'host' ? readHostBytes(target, pathOptions) : readBoundedBytes(boundedRoot(target), relative(boundedRoot(target), target) || '.'); };
   const write = async (path: string, content: string) => {
     checkWrite();
+    if (frozenPath(path) !== path || request.frozenResourcePaths?.some(item => path === item.target || path.startsWith(item.target + sep))) throw new Error('Frozen capability resources are read-only');
     if (request.filesystemAccess === 'host') await writeHost(path, content, pathOptions);
     else { const root = boundedRoot(path, true); await writeBounded(root, relative(root, path), content); }
   };
@@ -33,14 +37,16 @@ export async function openDurableTools(request: AgentSessionRequest, options: { 
   const shell = async (command: string, cwd: string, options: { onData: (data: Buffer) => void; signal?: AbortSignal; timeout?: number }) => {
     const scratch = join(request.stateDir, 'durable-tools-scratch');
     await mkdir(scratch, { recursive: true, mode: 0o700 });
+    const runtime = graphNodeRuntime();
+    const runtimeRoot = runtime.electron ? dirname(dirname(runtime.execPath)) : dirname(runtime.execPath);
     const acquired = await acquireRestrictedExecutor();
     try {
       const result = await acquired.executor.run({ broker: { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
         cwd, scratchDir: scratch, executable: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash', args: process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command],
-        readPaths: request.readOnly && request.filesystemAccess === 'host' ? ['/', ...roots] : roots, writePaths: request.readOnly ? [scratch] : [request.workspace, scratch, ...request.writeRoots ?? []],
+        readPaths: request.readOnly && request.filesystemAccess === 'host' ? ['/', ...roots] : [...roots, runtimeRoot], writePaths: request.readOnly ? [scratch] : [request.workspace, scratch, ...request.writeRoots ?? []],
         ...(request.filesystemAccess === 'host' && !request.readOnly ? { filesystem: 'host' as const, ...(!request.readOnly ? { unsandboxed: true } : {}), protectedPathExceptions: [request.stateDir] } : {}),
         protectedPaths: request.protectedPaths ?? [], denyWrite: request.readOnly ? [request.workspace] : [], allowGitMetadataWritesAll: request.allowGitMetadataWritesAll ?? false,
-        env: { ...request.env, PATH: developerPath(request.env?.PATH ?? process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin') }, networkDomains: request.networkDomains ?? [],
+        env: { ...request.env, PATH: `${dirname(runtime.execPath)}:${developerPath(request.env?.PATH ?? process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin')}`, ...(runtime.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }, networkDomains: request.networkDomains ?? [],
         allowUnrestrictedNetwork: request.allowUnrestrictedNetwork ?? false, allowLocalBinding: request.allowLocalBinding ?? false,
         unixSockets: request.unixSockets ?? [], allowAllUnixSockets: request.allowAllUnixSockets ?? false, allowAppleEvents: request.allowAppleEvents ?? false,
         ...(options.signal ? { signal: options.signal } : {}), ...(options.timeout ? { timeoutMs: options.timeout * 1000 } : {}),
@@ -98,42 +104,55 @@ export async function openDurableTools(request: AgentSessionRequest, options: { 
   const enabled = new Set(request.nativeTools ?? []);
   const surface = selectAgentToolSurface({ nativeTools: [...enabled], tools: request.tools ?? [] });
   const plugins = await openDurablePlugins(request, options.context ? { context: options.context } : {});
-  const definitions = [...native.filter(tool => enabled.has(tool.name)), ...surface.tools, ...plugins.tools];
+  const allowedPlugins = new Set(request.piExtensionTools ?? []);
+  const definitions = [...native.filter(tool => enabled.has(tool.name)), ...surface.tools, ...plugins.tools.filter(tool => allowedPlugins.has(tool.name))];
   const unsupported = [...enabled].filter(name => !definitions.some(tool => tool.name === name));
   if (unsupported.length) throw new Error(`Durable native tools not installed: ${unsupported.join(', ')}`);
   const discoveredSkills = await Promise.all(plugins.discoveredSkillPaths.map(async path => { const approved = await realpath(path); boundedRoot(approved); return approved; }));
   const skills = loadSkills({ cwd: request.workspace, agentDir: request.stateDir, includeDefaults: false, skillPaths: [...discoveredSkills, ...request.skillPaths ?? [], ...request.skillFolder ? [request.skillFolder] : []] });
+  const renderResult = toolResultHook({ scopeId: request.binding.instanceId, spillDir: join(request.stateDir, 'tool-results') });
   let stopping = false;
   let runningTools = 0;
   const tools: ToolRegistration[] = definitions.map(tool => ({
     name: tool.name, description: tool.description, parameters: tool.parameters,
     replay: 'unsafe', executionMode: 'sequential',
+    ...(tool.prepareArguments ? { prepareArguments: tool.prepareArguments } : {}),
+    outputLimits: { maxLines: Number.MAX_SAFE_INTEGER, maxBytes: Number.MAX_SAFE_INTEGER },
     async execute(args, api, context) {
       if (stopping) return { content: [{ type: 'text', text: 'Stopped before tool execution' }], control: { terminate: true } };
       runningTools += 1;
       const started = Date.now();
       const id = randomUUID();
       let isError = false;
+      let dispatched = false;
       try {
-        const execute = () => Reflect.apply(tool.execute, tool, [api.callId, args, context.abortSignal, (update: { content: { type: string; text?: string }[] }) => {
+        let effectiveArgs = args;
+        if (typeof args === 'object' && args !== null && 'path' in args && typeof args.path === 'string') {
+          const path = resolve(request.workspace, args.path);
+          const target = frozenPath(path);
+          if (['write', 'edit'].includes(tool.name) && target !== path) throw new Error('Frozen capability resources are read-only');
+          if (['read', 'ls', 'find', 'grep'].includes(tool.name) && target !== path) effectiveArgs = { ...args, path: target };
+        }
+        const execute = () => Reflect.apply(tool.execute, tool, [api.callId, effectiveArgs, context.abortSignal, (update: { content: { type: string; text?: string }[] }) => {
           for (const part of update.content) if (part.type === 'text') api.output(part.text ?? '');
         }, undefined]);
         if (options.refreshContext) await plugins.setContext(await options.refreshContext());
         const block = await plugins.beforeTool(tool.name, api.callId, args);
         if (block?.block) throw new Error(block.reason ?? 'Plugin blocked tool call');
-        const original = await (isExternallyGated(tool) ? execute() : request.broker.dispatch(id, 0, execute));
+        const original = await (isExternallyGated(tool) ? execute() : request.broker.dispatch(id, 0, () => { dispatched = true; return execute(); }));
         const result = await plugins.afterTool(tool.name, api.callId, args, original);
         if (!result || typeof result !== 'object' || !('content' in result) || !Array.isArray(result.content)) throw new Error('Tool returned an invalid content result');
+        const rendered = await renderResult({ toolCall: { name: tool.name }, args, result: { content: result.content } });
         isError = 'isError' in result && Boolean(result.isError);
         if ('terminate' in result && result.terminate) stopping = true;
-        return { content: result.content, ...('details' in result && result.details !== undefined ? { details: JSON.parse(JSON.stringify(result.details)) } : {}), isError, ...(stopping || ('terminate' in result && result.terminate) ? { control: { terminate: true as const } } : {}) };
+        return { content: rendered?.content ?? result.content, ...('details' in result && result.details !== undefined ? { details: JSON.parse(JSON.stringify(result.details)) } : {}), isError, ...(stopping || ('terminate' in result && result.terminate) ? { control: { terminate: true as const } } : {}) };
       } catch (error) { isError = true; throw error; }
       finally {
         runningTools -= 1;
-        if (!isExternallyGated(tool)) request.broker.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+        if (dispatched) request.broker.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
         try { request.onToolCall?.({ tool: tool.name, ms: Date.now() - started, isError, target: null }); } catch { /* telemetry cannot replace tool result */ }
       }
     },
   }));
-  return { stop: () => { stopping = true; }, get runningTools() { return runningTools; }, get stopped() { return stopping; }, tools, skillsPrompt: formatSkillsForPrompt(skills.skills), activeTools: definitions.map(tool => tool.name), loadedExtensions: plugins.loadedExtensions, extensionErrors: plugins.extensionErrors, beforePrompt: async (...args: Parameters<typeof plugins.beforePrompt>) => { if (options.refreshContext) await plugins.setContext(await options.refreshContext()); return plugins.beforePrompt(...args); }, onEvent: plugins.onEvent, close: plugins.close };
+  return { stop: () => { stopping = true; }, get runningTools() { return runningTools; }, get stopped() { return stopping; }, tools, skillsPrompt: formatSkillsForPrompt(skills.skills), activeTools: definitions.map(tool => tool.name), loadedExtensions: plugins.loadedExtensions, extensionErrors: plugins.extensionErrors, beforePrompt: async (...args: Parameters<typeof plugins.beforePrompt>) => { stopping = false; if (options.refreshContext) await plugins.setContext(await options.refreshContext()); return plugins.beforePrompt(...args); }, onEvent: plugins.onEvent, close: plugins.close };
 }

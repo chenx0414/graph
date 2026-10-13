@@ -190,7 +190,7 @@ test('changing the native node recipe takes effect on its next turn through a re
   expect(JSON.stringify(request.messages.filter(message => message.role === 'system' || message.role === 'developer'))).toContain('SPECIALIST_IDENTITY_SENTINEL');
   expect(JSON.stringify(request)).toContain('ORIGINAL_OWN_REPLY'); expect(JSON.stringify(request)).not.toContain('UNRELATED_PEER_HISTORY');
   expect(nativeLastUser(request)).toContain('NEW_INPUT_SENTINEL');
-  expect(graph.runtime.nodeRun(graph.graphId, 'work').session!.sessionId).not.toBe(session);
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').session!.sessionId).toBe(session);
   expect(graph.runtime.nodeRun(graph.graphId, 'work').instance!.id).toBe(before.instance!.id);
   expect(graph.runtime.nodeRun(graph.graphId, 'work').instance!.used).toBe(100);
   expect(graph.runtime.nodeRun(graph.graphId, 'work').instance!.definitionVersion).toBe('specialist@1');

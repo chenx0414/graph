@@ -42,7 +42,7 @@ export type AgentToolDeclaration = Pick<ToolDefinition, 'name' | 'label' | 'desc
 };
 
 /** Argument hints by tool name. A real Agent process rebuilds every tool from the JSON its host sent, so a
- * closure cannot travel: the hint is attached by name on both sides instead (here and in `pi-worker.ts`).
+ * argument repair stays with the declaration and is forwarded to the durable tool registration.
  * Anything added to this table must stay free of host state - both processes run it. */
 export const AGENT_TOOL_ARGUMENT_HINTS: Record<string, (args: unknown) => string | undefined> = {
   apply_rsi_change: rsiChangeShapeHint,

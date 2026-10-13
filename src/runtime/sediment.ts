@@ -7,7 +7,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import type { StreamFn } from '@earendil-works/pi-agent-core';
+import type { ControlledStream as StreamFn } from './controlled-openai.ts';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { MODEL_GRADE_ORDER, modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';

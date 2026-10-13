@@ -11,7 +11,7 @@ import type { ArtifactPage, ArtifactRecord, ArtifactTrust, PublishArtifactInput 
 import {
   listBounded, listHost, readBounded, readBoundedBytes, readHost, readHostBytes, writeBounded, writeHost,
 } from './bounded-path.ts';
-import { externallyGated } from './pi-instance.ts';
+import { externallyGated } from './tool-gating.ts';
 import { WriteLedger } from '../core/write-ledger.ts';
 import { describeAgentTools, type AgentToolName } from './agent-tool-definitions.ts';
 import type { ConversationToolChannel } from './conversation-tools.ts';

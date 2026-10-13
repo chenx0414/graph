@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { clampThinkingLevel, type Model } from '@earendil-works/pi-ai';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { Catalog } from '../catalog/catalog.ts';
 import { reportPromptIntegrity } from './prompt-integrity.ts';
 import { agentSkillOwnedRoots, agentSkillsDir, nativeSkillDirs } from './agent-skills.ts';
@@ -13,7 +13,7 @@ import { thinkingLevelMapFor } from '../catalog/thinking.ts';
 import { appendNodeEntry, recordNodeSession } from '../core/node-run.ts';
 import { digest, recordContextSession } from '../core/context.ts';
 import { WriteLedger } from '../core/write-ledger.ts';
-import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type NativeProposal } from '../core/types.ts';
+import { RuntimeError, type ActionAdapter, type Json, type NodeSpec, type NativeProposal, type Operation, type OperationResult } from '../core/types.ts';
 import { promptImagesFromAttachments } from '../core/attachments.ts';
 import { boundSkills, injectRequestedSkills, requestedSkillNames } from '../core/skill-invocation.ts';
 import type { TaskStore } from '../core/store.ts';
@@ -26,8 +26,10 @@ import { peerNodes } from './agent-messaging.ts';
 import { agentTools } from './agent-tools.ts';
 import { appendMessage, conversationActivityRecords, persistConversationActivity, conversationForTask, publishConversationDelta, RSI_RELOAD_RECEIPT } from '../core/conversation.ts';
 import { unknownUsageIsNonBlocking } from '../core/budget-ledger.ts';
-import type { CapabilityPermissionRequest } from './capabilities.ts';
-import type { CapabilityOperation } from './capability-bundle.ts';
+import { loadCapabilities, type CapabilityPermissionRequest } from './capabilities.ts';
+import { restoreCapabilitySettings, type CapabilityOperation } from './capability-bundle.ts';
+import { freezeDurableModel, restoreDurableResources } from './durable-freeze.ts';
+import type { FrozenDurableExecution } from './durable-host.ts';
 import { openAgentContextAssembly } from './agent-context-assembly.ts';
 import { agentArtifactAccess } from './agent-tool-definitions.ts';
 import { graphApplicationRoot } from './graph-root.ts';
@@ -38,13 +40,13 @@ import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGat
 import { guardHandoffResponses } from './handoff-response.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
-import { finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
+import { OperationLifecycle, finishOperationCredentialWait, markOperationCredentialWait } from '../core/operation-lifecycle.ts';
 import { generatePromptSuggestion, selectPromptSuggestionModel, type PromptSuggestionReply } from './prompt-suggestion.ts';
 import { rsiChangeMaterial } from './rsi.ts';
 import {
-  createRestrictedProcessAgentSessionTransport,
   type AgentSession,
   type AgentSessionTransport,
+  type AgentSessionRequest,
 } from './agent-session.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { taskGate } from './task-gate.ts';
@@ -194,60 +196,57 @@ export function createPiAdapter(options: {
   scheduler?: ModelScheduler;
   /** Settings for the post-operation skill review, read live so the switch needs no restart. */
   sediment?: () => SedimentSettings;
-  modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   capabilitySecrets?: () => Record<string, string>;
   /** Optional provider adapter for subscription/account-level usage deltas. */
   accountUsageDelta?: ControlledStreamUsageOptions['accountUsageDelta'];
   channels?: PiAdapterChannels;
-  transport?: AgentSessionTransport;
+  transport: AgentSessionTransport;
 }): ActionAdapter {
-  const transport = options.transport ?? createRestrictedProcessAgentSessionTransport();
+  const transport = options.transport;
   const activeInstances = new Map<string, AgentSession>();
   /** The live turn's ordinal allocator, so a steering message can take its place
    * in the order of the turn it interrupts. */
   const turnOrdinals = new Map<string, () => number>();
   const systemChangeApplications = new Map<string, Promise<Record<string, unknown>>>();
-  return {
-    kind: 'agent',
-    reserveTokens: PI_SESSION_RESERVE,
-    canReplayBeforeSend: operation => {
-      // Capability load is recorded before transport.open can start the Pi
-      // session (including extension hooks). A model send is also recorded
-      // before it reaches the provider. Only replay before both boundaries.
-      return !options.store.db.prepare('SELECT 1 FROM node_capabilities WHERE operation_id=? LIMIT 1').get(operation.id)
-        && !options.store.db.prepare('SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1').get(operation.id);
-    },
-    async steer(operation, text) {
-      const active = activeInstances.get(operation.id);
-      if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');
-      await active.steer(text);
-      // The injected message takes the next ordinal of the turn it interrupted, so
-      // the transcript can show it where it landed instead of above the turn.
-      const ordinal = turnOrdinals.get(operation.id)?.();
-      return ordinal === undefined ? {} : { ordinal };
-    },
-    async interrupt(operation, text) {
-      const active = activeInstances.get(operation.id);
-      if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting interruption');
-      await active.interrupt(text);
-      const ordinal = text ? turnOrdinals.get(operation.id)?.() : undefined;
-      return ordinal === undefined ? {} : { ordinal };
-    },
-    /** Soft-stop the turn an operation is running: the in-flight tool call
-     * finishes, the turn ends before the next model request, and the session is
-     * retained. Idempotent when the operation has no live session. */
-    async stop(operation) {
-      const active = activeInstances.get(operation.id);
-      if (!active) return;
-      await active.stop();
-    },
-    prepare: async operation => {
+  transport.registerRecoveryFactory?.(async (snapshot, receipt) => {
+    const persisted = new OperationLifecycle(options.store).get(snapshot.executionId);
+    if (!persisted) return undefined;
+    if (persisted.operation.instanceId !== snapshot.identity) throw new Error('Frozen main operation identity mismatch');
+    if (receipt?.type === 'input' && receipt.status === 'done') {
+      const lifecycle = new OperationLifecycle(options.store).resumeDurableAdmission(snapshot.executionId, snapshot.inputRequestId, true, snapshot.preAdmissionInvocationIds);
+      const policy = snapshot.configuration.policy;
+      const model = snapshot.configuration.executionConfiguration?.model;
+      if (!model) throw new Error('Completed main execution model configuration is missing');
+      return {
+        executionId: snapshot.executionId, inputRequestId: snapshot.inputRequestId,
+        binding: policy.binding, workspace: policy.workspace, stateDir: policy.stateDir,
+        model: snapshot.model, systemPrompt: snapshot.agent.instructions ?? '',
+        bundleDigest: policy.bundleDigest, toolPolicyDigest: policy.toolPolicyDigest, runtimePolicyDigest: policy.runtimePolicyDigest,
+        broker: taskGate(options.store, { id: snapshot.executionId, taskId: persisted.operation.taskId, instanceId: snapshot.identity, nodeId: persisted.operation.nodeId }, model),
+        stream: () => { throw new Error('Completed durable input must not issue another provider request'); },
+        onRecoveryComplete: async turn => {
+          lifecycle.settle({ outcome: turn.errorMessage || turn.stopReason === 'error' || turn.stopReason === 'aborted' ? 'failed' : 'completed',
+            output: { text: turn.finalAssistantText, ...(turn.errorMessage ? { error: turn.errorMessage } : {}) }, usage: lifecycle.usage });
+        },
+      };
+    }
+    const resumed = new OperationLifecycle(options.store).resumeDurableAdmission(snapshot.executionId, snapshot.inputRequestId, false, snapshot.preAdmissionInvocationIds);
+    let request: AgentSessionRequest | undefined;
+    const run = await prepareOperation(persisted.operation, snapshot, value => { request = value; }, resumed);
+    const result = await run();
+    if (!request) throw new Error(`Frozen main admission could not be restored: ${JSON.stringify(result.output)}`);
+    return request;
+  });
+  async function prepareOperation(operation: Operation, frozen?: FrozenDurableExecution, capture?: (request: AgentSessionRequest) => void, resumed?: ReturnType<OperationLifecycle['resumeDurableAdmission']>): Promise<() => Promise<OperationResult>> {
+
       if (!operation.instanceId) throw new RuntimeError('invalid_adapter', 'Agents require an instance');
-      const instance = options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
-      const entry = options.directory().find(model => model.id === instance.model);
+      const instance = frozen ? { definition_version: frozen.configuration.policy.binding.definitionVersion, model: frozen.configuration.credentialReference.modelId } : options.store.db.prepare('SELECT definition_version,model FROM instances WHERE id=?').get(operation.instanceId) as { definition_version: string | null; model: string | null };
+      const executionConfiguration = frozen?.configuration.executionConfiguration;
+      if (frozen && !executionConfiguration) throw new Error('Frozen main execution configuration is missing');
+      const entry = executionConfiguration?.model ?? options.directory().find(model => model.id === instance.model);
       if (!entry) throw new RuntimeError('model_unavailable', 'No configured model for this instance');
-      const modelNow = (candidate: ModelEntry) => options.directory().find(model => model.id === candidate.id) ?? candidate;
+      const modelNow = (candidate: ModelEntry) => frozen ? candidate : options.directory().find(model => model.id === candidate.id) ?? candidate;
       const endpointChanged = (candidate: ModelEntry, latest: ModelEntry) => latest.baseUrl !== candidate.baseUrl || latest.api !== candidate.api
         || JSON.stringify(latest.headers ?? {}) !== JSON.stringify(candidate.headers ?? {});
       const resolveBindingFor = (candidate: ModelEntry) => options.bindingFor?.(candidate)
@@ -328,7 +327,7 @@ export function createPiAdapter(options: {
       const task = options.store.task(operation.taskId);
       const project = options.store.db.prepare('SELECT root FROM projects WHERE id=?').get(task.project_id) as { root: string };
       const definitionVersion = instance.definition_version ?? 'unknown@1';
-      const accessPolicy = operation.accessPolicy;
+      const accessPolicy = executionConfiguration?.accessPolicy ?? operation.accessPolicy;
       const fullAccess = isFullAccess(accessPolicy);
       return async () => {
         const gate = taskGate(
@@ -353,9 +352,10 @@ export function createPiAdapter(options: {
           },
           settle: (id, usage) => gate.settle(id, usage),
         };
-        const spec = JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
+        const spec = executionConfiguration?.spec ?? JSON.parse((options.store.db.prepare('SELECT spec FROM nodes WHERE task_id=? AND id=?').get(operation.taskId, operation.nodeId) as { spec: string }).spec) as NodeSpec;
         const conversation = task.phase === 'chatting' ? conversationForTask(options.store, operation.taskId) : undefined;
-        const workspace = await realpath(operation.workspace ?? project.root);
+        const workspace = frozen?.configuration.policy.workspace ?? await realpath(operation.workspace ?? project.root);
+        let captured = false;
         let permissionRequest: CapabilityPermissionRequest | undefined;
         // The agent's own question to the user, asked through ask_user; it turns the turn
         // into a waiting turn once the loop stops.
@@ -364,13 +364,13 @@ export function createPiAdapter(options: {
         const channels = options.channels;
         const agentPromptLibrary = channels?.agentContext;
         let capabilityOperation: CapabilityOperation;
-        let contextAssembly: Awaited<ReturnType<typeof openAgentContextAssembly>>;
+        let contextAssembly: Awaited<ReturnType<typeof openAgentContextAssembly>> | undefined;
         let commands: Awaited<ReturnType<typeof openWorkspaceCommandRunner>> | undefined;
         const systemDomains = spec.role === 'master'
           ? ['github.com', 'raw.githubusercontent.com', 'api.github.com']
           : [];
-        const retrievalDomains = [...new Set([...(options.network?.retrievalDomains ?? []), ...systemDomains])];
-        const unrestrictedRetrieval = accessPolicy?.network === 'unrestricted';
+        const retrievalDomains = frozen ? frozen.configuration.policy.networkDomains : [...new Set([...(options.network?.retrievalDomains ?? []), ...systemDomains])];
+        const unrestrictedRetrieval = frozen ? frozen.configuration.policy.allowUnrestrictedNetwork : accessPolicy?.network === 'unrestricted';
         const retrieval = retrievalDomains.length || unrestrictedRetrieval
           ? createRetrievalBroker({ domains: retrievalDomains, gate, ...(unrestrictedRetrieval ? { unrestricted: true } : {}) })
           : undefined;
@@ -400,69 +400,7 @@ export function createPiAdapter(options: {
             promotedBy: instance.definition_version ?? operation.nodeId,
           }),
         } : undefined;
-        try {
-          const definitionId = instance.definition_version?.split('@')[0];
-          const skillCapabilityRoot = options.catalog.capabilityRootPath();
-          contextAssembly = await openAgentContextAssembly({
-            catalog: options.catalog,
-            ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
-            action: spec.action,
-            ...(spec.role ? { role: spec.role } : {}),
-            workspace,
-            skillProjectRoot: project.root,
-            fullAccess,
-            retrieval: Boolean(retrieval),
-            rsi: Boolean(channels?.rsi?.available && spec.role === 'master' && fullAccess),
-            ...(agentPromptLibrary ? { library: agentPromptLibrary } : {}),
-            bootstrap: {
-              ...(definitionId && channels?.bootstrapPrompts?.[definitionId]
-                ? { agent: channels.bootstrapPrompts[definitionId]! } : {}),
-              ...(channels?.bootstrapToolPrompt !== undefined ? { tool: channels.bootstrapToolPrompt } : {}),
-            },
-            ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
-            ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
-            ...(definitionId && skillCapabilityRoot ? {
-              skillFolder: agentSkillsDir(definitionId, resolve(skillCapabilityRoot, '..')),
-              skillOwnedRoots: agentSkillOwnedRoots({
-                capabilityRoot: skillCapabilityRoot,
-                stateDir: dirname(options.instancesDir),
-              }),
-            } : {}),
-          });
-          const bundle = contextAssembly.bundle;
-          const capabilityRoot = spec.role === 'master' && options.catalog?.capabilityRootPath()
-            ? await realpath(options.catalog.capabilityRootPath()!).catch(() => undefined)
-            : undefined;
-          const graphRoot = spec.role === 'master'
-            ? await realpath(graphApplicationRoot()).catch(() => undefined)
-            : undefined;
-          const masterReadRoots = spec.role === 'master'
-            ? [...new Set([capabilityRoot, graphRoot, agentPromptLibrary?.contextRoot].filter((path): path is string => Boolean(path)))]
-            : [];
-          // The work copy is dependency-free on disk; the project's own install
-          // is linked in and granted to the sandbox so a worker command resolves
-          // the project toolchain the way it would in the project root.
-          const dependencies = await linkProjectDependencies(workspace, join(project.root, 'node_modules'));
-          commands = await openWorkspaceCommandRunner({
-            workspace,
-            scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'),
-            gate,
-            ...(accessPolicy ? { access: accessPolicy } : {}),
-            ...(dependencies ? { readPaths: [dependencies] } : {}),
-          });
-          capabilityOperation = await bundle.openOperation({
-            workspace,
-            scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'),
-            gate,
-            action: spec.action,
-            ...(spec.role ? { role: spec.role } : {}),
-            nativeTools: piNativeToolNamesForPlatform(),
-            ...(accessPolicy ? { access: accessPolicy } : {}),
-            ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
-            grants: operation.grants,
-            disabledTools: contextAssembly.disabledTools,
-            onPermissionRequired: request => { permissionRequest ??= request; },
-            hostTools: ({ readRoots }) => agentTools({
+        const hostTools = ({ readRoots }: { readRoots: readonly string[] }) => agentTools({
               workspace, ...(spec.role ? { role: spec.role } : {}),
               // The tool surface records the agent's own question here; the capability
               // layer above knows nothing about it.
@@ -688,8 +626,100 @@ export function createPiAdapter(options: {
                 },
               } : {}),
 
-            }),
+            });
+        try {
+          if (frozen) {
+            const policy = frozen.configuration.policy;
+            const descriptor = frozen.configuration.descriptor;
+            if (!descriptor) throw new Error('Frozen main capability descriptor is missing');
+            const settings = restoreCapabilitySettings(descriptor.settings, options.capabilitySecrets?.() ?? {}) as { env: Record<string, string>; mcpAdapterServers: { name: string; definition: unknown }[] };
+            commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(policy.stateDir, 'command-scratch'), gate, ...(accessPolicy ? { access: accessPolicy } : {}) });
+            const resources = await restoreDurableResources(frozen.configuration);
+            const extensions = await loadCapabilities({
+              catalog: options.catalog,
+              ...(descriptor.definitionVersion ? { definitionVersion: descriptor.definitionVersion } : {}),
+              frozenFacts: descriptor.facts.filter(fact => fact.kind === 'extension').map(fact => ({ ...fact, path: resources.pathFor(fact.path), ...(fact.entry ? { entry: resources.pathFor(fact.entry) } : {}) })),
+              workspace, scratchDir: join(policy.stateDir, 'capability-scratch'), gate,
+              grants: operation.grants, ...(accessPolicy ? { access: accessPolicy } : {}),
+            });
+            const declared = new Map(frozen.tools.map(tool => [tool.name, tool]));
+            const tools = [...hostTools({ readRoots: [...policy.readRoots, resources.directory] }), ...extensions.tools].filter(tool => declared.has(tool.name)).map(tool => ({ ...tool, ...declared.get(tool.name)! }));
+            const known = new Set([...tools.map(tool => tool.name), ...policy.nativeTools, ...policy.piExtensionTools]);
+            for (const tool of frozen.tools) if (!known.has(tool.name)) throw new Error(`Frozen main tool cannot be restored: ${tool.name}`);
+            capabilityOperation = {
+              descriptor, tools, nativeTools: policy.nativeTools, allowedToolNames: policy.allowedToolNames,
+              bundleDigest: policy.bundleDigest, toolPolicyDigest: policy.toolPolicyDigest, runtimePolicyDigest: policy.runtimePolicyDigest, legacyPromptDigest: policy.bundleDigest,
+              prompts: { system: '', tool: null }, report: [], skillPaths: policy.skillPaths, skillFolder: policy.skillFolder,
+              readRoots: policy.readRoots, writeRoots: policy.writeRoots, env: settings.env, networkDomains: policy.networkDomains,
+              allowUnrestrictedNetwork: policy.allowUnrestrictedNetwork, allowLocalBinding: policy.allowLocalBinding, unixSockets: policy.unixSockets,
+              piExtensionPaths: policy.piExtensionPaths, piExtensionTools: policy.piExtensionTools, mcpAdapterServers: settings.mcpAdapterServers,
+              close: extensions.close,
+            };
+          } else {
+          const definitionId = instance.definition_version?.split('@')[0];
+          const skillCapabilityRoot = options.catalog.capabilityRootPath();
+          contextAssembly = await openAgentContextAssembly({
+            catalog: options.catalog,
+            ...(instance.definition_version ? { definitionVersion: instance.definition_version } : {}),
+            action: spec.action,
+            ...(spec.role ? { role: spec.role } : {}),
+            workspace,
+            skillProjectRoot: project.root,
+            fullAccess,
+            retrieval: Boolean(retrieval),
+            rsi: Boolean(channels?.rsi?.available && spec.role === 'master' && fullAccess),
+            ...(agentPromptLibrary ? { library: agentPromptLibrary } : {}),
+            bootstrap: {
+              ...(definitionId && channels?.bootstrapPrompts?.[definitionId]
+                ? { agent: channels.bootstrapPrompts[definitionId]! } : {}),
+              ...(channels?.bootstrapToolPrompt !== undefined ? { tool: channels.bootstrapToolPrompt } : {}),
+            },
+            ...(options.network?.mcpDomains?.length ? { mcpDomains: options.network.mcpDomains } : {}),
+            ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
+            ...(definitionId && skillCapabilityRoot ? {
+              skillFolder: agentSkillsDir(definitionId, resolve(skillCapabilityRoot, '..')),
+              skillOwnedRoots: agentSkillOwnedRoots({
+                capabilityRoot: skillCapabilityRoot,
+                stateDir: dirname(options.instancesDir),
+              }),
+            } : {}),
           });
+          const bundle = contextAssembly.bundle;
+          const capabilityRoot = spec.role === 'master' && options.catalog?.capabilityRootPath()
+            ? await realpath(options.catalog.capabilityRootPath()!).catch(() => undefined)
+            : undefined;
+          const graphRoot = spec.role === 'master'
+            ? await realpath(graphApplicationRoot()).catch(() => undefined)
+            : undefined;
+          const masterReadRoots = spec.role === 'master'
+            ? [...new Set([capabilityRoot, graphRoot, agentPromptLibrary?.contextRoot].filter((path): path is string => Boolean(path)))]
+            : [];
+          // The work copy is dependency-free on disk; the project's own install
+          // is linked in and granted to the sandbox so a worker command resolves
+          // the project toolchain the way it would in the project root.
+          const dependencies = await linkProjectDependencies(workspace, join(project.root, 'node_modules'));
+          commands = await openWorkspaceCommandRunner({
+            workspace,
+            scratchDir: join(options.instancesDir, operation.instanceId!, 'command-scratch'),
+            gate,
+            ...(accessPolicy ? { access: accessPolicy } : {}),
+            ...(dependencies ? { readPaths: [dependencies] } : {}),
+          });
+          capabilityOperation = await bundle.openOperation({
+            workspace,
+            scratchDir: join(options.instancesDir, operation.instanceId!, 'capability-scratch'),
+            gate,
+            action: spec.action,
+            ...(spec.role ? { role: spec.role } : {}),
+            nativeTools: piNativeToolNamesForPlatform(),
+            ...(accessPolicy ? { access: accessPolicy } : {}),
+            ...(masterReadRoots.length ? { additionalReadRoots: masterReadRoots } : {}),
+            grants: operation.grants,
+            disabledTools: contextAssembly.disabledTools,
+            onPermissionRequired: request => { permissionRequest ??= request; },
+            hostTools,
+          });
+          }
         } catch (error) {
           // A missing or unsupported bound capability stops this node with a concrete
           // reason instead of silently running without the definition's capabilities.
@@ -700,7 +730,7 @@ export function createPiAdapter(options: {
         // A stored level can predate a catalog refresh, or name a model the
         // snapshot does not list: clamp it to a level this model accepts before
         // the turn runs, using the same SDK rule the console displays.
-        const thinkingLevel = clampThinkingLevel(toPiModel(entry), (conversation?.thinking_level ?? 'off') as ThinkingLevel) as ThinkingLevel;
+        const thinkingLevel = frozen ? frozen.configuration.policy.thinkingLevel ?? 'off' : clampThinkingLevel(toPiModel(entry), (conversation?.thinking_level ?? 'off') as ThinkingLevel) as ThinkingLevel;
         const modelPolicyDigest = digest({
           id: entry.id,
           modelId: entry.modelId ?? null,
@@ -713,11 +743,12 @@ export function createPiAdapter(options: {
         });
         const toolPolicyDigest = capabilityOperation.toolPolicyDigest;
         const definitionVersion = instance.definition_version ?? 'unknown@1';
-        const composedPrompt = contextAssembly.forOperation(capabilityOperation).composed;
+        if (!frozen && !contextAssembly) throw new Error('Main context assembly is missing');
+        const composedPrompt = frozen ? { text: frozen.agent.instructions ?? '' } : contextAssembly!.forOperation(capabilityOperation).composed;
         const agentContext = operation.context.agentContext;
         // Record what was actually loaded for this operation so the node
         // projection cannot later guess from catalog status.
-        recordCapabilityLoad(options.store, {
+        if (!frozen) recordCapabilityLoad(options.store, {
           taskId: operation.taskId, nodeId: operation.nodeId, instanceId: operation.instanceId,
           operationId: operation.id, readOnly: false, report: capabilityOperation.report,
           digest: capabilityOperation.bundleDigest,
@@ -965,10 +996,23 @@ export function createPiAdapter(options: {
           })();
           // The skills the session may read must match the block Graph renders: the bound
           // snapshots plus the SDK's own global and project folders.
-          const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
-          const session = await transport.open({
+          const skillReadPaths = frozen ? frozen.configuration.policy.skillPaths : [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
+          const frozenModelEntry = { ...entry };
+          delete frozenModelEntry.headers;
+          const frozenHeaders = freezeDurableModel(toPiModel(entry)).model.headers;
+          if (frozenHeaders) frozenModelEntry.headers = frozenHeaders;
+          const restoredModel = frozen ? structuredClone(frozen.model) : toPiModel(entry);
+          if (frozen && frozen.configuration.headerCredentials.length) {
+            const live = options.directory().find(model => model.id === frozen.configuration.credentialReference.modelId && model.provider === frozen.configuration.credentialReference.provider);
+            for (const name of frozen.configuration.headerCredentials) {
+              const value = live?.headers?.[name];
+              if (value === undefined) throw new Error(`Frozen main header credential is unavailable: ${name}`);
+              (restoredModel.headers ??= {})[name] = value;
+            }
+          }
+          const request: AgentSessionRequest = {
             executionId: operation.id,
-            inputRequestId: `${operation.id}:attempt:${operation.attempt}`,
+            inputRequestId: frozen?.inputRequestId ?? `${operation.id}:attempt:${operation.attempt}`,
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             // Durable telemetry for every tool call this instance executes, Graph's and Pi's alike.
             // The write is guarded here: a statistics table must never be able to break a turn.
@@ -982,8 +1026,9 @@ export function createPiAdapter(options: {
                 // Observed, not executed: recording stays outside the turn's own failure path.
               }
             },
-            workspace, stateDir: join(options.instancesDir, operation.instanceId!),
-            model: toPiModel(entry),
+            workspace, stateDir: frozen?.configuration.policy.stateDir ?? join(options.instancesDir, operation.instanceId!),
+            model: restoredModel,
+            executionConfiguration: { model: frozenModelEntry, spec, ...(accessPolicy ? { accessPolicy } : {}) },
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
               ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
@@ -1004,6 +1049,8 @@ export function createPiAdapter(options: {
             }),
             thinkingLevel,
             tools,
+            capabilityDescriptor: capabilityOperation.descriptor,
+            credentialReference: { modelId: entry.id, provider: entry.provider, ...(entry.credentialId ? { credentialId: entry.credentialId } : {}) },
             allowedToolNames: [...capabilityOperation.allowedToolNames],
             ...(skillReadPaths.length ? { skillPaths: skillReadPaths } : {}),
             ...(capabilityOperation.skillFolder ? { skillFolder: capabilityOperation.skillFolder } : {}),
@@ -1035,9 +1082,30 @@ export function createPiAdapter(options: {
             ...(conversation ? { allowWorkspaceChange: true } : {}),
             // Auto-compaction stays on for workers, reviewers and the master;
             // thresholds follow the model that will receive the summary.
-            compaction: compactionSettings(entry),
+            ...(frozen ? (frozen.configuration.policy.compaction ? { compaction: frozen.configuration.policy.compaction } : {}) : { compaction: compactionSettings(entry) }),
             onEvent,
-          });
+          };
+          if (capture) {
+            captured = true;
+            request.onRecoveryClose = async () => { turnOrdinals.delete(operation.id); await capabilityOperation.close(); await commands!.close(); };
+            if (!resumed) throw new Error('Original durable admission was not reconciled');
+            const { settle: settleOriginal } = resumed;
+            request.onRecoveryComplete = async turn => {
+              flushDeltas(true);
+              const output: Json = {
+                text: turn.finalAssistantText,
+                ...(turn.errorMessage ? { error: turn.errorMessage } : {}),
+                ...(toolActivity.length ? { toolActivity: toolActivity as unknown as Json } : {}),
+                ...(activity.length ? { activity: activity as unknown as Json } : {}),
+              };
+              if (askedQuestion) settleOriginal({ outcome: 'waiting', output, question: { prompt: askedQuestion.prompt, data: { ...askedQuestion, requestType: 'agent' } }, usage: gate.total() });
+              else settleOriginal({ outcome: turn.errorMessage || turn.stopReason === 'error' || turn.stopReason === 'aborted' ? 'failed' : 'completed', output, usage: gate.total() });
+            };
+            capture(request);
+            return { outcome: 'completed' as const, output: {} };
+          }
+          if (!contextAssembly) throw new Error('Main context assembly is missing');
+          const session = await transport.open(request);
           activeInstances.set(operation.id, session);
           const inspected = session.inspect();
           const extensionErrors = inspected.extensionErrors ?? [];
@@ -1365,8 +1433,43 @@ export function createPiAdapter(options: {
             activeInstances.delete(operation.id);
             await session.close();
           }
-        } finally { await capabilityOperation.close(); await commands.close(); }
+        } finally { if (!captured) { await capabilityOperation.close(); await commands.close(); } }
       };
+  }
+  return {
+    kind: 'agent',
+    reserveTokens: PI_SESSION_RESERVE,
+    canReplayBeforeSend: operation => {
+      // Capability load is recorded before transport.open can start the Pi
+      // session (including extension hooks). A model send is also recorded
+      // before it reaches the provider. Only replay before both boundaries.
+      return !options.store.db.prepare('SELECT 1 FROM node_capabilities WHERE operation_id=? LIMIT 1').get(operation.id)
+        && !options.store.db.prepare('SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1').get(operation.id);
     },
+    async steer(operation, text) {
+      const active = activeInstances.get(operation.id);
+      if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting steering messages');
+      await active.steer(text);
+      // The injected message takes the next ordinal of the turn it interrupted, so
+      // the transcript can show it where it landed instead of above the turn.
+      const ordinal = turnOrdinals.get(operation.id)?.();
+      return ordinal === undefined ? {} : { ordinal };
+    },
+    async interrupt(operation, text) {
+      const active = activeInstances.get(operation.id);
+      if (!active) throw new RuntimeError('no_active_operation', 'The master Agent is no longer accepting interruption');
+      await active.interrupt(text);
+      const ordinal = text ? turnOrdinals.get(operation.id)?.() : undefined;
+      return ordinal === undefined ? {} : { ordinal };
+    },
+    /** Soft-stop the turn an operation is running: the in-flight tool call
+     * finishes, the turn ends before the next model request, and the session is
+     * retained. Idempotent when the operation has no live session. */
+    async stop(operation) {
+      const active = activeInstances.get(operation.id);
+      if (!active) return;
+      await active.stop();
+    },
+    prepare: operation => prepareOperation(operation),
   };
 }

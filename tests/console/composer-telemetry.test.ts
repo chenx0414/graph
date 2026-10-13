@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'vitest';
 import { conversationMasterUsage } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
-import type { ActionAdapter, OperationResult } from '../../src/core/types.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -20,10 +20,6 @@ async function temp(name: string) {
   const dir = await mkdtemp(join(tmpdir(), `graph-composer-telemetry-${name}-`));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   return dir;
-}
-
-function scripted(handler: () => OperationResult): ActionAdapter {
-  return { kind: 'agent', reserveTokens: 100, prepare: async () => async () => handler() };
 }
 
 /** A minimal conversation ledger with one master node, so the usage rebuild can
@@ -48,21 +44,23 @@ function seedConversation(root: string, conversationId: string, taskId: string) 
 
 test('after a reload the context and cache numbers are rebuilt from persisted master invocations', async () => {
   const root = await temp('reload');
+  const provider = await openaiServer([{ text: '好的。', usage: { prompt_tokens: 20, completion_tokens: 1 } }]);
+  cleanup.push(() => provider.close());
   const options = {
     stateDir: join(root, 'state'),
-    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: '好的。' }, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } })) },
     models: {
       entries: [{
-        id: 'm', provider: 'synthetic', grade: 'high' as const, api: 'openai-completions' as const,
-        baseUrl: 'http://127.0.0.1:1', contextWindow: 32_000, maxTokens: 256, reasoning: false,
+        id: 'm', provider: 'graph-openai', grade: 'high' as const, api: 'openai-completions' as const,
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, reasoning: false,
       }],
-      modelRuntime: {} as never,
+      apiKey: 'telemetry-local-key',
     },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
   };
   const first = await openTaskRuntime(options);
   const created = await first.conversations.create({ text: '帮我看下这个项目。', requestId: 'telemetry-create' });
   await first.host.runReady();
+  expect(provider.requests).toHaveLength(1);
   await first.close();
 
   // Reopen the ledger on its own and record the master turns the way Pi's SDK
@@ -86,9 +84,10 @@ test('after a reload the context and cache numbers are rebuilt from persisted ma
   expect(view.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
   expect(view.telemetry?.contextTokens).toBe(400);
   expect(view.telemetry?.cachedInput).toBe(300);
-  expect(view.telemetry?.cacheInput).toBe(420);
-  expect(view.telemetry?.cacheHitRate).toBeCloseTo(300 / 420, 6);
+  expect(view.telemetry?.cacheInput).toBe(440);
+  expect(view.telemetry?.cacheHitRate).toBeCloseTo(300 / 440, 6);
   expect(view.telemetry?.contextLimit).toBe(32_000);
+  expect(provider.requests).toHaveLength(1);
 });
 
 test('only the master node of a conversation counts toward its context usage', async () => {

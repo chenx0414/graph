@@ -1,6 +1,6 @@
 # Graph 实现架构
 
-当前架构依据 [Graph v2 定稿规格](specs/graph-rebuild-v2.md)、[产品范围](graph-mvp.md)和 [ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)。实现使用 TypeScript 自有持久内核、Pi、共享 SQLite、本机 HTTP/SSE 和 React/React Flow。历史 M0–M7 架构不再是当前 graph 执行模型；[进度记录](agent/issue-1-implementation-progress.md)与 [退役审计](agent/issue-1-old-kernel-removal-audit.md)区分实际证据和剩余工作。
+当前架构依据 [Graph v2 定稿规格](specs/graph-rebuild-v2.md)、[产品范围](graph-mvp.md)、[ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)与 [ADR 0031](adr/0031-pi-durable-agent-kernel.md)。Graph 领域编排使用 TypeScript，main 与节点的 Agent 执行迁移至 pi-durable 1.1.0，共享 SQLite、本机 HTTP/SSE 和 React/React Flow。迁移交付状态见 [验证进度](agent/pi-durable-migration-evidence.md)，默认应用切换仍需最终验收。历史 M0–M7 架构不再是当前 graph 执行模型；[进度记录](agent/issue-1-implementation-progress.md)与 [退役审计](agent/issue-1-old-kernel-removal-audit.md)区分实际证据和剩余工作。
 
 ## 职责与正式对象
 
@@ -15,7 +15,7 @@ graph 不从节点成功状态推断依赖就绪，不使用特殊 loop 执行�
 | Graph Runtime/Service | create、patch、inspect、send、control | 归属、修订冲突、生命周期、工作清空与通知 |
 | Graph Runner | 推进已受理工作 | 节点并发、模块串行输入、transition/outbox 恢复 |
 | Node Executor/Driver | 运行一条队列输入 | 冻结配置、初始或复跑 prompt、补交、重试与不可撤回提交 |
-| Pi resident host/lane | 常驻节点会话的 turn、inspect、close | 真实模型 transport、能力装配、凭据、配置重绑与崩溃重建 |
+| Durable host/transport/lane | 稳定会话、持久输入收据、模型与工具任务 | 单一 Harness、冻结执行配置、受控凭据与工具装配、checkpoint 恢复 |
 | Module Runtime/Broker | each/once、重开、自定义规则和宿主操作 | 输入最新状态、代码隔离、资源上限、命令副作用与恢复 |
 | Catalog/Artifact/Git | 版本化配方、发布成果、代码集成 | 能力发现、不可变内容、作者权限、commit 与最终验收 |
 | HTTP/Web | 查询、命令和可恢复 SSE | 正式图投影、稳定布局、独立聊天与按需历史 |
@@ -34,15 +34,15 @@ SSE 传递可恢复的事件与引用，公开结果通过 resultId 主动查询
 
 ## 进程、配置与能力
 
-每个 graph Agent 节点有一个常驻 Pi 进程，空闲不占执行名额。首次执行创建自己的会话，复跑使用原历史；没有从另一节点 transcript 派生 graph 节点的公开配置。图结束、节点删除或进程故障时按生命周期处理进程。
+main 与所有 graph Agent 节点使用同一个 durable Harness，分别具有稳定会话身份。空闲节点不占 Graph 执行名额，返工沿用原会话与累计预算；没有从另一节点 transcript 派生 graph 节点的公开配置。工具扩展可以在受限辅助进程中加载，该进程不执行第二套 Agent 循环。
 
-当前 execution 固定节点配置、配方、工作位置和模型事实。下一次执行采用最新修订；必要时在 turn 之间重建进程并保留会话、身份与累计额度。接收时协议和执行时配置分别记录，不把旧输入悄悄解释成新协议。
+当前 execution 固定节点配置、配方、工作位置和模型事实。下一次执行采用最新修订；恢复已受理输入时重装原执行的模型、能力资源、工作位置与权限，保留原输入收据、会话、身份与累计额度。接收时协议和执行时配置分别记录，不把旧输入悄悄解释成新协议。
 
 配方与节点分责：配方提供身份、规则、Skills/MCP/extensions/工具；节点提供任务、验收、接口和运行选择。system prompt、有效工具及其运行预览由同源装配生成；GUI 区分已发送配置与下一次配置，不把声明能力冒充实际加载成功。
 
 节点工作位置可以是项目、准备好的独立 worktree 或其中的目录；显式 worktree 不可静默回退到项目。目录规范化核对真实路径、范围与符号链接。权限、网络和受保护路径受宿主上限约束，不能通过配方或 patch 扩大授权。
 
-main 保留自己的会话与 operation 基础设施，位于 graph 外部；它的结束不由 graph 生命周期控制。基础设施中的会话恢复与配置重绑记录不构成旧 graph 的第二套调度器。
+main 保留自己的会话与 operation 基础设施，位于 graph 外部；它的结束不由 graph 生命周期控制。Agent checkpoint 与执行恢复由 durable 负责；Graph 保留业务命令、未知用量、模块副作用与 Git 收据的核对，不另设 Agent 恢复器。
 
 ## 模块隔离与副作用
 

@@ -35,6 +35,7 @@ export class Execution {
   private readonly pending = new Set<Promise<unknown>>();
   private driveActive = 0;
   private stopping = false;
+  private writersClosed = false;
   private readonly driveWaiters: (() => void)[] = [];
   private readonly store: TaskStore;
   /**
@@ -100,9 +101,10 @@ export class Execution {
     ]);
   }
 
-  /** After resident transports are closed, finish all kernel writers before closing SQLite. */
+  /** After durable transports close, join kernel writers and seal late adapter reports before SQLite closes. */
   async settleGraphShutdown(): Promise<void> {
     await Promise.allSettled([...this.activeGraphs.values()]);
+    this.writersClosed = true;
   }
 
   /**
@@ -752,8 +754,10 @@ export class Execution {
     let dispatch: () => Promise<OperationResult>;
     try {
       dispatch = await adapter.prepare(operation);
+      if (this.writersClosed) return false;
       if (typeof dispatch !== 'function') throw new RuntimeError('invalid_adapter', 'prepare must return a dispatch callback');
     } catch (error) {
+      if (this.writersClosed) return false;
       this.lifecycle.markPreparationFailed(operation.id, String(error));
       return false;
     }
@@ -768,6 +772,7 @@ export class Execution {
     try {
       const result = await dispatch();
       quiescent = true;
+      if (this.writersClosed) return false;
       try {
         this.report(operation.id, operation.generation, result);
       } catch (error) {
@@ -787,6 +792,7 @@ export class Execution {
       // interrupted with its known usage accounted once and its session kept,
       // so the node can resume on the same instance. Neither case advances the
       // graph or hides the worker state.
+      if (this.writersClosed) return false;
       const refusal = error instanceof RuntimeError ? error : undefined;
       if (refusal && this.lifecycle.handleDispatchRefusal(operation, refusal, reservation)) return false;
       this.lifecycle.markUncertain(operation, error, quiescent);

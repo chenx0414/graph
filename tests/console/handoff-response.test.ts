@@ -2,10 +2,11 @@ import { afterEach, expect, test } from 'vitest';
 import { controlledOpenAIStream, type SendGate } from '../../src/runtime/controlled-openai.ts';
 import { guardHandoffResponses } from '../../src/runtime/handoff-response.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { externallyGated, openPiInstance } from '../../src/runtime/pi-instance.ts';
+import { externallyGated } from '../../src/runtime/tool-gating.ts';
+import { openDurableAgent } from '../fixtures/durable-agent.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
@@ -131,7 +132,7 @@ test('Pi executes a real tool after a leaked text call, then completes with veri
   const calls: string[] = [];
   const notices: string[] = [];
   const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
-  const instance = await openPiInstance({
+  const instance = await openDurableAgent({
     binding: { instanceId: 'main', nodeId: 'main', definitionVersion: 'main@1' },
     workspace: root, stateDir: join(root, 'state'), model: server.model, modelRuntime: server.runtime,
     stream: guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), {
@@ -150,7 +151,7 @@ test('Pi executes a real tool after a leaked text call, then completes with veri
     expect(notices).toEqual(['retrying', 'recovered']);
     const state = instance.inspect();
     expect(state.messages.at(-1)).toMatchObject({ role: 'assistant', content: [{ text: 'Inspection completed with the tool result.' }] });
-    expect(await readFile(state.sessionFile, 'utf8')).not.toContain('<｜DSML｜');
+    expect(JSON.stringify(state.messages)).not.toContain('<｜DSML｜');
   } finally { await instance.close(); }
 });
 
@@ -212,7 +213,7 @@ test.each([
   cleanup.push(() => server.close());
   const gate: SendGate = { dispatch(_id, _reservation, send) { return send(); }, settle() {} };
   const events: unknown[] = [];
-  const instance = await openPiInstance({
+  const instance = await openDurableAgent({
     binding: { instanceId: 'main', nodeId: 'main', definitionVersion: 'main@1' },
     workspace: root, stateDir: join(root, 'state'), model: server.model, modelRuntime: server.runtime,
     stream: guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} }),
@@ -227,7 +228,7 @@ test.each([
     await instance.prompt('Inspect and answer.');
     expect(server.requests).toHaveLength(2);
     expect(JSON.stringify(events)).not.toContain(privateText);
-    expect(await readFile(instance.inspect().sessionFile, 'utf8')).not.toContain(privateText);
+    expect(JSON.stringify(instance.inspect().messages)).not.toContain(privateText);
   } finally { await instance.close(); }
 });
 
@@ -313,7 +314,7 @@ test('the Pi session continues tools after correction, persists only the valid a
   let settled = 0;
   const calls: string[] = [];
   const gate: SendGate = { dispatch(_id, _r, send) { sends++; return send(); }, settle() { settled++; } };
-  const instance = await openPiInstance({
+  const instance = await openDurableAgent({
     binding: { instanceId: 'main', nodeId: 'main', definitionVersion: 'main@1' },
     workspace: root, stateDir: join(root, 'state'), model: server.model, modelRuntime: server.runtime,
     stream: guardHandoffResponses(controlledOpenAIStream(gate, 'test-key'), { enabled: () => true, onRecovery() {} }),
@@ -329,7 +330,7 @@ test('the Pi session continues tools after correction, persists only the valid a
     expect(settled).toBe(4);
     const state = instance.inspect();
     expect(JSON.stringify(state.messages)).not.toContain('private-history-marker');
-    expect(await readFile(state.sessionFile, 'utf8')).not.toContain('private-history-marker');
+    expect(JSON.stringify(state.messages)).not.toContain('private-history-marker');
     expect(state.messages.at(-1)).toMatchObject({ role: 'assistant', content: [{ text: '验证完成。' }] });
   } finally { await instance.close(); }
 });

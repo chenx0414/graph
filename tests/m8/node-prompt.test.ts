@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { openGraphServer } from '../../src/server/host.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
+import { createDurableSessionTransport } from '../../src/runtime/durable-session.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -33,6 +33,7 @@ test('a subagent node reports the system prompt and briefing it really sent', as
   const provider = await openaiServer([{ text: 'work done' }, { text: 'extra' }]);
   cleanup.push(() => provider.close());
   const server = await openGraphServer({
+    sessionTransport: createDurableSessionTransport,
     stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     limits: { defaultBudgetTokens: 20_000_000 },
     models: {
@@ -79,21 +80,18 @@ test('a subagent node reports the system prompt and briefing it really sent', as
   expect((view.recorded?.tools ?? '').length).toBeGreaterThan(0);
   expect(view.recorded?.operationId).toBeTruthy();
 
-  // The briefing is the first user message of the node's own session file, read back here
-  // from that same file so the assertion is about the record rather than the renderer.
-  const database = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
-  const row = database.prepare('SELECT session_file FROM node_sessions').get() as { session_file: string };
-  database.close();
-  expect(view.briefing?.sessionFile).toBe(row.session_file);
-  const firstUser = (await readFile(row.session_file, 'utf8')).split('\n').filter(line => line.trim())
-    .map(line => JSON.parse(line) as { message?: { role?: string; content?: unknown } })
-    .find(entry => entry.message?.role === 'user');
+  // The console briefing is the same input the real provider received, and its
+  // stable session reference names the node's durable conversation.
+  expect(view.briefing?.sessionFile).toBe(server.runtime.nodeRun(graphId, 'work').session?.sessionFile);
+  expect(view.briefing?.sessionFile).toMatch(/^durable:/);
+  const firstUser = body.messages?.find(message => message.role === 'user');
+  expect(firstUser, JSON.stringify(body)).toBeDefined();
   // A user message carries either a string or text blocks; read whichever this session used.
-  const content = firstUser?.message?.content;
+  const content = firstUser?.content;
   const text = typeof content === 'string'
     ? content
     : (content as { text?: string }[] | undefined ?? []).map(part => part.text ?? '').join('');
-  expect(text.length).toBeGreaterThan(0);
+  expect(text.length, JSON.stringify(firstUser)).toBeGreaterThan(0);
   expect(view.briefing?.text).toBe(text);
   expect(view.briefing?.text).toContain('写下结果');
   expect(view.briefing?.text).toContain('src/a.ts');

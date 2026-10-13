@@ -249,16 +249,17 @@ test('runtime recovery retains input, attempt counters and unknown provider hold
   kernel.noteExecutionContinuation('x', 'retry');
   kernel.reserveNodeTokens('t1', 'n1', { budget: 100, unlimited: false }, 100);
   kernelProviderGate(kernel, 't1', 'n1', { budget: 100, unlimited: false }).dispatch('lost', 40, () => undefined);
-  expect(recoverKernelExecutions(kernel)).toBe(1);
   expect(recoverKernelExecutions(kernel)).toBe(0);
-  expect(kernel.execution('x')).toMatchObject({ state: 'blocked', attempt: 1, retriesUsed: 1 });
-  expect(kernel.nextQueued('t1', 'n1')).toMatchObject({ payload: { text: 'retained input' } });
-  expect(kernel.nodeState('t1', 'n1').paused).toBe(true);
+  expect(recoverKernelExecutions(kernel)).toBe(0);
+  expect(kernel.execution('x')).toMatchObject({ state: 'running', attempt: 1, retriesUsed: 1 });
+  expect(kernel.db.prepare('SELECT state FROM kernel_queue WHERE task_id=? AND node_id=?').get('t1', 'n1')).toMatchObject({ state: 'claimed' });
+  expect(kernel.nodeState('t1', 'n1').paused).toBe(false);
+  expect(kernel.providerCalls('t1', 'n1').find(call => call.id === 'lost')).toMatchObject({ state: 'unknown' });
   const usage = { input: 20, output: 10, cacheRead: 0, cacheWrite: 0 };
   expect(reconcileKernelUsage(kernel, 't1', 'lost', usage).replayed).toBe(false);
   expect(reconcileKernelUsage(kernel, 't1', 'lost', usage).replayed).toBe(true);
-  expect(kernel.budgetState('t1', 'n1', { budget: 100, unlimited: false })).toMatchObject({ used: 30, reserved: 0 });
-  expect(kernel.nodeState('t1', 'n1').paused).toBe(true);
+  expect(kernel.budgetState('t1', 'n1', { budget: 100, unlimited: false })).toMatchObject({ used: 30, reserved: 100 });
+  expect(kernel.nodeState('t1', 'n1').paused).toBe(false);
   store.db.close();
 });
 

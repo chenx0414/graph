@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { createDurableSessionTransport } from '../../src/runtime/durable-session.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { TaskStore } from '../../src/core/store.ts';
@@ -12,7 +13,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
-test('native worker output is integrated from its own worktree and leaves the target branch pending delivery', async () => {
+test('durable native worker output is integrated from its own worktree and leaves the target branch pending delivery', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-native-git-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project'); await mkdir(project);
@@ -37,7 +38,7 @@ test('native worker output is integrated from its own worktree and leaves the ta
   ]);
   cleanup.push(() => provider.close());
   const stateDir = join(root, 'state');
-  const runtime = await openTaskRuntime({ stateDir, projects: [{ id: 'p', root: project }],
+  const runtime = await openTaskRuntime({ stateDir, sessionTransport: createDurableSessionTransport, projects: [{ id: 'p', root: project }],
     catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
     limits: { defaultBudgetTokens: 20000000 },
     models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-fixture', modelRuntime: provider.runtime },
@@ -52,6 +53,8 @@ test('native worker output is integrated from its own worktree and leaves the ta
     modules: {}, edges: {}, outputs: { result: { from: 'work.result', protocol: 'data' } } }) }) as { graphId: string };
   await main.graphSend({ graphId: graph.graphId, nodeId: 'work', input: 'start', value: {} });
   await runtime.host.drive();
+  const firstSession = runtime.nodeRun(graph.graphId, 'work').session;
+  expect(firstSession?.sessionFile).toMatch(/^durable:/);
   const disk = new TaskStore(join(stateDir, 'tasks.sqlite')); cleanup.push(() => disk.close());
   const worker = disk.db.prepare('SELECT path FROM worktrees WHERE task_id=? AND node_id=?').get(graph.graphId, 'work') as { path: string };
   expect(await readFile(join(worker.path, 'feature.txt'), 'utf8')).toBe('implemented\n');
@@ -76,6 +79,7 @@ test('native worker output is integrated from its own worktree and leaves the ta
   const previousCommit = git(worker.path, ['rev-parse', 'HEAD']).stdout.trim();
   await main.graphSend({ graphId: graph.graphId, nodeId: 'work', input: 'start', value: { request: 'Integrate the later working version.' } });
   await runtime.host.drive();
+  expect(runtime.nodeRun(graph.graphId, 'work').session?.sessionId).toBe(firstSession?.sessionId);
   expect(git(worker.path, ['rev-parse', 'HEAD']).stdout.trim()).not.toBe(previousCommit);
   expect(await readFile(join(integration.path, 'feature.txt'), 'utf8')).toBe('later working version\n');
   expect(git(worker.path, ['log', '-1', '--format=%an <%ae>|%cn <%ce>']).stdout.trim())
@@ -123,7 +127,7 @@ const gateRuntime = async (root: string, project: string, replies: Parameters<ty
   const provider = await openaiServer(replies);
   cleanup.push(() => provider.close());
   const stateDir = join(root, 'state');
-  const runtime = await openTaskRuntime({ stateDir, projects: [{ id: 'p', root: project }],
+  const runtime = await openTaskRuntime({ stateDir, sessionTransport: createDurableSessionTransport, projects: [{ id: 'p', root: project }],
     catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
     limits: { defaultBudgetTokens: 20000000 },
     models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256 }], apiKey: 'local-fixture', modelRuntime: provider.runtime },

@@ -238,16 +238,10 @@ export class OperationLifecycle {
           });
           releaseMessages(this.store, row.id);
         } else {
-          const operation = operationFrom(row);
           if (this.restoreUnsentConversation(row)) continue;
-          if (isFullAccess(operation.accessPolicy)) {
-            this.releaseFullAccessRecovery(row, 'Full access recovery released the uncertain dispatch for retry');
-            this.store.event(row.task_id, 'operation.recovery_bypassed', {
-              operationId: row.id,
-              policy: 'full_access',
-            });
-            continue;
-          }
+          // Access grants describe allowed effects, not evidence that an
+          // interrupted effect did not happen. Keep the durable tool's unknown
+          // outcome for its owner to reconcile, even under full access.
           // A new process owns no live worker, so a recorded dispatch is
           // uncertain and must stop holding an execution slot. Leaving
           // worker_active=1 would starve every later agent and block usage
@@ -380,21 +374,6 @@ export class OperationLifecycle {
     }
   }
 
-  private releaseFullAccessRecovery(row: OperationDbRow, reason: string) {
-    this.markNotSent(row, { resetNode: true, eventReason: reason });
-    const node = this.nodeRow(row.task_id, row.node_id);
-    const spec = JSON.parse(node.spec) as NodeSpec;
-    const conversation = spec.role === 'master' && this.store.task(row.task_id).phase === 'chatting'
-      ? conversationForTask(this.store, row.task_id) : undefined;
-    // An uncertain turn already consumed its message. Do not turn it into a
-    // fresh request; explicit recovery can still set the master pending later.
-    if (conversation && !pendingMessages(this.store, conversation.id, 1).length
-      && !pendingRsiContinuation(this.store, row.task_id, row.node_id)) {
-      this.store.db.prepare("UPDATE nodes SET status='failed' WHERE task_id=? AND id=?").run(row.task_id, row.node_id);
-      this.store.db.prepare("UPDATE activations SET state='failed' WHERE id=?").run(node.activation_id);
-    }
-  }
-
   /** Roll back a pre-dispatch attempt while preserving the same node identity. */
   cancelBeforeDispatch(operationId: string, reason = 'Cancelled before dispatch') {
     this.transaction(() => {
@@ -432,6 +411,33 @@ export class OperationLifecycle {
         requestId: operation.context.rsiContinuation.requestId, operationId: operation.id,
       });
     });
+  }
+
+  /** A verified, still-admitted durable input reattaches its original worker;
+   * it does not allocate an operation, attempt, prompt or budget reservation. */
+  resumeDurableAdmission(id: string, inputRequestId: string, completed = false, preAdmissionInvocationIds: string[] = []): { settle(result: OperationResult): void; usage: TokenUsage | null } {
+    const operation = this.transaction(() => {
+      const row = this.operationRow(id);
+      const original = operationFrom(row);
+      const calls = (this.store.db.prepare('SELECT id,usage FROM invocations WHERE operation_id=?').all(id) as { id: string; usage: string | null }[]).filter(call => !preAdmissionInvocationIds.includes(call.id));
+      if (completed ? calls.some(call => !call.usage || usageSourceOf(JSON.parse(call.usage) as TokenUsage) !== 'authoritative') : calls.length > 0) {
+        throw new RuntimeError('invalid_reconciliation', 'Durable admission has unresolved dispatch evidence');
+      }
+      if (inputRequestId !== `${id}:attempt:${original.attempt}` || original.kind !== 'agent'
+        || this.store.task(original.taskId).phase !== 'chatting') {
+        throw new RuntimeError('invalid_reconciliation', 'Durable admission has no proof of an unsent original main input');
+      }
+      if (row.state !== 'unknown' && row.state !== 'dispatched') throw new RuntimeError('invalid_operation', 'Durable admission is no longer pending');
+      this.store.db.prepare("UPDATE operations SET state='dispatched',worker_active=1,waiting_slot=0 WHERE id=?").run(id);
+      this.store.db.prepare("UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND kind='recovery' AND status='open'")
+        .run(canonicalJson({ proof: completed ? 'Original durable input has its completed SDK receipt and authoritative dispatch evidence' : 'Original durable input is admitted without a provider dispatch', inputRequestId }), id);
+      closeUserWaitForOperation(this.store, id);
+      this.store.db.prepare("UPDATE nodes SET status='running' WHERE task_id=? AND id=? AND activation_id=?").run(original.taskId, original.nodeId, original.activationId);
+      this.store.db.prepare("UPDATE activations SET state='running' WHERE id=?").run(original.activationId);
+      this.store.event(original.taskId, 'operation.durable_resumed', { operationId: id, inputRequestId });
+      return { original, usage: completed ? sumKnownUsage(calls) : null };
+    });
+    return { usage: operation.usage, settle: result => this.transaction(() => { this.settle(operation.original, result); }) };
   }
 
   report(id: string, generation: number, result: OperationResult) {

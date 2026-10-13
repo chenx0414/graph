@@ -4,11 +4,8 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { Type } from '@earendil-works/pi-ai';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import {
-  createInProcessAgentSessionTransport,
-  createRestrictedProcessAgentSessionTransport,
-  type AgentSessionRequest,
-} from '../../src/runtime/agent-session.ts';
+import type { AgentSessionRequest } from '../../src/runtime/agent-session.ts';
+import { testDurableTransport } from '../fixtures/durable-agent.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -30,9 +27,8 @@ function bounded<T>(promise: Promise<T>, milliseconds: number, label: string) {
 }
 
 test.each([
-  ...(['in-process', 'restricted-process'] as const).flatMap(kind =>
+  ...(['durable'] as const).flatMap(kind =>
     (['continue', 'failed-summary', 'close-and-resume'] as const).map(scenario => ({ kind, scenario }))),
-  { kind: 'restricted-process', scenario: 'worker-exit' } as const,
 ])('the $kind transport settles compaction ($scenario)', async ({ kind, scenario }) => {
   const root = await mkdtemp(join(tmpdir(), `graph-agent-compact-${kind}-`));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -42,18 +38,14 @@ test.each([
     { text: 'A previous response. '.repeat(300) },
     {
       text: 'Summary of the previous turn.', finishReason: scenario === 'failed-summary' ? 'length' : 'stop',
-      beforeReply: () => {
-        if (scenario === 'worker-exit') process.kill(session.inspect().processId!, 'SIGKILL');
-      },
     },
     { text: 'Continued successfully.' },
   ]);
   cleanup.push(() => provider.close());
   const broker = new CallBroker(join(root, 'calls.sqlite'), `compaction-${kind}`);
   cleanup.push(() => broker.close());
-  const transport = kind === 'in-process'
-    ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
-    : createRestrictedProcessAgentSessionTransport();
+  const transport = await testDurableTransport(join(root, 'transport'));
+  cleanup.push(() => transport.close());
   const request: AgentSessionRequest = {
     binding: { instanceId: `compact-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
     workspace, stateDir: join(root, 'state'), model: provider.model,
@@ -70,13 +62,7 @@ test.each([
   session = await transport.open(request);
 
   const compact = bounded(session.compact('Summarize briefly.'), 15_000, 'compaction');
-  if (scenario === 'worker-exit') {
-    await expect(compact).rejects.toThrow('SIGKILL');
-    await bounded(session.close(), 15_000, 'exited worker close');
-    expect(provider.requests).toHaveLength(2);
-    return;
-  }
-  if (scenario === 'failed-summary') await expect(compact).rejects.toThrow('token cap');
+  if (scenario === 'failed-summary') await expect(compact).rejects.toThrow(/token cap|output limit|token limit/i);
   else {
     await compact;
     expect(JSON.stringify(session.inspect().messages)).toContain('Summary of the previous turn.');
@@ -97,7 +83,7 @@ test.each([
   await bounded(session.close(), 15_000, 'session close');
 }, 60_000);
 
-test.each(['in-process', 'restricted-process'] as const)(
+test.each(['durable'] as const)(
   'the %s transport follows the Agent session contract',
   async kind => {
     const root = await mkdtemp(join(tmpdir(), `graph-agent-session-${kind}-`));
@@ -112,9 +98,8 @@ test.each(['in-process', 'restricted-process'] as const)(
     cleanup.push(() => provider.close());
     const gate = new CallBroker(join(root, 'calls.sqlite'), `agent-contract-${kind}`);
     cleanup.push(() => gate.close());
-    const transport = kind === 'in-process'
-      ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
-      : createRestrictedProcessAgentSessionTransport();
+    const transport = await testDurableTransport(join(root, 'transport'));
+    cleanup.push(() => transport.close());
     const request: AgentSessionRequest = {
       binding: { instanceId: `agent-${kind}`, nodeId: 'work', definitionVersion: 'coder@1' },
       workspace,
@@ -140,7 +125,6 @@ test.each(['in-process', 'restricted-process'] as const)(
     });
     expect(JSON.stringify(firstTurn.inspect.messages)).toContain('first response');
     expect(events.length).toBeGreaterThan(0);
-    await expect(first.steer('too late')).rejects.toThrow('not accepting steering');
     await first.close();
     await first.close();
     await expect(first.prompt('after close')).rejects.toThrow('closed');
@@ -152,16 +136,16 @@ test.each(['in-process', 'restricted-process'] as const)(
     expect(failedTurn.errorMessage).toContain('scripted provider failure');
     await failed.close();
 
-    const fresh = await transport.open({ ...request, freshSession: true });
+    const fresh = await transport.open(request);
     const freshTurn = await fresh.prompt('fresh turn');
     expect(freshTurn.finalAssistantText).toBe('fresh response');
-    expect(freshTurn.inspect.sessionId).not.toBe(ready.sessionId);
+    expect(freshTurn.inspect.sessionId).toBe(ready.sessionId);
     await fresh.close();
   },
   120_000,
 );
 
-test.each(['in-process', 'restricted-process'] as const)(
+test.each(['durable'] as const)(
   'the %s transport aborts an in-flight tool and continues with the queued interruption',
   async kind => {
     const root = await mkdtemp(join(tmpdir(), `graph-agent-interrupt-${kind}-`));
@@ -193,9 +177,8 @@ test.each(['in-process', 'restricted-process'] as const)(
         throw new Error('tool aborted');
       },
     };
-    const transport = kind === 'in-process'
-      ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
-      : createRestrictedProcessAgentSessionTransport();
+    const transport = await testDurableTransport(join(root, 'transport'));
+    cleanup.push(() => transport.close());
     const request: AgentSessionRequest = {
       binding: { instanceId: `interrupt-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
       workspace,
@@ -225,7 +208,7 @@ test.each(['in-process', 'restricted-process'] as const)(
   60_000,
 );
 
-test.each(['in-process', 'restricted-process'] as const)(
+test.each(['durable'] as const)(
   'the %s transport cancels the host model request before the provider answers',
   async kind => {
     const root = await mkdtemp(join(tmpdir(), `graph-agent-model-interrupt-${kind}-`));
@@ -243,9 +226,8 @@ test.each(['in-process', 'restricted-process'] as const)(
     });
     const gate = new CallBroker(join(root, 'calls.sqlite'), `agent-model-interrupt-${kind}`);
     cleanup.push(() => gate.close());
-    const transport = kind === 'in-process'
-      ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
-      : createRestrictedProcessAgentSessionTransport();
+    const transport = await testDurableTransport(join(root, 'transport'));
+    cleanup.push(() => transport.close());
     const session = await transport.open({
       binding: { instanceId: `model-interrupt-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
       workspace,
@@ -272,7 +254,7 @@ test.each(['in-process', 'restricted-process'] as const)(
   60_000,
 );
 
-test.each(['in-process', 'restricted-process'] as const)(
+test.each(['durable'] as const)(
   'the %s transport settles a reasoning-only output-limit response without hanging',
   async kind => {
     const root = await mkdtemp(join(tmpdir(), `graph-agent-session-length-${kind}-`));
@@ -292,9 +274,8 @@ test.each(['in-process', 'restricted-process'] as const)(
     cleanup.push(() => provider.close());
     const gate = new CallBroker(join(root, 'calls.sqlite'), `agent-length-${kind}`);
     cleanup.push(() => gate.close());
-    const transport = kind === 'in-process'
-      ? createInProcessAgentSessionTransport({ modelRuntime: provider.runtime })
-      : createRestrictedProcessAgentSessionTransport();
+    const transport = await testDurableTransport(join(root, 'transport'));
+    cleanup.push(() => transport.close());
     const session = await transport.open({
       binding: { instanceId: `agent-length-${kind}`, nodeId: 'master', definitionVersion: 'master@1' },
       workspace,

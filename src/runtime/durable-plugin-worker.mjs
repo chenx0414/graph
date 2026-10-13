@@ -3,11 +3,12 @@ import { createInterface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
 import { writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createEventBus, createExtensionRuntime } from '@earendil-works/pi-coding-agent';
 
 const config = JSON.parse(await readFile(process.argv[2], 'utf8'));
-const { loadExtensions } = await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))), 'core/extensions/loader.js')).href);
+const { loadExtensions, loadExtensionFromFactory } = await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))), 'core/extensions/loader.js')).href);
 const bus = createEventBus();
 const runtime = createExtensionRuntime();
 const tools = new Map();
@@ -20,7 +21,34 @@ runtime.setActiveTools = names => {
   if (!Array.isArray(names) || names.some(name => !config.allowedToolNames.includes(name))) unsupported('setActiveTools: tool outside frozen capability');
   activeTools = [...new Set(names)];
 };
-const loaded = await loadExtensions(config.paths, config.workspace, bus, runtime);
+const loaded = { extensions: [], errors: [], runtime };
+if (config.resourcePaths?.length) {
+  const requireSdk = createRequire(import.meta.resolve('@earendil-works/pi-coding-agent'));
+  const { createJiti } = await import(pathToFileURL(requireSdk.resolve('jiti')).href);
+  const moduleRoots = [];
+  for (const mapping of [...config.resourcePaths].sort((left, right) => left.source.length - right.source.length)) {
+    if (!moduleRoots.some(root => mapping.source === root.source || mapping.source.startsWith(root.source + '/'))) moduleRoots.push(mapping);
+  }
+  const aliases = Object.fromEntries(moduleRoots.map(({ source, target }) => [source, target]));
+  // Match the pinned SDK's extension compatibility surface. These are host
+  // runtime modules, not a fallback to the mutable capability catalog.
+  for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-agent-core', '@earendil-works/pi-tui', '@earendil-works/pi-ai/compat', '@earendil-works/pi-ai/oauth', '@earendil-works/pi-ai/providers/all', 'typebox', 'typebox/compile', 'typebox/value']) {
+    const target = name.startsWith('@earendil-works/') ? fileURLToPath(import.meta.resolve(name, import.meta.resolve('@earendil-works/pi-coding-agent'))) : requireSdk.resolve(name);
+    aliases[name] = target;
+    if (name.startsWith('@earendil-works/')) aliases[name.replace('@earendil-works/', '@mariozechner/')] = target;
+    if (name.startsWith('typebox')) aliases[name.replace('typebox', '@sinclair/typebox')] = target;
+  }
+  aliases['@earendil-works/pi-ai'] = aliases['@earendil-works/pi-ai/compat'];
+  aliases['@mariozechner/pi-ai'] = aliases['@earendil-works/pi-ai/compat'];
+  for (const path of config.paths) {
+    try {
+      const jiti = createJiti(path, { fsCache: false, moduleCache: false, tryNative: false, alias: aliases });
+      const factory = await jiti.import(path, { default: true });
+      const result = await loadExtensionFromFactory(factory, config.workspace, bus, runtime, path);
+      loaded.extensions.push(result);
+    } catch (error) { loaded.errors.push({ path, error: error.message }); }
+  }
+} else Object.assign(loaded, await loadExtensions(config.paths, config.workspace, bus, runtime));
 const supported = new Set(['resources_discover', 'session_tree', 'input', 'session_start', 'session_shutdown', 'before_agent_start', 'agent_start', 'agent_end', 'turn_start', 'turn_end', 'message_start', 'message_update', 'message_end', 'tool_call', 'tool_result']);
 for (const extension of loaded.extensions) {
   for (const name of extension.handlers.keys()) if (!supported.has(name)) loaded.errors.push({ path: extension.path, error: `capability_unsupported: hook ${name}` });

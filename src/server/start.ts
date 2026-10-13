@@ -3,8 +3,6 @@ import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { InMemoryCredentialStore, type Model } from '@earendil-works/pi-ai';
-import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError } from '../core/types.ts';
 import { emptyGraphConfig, loadGraphConfig, parseGraphConfig, resolveCredentialSecret, type ConfiguredModel, type GraphConfig } from './config.ts';
 import { modelTier, modelRequestHeaders } from '../catalog/models.ts';
@@ -74,23 +72,6 @@ export interface GraphDaemon {
   /** Explicit archived-price refresh (C01); failure keeps old values as stale. */
   refreshPrices(expectedRevision: number): Promise<ApplyConfigResult & { results: PriceRefreshResult[] }>;
   close(): Promise<void>;
-}
-
-function piModel(entry: ConfiguredModel): Model<ConfiguredModel['api']> {
-  const headers = modelRequestHeaders(entry);
-  return {
-    id: entry.id,
-    name: entry.id,
-    provider: entry.provider,
-    api: entry.api,
-    baseUrl: entry.baseUrl,
-    reasoning: entry.reasoning !== false,
-    input: ['text'],
-    contextWindow: entry.contextWindow,
-    maxTokens: entry.maxTokens,
-    cost: entry.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    ...(headers ? { headers } : {}),
-  };
 }
 
 /** Group model entries by provider; sharing a provider means the same endpoint
@@ -227,33 +208,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   }
 
   const scheduler = createModelScheduler();
-  let modelRuntime: ModelRuntime | undefined;
   let definitionsPublished = false;
-  const ensureModelRuntime = async () => {
-    if (!modelRuntime) {
-      modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, allowModelNetwork: true, refreshOnCreate: false });
-    }
-    return modelRuntime;
-  };
-  const syncProviders = async () => {
-    if (!options.dynamic && !live.enabled()) return;
-    const runtime = await ensureModelRuntime();
-    for (const [provider, group] of providerGroups(live.entries())) {
-      const binding = live.credentialFor(group.entries[0]!);
-      if (!binding) continue;
-      const headers = modelRequestHeaders(group.entries[0]!);
-      // Re-registering the same provider name replaces its endpoint/key, so a
-      // saved rotation applies to the next session opened for this provider.
-      runtime.registerProvider(provider, {
-        baseUrl: group.baseUrl,
-        api: group.api,
-        apiKey: binding.apiKey,
-        models: group.entries.map(piModel),
-        ...(headers ? { headers } : {}),
-      });
-    }
-  };
-  await syncProviders();
 
   const activateDispatch = (server: Awaited<ReturnType<typeof openGraphServer>>) => {
     // View-only CLI intent never starts dispatching because a config was saved.
@@ -306,7 +261,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   // loaded from, which is the honest answer for both a source run and a packaged app.
   const runningSource = readSourceIdentity(graphApplicationRoot());
 
-  const runtimeReady = await ensureModelRuntime();
   const presetsRoot = options.presetsDir ?? fileURLToPath(new URL('../../presets', import.meta.url));
   const userGraphHome = options.graphHome ?? resolveGraphHome(options.env);
   const capabilityPath = join(userGraphHome, 'capabilities');
@@ -413,7 +367,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
       entries: live.entries(),
       preferences: live.preferences(),
       apiKey: '',
-      modelRuntime: runtimeReady,
       modelScheduler: scheduler,
       credentialFor: entry => live.credentialFor(entry),
     },
@@ -586,7 +539,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     }
     const result = live.apply(saved.config, saved.revision);
     if (result.applied) {
-      await syncProviders();
       server.runtime.host.syncProjects();
       scheduler.wake();
       publishDefinitions();
@@ -630,7 +582,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     if (persisted) secretPersist.confirmed(ref);
     else if (result.applied) secretPersist.mark(ref, revoking ? null : value.trim());
     if (result.applied) {
-      await syncProviders();
       scheduler.wake();
       publishDefinitions();
       activateDispatch(server);
@@ -702,7 +653,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
           if (result.applied) {
             void (async () => {
               try {
-                await syncProviders();
                 server.runtime.host.syncProjects();
                 scheduler.wake();
                 publishDefinitions();

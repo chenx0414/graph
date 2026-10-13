@@ -31,9 +31,9 @@ import { routeModuleOutputs } from './module-router.ts';
  * belongs to the graph runtime and is not bypassed here.
  */
 
-/** The subset of `ResidentHost` a run needs. */
+/** The node execution host surface a Graph run needs. */
 export interface RunnerHost extends ExecutorHost {
-  turn(text: string): Promise<{ turnId: string; inspect: unknown }>;
+  turn(text: string, input?: { executionId: string; attempt: number }): Promise<{ turnId: string; inspect: unknown }>;
 }
 
 export interface ModuleOperationRequest {

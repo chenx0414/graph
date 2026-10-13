@@ -253,7 +253,7 @@ stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍�
 
 释放资源不会证明副作用或检查结果：操作仍为 `uncertain`、模块暂停，不自动重跑，不产生业务输出。main 核查后明确取消已有操作，再通过新的合法输入启动后续工作。受限执行器尚未接通同等凭证，不能将上述清理保证解释为所有运行方式均已完成。
 
-常驻 Pi 的宿主控制流结束时，会结束未完成的宿主请求、中断当前 turn，并关闭会话与进程；断连后不继续请求模型。已提交输出仍保持不可撤回，崩溃执行和未知用量仍按持久账本由 main 处理，不将进程退出当作任务成功。
+durable 宿主关闭时结束当前工具与模型的控制流，持久会话和输入收据留在共享 SQLite；重启先装回冻结配置，再由 durable 处理 checkpoint。副作用未知时交 main 核查，不自动重跑原输入。已提交输出仍保持不可撤回，崩溃执行和未知用量仍按持久账本由 main 处理，不将进程退出当作任务成功。
 
 不限 token 额度的原生执行在成功模型响应缺少 usage 时使用已有本地估算，provider_calls 中保留 usageSource:"estimated"；费用仍取决于已配置价格。是否允许估算取自本次执行冻结的额度，不采用执行途中改写的配置。有限额度不以估算替代可核算用量，保留 unknown 记录和输入并等待 main 核对；不限额度仍无法估算时保持 usage:null / usageSource:"unknown" 和未知费用，允许后续请求及 workspace_commit；未知调用的占位继续保留，不补造零用量。若下次执行改为有限额度，旧的未知 provider 用量必须先显式核对；执行前暂停队列，不消耗自动重试次数。
 
@@ -287,7 +287,7 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 
 确认草稿必须声明非空 definition.acceptance，并在外层 acceptance 摘要中完整列出同一组 ID 和描述；check 的 checkNode 对应 module，review 的 checkNode 对应 node。数量、ID、描述或检查对象不一致时，validate_proposal 和 propose_graph 都会在创建草稿前拒绝，不把无法执行或与用户展示矛盾的验收留到完成时才发现。human 仍使用用户验收流程，不从路由 passed 推断人工批准。
 
-脚本化 ActionAdapter 用于无模型的确定性宿主测试，其 operation.input 来自当前已 claim 的投递 value（聊天 / 控制输入保留对应 payload），context.briefing 是该次实际组装的 prompt；不再读取旧 proposal.nodes 的 input/context。正式节点仍通过各自常驻 Pi 执行。原生节点详情的 elapsedMs / timing.totalMs 记录实际执行墙钟时间并可在重启后查看；未记录的 runMs / waitingMs 分项保持 null。
+脚本化 ActionAdapter 用于无模型的确定性宿主测试，其 operation.input 来自当前已 claim 的投递 value（聊天 / 控制输入保留对应 payload），context.briefing 是该次实际组装的 prompt；不再读取旧 proposal.nodes 的 input/context。正式节点通过共享 durable Harness 的独立持久会话执行。原生节点详情的 elapsedMs / timing.totalMs 记录实际执行墙钟时间并可在重启后查看；未记录的 runMs / waitingMs 分项保持 null。
 
 
 原生节点详情的 timing.pauseMs 来自持久暂停账本：用户 task.pause/resume 和 main 的 graph_control pause/resume 都记录实际边界。整个 graph 与单节点暂停重叠时只累计一次，恢复其中一层不会结束另一层暂停；重复操作不重复累计。记录跨后台重启保留，新增节点继承已记录的 graph 暂停。创建 worktree 的内部准备锁、执行失败后的队列保持不会被补造为用户暂停。graph 停止、完成或节点退役会关闭尚未结束的暂停区间；从未记录暂停时仍返回 null。人工等待 userWaitMs 尚无原生实际边界记录，保持 null。

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installPresets } from '../../src/catalog/presets.ts';
@@ -1578,7 +1578,7 @@ test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes o
     expect(await restored.host.runReady()).toEqual({ dispatched: 0 });
   } else {
     expect(view.messages.filter(message => message.role === 'assistant')).toHaveLength(0);
-    expect(view.master?.status).toBe('failed');
+    expect(view.questions).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'recovery', owner: 'main', status: 'open' })]));
   }
 });
 
@@ -1697,3 +1697,31 @@ test('draft cards belong to their own conversation and never leak across', async
   expect(theirs.proposal).toBeNull();
   expect(theirs.archivedProposals.map(item => item.version)).toEqual([1]);
 });
+
+
+test.each(['resolve', 'reject'])('bounded shutdown preserves an unsent input when adapter preparation later %s', async (outcome) => {
+  const root = await temp('late-prepare-close');
+  const started = Promise.withResolvers<void>();
+  const preparation = Promise.withResolvers<() => Promise<OperationResult>>();
+  const runtime = await openTaskRuntime({
+    stateDir: join(root, 'state'),
+    actions: { master: { kind: 'agent', reserveTokens: 100, prepare: async () => { started.resolve(); return preparation.promise; } } },
+    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
+  });
+  cleanup.push(() => runtime.close());
+  const created = await runtime.conversations.create({ text: 'Preserve the original unsent request.', requestId: 'begin' });
+  const running = runtime.host.runReady();
+  await started.promise;
+  await runtime.close();
+  if (outcome === 'reject') preparation.reject(new Error('Late preparation failure'));
+  else preparation.resolve(async () => {
+    await writeFile(join(root, 'must-not-dispatch.txt'), 'late effect');
+    return { outcome: 'completed', output: { text: 'Must not settle after close.' }, usage };
+  });
+  await running;
+  await expect(readFile(join(root, 'must-not-dispatch.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  const reopened = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'New authorized input.' }, usage }));
+  const view = await reopened.conversations.view(created.conversationId);
+  expect(view.messages.filter(message => message.role === 'user').map(message => message.text)).toEqual(['Preserve the original unsent request.']);
+  expect(view.messages.filter(message => message.role === 'assistant')).toEqual([]);
+}, 15_000);

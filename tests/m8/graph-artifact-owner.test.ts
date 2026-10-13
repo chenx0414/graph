@@ -130,8 +130,8 @@ test.each(['confirmed', 'managed'] as const)('main revises %s graph artifacts wi
       { text: 'Graph workspace discovered.' });
     await main.graphSend({ graphId, nodeId: 'other', input: 'job', value: {} }); await runtime.host.drive();
     const nodeMessages = (workerProvider.requests.at(-1) as { messages: { tool_call_id?: string; content: string }[] }).messages;
-    const page = JSON.parse(JSON.parse(nodeMessages.find(message => message.tool_call_id === 'node-list')!.content).content[0].text);
-    const next = JSON.parse(JSON.parse(nodeMessages.find(message => message.tool_call_id === 'node-next')!.content).content[0].text);
+    const page = JSON.parse(nodeMessages.find(message => message.tool_call_id === 'node-list')!.content);
+    const next = JSON.parse(nodeMessages.find(message => message.tool_call_id === 'node-next')!.content);
     expect(page).toMatchObject({ total: 3, nextCursor: '2' });
     expect(next).toMatchObject({ total: 3, nextCursor: null });
     expect([...page.artifacts, ...next.artifacts]).toEqual(expect.arrayContaining([1, 2, 3].map(version => expect.objectContaining({

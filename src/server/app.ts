@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Fastify from 'fastify';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import { RuntimeError, type AttachmentInput } from '../core/types.ts';
 import type { openTaskRuntime } from '../core/task-runtime.ts';
 import { createSession, guard, localOrigin, setSessionCookie } from './auth.ts';

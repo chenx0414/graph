@@ -1,14 +1,14 @@
-import { createModels, createProvider } from 'pi-ai-v1/models';
-import { AssistantMessageEventStream } from 'pi-ai-v1/utils/event-stream';
+import { createModels, createProvider } from '@earendil-works/pi-ai/models';
+import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import type { AgentSessionRequest } from './agent-session.ts';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
-import type { StreamFunction } from 'pi-ai-v1';
-import type { MutableModels } from 'pi-ai-v1/models';
+import type { StreamFunction } from '@earendil-works/pi-ai';
+import type { MutableModels } from '@earendil-works/pi-ai/models';
 
 /** Expand-contract bridge: the frozen Graph provider callback remains the
  * owner of auth, credential slots, raw usage evidence and budget admission.
  * Durable owns generation; it never opens an ungated provider channel. */
-export function installDurableModel(models: MutableModels, name: string, request: AgentSessionRequest, stopping: () => boolean = () => false) {
+export function installDurableModel(models: MutableModels, name: string, request: Pick<AgentSessionRequest, 'model' | 'stream'>, stopping: () => boolean = () => false) {
   const stream: StreamFunction = (_model, transcript, options) => {
     const output = new AssistantMessageEventStream();
     void (async () => {

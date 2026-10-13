@@ -72,7 +72,7 @@ test('intent recovery is conservative and attempt identity stays behind the life
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get()).toEqual({ status: 'pending' });
 });
 
-test.each([false, true])('full access restart only retries an uncertain chatting master with queued work (queued=%s)', async queued => {
+test.each([false, true])('full access restart preserves an uncertain chatting master for reconciliation (queued=%s)', async queued => {
   const { store, lifecycle } = await fixture();
   store.db.prepare("UPDATE tasks SET phase='chatting',conversation_id='c' WHERE id='t'").run();
   store.db.prepare("INSERT INTO conversations(id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES('c','p','t','chat',1,1)").run();
@@ -89,11 +89,11 @@ test.each([false, true])('full access restart only retries an uncertain chatting
   if (queued) appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'next', state: 'queued' });
 
   new OperationLifecycle(store).recover();
-  expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'not_sent', reserved: 0, workerActive: false }]);
+  expect(operationSnapshots(store, 't')).toMatchObject([{ state: 'unknown', reserved: 100, workerActive: false }]);
   expect(store.db.prepare("SELECT status FROM nodes WHERE task_id='t' AND id='work'").get())
-    .toEqual({ status: queued ? 'pending' : 'failed' });
+    .toEqual({ status: 'pending' });
   expect(pendingMessages(store, 'c').map(message => message.text)).toEqual(queued ? ['next'] : []);
-  expect(store.db.prepare("SELECT id FROM questions WHERE status='open'").all()).toEqual([]);
+  expect(store.db.prepare("SELECT kind,owner FROM questions WHERE status='open'").all()).toEqual([{ kind: 'recovery', owner: 'main' }]);
 });
 
 test('system-change questions accept only an explicit user decision', async () => {
@@ -212,8 +212,11 @@ test.each(['intent', 'dispatched', 'not_sent'])('restart restores delivered mess
   });
   if (stage !== 'intent') lifecycle.dispatch(operation);
   if (stage === 'not_sent') {
-    // State left by the older full-access startup recovery, before it released messages.
-    new OperationLifecycle(store).recover();
+    // Import the state written by the retired full-access restart implementation.
+    // Current recovery must never recreate that unsafe transition itself.
+    store.db.prepare("UPDATE operations SET state='not_sent',worker_active=0,reserved=0 WHERE id=?").run(operation.id);
+    store.db.prepare("UPDATE nodes SET status='pending' WHERE task_id='t' AND id='work'").run();
+    store.event('t', 'operation.recovery_bypassed', { operationId: operation.id, policy: 'full_access' });
   }
   appendMessage(store, { conversationId: 'c', role: 'user', kind: 'chat', text: 'and recent work', state: 'queued' });
   const restored = new OperationLifecycle(store, { canReplayBeforeSend: () => true });

@@ -65,7 +65,7 @@ async function inspect(dbPath: string) {
 }
 
 for (const fixture of ['v13', 'v17'] as const) {
-  test(`a real ${fixture} state directory discards old graphs, preserves configuration and runs a native graph in the same database (C03)`, async () => {
+  test(`a real ${fixture} state directory retires old execution while preserving history and configuration and runs a native graph in the same database (C03)`, async () => {
     const provider = await openaiServer([
       { tools: [{ id: 'submit', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { upgraded: true } } } }) }] },
       { text: 'Native upgrade worker finished' },
@@ -93,14 +93,13 @@ for (const fixture of ['v13', 'v17'] as const) {
     const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
     const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
     const taskView = await fetch(`${daemon.url}/api/tasks/legacy-task`, { headers });
-    expect(taskView.status).toBe(400);
-    expect(await taskView.json()).toMatchObject({ code: 'not_found' });
+    expect(taskView.status).toBe(200);
+    expect(await taskView.json()).toMatchObject({ id: 'legacy-task', phase: 'stopped' });
     const tasks = await (await fetch(`${daemon.url}/api/tasks`, { headers })).json() as { id: string }[];
-    expect(tasks.map(task => task.id)).not.toContain('legacy-task');
-    expect(tasks.map(task => task.id)).not.toContain('history-only-task');
+    expect(tasks.map(task => task.id)).toContain('legacy-task');
+    expect(tasks.map(task => task.id)).toContain('history-only-task');
     const historyView = await fetch(`${daemon.url}/api/tasks/history-only-task`, { headers });
-    expect(historyView.status).toBe(400);
-    expect(await historyView.json()).toMatchObject({ code: 'not_found' });
+    expect(historyView.status).toBe(200);
     const configBefore = await (await fetch(`${daemon.url}/api/config`, { headers })).json() as { revision: number };
     const saveResponse = await fetch(`${daemon.url}/api/config`, { method: 'POST', headers, body: JSON.stringify({ expectedRevision: configBefore.revision, document: document(configBefore.revision, true) }) });
     expect(saveResponse.status).toBe(200);
@@ -113,8 +112,8 @@ for (const fixture of ['v13', 'v17'] as const) {
 
     const upgraded = await inspect(dbPath);
     expect(upgraded.version).toBe(SCHEMA_VERSION);
-    expect(upgraded.instance).toBeUndefined();
-    expect(upgraded.cost).toBeUndefined();
+    expect(upgraded.instance).toEqual({ budget: 20_000_000, used: 12_345, unlimited: 0, models_used: '["legacy-model"]' });
+    expect(upgraded.cost).toEqual({ cost: '{"amount":0.001,"currency":"USD"}' });
     expect(upgraded.pauseColumns.sort()).toEqual(['pause_ms', 'pause_since', 'user_wait_ms', 'user_wait_since']);
     expect(upgraded.conversationColumns).toEqual(expect.arrayContaining(['archived_at', 'thinking_level']));
     expect(upgraded.bindingColumns).toEqual(expect.arrayContaining(['model_policy_digest', 'tool_policy_digest']));
@@ -157,7 +156,7 @@ for (const fixture of ['v13', 'v17'] as const) {
     expect(after.newNodes.count).toBeGreaterThan(0);
     // Same file throughout: no delete-and-recreate migration.
     expect((await stat(dbPath)).ino).toBe(inodeBefore);
-    expect(after.instance).toBeUndefined();
+    expect(after.instance).toEqual(upgraded.instance);
     await runtime.close();
     runtime = await openTaskRuntime(runtimeOptions);
     await runtime.host.drive();
@@ -168,9 +167,9 @@ for (const fixture of ['v13', 'v17'] as const) {
     const disk = new TaskStore(dbPath);
     try {
       expect(disk.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      expect(disk.db.prepare("SELECT id FROM tasks WHERE id='legacy-task'").get()).toBeUndefined();
-      expect(disk.db.prepare("SELECT id FROM tasks WHERE id='history-only-task'").get()).toBeUndefined();
-      expect(disk.db.prepare("SELECT task_id FROM graph_revisions WHERE task_id='history-only-task'").all()).toEqual([]);
+      expect(disk.db.prepare("SELECT id FROM tasks WHERE id='legacy-task'").get()).toEqual({id: 'legacy-task'});
+      expect(disk.db.prepare("SELECT id FROM tasks WHERE id='history-only-task'").get()).toEqual({id: 'history-only-task'});
+      expect(disk.db.prepare("SELECT task_id FROM graph_revisions WHERE task_id='history-only-task'").all()).toEqual([{task_id: 'history-only-task'}]);
     } finally { disk.close(); }
   }, 120_000);
 }

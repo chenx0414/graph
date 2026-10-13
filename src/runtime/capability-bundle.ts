@@ -78,7 +78,55 @@ export interface CapabilityOperationOptions {
   hostTools(input: { readRoots: readonly string[] }): ToolDefinition[];
 }
 
+export type FrozenCapabilitySetting =
+  | { kind: 'literal'; value: null | boolean | number }
+  | { kind: 'string'; parts: (string | { credential: string })[] }
+  | { kind: 'array'; items: FrozenCapabilitySetting[] }
+  | { kind: 'object'; properties: Record<string, FrozenCapabilitySetting> };
+
+function freezeSettings(value: unknown, credentials: Record<string, string>): FrozenCapabilitySetting {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return { kind: 'literal', value };
+  if (typeof value === 'string') {
+    const candidates = Object.entries(credentials).filter(([, text]) => text.length > 0).sort((a, b) => b[1].length - a[1].length);
+    const parts: (string | { credential: string })[] = [];
+    let rest = value;
+    while (rest.length) {
+      let match: { index: number; name: string; text: string } | undefined;
+      for (const [name, text] of candidates) {
+        const index = rest.indexOf(text);
+        if (index >= 0 && (!match || index < match.index)) match = { index, name, text };
+      }
+      if (!match) { parts.push(rest); break; }
+      if (match.index) parts.push(rest.slice(0, match.index));
+      parts.push({ credential: match.name });
+      rest = rest.slice(match.index + match.text.length);
+    }
+    return { kind: 'string', parts };
+  }
+  if (Array.isArray(value)) return { kind: 'array', items: value.map(item => freezeSettings(item, credentials)) };
+  if (typeof value === 'object') return { kind: 'object', properties: Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, freezeSettings(item, credentials)])) };
+  throw new Error('Capability setting is not serializable');
+}
+
+/** Rebind the same named credentials while retaining every literal setting. */
+export function restoreCapabilitySettings(value: FrozenCapabilitySetting, credentials: Record<string, string>): unknown {
+  switch (value.kind) {
+    case 'literal': return value.value;
+    case 'string': return value.parts.map(part => {
+      if (typeof part === 'string') return part;
+      if (credentials[part.credential] === undefined) throw new Error(`Frozen capability requires credential ${part.credential}`);
+      return credentials[part.credential];
+    }).join('');
+    case 'array': return value.items.map(item => restoreCapabilitySettings(item, credentials));
+    case 'object': return Object.fromEntries(Object.entries(value.properties).map(([key, item]) => [key, restoreCapabilitySettings(item, credentials)]));
+  }
+}
+
 export interface CapabilityOperation {
+  /** Serializable resolved versions, sources and credential-reference manifests;
+   * function closures and resolved secret values remain with the live operation. */
+  readonly descriptor: { definitionVersion: string | null; facts: readonly ResolvedCapabilityFact[]; settings: FrozenCapabilitySetting };
+
   readonly bundleDigest: string;
   readonly toolPolicyDigest: string;
   readonly runtimePolicyDigest: string;
@@ -175,6 +223,7 @@ export class CapabilityBundleVersion {
 
   async openOperation(options: CapabilityOperationOptions): Promise<CapabilityOperation> {
     let loaded: LoadedCapabilities | undefined;
+    const credentialBindings = this.input.secrets?.() ?? {};
     try {
       loaded = await loadCapabilities({
         catalog: this.input.catalog,
@@ -184,7 +233,7 @@ export class CapabilityBundleVersion {
         gate: options.gate,
         ...(this.input.bootstrap ? { bootstrap: this.input.bootstrap } : {}),
         ...(this.input.mcpDomains?.length ? { mcpDomains: this.input.mcpDomains } : {}),
-        ...(this.input.secrets ? { secrets: this.input.secrets() } : {}),
+        ...(this.input.secrets ? { secrets: credentialBindings } : {}),
         ...(options.grants ? { grants: options.grants } : {}),
         ...(options.readOnly ? { readOnly: true } : {}),
         ...(options.onPermissionRequired ? { onPermissionRequired: options.onPermissionRequired } : {}),
@@ -200,7 +249,7 @@ export class CapabilityBundleVersion {
           ...(fact.path ? { path: fact.path } : {}),
           role: fact.role ?? 'tool',
         })),
-        this.input.secrets ? this.input.secrets() : {},
+        credentialBindings,
       );
       const readRoots = Object.freeze([...new Set([...loaded.readRoots, ...(options.additionalReadRoots ?? [])])]);
       // A bound skill's path only exists in the load facts, so mirror them here as well:
@@ -303,6 +352,7 @@ export class CapabilityBundleVersion {
         ...(serverNames.length ? [MCP_ADAPTER_PROXY_TOOL] : []),
       ])].sort());
       const operation: CapabilityOperation = {
+        descriptor: Object.freeze({ definitionVersion: this.definitionVersion ?? null, facts: Object.freeze(this.facts.map(fact => Object.freeze({ ...fact }))), settings: freezeSettings({ env: loaded.env, mcpAdapterServers: adapterServers }, credentialBindings) }),
         bundleDigest: this.digest,
         toolPolicyDigest,
         runtimePolicyDigest,

@@ -2,7 +2,7 @@ import { openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { appendNodeEntry } from '../../src/core/node-run.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
-import { mkdir, mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
@@ -230,8 +230,10 @@ test('native graph chats keep a session and expose the actual provider prompt in
   expect(second.node.role).toBe('reviewer');
   expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').role).toBe('reviewer');
   expect(server.runtime.nodePrompt(graph.graphId, 'build/worker').recorded?.text).toContain('NODE RUNTIME NEXT');
-  const configs = await readdir(join(root, 'state', 'kernel-worker'));
-  for (const config of configs) expect(await readFile(join(root, 'state', 'kernel-worker', config), 'utf8')).not.toContain('local-test-key');
+  // The host credential authenticates the real requests, but is never model-visible.
+  expect(provider.authorizations).toEqual(['Bearer local-test-key', 'Bearer local-test-key']);
+  expect(JSON.stringify(provider.requests)).not.toContain('local-test-key');
+  expect(JSON.stringify(server.runtime.nodePrompt(graph.graphId, 'build/worker'))).not.toContain('local-test-key');
   expect(second.instance?.used).toBe(100);
   expect(second.instance?.budget).toBe(1500000);
   expect((second.operations as { tokenBudget: { budget: number } }[]).map(item => item.tokenBudget.budget)).toEqual([1000000, 1500000]);
@@ -260,6 +262,7 @@ test('native graph chats keep a session and expose the actual provider prompt in
   await page.locator('[data-node-id="build/worker"]').click();
   await page.getByTestId('node-prompt').locator('summary').click();
   await expect.poll(() => page.getByTestId('node-prompt-sent-text').textContent()).toBe(actual);
+  expect(await page.getByTestId('node-briefing-text').textContent()).not.toContain('local-test-key');
   expect(await page.getByTestId('node-chat-tab').textContent()).toContain('native second reply');
   await expect.poll(() => page.getByTestId('node-overview').textContent()).toContain('预算 1,500,000');
   await expect.poll(() => page.getByTestId('node-overview').textContent()).toContain('用户授权2,000,000');

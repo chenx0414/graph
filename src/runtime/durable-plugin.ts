@@ -54,7 +54,7 @@ export async function openDurablePlugins(request: AgentSessionRequest, options: 
   const runtime = graphNodeRuntime();
   const workspace = await realpath(request.workspace);
   await writeFile(configPath, JSON.stringify({ paths, workspace, systemPrompt: request.systemPrompt ?? '', model: request.model, thinkingLevel: request.thinkingLevel,
-    context: options.context, allowedToolNames: request.piExtensionTools ?? [], servers: request.mcpAdapterServers ?? [] }), { mode: 0o600 });
+    resourcePaths: request.frozenResourcePaths ?? [], context: options.context, allowedToolNames: request.piExtensionTools ?? [], servers: request.mcpAdapterServers ?? [] }), { mode: 0o600 });
   const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; update?: (value: unknown) => void }>();
   const started = Promise.withResolvers<RestrictedProcessControl>();
   const acquired = await acquireRestrictedExecutor();
@@ -65,7 +65,7 @@ export async function openDurablePlugins(request: AgentSessionRequest, options: 
   const exited = acquired.executor.run({
     broker: { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
     cwd: workspace, scratchDir: scratch, executable: runtime.execPath,
-    args: [fileURLToPath(new URL('./durable-plugin-worker.mjs', import.meta.url)), configPath],
+    args: ['--experimental-import-meta-resolve', fileURLToPath(new URL('./durable-plugin-worker.mjs', import.meta.url)), configPath],
     readPaths: [...new Set([...reads, ...request.filesystemAccess === 'host' && request.readOnly ? ['/'] : []])], writePaths: [scratch, ...request.readOnly ? [] : [workspace, ...request.writeRoots ?? []]],
     ...(request.filesystemAccess === 'host' && !request.readOnly ? { filesystem: 'host', unsandboxed: true, protectedPathExceptions: [request.stateDir], protectedReadPathExceptions: extensions } : {}),
     protectedPaths: request.protectedPaths ?? [], denyWrite: request.readOnly ? [workspace] : [], allowGitMetadataWritesAll: request.allowGitMetadataWritesAll ?? false,

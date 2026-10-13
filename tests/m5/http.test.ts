@@ -99,7 +99,7 @@ test('pause over HTTP shows pausing then paused, and answering one question leav
   await post(`/api/tasks/${begun.taskId}/resume`, { requestId: 'resume' });
   await runtime.host.drive();
   const resumed = runtime.nodeRun(begun.taskId, 'work');
-  expect(resumed.operations).toMatchObject([{ state: 'completed', retries_used: 0, resubmits_used: 1 }]);
+  expect(resumed.operations).toMatchObject([{ state: 'completed', retries_used: 0, resubmits_used: 0 }]);
   expect(provider.requests).toHaveLength(3);
   expect(resumed.instance!.used).toBe(150);
   await main.graphControl({ graphId: begun.taskId, action: 'complete' });
