@@ -1,6 +1,6 @@
-# pi-durable 迁移证据与剩余验收
+# pi-durable 迁移与交付证据
 
-截至 2026-10-13，规格见 [main 与 Graph 节点迁移至 pi-durable 1.1.0](../specs/pi-durable-kernel.md)。默认桌面应用已切换；真实 Matt 团队的原 worker 返工及最终提交审查已通过，暂停队列的桌面重启验收仍待完成。以下测试不能替代该验收。
+截至 2026-10-13，规格见 [main 与 Graph 节点迁移至 pi-durable 1.1.0](../specs/pi-durable-kernel.md)。默认桌面应用已切换；真实 Matt 团队的原 worker 返工及最终提交审查已通过，暂停队列的真实桌面重启及恢复一次执行已通过；Graph 已正式完成并交付到目标 main 分支。以下测试不能替代该验收。
 
 ## 最终整合代码的验证
 
@@ -50,6 +50,16 @@
 
 公开 main 回归在修复前实际得到 used=0，修复后得到独立 HTTP 回执中的 50。SIGKILL-before-ACK 表增加响应前中断、最新输入 SDK 完成的案例，恢复及再次重开保持最新答案、50 已知用量、unknown 费用，模型请求不增加。旧恢复 guard 的负控实际以 invalid_reconciliation 失败；新路径仅在已验证 SDK done 回执时恢复，未完成输入的 dispatch 证据仍阻止重放。两轴只读审查均无发现。全量检查 270 文件、1864 项通过。首轮真实 MCP gateway 用例超时，其余 1863 项通过；该文件独立四项通过，随后重跑整条检查全部通过，没有放宽超时或修改断言。
 
-## 交付前仍需完成
+## 暂停队列的真实桌面重启
 
-完成用量修复的全量检查并刷新默认安装包；验证真实默认桌面的暂停队列重启及原 worker 只执行一次，核对可复用模板的已验证模型配置，完成目标分支交付。全部完成前不声明迁移交付。
+默认安装包更新为 ef257dd，正常退出前确认无活动操作，独占 SQLite 备份保存在用户数据 migration-backups。升级启动前后的 worker paused=1、used=746352、reserved=0、durable 会话 5678 和 seq=61 queued 的完整身份、payload 摘要保持一致。随后通过实际 Electron bridge 重启，daemon PID 从 775 变为 3649，startedAt 改变，298 条原 main 消息身份与内容保持；普通浏览器不能替代该证据。
+
+main 明确 resume 后，seq=61 变为 done；仅增加 exec-efb6a88b-5b5c-4cee-abb6-df6171b58140-worker-61，attempt=1、retries_used=0、state=completed、submission_id=NULL，全图 execution 从 18 变为 19。原 worker 用量延续至 873592，reserved=0；没有新的 workflow submission 或正式产物。
+
+本轮生成的可复用 Matt 定义与 task options 将两个审查轴的默认模型设为本轮真实完成审查的独立上游模型；通用组装器没有硬编码账户模型。四节点精确技能绑定、instructions、接口、协议、验收保持。模板与 Electron/数据库重启证据已保存至用户数据 migration-backups/pi-durable-final-acceptance-20261013 私有目录，避免依赖临时目录存续。
+
+## 正式交付
+
+main 在重启探针完成后重新核对三项验收均绑定 06aabdd，ready=true、drained=true，通过正常 graph_control 请求 complete。真实默认桌面与数据库均确认 graph phase=completed；验收项目目标分支 main 的 HEAD 为 06aabdd426101ae007ce64c3af75a8b24988c694，工作树干净。探针实际 Node 检查五项通过，混合分隔示例返回 ["bar","baz","foo"]，未修改任何文件或发布正式产物。
+
+默认应用已运行精确 1.1.0 内核。原 119 个 main 的历史、身份与配置经副本及独占备份审计保留；旧 graph 执行已按批准范围退休。历史未知调用仍保持未知，不承诺任意外部副作用 exactly-once。此次原 worker 返工、动态原图修订、最终独立审查、宿主检查、暂停输入重启与单次恢复执行和目标 Git 交付均有真实证据。
