@@ -77,13 +77,15 @@ test('the published MCP adapter gateway calls its runtime-bound HTTP server insi
   const provider = await openaiServer([]);
   let plugins: Awaited<ReturnType<typeof openDurablePlugins>> | undefined;
   try {
-    plugins = await openDurablePlugins({ binding: { instanceId: 'mcp-owner', nodeId: 'worker', definitionVersion: 'worker@1' }, workspace, stateDir,
+    const request: AgentSessionRequest = { binding: { instanceId: 'mcp-owner', nodeId: 'worker', definitionVersion: 'worker@1' }, workspace, stateDir,
       model: provider.model, stream: () => { throw new Error('Plugins cannot create an independent provider path'); },
       piExtensionPaths: [entry], piExtensionTools: ['mcp'], bundleDigest: 'adapter-2.38.0', toolPolicyDigest: 'mcp-only', runtimePolicyDigest: 'loopback-only',
       readRoots: [join(adapter, '..')], writeRoots: [stateDir], env: { PI_CODING_AGENT_DIR: stateDir }, networkDomains: ['127.0.0.1'],
       mcpAdapterServers: [{ name: 'fixture', definition: { url: `http://127.0.0.1:${address.port}/mcp` } }],
       broker: { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
-    }, { context: { entries: [], branch: [], sessionId: 'durable:1', leafId: null, model: provider.model } });
+    };
+    const context = { entries: [], branch: [], sessionId: 'durable:1', leafId: null, model: provider.model };
+    plugins = await openDurablePlugins(request, { context });
     await plugins.beforePrompt('Call the approved gateway');
     const gateway = plugins.tools.find(tool => tool.name === 'mcp')!;
     expect(gateway).toBeDefined();
@@ -91,5 +93,12 @@ test('the published MCP adapter gateway calls its runtime-bound HTTP server insi
     expect(JSON.stringify(result)).toContain('MCP accepted approved result');
     expect(await readFile(join(workspace, 'mcp-result.txt'), 'utf8')).toBe('frozen gateway effect');
     expect(methods).toContain('initialize'); expect(methods).toContain('tools/call');
+    await plugins.close();
+    plugins = await openDurablePlugins(request, { context });
+    await plugins.beforePrompt('Continue with the same approved gateway after reopening');
+    const reopenedGateway = plugins.tools.find(tool => tool.name === 'mcp')!;
+    await reopenedGateway.execute('gateway-reopened-effect', { server: 'fixture', tool: 'record', args: { text: 'gateway effect after reopening' } }, undefined, undefined, undefined!);
+    expect(await readFile(join(workspace, 'mcp-result.txt'), 'utf8')).toBe('gateway effect after reopening');
+    expect(methods.filter(method => method === 'tools/call')).toHaveLength(2);
   } finally { await plugins?.close(); await provider.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, {recursive:true,force:true}); }
 }, 30_000);

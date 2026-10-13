@@ -8,10 +8,14 @@ import type { MutableModels } from 'pi-ai-v1/models';
 /** Expand-contract bridge: the frozen Graph provider callback remains the
  * owner of auth, credential slots, raw usage evidence and budget admission.
  * Durable owns generation; it never opens an ungated provider channel. */
-export function installDurableModel(models: MutableModels, name: string, request: AgentSessionRequest) {
+export function installDurableModel(models: MutableModels, name: string, request: AgentSessionRequest, stopping: () => boolean = () => false) {
   const stream: StreamFunction = (_model, transcript, options) => {
     const output = new AssistantMessageEventStream();
     void (async () => {
+      if (stopping()) {
+        output.push({ type: 'error', reason: 'aborted', error: { role: 'assistant', api: request.model.api, provider: name, model: request.model.id, content: [], stopReason: 'aborted', errorMessage: 'Turn stopped at the tool boundary', timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } });
+        return;
+      }
       const source = await request.stream(request.model, normalizeContext({ messages: transcript.messages }), options);
       let terminal = false;
       for await (const event of source) {

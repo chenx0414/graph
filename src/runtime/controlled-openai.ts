@@ -441,6 +441,15 @@ export function controlledOpenAIStream(
             // retry re-queues and re-passes the gate after releasing capacity.
             return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
               reservation: model.contextWindow + model.maxTokens,
+              fetchImpl: (url, init) => {
+                // Resolve after the credential slot and the send gate: queued
+                // calls adopt a rotated key, while sent calls keep their bytes.
+                const liveKey = typeof apiKey === 'function' ? apiKey() : apiKey;
+                const headers = new Headers(init?.headers);
+                if (headers.get('authorization') === `Bearer ${key}`) headers.set('authorization', `Bearer ${liveKey}`);
+                if (headers.get('x-api-key') === key) headers.set('x-api-key', liveKey);
+                return fetch(url, { ...init, headers });
+              },
               ...(slot ? { acquireSlot: () => slot.acquire(options?.signal) } : {}),
               onResponse: (id, response, release) => {
                 // Consuming the evidence clone to the end also proves the

@@ -968,6 +968,7 @@ export function createPiAdapter(options: {
           const skillReadPaths = [...new Set([...capabilityOperation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, project.root] })])];
           const session = await transport.open({
             executionId: operation.id,
+            inputRequestId: `${operation.id}:attempt:${operation.attempt}`,
             binding: { instanceId: operation.instanceId!, nodeId: operation.nodeId, definitionVersion },
             // Durable telemetry for every tool call this instance executes, Graph's and Pi's alike.
             // The write is guarded here: a statistics table must never be able to break a turn.

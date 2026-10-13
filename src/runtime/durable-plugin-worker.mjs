@@ -41,9 +41,14 @@ const modelRegistry = new Proxy(Object.freeze({
   getAvailable: () => snapshot?.model ? [readContext('model')] : [],
   getAll: () => snapshot?.model ? [readContext('model')] : [],
 }), { get: (target, name) => Reflect.get(target, name) ?? (() => unsupported(`modelRegistry.${String(name)}`)) });
+// Status text is presentation-only. Headless durable sessions have no terminal
+// footer; support the SDK's headless no-op without enabling interactive APIs.
+const headlessUi = new Proxy(Object.freeze({ theme: undefined, setStatus: () => {} }), {
+  get: (target, name) => Reflect.has(target, name) ? Reflect.get(target, name) : () => unsupported(`ui.${String(name)}`),
+});
 const context = (signal) => ({
   cwd: config.workspace, model: snapshot?.model ?? config.model, mode: 'rpc', hasUI: false,
-  ui: new Proxy({}, { get: (_target, name) => () => unsupported(`ui.${String(name)}`) }),
+  ui: headlessUi,
   sessionManager,
   modelRegistry,
   scopedModels: [], thinkingLevel: config.thinkingLevel, signal,

@@ -1,3 +1,4 @@
+import { createDurableSessionTransport } from '../runtime/durable-session.ts';
 import { explainEdge, explainModule, type ModuleHistoryQuery } from './kernel-explain.ts';
 import { retireLegacyGraphs } from './retire-legacy-graphs.ts';
 import { sendKernelMainMessage, sendKernelNodeMessage } from './kernel-node-messages.ts';
@@ -512,7 +513,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
       });
     }
-    sessionTransport = await options.sessionTransport?.(store);
+    sessionTransport = await (options.sessionTransport ?? (options.models || options.live ? createDurableSessionTransport : undefined))?.(store);
     const fallback = options.models || options.live ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: liveEntries, artifacts,
       ...(sessionTransport ? { transport: sessionTransport } : {}),
