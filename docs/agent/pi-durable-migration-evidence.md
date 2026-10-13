@@ -30,6 +30,14 @@
 
 真实默认桌面后续发现 ui.notify 与 SDK 无终端模式不一致：固定 SDK 的 noOpUIContext 明确将该通知作为空操作。兼容层按同一语义提供通知空操作，仍不提供交互决策。公开 gateway 的 input hook 实际调用该 API，修复前阻止工具执行；修复后真实 gateway、回复、历史重开与 shutdown 均通过；最终干净全检查 270 个文件、1861 项测试通过。实际 Electron bridge 重启已验证 daemon PID/startedAt 改变、原会话所有消息身份和内容保持。
 
+## 真实 Matt 首轮与后续发现
+
+默认桌面中的 main 已实际读取 ask-matt 和 writing-for-agents，通过当前能力库装配四角色可复用团队；节点 instructions 由 main 填写。原图 efb6a88b-5b5c-4cee-abb6-df6171b58140 的 planner 发布精确 plan，worker 读取该版本及冻结 tdd 技能后真实提交。第一轮集成 SHA 为 7633def9653aea30fd766ae45ac22c069ea89c25；Standards、Spec 的真实 submit 引用相同 plan 和 subject，均审查该 SHA。Spec 上游曾返回 429，main 在原图修订中更换后续模型并重试原队列项，保留原身份和用量。宿主 check 回执退出码 0，verifiedCommit 同为该 SHA。
+
+分号规格变更已投递。连续 steering 暴露宿主只等待首次替代输入的问题；公开 main 接口配合真实 HTTP 模型的回归在修复前不能完成最新回复，修复后保留三条用户消息并完成最后回复，相关两文件十项验证通过。已为替代输入加入原执行关联键，并从 SDK 回执恢复最新关联输入。表驱动 SIGKILL 验收确认最新回复完成后、Graph 确认前终止，重开及再次重开均不增加模型请求；移除关联解析时无法恢复最新回复，反证失败。四文件十四项针对性测试、两轴独立复查及全量 270 文件 1863 项检查通过。当前仍需重建安装包并继续分号规格返工验收。原 worker instance 为 24900c0b-8122-4e18-95cd-c6db8711742e，durable 会话为 5678，第一轮累计用量 189754；以这些事实核对后续返工。
+
+独占备份已迁入 Graph 用户数据 migration-backups/pi-durable-20261013T2030，119 份原始历史逐一摘要一致，重新定位后的 manifest 有效。
+
 ## 交付前仍需完成
 
 桌面插件兼容修复完整检查已通过，仍需刷新默认安装包；继续真实默认桌面应用中的可复用 Matt 团队独立审查、原 worker 返工和重启验收。全部完成前不声明迁移交付。

@@ -80,7 +80,7 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
       } else await conversation.configure({ model, instructions, cwd: request.workspace, tools: bridge.tools, extensions: [extension],
         ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}) }, BACKGROUND_CONTEXT);
       const freeze = async (effectiveInstructions: string) => host.freeze(conversation.id, {
-        identity: request.binding.instanceId, executionId: request.executionId ?? '', inputRequestId: request.inputRequestId ?? request.executionId ?? '',
+        identity: request.binding.instanceId, executionId: request.executionId ?? '', ...(restoring?.originalInputRequestId ? { originalInputRequestId: restoring.originalInputRequestId } : {}), inputRequestId: request.inputRequestId ?? request.executionId ?? '',
         preAdmissionInvocationIds: restoring?.preAdmissionInvocationIds ?? (store.db.prepare('SELECT id FROM invocations WHERE operation_id=? AND usage IS NOT NULL').all(request.executionId ?? '') as { id: string }[]).map(call => call.id),
         model: freezeDurableModel(request.model).model, agent: { model, instructions: effectiveInstructions, cwd: request.workspace }, extensionName: extension.name,
         tools: bridge.tools.map(tool => JSON.parse(JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters }))), configuration,
@@ -90,6 +90,7 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
       let closed = false;
       let interrupted = false;
       let continuation: Promise<Submission> | undefined;
+      let acceptingInput = false;
       const pendingContinuation = () => continuation;
       const inspect = (): AgentSessionInspect => ({ binding: request.binding, sessionId: String(conversation.id), sessionFile: `durable:${conversation.id}`,
         model: request.model.id, messages, leafId: null, bundleDigest: request.bundleDigest, toolPolicyDigest: request.toolPolicyDigest,
@@ -114,7 +115,7 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
         inspect,
         async prompt(text, images) {
           checked();
-          interrupted = false; continuation = undefined;
+          interrupted = false; continuation = undefined; acceptingInput = true;
 
           const plugin = await bridge.beforePrompt(text, images);
           if (plugin.systemPrompt !== undefined && plugin.systemPrompt !== request.systemPrompt) await conversation.configure({ instructions: [plugin.systemPrompt, projectPrompt, bridge.skillsPrompt, `<cwd>${request.workspace}</cwd>`].filter(Boolean).join('\n\n') }, BACKGROUND_CONTEXT);
@@ -167,8 +168,14 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
             const admitted = existing ? await host.harness.submission(existing.id, BACKGROUND_CONTEXT) : undefined;
             const input = admitted ?? await conversation.submit({ type: 'input', content: images?.length ? [{ type: 'text', text }, ...images] : text, requestId: request.inputRequestId ?? request.executionId ?? randomUUID(), whenBusy: 'reject' }, BACKGROUND_CONTEXT);
             let result = await input.wait(BACKGROUND_CONTEXT);
-            const replacement = pendingContinuation();
-            if (replacement) result = await (await replacement).wait(BACKGROUND_CONTEXT);
+            let awaitedReplacement: Promise<Submission> | undefined;
+            let replacement = pendingContinuation();
+            while (replacement && replacement !== awaitedReplacement) {
+              awaitedReplacement = replacement;
+              result = await (await replacement).wait(BACKGROUND_CONTEXT);
+              replacement = pendingContinuation();
+            }
+            acceptingInput = false;
             messages = [...(await conversation.context(BACKGROUND_CONTEXT)).messages];
             const last = [...messages].reverse().find(message => typeof message === 'object' && message !== null && 'role' in message && message.role === 'assistant');
             const assistantText = last && typeof last === 'object' && 'content' in last && Array.isArray(last.content)
@@ -183,17 +190,17 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
             }
             return { inspect: inspect(), finalAssistantText: assistantText, stopReason: bridge.stopped ? 'stop' : interrupted && !continuation ? 'aborted' : result.status === 'done' && last && typeof last === 'object' && 'stopReason' in last ? last.stopReason as AssistantMessage['stopReason'] : result.status === 'done' ? 'stop' : 'error',
               ...(result.status === 'done' || bridge.stopped ? {} : { errorMessage: String(result.detail ?? result.reason) }), usage };
-          } finally { await events.stop(); }
+          } finally { acceptingInput = false; await events.stop(); }
         },
         compact,
-        async steer(text) { checked(); await conversation.submit({ type: 'input', content: text, whenBusy: 'steer' }, BACKGROUND_CONTEXT); },
+        async steer(text) { checked(); if (!acceptingInput) throw new Error('The main turn is no longer accepting steering messages'); await conversation.submit({ type: 'input', content: text, requestId: `${restoring?.originalInputRequestId ?? request.inputRequestId ?? request.executionId}:continuation:${randomUUID()}`, whenBusy: 'steer' }, BACKGROUND_CONTEXT); },
         async interrupt(text) {
-          checked(); interrupted = true;
+          checked(); if (!acceptingInput) throw new Error('The main turn is no longer accepting interruption'); interrupted = true;
           const next = text ? Promise.withResolvers<Submission>() : undefined;
           continuation = next?.promise;
           try {
             await conversation.abort(BACKGROUND_CONTEXT);
-            if (next) next.resolve(await conversation.submit({ type: 'input', content: text! }, BACKGROUND_CONTEXT));
+            if (next) next.resolve(await conversation.submit({ type: 'input', content: text!, requestId: `${restoring?.originalInputRequestId ?? request.inputRequestId ?? request.executionId}:continuation:${randomUUID()}` }, BACKGROUND_CONTEXT));
           } catch (error) { next?.reject(error); throw error; }
         },
         async stop() { if (closed) return; bridge.stop(); if (!bridge.runningTools) await conversation.abort(BACKGROUND_CONTEXT); },

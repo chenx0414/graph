@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Harness, configure, createRegistry, defineDoc, type AgentChange, type ConversationId, type Tx, type ToolRegistration } from '@earendil-works/pi-durable';
+import { Harness, configure, createRegistry, defineDoc, type AgentChange, type ConversationId, type Cursor, type Tx, type ToolRegistration } from '@earendil-works/pi-durable';
 import type { MutableModels } from '@earendil-works/pi-ai/models';
 import { openDurableStorage } from './durable-storage.ts';
 import { freezeDurableModel, restoreDurableResources, type freezeDurableResources } from './durable-freeze.ts';
@@ -13,6 +13,7 @@ export type FrozenDurableExecution = {
   identity: string;
   executionId: string;
   inputRequestId: string;
+  originalInputRequestId?: string;
   preAdmissionInvocationIds?: string[];
   model: AgentSessionRequest['model'];
   agent: AgentChange;
@@ -44,6 +45,21 @@ export async function openDurableHost(store: TaskStore, models: MutableModels) {
       if (ready?.request.executionId) { admissions.set(ready.request.executionId, ready); notifyAdmission?.(); }
       const registered = recovered ??= (async () => {
     const frozen = await root.commit(async tx => JSON.parse(JSON.stringify((await tx.doc(Executions)).conversations)) as Record<string, string>, BACKGROUND_CONTEXT);
+    // Steering inputs belong to the same frozen Graph execution. Read their
+    // actual SDK receipts, including a completed answer whose Graph ACK died.
+    for (const [id, encoded] of Object.entries(frozen)) {
+      const snapshot: FrozenDurableExecution = JSON.parse(encoded);
+      const original = snapshot.originalInputRequestId ?? snapshot.inputRequestId;
+      if (!original) continue;
+      let cursor: Cursor | undefined;
+      let latest: string | undefined;
+      do {
+        const page = await storage.scanSubmissions({ conversationId: Number(id) as ConversationId, order: 'descending' }, 100, cursor, BACKGROUND_CONTEXT);
+        latest = page.items.find(item => item.type === 'input' && typeof item.requestId === 'string' && item.requestId.startsWith(original + ':continuation:'))?.requestId;
+        cursor = page.next;
+      } while (!latest && cursor);
+      if (latest) frozen[id] = JSON.stringify({ ...snapshot, originalInputRequestId: original, inputRequestId: latest });
+    }
     const inspection = await harness.inspect(BACKGROUND_CONTEXT);
     const active = new Set(inspection.tasks.map(task => String(task.record.conversationId)));
     for (const [id, encoded] of Object.entries(frozen)) {

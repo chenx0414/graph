@@ -105,21 +105,21 @@ test('hard-killed unsent main admissions keep their original configuration and i
 
 // Different failure boundary: the provider and SDK succeeded but the Graph
 // result was never acknowledged. Recovery must settle rather than call again.
-test('a completed durable main receipt survives death before Graph acknowledgement without another provider call', async () => {
+test.each([false, true])('a completed durable main receipt survives death before Graph acknowledgement without another provider call (steering=%s)', async steering => {
   const root = await mkdtemp(join(tmpdir(), 'graph-durable-before-ack-'));
-  const provider = await openaiServer([{ text: 'Already completed before the crash.' }]);
+  const provider = await openaiServer([...(steering ? [{ tools: [{ id: 'wait-for-clarification', name: 'bash', arguments: JSON.stringify({ command: 'sleep 5' }) }] }] : []), { text: 'Already completed before the crash.' }]);
   let child: ReturnType<typeof fork> | undefined;
   let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
   try {
-    child = fork(fileURLToPath(new URL('../fixtures/durable-main-before-ack.ts', import.meta.url)), [root, provider.model.baseUrl], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    child = fork(fileURLToPath(new URL('../fixtures/durable-main-before-ack.ts', import.meta.url)), [root, provider.model.baseUrl, ...(steering ? ['steer'] : [])], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     let stderr = '';
     child.stderr!.on('data', data => { stderr += data; });
     const completed = await new Promise<{ conversationId: string; taskId: string }>((resolve, reject) => {
-      child!.once('message', message => resolve(JSON.parse(JSON.stringify(message))));
+      child!.on('message', message => { const value = JSON.parse(JSON.stringify(message)); if (value.error) reject(new Error(value.error)); else if (value.stage === 'steer-ready') child!.send('steer'); else if (value.stage === 'completed') resolve(value); });
       child!.once('error', reject);
       child!.once('exit', code => reject(new Error(`Terminal fixture exited ${code}: ${stderr}`)));
     });
-    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(steering ? 2 : 1);
     const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
     for (const instance of await readdir(join(root, 'state', 'instances'))) await rm(join(root, 'state', 'instances', instance, 'durable-frozen-resources'), { recursive: true, force: true });
     const options = {
@@ -133,18 +133,18 @@ test('a completed durable main receipt survives death before Graph acknowledgeme
     runtime = await openTaskRuntime(options);
     await runtime.host.runReady();
     const recovered = await runtime.conversations.view(completed.conversationId);
-    expect(recovered.messages.filter(message => message.role === 'user')).toHaveLength(1);
+    expect(recovered.messages.filter(message => message.role === 'user')).toHaveLength(steering ? 2 : 1);
     expect(recovered.messages.filter(message => message.role === 'assistant').map(message => message.text)).toEqual(['Already completed before the crash.']);
     expect(recovered.questions.filter(question => question.status === 'open')).toEqual([]);
     expect(recovered.master?.used).toBeGreaterThan(0);
-    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(steering ? 2 : 1);
     await runtime.close();
     runtime = await openTaskRuntime(options);
     await runtime.host.runReady();
     const repeated = await runtime.conversations.view(completed.conversationId);
     expect(repeated.messages.map(message => message.id)).toEqual(recovered.messages.map(message => message.id));
     expect(repeated.master?.used).toBe(recovered.master?.used);
-    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(steering ? 2 : 1);
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; }
     await runtime?.close();

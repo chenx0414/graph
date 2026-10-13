@@ -201,3 +201,40 @@ test('an admitted main reads frozen skill bytes and refuses an authorized write 
     expect(JSON.stringify(provider.requests[4])).toContain('LATEST_SKILL_BYTES');
   } finally { await runtime?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
 }, 40000);
+
+test('consecutive public main steering waits for the latest replacement input', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-durable-main-steering-'));
+  const firstStarted = Promise.withResolvers<void>();
+  const secondStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const releaseSecond = Promise.withResolvers<void>();
+  const provider = await openaiServer([
+    { beforeReply: async () => { firstStarted.resolve(); await releaseFirst.promise; }, text: 'Superseded initial answer.' },
+    { beforeReply: async () => { secondStarted.resolve(); await releaseSecond.promise; }, text: 'Superseded first replacement.' },
+    { text: 'Latest replacement completed.' },
+  ]);
+  let runtime: Awaited<ReturnType<typeof openTaskRuntime>> | undefined;
+  try {
+    runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+      models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
+      master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
+    });
+    const created = await runtime.conversations.create({ projectId: 'p', text: 'Original task.', requestId: 'initial' });
+    const drive = runtime.host.runReady();
+    await firstStarted.promise;
+    await runtime.conversations.chat(created.conversationId, { text: 'First clarification.', requestId: 'first-clarification' });
+    expect(await runtime.conversations.steer(created.conversationId, { requestId: 'first-steering' })).toMatchObject({ state: 'steered', steered: 1 });
+    releaseFirst.resolve();
+    await secondStarted.promise;
+    await runtime.conversations.chat(created.conversationId, { text: 'Latest clarification.', requestId: 'latest-clarification' });
+    expect(await runtime.conversations.steer(created.conversationId, { requestId: 'latest-steering' })).toMatchObject({ state: 'steered', steered: 1 });
+    releaseSecond.resolve();
+    await drive;
+    const view = await runtime.conversations.view(created.conversationId);
+    expect(view.messages.filter(message => message.role === 'assistant').map(message => message.text)).toContain('Latest replacement completed.');
+    expect(view.messages.filter(message => message.role === 'user').map(message => message.text)).toEqual(['Original task.', 'First clarification.', 'Latest clarification.']);
+    expect(provider.requests).toHaveLength(3);
+    expect(JSON.stringify(provider.requests[2])).toContain('Latest clarification.');
+    expect(view.questions.filter(question => question.status === 'open')).toEqual([]);
+  } finally { releaseFirst.resolve(); releaseSecond.resolve(); await runtime?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
+}, 30_000);

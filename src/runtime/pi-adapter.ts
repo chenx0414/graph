@@ -214,7 +214,7 @@ export function createPiAdapter(options: {
     if (!persisted) return undefined;
     if (persisted.operation.instanceId !== snapshot.identity) throw new Error('Frozen main operation identity mismatch');
     if (receipt?.type === 'input' && receipt.status === 'done') {
-      const lifecycle = new OperationLifecycle(options.store).resumeDurableAdmission(snapshot.executionId, snapshot.inputRequestId, true, snapshot.preAdmissionInvocationIds);
+      const lifecycle = new OperationLifecycle(options.store).resumeDurableAdmission(snapshot.executionId, snapshot.originalInputRequestId ?? snapshot.inputRequestId, true, snapshot.preAdmissionInvocationIds);
       const policy = snapshot.configuration.policy;
       const model = snapshot.configuration.executionConfiguration?.model;
       if (!model) throw new Error('Completed main execution model configuration is missing');
@@ -231,7 +231,7 @@ export function createPiAdapter(options: {
         },
       };
     }
-    const resumed = new OperationLifecycle(options.store).resumeDurableAdmission(snapshot.executionId, snapshot.inputRequestId, false, snapshot.preAdmissionInvocationIds);
+    const resumed = new OperationLifecycle(options.store).resumeDurableAdmission(snapshot.executionId, snapshot.originalInputRequestId ?? snapshot.inputRequestId, false, snapshot.preAdmissionInvocationIds);
     let request: AgentSessionRequest | undefined;
     const run = await prepareOperation(persisted.operation, snapshot, value => { request = value; }, resumed);
     const result = await run();
