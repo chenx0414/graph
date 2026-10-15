@@ -1,3 +1,4 @@
+import { workerModelOptions } from './worker-model-options.ts';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { Socket } from 'node:net';
@@ -83,12 +84,12 @@ export async function runResidentWorker(configPath: string): Promise<void> {
   const modelPending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   let turnUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
   let unknownUsage = false;
-  const hostStream: import('@earendil-works/pi-agent-core').StreamFn = async (_model, context) => {
+  const hostStream: import('@earendil-works/pi-agent-core').StreamFn = async (_model, context, options) => {
     if (ownerDisconnected) throw new Error('Resident owner disconnected');
     const requestId = `model-${randomUUID()}`;
     const reply = await new Promise<unknown>((resolve, reject) => {
       modelPending.set(requestId, { resolve, reject });
-      notify({ operation: 'model_call', requestId, context });
+      notify({ operation: 'model_call', requestId, context, options: workerModelOptions(options) });
     }) as { frames: AssistantMessageFrame[]; settlement: AssistantMessage; usage?: typeof turnUsage };
     if (!reply.usage) unknownUsage = true;
     else for (const name of ['input', 'output', 'cacheRead', 'cacheWrite', 'total'] as const) turnUsage[name] += reply.usage[name];

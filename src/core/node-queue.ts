@@ -26,12 +26,7 @@ export interface QueueInput {
   text?: string;
   input?: string;
   value?: Json;
-  /**
-   * When present, this input re-sends work for an execution that already
-   * submitted successfully. §7 forbids re-sending the original input after a
-   * successful submit, so the enqueue is refused.
-   */
-  originalOf?: string;
+
 }
 
 export interface RetryBudget {
@@ -67,12 +62,6 @@ export class NodeQueue {
 
   /** Append one input; returns the accepted row. Refuses a re-send after a successful submit. */
   enqueue(input: QueueInput): QueueRow {
-    if (input.originalOf) {
-      const execution = this.kernel.execution(input.originalOf);
-      if (execution?.submissionId) {
-        throw new RuntimeError('invalid_queue', `Execution ${input.originalOf} already submitted; the original input must not be re-sent`);
-      }
-    }
     const payload: Json = input.kind === 'chat'
       ? { text: input.text ?? '' }
       : input.kind === 'control'

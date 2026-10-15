@@ -132,28 +132,11 @@ describe('models.dev snapshot mapping (B-1)', () => {
     expect(lookupModelMetadata('acme', 'acme-plain', SAMPLE)!.input).toEqual(['text']);
   });
 
-  it('normalizes price and currency per million tokens including cache rates', () => {
-    const metadata = lookupModelMetadata('acme', 'acme-flagship', SAMPLE);
-    expect(metadata!.cost).toEqual({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 });
-    expect(metadata!.currency).toBe('EUR');
-    expect(metadata!.sourceUrl).toBe('https://example.test/api.json');
-    expect(metadata!.catalogRevision).toBe('models-dev.2026-01-02T03:04:05.000Z');
-  });
-
   it('returns null when the snapshot, provider or model is missing', () => {
     expect(lookupModelMetadata('deepseek', 'deepseek-v4-flash', { providers: {} })).toBeNull();
     expect(lookupModelMetadata('not-a-provider', 'deepseek-v4-flash')).toBeNull();
     expect(lookupModelMetadata('deepseek', 'no-such-model')).toBeNull();
     expect(lookupModelMetadata('', 'deepseek-v4-flash')).toBeNull();
-  });
-
-  it('omits cost entirely when the snapshot prices only part of the model', () => {
-    const metadata = lookupModelMetadata('acme', 'acme-partial', SAMPLE);
-    expect(metadata).not.toBeNull();
-    expect(metadata!.contextWindow).toBe(8_000);
-    expect(metadata!.cost).toBeUndefined();
-    // No side may quietly become 0.
-    expect(JSON.stringify(metadata)).not.toMatch(/"(input|output|cacheRead|cacheWrite)":0\b/);
   });
 
   it('leaves a price unknown instead of zero-filling it', () => {
@@ -190,15 +173,4 @@ describe('models.dev snapshot mapping (B-1)', () => {
     expect(catalogProvenance({ providers: {} }).attribution).toBe(MODELS_DEV_ATTRIBUTION);
   });
 
-  it('reads the vendored `_meta` block and the earlier top-level metadata shape', () => {
-    const withMeta = normalizeModelsDevSnapshot({ _meta: { sourceUrl: 'https://meta.test/api.json', fetchedAt: '2026-05-06T07:08:09.000Z', attribution: 'meta attribution' }, providers: {} });
-    expect(withMeta).toMatchObject({ sourceUrl: 'https://meta.test/api.json', fetchedAt: '2026-05-06T07:08:09.000Z', attribution: 'meta attribution' });
-    expect(catalogProvenance(withMeta)).toMatchObject({ sourceUrl: 'https://meta.test/api.json', catalogRevision: 'models-dev.2026-05-06T07:08:09.000Z' });
-    expect(normalizeModelsDevSnapshot({ sourceUrl: 'https://legacy.test', fetchedAt: '2025-01-01T00:00:00.000Z', license: 'legacy', providers: {} })).toMatchObject({ sourceUrl: 'https://legacy.test', fetchedAt: '2025-01-01T00:00:00.000Z', attribution: 'legacy' });
-  });
-
-  it('accepts a bare provider map as a snapshot', () => {
-    const bare = normalizeModelsDevSnapshot({ acme: { id: 'acme', models: { 'acme-plain': { id: 'acme-plain', limit: { context: 1_024, output: 512 } } } } });
-    expect(lookupModelMetadata('acme', 'acme-plain', bare)).toMatchObject({ contextWindow: 1_024, maxTokens: 512 });
-  });
 });

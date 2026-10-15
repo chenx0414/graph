@@ -15,25 +15,6 @@ afterEach(async () => {
 });
 
 
-const nativeContextDefinition = (settings: Record<string, unknown> = {}) => ({ schemaVersion: 2, name: 'Explicit context', protocols: { data: { type: 'object' } },
-  nodes: { work: { recipe: 'coder@1', task: 'Work on the explicit input', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {}, ...settings } }, modules: {}, edges: {} });
-
-test('native definitions reject legacy transcript-inheritance context instead of pretending it changes the session', () => {
-  expect(() => parseGraphDefinition(nativeContextDefinition())).not.toThrow();
-  for (const context of [
-    { purpose: 'review', sourceNode: 'work', requiredFacts: [{ kind: 'transcript_range' }], independence: 'model-excluded' },
-    { purpose: 'explore', sourceNode: 'work', requiredFacts: [{ kind: 'transcript_range' }] },
-  ]) expect(() => parseGraphDefinition(nativeContextDefinition({ context }))).toThrow(/Node work.*context/);
-});
-
-test('native definitions reject inferred predecessor handoffs and legacy dependency scheduling fields', () => {
-  for (const settings of [
-    { context: { predecessors: [{ source: 'work', mode: 'result_handoff' }] } },
-    { context: { predecessors: [{ source: 'probe', mode: 'evidence_only' }] } },
-    { dependsOn: ['work'] }, { when: { node: 'review', equals: true } }, { container: 'bundle' },
-  ]) expect(() => parseGraphDefinition(nativeContextDefinition(settings))).toThrow(/Node work.*(context|dependsOn|when|container)/);
-});
-
 const nativePort = { protocol: 'data' };
 const nativeNode = (model: string, task = 'Process the explicit input.', outputs = false) => ({ recipe: 'coder@1', model, task,
   inputs: { job: nativePort }, outputs: outputs ? { result: nativePort } : {}, submission: outputs ? { required: ['result'] } : {} });

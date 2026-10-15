@@ -110,9 +110,3 @@ export function composerHistoryDown(state: ComposerHistoryState): ComposerHistor
     value: state.entries[state.entries.length - 1 - cursor]!,
   };
 }
-
-/** The prompt the cursor points at, for tests and hints. */
-export function composerHistoryValue(state: ComposerHistoryState): string | null {
-  if (state.cursor === null) return null;
-  return state.entries[state.entries.length - 1 - state.cursor] ?? null;
-}

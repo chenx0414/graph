@@ -486,17 +486,6 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
   return definition;
 }
 
-/** True when a protocol id is referenced anywhere in the given definition. */
-export function protocolReferenced(definition: GraphDefinition, protocolId: string): boolean {
-  if (definition.protocols[protocolId]) return true;
-  const refs: (ProtocolRef | undefined)[] = [];
-  for (const node of Object.values(definition.nodes)) refs.push(...Object.values(node.inputs ?? {}), ...Object.values(node.outputs ?? {}));
-  for (const module of Object.values(definition.modules)) refs.push(...Object.values(module.inputs ?? {}), ...Object.values(module.outputs ?? {}));
-  for (const io of Object.values(definition.inputs)) refs.push({ protocol: io.protocol, ...(io.version === undefined ? {} : { version: io.version }) });
-  for (const io of Object.values(definition.outputs)) refs.push({ protocol: io.protocol, ...(io.version === undefined ? {} : { version: io.version }) });
-  return refs.some(ref => ref?.protocol === protocolId);
-}
-
 const protocolAjv = new Ajv({ strict: false, strictSchema: true, validateFormats: false, addUsedSchema: false });
 protocolAjv.addKeyword({ keyword: 'version', schemaType: 'number', valid: true });
 const protocolValidators = new Map<string, ValidateFunction>();

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import './preferences.css';
 
 /** All preference keys share this prefix so they are easy to spot in storage. */
-export const PREFERENCES_PREFIX = 'graph-pref-';
+const PREFERENCES_PREFIX = 'graph-pref-';
 
 export interface Preferences {
   /** Render user and agent messages as Markdown. Default on. */
@@ -21,9 +21,9 @@ export interface Preferences {
   candidatePrompt: boolean;
 }
 
-export type PreferenceName = keyof Preferences;
+type PreferenceName = keyof Preferences;
 
-export const DEFAULT_PREFERENCES: Preferences = {
+const DEFAULT_PREFERENCES: Preferences = {
   markdownRendering: true,
   candidatePrompt: false,
 };
@@ -34,14 +34,14 @@ const STORAGE_KEYS: Record<PreferenceName, string> = {
 };
 
 /** Dispatched on `window` after a preference changes in this tab. */
-export const PREFERENCES_EVENT = 'graph:preferences-changed';
+const PREFERENCES_EVENT = 'graph:preferences-changed';
 
 export interface PreferenceStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }
 
-export function preferenceKey(name: PreferenceName): string {
+function preferenceKey(name: PreferenceName): string {
   return STORAGE_KEYS[name];
 }
 

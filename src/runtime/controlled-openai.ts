@@ -268,18 +268,9 @@ export interface StreamSlot {
   acquire(signal?: AbortSignal): Promise<() => void>;
 }
 
-export interface AccountUsageDeltaInput {
-  model: Model<ModelApi>;
-  context: TranscriptContext;
-  /** A fresh clone owned by the callback; it may be consumed. */
-  response: Response;
-}
-
 export interface ControlledStreamUsageOptions {
-  /** Estimate a successful response when neither per-request nor account-level usage exists. */
+  /** Estimate a successful response when per-request usage is absent. */
   estimateMissing?: boolean;
-  /** Provider adapter hook. It must return the account-level delta attributable to this send. */
-  accountUsageDelta?: (input: AccountUsageDeltaInput) => Promise<TokenUsage | null> | TokenUsage | null;
   /**
    * Reports the exact system prompt one send carries. The console shows what the model really
    * received, so this must be the string the transport sends — never a re-render of the same facts.
@@ -406,8 +397,8 @@ export function controlledOpenAIStream(
         if (model.api !== api) throw new Error('Unverified model transport');
         let sent = false;
         let reported = false;
-        // Resolve the credential at actual send time so a key rotation that
-        // happened while this request waited applies to unsent calls.
+        // The SDK needs an initial credential to construct its request. The send callback
+        // below refreshes host-owned auth after any credential-slot wait.
         const key = typeof apiKey === 'function' ? apiKey() : apiKey;
         const openCodeGo = model.provider === 'opencode-go' || model.baseUrl.includes('opencode.ai/zen/go');
         const headers = {
@@ -442,13 +433,22 @@ export function controlledOpenAIStream(
             return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
               reservation: model.contextWindow + model.maxTokens,
               ...(slot ? { acquireSlot: () => slot.acquire(options?.signal) } : {}),
+              fetchImpl: (request, requestInit) => {
+                // SDK request headers are built before the credential queue grants a slot.
+                // Refresh the host-owned auth at the actual send; explicit gateway auth stays intact.
+                const liveKey = typeof apiKey === 'function' ? apiKey() : apiKey;
+                const auth = new Headers(requestInit?.headers);
+                const explicitAuth = new Headers(headers);
+                if (!explicitAuth.has('authorization') && auth.get('authorization') === `Bearer ${key}`) auth.set('authorization', `Bearer ${liveKey}`);
+                if (!explicitAuth.has('x-api-key') && auth.get('x-api-key') === key) auth.set('x-api-key', liveKey);
+                return fetch(request, { ...requestInit, headers: auth });
+              },
               onResponse: (id, response, release) => {
                 // Consuming the evidence clone to the end also proves the
                 // provider finished sending, so it can release the slot too.
                 // Optional clones are created before the first await: the response
                 // wrapper locks the original body immediately after this callback.
                 const providerEvidence = response.clone();
-                const accountEvidence = usageOptions.accountUsageDelta ? response.clone() : undefined;
                 const estimateEvidence = usageOptions.estimateMissing ? response.clone() : undefined;
                 const discard = (evidence: Response | undefined) => {
                   if (!evidence) return;
@@ -458,29 +458,9 @@ export function controlledOpenAIStream(
                   try {
                     const authoritative = await readUsage(providerEvidence, api);
                     if (authoritative) {
-                      discard(accountEvidence);
                       discard(estimateEvidence);
                       broker.settle(id, authoritative);
                       return;
-                    }
-                    if (usageOptions.accountUsageDelta && accountEvidence) {
-                      let delta: TokenUsage | null = null;
-                      try {
-                        delta = await usageOptions.accountUsageDelta({
-                          model: model as Model<ModelApi>,
-                          context,
-                          response: accountEvidence,
-                        });
-                      } catch {
-                        delta = null;
-                      } finally {
-                        discard(accountEvidence);
-                      }
-                      if (delta) {
-                        discard(estimateEvidence);
-                        broker.settle(id, { ...delta, usageSource: 'account_delta' });
-                        return;
-                      }
                     }
                     if (usageOptions.estimateMissing && estimateEvidence) {
                       const estimated = await estimateMissingUsage(estimateEvidence, api, context);
@@ -491,7 +471,6 @@ export function controlledOpenAIStream(
                     }
                     broker.settle(id, null);
                   } catch {
-                    discard(accountEvidence);
                     discard(estimateEvidence);
                     broker.settle(id, null);
                   } finally {

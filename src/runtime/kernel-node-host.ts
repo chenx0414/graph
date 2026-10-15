@@ -56,6 +56,8 @@ export interface NodeSessionOptions {
   /** The revision the node runs at; the recipe is read from it, not from mutable state. */
   revisionVersion: number;
   workspace: string;
+  /** The bound project remains a skill source when the node works in a subdirectory or worktree. */
+  projectRoot?: string;
   /** Where per-node session directories live. */
   instancesDir: string;
   /** The gate the capability layer reports permission requests through. */
@@ -93,6 +95,7 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
     // Review is a recipe responsibility, independent of node names or task prose.
     action, runtime: 'node',
     workspace: options.workspace,
+    ...(options.projectRoot ? { skillProjectRoot: options.projectRoot } : {}),
     ...(options.library ? { library: options.library } : {}),
   });
 

@@ -19,7 +19,7 @@ import {
   redoComposer,
   undoComposer,
 } from './chat-undo.ts';
-import { clampComposerHeight, composerPrimaryState } from './composer-state.ts';
+import { composerPrimaryState } from './composer-state.ts';
 import {
   addComposerAttachment,
   attachmentSize,

@@ -35,7 +35,7 @@ import { ModelsPage, Settings } from './Settings.tsx';
 import { UsagePage } from './Usage.tsx';
 import { ToolStatsPage } from './ToolStats.tsx';
 import { ResourceLibrary as CapabilityResourceLibrary } from './ResourceLibrary.tsx';
-import { buildTimeline, formatTokens, openQuestionTotal, summarizeUsage, type EventRow } from './insights.ts';
+import { formatTokens, openQuestionTotal } from './insights.ts';
 import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
 import type { CapabilityRecord } from '../catalog/catalog.ts';
 import type { AgentCombination, AgentCombinationView } from '../catalog/agent-combinations.ts';

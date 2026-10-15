@@ -56,6 +56,7 @@ import { modelTier, mergeCosts, sumCosts, type ModelEntry } from '../catalog/mod
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
+import { checkedOutBranch } from '../git/git.ts';
 import { invocationRows } from '../runtime/task-gate.ts';
 import { usageSourceOf } from '../runtime/call-broker.ts';
 import { createModelScheduler, type ModelScheduler } from '../runtime/model-scheduler.ts';
@@ -956,7 +957,9 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     },
     async projects() {
       ensureOpen();
-      const withPreparation = <T extends { id: string }>(project: T) => ({ ...project, preparation: git.preparation(project.id) });
+      const withPreparation = <T extends { id: string; root: string }>(project: T) => ({
+        ...project, branch: checkedOutBranch(project.root) ?? null, preparation: git.preparation(project.id),
+      });
       const configured = configuredProjects();
       if (configured !== undefined) {
         return configured.map(project => withPreparation({ id: project.id, root: resolve(project.root), grants: [...new Set(project.grants ?? [])].sort() }));

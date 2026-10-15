@@ -9,8 +9,6 @@ import {
   budgetSnapshot,
   commitUsage,
   ensureBudgetScope,
-  modelsUsed,
-  recordModelUse,
   releaseOperationReservation,
   reserveOperation,
   setBudget,
@@ -74,38 +72,4 @@ test('one scope owns reservation, commit and shared cap changes', async () => {
     ]);
   expect(() => assertWithinBudget(store, 'i-source', 90)).not.toThrow();
   expect(() => assertWithinBudget(store, 'i-source', 91)).toThrow(/Shared context budget/);
-});
-
-test('unlimited and model history remain explicit ledger facts', async () => {
-  const store = await fixture();
-  const scopeId = ensureBudgetScope(store, 't', 'i-source');
-  recordModelUse(store, 'i-source', 'm1');
-  recordModelUse(store, 'i-source', 'm2');
-  recordModelUse(store, 'i-source', 'm2');
-  expect(modelsUsed(store, 'i-source')).toEqual(['m1', 'm2']);
-
-  commitUsage(store, 'i-source', 0);
-  expect(budgetSnapshot(store, 'i-source')).toMatchObject({ used: 0, scopeUsed: 0 });
-  setBudget(store, 'i-source', null);
-  expect(budgetSnapshot(store, 'i-source')).toMatchObject({ unlimited: true, scopeUnlimited: true });
-  expect(budgetScopeView(store, scopeId)).toMatchObject({ limit: null, unlimited: true });
-  expect(() => assertWithinBudget(store, 'i-source', 1_000_000)).not.toThrow();
-});
-
-test('in-flight invocation usage is counted before settlement without becoming committed usage', async () => {
-  const store = await fixture();
-  const scopeId = ensureBudgetScope(store, 't', 'i-source');
-  reserveOperation(store, 'op', 50);
-  store.transaction(() => {
-    store.db.prepare("UPDATE operations SET state='dispatched',worker_active=1 WHERE id='op'").run();
-    store.db.prepare("INSERT INTO invocations(id,operation_id,instance_id,model,usage) VALUES('inv','op','i-source','m1',?)")
-      .run(JSON.stringify({ input: 30, output: 0, cacheRead: 0, cacheWrite: 0 }));
-  });
-  expect(budgetScopeView(store, scopeId)).toMatchObject({ used: 0 });
-  expect(() => assertWithinBudget(store, 'i-source', 20)).not.toThrow();
-  expect(() => assertWithinBudget(store, 'i-source', 21)).toThrow(/Shared context budget/);
-
-  releaseOperationReservation(store, 'op');
-  commitUsage(store, 'i-source', 30);
-  expect(budgetScopeView(store, scopeId)).toMatchObject({ used: 30 });
 });

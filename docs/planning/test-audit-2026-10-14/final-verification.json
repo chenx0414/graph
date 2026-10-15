@@ -1,0 +1,35 @@
+{
+  "baseline": {
+    "revision": "463fa2ca61157d10e4617c208a4684b1cd9744c9",
+    "files": 271,
+    "tests": 1852
+  },
+  "final": {
+    "files": 263,
+    "tests": 1474,
+    "passed": 1474,
+    "failed": 0,
+    "pending": 0,
+    "success": true
+  },
+  "netRemoved": 378,
+  "reductionPercent": 20.41036717062635,
+  "verification": {
+    "command": "GRAPH_UPDATE_BASELINE=1 node --run check",
+    "exitCode": 0,
+    "testSeconds": 229.67,
+    "acceptanceEvidence": "unchanged",
+    "staticReview": "no actionable correctness or E2E-preservation findings"
+  },
+  "scope": "Latest active goal: remove at least20% low-value unit/integration tests; preserve existing E2E. Earlier2%/all-E2E scope retired.",
+  "precommitVerification": {
+    "clientDate": "2026-10-16",
+    "command": "node --run check",
+    "exitCode": 0,
+    "files": 263,
+    "passed": 1474,
+    "testSeconds": 241.18,
+    "baseline": "matches",
+    "acceptanceEvidence": "unchanged"
+  }
+}

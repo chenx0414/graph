@@ -26,6 +26,7 @@ export function sanitizeConfig(config: GraphConfig, env: Record<string, string |
       secretRef: credential.secretRef,
       configured: Boolean(env[credential.secretRef]?.trim()),
       ...(credential.displayName ? { displayName: credential.displayName } : {}),
+      ...(credential.platform ? { platform: credential.platform } : {}),
       ...(credential.sharedLimitGroupId ? { sharedLimitGroupId: credential.sharedLimitGroupId } : {}),
     }])),
     limits: config.limits,

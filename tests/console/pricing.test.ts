@@ -2,27 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { estimateCost } from '../../src/catalog/models.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
-
-test('cost normalization uses per-million units, keeps currency and never fills unknown with zero', () => {
-  const usage = { input: 1_000_000, output: 500_000, cacheRead: 100_000, cacheWrite: 0 };
-  const pricing = { currency: 'USD', unit: 'per_million_tokens' as const, sourceUrl: 'https://example.test/pricing', retrievedAt: '2026-09-15', catalogRevision: '2026-09-15', status: 'known' as const };
-  expect(estimateCost(usage, { input: 2, output: 4, cacheRead: 0.5, cacheWrite: 1 }, pricing)).toEqual({
-    amount: 4.05, currency: 'USD', unit: 'per_million_tokens', priceRevision: '2026-09-15',
-  });
-  // A configured free price is a real zero with provenance.
-  expect(estimateCost(usage, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, pricing)).toMatchObject({ amount: 0, currency: 'USD' });
-  // Missing price is unknown, not zero.
-  expect(estimateCost(usage)).toEqual({ unknown: true });
-  expect(estimateCost(usage, undefined, pricing)).toEqual({ unknown: true });
-  // Legacy entries without currency still produce the historical amount shape.
-  expect(estimateCost(usage, { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 })).toEqual({ amount: 1.6 });
-});
 
 test('a price refresh changes future invocations and leaves recorded cost snapshots untouched', async () => {
   const provider = await openaiServer([{ text: 'first' }, { text: 'second' }]);

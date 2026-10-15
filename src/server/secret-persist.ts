@@ -21,7 +21,6 @@ export interface SecretPersist {
   /** The desktop stored (or deleted) the ref; nothing is pending for it. */
   confirmed(ref: string): void;
   list(): SecretPersistRequest[];
-  refs(): string[];
 }
 
 export function createSecretPersist(): SecretPersist {
@@ -30,6 +29,5 @@ export function createSecretPersist(): SecretPersist {
     mark(ref, value) { pending.set(ref, value); },
     confirmed(ref) { pending.delete(ref); },
     list: () => [...pending].map(([ref, value]) => ({ ref, value })),
-    refs: () => [...pending.keys()],
   };
 }

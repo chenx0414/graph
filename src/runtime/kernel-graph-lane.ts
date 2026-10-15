@@ -1,3 +1,5 @@
+import { nativeSkillDirs } from './agent-skills.ts';
+import { workerModelOptions } from './worker-model-options.ts';
 import { kernelToolGate } from './kernel-tool-gate.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { compactionSettings } from './compaction.ts';
@@ -228,6 +230,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       nodeId,
       revisionVersion: revision.version,
       workspace,
+      ...(options.workspaceFor(graphId) ? { projectRoot: options.workspaceFor(graphId)! } : {}),
       bindings: {
         ...(retrieval ? { fetch: (url: string, signal?: AbortSignal) => retrieval.fetch(url, signal) } : {}),
         ...(options.git && options.kernel.store.task(graphId).integration_branch && location?.base === 'worktree' && role !== 'reviewer' ? {
@@ -408,7 +411,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           } as never,
         }],
         nativeTools: [...(session.operation?.nativeTools ?? [])],
-        skillPaths: [...(session.operation?.skillPaths ?? [])],
+        skillPaths: [...new Set([...(session.operation?.skillPaths ?? []),
+          ...nativeSkillDirs({ cwds: [workspace, options.workspaceFor(graphId)] })])],
         ...(session.operation?.skillFolder ? { skillFolder: session.operation.skillFolder } : {}),
         piExtensionPaths: [...(session.operation?.piExtensionPaths ?? [])],
         piExtensionTools: [...(session.operation?.piExtensionTools ?? [])],
@@ -430,7 +434,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       if (cached && hostConfigs.get(key) === signature) return cached;
       if (cached) await cached.stop();
       await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
-      const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId)}.json`);
+      const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId).replaceAll('*', '%2A')}.json`);
       const session = sessions.get(key);
       if (!session) throw new Error('Resident host has no prepared session');
       const workspace = session.environment!.workspace;
@@ -448,7 +452,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         cwd: workspace,
         configPath,
         config: config as never,
-        onModelCall: async (raw, hostSignal) => {
+        onModelCall: async (raw, hostSignal, streamOptions) => {
           const credential = options.credentialFor(model);
           if (!credential) throw new Error('Bound model credential unavailable');
           const context = raw as Context;
@@ -508,7 +512,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
             onSend: prompt => options.kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)')
               .run(graphId, nodeId, (options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined)?.id ?? null,
                 prompt.systemPrompt ?? '', prompt.toolDeclarations ?? '[]', Date.now()),
-          })(toPiModel(model), normalizeContext(context), { signal: abort.signal });
+          })(toPiModel(model), normalizeContext(context), { ...workerModelOptions(streamOptions), signal: abort.signal });
           const frames = await encodeAssistantStream(stream);
           const settlement = await stream.result();
           // Provider SDKs wrap gate refusals as connection errors. Preserve the

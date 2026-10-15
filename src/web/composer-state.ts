@@ -5,28 +5,7 @@
  * every rule here can be verified without a browser, a port or a renderer.
  */
 
-export const COMPOSER_MAX_HEIGHT = 180;
-export const COMPOSER_LINE_HEIGHT = 20;
 export const COMPOSER_DRAFT_PREFIX = 'graph.conversation.composer.';
-
-/* ------------------------------------------------------------------ *
- * ① Adaptive input height
- * ------------------------------------------------------------------ */
-
-/** Clamp a measured content height to the composer's maximum. */
-export function clampComposerHeight(contentHeight: number, maxHeight = COMPOSER_MAX_HEIGHT) {
-  const content = Number.isFinite(contentHeight) ? Math.max(0, contentHeight) : 0;
-  return { height: Math.min(content, maxHeight), scrollable: content > maxHeight };
-}
-
-/** Height for a number of content lines, capped with a scroll flag. */
-export function composerTextareaHeight(
-  lineCount: number,
-  options: { maxHeight?: number; lineHeight?: number } = {},
-) {
-  const lines = Math.max(1, Math.floor(Number.isFinite(lineCount) ? lineCount : 1));
-  return clampComposerHeight(lines * (options.lineHeight ?? COMPOSER_LINE_HEIGHT), options.maxHeight ?? COMPOSER_MAX_HEIGHT);
-}
 
 /* ------------------------------------------------------------------ *
  * ② Per-conversation draft persistence

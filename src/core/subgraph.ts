@@ -88,6 +88,3 @@ export function expandSubgraph(input: ExpandInput): ExpandedSubgraph {
     wiring: { inputs: { ...(input.inputWiring ?? {}) }, outputs: { ...(input.outputWiring ?? {}) } },
   };
 }
-
-/** A marker recording that a parent definition contains expanded subgraph instances. */
-export const SUBGRAPH_MARKER = 'subgraphs';

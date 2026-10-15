@@ -244,11 +244,6 @@ export function rejectionNotices(results: readonly AttachmentResult[]): string[]
   return notices;
 }
 
-/** Join a batch of notices for a single-line fallback such as a toast. */
-export function noticeText(results: readonly AttachmentResult[]): string {
-  return rejectionNotices(results).join('；');
-}
-
 export function addComposerAttachment(state: readonly ChatAttachment[], attachment: ChatAttachment): ChatAttachment[] {
   if (state.some(item => item.name === attachment.name && item.size === attachment.size)) return [...state];
   return [...state, attachment];
@@ -256,11 +251,6 @@ export function addComposerAttachment(state: readonly ChatAttachment[], attachme
 
 export function removeComposerAttachment(state: readonly ChatAttachment[], target: { name: string; size: number }): ChatAttachment[] {
   return state.filter(item => !(item.name === target.name && item.size === target.size));
-}
-
-/** Sending clears the chips; attachments are never written to the draft. */
-export function clearComposerAttachments(): ChatAttachment[] {
-  return [];
 }
 
 /** Render raster attachments independently of the Markdown display preference. */

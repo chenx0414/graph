@@ -1,5 +1,5 @@
 /** Pure desktop-app helpers; the Electron glue in main.mjs stays thin. */
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 export interface AppPaths {
   root: string;
@@ -125,28 +125,6 @@ export function parseBannerAddress(text: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** Execute mode needs at least one model whose credential resolves; models
- * with missing credentials stay disabled instead of forcing view-only. */
-export function resolveDaemonMode(
-  config: unknown,
-  env: Record<string, string | undefined>,
-  secrets: Record<string, string>,
-): 'view' | 'execute' {
-  if (!config || typeof config !== 'object') return 'view';
-  const entries = (config as { models?: { entries?: unknown } }).models?.entries;
-  if (!Array.isArray(entries) || entries.length === 0) return 'view';
-  const credentials = (config as { credentials?: unknown }).credentials;
-  if (!credentials || typeof credentials !== 'object') return 'view';
-  for (const model of entries) {
-    const credentialId = (model as { credentialId?: unknown } | null)?.credentialId;
-    if (typeof credentialId !== 'string' || credentialId.length === 0) continue;
-    const ref = (credentials as Record<string, { secretRef?: unknown }>)[credentialId]?.secretRef;
-    if (typeof ref !== 'string' || ref.length === 0) continue;
-    if (env[ref] !== undefined || secrets[ref] !== undefined) return 'execute';
-  }
-  return 'view';
 }
 
 export interface SecretCodec {
@@ -333,10 +311,6 @@ export function absolutePaths(paths: AppPaths): AppPaths {
     serverEntry: ensure(paths.serverEntry),
     webDir: ensure(paths.webDir),
   };
-}
-
-export function configDir(paths: AppPaths): string {
-  return dirname(paths.configPath);
 }
 
 /** The config store only exists when the daemon is started with a config

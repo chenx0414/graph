@@ -25,13 +25,12 @@ const BASELINE_PATH = resolve(here, '../tests/suite-baseline.json');
 const REPORT_PATH = resolve(here, '../tests/.suite-report.json');
 
 /**
- * Compare the current run against the baseline. Pure, so the guard's own rules are
- * testable without running the suite (tests/m8/test-baseline-guard.test.ts).
+ * Compare the current run against the baseline.
  *
  * Returns { ok, write, message }: `ok` false means the gate must fail; `write` true
  * means the baseline should be updated to `current`.
  */
-export function compareBaseline(baseline, current, update = false) {
+function compareBaseline(baseline, current, update = false) {
   const malformed = baseline !== null
     && (typeof baseline !== 'object'
       || !Number.isInteger(baseline.files) || baseline.files < 0
@@ -74,7 +73,7 @@ export function compareBaseline(baseline, current, update = false) {
 }
 
 /** Read the counts vitest wrote with its json reporter. */
-export function readRunReport(path = REPORT_PATH) {
+function readRunReport(path = REPORT_PATH) {
   if (!existsSync(path)) {
     throw new Error(`No suite report at ${path}. The gate must run the suite with the json reporter (see package.json "test:report").`);
   }

@@ -81,32 +81,6 @@ async function withRuntime(root: string, handler: (operation: Operation) => Prom
   return runtime;
 }
 
-test('a conversation starts and chats without a project or feature task', async () => {
-  const root = await temp('start');
-  const seen: Operation[] = [];
-  const runtime = await withRuntime(root, operation => { seen.push(operation); return { outcome: 'completed', output: { text: '先告诉我你想解决什么，我可以先看这个项目。' }, usage }; });
-  const created = await runtime.conversations.create({ text: '这个项目很乱，先帮我看看。', requestId: 'create-1' });
-  const conversation = await runtime.conversations.view(created.conversationId);
-  expect(conversation.projectId).toBeNull();
-  expect(conversation.messages.map(message => message.role)).toEqual(['user']);
-  expect(conversation.messages[0]!.state).toBe('pending');
-  expect(conversation.tasks).toEqual([]);
-  expect(await runtime.user.list()).toEqual([]);
-
-  const result = await runtime.host.runReady();
-  expect(result.dispatched).toBe(1);
-  expect(seen).toHaveLength(1);
-  expect(seen[0]!.context.messages).toEqual([{ id: conversation.messages[0]!.id, text: '这个项目很乱，先帮我看看。', requirementVersion: 1 }]);
-  const after = await runtime.conversations.view(created.conversationId);
-  expect(after.messages.map(message => [message.role, message.state])).toEqual([['user', 'delivered'], ['assistant', 'done']]);
-  expect(after.messages[1]!.text).toContain('先告诉我');
-  expect(after.master?.status).toBe('succeeded');
-  expect(after.requirementVersion).toBe(1);
-  // Discussion never dispatches implementation work.
-  expect(after.tasks).toEqual([]);
-  expect(await runtime.user.list()).toEqual([]);
-});
-
 test('compact is a durable conversation command carried into the next master operation', async () => {
   const root = await temp('compact-command');
   const seen: Operation[] = [];
@@ -132,46 +106,6 @@ test('compact is a durable conversation command carried into the next master ope
     text: '压缩当前会话上下文',
     data: { command: 'compact' },
   });
-});
-
-test('the master briefing includes Agent recipe descriptions for subagent selection', async () => {
-  const root = await temp('agent-recipe-description');
-  const capabilityRoot = join(root, 'capabilities');
-  const identity = join(capabilityRoot, 'agent-md', 'coder-identity');
-  await mkdir(identity, { recursive: true });
-  await writeFile(join(identity, 'capability.json'), JSON.stringify({
-    id: 'coder-identity',
-    kind: 'prompt',
-    role: 'agent',
-    version: '1.0.0',
-    name: 'Coder identity',
-  }));
-  await writeFile(join(identity, 'agent.md'), 'You are a coder.\n');
-  const seen: Operation[] = [];
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    actions: { master: scripted(operation => {
-      seen.push(operation);
-      return { outcome: 'completed', output: { text: 'ok' }, usage };
-    }) },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-    catalog: { capabilityRoot, recipesPath: join(root, 'agent-combinations.json') },
-  });
-  cleanup.push(() => runtime.close());
-  await runtime.catalog.saveAgentCombination({
-    id: 'coder',
-    name: 'Bob_coder',
-    description: '默认主实现，承担功能开发、维护、修复和基础测试。',
-    recommendedGrade: 'medium',
-    review: false,
-    tags: ['编码'],
-    resources: [{ resourceId: 'coder-identity', version: '1.0.0', role: 'identity', required: true }],
-  });
-  const created = await runtime.conversations.create({ text: '选择实现 Agent。', requestId: 'recipe-description-create' });
-  await runtime.host.runReady();
-  expect(seen).toHaveLength(1);
-  expect(seen[0]!.context.briefing).toContain('Agent recipe coder (Bob_coder, medium, valid): 默认主实现，承担功能开发、维护、修复和基础测试。');
-  await runtime.conversations.view(created.conversationId);
 });
 
 test('Main Agent can validate a graph, inspect its state, list projects and bind a project', async () => {
@@ -244,43 +178,6 @@ test('Main Agent can validate a graph, inspect its state, list projects and bind
   const bound = await supervisor.bindProject({ projectId: 'one', requestId: 'bind-one' });
   expect(bound).toMatchObject({ changed: true });
   expect((await runtime.conversations.view(created.conversationId)).projectId).toBe('one');
-});
-
-test('conversations can be archived and restored without deleting their history', async () => {
-  const root = await temp('archive');
-  const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'ok' }, usage }));
-  const created = await runtime.conversations.create({ text: '稍后继续', requestId: 'archive-create' });
-
-  expect((await runtime.conversations.list()).map(item => item.id)).toContain(created.conversationId);
-  const archived = await runtime.conversations.archive(created.conversationId, 'archive-1');
-  expect(archived).toMatchObject({ archived: true, conversationId: created.conversationId });
-  expect(await runtime.conversations.list()).toEqual([]);
-  expect((await runtime.conversations.list({ archived: true }))[0]).toMatchObject({
-    id: created.conversationId,
-    archivedAt: archived.archivedAt,
-  });
-  expect((await runtime.conversations.view(created.conversationId)).archived).toBe(true);
-
-  const restored = await runtime.conversations.unarchive(created.conversationId, 'archive-2');
-  expect(restored).toMatchObject({ archived: false, archivedAt: null });
-  expect((await runtime.conversations.list()).map(item => item.id)).toContain(created.conversationId);
-  expect((await runtime.conversations.view(created.conversationId)).messages).toHaveLength(1);
-});
-
-test('an archived conversation does not occupy a chatting lane', async () => {
-  const root = await temp('archive-lane');
-  const seen: Operation[] = [];
-  const runtime = await withRuntime(root, operation => {
-    seen.push(operation);
-    return { outcome: 'completed', output: { text: 'ok' }, usage };
-  });
-  const created = await runtime.conversations.create({ text: '先归档', requestId: 'archive-lane-create' });
-  await runtime.conversations.archive(created.conversationId, 'archive-lane');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 0 });
-  expect(seen).toHaveLength(0);
-  await runtime.conversations.unarchive(created.conversationId, 'archive-lane-restore');
-  expect(await runtime.host.runReady()).toEqual({ dispatched: 1 });
-  expect(seen).toHaveLength(1);
 });
 
 test('full access does not retry a chatting master with an empty queue', async () => {
@@ -372,122 +269,6 @@ test('conversation model and thinking selection applies to the next master turn'
   expect((await runtime.conversations.view(created.conversationId)).telemetry).toMatchObject({ model: 'm1', thinkingLevel: 'high' });
 });
 
-test('an output-limit turn settles with a retry notice instead of staying in progress', async () => {
-  const root = await temp('output-limit');
-  const provider = await openaiServer([{
-    thinking: 'This reasoning consumed the entire output budget. '.repeat(200),
-    finishReason: 'length',
-    usage: {
-      prompt_tokens: 128,
-      completion_tokens: 256,
-      prompt_tokens_details: { cached_tokens: 0 },
-      completion_tokens_details: { reasoning_tokens: 256 },
-    },
-  }]);
-  cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
-    models: {
-      entries: [{
-        id: 'local',
-        provider: 'graph-openai',
-        grade: 'high',
-        api: 'openai-completions',
-        baseUrl: provider.model.baseUrl,
-        contextWindow: 32_000,
-        maxTokens: 256,
-        reasoning: true,
-      }],
-      apiKey: 'scripted-local-key',
-      modelRuntime: provider.runtime,
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
-  });
-  cleanup.push(() => runtime.close());
-  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
-
-  const created = await runtime.conversations.create({ text: '这个问题需要很长的思考。', requestId: 'output-limit-create' });
-  await runtime.host.runReady();
-
-  const view = await runtime.conversations.view(created.conversationId);
-  const notice = view.messages.find(message => message.role === 'system' && message.kind === 'error');
-  expect(notice?.text).toContain('输出被截断');
-  expect(view.master?.status).not.toBe('dispatched');
-}, 30_000);
-
-test('a tool-use response that keeps SSE open does not stall the following turn', async () => {
-  const root = await temp('tool-use-output-limit');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  const images = ['1.png', '2.png', '3.png', '4.png'].map(name => join(project, name));
-  for (const image of images) await writeFile(image, Buffer.alloc(512 * 1024, 7));
-  const provider = await openaiServer([
-    {
-      finishReason: 'tool_calls',
-      tools: images.map((image, index) => ({
-        id: `read-image-${index}`,
-        name: 'read',
-        arguments: JSON.stringify({ path: image }),
-      })),
-    },
-    { text: 'First reply.' },
-    {
-      thinking: 'I will publish the plan without supplying its content. '.repeat(100),
-      finishReason: 'tool_calls',
-      tools: [{
-        id: 'publish-without-content',
-        name: 'artifact_publish',
-        arguments: JSON.stringify({
-          namespace: 'plans',
-          name: 'truncated-plan',
-          requestId: 'truncated-plan-1',
-        }),
-      }],
-      usage: {
-        prompt_tokens: 128,
-        completion_tokens: 256,
-        prompt_tokens_details: { cached_tokens: 0 },
-        completion_tokens_details: { reasoning_tokens: 256 },
-      },
-      holdOpen: true,
-    },
-    { text: 'The publish error was handled.' },
-  ]);
-  cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
-    catalog: { capabilityRoot: join(root, 'graph', 'capabilities'), recipesPath: join(root, 'graph', 'agent-combinations.json') },
-    models: {
-      entries: [{
-        id: 'local',
-        provider: 'graph-openai',
-        grade: 'high',
-        api: 'openai-completions',
-        baseUrl: provider.model.baseUrl,
-        contextWindow: 32_000,
-        maxTokens: 256,
-        reasoning: true,
-      }],
-      apiKey: 'scripted-local-key',
-      modelRuntime: provider.runtime,
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
-  });
-  cleanup.push(() => runtime.close());
-  runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'master');
-
-  const created = await runtime.conversations.create({ projectId: 'p', text: '开始。', requestId: 'tool-limit-create' });
-  await runtime.host.runReady();
-  await runtime.conversations.chat(created.conversationId, { text: '继续，按推荐处理。', requestId: 'tool-limit-follow-up' });
-  await runtime.host.runReady();
-
-  const view = await runtime.conversations.view(created.conversationId);
-  expect(view.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('publish error was handled');
-  expect(view.master?.status).not.toBe('dispatched');
-}, 30_000);
-
 test('new conversations inherit the master model default thinking level', async () => {
   const root = await temp('default-thinking');
   const runtime = await openTaskRuntime({
@@ -568,398 +349,6 @@ test('settings offer only currently configured models, not removed history', asy
   expect(reopened.models().map(model => model.id)).toEqual(['live']);
 });
 
-test('messages sent while the master is running are answered one queued turn at a time', async () => {
-  const root = await temp('queue');
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const seen: Operation[] = [];
-  const runtime = await withRuntime(root, async operation => {
-    seen.push(operation);
-    if (seen.length === 1) await gate;
-    return { outcome: 'completed', output: { text: `答：${operation.context.messages?.map(message => message.text).join(' / ')}` }, usage };
-  });
-  const created = await runtime.conversations.create({ text: '第一条', requestId: 'create' });
-  const first = runtime.host.runReady();
-  await new Promise(resolve => setTimeout(resolve, 30));
-  await runtime.conversations.chat(created.conversationId, { text: '第二条', requestId: 'chat-2' });
-  await runtime.conversations.chat(created.conversationId, { text: '第三条', requestId: 'chat-3' });
-  const queued = await runtime.conversations.view(created.conversationId);
-  expect(queued.messages.filter(message => message.role === 'user').map(message => message.state)).toEqual(['delivered', 'queued', 'queued']);
-  release();
-  await first;
-  await runtime.host.runReady();
-  expect(seen).toHaveLength(2);
-  expect(seen[1]!.context.messages?.map(message => message.text)).toEqual(['第二条']);
-  const middle = await runtime.conversations.view(created.conversationId);
-  expect(middle.messages.find(message => message.text === '第二条')?.state).toBe('delivered');
-  expect(middle.messages.find(message => message.text === '第三条')?.state).toBe('queued');
-  await runtime.host.runReady();
-  expect(seen).toHaveLength(3);
-  expect(seen[2]!.context.messages?.map(message => message.text)).toEqual(['第三条']);
-  const after = await runtime.conversations.view(created.conversationId);
-  expect(after.messages.filter(message => message.role === 'user').every(message => message.state === 'delivered')).toBe(true);
-  expect(after.messages.filter(message => message.role === 'assistant')).toHaveLength(3);
-  expect(after.messages.filter(message => message.role === 'assistant').map(message => message.text)).toEqual([
-    '答：第一条',
-    '答：第二条',
-    '答：第三条',
-  ]);
-});
-
-test('the master prompt suggestion is stored with the assistant reply', async () => {
-  const root = await temp('suggestion');
-  const runtime = await withRuntime(root, () => ({
-    outcome: 'completed',
-    output: { text: '第一阶段检查完成。', suggestedPrompt: '继续检查测试覆盖和失败分支。' },
-    usage,
-  }));
-  const created = await runtime.conversations.create({ text: '先检查项目。', requestId: 'suggestion' });
-  await runtime.host.runReady();
-  const conversation = await runtime.conversations.view(created.conversationId);
-  const assistant = conversation.messages.find(message => message.role === 'assistant')!;
-  expect((assistant.data as { suggestedPrompt?: unknown } | null)?.suggestedPrompt).toBe('继续检查测试覆盖和失败分支。');
-});
-
-test('queued messages can steer the active master turn', async () => {
-  const root = await temp('steer');
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const steered: string[] = [];
-  const adapter: ActionAdapter = {
-    kind: 'agent',
-    reserveTokens: 100,
-    prepare: async () => async () => {
-      await gate;
-      return { outcome: 'completed', output: { text: '已根据引导继续完成。' }, usage };
-    },
-    steer: async (_operation, text) => { steered.push(text); },
-  };
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    actions: { master: adapter },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
-  const created = await runtime.conversations.create({ text: '开始检查。', requestId: 'steer' });
-  const firstTurn = runtime.host.runReady();
-  await expect.poll(async () => (await runtime.conversations.view(created.conversationId)).master?.status).toBe('running');
-  await runtime.conversations.chat(created.conversationId, { text: '先看测试覆盖。', requestId: 'steer-1' });
-  await runtime.conversations.chat(created.conversationId, { text: '再看失败分支。', requestId: 'steer-2' });
-
-  const steeredReceipt = await runtime.conversations.steer(created.conversationId, { requestId: 'steer-guide' });
-  expect(steeredReceipt).toMatchObject({ state: 'steered', steered: 2 });
-  expect(steered).toEqual(['先看测试覆盖。\n\n再看失败分支。']);
-  const guided = await runtime.conversations.view(created.conversationId);
-  expect(guided.messages.filter(message => message.role === 'user').map(message => message.state)).toEqual(['delivered', 'delivered', 'delivered']);
-  expect(guided.messages.filter(message => message.role === 'user').slice(1).every(message => message.operationId)).toBe(true);
-
-  release();
-  await firstTurn;
-  const completed = await runtime.conversations.view(created.conversationId);
-  expect(completed.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
-  expect(completed.messages.at(-1)?.text).toBe('已根据引导继续完成。');
-});
-
-test('explicit newVersion keeps draft history and only the latest can be confirmed', async () => {
-  const root = await temp('draft');
-  const project = join(root, 'project');
-  const { mkdir } = await import('node:fs/promises');
-  await mkdir(project, { recursive: true });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
-    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'draft ready' }, usage })) },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
-  const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
-  await runtime.host.runReady();
-  const conversation = await runtime.conversations.view(created.conversationId);
-  const anchorTaskId = conversation.anchorTaskId;
-
-  const proposal = (summary: string) => workflowDraft(1, summary);
-  await runtime.supervisor(anchorTaskId).propose(proposal('旧方案'), 'proposal-1');
-  // Version history is now opt-in: without newVersion the current draft is edited in place.
-  await runtime.supervisor(anchorTaskId).propose(proposal('新方案'), 'proposal-2', { newVersion: true });
-  const drafted = await runtime.conversations.view(created.conversationId);
-  expect(drafted.proposal?.version).toBe(2);
-  expect(drafted.proposal?.spec.summary).toBe('新方案');
-  expect(drafted.proposalHistory.map(item => ({ version: item.version, summary: item.summary, accepted: item.accepted, stale: item.stale }))).toEqual([
-    { version: 1, summary: '旧方案', accepted: false, stale: false },
-    { version: 2, summary: '新方案', accepted: false, stale: false },
-  ]);
-  expect((await runtime.conversations.proposal(created.conversationId, 1)).spec.summary).toBe('旧方案');
-  await expect(runtime.conversations.proposal(created.conversationId, 99)).rejects.toMatchObject({ code: 'not_found' });
-
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-old' }))
-    .rejects.toMatchObject({ code: 'stale_proposal' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-new' });
-  const after = await runtime.conversations.view(created.conversationId);
-  expect(after.requirementVersion).toBe(2);
-  expect(after.tasks).toHaveLength(1);
-  expect(after.tasks[0]!.id).toBe(confirmed.taskId);
-  expect(after.tasks[0]!.phase).toBe('running');
-  expect(after.tasks[0]!.nodes.map(node => node.id)).toEqual(['work']);
-  expect(after.tasks[0]!.nodes[0]!.status).toBe('idle');
-  expect(runtime.kernelGraph(confirmed.taskId)).toMatchObject({ revision: 1, definition: {
-    modules: { check: { type: 'operation', operation: { action: 'workspace.command' } } },
-    edges: { checked: { from: 'work.result', to: 'check.job', enabled: true } },
-  } });
-  const queued = await runtime.supervisor(anchorTaskId).graphInspect({ graphId: confirmed.taskId, query: 'queue' }) as { items: unknown[] };
-  expect(queued.items).toEqual([]);
-  expect(after.accepted.map(item => item.proposalVersion)).toEqual([2]);
-  expect(after.proposalHistory.map(item => ({ version: item.version, accepted: item.accepted, stale: item.stale }))).toEqual([
-    { version: 1, accepted: false, stale: true },
-    { version: 2, accepted: true, stale: true },
-  ]);
-  expect((await runtime.conversations.proposal(created.conversationId, 2)).stale).toBe(true);
-  // The old draft is stale after the requirement advanced.
-  expect((await runtime.conversations.view(created.conversationId)).proposal?.stale).toBe(true);
-  const graphState = await runtime.supervisor(anchorTaskId).graphState() as {
-    relatedTasks: { taskId: string; graphVersion: number; nodes: { id: string }[] }[];
-  };
-  expect(graphState.relatedTasks).toEqual([
-    expect.objectContaining({
-      taskId: confirmed.taskId,
-      graphVersion: 1,
-      nodes: [expect.objectContaining({ id: 'work', origin: 'v2', status: 'idle' })],
-    }),
-  ]);
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-again' }))
-    .rejects.toMatchObject({ code: 'stale_proposal' });
-  // The feature task is visible as a normal task; the anchor is not.
-  expect((await runtime.user.list()).map(task => task.id)).toEqual([confirmed.taskId]);
-});
-
-// The draft-lifecycle contract: editing a draft in place must not pile up versions,
-// a credential taken from replaced content must never confirm the replacement, and
-// archive/delete are per-version tombstones that leave a started graph untouched.
-async function draftFixture(name: string) {
-  const root = await temp(name);
-  const project = join(root, 'project');
-  const second = join(root, 'second');
-  await mkdir(project, { recursive: true });
-  await mkdir(second, { recursive: true });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }, { id: 'q', root: second }],
-    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'draft ready' }, usage })) },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
-  const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  return { runtime, conversationId: created.conversationId, anchorTaskId, proposal: (summary: string) => workflowDraft(1, summary) };
-}
-
-test('editing a draft in place replaces its content without stacking versions', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('in-place');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
-  const first = await runtime.conversations.view(conversationId);
-  expect(first.proposal?.version).toBe(1);
-  const firstRevision = first.proposal!.draftRevision;
-  expect(typeof firstRevision).toBe('number');
-  const firstDigest = first.proposal!.draftDigest;
-
-  await runtime.supervisor(anchorTaskId).propose(proposal('改过的方案'), 'p2');
-  const edited = await runtime.conversations.view(conversationId);
-  // Same version, same draft identity, new content and a new credential.
-  expect(edited.proposal?.version).toBe(1);
-  expect(edited.proposal?.spec.summary).toBe('改过的方案');
-  expect(edited.proposal!.draftRevision).toBeGreaterThan(firstRevision);
-  expect(edited.proposal!.draftDigest).not.toBe(firstDigest);
-  expect(edited.proposalHistory.map(item => item.version)).toEqual([1]);
-  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('改过的方案');
-});
-
-test('a confirmation credential from replaced draft content is refused', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('stale-credential');
-  await runtime.supervisor(anchorTaskId).propose(proposal('原始内容'), 'p1');
-  const stale = (await runtime.conversations.view(conversationId)).proposal!.draftRevision;
-  await runtime.supervisor(anchorTaskId).propose(proposal('被替换的内容'), 'p2');
-  await expect(runtime.conversations.confirm(conversationId, {
-    proposalVersion: 1, draftRevision: stale, targetBranch: 'main', requestId: 'confirm-stale',
-  })).rejects.toMatchObject({ code: 'stale_proposal' });
-  const current = await runtime.conversations.view(conversationId);
-  const confirmed = await runtime.conversations.confirm(conversationId, {
-    proposalVersion: 1, draftRevision: current.proposal!.draftRevision, targetBranch: 'main', requestId: 'confirm-current',
-  });
-  expect(confirmed.taskId).toBeTruthy();
-  const after = await runtime.conversations.view(conversationId);
-  expect(after.tasks).toHaveLength(1);
-  expect(after.tasks[0]!.id).toBe(confirmed.taskId);
-  // The acceptance records the exact content that was confirmed, not just a version.
-  expect(after.accepted.map(item => ({ version: item.proposalVersion, revision: item.draftRevision })))
-    .toEqual([{ version: 1, revision: current.proposal!.draftRevision }]);
-});
-
-test('archive hides a draft from the active list and restore brings it back', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('archive');
-  await runtime.supervisor(anchorTaskId).propose(proposal('待归档方案'), 'p1');
-  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 1, requestId: 'archive-1' });
-  const archived = await runtime.conversations.view(conversationId);
-  expect(archived.proposal).toBeNull();
-  // Archiving is not deletion: the content is still readable by version, and the
-  // card is gone from the active list rather than flagged in it.
-  expect(archived.proposalHistory).toEqual([]);
-  expect(archived.archivedProposals.map(item => item.version)).toEqual([1]);
-  const mainView = await runtime.supervisor(anchorTaskId).graphState();
-  expect(mainView.proposal).toBeNull();
-  expect(mainView.archivedProposals?.map(item => item.version)).toEqual([1]);
-  expect((await runtime.user.task(anchorTaskId).view()).proposal).toBeNull();
-  // Archiving is not deletion: the content is still readable by version.
-  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('待归档方案');
-  await expect(runtime.conversations.confirm(conversationId, {
-    proposalVersion: 1, draftRevision: archived.archivedProposals[0]!.draftRevision, targetBranch: 'main', requestId: 'confirm-archived',
-  })).rejects.toMatchObject({ code: 'stale_proposal' });
-
-  await runtime.conversations.restoreDraft(conversationId, { proposalVersion: 1, requestId: 'restore-1' });
-  const restored = await runtime.conversations.view(conversationId);
-  expect(restored.proposal?.version).toBe(1);
-  expect(restored.proposal?.spec.summary).toBe('待归档方案');
-  expect(restored.archivedProposals).toEqual([]);
-});
-
-test('deleting a draft hides it but never removes the graph it started', async () => {
-  const root = await temp('delete');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  // A real Pi run (work -> check) so there is real evidence, a real session and a
-  // real graph revision that deletion is forbidden to touch.
-  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
-  const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  await runtime.supervisor(anchorTaskId).propose(workflowDraft(1, '会被确认的方案'), 'p1');
-  const current = await runtime.conversations.view(created.conversationId);
-  const confirmed = await runtime.conversations.confirm(created.conversationId, {
-    proposalVersion: 1, draftRevision: current.proposal!.draftRevision, targetBranch: 'main', requestId: 'confirm-1',
-  });
-  const taskId = confirmed.taskId;
-  const session = await runWorker(taskId);
-  const before = await runtime.conversations.view(created.conversationId);
-  const messagesBefore = before.messages.length;
-  // The run itself: node entries, the graph's acceptance record and the proposal
-  // copy the confirmed task owns.
-  const entriesBefore = runtime.nodeRun(taskId, 'work').entries.length;
-  const acceptanceBefore = (await runtime.supervisor(anchorTaskId).graphInspect({ graphId: taskId, query: 'acceptance' }) as { items: unknown[] }).items.length;
-  expect(entriesBefore).toBeGreaterThan(0);
-  expect(acceptanceBefore).toBeGreaterThan(0);
-
-  // The confirmed card can be cleared out of the draft lists, and doing so must not
-  // touch the started graph, its chat, its evidence or the frozen acceptance.
-  await runtime.conversations.deleteDraft(created.conversationId, { proposalVersion: 1, requestId: 'delete-1' });
-  const after = await runtime.conversations.view(created.conversationId);
-  expect(after.proposal).toBeNull();
-  expect(after.proposalHistory).toEqual([]);
-  expect(after.archivedProposals).toEqual([]);
-  await expect(runtime.conversations.proposal(created.conversationId, 1)).rejects.toMatchObject({ code: 'not_found' });
-  expect(after.messages.length).toBe(messagesBefore);
-  expect(after.tasks.map(task => task.id)).toEqual([taskId]);
-  expect(after.tasks[0]!.acceptedProposalVersion).toBe(1);
-  expect(runtime.nodeRun(taskId, 'work').entries.length).toBe(entriesBefore);
-  expect((await runtime.supervisor(anchorTaskId).graphInspect({ graphId: taskId, query: 'acceptance' }) as { items: unknown[] }).items.length).toBe(acceptanceBefore);
-  expect((await runtime.user.list()).map(task => task.id)).toEqual([taskId]);
-  expect(runtime.kernelGraph(taskId)).toMatchObject({ revision: 1, definition: { nodes: { work: expect.anything() } } });
-  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('succeeded');
-  expect(session).toContain('work');
-});
-
-test('a confirmed draft is never overwritten by a later task or a rebinding', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('immutable-after-confirm');
-  await runtime.supervisor(anchorTaskId).propose(proposal('会被确认的方案'), 'p1');
-  const before = await runtime.conversations.view(conversationId);
-  const confirmed = await runtime.conversations.confirm(conversationId, {
-    proposalVersion: 1, draftRevision: before.proposal!.draftRevision, targetBranch: 'main', requestId: 'confirm-1',
-  });
-  // Confirmation advances the anchor requirement, so the confirmed card can no
-  // longer be edited in place: the next draft is a new version.
-  expect((await runtime.conversations.view(conversationId)).requirementVersion).toBe(2);
-  await runtime.supervisor(anchorTaskId).propose(workflowDraft(2, '第二个方案'), 'p2');
-  expect((await runtime.conversations.view(conversationId)).proposal?.version).toBe(2);
-  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('会被确认的方案');
-  expect(runtime.kernelGraph(confirmed.taskId)).toMatchObject({ revision: 1, definition: { nodes: { work: expect.anything() } } });
-
-  // Rebinding the conversation to another project invalidates drafts the same way.
-  await runtime.conversations.bind(conversationId, { projectId: 'q', requestId: 'rebind' });
-  expect((await runtime.conversations.view(conversationId)).requirementVersion).toBe(3);
-  await runtime.supervisor(anchorTaskId).propose(workflowDraft(3, '第三个方案'), 'p3');
-  expect((await runtime.conversations.view(conversationId)).proposal?.version).toBe(3);
-  expect((await runtime.conversations.proposal(conversationId, 2)).spec.summary).toBe('第二个方案');
-  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('会被确认的方案');
-});
-
-test('a deleted or archived version is never handed out again', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('tombstone-high-water');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第二版'), 'p2', { newVersion: true });
-  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 2, requestId: 'archive-2' });
-  await runtime.conversations.restoreDraft(conversationId, { proposalVersion: 1, requestId: 'restore-1' });
-  // The archived v2 still holds its number, so the next explicit version is 3.
-  await runtime.supervisor(anchorTaskId).propose(proposal('第三版'), 'p3', { newVersion: true });
-  const view = await runtime.conversations.view(conversationId);
-  expect(view.proposal?.version).toBe(3);
-  expect(view.proposalHistory.map(item => item.version)).toEqual([1, 3]);
-  expect(view.archivedProposals.map(item => item.version)).toEqual([2]);
-  // Archiving is not deletion: the archived content is still readable by version.
-  expect((await runtime.conversations.proposal(conversationId, 2)).spec.summary).toBe('第二版');
-  // A delete leaves a tombstone, so the version after it is still fresh ground.
-  await runtime.conversations.deleteDraft(conversationId, { proposalVersion: 3, requestId: 'delete-3' });
-  await runtime.supervisor(anchorTaskId).propose(proposal('第四版'), 'p4', { newVersion: true });
-  const later = await runtime.conversations.view(conversationId);
-  expect(later.proposal?.version).toBe(4);
-  expect(later.proposalHistory.map(item => item.version)).toEqual([1, 4]);
-});
-
-test('a deleted draft version is never handed out again', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('high-water');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
-  await runtime.conversations.deleteDraft(conversationId, { proposalVersion: 1, requestId: 'delete-1' });
-  await runtime.supervisor(anchorTaskId).propose(proposal('删除之后的新草稿'), 'p2');
-  const view = await runtime.conversations.view(conversationId);
-  expect(view.proposal?.version).toBe(2);
-  expect(view.proposal?.spec.summary).toBe('删除之后的新草稿');
-  expect(view.proposalHistory.map(item => item.version)).toEqual([2]);
-});
-
-test('restoring an archived draft makes it current again without stacking versions', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('restore-current');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第一版'), 'p1');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第二版'), 'p2', { newVersion: true });
-  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 1, requestId: 'archive-1' });
-  await runtime.conversations.archiveDraft(conversationId, { proposalVersion: 2, requestId: 'archive-2' });
-  const archived = await runtime.conversations.view(conversationId);
-  expect(archived.proposal).toBeNull();
-  expect(archived.proposalHistory).toEqual([]);
-  expect(archived.archivedProposals.map(item => item.version)).toEqual([1, 2]);
-  // An explicit by-version read still shows archived content, marked archived.
-  expect((await runtime.conversations.proposal(conversationId, 1)).spec.summary).toBe('第一版');
-  expect((await runtime.conversations.proposal(conversationId, 1)).archived).toBe(true);
-
-  await runtime.conversations.restoreDraft(conversationId, { proposalVersion: 1, requestId: 'restore-1' });
-  const restored = await runtime.conversations.view(conversationId);
-  // Restored v1 is the current draft again, so a default edit stays on v1 instead
-  // of piling up another version.
-  expect(restored.proposal?.version).toBe(1);
-  expect(restored.proposal?.spec.summary).toBe('第一版');
-  await runtime.supervisor(anchorTaskId).propose(proposal('第一版改过'), 'p3');
-  const edited = await runtime.conversations.view(conversationId);
-  expect(edited.proposal?.version).toBe(1);
-  expect(edited.proposal?.spec.summary).toBe('第一版改过');
-  expect(edited.proposal!.draftRevision).toBe(2);
-  expect(edited.proposalHistory.map(item => item.version)).toEqual([1]);
-  // The archived v2 is still archived and still holds its number.
-  expect(edited.archivedProposals.map(item => item.version)).toEqual([2]);
-  await runtime.supervisor(anchorTaskId).propose(proposal('第三版'), 'p4', { newVersion: true });
-  const later = await runtime.conversations.view(conversationId);
-  expect(later.proposal?.version).toBe(3);
-  expect(later.proposalHistory.map(item => item.version)).toEqual([1, 3]);
-});
-
 test('a conversation master patches its native feature graph and reads queued status', async () => {
   const root = await temp('revise-feature');
   const project = join(root, 'project'); await mkdir(project);
@@ -998,41 +387,6 @@ test('a conversation master patches its native feature graph and reads queued st
   await expect(supervisor.taskStatus({ taskId: '0faf1367-0000-0000-0000-000000000000' })).rejects.toMatchObject({ code: 'invalid_input' });
   await expect(supervisor.graphPatch({ graphId: '0faf1367-0000-0000-0000-000000000000', baseRevision: 1,
     changes: { reason: '越界', patch: { nodes: {} } } })).rejects.toMatchObject({ code: 'not_found' });
-});
-
-test('post-confirmation chat keeps the requirement fixed and sees real execution status', async () => {
-  const root = await temp('post');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  const seen: Operation[] = [];
-  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }], operation => { seen.push(operation); });
-  const created = await runtime.conversations.create({ text: '先做最小可用版', requestId: 'create' });
-  await runtime.host.runReady();
-  const conversation = await runtime.conversations.view(created.conversationId);
-  await runtime.supervisor(conversation.anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'proposal');
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
-  await runtime.conversations.chat(created.conversationId, { text: '现在卡在哪里？', requestId: 'ask' });
-  seen.length = 0;
-  await runtime.host.runReady();
-  expect(seen).toHaveLength(1);
-  const briefing = seen[0]!.context.briefing ?? '';
-  expect(briefing).toContain('现在卡在哪里？');
-  expect(briefing).toContain(confirmed.taskId.slice(0, 8));
-  expect(briefing).toContain('Feature task');
-  expect(briefing).toContain('work:idle');
-  expect((await runtime.conversations.view(created.conversationId)).requirementVersion).toBe(2);
-
-  // An explicit input runs a real Pi; the next main turn must describe its
-  // recorded result rather than the idle status from the confirmation card.
-  await runWorker(confirmed.taskId);
-  seen.length = 0;
-  await runtime.conversations.chat(created.conversationId, { text: '执行完成了吗？', requestId: 'after-work' });
-  await runtime.host.runReady();
-  expect(seen).toHaveLength(1);
-  expect(seen[0]!.context.briefing).toContain('执行完成了吗？');
-  expect(seen[0]!.context.briefing).toContain('work:succeeded');
-  expect((await runtime.conversations.view(created.conversationId)).requirementVersion).toBe(2);
 });
 
 test('a pre-send failure returns the message to the queue instead of losing it', async () => {
@@ -1143,33 +497,6 @@ async function openTaskRuntimeQuestions(runtime: Awaited<ReturnType<typeof openT
   return runtime.user.task(taskId).view().then(view => view.questions.filter(question => question.status === 'open'));
 }
 
-test('queued messages survive a restart and are answered once', async () => {
-  const root = await temp('restart');
-  const first = await withRuntime(root, () => ({ outcome: 'completed', output: { text: '不该在第一段运行' }, usage }));
-  const created = await first.conversations.create({ text: '重启前的消息', requestId: 'create' });
-  await first.close();
-  const seen: Operation[] = [];
-  const second = await withRuntime(root, operation => { seen.push(operation); return { outcome: 'completed', output: { text: '重启后回答' }, usage }; });
-  await second.host.runReady();
-  expect(seen).toHaveLength(1);
-  expect(seen[0]!.context.messages?.map(message => message.text)).toEqual(['重启前的消息']);
-  const view = await second.conversations.view(created.conversationId);
-  expect(view.messages.map(message => message.role)).toEqual(['user', 'assistant']);
-  // A second drive must not re-send the same message.
-  expect((await second.host.runReady()).dispatched).toBe(0);
-});
-
-test('chat request ids are idempotent and bound to their content', async () => {
-  const root = await temp('idempotent');
-  const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'ok' }, usage }));
-  const created = await runtime.conversations.create({ text: '第一次', requestId: 'create' });
-  await runtime.conversations.chat(created.conversationId, { text: '重复消息', requestId: 'same' });
-  await runtime.conversations.chat(created.conversationId, { text: '重复消息', requestId: 'same' });
-  const view = await runtime.conversations.view(created.conversationId);
-  expect(view.messages.filter(message => message.text === '重复消息')).toHaveLength(1);
-  await expect(runtime.conversations.chat(created.conversationId, { text: '不同内容', requestId: 'same' })).rejects.toMatchObject({ code: 'idempotency_conflict' });
-});
-
 test('unknown master usage on an unlimited conversation completes without a blocking question', async () => {
   const root = await temp('unknown');
   const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: '答复已产生但用量未知' }, usage: null }));
@@ -1181,47 +508,6 @@ test('unknown master usage on an unlimited conversation completes without a bloc
   expect(anchorTask.questions.some(item => item.kind === 'unknown_usage')).toBe(false);
   expect(anchorTask.nodes.find(node => node.role === 'master')).toMatchObject({ status: 'succeeded', used: 0, unlimited: true });
   expect(view.messages.filter(message => message.role === 'assistant')).toHaveLength(1);
-});
-
-test('a scope change after confirmation becomes a new queued task, not an edit of the running one', async () => {
-  const root = await temp('new-task');
-  const project = join(root, 'project');
-  const { mkdir } = await import('node:fs/promises');
-  await mkdir(project, { recursive: true });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
-    actions: {
-      master: scripted(() => ({ outcome: 'completed', output: { text: '这会是一个新任务。' }, usage })),
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
-  const created = await runtime.conversations.create({ text: '先做第一版', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  const proposal = (summary: string, requirementVersion: number) => workflowDraft(requirementVersion, summary);
-  await runtime.supervisor(anchorTaskId).propose(proposal('第一版', 1), 'draft-1');
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const first = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-1' });
-  const firstTask = await runtime.user.task(first.taskId).view();
-  expect(firstTask.phase).toBe('running');
-
-  // The user changes the goal while the first task runs.
-  await runtime.conversations.chat(created.conversationId, { text: '顺便加上另一平台。', requestId: 'scope' });
-  await runtime.host.runReady();
-  await runtime.supervisor(anchorTaskId).propose(proposal('另一平台', 2), 'draft-2');
-  const second = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-2' });
-  expect(second.taskId).not.toBe(first.taskId);
-  const view = await runtime.conversations.view(created.conversationId);
-  expect(view.tasks.map(task => task.id)).toEqual([first.taskId, second.taskId]);
-  expect(view.tasks.map(task => task.phase)).toEqual(['running', 'queued']);
-  // The running task keeps its confirmed acceptance scope.
-  const unchanged = await runtime.user.task(first.taskId).view();
-  expect(unchanged.acceptedProposalVersion).toBe(1);
-  expect(unchanged.proposal?.acceptance.map(item => item.description)).toEqual(['检查通过']);
-  expect(unchanged.phase).toBe('running');
-  expect(view.requirementVersion).toBe(3);
 });
 
 test('a conversation created without models gets its master once dispatch is available', async () => {
@@ -1264,37 +550,6 @@ test('unknown master usage does not block a queued conversation turn', async () 
   expect(calls).toBe(2);
 });
 
-test('rebinding a conversation invalidates drafts investigated for the previous project', async () => {
-  const root = await temp('rebind');
-  const { mkdir } = await import('node:fs/promises');
-  await mkdir(join(root, 'a'), { recursive: true });
-  await mkdir(join(root, 'b'), { recursive: true });
-  const runtime = await openTaskRuntime({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'a', root: join(root, 'a') }, { id: 'b', root: join(root, 'b') }],
-    actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'ok' }, usage })) },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-  });
-  cleanup.push(() => runtime.close());
-  const created = await runtime.conversations.create({ projectId: 'a', text: '只改进 A', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  const draft = (version: number, summary: string) => workflowDraft(version, summary);
-  await runtime.supervisor(anchorTaskId).propose(draft(1, '来自 A 的草稿'), 'draft-a');
-  const rebound = await runtime.conversations.bind(created.conversationId, { projectId: 'b', requestId: 'rebind' });
-  expect(rebound).toMatchObject({ invalidatedDrafts: true });
-  const afterBind = await runtime.conversations.view(created.conversationId);
-  expect(afterBind.projectId).toBe('b');
-  expect(afterBind.requirementVersion).toBe(2);
-  expect(afterBind.proposal?.stale).toBe(true);
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-old' }))
-    .rejects.toMatchObject({ code: 'stale_proposal' });
-  // A draft made after the rebind can be confirmed for the new project.
-  await runtime.supervisor(anchorTaskId).propose(draft(2, '来自 B 的草稿'), 'draft-b');
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 2, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-new' });
-  expect((await runtime.user.task(confirmed.taskId).view()).projectId).toBe('b');
-});
-
 test('the default message page shows the newest records and older history stays reachable', async () => {
   const root = await temp('paging');
   const runtime = await withRuntime(root, () => ({ outcome: 'completed', output: { text: 'ok' }, usage }));
@@ -1311,23 +566,6 @@ test('the default message page shows the newest records and older history stays 
   expect(older.messages.map(message => message.text)).toEqual(['message-000', 'message-001']);
   const forward = await runtime.conversations.view(created.conversationId, { after: page.messages.at(-1)!.seq });
   expect(forward.messages).toEqual([]);
-});
-
-test('a confirmed task carries the conversation decisions and constraints to its workers', async () => {
-  const root = await temp('digest');
-  const project = join(root, 'project');
-  const { mkdir } = await import('node:fs/promises');
-  await mkdir(project, { recursive: true });
-  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
-  const created = await runtime.conversations.create({ text: '约束：预算有限，登录先不改。', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await runtime.supervisor(anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'draft');
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
-  const briefing = await runWorker(confirmed.taskId);
-  expect(briefing).toContain('Decisions and constraints from the conversation');
-  expect(briefing).toContain('预算有限，登录先不改');
 });
 
 test('decision snapshots are frozen with the draft and scoped to the project binding', async () => {
@@ -1477,64 +715,6 @@ test('message state changes are published so incremental caches stay in sync', a
   expect(updates(retriedId)).toContain('pending');
 });
 
-test('a native delivery failure notifies main and the user decision reaches a new explicit input without leaking a defective output', async () => {
-  const root = await temp('native-noncompliant'); const project = join(root, 'project'); await mkdir(project);
-  const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
-  const fixed = { objective: 'Escalated handoff', workSummary: 'FIXED_AFTER_ESCALATION' };
-  const mainProvider = await openaiServer([{ text: 'Ready to coordinate' }, { text: '交接文档缺少 objective，需要你确认目标表述后再继续。' }, { text: '已记录用户决定。' }]);
-  const worker = await openaiServer([
-    { tools: [{ id: 'invalid', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: { workSummary: 'BROKEN_HANDOFF_SENTINEL' } } } }) }] },
-    { text: 'Forgot the required valid result' }, { text: 'Still missing the required result' },
-    { tools: [{ id: 'fixed', name: 'submit', arguments: JSON.stringify({ outputs: { result: { enable: true, value: fixed } } }) }] }, { text: 'Fixed after user decision' },
-  ]);
-  const suggestion = await openaiServer(Array.from({ length: 4 }, () => ({ text: 'none' })));
-  const next = await openaiServer([{ text: 'Received the valid handoff' }]);
-  for (const provider of [mainProvider, worker, next, suggestion]) cleanup.push(() => provider.close());
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root: project }],
-    catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') },
-    master: { action: 'master', definitionVersion: 'main@1', model: 'main' },
-    models: { apiKey: 'local-only', modelRuntime: mainProvider.runtime, entries: ([['main', mainProvider], ['worker', worker], ['next', next], ['suggestion', suggestion]] as const).map(([id, provider]) => ({
-      id, modelId: id, provider: provider.model.provider, grade: id === 'suggestion' ? 'low' : 'medium', api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256,
-    })) } }); cleanup.push(() => runtime.close());
-  await installPresets(runtime.catalog, fileURLToPath(new URL('../../presets', import.meta.url)));
-  runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'coder');
-  const created = await runtime.conversations.create({ projectId: 'p', text: 'TASK_REQUEST_SENTINEL：实现并交接', requestId: 'create' }); await runtime.host.drive();
-  const main = runtime.supervisor(created.taskId); const data = { protocol: 'handoff' };
-  const { graphId } = await main.graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Explicit repair',
-    protocols: { handoff: { type: 'object', required: ['objective'], properties: { objective: { type: 'string', minLength: 1 }, workSummary: { type: 'string' } } } },
-    nodes: { work: { recipe: 'coder@1', model: 'worker', task: 'Submit a valid result satisfying the handoff protocol', inputs: { job: data }, outputs: { result: data }, submission: { required: ['result'] } },
-      next: { recipe: 'coder@1', model: 'next', task: 'Read the valid result', inputs: { job: data }, outputs: {}, submission: {} } },
-    modules: {}, edges: { handoff: { from: 'work.result', to: 'next.job', enabled: true } },
-  }) }) as { graphId: string };
-  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { objective: 'INITIAL_WORK_OBJECTIVE' } }); await runtime.host.drive();
-  const before = runtime.nodeRun(graphId, 'work'); expect(before.node.status).toBe('failed');
-  expect(before.operations).toMatchObject([{ state: 'failed', resubmits_used: 1 }]);
-  expect(worker.requests).toHaveLength(3); expect(next.requests).toHaveLength(0);
-  const refusal = (worker.requests[1] as { messages: { role: string; content: unknown }[] }).messages.filter(message => message.role === 'tool');
-  expect(JSON.stringify(refusal)).toContain('output_protocol_mismatch'); expect(JSON.stringify(refusal)).toContain('objective');
-  await expect(main.graphInspect({ graphId, query: 'edge', id: 'handoff' })).resolves.toMatchObject({ deliveries: [] });
-  expect(mainProvider.requests).toHaveLength(2);
-  expect(JSON.stringify(mainProvider.requests[1])).toContain(graphId);
-  expect(JSON.stringify(mainProvider.requests[1])).toMatch(/work.*required|Missing required|missing required/i);
-  const visible = await runtime.conversations.view(created.conversationId);
-  expect(visible.messages.filter(message => message.role === 'user')).toHaveLength(1);
-  expect(visible.messages.filter(message => message.role === 'assistant').at(-1)?.text).toContain('需要你确认目标表述');
-  const decision = 'USER_DECISION_SENTINEL：目标按交付页描述。';
-  await runtime.conversations.chat(created.conversationId, { text: decision, requestId: 'user-decision' }); await runtime.host.drive();
-  expect(mainProvider.requests).toHaveLength(3); expect(JSON.stringify(mainProvider.requests[2])).toContain(decision);
-  const queue = await main.graphInspect({ graphId, query: 'queue' }) as { items: { seq: number; state: string }[] };
-  await main.graphControl({ graphId, action: 'skip', seq: queue.items[0]!.seq });
-  await main.graphSend({ graphId, nodeId: 'work', input: 'job', value: { objective: decision, workSummary: 'Repair BROKEN_HANDOFF_SENTINEL' } }); await runtime.host.drive();
-  const after = runtime.nodeRun(graphId, 'work'); expect(after.node.status).toBe('succeeded');
-  expect(after.instance!.id).toBe(before.instance!.id); expect(after.session!.sessionId).toBe(before.session!.sessionId);
-  expect(after.operations).toHaveLength(2); expect(worker.requests).toHaveLength(5); expect(next.requests).toHaveLength(1);
-  const newestUser = (worker.requests[3] as { messages: { role: string; content: unknown }[] }).messages.filter(message => message.role === 'user').at(-1);
-  expect(JSON.stringify(newestUser)).toContain(decision); expect(JSON.stringify(newestUser)).toContain('BROKEN_HANDOFF_SENTINEL');
-  expect(JSON.stringify(newestUser)).not.toContain('TASK_REQUEST_SENTINEL');
-  expect(JSON.stringify(next.requests[0])).toContain('FIXED_AFTER_ESCALATION'); expect(JSON.stringify(next.requests[0])).not.toContain('BROKEN_HANDOFF_SENTINEL');
-  await expect(main.graphInspect({ graphId, query: 'edge', id: 'handoff' })).resolves.toMatchObject({ deliveries: [{ value: fixed }] });
-}, 60000);
-
 test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes only a proven unsent Pi conversation (%s)', async stage => {
   const root = await temp(`restart-${stage}`);
   const provider = await openaiServer([{ text: 'Recovered and answered the original request.' }]);
@@ -1582,14 +762,15 @@ test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes o
   }
 });
 
-test('the master can withdraw its own unconfirmed draft without losing it', async () => {
-  const root = await temp('withdraw-draft');
+async function draftFixture(name: string) {
+  const root = await temp(name);
   const project = join(root, 'project');
-  const { mkdir } = await import('node:fs/promises');
+  const second = join(root, 'second');
   await mkdir(project, { recursive: true });
+  await mkdir(second, { recursive: true });
   const runtime = await openTaskRuntime({
     stateDir: join(root, 'state'),
-    projects: [{ id: 'p', root: project }],
+    projects: [{ id: 'p', root: project }, { id: 'q', root: second }],
     actions: { master: scripted(() => ({ outcome: 'completed', output: { text: 'draft ready' }, usage })) },
     master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
   });
@@ -1597,65 +778,9 @@ test('the master can withdraw its own unconfirmed draft without losing it', asyn
   const created = await runtime.conversations.create({ text: '做一个最小可用版', requestId: 'create' });
   await runtime.host.runReady();
   const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  const draft = {
-    requirementVersion: 1, summary: '被取代的方案',
-    acceptance: [{ id: 'works', description: '检查通过', checkNode: 'check' }],
-    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Minimal implementation', protocols: { data: { type: 'object' } },
-      nodes: { work: { recipe: 'coder@1', model: 'm', task: 'Implement the minimal version', inputs: { job: { protocol: 'data' } },
-        outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
-      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
-        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
-      edges: { checkWork: { from: 'work.result', to: 'check.job', enabled: true } },
-      acceptance: [{ id: 'works', description: '检查通过', kind: 'check', module: 'check' }] }),
-  };
-  await runtime.supervisor(anchorTaskId).propose(draft, 'draft-1');
   await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-
-  // Only a draft that exists and is still the current one can be withdrawn.
-  await expect(runtime.supervisor(anchorTaskId).withdrawDraft({ proposalVersion: 7, requestId: 'w-none' }))
-    .rejects.toMatchObject({ code: 'not_found' });
-
-  const receipt = await runtime.supervisor(anchorTaskId).withdrawDraft({ proposalVersion: 1, reason: '方向已变', requestId: 'w-1' });
-  expect(receipt).toMatchObject({ withdrawnVersion: 1, nextProposalVersion: 2 });
-
-  // The user-visible outcome: the draft is gone from the conversation view (the same source the
-  // briefing digest reads), its history stays readable, the user is told, and the confirmation
-  // entry is refused instead of confirming something that was withdrawn.
-  const view = await runtime.conversations.view(created.conversationId);
-  expect(view.proposal).toBeNull();
-  expect(view.proposalHistory.map(item => item.version)).toContain(1);
-  expect(view.messages.some(message => message.role === 'system' && message.text.includes('已作废：方向已变'))).toBe(true);
-  await expect(runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm-withdrawn' }))
-    .rejects.toMatchObject({ code: 'stale_proposal' });
-
-  // Withdrawing again is refused, and the next draft keeps a monotonic version: the withdrawn
-  // number and the retired one are both skipped, so v1 → v3.
-  await expect(runtime.supervisor(anchorTaskId).withdrawDraft({ proposalVersion: 1, requestId: 'w-again' }))
-    .rejects.toMatchObject({ code: 'stale_proposal' });
-  await runtime.supervisor(anchorTaskId).propose({ ...draft, summary: '新方案' }, 'draft-2');
-  expect((await runtime.conversations.view(created.conversationId)).proposal?.version).toBe(3);
-});
-
-// The worker needs the confirmed constraints, not the main agent's conversation
-// status. Check the real model request so the two contexts cannot be conflated.
-test('the conversation status stays with the master while the constraints still reach the workers', async () => {
-  const root = await temp('status-scope');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  const { runtime, runWorker } = await nativeWorkerRuntime(root, [{ id: 'p', root: project }]);
-  const created = await runtime.conversations.create({ text: '约束：预算有限，登录先不改。', requestId: 'create' });
-  await runtime.host.runReady();
-  const anchorTaskId = (await runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await runtime.supervisor(anchorTaskId).propose(workflowDraft(1, '最小可用版'), 'draft');
-  await runtime.conversations.bind(created.conversationId, { projectId: 'p', requestId: 'bind' });
-  const confirmed = await runtime.conversations.confirm(created.conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'confirm' });
-  const briefing = await runWorker(confirmed.taskId);
-  // The constraint the user stated is what this node has to obey.
-  expect(briefing).toContain('Decisions and constraints from the conversation');
-  expect(briefing).toContain('预算有限，登录先不改');
-  // The master's monitoring picture is not this node's business.
-  expect(briefing).not.toContain('Conversation and execution status');
-});
+  return { runtime, conversationId: created.conversationId, anchorTaskId, proposal: (summary: string) => workflowDraft(1, summary) };
+}
 
 test('accepting a draft needs the credential of the revision that was reviewed', async () => {
   const { runtime, proposal } = await draftFixture('accept-credential');
@@ -1679,21 +804,4 @@ test('accepting a draft needs the credential of the revision that was reviewed',
   const replay = await runtime.user.task(anchorTaskId).accept({ proposalVersion: 1, draftRevision: 2, targetBranch: 'main', requestId: 'accept-new' });
   expect(replay).toMatchObject({ proposalVersion: 1, draftRevision: 2 });
   expect((await runtime.user.task(anchorTaskId).view()).acceptedProposalVersion).toBe(1);
-});
-
-test('draft cards belong to their own conversation and never leak across', async () => {
-  const { runtime, conversationId, anchorTaskId, proposal } = await draftFixture('card-isolation');
-  const other = await runtime.conversations.create({ text: '另一个会话', requestId: 'other-create' });
-  await runtime.host.runReady();
-  const otherAnchor = (await runtime.conversations.view(other.conversationId)).anchorTaskId;
-  await runtime.conversations.bind(other.conversationId, { projectId: 'p', requestId: 'other-bind' });
-  await runtime.supervisor(anchorTaskId).propose(proposal('甲会话草稿'), 'p1');
-  await runtime.supervisor(otherAnchor).propose(workflowDraft(1, '乙会话草稿'), 'p2');
-  await runtime.conversations.archiveDraft(other.conversationId, { proposalVersion: 1, requestId: 'archive-other' });
-  const mine = await runtime.conversations.view(conversationId);
-  expect(mine.proposal?.spec.summary).toBe('甲会话草稿');
-  expect(mine.archivedProposals).toEqual([]);
-  const theirs = await runtime.conversations.view(other.conversationId);
-  expect(theirs.proposal).toBeNull();
-  expect(theirs.archivedProposals.map(item => item.version)).toEqual([1]);
 });

@@ -42,18 +42,17 @@ type CapabilityConfigItem = {
 type CapabilitySort = 'alphabetical' | 'enabled' | 'popular';
 
 /* ------------------------------------------------- resource grouping */
-/* Pure, DOM-free helpers that split the library into configured and
- * unconfigured entries. Shared by the component and the console test. */
+/* Group the catalog and configuration views by their effective configuration. */
 
-export type LibraryEntryFilter = 'all' | 'configured' | 'unconfigured';
+type LibraryEntryFilter = 'all' | 'configured' | 'unconfigured';
 
-export interface LibraryEntryCounts {
+interface LibraryEntryCounts {
   all: number;
   configured: number;
   unconfigured: number;
 }
 
-export interface LibraryEntrySplit<T> {
+interface LibraryEntrySplit<T> {
   configured: T[];
   unconfigured: T[];
   counts: LibraryEntryCounts;
@@ -61,14 +60,14 @@ export interface LibraryEntrySplit<T> {
   visible: T[];
 }
 
-export const LIBRARY_FILTERS: readonly { id: LibraryEntryFilter; label: string }[] = [
+const LIBRARY_FILTERS: readonly { id: LibraryEntryFilter; label: string }[] = [
   { id: 'all', label: '全部' },
   { id: 'configured', label: '已配置' },
   { id: 'unconfigured', label: '未配置' },
 ];
 
 /** Split entries by configured state and apply the three-state filter. */
-export function splitLibraryEntries<T>(
+function splitLibraryEntries<T>(
   entries: readonly T[],
   filter: LibraryEntryFilter,
   isConfigured: (entry: T) => boolean,
@@ -90,7 +89,7 @@ export function splitLibraryEntries<T>(
 /** A capability counts as configured when its manifest is readable and any
  * required env/credential fields are present. Entries without a config view
  * have nothing to configure. */
-export function capabilityIsConfigured(item: CapabilityRecord, config?: CapabilityConfigItem): boolean {
+function capabilityIsConfigured(item: CapabilityRecord, config?: CapabilityConfigItem): boolean {
   if (item.status !== 'available') return false;
   return config ? config.ready : true;
 }
@@ -98,14 +97,14 @@ export function capabilityIsConfigured(item: CapabilityRecord, config?: Capabili
 /** Shared "how to configure" hint. Both the capability list view and the
  * config view funnel through this, so an unconfigured entry is never rendered
  * with an empty hint: the no-detail case falls back to a generic instruction. */
-export function configGuidance(input: { missing?: string[] | undefined; error?: string | undefined }): string {
+function configGuidance(input: { missing?: string[] | undefined; error?: string | undefined }): string {
   if (input.error) return `配置读取失败：${input.error} 请在能力目录修复后重新扫描。`;
   if (input.missing?.length) return `需要配置 ${input.missing.join(' / ')}：设置对应环境变量，或到设置页保存凭据；保存后立即对新请求生效。`;
   return '需要配置：到设置页连接模型或保存对应凭据；保存后立即生效。';
 }
 
 /** One-line "how to configure" hint for a capability-list entry. */
-export function capabilityConfigGuidance(item: CapabilityRecord, config?: CapabilityConfigItem): string {
+function capabilityConfigGuidance(item: CapabilityRecord, config?: CapabilityConfigItem): string {
   if (item.status !== 'available') {
     return item.error
       ? `清单不可读：${item.error} 请在能力目录修复 capability.json 后重新扫描。`
@@ -115,12 +114,12 @@ export function capabilityConfigGuidance(item: CapabilityRecord, config?: Capabi
 }
 
 /** Config-view entries carry their own ready/error state. */
-export function capabilityConfigItemIsConfigured(item: CapabilityConfigItem): boolean {
+function capabilityConfigItemIsConfigured(item: CapabilityConfigItem): boolean {
   return item.ready && !item.error;
 }
 
 /** How-to-configure hint for a config-view entry. */
-export function capabilityConfigItemGuidance(item: CapabilityConfigItem): string {
+function capabilityConfigItemGuidance(item: CapabilityConfigItem): string {
   return configGuidance(item);
 }
 

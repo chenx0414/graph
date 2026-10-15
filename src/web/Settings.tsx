@@ -488,48 +488,16 @@ function ConfiguredProvidersPanel({ draft, credentialState, onEdit, onDelete }: 
   </Card>;
 }
 
-/** Sidebar sections and their fixed order (B-0). Plain data so the console
- * tests can assert navigation without rendering the page. */
-export interface SettingsSection {
+/** Sidebar sections in their displayed order. */
+interface SettingsSection {
   id: string;
   label: string;
 }
 
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'settings-overview', label: '常规' },
   { id: 'settings-archived', label: '归档对话' },
 ];
-
-/** One collapsible region inside the 高级设置 page. `fields` names the config
- * document paths it edits and `testIds` the controls that must keep working.
- * The independent 并发限制 region was removed in B-1: both caps now live inside
- * the ① 配置厂商 card, so this list is intentionally empty. */
-export interface AdvancedSetting {
-  id: string;
-  title: string;
-  summary: string;
-  fields: readonly string[];
-  testIds: readonly string[];
-  /** Advanced regions start closed so the common path stays uncluttered. */
-  defaultCollapsed: boolean;
-}
-
-export const ADVANCED_SETTINGS: readonly AdvancedSetting[] = [];
-
-export const ADVANCED_SETTING_IDS: readonly string[] = ADVANCED_SETTINGS.map(setting => setting.id);
-
-/** Initial open-state for the collapsible advanced regions. Collapsed entries
- * are omitted, so the default map is empty and every region renders closed. */
-export function defaultAdvancedOpen(settings: readonly AdvancedSetting[] = ADVANCED_SETTINGS): Record<string, boolean> {
-  const open: Record<string, boolean> = {};
-  for (const setting of settings) if (!setting.defaultCollapsed) open[setting.id] = true;
-  return open;
-}
-
-/** Read helper for the controlled collapse, shared with the pure test. */
-export function isAdvancedOpen(open: Record<string, boolean>, id: string): boolean {
-  return Boolean(open[id]);
-}
 
 type ProbeResponse = {
   models?: { id?: unknown; name?: unknown }[];

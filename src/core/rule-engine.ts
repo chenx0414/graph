@@ -276,11 +276,6 @@ export function parseRule(source: string): ParsedRule {
   };
 }
 
-/** Convenience for tests and callers that hold a parsed rule. */
-export function evaluateRule(rule: ParsedRule, environment: RuleEnvironment): boolean {
-  return rule.evaluate(environment);
-}
-
 /** Resolve an emit value against the environment. */
 export function resolveEmit(value: EmitValue, environment: RuleEnvironment): Json {
   switch (value.kind) {

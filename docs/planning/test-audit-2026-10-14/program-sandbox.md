@@ -1,0 +1,9 @@
+# Program sandbox environment owner migration
+
+Full original program-check-sandbox declarations and shared workspace-check fixture, host-command.ts checkEnvironment/runHostCommand and kernel-operation-broker actual command path read. All existing public SDK→real command→literal record permission/sandbox/default/temp/security/invalid declaration contracts retained. Only direct helper-only checkEnvironment inventory retired after meaningful assertions carried into actual child process.
+
+Native probe now reports actual PATH/HOME and absence of ELECTRON_RUN_AS_NODE/operator checkout/provider env secrets. Controlled synthetic host credential variables are restored exactly, not unconditionally removed. Both actual sandboxed and unsandboxed runs require same host secret isolation and allowed toolchain paths. Actual public runtime declared program.env TMPDIR override is separately exercised through public graph create/send/drive and actual Node stdout; no helper injects owner receipt or fake command result. Original declared-overrides-host contract has this strongest-boundary primary owner.
+
+7 declarations / 8 executed cases staged. No shared fixture or production seam changed. Root owner/type validation pending. Whole file only genuine E2E after candidate verification; active routing manifest unchanged by agent.
+
+Batch25 actual candidate found that restricted execution deliberately sends only its own narrower PATH; checkEnvironment's added Homebrew/local promise belongs to the unsandboxed host check. Full production host-command/broker route establishes this, so carry Homebrew/local assertion only on actual sandbox:false run; keep secret/checkout/Electron absence and HOME checks on both. New declared TMPDIR actual flow passed. Next candidate validation pending; no production policy change.

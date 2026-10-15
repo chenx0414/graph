@@ -301,7 +301,8 @@ export async function openPiInstance(options: PiInstanceOptions) {
   // The session's own view of skills must match the block Graph renders into the system
   // prompt: the Agent's folder plus the SDK's own global and project folders.
   const skillLoadPaths = [...new Set([
-    ...(options.skillFolder ? [options.skillFolder] : options.skillPaths ?? []),
+    ...(options.skillFolder ? [options.skillFolder] : []),
+    ...(options.skillPaths ?? []),
     ...nativeSkillDirs({ cwds: [workspace] }),
   ])];
   const loader = new DefaultResourceLoader({

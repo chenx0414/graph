@@ -16,6 +16,8 @@ export interface ResponsePlan {
   usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number }; completion_tokens_details?: { reasoning_tokens: number } } | null;
   status?: number;
   error?: string;
+  /** Vendor error code; defaults to context overflow for existing compaction fixtures. */
+  errorCode?: string;
   redirect?: string;
   /** Keep the HTTP response open after the SSE [DONE] marker. */
   holdOpen?: boolean;
@@ -52,7 +54,7 @@ export async function openaiServer(plans: ResponsePlan[]) {
     await plan.beforeReply?.();
     if (plan.status) {
       res.writeHead(plan.status, { 'content-type': 'application/json', ...(plan.redirect ? { location: plan.redirect } : {}) });
-      res.end(JSON.stringify({ error: { message: plan.error ?? 'Service unavailable', type: 'invalid_request_error', code: 'context_length_exceeded' }, usage: plan.usage }));
+      res.end(JSON.stringify({ error: { message: plan.error ?? 'Service unavailable', type: 'invalid_request_error', code: plan.errorCode ?? 'context_length_exceeded' }, usage: plan.usage }));
       return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });

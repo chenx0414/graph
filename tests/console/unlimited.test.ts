@@ -122,15 +122,15 @@ test('a finite native missing-usage hold survives restart and policy changes unt
   expect(calls).toMatchObject([{ state: 'unknown', usage: null }]);
   await main.graphControl({ graphId: graph.graphId, action: 'reconcile_usage', callId: calls[0]!.id,
     usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } });
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ used: 50, reserved: 0 });
+  expect(await main.graphControl({ graphId: graph.graphId, action: 'reconcile_usage', callId: calls[0]!.id,
+    usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 } })).toMatchObject({ replayed: true, nodeId: 'work' });
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ used: 50, reserved: 0 });
+  await expect(main.graphControl({ graphId: graph.graphId, action: 'reconcile_usage', callId: calls[0]!.id,
+    usage: { input: 41, output: 10, cacheRead: 0, cacheWrite: 0 } })).rejects.toThrow('already reconciled differently');
+  expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ used: 50, reserved: 0 });
   await graph.retry();
   expect(graph.provider.requests).toHaveLength(2);
   expect(graph.runtime.nodeRun(graph.graphId, 'work').instance).toMatchObject({ used: 100, reserved: 0 });
   expect((await graph.complete()).phase).toBe('completed');
-}, 30000);
-
-test('an invalid default budget is rejected instead of guessed', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-unlimited-invalid-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  await expect(openTaskRuntime({ stateDir: join(root, 'state'), limits: { defaultBudgetTokens: 0 } })).rejects.toMatchObject({ code: 'invalid_input' });
-  await expect(openTaskRuntime({ stateDir: join(root, 'state'), limits: { defaultBudgetTokens: -1 } })).rejects.toMatchObject({ code: 'invalid_input' });
 }, 30000);

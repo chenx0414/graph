@@ -2,8 +2,7 @@
  * The workspace tab set: which windows the user has open in the main area and
  * which one is in front.
  *
- * Pure policy — no React, no IO, no storage — so the rules can be tested in the
- * sandbox the same way `conversation-drawer.ts` is. The shell keeps the hash
+ * The shell keeps the hash
  * route as the truth for *what is on screen* and this module as the truth for
  * *which tabs exist*; activating a tab navigates, navigating updates the tab.
  *
@@ -37,10 +36,6 @@ export const EMPTY_TABS: WorkspaceTabs = { tabs: [], activeId: null };
 
 export function tabId(kind: WorkspaceTabKind, key: string): string {
   return `${kind}:${key}`;
-}
-
-export function activeTab(state: WorkspaceTabs): WorkspaceTab | null {
-  return state.tabs.find(tab => tab.id === state.activeId) ?? null;
 }
 
 /**

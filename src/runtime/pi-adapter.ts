@@ -34,7 +34,7 @@ import { graphApplicationRoot } from './graph-root.ts';
 import { piNativeToolNamesForPlatform } from './pi-native-tools.ts';
 import { recordCapabilityLoad } from '../core/node-run.ts';
 import { COMPACTION_INSTRUCTIONS, isCompactionNoop, isLeakedCompactionReply, isSummaryLeakRetry, compactionSettings, latestContextTokens, shouldCompactContext } from './compaction.ts';
-import { controlledOpenAIStream, type ControlledStreamUsageOptions, type SendGate } from './controlled-openai.ts';
+import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
 import { guardHandoffResponses } from './handoff-response.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { waitForAgentExecutionSlot } from './execution-slots.ts';
@@ -197,8 +197,6 @@ export function createPiAdapter(options: {
   modelRuntime: ModelRuntime;
   network?: { retrievalDomains?: string[]; mcpDomains?: string[] };
   capabilitySecrets?: () => Record<string, string>;
-  /** Optional provider adapter for subscription/account-level usage deltas. */
-  accountUsageDelta?: ControlledStreamUsageOptions['accountUsageDelta'];
   channels?: PiAdapterChannels;
   transport?: AgentSessionTransport;
 }): ActionAdapter {
@@ -984,7 +982,6 @@ export function createPiAdapter(options: {
             model: toPiModel(entry),
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
-              ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
               onSend: sent => {
                 if (sent.systemPrompt !== null) {
                   options.store.recordOperationSystemPrompt(operation.id, sent.systemPrompt, sent.toolDeclarations ?? undefined);
@@ -1213,7 +1210,6 @@ export function createPiAdapter(options: {
                 suggestionReply = await generatePromptSuggestion({
                   stream: controlledOpenAIStream(suggestionGate, resolveKeyFor(suggestionEntry), slotFor(suggestionEntry), suggestionEntry.api, {
                     estimateMissing: true,
-                    ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
                   }),
                   model: toPiModel(suggestionEntry),
                   userMessage: lastUserMessage!,
@@ -1296,7 +1292,6 @@ export function createPiAdapter(options: {
                         const candidateReply = await generateSkillProposal({
                           stream: controlledOpenAIStream(candidateGate, resolveKeyFor(candidate), slotFor(candidate), candidate.api, {
                             estimateMissing: true,
-                            ...(options.accountUsageDelta ? { accountUsageDelta: options.accountUsageDelta } : {}),
                           }),
                           model: toPiModel(candidate),
                           systemPrompt: sedimentSystemPrompt,

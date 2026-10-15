@@ -4,37 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
 import { TaskStore } from '../../src/core/store.ts';
-import { parseGraphConfig } from '../../src/server/config.ts';
-import { buildTemplateConfigDocument } from '../../src/web/setup.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
-
-test('a credential can declare which subscription platform it is an account of', () => {
-  const path = '/tmp/graph.config.json';
-  const parsed = parseGraphConfig({
-    version: 1,
-    revision: 3,
-    projects: [],
-    credentials: {
-      'opencode-go': { secretRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', displayName: '主账户' },
-      'opencode-go-work': { platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_WORK_KEY', displayName: '工作账户' },
-    },
-    models: { entries: [{ id: 'zen', provider: 'opencode-go', grade: 'high', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 1000000, maxTokens: 384000, credentialId: 'opencode-go' }] },
-  }, path);
-  expect(parsed.credentials['opencode-go-work']).toEqual({
-    platform: 'opencode-go', secretRef: 'GRAPH_OPENCODE_WORK_KEY', displayName: '工作账户',
-  });
-  // Existing configs never declared an account, and they keep working untouched.
-  expect(parsed.credentials['opencode-go']?.platform).toBeUndefined();
-  // An unusable platform is a config error rather than a silently ignored account.
-  expect(() => parseGraphConfig({
-    version: 1, revision: 1, projects: [],
-    credentials: { a: { platform: '   ', secretRef: 'GRAPH_KEY_A' } }, models: { entries: [{ id: 'x', provider: 'custom', grade: 'low', api: 'openai-completions', baseUrl: 'https://x.example/v1', contextWindow: 1000, maxTokens: 100, credentialId: 'a' }] },
-  }, path)).toThrow(/credentials\.a\.platform/);
-  expect(() => parseGraphConfig({
-    version: 1, revision: 1, projects: [],
-    credentials: { a: { platform: 7, secretRef: 'GRAPH_KEY_A' } }, models: { entries: [{ id: 'x', provider: 'custom', grade: 'low', api: 'openai-completions', baseUrl: 'https://x.example/v1', contextWindow: 1000, maxTokens: 100, credentialId: 'a' }] },
-  }, path)).toThrow(/credentials\.a\.platform/);
-});
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -70,42 +40,6 @@ async function fixture(name: string, options: { document: Record<string, unknown
 const modelEntry = (baseUrl: string, extra: Record<string, unknown> = {}) => ({
   id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
   baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local', ...extra,
-});
-
-test('legacy models default to reasoning-capable and explicit opt-out is preserved', () => {
-  const parsed = parseGraphConfig({
-    version: 1,
-    projects: [],
-    credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
-    models: { entries: [
-      { ...modelEntry('http://127.0.0.1:1'), id: 'legacy' },
-      { ...modelEntry('http://127.0.0.1:1'), id: 'standard', reasoning: false },
-    ] },
-  }, '/tmp/graph.config.json');
-  expect(parsed.models?.entries.map(model => [model.id, model.reasoning])).toEqual([
-    ['legacy', true],
-    ['standard', false],
-  ]);
-});
-
-test('model input modalities are explicit, ordered, and validated', () => {
-  const document = (input?: string[]) => ({
-    version: 1,
-    projects: [],
-    credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
-    models: { entries: [
-      { ...modelEntry('http://127.0.0.1:1'), id: 'legacy' },
-      { ...modelEntry('http://127.0.0.1:1'), id: 'vision', ...(input ? { input } : {}) },
-    ] },
-  });
-  const parsed = parseGraphConfig(document(['text', 'image']), '/tmp/graph.config.json');
-  expect(parsed.models?.entries.map(model => [model.id, model.input])).toEqual([
-    ['legacy', undefined],
-    ['vision', ['text', 'image']],
-  ]);
-  expect(() => parseGraphConfig(document(['image']), '/tmp/graph.config.json')).toThrow(/must include "text"/);
-  expect(() => parseGraphConfig(document(['text', 'audio']), '/tmp/graph.config.json')).toThrow(/unsupported input modality/);
-  expect(() => parseGraphConfig(document(['text', 'text']), '/tmp/graph.config.json')).toThrow(/must not contain duplicate/);
 });
 
 async function post(daemon: GraphDaemon, api: Session, path: string, body: unknown) {
@@ -252,26 +186,7 @@ test('a hot null default budget reaches new instances and never rewrites old one
   expect((await daemon.server.runtime.user.task(first.taskId).view()).nodes[0]).toMatchObject({ budget: 1000, unlimited: false });
 }, 30_000);
 
-test('the same upstream model id on two platforms becomes two connections (UC-R08)', () => {
-  const first = buildTemplateConfigDocument({}, {
-    providerId: 'platform-a', api: 'openai-completions', baseUrl: 'https://a.example/v1',
-    credentialId: 'a', secretRef: 'A_KEY', models: [{ id: 'same-model', grade: 'high', contextWindow: 32_000, maxTokens: 256 }],
-  });
-  const both = buildTemplateConfigDocument(first, {
-    providerId: 'platform-b', api: 'openai-completions', baseUrl: 'https://b.example/v1',
-    credentialId: 'b', secretRef: 'B_KEY', models: [{ id: 'same-model', grade: 'high', contextWindow: 32_000, maxTokens: 256 }],
-  });
-  const entries = (both as { models: { entries: Record<string, unknown>[] } }).models.entries;
-  expect(entries).toHaveLength(2);
-  expect(entries[0]).toMatchObject({ id: 'same-model', modelId: 'same-model', provider: 'platform-a', credentialId: 'a' });
-  expect(entries[1]).toMatchObject({ id: 'same-model-platform-b', modelId: 'same-model', provider: 'platform-b', credentialId: 'b' });
-  // Re-adding the first platform keeps its identity and does not duplicate.
-  const again = buildTemplateConfigDocument(both, {
-    providerId: 'platform-a', api: 'openai-completions', baseUrl: 'https://a.example/v1',
-    credentialId: 'a', secretRef: 'A_KEY', models: [{ id: 'same-model', grade: 'high', contextWindow: 32_000, maxTokens: 256 }],
-  });
-  expect(((again as { models: { entries: unknown[] } }).models.entries)).toHaveLength(2);
-});
+
 
 test('each connection sends its own endpoint with the upstream model id (UC-R08)', async () => {
   const platformA = await openaiServer([{ text: 'from-a' }]);

@@ -121,9 +121,6 @@ interface UsageServiceOptions {
   loadConfig?: LoadConfig | undefined;
   env?: Record<string, string | undefined> | undefined;
   home?: string | undefined;
-  fetch?: FetchLike | undefined;
-  pricingPath?: string | undefined;
-  cacheTtlMs?: number | undefined;
 }
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
@@ -1027,12 +1024,12 @@ function summarize(plans: UsagePlan[]): UsageSnapshot['summary'] {
 }
 
 export function createUsageService(options: UsageServiceOptions = {}): UsageService {
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = fetch;
   const env = { ...(options.env ?? process.env) };
   const home = options.home ?? env.HOME?.trim() ?? homedir();
-  const pricingPath = options.pricingPath ?? join(home, '.cc-switch', 'model-pricing.json');
+  const pricingPath = join(home, '.cc-switch', 'model-pricing.json');
   const openCodeConfigPath = join(home, '.config', 'opencode', 'opencode.json');
-  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const cacheTtlMs = DEFAULT_CACHE_TTL_MS;
   let cached: UsageSnapshot | null = null;
   let inFlight: Promise<UsageSnapshot> | null = null;
 

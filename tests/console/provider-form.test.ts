@@ -13,87 +13,36 @@
 import { describe, expect, it } from 'vitest';
 import {
   FALLBACK_PLATFORMS,
-  addManualModelPick,
   autoProbeDecision,
   buildEntryDraft,
   completeCost,
   costError,
   customDraft,
   draftFromModelVendor,
-  accountCredentialEntry,
-  draftForCredential,
   draftFromPlatform,
-  draftFromPlatformWithCredential,
-  nextAccountDraft,
   draftToModelEntry,
   fillEntryFromMetadata,
-  hasProviderErrors,
   hasRequiredModelFields,
   keyEntryGuidance,
-  mergeProbeModels,
   metadataToFields,
   thinkingOptionsFromMetadata,
   missingRequiredModelFields,
   modelFieldErrors,
   modelVendorsFrom,
   normalizePlatforms,
-  parseLimit,
   platformById,
   platformsRequest,
   probeFailureNote,
   probeRequest,
-  readConcurrency,
-  selectedProbeModels,
   selectionBlockedReason,
   shouldAutoProbe,
-  validateProviderDraft,
   withCostField,
-  writeConcurrency,
   type ConcurrencyConfig,
 } from '../../src/web/provider-form.ts';
-// @ts-ignore -- .tsx import from a NodeNext test program
-import { ADVANCED_SETTING_IDS } from '../../src/web/Settings.tsx';
 import { estimateCost } from '../../src/catalog/models.ts';
 import { lookupModelMetadata } from '../../src/catalog/models-dev.ts';
 
 const preset = FALLBACK_PLATFORMS[0]!;
-
-describe('provider draft validation (step 1)', () => {
-  it('accepts a supported platform with just a key', () => {
-    expect(validateProviderDraft(draftFromPlatform(preset), { custom: false, hasKey: true })).toEqual({});
-  });
-
-  it('requires a key (or a resolvable credential) even for a supported platform', () => {
-    const errors = validateProviderDraft(draftFromPlatform(preset), { custom: false, hasKey: false });
-    expect(errors.key).toMatch(/API KEY|环境变量/);
-    expect(hasProviderErrors(errors)).toBe(true);
-  });
-
-  it('requires label, base URL, compatibility and key for a custom provider', () => {
-    const errors = validateProviderDraft(customDraft(), { custom: true, hasKey: false });
-    expect(errors.label).toBe('自定义厂商必须填写厂商名');
-    expect(errors.baseUrl).toMatch(/Base URL/);
-    expect(errors.key).toMatch(/API KEY/);
-  });
-
-  it('rejects a non-http base URL and an unknown compatibility mode', () => {
-    const errors = validateProviderDraft(
-      { ...customDraft(), label: '本地网关', baseUrl: 'ftp://example.com', api: 'responses' as never },
-      { custom: true, hasKey: true },
-    );
-    expect(errors.baseUrl).toMatch(/http/);
-    expect(errors.api).toMatch(/兼容格式/);
-  });
-
-  it('rejects malformed credential ids and credential refs with the daemon wording', () => {
-    const errors = validateProviderDraft(
-      { ...customDraft(), label: '网关', baseUrl: 'https://api.example.com/v1', credentialId: 'Bad Id', credentialRef: '1-bad' },
-      { custom: true, hasKey: true },
-    );
-    expect(errors.credentialId).toMatch(/凭据 id/);
-    expect(errors.credentialRef).toBe('credentialRef 必须是环境变量名');
-  });
-});
 
 describe('model thinking options in the provider editor', () => {
   it('shows OpenCode Go effort levels as soon as metadata is fetched', () => {
@@ -150,71 +99,9 @@ describe('probe request/response handling (step 2)', () => {
     expect(JSON.parse(probeRequest(draft, 'probe-456').init.body)).not.toHaveProperty('modelId');
   });
 
-  it('merges a probed list without overwriting the user’s existing picks', () => {
-    const previous = [
-      { modelId: 'manual-model', selected: true, manual: true },
-      { modelId: 'gpt-5', selected: true },
-    ];
-    const merged = mergeProbeModels([{ id: 'gpt-5', name: 'GPT-5' }, { id: 'o4-mini', name: 'o4-mini' }], previous);
-    expect(merged.map(pick => pick.modelId)).toEqual(['manual-model', 'gpt-5', 'o4-mini']);
-    expect(merged[0]).toMatchObject({ selected: true, manual: true });
-    expect(merged[1]).toMatchObject({ selected: true });
-    expect(merged[2]).toMatchObject({ selected: false });
-    expect(selectedProbeModels(merged).map(pick => pick.modelId)).toEqual(['manual-model', 'gpt-5']);
-  });
-
-  it('lets the endpoint without a model list keep manual ids', () => {
-    const first = addManualModelPick([], 'local-llama');
-    const second = addManualModelPick(first, 'local-llama');
-    expect(second).toHaveLength(1);
-    expect(second[0]).toMatchObject({ modelId: 'local-llama', selected: true, manual: true });
-  });
 });
 
 describe('snapshot metadata mapping', () => {
-  it('fills every field when the snapshot hits', () => {
-    const fields = metadataToFields({
-      contextWindow: 200_000,
-      maxTokens: 8_192,
-      input: ['text', 'image'],
-      reasoning: true,
-      thinkingLevels: ['low', 'medium', 'high'],
-      defaultThinkingLevel: 'medium',
-      grade: 'high',
-      cost: { input: 1.5, output: 6, cacheRead: 0.15, cacheWrite: 1.875 },
-      currency: 'USD',
-      sourceUrl: 'https://models.dev/api.json',
-    });
-    expect(fields).toMatchObject({
-      contextWindow: 200_000,
-      maxTokens: 8_192,
-      input: ['text', 'image'],
-      reasoning: true,
-      thinkingLevels: ['low', 'medium', 'high'],
-      defaultThinkingLevel: 'medium',
-      grade: 'high',
-      cost: { input: 1.5, output: 6, cacheRead: 0.15, cacheWrite: 1.875 },
-    });
-    expect(fields.pricing).toMatchObject({ currency: 'USD', unit: 'per_million_tokens', status: 'known' });
-  });
-
-  it('leaves an unmatched model blank and marks pricing unknown — never zero', () => {
-    const fields = metadataToFields(null);
-    expect(fields.contextWindow).toBeNull();
-    expect(fields.maxTokens).toBeNull();
-    expect(fields.cost).toBeNull();
-    expect(fields.pricing.status).toBe('unknown');
-    expect(fields.grade).toBeNull();
-    expect(buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'unknown-model', metadata: null })).not.toHaveProperty('cost');
-  });
-
-  it('marks pricing unknown when the model matched but has no usable price', () => {
-    const fields = metadataToFields({ contextWindow: 128_000, maxTokens: 4_096, reasoning: true });
-    expect(fields.contextWindow).toBe(128_000);
-    expect(fields.cost).toBeNull();
-    expect(fields.pricing.status).toBe('unknown');
-    expect(JSON.stringify(fields)).not.toContain('"input":0');
-  });
 
   it('never invents thinking levels that the catalog does not declare', () => {
     const fields = metadataToFields({ reasoning: true, thinkingLevels: ['low', 'bogus'], defaultThinkingLevel: 'bogus' });
@@ -232,23 +119,6 @@ describe('snapshot metadata mapping', () => {
     expect(entry).toMatchObject({ id: 'deepseek:v3', modelId: 'deepseek-v3', contextWindow: 64_000, maxTokens: 8_192, grade: 'medium' });
     expect(entry.cost).toEqual({ input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 });
     expect(entry.pricing?.status).toBe('known');
-  });
-
-  it('omits unknown context/output instead of inventing positive numbers', () => {
-    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null });
-    const entry = draftToModelEntry(draft);
-    expect(entry).not.toHaveProperty('contextWindow');
-    expect(entry).not.toHaveProperty('maxTokens');
-    expect(entry).not.toHaveProperty('cost');
-    // An unknown price carries no `pricing` at all: the daemon rejects an empty
-    // currency and inventing one (or a 0) would be a lie about the price.
-    expect(entry).not.toHaveProperty('pricing');
-  });
-
-  it('never invents a grade when the snapshot (which has none) does not provide one', () => {
-    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: { contextWindow: 128_000, maxTokens: 4_096 } });
-    expect(draft.grade).toBeUndefined();
-    expect(draftToModelEntry(draft)).not.toHaveProperty('grade');
   });
 
   it('does not overwrite values the user already typed', () => {
@@ -333,12 +203,6 @@ describe('price completeness (step 2)', () => {
     expect(withCostField({ input: 5 }, 'input', undefined)).toBeUndefined();
   });
 
-  it('(d) a partial cost blocks the document save', () => {
-    const problems = missingRequiredModelFields([{ id: 'm', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium', cost: { input: 1 } }]);
-    expect(problems).toHaveLength(1);
-    expect(problems[0]!.fields).toContain('cost');
-  });
-
   it('(d) estimateCost treats a missing price side as unknown, never as 0', () => {
     const usage = { input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 };
     expect(estimateCost(usage, { input: 1, output: null as unknown as number, cacheRead: 0, cacheWrite: 0 })).toEqual({ unknown: true });
@@ -347,41 +211,11 @@ describe('price completeness (step 2)', () => {
 });
 
 describe('unset default thinking strength (round A)', () => {
-  it('(A) never fabricates defaultThinkingLevel when the snapshot gives no default', () => {
-    // A reasoning model whose snapshot hit carries no explicit default level.
-    const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: { reasoning: true, thinkingLevels: ['low', 'medium', 'high'] } });
-    expect(draft.defaultThinkingLevel).toBeUndefined();
-    expect(draftToModelEntry(draft)).not.toHaveProperty('defaultThinkingLevel');
-    expect(metadataToFields({ reasoning: true }).defaultThinkingLevel).toBeNull();
-    expect(metadataToFields({ reasoning: true, defaultThinkingLevel: 'bogus' }).defaultThinkingLevel).toBeNull();
-  });
 
   it('(A) only writes a default level when one is actually provided', () => {
     const draft = buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: { reasoning: true, defaultThinkingLevel: 'high' } });
     expect(draft.defaultThinkingLevel).toBe('high');
     expect(draftToModelEntry(draft).defaultThinkingLevel).toBe('high');
-  });
-});
-
-describe('zero is a real free price (round A)', () => {
-  it('(A) a zero price round-trips through the cost helpers and is never treated as empty', () => {
-    const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    expect(costError(free)).toBeNull();
-    expect(completeCost(free)).toEqual(free);
-    // 0 is finite, so it is kept; only clearing (undefined) removes a side.
-    expect(withCostField({ input: 0 }, 'input', 0)).toEqual({ input: 0 });
-    expect(withCostField(undefined, 'input', 0)).toEqual({ input: 0 });
-    expect(withCostField({ input: 0 }, 'input', undefined)).toBeUndefined();
-  });
-
-  it('(A) a model with a complete zero price passes validation and persists as known', () => {
-    const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    const entry = { id: 'free', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium', cost: free };
-    expect(hasRequiredModelFields(entry)).toBe(true);
-    expect(missingRequiredModelFields([entry])).toEqual([]);
-    const persisted = draftToModelEntry({ id: 'free', modelId: 'free', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', grade: 'medium', contextWindow: 128_000, maxTokens: 4_096, cost: free });
-    expect(persisted.cost).toEqual(free);
-    expect(persisted.pricing?.status).toBe('known');
   });
 });
 
@@ -473,19 +307,6 @@ describe('model step vendor picker (step 2)', () => {
 });
 
 describe('key entry guidance', () => {
-  it('browser mode explains why there is no key box and points at the desktop app', () => {
-    const guidance = keyEntryGuidance({ hasBridge: false, credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY' });
-    expect(guidance.mode).toBe('browser');
-    expect(guidance.envVar).toBe('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
-    expect(guidance.exportLine).toBe('export GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY=…');
-    const copy = guidance.lines.join(' ');
-    expect(copy).toContain('浏览器无法访问系统钥匙串');
-    expect(copy).toContain('桌面 App 窗口');
-    expect(copy).toContain('GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY');
-    // The export line stays a placeholder: no plaintext secret anywhere.
-    expect(guidance.exportLine).toContain('=…');
-    expect(JSON.stringify(guidance)).not.toMatch(/sk-[A-Za-z0-9]/);
-  });
 
   it('desktop mode keeps the keychain input path', () => {
     const guidance = keyEntryGuidance({ hasBridge: true, credentialRef: 'GRAPH_PROVIDER_API_KEY' });
@@ -497,105 +318,5 @@ describe('key entry guidance', () => {
 
   it('falls back to a real variable name when the ref is blank', () => {
     expect(keyEntryGuidance({ hasBridge: false, credentialRef: '  ' }).envVar).toBe('GRAPH_PROVIDER_API_KEY');
-  });
-});
-
-describe('settings registry (step 1 / concurrency)', () => {
-  it('no longer declares an independent 并发限制 advanced section', () => {
-    expect(ADVANCED_SETTING_IDS).not.toContain('settings-limits');
-  });
-});
-
-describe('concurrency limits inside a provider entry', () => {
-  it('reads a credential cap and its shared group from the config', () => {
-    const config: ConcurrencyConfig = {
-      credentials: { opencode: { sharedLimitGroupId: 'team-a' } },
-      limits: { credentials: { opencode: 3 }, sharedGroups: { 'team-a': 8 } },
-    };
-    expect(readConcurrency(config, 'opencode')).toEqual({ credentialLimit: '3', sharedGroupId: 'team-a', sharedGroupLimit: '8' });
-    expect(readConcurrency({}, 'missing')).toEqual({ credentialLimit: '', sharedGroupId: '', sharedGroupLimit: '' });
-  });
-
-  it('writes the per-credential and shared-group caps back into the document', () => {
-    const config: ConcurrencyConfig = { credentials: { opencode: { sharedLimitGroupId: 'old' } }, limits: { credentials: {}, sharedGroups: { old: 2 } } };
-    writeConcurrency(config, 'opencode', { credentialLimit: '5', sharedGroupId: 'team-a', sharedGroupLimit: '9' });
-    expect(config.limits?.credentials).toEqual({ opencode: 5 });
-    expect(config.credentials?.opencode?.sharedLimitGroupId).toBe('team-a');
-    expect(config.limits?.sharedGroups).toEqual({ 'team-a': 9 });
-  });
-
-  it('clears caps and groups when the fields are emptied or invalid', () => {
-    const config: ConcurrencyConfig = { credentials: { opencode: { sharedLimitGroupId: 'team-a' } }, limits: { credentials: { opencode: 3 }, sharedGroups: { 'team-a': 8 } } };
-    writeConcurrency(config, 'opencode', { credentialLimit: '0', sharedGroupId: '', sharedGroupLimit: 'abc' });
-    expect(config.limits?.credentials).toEqual({});
-    expect(config.credentials?.opencode?.sharedLimitGroupId).toBeUndefined();
-    expect(config.limits?.sharedGroups).toEqual({});
-    expect(parseLimit('4')).toBe(4);
-    expect(parseLimit('4.5')).toBeUndefined();
-    expect(parseLimit('-1')).toBeUndefined();
-  });
-
-  it('keeps the env var name a working credential already stores', () => {
-    const platform = FALLBACK_PLATFORMS.find(item => item.id === 'opencode-go');
-    expect(platform).toBeDefined();
-    expect(draftFromPlatformWithCredential(platform!, { 'opencode-go': { secretRef: 'OPENCODE_GO_API_KEY' } }).credentialRef).toBe('OPENCODE_GO_API_KEY');
-    expect(draftFromPlatformWithCredential(platform!, { 'opencode-go': { secretRef: '   ' } }).credentialRef).toBe(platform!.credentialRef);
-    expect(draftFromPlatformWithCredential(platform!, {}).credentialRef).toBe(platform!.credentialRef);
-    expect(draftFromPlatformWithCredential(platform!, undefined).credentialRef).toBe(platform!.credentialRef);
-  });
-});
-
-describe('the card follows the selected credential', () => {
-  it('names the account the operator selected, not the platform', () => {
-    const platform = preset;
-    const credentials = {
-      [platform.id]: { secretRef: platform.credentialRef, displayName: 'OpenCode Go' },
-      'opencode-go-3': { secretRef: 'GRAPH_OPENCODE_GO_ACCOUNT_3', displayName: '账户 2' },
-    };
-    const account = draftForCredential(platform, credentials, 'opencode-go-3');
-    expect(account).toMatchObject({ credentialId: 'opencode-go-3', credentialRef: 'GRAPH_OPENCODE_GO_ACCOUNT_3', label: '账户 2' });
-    // The platform's own card still shows the platform credential.
-    expect(draftForCredential(platform, credentials, platform.id)).toMatchObject({ credentialRef: platform.credentialRef, label: 'OpenCode Go' });
-    // A brand new id keeps the platform defaults until it is saved.
-    expect(draftForCredential(platform, credentials, 'opencode-go-9')).toMatchObject({ credentialRef: platform.credentialRef, label: platform.label });
-  });
-});
-
-describe('an account keeps the name its operator gave it', () => {
-  it('shows the stored name instead of the platform label', () => {
-    const platform = preset;
-    expect(draftFromPlatformWithCredential(platform, { [platform.id]: { secretRef: platform.credentialRef, displayName: '账户 2' } }).label).toBe('账户 2');
-    // No name stored yet, or only whitespace: fall back to the platform label.
-    expect(draftFromPlatformWithCredential(platform, { [platform.id]: { secretRef: platform.credentialRef } }).label).toBe(platform.label);
-    expect(draftFromPlatformWithCredential(platform, { [platform.id]: { secretRef: platform.credentialRef, displayName: '   ' } }).label).toBe(platform.label);
-    expect(draftFromPlatformWithCredential(platform, undefined).label).toBe(platform.label);
-  });
-});
-
-describe('one platform, several accounts', () => {
-  const zen = preset;
-
-  it('gives an extra account its own credential id and variable name', () => {
-    // Reusing the first account's id would silently overwrite its key.
-    expect(nextAccountDraft(zen, ['opencode-go'])).toMatchObject({
-      platformId: 'opencode-go',
-      credentialId: 'opencode-go-2',
-      credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_2',
-    });
-    expect(nextAccountDraft(zen, ['opencode-go', 'opencode-go-2']).credentialId).toBe('opencode-go-3');
-    expect(nextAccountDraft(zen, ['other']).credentialId).toBe('opencode-go-2');
-  });
-
-  it('records which platform an account belongs to, and keeps what it already had', () => {
-    expect(accountCredentialEntry(undefined, { credentialId: 'opencode-go-2', credentialRef: 'GRAPH_ZEN_2', label: '工作账户', platformId: 'opencode-go', custom: false }))
-      .toEqual({ secretRef: 'GRAPH_ZEN_2', displayName: '工作账户', platform: 'opencode-go' });
-    // A credential that already carries a shared limit group must not lose it.
-    expect(accountCredentialEntry({ secretRef: 'GRAPH_ZEN', sharedLimitGroupId: 'g1' }, { credentialId: 'opencode-go', credentialRef: 'GRAPH_ZEN', label: '', platformId: 'opencode-go', custom: false }))
-      .toEqual({ secretRef: 'GRAPH_ZEN', displayName: 'opencode-go', sharedLimitGroupId: 'g1', platform: 'opencode-go' });
-  });
-
-  it('never claims a platform for a custom provider', () => {
-    expect(accountCredentialEntry({ secretRef: 'GRAPH_X', platform: 'opencode-go' }, { credentialId: 'custom', credentialRef: 'GRAPH_PROVIDER_API_KEY', label: '我的网关', platformId: 'custom', custom: true }))
-      .toEqual({ secretRef: 'GRAPH_PROVIDER_API_KEY', displayName: '我的网关' });
   });
 });

@@ -346,7 +346,7 @@ export class GraphRuntime {
   }
 
   /** §5: read the graph's structure and lifecycle for the main agent. */
-  inspect(query: { kind: 'summary' | 'revision' | 'nodes' | 'deliveries'; executionId?: string }): Json {
+  inspect(query: { kind: 'summary' | 'revision' | 'nodes' }): Json {
     this.ensureTask();
     const latest = this.kernel.latestRevision(this.graphId)!;
     if (query.kind === 'summary') {
@@ -357,10 +357,6 @@ export class GraphRuntime {
       const rows = this.kernel.db.prepare('SELECT node_id, instance_id, kind, status FROM kernel_nodes WHERE task_id=?').all(this.graphId) as
         { node_id: string; instance_id: string; kind: string; status: string }[];
       return rows.map(row => ({ id: row.node_id, instanceId: row.instance_id, kind: row.kind, status: row.status })) as unknown as Json;
-    }
-    if (query.kind === 'deliveries') {
-      if (!query.executionId) throw new RuntimeError('invalid_query', 'deliveries requires an executionId');
-      return this.kernel.deliveriesFor(query.executionId) as unknown as Json;
     }
     throw new RuntimeError('invalid_query', `Unknown inspect query ${String((query as { kind?: unknown }).kind)}`);
   }

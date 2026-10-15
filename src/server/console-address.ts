@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -44,13 +44,4 @@ export async function readConsoleAddress(stateDir: string): Promise<ConsoleAddre
   } catch {
     return null;
   }
-}
-
-/**
- * Retract the record. The daemon deliberately does not call this: the record is what lets the next
- * start return to the same port, and a stopped daemon's stale url is self-evident to a reader (it
- * refuses connections, and `pid` says whose it was). Kept for a caller that wants the file gone.
- */
-export async function clearConsoleAddress(stateDir: string): Promise<void> {
-  await rm(consoleAddressPath(stateDir), { force: true }).catch(() => undefined);
 }

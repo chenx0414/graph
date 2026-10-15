@@ -1,7 +1,6 @@
 import { expect, test } from 'vitest';
 import { operationIntentEvent } from '../../src/core/operation-lifecycle.ts';
 import type { Operation } from '../../src/core/types.ts';
-import { buildTimeline } from '../../src/web/insights.ts';
 
 /** A spec big enough that duplicating it in the event log is the bug under test. */
 const operation = {
@@ -28,14 +27,4 @@ test('an intent event points at the operation row instead of duplicating its spe
   expect(data).not.toHaveProperty('input');
   expect(data).not.toHaveProperty('dependencies');
   expect(data).not.toHaveProperty('context');
-});
-
-test('the timeline still identifies the operation from that reference', () => {
-  const events = [{
-    cursor: 1, taskId: 'task-1', type: 'operation.intent',
-    data: operationIntentEvent(operation), timestamp: 0,
-  }] as unknown as Parameters<typeof buildTimeline>[0];
-  const [entry] = buildTimeline(events);
-  expect(entry?.detail).toBe('op-1');
-  expect(entry?.tone).toBe('active');
 });

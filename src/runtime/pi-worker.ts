@@ -1,3 +1,4 @@
+import { workerModelOptions } from './worker-model-options.ts';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -117,7 +118,7 @@ async function main() {
     if (signal?.aborted) cancel();
     else signal?.addEventListener('abort', cancel, { once: true });
     try {
-      const response = await request({ operation: 'model', target, context, events: true }) as {
+      const response = await request({ operation: 'model', target, context, options: workerModelOptions(options), events: true }) as {
         frames: AssistantMessageFrame[];
         settlement: AssistantMessage;
       };

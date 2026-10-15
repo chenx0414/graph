@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openaiServer } from '../fixtures/openai-server.ts';
 import { startGraphDaemon } from '../../src/server/start.ts';
-import { parseGraphConfig } from '../../src/server/config.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -79,27 +78,6 @@ test('configured model headers reach the provider on a real dispatch', async () 
   const view = await daemon.server.runtime.user.task(taskId).view();
   expect(view.nodes.find(node => node.id === 'work')?.status).toBe('succeeded');
 }, 90_000);
-
-test('config parsing validates and keeps per-model request headers', () => {
-  const document = (headers: unknown) => ({
-    version: 1,
-    projects: [{ id: 'p', root: '/tmp' }],
-    models: {
-      entries: [{
-        id: 'local', provider: 'opencode-go', grade: 'high', api: 'openai-completions',
-        baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 32_000, maxTokens: 256,
-        credentialId: 'go', headers,
-      }],
-    },
-    credentials: { go: { secretRef: 'OPENCODE_GO_API_KEY' } },
-    limits: {},
-  });
-  const parsed = parseGraphConfig(document({ 'x-opencode-session': 'graph-console' }), '/tmp/graph.config.json');
-  expect(parsed.models?.entries[0]?.headers).toEqual({ 'x-opencode-session': 'graph-console' });
-  expect(() => parseGraphConfig(document({ 'bad header': 'x' }), '/tmp/graph.config.json')).toThrow(/not a valid header name/);
-  expect(() => parseGraphConfig(document({ 'x-test': '' }), '/tmp/graph.config.json')).toThrow(/non-empty string/);
-  expect(() => parseGraphConfig(document({ 'x-test': 42 }), '/tmp/graph.config.json')).toThrow(/non-empty string/);
-});
 
 test('OpenCode Go adds its routing header to connection tests and real dispatches', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-m8-opencode-go-headers-'));

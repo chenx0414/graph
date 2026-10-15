@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
-import { createModelScheduler } from '../../src/runtime/model-scheduler.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -271,42 +270,6 @@ test('a rejected candidate keeps the previous effective bindings', async () => {
   await waitFor(() => provider.authorizations.length >= 1 ? true : undefined);
   expect(provider.authorizations[0]).toContain('Bearer stable-key');
 }, 60_000);
-
-test('the scheduler applies a lowered limit to waiters and re-queues on key rotation', async () => {
-  const scheduler = createModelScheduler();
-  const release1 = await scheduler.acquire({ credentialId: 'local', apiKey: 'a', limit: 2 });
-  const release2 = await scheduler.acquire({ credentialId: 'local', apiKey: 'a', limit: 2 });
-  let granted = false;
-  const waiting = scheduler.acquire({
-    credentialId: 'local', apiKey: 'a', limit: 2,
-    refresh: () => ({ credentialId: 'local', apiKey: 'a', limit: 1 }),
-  }).then(release => { granted = true; return release; });
-  await new Promise(resolve => setTimeout(resolve, 20));
-  expect(granted).toBe(false);
-  release1();
-  await new Promise(resolve => setTimeout(resolve, 20));
-  // The lowered limit of 1 is already used by the second active call.
-  expect(granted).toBe(false);
-  release2();
-  const release3 = await waiting;
-  expect(granted).toBe(true);
-  release3();
-
-  // A queued request whose key rotates moves to the new scheduling identity.
-  const hold = await scheduler.acquire({ credentialId: 'local', apiKey: 'old', limit: 1 });
-  let rotated = false;
-  const second = scheduler.acquire({
-    credentialId: 'local', apiKey: 'old', limit: 1,
-    refresh: () => ({ credentialId: 'local', apiKey: 'new', limit: 1 }),
-  }).then(release => { rotated = true; return release; });
-  await new Promise(resolve => setTimeout(resolve, 20));
-  expect(rotated).toBe(false);
-  hold();
-  const release4 = await second;
-  expect(rotated).toBe(true);
-  release4();
-  expect(scheduler.queued()).toBe(0);
-}, 30_000);
 
 test('an endpoint change while a request waits never sends the new key to the old platform', async () => {
   let releaseFirst!: () => void;

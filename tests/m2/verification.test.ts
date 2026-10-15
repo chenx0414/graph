@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition, type ModuleDefinition } from '../../src/core/interface-spec.ts';
-import { reviewPolicyCode, reviewPolicyInputs, type PublishedSubject, type ReviewDecision, type ReviewPolicy } from '../../src/core/review-policy.ts';
+import { reviewPolicyInputs, type PublishedSubject, type ReviewDecision, type ReviewPolicy } from '../../src/core/review-policy.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -128,9 +128,22 @@ test('native rework carries the reviewer words and touched files rather than onl
 });
 
 test('native review configuration rejects duplicate dimensions and invalid module placement before creation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-invalid-review-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const config = multiview(); config.dimensions.push({ id: 'correctness', required: false, report: 'review' });
-  expect(() => reviewPolicyCode(config)).toThrow(/Dimension IDs/);
-  expect(() => parseGraphDefinition({ schemaVersion: 2, name: 'Invalid placement', protocols: { data: { type: 'object' } }, nodes: {}, modules: { gate: { type: 'operation', trigger: 'each', inputs: {}, outputs: { result: { protocol: 'data' } }, operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' }, code: { entry: '/tmp/gate.mjs', version: 1 } } }, edges: {} })).toThrow(/cannot also declare code/);
+  const configuration = join(root, 'invalid.json'); const entry = join(root, 'invalid.mjs');
+  await writeFile(configuration, JSON.stringify(config));
+  const failed = await promisify(execFile)(process.execPath, [join(process.cwd(), 'scripts/create-review-module.ts'), configuration, entry])
+    .then(() => null, error => error as { code: number; stderr: string });
+  expect(failed?.code).toBe(1); expect(failed?.stderr).toMatch(/Dimension IDs/);
+  expect(await access(entry).then(() => true, () => false)).toBe(false);
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }] }); cleanup.push(() => runtime.close());
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Reject invalid review configuration', requestId: 'begin' });
+  const main = runtime.supervisor(owner.taskId);
+  await expect(main.graphCreate({ definition: { schemaVersion: 2, name: 'Invalid placement', protocols: { data: { type: 'object' } }, nodes: {}, modules: {
+    gate: { type: 'operation', trigger: 'each', inputs: {}, outputs: { result: { protocol: 'data' } }, operation: {
+      action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result',
+    }, code: { entry, version: 1 } },
+  }, edges: {}, inputs: {}, outputs: {} } })).rejects.toThrow(/cannot also declare code/);
 });
 
 const adversarial = (): Extract<ReviewPolicy, { kind: 'adversarial' }> => ({ kind: 'adversarial', subject: 'implementation', reports: ['review'], criteria: ['works'] });

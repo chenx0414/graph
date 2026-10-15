@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -22,9 +22,17 @@ test('Matt assembly reports every missing capability before saving any role', as
   const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
   const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], catalog: { capabilityRoot, recipesPath: join(root, 'recipes.json') } });
   cleanup.push(() => runtime.close());
+  const app = await createApp(runtime, { origin: 'http://127.0.0.1:1' }); cleanup.push(() => app.close());
+  const url = await app.listen({ host: '127.0.0.1', port: 0 });
+  const configuration = join(root, 'missing-options.json'); const output = join(root, 'missing-team.json');
+  await writeFile(configuration, JSON.stringify(options));
   const before = runtime.catalog.agentCombinations();
-  await expect(assembleMattTeam(runtime.catalog, options)).rejects.toThrow(/planner.*codebase-design[\s\S]*worker.*tdd[\s\S]*standards.*code-review[\s\S]*spec.*code-review/);
+  const failed = await promisify(execFile)(process.execPath, ['examples/assemble-matt-team.ts', '--url', url, '--config', configuration, '--out', output],
+    { cwd: process.cwd() }).then(() => null, error => error as { code: number; stderr: string });
+  expect(failed?.code).toBe(1);
+  expect(failed?.stderr).toMatch(/planner.*codebase-design[\s\S]*worker.*tdd[\s\S]*standards.*code-review[\s\S]*spec.*code-review/);
   expect(runtime.catalog.agentCombinations()).toEqual(before);
+  expect(await access(output).then(() => true, () => false)).toBe(false);
 });
 
 async function mattCapabilities(root: string) {

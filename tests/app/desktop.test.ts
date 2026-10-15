@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   consoleRoute, restoreConsoleRoute, consoleReloadAction, appRootFilePath, applySecretRequest, daemonArgs, isLoopbackUrl, loadSecrets, parseBannerAddress, resolveAppPaths,
-  loadRawSecretEntries, resolveDaemonMode, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
+  loadRawSecretEntries, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText, taskNotifications,
   trayIconPath, trayMenuItems,
   type AppPaths, type SecretCodec,
 } from '../../desktop/lib.ts';
@@ -92,21 +92,7 @@ describe('daemon launch contract', () => {
     expect(isLoopbackUrl('http://evil.example/')).toBe(false);
   });
 
-  test('execute mode needs one resolvable model; unresolved models stay disabled', () => {
-    const config = {
-      version: 1,
-      models: { entries: [{ id: 'local', credentialId: 'local' }, { id: 'go', credentialId: 'go' }] },
-      credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' }, go: { secretRef: 'OPENCODE_GO_API_KEY' } },
-    };
-    expect(resolveDaemonMode(undefined, {}, {})).toBe('view');
-    expect(resolveDaemonMode({ ...config, models: { entries: [] } }, {}, {})).toBe('view');
-    expect(resolveDaemonMode(config, {}, {})).toBe('view');
-    // One broken credential must not force the whole daemon into view-only.
-    expect(resolveDaemonMode(config, { OPENCODE_GO_API_KEY: 'x' }, {})).toBe('execute');
-    expect(resolveDaemonMode(config, {}, { OPENCODE_GO_API_KEY: 'x' })).toBe('execute');
-    expect(resolveDaemonMode(config, { GRAPH_LOCAL_KEY: 'x' }, {})).toBe('execute');
-    expect(resolveDaemonMode({ ...config, models: { entries: [{ id: 'local', credentialId: 'missing' }] } }, { OPENCODE_GO_API_KEY: 'x' }, {})).toBe('view');
-  });
+
 });
 
 describe('keychain secrets file', () => {

@@ -1,3 +1,4 @@
+import { workerModelOptions, type WorkerModelOptions } from './worker-model-options.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
@@ -51,7 +52,7 @@ export interface ResidentHostOptions {
    * returns the result the node sees. Returning `ok:false` is how a refusal reaches the
    * model as a correctable error rather than an exception (§5).
    */
-  onModelCall?: (context: unknown, signal: AbortSignal) => Promise<unknown>;
+  onModelCall?: (context: unknown, signal: AbortSignal, options: WorkerModelOptions) => Promise<unknown>;
   onEvent?: (event: unknown) => void;
   onReady?: (inspect: ResidentInspect) => void;
   onToolCall?: (name: string, args: unknown) => { ok: boolean; text: string } | Promise<{ ok: boolean; text: string }>;
@@ -154,14 +155,14 @@ export class ResidentHost {
           this.onExit(new Error('Resident worker emitted invalid channel message'));
           this.restricted?.control.kill('SIGKILL'); this.child?.kill('SIGKILL'); return;
         }
-        const message = parsed as { operation?: string; requestId?: string; inspect?: ResidentInspect; name?: string; args?: unknown; event?: unknown; context?: unknown };
+        const message = parsed as { operation?: string; requestId?: string; inspect?: ResidentInspect; name?: string; args?: unknown; event?: unknown; context?: unknown; options?: unknown };
         // A node asking the host to run a tool (HB-262). The answer goes back on stdin,
         // the reverse direction of this channel, so the node's call resolves with it.
         if (message.operation === 'model_call' && message.requestId) {
           const requestId = message.requestId;
           const abort = new AbortController();
           this.modelAborts.add(abort);
-          void Promise.resolve(this.options.onModelCall?.(message.context, abort.signal) ?? Promise.reject(new Error('Host model transport unavailable')))
+          void Promise.resolve(this.options.onModelCall?.(message.context, abort.signal, workerModelOptions(message.options)) ?? Promise.reject(new Error('Host model transport unavailable')))
             .then(value => { this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: true, value })}\n`); })
             .catch(error => { this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: false, error: error instanceof Error ? error.message : String(error) })}\n`); })
             .finally(() => this.modelAborts.delete(abort));

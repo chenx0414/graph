@@ -65,8 +65,3 @@ export function readSourceIdentity(root: string): SourceIdentity {
     dirty: status.ok ? status.out.length > 0 : null,
   };
 }
-
-/** A short form of the commit for display, or the honest "unknown". */
-export function shortCommit(identity: SourceIdentity): string {
-  return identity.commit ? identity.commit.slice(0, 12) : '未知';
-}

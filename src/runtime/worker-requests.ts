@@ -1,3 +1,4 @@
+import { workerModelOptions } from './worker-model-options.ts';
 import { randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { normalizeContext } from '@earendil-works/pi-ai';
@@ -44,7 +45,7 @@ export function createWorkerRequests(options: {
             ...(Array.isArray(candidate.tools) ? { tools: candidate.tools } : {}),
           };
         }
-        const stream = await options.stream(options.model, normalizeContext(context), { signal: abort.signal });
+        const stream = await options.stream(options.model, normalizeContext(context), { ...workerModelOptions(request.options), signal: abort.signal });
         if (request.events === true) {
           // Every event carries the shared live `partial` message, so the raw
           // event list is quadratic in the response length. Send compact frames

@@ -328,29 +328,6 @@ export class ArtifactWorkspace {
       VALUES(?,?,?,?,?,?)`).run(taskId, record.artifactId, record.version, type, canonicalJson(data), Date.now());
   }
 
-  /**
-   * Record that a node was handed exact artifact versions: the briefing injects a dependency's
-   * artifact into a node without that node calling a tool, so nothing else would leave a reader
-   * trace. `artifact_read` records `artifact.accessed` for a tool read; this records the passive
-   * hand-off, which is how the console draws the artifact-to-reader edge. It writes no bytes and
-   * never throws on an unknown artifact: a briefing must not fail because a trace could not be kept.
-   */
-  recordReferences(input: { taskId: string; nodeId: string; artifacts: { artifactId: string; version: number }[]; relation?: string }) {
-    if (!input.artifacts.length) return;
-    for (const artifact of input.artifacts) {
-      this.artifactEvent(input.taskId, artifact, 'artifact.referenced', {
-        artifactId: artifact.artifactId,
-        version: artifact.version,
-        nodeId: input.nodeId,
-        relation: input.relation ?? 'briefed',
-      });
-    }
-  }
-
-  recordReference(input: { taskId: string; nodeId: string; artifactId: string; version: number; relation?: string }) {
-    this.recordReferences({ ...input, artifacts: [{ artifactId: input.artifactId, version: input.version }] });
-  }
-
   private taskBytes(taskId: string) {
     const row = this.store.db.prepare('SELECT COALESCE(SUM(size),0) AS bytes FROM artifacts WHERE task_id=?').get(taskId) as { bytes: number };
     return Number(row.bytes);

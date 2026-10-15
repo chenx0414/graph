@@ -29,10 +29,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { openTaskRuntime } from '../../src/core/task-runtime.ts';
+import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { runWorkspaceCheck, workspaceCheckOutput } from '../fixtures/workspace-check.ts';
 import { git as runGit } from '../../src/git/git.ts';
-import { checkEnvironment } from '../../src/runtime/host-command.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -73,6 +74,7 @@ async function repo() {
  */
 const PROBE_SCRIPT = [
   "console.log('tmp=' + (process.env.TMPDIR ?? 'none') + ' secret=' + (process.env[" + JSON.stringify(SECRET) + "] ?? 'absent'));",
+  "console.log('ENVIRONMENT=' + JSON.stringify({path:process.env.PATH,home:process.env.HOME,electron:process.env.ELECTRON_RUN_AS_NODE ?? null,checkout:process.env.GRAPH_RSI_ROOT ?? null,otherSecret:process.env.GRAPH_SUBSCRIPTION_X_API_KEY ?? null}));",
   '',
 ].join('\n');
 
@@ -133,40 +135,47 @@ test.each([false, true])('declaring nothing keeps a dedicated sandbox scratch un
   expect(body.sandboxed).toBe(true);
 });
 
-test('the environment a check runs with is built, not inherited', () => {
-  // The allowlist is the whole difference between "runs like the project" and "runs with everything
-  // the app has". Measured 2026-09-30: inheriting it handed the check a real provider key, the path of
-  // the live checkout, and a PATH without the toolchain (a GUI-launched app gets /usr/bin:/bin only).
-  const env = checkEnvironment({
-    executable: '/usr/bin/node',
-    declared: { TMPDIR: '/declared/tmp' },
-    host: {
-      PATH: '/usr/bin:/bin', HOME: '/Users/somebody', TMPDIR: '/host/tmp',
-      GRAPH_SUBSCRIPTION_X_API_KEY: 'oc_sk_a_real_looking_key', ELECTRON_RUN_AS_NODE: '1', GRAPH_RSI_ROOT: '/live/checkout',
-    },
-  });
-  expect(env['PATH']!.split(':')).toEqual(expect.arrayContaining(['/usr/bin', '/bin', '/opt/homebrew/bin', '/usr/local/bin']));
-  expect(env['HOME']).toBe('/Users/somebody');
-  // What the host declared for checks wins, including the temp directory.
-  expect(env['TMPDIR']).toBe('/declared/tmp');
-  for (const leaked of ['GRAPH_SUBSCRIPTION_X_API_KEY', 'ELECTRON_RUN_AS_NODE', 'GRAPH_RSI_ROOT']) {
-    expect(Object.keys(env), leaked).not.toContain(leaked);
-  }
-});
-
 test('a check is not handed the app own environment, sandboxed or not', async () => {
   // Measured 2026-09-30: the first version of this ran the check with process.env inherited, which
   // handed a real provider key to the check and to everything it spawned. The app's environment is
   // not the check's environment; only the allowlist a toolchain needs travels.
+  const previous = { [SECRET]: process.env[SECRET], GRAPH_SUBSCRIPTION_X_API_KEY: process.env.GRAPH_SUBSCRIPTION_X_API_KEY, GRAPH_RSI_ROOT: process.env.GRAPH_RSI_ROOT };
   process.env[SECRET] = 'oc_sk_not_for_checks';
-  cleanup.push(async () => { delete process.env[SECRET]; });
+  process.env.GRAPH_SUBSCRIPTION_X_API_KEY = 'synthetic-provider-secret';
+  process.env.GRAPH_RSI_ROOT = '/synthetic/operator/checkout';
+  cleanup.push(async () => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   for (const sandbox of [true, false]) {
     const root = await repo();
     const view = await run(root, { command: 'node', args: ['scripts/probe.mjs'], ...(sandbox ? {} : { sandbox: false }) }, { fullAccess: true });
     expect((await recordBody(view)).code).toBe(0);
     const body = await recordBody(view);
     expect(body.stdout, `sandboxed=${String(sandbox)}`).toContain('secret=absent');
+    const environment = JSON.parse(body.stdout.split('\n').find(line => line.startsWith('ENVIRONMENT='))!.slice('ENVIRONMENT='.length)) as { path: string; home: string; electron: unknown; checkout: unknown; otherSecret: unknown };
+    // checkEnvironment adds the GUI toolchain paths for an unsandboxed host check.
+    // The restricted runner deliberately uses its own narrower executable PATH.
+    if (!sandbox) expect(environment.path.split(':')).toEqual(expect.arrayContaining(['/usr/bin', '/bin', '/opt/homebrew/bin', '/usr/local/bin']));
+    expect(environment.home).toBe(process.env.HOME);
+    expect(environment).toMatchObject({ electron: null, checkout: null, otherSecret: null });
   }
+});
+
+test('a declared check environment wins over the actual host temporary directory', async () => {
+  const root = await repo();
+  const declared = join(root, 'declared-scratch'); await mkdir(declared);
+  await writeFile(join(root, 'probe.cjs'), "console.log(JSON.stringify({tmp:process.env.TMPDIR,marker:process.env.CHECK_EXPLICIT_MARKER}));");
+  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }], access: () => fullAccessPolicy(),
+    program: { env: { TMPDIR: declared, CHECK_EXPLICIT_MARKER: 'DECLARED_CHECK_INPUT' } } });
+  cleanup.push(() => runtime.close());
+  const owner = await runtime.user.begin({ projectId: 'p', request: 'Use declared check environment', requestId: 'begin' });
+  const main = runtime.supervisor(owner.taskId);
+  const { graphId } = await main.graphCreate({ definition: { schemaVersion: 2, name: 'Declared environment', protocols: { data: { type: 'object' } }, nodes: {},
+    modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['probe.cjs'], output: 'result', sandbox: false } } },
+    edges: {}, inputs: {}, outputs: {} } }) as { graphId: string };
+  await main.graphSend({ graphId, nodeId: 'check', input: 'job', value: {} }); await runtime.host.drive();
+  const operations = await main.graphInspect({ graphId, query: 'operations' }) as { state: string; result: { outputs: { result: { passed: boolean; stdout: string } } } }[];
+  expect(operations).toHaveLength(1); expect(operations[0]).toMatchObject({ state: 'settled', result: { outputs: { result: { passed: true } } } });
+  expect(JSON.parse(operations[0]!.result.outputs.result.stdout)).toEqual({ tmp: declared, marker: 'DECLARED_CHECK_INPUT' });
 });
 
 test('a sandbox declaration that is not a boolean is refused rather than guessed at', async () => {

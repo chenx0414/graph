@@ -14,7 +14,7 @@ afterEach(async () => {
   cleanup.length = 0;
 });
 
-async function fixture(plans: ResponsePlan[], deliverable: NonNullable<NodeDefinition['deliverable']>, reader = false) {
+async function fixture(plans: ResponsePlan[], deliverable: NodeDefinition['deliverable'], reader = false) {
   const root = await mkdtemp(join(tmpdir(), 'graph-node-deliverable-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans);
@@ -102,3 +102,51 @@ test('a missing declared file fails native execution and retains the input for m
   const queue = await runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'queue' });
   expect(queue).toMatchObject({ items: [{ nodeId: 'work', state: 'failed', reason: expect.stringMatching(/never written/i) }] });
 }, 30_000);
+
+
+test('an actually empty Pi-written declared file fails while a node without a deliverable completes without publishing', async () => {
+  const empty = await fixture([{ tools: [{ id: 'empty', name: 'write_file', arguments: JSON.stringify({ path: 'notes/empty.md', content: '' }) }] },
+    { text: 'The file is empty.' }], { path: 'notes/empty.md', namespace: 'research', name: 'empty' });
+  expect(empty.runtime.nodeRun(empty.taskId, 'work').node.status).toBe('failed');
+  expect(empty.runtime.artifacts.list(empty.taskId).artifacts).toEqual([]);
+  await expect(empty.runtime.supervisor(empty.taskId).graphInspect({ graphId: empty.taskId, query: 'queue' })).resolves.toMatchObject({
+    items: [{ nodeId: 'work', state: 'failed', reason: expect.stringMatching(/is empty/i) }],
+  });
+  const ordinary = await fixture([{ text: 'No file was promised.' }], undefined);
+  expect(ordinary.runtime.nodeRun(ordinary.taskId, 'work').node.status).toBe('succeeded');
+  expect(ordinary.runtime.artifacts.list(ordinary.taskId).artifacts).toEqual([]);
+}, 30_000);
+
+test('real subsequent executions deduplicate unchanged bytes, publish changed bytes and preserve old bytes when a schema is added', async () => {
+  const firstText = JSON.stringify({ commit: null, passed: true, reason: 'First review' });
+  const secondText = JSON.stringify({ commit: null, passed: true, reason: 'Updated review' });
+  const declaration = { path: 'reviews/result.json', namespace: 'reviews' as const, name: 'result' };
+  const write = (content: string): ResponsePlan => ({ tools: [{ id: 'write', name: 'write_file', arguments: JSON.stringify({ path: declaration.path, content }) }] });
+  const { runtime, taskId, provider } = await fixture([write(firstText), { text: 'First review written.' },
+    { text: 'The existing bytes remain unchanged.' }, write(secondText), { text: 'Changed review written.' },
+    { text: 'Interpret the existing review with the declared schema.' }, { text: 'The typed bytes remain unchanged.' }], declaration);
+  const main = runtime.supervisor(taskId);
+  const versions = () => runtime.artifacts.list(taskId, { namespace: 'reviews', latestOnly: false }).artifacts;
+  const initial = versions()[0]!;
+  expect(initial).toMatchObject({ version: 1, schemaKind: null });
+  await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { run: 'unchanged' } }); await runtime.host.drive();
+  expect(versions()).toHaveLength(1);
+  await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { run: 'changed' } }); await runtime.host.drive();
+  expect(versions().map(item => item.version).sort()).toEqual([1, 2]);
+  const changed = runtime.artifacts.get(taskId, initial.artifactId, 2);
+  expect(changed.digest).not.toBe(initial.digest);
+  await main.graphPatch({ graphId: taskId, baseRevision: 1, changes: { reason: 'Declare the interpretation for future executions', patch: {
+    nodes: { work: { deliverable: { ...declaration, schema: 'graph.review@1' } } },
+  } } });
+  await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { run: 'typed' } }); await runtime.host.drive();
+  const typed = runtime.artifacts.get(taskId, initial.artifactId, 3);
+  expect(typed).toMatchObject({ version: 3, schemaKind: 'graph.review', schemaVersion: 1, digest: changed.digest });
+  expect(typed.producer?.operationId).not.toBe(changed.producer?.operationId);
+  expect(runtime.artifacts.get(taskId, initial.artifactId, 2).schemaKind).toBeNull();
+  expect((await runtime.artifacts.read(taskId, initial.artifactId, 1)).text).toBe(firstText);
+  expect((await runtime.artifacts.read(taskId, initial.artifactId, 2)).text).toBe(secondText);
+  await main.graphSend({ graphId: taskId, nodeId: 'work', input: 'job', value: { run: 'typed-unchanged' } }); await runtime.host.drive();
+  expect(versions().map(item => item.version).sort()).toEqual([1, 2, 3]);
+  expect(runtime.nodeRun(taskId, 'work').node.status).toBe('succeeded');
+  expect(provider.requests).toHaveLength(7);
+}, 60_000);

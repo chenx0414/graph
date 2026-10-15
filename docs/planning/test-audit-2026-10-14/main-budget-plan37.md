@@ -1,0 +1,38 @@
+# Legacy budget owner plan 37 — read-only
+
+Read all three declarations/harness in console/budget-ledger.test.ts and all src/core/budget-ledger.ts; inspected all production imports/call sites, main executor/model selection, operation lifecycle reservation/settlement/refusal, full task-gate, nodeRun public projection, full context resolver/freeze/view, runtime construction and user setBudget. History: extraction116ec83, context removal6dc73a2 (same retired-context guard already present in that committed version), later unknown-usage fixesb689350/187503f. Read ADR0009,0014,0017,0030 and current CONTEXT. Repository unchanged; no tests executed.
+
+## Fork/share helper decision
+
+`shareBudgetScope` has zero production callers (`rg` src only declaration); only old first test calls it. It is safe to delete this dead exported function after retiring that helper-only fork scenario. Keep existing SQL tables/columns, FK constraints, fork enum values and context views unchanged. Keep current ensureBudgetScope/budgetScopeView/assertWithinBudget/setBudget/addBudget shared-scope arithmetic and ownership checks: these are active readers/mutators and may encounter existing stored main histories. Do not remove shared-format compatibility merely because new forks cannot be produced.
+
+ADR0014 historically promises fork/shared quota. ADR0030 retires old graph execution, and current committed context.ts rejects any non-master or explicit legacy context, returns only main fresh/continue, freeze rejects every other mode. Kernel native nodes hold their own resident session/ledger and have no instances-based fork path. Thus no current public Graph operation can create the legacy child instance and call shareBudgetScope. The low-level Pi fork transport remains a reusable implementation capability; it does not itself create instances or join budget scopes. Do not claim ADR0014's feature works today, and do not silently delete/alter its historical text. Record that current product context inheritance is retired under the v2 cutover; any attempt to restore shared forks would need a new public product implementation and proof.
+
+## Three declarations
+
+1. `one scope owns reservation, commit and shared cap changes`: D for helper-only new fork creation/child-owner branches; C for actual single-main scope identity/commit/reservation/quota behavior into new real main workflow below. Existing native-node keeper is NOT equivalent: it uses kernel_node_state, not instances/budget_scopes. Historical multi-member format remains supported by existing code, but new keeper need not fabricate a new supported fork operation.
+2. `unlimited and model history remain explicit ledger facts`: C, but current native-node unlimited keeper does NOT absorb main modelsUsed or main scopeUnlimited. New real main/restart workflow must assert nodeRun.instance.modelsUsed identity order and dedup, scope.limit/null/unlimited and usage. Keep old declaration until that proof passes.
+3. `in-flight invocation usage is counted before settlement without becoming committed usage`: C, but NOT covered by native kernel gate or current node-budget keeper. `taskGate.check`→assertWithinBudget→scopeInFlightUsage is an active main path. Need actual multirequest main operation with genuine invocation writer and pre-settlement state. Keep old declaration until new keeper demonstrates this and catches removal of scopeInFlightUsage.
+
+## Recommended keeper: new tests/e2e/main-budget.test.ts
+
+Use openTaskRuntime, standard access policy (never full access), real external main Pi/native process, real openaiServer SDK fixture and actual filesystem. No injected ActionAdapter/hand-built instance/invocation SQL. Model entry contextWindow32000/maxTokens256, `master` definition, isolated catalog/state/project. PI_SESSION_RESERVE in production is2000000; actual provider reservation is32256. Choose fixed expectations from those independently documented fixture values; do not derive expected guard result from subject helper.
+
+### A: actual pending invocation contributes before commit (two scenario rows)
+
+Finite budget2050000 versus2060000. First real provider reply invokes a real read/list tool (project seed file) with usage prompt_tokens20000/completion_tokens0. This is below configured contextWindow. It causes a second model request within the same operation.
+
+- Positive2060000 scenario: second request enters beforeReply held by fixture promise. Observe public nodeRun while held: operation dispatched/active, instance.used0, context.budgetScope.used0; first invocation carries authoritative input20000; real second request proves this is not just absent-tool fake path. Release second reply with default50 usage; settle should instance.used20050/scope.used20050 and no outstanding reservation (public operations[].reserved0). Assertion source is actual SDK writer.
+- Negative2050000 scenario: initial admission allows2000000; first provider check allows2000000+32256. Before second request the aggregate is2000000+20000+32256=2052256>2050000. Should issue exactly one vendor request, reject second at budget guard, preserve actual first20000 charge and release operation reservation. Assert real budget question/reason and operation interrupted rather than successful zero-call result. This catches removal of in-flight usage from the main scope sum. Existing pure old third test never exercised real writer or gate.
+- Mutation: omit `+ scopeInFlightUsage(store,snapshot.scopeId)` in assertWithinBudget; negative row must emit an unwanted second request and fail intended request-count/guard assertion; restore bytes. No extra cross-layer test needed.
+
+### B: main quota/model history survives restart
+
+Real conversation one reply on upstream model identitym1; inspect nodeRun: stable instance, modelsUsed=['m1'], actual scope owner/member1/used50. User.task(anchor).setBudget(master,null)→public instance budgetnull/unlimitedtrue and context.budgetScope.limitnull/unlimitedtrue with same scopeID and used50. Close/reopen runtime with same state and real provider options but switch main selected model to upstreamm2 through actual supported runtime config (or real dynamic config API). Second real message onm2, third message againm2: actual vendor requests, used150, modelsUsed=['m1','m2'] ordered/dedup, same instance/scope/session continuity. Use nodeRun's actual projection, not modelsUsed helper. Ensure selection change uses a real public config/reopen; if main explicit persisted spec.model is sticky, use dynamic preference/definition update owner rather than hand-editing DB. Investigate that before implementing. Add another independent conversation only if needed for zero-used expectation; zero commit itself isn't a distinct public mutation contract.
+
+- Modelhistory mutations: disabling recordModelUse should lose m2; removing dedup should duplicate m2. Explicit history contract requires meaningful failing control before deletion.
+- Main unlimited mutation: disable scope cap update in setBudget→context.scope remains finite though instance unlimited, keeper red. Existing native quota mutation would not catch this owner.
+
+## Cutover/verification
+
+Apply only when current Vitest freeze ends. Run both real keepers plus console/budget-ledger and main conversation/usage siblings before deleting the3old tests. Remove shareBudgetScope only; retain DB-format and active ledger functions. Full-read final whole file before E2E routing. Independent preservation review + deliberate controls and restored candidate required. Current recommendation is a plan, not proof completed; no old declaration is approved for immediate deletion based on native node-budget tests alone.
