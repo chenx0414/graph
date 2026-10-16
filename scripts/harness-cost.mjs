@@ -18,6 +18,7 @@ try {
   let callsWithFrozenRates = 0;
   const tasks = new Map(rows('SELECT id,phase FROM tasks').map(row => [row.id, {
     id: row.id, phase: row.phase, requests: 0, unknownUsage: 0, estimatedUsage: 0, cacheHitRequests: 0, measuredRequests: 0,
+    cacheMeasuredRequests: 0, cacheEvidenceTokens: { input: 0, cacheRead: 0, cacheWrite: 0 },
     tokens: Object.fromEntries(billing.map(key => [key, 0])), costs: {}, unknownCost: 0,
     operations: new Set(), executions: new Set(), purposes: {},
   }]));
@@ -32,21 +33,27 @@ try {
     const usage = parse(call.usage);
     // Tool admission also uses the invocation ledger; zero-token tool calls are not model turns.
     // Retain missing usage: it may be a billed request and cannot be treated as zero.
-    if (usage && billing.every(key => usage[key] === 0)) continue;
+    if (usage && billing.every(key => usage[key] === 0) && call.lane === 'main' && !profilesByCall.has(call.id)) continue;
     task.requests++;
     task.purposes[call.purpose] = (task.purposes[call.purpose] ?? 0) + 1;
     task[call.lane === 'main' ? 'operations' : 'executions'].add(call.turn);
     if (!usage || billing.some(key => !Number.isFinite(usage[key]) || usage[key] < 0)) task.unknownUsage++;
     else {
       if (usage.usageSource === 'estimated') task.estimatedUsage++;
+      if (usage.usageSource === 'unknown') task.unknownUsage++;
       for (const key of billing) task.tokens[key] += usage[key];
       task.measuredRequests++;
-      if (usage.cacheRead > 0) task.cacheHitRequests++;
+      const cacheEvidence = usage.usageSource === undefined || usage.usageSource === 'authoritative' || usage.usageSource === 'account_delta';
+      if (cacheEvidence && usage.input + usage.cacheRead + usage.cacheWrite > 0) {
+        task.cacheMeasuredRequests++;
+        if (usage.cacheRead > 0) task.cacheHitRequests++;
+        for (const key of ['input', 'cacheRead', 'cacheWrite']) task.cacheEvidenceTokens[key] += usage[key];
+      }
       const frozen = parse(call.frozen_model);
       const profile = profilesByCall.get(call.id);
       const rates = frozen?.cost ?? profile?.rates;
       const pricing = frozen?.pricing ?? profile?.pricing;
-      if (rates && billing.every(key => Number.isFinite(rates[key]) && rates[key] >= 0)) {
+      if (cacheEvidence && rates && billing.every(key => Number.isFinite(rates[key]) && rates[key] >= 0)) {
         callsWithFrozenRates++;
         const totals = billingCosts[pricing?.currency ?? 'unspecified'] ??= Object.fromEntries(billing.map(key => [key, 0]));
         for (const key of billing) totals[key] += usage[key] * rates[key] / 1_000_000;
@@ -76,9 +83,10 @@ try {
   const toolDenominator = exists('tool_calls') ? rows('SELECT COUNT(DISTINCT task_id) AS n FROM tool_calls')[0].n : 0;
   const outputTasks = observedTasks.map(task => ({ ...task,
     operations: task.operations.size, executions: task.executions.size,
-    cacheHitRequestRate: task.measuredRequests ? task.cacheHitRequests / task.measuredRequests : null,
-    cacheReadFraction: task.tokens.input + task.tokens.cacheRead + task.tokens.cacheWrite > 0
-      ? task.tokens.cacheRead / (task.tokens.input + task.tokens.cacheRead + task.tokens.cacheWrite) : null,
+    cacheUnmeasuredRequests: task.requests - task.cacheMeasuredRequests,
+    cacheHitRequestRate: task.cacheMeasuredRequests ? task.cacheHitRequests / task.cacheMeasuredRequests : null,
+    cacheReadFraction: task.cacheEvidenceTokens.input + task.cacheEvidenceTokens.cacheRead + task.cacheEvidenceTokens.cacheWrite > 0
+      ? task.cacheEvidenceTokens.cacheRead / (task.cacheEvidenceTokens.input + task.cacheEvidenceTokens.cacheRead + task.cacheEvidenceTokens.cacheWrite) : null,
   }));
   const completed = outputTasks.filter(task => task.phase === 'completed');
   const completedCosts = {};
@@ -94,6 +102,7 @@ try {
       'File/search/command/summary provenance is unavailable in historical wire messages; no fabricated source split.',
       'Main conversations and child graphs remain separate task rows; completion costs exclude unallocated main planning.',
       'Tool reach uses tasks with retained tool telemetry; retention can differ from invocation retention.',
+      'Cache metrics and costByBillingType exclude estimated/unknown provenance; local estimates cannot establish cache misses.',
     ],
     summary: {
       tasks: outputTasks.length, completedTasks: completed.length,

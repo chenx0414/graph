@@ -15,17 +15,20 @@ test.each([
   { compactDocs: false, cacheField: 'standard' },
   { compactDocs: true, cacheField: 'deepseek' },
   { compactDocs: false, cacheField: 'kimi' },
+  { compactDocs: false, cacheField: 'unreported' },
+  { compactDocs: false, cacheField: 'capacity-retry' },
 ])('compactDocs=$compactDocs/cache=$cacheField: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI', async ({ compactDocs, cacheField }) => {
   const previous = process.env.GRAPH_COMPACT_DOCUMENTATION;
   process.env.GRAPH_COMPACT_DOCUMENTATION = compactDocs ? '1' : '0';
   cleanup.push(async () => { if (previous === undefined) delete process.env.GRAPH_COMPACT_DOCUMENTATION; else process.env.GRAPH_COMPACT_DOCUMENTATION = previous; });
   const root = await mkdtemp(join(tmpdir(), 'graph-harness-cost-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const usage = { prompt_tokens: 40, completion_tokens: 10,
+  const usage = cacheField === 'unreported' ? null : { prompt_tokens: 40, completion_tokens: 10,
     ...(cacheField === 'standard' ? { prompt_tokens_details: { cached_tokens: 15 } }
       : cacheField === 'deepseek' ? { prompt_cache_hit_tokens: 15, prompt_cache_miss_tokens: 25 } : { cached_tokens: 15 }),
   };
   const provider = await openaiServer([
+    ...(cacheField === 'capacity-retry' ? [{ status: 429 }] : []),
     { tools: [{ id: 'write-proof', name: 'bash', arguments: JSON.stringify({ command: 'printf harness-proof > proof.txt' }) }], usage },
     { text: 'The proof file is ready.', usage },
   ]);
@@ -58,24 +61,34 @@ test.each([
   expect(await readFile(join(root, 'proof.txt'), 'utf8')).toBe('harness-proof');
   const events = await (await fetch(`${daemon.url}/api/conversations/${created.conversationId}/events?limit=500`, { headers })).json() as { type: string; data: Record<string, unknown> }[];
   const profiles = events.filter(event => event.type === 'provider.request_profile');
-  expect(profiles).toHaveLength(2);
+  expect(profiles).toHaveLength(cacheField === 'capacity-retry' ? 3 : 2);
   expect(JSON.stringify(profiles)).not.toMatch(/private-user-marker|private-fixture-key|printf harness-proof/);
   expect(profiles[0]!.data.staticFingerprint).toBe(profiles[1]!.data.staticFingerprint);
-  expect(profiles[1]!.data.sections).toHaveProperty('tool_results');
+  expect(profiles.at(-1)!.data.sections).toHaveProperty('tool_results');
   // Public statistics read ingests worker telemetry through its real owner.
   expect((await fetch(`${daemon.url}/api/tool-stats`, { headers })).ok).toBe(true);
   const { stdout } = await execute(process.execPath, ['scripts/harness-cost.mjs', join(root, 'state', 'tasks.sqlite')], { cwd: process.cwd() });
   const report = JSON.parse(stdout);
   const task = report.tasks.find((task: { id: string }) => task.id === created.taskId);
-  expect(task).toMatchObject({ requests: 2, unknownUsage: 0, unknownCost: 0,
-    tokens: { input: 50, output: 20, cacheRead: 30, cacheWrite: 0 }, cacheReadFraction: 0.375 });
-  expect(task.costs.USD).toBeCloseTo(0.000195, 10);
-  expect(report.summary.costPerCompletedTask).toBeNull();
-  expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(2);
-  expect(report.summary.costByBillingType.amounts.USD.input).toBeCloseTo(0.0001, 10);
-  expect(report.summary.costByBillingType.amounts.USD.output).toBeCloseTo(0.00008, 10);
-  expect(report.summary.costByBillingType.amounts.USD.cacheRead).toBeCloseTo(0.000015, 10);
-  expect(task.cacheHitRequestRate).toBe(1);
-  expect(report.requestProfiles.samples).toBe(2);
+  if (cacheField === 'unreported') {
+    expect(task.cacheHitRequestRate).toBeNull();
+    expect(task.cacheReadFraction).toBeNull();
+    expect(task).toMatchObject({ requests: 2, estimatedUsage: 2, cacheMeasuredRequests: 0, cacheUnmeasuredRequests: 2 });
+    expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(0);
+    expect(report.summary.costPerCompletedTask).toBeNull();
+  } else {
+    expect(task).toMatchObject({ requests: cacheField === 'capacity-retry' ? 3 : 2, unknownUsage: 0, unknownCost: 0,
+      tokens: { input: 50, output: 20, cacheRead: 30, cacheWrite: 0 }, cacheReadFraction: 0.375 });
+    expect(task.costs.USD).toBeCloseTo(0.000195, 10);
+    expect(report.summary.costPerCompletedTask).toBeNull();
+    expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(cacheField === 'capacity-retry' ? 3 : 2);
+    expect(task.cacheMeasuredRequests).toBe(2);
+    expect(task.cacheUnmeasuredRequests).toBe(cacheField === 'capacity-retry' ? 1 : 0);
+    expect(report.summary.costByBillingType.amounts.USD.input).toBeCloseTo(0.0001, 10);
+    expect(report.summary.costByBillingType.amounts.USD.output).toBeCloseTo(0.00008, 10);
+    expect(report.summary.costByBillingType.amounts.USD.cacheRead).toBeCloseTo(0.000015, 10);
+    expect(task.cacheHitRequestRate).toBe(1);
+  }
+  expect(report.requestProfiles.samples).toBe(cacheField === 'capacity-retry' ? 3 : 2);
   expect(report.tools.find((tool: { tool: string }) => tool.tool === 'bash')).toMatchObject({ calls: 1, errors: 0, taskReach: 1 });
 }, 60_000);

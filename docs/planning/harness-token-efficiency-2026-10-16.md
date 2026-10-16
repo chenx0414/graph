@@ -237,3 +237,7 @@ GRAPH_COMPACT_DOCUMENTATION=1 node scripts/harness-real-eval.mjs /path/to/graph.
 最新完整门禁已验证目录加载 E2E、光标恢复生产修复与真实桌面持久化等待：267/267 文件、1,483/1,483 测试通过，验收证据未变化。目录加载实验提交 `068f940`；光标恢复修复和对应 composer 断言提交 `33eb786`。composer 文件只暂存相关选区 hunk，既有新动画测试和代理变化没有混入。desktop 等待修正位于使用者尚未提交的整个新授权 E2E 中，保留在工作区，未把该整项供应商/UI 工作纳入本任务提交。
 
 历史工具错误的可见原因已按实际证据记录：artifact_publish 的参数二选一错误、源路径不存在、版本冲突。未知原因不假装归类完成；没有为了减少错误率而放宽来源和并发保护。
+
+## 缓存证据边界补充
+
+本地 estimated usage 的 cacheRead=0 是估算器缺证据的默认值，不能计作一次真实缓存 miss。新增真实 HTTP→shell→SQLite→CLI 的 usage 缺失场景，在修复前明确失败于 cacheHitRequestRate=0（预期 null）。报告现单列 cacheMeasuredRequests、cacheUnmeasuredRequests、cacheEvidenceTokens，仅 authoritative/legacy-authoritative/account_delta 参与缓存比例和按计费类型费用；estimated/unknown 保留自身计数与总估算，不冒充缓存证据。五种供应商响应场景全部通过，包括真实 429 后的重试：拒绝请求仍计入 requests，但不冒充缓存 miss。历史 main 零用量且无 request profile 的记录无法区分工具准入与供应商尝试，仍排除；node provider 记录和有 profile 的 main 请求完整保留。最新只读快照 `/tmp/graph-harness-baseline-v3.json`。完整门禁 `/tmp/graph-harness-check-retry.log`：267 文件、1,485 测试通过，验收证据未变化。
