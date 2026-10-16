@@ -9,7 +9,7 @@ import { RuntimeError, type Json } from '../core/types.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { git, revParse } from '../git/git.ts';
 import { openWorkspaceCommandRunner, resolveUnsandboxedCommand } from './workspace-command.ts';
-import { checkEnvironment, runHostCommand } from './host-command.ts';
+import { checkEnvironment, runHostCommand, type HostCommandResult } from './host-command.ts';
 import { linkProjectDependencies } from './project-dependencies.ts';
 
 /**
@@ -103,13 +103,14 @@ export async function executeModuleOperation(options: {
     const modules = await linkProjectDependencies(workspace, options.program?.nodeModulesPath);
     const readPaths = (await Promise.all([...(options.program?.readPaths ?? []), ...(modules ? [modules] : [])]
       .map(path => realpath(path).catch(() => undefined)))).filter((path): path is string => path !== undefined);
-    let result;
+    let result: HostCommandResult;
     if (operation.sandbox === false) {
       const command = resolveUnsandboxedCommand(operation.command, operation.args);
       const nonce = randomUUID();
       const quiescence = { path: join(scratchDir, `quiescence-${nonce}.json`), nonce };
       kernel.db.prepare('UPDATE kernel_module_operations SET resource_receipt=? WHERE id=?').run(canonicalJson(quiescence), id);
       const running = runHostCommand({ cwd: workspace, executable: command.executable, args: command.args,
+        outputDir: scratchDir,
         env: checkEnvironment({ executable: command.executable, host: process.env, declared: { ...options.program?.env, ...command.env } }),
         timeoutMs: operation.timeoutMs ?? 120_000, signal: cancellation.signal, quiescence,
         beforeStart: () => { admit(); dispatched(); } });
@@ -134,6 +135,7 @@ export async function executeModuleOperation(options: {
     await writeFile(recordPath, recordBytes, { mode: 0o600 });
     const recordDigest = createHash('sha256').update(recordBytes).digest('hex');
     const output = { passed: result.code === 0, code: result.code, commit, verifiedCommit, record: recordPath, operationId: id,
+      ...(result.outputFiles ? { outputFiles: result.outputFiles } : {}),
       stdout: result.stdout.slice(-32_768), stderr: result.stderr.slice(-32_768), elapsedMs: record.elapsedMs };
     const evaluated = { ok: true, state: options.state, outputs: { [operation.output]: output }, diagnostics: [`workspace.command ${id}`] };
     kernel.store.transaction(() => {

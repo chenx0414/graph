@@ -3,6 +3,9 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { graphNodeRuntime } from './workspace-command.ts';
 
 /**
@@ -73,9 +76,12 @@ export interface HostCommandResult {
   code: number | null;
   stdout: string;
   stderr: string;
+  outputFiles?: Record<'stdout' | 'stderr', { path: string; bytes: number; digest: string }>;
 }
 
 export interface HostCommandInput {
+  /** Host-owned operation directory. Full streams survive bounded inline views. */
+  outputDir?: string;
   cwd: string;
   executable: string;
   args: string[];
@@ -93,6 +99,19 @@ export interface HostCommandInput {
 export async function runHostCommand(input: HostCommandInput): Promise<HostCommandResult> {
   return new Promise<HostCommandResult>((resolve, reject) => {
     if (input.signal?.aborted) { resolve({ code: null, stdout: '', stderr: '' }); return; }
+    const streams = input.outputDir ? (() => {
+      mkdirSync(input.outputDir!, { recursive: true, mode: 0o700 });
+      const opened: number[] = [];
+      try {
+        const open = (name: string) => {
+          const path = join(input.outputDir!, `${name}.log`);
+          const fd = openSync(path, 'wx', 0o600);
+          opened.push(fd);
+          return { path, fd, bytes: 0, hash: createHash('sha256') };
+        };
+        return { stdout: open('stdout'), stderr: open('stderr') };
+      } catch (error) { for (const fd of opened) closeSync(fd); throw error; }
+    })() : undefined;
     const runtime = graphNodeRuntime();
     const child = spawn(runtime.execPath, [fileURLToPath(new URL('./host-command-worker.mjs', import.meta.url))], {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -118,6 +137,17 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
     let truncated = false;
     let timedOut = false;
     let settled = false;
+    let outputError: unknown;
+    const preserve = (name: 'stdout' | 'stderr', chunk: Buffer) => {
+      const stream = streams?.[name];
+      if (!stream || outputError) return;
+      try {
+        let offset = 0;
+        while (offset < chunk.length) offset += writeSync(stream.fd, chunk, offset, chunk.length - offset);
+        stream.hash.update(chunk);
+        stream.bytes += chunk.length;
+      } catch (error) { outputError = error; killTree(); }
+    };
 
     const keep = (chunks: Buffer[], bytes: number, chunk: Buffer) => {
       if (bytes >= MAX_OUTPUT_BYTES) { truncated = true; return bytes; }
@@ -127,8 +157,8 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
       return bytes + room;
     };
 
-    child.stdout?.on('data', (chunk: Buffer) => { stdoutBytes = keep(stdout, stdoutBytes, chunk); });
-    child.stderr?.on('data', (chunk: Buffer) => { stderrBytes = keep(stderr, stderrBytes, chunk); });
+    child.stdout?.on('data', (chunk: Buffer) => { preserve('stdout', chunk); stdoutBytes = keep(stdout, stdoutBytes, chunk); });
+    child.stderr?.on('data', (chunk: Buffer) => { preserve('stderr', chunk); stderrBytes = keep(stderr, stderrBytes, chunk); });
 
     // A check that times out must say so in the record: the same wording the sandboxed runner uses,
     // because the difference between "the command said no" and "the harness cut it" is the whole
@@ -146,6 +176,8 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
       settled = true;
       if (timer) clearTimeout(timer);
       input.signal?.removeEventListener('abort', abort);
+      if (streams) for (const stream of Object.values(streams)) closeSync(stream.fd);
+      if (outputError) { reject(outputError); return; }
       const reason = timedOut ? `Process terminated by SIGKILL: it exceeded the ${input.timeoutMs}ms timeout\n` : '';
       const tail = truncated ? `Output truncated at ${MAX_OUTPUT_BYTES} bytes\n` : '';
       if (admissionError !== undefined) { reject(admissionError); return; }
@@ -153,6 +185,8 @@ export async function runHostCommand(input: HostCommandInput): Promise<HostComma
         code: timedOut ? null : code,
         stdout: Buffer.concat(stdout).toString('utf8'),
         stderr: `${Buffer.concat(stderr).toString('utf8')}${extraStderr}${reason}${tail}`,
+        ...(streams ? { outputFiles: Object.fromEntries(Object.entries(streams).map(([name, stream]) =>
+          [name, { path: stream.path, bytes: stream.bytes, digest: stream.hash.digest('hex') }])) as NonNullable<HostCommandResult['outputFiles']> } : {}),
       });
     };
 
