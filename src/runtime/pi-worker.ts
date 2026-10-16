@@ -182,6 +182,9 @@ async function main() {
     hidden: true,
     factory: pi => {
       pi.on('tool_call', async event => {
+        // This host-owned loader only changes which already-bound schemas are
+        // visible. The loaded tools still pass their original execution gates.
+        if (config.deferredCatalogTools && event.toolName === 'load_catalog_tools') return;
         if (proxiedTools.has(event.toolName)) return;
         const decision = await request({
           operation: 'tool_gate',
@@ -215,6 +218,7 @@ async function main() {
     systemPrompt: config.systemPrompt,
     activateExtensionTools: true,
     allowedToolNames: config.allowedToolNames,
+    deferredCatalogTools: config.deferredCatalogTools ?? false,
     bundleDigest: config.bundleDigest,
     ...(config.legacyCapabilityDigest ? { legacyCapabilityDigest: config.legacyCapabilityDigest } : {}),
     toolPolicyDigest: config.toolPolicyDigest,

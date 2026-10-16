@@ -29,6 +29,7 @@ export interface PiWorkerTool {
 }
 
 export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'onEvent' | 'tools' | 'readOnly'> & {
+  deferredCatalogTools?: boolean;
   binding: AgentSessionBinding;
   thinkingLevel: ThinkingLevel;
   tools: PiWorkerTool[];
@@ -72,6 +73,7 @@ export function piWorkerConfig(options: PiProcessOptions, resolved: {
     stateDir,
     model: options.model,
     thinkingLevel: options.thinkingLevel ?? 'off',
+    deferredCatalogTools: process.env.GRAPH_DEFER_CATALOG_TOOLS === '1',
     tools: serializedTools(tools),
     nativeTools: options.nativeTools ?? [],
     skillPaths,
@@ -85,7 +87,7 @@ export function piWorkerConfig(options: PiProcessOptions, resolved: {
     allowedToolNames: [...(options.allowedToolNames ?? [
       ...tools.map(tool => tool.name),
       ...(options.piExtensionTools ?? []),
-    ])].sort(),
+    ]), ...(process.env.GRAPH_DEFER_CATALOG_TOOLS === '1' ? ['load_catalog_tools'] : [])].sort(),
     bundleDigest: options.bundleDigest.trim(),
     ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
     toolPolicyDigest: options.toolPolicyDigest.trim(),

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
+import { Type } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
@@ -56,6 +57,7 @@ export function isExternallyGated(tool: ToolDefinition) {
 }
 
 export interface PiInstanceOptions {
+  deferredCatalogTools?: boolean;
   binding: InstanceBinding;
   /** Reporting sink for executed tool calls (durable telemetry). A throw here is swallowed. */
   onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;
@@ -318,7 +320,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   if (options.tools?.some(tool => !isExternallyGated(tool)) && !options.broker) throw new Error('Tools require a call broker');
   const nativeTools = [...new Set((options.nativeTools ?? []).map(name => name.trim()).filter(Boolean))];
   const nativeToolNames = new Set(nativeTools);
-  const customTools = options.tools?.filter(tool => !nativeToolNames.has(tool.name)).map(tool => isExternallyGated(tool) ? tool : {
+  const customTools: ToolDefinition[] = options.tools?.filter(tool => !nativeToolNames.has(tool.name)).map(tool => isExternallyGated(tool) ? tool : {
     ...tool,
     execute: async (...args: Parameters<ToolDefinition['execute']>) => {
       const id = randomUUID();
@@ -339,9 +341,43 @@ export async function openPiInstance(options: PiInstanceOptions) {
       finally { options.broker!.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
     },
   }) ?? [];
+  // An opt-in experiment: only bound, low-frequency catalog inspection tools
+  // are deferred. Execution, graph control and workspace tools stay available.
+  const catalogNames = new Set(['get_agent_combination', 'get_resource', 'list_agent_combinations',
+    'read_system_capabilities', 'search_resources', 'inspect_graph_system']);
+  const deferredNames = (options.deferredCatalogTools ?? process.env.GRAPH_DEFER_CATALOG_TOOLS === '1')
+    ? customTools.filter(tool => catalogNames.has(tool.name)
+      && (!options.allowedToolNames || options.allowedToolNames.includes(tool.name))).map(tool => tool.name)
+    : [];
+  const catalogStatePath = join(stateDir, 'catalog-tools-loaded.json');
+  let catalogLoaded = false;
+  if (deferredNames.length && forceFresh) await writeAtomic(catalogStatePath, JSON.stringify({ loaded: false }));
+  if (deferredNames.length && !forceFresh) {
+    try { catalogLoaded = JSON.parse(await readFile(catalogStatePath, 'utf8')).loaded === true; }
+    catch { /* Missing experiment state starts with the discoverable surface. */ }
+  }
+  let activateCatalog: (() => void) | undefined;
+  let catalogLoading: Promise<void> | undefined;
+  if (deferredNames.length) customTools.push({
+    name: 'load_catalog_tools', label: 'Load catalog tools',
+    description: `Load bound catalog and system inspection tools before calling them: ${deferredNames.join(', ')}. Their schemas become available on the next request.`,
+    parameters: Type.Object({}),
+    execute: async () => {
+      if (!catalogLoaded) {
+        catalogLoading ??= (async () => {
+          await writeAtomic(catalogStatePath, JSON.stringify({ loaded: true }));
+          activateCatalog!();
+          catalogLoaded = true;
+        })();
+        try { await catalogLoading; } finally { catalogLoading = undefined; }
+      }
+      return { content: [{ type: 'text', text: `Available: ${deferredNames.join(', ')}` }], details: {} };
+    },
+  });
   const allowedToolNames = new Set([
     ...(options.allowedToolNames ?? [...customTools.map(tool => tool.name), ...options.piExtensionTools ?? []]),
     ...nativeTools,
+    ...(deferredNames.length ? ['load_catalog_tools'] : []),
   ]);
   const registeredToolNames = [
     ...customTools.map(tool => tool.name),
@@ -354,8 +390,12 @@ export async function openPiInstance(options: PiInstanceOptions) {
     sessionManager: manager, settingsManager: settings, thinkingLevel: options.thinkingLevel ?? 'off',
     customTools,
     noTools: 'all',
+    // SDK `tools` is the registry allowlist, not just the initial loadout.
+    // Keep deferred definitions registered so activation can find them.
     tools: [...allowedToolNames],
   });
+  if (deferredNames.length) session.setActiveToolsByName([...allowedToolNames].filter(name => catalogLoaded || !deferredNames.includes(name)));
+  activateCatalog = () => session.setActiveToolsByName([...new Set([...session.getActiveToolNames(), ...deferredNames])]);
   const customNames = new Set(customTools.map(tool => tool.name));
   const allowedExtensionTools = new Set(options.piExtensionTools ?? []);
   const extensionNames = options.activateExtensionTools
@@ -485,7 +525,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
         runtimePolicyDigest: options.runtimePolicyDigest ?? null,
         piVersion,
         context: structuredClone(contextInfo),
-        activeTools: activeToolNames,
+        activeTools: session.getActiveToolNames(),
         registeredTools: [...new Set(registeredToolNames)],
         loadedExtensions,
         loadedExtensionTools,

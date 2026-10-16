@@ -158,6 +158,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     // offered tools are exactly the ones the host named, so passing it through is what
     // makes them callable at all (HB-262).
     allowedToolNames: config.allowedToolNames ?? [],
+    deferredCatalogTools: config.deferredCatalogTools ?? false,
     bundleDigest: config.bundleDigest,
     toolPolicyDigest: config.toolPolicyDigest,
     runtimePolicyDigest: config.runtimePolicyDigest,
