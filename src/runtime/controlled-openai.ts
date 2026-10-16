@@ -399,6 +399,7 @@ export function controlledOpenAIStream(
     const output = createAssistantMessageEventStream();
     void (async () => {
       let evidence: Promise<void> | undefined;
+      let transport: Promise<Response> | undefined;
       try {
         if (model.api !== api) throw new Error('Unverified model transport');
         let sent = false;
@@ -436,7 +437,7 @@ export function controlledOpenAIStream(
             }
             // The slot is acquired per attempt inside gatedProviderFetch, so a
             // retry re-queues and re-passes the gate after releasing capacity.
-            return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
+            transport = gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
               reservation: model.contextWindow + model.maxTokens,
               ...(usageOptions.onRequest ? { onRequest: (id: string) => {
                 const profile = profileProviderRequest(init?.body);
@@ -489,16 +490,24 @@ export function controlledOpenAIStream(
                 })();
               },
             });
+            return transport;
           },
         };
         const stream = api === 'anthropic-messages'
           ? anthropicStreamSimple(model as Model<'anthropic-messages'>, context, streamOptions as Parameters<typeof openaiStreamSimple>[2])
           : openaiStreamSimple(model as Model<'openai-completions'>, context, streamOptions);
         for await (const event of stream) {
-          if (event.type === 'done' || event.type === 'error') await evidence;
+          if (event.type === 'done' || event.type === 'error') {
+            // The SDK can report abort before its custom fetch has returned.
+            // Join that send before reading evidence, which is installed only
+            // after response headers arrive; otherwise settlement outlives the turn.
+            await transport?.catch(() => undefined);
+            await evidence;
+          }
           output.push(event);
         }
       } catch (error) {
+        await transport?.catch(() => undefined);
         await evidence;
         const message: AssistantMessage = {
           role: 'assistant', api: model.api, provider: model.provider, model: model.id,

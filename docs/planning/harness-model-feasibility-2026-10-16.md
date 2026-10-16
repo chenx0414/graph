@@ -43,3 +43,37 @@
 - a3: `/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-real-eval-default-1hV16d`
 
 相关工程验证：成本来源与 429 计数修正提交 `d86cd99`，完整门禁 `/tmp/graph-harness-check-retry.log`：267 文件、1,485 测试通过，验收证据未变化。
+
+## 第二类：CLI 参数（2026-10-16）
+
+固定输入、验收和独立项目已保存；A B B A A B 顺序，每模型三次，120 秒截止。此轮使用 operation 完成状态与正式 pause+interrupt 取消，运行进程均退出 0。两模型完整成功均为 1/3，未达到上线门槛。保留现有 grade 差异，A 价格仍未知。此轮不证明模型本身因果优势或整棵树降本。
+
+| 样本 | 完整成功 | operation | 请求 | 时长 ms |
+| --- | --- | --- | ---: | ---: |
+| a1 | True | succeeded | 13 | 105978 |
+| b1 | False | interrupted | 16 | 120454 |
+| b2 | False | interrupted | 25 | 120358 |
+| a2 | False | interrupted | 21 | 120030 |
+| a3 | False | interrupted | 22 | 120537 |
+| b3 | True | succeeded | 7 | 78423 |
+
+原始汇总 `/tmp/graph-model-cli-summary.json`，顺序 `/tmp/graph-model-cli-order.json`，单项 `/tmp/graph-model-cli-{样本}.json` 与 `.log`。成功必须同时满足默认输出不变、--count 3 三行、非法数值/负值/小数/缺值非零退出并报错，以及 operation succeeded。失败不被零价格掩盖。
+
+## 评测收尾修复
+
+真实 CLI→HTTP→受控外部供应商→SQLite E2E 将迟到请求缩成 5 秒。最初明确失败于 database is not open；暂停属于软停止，不取消当前模型请求；增加立即中断后局部通过，但完整门禁在 Node 24 再现。等待账本 cost 非空仍不足：SDK 会在自定义 fetch 返回之前报告 abort，导致 evidence 尚未建立，turn 提前结束。受控传输现等待已开始的 fetch，再等待 usage evidence，然后才能发出终态。未吞掉费用证据、未把未知用量填零。新增正常完成与超时取消两条真实 CLI E2E，后者保留 interrupted 与 timedOut，不冒充成功。
+
+可复现命令：`node_modules/.bin/node node_modules/vitest/vitest.mjs run tests/e2e/harness-eval-lifecycle.test.ts`。修复前日志 `/tmp/graph-eval-lifecycle-red.log`，中间不充分修复的完整门禁 `/tmp/graph-harness-check-eval-drain.log`，传输修复后局部 `/tmp/graph-eval-lifecycle-join.log` 两项通过。该中间修复完整门禁仍失败；检查失败账本发现 pause 发生于 live session 注册前，interrupt 返回 no_active_operation，评测器异常退出并关闭数据库。现只对该明确拒绝作有界重试，等待真实 session 就绪再取消。最终完整门禁 `/tmp/graph-harness-check-cancel-registration.log`：268 文件、1,487 测试通过，验收证据不变。
+
+## 持久状态与命令任务试跑
+
+使用已保存用例、Node 24、每模型每类一次，尚未完成三次重复；顺序见 `/tmp/graph-model-next-pilots-order.json`。
+
+| 类别 | 模型 | 完整成功 | operation | 请求 | 时长 ms |
+| --- | --- | --- | --- | ---: | ---: |
+| persistence | a1 | False | interrupted | 11 | 120682 |
+| persistence | b1 | False | interrupted | 14 | 120722 |
+| command | a1 | True | succeeded | 11 | 70407 |
+| command | b1 | True | succeeded | 6 | 44599 |
+
+持久状态两者均超时，不通过；命令任务两者均通过且检查程序字节未改。LongCat 命令样本费用 USD 0，DeepSeek 冻结价格缺失保持未知。单样本不支持置信区间或整棵树收益。原始 `/tmp/graph-model-{类别}-{样本}.json`、`.log`，每份 JSON 记录隔离目录。graph、artifact、续跑、独立审查和完整树成本仍未验证。
