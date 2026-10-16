@@ -12,12 +12,16 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
 test.each([
-  { compactDocs: false, cacheField: 'standard' },
-  { compactDocs: true, cacheField: 'deepseek' },
-  { compactDocs: false, cacheField: 'kimi' },
-  { compactDocs: false, cacheField: 'unreported' },
-  { compactDocs: false, cacheField: 'capacity-retry' },
-])('compactDocs=$compactDocs/cache=$cacheField: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI', async ({ compactDocs, cacheField }) => {
+  { classifyFriction: true, compactDocs: false, cacheField: 'standard' },
+  { classifyFriction: false, compactDocs: false, cacheField: 'standard' },
+  { classifyFriction: false, compactDocs: true, cacheField: 'deepseek' },
+  { classifyFriction: false, compactDocs: false, cacheField: 'kimi' },
+  { classifyFriction: false, compactDocs: false, cacheField: 'unreported' },
+  { classifyFriction: false, compactDocs: false, cacheField: 'capacity-retry' },
+])('classifyFriction=$classifyFriction/compactDocs=$compactDocs/cache=$cacheField: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI', async ({ compactDocs, cacheField, classifyFriction }) => {
+  const previousFriction = process.env.GRAPH_CLASSIFY_HARNESS_FRICTION;
+  process.env.GRAPH_CLASSIFY_HARNESS_FRICTION = classifyFriction ? '1' : '0';
+  cleanup.push(async () => { if (previousFriction === undefined) delete process.env.GRAPH_CLASSIFY_HARNESS_FRICTION; else process.env.GRAPH_CLASSIFY_HARNESS_FRICTION = previousFriction; });
   const previous = process.env.GRAPH_COMPACT_DOCUMENTATION;
   process.env.GRAPH_COMPACT_DOCUMENTATION = compactDocs ? '1' : '0';
   cleanup.push(async () => { if (previous === undefined) delete process.env.GRAPH_COMPACT_DOCUMENTATION; else process.env.GRAPH_COMPACT_DOCUMENTATION = previous; });
@@ -59,6 +63,10 @@ test.each([
     return view.messages.some((message: { role: string; text: string }) => message.role === 'assistant' && message.text.includes('proof file'));
   }, { timeout: 30_000 }).toBe(true);
   expect(await readFile(join(root, 'proof.txt'), 'utf8')).toBe('harness-proof');
+  const firstRequest = provider.requests[0] as { messages: { role: string; content: string }[] };
+  const instructions = firstRequest.messages.filter(message => message.role === 'system' || message.role === 'developer').map(message => message.content).join('\n');
+  expect(instructions.includes('A failing project check, missing project configuration')).toBe(classifyFriction);
+  expect(instructions).toContain('the executor and the improver are the same Agent');
   const events = await (await fetch(`${daemon.url}/api/conversations/${created.conversationId}/events?limit=500`, { headers })).json() as { type: string; data: Record<string, unknown> }[];
   const profiles = events.filter(event => event.type === 'provider.request_profile');
   expect(profiles).toHaveLength(cacheField === 'capacity-retry' ? 3 : 2);

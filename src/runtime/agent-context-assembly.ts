@@ -4,7 +4,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describeAgentTools, type AgentToolFeatures } from './agent-tool-definitions.ts';
 import {
   DEFAULT_COMMON_RULES, DEFAULT_MAIN_FULL_ACCESS_IDENTITY, DEFAULT_MAIN_RULES,
-  DEFAULT_MAIN_RSI_IDENTITY, DEFAULT_MAIN_TOOL_GUIDANCE, DEFAULT_REVIEWER_RULES, DEFAULT_REVIEWER_TOOL_GUIDANCE,
+  CLASSIFIED_MAIN_RSI_IDENTITY, DEFAULT_MAIN_RSI_IDENTITY, DEFAULT_MAIN_TOOL_GUIDANCE, DEFAULT_REVIEWER_RULES, DEFAULT_REVIEWER_TOOL_GUIDANCE,
   DEFAULT_WORKER_RULES, DEFAULT_WORKER_TOOL_GUIDANCE, DEFAULT_WORKER_PROMPT, DEFAULT_NODE_PROMPT,
   renderAgentPrompt, type AgentContextLibrary,
 } from './agent-context.ts';
@@ -167,7 +167,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
       identity, definitionVersion, toolGuidance, role,
       compactDocumentation: process.env.GRAPH_COMPACT_DOCUMENTATION === '1',
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
-      ...(input.rsi && role === 'main' ? { harnessContext: DEFAULT_MAIN_RSI_IDENTITY } : {}),
+      ...(input.rsi && role === 'main' ? { harnessContext: process.env.GRAPH_CLASSIFY_HARNESS_FRICTION === '1' ? CLASSIFIED_MAIN_RSI_IDENTITY : DEFAULT_MAIN_RSI_IDENTITY } : {}),
       rules: { common, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
       docs,
     });

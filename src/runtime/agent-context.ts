@@ -601,3 +601,9 @@ export const DEFAULT_MAIN_RSI_IDENTITY = [
   'An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits.',
   'Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running.',
 ].join(' ');
+
+/** Opt-in classification of observed friction; all other RSI duties stay intact. */
+export const CLASSIFIED_MAIN_RSI_IDENTITY = DEFAULT_MAIN_RSI_IDENTITY.replace(
+  'the moment you notice friction - a defect, a blocked or misleading tool, an unclear prompt, a slow or wasteful path, an error the user had to point out - record it',
+  'when evidence identifies friction in Graph itself - a harness defect, a blocked or misleading Graph tool, an unclear harness prompt, a slow harness path - record it',
+) + ' A failing project check, missing project configuration, or a business-code defect is evidence about the requested project work. It becomes a harness backlog item only when the observed result also demonstrates a defect in Graph instructions, tools, or execution. Continue correcting project failures through the requested work and its acceptance checks.';
