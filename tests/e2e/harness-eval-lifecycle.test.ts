@@ -12,7 +12,8 @@ test.each([true, false])('real evaluation CLI records terminal state and closes 
   const root = await mkdtemp(join(tmpdir(), 'graph-eval-lifecycle-'));
   const provider = await openaiServer(timedOut
     ? [{ text: 'Too late', beforeReply: () => new Promise(resolve => setTimeout(resolve, 5_000)) }]
-    : [{ tools: [{ id: 'repair', name: 'bash', arguments: JSON.stringify({ command: `cat > config.js <<'EOF'
+    : [{ tools: [{ id: 'repair', name: 'bash', arguments: JSON.stringify({ command: `if test -e ../case.json; then echo 'verification leaked' >&2; exit 1; fi
+cat > config.js <<'EOF'
 export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const index = line.indexOf('='); return [line.slice(0,index),line.slice(index+1)]; })); }
 EOF` }) }] }, { text: 'Fixed.' }]);
   let artifactRoot: string | undefined;

@@ -1,5 +1,7 @@
 # 模型分层：已批准隔离评测的首轮结果
 
+> 证据更正：下述 runner 使用 main 对话而非 Graph 原生 worker。CLI、持久状态和命令轮次曾将验收代码 case.json 放在模型可读目录；至少四项轨迹明确读取。以下数据保留为探索和缺陷发现证据，不能作为独立 worker 质量或模型分层收益结论。
+
 使用者于 2026-10-16 以“批准模型分层提案”授权隔离评测，范围见 [提案](harness-model-mix-proposal-2026-10-16.md)。生产 main、模型和路由均未改变。
 
 结论：首轮可行性不足以批准上线。LongCat 的文件行为 3/3 通过，但完整 operation 仅 2/3 正常结束；DeepSeek 1/3 正常结束并通过，另两次超时且行为失败。两模型的异常样本都在关闭评测 daemon 时出现迟到回调访问已关闭数据库，需先修复评测收尾，不能把本轮当作无混杂的模型质量比较。
@@ -77,3 +79,13 @@
 | command | b1 | True | succeeded | 6 | 44599 |
 
 持久状态两者均超时，不通过；命令任务两者均通过且检查程序字节未改。LongCat 命令样本费用 USD 0，DeepSeek 冻结价格缺失保持未知。单样本不支持置信区间或整棵树收益。原始 `/tmp/graph-model-{类别}-{样本}.json`、`.log`，每份 JSON 记录隔离目录。graph、artifact、续跑、独立审查和完整树成本仍未验证。
+
+## 验收代码暴露与角色纠正
+
+审计 `/tmp/graph-model-verifier-exposure-audit.json`：cli b1、cli a2、persistence b1、persistence a1 的工具轨迹明确包含 case.json。cli b1 还将其中 verify 写成 /tmp/greet-verify.mjs 执行；不是假想风险。其他摘要没有记录读取不等于证明未暴露。整个第二类及后续试跑不用于独立质量比较，不只剔除失败样本。第一类 parser 当时没有 case.json，但仍走 main 对话，不能作为原生 worker 对照。
+
+工具审计 `/tmp/graph-model-trace-tool-audit.json` 显示多个超时样本调查配方、graph 协议和 Graph 源码，部分尝试 validate_proposal；这混入 main 的编排职责，不能据此归因 worker 编码能力。此前 worker 可行性措辞予以撤回。没有据此改变生产默认值。
+
+修正：case.json 仅在 daemon 关闭后保存，cleanupIncomplete 时不保存。现有真实 CLI E2E 的修复命令先检查 ../case.json 不存在再编辑；修复前 `/tmp/graph-eval-leak-red.log` 明确行为失败，修复后 `/tmp/graph-eval-leak-green.log` 两项通过。完整 `/tmp/graph-harness-check-verifier-visibility.log`：268 文件、1,487 测试通过，证据不变。
+
+此修复只解决显式验收文件过早发布；main 完全访问仍能读取仓库中的评测源码，不能宣称隔离安全。后续必须使用正式 Graph worker 配方、独立工作副本和工作区沙箱，并以外部行为验收；main 编排任务作为另一个评测类别。不能通过给 main 去掉产品职责来冒充 worker，也不改变生产路由或 effort。

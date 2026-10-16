@@ -17,7 +17,6 @@ const root=await mkdtemp(join(tmpdir(),`graph-real-eval-${variant}-`));
 const project=join(root,'project');await mkdir(project);
 await writeFile(join(project,'package.json'),'{"type":"module"}');
 for(const [path,content] of Object.entries(scenario.files))await writeFile(join(project,path),content);
-await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
 const source=JSON.parse(await readFile(process.argv[2],'utf8'));
 const model=source.models.entries[0];
 const webDir=join(root,'web');await mkdir(webDir);await writeFile(join(webDir,'index.html'),'<!doctype html><div>Eval</div>');
@@ -71,6 +70,8 @@ try {
  result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,elapsedMs:Date.now()-began,taskId:created.taskId};
 } catch(error){result={variant,root,model:model.id,error:error instanceof Error?error.message:String(error)};}
 finally {if(!cleanupIncomplete)await daemon?.close();}
+// Persist the verifier only after the model process has stopped.
+if(!cleanupIncomplete)await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
 const report=await exec(process.execPath,[new URL('./harness-cost.mjs', import.meta.url).pathname,join(root,'state','tasks.sqlite')]);
 await writeFile(join(root,'cost-report.json'),report.stdout);
 const cost=JSON.parse(report.stdout);
