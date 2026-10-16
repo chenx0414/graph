@@ -12,7 +12,7 @@ const caseId=process.argv[3] ?? 'parser';
 const scenario=cases[caseId];if(!scenario)throw new Error(`Unknown evaluation case: ${caseId}`);
 const deadlineMs=Number(process.env.GRAPH_EVAL_TIMEOUT_MS ?? 120000);
 if (!Number.isSafeInteger(deadlineMs) || deadlineMs <= 0) throw new Error('Invalid GRAPH_EVAL_TIMEOUT_MS');
-const variant=process.env.GRAPH_DEFER_CATALOG_TOOLS==='1'?'deferred-catalog':process.env.GRAPH_COMPACT_DOCUMENTATION==='1'?'compact':'default';
+const variant=process.env.GRAPH_DEFER_BROWSER_TOOLS==='1'?'deferred-browser':process.env.GRAPH_DEFER_CATALOG_TOOLS==='1'?'deferred-catalog':process.env.GRAPH_COMPACT_DOCUMENTATION==='1'?'compact':'default';
 const root=await mkdtemp(join(tmpdir(),`graph-real-eval-${variant}-`));
 const project=join(root,'project');await mkdir(project);
 await writeFile(join(project,'package.json'),'{"type":"module"}');
@@ -22,11 +22,20 @@ const model=source.models.entries[0];
 const webDir=join(root,'web');await mkdir(webDir);await writeFile(join(webDir,'index.html'),'<!doctype html><div>Eval</div>');
 const configPath=join(root,'config.json');
 await writeFile(configPath,JSON.stringify({version:1,projects:[{id:'p',root:project}],credentials:source.credentials,models:{entries:[model]}}));
+const graphHome=join(root,'graph');
+if(process.env.GRAPH_EVAL_BROWSER_SOURCE){
+ const browserSource=process.env.GRAPH_EVAL_BROWSER_SOURCE;
+ const pkg=JSON.parse(await readFile(join(browserSource,'package.json'),'utf8'));
+ const capability=join(graphHome,'capabilities','eval-browser');await mkdir(capability,{recursive:true});
+ await writeFile(join(capability,'capability.json'),JSON.stringify({id:'eval-browser',kind:'pi-extension',name:'Bound browser evaluation',version:pkg.version,source:browserSource,base:true,
+  runtime:{commands:['agent-browser'],env:{PATH:process.env.PATH,HOME:process.env.HOME},networkAccess:'unrestricted'},
+  tools:[{name:'agent_browser',description:'Browse live websites.'}]}));
+}
 let daemon;
 let result;
 let cleanupIncomplete=false;
 try {
- daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome:join(root,'graph'),webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
+ daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
  const home=await fetch(daemon.url,{headers:{origin:daemon.url}});
  const headers={origin:daemon.url,cookie:home.headers.get('set-cookie')??'','content-type':'application/json'};
  const createdResponse=await fetch(`${daemon.url}/api/conversations`,{method:'POST',headers,body:JSON.stringify({projectId:'p',model:model.id,text:scenario.prompt,requestId:'real-parser-eval'})});

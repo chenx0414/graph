@@ -185,6 +185,7 @@ async function main() {
         // This host-owned loader only changes which already-bound schemas are
         // visible. The loaded tools still pass their original execution gates.
         if (config.deferredCatalogTools && event.toolName === 'load_catalog_tools') return;
+        if (config.deferredBrowserTools && event.toolName === 'load_browser_tools') return;
         if (proxiedTools.has(event.toolName)) return;
         const decision = await request({
           operation: 'tool_gate',
@@ -219,6 +220,7 @@ async function main() {
     activateExtensionTools: true,
     allowedToolNames: config.allowedToolNames,
     deferredCatalogTools: config.deferredCatalogTools ?? false,
+    deferredBrowserTools: config.deferredBrowserTools ?? false,
     bundleDigest: config.bundleDigest,
     ...(config.legacyCapabilityDigest ? { legacyCapabilityDigest: config.legacyCapabilityDigest } : {}),
     toolPolicyDigest: config.toolPolicyDigest,

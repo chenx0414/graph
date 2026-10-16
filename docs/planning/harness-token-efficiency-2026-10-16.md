@@ -260,3 +260,5 @@ GRAPH_COMPACT_DOCUMENTATION=1 node scripts/harness-real-eval.mjs /path/to/graph.
 后续应返回已观测大开销的 harness 层。main 的浏览器工具正文曾约 10,158 字符且保留样本仅 11.76% 任务调用，现有目录加载 flag 只覆盖六个小 catalog 工具，未覆盖这个主要体积来源；若开展浏览器按需加载，必须独立默认关闭、有真实绑定的浏览器工具、首次任务发现与加载后调用 E2E，并用完整任务对照，不能拿当前无浏览器工具的隔离跑分证明收益。尚未实现该候选。
 
 main 评测器取消收尾现同时等待 operations.worker_active=0 与所有 invocation 的费用结算标记；失败账本曾证明 provider profile 在 pause 之后才出现，不能仅用调用表当前为空推断已静止。该改动不改变生产权限/模型/提示词。局部四条 E2E `/tmp/graph-eval-active-drain.log` 与上述完整门禁通过。
+
+浏览器大 schema 实验已实现独立默认关闭 flag，完整报告 [浏览器按需加载](harness-browser-loading-2026-10-16.md)。六次同模型对照 A 3/3、B 2/3 完整成功；首请求工具 JSON 少 9,885 字节，但统一权重的每完成任务估算约贵 39.1%，且价格/一次 usage 未知，不能当精确账单。候选未通过，保持关闭。最新带真实浏览器门禁 269 文件、1,491 测试通过。RSI backlog 的额外工作已在轨迹确认，尚未改变其产品职责；artifact schema 字段缺少 kind@version 格式说明是下一项有证据的参数错误候选。

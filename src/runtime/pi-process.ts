@@ -30,6 +30,7 @@ export interface PiWorkerTool {
 
 export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'onEvent' | 'tools' | 'readOnly'> & {
   deferredCatalogTools?: boolean;
+  deferredBrowserTools?: boolean;
   binding: AgentSessionBinding;
   thinkingLevel: ThinkingLevel;
   tools: PiWorkerTool[];
@@ -74,6 +75,7 @@ export function piWorkerConfig(options: PiProcessOptions, resolved: {
     model: options.model,
     thinkingLevel: options.thinkingLevel ?? 'off',
     deferredCatalogTools: process.env.GRAPH_DEFER_CATALOG_TOOLS === '1',
+    deferredBrowserTools: process.env.GRAPH_DEFER_BROWSER_TOOLS === '1',
     tools: serializedTools(tools),
     nativeTools: options.nativeTools ?? [],
     skillPaths,
@@ -87,7 +89,7 @@ export function piWorkerConfig(options: PiProcessOptions, resolved: {
     allowedToolNames: [...(options.allowedToolNames ?? [
       ...tools.map(tool => tool.name),
       ...(options.piExtensionTools ?? []),
-    ]), ...(process.env.GRAPH_DEFER_CATALOG_TOOLS === '1' ? ['load_catalog_tools'] : [])].sort(),
+    ]), ...(process.env.GRAPH_DEFER_CATALOG_TOOLS === '1' ? ['load_catalog_tools'] : []), ...(process.env.GRAPH_DEFER_BROWSER_TOOLS === '1' ? ['load_browser_tools'] : [])].sort(),
     bundleDigest: options.bundleDigest.trim(),
     ...(options.legacyCapabilityDigest ? { legacyCapabilityDigest: options.legacyCapabilityDigest } : {}),
     toolPolicyDigest: options.toolPolicyDigest.trim(),

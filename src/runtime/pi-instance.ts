@@ -58,6 +58,7 @@ export function isExternallyGated(tool: ToolDefinition) {
 
 export interface PiInstanceOptions {
   deferredCatalogTools?: boolean;
+  deferredBrowserTools?: boolean;
   binding: InstanceBinding;
   /** Reporting sink for executed tool calls (durable telemetry). A throw here is swallowed. */
   onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;
@@ -374,10 +375,42 @@ export async function openPiInstance(options: PiInstanceOptions) {
       return { content: [{ type: 'text', text: `Available: ${deferredNames.join(', ')}` }], details: {} };
     },
   });
+  const browserNames = options.activateExtensionTools && (options.deferredBrowserTools ?? process.env.GRAPH_DEFER_BROWSER_TOOLS === '1')
+    ? loader.getExtensions().extensions.flatMap(extension => [...extension.tools.keys()])
+      .filter(name => (name === 'agent_browser' || name === 'agent_browser_web_search')
+        && options.piExtensionTools?.includes(name)
+        && (!options.allowedToolNames || options.allowedToolNames.includes(name)))
+    : [];
+  const browserStatePath = join(stateDir, 'browser-tools-loaded.json');
+  let browserLoaded = false;
+  if (browserNames.length && forceFresh) await writeAtomic(browserStatePath, JSON.stringify({ loaded: false }));
+  if (browserNames.length && !forceFresh) {
+    try { browserLoaded = JSON.parse(await readFile(browserStatePath, 'utf8')).loaded === true; }
+    catch { /* An unseen browser surface starts behind its discovery pointer. */ }
+  }
+  let activateBrowser: (() => void) | undefined;
+  let browserLoading: Promise<void> | undefined;
+  if (browserNames.length) customTools.push({
+    name: 'load_browser_tools', label: 'Load browser tools',
+    description: `Load bound browser tools before browsing, UI verification, screenshots or live web search: ${browserNames.join(', ')}. Their schemas become available on the next request.`,
+    parameters: Type.Object({}),
+    execute: async () => {
+      if (!browserLoaded) {
+        browserLoading ??= (async () => {
+          await writeAtomic(browserStatePath, JSON.stringify({ loaded: true }));
+          activateBrowser!();
+          browserLoaded = true;
+        })();
+        try { await browserLoading; } finally { browserLoading = undefined; }
+      }
+      return { content: [{ type: 'text', text: `Available: ${browserNames.join(', ')}` }], details: {} };
+    },
+  });
   const allowedToolNames = new Set([
     ...(options.allowedToolNames ?? [...customTools.map(tool => tool.name), ...options.piExtensionTools ?? []]),
     ...nativeTools,
     ...(deferredNames.length ? ['load_catalog_tools'] : []),
+    ...(browserNames.length ? ['load_browser_tools'] : []),
   ]);
   const registeredToolNames = [
     ...customTools.map(tool => tool.name),
@@ -394,8 +427,10 @@ export async function openPiInstance(options: PiInstanceOptions) {
     // Keep deferred definitions registered so activation can find them.
     tools: [...allowedToolNames],
   });
-  if (deferredNames.length) session.setActiveToolsByName([...allowedToolNames].filter(name => catalogLoaded || !deferredNames.includes(name)));
+  if (deferredNames.length || browserNames.length) session.setActiveToolsByName([...allowedToolNames].filter(name =>
+    (catalogLoaded || !deferredNames.includes(name)) && (browserLoaded || !browserNames.includes(name))));
   activateCatalog = () => session.setActiveToolsByName([...new Set([...session.getActiveToolNames(), ...deferredNames])]);
+  activateBrowser = () => session.setActiveToolsByName([...new Set([...session.getActiveToolNames(), ...browserNames])]);
   const customNames = new Set(customTools.map(tool => tool.name));
   const allowedExtensionTools = new Set(options.piExtensionTools ?? []);
   const extensionNames = options.activateExtensionTools

@@ -159,6 +159,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     // makes them callable at all (HB-262).
     allowedToolNames: config.allowedToolNames ?? [],
     deferredCatalogTools: config.deferredCatalogTools ?? false,
+    deferredBrowserTools: config.deferredBrowserTools ?? false,
     bundleDigest: config.bundleDigest,
     toolPolicyDigest: config.toolPolicyDigest,
     runtimePolicyDigest: config.runtimePolicyDigest,
