@@ -231,7 +231,13 @@ test('typing, paste, deletion and clear undo as user actions, with redo invalida
   await input.press('ControlOrMeta+z');
   await expect.poll(() => value(input)).toBe('hello');
   await input.press('ControlOrMeta+a');
-  await input.press('Backspace');
+  // CodeMirror can paint its restored selection after key delivery under suite load.
+  // Observe the actual browser selection before applying the destructive next action.
+  await expect.poll(() => input.evaluate((element: HTMLTextAreaElement) => [element.selectionStart, element.selectionEnd])).toEqual([0, 5]);
+  await expect.poll(() => input.evaluate(() => window.getSelection()?.toString())).toBe('hello');
+  // Send the destructive key to the already-selected editor without Locator.press
+  // refocusing the contenteditable and potentially resetting its selection.
+  await h.page.keyboard.press('Backspace');
   await expect.poll(() => value(input)).toBe('');
   await input.press('ControlOrMeta+z');
   await expect.poll(() => value(input)).toBe('hello');

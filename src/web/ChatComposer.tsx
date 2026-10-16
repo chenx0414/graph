@@ -172,6 +172,7 @@ export function ChatComposer({
   // An explicit snapshot stack: React writes the textarea value programmatically,
   // so the browser's native undo has nothing to replay.
   const undoRef = useRef(createComposerUndoState());
+  const selectionEpoch = useRef(0);
   const historyRef = useRef(createComposerHistoryState());
   const [historyBrowsing, setHistoryBrowsing] = useState(false);
   const activeMention = mentionAt(value, cursor);
@@ -223,12 +224,16 @@ export function ChatComposer({
 
   /** Put a value in the box without treating it as a user edit (undo, recall). */
   function applyProgrammatic(next: string) {
+    const epoch = ++selectionEpoch.current;
     onChange(next);
     const caret = next.length;
     setCursor(caret);
     setMentionOpen(false);
     setSlashOpen(false);
     requestAnimationFrame(() => {
+      // A later user action owns the selection. An older undo must not move
+      // the caret after the user has already selected text or typed again.
+      if (selectionEpoch.current !== epoch) return;
       const target = textareaRef.current;
       target?.focus();
       target?.setSelectionRange(caret, caret);
@@ -588,7 +593,7 @@ export function ChatComposer({
             setSlashIndex(0);
           }
         }}
-        onSelect={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
+        onSelect={event => { selectionEpoch.current++; setCursor(event.currentTarget.selectionStart ?? value.length); }}
         onClick={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
         onPaste={handlePaste}
         onContextMenu={event => {
@@ -600,6 +605,7 @@ export function ChatComposer({
         data-suggestion={showingSuggestion ? availableSuggestion : undefined}
         autoFocus={autoFocus}
         onKeyDown={event => {
+          selectionEpoch.current++;
           const shortcut = (event.metaKey || event.ctrlKey) && !event.altKey;
           const key = event.key.toLowerCase();
           if (shortcut && (key === 'z' || key === 'y')) {
