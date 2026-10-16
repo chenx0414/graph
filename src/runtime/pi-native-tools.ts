@@ -47,8 +47,10 @@ export function selectAgentToolSurface<T extends { name: string }>(input: {
   const available = (name: string) => !disabled.has(name) && !superseded.has(name);
   return {
     nativeTools,
-    tools: input.tools.filter(tool => available(tool.name)),
-    extensionTools: (input.extensionTools ?? []).filter(available),
+    // Discovery order (especially MCP completion order) is not part of tool semantics.
+    // Keep the schema prefix stable across equivalent operation assemblies.
+    tools: input.tools.filter(tool => available(tool.name)).sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0),
+    extensionTools: (input.extensionTools ?? []).filter(available).sort(),
   };
 }
 
