@@ -74,6 +74,7 @@ export interface ComposeAgentSystemPromptInput {
   };
   docs: GraphDocumentationPaths;
   role?: 'main' | 'worker' | 'reviewer';
+  compactDocumentation?: boolean;
 }
 
 export interface ComposedAgentSystemPrompt {
@@ -139,7 +140,7 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
     id: 'docs.guide',
     title: 'Graph documentation and reading protocol',
     origin: 'generated',
-    content: graphDocumentationPrompt(input.docs),
+    content: graphDocumentationPrompt(input.docs, input.compactDocumentation),
     source: 'docs/agent/README.md',
   }]);
 

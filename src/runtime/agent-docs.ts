@@ -21,7 +21,13 @@ export function graphDocumentationPaths(appRoot = graphApplicationRoot()): Graph
   };
 }
 
-export function graphDocumentationPrompt(paths: GraphDocumentationPaths) {
+export function graphDocumentationPrompt(paths: GraphDocumentationPaths, compact = false) {
+  if (compact) return [
+    `Graph host documentation: ${paths.main}. Read relevant topics for Graph runtime, tools, recovery, configuration, or harness changes.`,
+    `Before graph build/validate/start/patch: ${join(paths.root, 'graph-v2.md')}; native examples: ${join(paths.root, '..', 'design-graph-examples.md')}. Host API: schemaVersion:2, interface deliveries.`,
+    `Topic index: ${paths.main}; additional docs: ${paths.root}; examples: ${paths.examples}. Read the complete relevant topic and follow references needed for the operation.`,
+    'These paths describe the running host. Resolve topic references there, and examples under the examples path. Business-checkout docs and old conversation memory may describe a different API.',
+  ].join('\n');
   return [
     'Graph documentation (read when the user asks about Graph itself, its Agent runtime, tools, task execution, recovery, permissions or configuration, and whenever you change Graph\'s own code, prompts or harness):',
     `- Main documentation: ${paths.main}`,

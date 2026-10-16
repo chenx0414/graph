@@ -165,6 +165,7 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   const compose = (identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[]) => {
     const composed = composeAgentSystemPrompt({
       identity, definitionVersion, toolGuidance, role,
+      compactDocumentation: process.env.GRAPH_COMPACT_DOCUMENTATION === '1',
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
       ...(input.rsi && role === 'main' ? { harnessContext: DEFAULT_MAIN_RSI_IDENTITY } : {}),
       rules: { common, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
