@@ -1,3 +1,4 @@
+import { withAgentTestingPolicy } from './agent-testing-policy.ts';
 import type { GraphManagement } from '../core/graph-service.ts';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -1214,7 +1215,7 @@ export function createPiAdapter(options: {
                   model: toPiModel(suggestionEntry),
                   userMessage: lastUserMessage!,
                   assistantReply: reply,
-                  systemPrompt: agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/prompt-suggestion.md') : DEFAULT_PROMPT_SUGGESTION_PROMPT,
+                  systemPrompt: withAgentTestingPolicy(agentPromptLibrary ? await agentPromptLibrary.prompt('runtime/prompt-suggestion.md') : DEFAULT_PROMPT_SUGGESTION_PROMPT, DEFAULT_PROMPT_SUGGESTION_PROMPT),
                   signal: controller.signal,
                 });
                 suggestedPrompt = suggestionReply.text || undefined;
@@ -1258,9 +1259,9 @@ export function createPiAdapter(options: {
                   reply: (reloadReceipt ? rsiChangeMaterial(reloadReceipt, reply) : reply).slice(0, 8_000),
                   existingSkills: existingSkillSummaries(project.root),
                 };
-                const sedimentSystemPrompt = agentPromptLibrary
+                const sedimentSystemPrompt = withAgentTestingPolicy(agentPromptLibrary
                   ? await agentPromptLibrary.prompt('runtime/sediment.md')
-                  : DEFAULT_SEDIMENT_PROMPT;
+                  : DEFAULT_SEDIMENT_PROMPT, DEFAULT_SEDIMENT_PROMPT);
                 // A cheap model is exactly the one whose account can be out of quota, so a refusal is not
                 // the end of the review: candidates are asked in order and every attempt is kept, so the
                 // record can never show a single silent failure as if it were a decision.

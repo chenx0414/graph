@@ -5,6 +5,8 @@ description: "Writing/changing/reviewing/sweeping tests: reject duplicate or imp
 
 # Test Audit
 
+- Graph policy: only author or modify genuine E2E tests. Never add unit or integration tests, even test-first. Existing lower-level tests may run or be audited; preserve their independent contracts through real E2E before retirement. An unavailable E2E environment is a reported blocker, not permission to substitute isolated tests.
+
 - Authoring gates every new/changed test.
 - Audits: remove low-value proof in coherent owner batches; never chase deletion counts.
 - Whole-subsystem campaign: read [CAMPAIGN.md](CAMPAIGN.md) first.

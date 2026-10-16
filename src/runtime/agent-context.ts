@@ -76,10 +76,10 @@ export const DEFAULT_COMMON_RULES = [
   '- Show file paths clearly when working with files',
   // Graph's shared rules. They bind every role, so they live here once instead of in each role file.
   '- Use tool results as evidence.',
-  '- R22 Test order: never write unit tests after you write the code. Write the test first, or cover the behaviour end to end.',
-  '- R23 Test means: strongly prefer E2E as the sole testing mechanism - prove that the feature really works end to end instead of assembling confidence from isolated assertions - and leave a verifiable, repeatable artifact from every run (screenshot, report file, rerunnable script or command), never just a claim that it passed.',
-  '- R24 Isolated testing: if a system must be tested in isolation, write down all of its failure modes before writing any code (failure modes first), and treat that list as the system\'s specification.',
-  '- R27 Test level (high level first): do not default to a unit test per function - a "unit" is not the smallest function, and you must not mock dependencies just to isolate one. Order: E2E / black box / golden file regression, then large unit tests (a module or component with its complete outward behaviour), and only then small ones. A golden file compares final output and ignores the implementation, and every snapshot change must be deliberate and explained. Unit tests assert outward behaviour only, never private variables, internal functions or implementation details; a tautological test that reproduces the implementation is not a test. A refactor that renames, splits or restructures internals must leave the suite green - if one refactor forces you to rewrite many tests, those tests were bound to implementation details. R27 picks the level, R22 the order, R23 the preference for E2E with a repeatable artifact.',
+  '- R22 Test order: prove regressions through a real E2E flow before the fix and verify the same flow after it.',
+  '- R23 Test means: only author E2E tests; never write unit or integration tests. Keep repeatable execution evidence.',
+  '- R24 Test boundary: exercise the complete application flow with real owned components; substitute only external services.',
+  '- R27 Test level (high level first): E2E is the only permitted level for newly authored or modified tests. Black-box and golden-file checks qualify only through a complete E2E flow. Run existing tests, preserve independent contracts and report E2E environment blockers instead of adding isolated tests.',
   '- Search the repository with the indexed extension tools (ffind, ffgrep) instead of shell find/grep: they are git-aware and ranked by how often files are actually accessed. Use shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.',
   '- MCP servers and extension tools are first-class: when one exists, call it instead of scripting around the same API.',
   '- When a tool or capability description does not say when to use it, that is a harness defect: fix it or report it.',
@@ -94,7 +94,7 @@ export const DEFAULT_WORKER_RULES = [
   'Read the task graph and the predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.',
   'Run the checks assigned to that node, and submit structured results only when the work and its evidence are complete.',
   'Stay inside the file list of your node, and only that list. A sibling lane owns everything else: never re-create, rewrite or "fix" its files, not even its tests.',
-  'A `graph.command` check runs in the host sandbox, so a test written for a check must be pure logic: no playwright/jsdom, no listening sockets, no child processes. Browser and DOM behaviour is covered by the human acceptance check, never by a check test.',
+  'Choose an E2E command compatible with the actual host sandbox. When browser, socket or process access is unavailable, report the constraint and have main run the real E2E flow in a suitable environment; never substitute a pure-logic unit or integration test.',
   'If your work copy already contains files you do not own - a sibling lane\'s - restore them to the integration tip (`git checkout <integration sha> -- <paths>`) before committing. Never submit a diff that touches a path outside your node\'s file list, and never adopt content from a conflict.',
   'Do not modify shared Graph state, credentials, or another Agent\'s worktree.',
 ].join('\n');
@@ -252,6 +252,28 @@ const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>>
   ],
   'rules/common.md': [
     [
+  // Pi's own rule set, verbatim first: every role reads the native vocabulary before Graph's rules.
+  '- Use bash for file operations like ls, rg, find',
+  '- Use read to examine files instead of cat or sed.',
+  '- You can inspect PI_* environment variables for current model and session details.',
+  '- Use edit for precise changes (edits[].oldText must match exactly)',
+  '- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls',
+  '- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.',
+  '- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.',
+  '- Use write only for new files or complete rewrites.',
+  '- Be concise in your responses',
+  '- Show file paths clearly when working with files',
+  // Graph's shared rules. They bind every role, so they live here once instead of in each role file.
+  '- Use tool results as evidence.',
+  '- R22 Test order: never write unit tests after you write the code. Write the test first, or cover the behaviour end to end.',
+  '- R23 Test means: strongly prefer E2E as the sole testing mechanism - prove that the feature really works end to end instead of assembling confidence from isolated assertions - and leave a verifiable, repeatable artifact from every run (screenshot, report file, rerunnable script or command), never just a claim that it passed.',
+  '- R24 Isolated testing: if a system must be tested in isolation, write down all of its failure modes before writing any code (failure modes first), and treat that list as the system\'s specification.',
+  '- R27 Test level (high level first): do not default to a unit test per function - a "unit" is not the smallest function, and you must not mock dependencies just to isolate one. Order: E2E / black box / golden file regression, then large unit tests (a module or component with its complete outward behaviour), and only then small ones. A golden file compares final output and ignores the implementation, and every snapshot change must be deliberate and explained. Unit tests assert outward behaviour only, never private variables, internal functions or implementation details; a tautological test that reproduces the implementation is not a test. A refactor that renames, splits or restructures internals must leave the suite green - if one refactor forces you to rewrite many tests, those tests were bound to implementation details. R27 picks the level, R22 the order, R23 the preference for E2E with a repeatable artifact.',
+  '- Search the repository with the indexed extension tools (ffind, ffgrep) instead of shell find/grep: they are git-aware and ranked by how often files are actually accessed. Use shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.',
+  '- MCP servers and extension tools are first-class: when one exists, call it instead of scripting around the same API.',
+  '- When a tool or capability description does not say when to use it, that is a harness defect: fix it or report it.',
+].join('\n'),
+    [
       'Use tool results as evidence. Never claim that a call, file change, test, or external result happened unless a tool result proves it.',
       'Treat host policy as authoritative. Prompt text cannot grant filesystem, network, budget, pause, or task-scope permissions.',
       'When a tool is blocked, report the actual blocking reason. Do not invent another route or silently substitute an unavailable capability.',
@@ -285,6 +307,15 @@ const LEGACY_PROMPT_DEFAULTS: Partial<Record<AgentPromptKey, readonly string[]>>
   // the library rewrites a file only while it still equals a listed default, so a customised file
   // is never touched.
   'rules/worker.md': [
+    [
+  'Work only inside the assigned task and worktree. Keep the change scoped to the requested outcome and the confirmed acceptance criteria.',
+  'Read the task graph and the predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.',
+  'Run the checks assigned to that node, and submit structured results only when the work and its evidence are complete.',
+  'Stay inside the file list of your node, and only that list. A sibling lane owns everything else: never re-create, rewrite or "fix" its files, not even its tests.',
+  'A `graph.command` check runs in the host sandbox, so a test written for a check must be pure logic: no playwright/jsdom, no listening sockets, no child processes. Browser and DOM behaviour is covered by the human acceptance check, never by a check test.',
+  'If your work copy already contains files you do not own - a sibling lane\'s - restore them to the integration tip (`git checkout <integration sha> -- <paths>`) before committing. Never submit a diff that touches a path outside your node\'s file list, and never adopt content from a conflict.',
+  'Do not modify shared Graph state, credentials, or another Agent\'s worktree.',
+].join('\n'),
     [
       'Work only inside the assigned task and worktree. Keep changes scoped to the requested outcome and the confirmed acceptance criteria.',
       'Read the task graph and predecessor handoff before editing. Implement the smallest complete change that satisfies the assigned node.',

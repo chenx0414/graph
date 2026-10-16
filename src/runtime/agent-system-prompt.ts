@@ -1,3 +1,4 @@
+import { AGENT_TESTING_POLICY } from './agent-testing-policy.ts';
 import { graphDocumentationPrompt, type GraphDocumentationPaths } from './agent-docs.ts';
 
 export type AgentPromptOrigin = 'editable' | 'generated' | 'pi';
@@ -126,12 +127,12 @@ export function composeAgentSystemPrompt(input: ComposeAgentSystemPromptInput): 
       content: input.toolGuidance,
       source: 'tools/<role>.md',
     },
-    ...(input.role === 'main' ? [] : [{
-      id: 'rules.worktree',
-      title: 'Worktree',
+    {
+      id: 'rules.host',
+      title: 'Host rules',
       origin: 'generated' as const,
-      content: "This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree.",
-    }]),
+      content: [AGENT_TESTING_POLICY, ...(input.role === 'main' ? [] : ["This directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree."])].join('\n\n'),
+    },
   ]);
 
   const docs = section('docs', 'Documentation', [{
