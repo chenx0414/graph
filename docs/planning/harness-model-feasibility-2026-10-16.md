@@ -89,3 +89,22 @@
 修正：case.json 仅在 daemon 关闭后保存，cleanupIncomplete 时不保存。现有真实 CLI E2E 的修复命令先检查 ../case.json 不存在再编辑；修复前 `/tmp/graph-eval-leak-red.log` 明确行为失败，修复后 `/tmp/graph-eval-leak-green.log` 两项通过。完整 `/tmp/graph-harness-check-verifier-visibility.log`：268 文件、1,487 测试通过，证据不变。
 
 此修复只解决显式验收文件过早发布；main 完全访问仍能读取仓库中的评测源码，不能宣称隔离安全。后续必须使用正式 Graph worker 配方、独立工作副本和工作区沙箱，并以外部行为验收；main 编排任务作为另一个评测类别。不能通过给 main 去掉产品职责来冒充 worker，也不改变生产路由或 effort。
+
+## 正式 Graph worker 小集：候选未通过（2026-10-16）
+
+新增 `scripts/harness-worker-eval.mjs` 使用标准访问策略、正式提案/接受、输入投递、执行查询、独立 worktree 和原生 worker 配方。父侧仅作固定编排，不运行模型 planner；这仍不等于整棵树对照。验收代码仅在关闭后保存。真实 E2E 证明 worker 读取工作区外的独立标记被拒绝且没有返回标记；从真实工作副本运行 CLI 验收。
+
+固定 parser 输入、CLI 验收、120 秒截止、两 flag 关闭，B A A B B A 顺序，每模型三次。grade 保留 A high / B medium，比较配置组合，不能归因纯模型效应。顺序 `/tmp/graph-native-parser-order.json`，汇总 `/tmp/graph-native-parser-summary.json`，单项 `/tmp/graph-native-parser-{样本}.json` 和 `.log`，每项记录 worktree 与原始 SQLite。
+
+| 样本 | 完整成功 | 行为通过 | 超时 | 执行状态 | 时长 ms | 请求 | 未缓存输入 | 输出 | 缓存读 | 费用未知调用 |
+| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| b1 | True | True | False | completed | 108865 | 9 | 11788 | 2977 | 39168 | 0 |
+| a1 | True | True | False | completed | 67148 | 14 | 10441 | 3094 | 88704 | 14 |
+| a2 | True | True | False | completed | 73708 | 12 | 10546 | 3878 | 76544 | 12 |
+| b2 | False | False | True | failed | 120097 | 6 | 12164 | 3744 | 17024 | 1 |
+| b3 | False | True | True | failed | 120097 | 8 | 12322 | 3515 | 29696 | 1 |
+| a3 | True | True | False | completed | 46025 | 11 | 6874 | 2796 | 63744 | 11 |
+
+DeepSeek 3/3 完整通过，LongCat 1/3；候选两次超时，其中一次行为已通过但执行仍未结束，不计完整成功。按预先门槛停止扩大该候选，不做 planner+worker 原型，不启用路由。样本小，不能声称统计显著的模型因果质量差异，但已经没有通过当前可行性门槛。免费供应商价格不抵消失败与返工；不报告节省百分比或收益置信区间。价格未知的 A 调用仍保持未知。
+
+新 worker 超时 E2E 原先 1 秒截止在全套负载下于启动阶段耗尽，未实际请求供应商；保留已发送断言，将专用测试截止设为 10 秒、外部供应商延迟 20 秒，真实模型仍 120 秒。`/tmp/graph-harness-check-native-worker-deadline.log` 中四条新生命周期 E2E 通过；整套仅现有 decision snapshots 测试 15 秒超时。真实模型结束后的默认并发检查 `/tmp/graph-harness-check-native-worker-quiet.log` 再现 main 取消竞态及既有 decision snapshot 超时。使用 Vitest 正式支持的 VITEST_MAX_WORKERS=4 运行 node --run check，`/tmp/graph-harness-check-native-worker-bounded.log`：268 文件、1,489 测试全部通过，验收证据未变化，未改动既有 decision snapshot 断言或超时。main 取消在高负载下的残余窗口仍单独处理，不把这次通过解释为该窗口已消失。
