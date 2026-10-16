@@ -52,9 +52,12 @@ try {
   }
   // An interrupted SDK turn can finish before its transport usage observer.
   // cost is written for every settled invocation, including unknown usage.
+  // Startup can be active before it creates its first invocation.
   const ledger=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
   try {
-   const pending=ledger.prepare('SELECT COUNT(*) AS n FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=? AND i.cost IS NULL');
+   const pending=ledger.prepare(`SELECT
+    (SELECT COUNT(*) FROM operations WHERE task_id=?1 AND worker_active=1) +
+    (SELECT COUNT(*) FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=?1 AND i.cost IS NULL) AS n`);
    const drainBegan=Date.now();
    while(pending.get(created.taskId).n>0 && Date.now()-drainBegan<30000)await new Promise(resolve=>setTimeout(resolve,100));
    cleanupIncomplete=pending.get(created.taskId).n>0;

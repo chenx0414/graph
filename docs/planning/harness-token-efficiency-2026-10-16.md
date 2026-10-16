@@ -1,6 +1,6 @@
 # Graph harness token 成本优化：2026-10-16
 
-当前审计结果：工程修改已形成独立提交，最新完整 `node --run check` 为 **267 文件、1,483 测试全部通过**，验收证据未变化（`/tmp/graph-harness-check-selection.log`）。docs 精简与目录工具按需加载两个实验都默认关闭；真实小样本分别约贵 28.9% 和 3.35%，不能宣称每完成任务成本已降低。下一阶段模型分层仅形成[待审阅提案](harness-model-mix-proposal-2026-10-16.md)，未执行模型/路由/effort 默认值变更。
+当前审计结果：最新通过的完整门禁为 `VITEST_MAX_WORKERS=4 node --run check`，**268 文件、1,489 测试全部通过**，验收证据未变化（`/tmp/graph-harness-check-native-worker-bounded.log`）。docs 精简与目录工具按需加载均默认关闭；早期真实小样本分别约贵 28.9% 和 3.35%，未证明降本。模型隔离评测已获批准；正式原生 worker 固定小集 DeepSeek 3/3、LongCat 1/3 完整成功，候选未通过质量门槛，停止扩大。旧 main 评测混入角色和验收代码暴露，已在[评测报告](harness-model-feasibility-2026-10-16.md)更正。生产模型、路由和 effort 默认值未改。main 取消收尾仍有高负载窗口，本轮另补 worker 静止检查，完整门禁 `/tmp/graph-harness-check-active-drain.log`：268 文件、1,489 测试通过，证据不变。
 
 报告中的阶段日志保留早先失败，以上为最新验证状态。目标业务指标尚未被证明，未标记 goal 完成。
 
@@ -17,7 +17,7 @@
 | 节点 | `kernel-graph-lane.ts` 的 onModelCall 在宿主发送，resident-worker 保存自己的历史；`kernel-provider-gate.ts` 冻结模型、价格、purpose 与 execution。 |
 | 计量 | `task-gate.ts` 保存 invocations；节点保存 kernel_provider_calls；input/output/cacheRead/cacheWrite 是互斥计数，未知不记零。工具使用 tool_calls，并从 worker spool 经公开统计读取入库。 |
 | 历史与压缩 | Pi session JSONL 保留 transcript；`compaction.ts` 已采用约 1500 token handoff、保留状态路径和后续工作；压缩独立计费。 |
-| 输出 | `tool-results.ts` 已做落盘、head/tail 和路径读取；大结果前两次通常完整，第三次摘要。bash/system/conversation 有首次上限。`host-command.ts` 在每流 32 MiB 处仍丢弃内容，这是未修复缺口。 |
+| 输出 | `tool-results.ts` 已做落盘、head/tail 和路径读取；大结果前两次通常完整，第三次摘要。bash/system/conversation 有首次上限。`host-command.ts` 已在执行 scratchDir 保全完整 stdout/stderr，并提供路径、字节数、digest；内联窗口仍有限，不等于磁盘数据被截断。 |
 | 检索 | `retrieval.ts`、扩展 ffind/ffgrep；没有本次可用的语义检索质量对照。 |
 | 协作 | main 通过正式 graph 声明节点，节点 fresh/continue 会话和独立 worktree；按 ADR 0030 不恢复旧 fork 图模型。未改变模型、effort 或任务拆分。 |
 
@@ -91,13 +91,13 @@ identity、common/role/runtime/tool/host rules：全部 keep，本次不改。�
 | 优先 | 层/候选 | 估算方法及风险 | 验证/回滚 |
 | --- | --- | --- | --- |
 | 1 | 补价格与逐请求 profile、main-child 任务归属 | 无直接节省；使真实目标可测。低行为风险，存储写放大需监控 | 真实 HTTP/tool/CLI E2E；回滚 telemetry callbacks 与脚本 |
-| 2 | main 工具按需发现 | main 静态字符约 74% 为工具；若可移除半数则此两块字符上界减少 37%，非任务费用预测。中高风险，首轮缺工具与多轮发现 | 待实现独立默认关闭 flag，核心工具和模式必需工具常驻；比较首轮成功、工具不存在错误、总轮次；恢复全量 schemas |
-| 3 | recurring tool errors | edit/artifact_publish ~9% 错误，原因未分类；不能把所有错误当 bug | 按 invalid arguments/env/provider/timeout/abort/unknown 分类后选真实回归；只修有证据缺陷 |
-| 4 | 大输出首次落盘/保全 | 已有 spill；32MiB host 截断仍丢失，重复前两次全量仍大。收益按 profile 的 tool_results 份额与减少率测 | 所有字节保全、尾部错误、读范围/生命周期 E2E；新格式须 flag；先保全再格式实验 |
+| 2 | main 工具按需发现 | main 静态字符约 74% 为工具；若可移除半数则此两块字符上界减少 37%，非任务费用预测。中高风险，首轮缺工具与多轮发现 | 已实现默认关闭 GRAPH_DEFER_CATALOG_TOOLS；核心工具常驻。单样本总价未下降，保持关闭；恢复全量 schemas |
+| 3 | recurring tool errors | edit/artifact_publish ~9% 错误；已见 artifact 参数互斥、源路径不存在和版本冲突，不能把所有错误当 bug | 按 invalid arguments/env/provider/timeout/abort/unknown 分类后选真实回归；只修有证据缺陷 |
+| 4 | 大输出首次落盘/保全 | host 完整输出已保全落盘；重复前两次全量仍大。输出重格式化收益尚未证明，按 profile 的 tool_results 份额与减少率测 | 所有字节保全、尾部错误、读范围/生命周期 E2E；新格式须 flag；先保全再格式实验 |
 | 5 | docs 精简 flag（已实现） | 估算每次 250 tokens；需对照是否多一次文档读取。中等质量风险 | 环境变量关闭并重启 |
 | 6 | volatile setup 后移/cache layout | SDK 已管理 Anthropic system/tool/history breakpoint；不能重复加或重写旧 transcript。需 profile 验证 prefix 不稳定来源 | 可证明 volatile 位置后按 provider 处理；保持用户可见实际 prompt 真值 |
 | 7 | compaction/subagent 提示词 | 已有短 handoff；本次不盲缩。协调和质量风险高 | 使用完整长任务与恢复对照；独立 flag |
-| 提案 | 模型、路由、effort、分工 | 仅提案；必须按 whole-tree 成本和任务质量测。未切换任何默认值 | 用户选择实验后独立配置比较 |
+| 提案 | 模型、路由、effort、分工 | 已批准隔离评测；免费 worker 未通过可行性门槛。whole-tree 收益仍未证明，未切换默认值 | 用户选择实验后独立配置比较 |
 
 ## Provider/cache 核对
 
@@ -241,3 +241,22 @@ GRAPH_COMPACT_DOCUMENTATION=1 node scripts/harness-real-eval.mjs /path/to/graph.
 ## 缓存证据边界补充
 
 本地 estimated usage 的 cacheRead=0 是估算器缺证据的默认值，不能计作一次真实缓存 miss。新增真实 HTTP→shell→SQLite→CLI 的 usage 缺失场景，在修复前明确失败于 cacheHitRequestRate=0（预期 null）。报告现单列 cacheMeasuredRequests、cacheUnmeasuredRequests、cacheEvidenceTokens，仅 authoritative/legacy-authoritative/account_delta 参与缓存比例和按计费类型费用；estimated/unknown 保留自身计数与总估算，不冒充缓存证据。五种供应商响应场景全部通过，包括真实 429 后的重试：拒绝请求仍计入 requests，但不冒充缓存 miss。历史 main 零用量且无 request profile 的记录无法区分工具准入与供应商尝试，仍排除；node provider 记录和有 profile 的 main 请求完整保留。最新只读快照 `/tmp/graph-harness-baseline-v3.json`。完整门禁 `/tmp/graph-harness-check-retry.log`：267 文件、1,485 测试通过，验收证据未变化。
+
+## 当前目标验收审计
+
+| 原始要求 | 权威证据与结论 |
+| --- | --- |
+| 地图、真实 wire、模型缓存/价格 | 本报告地图、provider profile、官方资料；历史价格缺失仍明确未知 |
+| 来源 × billing、静态量、缓存、每任务轮次、工具覆盖/错误 | CLI 已提供可观测项；来源估算不可当精确账单拆分，完整来源计费归因未完成 |
+| 机会排序与估算/风险/回滚 | 本报告机会表；以体积 proxy 排序，不虚构收益 |
+| safe 变更独立提交 | telemetry、排序、完整输出保全和已证实错误修复已提交；生产默认提示词与模型未改 |
+| prompt 逐行处置与 diff | docs 块完整映射；其他身份/规则保留，未假称全部删除 |
+| 风险变更 flag 与验证方案 | 两 flag 默认关闭；已记录费用未降，不启用 |
+| 模型/路由/effort/分工仅提案 | 隔离评测已批准；原生 worker LongCat 候选不通过，不扩大生产范围 |
+| 固定集与真实使用质量/成本验证 | 有探索与 parser 原生 worker 小集；模型候选提前触及可行性失败门槛。没有 whole-tree 降本或质量等效证明 |
+| reasoning 与完整结果保留 | 未删除 reasoning；大型命令输出完整文件保全。未以截断/放弃任务获得节省 |
+| 目标：每完成任务价格加权成本下降且质量不降 | **未证明，goal 不能标为完成** |
+
+后续应返回已观测大开销的 harness 层。main 的浏览器工具正文曾约 10,158 字符且保留样本仅 11.76% 任务调用，现有目录加载 flag 只覆盖六个小 catalog 工具，未覆盖这个主要体积来源；若开展浏览器按需加载，必须独立默认关闭、有真实绑定的浏览器工具、首次任务发现与加载后调用 E2E，并用完整任务对照，不能拿当前无浏览器工具的隔离跑分证明收益。尚未实现该候选。
+
+main 评测器取消收尾现同时等待 operations.worker_active=0 与所有 invocation 的费用结算标记；失败账本曾证明 provider profile 在 pause 之后才出现，不能仅用调用表当前为空推断已静止。该改动不改变生产权限/模型/提示词。局部四条 E2E `/tmp/graph-eval-active-drain.log` 与上述完整门禁通过。
