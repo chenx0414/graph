@@ -983,6 +983,9 @@ export function createPiAdapter(options: {
             model: toPiModel(entry),
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
+              onRequest: (callId, profile) => options.store.event(operation.taskId, 'provider.request_profile', {
+                callId, operationId: operation.id, instanceId: operation.instanceId!, model: entry.id, rates: entry.cost ?? null, pricing: entry.pricing ?? null, ...profile,
+              }),
               onSend: sent => {
                 if (sent.systemPrompt !== null) {
                   options.store.recordOperationSystemPrompt(operation.id, sent.systemPrompt, sent.toolDeclarations ?? undefined);
@@ -1211,6 +1214,9 @@ export function createPiAdapter(options: {
                 suggestionReply = await generatePromptSuggestion({
                   stream: controlledOpenAIStream(suggestionGate, resolveKeyFor(suggestionEntry), slotFor(suggestionEntry), suggestionEntry.api, {
                     estimateMissing: true,
+                    onRequest: (callId, profile) => options.store.event(operation.taskId, 'provider.request_profile', {
+                      callId, operationId: operation.id, model: suggestionEntry.id, rates: suggestionEntry.cost ?? null, pricing: suggestionEntry.pricing ?? null, ...profile,
+                    }),
                   }),
                   model: toPiModel(suggestionEntry),
                   userMessage: lastUserMessage!,
@@ -1293,6 +1299,9 @@ export function createPiAdapter(options: {
                         const candidateReply = await generateSkillProposal({
                           stream: controlledOpenAIStream(candidateGate, resolveKeyFor(candidate), slotFor(candidate), candidate.api, {
                             estimateMissing: true,
+                            onRequest: (callId, profile) => options.store.event(operation.taskId, 'provider.request_profile', {
+                              callId, operationId: operation.id, model: candidate.id, rates: candidate.cost ?? null, pricing: candidate.pricing ?? null, ...profile,
+                            }),
                           }),
                           model: toPiModel(candidate),
                           systemPrompt: sedimentSystemPrompt,

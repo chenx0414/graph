@@ -6,6 +6,7 @@ import { streamSimple as anthropicStreamSimple } from '@earendil-works/pi-ai/api
 import { estimateContextTokens, estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { ModelApi } from '../catalog/models.ts';
 import type { TokenUsage } from './call-broker.ts';
+import { profileProviderRequest } from './request-profile.ts';
 
 /** Pause and usage gate around one actual provider send. CallBroker satisfies this. */
 export interface SendGate {
@@ -19,7 +20,8 @@ function parseUsage(value: unknown): TokenUsage | null {
   const input = raw.prompt_tokens;
   const output = raw.completion_tokens;
   const details = raw.prompt_tokens_details as { cached_tokens?: unknown } | undefined;
-  const cache = details?.cached_tokens ?? 0;
+  // Match the SDK's provider-native aliases at our independent billing boundary.
+  const cache = details?.cached_tokens ?? raw.prompt_cache_hit_tokens ?? raw.cached_tokens ?? 0;
   if (![input, output, cache].every(value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) return null;
   if ((cache as number) > (input as number)) return null;
   if (raw.total_tokens !== undefined && raw.total_tokens !== (input as number) + (output as number)) return null;
@@ -139,6 +141,8 @@ export interface GatedProviderFetchOptions {
   acquireSlot?: () => Promise<() => void>;
   /** Called once for the successful attempt so the caller can settle its usage. */
   onResponse?: (id: string, response: Response, release: () => void) => Promise<void> | void;
+  /** Best-effort observation after admission, once per actual transport attempt. */
+  onRequest?: (id: string) => void;
 }
 
 const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, usageSource: 'authoritative' };
@@ -228,6 +232,7 @@ export async function gatedProviderFetch(
       // the gate again instead of holding capacity through the backoff.
       if (options.acquireSlot) release = await options.acquireSlot();
       const response = await broker.dispatch(id, options.reservation, () => {
+        try { options.onRequest?.(id); } catch { /* telemetry cannot refuse a send */ }
         sent = true;
         return (options.fetchImpl ?? fetch)(input, init);
       });
@@ -269,6 +274,7 @@ export interface StreamSlot {
 }
 
 export interface ControlledStreamUsageOptions {
+  onRequest?: (id: string, profile: NonNullable<ReturnType<typeof profileProviderRequest>>) => void;
   /** Estimate a successful response when per-request usage is absent. */
   estimateMissing?: boolean;
   /**
@@ -432,6 +438,10 @@ export function controlledOpenAIStream(
             // retry re-queues and re-passes the gate after releasing capacity.
             return gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
               reservation: model.contextWindow + model.maxTokens,
+              ...(usageOptions.onRequest ? { onRequest: (id: string) => {
+                const profile = profileProviderRequest(init?.body);
+                if (profile) usageOptions.onRequest!(id, profile);
+              } } : {}),
               ...(slot ? { acquireSlot: () => slot.acquire(options?.signal) } : {}),
               fetchImpl: (request, requestInit) => {
                 // SDK request headers are built before the credential queue grants a slot.
