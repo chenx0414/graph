@@ -262,3 +262,5 @@ GRAPH_COMPACT_DOCUMENTATION=1 node scripts/harness-real-eval.mjs /path/to/graph.
 main 评测器取消收尾现同时等待 operations.worker_active=0 与所有 invocation 的费用结算标记；失败账本曾证明 provider profile 在 pause 之后才出现，不能仅用调用表当前为空推断已静止。该改动不改变生产权限/模型/提示词。局部四条 E2E `/tmp/graph-eval-active-drain.log` 与上述完整门禁通过。
 
 浏览器大 schema 实验已实现独立默认关闭 flag，完整报告 [浏览器按需加载](harness-browser-loading-2026-10-16.md)。六次同模型对照 A 3/3、B 2/3 完整成功；首请求工具 JSON 少 9,885 字节，但统一权重的每完成任务估算约贵 39.1%，且价格/一次 usage 未知，不能当精确账单。候选未通过，保持关闭。最新带真实浏览器门禁 269 文件、1,491 测试通过。RSI backlog 的额外工作已在轨迹确认，尚未改变其产品职责；artifact schema 字段缺少 kind@version 格式说明是下一项有证据的参数错误候选。
+
+Artifact schema 格式说明已按真实错误补齐，不改运行时保护；四项真实 artifact E2E 通过；完整门禁 1,489 项通过、2 项浏览器环境依赖测试跳过（总清单 269 文件/1,491 测试）。三个真实模型发布样本完整成功、无工具错误，尚无固定未修改对照，不能据此声称降本。详见 [参数说明修正](harness-artifact-schema-2026-10-16.md)。

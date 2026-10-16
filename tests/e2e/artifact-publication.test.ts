@@ -59,6 +59,7 @@ test('native publication validates labels and logical names, preserves immutable
   const first = { namespace: 'research', name: 'note', content: '{"note":"NATIVE_VERSION_ONE"}', schema: 'source-list@1', tags: ['编码', 'Known-Issue'],
     title: '中文标签', expectedVersion: 0, requestId: 'first' };
   const graph = await fixture([
+    { tools: [tool('bad-schema', { ...first, schema: 'source-list/v1', requestId: 'bad-schema' })] },
     { tools: [tool('first', first)] }, { tools: [tool('replay', first)] },
     { tools: [tool('bad-tag', { ...first, tags: ['bad tag'], requestId: 'bad-tag' })] },
     { tools: [tool('bad-name', { ...first, name: '中文名', requestId: 'bad-name' })] },
@@ -80,11 +81,12 @@ test('native publication validates labels and logical names, preserves immutable
       return parsed.content?.map(part => part.text ?? '').join('\n') ?? content;
     } catch { return content; }
   };
-  expect(lastTool(1)).toContain('"version":1'); expect(lastTool(2)).toContain('"version":1');
-  expect(lastTool(3)).toContain('must be a label'); expect(lastTool(4)).toContain('lowercase slug');
-  expect(lastTool(6)).toContain('Artifact head changed');
+  expect(lastTool(1)).toContain('schema must use kind@version syntax');
+  expect(lastTool(2)).toContain('"version":1'); expect(lastTool(3)).toContain('"version":1');
+  expect(lastTool(4)).toContain('must be a label'); expect(lastTool(5)).toContain('lowercase slug');
+  expect(lastTool(7)).toContain('Artifact head changed');
   expect(graph.runtime.nodeRun(graph.graphId, 'writer').node.status).toBe('succeeded');
-  expect(graph.vendor.requests).toHaveLength(7);
+  expect(graph.vendor.requests).toHaveLength(8);
 }, 60_000);
 
 test('native publication refuses traversal and a real symlink without returning host bytes, and explains both supported corrections', async () => {

@@ -110,7 +110,7 @@ function declarations(features: AgentToolFeatures) {
       parameters: Type.Object({
         namespace: Type.Optional(Type.String()),
         prefix: Type.Optional(Type.String()),
-        schema: Type.Optional(Type.String()),
+        schema: Type.Optional(Type.String({ description: 'Optional schema identity in kind@version form, e.g. source-list@1. The kind starts with a lowercase letter and contains lowercase letters, digits, dots, underscores or hyphens; version is a positive integer. Omit when no schema identity is needed.' })),
         tag: Type.Optional(Type.String()),
         trust: Type.Optional(Type.String()),
         includeRetired: Type.Optional(Type.Boolean()),
