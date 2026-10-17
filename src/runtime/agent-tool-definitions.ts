@@ -369,8 +369,8 @@ function declarations(features: AgentToolFeatures) {
       externallyGated: false,
     },
     read_system_capabilities: {
-      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read configuration inventory: redacted subscription plans, model connections, current Agent recipes, compiled Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.',
-      parameters: Type.Object({}),
+      name: 'read_system_capabilities', label: 'Read system capabilities', description: 'Read configuration inventory: redacted subscription plans, model connections, current Agent recipes, compiled Agent definitions, graph architectures and quota windows. Secret values are never included. Use this before choosing a model, assembling subagents or claiming that something is available.' + (process.env.GRAPH_SCOPED_SYSTEM_CAPABILITIES === '1' ? ' section returns that complete inventory field; omit it for the full inventory.' : ''),
+      parameters: process.env.GRAPH_SCOPED_SYSTEM_CAPABILITIES === '1' ? Type.Object({section: Type.Optional(Type.Union(['configuredModels','access','agentCombinations','agentDefinitions','architectures','subscriptionPlans','summary','capabilities','agentContext','application'].map(value=>Type.Literal(value))))}) : Type.Object({}),
       available: main && Boolean(features.systemContext?.systemSummary),
       externallyGated: false,
     },

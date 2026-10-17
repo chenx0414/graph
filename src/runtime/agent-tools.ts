@@ -522,7 +522,13 @@ export function agentTools(input: {
       }
       return text(JSON.stringify(capabilityView(entry)));
     },
-    read_system_capabilities: async () => text(JSON.stringify(await input.systemContext!.systemSummary!())),
+    read_system_capabilities: async (_id, params) => {
+      const inventory = await input.systemContext!.systemSummary!();
+      const section = process.env.GRAPH_SCOPED_SYSTEM_CAPABILITIES === '1' ? fields(params).section : undefined;
+      if (section === undefined) return text(JSON.stringify(inventory));
+      if (typeof section !== 'string' || !Object.hasOwn(inventory, section)) throw new RuntimeError('invalid_input', 'Unknown system capability section');
+      return text(JSON.stringify({ [section]: inventory[section] }));
+    },
     inspect_graph_system: async () => text(JSON.stringify(await input.systemContext!.systemDiagnostics!())),
     propose_system_change: async (_id, params) => {
       const body = fields(params);

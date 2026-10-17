@@ -292,3 +292,7 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 实际 parser A/B：DeepSeek 24 API 请求、行为未通过；Step 5 12 completion 加 1 DeepSeek 建议请求、行为通过且 main 直接提交。两组都没有正式草案/worker/完整 workflow，故按提案停止扩样，未运行余下 CLI B/A。两组每完成 workflow 成本均 null，不能报告降本或生产模型优劣；总体目标尚未达成。详见 [本轮结果](harness-step5-feasibility-2026-10-18.md)。
 
 本轮 prompt 差异仅在私有评测配方：coder 描述增加固定 worker 连接 ID（keep：冻结比较角色）；新增独立 reviewer 配方及其固定模型（keep：既有独立性与精确 commit 审查契约）。未要求节省 token、少做工作或缩短推理；未改生产 prompt/defaults。目录 grade 与实际 thinking level 分别记录，不再把 high/medium grade 当成 effort 事实。
+
+## 2026-10-18 轨迹审计与按节清单实验
+
+审计 parser A 的真实会话，33 个工具结果只有 1 个 isError，主要开销是源码/文档调查，不能归因连续宿主故障。完整能力清单 28,436 字节，模型整节投影 500 字节，但新工具声明 JSON 与实际供应商工具 wire 都增加 517 字节（token/费用增量未测）；生产人群调用率和价格加权影响仍未知。实现默认关闭的 GRAPH_SCOPED_SYSTEM_CAPABILITIES，可选整节/仍可完整读取，不丢弃内容、不改模型或分工；真实 HTTP E2E 保护十节与原值等价及默认 wire/返回不变。详见 [实验与验证](harness-scoped-inventory-2026-10-18.md)。总体降本目标仍未达成。
