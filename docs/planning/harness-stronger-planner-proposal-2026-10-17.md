@@ -1,4 +1,6 @@
-# 待批准：更强 planner 的隔离可行性对照
+# 已批准：更强 planner 的隔离可行性对照
+
+2026-10-17 使用者明确回复“批准模型分层提案”及“批准”，授权下述最多四个隔离会话。先补齐 runner 的完整生命周期受控验证，再开始计入真实会话；批准不涉及生产默认值。执行准备跨至 2026-10-18。
 
 目标仍是每完成任务价格加权成本下降且质量不降。本提案不修改生产默认值、不安装新凭据、不在已有会话中切换模型。授权边界来自最初目标的“Propose only: changes to which models run, routing, reasoning-effort defaults, or how work is split across agents.” 此前批准仅覆盖 LongCat worker 隔离提案；该候选已不通过。本提案尚未执行候选模型。
 
@@ -22,4 +24,4 @@ worker 固定 DeepSeek V4.1 Flash，隔离 worktree；需要独立 review 时以
 
 候选出现额外验收失败、越权、证据虚构或独立性违规，不扩大。主机/供应商错误、超时、cache 与 request 数全部保留。模型/API ID 不可用不自动换候选。即使可行也不启用生产；正式任务集没有支持更低完整成本与无质量下降，继续关闭。撤销临时配置即可回滚，既有 main 会话与用户项目不受影响。
 
-待使用者决定：是否批准上述四个临时会话及固定 worker/reviewer 的隔离评测范围。批准评测不等同于批准生产模型、路由或 effort 变更。
+使用者已批准上述四个临时会话及固定 worker/reviewer 的隔离评测范围。批准评测不等同于批准生产模型、路由或 effort 变更。

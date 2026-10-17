@@ -9,9 +9,10 @@ const execute=promisify(execFile);
 
 test.each([false,true])('evaluation confirms a real draft and accounts for native worker dispatch=%s without calling it completed', async dispatch => {
  const root=await mkdtemp(join(tmpdir(),'graph-eval-workflow-'));
+ const workerProvider=await openaiServer([{text:'[]'},{text:'Worker execution observed.'},{text:'[]'}]);
  const proposal={requirementVersion:1,summary:'Repair the parser',acceptance:[{id:'behavior',description:'Parser behavior',checkNode:'work'}],definition:{
   schemaVersion:2,name:'Parser repair',protocols:{data:{type:'object'}},
-  nodes:{work:{recipe:'coder@1',model:'local',task:'Repair config.js',workspace:{base:'worktree'},inputs:{job:{protocol:'data'}},outputs:{},submission:{}}},
+  nodes:{work:{recipe:'coder@2',model:'worker',task:'Repair config.js',workspace:{base:'worktree'},inputs:{job:{protocol:'data'}},outputs:{},submission:{}}},
   modules:{},edges:{},inputs:{},outputs:{},acceptance:[{id:'behavior',description:'Parser behavior',kind:'human'}],
  }};
  const provider=await openaiServer([
@@ -23,17 +24,17 @@ test.each([false,true])('evaluation confirms a real draft and accounts for nativ
     const graphId=/已确认 graph ([0-9a-f-]+)/.exec(last)?.[1];
     if(!graphId)throw new Error('Missing real confirmation graph ID');
     return JSON.stringify({graphId,nodeId:'work',input:'job',value:{request:'Repair config.js'}});
-  }}]},{text:'Input accepted.'},{text:'Worker execution observed.'}] : [{text:'Confirmation received; work has not started.'}]),
+  }}]},{text:'Input accepted.'}] : [{text:'Confirmation received; work has not started.'}]),
  ]);
  let artifactRoot: string|undefined;
  try {
   const configPath=join(root,'config.json');
-  await writeFile(configPath,JSON.stringify({version:1,projects:[],credentials:{local:{secretRef:'GRAPH_EVAL_LOCAL_KEY'}},models:{entries:[{
-   id:'local',modelId:'local',provider:'graph-openai',grade:'high',api:'openai-completions',baseUrl:provider.model.baseUrl,
+  await writeFile(configPath,JSON.stringify({version:1,projects:[],credentials:{local:{secretRef:'GRAPH_EVAL_LOCAL_KEY'}},models:{entries:['local','worker'].map(id=>({
+   id,modelId:id,provider:id==='worker'?'graph-openai-worker':'graph-openai',grade:'high',api:'openai-completions',baseUrl:(id==='worker'?workerProvider:provider).model.baseUrl,
    contextWindow:32000,maxTokens:256,credentialId:'local',cost:{input:2,output:4,cacheRead:.5,cacheWrite:1},
-  }]}}));
+  }))}}));
   const {stdout}=await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath],{cwd:process.cwd(),timeout:45000,
-   env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_TIMEOUT_MS:'10000'}});
+   env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:'worker',GRAPH_EVAL_TIMEOUT_MS:'10000'}});
   const report=JSON.parse(stdout);artifactRoot=report.root;
   expect(report.error,JSON.stringify(report)).toBeUndefined();
   expect(report.workflow).toMatchObject({coderAvailable:true,proposalSeen:true});
@@ -45,7 +46,7 @@ test.each([false,true])('evaluation confirms a real draft and accounts for nativ
   const mainCost=ledger.tasks.find((task:{id:string})=>task.id===report.taskId);
   expect(mainCost.requests).toBeGreaterThan(0);
   const workerCost=ledger.tasks.find((task:{id:string})=>task.id===report.workflow.confirmedTaskId);
-  if(dispatch){expect(workerCost.requests).toBeGreaterThan(0);expect(workerCost.executions).toBeGreaterThan(0);}
+  if(dispatch){expect(workerCost).toBeDefined();expect(workerCost.requests).toBeGreaterThan(0);expect(workerCost.executions).toBeGreaterThan(0);expect(workerProvider.requests.some(request=>(request as {model:string;max_completion_tokens:number}).model==='worker' && (request as {max_completion_tokens:number}).max_completion_tokens===256)).toBe(true);}
   else expect(workerCost?.requests ?? 0).toBe(0);
   const catalogReply=(provider.requests[1] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool');
   expect(JSON.stringify(catalogReply)).toContain('coder');
@@ -59,7 +60,81 @@ test.each([false,true])('evaluation confirms a real draft and accounts for nativ
   await expect(execute(process.execPath,['scripts/harness-eval-summary.mjs',manifestPath],{cwd:process.cwd()})).rejects.toThrow(/mixed-model workflow/);
 
  } finally {
-  await provider.close();await rm(root,{recursive:true,force:true});
+  await provider.close();await workerProvider.close();await rm(root,{recursive:true,force:true});
   if(artifactRoot)await rm(artifactRoot,{recursive:true,force:true});
  }
 },60000);
+
+test('evaluation completes a confirmed graph only after real worktree integration, host check, independent review and target delivery', async()=>{
+ const root=await mkdtemp(join(tmpdir(),'graph-eval-delivery-'));
+ let artifactRoot:string|undefined;
+ const repaired="export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)]; })); }\n";
+ const tool=(name:string,value:()=>unknown)=>({tools:[{id:name,name,arguments:()=>JSON.stringify(value())}]});
+ const messages=(server:{requests:unknown[]})=>(server.requests.at(-1) as {messages:{role:string;content:unknown}[]}).messages;
+ const graphId=()=>{
+  const match=/已确认 graph ([0-9a-f-]+)/.exec(JSON.stringify(messages(main)));
+  if(!match)throw new Error('Missing confirmed graph');return match[1]!;
+ };
+ const commit=()=>{
+  for(const message of [...messages(main)].reverse())if(message.role==='tool' && typeof message.content==='string'){
+   const value=JSON.parse(message.content) as {commit?:string};if(value.commit)return value.commit;
+  }
+  throw new Error('Missing real integration commit');
+ };
+ const worker=await openaiServer([
+  tool('write_file',()=>({path:'config.js',content:repaired})),
+  tool('workspace_commit',()=>({paths:['config.js'],message:'Repair parser'})),
+  tool('artifact_publish',()=>({namespace:'deliverables',name:'parser',sourcePath:'config.js',metadata:{kind:'code'},requestId:'publish-parser'})),
+  {text:'Parser committed and published.'},
+ ]);
+ const review=await openaiServer([
+  {text:'No suggestion'},
+  tool('artifact_list',()=>({namespace:'deliverables'})),
+  tool('artifact_read',()=>{
+   const reply=messages(review).filter(message=>message.role==='tool').at(-1)!;
+   const envelope=JSON.parse(String(reply.content)) as {content:{text:string}[]};
+   const value=JSON.parse(envelope.content[0]!.text) as {artifacts:{artifactId:string;version:number}[]};
+   return {artifactId:value.artifacts[0]!.artifactId,version:value.artifacts[0]!.version};
+  }),
+  tool('artifact_publish',()=>({namespace:'reviews',name:'parser',schema:'graph.review@1',mediaType:'application/json',
+   content:JSON.stringify({commit:commit(),passed:true,reason:'Read the immutable parser implementation; it preserves equals and ignores empty lines.'}),requestId:'publish-review'})),
+  {text:'Independent review published.'},{text:'No suggestion'},
+ ]);
+ const data={protocol:'data'};
+ const acceptance=[{id:'behavior',description:'Parser works at the integrated commit',kind:'check',module:'check'},
+  {id:'review',description:'Independent review of the delivered commit',kind:'review',node:'review'}];
+ const proposal={requirementVersion:1,summary:'Repair and deliver parser',acceptance:[
+  {id:'behavior',description:acceptance[0]!.description,checkNode:'check'},{id:'review',description:acceptance[1]!.description,checkNode:'review'}],definition:{
+  schemaVersion:2,name:'Parser delivery',protocols:{data:{type:'object'}},nodes:{
+   work:{recipe:'coder@2',model:'worker',task:'Repair, commit and publish config.js',workspace:{base:'worktree'},inputs:{job:data},outputs:{},submission:{}},
+   review:{recipe:'reviewer@2',model:'review',task:'Read the immutable parser artifact and review the specified integration commit.',inputs:{job:data},outputs:{},submission:{}},
+  },modules:{check:{type:'operation',trigger:'each',inputs:{job:data},outputs:{result:data},operation:{action:'workspace.command',version:1,command:'node',args:['--input-type=module','-e',"import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});"],output:'result'}}},edges:{},inputs:{},outputs:{},acceptance,
+ }};
+ const main=await openaiServer([
+  tool('list_agent_combinations',()=>({})),tool('propose_graph',()=>({proposal,requestId:'delivery-draft'})),{text:'Draft ready.'},
+  tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}})),
+  tool('get_task_status',()=>({taskId:graphId(),waitForNode:'work',timeoutMs:15000})),
+  tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
+  tool('graph_send',()=>({graphId:graphId(),nodeId:'check',input:'job',value:{}})),
+  tool('graph_send',()=>({graphId:graphId(),nodeId:'review',input:'job',value:{commit:commit()}})),
+  tool('get_task_status',()=>({taskId:graphId(),waitForNode:'review',timeoutMs:15000})),
+  tool('graph_control',()=>({graphId:graphId(),action:'complete'})),{text:'Delivered.'},
+ ]);
+ try{
+  const configPath=join(root,'config.json');
+  await writeFile(configPath,JSON.stringify({version:1,projects:[],credentials:{local:{secretRef:'GRAPH_EVAL_LOCAL_KEY'}},models:{entries:[['main',main,'high'],['worker',worker,'high'],['review',review,'medium']].map(([id,server,grade])=>({
+   id,modelId:id,provider:`graph-${id}`,grade,api:'openai-completions',baseUrl:(server as typeof main).model.baseUrl,contextWindow:32000,maxTokens:256,credentialId:'local',cost:{input:2,output:4,cacheRead:.5,cacheWrite:1},
+  }))}}));
+  const {stdout}=await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath],{cwd:process.cwd(),timeout:60000,
+   env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:'worker',GRAPH_EVAL_REVIEWER_MODEL:'review',GRAPH_EVAL_TIMEOUT_MS:'35000'}});
+  const report=JSON.parse(stdout);artifactRoot=report.root;
+  expect(report,JSON.stringify({report,main:main.requests,worker:worker.requests,review:review.requests})).toMatchObject({completed:true,taskSuccess:true,success:true,workflow:{phase:'completed'}});
+  expect(await readFile(join(report.root,'project','config.js'),'utf8')).toBe(repaired);
+  const ledger=JSON.parse(await readFile(join(report.root,'cost-report.json'),'utf8'));
+  expect(ledger.tasks.find((task:{id:string})=>task.id===report.workflow.confirmedTaskId).executions).toBe(2);
+  expect(ledger.summary.requests).toBe(main.requests.length+worker.requests.length+review.requests.length);
+ }finally{
+  await Promise.all([main.close(),worker.close(),review.close()]);await rm(root,{recursive:true,force:true});
+  if(artifactRoot)await rm(artifactRoot,{recursive:true,force:true});
+ }
+},75000);

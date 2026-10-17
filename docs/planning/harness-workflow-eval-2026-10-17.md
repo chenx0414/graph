@@ -25,3 +25,13 @@ coder 可成功读取，但 proposalSeen=false、未确认图、超时、行为�
 扩展同一真实 CLI E2E 为两行：确认后不投递；确认后由 main 的正式 graph_send 投递。供应商使用当前真实确认消息里的 graph ID，不伪造图或回执。投递行确实启动原生 worker，cost-report 中主会话请求与图的 provider requests/executions 都大于零，并由汇总 CLI 将全部独立状态库调用计入分子。两行仍都 taskSuccess=false，因为没有独立验收/集成/交付；未把 worker 出现当完成。
 
 局部 `/tmp/graph-workflow-worker-dispatch.log` 两项通过；完整 `/tmp/graph-harness-check-publish-and-dispatch.log`：270 文件、1,501 测试全部通过，真实浏览器与 FFF 依赖均执行，验收证据未变化。这补齐前置生命周期，不代表 Step 5 候选已获批或已运行。
+
+## 2026-10-18 已批准后的评测器准备
+
+模型分层提案已获用户明确批准。runner 支持显式 GRAPH_EVAL_WORKER_MODEL / GRAPH_EVAL_REVIEWER_MODEL，从输入临时配置精确取连接；不存在即拒绝，不换模型。只加载 planner 与显式角色所需条目。coder/reviewer 配方保存后记录实际发布的 definitionVersion，确认前核对每个节点的配方、模型，以及 coder 的 worktree；越出冻结范围则保留失败，不改写草案。历史 coder@1 不等于本次保存的 coder@2。
+
+完整真实 CLI E2E 已覆盖 main 发布正式 proposal、用户确认、实际 graph_send、独立 worktree 写入/commit/artifact、真实宿主 node 检查、不同模型的 reviewer 读取不可变产物并发布当前 commit 的 graph.review@1、完成控制、目标分支收到代码，最后独立行为检查通过才 taskSuccess=true。账本请求数等于全部外部供应商实际请求数。两条原有不交付对照继续失败。局部 /tmp/graph-workflow-delivery.log：3/3 通过；typecheck 通过。
+
+受控供应商最初共享响应队列，新增模型触发真实 prompt_suggestion 后消费了 worker 的脚本响应；现分开外部模型服务保留真实建议调用。review artifact_list 的节点工具结果另有 content 包装，修复夹具解包后流程通过；未改自有业务状态或伪造验收。历史未完整交付的 1,501 测试结论不外推到本次新覆盖。
+
+完整门禁 /tmp/graph-harness-check-layered-workflow.log：270 文件、1,502 测试全部通过，真实浏览器与 FFF 依赖均执行，验收证据未变化。2026-10-18 开始获批的 parser A 首轮；最多四次，不补跑失败。

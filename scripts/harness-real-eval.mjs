@@ -19,9 +19,20 @@ await writeFile(join(project,'package.json'),'{"type":"module"}');
 for(const [path,content] of Object.entries(scenario.files))await writeFile(join(project,path),content);
 const source=JSON.parse(await readFile(process.argv[2],'utf8'));
 const model=source.models.entries[0];
+const workerId=process.env.GRAPH_EVAL_WORKER_MODEL;
+const reviewerId=process.env.GRAPH_EVAL_REVIEWER_MODEL;
+const configuredModel=id=>{
+ const entry=source.models.entries.find(entry=>entry.id===id);
+ if(!entry)throw new Error(`Evaluation model is not configured: ${id}`);
+ return entry;
+};
+const worker=workerId ? configuredModel(workerId) : model;
+const reviewer=reviewerId ? configuredModel(reviewerId) : undefined;
+if(reviewer && !workerId)throw new Error('Reviewer selection requires an explicit worker model');
+const entries=[...new Map([model,worker,...(reviewer?[reviewer]:[])].map(entry=>[entry.id,entry])).values()];
 const webDir=join(root,'web');await mkdir(webDir);await writeFile(join(webDir,'index.html'),'<!doctype html><div>Eval</div>');
 const configPath=join(root,'config.json');
-await writeFile(configPath,JSON.stringify({version:1,projects:[{id:'p',root:project}],credentials:source.credentials,models:{entries:[model]}}));
+await writeFile(configPath,JSON.stringify({version:1,projects:[{id:'p',root:project}],credentials:source.credentials,models:{entries}}));
 const graphHome=join(root,'graph');
 if(process.env.GRAPH_EVAL_BROWSER_SOURCE){
  const browserSource=process.env.GRAPH_EVAL_BROWSER_SOURCE;
@@ -41,7 +52,12 @@ let cleanupIncomplete=false;
 try {
  daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
  if(workflow){
-  await daemon.server.runtime.catalog.saveAgentCombination({id:'coder',name:'Controlled coding worker',description:'Implement the assigned project change and verify its acceptance in its worktree.',recommendedGrade:model.grade,review:false,tags:[],resources:[],systemPrompt:'Implement the assigned project change in the provided worktree. Follow the declared acceptance criteria and report evidence through the bound tools.'});
+  const coderRecipe=await daemon.server.runtime.catalog.saveAgentCombination({id:'coder',name:'Controlled coding worker',description:`Implement the assigned project change and verify its acceptance in its worktree.${workerId ? ` Evaluation worker model: ${worker.id}.` : ''}`,recommendedGrade:worker.grade,review:false,tags:[],resources:[],systemPrompt:'Implement the assigned project change in the provided worktree. Follow the declared acceptance criteria and report evidence through the bound tools.'});
+  workflow.coderDefinition=coderRecipe.definition?.definitionVersion;
+  if(reviewer){
+   const reviewRecipe=await daemon.server.runtime.catalog.saveAgentCombination({id:'reviewer',name:'Independent reviewer',description:`Review immutable code artifacts and the exact integration commit. Evaluation reviewer model: ${reviewer.id}.`,recommendedGrade:reviewer.grade,review:true,tags:[],resources:[],systemPrompt:'Review the immutable code artifacts and current integration commit, and publish the independent review through the bound tools.'});
+   workflow.reviewerDefinition=reviewRecipe.definition?.definitionVersion;
+  }
   await daemon.server.runtime.projects.prepare({projectId:'p',requestId:'eval-prepare',initialize:true,createBaseline:true});
   workflow.coderAvailable=true;
  }
@@ -60,6 +76,13 @@ try {
    const view=await daemon.server.runtime.conversations.view(created.conversationId);
    if(view.proposal && !view.proposal.stale && masterIdle && !workflow.confirmedTaskId){
     workflow.proposalSeen=true;
+    if(workerId){
+     const draft=await daemon.server.runtime.conversations.proposal(created.conversationId,view.proposal.version);
+     for(const node of Object.values(draft.spec.definition.nodes)){
+      const expected=node.recipe===workflow.coderDefinition ? worker.id : node.recipe===workflow.reviewerDefinition ? reviewer?.id : undefined;
+      if(!expected || node.model!==expected || (node.recipe===workflow.coderDefinition && node.workspace?.base!=='worktree'))throw new Error('Draft violates frozen evaluation worker/reviewer configuration');
+     }
+    }
     const confirmed=await daemon.server.runtime.conversations.confirm(created.conversationId,{proposalVersion:view.proposal.version,draftRevision:view.proposal.draftRevision,targetBranch:'main',requestId:'eval-confirm'});
     workflow.confirmedTaskId=confirmed.taskId;workflow.taskIds.push(confirmed.taskId);
     await daemon.server.runtime.conversations.chat(created.conversationId,{text:`已确认 graph ${confirmed.taskId}，继续按验收执行并交付。`,requestId:'eval-continue'});
