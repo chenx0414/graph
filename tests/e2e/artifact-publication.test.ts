@@ -68,6 +68,9 @@ test('native publication validates labels and logical names, preserves immutable
     { text: 'Valid versions stand; invalid publications were refused.' },
   ]);
   await graph.run({ goal: 'Publish and correct a labeled version' });
+  const wire = graph.vendor.requests[0] as {tools:{function:{name:string;parameters:{properties:{schema?:{description?:string}}}}}[]};
+  expect(wire.tools.find(tool=>tool.function.name==='artifact_publish')?.function.parameters.properties.schema?.description).toContain('kind@version');
+
   const head = graph.runtime.artifacts.list(graph.graphId, { namespace: 'research', tag: '编码' }).artifacts;
   expect(head).toHaveLength(1); expect(head[0]).toMatchObject({ version: 2, tags: ['known-issue', '编码'], schemaKind: 'source-list', schemaVersion: 1 });
   expect(graph.runtime.artifacts.list(graph.graphId, { latestOnly: false }).artifacts).toHaveLength(2);

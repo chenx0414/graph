@@ -144,7 +144,7 @@ function declarations(features: AgentToolFeatures) {
         sourcePath: Type.Optional(Type.String()),
         content: Type.Optional(Type.String()),
         mediaType: Type.Optional(Type.String()),
-        schema: Type.Optional(Type.String()),
+        schema: Type.Optional(Type.String({ description: 'Optional schema identity in kind@version form, e.g. source-list@1. The kind starts with a lowercase letter and contains lowercase letters, digits, dots, underscores or hyphens; version is a positive integer. Omit when no schema identity is needed.' })),
         title: Type.Optional(Type.String()),
         summary: Type.Optional(Type.String()),
         tags: Type.Optional(Type.Array(Type.String())),

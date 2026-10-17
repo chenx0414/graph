@@ -1,5 +1,7 @@
 # Artifact schema 参数说明修正
 
+> 2026-10-17 纠正：先前提交 19096be 实际把说明加到 artifact_list.schema，未加到目标 artifact_publish.schema。下面旧验证只证明发布行为，不能证明发布参数收到说明；三次真实模型发布也不能算该修正后的效果。现已在发布字段补齐，并增加真实 wire 回归，保留旧记录但撤回原效果暗示。
+
 真实命令对照 B3 在修复配置后调用 artifact_publish，收到“schema must use kind@version syntax”；随后读文档与源码并尝试 RSI 修改参数说明，最终在 120 秒截止时未结束。原始 `/tmp/graph-browser-command-b3.json` 记录独立目录，SQLite 中 message.tool 保留失败和后续动作。该尝试被工作区变更保护拒绝，没有放松保护。
 
 运行时 parseSchema 使用既有格式 `^([a-z][a-z0-9._-]*)@([1-9]\d*)$`，而工具参数仅 Type.String。现补参数 description：kind@version、source-list@1 示例、kind 字符范围与正整数版本；不需要身份时可省略。未新增限制，未修改运行时 parser、来源权限或并发规则。这是有轨迹依据的工具错误修正，不是向模型要求少用 token。
@@ -19,3 +21,7 @@
 | 3 | True | 7 | 65963 | 0 |
 
 原始 `/tmp/graph-artifact-schema-real-{1,2,3}.json`、`.log`，汇总 `/tmp/graph-artifact-schema-real-summary.json`，每项记录隔离目录。临时脚本沿用 parser 的 caseId 标签，但实际 prompt 与验收已替换为上述 artifact 任务；不能把这三项算 parser 验收。三次均无工具错误，不代表未修改组也会失败；没有固定前后对照，故不声称降本或质量提升。费用仍未知，保留四类 token 供以后对照。
+
+## 发布字段纠正与 wire 回归
+
+新断言通过真实 Graph worker 的供应商 HTTP 请求找到 artifact_publish.parameters.properties.schema.description，并验证 kind@version 提示存在。修复前 `/tmp/graph-artifact-publish-description-red.log` 得到 undefined 而失败；按 artifact_publish 声明的精确代码范围补齐后 `/tmp/graph-artifact-publish-description-green.log` 四项通过。没有修改 parser、命名、来源或并发保护。保留 artifact_list 的格式说明，因为列表过滤同样使用 schema 身份，但它不能代替发布字段说明。完整 `/tmp/graph-harness-check-publish-and-dispatch.log`：270 文件、1,501 测试全部通过，真实浏览器与 FFF 依赖均执行，验收证据未变化。
