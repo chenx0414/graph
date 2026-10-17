@@ -1,4 +1,4 @@
-import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFile} from 'node:child_process';
@@ -6,6 +6,7 @@ import {promisify} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
 import {startGraphDaemon} from '../src/server/start.ts';
 import {cases} from './harness-eval-cases.mjs';
+import {installEvaluationContext} from './harness-eval-context.mjs';
 const exec=promisify(execFile);
 if (process.argv.length < 3 || process.argv.length > 4) { console.error('Usage: node scripts/harness-real-eval.mjs /path/to/graph.config.json [parser|cli|persistence|command]'); process.exit(1); }
 const caseId=process.argv[3] ?? 'parser';
@@ -19,6 +20,7 @@ await writeFile(join(project,'package.json'),'{"type":"module"}');
 for(const [path,content] of Object.entries(scenario.files))await writeFile(join(project,path),content);
 const source=JSON.parse(await readFile(process.argv[2],'utf8'));
 const model=source.models.entries[0];
+const contextSnapshot=process.env.GRAPH_EVAL_CONTEXT_SNAPSHOT;
 const workerId=process.env.GRAPH_EVAL_WORKER_MODEL;
 const reviewerId=process.env.GRAPH_EVAL_REVIEWER_MODEL;
 const configuredModel=id=>{
@@ -29,11 +31,20 @@ const configuredModel=id=>{
 const worker=workerId ? configuredModel(workerId) : model;
 const reviewer=reviewerId ? configuredModel(reviewerId) : undefined;
 if(reviewer && !workerId)throw new Error('Reviewer selection requires an explicit worker model');
-const entries=[...new Map([model,worker,...(reviewer?[reviewer]:[])].map(entry=>[entry.id,entry])).values()];
+const entries=contextSnapshot ? source.models.entries : [...new Map([model,worker,...(reviewer?[reviewer]:[])].map(entry=>[entry.id,entry])).values()];
 const webDir=join(root,'web');await mkdir(webDir);await writeFile(join(webDir,'index.html'),'<!doctype html><div>Eval</div>');
 const configPath=join(root,'config.json');
-await writeFile(configPath,JSON.stringify({version:1,projects:[{id:'p',root:project}],credentials:source.credentials,models:{entries}}));
+const evaluationConfig={...source,projects:[{id:'p',root:project}],models:contextSnapshot?source.models:{entries}};
+await writeFile(configPath,JSON.stringify(evaluationConfig),{mode:0o600});
 const graphHome=join(root,'graph');
+let evaluationContext;
+try {
+ if(contextSnapshot){
+  if(process.env.GRAPH_EVAL_BROWSER_SOURCE)throw new Error('Frozen context cannot be combined with an ad-hoc browser capability');
+  const frozen=await installEvaluationContext(contextSnapshot,graphHome);
+  evaluationContext={sha256:frozen.sha256,recipes:frozen.recipes,capabilities:frozen.capabilities.length,catalogValidated:true,allRuntimeDependenciesProven:false};
+ }
+}catch(error){await rm(root,{recursive:true,force:true});throw error;}
 if(process.env.GRAPH_EVAL_BROWSER_SOURCE){
  const browserSource=process.env.GRAPH_EVAL_BROWSER_SOURCE;
  const pkg=JSON.parse(await readFile(join(browserSource,'package.json'),'utf8'));
@@ -51,12 +62,21 @@ let cleanupError;
 let cleanupIncomplete=false;
 try {
  daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
+ if(evaluationContext)for(const expected of evaluationContext.recipes){
+  const actual=daemon.server.runtime.catalog.agentCombinations().find(recipe=>recipe.id===expected.id);
+  if(actual?.status!=='valid' || JSON.stringify(actual.resources)!==JSON.stringify(expected.resources))throw new Error(`Frozen recipe did not load: ${expected.id}`);
+ }
  if(workflow){
+  if(evaluationContext){
+   workflow.coderDefinition=daemon.server.runtime.catalog.compileAgentCombination('coder').definitionVersion;
+   if(daemon.server.runtime.catalog.agentCombinations().some(recipe=>recipe.id==='reviewer'))workflow.reviewerDefinition=daemon.server.runtime.catalog.compileAgentCombination('reviewer').definitionVersion;
+  }else{
   const coderRecipe=await daemon.server.runtime.catalog.saveAgentCombination({id:'coder',name:'Controlled coding worker',description:`Implement the assigned project change and verify its acceptance in its worktree.${workerId ? ` Evaluation worker model: ${worker.id}.` : ''}`,recommendedGrade:worker.grade,review:false,tags:[],resources:[],systemPrompt:'Implement the assigned project change in the provided worktree. Follow the declared acceptance criteria and report evidence through the bound tools.'});
   workflow.coderDefinition=coderRecipe.definition?.definitionVersion;
   if(reviewer){
    const reviewRecipe=await daemon.server.runtime.catalog.saveAgentCombination({id:'reviewer',name:'Independent reviewer',description:`Review immutable code artifacts and the exact integration commit. Evaluation reviewer model: ${reviewer.id}.`,recommendedGrade:reviewer.grade,review:true,tags:[],resources:[],systemPrompt:'Review the immutable code artifacts and current integration commit, and publish the independent review through the bound tools.'});
    workflow.reviewerDefinition=reviewRecipe.definition?.definitionVersion;
+  }
   }
   await daemon.server.runtime.projects.prepare({projectId:'p',requestId:'eval-prepare',initialize:true,createBaseline:true});
   workflow.coderAvailable=true;
@@ -151,7 +171,7 @@ const cost=JSON.parse(report.stdout);
 const db=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
 const settled=db.prepare('SELECT state,settled_at-dispatched_at AS operationMs FROM operations ORDER BY rowid DESC LIMIT 1').get();
 db.close();
-result={...result,settled,cleanupIncomplete,...(cleanupError ? {cleanupError} : {}),taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
+result={...result,evaluationContext,settled,cleanupIncomplete,...(cleanupError ? {cleanupError} : {}),taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
 console.log(JSON.stringify({...result,accounting:cost.summary,task:cost.tasks[0]},null,2));
 
 // This standalone evaluator owns its process. If a transport never drains, keep
