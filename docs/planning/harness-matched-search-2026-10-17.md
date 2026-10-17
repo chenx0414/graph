@@ -40,3 +40,13 @@ main 按产品设计可以读取 Graph 源码，单纯延迟 case.json 无法保
 后续验证不依赖隐藏公开契约：CLI 默认输出、合法正整数次数、非法参数退出仍是原目标，但合法次数在模型结束后由验收进程生成，包含原 3 加六个新的不同正整数（1..100）。模型不能预知这些输入；成功报告 verificationEvidence 保存实际次数以复现；当前失败报告仍仅保留行为失败，未保存失败时生成的全部次数，这是后续诊断缺口。实现细节公开不等于数据提前给出；父进程在发送模型前加载验收字符串，模型结束后才运行独立 Node 验收，模型自己写出的“验证通过”不会充当回执。该机制仍不声称约束拥有完全主机权限的恶意 Agent，测试隔离边界应由正式工作副本/沙箱 E2E 证明。
 
 新增真实 CLI E2E：外部供应商工具确实写入 greet.mjs，普通通用实现通过；只对旧固定次数 3 输出正确的实现拒绝。负向控制临时去掉新次数生成，旧固定案例错误地通过，`/tmp/graph-eval-unseen-negative.log` 断言明确失败；恢复生成后完整门禁 `/tmp/graph-harness-check-unseen-verification.log`：269 文件、1,498 测试全部通过，真实浏览器与 FFF 依赖测试均已执行，验收证据未变化。此改进不改变生产 prompt、模型、effort 或路由，不用旧污染样本补新一轮样本。
+
+## 失败输入诊断与最小环境限制
+
+后续补齐失败路径：生成次数在验收前输出，父进程在 execFile 异常中保留 stdout。字段名使用 generatedCounts，不把失败输入称作已验证通过。现有真实 CLI E2E 先扩展到要求失败报告含输入，旧实现明确报 undefined JSON，`/tmp/graph-eval-failed-inputs-red.log`；修复后六项通过 `/tmp/graph-eval-failed-inputs-green.log`。完整 `/tmp/graph-harness-check-failure-inputs.log`：269 文件、1,498 测试全通过，浏览器与 FFF 依赖均执行，验收证据不变。
+
+新增独立两次试跑 B1/A1（不是每组三次完整固定集），预注册 `/tmp/graph-unseen-cli-order.json`，原始 `/tmp/graph-unseen-cli-{b1,a1}.json`、`.log`，汇总 `/tmp/graph-unseen-cli-summary.json`：B1 14 请求、A1 10 请求，均 timeout 且行为验收失败；两者均无 proposal.* 事件，不把未完成修复假说成正常等待确认。B1 生成 [3,31,62,73,43,50,2]，A1 [3,26,59,35,44,97,41]；两份失败报告均保存，不能再把缺失诊断当通过。
+
+检查临时 graph/agent-combinations.json 发现只包含 main、resources=[]。实际安装配置具有 coder、reviewer 等 worker 配方和资源，不能假定临时最小环境等于生产完整能力。此前多个 main 样本调查 recipe/协议，环境差异是混杂因素；所有 main 隔离成本结果只能支持最小环境探索，不证明生产安装或完整 main→worker→交付流程收益。原生 worker 对照使用显式发布配方和独立 worktree，属于另一已明确记录的单体可行性结果，不受此 main 配方缺失结论替代。
+
+后续先建立受控 worker 配方与正式提案/确认/投递流程，再测完整任务成本；合法等待确认应单独标记，不计作普通执行失败，也不能当作完成。不能继续用单个 main operation 的状态冒充整棵任务树成本。所有实验仍默认关闭，前一 command 初步正信号不升级为启用决定。

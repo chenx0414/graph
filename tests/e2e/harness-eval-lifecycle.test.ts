@@ -53,10 +53,10 @@ EOF` }) }] }, { text: 'Fixed.' }]);
       expect(report.cleanupIncomplete).toBe(false);
       expect(report.task.requests).toBeGreaterThan(0);
     }
-    if(caseId==='cli' && !fixedCount){
-      const evidence=JSON.parse(report.verificationEvidence) as {verifiedCounts:number[]};
-      expect(new Set(evidence.verifiedCounts).size).toBe(7);
-      expect(evidence.verifiedCounts).toContain(3);
+    if(caseId==='cli'){
+      const evidence=JSON.parse(report.verificationEvidence) as {generatedCounts:number[]};
+      expect(new Set(evidence.generatedCounts).size).toBe(7);
+      expect(evidence.generatedCounts).toContain(3);
     }
     expect(stderr).not.toMatch(/database is not open|ERR_INVALID_STATE/);
   } finally {

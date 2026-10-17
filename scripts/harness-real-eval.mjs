@@ -78,7 +78,10 @@ try {
   verificationEvidence=checked.stdout.trim() || undefined;
   for(const path of scenario.unchanged ?? [])if(await readFile(join(project,path),'utf8')!==scenario.files[path])throw new Error('protected file changed');
   success=true;verification='verified';
- } catch {verification='behavioral CLI check failed';}
+ } catch(error) {
+  if(typeof error?.stdout==='string')verificationEvidence=error.stdout.trim() || undefined;
+  verification='behavioral CLI check failed';
+ }
 
  result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,verificationEvidence,elapsedMs:Date.now()-began,taskId:created.taskId};
 } catch(error){result={variant,root,model:model.id,error:error instanceof Error?error.message:String(error)};}
