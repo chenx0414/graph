@@ -42,7 +42,7 @@ try {
  if(contextSnapshot){
   if(process.env.GRAPH_EVAL_BROWSER_SOURCE)throw new Error('Frozen context cannot be combined with an ad-hoc browser capability');
   const frozen=await installEvaluationContext(contextSnapshot,graphHome);
-  evaluationContext={sha256:frozen.sha256,recipes:frozen.recipes,capabilities:frozen.capabilities.length,catalogValidated:true,allRuntimeDependenciesProven:false};
+  evaluationContext={sha256:frozen.sha256,recipes:frozen.recipes,capabilities:frozen.capabilities.length,packageCacheIncluded:Boolean(frozen.packageCacheIncluded),catalogValidated:true,allRuntimeDependenciesProven:false};
  }
 }catch(error){await rm(root,{recursive:true,force:true});throw error;}
 if(process.env.GRAPH_EVAL_BROWSER_SOURCE){

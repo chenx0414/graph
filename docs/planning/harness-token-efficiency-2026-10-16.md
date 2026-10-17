@@ -315,3 +315,7 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 实现 [完整本地快照](harness-frozen-context-2026-10-18.md)及 runner 严格装配路径，保留全部生产配方/能力/Prompt，workflow 不再覆盖为裸 coder/reviewer。实际本机 11 配方、377 条目、123,904 文件摘要核对通过，模型调用数 0；main/worker/reviewer 的冻结 skill 和完整正式交付由真实 CLI E2E 覆盖。已有 FFF/browser package spec 是范围，真实解析与 MCP 等外部依赖仍未全部证明，不提前开展付费性能比较或声称已复现生产；总体降本目标仍未达成。
 
 该阶段最终门禁 frozen-context-final：272 文件、1,510 测试通过，验收证据未变。修复还保留源 limits/access（两种模式）及完整模型 preferences（快照模式），标准访问 + 有限预算不再在评测配置重建时丢失；full 模式按 ADR 0024 保持原语义。外部包/MCP 运行依赖仍待证明，不启用优化、不声称降本。
+
+## 2026-10-18 SDK 缓存与实际包解析
+
+[运行缓存证据](harness-runtime-cache-2026-10-18.md)：声明版本不是 source 型资源的实际 pin。完整本地快照现在包含 SDK extensions 安装树，143,901 文件；原 3 个 source range 在私有缓存解析为 0.11.0 / 0.6.17 / 2.38.0，lock 前后不变。私有 FFF/browser 实际工具 E2E 12 项与最终全量 272/1,510 均通过，证据不变。未改生产配置、未新增付费模型调用；完整角色/MCP 运行验证仍未完成，不能声称真实任务成本降低。

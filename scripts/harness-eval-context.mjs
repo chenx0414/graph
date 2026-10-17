@@ -5,7 +5,7 @@ import {join,resolve,relative,dirname,isAbsolute,basename,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {CapabilityLibrary} from '../src/catalog/capability-library.ts';
 
-const parts=['agent-combinations.json','capabilities','prompts'];
+const parts=['agent-combinations.json','capabilities','prompts','extensions'];
 const inside=(root,path)=>{const value=relative(root,path);return value==='' || (value!=='..' && !value.startsWith(`..${sep}`) && !isAbsolute(value));};
 const recipeFacts=library=>library.recipes.map(({id,resources,resolved})=>({id,resources,resolved}));
 const capabilityFacts=library=>library.capabilities.map(({id,version,kind,status,base})=>({id,version,kind,status,...(base?{base:true}:{})}));
@@ -70,7 +70,7 @@ export async function createEvaluationContext(sourceHome,destination){
  if(JSON.stringify(recipeFacts(installed))!==JSON.stringify(recipeFacts(library)) || JSON.stringify(capabilityFacts(installed))!==JSON.stringify(capabilityFacts(library)))throw new Error('Copied catalog does not match source');
  const manifest={schemaVersion:1,sourceHome:source,sha256:copied.sha256,fileCount:copied.entries.filter(e=>e[1]==='file').length,
   recipes:recipeFacts(library),capabilities:capabilityFacts(library),
-  runtimeLoaded:false,externalDependencyPolicy:'Declared package sources, commands and services are preserved, not claimed frozen or runtime-validated.'};
+  packageCacheIncluded:existsSync(join(graphHome,'extensions')),runtimeLoaded:false,externalDependencyPolicy:'Local SDK cache is copied when present. Declared source ranges may still resolve updates; commands and services are not claimed runtime-validated.'};
  await writeFile(join(output,'context.json'),JSON.stringify(manifest,null,2),{mode:0o600});
  return manifest;
 }
@@ -89,6 +89,6 @@ export async function installEvaluationContext(snapshotHome,graphHome){
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  if(process.argv.length!==4){console.error('Usage: node scripts/harness-eval-context.mjs /source/graph-home /new/snapshot-directory');process.exitCode=1;}
- else try{const manifest=await createEvaluationContext(process.argv[2],process.argv[3]);console.log(JSON.stringify({sha256:manifest.sha256,fileCount:manifest.fileCount,recipes:manifest.recipes.map(r=>({id:r.id,resources:r.resources.length})),capabilities:manifest.capabilities.length,runtimeLoaded:false}));}
+ else try{const manifest=await createEvaluationContext(process.argv[2],process.argv[3]);console.log(JSON.stringify({sha256:manifest.sha256,fileCount:manifest.fileCount,recipes:manifest.recipes.map(r=>({id:r.id,resources:r.resources.length})),capabilities:manifest.capabilities.length,packageCacheIncluded:manifest.packageCacheIncluded,runtimeLoaded:false}));}
  catch(error){console.error(error instanceof Error?error.message:String(error));process.exitCode=1;}
 }

@@ -35,3 +35,7 @@ runner 在模型调用前核验摘要/目录元数据，安装至本次私有 gr
 最终配置回归中，冻结图的 worker 不显式指定模型，由源 high preference 选中实际 worker 供应商；没有把首目录 main 当 worker。检查项目仍须真实交付。标准访问的有限预算分别覆盖裸/快照路径，拒绝必须发生在模型供应商收到请求之前。
 
 最终 /tmp/graph-harness-check-frozen-context-final.log：272 文件、1,510 测试全部通过，真实浏览器与 FFF 依赖执行，验收证据未变化。9 项直接相关 E2E 包含冻结/篡改/缺失、两种模式的标准预算，以及冻结资源和 preferences 下的完整正式交付。初步 1,508 门禁不能代替这次包含配置修复的最终门禁。
+
+## SDK 安装缓存补充
+
+[缓存解析与真实执行](harness-runtime-cache-2026-10-18.md)补充 extensions 树及 packageCacheIncluded，原 123,904 文件快照未被改写；新完整本地快照为 143,901 普通文件。原 source 范围在私有缓存中经 SDK 解析为 FFF 0.11.0、browser 0.6.17、mcp-adapter 2.38.0，lock 不变；私有包实际 FFF/browser E2E 12 项通过，最终全量仍为 1,510 项通过。仍不把缓存存在当作全部 MCP/宿主运行依赖成功，不调用付费模型、不启用生产优化。
