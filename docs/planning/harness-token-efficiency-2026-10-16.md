@@ -284,3 +284,11 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 当前有证据并已授权的直接缺陷修复及评测基础已交付。原业务目标仍未满足：来源×billing 精确归因和部分真实冻结费用未知；没有可靠跨类别/整棵流程成本下降与无质量下降证明；无在线 A/B 或代码存留长期证据。所有实验 flag 保持关闭，不因测试绿或局部 schema 缩短启用。
 
 继续路径是已准备好的[最多四会话新 planner 隔离提案](harness-stronger-planner-proposal-2026-10-17.md)。原目标明确将模型选择/路由/effort/分工限定 propose only；旧 LongCat worker 批准不覆盖新的 Step 5 paid upstream。候选未调用、用户配置未改。该审批边界已持续多轮，独立的已授权前置工作现已完成；goal 保持未完成，标记 blocked 等待使用者决定。批准后再按提案先验证生命周期，拒绝则不调用候选，并重新决定是否有值得继续的非模型实验。
+
+## 2026-10-18 模型分层批准后的最新状态
+
+使用者已明确批准 Step 5 planner 的最多四会话范围，原“等待批准/blocked”记录不再代表当前状态。先补齐完整 CLI→正式草案→确认→worktree worker→宿主检查→独立 review→目标交付 E2E，并完成 270 文件/1,502 测试全量检查（验收证据未变），提交 91ca9dd。
+
+实际 parser A/B：DeepSeek 24 API 请求、行为未通过；Step 5 12 completion 加 1 DeepSeek 建议请求、行为通过且 main 直接提交。两组都没有正式草案/worker/完整 workflow，故按提案停止扩样，未运行余下 CLI B/A。两组每完成 workflow 成本均 null，不能报告降本或生产模型优劣；总体目标尚未达成。详见 [本轮结果](harness-step5-feasibility-2026-10-18.md)。
+
+本轮 prompt 差异仅在私有评测配方：coder 描述增加固定 worker 连接 ID（keep：冻结比较角色）；新增独立 reviewer 配方及其固定模型（keep：既有独立性与精确 commit 审查契约）。未要求节省 token、少做工作或缩短推理；未改生产 prompt/defaults。目录 grade 与实际 thinking level 分别记录，不再把 high/medium grade 当成 effort 事实。

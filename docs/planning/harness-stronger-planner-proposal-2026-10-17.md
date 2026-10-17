@@ -2,7 +2,7 @@
 
 2026-10-17 使用者明确回复“批准模型分层提案”及“批准”，授权下述最多四个隔离会话。先补齐 runner 的完整生命周期受控验证，再开始计入真实会话；批准不涉及生产默认值。执行准备跨至 2026-10-18。
 
-目标仍是每完成任务价格加权成本下降且质量不降。本提案不修改生产默认值、不安装新凭据、不在已有会话中切换模型。授权边界来自最初目标的“Propose only: changes to which models run, routing, reasoning-effort defaults, or how work is split across agents.” 此前批准仅覆盖 LongCat worker 隔离提案；该候选已不通过。本提案尚未执行候选模型。
+目标仍是每完成任务价格加权成本下降且质量不降。本提案不修改生产默认值、不安装新凭据、不在已有会话中切换模型。授权边界来自最初目标的“Propose only: changes to which models run, routing, reasoning-effort defaults, or how work is split across agents.” 此前批准仅覆盖 LongCat worker 隔离提案；该候选已不通过。本提案已执行基础 parser A/B，结果见 [可行性报告](harness-step5-feasibility-2026-10-18.md)；正式规划基础阶段未通过，按停止条件不执行余下两项。
 
 ## 证据与候选
 
