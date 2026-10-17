@@ -50,3 +50,7 @@ main 按产品设计可以读取 Graph 源码，单纯延迟 case.json 无法保
 检查临时 graph/agent-combinations.json 发现只包含 main、resources=[]。实际安装配置具有 coder、reviewer 等 worker 配方和资源，不能假定临时最小环境等于生产完整能力。此前多个 main 样本调查 recipe/协议，环境差异是混杂因素；所有 main 隔离成本结果只能支持最小环境探索，不证明生产安装或完整 main→worker→交付流程收益。原生 worker 对照使用显式发布配方和独立 worktree，属于另一已明确记录的单体可行性结果，不受此 main 配方缺失结论替代。
 
 后续先建立受控 worker 配方与正式提案/确认/投递流程，再测完整任务成本；合法等待确认应单独标记，不计作普通执行失败，也不能当作完成。不能继续用单个 main operation 的状态冒充整棵任务树成本。所有实验仍默认关闭，前一 command 初步正信号不升级为启用决定。
+
+## 汇总工具后的严格口径
+
+可复现 CLI 重算见 [评测汇总](harness-evaluation-summary-2026-10-17.md)。基线 A 的未知 usage 导致严格每完成任务费用和情景成本均为 null；B 的用量完整但冻结价格未知，精确费用也 null。此前约 66.8% 仅为记录 token 的探索比较，不是完整成本或启用证据。

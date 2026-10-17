@@ -1,6 +1,6 @@
 # Graph harness token 成本优化：2026-10-16
 
-当前审计结果：最新通过的完整门禁为 `VITEST_MAX_WORKERS=4 node --run check`，**269 文件、1,498 测试全部通过**，验收证据未变化（`/tmp/graph-harness-check-unseen-verification.log`，本轮同时提供真实浏览器和 FFF 依赖）。docs 精简与目录工具按需加载均默认关闭；早期真实小样本分别约贵 28.9% 和 3.35%，未证明降本。模型隔离评测已获批准；正式原生 worker 固定小集 DeepSeek 3/3、LongCat 1/3 完整成功，候选未通过质量门槛，停止扩大。旧 main 评测混入角色和验收代码暴露，已在[评测报告](harness-model-feasibility-2026-10-16.md)更正。生产模型、路由和 effort 默认值未改。main 取消收尾仍有高负载窗口，本轮另补 worker 静止检查，完整门禁 `/tmp/graph-harness-check-active-drain.log`：268 文件、1,489 测试通过，证据不变。
+当前审计结果：最新通过的完整门禁为 `VITEST_MAX_WORKERS=4 node --run check`，**270 文件、1,500 测试全部通过**，验收证据未变化（`/tmp/graph-harness-check-summary.log`，本轮同时提供真实浏览器和 FFF 依赖）。docs 精简与目录工具按需加载均默认关闭；早期真实小样本分别约贵 28.9% 和 3.35%，未证明降本。模型隔离评测已获批准；正式原生 worker 固定小集 DeepSeek 3/3、LongCat 1/3 完整成功，候选未通过质量门槛，停止扩大。旧 main 评测混入角色和验收代码暴露，已在[评测报告](harness-model-feasibility-2026-10-16.md)更正。生产模型、路由和 effort 默认值未改。main 取消收尾仍有高负载窗口，本轮另补 worker 静止检查，完整门禁 `/tmp/graph-harness-check-active-drain.log`：268 文件、1,489 测试通过，证据不变。
 
 报告中的阶段日志保留早先失败，以上为最新验证状态。目标业务指标尚未被证明，未标记 goal 完成。
 
@@ -274,3 +274,5 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 2026-10-17 后续诊断：失败报告也保存模型结束后生成的 CLI 参数（generatedCounts），真实退化回归与完整 1,498 测试通过。两次新最小环境试跑均失败，未支持跨类别收益。发现临时 graphHome 只含 main、无 worker 配方，和实际安装能力不同；main 成本实验仅属最小环境探索，不能宣称生产整棵树收益。下一步应补齐受控配方和提案确认流程。
 
 2026-10-17 正式流程评测基础：新增受控 coder 配方、Git 准备、合法 draft→confirm 和 task ID 归属；E2E 证明“只确认图不等于完整成功”，带真实依赖完整 270 文件/1,499 测试通过。180 秒真实模型试跑 coder 可读取，但 23 请求后仍未发布提案，未到 worker，不报告整棵树节省。详见 [流程评测](harness-workflow-eval-2026-10-17.md)。另一 planner 的付费官方 Step 5 Preview ID 与本地旧 free ID 不同，已形成[待批准隔离提案](harness-stronger-planner-proposal-2026-10-17.md)，候选未调用，生产配置未改。
+
+2026-10-17 可复现成本汇总已完成：[评测汇总工具](harness-evaluation-summary-2026-10-17.md) 保留全部失败成本、拒绝重复状态目录，未知/估算用量或费用时精确成本返回 null，并阻止统一权重为混合模型 workflow 定价。重算 command 数据后 A 未知用量使严格比较不可得，约 66.8% 仅保留为探索 token 信号，不支持启用。完整带真实浏览器/FFF 门禁 270 文件、1,500 测试通过，证据未变。Step 5 仍未运行，模型提案仍待批准。

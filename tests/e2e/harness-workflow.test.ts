@@ -37,6 +37,15 @@ test('evaluation confirms a real model draft against a seeded worker and does no
   expect(report.workflow.taskIds).toEqual(expect.arrayContaining([report.taskId,report.workflow.confirmedTaskId]));
   const catalogReply=(provider.requests[1] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool');
   expect(JSON.stringify(catalogReply)).toContain('coder');
+  const runPath=join(root,'run.json');await writeFile(runPath,stdout);
+  const manifestPath=join(root,'comparison.json');
+  const group={name:'workflow',scope:'workflow',runs:[runPath]};
+  await writeFile(manifestPath,JSON.stringify({groups:[group]}));
+  const comparison=await execute(process.execPath,['scripts/harness-eval-summary.mjs',manifestPath],{cwd:process.cwd()});
+  expect(JSON.parse(comparison.stdout).groups[0]).toMatchObject({scope:'workflow',attempts:1,completed:0,requests:report.accounting.requests,costPerCompletedTask:null});
+  await writeFile(manifestPath,JSON.stringify({groups:[group],weights:{currency:'USD',perMillion:{input:1,output:1,cacheRead:1,cacheWrite:1}}}));
+  await expect(execute(process.execPath,['scripts/harness-eval-summary.mjs',manifestPath],{cwd:process.cwd()})).rejects.toThrow(/mixed-model workflow/);
+
  } finally {
   await provider.close();await rm(root,{recursive:true,force:true});
   if(artifactRoot)await rm(artifactRoot,{recursive:true,force:true});
