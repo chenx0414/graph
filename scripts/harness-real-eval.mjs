@@ -31,24 +31,52 @@ if(process.env.GRAPH_EVAL_BROWSER_SOURCE){
   runtime:{commands:['agent-browser'],env:{PATH:process.env.PATH,HOME:process.env.HOME},networkAccess:'unrestricted'},
   tools:[{name:'agent_browser',description:'Browse live websites.'}]}));
 }
+const workflowEnabled=process.env.GRAPH_EVAL_CONFIRM_WORKFLOW==='1';
+const workflow=workflowEnabled ? {coderAvailable:false,proposalSeen:false,confirmedTaskId:null,phase:null,awaitingInput:false,taskIds:[]} : undefined;
 let daemon;
 let result;
+let ownerTaskId;
+let cleanupError;
 let cleanupIncomplete=false;
 try {
  daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
+ if(workflow){
+  await daemon.server.runtime.catalog.saveAgentCombination({id:'coder',name:'Controlled coding worker',description:'Implement the assigned project change and verify its acceptance in its worktree.',recommendedGrade:model.grade,review:false,tags:[],resources:[],systemPrompt:'Implement the assigned project change in the provided worktree. Follow the declared acceptance criteria and report evidence through the bound tools.'});
+  await daemon.server.runtime.projects.prepare({projectId:'p',requestId:'eval-prepare',initialize:true,createBaseline:true});
+  workflow.coderAvailable=true;
+ }
  const home=await fetch(daemon.url,{headers:{origin:daemon.url}});
  const headers={origin:daemon.url,cookie:home.headers.get('set-cookie')??'','content-type':'application/json'};
  const createdResponse=await fetch(`${daemon.url}/api/conversations`,{method:'POST',headers,body:JSON.stringify({projectId:'p',model:model.id,text:scenario.prompt,requestId:'real-parser-eval'})});
  if(!createdResponse.ok)throw new Error(`create: ${createdResponse.status}`);
  const created=await createdResponse.json();
+ ownerTaskId=created.taskId;
+ if(workflow)workflow.taskIds.push(created.taskId);
  const began=Date.now();let completed=false;
  while(Date.now()-began<deadlineMs){
   const operations=await(await fetch(`${daemon.url}/api/tasks/${created.taskId}/operations?latest=true`,{headers})).json();
-  if(operations.length && operations.every(operation=>operation.state!=='dispatched' && operation.state!=='prepared')){completed=operations.every(operation=>operation.state==='succeeded');break;}
+  const masterIdle=operations.length && operations.every(operation=>!operation.workerActive && operation.state!=='dispatched' && operation.state!=='prepared');
+  if(workflow){
+   const view=await daemon.server.runtime.conversations.view(created.conversationId);
+   if(view.proposal && !view.proposal.stale && masterIdle && !workflow.confirmedTaskId){
+    workflow.proposalSeen=true;
+    const confirmed=await daemon.server.runtime.conversations.confirm(created.conversationId,{proposalVersion:view.proposal.version,draftRevision:view.proposal.draftRevision,targetBranch:'main',requestId:'eval-confirm'});
+    workflow.confirmedTaskId=confirmed.taskId;workflow.taskIds.push(confirmed.taskId);
+    await daemon.server.runtime.conversations.chat(created.conversationId,{text:`已确认 graph ${confirmed.taskId}，继续按验收执行并交付。`,requestId:'eval-continue'});
+   }
+   const graph=view.tasks.find(task=>task.id===workflow.confirmedTaskId);
+   workflow.phase=graph?.phase ?? null;
+   if(graph?.phase==='completed' && masterIdle){completed=true;break;}
+   if(masterIdle && ((graph?.openQuestions?.length ?? 0)>0 || (view.master?.questions?.length ?? 0)>0)){
+    workflow.awaitingInput=true;break;
+   }
+  } else if(masterIdle){completed=operations.every(operation=>operation.state==='succeeded');break;}
+
   await new Promise(resolve=>setTimeout(resolve,1000));
  }
  const timedOut=!completed && Date.now()-began>=deadlineMs;
  if(timedOut){
+  if(workflow?.confirmedTaskId)await daemon.server.runtime.supervisor(created.taskId).graphControl({graphId:workflow.confirmedTaskId,action:'stop'});
   const paused=await fetch(`${daemon.url}/api/conversations/${created.conversationId}/pause`,{method:'POST',headers,body:JSON.stringify({requestId:'eval-deadline-pause'})});
   if(!paused.ok)throw new Error(`pause: ${paused.status}`);
   const cancelBegan=Date.now();
@@ -65,11 +93,11 @@ try {
   const ledger=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
   try {
    const pending=ledger.prepare(`SELECT
-    (SELECT COUNT(*) FROM operations WHERE task_id=?1 AND worker_active=1) +
-    (SELECT COUNT(*) FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=?1 AND i.cost IS NULL) AS n`);
+    (SELECT COUNT(*) FROM operations WHERE task_id IN (?1,?2) AND worker_active=1) +
+    (SELECT COUNT(*) FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id IN (?1,?2) AND i.cost IS NULL) AS n`);
    const drainBegan=Date.now();
-   while(pending.get(created.taskId).n>0 && Date.now()-drainBegan<30000)await new Promise(resolve=>setTimeout(resolve,100));
-   cleanupIncomplete=pending.get(created.taskId).n>0;
+   while(pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0 && Date.now()-drainBegan<30000)await new Promise(resolve=>setTimeout(resolve,100));
+   cleanupIncomplete=pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0;
   } finally {ledger.close();}
  }
  let success=false;let verification='';let verificationEvidence;
@@ -83,9 +111,15 @@ try {
   verification='behavioral CLI check failed';
  }
 
- result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,verificationEvidence,elapsedMs:Date.now()-began,taskId:created.taskId};
-} catch(error){result={variant,root,model:model.id,error:error instanceof Error?error.message:String(error)};}
-finally {if(!cleanupIncomplete)await daemon?.close();}
+ result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,verificationEvidence,workflow,elapsedMs:Date.now()-began,taskId:created.taskId};
+} catch(error){result={variant,caseId,root,model:model.id,taskId:ownerTaskId,workflow,error:error instanceof Error?error.message:String(error)};}
+finally {
+ if(workflow?.confirmedTaskId && ownerTaskId && workflow.phase!=='completed'){
+  try {await daemon?.server.runtime.supervisor(ownerTaskId).graphControl({graphId:workflow.confirmedTaskId,action:'stop'});}
+  catch(error){cleanupIncomplete=true;cleanupError=String(error);}
+ }
+ if(!cleanupIncomplete)await daemon?.close();
+}
 // Persist the verifier only after the model process has stopped.
 if(!cleanupIncomplete)await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
 const report=await exec(process.execPath,[new URL('./harness-cost.mjs', import.meta.url).pathname,join(root,'state','tasks.sqlite')]);
@@ -94,7 +128,7 @@ const cost=JSON.parse(report.stdout);
 const db=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
 const settled=db.prepare('SELECT state,settled_at-dispatched_at AS operationMs FROM operations ORDER BY rowid DESC LIMIT 1').get();
 db.close();
-result={...result,settled,cleanupIncomplete,taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
+result={...result,settled,cleanupIncomplete,...(cleanupError ? {cleanupError} : {}),taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
 console.log(JSON.stringify({...result,accounting:cost.summary,task:cost.tasks[0]},null,2));
 
 // This standalone evaluator owns its process. If a transport never drains, keep
