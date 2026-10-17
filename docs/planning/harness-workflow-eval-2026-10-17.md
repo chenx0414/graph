@@ -19,3 +19,9 @@ main 生成当前有效 draft、回合静止后，评测器使用 conversations.
 coder 可成功读取，但 proposalSeen=false、未确认图、超时、行为验收失败。轨迹主要阅读 workspace/integration/模块实现，最后在 /tmp 写 proposal.json 并只验证 JSON 语法，没有调用正式 propose_graph。因而没有 worker 模型调用、review 或交付，不是完整任务成本对照。不能报告更省钱，不能把 180 秒超时解释为正常等待用户确认。
 
 结论：原先缺 worker 配方的混杂已有可执行修复，但真实规划瓶颈仍在；下一步不能继续只按 schema 字节优化。应评估明确的原生 graph 定义示例是否足够减少源码调查，或单独提案更强 planner；模型选择、effort 与生产分工仍不自动改变。
+
+## 正式投递和 worker 成本归属补充
+
+扩展同一真实 CLI E2E 为两行：确认后不投递；确认后由 main 的正式 graph_send 投递。供应商使用当前真实确认消息里的 graph ID，不伪造图或回执。投递行确实启动原生 worker，cost-report 中主会话请求与图的 provider requests/executions 都大于零，并由汇总 CLI 将全部独立状态库调用计入分子。两行仍都 taskSuccess=false，因为没有独立验收/集成/交付；未把 worker 出现当完成。
+
+局部 `/tmp/graph-workflow-worker-dispatch.log` 两项通过；完整 `/tmp/graph-harness-check-publish-and-dispatch.log`：270 文件、1,501 测试全部通过，真实浏览器与 FFF 依赖均执行，验收证据未变化。这补齐前置生命周期，不代表 Step 5 候选已获批或已运行。

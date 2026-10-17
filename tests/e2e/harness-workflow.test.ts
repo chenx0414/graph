@@ -1,13 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { openaiServer } from '../fixtures/openai-server.ts';
 const execute=promisify(execFile);
 
-test('evaluation confirms a real model draft against a seeded worker and does not count confirmation as completion', async () => {
+test.each([false,true])('evaluation confirms a real draft and accounts for native worker dispatch=%s without calling it completed', async dispatch => {
  const root=await mkdtemp(join(tmpdir(),'graph-eval-workflow-'));
  const proposal={requirementVersion:1,summary:'Repair the parser',acceptance:[{id:'behavior',description:'Parser behavior',checkNode:'work'}],definition:{
   schemaVersion:2,name:'Parser repair',protocols:{data:{type:'object'}},
@@ -17,7 +17,13 @@ test('evaluation confirms a real model draft against a seeded worker and does no
  const provider=await openaiServer([
   {tools:[{id:'catalog',name:'list_agent_combinations',arguments:'{}'}]},
   {tools:[{id:'draft',name:'propose_graph',arguments:JSON.stringify({proposal,requestId:'publish-draft'})}]},
-  {text:'The draft is ready.'},{text:'Confirmation received; work has not started.'},
+  {text:'The draft is ready.'},
+  ...(dispatch ? [{tools:[{id:'send-work',name:'graph_send',arguments:()=>{
+    const last=JSON.stringify(provider.requests.at(-1));
+    const graphId=/已确认 graph ([0-9a-f-]+)/.exec(last)?.[1];
+    if(!graphId)throw new Error('Missing real confirmation graph ID');
+    return JSON.stringify({graphId,nodeId:'work',input:'job',value:{request:'Repair config.js'}});
+  }}]},{text:'Input accepted.'},{text:'Worker execution observed.'}] : [{text:'Confirmation received; work has not started.'}]),
  ]);
  let artifactRoot: string|undefined;
  try {
@@ -35,6 +41,12 @@ test('evaluation confirms a real model draft against a seeded worker and does no
   expect(report.workflow.confirmedTaskId).not.toBe(report.taskId);
   expect(report).toMatchObject({completed:false,taskSuccess:false});
   expect(report.workflow.taskIds).toEqual(expect.arrayContaining([report.taskId,report.workflow.confirmedTaskId]));
+  const ledger=JSON.parse(await readFile(join(report.root,'cost-report.json'),'utf8'));
+  const mainCost=ledger.tasks.find((task:{id:string})=>task.id===report.taskId);
+  expect(mainCost.requests).toBeGreaterThan(0);
+  const workerCost=ledger.tasks.find((task:{id:string})=>task.id===report.workflow.confirmedTaskId);
+  if(dispatch){expect(workerCost.requests).toBeGreaterThan(0);expect(workerCost.executions).toBeGreaterThan(0);}
+  else expect(workerCost?.requests ?? 0).toBe(0);
   const catalogReply=(provider.requests[1] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool');
   expect(JSON.stringify(catalogReply)).toContain('coder');
   const runPath=join(root,'run.json');await writeFile(runPath,stdout);
