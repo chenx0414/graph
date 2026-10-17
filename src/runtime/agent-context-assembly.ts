@@ -163,12 +163,18 @@ export async function openAgentContextAssembly(input: AgentContextAssemblyOption
   const docs = graphDocumentationPaths();
   const definitionVersion = input.definitionVersion ?? 'unknown@1';
   const compose = (identity: string, tools: AgentContextTool[], capabilities: AgentCapabilityPromptEntry[]) => {
+    // Match only the built-in rules; user-owned text is never rewritten.
+    const available = new Set(tools.filter(tool => tool.enabled && tool.available).map(tool => tool.name));
+    const searchRule = DEFAULT_COMMON_RULES.split('\n').find(line => line.startsWith('- Search the repository with the indexed extension tools'))!;
+    const commonRules = process.env.GRAPH_MATCH_SEARCH_GUIDANCE === '1' && common === DEFAULT_COMMON_RULES
+      ? common.replace(searchRule, `- Repository search tools available in this session: ${['fffind', 'ffind', 'ffgrep', 'find', 'grep', 'bash'].filter(name => available.has(name)).join(', ') || 'none'}. Use an available indexed search tool when it fits; otherwise use an available native search tool or shell rg. Indexed search tools absent from this list are not bound to this session.`)
+      : common;
     const composed = composeAgentSystemPrompt({
       identity, definitionVersion, toolGuidance, role,
       compactDocumentation: process.env.GRAPH_COMPACT_DOCUMENTATION === '1',
       ...(input.fullAccess && role === 'main' ? { identityContext: DEFAULT_MAIN_FULL_ACCESS_IDENTITY } : {}),
       ...(input.rsi && role === 'main' ? { harnessContext: process.env.GRAPH_CLASSIFY_HARNESS_FRICTION === '1' ? CLASSIFIED_MAIN_RSI_IDENTITY : DEFAULT_MAIN_RSI_IDENTITY } : {}),
-      rules: { common, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
+      rules: { common: commonRules, role: roleRules, ...(runtime === undefined ? {} : { runtime }) },
       docs,
     });
     return { tools, capabilities, composed, docsRoot: docs.root };
