@@ -12,13 +12,15 @@ export const cases = {
   cli: {
     prompt: '给 greet.mjs 加 --count 参数重复输出，默认行为别变。非法值要报错退出。',
     files: { 'greet.mjs': "console.log('hello');\n" },
-    verify: `import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
+    verify: `import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {randomInt} from 'node:crypto';
       const run=(...args)=>spawnSync(process.execPath,['greet.mjs',...args],{encoding:'utf8',timeout:3000});
       const baseline=run();assert.equal(baseline.status,0);assert.equal(baseline.stdout,'hello\\n');
-      const repeated=run('--count','3');assert.equal(repeated.status,0);assert.equal(repeated.stdout,'hello\\nhello\\nhello\\n');
+      const counts=new Set([3]);while(counts.size<7)counts.add(randomInt(1,101));
+      for(const count of counts){const repeated=run('--count',String(count));assert.equal(repeated.status,0);assert.equal(repeated.stdout,'hello\\n'.repeat(count));}
       for(const args of [['--count','no'],['--count','-1'],['--count','1.5'],['--count']]){
         const result=run(...args);assert.notEqual(result.status,0);assert.ok(result.stderr.trim());
-      }`,
+      }
+      console.log(JSON.stringify({verifiedCounts:[...counts]}));`,
   },
   persistence: {
     prompt: 'counter.mjs 没保存指定的状态文件，修一下，重启后也要接着计数。',

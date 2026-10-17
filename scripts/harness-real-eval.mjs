@@ -72,14 +72,15 @@ try {
    cleanupIncomplete=pending.get(created.taskId).n>0;
   } finally {ledger.close();}
  }
- let success=false;let verification='';
+ let success=false;let verification='';let verificationEvidence;
  try {
-  await exec(process.execPath,['--input-type=module','-e',scenario.verify],{cwd:project,timeout:15000});
+  const checked=await exec(process.execPath,['--input-type=module','-e',scenario.verify],{cwd:project,timeout:15000});
+  verificationEvidence=checked.stdout.trim() || undefined;
   for(const path of scenario.unchanged ?? [])if(await readFile(join(project,path),'utf8')!==scenario.files[path])throw new Error('protected file changed');
   success=true;verification='verified';
  } catch {verification='behavioral CLI check failed';}
 
- result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,elapsedMs:Date.now()-began,taskId:created.taskId};
+ result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,verificationEvidence,elapsedMs:Date.now()-began,taskId:created.taskId};
 } catch(error){result={variant,root,model:model.id,error:error instanceof Error?error.message:String(error)};}
 finally {if(!cleanupIncomplete)await daemon?.close();}
 // Persist the verifier only after the model process has stopped.

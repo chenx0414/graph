@@ -8,10 +8,16 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 
 const execute = promisify(execFile);
 
-test.each([{timedOut:true,lane:'main'}, {timedOut:false,lane:'main'}, {timedOut:false,lane:'worker'}, {timedOut:true,lane:'worker'}])('real evaluation CLI records terminal state and closes its ledger ($lane, timeout=$timedOut)', async ({timedOut,lane}) => {
+test.each([{caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {caseId:'cli',fixedCount:true,timedOut:false,lane:'main'}, {caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {caseId:'parser',fixedCount:false,timedOut:false,lane:'main'}, {caseId:'parser',fixedCount:false,timedOut:false,lane:'worker'}, {caseId:'parser',fixedCount:false,timedOut:true,lane:'worker'}])('real evaluation CLI records terminal state and closes its ledger ($lane, case=$caseId, fixedCount=$fixedCount, timeout=$timedOut)', async ({timedOut,lane,caseId,fixedCount}) => {
   const root = await mkdtemp(join(tmpdir(), 'graph-eval-lifecycle-'));
   await writeFile(join(root,'hidden-verifier.txt'),'private-independent-verifier-marker');
-  const provider = await openaiServer(timedOut
+  const cliCommand = `cat > greet.mjs <<'EOF'
+const args=process.argv.slice(2);let n=1;if(args.length){n=Number(args[1]);if(args[0]!=='--count'||!args[1]||!Number.isInteger(n)||n<1){console.error('Invalid count');process.exit(1);} }
+for(let i=0;i<(${fixedCount ? "args.length ? 3 : 1" : 'n'});i++)console.log('hello');
+EOF`;
+  const provider = await openaiServer(caseId==='cli'
+    ? [{tools:[{id:'write-cli',name:'bash',arguments:JSON.stringify({command:cliCommand})}]},{text:'CLI ready.'}]
+    : timedOut
     ? [{ text: 'Too late', beforeReply: () => new Promise(resolve => setTimeout(resolve, lane==='worker' ? 20_000 : 5_000)) }]
     : [...(lane==='worker' ? [{tools:[{id:'outside-read',name:'read',arguments:JSON.stringify({path:join(root,'hidden-verifier.txt')})}]}] : []), { tools: [{ id: 'repair', name: 'bash', arguments: JSON.stringify({ command: `if test -e ../case.json; then echo 'verification leaked' >&2; exit 1; fi
 cat > config.js <<'EOF'
@@ -27,7 +33,7 @@ EOF` }) }] }, { text: 'Fixed.' }]);
         credentialId: 'local', cost: { input: 2, output: 4, cacheRead: 0.5, cacheWrite: 1 },
       }] },
     }));
-    const { stdout, stderr } = await execute(process.execPath, [lane==='worker' ? 'scripts/harness-worker-eval.mjs' : 'scripts/harness-real-eval.mjs', configPath], {
+    const { stdout, stderr } = await execute(process.execPath, [lane==='worker' ? 'scripts/harness-worker-eval.mjs' : 'scripts/harness-real-eval.mjs', configPath, caseId], {
       cwd: process.cwd(), timeout: 45_000,
       env: { ...process.env, HOME: root, GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '1000') : '15000' },
     });
@@ -42,10 +48,15 @@ EOF` }) }] }, { text: 'Fixed.' }]);
       if(!timedOut)expect(JSON.stringify(provider.requests[1])).toMatch(/outside|denied|not permitted|not allowed/i);
       expect(report.accounting.summary.requests).toBeGreaterThan(0);
     } else {
-      expect(report).toMatchObject({ completed: !timedOut, success: !timedOut, timedOut });
+      expect(report).toMatchObject({ completed: !timedOut, success: !timedOut && !fixedCount, timedOut });
       expect(report.settled.state).toBe(timedOut ? 'interrupted' : 'succeeded');
       expect(report.cleanupIncomplete).toBe(false);
       expect(report.task.requests).toBeGreaterThan(0);
+    }
+    if(caseId==='cli' && !fixedCount){
+      const evidence=JSON.parse(report.verificationEvidence) as {verifiedCounts:number[]};
+      expect(new Set(evidence.verifiedCounts).size).toBe(7);
+      expect(evidence.verifiedCounts).toContain(3);
     }
     expect(stderr).not.toMatch(/database is not open|ERR_INVALID_STATE/);
   } finally {

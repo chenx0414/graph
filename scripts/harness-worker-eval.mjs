@@ -51,15 +51,16 @@ try {
  execution=executions.items.at(-1);
  const view=await runtime.user.task(taskId).view();
  const workspace=view.worktrees.find(item=>item.nodeId==='work')?.path;
- let behavior=false;let verification='No isolated workspace';
+ let behavior=false;let verification='No isolated workspace';let verificationEvidence;
  if(workspace){
   try {
-   await exec(process.execPath,['--input-type=module','-e',scenario.verify],{cwd:workspace,timeout:15000});
+   const checked=await exec(process.execPath,['--input-type=module','-e',scenario.verify],{cwd:workspace,timeout:15000});
+   verificationEvidence=checked.stdout.trim() || undefined;
    for(const path of scenario.unchanged ?? [])if(await readFile(join(workspace,path),'utf8')!==scenario.files[path])throw new Error('Protected file changed');
    behavior=true;verification='verified';
   } catch {verification='Behavioral CLI verification failed';}
  }
- result={root,caseId,model:model.id,grade:model.grade,taskId,workspace,execution,timedOut,behavior,verification,driveError,
+ result={root,caseId,model:model.id,grade:model.grade,taskId,workspace,execution,timedOut,behavior,verification,verificationEvidence,driveError,
   taskSuccess:!timedOut && execution?.state==='completed' && behavior,elapsedMs:Date.now()-began};
 } catch(error){result={root,caseId,model:model.id,error:String(error),taskSuccess:false};}
 finally {await daemon?.close();}

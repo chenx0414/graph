@@ -30,3 +30,13 @@ GRAPH_MATCH_SEARCH_GUIDANCE=1 只在 common 与 DEFAULT_COMMON_RULES 完全相�
 A 2/3、B 3/3 完整成功。包括失败尝试的全部已记录用量，按 input .30/output 1.20/cacheRead .006 USD/百万 token 同权重情景，每完成任务 A .019723080、B .006555048，低约 66.8%。A3 的 usage 有一项未知，A/B 真实冻结费用皆缺失，因此不是账单，也不是精确节省。两组都发生项目修复，B 没有靠跳过检查通过；check.mjs 字节与 settings.label 保护由外部 CLI 独立验收。
 
 这是探索的首个正信号，不能启用：只有一类任务、每组三次，差异受基线一次超时影响，未知用量、时序/cache 和 main 自维护仍混杂。对三次样本做 bootstrap 无法消除这些限制，不用条件置信区间包装确定收益。两 flag 默认关闭，尚无跨类别固定集、真实使用或完整树成本下降证据。下一步同组合在 CLI 参数类别复验，保留所有失败，不与旧污染评测混算。
+
+## CLI 复验提前停止与验收改进
+
+2026-10-17 CLI 类别原定 A B B A A B。已完成 a1、b1、b2 和在途 a2；发现 b1 通过 read/grep 读取公开的 harness-real-eval.mjs 与 harness-eval-cases.mjs，并生成 /tmp/eval-verify-cli.mjs。a1 与 b1 均超时；b1 旧固定行为验收通过不作为独立质量证据。观察该证据后停止后续调度，在途 a2 允许结束，未重启或覆盖任何样本。b3/a3 未运行，不伪装成完整固定集。汇总 `/tmp/graph-matched-cli-stopped-summary.json`，原始 `/tmp/graph-matched-cli-{样本}.json` 与 `.log`。
+
+main 按产品设计可以读取 Graph 源码，单纯延迟 case.json 无法保证验收实现保密。因此本轮 CLI 复验不用于启用判断；前一 command 初步信号仍是待复验，不升级为结论。
+
+后续验证不依赖隐藏公开契约：CLI 默认输出、合法正整数次数、非法参数退出仍是原目标，但合法次数在模型结束后由验收进程生成，包含原 3 加六个新的不同正整数（1..100）。模型不能预知这些输入；成功报告 verificationEvidence 保存实际次数以复现；当前失败报告仍仅保留行为失败，未保存失败时生成的全部次数，这是后续诊断缺口。实现细节公开不等于数据提前给出；父进程在发送模型前加载验收字符串，模型结束后才运行独立 Node 验收，模型自己写出的“验证通过”不会充当回执。该机制仍不声称约束拥有完全主机权限的恶意 Agent，测试隔离边界应由正式工作副本/沙箱 E2E 证明。
+
+新增真实 CLI E2E：外部供应商工具确实写入 greet.mjs，普通通用实现通过；只对旧固定次数 3 输出正确的实现拒绝。负向控制临时去掉新次数生成，旧固定案例错误地通过，`/tmp/graph-eval-unseen-negative.log` 断言明确失败；恢复生成后完整门禁 `/tmp/graph-harness-check-unseen-verification.log`：269 文件、1,498 测试全部通过，真实浏览器与 FFF 依赖测试均已执行，验收证据未变化。此改进不改变生产 prompt、模型、effort 或路由，不用旧污染样本补新一轮样本。
