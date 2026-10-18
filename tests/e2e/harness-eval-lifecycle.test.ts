@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
@@ -18,7 +19,7 @@ EOF`;
   const provider = await openaiServer((caseId==='cli'
     ? [{tools:[{id:'write-cli',name:'bash',arguments:JSON.stringify({command:cliCommand})}]},{text:'CLI ready.'}]
     : timedOut
-    ? [{ text: 'Too late', beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, lane==='worker' ? 20_000 : 5_000)) }]
+    ? [...(lane==='main' ? [{tools:[{id:'before-timeout',name:'bash',arguments:JSON.stringify({command:'printf observed-before-interrupt > observed.txt'})}]}] : []), { text: 'Too late', beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, lane==='worker' ? 20_000 : 5_000)) }]
     : [...(lane==='worker' ? [{tools:[{id:'outside-read',name:'read',arguments:JSON.stringify({path:join(root,'hidden-verifier.txt')})}]}] : []), { tools: [{ id: 'repair', name: 'bash', arguments: JSON.stringify({ command: `if test -e ../case.json; then echo 'verification leaked' >&2; exit 1; fi
 cat > config.js <<'EOF'
 export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const index = line.indexOf('='); return [line.slice(0,index),line.slice(index+1)]; })); }
@@ -42,7 +43,7 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
     }
     const { stdout, stderr } = await execute(process.execPath, [lane==='worker' ? 'scripts/harness-worker-eval.mjs' : 'scripts/harness-real-eval.mjs', configPath, caseId], {
       cwd: process.cwd(), timeout: 45_000,
-      env: { ...process.env, HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '1000') : '15000' },
+      env: { ...process.env, HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '4000') : '15000' },
     });
     const report = JSON.parse(stdout);
     artifactRoot = report.root;
@@ -60,6 +61,19 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
       expect(report.cleanupIncomplete).toBe(false);
       expect(report.task.requests).toBeGreaterThan(0);
     }
+    const ledger=JSON.parse(await readFile(join(report.root,'cost-report.json'),'utf8'));
+    if(!timedOut || lane==='main'){
+      expect(ledger.tools.find((item:{tool:string})=>item.tool==='bash')).toMatchObject({calls:1,errors:0,tasks:1,taskReach:1});
+      if(timedOut)expect(await readFile(join(report.root,'project','observed.txt'),'utf8')).toBe('observed-before-interrupt');
+      if(lane==='worker'){
+        expect(ledger.tools.find((item:{tool:string})=>item.tool==='read')).toMatchObject({calls:1,errors:1});
+        const db=new DatabaseSync(join(report.root,'state','tasks.sqlite'),{readOnly:true});
+        try{
+          expect(db.prepare('SELECT DISTINCT task_id,node_id,role FROM tool_calls').all()).toEqual([{task_id:report.taskId,node_id:'work',role:'worker'}]);
+        }finally{db.close();}
+      }
+    }else expect(ledger.tools).toEqual([]);
+    expect(report.toolTelemetry).toMatchObject({collected:true});
     if(caseId==='cli'){
       const evidence=JSON.parse(report.verificationEvidence) as {generatedCounts:number[]};
       expect(new Set(evidence.generatedCounts).size).toBe(7);

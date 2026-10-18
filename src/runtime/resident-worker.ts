@@ -9,6 +9,7 @@ import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { openPiInstance } from './pi-instance.ts';
+import { spoolToolCall } from './tool-call-spool.ts';
 import { replayAssistantStream } from './assistant-stream-frames.ts';
 import { controlledOpenAIStream } from './controlled-openai.ts';
 import { sdkPromptOptions } from './prompt-options.ts';
@@ -127,6 +128,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
 
   const session = await openPiInstance({
     binding: config.binding,
+    onToolCall: call => { void spoolToolCall(config.stateDir, config.binding.instanceId, call); },
     workspace: config.workspace,
     ...(config.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
     stateDir: config.stateDir,

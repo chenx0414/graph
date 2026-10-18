@@ -60,6 +60,7 @@ let result;
 let ownerTaskId;
 let cleanupError;
 let cleanupIncomplete=false;
+let toolTelemetry={collected:false,reason:'daemon_unavailable'};
 try {
  daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
  if(evaluationContext)for(const expected of evaluationContext.recipes){
@@ -171,7 +172,13 @@ finally {
   try {await daemon?.server.runtime.supervisor(ownerTaskId).graphControl({graphId:workflow.confirmedTaskId,action:'stop'});}
   catch(error){cleanupIncomplete=true;cleanupError=String(error);}
  }
- if(!cleanupIncomplete)await daemon?.close();
+ if(!cleanupIncomplete){
+  // Child processes spool native calls. Fold them through the public runtime
+  // before closing the store; harness-cost intentionally reads only SQLite.
+  if(daemon)try {await daemon.server.runtime.toolCallStats();toolTelemetry={collected:true};}
+  catch(error){toolTelemetry={collected:false,error:String(error)};}
+  await daemon?.close();
+ }else toolTelemetry={collected:false,reason:'cleanup_incomplete'};
 }
 // Persist the verifier only after the model process has stopped.
 if(!cleanupIncomplete)await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
@@ -181,7 +188,7 @@ const cost=JSON.parse(report.stdout);
 const db=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
 const settled=db.prepare('SELECT state,settled_at-dispatched_at AS operationMs FROM operations ORDER BY rowid DESC LIMIT 1').get();
 db.close();
-result={...result,evaluationContext,settled,cleanupIncomplete,...(cleanupError ? {cleanupError} : {}),taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
+result={...result,evaluationContext,settled,cleanupIncomplete,toolTelemetry,...(cleanupError ? {cleanupError} : {}),taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
 console.log(JSON.stringify({...result,accounting:cost.summary,task:cost.tasks[0]},null,2));
 
 // This standalone evaluator owns its process. If a transport never drains, keep

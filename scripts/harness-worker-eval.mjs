@@ -21,7 +21,8 @@ const model=source.models.entries[0];
 const configPath=join(root,'config.json');
 await writeFile(configPath,JSON.stringify({version:1,projects:[{id:'p',root:project}],credentials:source.credentials,models:{entries:[model]},access:{mode:'standard'}}),{mode:0o600});
 const webDir=join(root,'web');await mkdir(webDir);await writeFile(join(webDir,'index.html'),'<!doctype html>');
-const began=Date.now();let daemon;let result;let drive;
+const began=Date.now();let daemon;let result;let drive;let workerSettled=false;
+let toolTelemetry={collected:false,reason:'worker_not_settled'};
 try {
  daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome:join(root,'graph'),webDir,port:0,mode:'view',dynamic:true,env:process.env,log:()=>{}});
  const runtime=daemon.server.runtime;
@@ -47,6 +48,7 @@ try {
  const timedOut=driving && execution?.state!=='completed' && Date.now()-executionBegan>=deadlineMs;
  if(timedOut)await main.graphControl({graphId:taskId,action:'stop'});
  await drive;
+ workerSettled=true;
  const executions=await main.graphInspect({graphId:taskId,query:'executions'});
  execution=executions.items.at(-1);
  const view=await runtime.user.task(taskId).view();
@@ -66,9 +68,13 @@ try {
  result={root,caseId,model:model.id,grade:model.grade,taskId,workspace,execution,timedOut,behavior,verification,verificationEvidence,driveError,
   taskSuccess:!timedOut && execution?.state==='completed' && behavior,elapsedMs:Date.now()-began};
 } catch(error){result={root,caseId,model:model.id,error:String(error),taskSuccess:false};}
-finally {await daemon?.close();}
+finally {
+ if(daemon && workerSettled)try {await daemon.server.runtime.toolCallStats();toolTelemetry={collected:true};}
+ catch(error){toolTelemetry={collected:false,error:String(error)};}
+ await daemon?.close();
+}
 // Worker has ended before the verifier becomes a local artifact.
 await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
 const {stdout}=await exec(process.execPath,[resolve('scripts/harness-cost.mjs'),join(root,'state','tasks.sqlite')]);
 await writeFile(join(root,'cost-report.json'),stdout);
-console.log(JSON.stringify({...result,accounting:JSON.parse(stdout)},null,2));
+console.log(JSON.stringify({...result,toolTelemetry,accounting:JSON.parse(stdout)},null,2));

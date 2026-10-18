@@ -338,3 +338,10 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 使用者批准最多四个隔离 workflow、180 秒/项、失败即停。仅首项 DeepSeek 对照 parser A 运行：25 请求，已记录 input/output/cacheRead 80,738/20,695/1,152,768；未知 usage 1，严格成本及每完成任务情景均 null。main 在文档和源码探索中用尽时限，无 proposal、worker 或 reviewer，config.js 未修改，独立业务验收失败。其余三项未启动，不给 LongCat/Step 5 质量结论。修正评测 setup 将 definitionVersion 冒称 recipe 的术语混淆，仅做本地 E2E，不补跑真实模型。另发现 main 工具调用保留在 43 行 spool 中，但评测收尾未触发公开统计读取归并，故本轮 tool_calls 表为空；后续需补齐评测统计收尾，不把空表当无调用。详见 [停止结果](harness-bound-model-tiering-result-2026-10-18.md)。生产默认保持，goal 仍未达成。
 
 本阶段最终门禁 `/tmp/graph-model-recipe-identity-check.log`：272 文件、1,514 测试全部通过，353.18 秒，baseline 匹配且验收证据不变。该门禁只证明本地工程回归通过，不改变真实对照失败或整体降本尚未证明的结论。
+
+
+## 2026-10-18：补齐主会话/常驻 worker 工具统计
+
+修复评测收尾未归并 spool、常驻 worker 未记录调用以及当前内核 task/node/role 归属缺失；harness-cost 仍只读，评测输出明确 toolTelemetry 收集状态。13 项真正 E2E 验证正常、业务失败、未知 usage、超时后的已完成工具、隔离 worker 越界 read 错误和完整 graph 交付。原 parser A 的状态副本经公开 HTTP 读取恢复 43 调用/2 错误，重复读取幂等，原始证据和模型账本不变。没有新增真实模型调用，整体降本仍未证明。详见 [工具统计修复](harness-tool-telemetry-2026-10-18.md)。
+
+本轮工具计量最终全量 `/tmp/graph-eval-tool-collection-check.log`：272 文件、1,514 测试通过，356.51 秒，baseline 与验收证据保持。此结果证明计量修复的工程回归，不证明每完成任务成本下降；goal 保持未完成。

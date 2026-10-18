@@ -112,6 +112,7 @@ try {
       'File/search/command/summary provenance is unavailable in historical wire messages; no fabricated source split.',
       'Main conversations and child graphs remain separate task rows; completion costs exclude unallocated main planning.',
       'Tool reach uses tasks with retained tool telemetry; retention can differ from invocation retention.',
+      'Tool rows reflect SQLite only; worker spools must first be ingested through the public tool statistics read. Empty rows do not establish zero tool use.',
       'Cache metrics and costByBillingType exclude estimated/unknown provenance; local estimates cannot establish cache misses.',
     ],
     summary: {

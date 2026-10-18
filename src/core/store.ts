@@ -701,14 +701,21 @@ export class TaskStore {
    * failure here must never be able to break a turn - the caller guards it, and the write itself
    * stays a single statement.
    *
-   * Attribution is resolved once, at write time, from the node that owns the instance: `nodes`
-   * identifies it uniquely through `instance_id`, and `spec.role` names the Agent role (master,
-   * coder, ...). An instance with no node row records `null` attribution rather than guessing.
+   * Attribution is resolved once, at write time, from the node that owns the instance.
+   * Main uses `nodes`; graph Agents use `kernel_nodes` and their resolved binding role.
+   * An instance with no node row records `null` attribution rather than guessing.
    */
   recordToolCall(input: { instanceId: string; tool: string; ms: number; isError: boolean; at?: number; target?: string | null }): void {
-    const node = this.db.prepare(
+    let node = this.db.prepare(
       `SELECT n.task_id AS task_id, n.id AS node_id, json_extract(n.spec, '$.role') AS role FROM nodes n WHERE n.instance_id = ?`,
     ).get(input.instanceId) as { task_id: string; node_id: string; role: string | null } | undefined;
+    // TaskStore can also be used without a graph kernel (for example main-only
+    // storage). Do not require kernel tables until that runtime has created them.
+    if (!node && this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_nodes'").get()) {
+      node = this.db.prepare(`SELECT n.task_id,n.node_id,b.role
+        FROM kernel_nodes n LEFT JOIN kernel_node_bindings b ON b.task_id=n.task_id AND b.node_id=n.node_id
+        WHERE n.instance_id=?`).get(input.instanceId) as typeof node;
+    }
     this.db.prepare(
       'INSERT INTO tool_calls(instance_id, task_id, node_id, role, tool, ms, is_error, created_at, target) VALUES(?,?,?,?,?,?,?,?,?)',
     ).run(

@@ -52,3 +52,5 @@
 聚合核对：`/tmp/graph-bound-model-tiering-observation.json`。本轮 source/case/model/context hash 均在发请求前持久化；context SHA-256 为 de57b345f76ce241c037d3eb2c3ca873372a1ee026d573c32e194fdde5034b39。运行后本地术语修复改变 runner hash，不篡改冻结值。
 
 本次批准范围已经按停止条件结束。后续先处理主会话工具统计缺口与正式 graph API 的发现成本，不继续消耗未启动三项，也不以新 setup 为理由自动重试。若要再运行模型比较，需形成新的具体范围；当前保留全部默认值，整体价格加权降本且质量不降目标未达成。
+
+后续计量修复：已补齐新评测收尾和常驻 worker 记录/当前内核归属；对本轮原状态只做一致副本验证，恢复 43 条统计且模型账本不变。原始运行和成本结论没有重写，详见 [工具统计报告](harness-tool-telemetry-2026-10-18.md)。
