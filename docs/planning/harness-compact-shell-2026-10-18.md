@@ -50,3 +50,8 @@
 材料：`/tmp/graph-compact-shell-observation.json`；冻结 plan/config、A/B、comparison-off-peak 及结果在 `/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-compact-shell-pair-pDRQJy`。状态根 A `/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-real-eval-default-M24XyF`，B `/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-real-eval-compact-shell-qyMrJY`。
 
 下一次模型验证应取自当前版本、自然产生大 shell 结果且可独立验收的真实任务；不能要求模型禁止重定向、故意喂大输出，或从这次非触发样本追逐有利波动。当前仅保留关闭的实验和历史机会估计。
+
+
+## 后续获批完整workflow范围
+
+[600秒完整对照](harness-shell-workflow-result-2026-10-18.md)另行获得四会话授权；parser A成功、B实际7次触发但未交付且main未知usage=1，CLI两项取消。旧command对照的0触发结论保持，不拿新范围补改旧数据。当前仍无候选完整任务成本或质量等效证明，默认关闭。
