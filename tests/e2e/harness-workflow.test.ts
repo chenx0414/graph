@@ -75,7 +75,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
  const root=await mkdtemp(join(tmpdir(),'graph-eval-delivery-'));
  let artifactRoot:string|undefined;
  const repaired="export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)]; })); }\n";
- const tool=(name:string,value:()=>unknown)=>({tools:[{id:name,name,arguments:()=>JSON.stringify(value())}]});
+ const tool=(name:string,value:()=>unknown,thinking?:string)=>({...(thinking?{thinking}:{}),tools:[{id:name,name,arguments:()=>JSON.stringify(value())}]});
  const messages=(server:{requests:unknown[]})=>(server.requests.at(-1) as {messages:{role:string;content:unknown}[]}).messages;
  const skillPath=(server:{requests:unknown[]})=>[...JSON.stringify(messages(server)).matchAll(/\/[^\\\s"<>]+\/SKILL\.md/g)].map(match=>match[0]).find(path=>path.includes('delivery-context'))??join(root,'missing-skill.md');
  const graphId=()=>{
@@ -90,7 +90,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
  };
  const worker=await openaiServer([
   ...(frozenContext?[tool('read',()=>({path:skillPath(worker)}))]:[]),
-  tool('write_file',()=>({path:'config.js',content:repaired})),
+  tool('write_file',()=>({path:'config.js',content:repaired}),'private-worker-reasoning-marker'),
   tool('workspace_commit',()=>({paths:['config.js'],message:'Repair parser'})),
   tool('artifact_publish',()=>({namespace:'deliverables',name:'parser',sourcePath:'config.js',metadata:{kind:'code'},requestId:'publish-parser'})),
   {text:'Parser committed and published.'},
@@ -98,7 +98,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
  const review=await openaiServer([
   {text:'No suggestion'},
   ...(frozenContext?[tool('read',()=>({path:skillPath(review)}))]:[]),
-  tool('artifact_list',()=>({namespace:'deliverables'})),
+  tool('artifact_list',()=>({namespace:'deliverables'}),'private-review-reasoning-marker'),
   tool('artifact_read',()=>{
    const reply=messages(review).filter(message=>message.role==='tool').at(-1)!;
    const envelope=JSON.parse(String(reply.content)) as {content:{text:string}[]};
@@ -126,7 +126,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   ...(explicitRoles ? ['coding recipe','independent reviewer recipe'].map(label=>tool('get_agent_combination',()=>({
    id:new RegExp(`${label}: ([^;\\s]+)`).exec(JSON.stringify(messages(main)))?.[1]??'missing-recipe',
   }))) : [tool('list_agent_combinations',()=>({}))]),
-  tool('propose_graph',()=>({proposal,requestId:'delivery-draft'})),{text:'Draft ready.'},
+  tool('propose_graph',()=>({proposal,requestId:'delivery-draft'}),'private-main-reasoning-marker'),{text:'Draft ready.'},
   tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}})),
   tool('get_task_status',()=>({taskId:graphId(),waitForNode:'work',timeoutMs:15000})),
   tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
@@ -176,6 +176,21 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
     const reply=(main.requests[index] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool').at(-1);
     expect(JSON.stringify(reply)).not.toContain('Unknown Agent combination');
     expect(JSON.stringify(reply)).toContain(`Snapshot ${id}`);
+   }
+  }
+  // Observe actual outgoing provider bodies after real tool execution. Main also
+  // crosses the persisted draft/confirmation operation boundary in this workflow.
+  for(const [server,toolName,reasoning] of [
+   [main,'propose_graph','private-main-reasoning-marker'],
+   [worker,'write_file','private-worker-reasoning-marker'],
+   [review,'artifact_list','private-review-reasoning-marker'],
+  ] as const){
+   const replayed=server.requests.flatMap(request=>(request as {messages:{role:string;reasoning_content?:string;content:unknown;tool_calls?:{function:{name:string}}[]}[]}).messages)
+    .filter(message=>message.role==='assistant' && message.tool_calls?.some(call=>call.function.name===toolName));
+   expect(replayed.length).toBeGreaterThan(1);
+   for(const message of replayed){
+    expect(message.reasoning_content).toBe(reasoning);
+    expect(JSON.stringify(message.content)).not.toContain(reasoning);
    }
   }
   expect(await readFile(join(report.root,'project','config.js'),'utf8')).toBe(repaired);
