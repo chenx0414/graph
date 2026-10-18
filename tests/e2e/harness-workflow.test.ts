@@ -131,6 +131,17 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   tool('get_task_status',()=>({taskId:graphId(),waitForNode:'work',timeoutMs:15000})),
   tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
   tool('graph_send',()=>({graphId:graphId(),nodeId:'check',input:'job',value:{}})),
+  ...(context==='frozen-explicit' ? [
+   tool('get_task_status',()=>({taskId:graphId(),nodeId:'toString'})),
+   tool('get_task_status',()=>({taskId:graphId(),nodeId:'check'})),
+   tool('get_task_status',()=>({taskId:graphId(),waitForNode:'check',timeoutMs:5000})),
+   tool('graph_inspect',()=>{
+    const reply=messages(main).filter(message=>message.role==='tool').at(-1);
+    const hint=/graph_inspect\((\{[^)]*\})\)/.exec(String(reply?.content))?.[1];
+    return hint?JSON.parse(hint):{graphId:graphId(),query:'missing-module-recovery-hint'};
+   }),
+   tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
+  ] : []),
   tool('graph_send',()=>({graphId:graphId(),nodeId:'review',input:'job',value:{commit:commit()}})),
   tool('get_task_status',()=>({taskId:graphId(),waitForNode:'review',timeoutMs:15000})),
   tool('graph_control',()=>({graphId:graphId(),action:'complete'})),{text:'Delivered.'},
@@ -177,6 +188,22 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
     expect(JSON.stringify(reply)).not.toContain('Unknown Agent combination');
     expect(JSON.stringify(reply)).toContain(`Snapshot ${id}`);
    }
+  }
+  if(context==='frozen-explicit'){
+   const replies=messages(main).filter(message=>message.role==='tool');
+   expect(replies.find(message=>String(message.content).includes('has no node toString'))?.content)
+    .toBe(`RuntimeError: Task ${graphId()} has no node toString`);
+   const rejected=replies.filter(message=>String(message.content).includes('has no node check'));
+   expect(rejected).toHaveLength(2);
+   for(const reply of rejected){
+    expect(String(reply.content)).toContain('check is a module');
+    expect(String(reply.content)).toContain(`graph_inspect(${JSON.stringify({graphId:graphId(),query:'operations'})})`);
+   }
+   const recovered=replies.flatMap(message=>{try{const value=JSON.parse(String(message.content));return Array.isArray(value)?value:[];}catch{return [];}})
+    .find(value=>value.module_id==='check');
+   expect(recovered).toMatchObject({request:{operation:{action:'workspace.command'}}});
+   // Inspection can observe prepared/dispatched work; the completed runner report
+   // above proves the real host check and final delivery subsequently settled.
   }
   // Observe actual outgoing provider bodies after real tool execution. Main also
   // crosses the persisted draft/confirmation operation boundary in this workflow.

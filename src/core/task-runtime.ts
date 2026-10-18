@@ -166,6 +166,15 @@ function conversationTarget(store: TaskStore, supervisorTaskId: string, requeste
   return requested;
 }
 
+function missingTaskNode(kernel: KernelStore, taskId: string, nodeId: string) {
+  const modules = kernel.latestRevision(taskId)?.definition.modules;
+  const module = modules && Object.hasOwn(modules, nodeId) ? modules[nodeId] : undefined;
+  const query = module?.type === 'operation' ? { graphId: taskId, query: 'operations' }
+    : { graphId: taskId, query: 'module', id: nodeId };
+  const hint = module ? `. ${nodeId} is a module; get_task_status selects Agent nodes. Read graph_inspect(${JSON.stringify(query)}) for its state and results.` : '';
+  return new RuntimeError('not_found', `Task ${taskId} has no node ${nodeId}${hint}`);
+}
+
 // A compact projection of one task: which node runs what, what still runs, what needs the user and
 // which acceptance evidence is currently valid. `graphState` carries the same information at roughly
 // ten times the size, so this is the read to poll with.
@@ -184,7 +193,7 @@ function taskStatusView(store: TaskStore, kernel: KernelStore, taskId: string, n
       id: string; spec: string; status: string; stall_count: number; model: string | null; definition_version: string | null;
     }[];
   const selected = nodeId === undefined ? nodes : nodes.filter(row => row.id === nodeId);
-  if (nodeId !== undefined && !selected.length) throw new RuntimeError('not_found', `Task ${taskId} has no node ${nodeId}`);
+  if (nodeId !== undefined && !selected.length) throw missingTaskNode(kernel, taskId, nodeId);
   const questions = store.db.prepare("SELECT id,node_id,kind,owner FROM questions WHERE task_id=? AND status='open' ORDER BY rowid").all(taskId) as {
     id: string; node_id: string; kind: string; owner: string;
   }[];
@@ -2289,7 +2298,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           let reason: 'settled' | 'needs_you' | 'timeout' = 'timeout';
           for (;;) {
             const node = current.nodes.find(entry => entry.id === waiting);
-            if (!node) throw new RuntimeError('not_found', `Task ${target} has no node ${waiting}`);
+            if (!node) throw missingTaskNode(kernel, target, waiting);
             if ([...current.questions, ...current.problems].some(entry => !known.has(entry.id))) { reason = 'needs_you'; break; }
             const nativeQueued = kernel.latestRevision(target) && !['blocked', 'failed'].includes(node.status)
               && store.db.prepare("SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state IN ('queued','claimed') LIMIT 1").get(target, waiting);

@@ -371,3 +371,10 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 ## 2026-10-18：360 秒模型分层新范围已执行并停止
 
 使用者批准新四会话范围后，只运行 parser A。完整 14/6/5 资源、冻结源码/文档、所有 flags=0；DeepSeek 实现与 Step 5 独立审查均完成，graph completed、目标行为 verified，但 main 最终操作到 360 秒仍未结束，taskSuccess=false，按约取消其余三项，不补跑。整树 68 请求，已记录 input/output/cacheRead=119390/42255/2744768，未知 usage=2（含继承配置的 LongCat prompt_suggestion 辅助调用），严格成本及每完成任务情景均 null。工具收尾成功：90 调用、6 错误，68 请求都有逐工具重发 profile。不能用内部 graph completedTasks=1 替代完整任务成功数 0，也不能删去 graph 完成后的探索与失败 RSI 成本。详见[新范围停止结果](harness-model-tiering-v2-result-2026-10-18.md)。这次没有 LongCat worker 对照，未证明降本或质量等效，默认保持。
+
+
+## 2026-10-18：模块状态误查的直接恢复
+
+真实 v2 会话在 graph 完成后又产生 11 条请求 profile、16 次工具调用并超时；其中两次把 check 模块传给 get_task_status。运行时现在保留 not_found 并返回可调用的 graph_inspect 恢复参数，仅识别正式定义自身的模块键，未知对象不冒充模块。已有完整交付 E2E 的一行重放两类错误、从实际错误提取查询、读取真实操作记录并完成原交付，修复前明确红灯、最终定向通过。最终全量 272/1,514 通过，352.33 秒、baseline 与验收证据不变。没有 system prompt、模型/分工/default flag 改动或新真实模型调用。详见[模块恢复证据](harness-module-status-recovery-2026-10-18.md)。
+
+机会排序的新证据是：冻结 off-peak 权重下，本次已记录部分 main/worker/reviewer 分别约0.0381/0.0042/0.0638 USD，不能套用其他团队 worker 占比直接推导免费 worker 的整树收益。未知 usage 与完整成功数0仍使完整费用/每完成任务情景 null。该修复没有证明减少真实模型请求或达到总体降本目标。
