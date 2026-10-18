@@ -11,6 +11,16 @@ const count = (value, name) => {
   return value;
 };
 const weights = manifest.weights;
+const modelWeights = manifest.modelWeights;
+if(weights && modelWeights)throw new Error('Choose uniform weights or modelWeights');
+const modelRates=new Map();
+if(modelWeights){
+ if(typeof modelWeights.currency!=='string' || !modelWeights.currency || !Array.isArray(modelWeights.models) || !modelWeights.models.length)throw new Error('modelWeights requires a currency and model rates');
+ for(const row of modelWeights.models){
+  if(typeof row.model!=='string' || !row.model || modelRates.has(row.model) || billing.some(key=>row.perMillion?.[key]!==null && (!Number.isFinite(row.perMillion?.[key]) || row.perMillion[key]<0)))throw new Error('Each model needs a unique identity and four nonnegative or null rates');
+  modelRates.set(row.model,row.perMillion);
+ }
+}
 if (weights && (typeof weights.currency !== 'string' || !weights.currency || billing.some(key => !Number.isFinite(weights.perMillion?.[key]) || weights.perMillion[key] < 0))) {
   throw new Error('Weights require a currency and four nonnegative perMillion rates');
 }
@@ -26,6 +36,7 @@ for (const group of manifest.groups) {
   const total = { name: group.name, scope: group.scope, attempts: 0, completed: 0, requests: 0,
     unknownUsage: 0, estimatedUsage: 0, unknownCost: 0, tokens: Object.fromEntries(billing.map(key => [key, 0])) };
   const costs = new Map();
+  let modelAmount=0,modelPricingComplete=true;
   const runs = [];
   for (const file of group.runs) {
     if (typeof file !== 'string') throw new Error('Run paths must be strings');
@@ -39,6 +50,24 @@ for (const group of manifest.groups) {
     if (actualScope !== group.scope) throw new Error(`Scope mismatch for ${path}: ${actualScope}`);
     const ledger = JSON.parse(await readFile(join(root, 'cost-report.json'), 'utf8'));
     if (ledger.schemaVersion !== 1 || !Array.isArray(ledger.tasks)) throw new Error(`Unsupported cost ledger: ${root}`);
+    if(weights || modelWeights){
+      if(!Array.isArray(ledger.models) || !ledger.models.length)throw new Error('Model breakdown required for scenario weights; regenerate cost-report.json');
+      const modelTotals=Object.fromEntries(billing.map(key=>[key,0]));let modelRequests=0;
+      for(const model of ledger.models){
+        modelRequests+=count(model.requests,'model requests');
+        for(const key of billing)modelTotals[key]+=count(model.tokens?.[key],`model ${key}`);
+        if(weights && (ledger.models.length!==1 || typeof model.model!=='string'))throw new Error('Uniform scenario weights cannot price a mixed-model operation');
+        if(modelWeights){
+          const rates=modelRates.get(model.model);
+          if(typeof model.model!=='string' || !rates)modelPricingComplete=false;
+          for(const key of billing){
+            const tokens=model.tokens[key],rate=rates?.[key];
+            if(tokens>0){if(!Number.isFinite(rate) || rate<0)modelPricingComplete=false;else modelAmount+=tokens*rate/1_000_000;}
+          }
+        }
+      }
+      if(modelRequests!==ledger.summary.requests || billing.some(key=>modelTotals[key]!==ledger.summary.tokens[key]))throw new Error('Model breakdown differs from ledger totals');
+    }
     // Success is the benchmark's external behavior + terminal-state result, not
     // a provider's completion message or the database's conversation phase.
     const complete = run.taskSuccess === true && !run.timedOut && !run.cleanupIncomplete
@@ -64,6 +93,9 @@ for (const group of manifest.groups) {
   const scenarioAmount = weights ? billing.reduce((sum, key) => sum + total.tokens[key] * weights.perMillion[key] / 1_000_000, 0) : null;
   if (weights && !Number.isFinite(scenarioAmount)) throw new Error('Scenario cost overflow');
   groups.push({ ...total, successRate: total.completed / total.attempts, knownCost, costPerCompletedTask,
+    ...(modelWeights ? {scenario:{currency:modelWeights.currency,models:modelWeights.models,pricingComplete:modelPricingComplete,
+      usageComplete:!total.unknownUsage && !total.estimatedUsage,recordedTokenWeightTotal:modelPricingComplete?modelAmount:null,
+      costPerCompletedTask:total.completed && modelPricingComplete && !total.unknownUsage && !total.estimatedUsage?modelAmount/total.completed:null}} : {}),
     ...(weights ? { scenario: { currency: weights.currency, perMillion: weights.perMillion, recordedTokenWeightTotal: scenarioAmount,
       usageComplete: !total.unknownUsage && !total.estimatedUsage,
       costPerCompletedTask: total.completed && !total.unknownUsage && !total.estimatedUsage ? scenarioAmount / total.completed : null } } : {}), runs });
@@ -71,7 +103,7 @@ for (const group of manifest.groups) {
 console.log(JSON.stringify({ schemaVersion: 1, caveats: [
   'Every attempt contributes cost; failures are never removed from the numerator.',
   'Known cost is a subtotal when any usage or price is unknown; incomplete totals yield null cost per completed task.',
-  'Uniform token weights are an explicit scenario, not a reconstructed provider invoice.',
+  'Token weights are an explicit scenario, not a reconstructed provider invoice; modelWeights uses recorded identities and retains missing rates as unknown.',
   'Scope is explicit: main or worker operations do not prove complete workflow savings.',
   'This summary provides no causal or statistical quality guarantee; inspect frozen tasks and validation evidence.',
 ], groups }, null, 2));

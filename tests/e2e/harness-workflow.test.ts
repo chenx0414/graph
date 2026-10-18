@@ -146,6 +146,25 @@ test.each([false,true])('evaluation completes only after worktree integration, h
   const ledger=JSON.parse(await readFile(join(report.root,'cost-report.json'),'utf8'));
   expect(ledger.tasks.find((task:{id:string})=>task.id===report.workflow.confirmedTaskId).executions).toBe(2);
   expect(ledger.summary.requests).toBe(main.requests.length+worker.requests.length+review.requests.length);
+  const runPath=join(root,'run.json');await writeFile(runPath,stdout);
+  const comparisonPath=join(root,'model-comparison.json');
+  const group={name:'delivery',scope:'workflow',runs:[runPath]};
+  const modelWeights={currency:'USD',models:[['main',2],['worker',1],['review',3]].map(([modelId,input])=>({model:modelId,perMillion:{input,output:4,cacheRead:.5,cacheWrite:null}}))};
+  await writeFile(comparisonPath,JSON.stringify({groups:[group],modelWeights}));
+  const compared=JSON.parse((await execute(process.execPath,['scripts/harness-eval-summary.mjs',comparisonPath],{cwd:process.cwd()})).stdout).groups[0];
+  const expected=(main.requests.length*(25*2+10*4+15*.5)+worker.requests.length*(25+10*4+15*.5)+review.requests.length*(25*3+10*4+15*.5))/1_000_000;
+  expect(compared.scenario.costPerCompletedTask).toBeCloseTo(expected,10);
+  expect(compared.scenario.pricingComplete).toBe(true);
+  await writeFile(comparisonPath,JSON.stringify({groups:[group],modelWeights:{...modelWeights,models:modelWeights.models.filter(row=>row.model!=='review')}}));
+  const missingRate=JSON.parse((await execute(process.execPath,['scripts/harness-eval-summary.mjs',comparisonPath],{cwd:process.cwd()})).stdout).groups[0];
+  expect(missingRate.scenario.costPerCompletedTask).toBeNull();
+  expect(missingRate.scenario.pricingComplete).toBe(false);
+  await writeFile(comparisonPath,JSON.stringify({groups:[group],modelWeights:{...modelWeights,models:modelWeights.models.map(row=>({...row,perMillion:{...row.perMillion,input:null}}))}}));
+  const unknownRate=JSON.parse((await execute(process.execPath,['scripts/harness-eval-summary.mjs',comparisonPath],{cwd:process.cwd()})).stdout).groups[0];
+  expect(unknownRate.scenario.costPerCompletedTask).toBeNull();
+  expect(unknownRate.scenario.pricingComplete).toBe(false);
+
+
   if(frozenContext){
    for(const server of [worker,review]){expect(JSON.stringify(server.requests)).toContain('FROZEN_DELIVERY_CONTEXT');expect(JSON.stringify(server.requests)).not.toContain('CHANGED_DELIVERY_CONTEXT');}
    expect(report.evaluationContext.recipes).toHaveLength(3);

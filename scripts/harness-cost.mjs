@@ -15,6 +15,7 @@ try {
   const profiles = exists('events') ? rows("SELECT task_id,data FROM events WHERE type='provider.request_profile'") : [];
   const profilesByCall = new Map(profiles.map(row => { const data = parse(row.data); return [data?.callId, data]; }));
   const billingCosts = {};
+  const models = new Map();
   let callsWithFrozenRates = 0;
   const tasks = new Map(rows('SELECT id,phase FROM tasks').map(row => [row.id, {
     id: row.id, phase: row.phase, requests: 0, unknownUsage: 0, estimatedUsage: 0, cacheHitRequests: 0, measuredRequests: 0,
@@ -34,6 +35,17 @@ try {
     // Tool admission also uses the invocation ledger; zero-token tool calls are not model turns.
     // Retain missing usage: it may be a billed request and cannot be treated as zero.
     if (usage && billing.every(key => usage[key] === 0) && call.lane === 'main' && !profilesByCall.has(call.id)) continue;
+    const frozen = parse(call.frozen_model);
+    const profile = profilesByCall.get(call.id);
+    const identity = profile?.model ?? (frozen?.provider && frozen?.id ? `${frozen.provider}:${frozen.id}` : null);
+    const model = models.get(identity) ?? {model:identity,requests:0,unknownUsage:0,estimatedUsage:0,tokens:Object.fromEntries(billing.map(key=>[key,0]))};
+    models.set(identity,model);model.requests++;
+    const validUsage = usage && billing.every(key=>Number.isFinite(usage[key]) && usage[key]>=0);
+    if(!validUsage || usage.usageSource==='unknown')model.unknownUsage++;
+    if(validUsage){
+      if(usage.usageSource==='estimated')model.estimatedUsage++;
+      for(const key of billing)model.tokens[key]+=usage[key];
+    }
     task.requests++;
     task.purposes[call.purpose] = (task.purposes[call.purpose] ?? 0) + 1;
     task[call.lane === 'main' ? 'operations' : 'executions'].add(call.turn);
@@ -49,8 +61,6 @@ try {
         if (usage.cacheRead > 0) task.cacheHitRequests++;
         for (const key of ['input', 'cacheRead', 'cacheWrite']) task.cacheEvidenceTokens[key] += usage[key];
       }
-      const frozen = parse(call.frozen_model);
-      const profile = profilesByCall.get(call.id);
       const rates = frozen?.cost ?? profile?.rates;
       const pricing = frozen?.pricing ?? profile?.pricing;
       if (cacheEvidence && rates && billing.every(key => Number.isFinite(rates[key]) && rates[key] >= 0)) {
@@ -117,6 +127,7 @@ try {
     requestProfiles: { samples: profiles.length, distinctStaticFingerprints: fingerprints.size, sources,
       meanEstimatedStaticTokens: profiles.length ? ((sources.system?.estimatedTokens ?? 0) + (sources.tools?.estimatedTokens ?? 0)) / profiles.length : null },
     tools: toolRows.map(tool => ({ ...tool, errorRate: tool.errors / tool.calls, taskReach: toolDenominator ? tool.tasks / toolDenominator : null })),
+    models: [...models.values()],
     tasks: outputTasks,
   }, null, 2));
   db.exec('COMMIT');
