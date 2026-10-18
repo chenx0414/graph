@@ -1,10 +1,21 @@
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import {createReadStream,constants,existsSync} from 'node:fs';
-import {mkdir,readdir,lstat,readlink,symlink,copyFile,chmod,readFile,writeFile,realpath} from 'node:fs/promises';
+import {mkdir,readdir,lstat,readlink,symlink,copyFile,chmod,readFile,writeFile,realpath,rm} from 'node:fs/promises';
 import {join,resolve,relative,dirname,isAbsolute,basename,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {CapabilityLibrary} from '../src/catalog/capability-library.ts';
 
+const execute=promisify(execFile);
+async function tar(args){return execute('tar',args,{env:{...process.env,COPYFILE_DISABLE:'1'},maxBuffer:64*1024*1024});}
+async function validateArchive(path){
+ const {stdout}=await tar(['-tzf',path]);
+ for(const name of stdout.split('\n').filter(Boolean)){
+  const segments=name.replace(/\/$/,'').split('/');
+  if(isAbsolute(name) || segments.includes('..') || !parts.includes(segments[0]))throw new Error('Evaluation context archive contains an unsafe path');
+ }
+}
 const parts=['agent-combinations.json','capabilities','prompts','extensions'];
 const inside=(root,path)=>{const value=relative(root,path);return value==='' || (value!=='..' && !value.startsWith(`..${sep}`) && !isAbsolute(value));};
 const recipeFacts=library=>library.recipes.map(({id,resources,resolved})=>({id,resources,resolved}));
@@ -68,23 +79,37 @@ export async function createEvaluationContext(sourceHome,destination){
  if(before.sha256!==after.sha256 || before.sha256!==copied.sha256)throw new Error('Context changed while being copied');
  const installed=await validatedLibrary(graphHome);
  if(JSON.stringify(recipeFacts(installed))!==JSON.stringify(recipeFacts(library)) || JSON.stringify(capabilityFacts(installed))!==JSON.stringify(capabilityFacts(library)))throw new Error('Copied catalog does not match source');
- const manifest={schemaVersion:1,sourceHome:source,sha256:copied.sha256,fileCount:copied.entries.filter(e=>e[1]==='file').length,
+ const archive=join(output,'context.tar.gz');
+ await tar(['-czf',archive,'--no-xattrs','-C',graphHome,...parts.filter(part=>existsSync(join(graphHome,part)))]);
+ await chmod(archive,0o600);
+ await validateArchive(archive);
+ if((await inventory(graphHome)).sha256!==copied.sha256)throw new Error('Context changed while being archived');
+ const manifest={schemaVersion:2,payload:{format:'tar+gzip',file:'context.tar.gz',sha256:await fileDigest(archive)},sourceHome:source,sha256:copied.sha256,fileCount:copied.entries.filter(e=>e[1]==='file').length,
   recipes:recipeFacts(library),capabilities:capabilityFacts(library),
   packageCacheIncluded:existsSync(join(graphHome,'extensions')),runtimeLoaded:false,externalDependencyPolicy:'Local SDK cache is copied when present. Declared source ranges may still resolve updates; commands and services are not claimed runtime-validated.'};
  await writeFile(join(output,'context.json'),JSON.stringify(manifest,null,2),{mode:0o600});
+ await rm(graphHome,{recursive:true});
  return manifest;
 }
 export async function installEvaluationContext(snapshotHome,graphHome){
  const snapshot=await realpath(snapshotHome),source=join(snapshot,'graph');
  const target=join(await realpath(dirname(resolve(graphHome))),basename(resolve(graphHome)));
- if(inside(source,target) || inside(target,source))throw new Error('Snapshot and destination directories must be disjoint');
+ if(inside(snapshot,target) || inside(target,snapshot))throw new Error('Snapshot and destination directories must be disjoint');
  const manifest=JSON.parse(await readFile(join(snapshot,'context.json'),'utf8'));
- if(manifest.schemaVersion!==1 || (await inventory(source)).sha256!==manifest.sha256)throw new Error('Evaluation context snapshot is invalid or changed');
- const library=await validatedLibrary(source);
- if(JSON.stringify(manifest.recipes)!==JSON.stringify(recipeFacts(library)) || JSON.stringify(manifest.capabilities)!==JSON.stringify(capabilityFacts(library)))throw new Error('Evaluation context metadata differs from snapshot');
  if(existsSync(target) && (await readdir(target)).length)throw new Error('Evaluation context destination is not empty');
- await copyContext(source,target);
+ if(manifest.schemaVersion===2){
+  const archive=join(snapshot,'context.tar.gz');
+  if(manifest.payload?.format!=='tar+gzip' || manifest.payload.file!=='context.tar.gz' || (await fileDigest(archive))!==manifest.payload.sha256)throw new Error('Evaluation context snapshot is invalid or changed');
+  await validateArchive(archive);
+  await mkdir(target,{recursive:true,mode:0o700});
+  await tar(['-xzpf',archive,'--no-same-owner','--no-xattrs','-C',target]);
+ }else if(manifest.schemaVersion===1){
+  if((await inventory(source)).sha256!==manifest.sha256)throw new Error('Evaluation context snapshot is invalid or changed');
+  await copyContext(source,target);
+ }else throw new Error('Evaluation context snapshot is invalid or changed');
  if((await inventory(target)).sha256!==manifest.sha256)throw new Error('Installed evaluation context differs from snapshot');
+ const library=await validatedLibrary(target);
+ if(JSON.stringify(manifest.recipes)!==JSON.stringify(recipeFacts(library)) || JSON.stringify(manifest.capabilities)!==JSON.stringify(capabilityFacts(library)))throw new Error('Evaluation context metadata differs from snapshot');
  return manifest;
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -13,7 +13,8 @@ test.each(['valid','missing','tampered','limited','limited-bare'])('evaluation p
  const skillText='---\nname: eval-skill\ndescription: Context snapshot proof.\n---\nFROZEN_CONTEXT_SKILL\n';
  await writeFile(join(skill,'SKILL.md'),skillText);
  await mkdir(join(source,'extensions'),{recursive:true});
- await writeFile(join(source,'extensions','cache-proof.mjs'),"console.log('FROZEN_CACHE_CODE');\n");
+ await writeFile(join(source,'extensions','empty-proof.mjs'),'');
+ await writeFile(join(source,'extensions','cache-proof.mjs'),"import './empty-proof.mjs';console.log('FROZEN_CACHE_CODE');\n");
  await writeFile(join(skill,'capability.json'),JSON.stringify({id:'eval-skill',version:'1',kind:'skill',name:'eval-skill'}));
  await writeFile(join(source,'agent-combinations.json'),JSON.stringify({version:1,combinations:[{id:'main',mode:'main',name:'Snapshot main',description:'Use the bound eval-skill before implementing the requested project change.',recommendedGrade:'high',review:false,tags:[],systemPrompt:'Use the bound eval-skill before implementing the requested project change.',resources:[{resourceId:'eval-skill',version:state==='missing'?'2':'1',role:'skill',required:true}]}]}));
  let advertisedSkillPath=join(skill,'SKILL.md');
@@ -41,7 +42,8 @@ test.each(['valid','missing','tampered','limited','limited-bare'])('evaluation p
   await create();
   await writeFile(join(skill,'SKILL.md'),skillText.replace('FROZEN_CONTEXT_SKILL','CHANGED_SOURCE_SKILL'));
   await writeFile(join(source,'extensions','cache-proof.mjs'),"console.log('CHANGED_CACHE_CODE');\n");
-  if(state==='tampered')await writeFile(join(snapshot,'graph','capabilities','skills','eval-skill','SKILL.md'),'TAMPERED_SNAPSHOT');
+  if(state==='valid')await rm(join(snapshot,'graph','extensions','empty-proof.mjs'),{force:true});
+  if(state==='tampered')await writeFile(join(snapshot,'context.tar.gz'),'TAMPERED_ARCHIVE');
   const configPath=join(root,'config.json');await writeFile(configPath,JSON.stringify({version:1,projects:[],credentials:{local:{secretRef:'GRAPH_LOCAL_KEY'}},models:{entries:[{id:'local',modelId:'local',provider:'graph-openai',grade:'high',api:'openai-completions',baseUrl:provider.model.baseUrl,contextWindow:32000,maxTokens:256,credentialId:'local'}]},...(state.startsWith('limited')?{access:{mode:'standard'},limits:{credentials:{},sharedGroups:{},defaultBudgetTokens:1}}:{})}));
   const run=()=>execute(process.execPath,['scripts/harness-real-eval.mjs',configPath],{cwd:process.cwd(),timeout:30000,env:{...process.env,HOME:root,GRAPH_LOCAL_KEY:'fixture',GRAPH_EVAL_CONTEXT_SNAPSHOT:state==='limited-bare'?'':snapshot,GRAPH_EVAL_TIMEOUT_MS:'10000'}});
   if(state==='tampered'){
