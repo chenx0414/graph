@@ -366,3 +366,8 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 针对真实 planner 大量查询验收与 integration 源码的轨迹，补齐 parser-delivery 原生定义及 code-delivery 操作指南，并从现有 Graph/产物页提供入口；系统 prompt、模型、effort 和 flags 不改。原完整交付 E2E 直接消费该 JSON（仅替换本地连接），替代内联副本，5 项通过。材料合计 7,283 bytes 只是体积，不是节省证明；受控模型测试也不能证明真实模型发现率。没有新增付费会话、补跑旧小集或弱化正式检查/独立审查。见 [示例交付与局限](harness-delivery-example-2026-10-18.md)。
 
 完整交付示例最终全量 `/tmp/graph-delivery-example-check.log`：272 文件、1,514 测试通过，348.49 秒，baseline 匹配、验收证据不变。该门禁验证示例和工程回归，整体价格加权成本下降且质量不降仍未证明。
+
+
+## 2026-10-18：360 秒模型分层新范围已执行并停止
+
+使用者批准新四会话范围后，只运行 parser A。完整 14/6/5 资源、冻结源码/文档、所有 flags=0；DeepSeek 实现与 Step 5 独立审查均完成，graph completed、目标行为 verified，但 main 最终操作到 360 秒仍未结束，taskSuccess=false，按约取消其余三项，不补跑。整树 68 请求，已记录 input/output/cacheRead=119390/42255/2744768，未知 usage=2（含继承配置的 LongCat prompt_suggestion 辅助调用），严格成本及每完成任务情景均 null。工具收尾成功：90 调用、6 错误，68 请求都有逐工具重发 profile。不能用内部 graph completedTasks=1 替代完整任务成功数 0，也不能删去 graph 完成后的探索与失败 RSI 成本。详见[新范围停止结果](harness-model-tiering-v2-result-2026-10-18.md)。这次没有 LongCat worker 对照，未证明降本或质量等效，默认保持。
