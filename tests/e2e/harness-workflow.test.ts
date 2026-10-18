@@ -72,6 +72,13 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
  example.nodes.work.recipe='coder@2';
  if(explicitRoles)example.nodes.work.model='worker';else delete example.nodes.work.model;
  example.nodes.review.recipe='reviewer@2';
+ const literal='{"keep":"literal"}';
+ const changes={reason:'Name the parser delivery',patch:{name:'Parser delivery with recovery'}};
+ if(context==='frozen-explicit'){
+  example.protocols.literal={type:'string'};
+  example.modules.literalEcho={type:'router',trigger:'each',inputs:{job:{protocol:'literal'}},outputs:{result:{protocol:'literal'}},rules:[{when:'true',emit:{result:'$job'}}]};
+  example.outputs.literalEcho={from:'literalEcho.result',protocol:'literal'};
+ }
  const root=await mkdtemp(join(tmpdir(),'graph-eval-delivery-'));
  let artifactRoot:string|undefined;
  const repaired="export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)]; })); }\n";
@@ -127,7 +134,19 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    id:new RegExp(`${label}: ([^;\\s]+)`).exec(JSON.stringify(messages(main)))?.[1]??'missing-recipe',
   }))) : [tool('list_agent_combinations',()=>({}))]),
   tool('propose_graph',()=>({proposal,requestId:'delivery-draft'}),'private-main-reasoning-marker'),{text:'Draft ready.'},
-  tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}})),
+  ...(context==='frozen-explicit' ? [
+   tool('graph_patch',()=>({graphId:graphId(),baseRevision:1,changes:JSON.stringify(changes)})),
+   tool('graph_patch',()=>{
+    const reply=messages(main).filter(message=>message.role==='tool').at(-1);
+    return {graphId:graphId(),baseRevision:1,changes:String(reply?.content).includes('RuntimeError')?changes:JSON.stringify(changes)};
+   }),
+   tool('graph_send',()=>({graphId:graphId(),nodeId:'literalEcho',input:'job',value:literal})),
+   tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:'{}'})),
+   tool('graph_send',()=>{
+    const reply=messages(main).filter(message=>message.role==='tool').at(-1);
+    return {graphId:graphId(),nodeId:'work',input:'job',value:String(reply?.content).includes('RuntimeError')?{}:'{}'};
+   }),
+  ] : [tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}}))]),
   ...(context==='frozen-explicit' ? [
    tool('get_task_status',()=>({graphId:graphId(),waitForNode:'work',timeoutMs:15000})),
    tool('get_task_status',()=>{
@@ -151,7 +170,8 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   ] : []),
   tool('graph_send',()=>({graphId:graphId(),nodeId:'review',input:'job',value:{commit:commit()}})),
   tool('get_task_status',()=>({taskId:graphId(),waitForNode:'review',timeoutMs:15000})),
-  tool('graph_control',()=>({graphId:graphId(),action:'complete'})),{text:'Delivered.'},
+  tool('graph_control',()=>({graphId:graphId(),action:'complete'})),
+  ...(context==='frozen-explicit'?[tool('graph_inspect',()=>({graphId:graphId(),query:'results'}))]:[]),{text:'Delivered.'},
  ]);
  try{
   const snapshot=join(root,'snapshot');
@@ -198,6 +218,11 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   }
   if(context==='frozen-explicit'){
    const replies=messages(main).filter(message=>message.role==='tool');
+   expect(String(replies.find(message=>String(message.content).includes('changes must be a JSON object'))?.content)).toContain('JSON-encoded string');
+   expect(String(replies.find(message=>String(message.content).includes('work.job: must be object'))?.content)).toContain('JSON-encoded string');
+   const results=replies.flatMap(message=>{try{const value=JSON.parse(String(message.content));return Array.isArray(value)?value:[];}catch{return [];}});
+   expect(results.find(value=>value.output_name==='literalEcho')?.value).toBe(literal);
+   expect(replies.some(message=>{try{return JSON.parse(String(message.content)).revision===2;}catch{return false;}})).toBe(true);
    const targetError=replies.find(message=>String(message.content).includes('uses taskId'));
    expect(String(targetError?.content)).toContain(`get_task_status(${JSON.stringify({taskId:graphId(),waitForNode:'work',timeoutMs:15000})})`);
    const status=replies.flatMap(message=>{try{return [JSON.parse(String(message.content))];}catch{return [];}})

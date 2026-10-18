@@ -122,6 +122,9 @@ export class GraphRuntime {
       // Zero partial change: the caller is told the current version and must retry.
       throw new RuntimeError('stale_revision', `Patch is based on revision ${input.baseRevision} but the current revision is ${latest.version}`);
     }
+    if (!input.changes || typeof input.changes !== 'object' || Array.isArray(input.changes)) {
+      throw new RuntimeError('invalid_input', 'Graph changes must be a JSON object; pass changes directly, not as a JSON-encoded string.');
+    }
     if (typeof input.changes.reason !== 'string' || !input.changes.reason.trim()) throw new RuntimeError('invalid_input', 'Graph change requires a reason');
     if ((input.changes.definition !== undefined) === (input.changes.patch !== undefined)) throw new RuntimeError('invalid_input', 'Supply exactly one full definition or local patch');
     // Both update forms produce the same formal definition and validate before writing.

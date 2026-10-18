@@ -506,6 +506,8 @@ export function validateProtocolValue(spec: ProtocolSpec, value: Json, path = ''
     const validate = protocolValidator(spec);
     if (validate(value)) return null;
     const error = validate.errors?.[0];
-    return `${path || '(root)'}${error?.instancePath ?? ''}: ${error?.message ?? 'invalid value'}`;
+    const hint = spec.type === 'object' && error?.keyword === 'type' && error.instancePath === '' && error.params.type === 'object' && typeof value === 'string'
+      ? ' Received a string; pass the object directly as the JSON value, not as a JSON-encoded string.' : '';
+    return `${path || '(root)'}${error?.instancePath ?? ''}: ${error?.message ?? 'invalid value'}${hint}`;
   } catch (error) { return `${path || '(root)'}: invalid protocol schema: ${error instanceof Error ? error.message : String(error)}`; }
 }
