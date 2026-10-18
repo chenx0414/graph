@@ -16,16 +16,18 @@ test.each([{suggestion:true,missingUsage:false,caseId:'cli',fixedCount:false,tim
 const args=process.argv.slice(2);let n=1;if(args.length){n=Number(args[1]);if(args[0]!=='--count'||!args[1]||!Number.isInteger(n)||n<1){console.error('Invalid count');process.exit(1);} }
 for(let i=0;i<(${fixedCount ? "args.length ? 3 : 1" : 'n'});i++)console.log('hello');
 EOF`;
-  const provider = await openaiServer((caseId==='cli'
+  const plans=(caseId==='cli'
     ? [{tools:[{id:'write-cli',name:'bash',arguments:JSON.stringify({command:cliCommand})}]},{text:'CLI ready.'}]
     : timedOut
     ? [...(lane==='main' ? [{tools:[{id:'before-timeout',name:'bash',arguments:JSON.stringify({command:'printf observed-before-interrupt > observed.txt'})}]}] : []), { text: 'Too late', beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, lane==='worker' ? 20_000 : 5_000)) }]
     : [...(lane==='worker' ? [{tools:[{id:'outside-read',name:'read',arguments:JSON.stringify({path:join(root,'hidden-verifier.txt')})}]}] : []), { tools: [{ id: 'repair', name: 'bash', arguments: JSON.stringify({ command: `if test -e ../case.json; then echo 'verification leaked' >&2; exit 1; fi
 cat > config.js <<'EOF'
 export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const index = line.indexOf('='); return [line.slice(0,index),line.slice(index+1)]; })); }
-EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage:null} : {})})));
-  const auxiliary=suggestion ? await openaiServer([{text:'Run another check.'}]) : undefined;
+EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage:null} : {})}));
+  const provider=await openaiServer(suggestion?[...plans,...plans]:plans);
+  const auxiliary=suggestion ? await openaiServer(Array.from({length:2},()=>({text:'Run another check.',beforeReply:()=>new Promise<void>(resolve=>setTimeout(resolve,6500))}))) : undefined;
   let artifactRoot: string | undefined;
+  let defaultArtifactRoot: string | undefined;
   try {
     const configPath = join(root, 'config.json');
     await writeFile(configPath, JSON.stringify({ version: 1, projects: [],
@@ -43,7 +45,7 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
     }
     const { stdout, stderr } = await execute(process.execPath, [lane==='worker' ? 'scripts/harness-worker-eval.mjs' : 'scripts/harness-real-eval.mjs', configPath, caseId], {
       cwd: process.cwd(), timeout: 45_000,
-      env: { ...process.env, HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '4000') : '15000' },
+      env: { ...process.env, HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'1'}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '4000') : '15000' },
     });
     const report = JSON.parse(stdout);
     artifactRoot = report.root;
@@ -82,7 +84,27 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
       const manifestPath=join(root,'comparison.json');
       await writeFile(manifestPath,JSON.stringify({groups:[{name:'observed',scope:'main-operation',runs:[runPath]}],weights:{currency:'USD',perMillion:{input:2,output:4,cacheRead:.5,cacheWrite:1}}}));
       if(auxiliary){
-        expect(auxiliary.requests.length).toBeGreaterThan(0);
+        expect(auxiliary.requests).toHaveLength(1);
+        const db=new DatabaseSync(join(report.root,'state','tasks.sqlite'),{readOnly:true});
+        try{
+          const decision=db.prepare("SELECT data FROM events WHERE type='prompt_suggestion.decided'").get() as {data:string};
+          expect(JSON.parse(decision.data)).toMatchObject({model:'suggestion',asked:true,timeoutMs:20000,timedOut:false,error:null});
+        }finally{db.close();}
+        expect(ledger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:0,tokens:{input:25,output:10,cacheRead:15,cacheWrite:0}});
+        const baseline=JSON.parse((await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath,caseId],{
+          cwd:process.cwd(),timeout:45000,
+          env:{...process.env,HOME:root,GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_TIMEOUT_MS:'15000',GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'0'},
+        })).stdout);
+        defaultArtifactRoot=baseline.root;
+        expect(baseline).toMatchObject({taskSuccess:true,cleanupIncomplete:false});
+        const defaultLedger=JSON.parse(await readFile(join(baseline.root,'cost-report.json'),'utf8'));
+        expect(defaultLedger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:1});
+        const defaultDb=new DatabaseSync(join(baseline.root,'state','tasks.sqlite'),{readOnly:true});
+        try{
+          const decision=defaultDb.prepare("SELECT data FROM events WHERE type='prompt_suggestion.decided'").get() as {data:string};
+          expect(JSON.parse(decision.data)).toMatchObject({model:'suggestion',asked:true,timeoutMs:5000,timedOut:true});
+        }finally{defaultDb.close();}
+        expect(auxiliary.requests).toHaveLength(2);
         await expect(execute(process.execPath,['scripts/harness-eval-summary.mjs',manifestPath],{cwd:process.cwd()})).rejects.toThrow(/mixed-model operation/);
         return;
       }
@@ -102,5 +124,6 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
     await provider.close();await auxiliary?.close();
     await rm(root, { recursive: true, force: true });
     if (artifactRoot) await rm(artifactRoot, { recursive: true, force: true });
+    if (defaultArtifactRoot) await rm(defaultArtifactRoot,{recursive:true,force:true});
   }
 }, 60_000);

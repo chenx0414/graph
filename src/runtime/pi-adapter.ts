@@ -1194,6 +1194,8 @@ export function createPiAdapter(options: {
             let suggestedPrompt: string | undefined;
             let suggestionUsage: TokenUsage | null = null;
             let suggestionReply: PromptSuggestionReply | null = null;
+            const suggestionTimeoutMs = process.env.GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT === '1' ? 20_000 : PROMPT_SUGGESTION_TIMEOUT_MS;
+            let suggestionTimedOut = false;
             const lastUserMessage = [...(operation.context.messages ?? [])].reverse()
               .find(message => message.text.trim())?.text;
             const suggestionEntry = conversation && lastUserMessage
@@ -1201,7 +1203,7 @@ export function createPiAdapter(options: {
               : undefined;
             if (suggestionEntry && reply.trim()) {
               const controller = new AbortController();
-              const timeout = setTimeout(() => controller.abort(), PROMPT_SUGGESTION_TIMEOUT_MS);
+              const timeout = setTimeout(() => { suggestionTimedOut = true; controller.abort(); }, suggestionTimeoutMs);
               timeout.unref?.();
               const suggestionGate = taskGate(
                 options.store,
@@ -1240,6 +1242,8 @@ export function createPiAdapter(options: {
                 nodeId: operation.nodeId,
                 model: suggestionEntry?.id ?? null,
                 asked: Boolean(suggestionEntry && reply.trim()),
+                timeoutMs: suggestionEntry && reply.trim() ? suggestionTimeoutMs : null,
+                timedOut: suggestionTimedOut,
                 stopReason: suggestionReply?.stopReason ?? null,
                 error: suggestionReply?.error ?? null,
                 chars: suggestionReply?.raw.length ?? 0,
