@@ -448,6 +448,14 @@ export function agentTools(input: {
       const nodeId = optional('nodeId');
       const waitForNode = optional('waitForNode');
       const timeoutMs = typeof body.timeoutMs === 'number' && Number.isFinite(body.timeoutMs) ? Math.trunc(body.timeoutMs) : undefined;
+      if (Object.hasOwn(body, 'graphId')) {
+        const corrected = {
+          taskId: taskId ?? optional('graphId') ?? '<graph id>',
+          ...(nodeId ? { nodeId } : {}), ...(waitForNode ? { waitForNode } : {}),
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        };
+        throw new RuntimeError('invalid_input', `get_task_status uses taskId, not graphId. Retry get_task_status(${JSON.stringify(corrected)}) with graphId removed.`);
+      }
       return text(JSON.stringify(await input.supervisor!.taskStatus!({
         ...(taskId ? { taskId } : {}), ...(nodeId ? { nodeId } : {}),
         ...(waitForNode ? { waitForNode } : {}), ...(timeoutMs === undefined ? {} : { timeoutMs }),

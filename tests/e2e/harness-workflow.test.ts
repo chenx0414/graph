@@ -128,7 +128,14 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   }))) : [tool('list_agent_combinations',()=>({}))]),
   tool('propose_graph',()=>({proposal,requestId:'delivery-draft'}),'private-main-reasoning-marker'),{text:'Draft ready.'},
   tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}})),
-  tool('get_task_status',()=>({taskId:graphId(),waitForNode:'work',timeoutMs:15000})),
+  ...(context==='frozen-explicit' ? [
+   tool('get_task_status',()=>({graphId:graphId(),waitForNode:'work',timeoutMs:15000})),
+   tool('get_task_status',()=>{
+    const reply=messages(main).filter(message=>message.role==='tool').at(-1);
+    const hint=/get_task_status\((\{[^)]*\})\)/.exec(String(reply?.content))?.[1];
+    return hint?JSON.parse(hint):{taskId:'missing-status-target-hint'};
+   }),
+  ] : [tool('get_task_status',()=>({taskId:graphId(),waitForNode:'work',timeoutMs:15000}))]),
   tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
   tool('graph_send',()=>({graphId:graphId(),nodeId:'check',input:'job',value:{}})),
   ...(context==='frozen-explicit' ? [
@@ -191,6 +198,11 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   }
   if(context==='frozen-explicit'){
    const replies=messages(main).filter(message=>message.role==='tool');
+   const targetError=replies.find(message=>String(message.content).includes('uses taskId'));
+   expect(String(targetError?.content)).toContain(`get_task_status(${JSON.stringify({taskId:graphId(),waitForNode:'work',timeoutMs:15000})})`);
+   const status=replies.flatMap(message=>{try{return [JSON.parse(String(message.content))];}catch{return [];}})
+    .find(value=>value.taskId===graphId() && value.reason==='settled');
+   expect(status?.nodes).toEqual(expect.arrayContaining([expect.objectContaining({id:'work',status:'succeeded'})]));
    expect(replies.find(message=>String(message.content).includes('has no node toString'))?.content)
     .toBe(`RuntimeError: Task ${graphId()} has no node toString`);
    const rejected=replies.filter(message=>String(message.content).includes('has no node check'));
