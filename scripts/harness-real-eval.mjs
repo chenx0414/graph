@@ -87,8 +87,8 @@ try {
  // Keep the original business request separate from this user-role setup.
  const executionConstraints=workflow && workerId ? [
   '[已批准的隔离评测执行约束]',
-  `通过正式 graph 完成交付，coding recipe: ${workflow.coderDefinition}; worker model: ${worker.id}; workspace.base: worktree。main 负责规划、协调和验收，由 coding worker 修改业务文件。`,
-  ...(reviewer ? [`independent reviewer recipe: ${workflow.reviewerDefinition}; reviewer model: ${reviewer.id}。reviewer 读取不可变代码 artifact 并审查当前 integration commit，独立于实现者。`] : []),
+  `通过正式 graph 完成交付，coding recipe: coder; graph node definition: ${workflow.coderDefinition}; worker model: ${worker.id}; workspace.base: worktree。main 负责规划、协调和验收，由 coding worker 修改业务文件。`,
+  ...(reviewer ? [`independent reviewer recipe: reviewer; graph node definition: ${workflow.reviewerDefinition}; reviewer model: ${reviewer.id}。reviewer 读取不可变代码 artifact 并审查当前 integration commit，独立于实现者。`] : []),
   '发布 proposal 后，隔离 runner 将通过公开接口确认。保留真实 worktree 提交、代码 artifact、host check、正式验收和目标项目交付；完成整个 graph 后再报告交付。',
  ].join('\n') : '';
  const initialText=[scenario.prompt,executionConstraints].filter(Boolean).join('\n\n');

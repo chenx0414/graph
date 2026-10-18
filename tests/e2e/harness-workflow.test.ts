@@ -116,7 +116,10 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   },modules:{check:{type:'operation',trigger:'each',inputs:{job:data},outputs:{result:data},operation:{action:'workspace.command',version:1,command:'node',args:['--input-type=module','-e',"import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});"],output:'result'}}},edges:{},inputs:{},outputs:{},acceptance,
  }};
  const main=await openaiServer([
-  tool('list_agent_combinations',()=>({})),tool('propose_graph',()=>({proposal,requestId:'delivery-draft'})),{text:'Draft ready.'},
+  ...(explicitRoles ? ['coding recipe','independent reviewer recipe'].map(label=>tool('get_agent_combination',()=>({
+   id:new RegExp(`${label}: ([^;\\s]+)`).exec(JSON.stringify(messages(main)))?.[1]??'missing-recipe',
+  }))) : [tool('list_agent_combinations',()=>({}))]),
+  tool('propose_graph',()=>({proposal,requestId:'delivery-draft'})),{text:'Draft ready.'},
   tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}})),
   tool('get_task_status',()=>({taskId:graphId(),waitForNode:'work',timeoutMs:15000})),
   tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
@@ -152,6 +155,11 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    expect(text).toContain('worker model: worker');
    expect(text).toContain('reviewer model: review');
    expect(text).toContain('worktree');
+   if(frozenContext)for(const [index,id] of [[1,'coder'],[2,'reviewer']] as const){
+    const reply=(main.requests[index] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool').at(-1);
+    expect(JSON.stringify(reply)).not.toContain('Unknown Agent combination');
+    expect(JSON.stringify(reply)).toContain(`Snapshot ${id}`);
+   }
   }
   expect(await readFile(join(report.root,'project','config.js'),'utf8')).toBe(repaired);
   const ledger=JSON.parse(await readFile(join(report.root,'cost-report.json'),'utf8'));
