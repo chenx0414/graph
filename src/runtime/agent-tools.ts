@@ -671,7 +671,14 @@ export function agentTools(input: {
       const id = String(fields(params).id).trim();
       if (!id || id.length > 160) throw new Error('A bounded Agent combination id is required');
       const combination = input.catalog!.agentCombination(id);
-      if (!combination) throw new Error(`Unknown Agent combination ${id}`);
+      if (!combination) {
+        const recipeId = /^(.*)@[1-9]\d*$/.exec(id)?.[1];
+        const recipe = recipeId ? input.catalog!.agentCombination(recipeId) : undefined;
+        const hint = recipe
+          ? ` Use get_agent_combination(${JSON.stringify({ id: recipe.id })}) for current recipe details. A graph node's recipe field uses a versioned definition reference; this lookup takes the stable recipe id and does not resolve historical definitions.`
+          : ' Use list_agent_combinations to discover available recipe ids.';
+        throw new Error(`Unknown Agent combination ${id}.${hint}`);
+      }
       return text(JSON.stringify(combination));
     },
   };

@@ -116,6 +116,14 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   },modules:{check:{type:'operation',trigger:'each',inputs:{job:data},outputs:{result:data},operation:{action:'workspace.command',version:1,command:'node',args:['--input-type=module','-e',"import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});"],output:'result'}}},edges:{},inputs:{},outputs:{},acceptance,
  }};
  const main=await openaiServer([
+  ...(context==='frozen-explicit' ? ['coder@2','reviewer@2'].flatMap(id=>[
+   tool('get_agent_combination',()=>({id})),
+   tool('get_agent_combination',()=>{
+    const reply=messages(main).filter(message=>message.role==='tool').at(-1);
+    const hint=/get_agent_combination\((\{[^)]*\})\)/.exec(String(reply?.content))?.[1];
+    return hint?JSON.parse(hint):{id:'missing-recovery-hint'};
+   }),
+  ]) : []),
   ...(explicitRoles ? ['coding recipe','independent reviewer recipe'].map(label=>tool('get_agent_combination',()=>({
    id:new RegExp(`${label}: ([^;\\s]+)`).exec(JSON.stringify(messages(main)))?.[1]??'missing-recipe',
   }))) : [tool('list_agent_combinations',()=>({}))]),
@@ -155,7 +163,17 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    expect(text).toContain('worker model: worker');
    expect(text).toContain('reviewer model: review');
    expect(text).toContain('worktree');
-   if(frozenContext)for(const [index,id] of [[1,'coder'],[2,'reviewer']] as const){
+   if(context==='frozen-explicit'){
+    const replies=(main.requests[4] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool');
+    expect(replies).toHaveLength(4);
+    for(const [index,id] of [[0,'coder'],[2,'reviewer']] as const){
+     expect(String(replies[index]?.content)).toContain(`Unknown Agent combination ${id}@2`);
+     expect(JSON.parse(String(replies[index+1]?.content))).toMatchObject({id,name:`Snapshot ${id}`});
+    }
+   }
+   const recoveryCalls=context==='frozen-explicit'?4:0;
+   if(frozenContext)for(const [offset,id] of [[1,'coder'],[2,'reviewer']] as const){
+    const index=offset+recoveryCalls;
     const reply=(main.requests[index] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool').at(-1);
     expect(JSON.stringify(reply)).not.toContain('Unknown Agent combination');
     expect(JSON.stringify(reply)).toContain(`Snapshot ${id}`);

@@ -345,3 +345,10 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 修复评测收尾未归并 spool、常驻 worker 未记录调用以及当前内核 task/node/role 归属缺失；harness-cost 仍只读，评测输出明确 toolTelemetry 收集状态。13 项真正 E2E 验证正常、业务失败、未知 usage、超时后的已完成工具、隔离 worker 越界 read 错误和完整 graph 交付。原 parser A 的状态副本经公开 HTTP 读取恢复 43 调用/2 错误，重复读取幂等，原始证据和模型账本不变。没有新增真实模型调用，整体降本仍未证明。详见 [工具统计修复](harness-tool-telemetry-2026-10-18.md)。
 
 本轮工具计量最终全量 `/tmp/graph-eval-tool-collection-check.log`：272 文件、1,514 测试通过，356.51 秒，baseline 与验收证据保持。此结果证明计量修复的工程回归，不证明每完成任务成本下降；goal 保持未完成。
+
+
+## 2026-10-18：配方 ID 查询错误的恢复信息
+
+依据完整绑定真实轨迹的 coder@2/reviewer@2 错误，get_agent_combination 失败时仅在稳定 ID 配方存在时返回可调用的准确 ID，并说明当前 recipe 与历史 definitionVersion 的边界；不存在则指向现有发现入口，错误状态保留。原完整交付 E2E 由真实错误内容提取参数、查询配方并完成正式交付，5 项通过；没有改变 schema/系统 prompt/模型或补跑真实小集。这证明恢复信息可用，不证明真实任务轮次或费用下降。详见 [配方错误恢复](harness-recipe-recovery-2026-10-18.md)。
+
+配方恢复最终全量 `/tmp/graph-recipe-recovery-check.log`：272 文件、1,514 测试全部通过，351.19 秒，baseline 匹配，验收证据不变。生产默认与模型保持；整体价格加权降本且质量不降仍待证明。
