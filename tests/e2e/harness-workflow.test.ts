@@ -65,7 +65,9 @@ test.each([false,true])('evaluation confirms a real draft and accounts for nativ
  }
 },60000);
 
-test.each([false,true])('evaluation completes only after worktree integration, host check, independent review and target delivery; frozen context=%s', async frozenContext=>{
+test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only after worktree integration, host check, independent review and target delivery; context=%s', async context=>{
+ const frozenContext=context!=='bare';
+ const explicitRoles=context!=='frozen-auto';
  const root=await mkdtemp(join(tmpdir(),'graph-eval-delivery-'));
  let artifactRoot:string|undefined;
  const repaired="export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)]; })); }\n";
@@ -109,7 +111,7 @@ test.each([false,true])('evaluation completes only after worktree integration, h
  const proposal={requirementVersion:1,summary:'Repair and deliver parser',acceptance:[
   {id:'behavior',description:acceptance[0]!.description,checkNode:'check'},{id:'review',description:acceptance[1]!.description,checkNode:'review'}],definition:{
   schemaVersion:2,name:'Parser delivery',protocols:{data:{type:'object'}},nodes:{
-   work:{recipe:'coder@2',...(frozenContext?{}:{model:'worker'}),task:'Repair, commit and publish config.js',workspace:{base:'worktree'},inputs:{job:data},outputs:{},submission:{}},
+   work:{recipe:'coder@2',...(explicitRoles?{model:'worker'}:{}),task:'Repair, commit and publish config.js',workspace:{base:'worktree'},inputs:{job:data},outputs:{},submission:{}},
    review:{recipe:'reviewer@2',model:'review',task:'Read the immutable parser artifact and review the specified integration commit.',inputs:{job:data},outputs:{},submission:{}},
   },modules:{check:{type:'operation',trigger:'each',inputs:{job:data},outputs:{result:data},operation:{action:'workspace.command',version:1,command:'node',args:['--input-type=module','-e',"import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});"],output:'result'}}},edges:{},inputs:{},outputs:{},acceptance,
  }};
@@ -139,9 +141,18 @@ test.each([false,true])('evaluation completes only after worktree integration, h
    id,modelId:id,provider:`graph-${id}`,grade,api:'openai-completions',baseUrl:(server as typeof main).model.baseUrl,contextWindow:32000,maxTokens:256,credentialId:'local',cost:{input:2,output:4,cacheRead:.5,cacheWrite:1},
   })),preferences:frozenContext?{high:['worker']}:{}}}));
   const {stdout}=await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath],{cwd:process.cwd(),timeout:60000,
-   env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:frozenContext?'':'worker',GRAPH_EVAL_REVIEWER_MODEL:frozenContext?'':'review',GRAPH_EVAL_TIMEOUT_MS:'35000',...(frozenContext?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{})}});
+   env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:explicitRoles?'worker':'',GRAPH_EVAL_REVIEWER_MODEL:explicitRoles?'review':'',GRAPH_EVAL_TIMEOUT_MS:'35000',...(frozenContext?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{})}});
   const report=JSON.parse(stdout);artifactRoot=report.root;
   expect(report,JSON.stringify({report,main:main.requests,worker:worker.requests,review:review.requests})).toMatchObject({completed:true,taskSuccess:true,success:true,workflow:{phase:'completed'}});
+  if(explicitRoles){
+   const initial=(main.requests[0] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='user');
+   const text=JSON.stringify(initial);
+   expect(text).toContain('修一下 config.js，空白行别当成配置，保留值里的等号。');
+   expect(text).toContain('已批准的隔离评测执行约束');
+   expect(text).toContain('worker model: worker');
+   expect(text).toContain('reviewer model: review');
+   expect(text).toContain('worktree');
+  }
   expect(await readFile(join(report.root,'project','config.js'),'utf8')).toBe(repaired);
   const ledger=JSON.parse(await readFile(join(report.root,'cost-report.json'),'utf8'));
   expect(ledger.tasks.find((task:{id:string})=>task.id===report.workflow.confirmedTaskId).executions).toBe(2);
