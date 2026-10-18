@@ -221,6 +221,7 @@ async function main() {
     allowedToolNames: config.allowedToolNames,
     deferredCatalogTools: config.deferredCatalogTools ?? false,
     deferredBrowserTools: config.deferredBrowserTools ?? false,
+    compactShellResults: config.compactShellResults ?? false,
     bundleDigest: config.bundleDigest,
     ...(config.legacyCapabilityDigest ? { legacyCapabilityDigest: config.legacyCapabilityDigest } : {}),
     toolPolicyDigest: config.toolPolicyDigest,

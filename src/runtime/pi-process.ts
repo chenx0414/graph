@@ -31,6 +31,7 @@ export interface PiWorkerTool {
 export type PiWorkerConfig = Omit<AgentSessionRequest, 'stream' | 'broker' | 'onEvent' | 'tools' | 'readOnly'> & {
   deferredCatalogTools?: boolean;
   deferredBrowserTools?: boolean;
+  compactShellResults?: boolean;
   binding: AgentSessionBinding;
   thinkingLevel: ThinkingLevel;
   tools: PiWorkerTool[];
@@ -76,6 +77,7 @@ export function piWorkerConfig(options: PiProcessOptions, resolved: {
     thinkingLevel: options.thinkingLevel ?? 'off',
     deferredCatalogTools: process.env.GRAPH_DEFER_CATALOG_TOOLS === '1',
     deferredBrowserTools: process.env.GRAPH_DEFER_BROWSER_TOOLS === '1',
+    compactShellResults: process.env.GRAPH_COMPACT_SHELL_RESULTS === '1',
     tools: serializedTools(tools),
     nativeTools: options.nativeTools ?? [],
     skillPaths,

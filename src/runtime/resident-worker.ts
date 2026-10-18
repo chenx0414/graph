@@ -160,6 +160,7 @@ export async function runResidentWorker(configPath: string): Promise<void> {
     allowedToolNames: config.allowedToolNames ?? [],
     deferredCatalogTools: config.deferredCatalogTools ?? false,
     deferredBrowserTools: config.deferredBrowserTools ?? false,
+    compactShellResults: config.compactShellResults ?? false,
     bundleDigest: config.bundleDigest,
     toolPolicyDigest: config.toolPolicyDigest,
     runtimePolicyDigest: config.runtimePolicyDigest,

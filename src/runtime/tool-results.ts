@@ -17,7 +17,10 @@
  * the first view, and the two bounds that keep it honest over time - the occurrence map
  * is capped (a forgotten key only ever means a full view again), the spill directory keeps
  * only the newest files, and the counts are written next to them so an instance that is
- * reopened for the same binding keeps counting instead of starting over.
+ * reopened for the same binding keeps counting instead of starting over. The opt-in
+ * compact shell view spills bash text over 4,000 characters on its first occurrence
+ * and returns the existing short summary. Its saved text lives for the instance,
+ * outside the older lazy-result eviction window; full-output notices are preserved.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -192,6 +195,7 @@ function boundSide(text: string, budget: number, fromEnd: boolean): string {
 /** Keep only the newest spilled results. A reclaimed handle is deliberately possible: the
  * summary stays truthful about the bytes, but a very old handle may be gone. */
 async function pruneSpills(spillDir: string, keep: number): Promise<void> {
+  if (keep === Number.POSITIVE_INFINITY) return;
   const names = (await readdir(spillDir)).filter(name => name.endsWith('.txt'));
   if (names.length <= keep) return;
   const dated = await Promise.all(names.map(async (name) => {
@@ -311,7 +315,7 @@ async function persistScope(scopeId: string, tracker: ToolResultTracker): Promis
  * first or second view of a large one, or a result with no text at all - so nothing
  * but a genuinely repeated large result (or one over its ceiling) is ever rewritten.
  */
-export function toolResultHook(input: { scopeId: string; spillDir: string; maxSpillFiles?: number }) {
+export function toolResultHook(input: { scopeId: string; spillDir: string; maxSpillFiles?: number; compactShellResults?: boolean }) {
   return async (context: ToolResultHookContext): Promise<AfterToolCallResult | undefined> => {
     const parts = context?.result?.content;
     if (!Array.isArray(parts)) return undefined;
@@ -319,8 +323,9 @@ export function toolResultHook(input: { scopeId: string; spillDir: string; maxSp
     if (!texts.length) return undefined;
     const name = context.toolCall?.name ?? 'unknown';
     const text = texts.join('\n');
-    const ceiling = TOOL_TEXT_LIMITS[name];
-    const limit = ceiling !== undefined && text.length > ceiling ? ceiling : undefined;
+    const compactShell = input.compactShellResults === true && name === 'bash';
+    const ceiling = compactShell ? TOOL_RESULT_LIMIT : TOOL_TEXT_LIMITS[name];
+    const limit = ceiling !== undefined && text.length > ceiling ? (compactShell ? SUMMARY_LIMIT : ceiling) : undefined;
     if (limit === undefined && text.length <= TOOL_RESULT_LIMIT) return undefined;
     return inSpillDirectory(input.spillDir, async () => {
       const tracker = await trackerFor(input.scopeId, input.spillDir);
@@ -329,10 +334,10 @@ export function toolResultHook(input: { scopeId: string; spillDir: string; maxSp
         conversationId: input.scopeId,
         tool: name,
         params: context.args,
-        spillDir: input.spillDir,
+        spillDir: compactShell ? join(input.spillDir, 'shell') : input.spillDir,
         tracker,
         ...(limit === undefined ? {} : { limit }),
-        ...(input.maxSpillFiles === undefined ? {} : { maxSpillFiles: input.maxSpillFiles }),
+        ...(compactShell ? { maxSpillFiles: Number.POSITIVE_INFINITY } : input.maxSpillFiles === undefined ? {} : { maxSpillFiles: input.maxSpillFiles }),
       });
       // Only the lazy path advances a count, so only it needs to be durable.
       if (limit === undefined) await persistScope(input.scopeId, tracker);

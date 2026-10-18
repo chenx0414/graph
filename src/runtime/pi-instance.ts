@@ -59,6 +59,7 @@ export function isExternallyGated(tool: ToolDefinition) {
 export interface PiInstanceOptions {
   deferredCatalogTools?: boolean;
   deferredBrowserTools?: boolean;
+  compactShellResults?: boolean;
   binding: InstanceBinding;
   /** Reporting sink for executed tool calls (durable telemetry). A throw here is swallowed. */
   onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;
@@ -475,6 +476,7 @@ export async function openPiInstance(options: PiInstanceOptions) {
   const toolResultSeam = toolResultHook({
     scopeId: options.binding.instanceId,
     spillDir: join(stateDir, 'tool-results'),
+    compactShellResults: options.compactShellResults ?? process.env.GRAPH_COMPACT_SHELL_RESULTS === '1',
   });
   session.agent.afterToolCall = async (context, _signal) => {
     const startedAt = toolStarted.get(context.toolCall.id);

@@ -13,7 +13,7 @@ const caseId=process.argv[3] ?? 'parser';
 const scenario=cases[caseId];if(!scenario)throw new Error(`Unknown evaluation case: ${caseId}`);
 const deadlineMs=Number(process.env.GRAPH_EVAL_TIMEOUT_MS ?? 120000);
 if (!Number.isSafeInteger(deadlineMs) || deadlineMs <= 0) throw new Error('Invalid GRAPH_EVAL_TIMEOUT_MS');
-const variant=process.env.GRAPH_SCOPED_SYSTEM_CAPABILITIES==='1'?'scoped-capabilities':process.env.GRAPH_MATCH_SEARCH_GUIDANCE==='1'?'matched-search':process.env.GRAPH_CLASSIFY_HARNESS_FRICTION==='1'?'classified-friction':process.env.GRAPH_DEFER_BROWSER_TOOLS==='1'?'deferred-browser':process.env.GRAPH_DEFER_CATALOG_TOOLS==='1'?'deferred-catalog':process.env.GRAPH_COMPACT_DOCUMENTATION==='1'?'compact':'default';
+const variant=process.env.GRAPH_COMPACT_SHELL_RESULTS==='1'?'compact-shell':process.env.GRAPH_SCOPED_SYSTEM_CAPABILITIES==='1'?'scoped-capabilities':process.env.GRAPH_MATCH_SEARCH_GUIDANCE==='1'?'matched-search':process.env.GRAPH_CLASSIFY_HARNESS_FRICTION==='1'?'classified-friction':process.env.GRAPH_DEFER_BROWSER_TOOLS==='1'?'deferred-browser':process.env.GRAPH_DEFER_CATALOG_TOOLS==='1'?'deferred-catalog':process.env.GRAPH_COMPACT_DOCUMENTATION==='1'?'compact':'default';
 const root=await mkdtemp(join(tmpdir(),`graph-real-eval-${variant}-`));
 const project=join(root,'project');await mkdir(project);
 await writeFile(join(project,'package.json'),'{"type":"module"}');
