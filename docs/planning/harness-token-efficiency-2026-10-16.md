@@ -378,3 +378,13 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 真实 v2 会话在 graph 完成后又产生 11 条请求 profile、16 次工具调用并超时；其中两次把 check 模块传给 get_task_status。运行时现在保留 not_found 并返回可调用的 graph_inspect 恢复参数，仅识别正式定义自身的模块键，未知对象不冒充模块。已有完整交付 E2E 的一行重放两类错误、从实际错误提取查询、读取真实操作记录并完成原交付，修复前明确红灯、最终定向通过。最终全量 272/1,514 通过，352.33 秒、baseline 与验收证据不变。没有 system prompt、模型/分工/default flag 改动或新真实模型调用。详见[模块恢复证据](harness-module-status-recovery-2026-10-18.md)。
 
 机会排序的新证据是：冻结 off-peak 权重下，本次已记录部分 main/worker/reviewer 分别约0.0381/0.0042/0.0638 USD，不能套用其他团队 worker 占比直接推导免费 worker 的整树收益。未知 usage 与完整成功数0仍使完整费用/每完成任务情景 null。该修复没有证明减少真实模型请求或达到总体降本目标。
+
+
+## 2026-10-18：Reviewer 身份与用量阻碍的离线诊断
+
+[实际请求诊断](harness-reviewer-identity-audit-2026-10-18.md)核对独立reviewer的12条usage及实际身份原文。没有反复加载Skill；成本权重由input/output/cacheRead=0.015442/0.028215/0.020128 USD构成，长身份只是部分来源。未安装候选把13887字节身份改为2507字节并保留323行处置表，仅为首请求静态字节29.4%的投影，未物化参考路径，不能声称可执行或费用下降。另核实LongCat提示建议在约5001ms后、首main operation结束前已中止，排除“自动确认抢跑”的归因；仍需权威usage方案。没有重开已停止实验、改变默认、关闭辅助请求或追加模型调用。下一步是物化/受控验证与用量诊断，不能绕过缺口直接付费扩样。
+
+
+## 2026-10-18：辅助调用时限的默认关闭实验
+
+795910f 增加 `GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT=1`，仅将提示建议上限从默认5000ms改为20000ms；默认、模型/路由/effort/prompt/调用次数均保持。事件记录timeoutMs/timedOut。原真实CLI E2E的suggestion行以6500ms外部响应分别运行实验/默认流程：两次业务成功，实验权威usage完整，默认保留未知usage，均只发一次辅助请求。修复前明确红灯、最终定向19.83秒通过；全量272/1514通过、356.10秒，baseline与验收证据不变。它不是已部署修复或降本证明，不回填旧usage。最多一个新360秒完整parser基线的[提案](harness-auxiliary-deadline-proposal-2026-10-18.md)尚待批准，20秒辅助等待包含在360秒内；原14/6/5资源、角色模型和停止条件保持，reviewer候选不参与。
