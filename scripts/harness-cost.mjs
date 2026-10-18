@@ -76,10 +76,21 @@ try {
     } else task.unknownCost++;
   }
   const sources = {};
+  const toolResults = new Map();
+  let toolResultProfileSamples = 0;
   const fingerprints = new Set();
   for (const row of profiles) {
     const profile = parse(row.data);
     if (!profile?.sections) continue;
+    if (Array.isArray(profile.toolResults)) {
+      toolResultProfileSamples++;
+      for (const result of profile.toolResults) {
+        const row = toolResults.get(result.tool) ?? {tool:result.tool,requestViews:0,resultViews:0,bytes:0,estimatedTokens:0};
+        row.requestViews++;
+        for (const key of ['resultViews','bytes','estimatedTokens']) row[key]+=result[key];
+        toolResults.set(result.tool,row);
+      }
+    }
     fingerprints.add(profile.staticFingerprint);
     for (const [source, section] of Object.entries(profile.sections)) {
       const value = sources[source] ??= { bytes: 0, estimatedTokens: 0 };
@@ -109,6 +120,7 @@ try {
       'Known costs are lower bounds when unknownCost > 0; unspecified currency is never combined with named currencies.',
       'operations/executions are task-level turns; requests include retries, compaction and optional model calls.',
       'Source estimates describe rendered JSON, not provider tokenizer counts or source-by-billing cost attribution.',
+      'Per-tool result views count repeated appearances in provider requests, not tool executions; null tool identities and historical profiles without this field are not attributed.',
       'File/search/command/summary provenance is unavailable in historical wire messages; no fabricated source split.',
       'Main conversations and child graphs remain separate task rows; completion costs exclude unallocated main planning.',
       'Tool reach uses tasks with retained tool telemetry; retention can differ from invocation retention.',
@@ -126,6 +138,7 @@ try {
       tokens: Object.fromEntries(billing.map(key => [key, outputTasks.reduce((sum, task) => sum + task.tokens[key], 0)])),
     },
     requestProfiles: { samples: profiles.length, distinctStaticFingerprints: fingerprints.size, sources,
+      toolResultProfileSamples,toolResultUnprofiledSamples:profiles.length-toolResultProfileSamples,toolResults:[...toolResults.values()].sort((a,b)=>b.bytes-a.bytes),
       meanEstimatedStaticTokens: profiles.length ? ((sources.system?.estimatedTokens ?? 0) + (sources.tools?.estimatedTokens ?? 0)) / profiles.length : null },
     tools: toolRows.map(tool => ({ ...tool, errorRate: tool.errors / tool.calls, taskReach: toolDenominator ? tool.tasks / toolDenominator : null })),
     models: [...models.values()],

@@ -42,6 +42,7 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   const provider = await openaiServer([
     ...(cacheField === 'capacity-retry' ? [{ status: 429 }] : []),
     { tools: [{ id: 'write-proof', name: 'bash', arguments: JSON.stringify({ command: 'printf harness-proof > proof.txt' }) }, ...(boundSearch ? [{id:'indexed-search',name:'fffind',arguments:JSON.stringify({pattern:'find-proof'})}] : [])], usage },
+    { tools: [{id:'read-proof',name:'read',arguments:JSON.stringify({path:'proof.txt'})}], usage },
     { text: 'The proof file is ready.', usage },
   ]);
   cleanup.push(() => provider.close());
@@ -96,7 +97,7 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   }
   const events = await (await fetch(`${daemon.url}/api/conversations/${created.conversationId}/events?limit=500`, { headers })).json() as { type: string; data: Record<string, unknown> }[];
   const profiles = events.filter(event => event.type === 'provider.request_profile');
-  expect(profiles).toHaveLength(cacheField === 'capacity-retry' ? 3 : 2);
+  expect(profiles).toHaveLength(cacheField === 'capacity-retry' ? 4 : 3);
   expect(JSON.stringify(profiles)).not.toMatch(/private-user-marker|private-fixture-key|printf harness-proof/);
   expect(profiles[0]!.data.staticFingerprint).toBe(profiles[1]!.data.staticFingerprint);
   expect(profiles.at(-1)!.data.sections).toHaveProperty('tool_results');
@@ -108,24 +109,31 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   if (cacheField === 'unreported') {
     expect(task.cacheHitRequestRate).toBeNull();
     expect(task.cacheReadFraction).toBeNull();
-    expect(task).toMatchObject({ requests: 2, estimatedUsage: 2, cacheMeasuredRequests: 0, cacheUnmeasuredRequests: 2 });
+    expect(task).toMatchObject({ requests: 3, estimatedUsage: 3, cacheMeasuredRequests: 0, cacheUnmeasuredRequests: 3 });
     expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(0);
     expect(report.summary.costPerCompletedTask).toBeNull();
   } else {
-    expect(task).toMatchObject({ requests: cacheField === 'capacity-retry' ? 3 : 2, unknownUsage: 0, unknownCost: 0,
-      tokens: { input: 50, output: 20, cacheRead: 30, cacheWrite: 0 }, cacheReadFraction: 0.375 });
-    expect(task.costs.USD).toBeCloseTo(0.000195, 10);
+    expect(task).toMatchObject({ requests: cacheField === 'capacity-retry' ? 4 : 3, unknownUsage: 0, unknownCost: 0,
+      tokens: { input: 75, output: 30, cacheRead: 45, cacheWrite: 0 }, cacheReadFraction: 0.375 });
+    expect(task.costs.USD).toBeCloseTo(0.0002925, 10);
     expect(report.summary.costPerCompletedTask).toBeNull();
-    expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(cacheField === 'capacity-retry' ? 3 : 2);
-    expect(task.cacheMeasuredRequests).toBe(2);
+    expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(cacheField === 'capacity-retry' ? 4 : 3);
+    expect(task.cacheMeasuredRequests).toBe(3);
     expect(task.cacheUnmeasuredRequests).toBe(cacheField === 'capacity-retry' ? 1 : 0);
-    expect(report.summary.costByBillingType.amounts.USD.input).toBeCloseTo(0.0001, 10);
-    expect(report.summary.costByBillingType.amounts.USD.output).toBeCloseTo(0.00008, 10);
-    expect(report.summary.costByBillingType.amounts.USD.cacheRead).toBeCloseTo(0.000015, 10);
+    expect(report.summary.costByBillingType.amounts.USD.input).toBeCloseTo(0.00015, 10);
+    expect(report.summary.costByBillingType.amounts.USD.output).toBeCloseTo(0.00012, 10);
+    expect(report.summary.costByBillingType.amounts.USD.cacheRead).toBeCloseTo(0.0000225, 10);
     expect(task.cacheHitRequestRate).toBe(1);
   }
-  expect(report.requestProfiles.samples).toBe(cacheField === 'capacity-retry' ? 3 : 2);
+  expect(report.requestProfiles.samples).toBe(cacheField === 'capacity-retry' ? 4 : 3);
   expect(report.tools.find((tool: { tool: string }) => tool.tool === 'bash')).toMatchObject({ calls: 1, errors: 0, taskReach: 1 });
+  // One executed bash result is resent on both later provider requests; read is sent once.
+  expect(report.requestProfiles.toolResults.find((row:{tool:string})=>row.tool==='bash')).toMatchObject({requestViews:2,resultViews:2});
+  expect(report.requestProfiles.toolResults.find((row:{tool:string})=>row.tool==='read')).toMatchObject({requestViews:1,resultViews:1});
+  const attributedBytes=report.requestProfiles.toolResults.reduce((sum:number,row:{bytes:number})=>sum+row.bytes,0);
+  expect(attributedBytes).toBe(report.requestProfiles.sources.tool_results.bytes);
+  expect(JSON.stringify(profiles.map(profile=>profile.data.toolResults))).not.toMatch(/private-user-marker|private-fixture-key|harness-proof|proof.txt|write-proof|read-proof/);
+
 }, 60_000);
 
 }
