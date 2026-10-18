@@ -2,6 +2,8 @@
 
 本页描述当前源码中的原生内核 API。源码入口已统一采用该内核；默认桌面启动已独立核对当前源码和原用户状态，完整证据见 [逐项验收对应](issue-1-spec-acceptance-matrix.md)。完整契约见 [已确认规格](../specs/graph-rebuild-v2.md)。
 
+代码修改需要 worktree、宿主检查与独立审查时，参阅 [完整代码交付示例](code-delivery.md)及其可执行 JSON。
+
 ## 创建与启动
 
 需要用户确认的草稿使用 `propose_graph({proposal:{requirementVersion,summary,definition,acceptance,decisions?},requestId})`。definition 使用本文同一 JSON 格式；无需旧 nodes 数组。外层 acceptance 暂用 `{id,description,checkNode}`，指向定义中的实际节点或模块；定义同时声明正式 acceptance 时，两者需一致。main 位于定义外部。确认后收到 graph_ready 通知，再显式 graph_send，不自动运行根节点。主 agent 的 propose_graph 只接收此结构化对象，已关闭旧 proposalJson 字符串别名；运行中修改使用 graph_patch，旧 revise_graph 工具已移除。SDK 也要求原生 definition；旧 revise SDK 方法也已删除，使用 graph_patch 修订。正式 SDK 草稿只接收 NativeProposal，definition 必需；不再暴露旧 nodes/containers/loops 草稿类型。旧节点上下文继承、依赖调度和草稿格式不再是正式 SDK；默认应用切换证据见实施进度。

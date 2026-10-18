@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "name": "Parser code delivery",
+  "protocols": {
+    "data": {
+      "type": "object"
+    }
+  },
+  "nodes": {
+    "work": {
+      "recipe": "coder@1",
+      "model": "work",
+      "task": "Repair config.js, commit and publish the code artifact",
+      "instructions": "Read config.js and the project rules. Ignore blank lines and preserve equals signs inside values. Implement in this worktree, verify the behavior, call workspace_commit for config.js, then artifact_publish with namespace deliverables, name parser, sourcePath config.js and metadata.kind code. Report the commit and exact artifact reference.",
+      "workspace": {
+        "base": "worktree"
+      },
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {},
+      "submission": {}
+    },
+    "review": {
+      "recipe": "reviewer@1",
+      "model": "review",
+      "task": "Review the immutable parser code and the supplied integration commit",
+      "instructions": "Read the supplied integration commit and the exact published parser artifact with artifact_list and artifact_read. Review the parser against the acceptance criteria. Publish an application/json artifact with schema graph.review@1, namespace reviews, name parser, and content {commit,passed,reason}; commit is the full reviewed integration SHA, passed is the actual verdict and reason explains the evidence. Report the review artifact reference.",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {},
+      "submission": {}
+    }
+  },
+  "modules": {
+    "check": {
+      "type": "operation",
+      "trigger": "each",
+      "inputs": {
+        "job": {
+          "protocol": "data"
+        }
+      },
+      "outputs": {
+        "result": {
+          "protocol": "data"
+        }
+      },
+      "operation": {
+        "action": "workspace.command",
+        "version": 1,
+        "command": "node",
+        "args": [
+          "--input-type=module",
+          "-e",
+          "import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});assert.deepEqual(parseConfig(''),{});"
+        ],
+        "output": "result"
+      }
+    }
+  },
+  "edges": {},
+  "inputs": {},
+  "outputs": {},
+  "acceptance": [
+    {
+      "id": "behavior",
+      "description": "Parser works at the integrated commit",
+      "kind": "check",
+      "module": "check"
+    },
+    {
+      "id": "review",
+      "description": "Independent review of the delivered commit",
+      "kind": "review",
+      "node": "review"
+    }
+  ]
+}

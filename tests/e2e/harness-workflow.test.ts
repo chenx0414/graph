@@ -68,6 +68,10 @@ test.each([false,true])('evaluation confirms a real draft and accounts for nativ
 test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only after worktree integration, host check, independent review and target delivery; context=%s', async context=>{
  const frozenContext=context!=='bare';
  const explicitRoles=context!=='frozen-auto';
+ const example=JSON.parse(await readFile(new URL('../../examples/graphs/parser-delivery.json',import.meta.url),'utf8'));
+ example.nodes.work.recipe='coder@2';
+ if(explicitRoles)example.nodes.work.model='worker';else delete example.nodes.work.model;
+ example.nodes.review.recipe='reviewer@2';
  const root=await mkdtemp(join(tmpdir(),'graph-eval-delivery-'));
  let artifactRoot:string|undefined;
  const repaired="export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)]; })); }\n";
@@ -105,16 +109,11 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    content:JSON.stringify({commit:commit(),passed:true,reason:'Read the immutable parser implementation; it preserves equals and ignores empty lines.'}),requestId:'publish-review'})),
   {text:'Independent review published.'},{text:'No suggestion'},
  ]);
- const data={protocol:'data'};
- const acceptance=[{id:'behavior',description:'Parser works at the integrated commit',kind:'check',module:'check'},
-  {id:'review',description:'Independent review of the delivered commit',kind:'review',node:'review'}];
- const proposal={requirementVersion:1,summary:'Repair and deliver parser',acceptance:[
-  {id:'behavior',description:acceptance[0]!.description,checkNode:'check'},{id:'review',description:acceptance[1]!.description,checkNode:'review'}],definition:{
-  schemaVersion:2,name:'Parser delivery',protocols:{data:{type:'object'}},nodes:{
-   work:{recipe:'coder@2',...(explicitRoles?{model:'worker'}:{}),task:'Repair, commit and publish config.js',workspace:{base:'worktree'},inputs:{job:data},outputs:{},submission:{}},
-   review:{recipe:'reviewer@2',model:'review',task:'Read the immutable parser artifact and review the specified integration commit.',inputs:{job:data},outputs:{},submission:{}},
-  },modules:{check:{type:'operation',trigger:'each',inputs:{job:data},outputs:{result:data},operation:{action:'workspace.command',version:1,command:'node',args:['--input-type=module','-e',"import {parseConfig} from './config.js';import assert from 'node:assert/strict';assert.deepEqual(parseConfig('X=a=b\\n\\n'),{X:'a=b'});"],output:'result'}}},edges:{},inputs:{},outputs:{},acceptance,
- }};
+ const proposal={requirementVersion:1,summary:'Repair and deliver parser',
+  acceptance:example.acceptance.map((item:{id:string;description:string;kind:string;module?:string;node?:string})=>({
+   id:item.id,description:item.description,checkNode:item.kind==='check'?item.module:item.node,
+  })),definition:example,
+ };
  const main=await openaiServer([
   ...(context==='frozen-explicit' ? ['coder@2','reviewer@2'].flatMap(id=>[
    tool('get_agent_combination',()=>({id})),

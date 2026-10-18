@@ -1,5 +1,7 @@
 # Artifacts, Handoff and Git
 
+完整建图与投递步骤见 [代码交付示例](code-delivery.md)，覆盖实际代码 artifact、integration commit、宿主检查与独立 reviewer 报告。
+
 ## 工作位置与代码交付
 
 节点 workspace 决定使用项目目录还是已准备的私有 worktree，具体声明与权限见 [graph-v2.md](graph-v2.md#节点工作目录与权限)。system prompt 和运行快照显示本次实际位置；相对路径以它为基准。普通节点不能写另一节点工作目录或共同 Git metadata。

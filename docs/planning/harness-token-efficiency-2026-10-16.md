@@ -359,3 +359,10 @@ RSI 摩擦分类提示词已作默认关闭实验，默认 A 3/3、实验 B 1/3 
 新增实际 wire profile 的逐工具结果 bytes/估算 tokens/resultViews，CLI 汇总 requestViews 并明确历史缺失覆盖；不存正文/参数/路径/call ID，未知名称保留 null，不按比例分摊供应商账单。真正 HTTP/Pi E2E 验证 bash 只执行一次但结果发送两次、read 结果一次，逐工具 bytes 与原 section 一致。原失败轨迹首次正文 183,166 bytes，实际累计 tool_results 2,676,224 bytes，口径不同不能相除作为精确重发倍数；旧 profile 的 25 项逐工具归属均明确未观测。生产请求、模型和 flag 未变，无新增付费会话，整体收益仍待证明。见 [逐工具请求观测](harness-tool-wire-attribution-2026-10-18.md)。
 
 逐工具请求观测最终全量 `/tmp/graph-tool-wire-attribution-check.log`：272 文件、1,514 测试通过，355.01 秒，baseline 匹配、验收证据不变。该修改仅补计量，不能作为整体价格加权任务降本已达成的证据。
+
+
+## 2026-10-18：完整代码交付示例与按需 API 指南
+
+针对真实 planner 大量查询验收与 integration 源码的轨迹，补齐 parser-delivery 原生定义及 code-delivery 操作指南，并从现有 Graph/产物页提供入口；系统 prompt、模型、effort 和 flags 不改。原完整交付 E2E 直接消费该 JSON（仅替换本地连接），替代内联副本，5 项通过。材料合计 7,283 bytes 只是体积，不是节省证明；受控模型测试也不能证明真实模型发现率。没有新增付费会话、补跑旧小集或弱化正式检查/独立审查。见 [示例交付与局限](harness-delivery-example-2026-10-18.md)。
+
+完整交付示例最终全量 `/tmp/graph-delivery-example-check.log`：272 文件、1,514 测试通过，348.49 秒，baseline 匹配、验收证据不变。该门禁验证示例和工程回归，整体价格加权成本下降且质量不降仍未证明。
