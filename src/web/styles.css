@@ -14,20 +14,20 @@
   --panel: #ffffff;
   --panel-soft: #f7f7f8;
   --border: #e8e9eb;
-  --border-strong: #d7d9dc;
+  --border-strong: #858b94;
   --text: #1a1c1f;
   --muted: #5d6066;
-  --faint: #8b8f96;
+  --faint: #646971;
   --accent: #1a1c1f;
   --accent-strong: #000000;
   --accent-weak: rgba(26, 28, 31, 0.08);
-  --success: #0f9d58;
+  --success: #08783f;
   --success-weak: rgba(15, 157, 88, 0.12);
   --warn: #b45309;
   --warn-weak: rgba(217, 119, 6, 0.14);
   --danger: #d33a3a;
   --danger-weak: rgba(211, 58, 58, 0.12);
-  --info: #2563eb;
+  --info: #1d4ed8;
   --info-weak: rgba(37, 99, 235, 0.12);
   --sidebar: #f9f9fa;
   --sidebar-text: #1a1c1f;
@@ -176,11 +176,6 @@ small { color: var(--muted); }
 @keyframes stream-caret {
   0%, 45% { opacity: 0.72; }
   46%, 100% { opacity: 0.12; }
-}
-@keyframes working-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(77, 141, 247, 0.34); }
-  70% { box-shadow: 0 0 0 7px rgba(77, 141, 247, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(77, 141, 247, 0); }
 }
 @keyframes pulse-ring {
   0% { box-shadow: 0 0 0 0 var(--success-weak); }
@@ -643,7 +638,7 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   cursor: pointer;
 }
 .full-access-toggle:hover { background: color-mix(in srgb, #d97706 10%, transparent); }
-.full-access-toggle[data-active="true"] { color: #d97706; background: color-mix(in srgb, #d97706 10%, transparent); }
+.full-access-toggle[data-active="true"] { color: var(--warn); background: color-mix(in srgb, #d97706 10%, transparent); }
 .full-access-toggle:disabled { opacity: 0.45; cursor: wait; }
 .composer-project {
   border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px;
@@ -1128,6 +1123,12 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   width: 100%; padding: 2px 0; background: transparent; border: 0; color: var(--faint); font-size: 12px;
 }
 .agent-status-row { min-height: 28px; }
+.agent-thinking-orb {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
 .agent-working {
   display: inline-flex;
   align-items: center;
@@ -1144,15 +1145,6 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   font-weight: 600;
 }
 .process-author svg { color: #4d8df7; }
-.working-pulse {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-radius: 999px;
-  background: #4d8df7;
-  box-shadow: 0 0 0 0 rgba(77, 141, 247, 0.36);
-  animation: working-pulse 1.45s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-}
 .tool-activity-group {
   width: 100%;
   margin: -2px 0 18px;

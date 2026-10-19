@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { Button, Icon } from './ui.tsx';
@@ -21,6 +21,16 @@ function folderName(path: string) {
 
 export function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const bridge = typeof window !== 'undefined' ? window.graph : undefined;
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const trigger = document.activeElement;
+    dialog.current?.showModal();
+    dialog.current?.querySelector<HTMLInputElement>('#project-name')?.focus();
+    return () => {
+      dialog.current?.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
+    };
+  }, []);
   const [name, setName] = useState('');
   const [root, setRoot] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,6 +46,7 @@ export function CreateProjectDialog({ onClose, onCreated }: { onClose: () => voi
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
+    if (busy) return;
     const id = name.trim();
     const projectRoot = root.trim();
     if (!id) { setError('请输入项目名称'); return; }
@@ -77,29 +88,33 @@ export function CreateProjectDialog({ onClose, onCreated }: { onClose: () => voi
   }
 
   return createPortal(
-    <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <dialog ref={dialog} className="project-modal" aria-labelledby="project-dialog-title" onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
       <form className="modal-card project-dialog" data-testid="create-project-dialog" onSubmit={event => void create(event)}>
         <div className="modal-head">
-          <h2>创建项目</h2>
+          <h2 id="project-dialog-title">创建项目</h2>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
             <Icon name="close" size={16} />
           </button>
         </div>
+        <label className="field-label" htmlFor="project-name">项目名称</label>
         <label className="project-input-row">
           <Icon name="box" size={17} />
           <input
+            id="project-name"
+            name="project-name"
+            required
             data-testid="project-name"
             value={name}
             onChange={event => setName(event.target.value)}
-            placeholder="项目名称"
-            autoFocus
+            placeholder="例如：我的网站"
           />
         </label>
-        <div className="field-label">源文件夹</div>
+        <label className="field-label" htmlFor={bridge ? "project-pick" : "project-root"}>源文件夹</label>
+        <p className="field-hint">选择要协作的项目目录，现有文件会保留。</p>
         <div className="source-picker">
           {bridge ? (
             <>
-              <button type="button" className="source-picker-trigger" data-testid="project-pick" onClick={() => void chooseRoot()}>
+              <button type="button" id="project-pick" className="source-picker-trigger" data-testid="project-pick" onClick={() => void chooseRoot()}>
                 <span>{root || '在此电脑上添加文件夹'}</span>
                 <Icon name="chevron" size={14} />
               </button>
@@ -108,6 +123,9 @@ export function CreateProjectDialog({ onClose, onCreated }: { onClose: () => voi
           ) : (
             <input
               className="input"
+              id="project-root"
+              name="project-root"
+              required
               data-testid="project-root"
               value={root}
               onChange={event => setRoot(event.target.value)}
@@ -118,12 +136,12 @@ export function CreateProjectDialog({ onClose, onCreated }: { onClose: () => voi
         {error && <p className="field-error" role="alert">{error}</p>}
         <div className="modal-actions">
           <Button type="button" variant="ghost" data-testid="project-cancel" onClick={onClose}>取消</Button>
-          <Button type="submit" variant="primary" data-testid="project-create" disabled={busy || !name.trim() || !root.trim()}>
+          <Button type="submit" variant="primary" data-testid="project-create" disabled={busy}>
             {busy ? '创建中…' : '创建项目'}
           </Button>
         </div>
       </form>
-    </div>,
+    </dialog>,
     document.body,
   );
 }

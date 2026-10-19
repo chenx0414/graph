@@ -44,10 +44,9 @@ export function TabBar({ state, onActivate, onClose, onOpenNew }: {
           >
             <button
               type="button"
-              role="tab"
               className="tab-open"
               data-testid={`tab-open-${index}`}
-              aria-selected={active}
+              aria-current={active ? 'page' : undefined}
               title={`${tab.title}${index < 8 ? ` · ⌘${index + 1}` : ''}`}
               onClick={() => onActivate(tab.id)}
             >

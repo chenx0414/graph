@@ -150,6 +150,20 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 ---
 
+## 服务商选择与浏览器授权
+
+首次设置和模型设置使用 `src/catalog/providers.ts` 的同一服务商目录；支持名称/端点搜索、API key/订阅凭据筛选、本地 LobeHub 品牌图标和自定义兼容服务。新增 OpenAI、Anthropic、Google Gemini、OpenRouter 到模型设置入口；原有账户 ID、`secretRef` 与保存路径不迁移。
+
+**OpenRouter 浏览器授权**已接入 Pi 0.86.1 的 provider OAuth 实现：选择 OpenRouter → 授权登录 → 打开浏览器授权 → 等待桌面安全存储确认 → 保存配置、选择模型并验证。依据 [OpenRouter 官方 PKCE 文档](https://openrouter.ai/docs/guides/overview/auth/oauth)，该流程交换的是用户控制的 API key，直接用于现有 Chat Completions 路径，不存在 access/refresh token 定时刷新。认证与模型可调用性仍分别验证。
+
+- 认证由宿主运行；PKCE verifier、授权码和 key 不进入 renderer。Pi 在 loopback 临时端口上监听每次随机 callback 路径，只接受该流程的回调，重复回调不重复交换。Graph 只向页面返回安全状态和 OpenRouter 授权地址。
+- `POST /api/providers/login {providerId:"openrouter", credentialRef}` 启动流程；`GET /api/providers/login/:id` 返回 `starting / waiting / saving / complete / cancelled / failed`；`POST /api/providers/login/:id/cancel` 取消。它们使用现有本机会话 cookie 与写请求 Origin 守卫，不能绕过鉴权。
+- 同一凭据进行中的登录复用同一流程，五分钟未完成则取消；宿主关闭会清理回调服务。认证拒绝或交换失败保留已有凭据，不返回上游敏感错误原文。未实现远程浏览器手动粘贴回调，浏览器需与宿主在同一机器。
+- 较早的桌面持久化确认不得覆盖最新凭据或恢复已撤销凭据；收到过期确认时保留当前状态，并重新排队同步最新值。
+- `saving` 包括等待桌面 App 拉取密钥并通过 safeStorage 保存；只有待持久化请求消失才返回 `complete`。桌面 App 未运行或安全存储不可用时不能宣称永久保存，也不要用明文文件代替。
+- `POST /api/providers/disconnect {credentialRef}` 先终止同凭据登录再撤销本机密钥；断开期间拒绝新的登录，防止迟到回调恢复密钥。撤销进入现有跨重启的 revoked-secrets 机制，桌面端随后移除加密保存值。**这是本机断开**，服务商端密钥须由用户在 OpenRouter 账户管理中撤销。共享同一个 `secretRef` 的配置会一同受影响。
+- 其他订阅卡片仍使用访问令牌，不表示已支持 OAuth。ChatGPT/Codex 的 Responses 接入与可刷新 token 生命周期尚未实现。
+
 ## 已知厂商 preset（写实）
 
 `id` / `label` / `baseUrl` / 凭据变量名 / 种类 / 模型列表探测，均为仓库内置声明：
@@ -160,6 +174,10 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `command-goat` | Command Goat | openai-completions | `https://api.commandcode.ai/provider/v1` | `GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY` | 订阅 | 是 |
 | `grok` | Grok | openai-completions | `https://api.x.ai/v1` | `GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN` | 订阅 | 是 |
 | `chatgpt` | ChatGPT | openai-completions | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | 是 |
+| `openai` | OpenAI | openai-completions | `https://api.openai.com/v1` | `OPENAI_API_KEY` | API KEY | 是 |
+| `anthropic` | Anthropic | anthropic-messages | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | API KEY | 是 |
+| `gemini` | Google Gemini | openai-completions | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | API KEY | 是 |
+| `openrouter` | OpenRouter | openai-completions | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | API KEY / 浏览器授权 | 是 |
 | `deepseek` | DeepSeek | openai-completions | `https://api.deepseek.com/v1` | `GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY` | API KEY | 是 |
 | `custom` | 自定义 | openai-completions | 自填 | `GRAPH_PROVIDER_API_KEY` | API KEY | 是 |
 

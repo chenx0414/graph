@@ -107,7 +107,15 @@ test('the console completes the main flow, keeps projects separate, and restores
   await page.goto(`${server.url}/#/tasks/${taskA}/graph`);
   await page.getByTestId('graph').waitFor();
 
-  await page.locator('.react-flow__node').filter({ hasText: 'implement' }).first().click();
+  if (await page.getByTestId('graph-edge-inspector').isVisible()) await page.getByRole('button', { name: '关闭边详情' }).click();
+  const edgeByKeyboard = page.getByTestId('rf__edge-check');
+  await edgeByKeyboard.focus();
+  await page.keyboard.press('Enter');
+  await page.getByTestId('graph-edge-inspector').waitFor();
+  await page.getByRole('button', { name: '关闭边详情' }).click();
+  const nodeByKeyboard = page.locator('.react-flow__node').filter({ hasText: 'implement' }).first();
+  await nodeByKeyboard.focus();
+  await page.keyboard.press('Enter');
   // A node opens its own tab; the overview states what it is, and the graph keeps the state.
   await expect.poll(() => page.getByTestId('node-overview').innerText()).toContain('implement');
   await expect.poll(() => page.getByTestId('node-environment').innerText()).toContain(rootA);

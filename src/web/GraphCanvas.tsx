@@ -322,7 +322,7 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
       const tone = nodeTone(node.status);
       const nodeType = graphNodeVisualKind(node);
       return {
-        id: node.id, type: 'graphNode', position: relativePosition(node.id, position),
+        id: node.id, ariaLabel: `${graphNodeLabel(node)}，${boardStateLabel(node.status)}，按 Enter 打开`, ariaRole: 'button', type: 'graphNode', position: relativePosition(node.id, position),
         data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status, boardState: boardNodeState(node.status), unknown: !boardStateKnown(node.status) } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
@@ -404,7 +404,18 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
   const legend = boardStateCounts(statuses);
   const unknownCount = boardUnknownCount(statuses);
   return (
-    <div className="graph-wrap" data-testid="flow">
+    <div className="graph-wrap" data-testid="flow" onKeyDownCapture={event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (!(event.target instanceof Element)) return;
+      const target = event.target.closest('.react-flow__node, .react-flow__edge');
+      if (!target || event.target !== target) return;
+      const id = target.getAttribute('data-id');
+      if (!id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (target.classList.contains('react-flow__edge')) setSelectedEdge(id);
+      else { setSelectedEdge(null); onSelect(id); }
+    }}>
       <ul className="graph-board-legend" data-testid="legend" aria-label="节点状态图例">
         {legend.map(item => (
           <li className="graph-board-legend-item" key={item.id} data-board-state={item.id}>
@@ -432,7 +443,7 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
           }}
         />
       </ReactFlow>
-      {selectedModule && !selectedEdge && <aside className="graph-edge-inspector" data-testid="graph-module-inspector">
+      {selectedModule && !selectedEdge && <aside className="graph-edge-inspector" data-testid="graph-module-inspector" aria-label="模块详情">
         <ModuleHistory key={`${taskId}:${selectedModule.moduleId}`} taskId={taskId ?? null} summary={selectedModule} {...(onReopen ? { onReopen } : {})} />
       </aside>}
       {currentEdge && <aside className="graph-edge-inspector" data-testid="graph-edge-inspector">

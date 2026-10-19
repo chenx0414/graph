@@ -1,0 +1,730 @@
+{
+  "measuredAt": "2026-10-16T04:24:28.257Z",
+  "root": "/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-flash-QRK8eu",
+  "baseline": "/tmp/graph-flash-baseline-web",
+  "candidate": "/Users/macmini/workspace/13-Graph/dist/web",
+  "runs": 10,
+  "profile": "Fast4G 20ms 4/3Mbps",
+  "summary": {
+    "A": {
+      "startup": {
+        "p50": 2997,
+        "p75": 2999,
+        "p95": 3019.800000011921
+      },
+      "conversation": {
+        "p50": 175.10000002384186,
+        "p75": 176.4000000357628,
+        "p95": 184.39999997615814
+      },
+      "graph": {
+        "p50": 109.89999997615814,
+        "p75": 111,
+        "p95": 123.30000001192093
+      }
+    },
+    "B": {
+      "startup": {
+        "p50": 1018.3999999761581,
+        "p75": 1035.2999999523163,
+        "p95": 1037.5999999642372
+      },
+      "conversation": {
+        "p50": 171.30000001192093,
+        "p75": 178.79999995231628,
+        "p95": 186.30000001192093
+      },
+      "graph": {
+        "p50": 109.10000002384186,
+        "p75": 109.60000002384186,
+        "p95": 110.5
+      }
+    }
+  },
+  "results": {
+    "A": [
+      {
+        "startup": 2999,
+        "conversation": 116.30000001192093,
+        "graph": 123.30000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 56.40000003576279
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2912.600000023842
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 65.60000002384186
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 110.60000002384186
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 698.5
+          }
+        ]
+      },
+      {
+        "startup": 2992.300000011921,
+        "conversation": 175.10000002384186,
+        "graph": 109.89999997615814,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2907.2000000476837
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 54.200000047683716
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 63.200000047683716
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 108.20000004768372
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 696.3000000119209
+          }
+        ]
+      },
+      {
+        "startup": 2994.5,
+        "conversation": 174.30000001192093,
+        "graph": 111,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2910.099999964237
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 53.69999998807907
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 63.09999996423721
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 108.09999996423721
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 696.0999999642372
+          }
+        ]
+      },
+      {
+        "startup": 2992.599999964237,
+        "conversation": 178.5999999642372,
+        "graph": 109.80000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 53.69999998807907
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2910.699999988079
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 66.19999998807907
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 108.09999996423721
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 695.6999999880791
+          }
+        ]
+      },
+      {
+        "startup": 2998.600000023842,
+        "conversation": 172.10000002384186,
+        "graph": 110.09999996423721,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 59.89999997615814
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2916.600000023842
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 68.60000002384186
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 114.30000001192093
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 702
+          }
+        ]
+      },
+      {
+        "startup": 2997,
+        "conversation": 176.4000000357628,
+        "graph": 109.30000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 56.80000001192093
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2913.600000023842
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 69.60000002384186
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 114.5
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 700
+          }
+        ]
+      },
+      {
+        "startup": 3000.199999988079,
+        "conversation": 175.19999998807907,
+        "graph": 109.39999997615814,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2919.5
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 63.59999996423721
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 75.5
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 117.59999996423721
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 705.5
+          }
+        ]
+      },
+      {
+        "startup": 2998.899999976158,
+        "conversation": 170.69999998807907,
+        "graph": 110.19999998807907,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 59.799999952316284
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2916.699999988079
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 69.29999995231628
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 114.5
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 702.5999999642372
+          }
+        ]
+      },
+      {
+        "startup": 2996.5,
+        "conversation": 175.39999997615814,
+        "graph": 106.80000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 60.69999998807907
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 117.90000003576279
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2916.600000023842
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 69.60000002384186
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 702.6000000238419
+          }
+        ]
+      },
+      {
+        "startup": 3019.800000011921,
+        "conversation": 184.39999997615814,
+        "graph": 111,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 1260114,
+            "end": 2916.699999988079
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 59.69999998807907
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 8243,
+            "end": 114.5
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 69.10000002384186
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 155670,
+            "end": 702.6000000238419
+          }
+        ]
+      }
+    ],
+    "B": [
+      {
+        "startup": 1007.6000000238419,
+        "conversation": 115,
+        "graph": 108.39999997615814,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 930.1000000238419
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 57.40000003576279
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 66.20000004768372
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 84.20000004768372
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 179.9000000357628
+          }
+        ]
+      },
+      {
+        "startup": 1008.4000000357628,
+        "conversation": 178.79999995231628,
+        "graph": 109.10000002384186,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 930.3000000119209
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 57.40000003576279
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 66.19999998807907
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 84.19999998807907
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 179.9000000357628
+          }
+        ]
+      },
+      {
+        "startup": 1018.1000000238419,
+        "conversation": 170.5,
+        "graph": 108.5,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 63.10000002384186
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 86.80000001192093
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 933.1999999880791
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 69.10000002384186
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 183.10000002384186
+          }
+        ]
+      },
+      {
+        "startup": 1018.3999999761581,
+        "conversation": 186.30000001192093,
+        "graph": 109.59999996423721,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 65.79999995231628
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 936.7999999523163
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 72.39999997615814
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 90.59999996423721
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 186.5
+          }
+        ]
+      },
+      {
+        "startup": 1021.5,
+        "conversation": 170.5999999642372,
+        "graph": 109.60000002384186,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 75.69999998807907
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 942.6999999880791
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 78.59999996423721
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 93
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 192.5999999642372
+          }
+        ]
+      },
+      {
+        "startup": 1020.4000000357628,
+        "conversation": 171.30000001192093,
+        "graph": 109.39999997615814,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 72.70000004768372
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 75.60000002384186
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 93.60000002384186
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 939.4000000357628
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 189.60000002384186
+          }
+        ]
+      },
+      {
+        "startup": 1016.5999999642372,
+        "conversation": 171.5999999642372,
+        "graph": 109.10000002384186,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 936.5999999642372
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 66.5
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 72.39999997615814
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 90.59999996423721
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 186.5
+          }
+        ]
+      },
+      {
+        "startup": 1037.5999999642372,
+        "conversation": 171.5,
+        "graph": 109.89999997615814,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 939.6999999880791
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 66.80000001192093
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 75.39999997615814
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 93.5
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 188.80000001192093
+          }
+        ]
+      },
+      {
+        "startup": 1035.2999999523163,
+        "conversation": 169.9000000357628,
+        "graph": 110.5,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 66.5
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 936.6999999880791
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 90.59999996423721
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 72.59999996423721
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 186.39999997615814
+          }
+        ]
+      },
+      {
+        "startup": 1035.699999988079,
+        "conversation": 186.0999999642372,
+        "graph": 108.80000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n新对话会显示在这里\n没有打开的窗口\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 63.80000001192093
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 72.39999997615814
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 90.5
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 936.5999999642372
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 186.39999997615814
+          }
+        ]
+      }
+    ]
+  }
+}

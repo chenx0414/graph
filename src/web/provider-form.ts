@@ -1,3 +1,4 @@
+import { PROVIDER_PRESETS } from '../catalog/providers.ts';
 /**
  * Pure logic for the two-step model-provider flow (B-1).
  *
@@ -49,6 +50,7 @@ export interface PlatformPreset {
   /** Environment variable / keychain entry name; config stores only this. */
   credentialRef: string;
   credentialKind: CredentialKind;
+  oauthProvider?: 'openrouter';
   /** True when the vendor is known to expose `<baseUrl>/models`. Display-only:
    * a probe always attempts `/models` and lets the vendor's response decide. */
   modelsListSupported: boolean;
@@ -62,14 +64,10 @@ export interface PlatformPreset {
 
 /** Offline fallback only. The daemon catalog is authoritative; this mirrors the
  * built-in presets so the page still renders when the endpoint is unreachable. */
-export const FALLBACK_PLATFORMS: readonly PlatformPreset[] = [
-  { id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', credentialKind: 'subscription', modelsListSupported: true, headers: { 'x-opencode-session': 'graph-console' }, notes: ['订阅凭据；优先从 <baseUrl>/models 探测可用模型。'] },
-  { id: 'command-goat', label: 'Command Goat', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', credentialRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', credentialKind: 'subscription', modelsListSupported: true },
-  { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true },
-  { id: 'chatgpt', label: 'ChatGPT', api: 'openai-completions', baseUrl: 'https://chatgpt.com/backend-api/codex', credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true },
-  { id: 'deepseek', label: 'DeepSeek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialRef: 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY', credentialKind: 'api-key', modelsListSupported: true },
-  { id: CUSTOM_PLATFORM_ID, label: '自定义', api: 'openai-completions', baseUrl: '', credentialRef: 'GRAPH_PROVIDER_API_KEY', credentialKind: 'api-key', modelsListSupported: true, custom: true, credentialConfigured: false },
-];
+export const FALLBACK_PLATFORMS: readonly PlatformPreset[] = PROVIDER_PRESETS.map(preset => ({
+  ...preset,
+  ...(preset.id === CUSTOM_PLATFORM_ID ? { custom: true, credentialConfigured: false } : {}),
+}));
 
 const COMPATIBILITIES = new Set<string>(PROVIDER_COMPATIBILITIES.map(item => item.id));
 const GRADES = new Set<string>(MODEL_GRADES);
@@ -261,6 +259,7 @@ export function normalizePlatforms(payload: unknown): PlatformPreset[] {
       baseUrl: typeof entry.baseUrl === 'string' ? entry.baseUrl.trim() : '',
       credentialRef,
       credentialKind: entry.credentialKind === 'subscription' ? 'subscription' : 'api-key',
+      ...(entry.oauthProvider === 'openrouter' ? { oauthProvider: 'openrouter' as const } : {}),
       modelsListSupported: entry.modelsListSupported !== false,
       ...(entry.custom === true || id === CUSTOM_PLATFORM_ID ? { custom: true } : {}),
       ...(typeof entry.credentialConfigured === 'boolean' ? { credentialConfigured: entry.credentialConfigured } : {}),

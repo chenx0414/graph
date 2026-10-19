@@ -1,5 +1,6 @@
+import { createProviderLogins } from './provider-login.ts';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import Fastify from 'fastify';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { RuntimeError, type AttachmentInput } from '../core/types.ts';
@@ -346,6 +347,19 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   // Provider directory + probe on the console's session-cookie `/api` face.
   // The page cannot read the desktop app token, so these must NOT live under
   // `/api/app/*`.
+  const providerLogins = options.appServices ? createProviderLogins(options.appServices) : undefined;
+  app.addHook('onClose', async () => { await providerLogins?.close(); });
+  const loginService = () => {
+    if (!providerLogins) throw new RuntimeError('invalid_config', '浏览器授权需要桌面安全存储通道');
+    return providerLogins;
+  };
+  app.post('/api/providers/login', async request => {
+    const body = request.body as { providerId?: unknown; credentialRef?: unknown };
+    return loginService().start(body?.providerId, body?.credentialRef);
+  });
+  app.get<{ Params: { id: string } }>('/api/providers/login/:id', async request => loginService().status(request.params.id));
+  app.post<{ Params: { id: string } }>('/api/providers/login/:id/cancel', async request => loginService().cancel(request.params.id));
+  app.post('/api/providers/disconnect', async request => loginService().disconnect((request.body as { credentialRef?: unknown })?.credentialRef));
   app.get(PROVIDER_ROUTES.list, async () => providersView());
   app.post(PROVIDER_ROUTES.probe, async request => runProviderProbe(request.body));
   app.post('/api/app/secret', async request => {
@@ -940,13 +954,26 @@ export async function createApp(runtime: Runtime, options: { origin: string; web
   });
 
   if (options.webDir) {
+    const webRoot = resolve(options.webDir);
     app.get('/assets/*', async (request, reply) => {
-      const relative = request.url.replace(/^\//, '');
-      const file = join(options.webDir!, relative);
-      if (!file.startsWith(options.webDir!)) return reply.status(403).send();
-      const body = await readFile(file).catch(() => null);
+      const relative = new URL(request.url, 'http://localhost').pathname.slice(1);
+      const file = resolve(webRoot, relative);
+      if (!file.startsWith(`${webRoot}${sep}`)) return reply.status(403).send();
+      // Re-read on every request, including sidecars: a rebuilt checkout must
+      // never serve a cached chunk from a previous build (ADR 0028).
+      reply.header('vary', 'Accept-Encoding');
+      const encodings = (request.headers['accept-encoding'] ?? '').split(',').map(part => {
+        const [name, ...parameters] = part.trim().toLowerCase().split(';');
+        const quality = parameters.find(parameter => parameter.trim().startsWith('q='));
+        return { name, q: quality ? Number(quality.trim().slice(2)) : 1 };
+      });
+      const gzip = encodings.find(item => item.name === 'gzip') ?? encodings.find(item => item.name === '*');
+      const compressed = gzip && gzip.q > 0 && gzip.q <= 1 && /\.(?:js|css|json)$/.test(relative)
+        ? await readFile(`${file}.gz`).catch(() => null) : null;
+      const body = compressed ?? await readFile(file).catch(() => null);
       if (!body) return reply.status(404).send();
-      reply.type(relative.endsWith('.css') ? 'text/css' : relative.endsWith('.png') ? 'image/png' : 'text/javascript').send(body);
+      if (compressed) reply.header('content-encoding', 'gzip');
+      reply.type(relative.endsWith('.css') ? 'text/css' : relative.endsWith('.json') ? 'application/json' : relative.endsWith('.png') ? 'image/png' : 'text/javascript').send(body);
     });
   }
   void options.origin;

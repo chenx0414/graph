@@ -198,10 +198,11 @@ test('the shell groups conversations by project and keeps an unbound recent sect
   await page.getByTestId('new-conversation-input').focus();
   await page.mouse.move(700, 500);
   const add = page.getByTestId('new-conversation-recent');
-  await expect.poll(() => add.evaluate(element => getComputedStyle(element).opacity)).toBe('0');
-  await sidebar.getByRole('button', { name: '最近', exact: true }).hover();
+  // Starting a conversation stays discoverable without hover, including keyboard and touch.
   await expect.poll(() => add.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
-  // The rail is icons only, so each entry states its own name for assistive use.
+  await add.focus();
+  expect(await add.evaluate(element => element === document.activeElement)).toBe(true);
+  // The labelled rail keeps explicit names for assistive use.
   expect(await page.locator('a[href="#/inbox"]').getAttribute('aria-label')).toBe('问题');
   expect(await page.locator('a[href="#/catalog"]').getAttribute('aria-label')).toBe('资源库');
   expect(await page.locator('a[href="#/settings"]').getAttribute('aria-label')).toBe('设置');

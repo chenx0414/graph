@@ -137,3 +137,48 @@ export function templateModelEntry(template: ProviderTemplate, model: ProviderTe
     ...(model.pricing ? { pricing: model.pricing } : {}),
   };
 }
+
+/** Shared directory for setup, the settings workbench and the HTTP catalog.
+ * A subscription token is deliberately not advertised as an OAuth login. */
+export interface ProviderPreset {
+  id: string;
+  label: string;
+  api: ModelApi;
+  baseUrl: string;
+  credentialRef: string;
+  credentialKind: 'api-key' | 'subscription';
+  oauthProvider?: 'openrouter';
+  modelsListSupported: boolean;
+  docsUrl?: string;
+  headers?: Record<string, string>;
+  notes: string[];
+}
+
+const SUBSCRIPTION_PRESETS: ProviderPreset[] = [
+  { id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', credentialKind: 'subscription', modelsListSupported: true, headers: { 'x-opencode-session': 'graph-console' }, docsUrl: 'https://opencode.ai/docs/zen', notes: ['订阅凭据；所有请求自动附带 x-opencode-session。'] },
+  { id: 'command-goat', label: 'Command Goat', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', credentialRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；请从自己的服务商账户获取凭据。'] },
+  { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；使用 xAI 的 OpenAI 兼容端点。'] },
+  { id: 'chatgpt', label: 'ChatGPT', api: 'openai-completions', baseUrl: 'https://chatgpt.com/backend-api/codex', credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；Responses 协议适配尚未完成，登录或配置凭据不代表模型可调用，请先验证连接。'] },
+];
+
+export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
+  ...SUBSCRIPTION_PRESETS,
+  ...PROVIDER_TEMPLATES.map(template => ({
+    id: template.id,
+    label: template.label,
+    api: template.api,
+    baseUrl: template.baseUrl,
+    // Preserve the reference already used by the settings workbench.
+    credentialRef: template.id === 'deepseek' ? 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY'
+      : template.id === 'custom' ? 'GRAPH_PROVIDER_API_KEY' : template.credentialRefHint,
+    credentialKind: 'api-key' as const,
+    ...(template.id === 'openrouter' ? { oauthProvider: 'openrouter' as const } : {}),
+    modelsListSupported: true,
+    docsUrl: template.docsUrl,
+    notes: template.notes,
+  })),
+];
+
+export function providerPreset(id: string): ProviderPreset | undefined {
+  return PROVIDER_PRESETS.find(preset => preset.id === id);
+}

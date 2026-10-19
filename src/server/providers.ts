@@ -1,32 +1,10 @@
 import type { ModelApi } from '../catalog/models.ts';
 import type { GraphConfig } from './config.ts';
 
-/** Provider-credential category shown by the settings wizard: a plain API key
- * or a subscription access token. The wire value is always an environment
- * variable name (`secretRef`); the secret itself never enters this module. */
-export type ProviderCredentialKind = 'api-key' | 'subscription';
+import { PROVIDER_PRESETS, type ProviderPreset } from '../catalog/providers.ts';
 
-/** One first-class provider Graph can configure with a single credential.
- * Presets carry the endpoint and transport defaults so the wizard only has to
- * collect a KEY (or subscription token), while `自定义` collects all fields. */
-export interface PlatformPreset {
-  id: string;
-  label: string;
-  api: ModelApi;
-  baseUrl: string;
-  /** Environment variable that holds the key; config stores only this name. */
-  credentialRef: string;
-  credentialKind: ProviderCredentialKind;
-  /** Advisory only: hints whether the vendor is known to answer
-   * `<baseUrl>/models`. It never gates the probe - a wrong local guess must
-   * not hide a vendor that really does list models - so it only shapes copy.
-   * False means "expect a manual model id", not "do not request". */
-  modelsListSupported: boolean;
-  /** Headers that must travel with every request (routing hints). */
-  headers?: Record<string, string>;
-  docsUrl?: string;
-  notes: string[];
-}
+export type ProviderCredentialKind = ProviderPreset['credentialKind'];
+export type PlatformPreset = ProviderPreset;
 
 export const CUSTOM_PLATFORM_ID = 'custom';
 
@@ -39,74 +17,8 @@ export const PROVIDER_ROUTES = {
   probe: '/api/providers/probe',
 } as const;
 
-/** Built-in supported platforms. `custom` is the fallback for any other
- * OpenAI/Anthropic-compatible endpoint. Credential env names are shared with
- * the usage adapters (src/server/usage.ts) so one key configures both. */
-export const PLATFORM_PRESETS: readonly PlatformPreset[] = [
-  {
-    id: 'opencode-go',
-    label: 'OpenCode Go',
-    api: 'openai-completions',
-    baseUrl: 'https://opencode.ai/zen/go/v1',
-    credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY',
-    credentialKind: 'subscription',
-    modelsListSupported: true,
-    headers: { 'x-opencode-session': 'graph-console' },
-    docsUrl: 'https://opencode.ai/docs/zen',
-    notes: ['订阅凭据；<baseUrl>/models 实测可用，自动列出订阅侧模型；端点拒绝时按原始错误提示并允许手动添加模型 id。', '所有请求自动附带 x-opencode-session。'],
-  },
-  {
-    id: 'command-goat',
-    label: 'Command Goat',
-    api: 'openai-completions',
-    baseUrl: 'https://api.commandcode.ai/provider/v1',
-    credentialRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY',
-    credentialKind: 'subscription',
-    modelsListSupported: true,
-    notes: ['订阅凭据；优先从 <baseUrl>/models 探测可用模型。'],
-  },
-  {
-    id: 'grok',
-    label: 'Grok',
-    api: 'openai-completions',
-    baseUrl: 'https://api.x.ai/v1',
-    credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN',
-    credentialKind: 'subscription',
-    modelsListSupported: true,
-    notes: ['订阅访问令牌；使用 xAI 的 OpenAI 兼容端点。'],
-  },
-  {
-    id: 'chatgpt',
-    label: 'ChatGPT',
-    api: 'openai-completions',
-    baseUrl: 'https://chatgpt.com/backend-api/codex',
-    credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN',
-    credentialKind: 'subscription',
-    modelsListSupported: true,
-    notes: ['ChatGPT/Codex 订阅访问令牌；后端以 Responses 形状返回，本轮按 Chat Completions 契约注册与探测，正式调用需在人工验收中确认。'],
-  },
-  {
-    id: 'deepseek',
-    label: 'DeepSeek',
-    api: 'openai-completions',
-    baseUrl: 'https://api.deepseek.com/v1',
-    credentialRef: 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY',
-    credentialKind: 'api-key',
-    modelsListSupported: true,
-    docsUrl: 'https://api-docs.deepseek.com/',
-    notes: ['官方 API KEY；使用 OpenAI 兼容的 Chat Completions。'],
-  },
-  {
-    id: CUSTOM_PLATFORM_ID,
-    label: '自定义',
-    api: 'openai-completions',
-    baseUrl: '',
-    credentialRef: 'GRAPH_PROVIDER_API_KEY',
-    credentialKind: 'api-key',
-    modelsListSupported: true,
-    notes: ['自定义需提供 厂商名 + Base URL + 兼容格式（OpenAI Chat Completions / Anthropic Messages）+ API KEY。', '端点不支持模型列表时可手动添加模型 id。'],
-  },
-] as const;
+/** The shared directory is authoritative for HTTP, setup and offline fallback. */
+export const PLATFORM_PRESETS = PROVIDER_PRESETS;
 
 export const PLATFORM_CREDENTIAL_REFS: Readonly<Record<string, string>> = Object.fromEntries(
   PLATFORM_PRESETS.map(preset => [preset.id, preset.credentialRef]),

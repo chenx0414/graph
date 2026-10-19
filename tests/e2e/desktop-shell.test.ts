@@ -1,3 +1,7 @@
+import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
+import { openaiServer } from '../fixtures/openai-server.ts';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -9,7 +13,7 @@ const electronExecutable: string = createRequire(import.meta.url)('electron');
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
-async function shell() {
+async function shell(vendorOrigin?: string) {
   const tooling = join(process.cwd(), '.tooling');
   await mkdir(tooling, { recursive: true });
   const root = await mkdtemp(join(tooling, 'desktop-e2e-'));
@@ -20,6 +24,21 @@ async function shell() {
   await mkdir(join(root, '.graph'));
   for (const directory of ['src', 'presets', 'docs']) await cp(join(process.cwd(), directory), join(source, directory), { recursive: true });
   await cp(join(process.cwd(), 'package.json'), join(source, 'package.json'));
+  if (vendorOrigin) {
+    // Substitute only the external vendor transport in the fixture-owned
+    // subprocess. All Graph HTTP, lifecycle, persistence and model owners run.
+    await writeFile(join(source, 'src/server/vendor-transport.mjs'), `
+      const nativeFetch = globalThis.fetch;
+      globalThis.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        return nativeFetch(url.startsWith('https://openrouter.ai/api/v1/')
+          ? url.replace('https://openrouter.ai', ${JSON.stringify(vendorOrigin)}) : input, init);
+      };
+    `);
+    const cli = join(source, 'src/server/cli.ts');
+    await writeFile(cli, `import './vendor-transport.mjs';\n${await readFile(cli, 'utf8')}`);
+  }
+
   await writeFile(join(root, '.graph/app-root'), `${source}\n`);
   await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: join(source, 'dist/web'), emptyOutDir: true } });
   const app = await _electron.launch({
@@ -110,3 +129,120 @@ test('desktop relaunch stops only its owned daemon and the replacement survives 
   expect((await fetch(`${third.url}/api/health`)).status).toBe(200);
   expect(() => process.kill(third.pid, 0)).not.toThrow();
 }, 90000);
+
+
+test('OpenRouter browser authorization persists through the real desktop keychain, calls a model after restart and disconnects', async () => {
+  const model = await openaiServer([{ text: 'Authorized model reply' }]);
+  cleanup.push(() => model.close());
+  const secret = 'synthetic-openrouter-oauth-key';
+  let challenge = '';
+  let exchanges = 0;
+  let release: (() => void) | undefined;
+  const received: string[] = [];
+  const vendor = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
+    if (request.url === '/api/v1/auth/keys') {
+      exchanges += 1;
+      if (body.code !== 'approved' || body.code_challenge_method !== 'S256'
+        || createHash('sha256').update(body.code_verifier).digest('base64url') !== challenge) {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: 'invalid PKCE proof' }));
+        return;
+      }
+      await new Promise<void>(resolve => { release = resolve; });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ key: secret }));
+      return;
+    }
+    received.push(request.headers.authorization ?? '');
+    if (body.stream) {
+      const upstream = await fetch(`${model.model.baseUrl}/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: request.headers.authorization ?? '' }, body: JSON.stringify(body) });
+      response.writeHead(upstream.status, { 'content-type': 'text/event-stream' });
+      response.end(Buffer.from(await upstream.arrayBuffer()));
+    } else {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(request.url?.endsWith('/models') ? { data: [{ id: 'openrouter/auto' }] } : { choices: [{ message: { role: 'assistant', content: 'ok' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }));
+    }
+  });
+  await new Promise<void>(resolve => vendor.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { release?.(); vendor.closeAllConnections(); await new Promise<void>(resolve => vendor.close(() => resolve())); });
+  const fixture = await shell(`http://127.0.0.1:${(vendor.address() as AddressInfo).port}`);
+  const { page } = fixture;
+  const first = await fixture.address();
+  await page.goto(`${first.url}/#/setup`);
+  await page.getByTestId('setup-provider-openrouter').click();
+  await page.screenshot({ path: '/tmp/graph-magpie-providers-desktop.png', fullPage: true });
+  expect((await fetch(`${first.url}/api/providers/login/missing`)).status).toBe(401);
+  expect((await page.request.post(`${first.url}/api/providers/login`, { headers: { origin: 'https://outside.example' }, data: { providerId: 'openrouter', credentialRef: 'OPENROUTER_API_KEY' } })).status()).toBe(403);
+  const status = page.getByTestId('provider-login-status');
+  const start = async () => {
+    await page.getByRole('button', { name: '授权登录 OpenRouter', exact: true }).click();
+    const link = page.getByTestId('provider-login-open');
+    await link.waitFor();
+    const url = new URL((await link.getAttribute('href'))!);
+    expect(url.origin).toBe('https://openrouter.ai');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    challenge = url.searchParams.get('code_challenge')!;
+    return new URL(url.searchParams.get('callback_url')!);
+  };
+  const cancelled = await start();
+  const duplicate = await page.request.post(`${first.url}/api/providers/login`, { headers: { origin: first.url }, data: { providerId: 'openrouter', credentialRef: 'OPENROUTER_API_KEY' } });
+  expect(new URL((await duplicate.json()).url).searchParams.get('callback_url')).toBe(cancelled.href);
+  await page.getByRole('button', { name: '取消登录', exact: true }).click();
+  await expect.poll(() => status.innerText(), { timeout: 10000 }).toContain('已取消');
+  await expect(fetch(`${cancelled}?code=approved`)).rejects.toThrow();
+  expect(exchanges).toBe(0);
+  const denied = await start();
+  expect((await fetch(`${denied}?error=access_denied`)).status).toBe(400);
+  await expect.poll(() => status.innerText(), { timeout: 10000 }).toContain('授权未完成');
+  expect(exchanges).toBe(0);
+  const callback = await start();
+  const wrong = new URL('/oauth/callback/unrelated', callback);
+  expect((await fetch(`${wrong}?code=approved`)).status).toBe(404);
+  expect(exchanges).toBe(0);
+  const completion = fetch(`${callback}?code=approved`);
+  await expect.poll(() => exchanges).toBe(1);
+  expect((await fetch(`${callback}?code=approved`)).status).toBe(409);
+  release!();
+  expect((await completion).status).toBe(200);
+  await expect.poll(() => status.innerText(), { timeout: 20000 }).toContain('已授权并安全保存');
+  const secretsPath = join(fixture.userData, 'secrets.json');
+  expect(await readFile(secretsPath, 'utf8')).not.toContain(secret);
+  await page.getByTestId('setup-save').click();
+  await expect.poll(async () => JSON.parse(await readFile(join(fixture.userData, 'graph.config.json'), 'utf8')).credentials?.openrouter?.secretRef).toBe('OPENROUTER_API_KEY');
+  const restarted = await page.evaluate(() => window.graph!.relaunch());
+  await page.goto(`${restarted.url}/#/models`);
+  // The restart deliberately reuses its port. Hash navigation alone does not
+  // run GET / to replace the old daemon session cookie.
+  await page.reload();
+  await page.getByTestId('configured-provider-openrouter').waitFor();
+  await expect.poll(() => page.getByTestId('configured-provider-openrouter').innerText()).toContain('凭据就绪');
+  const tested = await page.request.post(`${restarted.url}/api/config/test`, { headers: { origin: restarted.url }, data: { modelId: 'openrouter/auto' } });
+  expect(await tested.json()).toMatchObject({ ok: true });
+  const created = await page.request.post(`${restarted.url}/api/conversations`, { headers: { origin: restarted.url }, data: { text: 'Check authorized model', model: 'openrouter/auto', requestId: 'oauth-model-call' } });
+  const conversation = await created.json();
+  expect(created.status()).toBe(200);
+  await expect.poll(() => model.requests.length, { timeout: 20000 }).toBeGreaterThan(0);
+  await expect.poll(async () => (await (await page.request.get(`${restarted.url}/api/tasks/${conversation.taskId}`)).json()).invocations.some((call: { usage?: { input: number } }) => (call.usage?.input ?? 0) > 0), { timeout: 20000 }).toBe(true);
+  expect(received.length).toBeGreaterThan(0);
+  expect(received.every(auth => auth === `Bearer ${secret}`)).toBe(true);
+  const configView = await (await page.request.get(`${restarted.url}/api/config`)).json();
+  expect(JSON.stringify(configView)).not.toContain(secret);
+  expect(await readFile(join(fixture.userData, 'graph.config.json'), 'utf8')).not.toContain(secret);
+  await page.getByTestId('configured-provider-edit-openrouter').click();
+  await page.getByRole('button', { name: '断开此凭据', exact: true }).click();
+  await expect.poll(() => page.getByTestId('configured-provider-openrouter').innerText()).toContain('凭据缺失');
+  // Live revocation precedes keychain persistence. The desktop polls that queue
+  // every 1.5s, so wait for its exact acknowledgement across a full poll cycle.
+  await expect.poll(async () => (await (await page.request.get(`${restarted.url}/api/config`)).json()).pendingSecretRefs, { timeout: 20_000 }).toEqual([]);
+  const again = await page.evaluate(() => window.graph!.relaunch());
+  await page.goto(`${again.url}/#/models`);
+  await page.reload();
+  await expect.poll(() => page.getByTestId('configured-provider-openrouter').innerText()).toContain('凭据缺失');
+  const before = received.length;
+  const refused = await page.request.post(`${again.url}/api/config/test`, { headers: { origin: again.url }, data: { modelId: 'openrouter/auto' } });
+  expect(await refused.json()).toMatchObject({ ok: false });
+  expect(received).toHaveLength(before);
+}, 120000);

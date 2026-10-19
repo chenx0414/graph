@@ -195,6 +195,9 @@ test('view-mode tasks recover through execute startup without dispatching remove
   const before = JSON.parse(await readFile(api.configPath, 'utf8'));
   const document = { ...before, projects: [...before.projects, { id: 'gone', root: api.root }] };
   expect(await (await api.post('/api/config', { expectedRevision: 0, document })).json()).toMatchObject({ applied: true });
+  // The public daemon runtime must keep the view-only drive stopped after a
+  // real HTTP save; otherwise the pending-node assertion races its first tick.
+  expect(api.host.server.driving()).toBe(false);
   const created = await (await api.post('/api/tasks', { projectId: 'p', request: 'queued in view mode', requestId: 'recover' })).json();
   const removed = await (await api.post('/api/tasks', { projectId: 'gone', request: 'removed project', requestId: 'removed' })).json();
   expect((await (await api.get(`/api/tasks/${created.taskId}`)).json()).nodes).toEqual([expect.objectContaining({ id: 'master', status: 'pending' })]);

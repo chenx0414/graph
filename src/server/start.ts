@@ -257,7 +257,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
 
   const activateDispatch = (server: Awaited<ReturnType<typeof openGraphServer>>) => {
     // View-only CLI intent never starts dispatching because a config was saved.
-    if (options.mode !== 'execute' && !options.dynamic) return;
+    if (options.mode !== 'execute') return;
     server.startDrive();
     server.runtime.host.recoverMasters();
   }
@@ -438,7 +438,7 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     limits: { defaultBudgetTokens: live.defaultBudgetTokens() },
     access: () => live.access(),
     config: { revision: () => live.revision() },
-    autoDrive: options.mode === 'execute' || options.dynamic === true,
+    autoDrive: options.mode === 'execute',
     port: options.port,
     webDir: options.webDir,
     startupInfo: () => ({
@@ -605,6 +605,18 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   const pushSecretNow = async (ref: string, value: string | null, persisted = false): Promise<ApplyConfigResult> => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) throw new RuntimeError('invalid_input', 'secretRef must be an environment variable name');
     if (value !== null && (!value.trim() || value.length > 8_192)) throw new RuntimeError('invalid_input', 'A nonempty bounded secret value is required');
+    if (persisted) {
+      const pending = secretPersist.list().find(request => request.ref === ref);
+      const current = live.revoked().includes(ref) ? null : live.secrets()[ref];
+      const acknowledged = value === null ? null : value.trim();
+      if ((pending && pending.value !== acknowledged) || (!pending && current !== undefined && current !== acknowledged)) {
+        // The desktop may already have written this obsolete value to disk.
+        // Keep (or requeue) the authoritative value so its next poll repairs it;
+        // an acknowledgement must never become a fresh credential mutation.
+        if (!pending && current !== undefined) secretPersist.mark(ref, current);
+        return { ...live.status(), revision: live.revision(), applied: false, reason: '持久化确认已过期，等待桌面同步最新值' };
+      }
+    }
     const revoking = value === null || value.trim() === '';
     const previousRevoked = live.revoked();
     const nextRefs = revoking ? [...previousRevoked, ref] : previousRevoked.filter(item => item !== ref);

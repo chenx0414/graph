@@ -17,7 +17,7 @@ import {
   type WorkspaceTabs,
 } from './workspace-tabs.ts';
 import { useUsageRefresh } from './usage-refresh.ts';
-import { Activity, useCallback, useEffect, useRef, useState } from 'react';
+import { Activity, lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { AgentContextPage, type AgentContextView } from './AgentContext.tsx';
 import { ChatComposer, type ChatAttachment } from './ChatComposer.tsx';
@@ -31,15 +31,19 @@ import { ConversationPanel, type ConversationSummary, type GraphAgentDetail } fr
 import { NODE_LABEL, QUESTION_LABEL, TASK_LABEL, describeQuestion, when } from './labels.ts';
 import { QuestionReply } from './Questions.tsx';
 import { ErrorBox, useAsync, useTargetBranch, useTaskStream } from './shared.tsx';
-import { ModelsPage, Settings } from './Settings.tsx';
-import { UsagePage } from './Usage.tsx';
-import { ToolStatsPage } from './ToolStats.tsx';
-import { ResourceLibrary as CapabilityResourceLibrary } from './ResourceLibrary.tsx';
 import { formatTokens, openQuestionTotal } from './insights.ts';
-import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast } from './ui.tsx';
+import { Button, Card, Empty, Icon, Pill, Spinner, Stat, StatusDot, Toaster, toast, type IconName } from './ui.tsx';
 import type { CapabilityRecord } from '../catalog/catalog.ts';
 import type { AgentCombination, AgentCombinationView } from '../catalog/agent-combinations.ts';
 import { composeSlashDirective, extractSlashTargets } from './SlashCommands.tsx';
+
+// Keep low-frequency pages outside the chat startup path. React retains each
+// resolved module; switching a workspace tab keeps its existing Activity state.
+const Settings = lazy(() => import('./Settings.tsx').then(module => ({ default: module.Settings })));
+const ModelsPage = lazy(() => import('./Settings.tsx').then(module => ({ default: module.ModelsPage })));
+const UsagePage = lazy(() => import('./Usage.tsx').then(module => ({ default: module.UsagePage })));
+const ToolStatsPage = lazy(() => import('./ToolStats.tsx').then(module => ({ default: module.ToolStatsPage })));
+const CapabilityResourceLibrary = lazy(() => import('./ResourceLibrary.tsx').then(module => ({ default: module.ResourceLibrary })));
 
 type TaskSummary = {
   id: string; projectId: string; request: string; phase: string; status: string;
@@ -115,7 +119,7 @@ export function App() {
   const [startup, setStartup] = useState<Startup | null>(null);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem('graph-sidebar-collapsed') === 'true'; } catch { return false; }
+    try { return window.matchMedia('(max-width: 860px)').matches || localStorage.getItem('graph-sidebar-collapsed') === 'true'; } catch { return false; }
   });
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedDrawerTaskId, setSelectedDrawerTaskId] = useState<string | null>(null);
@@ -134,6 +138,7 @@ export function App() {
     const onHash = () => {
       const next = route();
       setPath(next);
+      if (window.matchMedia('(max-width: 860px)').matches) setSidebarCollapsed(true);
       setTabs(current => openTab(current, tabForPath(next)));
     };
     const onConversationsChanged = () => void reloadConversations();
@@ -239,10 +244,14 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [tabs, path, settingsPage]);
 
+  useEffect(() => {
+    document.title = `${settingsPage ? '设置' : shownTabs.tabs.find(tab => tab.id === visibleTabId)?.title ?? '新对话'} · Graph`;
+  }, [settingsPage, shownTabs, visibleTabId]);
+
   if (settingsPage) {
     return (
       <div className="settings-app-root">
-        <Settings openGuide={pathname === '/setup'} />
+        <Suspense fallback={<Spinner />}><Settings openGuide={pathname === '/setup'} /></Suspense>
         <Toaster />
       </div>
     );
@@ -250,44 +259,42 @@ export function App() {
 
   return (
     <div className="app-shell">
+      <button type="button" className="skip-link" onClick={() => document.getElementById('workspace-main')?.focus()}>跳到主内容</button>
       <aside className="sidebar" data-collapsed={sidebarCollapsed}>
+        <div className="sidebar-heading">
+          <a className="brand" href="#/" aria-label="Graph 首页"><div className="brand-mark" /><span className="brand-name">Graph</span></a>
+          <span className="sidebar-caption">Agent 协作空间</span>
+        </div>
+        <a className="sidebar-start" href="#/" aria-label="新对话"><Icon name="plus" size={17} /><span>新对话</span></a>
         <nav className="rail" data-testid="app-rail" aria-label="主入口">
           <button type="button" className="rail-button icon-button" data-testid="sidebar-toggle"
             onClick={() => setSidebarCollapsed(value => !value)} aria-expanded={!sidebarCollapsed}
             title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-            aria-label={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}>
-            <Icon name="panel-left" size={17} />
+            aria-label={sidebarCollapsed ? '导航：展开左侧抽屉' : '导航：收起左侧抽屉'}>
+            <Icon name="panel-left" size={17} /><span className="rail-label">导航</span>
           </button>
           <a className="rail-button" href="#/inbox" data-testid="rail-inbox" title="问题" aria-label="问题" data-active={pathname === '/inbox'}>
-            <Icon name="inbox" size={17} />
+            <Icon name="inbox" size={17} /><span className="rail-label">问题</span>
             {questionTotal > 0 && <span className="rail-badge" data-testid="rail-inbox-badge">{questionTotal}</span>}
           </a>
           <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
-            <Icon name="catalog" size={17} />
+            <Icon name="catalog" size={17} /><span className="rail-label">资源库</span>
           </a>
           <a className="rail-button" href="#/usage" data-testid="rail-usage" title="用量" aria-label="用量" data-active={pathname === '/usage'}>
-            <Icon name="usage" size={17} />
+            <Icon name="usage" size={17} /><span className="rail-label">用量</span>
           </a>
           <a className="rail-button" href="#/tools" data-testid="rail-tools" title="工具" aria-label="工具" data-active={pathname === '/tools'}>
-            <Icon name="tool" size={17} />
+            <Icon name="tool" size={17} /><span className="rail-label">工具</span>
           </a>
           <a className="rail-button" href="#/models" data-testid="rail-models" title="模型" aria-label="模型" data-active={pathname === '/models'}>
-            <Icon name="bolt" size={17} />
+            <Icon name="bolt" size={17} /><span className="rail-label">模型</span>
           </a>
           <div className="rail-spacer" />
           <a className="rail-button" href="#/settings" data-testid="rail-settings" title="设置" aria-label="设置" data-active={settingsPage}>
-            <Icon name="settings" size={17} />
+            <Icon name="settings" size={17} /><span className="rail-label">设置</span>
           </a>
         </nav>
         <div className="sidebar-body">
-          <div className="brand-row">
-            <a className="brand" href="#/" title="新对话">
-              <div className="brand-mark" />
-              <div className="brand-copy">
-                <div className="brand-name">Graph</div>
-              </div>
-            </a>
-          </div>
           <Sidebar
             path={pathname ?? '/'}
             settings={settings}
@@ -296,7 +303,7 @@ export function App() {
           />
         </div>
       </aside>
-      <main className="main">
+      <main className="main" id="workspace-main" tabIndex={-1}>
         <div className="workspace-bar" data-testid="workspace-bar">
           <TabBar
             state={shownTabs}
@@ -329,9 +336,11 @@ export function App() {
         {startup && !startup.configured && (
           <div className="banner" data-testid="banner">
             <Icon name="alert" />
-            {startup.modelCount === 0
-              ? <>首次运行：未配置模型，当前为仅查看模式，任务不会被派发。请<a href="#/models">打开模型</a>连接厂商；保存后立即生效，无需重启。</>
-              : <>模型已配置但凭据未解析，当前为仅查看模式，任务不会被派发。请<a href="#/models">打开模型</a>检查凭据，或设置凭据引用的环境变量。{typeof window !== 'undefined' && window.graph && '桌面 APP 也可在模型页保存密钥到钥匙串，保存后立即对该守护进程生效，无需重启。'}</>}
+            <div className="banner-copy">
+              <strong>{startup.modelCount === 0 ? '连接模型，开始协作' : '模型凭据需要检查'}</strong>
+              <span>{startup.modelCount === 0 ? '连接厂商并添加模型。当前为仅查看模式，不会派发任务。' : '当前仅可浏览。请检查模型凭据或配置对应的环境变量。'}</span>
+            </div>
+            <a className="btn btn-sm" href="#/models">{startup.modelCount === 0 ? '连接模型' : '检查凭据'}<Icon name="chevron" size={14} /></a>
           </div>
         )}
         {startup?.mode === 'view' && startup.configured && (
@@ -389,10 +398,10 @@ function WorkspacePage({ path, active, settings, startup, tasks, conversations, 
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
             {pathname === '/inbox' && <Inbox tasks={tasks} onAnswered={() => void refreshTasks().catch(() => undefined)} />}
-            {catalogMatch && <CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} />}
-            {pathname === '/usage' && <UsagePage />}
-            {pathname === '/tools' && <ToolStatsPage />}
-            {pathname === '/models' && <ModelsPage />}
+            {catalogMatch && <Suspense fallback={<Spinner />}><CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} /></Suspense>}
+            {pathname === '/usage' && <Suspense fallback={<Spinner />}><UsagePage /></Suspense>}
+            {pathname === '/tools' && <Suspense fallback={<Spinner />}><ToolStatsPage /></Suspense>}
+            {pathname === '/models' && <Suspense fallback={<Spinner />}><ModelsPage /></Suspense>}
             {draftGraphMatch && (
               <DraftGraphTab
                 key={draftGraphMatch[1]}
@@ -519,13 +528,14 @@ function Sidebar({ path, settings, conversations, onSettingsChanged }: {
               </details>
             );
           })}
-          {!settings?.projects.length && <span className="sidebar-empty">尚未配置项目</span>}
+          {!settings?.projects.length && <div className="sidebar-empty">添加项目，让 Agent 了解你的代码。<button type="button" className="sidebar-empty-action" onClick={() => setCreateProject(true)}>添加项目<Icon name="plus" size={13} /></button></div>}
         </div>
         <div className="sidebar-label"><button type="button" className="sidebar-section-toggle" aria-expanded={sections.recent} onClick={() => setSections(value => ({ ...value, recent: !value.recent }))}><Icon name="chevron" size={12} /><span>最近</span></button>
           <a className="sidebar-add" href="#/" data-testid="new-conversation-recent" title="新对话" aria-label="新对话"><Icon name="plus" size={15} /></a>
         </div>
         <div className="sidebar-section" hidden={!sections.recent}>
           <div className="sidebar-conversations" style={{ paddingLeft: 0 }}>
+            {!unbound.length && <span className="sidebar-empty">新对话会显示在这里</span>}
             {unbound.map(conversation => (
               <SidebarConversation
                 key={conversation.id}
@@ -642,9 +652,10 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
   return (
     <section className="new-chat-page" data-testid="conversations">
       <div className="new-chat-intro">
-        <div className="new-chat-mark" />
+        <div className="new-chat-mark" aria-hidden="true" />
+        <span className="new-chat-eyebrow">从一个目标，开始协作</span>
         <h1>开始新对话</h1>
-        <p>说清目标即可。主 Agent 会先调查、追问并给出方案草稿，确认后才开始执行。</p>
+        <p>描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。</p>
       </div>
       <ChatComposer
         className="new-chat-composer"
@@ -677,7 +688,7 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
             onChange={event => setProjectId(event.target.value)}
             aria-label="对话项目"
           >
-            <option value="">未绑定项目</option>
+            <option value="">先聊聊，暂不选项目</option>
             {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
           </select>
         )}
@@ -694,6 +705,22 @@ function NewConversation({ settings, initialProjectId }: { settings: Settings_ |
         />
       </div>
       {error && <ErrorBox message={error} />}
+      <div className="starter-grid" aria-label="试试这些任务">
+        {([
+          { icon: 'search', title: '了解项目', hint: '梳理结构，找到改进方向', prompt: '帮我梳理这个项目的结构与主要流程，找出值得优先改进的地方。' },
+          { icon: 'bolt', title: '解决问题', hint: '描述现象，一起定位原因', prompt: '我遇到了一个问题，请先帮我分析原因，并告诉我需要补充哪些信息：' },
+          { icon: 'graph', title: '开发功能', hint: '从想法到可执行的方案', prompt: '我想给这个项目添加一项功能，请先帮我明确需求和验收条件，再制定方案：' },
+        ] satisfies { icon: IconName; title: string; hint: string; prompt: string }[]).map(item => <button type="button" className="starter-card" key={item.title} disabled={busy} onClick={() => {
+          if (text.trim()) return;
+          setText(item.prompt);
+          document.querySelector<HTMLElement>('[data-testid="new-conversation-input"]')?.focus();
+        }} aria-disabled={Boolean(text.trim())}>
+          <Icon name={item.icon} size={18} /><strong>{item.title}</strong><span>{item.hint}</span>
+        </button>)}
+      </div>
+      <ol className="onboarding-steps" aria-label="协作流程">
+        <li><span>1</span>描述目标</li><li><span>2</span>确认方案草稿</li><li><span>3</span>在任务图中跟进</li>
+      </ol>
     </section>
   );
 }
@@ -728,7 +755,7 @@ function Inbox({ tasks, onAnswered }: { tasks: TaskSummary[]; onAnswered: () => 
       {historyError && <ErrorBox message={historyError} />}
       {!pending.length && (
         <Card title="问题收件箱" icon="inbox">
-          <Empty icon="check" title="没有待处理问题" hint={<span data-testid="inbox-empty">所有任务都在正常推进；需要人工介入时会出现在这里。</span>} />
+          <Empty icon="check" title="没有待处理问题" hint={<span data-testid="inbox-empty">需要你决策或补充信息时，问题会显示在这里。</span>} />
         </Card>
       )}
       {pending.map(task => (

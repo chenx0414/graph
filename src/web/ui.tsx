@@ -1,4 +1,4 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
 /* ---------------------------------------------------------------- icons */
 
@@ -154,20 +154,28 @@ export function toast(message: string, tone: ToastTone = 'info') {
 
 export function Toaster() {
   const [items, setItems] = useState<ToastItem[]>([]);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const listener = (item: ToastItem) => {
       setItems(current => [...current, item]);
-      setTimeout(() => setItems(current => current.filter(entry => entry.id !== item.id)), 3_600);
+      if (item.tone !== 'danger') {
+        const timer = setTimeout(() => {
+          setItems(current => current.filter(entry => entry.id !== item.id));
+          timers.current.delete(timer);
+        }, 6_000);
+        timers.current.add(timer);
+      }
     };
     toastListeners.add(listener);
-    return () => { toastListeners.delete(listener); };
+    return () => { toastListeners.delete(listener); for (const timer of timers.current) clearTimeout(timer); timers.current.clear(); };
   }, []);
   return (
-    <div className="toasts" data-testid="toasts">
+    <div className="toasts" data-testid="toasts" aria-live="polite" aria-relevant="additions">
       {items.map(item => (
-        <div key={item.id} className="toast" data-tone={item.tone} role="status">
+        <div key={item.id} className="toast" data-tone={item.tone}>
           <StatusDot tone={item.tone === 'danger' ? 'danger' : item.tone === 'success' ? 'success' : 'info'} />
           <span>{item.message}</span>
+          <button type="button" className="icon-button" aria-label="关闭通知" onClick={() => setItems(current => current.filter(entry => entry.id !== item.id))}><Icon name="close" size={14} /></button>
         </div>
       ))}
     </div>

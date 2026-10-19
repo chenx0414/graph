@@ -85,7 +85,11 @@ async function harness(plans?: ResponsePlan[] | { answer: string; pending: Promi
         if (item !== undefined && !['host', 'connection', 'content-length', 'transfer-encoding'].includes(key)) headers.set(key, Array.isArray(item) ? item.join(', ') : item);
       }
       const upstream = await fetch(`${server.url}${request.url}`, { method: request.method ?? 'GET', headers, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
-      response.writeHead(upstream.status, Object.fromEntries(upstream.headers));
+      // fetch decodes gzip before exposing body; forward headers for those bytes.
+      const responseHeaders = new Headers(upstream.headers);
+      responseHeaders.delete('content-encoding');
+      responseHeaders.delete('content-length');
+      response.writeHead(upstream.status, Object.fromEntries(responseHeaders));
       if (request.url?.includes('/events/stream') && upstream.body) {
         response.flushHeaders();
         const reader = upstream.body.getReader();
@@ -153,6 +157,71 @@ async function paste(page: Page, input: Locator, text: string) {
   await clipboard(page, text);
   await input.dispatchEvent('contextmenu');
 }
+
+test('agent waiting feedback delays the orb, respects reduced motion and clears after the real reply', async () => {
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const h = await harness({ answer: 'Finished waiting for the agent.', pending });
+  cleanup.push(async () => { finish(); });
+  await h.page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
+  await h.page.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('[data-testid="agent-thinking"]') && !performance.getEntriesByName('thinking-visible').length) {
+        performance.mark('thinking-visible');
+      }
+      if (document.querySelector('[data-testid="agent-thinking"] canvas') && !performance.getEntriesByName('orb-visible').length) {
+        performance.mark('orb-visible');
+      }
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
+  await h.open(await h.conversation('Read src/one.ts then reply.', 'alpha'));
+  const status = h.page.getByTestId('agent-thinking');
+  await status.getByRole('status').waitFor();
+  const orb = status.locator('canvas');
+  await orb.waitFor();
+  const delay = await h.page.evaluate(() => performance.getEntriesByName('orb-visible')[0]!.startTime - performance.getEntriesByName('thinking-visible')[0]!.startTime);
+  expect(delay).toBeGreaterThanOrEqual(1_950);
+  expect(await orb.getAttribute('aria-hidden')).toBe('true');
+  expect(await orb.evaluate(canvas => canvas.getBoundingClientRect().width)).toBe(20);
+  // Wait for actual painted pixels, then verify reduced motion holds the frame.
+  await expect.poll(() => orb.evaluate((canvas: HTMLCanvasElement) => {
+    const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    return pixels.some((value, index) => index % 4 === 3 && value > 0);
+  })).toBe(true);
+  const frame = await orb.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  const laterFrame = await orb.evaluate((canvas: HTMLCanvasElement) => new Promise<string>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(canvas.toDataURL())));
+  }));
+  expect(laterFrame).toBe(frame);
+  await h.page.screenshot({ path: join(tmpdir(), 'graph-thinking-orb.png') });
+  finish();
+  await h.page.getByTestId('message-assistant').filter({ hasText: 'Finished waiting for the agent.' }).waitFor();
+  await status.waitFor({ state: 'detached' });
+}, 60_000);
+
+test('a real long-running command shows activity feedback and replaces it with its completed result', async () => {
+  const h = await harness([
+    { tools: [{ id: 'waiting-command', name: 'bash', arguments: JSON.stringify({ command: 'while [ ! -f tool-release ]; do sleep 0.1; done; cat src/one.ts', timeout: 30 }) }] },
+    { text: 'The command read export const one = 1.' },
+  ]);
+  cleanup.push(async () => { await writeFile(join(h.root, 'tool-release'), 'done'); });
+  await h.open(await h.conversation('Run the command to read src/one.ts.', 'alpha'));
+  const active = h.page.locator('[data-testid="tool-activity-group"][data-active="true"]');
+  await active.waitFor();
+  await active.locator('canvas').waitFor();
+  expect(await active.innerText()).toContain('进行中');
+  await active.getByRole('button', { name: '展开工具活动' }).click();
+  await expect.poll(() => active.locator('.tool-activity-label').innerText()).toContain('bash');
+  await writeFile(join(h.root, 'tool-release'), 'done');
+  await h.page.getByTestId('message-assistant').filter({ hasText: 'The command read export const one = 1.' }).waitFor();
+  await active.waitFor({ state: 'detached' });
+  await h.page.getByRole('button', { name: '展开这一轮的思考与工具调用' }).click();
+  const completed = h.page.getByTestId('tool-activity-group');
+  await completed.waitFor();
+  expect(await completed.locator('canvas').count()).toBe(0);
+  expect(await completed.innerText()).toContain('1 项活动');
+}, 60_000);
 
 test('copy and right-click paste preserve source bytes and report real clipboard permission failures', async () => {
   const markdown = '# Heading\n\n- **bold** and `code`';

@@ -1,3 +1,5 @@
+import { ProviderLogin } from './ProviderLogin.tsx';
+import { ProviderPicker, ProviderIcon } from './ProviderPicker.tsx';
 import { ModelGradeOptions } from './model-grade-options.tsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
@@ -364,38 +366,10 @@ function RunningSourceCard({ source }: { source?: { root: string; commit: string
 }
 
 function ThemePlaceholder() {
-  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
-  const options = [
-    { id: 'system', label: '系统' },
-    { id: 'light', label: '浅色' },
-    { id: 'dark', label: '深色' },
-  ] as const;
   return (
     <section className="settings-feature" data-testid="theme-placeholder">
-      <h2>主题</h2>
-      <div className="theme-options">
-        {options.map(option => (
-          <button
-            key={option.id}
-            type="button"
-            className="theme-option"
-            data-active={theme === option.id}
-            data-testid={`theme-${option.id}`}
-            onClick={() => setTheme(option.id)}
-            aria-pressed={theme === option.id}
-          >
-            <span className={`theme-preview theme-preview-${option.id}`}>
-              <span className="theme-preview-side" />
-              <span className="theme-preview-card">
-                <span className="theme-preview-line theme-preview-line-strong" />
-                <span className="theme-preview-line" />
-                <span className="theme-preview-line theme-preview-line-short" />
-              </span>
-            </span>
-            <span className="theme-option-label">{option.label}</span>
-          </button>
-        ))}
-      </div>
+      <h2>外观</h2>
+      <p className="muted">当前使用浅色主题。深色与跟随系统主题尚未提供。</p>
     </section>
   );
 }
@@ -476,7 +450,7 @@ function ConfiguredProvidersPanel({ draft, credentialState, onEdit, onDelete }: 
       {credentials.map(([id, credential]) => {
         const count = (draft.models?.entries ?? []).filter(model => model.credentialId === id).length;
         return <div className="configured-model-item" key={id} data-testid={`configured-provider-${id}`}>
-          <div className="configured-model-main"><strong>{credential.displayName || id}</strong><span className="muted">{credential.platform || id} · {id} · {count} 个模型</span></div>
+          <ProviderIcon id={credential.platform || (draft.models?.entries ?? []).find(model => model.credentialId === id)?.provider || id} /><div className="configured-model-main"><strong>{credential.displayName || id}</strong><span className="muted">{credential.platform || id} · {id} · {count} 个模型</span></div>
           <div className="configured-model-meta"><Pill tone={credentialState[id] ? 'success' : 'warn'}>{credentialState[id] ? '凭据就绪' : '凭据缺失'}</Pill></div>
           <div className="configured-model-actions">
             <Button size="sm" data-testid={`configured-provider-edit-${id}`} onClick={() => onEdit(id)}>编辑</Button>
@@ -556,7 +530,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
   mutate: (change: (next: RawConfig) => void) => void;
   openGuide: boolean;
   focusCredentialId: string | null;
-  onCredentialStored: (credentialId: string) => void;
+  onCredentialStored: (credentialId: string, configured?: boolean) => void;
 }) {
   const [platforms, setPlatforms] = useState<PlatformPreset[]>([...FALLBACK_PLATFORMS]);
   const [platformsNote, setPlatformsNote] = useState('');
@@ -830,11 +804,8 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     <>
       <section id="settings-credentials" className="settings-section" data-testid="provider-setup">
         <Card title="① 配置厂商" icon="link" subtitle="已支持厂商只需填 API KEY 或订阅凭据；自定义厂商需填名称、Base URL 与兼容格式。保存后自动发起一次最小请求验证，失败会原样显示厂商错误。">
-          <div className="chip-row" data-testid="provider-platforms">
-            {platforms.map(platform => (
-              <Button key={platform.id} size="sm" variant={platform.id === platformId ? 'primary' : 'default'} data-testid={`provider-platform-${platform.id}`} onClick={() => choosePlatform(platform.id)}>{platform.label}</Button>
-            ))}
-          </div>
+          <ProviderPicker choices={platforms} value={platformId} onChange={choosePlatform} testId="provider-platforms" testIdPrefix="provider-platform-" disabled={busy} />
+          {selected?.docsUrl && <p className="provider-help"><a href={selected.docsUrl} target="_blank" rel="noreferrer">获取 {selected.label} API 凭据 ↗</a></p>}
           {platformsNote && <p className="muted" data-testid="provider-platforms-note">{platformsNote}</p>}
           {selected?.notes?.length ? <p className="muted">{selected.notes.join('；')}</p> : null}
           {!selected?.modelsListSupported && <p className="muted" data-testid="provider-no-models-list">目录提示该端点可能不支持 /models 列表；保存后仍会尝试请求并以厂商响应为准，失败时请手动添加模型 id。</p>}
@@ -882,6 +853,11 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
             </div>
           )}
 
+          {selected?.oauthProvider === 'openrouter' && <ProviderLogin key={active.credentialRef} credentialRef={active.credentialRef} configured={resolved} onChange={configured => {
+            setKeyResolved(current => ({ ...current, [active.credentialId]: configured }));
+            onCredentialStored(active.credentialId, configured);
+            setPlatforms(current => current.map(platform => platform.id === platformId ? { ...platform, credentialConfigured: configured } : platform));
+          }} />}
           {bridge ? (
             <Field label={keyGuidance.title} hint="只写入系统钥匙串，不进入配置文件、接口响应或页面" error={fieldError('key')}>
               <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="provider-key" data-invalid={mark('key')} value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…" />
@@ -1363,7 +1339,7 @@ function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active
           <Icon name="chevron" size={15} /><span>{editorOpen ? '收起厂商与模型管理' : '展开厂商与模型管理'}</span>
         </button>
         {editorOpen && <ProviderWorkbench draft={draft} credentialState={credentialState} bridge={bridge} mutate={mutate} openGuide={openGuide}
-          focusCredentialId={focusCredentialId} onCredentialStored={credentialId => setCredentialState(current => ({ ...current, [credentialId]: true }))} />}
+          focusCredentialId={focusCredentialId} onCredentialStored={(credentialId, configured = true) => setCredentialState(current => ({ ...current, [credentialId]: configured }))} />}
       </div>
       </div>
       </section>}

@@ -1,0 +1,4 @@
+{
+  "fast4g": { "startup": 1100, "conversation": 210, "graph": 130 },
+  "local": { "startup": 100, "conversation": 105, "graph": 85 }
+}

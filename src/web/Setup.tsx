@@ -1,7 +1,9 @@
+import { ProviderLogin } from './ProviderLogin.tsx';
+import { ProviderPicker } from './ProviderPicker.tsx';
 import { ModelGradeOptions } from './model-grade-options.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.ts';
-import { PROVIDER_TEMPLATES, providerTemplate, type ProviderTemplate } from '../catalog/providers.ts';
+import { PROVIDER_TEMPLATES, PROVIDER_PRESETS, providerTemplate, type ProviderTemplate } from '../catalog/providers.ts';
 import { buildTemplateConfigDocument, type TemplateSetupModel } from './setup.ts';
 import { Button, Card, Field, Pill, toast } from './ui.tsx';
 
@@ -28,13 +30,30 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
   const [projectRoot, setProjectRoot] = useState('');
   const [revision, setRevision] = useState<number | null>(null);
   const [existing, setExisting] = useState<Record<string, unknown> | null>(null);
+  const [loginConfigured, setLoginConfigured] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<Status | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const template: ProviderTemplate = providerTemplate(providerId) ?? PROVIDER_TEMPLATES[0]!;
+  const preset = PROVIDER_PRESETS.find(item => item.id === providerId)!;
+  const template: ProviderTemplate = {
+    ...preset,
+    docsUrl: preset.docsUrl ?? '',
+    credentialRefHint: preset.credentialRef,
+    models: providerTemplate(providerId)?.models ?? [],
+  };
+  useEffect(() => {
+    let stopped = false;
+    void api<{ credentials?: Record<string, { secretRef: string; resolved: boolean }>; platforms: { credentialRef: string; credentialConfigured: boolean }[] }>('/api/providers').then(result => {
+      if (!stopped) {
+        const credential = result.credentials?.[credentialId];
+        setLoginConfigured(credential?.secretRef === secretRef ? credential.resolved : result.platforms.some(item => item.credentialRef === secretRef && item.credentialConfigured));
+      }
+    }).catch(() => undefined);
+    return () => { stopped = true; };
+  }, [credentialId, secretRef]);
   const chosenModels = useMemo<TemplateSetupModel[]>(() => [
     ...template.models.filter(model => selected[model.id]).map(model => ({ id: model.id, grade: model.grade, contextWindow: model.contextWindow, maxTokens: model.maxTokens })),
     ...customModels,
@@ -51,13 +70,13 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
   }, []);
 
   function chooseProvider(id: string) {
-    const next = providerTemplate(id)!;
+    const next = PROVIDER_PRESETS.find(item => item.id === id)!;
     setProviderId(id);
     setBaseUrl(next.baseUrl);
     setApiType(next.api);
     setCredentialId(next.id);
-    setSecretRef(next.credentialRefHint);
-    setSelected(Object.fromEntries(next.models.map(model => [model.id, true])));
+    setSecretRef((existing?.credentials as Record<string, { secretRef?: string }> | undefined)?.[id]?.secretRef ?? next.credentialRef);
+    setSelected(Object.fromEntries((providerTemplate(id)?.models ?? []).map(model => [model.id, true])));
     setCustomModels([]);
     setErrors({});
     setTestResult(null);
@@ -173,23 +192,21 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
   const reviewModel = chosenModels.find(model => model.grade === 'highest' || model.grade === 'high');
   return (
     <div className="stagger" data-testid="setup">
-      <Card title="连接模型" icon="wizard" subtitle="选择平台、填入 API key、确认推荐模型；保存后立即生效，无需重启">
+      <Card title="连接模型" icon="wizard" subtitle="选择服务商与认证方式，再选择模型；保存后立即生效，无需重启">
         {status && <div data-testid={status.testid ?? 'setup-status'} className="hint-card" style={{ display: 'block', borderColor: status.tone === 'danger' ? 'var(--danger)' : undefined }}>{status.text}</div>}
         <p className="muted" data-testid="setup-existing">
           {existing && ((existing.models as { entries?: unknown[] } | undefined)?.entries?.length ?? 0) > 0
             ? '已有配置。选择新平台会追加连接，不会覆盖已有平台。'
-            : '还没有配置连接。选择平台并填入 API key 即可开始。'}
+            : '还没有配置连接。选择服务商，填入 API key 或使用其浏览器授权入口。'}
         </p>
 
         <h3 className="section-title">平台</h3>
-        <div className="chip-row" data-testid="setup-providers">
-          {PROVIDER_TEMPLATES.map(item => (
-            <Button key={item.id} size="sm" variant={item.id === providerId ? 'primary' : 'default'} data-testid={`setup-provider-${item.id}`} onClick={() => chooseProvider(item.id)}>{item.label}</Button>
-          ))}
-        </div>
+        <ProviderPicker choices={PROVIDER_PRESETS} value={providerId} onChange={chooseProvider} testId="setup-providers" testIdPrefix="setup-provider-" disabled={busy} />
+        {preset.docsUrl && <p className="provider-help"><a href={preset.docsUrl} target="_blank" rel="noreferrer">获取 {preset.label} API 凭据 ↗</a></p>}
         {template.notes.length > 0 && <p className="muted">{template.notes.join('；')}</p>}
 
-        <h3 className="section-title">API key</h3>
+        {preset.oauthProvider === 'openrouter' && <ProviderLogin key={secretRef} credentialRef={secretRef} configured={loginConfigured} onChange={setLoginConfigured} />}
+        <h3 className="section-title">{preset.credentialKind === 'subscription' ? '订阅访问令牌' : 'API key'}</h3>
         {bridge
           ? <Field label="API 密钥" hint="只写入系统钥匙串；不进入配置文件、日志或页面状态">
               <input className="input" style={{ maxWidth: 'none' }} type="password" data-testid="setup-key" value={key} onChange={event => setKey(event.target.value)} placeholder="sk-…" />

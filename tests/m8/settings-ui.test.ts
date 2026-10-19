@@ -125,10 +125,8 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.getByTestId('config-revision').innerText()).toBe('0');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
   expect(await page.getByTestId('theme-placeholder').isVisible()).toBe(true);
-  expect(await page.getByTestId('theme-system').getAttribute('data-active')).toBe('true');
-  await page.getByTestId('theme-dark').click();
-  expect(await page.getByTestId('theme-dark').getAttribute('data-active')).toBe('true');
-  await page.getByTestId('theme-system').click();
+  expect(await page.getByTestId('theme-placeholder').innerText()).toContain('当前使用浅色主题');
+  expect(await page.getByTestId('theme-placeholder').getByRole('button').count()).toBe(0);
   const openPage = async (label: '模型' | '常规') => {
     await page.evaluate(hash => { location.hash = hash; }, label === '模型' ? '#/models' : '#/settings');
     await page.getByTestId(label === '模型' ? 'models-page' : 'settings-shell').waitFor();

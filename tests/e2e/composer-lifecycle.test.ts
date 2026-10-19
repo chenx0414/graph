@@ -54,7 +54,11 @@ async function fixture(plans: ResponsePlan[], finiteBudget = false, pauseRespons
       if (request.url?.endsWith('/pause')) await pauseResponse;
       if (request.url?.endsWith('/messages') && request.method === 'POST') await browserOptions.messageResponse;
       if (request.url?.endsWith('/steer') && request.method === 'POST') await browserOptions.steerResponse;
-      response.writeHead(upstream.status, Object.fromEntries(upstream.headers));
+      // fetch decodes gzip before exposing body; forward headers for those bytes.
+      const responseHeaders = new Headers(upstream.headers);
+      responseHeaders.delete('content-encoding');
+      responseHeaders.delete('content-length');
+      response.writeHead(upstream.status, Object.fromEntries(responseHeaders));
       if (upstream.body) {
         const reader = upstream.body.getReader();
         try {

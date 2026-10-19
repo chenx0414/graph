@@ -211,11 +211,25 @@ test('real provider fields reject missing keys and malformed custom configuratio
   const page = await browser.newPage();
   await page.goto(`${daemon.url}/#/models`);
   if (await page.getByTestId('model-editor-toggle').getAttribute('aria-expanded') === 'false') await page.getByTestId('model-editor-toggle').click();
-  await page.getByTestId('provider-platform-opencode-go').click();
+  const picker = page.getByTestId('provider-platforms');
+  await picker.getByRole('searchbox', { name: '搜索服务商' }).fill('api.anthropic.com');
+  await page.getByTestId('provider-platform-anthropic').click();
+  expect(await page.getByTestId('provider-baseUrl').inputValue()).toBe('https://api.anthropic.com');
+  const brand = picker.getByTestId('provider-platform-anthropic').locator('img');
+  await expect.poll(() => brand.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  expect(await page.getByRole('link', { name: '获取 Anthropic API 凭据 ↗' }).getAttribute('href')).toContain('claude.com');
+  await picker.getByRole('searchbox').fill('');
+  await picker.getByRole('combobox', { name: '服务商类型' }).selectOption('subscription');
+  expect(await picker.getByTestId('provider-platform-anthropic').count()).toBe(0);
+  await picker.getByTestId('provider-platform-opencode-go').click();
   await page.getByTestId('provider-save').click();
   await expect.poll(() => page.getByTestId('provider-key-error').innerText()).toContain('环境变量');
   expect(requests).toHaveLength(0);
   expect(await readFile(configPath, 'utf8')).toBe(original);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true);
+  await picker.getByRole('searchbox').fill('missing provider xyz');
+  await picker.getByRole('status').filter({ hasText: '没有匹配' }).waitFor();
   await page.getByTestId('provider-platform-custom').click();
   await page.getByTestId('provider-save').click();
   expect(await page.getByTestId('provider-label').getAttribute('data-invalid')).toBe('true');
@@ -236,6 +250,12 @@ test('real provider fields reject missing keys and malformed custom configuratio
   await expect.poll(async () => JSON.parse(await readFile(configPath, 'utf8')).credentials.local.displayName).toBe('Gateway');
   expect(requests).toContain('/v1/models');
   expect(JSON.parse(await readFile(configPath, 'utf8')).credentials.local).not.toHaveProperty('platform');
+  await page.reload();
+  await page.getByTestId('configured-provider-local').waitFor();
+  expect(await page.getByTestId('configured-provider-local').innerText()).toContain('Gateway');
+  const saved = JSON.parse(await readFile(configPath, 'utf8'));
+  expect(saved.credentials.local.secretRef).toBe('GRAPH_LOCAL_KEY');
+  expect(JSON.stringify(saved)).not.toContain('synthetic-key');
 }, 90_000);
 
 test('the setup wizard keeps two connections to one upstream model and repeated saves preserve the first identity', async () => {
@@ -259,6 +279,11 @@ test('the setup wizard keeps two connections to one upstream model and repeated 
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`${daemon.url}/#/setup`);
+  const setupPicker = page.getByTestId('setup-providers');
+  await setupPicker.getByRole('searchbox').fill('deepseek');
+  await page.getByTestId('setup-provider-deepseek').click();
+  expect(await page.getByTestId('setup-providers').getByRole('button', { pressed: true }).innerText()).toContain('DeepSeek');
+  await setupPicker.getByRole('searchbox').fill('');
   const configure = async (provider: 'openai' | 'anthropic') => {
     await page.getByTestId(`setup-provider-${provider}`).click();
     for (const checkbox of await page.getByTestId('setup-models').locator('input[type="checkbox"]').all()) await checkbox.uncheck();

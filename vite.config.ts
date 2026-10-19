@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { compressWebAssets } from './scripts/compress-web-assets.ts';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), compressWebAssets()],
   root: 'src/web',
   base: '/',
   build: { outDir: '../../dist/web', emptyOutDir: true },

@@ -21,16 +21,18 @@ test('the privileged secret bridge keeps latest pending writes and deletes until
   const browserHeaders = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
   const bridgeHeaders = { origin: daemon.url, 'x-graph-app-token': daemon.appToken, 'content-type': 'application/json' };
   const pending = async () => (await (await fetch(`${daemon.url}/api/app/secret-requests`, { headers: bridgeHeaders })).json()).requests;
-  const push = async (ref: string, value: string | null, persisted = false) => {
+  const push = async (ref: string, value: string | null, persisted = false, applied = true) => {
     const response = await fetch(`${daemon.url}/api/app/secret`, { method: 'POST', headers: bridgeHeaders, body: JSON.stringify({ ref, value, persisted }) });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ applied: true });
+    expect(await response.json()).toMatchObject({ applied });
   };
   expect((await fetch(`${daemon.url}/api/app/secret-requests`, { headers: browserHeaders })).status).toBe(403);
   expect(await pending()).toEqual([]);
   await push('GRAPH_LOCAL_KEY', 'synthetic-first');
   expect(await pending()).toEqual([{ ref: 'GRAPH_LOCAL_KEY', value: 'synthetic-first' }]);
   await push('GRAPH_LOCAL_KEY', 'synthetic-last');
+  // The desktop can finish an earlier disk write after a newer host update.
+  await push('GRAPH_LOCAL_KEY', 'synthetic-first', true, false);
   expect(await pending()).toEqual([{ ref: 'GRAPH_LOCAL_KEY', value: 'synthetic-last' }]);
   const config = await (await fetch(`${daemon.url}/api/config`, { headers: browserHeaders })).json();
   expect(config.pendingSecretRefs).toEqual(['GRAPH_LOCAL_KEY']);
@@ -41,6 +43,13 @@ test('the privileged secret bridge keeps latest pending writes and deletes until
   await push('GRAPH_LOCAL_KEY', 'synthetic-last', true);
   expect(await pending()).toEqual([]);
   await push('GRAPH_LOCAL_KEY', null);
+  expect(await pending()).toEqual([{ ref: 'GRAPH_LOCAL_KEY', value: null }]);
+  expect((await (await fetch(`${daemon.url}/api/config`, { headers: browserHeaders })).json()).config.credentials.local.configured).toBe(false);
+  await push('GRAPH_LOCAL_KEY', null, true);
+  expect(await pending()).toEqual([]);
+  // A delayed acknowledgement must not resurrect an OAuth key after logout;
+  // queue deletion again because the stale desktop writer may have saved it.
+  await push('GRAPH_LOCAL_KEY', 'synthetic-last', true, false);
   expect(await pending()).toEqual([{ ref: 'GRAPH_LOCAL_KEY', value: null }]);
   expect((await (await fetch(`${daemon.url}/api/config`, { headers: browserHeaders })).json()).config.credentials.local.configured).toBe(false);
   await push('GRAPH_LOCAL_KEY', null, true);

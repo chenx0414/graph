@@ -1,5 +1,6 @@
 import { toolActivity } from './tool-activity.ts';
-import { memo, useState, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
+import type { OrbState } from 'thinking-orbs';
 import {
   messageAttachments,
   type ConversationMessage,
@@ -17,6 +18,22 @@ import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
 import { useStreamVeils } from './use-stream-veils.ts';
+
+const ThinkingOrb = lazy(async () => {
+  const library = await import('thinking-orbs');
+  return { default: library.ThinkingOrb };
+});
+
+function ActivityOrb({ state }: { state: OrbState }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(true), 2_000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return visible ? <Suspense fallback={null}>
+    <ThinkingOrb state={state} size={20} theme="light" aria-hidden="true" />
+  </Suspense> : null;
+}
 
 function CopyButton({ text }: { text: string }) {
   return (
@@ -113,6 +130,11 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
   // one group when its detail is needed.
   const open = manualOpen ?? false;
   const summary = row.active ? activeToolStatus(row.tools) : toolGroupSummary(row.tools);
+  const activeTool = [...row.tools].reverse().find(tool => !tool.done);
+  const kind = activeTool ? toolActivity(activeTool.name, activeTool.summary).kind : 'other';
+  const orbState: OrbState = kind === 'search' || kind === 'browse' ? 'searching'
+    : kind === 'run' ? 'solving'
+      : kind === 'edit' ? 'composing' : 'working';
   return (
     <section
       className="tool-activity-group"
@@ -129,7 +151,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
         aria-label={open ? '收起工具活动' : '展开工具活动'}
       >
         <span className="tool-group-indicator" aria-hidden="true">
-          {row.active ? <span className="working-pulse" /> : <Icon name={row.tools.some(tool => tool.error) ? 'alert' : 'check'} size={13} />}
+          {row.active ? <ActivityOrb key={activeTool?.id ?? row.id} state={orbState} /> : <Icon name={row.tools.some(tool => tool.error) ? 'alert' : 'check'} size={13} />}
         </span>
         <span className="tool-group-copy">
           <strong>{summary}</strong>
@@ -391,6 +413,19 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   );
 }
 
+function ThinkingStatus() {
+  return (
+    <div className="message-row agent-status-row" data-role="assistant" data-testid="agent-thinking">
+      <div className="agent-working" role="status">
+        <span className="agent-thinking-orb" aria-hidden="true">
+          <ActivityOrb state="breathing" />
+        </span>
+        正在思考…
+      </div>
+    </div>
+  );
+}
+
 export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown = true }: {
   row: TranscriptRow;
   assistantAuthor?: string;
@@ -412,14 +447,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;
   if (row.kind === 'thinking') {
-    return (
-      <div className="message-row agent-status-row" data-role="assistant" data-testid="agent-thinking">
-        <div className="agent-working">
-          <span className="working-pulse" aria-hidden="true" />
-          正在思考…
-        </div>
-      </div>
-    );
+    return <ThinkingStatus />;
   }
   return null;
 }

@@ -16,12 +16,12 @@ export function costText(cost: { unknown?: boolean; amounts?: Record<string, num
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div data-testid="error" className="hint-card" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', margin: '8px 0' }}>
+    <div data-testid="error" className="hint-card" role="alert" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', margin: '8px 0' }}>
       <Icon name="alert" />
-      <span><strong>加载失败：</strong>{message}</span>
+      <span><strong>操作未完成：</strong>{message}</span>
       {message.includes('刷新页面')
-        ? <Button size="sm" variant="danger" onClick={() => location.reload()}>刷新页面</Button>
-        : onRetry && <Button size="sm" variant="danger" onClick={onRetry}>重试</Button>}
+        ? <Button size="sm" onClick={() => location.reload()}>刷新页面</Button>
+        : onRetry ? <Button size="sm" onClick={onRetry}>重试</Button> : <span className="error-recovery">检查连接或配置后，再尝试刚才的操作。</span>}
     </div>
   );
 }

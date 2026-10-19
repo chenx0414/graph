@@ -1,0 +1,1780 @@
+{
+  "measuredAt": "2026-10-16T04:25:21.334Z",
+  "root": "/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-flash-9Wjvax",
+  "baseline": "/tmp/graph-flash-gzip-web",
+  "candidate": "/Users/macmini/workspace/13-Graph/dist/web",
+  "runs": 10,
+  "profile": "local loopback, unthrottled",
+  "summary": {
+    "A": {
+      "startup": {
+        "p50": 83.5,
+        "p75": 91,
+        "p95": 100.90000003576279
+      },
+      "conversation": {
+        "p50": 84.30000001192093,
+        "p75": 86.5,
+        "p95": 88
+      },
+      "graph": {
+        "p50": 53.60000002384186,
+        "p75": 68.19999998807907,
+        "p95": 84.30000001192093
+      }
+    },
+    "B": {
+      "startup": {
+        "p50": 78.79999995231628,
+        "p75": 79.70000004768372,
+        "p95": 81.40000003576279
+      },
+      "conversation": {
+        "p50": 75.69999998807907,
+        "p75": 86.59999996423721,
+        "p95": 91.89999997615814
+      },
+      "graph": {
+        "p50": 64.69999998807907,
+        "p75": 67.5,
+        "p95": 67.79999995231628
+      }
+    }
+  },
+  "results": {
+    "A": [
+      {
+        "startup": 100.90000003576279,
+        "conversation": 88,
+        "graph": 84.30000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 13
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 9.400000035762787
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 10.900000035762787
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 10.800000011920929
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 11.100000023841858
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 60.19999998807907
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 81.5
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 82.19999998807907
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 85.10000002384186
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 85.19999998807907
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 85.80000001192093
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 84.10000002384186
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 93.10000002384186
+          }
+        ]
+      },
+      {
+        "startup": 92.60000002384186,
+        "conversation": 80.20000004768372,
+        "graph": 65,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 5.800000011920929
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.5
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.5
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.5
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 55.30000001192093
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 76.39999997615814
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 76.5
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 77.10000002384186
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 77.89999997615814
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 78.30000001192093
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 78.69999998807907
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 82.69999998807907
+          }
+        ]
+      },
+      {
+        "startup": 91,
+        "conversation": 75.5,
+        "graph": 53.60000002384186,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.5
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.800000011920929
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 55.5
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 76
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 77.30000001192093
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 77.69999998807907
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 77.90000003576279
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 78.19999998807907
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 77.19999998807907
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 81.90000003576279
+          }
+        ]
+      },
+      {
+        "startup": 85.19999998807907,
+        "conversation": 81.10000002384186,
+        "graph": 53.30000001192093,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 5.899999976158142
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.199999988079071
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.800000011920929
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.099999964237213
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 53.30000001192093
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 75.5
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 75.5
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 76.80000001192093
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 76.89999997615814
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 77
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 77.30000001192093
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 80.5
+          }
+        ]
+      },
+      {
+        "startup": 83.69999998807907,
+        "conversation": 82.90000003576279,
+        "graph": 54.10000002384186,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.5
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 6
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.300000011920929
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.300000011920929
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 53.39999997615814
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 73.60000002384186
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 73.69999998807907
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 75
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 75.30000001192093
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 75.60000002384186
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 78.89999997615814
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 75.80000001192093
+          }
+        ]
+      },
+      {
+        "startup": 82.80000001192093,
+        "conversation": 85.69999998807907,
+        "graph": 51.5,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.5
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 5.800000011920929
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.5
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 52.60000002384186
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 72.69999998807907
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 72.80000001192093
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 72.89999997615814
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 73.19999998807907
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 74.19999998807907
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 74.5
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 77.60000002384186
+          }
+        ]
+      },
+      {
+        "startup": 81.80000001192093,
+        "conversation": 86.60000002384186,
+        "graph": 52.40000003576279,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.199999988079071
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.300000011920929
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 5.600000023841858
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 5.899999976158142
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 5.899999976158142
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 52.39999997615814
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 71.89999997615814
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 73.30000001192093
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 73.60000002384186
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 73.69999998807907
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 74.10000002384186
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 73.10000002384186
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 77.30000001192093
+          }
+        ]
+      },
+      {
+        "startup": 82,
+        "conversation": 86.5,
+        "graph": 68.19999998807907,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.299999952316284
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 5.899999976158142
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.5
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 5.799999952316284
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 52.39999997615814
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 72.79999995231628
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 72.79999995231628
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 73.69999998807907
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 73.89999997615814
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 74.09999996423721
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 77.5
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 74.5
+          }
+        ]
+      },
+      {
+        "startup": 83.5,
+        "conversation": 84.30000001192093,
+        "graph": 51.90000003576279,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.099999964237213
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.599999964237213
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.599999964237213
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.299999952316284
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 52.5
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 72.5
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 72.59999996423721
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 73
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 73.39999997615814
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 73.79999995231628
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 77.89999997615814
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 75.19999998807907
+          }
+        ]
+      },
+      {
+        "startup": 83,
+        "conversation": 84.30000001192093,
+        "graph": 70.19999998807907,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-D8F8h9lq.js",
+            "bytes": 402884,
+            "end": 8.400000035762787
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6
+          },
+          {
+            "name": "/assets/index-B1Dy3rnp.css",
+            "bytes": 27273,
+            "end": 5.700000047683716
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 52.80000001192093
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 72.70000004768372
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 72.80000001192093
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 73.20000004768372
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 73.80000001192093
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 74
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 74.30000001192093
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 77.10000002384186
+          }
+        ]
+      }
+    ],
+    "B": [
+      {
+        "startup": 79.70000004768372,
+        "conversation": 86.59999996423721,
+        "graph": 67.5,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.300000011920929
+          },
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 8.700000047683716
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 5.700000047683716
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.300000011920929
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.400000035762787
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 7.900000035762787
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.600000023841858
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.600000023841858
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.400000035762787
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 44.200000047683716
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 64.30000001192093
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 64.30000001192093
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 65.5
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 65.70000004768372
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 65.90000003576279
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 69.60000002384186
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 66.5
+          }
+        ]
+      },
+      {
+        "startup": 78.69999998807907,
+        "conversation": 76.90000003576279,
+        "graph": 64.69999998807907,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 7
+          },
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 8.300000011920929
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.599999964237213
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 7.099999964237213
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 8.199999988079071
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.899999976158142
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 9.199999988079071
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 9.199999988079071
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.800000011920929
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 45.59999996423721
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 66.80000001192093
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 67
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 67.69999998807907
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 68.59999996423721
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 69
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 69.5
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 72.69999998807907
+          }
+        ]
+      },
+      {
+        "startup": 79.5,
+        "conversation": 75.39999997615814,
+        "graph": 66.69999998807907,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.299999952316284
+          },
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 7.799999952316284
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.399999976158142
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.199999988079071
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 9.599999964237213
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 9
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 9.599999964237213
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 9.799999952316284
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 46.59999996423721
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 68.89999997615814
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 69
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 69.39999997615814
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 70.5
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 70.69999998807907
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 71.19999998807907
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 74.29999995231628
+          }
+        ]
+      },
+      {
+        "startup": 80,
+        "conversation": 91.89999997615814,
+        "graph": 64,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.099999964237213
+          },
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 9.199999988079071
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.299999952316284
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.5
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.299999952316284
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 5.699999988079071
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.399999976158142
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 8.599999964237213
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.599999964237213
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.799999952316284
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 64.19999998807907
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 64.29999995231628
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 64.69999998807907
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 65.59999996423721
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 66
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 66.69999998807907
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 69.5
+          }
+        ]
+      },
+      {
+        "startup": 79.5,
+        "conversation": 73.5,
+        "graph": 52,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 9.199999988079071
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.399999976158142
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.399999976158142
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 7
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.600000023841858
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 8.399999976158142
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.800000011920929
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.899999976158142
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 9.100000023841858
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.60000002384186
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 63.60000002384186
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 65.19999998807907
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 65.69999998807907
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 65.89999997615814
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 66
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 69.39999997615814
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 64.80000001192093
+          }
+        ]
+      },
+      {
+        "startup": 78.79999995231628,
+        "conversation": 75.59999996423721,
+        "graph": 67.60000002384186,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 8.899999976158142
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.299999952316284
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.399999976158142
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.5
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 7.899999976158142
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.599999964237213
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.599999964237213
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.699999988079071
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.299999952316284
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 63.299999952316284
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 64.5
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 65
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 65
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 65.19999998807907
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 64.29999995231628
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 68.5
+          }
+        ]
+      },
+      {
+        "startup": 78.19999998807907,
+        "conversation": 76.19999998807907,
+        "graph": 67.79999995231628,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.199999988079071
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 8.300000011920929
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.300000011920929
+          },
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 9.099999964237213
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 6
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.399999976158142
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.300000011920929
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.099999964237213
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.30000001192093
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 63.39999997615814
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 63.5
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 64.39999997615814
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 64.59999996423721
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 64.89999997615814
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 65.5
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 68.30000001192093
+          }
+        ]
+      },
+      {
+        "startup": 78.30000001192093,
+        "conversation": 74.59999996423721,
+        "graph": 52.299999952316284,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 8.699999988079071
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 5.900000035762787
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.5
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.699999988079071
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 7.699999988079071
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.100000023841858
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.199999988079071
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.600000023841858
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.199999988079071
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.19999998807907
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 63.10000002384186
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 63.19999998807907
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 63.60000002384186
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 64.5
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 64.80000001192093
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 65.30000001192093
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 68
+          }
+        ]
+      },
+      {
+        "startup": 81.40000003576279,
+        "conversation": 87.60000002384186,
+        "graph": 50.59999996423721,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 8.700000047683716
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 5.900000035762787
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.400000035762787
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.600000023841858
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.400000035762787
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.300000011920929
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 7.600000023841858
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8.200000047683716
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.400000035762787
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.60000002384186
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 63.40000003576279
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 63.60000002384186
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 64
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 64.10000002384186
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 64.5
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 66.40000003576279
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 68.90000003576279
+          }
+        ]
+      },
+      {
+        "startup": 78.30000001192093,
+        "conversation": 75.69999998807907,
+        "graph": 67.19999998807907,
+        "homeText": "跳到主内容\nGraph\nAgent 协作空间\n新对话\n导航\n问题\n资源库\n用量\n工具\n模型\n设置\n项目\n添加项目，让 Agent 了解你的代码。\n添加项目\n最近\n性能验证会话\n没有打开的窗口\n仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。\n从一个目标，开始协作\n开始新对话\n\n描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。\n\n性能输入验证\n完全访问\n先聊聊，暂不选项目\nEnter 发送，Shift + Enter 换行\n缓存 —\n上下文 —\n未选择模型\n思考 low\n了解项目\n梳理结构，找到改进方向\n解决问题\n描述现象，一起定位原因\n开发功能\n从想法到可执行的方案\n1\n描述目标\n2\n确认方案草稿\n3\n在任务图中跟进\n读取访问模式失败：Route GET:/api/config not found",
+        "graphText": "性能验证任务图\n0\n图修订 v1 graph definition\n已连接\n任务图\n2 个节点\n重新布局\n○\n待执行\n2\n含未知 2\n◐\n运行中\n0\n✓\n已完成\n0\n⛔\n被阻塞\n0\noutput → input\nR\n○\n未知\nfirst route\nR\n○\n未知\nsecond route\nReact Flow\nfirst · 每次判断\n\n等待输入与条件满足\n\n正在读取判断历史…\n\n规则\n[\n  {\n    \"emit\": {\n      \"output\": \"$input\"\n    },\n    \"when\": \"true\"\n  }\n]\n输入状态\n[\n  {\n    \"name\": \"input\",\n    \"protocol\": \"data\",\n    \"delivered\": false,\n    \"missing\": true,\n    \"value\": null,\n    \"valueTruncated\": false,\n    \"valueBytes\": 0,\n    \"valuePreview\": null,\n    \"source\": null,\n    \"updatedAt\": null\n  }\n]\n持久状态\nnull\n判断记录\n重开",
+        "resources": [
+          {
+            "name": "/assets/index-BUSARdo_.js",
+            "bytes": 299783,
+            "end": 8.899999976158142
+          },
+          {
+            "name": "/assets/jsx-runtime-BuqwL3YU.js",
+            "bytes": 3115,
+            "end": 5.699999988079071
+          },
+          {
+            "name": "/assets/ui-YFpz4Q7z.js",
+            "bytes": 3357,
+            "end": 6.100000023841858
+          },
+          {
+            "name": "/assets/rolldown-runtime-CbXtAM7H.js",
+            "bytes": 589,
+            "end": 6.300000011920929
+          },
+          {
+            "name": "/assets/esm-3-EiaOHN.js",
+            "bytes": 57886,
+            "end": 7.399999976158142
+          },
+          {
+            "name": "/assets/models-CQbRLQ7Q.js",
+            "bytes": 479,
+            "end": 6.5
+          },
+          {
+            "name": "/assets/preload-helper-CrFWMiHS.css",
+            "bytes": 565,
+            "end": 7.199999988079071
+          },
+          {
+            "name": "/assets/index-C0UIuNqf.css",
+            "bytes": 26524,
+            "end": 8
+          },
+          {
+            "name": "/assets/preload-helper-mgc5Ipz1.js",
+            "bytes": 1797,
+            "end": 8.100000023841858
+          },
+          {
+            "name": "/assets/usage-refresh-V9OdmYaC.js",
+            "bytes": 573,
+            "end": 8.199999988079071
+          },
+          {
+            "name": "/assets/graph-icon-CkWrNGxW.png",
+            "bytes": 1108537,
+            "end": 43.39999997615814
+          },
+          {
+            "name": "/api/config",
+            "bytes": 82,
+            "end": 63.39999997615814
+          },
+          {
+            "name": "/api/usage/refresh",
+            "bytes": 90,
+            "end": 63.39999997615814
+          },
+          {
+            "name": "/api/settings",
+            "bytes": 206,
+            "end": 63.60000002384186
+          },
+          {
+            "name": "/api/startup",
+            "bytes": 70,
+            "end": 64.69999998807907
+          },
+          {
+            "name": "/api/tasks",
+            "bytes": 339,
+            "end": 65
+          },
+          {
+            "name": "/api/agent-context",
+            "bytes": 46076,
+            "end": 68.39999997615814
+          },
+          {
+            "name": "/api/conversations",
+            "bytes": 270,
+            "end": 65.69999998807907
+          }
+        ]
+      }
+    ]
+  }
+}
