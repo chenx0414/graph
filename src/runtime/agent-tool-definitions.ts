@@ -68,31 +68,16 @@ const nativeProposal = Type.Object({
   decisions: Type.Optional(Type.Array(Type.String())),
 });
 
-/**
- * A free-form JSON object argument, with the shape written out.
- *
- * `Type.Any()` publishes the schema `{}`, and the tool-call layer JSON-encodes every argument whose
- * schema carries no type: an object the Agent passes as an object reaches the handler as a string,
- * so `graph_create` refuses the definition, `graph_patch` refuses the changes and `graph_send`
- * delivers a JSON string where the receiving protocol expects an object. Naming the type keeps the
- * argument an object on the way in; what the object must contain stays with the runtime that owns
- * that shape (`parseGraphDefinition`, the patch merge, the endpoint protocol).
- */
-const anyObject = Type.Object({}, { additionalProperties: true });
-
-/** Any JSON value, for an interface payload whose protocol is declared by the graph, not here. */
-const jsonValue = Type.Union([anyObject, Type.Array(Type.Any()), Type.String(), Type.Number(), Type.Boolean(), Type.Null()]);
-
 function declarations(features: AgentToolFeatures) {
   const main = features.role === 'master';
   const rsiArguments = prepareToolArguments('apply_rsi_change');
   return {
     read_graph: { name: 'read_graph', label: 'Read graph definition', description: 'Read this graph definition at the immutable revision used by your current execution. Select nodes, modules, edges, protocols, acceptance, inputs or outputs; id reads one named object, otherwise after/limit page through the section. Read-only: cannot change the graph or access another graph. The initial graph overview is a bounded preview; use this tool for full details.', parameters: Type.Object({ section: Type.Union(['nodes', 'modules', 'edges', 'protocols', 'acceptance', 'inputs', 'outputs'].map(value => Type.Literal(value))), id: Type.Optional(Type.String()), after: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })) }), available: Boolean(features.graphRead), externallyGated: false },
-    graph_create: { name: 'graph_create', label: 'Create graph', description: 'Create an independently owned graph from a complete JSON definition. Nodes wait for input; read graph-v2.md under the Graph documentation directory for the schema.', parameters: Type.Object({ definition: anyObject, targetBranch: Type.Optional(Type.String()), requestId: Type.Optional(Type.String()) }), available: main && Boolean(features.graphManagement), externallyGated: false },
-    graph_patch: { name: 'graph_patch', label: 'Patch graph', description: 'Publish a full definition or local JSON merge patch with baseRevision concurrency control. Named objects merge; null removes a field. Current work keeps its config; connections apply at subsequent submit.', parameters: Type.Object({ graphId: Type.String(), baseRevision: Type.Number(), changes: anyObject }), available: main && Boolean(features.graphManagement), externallyGated: false },
+    graph_create: { name: 'graph_create', label: 'Create graph', description: 'Create an independently owned graph from a complete JSON definition. Nodes wait for input; read graph-v2.md under the Graph documentation directory for the schema.', parameters: Type.Object({ definition: Type.Any(), targetBranch: Type.Optional(Type.String()), requestId: Type.Optional(Type.String()) }), available: main && Boolean(features.graphManagement), externallyGated: false },
+    graph_patch: { name: 'graph_patch', label: 'Patch graph', description: 'Publish a full definition or local JSON merge patch with baseRevision concurrency control. Named objects merge; null removes a field. Current work keeps its config; connections apply at subsequent submit.', parameters: Type.Object({ graphId: Type.String(), baseRevision: Type.Number(), changes: Type.Any() }), available: main && Boolean(features.graphManagement), externallyGated: false },
     graph_inspect: { name: 'graph_inspect', label: 'Inspect graph', description: 'Read graph summary, revision, nodes, paged queue/executions for recovery, results, edge delivery history (newest first, nextBefore is the next after cursor; large values have valueTruncated), edge_delivery (id=edge ID and deliveryId, explicitly reads one full value), paged module judgment state (chronological, nextAfter cursor), module_values (explicit full input/state read), module_transition (id=module ID and transitionId, one full judgment), final acceptance evidence, host operation records or provider_calls (actual model sends and unknown usage holds).', parameters: Type.Object({ graphId: Type.String(), query: Type.Optional(Type.String()), id: Type.Optional(Type.String()), deliveryId: Type.Optional(Type.String()), transitionId: Type.Optional(Type.String()), after: Type.Optional(Type.Number()), limit: Type.Optional(Type.Number()) }), available: main && Boolean(features.graphManagement), externallyGated: false },
     graph_control: { name: 'graph_control', label: 'Control graph', description: 'Pause/resume, retry/skip/cancel a queue item, reopen a module, cancel an interrupted host operation, request/withdraw completion, stop, or explicitly relayout the canvas. Read graph-v2.md under the Graph documentation directory for action constraints.', parameters: Type.Object({ graphId: Type.String(), action: Type.String(), nodeId: Type.Optional(Type.String()), moduleId: Type.Optional(Type.String()), seq: Type.Optional(Type.Number()), operationId: Type.Optional(Type.String()), callId: Type.Optional(Type.String()), usage: Type.Optional(Type.Object({ input: Type.Number(), output: Type.Number(), cacheRead: Type.Number(), cacheWrite: Type.Number() })) }), available: main && Boolean(features.graphManagement), externallyGated: false },
-    graph_send: { name: 'graph_send', label: 'Send to graph agent', description: 'Send text as queued chat, or value through a named input using the same protocol and serial execution rules.', parameters: Type.Object({ graphId: Type.String(), nodeId: Type.Optional(Type.String()), input: Type.Optional(Type.String()), value: Type.Optional(jsonValue), text: Type.Optional(Type.String()) }), available: main && Boolean(features.graphManagement), externallyGated: false },
+    graph_send: { name: 'graph_send', label: 'Send to graph agent', description: 'Send text as queued chat, or value through a named input using the same protocol and serial execution rules.', parameters: Type.Object({ graphId: Type.String(), nodeId: Type.Optional(Type.String()), input: Type.Optional(Type.String()), value: Type.Optional(Type.Any()), text: Type.Optional(Type.String()) }), available: main && Boolean(features.graphManagement), externallyGated: false },
     read: {
       name: 'read', label: 'Read file', description: 'Read a UTF-8 file or supported image from the instance workspace or a bound capability.',
       parameters: Type.Object({ path: Type.String() }),
