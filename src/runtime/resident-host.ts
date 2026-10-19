@@ -76,6 +76,7 @@ export class ResidentHost {
   /** How many times this host started the underlying process (1 + recoveries + rebinds). */
   private spawns = 0;
   private modelAborts = new Set<AbortController>();
+  private modelCalls = new Set<Promise<void>>();
   private readyResolvers: ((inspect: ResidentInspect) => void)[] = [];
 
   private readonly options: ResidentHostOptions;
@@ -162,10 +163,11 @@ export class ResidentHost {
           const requestId = message.requestId;
           const abort = new AbortController();
           this.modelAborts.add(abort);
-          void Promise.resolve(this.options.onModelCall?.(message.context, abort.signal, workerModelOptions(message.options)) ?? Promise.reject(new Error('Host model transport unavailable')))
-            .then(value => { this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: true, value })}\n`); })
-            .catch(error => { this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: false, error: error instanceof Error ? error.message : String(error) })}\n`); })
-            .finally(() => this.modelAborts.delete(abort));
+          const call = Promise.resolve(this.options.onModelCall?.(message.context, abort.signal, workerModelOptions(message.options)) ?? Promise.reject(new Error('Host model transport unavailable')))
+            .then(value => { if (!this.closed && !this.disposed) this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: true, value })}\n`); })
+            .catch(error => { if (!this.closed && !this.disposed) this.write(`${JSON.stringify({ operation: 'model_result', requestId, ok: false, error: error instanceof Error ? error.message : String(error) })}\n`); })
+            .finally(() => { this.modelAborts.delete(abort); this.modelCalls.delete(call); });
+          this.modelCalls.add(call);
           newline = this.buffer.indexOf('\n');
           continue;
         }
@@ -278,11 +280,12 @@ export class ResidentHost {
         if (!this.closed) process.control.kill('SIGKILL');
       }
       await process.exited;
+      await Promise.allSettled([...this.modelCalls]);
       this.restricted = undefined; this.closed = true;
       return;
     }
     const child = this.child;
-    if (!child) return;
+    if (!child) { await Promise.allSettled([...this.modelCalls]); return; }
     if (this.alive()) {
       const exited = new Promise<void>(resolve => child.on('exit', () => resolve()));
       this.write(`${JSON.stringify({ operation: 'close' })}\n`);
@@ -290,6 +293,9 @@ export class ResidentHost {
       if (this.child!.exitCode === null) child.kill('SIGKILL');
       await exited.catch(() => undefined);
     }
+    // The worker can exit before the host finishes accounting for its HTTP send.
+    // Keep SQLite open until every host-owned model callback has settled.
+    await Promise.allSettled([...this.modelCalls]);
     this.channel?.destroy();
     this.child = undefined;
     this.channel = undefined;

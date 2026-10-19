@@ -21,6 +21,8 @@ export interface ResponsePlan {
   redirect?: string;
   /** Keep the HTTP response open after the SSE [DONE] marker. */
   holdOpen?: boolean;
+  /** Emit content but never the final usage or terminator, until the connection closes. */
+  holdBeforeUsage?: boolean;
   beforeReply?: () => Promise<void> | void;
 }
 /**
@@ -82,6 +84,7 @@ export async function openaiServer(plans: ResponsePlan[]) {
     } else {
       res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     }
+    if (plan.holdBeforeUsage) return;
     res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
     if (plan.holdOpen) res.write('data: [DONE]\n\n');
     else res.end('data: [DONE]\n\n');

@@ -134,6 +134,8 @@ async function readUsage(response: Response, api: 'openai-completions' | 'anthro
  */
 export interface GatedProviderFetchOptions {
   reservation: number;
+  /** Refuse another admission after the caller has stopped; an admitted send may still drain usage. */
+  admissionSignal?: AbortSignal;
   fetchImpl?: typeof fetch;
   delay?: (milliseconds: number) => Promise<void>;
   maxAttempts?: number;
@@ -224,6 +226,7 @@ export async function gatedProviderFetch(
 ): Promise<Response> {
   const maxAttempts = options.maxAttempts ?? 3;
   for (let attempt = 1; ; attempt++) {
+    options.admissionSignal?.throwIfAborted();
     const id = randomUUID();
     let sent = false;
     let release: (() => void) | undefined;
@@ -231,6 +234,7 @@ export async function gatedProviderFetch(
       // Every attempt acquires its own slot, so a retry must pass the queue and
       // the gate again instead of holding capacity through the backoff.
       if (options.acquireSlot) release = await options.acquireSlot();
+      options.admissionSignal?.throwIfAborted();
       const response = await broker.dispatch(id, options.reservation, () => {
         try { options.onRequest?.(id); } catch { /* telemetry cannot refuse a send */ }
         sent = true;
@@ -419,6 +423,7 @@ export function controlledOpenAIStream(
           // Reserve an upper bound for this model's accepted context and output.
           maxTokens: Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens),
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+            init?.signal?.throwIfAborted();
             if (sent) throw new Error('Unexpected provider retry; use a new controlled invocation');
             sent = true;
             if (!reported) {
@@ -437,8 +442,27 @@ export function controlledOpenAIStream(
             }
             // The slot is acquired per attempt inside gatedProviderFetch, so a
             // retry re-queues and re-passes the gate after releasing capacity.
-            transport = gatedProviderFetch(broker, input, { ...init, redirect: 'error' }, {
+            // Stopping the Agent stops delivery and further admissions. Keep an
+            // already admitted HTTP send alive briefly in the opt-in accounting
+            // mode to read final usage; aborting that connection discards it.
+            const callerSignal = init?.signal;
+            const drainCanceledUsage = process.env.GRAPH_DRAIN_CANCELED_USAGE === '1';
+            const accountingController = new AbortController();
+            let drainTimer: ReturnType<typeof setTimeout> | undefined;
+            const stop = () => {
+              drainTimer = setTimeout(() => accountingController.abort(callerSignal?.reason), 30_000);
+            };
+            const closeAccounting = () => {
+              if (drainTimer) clearTimeout(drainTimer);
+              callerSignal?.removeEventListener('abort', stop);
+            };
+            if (drainCanceledUsage) {
+              callerSignal?.addEventListener('abort', stop, { once: true });
+              if (callerSignal?.aborted) stop();
+            }
+            transport = gatedProviderFetch(broker, input, { ...init, ...(drainCanceledUsage ? { signal: accountingController.signal } : {}), redirect: 'error' }, {
               reservation: model.contextWindow + model.maxTokens,
+              ...(callerSignal ? { admissionSignal: callerSignal } : {}),
               ...(usageOptions.onRequest ? { onRequest: (id: string) => {
                 const profile = profileProviderRequest(init?.body);
                 if (profile) usageOptions.onRequest!(id, profile);
@@ -486,9 +510,13 @@ export function controlledOpenAIStream(
                     broker.settle(id, null);
                   } finally {
                     release();
+                    closeAccounting();
                   }
                 })();
               },
+            }).catch(error => {
+              closeAccounting();
+              throw error;
             });
             return transport;
           },

@@ -270,7 +270,10 @@ test('native graph chats keep a session and expose the actual provider prompt in
 
 
 // A hanging real provider exposes late SQLite writes and accidental restart after shutdown.
-test('closing a native graph aborts its provider and settles durable writers before releasing SQLite', async () => {
+test.each([false,true])('closing a native graph aborts its provider and settles durable writers before releasing SQLite; usage drain=%s', async drain => {
+  const previous=process.env.GRAPH_DRAIN_CANCELED_USAGE;
+  process.env.GRAPH_DRAIN_CANCELED_USAGE=drain?'1':'0';
+  try {
   const root = await temp('shutdown');
   const capabilityRoot = join(root, 'capabilities'); await mkdir(capabilityRoot);
   const sent = Promise.withResolvers<void>();
@@ -300,4 +303,7 @@ test('closing a native graph aborts its provider and settles durable writers bef
     expect(disk.db.prepare('SELECT state FROM kernel_provider_calls WHERE task_id=?').get(graph.graphId)).toEqual({ state: 'unknown' });
     expect(provider.requests).toHaveLength(1);
   } finally { disk.close(); }
-}, 30_000);
+  } finally {
+    if(previous===undefined)delete process.env.GRAPH_DRAIN_CANCELED_USAGE;else process.env.GRAPH_DRAIN_CANCELED_USAGE=previous;
+  }
+}, 45_000);

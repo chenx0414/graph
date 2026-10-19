@@ -152,7 +152,10 @@ try {
     (SELECT COUNT(*) FROM operations WHERE task_id IN (?1,?2) AND worker_active=1) +
     (SELECT COUNT(*) FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id IN (?1,?2) AND i.cost IS NULL) AS n`);
    const drainBegan=Date.now();
-   while(pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0 && Date.now()-drainBegan<30000)await new Promise(resolve=>setTimeout(resolve,100));
+   // Allow the opt-in 30s transport drain to settle and persist before this
+   // outer cleanup deadline; equal deadlines race the final unknown write.
+   const drainDeadlineMs=process.env.GRAPH_DRAIN_CANCELED_USAGE==='1' ? 35000 : 30000;
+   while(pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0 && Date.now()-drainBegan<drainDeadlineMs)await new Promise(resolve=>setTimeout(resolve,100));
    cleanupIncomplete=pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0;
   } finally {ledger.close();}
  }

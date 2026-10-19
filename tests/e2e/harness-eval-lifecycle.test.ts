@@ -9,7 +9,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 
 const execute = promisify(execFile);
 
-test.each([{suggestion:true,missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:true,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:true,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:false,lane:'worker'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'worker'}])('real evaluation CLI records terminal state and closes its ledger ($lane, case=$caseId, fixedCount=$fixedCount, missingUsage=$missingUsage, timeout=$timedOut, suggestion=$suggestion)', async ({timedOut,lane,caseId,fixedCount,missingUsage,suggestion}) => {
+test.each([{stalledUsage:true,missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {suggestion:true,missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:true,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:true,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:false,lane:'worker'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'worker'}])('real evaluation CLI records terminal state and closes its ledger ($lane, case=$caseId, fixedCount=$fixedCount, missingUsage=$missingUsage, timeout=$timedOut, suggestion=$suggestion, stalledUsage=$stalledUsage)', async ({timedOut,lane,caseId,fixedCount,missingUsage,suggestion,stalledUsage}) => {
   const root = await mkdtemp(join(tmpdir(), 'graph-eval-lifecycle-'));
   await writeFile(join(root,'hidden-verifier.txt'),'private-independent-verifier-marker');
   const cliCommand = `cat > greet.mjs <<'EOF'
@@ -19,7 +19,7 @@ EOF`;
   const plans=(caseId==='cli'
     ? [{tools:[{id:'write-cli',name:'bash',arguments:JSON.stringify({command:cliCommand})}]},{text:'CLI ready.'}]
     : timedOut
-    ? [...(lane==='main' ? [{tools:[{id:'before-timeout',name:'bash',arguments:JSON.stringify({command:'printf observed-before-interrupt > observed.txt'})}]}] : []), { text: 'Too late', beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, lane==='worker' ? 20_000 : 5_000)) }]
+    ? [...(lane==='main' ? [{tools:[{id:'before-timeout',name:'bash',arguments:JSON.stringify({command:'printf observed-before-interrupt > observed.txt'})}]}] : []), stalledUsage ? {text:'Waiting for final usage.',holdBeforeUsage:true} : { tools:[{id:'late-action',name:'bash',arguments:JSON.stringify({command:'printf forbidden > after-interrupt.txt'})}], beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, lane==='worker' ? 20_000 : 5_000)) }]
     : [...(lane==='worker' ? [{tools:[{id:'outside-read',name:'read',arguments:JSON.stringify({path:join(root,'hidden-verifier.txt')})}]}] : []), { tools: [{ id: 'repair', name: 'bash', arguments: JSON.stringify({ command: `if test -e ../case.json; then echo 'verification leaked' >&2; exit 1; fi
 cat > config.js <<'EOF'
 export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const index = line.indexOf('='); return [line.slice(0,index),line.slice(index+1)]; })); }
@@ -45,7 +45,7 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
     }
     const { stdout, stderr } = await execute(process.execPath, [lane==='worker' ? 'scripts/harness-worker-eval.mjs' : 'scripts/harness-real-eval.mjs', configPath, caseId], {
       cwd: process.cwd(), timeout: 45_000,
-      env: { ...process.env, HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'1'}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '4000') : '15000' },
+      env: { ...process.env, GRAPH_DRAIN_CANCELED_USAGE:'1', HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'1'}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? (lane==='worker' ? '10000' : '4000') : '15000' },
     });
     const report = JSON.parse(stdout);
     artifactRoot = report.root;
@@ -76,6 +76,17 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
       }
     }else expect(ledger.tools).toEqual([]);
     expect(report.toolTelemetry).toMatchObject({collected:true});
+    if(timedOut){
+      expect(ledger.tasks.reduce((sum:number,task:{unknownUsage:number})=>sum+task.unknownUsage,0)).toBe(stalledUsage ? 1 : 0);
+      expect(ledger.tasks.reduce((sum:number,task:{estimatedUsage:number})=>sum+task.estimatedUsage,0)).toBe(0);
+      expect(provider.requests).toHaveLength(lane==='main' ? 2 : 1);
+      await expect(readFile(join(lane==='worker'?report.workspace:join(report.root,'project'),'after-interrupt.txt'),'utf8')).rejects.toMatchObject({code:'ENOENT'});
+      if(stalledUsage){
+        expect(report.elapsedMs).toBeGreaterThanOrEqual(30_000);
+        expect(report.elapsedMs).toBeLessThan(42_000);
+        expect(ledger.summary.costPerCompletedTask).toBeNull();
+      }else expect(ledger.models[0].tokens).toEqual({input:lane==='main'?50:25,output:lane==='main'?20:10,cacheRead:lane==='main'?30:15,cacheWrite:0});
+    }
     if(caseId==='cli'){
       const evidence=JSON.parse(report.verificationEvidence) as {generatedCounts:number[]};
       expect(new Set(evidence.generatedCounts).size).toBe(7);
@@ -93,12 +104,12 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
         expect(ledger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:0,tokens:{input:25,output:10,cacheRead:15,cacheWrite:0}});
         const baseline=JSON.parse((await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath,caseId],{
           cwd:process.cwd(),timeout:45000,
-          env:{...process.env,HOME:root,GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_TIMEOUT_MS:'15000',GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'0'},
+          env:{...process.env,GRAPH_DRAIN_CANCELED_USAGE:'1',HOME:root,GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_TIMEOUT_MS:'15000',GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'0'},
         })).stdout);
         defaultArtifactRoot=baseline.root;
         expect(baseline).toMatchObject({taskSuccess:true,cleanupIncomplete:false});
         const defaultLedger=JSON.parse(await readFile(join(baseline.root,'cost-report.json'),'utf8'));
-        expect(defaultLedger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:1});
+        expect(defaultLedger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:0,estimatedUsage:0,tokens:{input:25,output:10,cacheRead:15,cacheWrite:0}});
         const defaultDb=new DatabaseSync(join(baseline.root,'state','tasks.sqlite'),{readOnly:true});
         try{
           const decision=defaultDb.prepare("SELECT data FROM events WHERE type='prompt_suggestion.decided'").get() as {data:string};
