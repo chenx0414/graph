@@ -38,7 +38,7 @@ function parseAnthropicUsage(value: unknown): TokenUsage | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   const input = raw.input_tokens;
-  const output = raw.output_tokens ?? 0;
+  const output = raw.output_tokens;
   const cacheRead = raw.cache_read_input_tokens ?? 0;
   const cacheWrite = raw.cache_creation_input_tokens ?? 0;
   if (![input, output, cacheRead, cacheWrite].every(item => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0)) return null;
@@ -78,6 +78,7 @@ async function readUsage(response: Response, api: 'openai-completions' | 'anthro
     // still stay open behind a proxy or keep-alive, so waiting for EOF here
     // would hold the model response hostage indefinitely.
     let usage: TokenUsage | null = null;
+    let anthropicDeltaComplete = false;
     let buffered = '';
     const processLine = (line: string): boolean => {
       if (!line.startsWith('data:')) return false;
@@ -88,15 +89,19 @@ async function readUsage(response: Response, api: 'openai-completions' | 'anthro
       try { event = JSON.parse(payload) as typeof event; } catch { return false; }
       if (api === 'anthropic-messages') {
         if (event.type === 'message_start') {
-          usage = parseAnthropicUsage(event.message?.usage) ?? usage;
+          usage = parseAnthropicUsage(event.message?.usage);
+          anthropicDeltaComplete = false;
         } else if (event.type === 'message_delta' && usage) {
           const delta = parseAnthropicUsage({
-            ...(event.usage as object | undefined),
             input_tokens: usage.input,
             cache_read_input_tokens: usage.cacheRead,
             cache_creation_input_tokens: usage.cacheWrite,
+            ...(event.usage as object | undefined),
           });
-          if (delta) usage = delta;
+          // Delta counts are cumulative. A malformed final delta must not
+          // preserve an earlier partial count as the complete request bill.
+          usage = delta;
+          anthropicDeltaComplete = delta !== null;
         }
         return event.type === 'message_stop';
       }
@@ -115,12 +120,14 @@ async function readUsage(response: Response, api: 'openai-completions' | 'anthro
       for (const line of lines) {
         if (!processLine(line)) continue;
         void reader.cancel();
-        return usage;
+        return api === 'anthropic-messages' && !anthropicDeltaComplete ? null : usage;
       }
     }
     buffered += decoder.decode();
-    if (buffered) processLine(buffered);
-    return usage;
+    if (buffered && processLine(buffered)) return api === 'anthropic-messages' && !anthropicDeltaComplete ? null : usage;
+    // message_start (and intermediate deltas) only provide a partial bill.
+    // EOF before message_stop cannot prove the final Anthropic token totals.
+    return api === 'anthropic-messages' ? null : usage;
   } catch { return null; }
   finally { reader.releaseLock(); }
 }

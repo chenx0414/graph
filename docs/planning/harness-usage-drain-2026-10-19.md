@@ -52,3 +52,16 @@ ResidentHost同时跟踪宿主模型回调：停止worker后先等待这些回�
 4. 本地故障E2E和完整仓库门禁通过后，真实供应商的采集可用性仍须在明确批准的新范围内验证。该验证须与优化对照区分；不可用的历史记录不用于补成基线。
 
 上述判据以可验证的数据完整性为目标，不能承诺网络/供应商/进程永远不丢数据。当前不启动或申请新付费范围。
+
+
+## 后续核验：部分用量不能冒充完整账单
+
+在6b3198f之后继续检查采集完整性，发现另一条预存问题：Anthropic的message_start只含起始用量，旧解析器在正常EOF前无message_stop时仍返回它；损坏或缺output_tokens的最终message_delta也可能保留旧值或补0；最终事件更新的input/cache字段则被起始字段覆盖。这与此前Step未知调用不是同一根因，不能用本地Anthropic复现解释历史Step账本。
+
+官方流式契约说明message_delta的usage是累计值，message_stop标记消息结束；完整示例还包含输入/cache更新。[官方流式协议](https://platform.claude.com/docs/en/build-with-claude/streaming)
+
+新增单一真正E2E owner：tests/e2e/provider-usage-completeness.test.ts，真实HTTP会话经Graph、Pi SDK、SQLite关闭重开、harness-cost CLI，外部服务仅替代Messages API。5场景覆盖正常累计、最终input/cache更新、起始数据后EOF、损坏尾部、尾部缺output。旧实现1通过4失败（usage-completeness-red-v3.log，7.80秒）；修复后连同既有credential-queue的3项共8项通过8.28秒（usage-completeness-green.log）。EOF触发的既有自动恢复不被禁用，每次外部实际发送与正式账本逐笔核对，不预设重试次数。
+
+修复仅调整采集：完整message_delta及message_stop齐备才将流式Anthropic用量记为权威；累计output采用最后值而不累加，最终事件提供的input/cache覆盖旧字段，省略的input/cache保留既有值；缺output不补0。无限预算下仍可明确estimated，不能进入权威成本；有限预算继续按正式规则处理。JSON非流式usage同样要求实际output_tokens。无新增模型/路由/推理努力变更，OpenAI路径不变，没有付费调用。最终完整`node --run check`通过：273文件/1521测试、394.72秒（usage-completeness-final-check.log），类型/lint/baseline/验收证据检查全部通过；baseline按增长规则自动增加1文件/5测试，验收证据不变。
+
+供应商恢复能力另见[官方接口核验](harness-provider-usage-recovery-2026-10-19.md)：request logs是值得核验的线索，聚合CSV不能逐笔补账，公开证据尚未建立按ID自动恢复四类token的契约。该结论不是断言供应商没有其他接口。
