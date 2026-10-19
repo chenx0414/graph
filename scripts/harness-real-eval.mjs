@@ -5,6 +5,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
 import {startGraphDaemon} from '../src/server/start.ts';
+import {writeConsoleAddress} from '../src/server/console-address.ts';
 import {cases} from './harness-eval-cases.mjs';
 import {installEvaluationContext} from './harness-eval-context.mjs';
 const exec=promisify(execFile);
@@ -63,6 +64,7 @@ let cleanupIncomplete=false;
 let toolTelemetry={collected:false,reason:'daemon_unavailable'};
 try {
  daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
+ await writeConsoleAddress(daemon.stateDir,{url:daemon.url,pid:process.pid,mode:daemon.mode,startedAt:Date.now()});
  if(evaluationContext)for(const expected of evaluationContext.recipes){
   const actual=daemon.server.runtime.catalog.agentCombinations().find(recipe=>recipe.id===expected.id);
   if(actual?.status!=='valid' || JSON.stringify(actual.resources)!==JSON.stringify(expected.resources))throw new Error(`Frozen recipe did not load: ${expected.id}`);

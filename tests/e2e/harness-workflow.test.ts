@@ -192,6 +192,9 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:explicitRoles?'worker':'',GRAPH_EVAL_REVIEWER_MODEL:explicitRoles?'review':'',GRAPH_EVAL_TIMEOUT_MS:'35000',...(frozenContext?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{})}});
   const report=JSON.parse(stdout);artifactRoot=report.root;
   expect(report,JSON.stringify({report,main:main.requests,worker:worker.requests,review:review.requests})).toMatchObject({completed:true,taskSuccess:true,success:true,workflow:{phase:'completed'}});
+  const address=JSON.parse(await readFile(join(report.root,'state','console.json'),'utf8'));
+  expect(address).toMatchObject({mode:'execute',pid:expect.any(Number),startedAt:expect.any(Number)});
+  expect(new URL(address.url).hostname).toBe('127.0.0.1');
   if(explicitRoles){
    const initial=(main.requests[0] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='user');
    const text=JSON.stringify(initial);
