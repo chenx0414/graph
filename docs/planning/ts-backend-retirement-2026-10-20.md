@@ -142,6 +142,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `console/conversation-queue.test.ts` 队列消息取消：可撤回、同一请求不重复撤回、不存在的消息报 missing | `tests/e2e/go-conversation-queue.test.ts` | 2 |
 | `e2e/rework-runtime.test.ts` 项目被移出配置后历史保留、拒绝新任务 | `tests/e2e/go-removed-project.test.ts` | 1 |
 | `console/attachments-payload.test.ts` 附件上限：文本文件进模型、超限被拒不落库、不支持的类型被指名拒绝 | `tests/e2e/go-attachments.test.ts` | 3 |
+| `tests/m5/http.test.ts` APP 桥接 RSI 重启队列：无令牌拒绝、队列形状、畸形 ack 拒绝、未知 id 不清空 | `tests/e2e/go-rsi-bridge.test.ts` | 2 |
 
 ## 执行批次
 
@@ -155,9 +156,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 6（已完成）**：队列消息的撤回。`tests/e2e/go-conversation-queue.test.ts`——证明排队中的消息可以撤回、同一请求不重复撤回、不存在的消息报 missing 而不是被编造。
 - **Batch 7（已完成）**：项目移出配置。`tests/e2e/go-removed-project.test.ts`——证明历史仍然可读、项目从控制台消失、新任务被明确拒绝而不是被静默接受。
 - **Batch 8（已完成）**：消息的附件上限。`tests/e2e/go-attachments.test.ts`——证明限额内的文本文件随消息进到模型手里，超限文件被指名拒绝且不留消息，不支持的类型被指名拒绝。
-- **Batch 9（下一步）**：APP 桥接 RSI 重启队列（`tests/m5/http.test.ts`）。
-- **Batch 10（下一步）**：图布局几何契约（`tests/m5/graph.test.ts`）——Go 的布局走 node+elkjs，风险最高，尽早证明。
-- **Batch 11 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
+- **Batch 9（已完成）**：APP 桥接的重启队列。`tests/e2e/go-rsi-bridge.test.ts`——证明无令牌被拒、队列形状可读、畸形 ack 被拒、未知 id 不会清空任何东西。
+- **Batch 10（下一步）**：RSI 的真实应用流程（`tests/e2e/rsi-shape.test.ts`）——模型发出 `apply_rsi_change`、真实 Git 提交、检查通过、生成待重载请求，ack 在 daemon 尚未真正重载前不得清空。
+- **Batch 11（下一步）**：图布局几何契约（`tests/m5/graph.test.ts`）——Go 的布局走 node+elkjs，风险最高，尽早证明。
+- **Batch 12 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
 ## 门禁与纪律
