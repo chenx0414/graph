@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -80,6 +81,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   example.outputs.literalEcho={from:'literalEcho.result',protocol:'literal'};
  }
  const root=await mkdtemp(join(tmpdir(),'graph-eval-delivery-'));
+ const runs=await mkdtemp('/tmp/graph-delivery-observe-');
  let artifactRoot:string|undefined;
  const repaired="export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)]; })); }\n";
  const tool=(name:string,value:()=>unknown,thinking?:string)=>({...(thinking?{thinking}:{}),tools:[{id:name,name,arguments:()=>JSON.stringify(value())}]});
@@ -161,11 +163,22 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    tool('get_task_status',()=>({taskId:graphId(),nodeId:'toString'})),
    tool('get_task_status',()=>({taskId:graphId(),nodeId:'check'})),
    tool('get_task_status',()=>({taskId:graphId(),waitForNode:'check',timeoutMs:5000})),
-   tool('graph_inspect',()=>{
+   {...tool('graph_inspect',()=>{
     const reply=messages(main).filter(message=>message.role==='tool').at(-1);
     const hint=/graph_inspect\((\{[^)]*\})\)/.exec(String(reply?.content))?.[1];
     return hint?JSON.parse(hint):{graphId:graphId(),query:'missing-module-recovery-hint'};
-   }),
+   }),beforeReply:async()=>{
+    // Sending to a module and creating its host operation are asynchronous.
+    // Wait for the real persisted operation before testing the inspection
+    // recovery hint; reading an earlier empty snapshot is valid behavior.
+    await expect.poll(async()=>{
+     const run=(await readdir(runs)).find(name=>name.startsWith('graph-real-eval-'));
+     if(!run)return false;
+     const db=new DatabaseSync(join(runs,run,'state','tasks.sqlite'),{readOnly:true});
+     try{return Boolean(db.prepare("SELECT 1 FROM kernel_module_operations WHERE task_id=? AND module_id='check'").get(graphId()));}
+     finally{db.close();}
+    },{timeout:10000}).toBe(true);
+   }},
    tool('graph_inspect',()=>({graphId:graphId(),query:'acceptance'})),
   ] : []),
   tool('graph_send',()=>({graphId:graphId(),nodeId:'review',input:'job',value:{commit:commit()}})),
@@ -189,7 +202,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    id,modelId:id,provider:`graph-${id}`,grade,api:'openai-completions',baseUrl:(server as typeof main).model.baseUrl,contextWindow:32000,maxTokens:256,credentialId:'local',cost:{input:2,output:4,cacheRead:.5,cacheWrite:1},
   })),preferences:frozenContext?{high:['worker']}:{}}}));
   const {stdout}=await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath],{cwd:process.cwd(),timeout:60000,
-   env:{...process.env,HOME:root,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:explicitRoles?'worker':'',GRAPH_EVAL_REVIEWER_MODEL:explicitRoles?'review':'',GRAPH_EVAL_TIMEOUT_MS:'35000',...(frozenContext?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{})}});
+   env:{...process.env,HOME:root,TMPDIR:runs,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_CONFIRM_WORKFLOW:'1',GRAPH_EVAL_WORKER_MODEL:explicitRoles?'worker':'',GRAPH_EVAL_REVIEWER_MODEL:explicitRoles?'review':'',GRAPH_EVAL_TIMEOUT_MS:'35000',...(frozenContext?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot}:{})}});
   const report=JSON.parse(stdout);artifactRoot=report.root;
   expect(report,JSON.stringify({report,main:main.requests,worker:worker.requests,review:review.requests})).toMatchObject({completed:true,taskSuccess:true,success:true,workflow:{phase:'completed'}});
   const address=JSON.parse(await readFile(join(report.root,'state','console.json'),'utf8'));
@@ -290,5 +303,6 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
  }finally{
   await Promise.all([main.close(),worker.close(),review.close()]);await rm(root,{recursive:true,force:true});
   if(artifactRoot)await rm(artifactRoot,{recursive:true,force:true});
+  await rm(runs,{recursive:true,force:true});
  }
 },75000);

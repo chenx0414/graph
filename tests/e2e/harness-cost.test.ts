@@ -98,6 +98,7 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   const events = await (await fetch(`${daemon.url}/api/conversations/${created.conversationId}/events?limit=500`, { headers })).json() as { type: string; data: Record<string, unknown> }[];
   const profiles = events.filter(event => event.type === 'provider.request_profile');
   expect(profiles).toHaveLength(cacheField === 'capacity-retry' ? 4 : 3);
+  expect(new Set(profiles.map(profile => profile.data.callId)).size).toBe(profiles.length);
   expect(JSON.stringify(profiles)).not.toMatch(/private-user-marker|private-fixture-key|printf harness-proof/);
   expect(profiles[0]!.data.staticFingerprint).toBe(profiles[1]!.data.staticFingerprint);
   expect(profiles.at(-1)!.data.sections).toHaveProperty('tool_results');
@@ -113,11 +114,12 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
     expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(0);
     expect(report.summary.costPerCompletedTask).toBeNull();
   } else {
-    expect(task).toMatchObject({ requests: cacheField === 'capacity-retry' ? 4 : 3, unknownUsage: 0, unknownCost: 0,
+    expect(task).toMatchObject({ requests: cacheField === 'capacity-retry' ? 4 : 3,
+      unknownUsage: cacheField === 'capacity-retry' ? 1 : 0, unknownCost: cacheField === 'capacity-retry' ? 1 : 0,
       tokens: { input: 75, output: 30, cacheRead: 45, cacheWrite: 0 }, cacheReadFraction: 0.375 });
     expect(task.costs.USD).toBeCloseTo(0.0002925, 10);
     expect(report.summary.costPerCompletedTask).toBeNull();
-    expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(cacheField === 'capacity-retry' ? 4 : 3);
+    expect(report.summary.costByBillingType.callsWithFrozenRates).toBe(3);
     expect(task.cacheMeasuredRequests).toBe(3);
     expect(task.cacheUnmeasuredRequests).toBe(cacheField === 'capacity-retry' ? 1 : 0);
     expect(report.summary.costByBillingType.amounts.USD.input).toBeCloseTo(0.00015, 10);

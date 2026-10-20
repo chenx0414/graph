@@ -983,6 +983,9 @@ export function createPiAdapter(options: {
             model: toPiModel(entry),
             stream: guardHandoffResponses(controlledOpenAIStream(observedGate, resolveKey, slot, entry.api, {
               estimateMissing: unknownUsageIsNonBlocking(options.store, operation.instanceId),
+              onTransport: observation => options.store.event(operation.taskId, 'provider.transport', {
+                ...observation, operationId: operation.id, instanceId: operation.instanceId!, model: entry.id,
+              }),
               onRequest: (callId, profile) => options.store.event(operation.taskId, 'provider.request_profile', {
                 callId, operationId: operation.id, instanceId: operation.instanceId!, model: entry.id, rates: entry.cost ?? null, pricing: entry.pricing ?? null, ...profile,
               }),
@@ -1216,6 +1219,9 @@ export function createPiAdapter(options: {
                 suggestionReply = await generatePromptSuggestion({
                   stream: controlledOpenAIStream(suggestionGate, resolveKeyFor(suggestionEntry), slotFor(suggestionEntry), suggestionEntry.api, {
                     estimateMissing: true,
+                    onTransport: observation => options.store.event(operation.taskId, 'provider.transport', {
+                      ...observation, operationId: operation.id, model: suggestionEntry.id,
+                    }),
                     onRequest: (callId, profile) => options.store.event(operation.taskId, 'provider.request_profile', {
                       callId, operationId: operation.id, model: suggestionEntry.id, rates: suggestionEntry.cost ?? null, pricing: suggestionEntry.pricing ?? null, ...profile,
                     }),
@@ -1303,6 +1309,9 @@ export function createPiAdapter(options: {
                         const candidateReply = await generateSkillProposal({
                           stream: controlledOpenAIStream(candidateGate, resolveKeyFor(candidate), slotFor(candidate), candidate.api, {
                             estimateMissing: true,
+                            onTransport: observation => options.store.event(operation.taskId, 'provider.transport', {
+                              ...observation, operationId: operation.id, model: candidate.id,
+                            }),
                             onRequest: (callId, profile) => options.store.event(operation.taskId, 'provider.request_profile', {
                               callId, operationId: operation.id, model: candidate.id, rates: candidate.cost ?? null, pricing: candidate.pricing ?? null, ...profile,
                             }),

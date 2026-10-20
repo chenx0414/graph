@@ -509,6 +509,9 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           try {
           const stream = await controlledOpenAIStream(observed, () => { const binding = options.credentialFor(model); if (!binding) throw new Error('Bound model credential unavailable'); return binding.apiKey; }, slot, model.api, {
             estimateMissing: options.kernel.execution(execution.id)?.tokenBudget?.unlimited === true,
+            onTransport: observation => options.kernel.store.event(graphId, 'provider.transport', {
+              ...observation, executionId: execution.id, nodeId, model: model.id,
+            }),
             onRequest: (callId, profile) => options.kernel.store.event(graphId, 'provider.request_profile', {
               callId, executionId: execution.id, nodeId, model: model.id, rates: model.cost ?? null, pricing: model.pricing ?? null, ...profile,
             }),

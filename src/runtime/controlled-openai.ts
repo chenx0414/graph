@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model, type TranscriptContext } from '@earendil-works/pi-ai';
 import { streamSimple as openaiStreamSimple } from '@earendil-works/pi-ai/api/openai-completions';
@@ -12,6 +12,44 @@ import { profileProviderRequest } from './request-profile.ts';
 export interface SendGate {
   dispatch<T>(id: string, reservation: number, send: () => T): T;
   settle(id: string, usage: TokenUsage | null): void;
+}
+
+/** Correlation evidence only; entering fetch never proves upstream receipt or billing. */
+export interface ProviderTransportObservation {
+  callId: string;
+  at: number;
+  phase: 'fetch_started' | 'response_headers' | 'transport_error';
+  requestSha256: string | null;
+  clientRequestId: string | null;
+  status?: number;
+  responseIds?: Record<string, string>;
+  errorCodes?: string[];
+  errorNames?: string[];
+  usageRecoverableFromTransport?: false;
+}
+
+function transportErrorIdentity(error: unknown) {
+  const errorCodes = new Set<string>();
+  const errorNames = new Set<string>();
+  let current = error;
+  // Error messages/URLs can contain credentials. Keep only bounded identifiers,
+  // never headers, request content, or arbitrary error/cause serialization.
+  for (let depth = 0; depth < 6 && current instanceof Error; depth++) {
+    if (/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(current.name)) errorNames.add(current.name);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code)) errorCodes.add(code);
+    current = current.cause;
+  }
+  return { errorCodes: [...errorCodes], errorNames: [...errorNames] };
+}
+
+function responseRequestIds(headers: Headers) {
+  const ids: Record<string, string> = {};
+  for (const name of ['x-opencode-request-id', 'x-request-id', 'request-id']) {
+    const value = headers.get(name);
+    if (value && /^[\x21-\x7e]{1,256}$/.test(value)) ids[name] = value;
+  }
+  return ids;
 }
 
 function parseUsage(value: unknown): TokenUsage | null {
@@ -135,9 +173,9 @@ async function readUsage(response: Response, api: 'openai-completions' | 'anthro
 /**
  * One logical provider request. A transport failure before any response header
  * cannot prove the provider did not receive or bill the request, so it is
- * recorded as unknown usage and never resent silently. Only failures that prove
- * nothing was sent (DNS failure, refused connection, connect timeout) are
- * resent, and each resend is a new invocation that passes the gate again.
+ * recorded as unknown usage and never resent silently. Transport retries require
+ * proof nothing was sent (DNS failure, refused connection, connect timeout).
+ * Bounded 429 capacity retries retain unknown usage and pass the gate again.
  */
 export interface GatedProviderFetchOptions {
   reservation: number;
@@ -152,6 +190,9 @@ export interface GatedProviderFetchOptions {
   onResponse?: (id: string, response: Response, release: () => void) => Promise<void> | void;
   /** Best-effort observation after admission, once per actual transport attempt. */
   onRequest?: (id: string) => void;
+  /** OpenCode forwards this correlation header; it is not an idempotency key. */
+  requestIdHeader?: 'x-opencode-request-id';
+  onTransport?: (observation: ProviderTransportObservation) => void;
 }
 
 const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, usageSource: 'authoritative' };
@@ -235,6 +276,11 @@ export async function gatedProviderFetch(
   for (let attempt = 1; ; attempt++) {
     options.admissionSignal?.throwIfAborted();
     const id = randomUUID();
+    const requestSha256 = typeof init?.body === 'string' ? createHash('sha256').update(init.body).digest('hex') : null;
+    const observe = (observation: Omit<ProviderTransportObservation, 'callId' | 'at' | 'requestSha256' | 'clientRequestId'>) => {
+      try { options.onTransport?.({ callId: id, at: Date.now(), requestSha256, clientRequestId: options.requestIdHeader ? id : null, ...observation }); }
+      catch { /* Correlation diagnostics do not change sends or usage evidence. */ }
+    };
     let sent = false;
     let release: (() => void) | undefined;
     try {
@@ -244,17 +290,22 @@ export async function gatedProviderFetch(
       options.admissionSignal?.throwIfAborted();
       const response = await broker.dispatch(id, options.reservation, () => {
         try { options.onRequest?.(id); } catch { /* telemetry cannot refuse a send */ }
+        const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        if (options.requestIdHeader) headers.set(options.requestIdHeader, id);
+        observe({ phase: 'fetch_started' });
         sent = true;
-        return (options.fetchImpl ?? fetch)(input, init);
+        return (options.fetchImpl ?? fetch)(input, { ...init, headers });
       });
-      // A capacity answer (429 or 503) means the provider rejected the request before producing any
-      // token, exactly like an unsent connection: give the same logical send another attempt instead
-      // of failing the Agent turn. Other 5xx answers stay hard failures - they can be a provider bug
-      // that the unknown-usage path must see. Settling zero usage matters too: an unknown settlement
-      // would turn a provider hiccup into a blocking usage question for the user.
-      if ((response.status === 429 || response.status === 503) && attempt < maxAttempts) {
+      observe({ phase: 'response_headers', status: response.status, responseIds: responseRequestIds(response.headers) });
+      // HTTP status alone is not token evidence. In particular a proxy can
+      // translate an ambiguous upstream failure into 503. It reaches raw-usage
+      // settlement, while 429 capacity retries retain their unknown attempt.
+      if (response.status === 429 && attempt < maxAttempts) {
+        // Retain bounded capacity recovery, including its unknown attempt in
+        // the ledger. A finite-budget gate can refuse the next admission until
+        // that usage is reconciled; an unlimited account need not lose its turn.
         release?.();
-        broker.settle(id, ZERO_USAGE);
+        broker.settle(id, null);
         await response.body?.cancel().catch(() => undefined);
         await (options.delay ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))))(500 * attempt);
         continue;
@@ -270,6 +321,7 @@ export async function gatedProviderFetch(
     } catch (error) {
       release?.();
       if (!sent) throw error; // The gate refused before anything was sent.
+      observe({ phase: 'transport_error', ...transportErrorIdentity(error), usageRecoverableFromTransport: false });
       const code = transportCode(error);
       const notSent = typeof code === 'string' && RETRYABLE_TRANSPORT_CODES.has(code);
       broker.settle(id, notSent ? ZERO_USAGE : null);
@@ -286,6 +338,7 @@ export interface StreamSlot {
 
 export interface ControlledStreamUsageOptions {
   onRequest?: (id: string, profile: NonNullable<ReturnType<typeof profileProviderRequest>>) => void;
+  onTransport?: (observation: ProviderTransportObservation) => void;
   /** Estimate a successful response when per-request usage is absent. */
   estimateMissing?: boolean;
   /**
@@ -469,6 +522,8 @@ export function controlledOpenAIStream(
             }
             transport = gatedProviderFetch(broker, input, { ...init, ...(drainCanceledUsage ? { signal: accountingController.signal } : {}), redirect: 'error' }, {
               reservation: model.contextWindow + model.maxTokens,
+              ...(openCodeGo ? { requestIdHeader: 'x-opencode-request-id' as const } : {}),
+              ...(usageOptions.onTransport ? { onTransport: usageOptions.onTransport } : {}),
               ...(callerSignal ? { admissionSignal: callerSignal } : {}),
               ...(usageOptions.onRequest ? { onRequest: (id: string) => {
                 const profile = profileProviderRequest(init?.body);

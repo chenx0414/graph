@@ -234,29 +234,6 @@ function fakeGate(pausedOnCall?: number) {
 const REFUSED = Object.assign(new Error('connect ECONNREFUSED'), { cause: { code: 'ECONNREFUSED' } });
 const RESET = Object.assign(new Error('socket hang up'), { cause: { code: 'ECONNRESET' } });
 
-test('a provider capacity answer is retried on the same logical send', async () => {
-  const gate = fakeGate();
-  let calls = 0;
-  const fetchImpl: typeof fetch = async () => {
-    calls += 1;
-    return calls === 1 ? new Response('model is at capacity', { status: 429 }) : new Response('ok', { status: 200 });
-  };
-  const response = await gatedProviderFetch(gate, 'http://provider.invalid/v1/chat', {}, { reservation: 10, fetchImpl, delay: async () => {} });
-  expect(await response.text()).toBe('ok');
-  expect(calls).toBe(2);
-  expect(gate.dispatches).toHaveLength(2);
-  // The rejected attempt produced no tokens, so it settles zero usage: an unknown settlement would
-  // turn a provider hiccup into a blocking usage question for the user.
-  expect(gate.settled).toHaveLength(1);
-  expect(gate.settled[0]!.usage).toMatchObject({ input: 0, output: 0 });
-  // A persistent capacity answer still reaches the caller so the node can fail honestly.
-  let exhausted = 0;
-  const alwaysBusy: typeof fetch = async () => { exhausted += 1; return new Response('at capacity', { status: 503 }); };
-  const busy = await gatedProviderFetch(gate, 'http://provider.invalid/v1/chat', {}, { reservation: 10, fetchImpl: alwaysBusy, delay: async () => {}, maxAttempts: 2 });
-  expect(busy.status).toBe(503);
-  expect(exhausted).toBe(2);
-});
-
 test('a provably unsent request is retried as a new gated invocation', async () => {
   const gate = fakeGate();
   let calls = 0;
