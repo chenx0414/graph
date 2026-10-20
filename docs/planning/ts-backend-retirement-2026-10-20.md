@@ -105,6 +105,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m5/http.test.ts` 会话创建时应用模型与思考档位 | `tests/e2e/go-conversation-http.test.ts` | 2 |
 | `tests/m5/http.test.ts` APP 桥接密钥生命周期 | `tests/e2e/go-app-bridge.test.ts` | 3 |
 | `console/config-edge.test.ts` 热配置生效、被拒候选不落盘、撤销跨重启、损坏撤销文件 fail-closed、双凭据撤销 | `tests/e2e/go-hot-config.test.ts` | 5 |
+| `tests/m5/http.test.ts` 暂停/恢复：暂停期间的消息不外发，恢复后放行，暂停跨重启保持 | `tests/e2e/go-pause-resume.test.ts` | 2 |
+| `console/conversation-queue.test.ts` 队列消息取消：可撤回、同一请求不重复撤回、不存在的消息报 missing | `tests/e2e/go-conversation-queue.test.ts` | 2 |
 
 ## 执行批次
 
@@ -114,9 +116,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 2（已完成）**：会话创建的模型与思考档位。`tests/e2e/go-conversation-http.test.ts`——证明用户选的模型与思考档位落在会话上，并且真正到达该模型指向的 provider。
 - **Batch 3（已完成）**：桌面 APP 桥接的密钥生命周期。`tests/e2e/go-app-bridge.test.ts`——证明推送的密钥生效、密文不落配置文件、撤销留下持久记录、无令牌被拒。
 - **Batch 4（已完成）**：运行中 daemon 的配置语义。`tests/e2e/go-hot-config.test.ts`——证明热保存后新项目立即可用、被拒候选不落盘且 daemon 保持原配置、撤销跨重启仍然生效、损坏的撤销文件 fail-closed、两个凭据的撤销都被记录。
-- **Batch 5（下一步）**：暂停/恢复/提问阻塞（`tests/m5/http.test.ts`）。
-- **Batch 6（下一步）**：APP 桥接 RSI 重启队列（`tests/m5/http.test.ts`）。
-- **Batch 7 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
+- **Batch 5（已完成）**：暂停与恢复。`tests/e2e/go-pause-resume.test.ts`——证明暂停期间到达的消息不会到达 provider、恢复后放行、暂停是任务的事实因而跨重启保持。
+- **Batch 6（已完成）**：队列消息的撤回。`tests/e2e/go-conversation-queue.test.ts`——证明排队中的消息可以撤回、同一请求不重复撤回、不存在的消息报 missing 而不是被编造。
+- **Batch 7（下一步）**：APP 桥接 RSI 重启队列（`tests/m5/http.test.ts`）。
+- **Batch 8 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 100+4 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
 ## 门禁与纪律
