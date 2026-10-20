@@ -29,12 +29,13 @@ import { RuntimeError } from './types.ts';
 export interface ExecutorHost {
   start(): Promise<{ processId: number }>;
   alive(): boolean;
+  recoveredAttempt?(): Promise<number | undefined>;
   /**
    * `usage` is what the turn cost (§9). Optional because not every transport reports it,
    * and an absent figure must stay absent rather than become zero: "unknown" and "free"
    * are different facts to a budget.
    */
-  turn(text: string): Promise<{ turnId: string; inspect: unknown; usage?: { total: number; accounted?: boolean } | undefined }>;
+  turn(text: string, input?: { executionId: string; attempt: number }): Promise<{ turnId: string; inspect: unknown; usage?: { total: number; accounted?: boolean } | undefined }>;
 }
 
 /** What a turn reported back: a missing-required gap, or nothing when it submitted. */
@@ -182,7 +183,9 @@ export class NodeExecutor {
     for (;;) {
       if (metering) {
         try {
-          this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount, executionId);
+          const existingHold = (this.kernel.db.prepare('SELECT token_reservation FROM kernel_executions WHERE id=?').get(executionId) as { token_reservation: number }).token_reservation;
+          if (existingHold === 0) this.kernel.reserveNodeTokens(this.graphId, nodeId, metering.limit, metering.amount, executionId);
+          else if (existingHold !== metering.amount) throw new RuntimeError('budget', 'Original execution reservation does not match its frozen budget');
           held = true;
         } catch (error) {
           if (!(error instanceof RuntimeError) || error.code !== 'budget') throw error;
@@ -194,8 +197,6 @@ export class NodeExecutor {
           return 'blocked';
         }
       }
-      attempt = this.kernel.noteExecutionAttempt(executionId);
-      this.queue.noteAttempt(nodeId);
       // A crash rebuild keeps the same execution; the turn resumes against the
       // rebuilt process rather than starting a fresh one.
       let report: TurnReport | void;
@@ -203,6 +204,9 @@ export class NodeExecutor {
       try {
         host ??= typeof this.options.host === 'function' ? await this.options.host(executionId, revision.version) : this.options.host;
         if (!host.alive()) await host.start();
+        const originalAttempt = await host.recoveredAttempt?.();
+        attempt = originalAttempt ?? this.kernel.noteExecutionAttempt(executionId);
+        if (originalAttempt === undefined) this.queue.noteAttempt(nodeId);
         turnStarted = true;
         report = await run(executionId, attempt, injection, item);
       } catch (error) {
@@ -213,6 +217,16 @@ export class NodeExecutor {
           this.kernel.finishExecution(executionId, 'blocked');
           this.kernel.blockNode(this.graphId, nodeId, reason);
           this.queue.complete(seq, { kind: 'blocked', reason });
+          return 'blocked';
+        }
+        // Preparing a reviewer can wait for a producer's real integration. A
+        // control pause before any model turn keeps the same input runnable and
+        // spends neither an attempt nor an automatic retry.
+        if (!turnStarted && error instanceof RuntimeError && error.code === 'paused') {
+          releaseHold();
+          this.kernel.finishExecution(executionId, 'blocked');
+          this.kernel.db.prepare("UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?").run(this.graphId, nodeId);
+          this.queue.complete(seq, { kind: 'blocked', reason: error.message });
           return 'blocked';
         }
         // A budget interruption after submit cannot make the original input runnable.

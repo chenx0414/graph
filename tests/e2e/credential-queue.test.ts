@@ -1,10 +1,10 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { startGraphDaemon } from '../../src/server/start.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
@@ -55,11 +55,12 @@ test.each([
   const configPath = join(root, 'graph.config.json');
   const document = { version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } }, limits: { credentials: { local: 2 } }, models: { entries: [{ id: 'local', provider: 'graph-local', grade: 'high', api, ...(explicit ? { headers: { authorization: 'Bearer original-synthetic-key' } } : {}), baseUrl: `http://127.0.0.1:${(provider.address() as AddressInfo).port}/v1`, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] } };
   await writeFile(configPath, JSON.stringify(document));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'execute', dynamic: true, env: { HOME: root, GRAPH_LOCAL_KEY: 'original-synthetic-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, env: { GRAPH_LOCAL_KEY: 'original-synthetic-key' }, extraArgs: ['--execute'] });
+  const appToken = (await readFile(join(root, 'state/app-token'), 'utf8')).trim();
   cleanup.push(() => daemon.close());
   const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
   const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
-  const post = (path: string, body: unknown, app = false) => fetch(`${daemon.url}${path}`, { method: 'POST', headers: app ? { ...headers, 'x-graph-app-token': daemon.appToken } : headers, body: JSON.stringify(body) });
+  const post = (path: string, body: unknown, app = false) => fetch(`${daemon.url}${path}`, { method: 'POST', headers: app ? { ...headers, 'x-graph-app-token': appToken } : headers, body: JSON.stringify(body) });
   const create = async (label: string) => {
     const response = await post('/api/conversations', { model: 'local', text: `Queue contract ${label}`, requestId: label });
     expect(response.status).toBe(200);

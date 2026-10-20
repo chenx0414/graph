@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model, type TranscriptContext } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model, type TranscriptContext, type Api, type SimpleStreamOptions, type AssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { streamSimple as openaiStreamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { streamSimple as anthropicStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
 import { estimateContextTokens, estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
@@ -15,6 +14,8 @@ export interface SendGate {
 }
 
 /** Correlation evidence only; entering fetch never proves upstream receipt or billing. */
+export type ControlledStream = (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream | Promise<AssistantMessageEventStream>;
+
 export interface ProviderTransportObservation {
   callId: string;
   at: number;
@@ -457,7 +458,7 @@ export function controlledOpenAIStream(
   slot?: StreamSlot,
   api: ModelApi = 'openai-completions',
   usageOptions: ControlledStreamUsageOptions = {},
-): StreamFn {
+): ControlledStream {
   if (api !== 'openai-completions' && api !== 'anthropic-messages') throw new Error('Unverified model transport');
   return (model, context, options) => {
     const output = createAssistantMessageEventStream();

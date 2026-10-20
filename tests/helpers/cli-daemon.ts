@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { join, resolve } from 'node:path';
+import { findGraphd, graphdSearchStarts } from '../../src/server/go-launch.ts';
+import { ensureBackendBinary } from './backend-binary.ts';
 
 /** Real executable, real loopback HTTP and an isolated caller-owned state directory. */
 export async function launchCli(root: string, options: {
@@ -10,14 +12,19 @@ export async function launchCli(root: string, options: {
   extraArgs?: string[];
 } = {}) {
   const sourceRoot = options.sourceRoot ?? process.cwd();
+  // A checkout that never built the backend would fail every assertion for a
+  // reason that has nothing to do with the code under test.
+  if (!process.env.GRAPH_DAEMON_BIN) ensureBackendBinary();
+  const bin = findGraphd([process.cwd(), sourceRoot, ...graphdSearchStarts()]);
   const args = [
-    resolve(sourceRoot, 'src/server/cli.ts'),
     '--state-dir', join(root, 'state'), '--graph-home', join(root, 'graph-home'),
     '--web-dir', join(root, 'web'), '--port', '0',
+    '--application-root', resolve(sourceRoot),
     ...(options.configPath ? ['--config', options.configPath] : []),
     ...options.extraArgs ?? [],
   ];
-  const child = spawn(process.execPath, args, {
+  process.stdout.write(`[graph] backend ${bin}\n`);
+  const child = spawn(bin, args, {
     cwd: root, env: { ...process.env, HOME: root, ...options.env }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';

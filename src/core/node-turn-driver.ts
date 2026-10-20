@@ -25,8 +25,9 @@ import type { KernelStore, QueueRow } from './kernel-store.ts';
 export interface DriverHost {
   start(): Promise<{ processId: number }>;
   alive(): boolean;
+  recoveredAttempt?(): Promise<number | undefined>;
   /** `usage` is what the turn cost (§9); absent means the transport reported nothing. */
-  turn(text: string): Promise<{ turnId: string; inspect: unknown; usage?: { total: number; accounted?: boolean } | undefined }>;
+  turn(text: string, input?: { executionId: string; attempt: number }): Promise<{ turnId: string; inspect: unknown; error?: string; usage?: { total: number; accounted?: boolean } | undefined }>;
 }
 
 /** What one turn produced, as the driver reports it back to the executor. */
@@ -138,12 +139,15 @@ export class NodeTurnDriver {
     if (!this.options.host.alive()) await this.options.host.start();
 
     const prompt = this.promptFor(executionId, attempt, injection, input);
-    appendNodeEntry(this.options.kernel.store, { taskId: this.options.graphId, nodeId: this.options.nodeId,
+    if (await this.options.host.recoveredAttempt?.() === undefined) appendNodeEntry(this.options.kernel.store, { taskId: this.options.graphId, nodeId: this.options.nodeId,
       operationId: executionId, role: 'user', kind: 'message', text: prompt });
-    const turn = await this.options.host.turn(prompt);
+    const turn = await this.options.host.turn(prompt, { executionId, attempt });
     // Kept for every exit below: a turn that costs something must be charged even when it
     // fails or is resubmitted, or the budget under-counts exactly the turns that misbehave.
     const usage = turn.usage ? { total: turn.usage.total, ...(turn.usage.accounted ? { accounted: true } : {}) } : undefined;
+
+    if (turn.error) return { done: false, usage, error: turn.error };
+    if (!this.submissionExists(executionId) && (this.options.kernel.store.task(this.options.graphId).paused || this.options.kernel.nodeState(this.options.graphId, this.options.nodeId).paused)) return { done: false, usage, error: 'Task paused' };
 
     const messages = (turn.inspect as { messages?: unknown[] } | undefined)?.messages ?? [];
     const assistant = [...messages].reverse().find(message => message && typeof message === 'object' && (message as { role?: string }).role === 'assistant') as { stopReason?: string; errorMessage?: string } | undefined;

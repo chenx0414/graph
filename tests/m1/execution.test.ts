@@ -322,18 +322,18 @@ test('native full access preserves manual pause, unknown usage and finite budget
 });
 
 test('native usage above a turn reservation is counted once across restart and does not exhaust a larger cumulative budget', async () => {
-  const fixture = await nativeAgent([{ text: 'Large completed turn', usage: { prompt_tokens: 300000, completion_tokens: 5 } }, { text: 'Next turn' }]);
+  const fixture = await nativeAgent([{ text: 'Large completed turn', usage: { prompt_tokens: 300000, completion_tokens: 5 } }, { text: '## Goal\nLarge turn retained', usage: { prompt_tokens: 40, completion_tokens: 10 } }, { text: 'Next turn' }]);
   const { runtime, main, graphId, provider, options } = fixture;
   await main.graphSend({ graphId, nodeId: 'work', text: 'Perform the large turn' }); await runtime.host.drive();
   const before = runtime.nodeRun(graphId, 'work');
-  expect(before.node.status).toBe('succeeded'); expect(before.instance).toMatchObject({ used: 300005, reserved: 0 });
-  expect(before.invocations).toHaveLength(1);
+  expect(before.node.status).toBe('succeeded'); expect(before.instance).toMatchObject({ used: 300055, reserved: 0 });
+  expect(before.invocations).toMatchObject([{ purpose: 'completion', usage: { input: 300000, output: 5 } }, { purpose: 'compaction', usage: { input: 40, output: 10 } }]);
   await runtime.close(); const restored = await openTaskRuntime(options); cleanup.push(() => restored.close());
-  await restored.host.drive(); expect(provider.requests).toHaveLength(1);
-  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, used: 300005 });
+  await restored.host.drive(); expect(provider.requests).toHaveLength(2);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ id: before.instance!.id, used: 300055 });
   await restored.supervisor(fixture.ownerId).graphSend({ graphId, nodeId: 'work', text: 'Continue within the remaining quota' }); await restored.host.drive();
-  expect(provider.requests).toHaveLength(2);
-  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ used: 300055, reserved: 0 });
+  expect(provider.requests).toHaveLength(3);
+  expect(restored.nodeRun(graphId, 'work').instance).toMatchObject({ used: 300105, reserved: 0 });
 });
 
 test('native business passed output cannot substitute for the declared real host acceptance check', async () => {

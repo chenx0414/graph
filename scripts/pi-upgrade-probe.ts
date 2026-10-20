@@ -1,5 +1,5 @@
 /**
- * Pi 0.86 upgrade probe.
+ * Pi durable 1.1 prompt integrity probe.
  *
  * The upgrade moves the system prompt into the transcript: the session creates
  * structured system messages with named sections and patches them per turn. The
@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getCurrentSystemPrompt, type Model, type TranscriptContext } from '@earendil-works/pi-ai';
-import { openPiInstance } from '../src/runtime/pi-instance.ts';
+import { openDurableAgent } from '../tests/fixtures/durable-agent.ts';
 import { modelA, respond, testModelRuntime } from '../tests/fixtures/models.ts';
 
 // Stands in for what our own composer emits: the three sections Graph owns.
@@ -32,7 +32,7 @@ async function main() {
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
   try {
-    const instance = await openPiInstance({
+    const instance = await openDurableAgent({
       binding: { instanceId: 'probe', nodeId: 'probe', definitionVersion: 'coder@1' },
       workspace, stateDir: join(root, 'state'),
       model: modelA as unknown as Model<never>, modelRuntime: await testModelRuntime(),

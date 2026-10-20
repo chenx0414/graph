@@ -8,7 +8,7 @@
  * Run: export PATH="$PWD/node_modules/.bin:$PATH"; node --run app:build
  */
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,11 +55,13 @@ for (const [from, to] of [
   ['docs/implementation-plan.md', 'docs/implementation-plan.md'],
   ['docs/graph-mvp.md', 'docs/graph-mvp.md'],
   ['docs/agent', 'docs/agent'],
+  ['docs/planning/baseline-cleanup-2026-10-20.md', 'docs/planning/baseline-cleanup-2026-10-20.md'],
   ['docs/design-graph-examples.md', 'docs/design-graph-examples.md'],
   ['docs/specs/graph-rebuild-v2.md', 'docs/specs/graph-rebuild-v2.md'],
   ['examples', 'examples'],
   ['desktop', 'desktop'],
   ['src', 'src'],
+  ['backend', 'backend'],
   ['build', 'build'],
   // The built-in skills/MCP/talent pack must ship with the app: the daemon
   // installs definitions from this directory on first start.
@@ -68,10 +70,32 @@ for (const [from, to] of [
   await cp(join(root, from), join(stage, to), { recursive: true });
 }
 await cp(join(root, 'dist/web'), join(stage, 'web'), { recursive: true });
+// Build after validating shipped resources so preflight failures stay actionable.
+execFileSync(process.execPath, [join(root, 'scripts/build-backend.mjs'), '--if-missing'], { stdio: 'inherit' });
+// Every package carries the current Go executable and its source for harness maintenance.
+const graphd = join(root, 'dist/graphd');
+await mkdir(join(stage, 'dist'), { recursive: true });
+await cp(graphd, join(stage, 'dist/graphd'));
+await chmod(join(stage, 'dist/graphd'), 0o755);
 // A real Node runtime for sandboxed helpers: packaged Electron cannot start
 // its own binary inside the OS sandbox (missing Helper apps).
 await mkdir(join(stage, 'runtime'), { recursive: true });
-await cp(process.execPath, join(stage, 'runtime/node'));
+// The copy has to be self-contained. An interpreter that reaches its libnode by
+// @rpath only resolves inside its own install prefix, so the shipped copy dies
+// with "Library not loaded: @rpath/libnode.147.dylib" on the first helper
+// start - and on the first Agent turn, because the worker runtime is the same
+// binary. GRAPH_APP_NODE_BIN names a standalone node to ship instead.
+const nodeRuntime = process.env.GRAPH_APP_NODE_BIN?.trim() || process.execPath;
+await cp(nodeRuntime, join(stage, 'runtime/node'));
+try {
+  execFileSync(join(stage, 'runtime/node'), ['--version'], { stdio: 'ignore' });
+} catch {
+  throw new Error(
+    `The Node runtime that would ship is not self-contained: ${nodeRuntime}. ` +
+    'Point GRAPH_APP_NODE_BIN at a standalone node binary (a real install, not a shim ' +
+    'that links libnode by @rpath) and build again.',
+  );
+}
 
 console.log('installing production dependencies into .stage (flat npm tree)');
 execFileSync('npm', ['install', '--omit=dev', '--package-lock=false', '--no-audit', '--no-fund'], { cwd: stage, stdio: 'inherit' });
@@ -80,7 +104,7 @@ await writeFile(join(stage, 'electron-builder.json'), `${JSON.stringify({
   appId: 'dev.graph.console',
   productName: 'Graph',
   directories: { output: join(root, 'dist/app'), buildResources: 'build' },
-  files: ['AGENTS.md', 'CODING_STANDARDS.md', 'CONTEXT.md', '.agents/**/*', 'docs/agents/**/*', 'docs/adr/**/*', 'docs/architecture.md', 'docs/implementation-plan.md', 'docs/graph-mvp.md', 'docs/agent/**/*', 'docs/design-graph-examples.md', 'docs/specs/graph-rebuild-v2.md', 'examples/**/*', 'desktop/**/*', 'src/**/*', 'web/**/*', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
+  files: ['AGENTS.md', 'CODING_STANDARDS.md', 'CONTEXT.md', '.agents/**/*', 'docs/agents/**/*', 'docs/adr/**/*', 'docs/architecture.md', 'docs/implementation-plan.md', 'docs/graph-mvp.md', 'docs/agent/**/*', 'docs/planning/baseline-cleanup-2026-10-20.md', 'docs/design-graph-examples.md', 'docs/specs/graph-rebuild-v2.md', 'examples/**/*', 'desktop/**/*', 'src/**/*', 'backend/**/*', 'web/**/*', 'dist/graphd', 'build/**/*', 'presets/**/*', 'runtime/**/*', 'node_modules/**/*', 'package.json'],
   asar: false,
   npmRebuild: false,
   electronVersion: repo.devDependencies.electron,

@@ -1,5 +1,7 @@
 # Issue #1：Graph v2 逐项验收对应
 
+> 历史实施与验收记录：保留当时的实现和证据，不代表当前进程模型或任务状态。当前 Go + durable 基线见 [2026-10-20 整合说明](../planning/baseline-cleanup-2026-10-20.md)与 [ADR 0032](../adr/0032-go-backend-shared-durable-host.md)。
+
 日期：2026-10-09。依据 [定稿规格](../specs/graph-rebuild-v2.md)、ADR0030 与当前工作树。此表将产品契约对应到生产职责和既有行为验收；不把测试数量或文件存在当作完整交付。最近完整运行为 gate171：267 文件 / 1823 用例通过，181.64 秒；日志 `/tmp/graph-v2-full-check-171.log`。下列测试属于该次运行，桌面交付另列独立证据。
 
 ## 正式模型与执行契约

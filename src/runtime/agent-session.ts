@@ -1,10 +1,14 @@
-import type { StreamFn, ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
+import type { ControlledStream as StreamFn } from './controlled-openai.ts';
 import type { Api, ImageContent, Model } from '@earendil-works/pi-ai';
-import type { AgentSessionEvent, ModelRuntime, RetrySettings, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { AgentSessionEvent, RetrySettings, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { SendGate } from './controlled-openai.ts';
-import { openPiInstance } from './pi-instance.ts';
-import { openPiProcess } from './pi-process.ts';
-import { sdkPromptOptions } from './prompt-options.ts';
+import type { SubmissionRecord } from '@earendil-works/pi-durable';
+import type { FrozenDurableExecution } from './durable-host.ts';
+import type { ModelEntry } from '../catalog/models.ts';
+import type { NodeSpec } from '../core/types.ts';
+import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
+import type { CapabilityOperation } from './capability-bundle.ts';
 
 export interface AgentSessionBinding {
   instanceId: string;
@@ -58,6 +62,19 @@ export interface AgentSessionTurn {
 }
 
 export interface AgentSessionRequest {
+  executionConfiguration?: { model: ModelEntry; spec: NodeSpec; accessPolicy?: ResolvedAccessPolicy };
+  /** Release resources reattached to an existing durable admission. */
+  onRecoveryClose?: () => Promise<void>;
+  /** Settle the original Graph operation from its existing durable receipt. */
+  onRecoveryComplete?: (turn: AgentSessionTurn) => Promise<void>;
+  frozenResourcePaths?: { source: string; target: string }[];
+  nodeExecutionConfiguration?: { model: ModelEntry; role: 'worker' | 'reviewer'; revision: number; base: 'project' | 'worktree'; access: ResolvedAccessPolicy };
+  capabilityDescriptor?: CapabilityOperation['descriptor'];
+  credentialReference?: { modelId: string; provider: string; credentialId?: string; headerCredentials?: string[] };
+  /** Stable admitted execution identity, used for durable input idempotency. */
+  executionId?: string;
+  /** Stable input identity within a Graph execution; retries/continuations differ. */
+  inputRequestId?: string;
   binding: AgentSessionBinding;
   /** Reporting sink for executed tool calls; the in-process transport forwards it to the instance. */
   onToolCall?: (call: { tool: string; ms: number; isError: boolean; target: string | null }) => void;
@@ -68,6 +85,9 @@ export interface AgentSessionRequest {
   thinkingLevel?: ThinkingLevel;
   tools?: ToolDefinition[];
   nativeTools?: string[];
+  deferredCatalogTools?: boolean;
+  deferredBrowserTools?: boolean;
+  compactShellResults?: boolean;
   skillPaths?: string[];
   /** The Agent's own skills folder: the SDK loads skills from here. */
   skillFolder?: string;
@@ -122,17 +142,13 @@ export interface AgentSession {
 }
 
 export interface AgentSessionTransport {
+  bootstrapRecovery?(): Promise<void>;
+  waitForRecovery?(): Promise<void>;
+  /** Bootstrap all original callback bindings before enabling the shared scheduler. */
+  registerRecoveryFactory?(factory: (snapshot: FrozenDurableExecution, receipt?: SubmissionRecord) => Promise<AgentSessionRequest | undefined>): () => void;
+  /** An already admitted, provably unsent durable input retains its attempt. */
+  recoverableInput?(identity: string, executionId: string): Promise<{ requestId: string; attempt: number } | undefined>;
   open(request: AgentSessionRequest): Promise<AgentSession>;
-}
-
-function assistantText(messages: unknown[]) {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index] as { role?: string; content?: { type: string; text?: string }[] };
-    if (message.role === 'assistant') {
-      return message.content?.filter(part => part.type === 'text').map(part => part.text ?? '').join('') ?? '';
-    }
-  }
-  return '';
 }
 
 /**
@@ -155,8 +171,7 @@ export function normalizeAssistantUsage(raw: Record<string, unknown>): AgentSess
 /**
  * The usage the newest assistant message reported, if any.
  *
- * Exported so the resident worker can charge §9 metering from the same read the in-process
- * path uses, rather than inventing a second interpretation of the provider's report.
+ * Exported so main and node transports can interpret metering from the same provider report, rather than inventing a second interpretation of the provider's report.
  */
 export function lastTurnUsage(inspect: AgentSessionInspect): AgentSessionTurn['usage'] {
   const lastAssistant = [...inspect.messages].reverse().find(message =>
@@ -164,154 +179,4 @@ export function lastTurnUsage(inspect: AgentSessionInspect): AgentSessionTurn['u
       && (message as { role?: unknown }).role === 'assistant')) as
     { usage?: Record<string, unknown> } | undefined;
   return lastAssistant?.usage ? normalizeAssistantUsage(lastAssistant.usage) : undefined;
-}
-
-function turn(inspect: AgentSessionInspect): AgentSessionTurn {
-  const lastAssistant = [...inspect.messages].reverse().find(message => {
-    return Boolean(message && typeof message === 'object' && !Array.isArray(message)
-      && (message as { role?: unknown }).role === 'assistant');
-  }) as { stopReason?: string; errorMessage?: string; usage?: Record<string, unknown> } | undefined;
-  return {
-    inspect,
-    finalAssistantText: assistantText(inspect.messages),
-    ...(lastAssistant?.stopReason ? { stopReason: lastAssistant.stopReason } : {}),
-    ...(lastAssistant?.errorMessage ? { errorMessage: lastAssistant.errorMessage } : {}),
-    ...(lastAssistant?.usage ? { usage: normalizeAssistantUsage(lastAssistant.usage) } : {}),
-  };
-}
-
-function sessionState() {
-  let closed = false;
-  let promptStarted = false;
-  let promptInFlight = false;
-  return {
-    beginPrompt() {
-      if (closed) throw new Error('Agent session is closed');
-      if (promptStarted || promptInFlight) throw new Error('Agent session already received a prompt');
-      promptStarted = true;
-      promptInFlight = true;
-    },
-    endPrompt() {
-      promptInFlight = false;
-    },
-    beginSteer() {
-      if (closed) throw new Error('Agent session is closed');
-      if (!promptInFlight) throw new Error('Agent session is not accepting steering messages');
-    },
-    beginClose() {
-      if (closed) return false;
-      closed = true;
-      return true;
-    },
-  };
-}
-
-export function createInProcessAgentSessionTransport(options: { modelRuntime: ModelRuntime }): AgentSessionTransport {
-  return {
-    async open(request) {
-      const instance = await openPiInstance({
-        binding: request.binding,
-        workspace: request.workspace,
-        stateDir: request.stateDir,
-        model: request.model,
-        modelRuntime: options.modelRuntime,
-        stream: request.stream,
-        ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-        ...(request.onToolCall ? { onToolCall: request.onToolCall } : {}),
-        ...(request.tools ? { tools: request.tools } : {}),
-        ...(request.nativeTools?.length ? { nativeTools: request.nativeTools } : {}),
-        ...(request.skillPaths?.length ? { skillPaths: request.skillPaths } : {}),
-        ...(request.skillFolder ? { skillFolder: request.skillFolder } : {}),
-        ...(request.piExtensionPaths?.length ? { piExtensionPaths: request.piExtensionPaths } : {}),
-        ...(request.piExtensionTools?.length ? { piExtensionTools: request.piExtensionTools } : {}),
-        ...(request.mcpAdapterServers?.length ? { mcpAdapterServers: request.mcpAdapterServers } : {}),
-        ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
-        ...(request.allowedToolNames ? { allowedToolNames: request.allowedToolNames } : {}),
-        activateExtensionTools: true,
-        bundleDigest: request.bundleDigest,
-        ...(request.legacyCapabilityDigest ? { legacyCapabilityDigest: request.legacyCapabilityDigest } : {}),
-        toolPolicyDigest: request.toolPolicyDigest,
-        runtimePolicyDigest: request.runtimePolicyDigest,
-        ...(request.allowWorkspaceChange ? { allowWorkspaceChange: true } : {}),
-        ...(request.freshSession ? { freshSession: true } : {}),
-        ...(request.forkFrom ? { forkFrom: request.forkFrom } : {}),
-        ...(request.compaction ? { compaction: request.compaction } : {}),
-        ...(request.retry ? { retry: request.retry } : {}),
-        broker: request.broker,
-        ...(request.onEvent ? { onEvent: request.onEvent } : {}),
-      });
-      const state = sessionState();
-      return {
-        async prompt(text, images) {
-          state.beginPrompt();
-          try {
-            await instance.prompt(text, sdkPromptOptions(images));
-            return turn(instance.inspect());
-          } finally {
-            state.endPrompt();
-          }
-        },
-        async compact(customInstructions?: string) {
-          await instance.compact(customInstructions);
-        },
-        async steer(text) {
-          state.beginSteer();
-          await instance.steer(text);
-        },
-        async interrupt(text) {
-          await instance.interrupt(text);
-        },
-        async stop() {
-          await instance.stop();
-        },
-        inspect() {
-          return instance.inspect();
-        },
-        async close() {
-          if (!state.beginClose()) return;
-          await instance.close();
-        },
-      };
-    },
-  };
-}
-
-export function createRestrictedProcessAgentSessionTransport(): AgentSessionTransport {
-  return {
-    async open(request) {
-      const process = await openPiProcess(request);
-      const state = sessionState();
-      return {
-        async prompt(text, images) {
-          state.beginPrompt();
-          try {
-            const inspect = await process.prompt(text, images);
-            return turn(inspect);
-          } finally {
-            state.endPrompt();
-          }
-        },
-        async compact(customInstructions?: string) {
-          await process.compact(customInstructions);
-        },
-        async steer(text) {
-          state.beginSteer();
-          await process.steer(text);
-        },
-        async interrupt(text) {
-          await process.interrupt(text);
-        },
-        async stop() {
-          await process.stop();
-        },
-        inspect() {
-          return process.inspect();
-        },
-        async close() {
-          if (!state.beginClose()) return;
-          await process.close();
-        },
-      };
-    },
-  };
 }

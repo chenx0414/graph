@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { startGraphDaemon } from '../../src/server/start.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 
 const execute = promisify(execFile);
 // External Messages API faults; all application transport, SDK, persistence and reporting are real.
@@ -36,7 +36,7 @@ test.each(['complete', 'updated-input', 'truncated', 'invalid-delta', 'missing-o
       response.end();
     });
     await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
-    let daemon: Awaited<ReturnType<typeof startGraphDaemon>> | undefined;
+    let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
     try {
       const webDir = join(root, 'web'); await mkdir(webDir);
       await writeFile(join(webDir, 'index.html'), '<!doctype html>Graph');
@@ -47,8 +47,7 @@ test.each(['complete', 'updated-input', 'truncated', 'invalid-delta', 'missing-o
         cost: { input: 2, output: 4, cacheRead: 0.5, cacheWrite: 1 },
         pricing: { currency: 'USD', unit: 'per_million_tokens', status: 'known', sourceUrl: 'fixture', retrievedAt: '2026-10-19' },
       }] } }));
-      daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'execute', dynamic: true,
-        env: { HOME: root, GRAPH_USAGE_KEY: 'external-fixture-only' }, log: () => undefined });
+      daemon = await launchCli(root, { configPath, env: { GRAPH_USAGE_KEY: 'external-fixture-only' }, extraArgs: ['--execute', '--dynamic'] });
       const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
       const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
       const response = await fetch(`${daemon.url}/api/conversations`, { method: 'POST', headers,

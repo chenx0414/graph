@@ -10,6 +10,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import type { UsageSnapshot } from '../../src/server/usage.ts';
+import { findGraphd, graphdSearchStarts } from '../../src/server/go-launch.ts';
 
 let webDir: string;
 beforeAll(async () => {
@@ -124,8 +125,10 @@ async function daemon(root: string, vendor: Awaited<ReturnType<typeof vendors>>,
       { modelId: 'gpt-5.6', displayName: 'GPT-5.6', inputCostPerMillion: '4', outputCostPerMillion: '20', cacheReadCostPerMillion: '0.4', cacheCreationCostPerMillion: '5' },
     ] }));
   }
-  const child = spawn(process.execPath, ['--use-env-proxy', join(process.cwd(), 'src/server/cli.ts'), '--view-only', '--config', configPath,
-    '--state-dir', stateDir, '--graph-home', join(home, '.graph'), '--web-dir', webDir, '--port', '0'], {
+  const daemonBin = findGraphd([process.cwd(), ...graphdSearchStarts()]);
+  const child = spawn(daemonBin, ['--view-only', '--config', configPath,
+    '--state-dir', stateDir, '--graph-home', join(home, '.graph'), '--web-dir', webDir, '--port', '0',
+    '--application-root', process.cwd()], {
     cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], env: {
       PATH: process.env.PATH ?? '', HOME: home, TMPDIR: tmpdir(),
       HTTPS_PROXY: vendor.url, HTTP_PROXY: vendor.url, NO_PROXY: '127.0.0.1,localhost', NODE_EXTRA_CA_CERTS: vendor.cert,

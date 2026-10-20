@@ -15,7 +15,7 @@ import { environmentValues, headerValues } from './mcp-adapter-server.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { callMcpTool, httpExchange, listMcpTools, resolveMcpArg, stdioExchange, type McpExchange, type McpTool } from './mcp-client.ts';
 import { allowedDomain, normalizeDomains } from '../core/domains.ts';
-import { externallyGated } from './pi-instance.ts';
+import { externallyGated } from './tool-gating.ts';
 import { resolvePiExtensionSource } from './pi-extension-source.ts';
 import { acquireRestrictedExecutor, type RestrictedGate } from './restricted-process.ts';
 import { graphNodeRuntime } from './workspace-command.ts';
@@ -970,6 +970,8 @@ export async function resolveCapabilityFacts(
 /** Internal resource loader. Production callers consume CapabilityBundleVersion. */
 export async function loadCapabilities(input: {
   catalog: Catalog;
+  /** Execution-owned immutable facts bypass mutable recipe/catalog resolution. */
+  frozenFacts?: readonly ResolvedCapabilityFact[];
   definitionVersion?: string;
   workspace: string;
   scratchDir: string;
@@ -1028,7 +1030,7 @@ export async function loadCapabilities(input: {
     tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
   };
   let definition;
-  try { definition = input.catalog.definition(input.definitionVersion); }
+  try { definition = input.frozenFacts ? { capabilities: input.frozenFacts.map(fact => ({ id: fact.id, version: fact.version })) } : input.catalog.definition(input.definitionVersion); }
   catch { return {
     skillPaths, piExtensionPaths, piExtensionTools, readRoots, writeRoots, env,
     networkDomains: [...runtimeNetworkDomains],
@@ -1038,7 +1040,7 @@ export async function loadCapabilities(input: {
     tools, prompts: { agent: agentPrompt, tool: toolPrompt }, digest: digest(), close, report,
   }; } // Unpublished definitions keep briefing-only behavior.
   try {
-    const bindings = definitionBindings(definition, input.catalog);
+    const bindings = input.frozenFacts ? input.frozenFacts.map(fact => ({ bound: { id: fact.id, version: fact.version }, role: 'capability' as const })) : definitionBindings(definition, input.catalog);
     // Bindings the definition declares itself are a promise to the user, so they stay fail-closed.
     // The rest come from base capabilities: a convenience layer nobody asked for, which must never
     // be able to stop a session (see the 2026-09-25 incident).
@@ -1053,7 +1055,8 @@ export async function loadCapabilities(input: {
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
       try {
-      const record = input.catalog.capability(bound.id, bound.version);
+      const frozen = input.frozenFacts?.find(fact => fact.id === bound.id && fact.version === bound.version);
+      const record = input.frozenFacts ? frozen && { kind: frozen.kind, status: 'available', snapshot: { path: frozen.path } } : input.catalog.capability(bound.id, bound.version);
       if (!record || record.status !== 'available') {
         throw new RuntimeError('capability_unavailable', `Capability ${bound.id}@${bound.version} is not available in the capability directory`);
       }

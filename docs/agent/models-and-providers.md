@@ -152,11 +152,11 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 ## 服务商选择与浏览器授权
 
-首次设置和模型设置使用 `src/catalog/providers.ts` 的同一服务商目录；支持名称/端点搜索、API key/订阅凭据筛选、本地 LobeHub 品牌图标和自定义兼容服务。新增 OpenAI、Anthropic、Google Gemini、OpenRouter 到模型设置入口；原有账户 ID、`secretRef` 与保存路径不迁移。
+首次设置和模型设置使用 `backend/internal/graph/catalog_providers.go` 的同一服务商目录；支持名称/端点搜索、API key/订阅凭据筛选、本地 LobeHub 品牌图标和自定义兼容服务。新增 OpenAI、Anthropic、Google Gemini、OpenRouter 到模型设置入口；原有账户 ID、`secretRef` 与保存路径不迁移。
 
-**OpenRouter 浏览器授权**已接入 Pi 0.86.1 的 provider OAuth 实现：选择 OpenRouter → 授权登录 → 打开浏览器授权 → 等待桌面安全存储确认 → 保存配置、选择模型并验证。依据 [OpenRouter 官方 PKCE 文档](https://openrouter.ai/docs/guides/overview/auth/oauth)，该流程交换的是用户控制的 API key，直接用于现有 Chat Completions 路径，不存在 access/refresh token 定时刷新。认证与模型可调用性仍分别验证。
+**OpenRouter 浏览器授权**由 Go 宿主实现 PKCE 授权：选择 OpenRouter → 授权登录 → 打开浏览器授权 → 等待桌面安全存储确认 → 保存配置、选择模型并验证。依据 [OpenRouter 官方 PKCE 文档](https://openrouter.ai/docs/guides/overview/auth/oauth)，该流程交换的是用户控制的 API key，直接用于现有 Chat Completions 路径，不存在 access/refresh token 定时刷新。认证与模型可调用性仍分别验证。
 
-- 认证由宿主运行；PKCE verifier、授权码和 key 不进入 renderer。Pi 在 loopback 临时端口上监听每次随机 callback 路径，只接受该流程的回调，重复回调不重复交换。Graph 只向页面返回安全状态和 OpenRouter 授权地址。
+- 认证由宿主运行；PKCE verifier、授权码和 key 不进入 renderer。Go 在 loopback 临时端口上监听每次随机 callback 路径，只接受该流程的回调，重复回调不重复交换。Graph 只向页面返回安全状态和 OpenRouter 授权地址。
 - `POST /api/providers/login {providerId:"openrouter", credentialRef}` 启动流程；`GET /api/providers/login/:id` 返回 `starting / waiting / saving / complete / cancelled / failed`；`POST /api/providers/login/:id/cancel` 取消。它们使用现有本机会话 cookie 与写请求 Origin 守卫，不能绕过鉴权。
 - 同一凭据进行中的登录复用同一流程，五分钟未完成则取消；宿主关闭会清理回调服务。认证拒绝或交换失败保留已有凭据，不返回上游敏感错误原文。未实现远程浏览器手动粘贴回调，浏览器需与宿主在同一机器。
 - 较早的桌面持久化确认不得覆盖最新凭据或恢复已撤销凭据；收到过期确认时保留当前状态，并重新排队同步最新值。

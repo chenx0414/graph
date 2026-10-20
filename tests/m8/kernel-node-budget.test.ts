@@ -101,8 +101,7 @@ test('unestimatable unlimited usage permits the frozen turn and Git commit, but 
     const commitReply = (provider.requests[2] as { messages: { role: string; tool_call_id?: string; content: string }[] }).messages
       .find(message => message.role === 'tool' && message.tool_call_id === 'commit');
     expect(commitReply).toBeDefined();
-    const toolResult = JSON.parse(commitReply!.content) as { content: { type: string; text: string }[] };
-    const committed = JSON.parse(toolResult.content.find(part => part.type === 'text')!.text) as { commit: string };
+    const committed = JSON.parse(commitReply!.content) as { commit: string };
     expect(committed).toMatchObject({ commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
     expect(checkedGit(['show', `${committed.commit}:result.txt`])).toBe('Work with unknown usage');
     const run = runtime.nodeRun(graphId, 'work');

@@ -507,6 +507,9 @@ test('removing a model bound to an unfinished task is refused and the daemon kee
   }, 'proposal');
   await daemon.server.runtime.projects.prepare({ projectId: 'sample', initialize: true, createBaseline: true, requestId: 'prepare' });
   const { taskId } = await daemon.server.runtime.conversations.confirm(conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
+  // This owner tests the feature's model binding, not a main response.
+  // Keep the anchor paused while draining the stopped feature graph.
+  await daemon.server.runtime.user.task(anchorTaskId).pause('pause-main');
   const document = {
     version: 1, projects: [{ id: 'sample', root: dir }],
     models: { entries: [{ id: 'replacement', provider: 'stub', grade: 'medium', api: 'openai-completions', baseUrl: stub.baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] }, credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } }, limits: { credentials: { local: 1 } },

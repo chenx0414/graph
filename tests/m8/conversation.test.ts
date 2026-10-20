@@ -758,7 +758,7 @@ test.each(['before_session', 'session_opened', 'model_sent'])('restart resumes o
     expect(await restored.host.runReady()).toEqual({ dispatched: 0 });
   } else {
     expect(view.messages.filter(message => message.role === 'assistant')).toHaveLength(0);
-    expect(view.master?.status).toBe('failed');
+    expect(view.questions).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'recovery', owner: 'main', status: 'open' })]));
   }
 });
 

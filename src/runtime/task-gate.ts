@@ -107,7 +107,8 @@ export function taskGate(
       purpose = next;
     },
     total() {
-      return unknown ? null : { ...total, usageSource: totalSource ?? 'authoritative' };
+      if (unknown && tokenUsageTotal(total) === 0) return null;
+      return { ...total, usageSource: unknown ? 'unknown' : totalSource ?? 'authoritative' };
     },
   };
 }

@@ -1,4 +1,6 @@
-import type { CapabilityOperation } from './capability-bundle.ts';
+import { restoreCapabilitySettings, type CapabilityOperation } from './capability-bundle.ts';
+import type { FrozenDurableExecution } from './durable-host.ts';
+import { restoreDurableResources } from './durable-freeze.ts';
 import { agentTools } from './agent-tools.ts';
 import { openWorkspaceCommandRunner } from './workspace-command.ts';
 import type { ResolvedAccessPolicy } from '../core/access-policy.ts';
@@ -28,7 +30,7 @@ import { type SendGate } from './controlled-openai.ts';
  */
 
 export interface NodeSessionRequest {
-  environment?: { revision: number; workspace: string; base: string; access: ResolvedAccessPolicy };
+  environment?: { revision: number; workspace: string; base: 'project' | 'worktree'; access: ResolvedAccessPolicy };
   role: 'worker' | 'reviewer';
   operation?: CapabilityOperation;
   close(): Promise<void>;
@@ -47,6 +49,8 @@ export interface NodeSessionRequest {
 
 export interface NodeSessionOptions {
   retainCapabilities?: boolean;
+  frozen?: FrozenDurableExecution;
+  secrets?: () => Record<string, string>;
   access?: ResolvedAccessPolicy;
   bindings?: Pick<Parameters<typeof agentTools>[0], 'peers' | 'artifacts' | 'commitWorkspace' | 'fetch'>;
   kernel: KernelStore;
@@ -85,11 +89,11 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
   const { kernel, catalog, graphId, nodeId } = options;
   const recipe = recipeFor(kernel, graphId, nodeId, options.revisionVersion);
 
-  const known = catalog.hasDefinition(recipe);
+  const known = options.frozen || catalog.hasDefinition(recipe);
   if (!known) throw new Error(`node ${nodeId} names recipe ${recipe}, which the catalog does not hold`);
 
-  const action = catalog.definition(recipe).review === true ? 'review' : 'work';
-  const assembly = await openAgentContextAssembly({
+  const action = options.frozen ? options.frozen.configuration.nodeExecutionConfiguration?.role === 'reviewer' ? 'review' : 'work' : catalog.definition(recipe).review === true ? 'review' : 'work';
+  const assembly = options.frozen ? undefined : await openAgentContextAssembly({
     catalog,
     definitionVersion: recipe,
     // Review is a recipe responsibility, independent of node names or task prose.
@@ -105,20 +109,13 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
   const gate = options.gate ?? { dispatch: <T>(_id: string, _reservation: number, send: () => T): T => send(), settle: () => {} };
   const commands = await openWorkspaceCommandRunner({ workspace: options.workspace,
     scratchDir: join(scratchDir, 'commands'), gate, ...(options.access ? { access: options.access } : {}) });
-  const operation = await assembly.bundle.openOperation({
-    workspace: options.workspace,
-    scratchDir,
-    action,
-    nativeTools: ['bash'], disabledTools: assembly.disabledTools,
-    // A node with no gate still counts tool calls; an absent gate send is a passthrough.
-    gate: options.gate ?? { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
-    ...(options.access ? { access: options.access } : {}),
-    hostTools: ({ readRoots }) => agentTools({ workspace: options.workspace,
-      role: action === 'review' ? 'reviewer' : 'worker', readRoots: [...readRoots], catalog, ...options.bindings,
+  const restoredResources = options.frozen ? await restoreDurableResources(options.frozen.configuration) : undefined;
+  const hostTools = ({ readRoots }: { readRoots: readonly string[] }) => agentTools({ workspace: options.workspace,
+      role: action === 'review' ? 'reviewer' : 'worker', readRoots: [...readRoots, ...restoredResources ? [restoredResources.directory] : []], catalog, ...options.bindings,
       readGraph: input => {
         // The capability operation is cached across turns. Resolve the active
         // execution's frozen revision, rather than the session's first revision.
-        const execution = kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { revision_version: number } | undefined;
+        const execution = options.frozen ? { revision_version: options.revisionVersion } : kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { revision_version: number } | undefined;
         if (!execution) throw new RuntimeError('invalid_execution', 'Graph definition reads require an active execution');
         const definition = kernel.revision(graphId, execution.revision_version)!.definition;
         if (!['nodes', 'modules', 'edges', 'protocols', 'acceptance', 'inputs', 'outputs'].includes(input.section)) throw new RuntimeError('invalid_query', 'Unknown graph definition section');
@@ -135,10 +132,36 @@ export async function nodeSessionRequest(options: NodeSessionOptions): Promise<N
       },
       ...(options.access ? { access: options.access } : {}),
       run: (command, args, signal) => commands.run(command, args, signal),
-    }),
+    });
+  const operation: CapabilityOperation = options.frozen ? (() => {
+    const frozen = options.frozen!;
+    const policy = frozen.configuration.policy;
+    const descriptor = frozen.configuration.descriptor;
+    if (!descriptor) throw new Error('Frozen node capability descriptor is missing');
+    const settings = restoreCapabilitySettings(descriptor.settings, options.secrets?.() ?? {}) as { env: Record<string, string>; mcpAdapterServers: { name: string; definition: unknown }[] };
+    const declarations = new Map(frozen.tools.map(tool => [tool.name, tool]));
+    const tools = hostTools({ readRoots: policy.readRoots }).filter(tool => declarations.has(tool.name)).map(tool => ({ ...tool, ...declarations.get(tool.name)! }));
+    const known = new Set(['submit', ...tools.map(tool => tool.name), ...policy.nativeTools, ...policy.piExtensionTools]);
+    for (const tool of frozen.tools) if (!known.has(tool.name)) throw new Error(`Frozen node tool cannot be restored: ${tool.name}`);
+    return { descriptor, tools, nativeTools: policy.nativeTools, allowedToolNames: policy.allowedToolNames,
+      bundleDigest: policy.bundleDigest, toolPolicyDigest: policy.toolPolicyDigest, runtimePolicyDigest: policy.runtimePolicyDigest, legacyPromptDigest: policy.bundleDigest,
+      prompts: { system: '', tool: null }, report: [], skillPaths: policy.skillPaths, skillFolder: policy.skillFolder,
+      readRoots: policy.readRoots, writeRoots: policy.writeRoots, env: settings.env, networkDomains: policy.networkDomains,
+      allowUnrestrictedNetwork: policy.allowUnrestrictedNetwork, allowLocalBinding: policy.allowLocalBinding, unixSockets: policy.unixSockets,
+      piExtensionPaths: policy.piExtensionPaths, piExtensionTools: policy.piExtensionTools, mcpAdapterServers: settings.mcpAdapterServers, close: async () => {},
+    };
+  })() : await assembly!.bundle.openOperation({
+    workspace: options.workspace,
+    scratchDir,
+    action,
+    nativeTools: ['bash'], disabledTools: assembly!.disabledTools,
+    // A node with no gate still counts tool calls; an absent gate send is a passthrough.
+    gate: options.gate ?? { dispatch: (_id, _reservation, send) => send(), settle: () => {} },
+    ...(options.access ? { access: options.access } : {}),
+    hostTools,
   });
 
-  const composed = assembly.forOperation(operation).composed;
+  const composed = options.frozen ? { text: options.frozen.agent.instructions ?? '' } : assembly!.forOperation(operation).composed;
   const request: NodeSessionRequest = {
     role: action === 'review' ? 'reviewer' : 'worker',
     ...(options.retainCapabilities ? { operation } : {}),

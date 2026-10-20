@@ -25,7 +25,8 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AfterToolCallResult } from '@earendil-works/pi-agent-core';
+import type { TextContent, ImageContent } from '@earendil-works/pi-ai';
+type ContentOverride = { content?: (TextContent | ImageContent)[] };
 
 export const TOOL_RESULT_LIMIT = 4_000;
 export const SUMMARY_LIMIT = 1_024;
@@ -65,7 +66,7 @@ const TOOL_TEXT_LIMITS: Record<string, number> = {
   conversation_read: CONVERSATION_READ_LIMIT,
 };
 
-type ContentPart = NonNullable<AfterToolCallResult['content']>[number];
+type ContentPart = NonNullable<ContentOverride['content']>[number];
 type ResultPart = { type: string; text?: string };
 
 /** The part of an agent-loop tool result this seam reads. */
@@ -316,7 +317,7 @@ async function persistScope(scopeId: string, tracker: ToolResultTracker): Promis
  * but a genuinely repeated large result (or one over its ceiling) is ever rewritten.
  */
 export function toolResultHook(input: { scopeId: string; spillDir: string; maxSpillFiles?: number; compactShellResults?: boolean }) {
-  return async (context: ToolResultHookContext): Promise<AfterToolCallResult | undefined> => {
+  return async (context: ToolResultHookContext): Promise<ContentOverride | undefined> => {
     const parts = context?.result?.content;
     if (!Array.isArray(parts)) return undefined;
     const texts = parts.filter(part => part.type === 'text').map(part => part.text ?? '');

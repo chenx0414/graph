@@ -38,7 +38,7 @@ router 保留每个输入最近一次有效 value；未收到与收到 false/nul
 
 ## 工具返回与大结果
 
-每个工具结果都要经过 agent loop 的 `afterToolCall` 接缝（`src/runtime/tool-results.ts`），它只替换 `content`，工具的 `details` 与 `terminate` 提示照旧存活：
+每个工具结果都要经过 agent loop 的 `afterToolCall` 接缝（`backend/internal/graph/runtime_tool_results.go`），它只替换 `content`，工具的 `details` 与 `terminate` 提示照旧存活：
 
 - 小于 `TOOL_RESULT_LIMIT`（4,000 字符）的结果原样交给模型；
 - 大于该阈值的结果，同一会话/工具/参数/内容的**前两次**仍全量返回，**第三次起**换为不超过 `SUMMARY_LIMIT`（1,024 字符）的首尾视图；

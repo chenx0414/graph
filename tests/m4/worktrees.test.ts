@@ -33,8 +33,7 @@ test('parallel native instances write in separate worktrees and both reach integ
   expect(await readFile(join(graph.project, 'nested', 'left.txt'), 'utf8')).toBe('L'); expect(await readFile(join(graph.project, 'right.txt'), 'utf8')).toBe('R');
   const reviewed = (graph.reviewer.requests[2] as { messages: { role: string; content: string }[] }).messages
     .filter(message => message.role === 'tool').flatMap(message => {
-      const result = JSON.parse(message.content) as { content: { type: string; text: string }[] };
-      return result.content.filter(part => part.type === 'text').map(part => JSON.parse(part.text) as { text: string });
+      return [JSON.parse(message.content) as { text: string }];
     });
   expect(reviewed.map(item => item.text).sort()).toEqual(['L', 'R']);
 }, 30000);

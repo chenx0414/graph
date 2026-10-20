@@ -6,12 +6,12 @@ Graph 是任务编排控制台；它交付过的 MediaBookmarks B站 Web 应用�
 
 ## 最短启动流程
 
-要求：macOS + 项目 Node 24.20.0（`node -v` 应输出 `v24.20.0`）；`pnpm` 可选，没有时用 `node --run` 或直接调用 `node_modules/.bin`。
+要求：macOS、Go 1.27.1 + 项目 Node 24.20.0（`node -v` 应输出 `v24.20.0`）；`pnpm` 可选，没有时用 `node --run` 或直接调用 `node_modules/.bin`。
 
 ```sh
 cd "$REPO"            # 仓库根目录
 node --run build:web  # 首次或前端改动后；有 pnpm 时 pnpm build:web
-node --run start      # 仅查看模式；有 pnpm 时 pnpm start
+node --run start      # 自动构建 Go 后端并启动仅查看模式；有 pnpm 时 pnpm start
 ```
 
 首次运行没有 `graph.config.json` 也能启动：页面显示首次运行横幅，只读浏览历史，不派发模型请求。启动输出包含配置文件、状态目录与访问地址：
@@ -31,7 +31,7 @@ Graph console
 
 ```sh
 node --run build:web
-node --run start:execute    # 或 node src/server/cli.ts --execute
+node --run start:execute    # 或 node --run build:backend && node backend/internal/graph/server_cli.go --execute
 ```
 
 执行模式要求配置中至少一个模型且其凭据引用的环境变量已设置；否则启动失败并明确报错。前端开发模式使用 `node --run dev`（Vite，默认 5173，`/api` 代理到 `GRAPH_DEV_API` 或 `http://127.0.0.1:4173`）。
@@ -46,11 +46,11 @@ node --run start:execute    # 或 node src/server/cli.ts --execute
 - 点「确认草稿并开始执行」后才会创建功能任务并派发工人；确认绑定当时的草稿版本、目标分支与验收项，旧草稿立即失效。
 - 执行期间继续在同一对话里问进度、解释与偏差；主 Agent 忙时输入会进入输入框上方的右侧队列，当前回复结束后按顺序每次发送一条，形成一问一答，不会丢消息。
 - 输入 `@` 可引用项目文件与文件夹；输入 `/` 可浏览当前主 Agent 实际可用的工具、已绑定能力，以及模型、思考强度和上下文压缩等系统命令。工具或能力选中后会作为 `/tool` 或 `/capability:id@version` 直接插入正文，并随消息形成明确的使用指令；模型与思考强度直接作用于下一轮，`/compact` 由同一 Pi session 执行真实上下文压缩。
-- 完全访问默认开启；聊天输入区的开关可切回 standard。full 模式下 Agent 可使用宿主文件系统、任意命令与网络、已绑定 MCP/扩展，并可修改工作区；暂停、预算、未知用量和恢复问题不会阻止调用，但操作、用量和事件仍会记录。
+- 完全访问默认开启；聊天输入区的开关可切回 standard。full 模式下 Agent 可使用宿主文件系统、任意命令与网络、已绑定 MCP/扩展，并可修改工作区；会话暂停、额度、未知用量和未核对的副作用仍按各自规则控制执行；访问权限不证明失败操作可以重放。
 - 主 Agent 完成回答时可留下灰色候选 prompt：`Tab` 填入输入框，`Enter` 直接发送；忙时输入 `Enter` 会入队，输入框为空且已有队列消息时再按 `Enter` 会把队列作为打断引导送入当前回复。
 - 暂停只作用于对话主 Agent；功能任务的暂停/继续仍在对应任务页。重启守护进程后，对话、未处理消息与执行状态都会恢复。
-- 工人默认使用 Fresh 上下文；只有主 Agent 明确要求精确 transcript/tool-call 状态时，Graph 才会从已成功源节点创建 Fork 新会话。返工和主 Agent 连续对话使用 Continue。Fork 不会共享可变 session，也不会重置预算。
-- 节点详情会显示实际上下文模式、来源节点、source/child digest、handoff 与共享预算作用域；独立审查始终使用 Fresh，且不能读取实现 Agent 的 transcript。
+- main 与每个节点拥有独立、稳定的 durable 会话。返工、重试、配置重绑和重启保留节点身份、历史与累计预算；节点之间通过具名接口和不可变产物协作。
+- 节点详情显示实际运行配置、prompt、工具、用量与预算作用域。独立审查沿用自己的会话和模型独立性约束，读取明确发布的成果及审查目标。
 
 确认后若要新增功能，主 Agent 会把它作为新的功能任务讨论与确认，原任务的验收范围不被静默修改。讨论阶段默认运行在完全访问模式，因此主 Agent 可以按用户要求直接读写工作区和调用能力；standard 模式才恢复讨论期只读边界。
 

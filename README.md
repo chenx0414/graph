@@ -30,19 +30,20 @@
 - [决策记录](docs/adr/)：已作选择的理由与权衡。
 - [运行示例](examples/README.md)：持久任务、验收 fixture 与 runtime contract 示例。
 
-首版采用 Pi Agent、TypeScript、本机 Web 和独立后台，支持全部已确认图模式与验证器。完成标准包括执行机制测试，以及由 Graph 交付 MediaBookmarks 的 B站 Web 应用任务。
+当前采用 Go 后端、pi-durable 1.1.0 共享 Agent 宿主、React 本机 Web 和 Electron 桌面壳，支持已确认的接口投递图模型。完成标准包括执行机制测试，以及由 Graph 交付 MediaBookmarks 的 B站 Web 应用任务。
 
 任务平台使用 GitHub Issues；目前仅有本地 Git，尚未指定 GitHub 仓库，工作包保存在实施计划中。
 
 ## 启动 Graph 控制台
 
 ```sh
+pnpm build:backend  # Go 1.27.1；生成 dist/graphd
 pnpm build:web      # 首次启动或前端改动后；无 pnpm 时用 node --run build:web
 pnpm start          # 仅查看：浏览项目、任务与图，不派发模型请求
 pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭据
 ```
 
-- 默认配置为当前目录的 `graph.config.json`；可用 `--config`、`--state-dir`、`--port`、`--web-dir` 覆盖，或设置 `GRAPH_CONFIG`、`GRAPH_STATE_DIR`、`GRAPH_WEB_DIR`、`GRAPH_PORT`。无 pnpm 时直接运行 `node src/server/cli.ts`。
+- 默认配置为当前目录的 `graph.config.json`；可用 `--config`、`--state-dir`、`--port`、`--web-dir` 覆盖，或设置 `GRAPH_CONFIG`、`GRAPH_STATE_DIR`、`GRAPH_WEB_DIR`、`GRAPH_PORT`。`node --run start` 会自动构建 Go 后端；直接运行 `node backend/internal/graph/server_cli.go` 前先运行 `node --run build:backend`。
 - 数据目录默认 `$XDG_STATE_HOME/graph` 或 `~/.local/state/graph`，与启动目录解耦；配置中的相对项目根路径按配置文件所在目录解析。同一数据目录只允许一个守护进程，第二次启动会被 owner 锁拒绝。
 - 只绑定 `127.0.0.1`。浏览器只是客户端：关闭浏览器不停止守护进程；`Ctrl-C`/SIGTERM 有界停止（5 秒），在途调用不会被记作成功。
 - 缺少 Web 构建时启动失败并给出 `pnpm build:web` 指令；端口占用、显式配置不存在、执行模式缺少模型或凭据分别以明确错误退出。
@@ -77,7 +78,7 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 
 ## 桌面 APP（开发预览）
 
-本分支包含桌面壳：APP 以子进程方式托管现有守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
+桌面 APP 以子进程方式托管 Go 守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
 
 ```sh
 export PATH="$PWD/node_modules/.bin:$PATH"
@@ -85,16 +86,19 @@ npx --yes electron@44.3.0 .        # 或安装 devDependencies 后：node --run 
 node --run app:build               # 打包：dist/app/mac-arm64/Graph.app 与 Graph-<版本>-arm64.dmg
 ```
 
-当前为 A5（桌面壳 + 向导 + 可视化增强 + 打包 + 界面重塑）：控制台采用设计系统与明暗主题，可产出本机 `.app`/`.dmg`，托盘常驻；对外分发所需的签名与公证待 Apple Developer ID（A6 提供操作手册）。
+桌面功能包含向导、可视化、打包和界面重塑：控制台采用设计系统与明暗主题，可产出本机 `.app`/`.dmg`，托盘常驻；对外分发所需的签名与公证待 Apple Developer ID（A6 提供操作手册）。
 
 ## 运行验证
 
 ```sh
 pnpm install --frozen-lockfile
+# 需要 Go 1.27.1 和 Node 24.20.0
 pnpm check
 pnpm demo:m1
 ```
 
 `demo:m1` 使用原生 Graph v2：第一个宿主通过真实 Pi 和本地脚本响应写入标题搜索、提交公开结果；第二个宿主重开同一状态，执行独立检查并显式完成。`delivery.json` 保存验收和结果；复跑已完成的示例不再请求模型。响应不含真实 token 证据，用量明确记为估算；不调用收费模型、不执行 Git 合并。旧演示目录需换成新目录。
+
+`check` 包含 Go 构建与 vet、TypeScript 检查、现有测试和证据门禁。Go 进程的持久化、重启、用量与桌面验收在 `tests/e2e/go-*.test.ts`、`provider-usage-completeness.test.ts` 和 `desktop-shell.test.ts`。
 
 pnpm 使用项目声明的 Node 24.20.0，不修改系统 Node。完整 M0 测试要求 macOS 的系统 sandbox-exec 和可用的 npm CLI；其他平台会明确失败。测试使用临时目录、本地响应服务与虚构凭据，不调用收费模型。

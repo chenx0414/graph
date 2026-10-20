@@ -1,0 +1,65 @@
+# pi-durable 迁移与交付证据
+
+截至 2026-10-13，规格见 [main 与 Graph 节点迁移至 pi-durable 1.1.0](../specs/pi-durable-kernel.md)。默认桌面应用已切换；真实 Matt 团队的原 worker 返工及最终提交审查已通过，暂停队列的真实桌面重启及恢复一次执行已通过；Graph 已正式完成并交付到目标 main 分支。以下测试不能替代该验收。
+
+## 最终整合代码的验证
+
+- main 和节点统一使用精确 1.1.0 SDK 的持久 Harness；旧 Agent 循环及其私有进程协议已移除。Graph 保留业务队列、动态图、权限、Git、产物和预算规则。
+- 实际 SIGKILL 恢复覆盖已受理尚未发送、工具效果未知、SDK 完成但 Graph 尚未确认的 main 输入及节点恢复。保留原执行、输入、尝试、冻结模型和权限；凭据按原引用解析当前值。注册所有冻结执行后才启动共享调度。
+- 恢复直接读取原输入完成回执的答案，避免事件消费滞后时结算为空。缺失冻结归档会拒绝启动；修复归档后同一进程可重新打开，证明数据库和执行器所有权已释放。
+- 新执行从首次受理起使用归档能力。实际技能读取、受保护写入拒绝、真实 pi-mcp-adapter 2.38.0 gateway 副作用均已通过。符号链接、相对资产、绝对包、裸包及传递依赖导入不能把原读取权限之外的资源带入归档。
+- main、节点、Git 和模块恢复的 9 个文件、84 项针对性测试通过；最终 main 与资源边界的 3 个文件、20 项测试通过，新增传递依赖边界及真实 gateway 的后续 2 个文件、20 项测试通过。
+- 整合全量运行 270 个文件、1861 项测试及整条检查通过。旧执行测试退休经过逐项审计后记录基线；没有跳过测试。随后移除临时诊断，并让配置绑定验收通过公开暂停接口停住无关 main、只排空目标 graph，严格保留绑定拒绝和后续配置更新断言；两个文件、63 项验收通过。清理后的整条检查也已通过：270 个文件、1861 项测试。
+- 启动首先校验全部可安全恢复的待执行归档，再恢复任意会话，避免较晚的缺档污染较早会话的能力发现记录。已完成及未知检查型输入不加载能力；SDK 完成但 Graph 未确认的输入，即使当前模型、凭据及归档移除，仍结算原答案及用量一次。
+- 关闭 Harness 后等待恢复回调，再封闭迟到适配器的准备及派发结果写入，保留有界退出。公开 resolve/reject 验收证明准备迟到时不会生成真实副作用文件，重开保留原用户输入；恢复与关闭的五文件、72 项并发验收也通过。
+- 两轴独立审查发现的启动清理、首次执行资源冻结及模块捕获权限问题均已修复；规格复查未发现新的具体缺陷。
+
+## 真实用户数据副本
+
+119 个 main 会话都有身份匹配的 manifest 与原始 JSONL，合计 239,138,084 字节。归档保留原始字节；原始 manifest 与 JSONL 保留；默认数据库已按正式入口迁移。
+
+最终整合代码在同一用户数据库副本上被动导入两次：119 个稳定会话映射、4674 条 durable 记录，第二次映射和数量完全一致。调度器保持 paused，没有执行任务或历史输入重放。
+
+旧 graph 执行退休入口重复执行后，main 身份、预算、task/instance 来源均保留，仅一条稳定切换收据，没有旧待执行 graph 输入。按主键计算的 31 张受保护表摘要与原备份相同；SQLite quick_check 为 ok，外键违规为零。副本没有真实在途输入，因此在途回滚与未知用量由另行故障验收证明。
+
+原始会话、身份映射和私有审计明细仅保存在受限临时目录，不提交到仓库。旧应用在确认没有活动操作后正常退出，并重新完成独占 SQLite、119 个 main 原始历史、配置及全部 Graph home 备份。最新副本导入和退休各执行两次，31 张保留表摘要不变。默认安装包和 app-root 已切换到整合提交 685d88d；真实 Electron preload、配置和会话接口正常。实际默认数据库迁移后、添加独立验收项目之前的 31 张保留表摘要也与独占备份完全相同。
+
+## 默认桌面发现与修复
+
+真实 main 首次启动被已有浏览器扩展注册的 fork 专用 session_checkpoint 拒绝。它只声明旧 resident 的睡眠检查，不序列化浏览器。兼容层接受这项注册，但不投递退役事件或采用 sleepReady；真实 session_shutdown 清理及 unsafe 工具恢复规则保留。已扩展公开 main gateway 验收：修复前没有工具副作用，修复后真实 gateway 工具、回复、历史恢复与关闭清理通过；hook 若被执行会主动抛错。
+
+真实默认桌面后续发现 ui.notify 与 SDK 无终端模式不一致：固定 SDK 的 noOpUIContext 明确将该通知作为空操作。兼容层按同一语义提供通知空操作，仍不提供交互决策。公开 gateway 的 input hook 实际调用该 API，修复前阻止工具执行；修复后真实 gateway、回复、历史重开与 shutdown 均通过；最终干净全检查 270 个文件、1861 项测试通过。实际 Electron bridge 重启已验证 daemon PID/startedAt 改变、原会话所有消息身份和内容保持。
+
+## 真实 Matt 首轮与后续发现
+
+默认桌面中的 main 已实际读取 ask-matt 和 writing-for-agents，通过当前能力库装配四角色可复用团队；节点 instructions 由 main 填写。原图 efb6a88b-5b5c-4cee-abb6-df6171b58140 的 planner 发布精确 plan，worker 读取该版本及冻结 tdd 技能后真实提交。第一轮集成 SHA 为 7633def9653aea30fd766ae45ac22c069ea89c25；Standards、Spec 的真实 submit 引用相同 plan 和 subject，均审查该 SHA。Spec 上游曾返回 429，main 在原图修订中更换后续模型并重试原队列项，保留原身份和用量。宿主 check 回执退出码 0，verifiedCommit 同为该 SHA。
+
+分号规格变更已投递。连续 steering 暴露宿主只等待首次替代输入的问题；公开 main 接口配合真实 HTTP 模型的回归在修复前不能完成最新回复，修复后保留三条用户消息并完成最后回复，相关两文件十项验证通过。已为替代输入加入原执行关联键，并从 SDK 回执恢复最新关联输入。表驱动 SIGKILL 验收确认最新回复完成后、Graph 确认前终止，重开及再次重开均不增加模型请求；移除关联解析时无法恢复最新回复，反证失败。四文件十四项针对性测试、两轴独立复查及全量 270 文件 1863 项检查通过。2047df6 安装包已正常安装并重启，随后完成分号规格返工验收。原 worker instance 为 24900c0b-8122-4e18-95cd-c6db8711742e，durable 会话为 5678，第一轮累计用量 189754；以这些事实核对后续返工。
+
+独占备份已迁入 Graph 用户数据 migration-backups/pi-durable-20261013T2030，119 份原始历史逐一摘要一致，重新定位后的 manifest 有效。
+
+## 原 worker 的真实返工与最终审查
+
+原 graph 保持同一身份并原地修订至 revision 6。Spec 对新增分号规格发布真实失败报告；原 worker 的 worker-52、worker-55 延续 instance 24900c0b-8122-4e18-95cd-c6db8711742e 及 durable 会话 5678，集成提交为 06aabdd426101ae007ce64c3af75a8b24988c694。subject 发布不可变版本 2，原 plan 版本 1 保持。
+
+部分上游调用在提交后失败，产物存在不能替代正式验收。main 保留未知调用账本，通过正常控制关闭失效队列项，再投递独立审查。最终 Standards 报告版本 4 来自 completed 的 standards-60，Spec 报告版本 4 来自 completed 的 spec-59；两者均引用该提交及相同精确 plan/subject。正式验收 ready=true、drained=true，宿主 check 的 verifiedCommit 为该 SHA；集成工作树复核五项用例通过且工作树干净。Graph 尚未 complete，继续进行暂停队列的真实重启验证。
+
+## 已知用量下界与完成回执恢复
+
+真实 main 的连续中断暴露聚合用量缺陷：只要一次调用未知，已知调用用量也会丢失。修复保留已知 token 下界及 unknown 来源，缺失调用仍保留未知费用。有限预算继续阻塞；无限额度及完全访问策略记录已知下界。
+
+公开 main 回归在修复前实际得到 used=0，修复后得到独立 HTTP 回执中的 50。SIGKILL-before-ACK 表增加响应前中断、最新输入 SDK 完成的案例，恢复及再次重开保持最新答案、50 已知用量、unknown 费用，模型请求不增加。旧恢复 guard 的负控实际以 invalid_reconciliation 失败；新路径仅在已验证 SDK done 回执时恢复，未完成输入的 dispatch 证据仍阻止重放。两轴只读审查均无发现。全量检查 270 文件、1864 项通过。首轮真实 MCP gateway 用例超时，其余 1863 项通过；该文件独立四项通过，随后重跑整条检查全部通过，没有放宽超时或修改断言。
+
+## 暂停队列的真实桌面重启
+
+默认安装包更新为 ef257dd，正常退出前确认无活动操作，独占 SQLite 备份保存在用户数据 migration-backups。升级启动前后的 worker paused=1、used=746352、reserved=0、durable 会话 5678 和 seq=61 queued 的完整身份、payload 摘要保持一致。随后通过实际 Electron bridge 重启，daemon PID 从 775 变为 3649，startedAt 改变，298 条原 main 消息身份与内容保持；普通浏览器不能替代该证据。
+
+main 明确 resume 后，seq=61 变为 done；仅增加 exec-efb6a88b-5b5c-4cee-abb6-df6171b58140-worker-61，attempt=1、retries_used=0、state=completed、submission_id=NULL，全图 execution 从 18 变为 19。原 worker 用量延续至 873592，reserved=0；没有新的 workflow submission 或正式产物。
+
+本轮生成的可复用 Matt 定义与 task options 将两个审查轴的默认模型设为本轮真实完成审查的独立上游模型；通用组装器没有硬编码账户模型。四节点精确技能绑定、instructions、接口、协议、验收保持。模板与 Electron/数据库重启证据已保存至用户数据 migration-backups/pi-durable-final-acceptance-20261013 私有目录，避免依赖临时目录存续。
+
+## 正式交付
+
+main 在重启探针完成后重新核对三项验收均绑定 06aabdd，ready=true、drained=true，通过正常 graph_control 请求 complete。真实默认桌面与数据库均确认 graph phase=completed；验收项目目标分支 main 的 HEAD 为 06aabdd426101ae007ce64c3af75a8b24988c694，工作树干净。探针实际 Node 检查五项通过，混合分隔示例返回 ["bar","baz","foo"]，未修改任何文件或发布正式产物。
+
+默认应用已运行精确 1.1.0 内核。原 119 个 main 的历史、身份与配置经副本及独占备份审计保留；旧 graph 执行已按批准范围退休。历史未知调用仍保持未知，不承诺任意外部副作用 exactly-once。此次原 worker 返工、动态原图修订、最终独立审查、宿主检查、暂停输入重启与单次恢复执行和目标 Git 交付均有真实证据。

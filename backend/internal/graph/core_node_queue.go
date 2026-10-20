@@ -1,0 +1,167 @@
+package graph
+
+import "fmt"
+
+// One serial queue per node. Retry counters live in the durable store.
+
+const DEFAULT_RETRIES = 2
+const DEFAULT_RESUBMITS = 1
+
+type QueueInput struct {
+	NodeId   string
+	Kind     string
+	Text     *string
+	Input    *string
+	Value    Json
+	HasValue bool
+}
+
+type RetryBudget struct {
+	Attempts         int `json:"attempts"`
+	RetriesAllowed   int `json:"retriesAllowed"`
+	ResubmitsAllowed int `json:"resubmitsAllowed"`
+	ResubmitsUsed    int `json:"resubmitsUsed"`
+}
+
+type QueueCompletion struct {
+	Kind   string
+	Reason string
+}
+
+type NodeRetryConfig struct {
+	RetriesAllowed   *int
+	ResubmitsAllowed *int
+}
+
+type NodeQueueDefaults struct {
+	DefaultRetries   *int
+	DefaultResubmits *int
+}
+
+type NodeQueue struct {
+	kernel   *KernelStore
+	taskId   string
+	defaults NodeQueueDefaults
+}
+
+// NewNodeQueue mirrors the TypeScript constructor, whose defaults argument is
+// optional and defaults to an empty object.
+func NewNodeQueue(kernel *KernelStore, taskId string, defaults ...NodeQueueDefaults) *NodeQueue {
+	queue := &NodeQueue{kernel: kernel, taskId: taskId}
+	if len(defaults) > 0 {
+		queue.defaults = defaults[0]
+	}
+	return queue
+}
+
+func queueText(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+// Enqueue appends one input and returns the accepted row.
+func (q *NodeQueue) Enqueue(input QueueInput) QueueRow {
+	var payload any
+	switch input.Kind {
+	case "chat":
+		payload = map[string]any{"text": queueText(input.Text)}
+	case "control":
+		value := input.Value
+		if !input.HasValue {
+			value = nil
+		}
+		payload = map[string]any{"action": queueText(input.Text), "value": value}
+	default:
+		value := input.Value
+		if !input.HasValue {
+			value = nil
+		}
+		payload = map[string]any{"input": queueText(input.Input), "value": value}
+	}
+	return q.kernel.Enqueue(q.taskId, QueueInsert{NodeId: input.NodeId, Kind: input.Kind, Payload: payload})
+}
+
+// Next is the oldest queued item, or nil when the node is paused or empty.
+func (q *NodeQueue) Next(nodeId string) *QueueRow {
+	if q.Paused(nodeId) {
+		return nil
+	}
+	return q.kernel.NextQueued(q.taskId, nodeId)
+}
+
+// Claim takes the node's next item and runs it as the node's one execution.
+func (q *NodeQueue) Claim(nodeId string) *QueueRow {
+	if q.Paused(nodeId) {
+		return nil
+	}
+	if _, busy := graphDBRow(q.kernel.Store.Db, "SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed' LIMIT 1", q.taskId, nodeId); busy {
+		return nil
+	}
+	next := q.kernel.NextQueued(q.taskId, nodeId)
+	if next == nil {
+		return nil
+	}
+	return q.kernel.ClaimQueued(q.taskId, next.Seq)
+}
+
+// Complete settles a successful submit, or marks a failure and pauses the node's queue.
+func (q *NodeQueue) Complete(seq int64, outcome QueueCompletion) {
+	nodeRow, ok := graphDBRow(q.kernel.Store.Db, "SELECT node_id FROM kernel_queue WHERE task_id=? AND seq=?", q.taskId, seq)
+	if !ok {
+		Raise("invalid_queue", fmt.Sprintf("Unknown queue item %d", seq))
+	}
+	switch outcome.Kind {
+	case "submitted":
+		q.kernel.FinishQueued(q.taskId, seq, "done")
+		return
+	case "blocked":
+		q.kernel.BlockQueued(q.taskId, seq)
+		return
+	}
+	q.kernel.FinishQueued(q.taskId, seq, "failed")
+	q.kernel.SetNodeQueuePaused(q.taskId, graphDBString(nodeRow, "node_id"), true)
+}
+
+func (q *NodeQueue) Paused(nodeId string) bool {
+	return q.kernel.NodeState(q.taskId, nodeId).Paused
+}
+
+// Resume reopens a paused node queue.
+func (q *NodeQueue) Resume(nodeId string) {
+	q.kernel.SetNodeQueuePaused(q.taskId, nodeId, false)
+}
+
+// RetryBudget is the node's retry budget. A restart does not reset it.
+func (q *NodeQueue) RetryBudget(nodeId string) RetryBudget {
+	state := q.kernel.NodeState(q.taskId, nodeId)
+	retries := DEFAULT_RETRIES
+	if state.RetriesAllowed != nil {
+		retries = *state.RetriesAllowed
+	} else if q.defaults.DefaultRetries != nil {
+		retries = *q.defaults.DefaultRetries
+	}
+	resubmits := DEFAULT_RESUBMITS
+	if state.ResubmitsAllowed != nil {
+		resubmits = *state.ResubmitsAllowed
+	} else if q.defaults.DefaultResubmits != nil {
+		resubmits = *q.defaults.DefaultResubmits
+	}
+	return RetryBudget{Attempts: state.Attempts, RetriesAllowed: retries, ResubmitsAllowed: resubmits, ResubmitsUsed: state.ResubmitsUsed}
+}
+
+// NoteAttempt counts one attempt before each execution.
+func (q *NodeQueue) NoteAttempt(nodeId string) {
+	q.kernel.NoteNodeAttempt(q.taskId, nodeId)
+}
+
+// NoteResubmit counts one automatic resubmit.
+func (q *NodeQueue) NoteResubmit(nodeId string) {
+	q.kernel.NoteNodeResubmit(q.taskId, nodeId, q.RetryBudget(nodeId).ResubmitsAllowed)
+}
+
+// Configure overrides the graph default retry budget for one node.
+func (q *NodeQueue) Configure(nodeId string, config NodeRetryConfig) {
+	q.kernel.ConfigureNodeRetries(q.taskId, nodeId, config)
+}

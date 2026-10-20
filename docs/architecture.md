@@ -1,6 +1,6 @@
 # Graph 实现架构
 
-当前架构依据 [Graph v2 定稿规格](specs/graph-rebuild-v2.md)、[产品范围](graph-mvp.md)和 [ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)。实现使用 TypeScript 自有持久内核、Pi、共享 SQLite、本机 HTTP/SSE 和 React/React Flow。历史 M0–M7 架构不再是当前 graph 执行模型；[进度记录](agent/issue-1-implementation-progress.md)与 [退役审计](agent/issue-1-old-kernel-removal-audit.md)区分实际证据和剩余工作。
+当前架构依据 [Graph v2 定稿规格](specs/graph-rebuild-v2.md)、[产品范围](graph-mvp.md)、[ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)与 [ADR 0031](adr/0031-pi-durable-agent-kernel.md)。Graph 领域编排与 HTTP/SSE 使用 Go，main 与节点的 Agent 执行迁移至 pi-durable 1.1.0，共享 SQLite、本机 HTTP/SSE 和 React/React Flow。迁移交付状态见 [验证进度](agent/pi-durable-migration-evidence.md)，Go 与 SDK 的边界见 [ADR 0032](adr/0032-go-backend-shared-durable-host.md)。历史 M0–M7 架构不再是当前 graph 执行模型；[进度记录](agent/issue-1-implementation-progress.md)与 [退役审计](agent/issue-1-old-kernel-removal-audit.md)区分实际证据和剩余工作。
 
 ## 职责与正式对象
 
@@ -15,7 +15,7 @@ graph 不从节点成功状态推断依赖就绪，不使用特殊 loop 执行�
 | Graph Runtime/Service | create、patch、inspect、send、control | 归属、修订冲突、生命周期、工作清空与通知 |
 | Graph Runner | 推进已受理工作 | 节点并发、模块串行输入、transition/outbox 恢复 |
 | Node Executor/Driver | 运行一条队列输入 | 冻结配置、初始或复跑 prompt、补交、重试与不可撤回提交 |
-| Pi resident host/lane | 常驻节点会话的 turn、inspect、close | 真实模型 transport、能力装配、凭据、配置重绑与崩溃重建 |
+| Durable host/transport/lane | 稳定会话、持久输入收据、模型与工具任务 | 单一 Harness、冻结执行配置、受控凭据与工具装配、checkpoint 恢复 |
 | Module Runtime/Broker | each/once、重开、自定义规则和宿主操作 | 输入最新状态、代码隔离、资源上限、命令副作用与恢复 |
 | Catalog/Artifact/Git | 版本化配方、发布成果、代码集成 | 能力发现、不可变内容、作者权限、commit 与最终验收 |
 | HTTP/Web | 查询、命令和可恢复 SSE | 正式图投影、稳定布局、独立聊天与按需历史 |
@@ -28,21 +28,21 @@ submit 事务先核对 execution、有效提交唯一性、本节点输出与全
 
 模块输入按受理序号串行处理。判断、状态更新和 transition/outbox 的持久边界允许重启继续广播而不重复判断或投递。自定义代码和外部命令不在 SQLite 事务中执行。
 
-大型 JSON 由 [kernel-content.ts](../src/core/kernel-content.ts)保存不可变正文、摘要与字节数，正式记录保存引用。提交、投递、队列、模块状态、operation 请求/结果和公开结果的生产读取还原原值；内容与业务引用在同一事务写入。兼容读取既有 inline JSON，不批量改写用户数据。概览 SQL 只读大内容元数据，精确详情查询再取全文。
+大型 JSON 由 [kernel-content.ts](../backend/internal/graph/core_kernel_content.go)保存不可变正文、摘要与字节数，正式记录保存引用。提交、投递、队列、模块状态、operation 请求/结果和公开结果的生产读取还原原值；内容与业务引用在同一事务写入。兼容读取既有 inline JSON，不批量改写用户数据。概览 SQL 只读大内容元数据，精确详情查询再取全文。
 
 SSE 传递可恢复的事件与引用，公开结果通过 resultId 主动查询。节点日志保留完整正文，但默认页和 node.entry 事件对大记录发送摘要；按 entryId 查询时验证其 task/node 归属。全文读取不修改 Agent 会话或正式工作队列。
 
 ## 进程、配置与能力
 
-每个 graph Agent 节点有一个常驻 Pi 进程，空闲不占执行名额。首次执行创建自己的会话，复跑使用原历史；没有从另一节点 transcript 派生 graph 节点的公开配置。图结束、节点删除或进程故障时按生命周期处理进程。
+每个 Go 守护进程通过私有 Unix socket 连接一个共享 Node SDK 宿主。main 与所有 graph Agent 节点使用同一个 durable Harness，分别具有稳定会话身份。空闲节点不占 Graph 执行名额，返工沿用原会话与累计预算；没有从另一节点 transcript 派生 graph 节点的公开配置。工具扩展可以在受限辅助进程中加载，该进程不执行第二套 Agent 循环。
 
-当前 execution 固定节点配置、配方、工作位置和模型事实。下一次执行采用最新修订；必要时在 turn 之间重建进程并保留会话、身份与累计额度。接收时协议和执行时配置分别记录，不把旧输入悄悄解释成新协议。
+当前 execution 固定节点配置、配方、工作位置和模型事实。下一次执行采用最新修订；恢复已受理输入时重装原执行的模型、能力资源、工作位置与权限，保留原输入收据、会话、身份与累计额度。接收时协议和执行时配置分别记录，不把旧输入悄悄解释成新协议。
 
 配方与节点分责：配方提供身份、规则、Skills/MCP/extensions/工具；节点提供任务、验收、接口和运行选择。system prompt、有效工具及其运行预览由同源装配生成；GUI 区分已发送配置与下一次配置，不把声明能力冒充实际加载成功。
 
 节点工作位置可以是项目、准备好的独立 worktree 或其中的目录；显式 worktree 不可静默回退到项目。目录规范化核对真实路径、范围与符号链接。权限、网络和受保护路径受宿主上限约束，不能通过配方或 patch 扩大授权。
 
-main 保留自己的会话与 operation 基础设施，位于 graph 外部；它的结束不由 graph 生命周期控制。基础设施中的会话恢复与配置重绑记录不构成旧 graph 的第二套调度器。
+main 保留自己的会话与 operation 基础设施，位于 graph 外部；它的结束不由 graph 生命周期控制。Agent checkpoint 与执行恢复由 durable 负责；Graph 保留业务命令、未知用量、模块副作用与 Git 收据的核对，不另设 Agent 恢复器。
 
 ## 模块隔离与副作用
 
@@ -64,13 +64,13 @@ main 与多个 graph 共用全局 Agent 执行名额，最多 10 个正在执行
 
 不可变 artifact 版本属于 graph，子 graph 共用顶层空间；文件、文本、JSON 发布保留来源、作者、修改者与精确引用。普通节点只能修改自己的成果，main 负责协调并可修改全部成果。
 
-代码产物包含真实 commit；worktree 只是访问位置。Git 集成是显式受控路径，最终验收由 [graph-acceptance.ts](../src/core/graph-acceptance.ts)核对真实 check、独立 review 与人工确认。通过状态的路由缓存不更新旧审查的 commit。
+代码产物包含真实 commit；worktree 只是访问位置。Git 集成是显式受控路径，最终验收由 [graph-acceptance.ts](../backend/internal/graph/core_graph_acceptance.go)核对真实 check、独立 review 与人工确认。通过状态的路由缓存不更新旧审查的 commit。
 
 最终合入绑定已验证的集成提交。目标变化、脏工作区、未检查的集成提交与未满足验收都要保留现场，不能裸更新 ref 或覆盖人工修改。非代码 graph 仍可完成，不隐含要求 Git 交付。
 
 ## 界面与查询
 
-ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚点；[orthogonal-routes.ts](../src/core/orthogonal-routes.ts)在统一格点上避开可见实心节点。展开容器边界透明；折叠子 graph 成为显示边界，使用同一走线算法重新连接外部边，不改变位置或运行事实。
+ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚点；[orthogonal-routes.ts](../backend/internal/graph/core_orthogonal_routes.go)在统一格点上避开可见实心节点。展开容器边界透明；折叠子 graph 成为显示边界，使用同一走线算法重新连接外部边，不改变位置或运行事实。
 
 子 graph 公开接口来自实际映射，显示精确名称、协议版本和内部端点；不能从扁平边猜造公开接口。折叠隐藏内部线，保留外部业务连接与跨边界聊天，详情仍显示原始投递和实际聊天双方。展开恢复原路线，嵌套折叠状态独立。
 
@@ -78,15 +78,15 @@ ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚�
 
 ## 当前代码导航
 
-- 定义、持久模型与生命周期：[interface-spec.ts](../src/core/interface-spec.ts)、[kernel-store.ts](../src/core/kernel-store.ts)、[graph-runtime.ts](../src/core/graph-runtime.ts)、[graph-service.ts](../src/core/graph-service.ts)。
-- 执行与恢复：[graph-runner.ts](../src/core/graph-runner.ts)、[node-executor.ts](../src/core/node-executor.ts)、[node-turn-driver.ts](../src/core/node-turn-driver.ts)、[kernel-recovery.ts](../src/core/kernel-recovery.ts)。
-- Pi 与能力：[kernel-graph-lane.ts](../src/runtime/kernel-graph-lane.ts)、[kernel-node-host.ts](../src/runtime/kernel-node-host.ts)、[agent-context-assembly.ts](../src/runtime/agent-context-assembly.ts)、[capability-library.ts](../src/catalog/capability-library.ts)。
-- 模块：[module-runtime.ts](../src/core/module-runtime.ts)、[module-router.ts](../src/core/module-router.ts)、[module-evaluator.ts](../src/runtime/module-evaluator.ts)、[kernel-operation-broker.ts](../src/runtime/kernel-operation-broker.ts)。
-- 产物与 Git：[artifact-workspace.ts](../src/core/artifact-workspace.ts)、[graph-acceptance.ts](../src/core/graph-acceptance.ts)、[Git 模块](../src/git/git.ts)。
-- 投影与界面：[kernel-views.ts](../src/core/kernel-views.ts)、[kernel-explain.ts](../src/core/kernel-explain.ts)、[node-run.ts](../src/core/node-run.ts)、[layout.ts](../src/server/layout.ts)、[GraphCanvas.tsx](../src/web/GraphCanvas.tsx)、[AgentNodeChat.tsx](../src/web/AgentNodeChat.tsx)。
+- 定义、持久模型与生命周期：[interface-spec.ts](../backend/internal/graph/core_interface_spec.go)、[kernel-store.ts](../backend/internal/graph/core_kernel_store.go)、[graph-runtime.ts](../backend/internal/graph/core_graph_runtime.go)、[graph-service.ts](../backend/internal/graph/core_graph_service.go)。
+- 执行与恢复：[graph-runner.ts](../backend/internal/graph/core_graph_runner.go)、[node-executor.ts](../backend/internal/graph/core_node_executor.go)、[node-turn-driver.ts](../backend/internal/graph/core_node_turn_driver.go)、[kernel-recovery.ts](../backend/internal/graph/core_kernel_recovery.go)。
+- Pi 与能力：[kernel-graph-lane.ts](../backend/internal/graph/runtime_kernel_graph_lane.go)、[kernel-node-host.ts](../backend/internal/graph/runtime_kernel_node_host.go)、[agent-context-assembly.ts](../backend/internal/graph/runtime_agent_context_assembly.go)、[capability-library.ts](../backend/internal/graph/catalog_capability_library.go)。
+- 模块：[module-runtime.ts](../backend/internal/graph/core_module_runtime.go)、[module-router.ts](../backend/internal/graph/core_module_router.go)、[module-evaluator.ts](../backend/internal/graph/runtime_module_evaluator.go)、[kernel-operation-broker.ts](../backend/internal/graph/runtime_kernel_operation_broker.go)。
+- 产物与 Git：[artifact-workspace.ts](../backend/internal/graph/core_artifact_workspace.go)、[graph-acceptance.ts](../backend/internal/graph/core_graph_acceptance.go)、[Git 模块](../backend/internal/graph/git_git.go)。
+- 投影与界面：[kernel-views.ts](../backend/internal/graph/core_kernel_views.go)、[kernel-explain.ts](../backend/internal/graph/core_kernel_explain.go)、[node-run.ts](../backend/internal/graph/core_node_run.go)、[layout.ts](../backend/internal/graph/server_layout.go)、[GraphCanvas.tsx](../src/web/GraphCanvas.tsx)、[AgentNodeChat.tsx](../src/web/AgentNodeChat.tsx)。
 
 ## 切换与验证边界
 
-ADR 0030 要求所有 graph 入口统一走新内核，旧 graph 及其历史丢弃，旧 DAG、特殊 loop、转换器和旧历史 reader 退役；不删除能力库、模型配置、外部 main 会话或整个数据库。ADR 0011 的每 operation Pi 生命周期已被每节点常驻替代；旧 Fresh/Fork/依赖 handoff 图模型不再适用。历史报告保留证据，不重新授权旧行为。
+ADR 0030 要求所有 graph 入口统一走新内核，旧 graph 及其历史丢弃，旧 DAG、特殊 loop、转换器和旧历史 reader 退役；不删除能力库、模型配置、外部 main 会话或整个数据库。ADR 0011 的每 operation Pi 生命周期及 ADR 0030 的每节点常驻进程实现均已被 ADR 0031/0032 的共享 durable 宿主替代；旧 Fresh/Fork/依赖 handoff 图模型不再适用。历史报告保留证据，不重新授权旧行为。
 
 库级与集成门禁证明其覆盖的行为，不能单独证明默认用户应用已经切换。最终交付还需重建当前包、验证实际 Electron 窗口与默认运行来源，并按完整规格逐项核对。执行说明见 [实施计划](implementation-plan.md)；尚未完成项必须明确保留。

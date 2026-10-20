@@ -2,8 +2,15 @@
 saveExact: true
 allowBuilds:
   '@google/genai': false
+  electron-winstaller: false
   esbuild: true
   protobufjs: false
 minimumReleaseAgeExclude:
   - '@types/node@24.13.4'
   - fastify@5.12.4
+# The durable kernel is a release tuple, not a floating transitive SDK upgrade.
+overrides:
+  '@earendil-works/pi-ai': 1.1.0
+  '@earendil-works/pi-coding-agent': 1.1.0
+  '@earendil-works/pi-agent-core': 1.1.0
+  '@earendil-works/pi-durable>@earendil-works/chord': 1.1.0

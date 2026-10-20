@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { loadGraphConfig, parseGraphConfig, resolveCredentialSecret } from '../../src/server/config.ts';
 import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
-import { parseArgs } from '../../src/server/cli.ts';
+import { ensureBackendBinary } from '../helpers/backend-binary.ts';
 import { RuntimeError } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -227,19 +227,21 @@ test('missing web build, missing config, busy port and execution gaps fail with 
   expect(leftover).toBeNull();
 });
 
-test('CLI argument parsing defaults stay explicit and reject bad input', () => {
-  const cwd = '/tmp/graph-cli-test';
-  const parsed = parseArgs([], { HOME: '/root-home' }, cwd);
-  expect(parsed).toMatchObject({ configPath: null, mode: 'view', port: 4173, webDir: join(cwd, 'dist', 'web') });
-  expect(parsed.stateDir).toBe(join('/root-home', '.local', 'state', 'graph'));
-  expect(parseArgs(['--execute', '--port', '8080'], {}, cwd)).toMatchObject({ mode: 'execute', port: 8080 });
-  expect(parseArgs(['--config', 'custom.json', '--state-dir', 's'], {}, cwd).configPath).toBe(join(cwd, 'custom.json'));
-  expect(() => parseArgs(['--port', 'abc'], {}, cwd)).toThrowError(/Invalid port/);
-  expect(() => parseArgs(['--unknown'], {}, cwd)).toThrowError(/Unknown argument/);
-  expect(() => parseArgs(['--execute', '--view-only'], {}, cwd)).toThrowError(/mutually exclusive/);
+test('the real Go CLI rejects invalid arguments before starting an application', () => {
+  const binary = ensureBackendBinary();
+  for (const [args, reason] of [
+    [['--port', 'abc'], /Invalid port/],
+    [['--unknown'], /Unknown argument/],
+    [['--execute', '--view-only'], /mutually exclusive/],
+  ] as const) {
+    const child = spawnSync(binary, [...args], { encoding: 'utf8' });
+    expect(child.status).toBe(2);
+    expect(child.stderr).toMatch(reason);
+  }
 });
 
 test('the CLI entry starts, prints its address, and stops cleanly on SIGTERM', async () => {
+  ensureBackendBinary();
   const dir = await temp('cli');
   const web = await fakeWeb(join(dir, 'web'));
   const path = await configFile(dir, { projects: [{ id: 'sample', root: dir }] });

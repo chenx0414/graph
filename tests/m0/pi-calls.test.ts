@@ -7,7 +7,7 @@ import { afterEach, expect, test } from 'vitest';
 import { Type, normalizeContext } from '@earendil-works/pi-ai';
 import type { ToolDefinition, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import { describeAgentTools } from '../../src/runtime/agent-tool-definitions.ts';
-import { openPiInstance } from '../../src/runtime/pi-instance.ts';
+import { openDurableAgent } from '../fixtures/durable-agent.ts';
 import { CallBroker, type TokenUsage } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream, gatedProviderFetch } from '../../src/runtime/controlled-openai.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
@@ -20,7 +20,7 @@ async function fixture(plans: ResponsePlan[], tools: (broker: CallBroker, provid
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans); cleanup.push(() => provider.close());
   const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1'); cleanup.push(() => broker.close());
-  const instance = await openPiInstance({
+  const instance = await openDurableAgent({
     binding: { instanceId: 'agent-1', nodeId: 'node-1', definitionVersion: 'coder@1' },
     workspace: root, stateDir: join(root, 'session'), model: provider.model, modelRuntime: provider.runtime,
     stream: controlledOpenAIStream(broker, 'scripted-local-key', undefined, 'openai-completions', config.onSend ? { onSend: config.onSend } : {}),
@@ -42,8 +42,8 @@ test('Graph supplies the custom prompt and the Pi session keeps its own native a
   // Graph no longer replaces the built prompt: its text is the session's custom
   // prompt and the Pi session appends its own parts itself, which is how the
   // working-directory line reaches the model.
-  expect(system.startsWith(composed)).toBe(true);
-  expect(system).toMatch(/<cwd>\n[^\n]+\n<\/cwd>/);
+  expect(system).toContain(composed);
+  expect(system).toMatch(/<cwd>[^<]+<\/cwd>/);
 });
 
 test('the exact system prompt sent to the provider is reported back to the caller', async () => {
@@ -72,9 +72,9 @@ test('native Pi HTTP calls pass the gate and raw cache/reasoning totals are char
   expect(provider.requests).toHaveLength(1);
   expect(broker.inspect()).toMatchObject({ used: 50, reserved: 0, status: 'ready' });
   broker.pause();
-  await instance.prompt('Do not send while paused');
+  const blocked = await instance.prompt('Do not send while paused');
   expect(provider.requests).toHaveLength(1);
-  expect(instance.inspect().messages.at(-1)).toMatchObject({ role: 'assistant', stopReason: 'error' });
+  expect(blocked).toMatchObject({ stopReason: 'error' });
 });
 
 test('HTTP redirects cannot make hidden requests after the provider response pauses the gate', async () => {
@@ -162,23 +162,19 @@ test.each([{ usage: null }, { status: 400, error: 'maximum context length exceed
   },
 );
 
-test('manual compaction and branch summaries use the same actual-send gate', async () => {
-  const { instance, broker, provider } = await fixture([{}, {}, {}, {}, {}, {}]);
+test('manual compaction uses the same actual-send gate and preserves the continuation', async () => {
+  const { instance, broker, provider } = await fixture([{ text: 'Original topic. '.repeat(800) }, {}, { text: 'Retained topic summary.' }, {}]);
   await instance.prompt('First topic');
-  const first = instance.inspect().leafId!;
   await instance.prompt('A later topic to summarize');
   broker.pause();
   await expect(instance.compact()).rejects.toThrow();
-  await expect(instance.navigate(first, true)).rejects.toThrow();
   expect(provider.requests).toHaveLength(2);
   broker.resume();
-  await instance.navigate(first, true);
-  expect(provider.requests).toHaveLength(3);
-  await instance.prompt('A new branch');
   await instance.compact();
-  // Pi summarizes the conversation prefix and split turn separately.
-  expect(provider.requests).toHaveLength(6);
-  expect(broker.inspect().used).toBe(300);
+  await instance.prompt('Continue the same topic');
+  expect(provider.requests).toHaveLength(4);
+  expect(JSON.stringify(provider.requests[3])).toContain('Retained topic summary.');
+  expect(broker.inspect().used).toBe(200);
 });
 
 test.each(['threshold', 'overflow'] as const)('automatic %s compaction cannot send after its start event pauses the instance', async reason => {

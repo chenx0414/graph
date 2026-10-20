@@ -10,7 +10,7 @@
 
 ## 装配并保存真实模板
 
-装配入口属于运行应用 Examples 路径中的 `assemble-matt-team.ts`；它和 `src/catalog/matt-team.ts` 随现有 App 源码打包，不依赖业务仓库的 scripts。下面命令中的路径替换成 system prompt 提供的运行应用 Examples 绝对路径，使用该应用的 Node 24：
+装配入口属于运行应用 Examples 路径中的 `assemble-matt-team.ts`；它和 `backend/internal/graph/catalog_matt_team.go` 随现有 App 源码打包，不依赖业务仓库的 scripts。下面命令中的路径替换成 system prompt 提供的运行应用 Examples 绝对路径，使用该应用的 Node 24：
 
 ```bash
 node <Examples>/assemble-matt-team.ts --url http://127.0.0.1:<port> --config /absolute/task-options.json --out /absolute/matt-team.json

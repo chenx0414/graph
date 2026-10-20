@@ -1,4 +1,4 @@
-import type { StreamFn } from '@earendil-works/pi-agent-core';
+import type { ControlledStream as StreamFn } from './controlled-openai.ts';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { MODEL_GRADE_ORDER, modelIdentity, type ModelApi, type ModelEntry } from '../catalog/models.ts';

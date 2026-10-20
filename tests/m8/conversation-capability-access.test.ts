@@ -1,4 +1,5 @@
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { createDurableSessionTransport } from '../../src/runtime/durable-session.ts';
+import { chmod, copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -326,9 +327,7 @@ test('a worker Agent can inspect Graph source through a declared read-only capab
 
   const toolResult = (provider.requests[1] as { messages?: { role?: string; content?: string }[] }).messages
     ?.find(message => message.role === 'tool')?.content ?? '';
-  const result = JSON.parse(toolResult) as { content: { type: string; text?: string }[] };
-  const packageText = result.content.filter(part => part.type === 'text').map(part => part.text ?? '').join('');
-  expect(JSON.parse(packageText)).toMatchObject({ name: 'graph' });
+  expect(JSON.parse(toolResult)).toMatchObject({ name: 'graph' });
 }, 120_000);
 
 test('an unrestricted Pi extension does not deadlock a bound MCP call in the same Main Agent turn', async () => {
@@ -677,6 +676,7 @@ test('native nodes retain their recipe version and explicitly rebind capability 
   ]);
   cleanup.push(() => provider.close());
   const runtime = await openTaskRuntime({
+    sessionTransport: createDurableSessionTransport,
     stateDir: join(root, 'state'),
     projects: [{ id: 'project', root }],
     catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
@@ -702,6 +702,7 @@ test('native nodes retain their recipe version and explicitly rebind capability 
   }) }) as { graphId: string };
   const tools = (index: number) => (provider.requests[index] as { tools?: { function?: { name?: string } }[] }).tools?.map(tool => tool.function?.name) ?? [];
   await main.graphSend({ graphId, nodeId: 'worker-a', text: 'Search the first repository' }); await runtime.host.drive();
+  expect(provider.requests.length, JSON.stringify(await main.graphInspect({ graphId, query: 'queue' }))).toBe(3);
   expect(tools(1)).toContain('mcp_github_search_repositories');
   expect(JSON.stringify(provider.requests[2])).toContain('repositories:first');
 
@@ -729,14 +730,15 @@ test('native nodes retain their recipe version and explicitly rebind capability 
   }
   await main.graphSend({ graphId, nodeId: 'worker-b', text: 'Continue with the new capability configuration' }); await runtime.host.drive();
   expect(tools(5)).not.toContain('mcp_github_search_repositories');
-  expect(JSON.stringify(provider.requests[5])).toContain('第二个 worker 完成。');
   const after = runtime.nodeRun(graphId, 'worker-b');
   expect(after.node).toMatchObject({ definitionVersion: 'worker@2' });
   expect(runtime.nodePrompt(graphId, 'worker-b')).toMatchObject({ definitionVersion: 'worker@2', configurations: { current: { revision: 2 }, next: { revision: 2 }, pending: false } });
   expect(after.instance!.id).toBe(before.instance!.id);
-  // ADR 0011: a changed bundle branches the session, retaining its transcript
-  // and the immutable previous file, rather than reusing its old tool binding.
-  expect(after.session!.sessionId).not.toBe(before.session!.sessionId);
-  expect(await readFile(before.session!.sessionFile!, 'utf8')).toContain('第二个 worker 完成。');
+  // New tools apply to the next input while this same durable conversation
+  // retains the actual prior assistant response in its provider history.
+  expect(after.session!.sessionId).toBe(before.session!.sessionId);
+  expect(after.session!.sessionFile).toBe(before.session!.sessionFile);
+  expect(after.session!.sessionFile).toMatch(/^durable:/);
+  expect(JSON.stringify(provider.requests[5])).toContain('第二个 worker 完成。');
   expect(provider.requests).toHaveLength(6);
 }, 120_000);

@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { sandboxNetworkDomains } from '../../src/core/domains.ts';
 import { openRestrictedExecutor } from '../../src/runtime/restricted-process.ts';
-import { createWorkerRequests } from '../../src/runtime/worker-requests.ts';
+import { openDurableAgent } from '../fixtures/durable-agent.ts';
 import { CallBroker } from '../../src/runtime/call-broker.ts';
 import { controlledOpenAIStream } from '../../src/runtime/controlled-openai.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -660,27 +660,28 @@ test('a scripted MCP server uses real stdio and inherits the same OS write restr
   } finally { broker.close(); }
 });
 
-test('the real Pi SDK runs in the OS sandbox while the host owns its provider credential and usage ledger', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-real-pi-worker-'))); dirs.push(root);
+test('durable native execution uses the OS sandbox while the host owns its provider credential and usage ledger', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-real-durable-worker-'))); dirs.push(root);
   const workspace = join(root, 'worker'); await mkdir(workspace);
-  const provider = await openaiServer([{}]);
+  const credentialFile = join(root, 'credential.txt'); await writeFile(credentialFile, 'host-only-key');
+  const provider = await openaiServer([
+    { tools: [{ id: 'sandbox-proof', name: 'bash', arguments: JSON.stringify({ command: `if /bin/cat '${credentialFile}' >/dev/null 2>&1; then printf 'allowed' > credential-read.txt; else printf 'denied' > credential-read.txt; fi; printf '%s' "\${GRAPH_TEST_CREDENTIAL-unset}" > environment.txt; printf 'sandbox completed'` }) }] },
+    { text: 'Sandbox completed without the provider credential.' },
+  ]);
   const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  let agent: Awaited<ReturnType<typeof openDurableAgent>> | undefined;
+  process.env.GRAPH_TEST_CREDENTIAL = 'synthetic-parent-only';
   try {
-    const result = await executor.run({
-      broker: gate,
-      cwd: workspace, executable: process.execPath, args: [resolve('tests/fixtures/sandboxed-pi.ts'), workspace, JSON.stringify(provider.model)],
-      readPaths: [dirname(process.execPath), resolve('src'), resolve('tests/fixtures'), resolve('node_modules'), resolve('package.json')],
-      writePaths: [workspace],
-      onRequest: createWorkerRequests({ broker: gate, model: provider.model, stream: controlledOpenAIStream(gate, 'host-only-key'), resources: {} }),
-    });
-    expect(result.code, result.stderr).toBe(0);
-    const snapshot = JSON.parse(result.stdout);
-    expect(snapshot.messages[0]).toMatchObject({ role: 'system' });
-    expect(snapshot.messages).toHaveLength(3);
-    expect(snapshot.messages[2]).toMatchObject({ role: 'assistant', stopReason: 'stop' });
-    expect(provider.requests).toHaveLength(1);
-    expect(gate.inspect().used).toBe(50);
-  } finally { gate.close(); await provider.close(); }
+    agent = await openDurableAgent({ binding: { instanceId: 'agent-1', nodeId: 'worker', definitionVersion: 'worker@1' }, workspace, stateDir: join(root, 'state'),
+      model: provider.model, stream: controlledOpenAIStream(gate, 'host-only-key'), broker: gate, nativeTools: ['bash'] });
+    const result = await agent.prompt('Check the granted workspace without host credentials.');
+    expect(result.finalAssistantText).toContain('Sandbox completed');
+    expect(await readFile(join(workspace, 'credential-read.txt'), 'utf8'), JSON.stringify(result.inspect.messages)).toBe('denied');
+    expect(await readFile(join(workspace, 'environment.txt'), 'utf8')).toBe('unset');
+    expect(provider.authorizations).toEqual(['Bearer host-only-key', 'Bearer host-only-key']);
+    expect(provider.requests).toHaveLength(2);
+    expect(gate.inspect().used).toBe(100);
+  } finally { delete process.env.GRAPH_TEST_CREDENTIAL; await agent?.close(); gate.close(); await provider.close(); }
 });
 
 test('dependency installation and its lifecycle script work within grants without widening write access', async () => {
@@ -711,48 +712,35 @@ test('dependency installation and its lifecycle script work within grants withou
   broker.close();
 });
 
-test('an extension or MCP process can request authorized reads and models only through the paused host broker', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-rpc-'))); dirs.push(root);
+test('a durable capability read stays behind the paused host broker and cannot invoke undeclared writes', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'graph-durable-resource-'))); dirs.push(root);
   const workspace = join(root, 'worker'); await mkdir(workspace);
-  const provider = await openaiServer([{}]);
-  const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
   let readHits = 0;
   const resource = createServer((req, res) => { readHits++; expect(req.method).toBe('GET'); res.end('Reference material'); });
   await new Promise<void>(resolve => resource.listen(0, '127.0.0.1', resolve));
-  const handle = createWorkerRequests({
-    broker: gate, model: provider.model, stream: controlledOpenAIStream(gate, 'host-only-test-key'),
-    resources: { docs: { url: `http://127.0.0.1:${(resource.address() as AddressInfo).port}` } },
-  });
-  const script = `
-    import { Socket } from 'node:net';
-    import { createInterface } from 'node:readline';
-    const channel = new Socket({fd:3, readable:true, writable:true});
-    const lines = createInterface({input:channel})[Symbol.asyncIterator]();
-    const rpc = async request => { channel.write(JSON.stringify(request)+'\\n'); return JSON.parse((await lines.next()).value); };
-    const read = await rpc({operation:'read',resource:'docs'});
-    const write = await rpc({operation:'publish',resource:'docs',body:'bad'});
-    const model = await rpc({operation:'model',prompt:'An extension requests a model'});
-    const paused = await rpc({operation:'model',prompt:'Try to bypass pause',apiKey:'invented',baseUrl:'http://elsewhere'});
-    console.log(JSON.stringify({read,write,model,paused}));
-    channel.destroy();
-  `;
-  await writeFile(join(workspace, 'extension.mjs'), script);
+  const gate = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
+  const provider = await openaiServer([
+    { tools: [{ id: 'paused-read', name: 'read_reference', arguments: '{}' }], beforeReply: () => gate.pause() },
+    { tools: [{ id: 'read', name: 'read_reference', arguments: '{}' }, { id: 'write', name: 'publish_reference', arguments: '{}' }] },
+    { text: 'Read the granted reference without publishing.' },
+  ]);
+  let agent: Awaited<ReturnType<typeof openDurableAgent>> | undefined;
   try {
-    const result = await executor.run({
-      broker: gate,
-      cwd: workspace, executable: process.execPath, args: ['extension.mjs'], readPaths: [dirname(process.execPath)], writePaths: [workspace],
-      onRequest: async request => { const result = await handle(request); if ((request as { operation?: string }).operation === 'model') gate.pause(); return result; },
+    agent = await openDurableAgent({ binding: { instanceId: 'agent-1', nodeId: 'worker', definitionVersion: 'worker@1' }, workspace, stateDir: join(root, 'state'),
+      model: provider.model, stream: controlledOpenAIStream(gate, 'host-only-test-key'), broker: gate,
+      tools: [{ name: 'read_reference', label: 'Read reference', description: 'Read the approved reference', parameters: { type: 'object' },
+        async execute() { const response = await fetch(`http://127.0.0.1:${(resource.address() as AddressInfo).port}`); return { content: [{ type: 'text', text: await response.text() }], details: {} }; } }],
     });
-    expect(result.code, result.stderr).toBe(0);
-    const replies = JSON.parse(result.stdout);
-    expect(replies.read).toEqual({ ok: true, value: 'Reference material' });
-    expect(replies.write.ok).toBe(false);
-    expect(replies.model).toMatchObject({ ok: true, value: { role: 'assistant', stopReason: 'stop' } });
-    expect(replies.paused).toMatchObject({ ok: true, value: { role: 'assistant', stopReason: 'error' } });
-    expect(provider.requests).toHaveLength(1);
-    expect(readHits).toBe(1);
-    expect(gate.inspect().used).toBe(50);
-  } finally { gate.close(); await provider.close(); resource.closeAllConnections(); await new Promise<void>(resolve => resource.close(() => resolve())); }
+    await agent.prompt('Read while paused');
+    expect(readHits).toBe(0); expect(provider.requests).toHaveLength(1);
+    gate.resume();
+    await agent.prompt('Read the granted reference and try an undeclared publication');
+    expect(readHits).toBe(1); expect(provider.requests).toHaveLength(3);
+    const request = JSON.stringify(provider.requests[2]);
+    expect(request).toContain('Reference material'); expect(request).toContain('publish_reference');
+    expect(request).toMatch(/unknown|not found|not registered|not available/i);
+    expect(gate.inspect().used).toBe(150);
+  } finally { await agent?.close(); gate.close(); await provider.close(); resource.closeAllConnections(); await new Promise<void>(resolve => resource.close(() => resolve())); }
 });
 
 test('a host reply that cannot be serialized is refused instead of killing the daemon', async () => {

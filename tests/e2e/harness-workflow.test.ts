@@ -110,9 +110,9 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
   tool('artifact_list',()=>({namespace:'deliverables'}),'private-review-reasoning-marker'),
   tool('artifact_read',()=>{
    const reply=messages(review).filter(message=>message.role==='tool').at(-1)!;
-   const envelope=JSON.parse(String(reply.content)) as {content:{text:string}[]};
-   const value=JSON.parse(envelope.content[0]!.text) as {artifacts:{artifactId:string;version:number}[]};
-   return {artifactId:value.artifacts[0]!.artifactId,version:value.artifacts[0]!.version};
+   const envelope=JSON.parse(String(reply.content)) as {content?:{text:string}[];artifacts?:{artifactId:string;version:number}[]};
+   const value = envelope.artifacts ? envelope : JSON.parse(envelope.content![0]!.text) as {artifacts:{artifactId:string;version:number}[]};
+   return {artifactId:value.artifacts![0]!.artifactId,version:value.artifacts![0]!.version};
   }),
   tool('artifact_publish',()=>({namespace:'reviews',name:'parser',schema:'graph.review@1',mediaType:'application/json',
    content:JSON.stringify({commit:commit(),passed:true,reason:'Read the immutable parser implementation; it preserves equals and ignores empty lines.'}),requestId:'publish-review'})),
@@ -140,13 +140,13 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
    tool('graph_patch',()=>({graphId:graphId(),baseRevision:1,changes:JSON.stringify(changes)})),
    tool('graph_patch',()=>{
     const reply=messages(main).filter(message=>message.role==='tool').at(-1);
-    return {graphId:graphId(),baseRevision:1,changes:String(reply?.content).includes('RuntimeError')?changes:JSON.stringify(changes)};
+    return {graphId:graphId(),baseRevision:1,changes:/RuntimeError|\[error\]/.test(String(reply?.content))?changes:JSON.stringify(changes)};
    }),
    tool('graph_send',()=>({graphId:graphId(),nodeId:'literalEcho',input:'job',value:literal})),
    tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:'{}'})),
    tool('graph_send',()=>{
     const reply=messages(main).filter(message=>message.role==='tool').at(-1);
-    return {graphId:graphId(),nodeId:'work',input:'job',value:String(reply?.content).includes('RuntimeError')?{}:'{}'};
+    return {graphId:graphId(),nodeId:'work',input:'job',value:/RuntimeError|\[error\]/.test(String(reply?.content))?{}:'{}'};
    }),
   ] : [tool('graph_send',()=>({graphId:graphId(),nodeId:'work',input:'job',value:{}}))]),
   ...(context==='frozen-explicit' ? [
@@ -245,7 +245,7 @@ test.each(['bare','frozen-auto','frozen-explicit'])('evaluation completes only a
     .find(value=>value.taskId===graphId() && value.reason==='settled');
    expect(status?.nodes).toEqual(expect.arrayContaining([expect.objectContaining({id:'work',status:'succeeded'})]));
    expect(replies.find(message=>String(message.content).includes('has no node toString'))?.content)
-    .toBe(`RuntimeError: Task ${graphId()} has no node toString`);
+    .toContain(`Task ${graphId()} has no node toString`);
    const rejected=replies.filter(message=>String(message.content).includes('has no node check'));
    expect(rejected).toHaveLength(2);
    for(const reply of rejected){

@@ -1,5 +1,7 @@
 # Issue #1 接手实施状态
 
+> 历史实施与验收记录：保留当时的实现和证据，不代表当前进程模型或任务状态。当前 Go + durable 基线见 [2026-10-20 整合说明](../planning/baseline-cleanup-2026-10-20.md)与 [ADR 0032](../adr/0032-go-backend-shared-durable-host.md)。
+
 工作分支：codex/graph-v2-complete；起点 5b5697c。实施仍在进行，不能关闭 Issue #1。
 
 ## 已修改并定向验证

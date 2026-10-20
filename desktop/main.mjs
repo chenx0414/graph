@@ -23,6 +23,26 @@ import {
 app.setName('Graph');
 if (process.env.GRAPH_APP_USER_DATA) app.setPath('userData', resolve(process.env.GRAPH_APP_USER_DATA));
 const devRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** The APP backend is the Go binary, not node on src/server/cli.ts. */
+function findPackagedDaemon(sourceRoot) {
+  if (process.env.GRAPH_DAEMON_BIN && existsSync(process.env.GRAPH_DAEMON_BIN)) return resolve(process.env.GRAPH_DAEMON_BIN);
+  const starts = [sourceRoot, devRoot, process.cwd()];
+  const seen = new Set();
+  for (const start of starts) {
+    let dir = resolve(start);
+    for (let depth = 0; depth < 12; depth += 1) {
+      if (seen.has(dir)) break;
+      seen.add(dir);
+      const candidate = join(dir, 'dist', 'graphd');
+      if (existsSync(candidate)) return candidate;
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  throw new Error('dist/graphd is missing. Build backend/cmd/graphd into dist/graphd.');
+}
 const withDevTools = process.argv.includes('--dev');
 const verbose = withDevTools || Boolean(process.env.GRAPH_APP_DEBUG);
 const smoke = Boolean(process.env.GRAPH_APP_SMOKE);
@@ -211,7 +231,8 @@ if (!app.requestSingleInstanceLock()) {
     // Sandboxed helpers cannot start the Electron binary (no Helper apps), so
     // the packaged app ships a real node and points every helper at it.
     const bundledNode = join(paths.root, 'runtime/node');
-    const startedChild = spawn(process.execPath, [paths.serverEntry, ...args], {
+    const daemonBin = findPackagedDaemon(paths.sourceRoot);
+    const startedChild = spawn(daemonBin, [...args, '--application-root', paths.sourceRoot], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(existsSync(bundledNode) ? { GRAPH_APP_NODE: bundledNode } : {}), ...secrets },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

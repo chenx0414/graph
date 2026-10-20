@@ -96,8 +96,8 @@ test('a granted domain is fetched through the gated broker and metered', async (
   const answer = JSON.stringify(provider.requests[1]);
   expect(answer).toContain('retrieval body');
   const messages = (provider.requests[1] as { messages: { role: string; content: string }[] }).messages;
-  const result = JSON.parse(messages.find(message => message.role === 'tool')!.content) as { content: { text: string }[] };
-  expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: 200, text: 'retrieval body' });
+  const result = JSON.parse(messages.find(message => message.role === 'tool')!.content);
+  expect(result).toMatchObject({ status: 200, text: 'retrieval body' });
   const view = await task.view();
   expect(view.questions).toEqual([]);
   expect(retrievalUsage()).toEqual([{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }]);

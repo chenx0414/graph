@@ -6,13 +6,15 @@ import { tokenUsageTotal, type TokenUsage } from './call-broker.ts';
 
 /** Provider sends are admitted and charged by the host, independently of Pi turn boundaries. */
 export function kernelProviderGate(kernel: KernelStore, graphId: string, nodeId: string,
-  limit?: { budget: number; unlimited: boolean }, model?: ModelEntry, recipe?: { definition: string; review: boolean }, purpose: 'completion' | 'compaction' = 'completion'): SendGate {
+  limit?: { budget: number; unlimited: boolean }, model?: ModelEntry, recipe?: { definition: string; review: boolean }, purpose: 'completion' | 'compaction' = 'completion', executionId?: string): SendGate {
   return {
     dispatch(id, reservation, send) {
       if (!Number.isSafeInteger(reservation) || reservation < 0) throw new RuntimeError('budget', 'Invalid provider reservation');
       try {
         kernel.store.transaction(() => {
-          const execution = kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          const execution = (executionId
+            ? kernel.db.prepare("SELECT id FROM kernel_executions WHERE id=? AND task_id=? AND node_id=? AND state='running'").get(executionId, graphId, nodeId)
+            : kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId)) as { id: string } | undefined;
           if (!execution) throw new RuntimeError('invalid_adapter', 'Provider send has no active execution');
           const frozenLimit = kernel.execution(execution.id)?.tokenBudget ?? limit;
           const state = kernel.db.prepare('SELECT used,paused FROM kernel_node_state WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { used: number; paused: number };

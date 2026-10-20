@@ -1,5 +1,8 @@
+import type { DurableHost } from '../runtime/durable-host.ts';
+import { importMainHistories } from '../runtime/durable-migration.ts';
+import { createDurableSessionTransport } from '../runtime/durable-session.ts';
 import { explainEdge, explainModule, type ModuleHistoryQuery } from './kernel-explain.ts';
-import { retireLegacyGraphs } from './retire-legacy-graphs.ts';
+import { retireLegacyGraphs, retirePreDurableExecutions } from './retire-legacy-graphs.ts';
 import { sendKernelMainMessage, sendKernelNodeMessage } from './kernel-node-messages.ts';
 import { wakeMaster } from './wake-ledger.ts';
 import { recoverKernelExecutions } from './kernel-recovery.ts';
@@ -53,6 +56,7 @@ import { approveHumanCheck, humanCheckPreReview, insertQuestion, pendingHumanChe
 import { talentDetail, talentExperience } from './talent.ts';
 import { Catalog, type DefinitionSpec } from '../catalog/catalog.ts';
 import { modelTier, mergeCosts, sumCosts, type ModelEntry } from '../catalog/models.ts';
+import type { AgentSessionTransport } from '../runtime/agent-session.ts';
 import { createPiAdapter, type PiAdapterChannels } from '../runtime/pi-adapter.ts';
 import { effectiveThinkingLevel, thinkingOptionsFor } from '../runtime/thinking.ts';
 import { GitIntegration } from '../git/integration.ts';
@@ -66,7 +70,7 @@ import { agentSkillOwnedRoots, agentSkillsDir } from '../runtime/agent-skills.ts
 import { agentArtifactAccess } from '../runtime/agent-tool-definitions.ts';
 import type { RsiChangeInput, RsiService } from '../runtime/rsi.ts';
 import type { ActionAdapter, Answer, EvidenceInput, Json, Operation, OperationResult } from './types.ts';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ModelThinkingLevel as ThinkingLevel } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { RuntimeError, type AttachmentInput, type ProjectConfig, type NativeProposal, type ProposalReceipt, type Receipt, type NodeSpec, type TaskUpdate, type TaskWatch } from './types.ts';
 import { cleanAttachments, isImageAttachment } from './attachments.ts';
@@ -292,12 +296,15 @@ export async function openTaskRuntime(options: {
   stateDir: string;
   projects?: ProjectConfig[];
   actions?: Record<string, ActionAdapter>;
+  /** Internal execution transport seam; shared storage ownership remains with the runtime. */
+  sessionTransport?: (store: TaskStore) => Promise<AgentSessionTransport & { host?: DurableHost; close(): Promise<void> }>;
   models?: {
     entries: ModelEntry[];
     preferences?: Partial<Record<ModelEntry['grade'], string[]>>;
     /** Legacy single key; used for entries without a credential binding. */
     apiKey?: string;
-    modelRuntime: ModelRuntime;
+    /** Deprecated catalog-only caller data; durable owns model dispatch. */
+    modelRuntime?: ModelRuntime;
     /** Per-model credential binding so aliases never share or cross keys. */
     credentialFor?: (entry: ModelEntry) => { credentialId: string; apiKey: string; limit?: number; sharedGroupId?: string; groupLimit?: number } | undefined;
     /** Shared scheduler; one is created per runtime when omitted. */
@@ -365,6 +372,7 @@ export async function openTaskRuntime(options: {
   catch (error) { releaseOwner(); throw error; }
   let closed = false;
   let execution: Execution;
+  let getGraphLane: (() => ReturnType<typeof kernelGraphLane>) | undefined;
   let residentGraphLane: ReturnType<typeof kernelGraphLane> | undefined;
   let catalog: Catalog;
   let git: GitIntegration;
@@ -404,8 +412,6 @@ export async function openTaskRuntime(options: {
   // runtime opens - the host loop queries them every tick, and an older database is
   // migrated here rather than by the first graph that happens to run.
   const kernel = new KernelStore(store);
-  try { retireLegacyGraphs(store); recoverKernelExecutions(kernel); }
-  catch (error) { try { store.close(); } finally { releaseOwner(); } throw error; }
   /**
    * The credential binding shared by main dispatch and native node admission.
    */
@@ -488,6 +494,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     });
   };
 
+  let sessionTransport: (AgentSessionTransport & { host?: DurableHost; close(): Promise<void> }) | undefined;
   try {
     if (defaultBudgetTokens !== null && (!Number.isSafeInteger(defaultBudgetTokens) || defaultBudgetTokens <= 0)) {
       throw new RuntimeError('invalid_input', 'limits.defaultBudgetTokens must be a positive integer or null');
@@ -518,9 +525,20 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         for (const entry of options.models!.entries) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
       });
     }
-    const fallback = options.models || options.live ? createPiAdapter({
+    sessionTransport = await (options.sessionTransport ?? (options.models || options.live ? createDurableSessionTransport : undefined))?.(store);
+    if (sessionTransport?.host) {
+      await importMainHistories(store, sessionTransport.host, join(stateDir, 'instances'));
+      // Only a validated durable startup can record the one-time execution
+      // fence. A view-only startup must not stamp a later durable cutover.
+      retirePreDurableExecutions(store);
+    }
+    retireLegacyGraphs(store);
+    recoverKernelExecutions(kernel);
+    if ((options.models || options.live) && !sessionTransport) throw new RuntimeError('invalid_configuration', 'Durable main transport is required');
+    const fallback = (options.models || options.live) && sessionTransport ? createPiAdapter({
       store, instancesDir: join(stateDir, 'instances'), catalog, directory: liveEntries, artifacts,
-      apiKey: options.models?.apiKey ?? '', modelRuntime: options.models!.modelRuntime,
+      transport: sessionTransport,
+      apiKey: options.models?.apiKey ?? '',
       ...(options.models?.credentialFor ? { bindingFor: (entry: ModelEntry) => options.models!.credentialFor!(entry) } : {}),
       ...(options.live ? { bindingFor: (entry: ModelEntry) => options.live!.credentialFor(entry) } : {}),
       scheduler: modelScheduler,
@@ -567,17 +585,12 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         for (const entry of options.live!.entries()) store.db.prepare('INSERT OR REPLACE INTO models VALUES(?,?)').run(entry.id, canonicalJson(entry));
       });
     }
-    execution = new Execution(store, options.actions ?? {}, {
-      ...(fallback ? { fallback } : {}),
-      catalog,
-      git,
-      artifacts,
-      // Native graphs run through one resident Pi host per node. Host command
-      // modules remain usable without a model; agent nodes require a configured model.
-      graphs: () => (residentGraphLane ??= kernelGraphLane({
+    getGraphLane = () => (residentGraphLane ??= kernelGraphLane({
         graphHome: options.catalog?.capabilityRoot ? resolve(options.catalog.capabilityRoot, '..') : resolve(homedir(), '.graph'),
         access: () => resolvedAccessPolicy(),
         kernel,
+        ...(options.capabilitySecrets ? { capabilitySecrets: options.capabilitySecrets } : {}),
+        ...(sessionTransport ? { sessionTransport } : {}),
         ...(options.network ? { network: options.network } : {}),
         ...(options.program ? { program: options.program } : {}),
         catalog,
@@ -600,7 +613,15 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
           name !== 'submit'
             ? { ok: false, text: `the host does not offer a tool named ${name}` }
             : hostSubmitCall(kernel, graphId, nodeId, args),
-      })).runnable(),
+      }));
+    execution = new Execution(store, options.actions ?? {}, {
+      ...(fallback ? { fallback } : {}),
+      catalog,
+      git,
+      artifacts,
+      // Native graphs share the durable execution owner. Host command
+      // modules remain usable without a model; agent nodes require a configured model.
+      graphs: () => getGraphLane!().runnable(),
       ...(options.models || options.live ? { models: liveEntries } : {}),
       ...(options.live || options.models?.preferences ? { preferences: options.live ? livePreferences : options.models!.preferences } : {}),
       access: () => resolvedAccessPolicy(),
@@ -668,6 +689,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
       }
     }
   } catch (error) {
+    await sessionTransport?.close().catch(() => undefined);
     try { store.close(); } finally { releaseOwner(); }
     throw error;
   }
@@ -1871,7 +1893,7 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
         if (result.cleared && options.autoWake) execution.kick();
         return result;
       },
-      async runReady() { ensureOpen(); return execution.runReady(); },
+      async runReady() { ensureOpen(); await sessionTransport?.waitForRecovery?.(); return execution.runReady(); },
       /** Read-only candidate check: a hot config that moves the root of a
        * project with tasks in flight must be rejected before anything is
        * persisted or activated. */
@@ -2614,11 +2636,19 @@ const liveBudget = () => options.live ? options.live.defaultBudgetTokens() : opt
     close() {
       if (!closing) {
         closed = true;
-        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); await execution.settleGraphShutdown(); try { store.close(); } finally { releaseOwner(); } })();
+        closing = (async () => { await execution.drain(); await residentGraphLane?.close(); try { await sessionTransport?.close(); await execution.settleGraphShutdown(); } finally { try { store.close(); } finally { releaseOwner(); } } })();
       }
       return closing;
     },
   };
   channels.supervisor = runtime.supervisor;
+  try {
+    if (sessionTransport?.bootstrapRecovery) { getGraphLane!(); await sessionTransport.bootstrapRecovery(); }
+  } catch (error) {
+    await residentGraphLane?.close().catch(() => undefined);
+    await sessionTransport?.close().catch(() => undefined);
+    try { store.close(); } finally { releaseOwner(); }
+    throw error;
+  }
   return runtime;
 }

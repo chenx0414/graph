@@ -1,5 +1,5 @@
 import { nativeSkillDirs } from './agent-skills.ts';
-import { workerModelOptions } from './worker-model-options.ts';
+import { Type } from '@earendil-works/pi-ai';
 import { kernelToolGate } from './kernel-tool-gate.ts';
 import { createRetrievalBroker } from './retrieval.ts';
 import { compactionSettings } from './compaction.ts';
@@ -9,52 +9,45 @@ import { waitForKernelExecutionSlot } from './execution-slots.ts';
 import { setNativeExecutionWaiting } from '../core/time-ledger.ts';
 import type { ModelScheduler } from './model-scheduler.ts';
 import { RuntimeError } from '../core/types.ts';
+import type { FrozenDurableExecution } from './durable-host.ts';
+import type { AgentSessionRequest, AgentSessionTransport } from './agent-session.ts';
+import { durableNodeHost } from './durable-node-host.ts';
+import { externallyGated } from './tool-gating.ts';
+import type { RunnerHost } from '../core/graph-runner.ts';
+import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import { randomUUID } from 'node:crypto';
 import type { AgentContextLibrary } from './agent-context.ts';
 import { nodeAccessPolicy, resolveAccessPolicy, standardAccessPolicy, type ResolvedAccessPolicy } from '../core/access-policy.ts';
 import { join, resolve, relative } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import type { KernelStore } from '../core/kernel-store.ts';
 import type { Catalog } from '../catalog/catalog.ts';
 import { selectModel, modelIdentity, type ModelEntry } from '../catalog/models.ts';
-import { appendNodeEntry, recordCapabilityLoad, recordNodeSession } from '../core/node-run.ts';
+import { appendNodeEntry, recordCapabilityLoad } from '../core/node-run.ts';
 import { graphAcceptance } from '../core/graph-acceptance.ts';
 import { GraphLane, type GraphLaneOptions } from '../core/graph-lane.ts';
 import type { ArtifactWorkspace } from '../core/artifact-workspace.ts';
-import { residentLauncher } from './resident-launcher.ts';
-import { ResidentHost } from './resident-host.ts';
 import { nodeSessionRequest, type NodeSessionRequest } from './kernel-node-host.ts';
 import { toPiModel, toolResultText } from './pi-adapter.ts';
 import { kernelProviderGate } from './kernel-provider-gate.ts';
 import { controlledOpenAIStream, type SendGate } from './controlled-openai.ts';
-import { encodeAssistantStream } from './assistant-stream-frames.ts';
 import { normalizeContext, type Context } from '@earendil-works/pi-ai';
-import { tokenUsageTotal, type TokenUsage } from './call-broker.ts';
+import { type TokenUsage } from './call-broker.ts';
 import type { GitIntegration } from '../git/integration.ts';
 
-/**
- * The production wiring of the v2 graph lane (Issue #1 §13.8).
- *
- * Everything the lane needs exists separately: the lane drives a graph (GraphLane), the
- * session for a node comes from its recipe (nodeSessionRequest), and the worker reaches the
- * provider with the host's credential (PiWorkerConfig.transport). This assembles them into
- * the one call `Execution` needs — `graphs()` — so a confirmed v2 graph runs in the running
- * product instead of only in tests.
- *
- * Credentials stay with the host (§3): the resident worker requests a model call over IPC;
- * the host selects the model, admits each send and records its authoritative usage.
- */
-
-const workerEntry = fileURLToPath(new URL('./resident-worker-entry.ts', import.meta.url));
+/** Bind Graph domain orchestration to the runtime's shared durable transport.
+ * The host selects and gates providers, while each admitted execution keeps its
+ * own workspace, capability policy, transcript identity and tool bindings. */
 
 /** What one v2 turn is expected to cost when the runtime has not said otherwise. */
 export const DEFAULT_V2_RESERVE_TOKENS = 200_000;
 
 export interface KernelGraphLaneOptions {
   kernel: KernelStore;
+  /** One runtime-owned durable transport, shared with main. */
+  sessionTransport?: AgentSessionTransport;
   access?: () => ResolvedAccessPolicy;
+  capabilitySecrets?: () => Record<string, string>;
   network?: { retrievalDomains?: string[] };
   program?: { readPaths?: string[]; env?: Record<string, string>; nodeModulesPath?: string };
   catalog: Catalog;
@@ -140,11 +133,12 @@ export function modelFor(options: KernelGraphLaneOptions, recipe: string,
 
 /**
  * Build the production v2 lane. A node's session is assembled once and reused for the life
- * of the lane, so the same node keeps one resident process across the graph's turns (§7).
+ * of the lane, so the same node keeps one durable conversation across the graph's turns (§7).
  */
 export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   let closing = false;
-  const hosts = new Map<string, ResidentHost>();
+  const restoring = new Map<string, FrozenDurableExecution>();
+  const hosts = new Map<string, RunnerHost & { stop(): Promise<void>; dispose(): Promise<void> }>();
   const sessions = new Map<string, NodeSessionRequest>();
   const sessionRevisions = new Map<string, string>();
   const hostConfigs = new Map<string, string>();
@@ -152,13 +146,16 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const preparedReviewExecutions = new Map<string, string>();
 
   const nodeDefinition = (graphId: string, nodeId: string, revisionVersion?: number) => {
-    const active = options.kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1")
+    const frozen = restoring.get(`${graphId}/${nodeId}`);
+    const active = frozen ? { revision_version: frozen.configuration.nodeExecutionConfiguration!.revision } : options.kernel.db.prepare("SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1")
       .get(graphId, nodeId) as { revision_version: number } | undefined;
     const revision = revisionVersion ?? active?.revision_version;
     return (revision === undefined ? options.kernel.latestRevision(graphId) : options.kernel.revision(graphId, revision))?.definition.nodes[nodeId];
   };
   /** Use the execution's frozen location, including publication during a concurrent patch. */
   const nodeLocation = (graphId: string, nodeId: string, revisionVersion?: number, prepare = false): { workspace: string; base: 'project' | 'worktree' } | undefined => {
+    const frozen = restoring.get(`${graphId}/${nodeId}`);
+    if (frozen) return { workspace: frozen.configuration.policy.workspace, base: frozen.configuration.nodeExecutionConfiguration!.base };
     const node = nodeDefinition(graphId, nodeId, revisionVersion);
     const selected = node?.workspace?.base ?? 'auto';
     const admitted = options.kernel.db.prepare('SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?').get(graphId, nodeId) as { instance_id: string } | undefined;
@@ -189,7 +186,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     }
   };
   const nodeWorkspace = (graphId: string, nodeId: string, revisionVersion?: number) => nodeLocation(graphId, nodeId, revisionVersion)?.workspace;
-  const nodeAccess = (graphId: string, nodeId: string, revisionVersion: number) => nodeAccessPolicy(
+  const nodeAccess = (graphId: string, nodeId: string, revisionVersion: number) => restoring.get(`${graphId}/${nodeId}`)?.configuration.nodeExecutionConfiguration?.access ?? nodeAccessPolicy(
     nodeDefinition(graphId, nodeId, revisionVersion)?.access,
     options.access?.() ?? resolveAccessPolicy(standardAccessPolicy(), { stateDir: options.stateDir, ...(options.graphHome ? { graphHome: options.graphHome } : {}) }),
     { stateDir: options.stateDir, ...(options.graphHome ? { graphHome: options.graphHome } : {}) });
@@ -197,16 +194,47 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
   const sessionFor = async (graphId: string, nodeId: string, revisionVersion: number): Promise<NodeSessionRequest> => {
     if (closing) throw new Error('Graph runtime is closing');
     const key = `${graphId}/${nodeId}`;
+    const frozen = restoring.get(key);
     const cached = sessions.get(key);
     const revision = options.kernel.revision(graphId, revisionVersion);
     if (!revision) throw new Error(`graph ${graphId} has no revision to run`);
     const recipe = revision.definition.nodes[nodeId]?.recipe;
-    const role = recipe && options.catalog.definition(recipe).review === true ? 'reviewer' : 'worker';
-    const prompts = options.library ? await Promise.all([
+    const role = frozen ? frozen.configuration.nodeExecutionConfiguration!.role : recipe && options.catalog.definition(recipe).review === true ? 'reviewer' : 'worker';
+    const prompts = !frozen && options.library ? await Promise.all([
       options.library.prompt('rules/common.md'), options.library.prompt(`rules/${role}.md`),
       options.library.prompt(`tools/${role}.md`), options.library.prompt('runtime/node.md'),
       options.library.agentPrompt(recipe?.split('@')[0] ?? nodeId, null),
     ]) : null;
+    // A submitted delivery can arrive before its producer finishes its tools and
+    // Git settlement. Reviewers must prepare their private copy only after that
+    // source has actually reached the integration branch.
+    if (!frozen && role === 'reviewer' && options.git && options.kernel.store.task(graphId).integration_branch) {
+      const queued = options.kernel.db.prepare("SELECT payload FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed' ORDER BY seq LIMIT 1")
+        .get(graphId, nodeId) as { payload: string } | undefined;
+      const payload = queued ? options.kernel.content.decode<{ deliveryId?: string }>(queued.payload) : undefined;
+      const source = payload?.deliveryId ? options.kernel.db.prepare(`SELECT s.execution_id AS id FROM kernel_deliveries d
+        JOIN kernel_submissions s ON s.id=d.submission_id WHERE d.id=?`).get(payload.deliveryId) as { id: string } | undefined : undefined;
+      if (source) {
+        const producer = options.kernel.execution(source.id)!;
+        const sourceNode = options.kernel.revision(graphId, producer.revisionVersion)!.definition.nodes[producer.nodeId];
+        const integrates = sourceNode?.recipe && options.catalog.hasDefinition(sourceNode.recipe)
+          && !options.catalog.definition(sourceNode.recipe).review;
+        if (integrates) for (;;) {
+          const task = options.kernel.store.task(graphId);
+          if (closing || task.paused || options.kernel.nodeState(graphId, nodeId).paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Review preparation is closed');
+          if (options.kernel.execution(source.id)!.state !== 'running') {
+            const merged = options.kernel.db.prepare("SELECT 1 FROM git_commits WHERE task_id=? AND operation_id=? AND kind='integration'").get(graphId, source.id);
+            if (!merged) throw new RuntimeError('integration_blocked', `Delivery source ${source.id} did not reach the integration branch`);
+            break;
+          }
+          await new Promise<void>(resolve => {
+            const finish = () => { clearTimeout(timer); unsubscribe(); resolve(); };
+            const timer = setTimeout(finish, 100);
+            const unsubscribe = options.kernel.store.onEvent(finish);
+          });
+        }
+      }
+    }
     const location = nodeLocation(graphId, nodeId, revisionVersion, true);
     const workspace = location?.workspace;
     if (!workspace) throw new RuntimeError('invalid_workspace', `graph ${graphId} node ${nodeId} has no workspace`);
@@ -221,6 +249,8 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     }) : undefined;
     const session = await nodeSessionRequest({
       retainCapabilities: true,
+      ...(frozen ? { frozen } : {}),
+      ...(options.capabilitySecrets ? { secrets: options.capabilitySecrets } : {}),
       gate: options.gateFor?.(graphId, nodeId) ?? kernelToolGate(options.kernel, graphId, nodeId, 'tool', () => closing),
       access,
       kernel: options.kernel,
@@ -230,7 +260,6 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
       nodeId,
       revisionVersion: revision.version,
       workspace,
-      ...(options.workspaceFor(graphId) ? { projectRoot: options.workspaceFor(graphId)! } : {}),
       bindings: {
         ...(retrieval ? { fetch: (url: string, signal?: AbortSignal) => retrieval.fetch(url, signal) } : {}),
         ...(options.git && options.kernel.store.task(graphId).integration_branch && location?.base === 'worktree' && role !== 'reviewer' ? {
@@ -277,7 +306,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     });
     if (closing) { await session.close(); throw new Error('Graph runtime is closing'); }
     session.environment = { revision: revisionVersion, workspace, base: location!.base, access };
-    session.systemPrompt += `\n\nNODE WORKING ENVIRONMENT\n${JSON.stringify({ workspace, base: session.environment.base, access })}`;
+    if (!frozen) session.systemPrompt += `\n\nNODE WORKING ENVIRONMENT\n${JSON.stringify({ workspace, base: session.environment.base, access })}`;
     if (cached) options.kernel.store.event(graphId, 'graph.node.rebound', { nodeId, revision: revisionVersion,
       previousRecipe: cached.binding.definitionVersion, recipe: session.binding.definitionVersion,
       previousWorkspace: cached.environment?.workspace ?? null, workspace,
@@ -289,7 +318,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     return session;
   };
 
-  return new GraphLane({
+  const laneOptions: GraphLaneOptions = {
     finalize: async graphId => {
       if (!options.git || !options.kernel.store.task(graphId).integration_branch) return;
       await options.git.exclusive(graphId, () => {
@@ -369,7 +398,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
     config: async (graphId, nodeId, revisionVersion) => {
       const session = await sessionFor(graphId, nodeId, revisionVersion);
       const recipe = session.binding.definitionVersion;
-      const model = modelFor(options, recipe, { graphId, nodeId, revisionVersion });
+      const model = restoring.get(`${graphId}/${nodeId}`)?.configuration.nodeExecutionConfiguration?.model ?? modelFor(options, recipe, { graphId, nodeId, revisionVersion });
       if (!model) throw new RuntimeError('model_selection', `No eligible configured model for recipe ${recipe}; review excludes recorded implementer models`);
       boundModels.set(`${graphId}/${nodeId}`, structuredClone(model));
       const credential = options.credentialFor(model);
@@ -411,8 +440,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           } as never,
         }],
         nativeTools: [...(session.operation?.nativeTools ?? [])],
-        skillPaths: [...new Set([...(session.operation?.skillPaths ?? []),
-          ...nativeSkillDirs({ cwds: [workspace, options.workspaceFor(graphId)] })])],
+        skillPaths: [...new Set([...(session.operation?.skillPaths ?? []), ...nativeSkillDirs({ cwds: [workspace, options.workspaceFor(graphId)] })])],
         ...(session.operation?.skillFolder ? { skillFolder: session.operation.skillFolder } : {}),
         piExtensionPaths: [...(session.operation?.piExtensionPaths ?? [])],
         piExtensionTools: [...(session.operation?.piExtensionTools ?? [])],
@@ -422,37 +450,33 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         bundleDigest: session.bundleDigest,
         toolPolicyDigest: session.toolPolicyDigest,
         runtimePolicyDigest: session.runtimePolicyDigest,
-        // Provider calls are executed by the host; credentials never enter this file.
-        hostModel: true,
       };
     },
-    // One resident process per node, reused across turns.
+    // Each turn binds the admitted execution to its persistent durable conversation.
     host: async (graphId: string, nodeId: string, config: unknown) => {
+      if (!options.sessionTransport) throw new RuntimeError('invalid_configuration', 'Durable node transport is required');
       const key = `${graphId}/${nodeId}`;
       const cached = hosts.get(key);
       const signature = JSON.stringify(config);
-      if (cached && hostConfigs.get(key) === signature) return cached;
       if (cached) await cached.stop();
-      await mkdir(join(options.stateDir, 'kernel-worker'), { recursive: true });
-      const configPath = join(options.stateDir, 'kernel-worker', `${encodeURIComponent(graphId)}-${encodeURIComponent(nodeId).replaceAll('*', '%2A')}.json`);
       const session = sessions.get(key);
-      if (!session) throw new Error('Resident host has no prepared session');
+      if (!session) throw new Error('Durable host has no prepared session');
       const workspace = session.environment!.workspace;
       if (closing) throw new Error('Graph runtime is closing');
-      if (!session.operation) throw new Error('Resident node has no resolved capability operation');
+      if (!session.operation) throw new Error('Durable node has no resolved capability operation');
       const model = boundModels.get(key);
-      if (!model || model.id !== (config as { model: { name: string } }).model.name) throw new Error('Resident host has no prepared model connection');
+      if (!model || model.id !== (config as { model: { name: string } }).model.name) throw new Error('Durable host has no prepared model connection');
+      const restoredExecution = restoring.get(key);
+      const admittedExecution = restoredExecution ? { id: restoredExecution.executionId } : options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+      if (!admittedExecution) throw new RuntimeError('invalid_execution', 'Node host has no admitted execution');
       let purpose: 'completion' | 'compaction' = 'completion';
       const nativeGate = kernelToolGate(options.kernel, graphId, nodeId, 'tool', () => closing);
-      const nativeCalls = new Map<string, string>();
-      const host = new ResidentHost({
-        launch: residentLauncher({ config: config as never, configPath, workerEntry, operation: session.operation,
-          access: session.environment!.access }),
-        workerEntry,
-        cwd: workspace,
-        configPath,
-        config: config as never,
-        onModelCall: async (raw, hostSignal, streamOptions) => {
+      const isRestored = !!restoredExecution;
+      const runModelCall = async <T>(raw: unknown, hostSignal: AbortSignal, consume: (stream: AssistantMessageEventStream, evidence: { usage: TokenUsage; readonly unknown: boolean; readonly refusal: RuntimeError | undefined }) => Promise<T>): Promise<T> => {
+          if (isRestored) while (options.kernel.execution(admittedExecution.id)?.state !== 'running' || options.kernel.store.task(graphId).paused || options.kernel.nodeState(graphId, nodeId).paused) {
+            if (closing || hostSignal.aborted) throw new Error('Restored provider admission was closed');
+            await new Promise<void>(resolve => { const finish = () => { clearTimeout(timer); unsubscribe(); resolve(); }; const timer = setTimeout(finish, 100); const unsubscribe = options.kernel.store.onEvent(finish); });
+          }
           const credential = options.credentialFor(model);
           if (!credential) throw new Error('Bound model credential unavailable');
           const context = raw as Context;
@@ -461,7 +485,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           let unknown = false;
           let refusal: RuntimeError | undefined;
           const gate = kernelProviderGate(options.kernel, graphId, nodeId, undefined, model,
-            { definition: session.binding.definitionVersion, review: session.role === 'reviewer' }, purpose);
+            { definition: session.binding.definitionVersion, review: session.role === 'reviewer' }, purpose, admittedExecution.id);
           const observed: SendGate = {
             dispatch: (id, reservation, send) => {
               try { return gate.dispatch(id, reservation, send); }
@@ -474,7 +498,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
               for (const name of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) usage[name] += cost[name];
             } else unknown = true; },
           };
-          const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          const execution = admittedExecution;
           if (!execution) throw new Error('No active execution');
           const abort = new AbortController();
           const cancel = () => abort.abort();
@@ -509,30 +533,20 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
           try {
           const stream = await controlledOpenAIStream(observed, () => { const binding = options.credentialFor(model); if (!binding) throw new Error('Bound model credential unavailable'); return binding.apiKey; }, slot, model.api, {
             estimateMissing: options.kernel.execution(execution.id)?.tokenBudget?.unlimited === true,
-            onTransport: observation => options.kernel.store.event(graphId, 'provider.transport', {
-              ...observation, executionId: execution.id, nodeId, model: model.id,
-            }),
             onRequest: (callId, profile) => options.kernel.store.event(graphId, 'provider.request_profile', {
               callId, executionId: execution.id, nodeId, model: model.id, rates: model.cost ?? null, pricing: model.pricing ?? null, ...profile,
             }),
             onSend: prompt => options.kernel.db.prepare('INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)')
-              .run(graphId, nodeId, (options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined)?.id ?? null,
+              .run(graphId, nodeId, admittedExecution.id,
                 prompt.systemPrompt ?? '', prompt.toolDeclarations ?? '[]', Date.now()),
-          })(toPiModel(model), normalizeContext(context), { ...workerModelOptions(streamOptions), signal: abort.signal });
-          const frames = await encodeAssistantStream(stream);
-          const settlement = await stream.result();
-          // Provider SDKs wrap gate refusals as connection errors. Preserve the
-          // host's control reason so pause cannot consume automatic retries.
-          if (refusal && settlement.stopReason === 'error') settlement.errorMessage = refusal.message;
-          return { frames, settlement, ...(!unknown ? { usage: { ...usage, total: tokenUsageTotal(usage), accounted: true } } : {}) };
+          })(toPiModel(model), normalizeContext(context), { signal: abort.signal });
+          return await consume(stream, { usage, get unknown() { return unknown; }, get refusal() { return refusal; } });
           } finally { unsubscribe(); hostSignal.removeEventListener('abort', cancel); }
-        },
-        onReady: inspect => recordNodeSession(options.kernel.store, (config as { binding: { instanceId: string } }).binding.instanceId, inspect.sessionId, inspect.sessionFile ?? null),
-        // The node's `submit` runs in the host, over the real execution (HB-262): the lane
-        // wires that through `onToolCall` when it builds the runner.
-        onEvent: event => {
+
+      };
+      const onEvent = (event: unknown) => {
           const data = event as { type: string; message?: { role: string; content: unknown }; toolName?: string; toolCallId?: string; args?: unknown; result?: unknown; isError?: boolean; systemPrompt?: string; tools?: unknown };
-          const execution = options.kernel.db.prepare("SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1").get(graphId, nodeId) as { id: string } | undefined;
+          const execution = admittedExecution;
           if (data.type === 'compaction_start') {
             purpose = 'compaction';
             options.kernel.store.event(graphId, 'session.compaction_started', { nodeId, operationId: execution?.id ?? null });
@@ -562,42 +576,72 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
               text: reason ? `工具执行失败：${reason.slice(0, 400)}` : JSON.stringify(call ? { name: data.toolName, args: data.args } : data.result),
               data: { toolName: data.toolName ?? '', toolCallId: data.toolCallId ?? '', isError: data.isError ?? false, ...(reason ? { message: reason } : {}) } });
           }
-        },
-        onToolCall: async (name, args) => {
-          if (name === 'native_tool_start' || name === 'native_tool_settle') {
-            const call = args as { id?: string; name?: string };
-            if (!call || typeof call.id !== 'string' || !call.id || !session.operation?.nativeTools.includes(call.name ?? '')) return { ok: false, text: 'Unknown native tool admission' };
-            try {
-              if (name === 'native_tool_start') {
-                if (nativeCalls.has(call.id)) throw new Error('Native tool already admitted');
-                const id = randomUUID();
-                nativeGate.dispatch(id, 0, () => undefined);
-                nativeCalls.set(call.id, id);
-              } else {
-                const id = nativeCalls.get(call.id);
-                if (!id) throw new Error('Native tool has no admission');
-                nativeGate.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-                nativeCalls.delete(call.id);
-              }
-              return { ok: true, text: 'ok' };
-            } catch (error) { return { ok: false, text: error instanceof Error ? error.message : String(error) }; }
-          }
-          const tool = sessions.get(key)?.operation?.tools.find(tool => tool.name === name);
-          if (!tool) return options.onToolCall?.(graphId, nodeId, name, args) ?? { ok: false, text: `the host does not offer a tool named ${name}` };
-          try {
-            const id = randomUUID();
-            const result = await nativeGate.dispatch(id, 0, async () => {
-              try { return await tool.execute(id, args as never, new AbortController().signal, undefined, undefined as never); }
-              finally { nativeGate.settle(id, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }); }
-            });
-            return { ok: !('isError' in result && result.isError), text: JSON.stringify(result) };
-          } catch (error) { return { ok: false, text: error instanceof Error ? error.message : String(error) }; }
-        },
-      });
-      hosts.set(key, host);
-      hostConfigs.set(key, signature);
-      return host;
+        };
+        const frozen = config as Pick<AgentSessionRequest, 'compaction'> & { allowedToolNames: string[] } & { tools: { name: string; label: string; description: string }[] };
+        const operation = session.operation;
+        const submit = frozen.tools.find(tool => tool.name === 'submit')!;
+        const execution = admittedExecution;
+        if (!execution) throw new RuntimeError('invalid_execution', 'Durable node has no admitted execution');
+        const host = durableNodeHost({ transport: options.sessionTransport, kernel: options.kernel, graphId, nodeId,
+          request: { onToolCall: call => { try { options.kernel.store.recordToolCall({ instanceId: session.binding.instanceId, ...call }); } catch { /* statistics are best effort */ } }, executionId: execution.id, binding: session.binding, workspace, stateDir: session.stateDir,
+            model: toPiModel(model), thinkingLevel: 'off', ...(frozen.compaction ? { compaction: frozen.compaction } : {}), systemPrompt: session.systemPrompt,
+            bundleDigest: session.bundleDigest, toolPolicyDigest: session.toolPolicyDigest, runtimePolicyDigest: session.runtimePolicyDigest,
+            tools: [...operation.tools, externallyGated({ ...submit, parameters: Type.Object({ outputs: Type.Record(Type.String(), Type.Object({ enable: Type.Boolean(), value: Type.Optional(Type.Unknown()) })) }), execute: async (_id, args) => {
+              const task = options.kernel.store.task(graphId);
+              if (closing || task.paused || options.kernel.nodeState(graphId, nodeId).paused || ['stopping', 'stopped', 'completed'].includes(task.phase)) throw new RuntimeError('paused', 'Node submission is paused');
+              const result = await options.onToolCall?.(graphId, nodeId, 'submit', args) ?? { ok: false, text: 'Graph submission channel unavailable' };
+              return { content: [{ type: 'text', text: result.text }], details: {}, isError: !result.ok };
+            } })],
+            nodeExecutionConfiguration: { model, role: session.role, revision: session.environment!.revision, base: session.environment!.base, access: session.environment!.access },
+            capabilityDescriptor: operation.descriptor,
+            credentialReference: { modelId: model.id, provider: model.provider, ...(model.credentialId ? { credentialId: model.credentialId } : {}) },
+            nativeTools: [...operation.nativeTools], skillPaths: [...new Set([...operation.skillPaths, ...nativeSkillDirs({ cwds: [workspace, options.workspaceFor(graphId)] })])],
+            ...(operation.skillFolder ? { skillFolder: operation.skillFolder } : {}),
+            readRoots: [...operation.readRoots], writeRoots: [...operation.writeRoots],
+            filesystemAccess: session.environment!.access.filesystem.read === 'host' ? 'host' : 'bounded',
+            protectedPaths: session.environment!.access.protectedPaths,
+            allowGitMetadataWritesAll: session.environment!.access.filesystem.gitMetadata === 'writable',
+            env: { ...operation.env }, networkDomains: [...operation.networkDomains],
+            allowUnrestrictedNetwork: operation.allowUnrestrictedNetwork, allowLocalBinding: operation.allowLocalBinding,
+            unixSockets: [...operation.unixSockets], allowAllUnixSockets: session.environment!.access.piExtensions.unixSockets === 'all',
+            allowAppleEvents: session.environment!.access.piExtensions.appleEvents,
+            piExtensionPaths: [...operation.piExtensionPaths], piExtensionTools: [...operation.piExtensionTools],
+            mcpAdapterServers: [...operation.mcpAdapterServers], allowedToolNames: frozen.allowedToolNames,
+            readOnly: session.role === 'reviewer', broker: nativeGate,
+            stream: (_model, context, streamOptions) => {
+              const output = new AssistantMessageEventStream();
+              void runModelCall(context, streamOptions?.signal ?? new AbortController().signal, async (source, evidence) => {
+                for await (const event of source) {
+                  if (event.type === 'error' && evidence.refusal) event.error.errorMessage = evidence.refusal.message;
+                  output.push(event);
+                }
+              }).catch(error => output.push({ type: 'error', reason: 'error', error: {
+                role: 'assistant', api: model.api, provider: model.provider, model: model.id, content: [], timestamp: Date.now(),
+                stopReason: 'error', errorMessage: error instanceof Error ? error.message : String(error),
+                usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+              } }));
+              return output;
+            },
+            onEvent,
+          },
+        });
+        hosts.set(key, host); hostConfigs.set(key, signature);
+        return host;
+
     },
 
+  };
+  options.sessionTransport?.registerRecoveryFactory?.(async snapshot => {
+    const execution = options.kernel.execution(snapshot.executionId);
+    if (!execution) return undefined;
+    if (!snapshot.configuration.nodeExecutionConfiguration) throw new Error('Frozen node execution configuration is missing');
+    const key = `${execution.taskId}/${execution.nodeId}`;
+    restoring.set(key, snapshot);
+    try {
+      const config = await laneOptions.config(execution.taskId, execution.nodeId, execution.revisionVersion);
+      const host = await laneOptions.host(execution.taskId, execution.nodeId, config, execution.revisionVersion) as RunnerHost & { recoveryRequest(): AgentSessionRequest };
+      return host.recoveryRequest();
+    } finally { restoring.delete(key); }
   });
+  return new GraphLane(laneOptions);
 }

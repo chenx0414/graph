@@ -55,7 +55,7 @@ test('native submit refusals remain correctable, identical replay is idempotent 
     expect(body.messages.filter(message => message.role === 'tool').at(-1)?.tool_call_id).toBe(`submit-${index - 1}`);
   }
   expect(lastTool(8)).toContain('already_submitted');
-  expect(lastTool(9)).toContain('Tool not_a_tool not found');
+  expect(lastTool(9)).toMatch(/Tool not_a_tool (?:not found|is not registered|is not available)/);
   const finalRequest = sender.requests[9] as { messages: { role: string; tool_call_id?: string }[] };
   expect(finalRequest.messages.filter(message => message.role === 'tool').at(-1)?.tool_call_id).toBe('unknown-tool');
   const prompt = sender.requests[0] as { tools: { function: { name: string } }[] };

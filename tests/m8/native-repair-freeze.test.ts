@@ -2,13 +2,14 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
+import { createDurableSessionTransport } from '../../src/runtime/durable-session.ts';
 import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { fullAccessPolicy, standardAccessPolicy } from '../../src/core/access-policy.ts';
 import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 /** Frozen task/recipe survive a real missing-output repair; the next execution adopts the patch. */
-test('a native Pi node freezes its task and recipe across resubmission, then adopts the next revision', async () => {
+test('a durable node freezes its task and recipe across resubmission, then adopts the next revision', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-native-repair-freeze-'));
   for (const directory of ['original', 'next']) await mkdir(join(root, directory));
   await writeFile(join(root, 'original', 'identity.txt'), 'ORIGINAL_DIRECTORY');
@@ -30,7 +31,7 @@ test('a native Pi node freezes its task and recipe across resubmission, then ado
     reads('next'),
     submit('next', 'new configuration'), { text: 'Next execution finished.' },
   ]);
-  const runtime = await openTaskRuntime({ stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
+  const runtime = await openTaskRuntime({ sessionTransport: createDurableSessionTransport, stateDir: join(root, 'state'), projects: [{ id: 'p', root }],
     access: () => hostAccess,
     limits: { defaultBudgetTokens: 20_000_000 },
     models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'medium', api: 'openai-completions',
@@ -89,6 +90,8 @@ test('a native Pi node freezes its task and recipe across resubmission, then ado
     expect(runtime.nodePrompt(graphId, 'work')).toMatchObject({ configurations: { current: { revision: 2 }, next: { revision: 2 }, pending: false },
       briefing: { text: expect.stringContaining('FULL_INSTRUCTION_END') } });
     const after = runtime.nodeRun(graphId, 'work');
+    expect(after.session?.sessionId).toBe(before.session?.sessionId);
+    expect(after.session?.sessionFile).toMatch(/^durable:/);
     expect(after.instance).toMatchObject({ id: before.instance!.id, used: 350, definitionVersion: 'worker@2' });
     expect(JSON.stringify(messages(5))).toContain('NEXT_DIRECTORY');
     expect(JSON.stringify(messages(5))).toContain('OUTSIDE_CURRENT_DIRECTORY');

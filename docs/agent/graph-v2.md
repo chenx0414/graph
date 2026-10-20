@@ -125,11 +125,11 @@ JSON 定义可含 `templates: {build: {version: 7, definition: {...}}}` 与 `ins
 
 ## Provider 用量与恢复
 
-生产 resident worker 经 IPC 请求宿主执行模型调用，配置文件不含 provider 凭据。每次实际发送分别受预算与共享凭据名额约束；等待凭据释放全局执行名额，获得凭据后重新取得执行名额。
+生产 Go 宿主通过私有 Unix socket 与同一数据库的共享 durable SDK 进程通信；main 与节点共用 Harness，模型请求和工具准入由 Go 执行，SDK 配置只保留凭据引用。每次实际发送分别受预算与共享凭据名额约束；等待凭据释放全局执行名额，获得凭据后重新取得执行名额。
 
 `graph_inspect({graphId,query:"provider_calls",id?})` 返回实际模型发送记录，id 可限定节点。每条记录包含调用 ID、执行 ID、固定的连接/上游模型身份、状态、预留及已知用量。未知用量保持 null，不按零结算；使用返回的调用 ID 做 reconcile_usage。节点详情的调用历史与 modelsUsed 来自这些记录，旧记录缺少身份时保持未知。
 
-运行时重启会保留输入、提交和尝试计数；无法证明用量或副作用的执行暂停等待处理。`graph_control({graphId,action:"reconcile_usage",callId,usage:{input,output,cacheRead,cacheWrite}})` 显式结算未知 provider 调用；相同结算可重放，不同结算被拒绝。结算不自动恢复节点，之后由 main 明确 resume。已成功提交的输入不能通过 retry 重发。
+运行时重启会保留输入、提交和尝试计数；无法证明用量或副作用的执行暂停等待处理。`graph_control({graphId,action:"reconcile_usage",callId,usage:{input,output,cacheRead,cacheWrite}})` 显式结算未知 provider 调用；相同结算可重放，不同结算被拒绝。结算不自动恢复节点，之后由 main 明确 resume。已成功提交的输入不能通过 retry 重发。SDK 已完成但 Graph 确认丢失时，显式恢复沿用原 execution、attempt 与 submission 完成验收，不重发模型或输出；未发送输入恢复冻结的原配置，未知外部效果继续停驻核对。
 
 ## 宿主命令模块
 
@@ -255,7 +255,7 @@ stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍�
 
 释放资源不会证明副作用或检查结果：操作仍为 `uncertain`、模块暂停，不自动重跑，不产生业务输出。main 核查后明确取消已有操作，再通过新的合法输入启动后续工作。受限执行器尚未接通同等凭证，不能将上述清理保证解释为所有运行方式均已完成。
 
-常驻 Pi 的宿主控制流结束时，会结束未完成的宿主请求、中断当前 turn，并关闭会话与进程；断连后不继续请求模型。已提交输出仍保持不可撤回，崩溃执行和未知用量仍按持久账本由 main 处理，不将进程退出当作任务成功。
+durable 宿主关闭时结束当前工具与模型的控制流，持久会话和输入收据留在共享 SQLite；重启先装回冻结配置，再由 durable 处理 checkpoint。副作用未知时交 main 核查，不自动重跑原输入。已提交输出仍保持不可撤回，崩溃执行和未知用量仍按持久账本由 main 处理，不将进程退出当作任务成功。
 
 不限 token 额度的原生执行在成功模型响应缺少 usage 时使用已有本地估算，provider_calls 中保留 usageSource:"estimated"；费用仍取决于已配置价格。是否允许估算取自本次执行冻结的额度，不采用执行途中改写的配置。有限额度不以估算替代可核算用量，保留 unknown 记录和输入并等待 main 核对；不限额度仍无法估算时保持 usage:null / usageSource:"unknown" 和未知费用，允许后续请求及 workspace_commit；未知调用的占位继续保留，不补造零用量。若下次执行改为有限额度，旧的未知 provider 用量必须先显式核对；执行前暂停队列，不消耗自动重试次数。
 
@@ -263,7 +263,7 @@ stop 后节点和模块不能产生新投递；已经成功的 submit 重放仍�
 确认任务共享项目集成的活动名额。当前任务真正 completed 或 stopped 后才释放名额，最早排队的确认任务随后进入 running；completing / stopping 期间仍保留名额。直接管理创建的 graph 不占用或释放其他确认任务的名额。用户 abandon 对原生 graph 表示停止请求，沿 stopping → stopped 取消待运行输入并等待活动工作停稳；重复 requestId 重放同一 receipt。
 
 
-SDK 的原生草稿类型是 `NativeProposal`（src/core/types.ts），必须包含 `definition`，只声明 requirementVersion、summary、acceptance、decisions；不需要旧 nodes / containers / loops。`supervisor.propose` 与 `validateProposal` 接受原生对象，main 的 Pi 工具通道也使用这一类型。旧 Proposal 及旧 SDK 调用仍在退役，尚不能据此宣称旧内核已删除。
+SDK 的原生草稿类型是 `NativeProposal`（backend/internal/graph/core_types.go），必须包含 `definition`，只声明 requirementVersion、summary、acceptance、decisions；不需要旧 nodes / containers / loops。`supervisor.propose` 与 `validateProposal` 接受原生对象，main 的 Pi 工具通道也使用这一类型。旧 Proposal 及旧 SDK 调用仍在退役，尚不能据此宣称旧内核已删除。
 
 
 原生节点聊天（runtime.sendNodeMessage）与内部 peer 聊天（runtime.sendPeerMessage、send_to_peer）均一次消息对应一次队列项；忙碌时排队，空闲时由宿主启动回复，保留原会话，不隐含重跑后继节点。requestId 按目标节点与发送者区分，同内容重放原 receipt，改变内容报 idempotency_conflict；已接受消息在 graph 停止后仍可重放 receipt，新消息关闭。peer 来源记入目标节点聊天记录，可视化消息弧读取该持久记录；用户消息不画成 peer 弧。跨 graph、无效发送者/目标和 self 消息拒绝。
@@ -289,7 +289,7 @@ main 使用 artifact_retire({artifactId,version,reason,requestId}) 撤回已被�
 
 确认草稿必须声明非空 definition.acceptance，并在外层 acceptance 摘要中完整列出同一组 ID 和描述；check 的 checkNode 对应 module，review 的 checkNode 对应 node。数量、ID、描述或检查对象不一致时，validate_proposal 和 propose_graph 都会在创建草稿前拒绝，不把无法执行或与用户展示矛盾的验收留到完成时才发现。human 仍使用用户验收流程，不从路由 passed 推断人工批准。
 
-脚本化 ActionAdapter 用于无模型的确定性宿主测试，其 operation.input 来自当前已 claim 的投递 value（聊天 / 控制输入保留对应 payload），context.briefing 是该次实际组装的 prompt；不再读取旧 proposal.nodes 的 input/context。正式节点仍通过各自常驻 Pi 执行。原生节点详情的 elapsedMs / timing.totalMs 记录实际执行墙钟时间并可在重启后查看；未记录的 runMs / waitingMs 分项保持 null。
+脚本化 ActionAdapter 用于无模型的确定性宿主测试，其 operation.input 来自当前已 claim 的投递 value（聊天 / 控制输入保留对应 payload），context.briefing 是该次实际组装的 prompt；不再读取旧 proposal.nodes 的 input/context。正式节点通过共享 durable Harness 的独立持久会话执行。原生节点详情的 elapsedMs / timing.totalMs 记录实际执行墙钟时间并可在重启后查看；未记录的 runMs / waitingMs 分项保持 null。
 
 
 原生节点详情的 timing.pauseMs 来自持久暂停账本：用户 task.pause/resume 和 main 的 graph_control pause/resume 都记录实际边界。整个 graph 与单节点暂停重叠时只累计一次，恢复其中一层不会结束另一层暂停；重复操作不重复累计。记录跨后台重启保留，新增节点继承已记录的 graph 暂停。创建 worktree 的内部准备锁、执行失败后的队列保持不会被补造为用户暂停。graph 停止、完成或节点退役会关闭尚未结束的暂停区间；从未记录暂停时仍返回 null。人工等待 userWaitMs 尚无原生实际边界记录，保持 null。

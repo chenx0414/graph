@@ -1,0 +1,284 @@
+package graph
+
+import (
+	"encoding/json"
+)
+
+// InvocationPurpose is what one provider send is for. Pi compaction and branch summaries are real
+// billed requests and must be attributable separately from normal turns.
+type InvocationPurpose string
+
+const (
+	InvocationCompletion       InvocationPurpose = "completion"
+	InvocationCompaction       InvocationPurpose = "compaction"
+	InvocationBranchSummary    InvocationPurpose = "branch_summary"
+	InvocationPromptSuggestion InvocationPurpose = "prompt_suggestion"
+	InvocationSkillSediment    InvocationPurpose = "skill_sediment"
+)
+
+// INVOCATION_PURPOSES is every purpose a provider send may declare.
+var INVOCATION_PURPOSES = []InvocationPurpose{
+	InvocationCompletion,
+	InvocationCompaction,
+	InvocationBranchSummary,
+	InvocationPromptSuggestion,
+	InvocationSkillSediment,
+}
+
+// TaskGateOperation is the operation one gate belongs to.
+type TaskGateOperation struct {
+	Id         string
+	TaskId     string
+	InstanceId string
+	// NodeId is absent when the caller does not know it yet; the gate then reads the
+	// operation row.
+	NodeId *string
+}
+
+// TaskGateOptions are the two relaxations one gate may carry.
+type TaskGateOptions struct {
+	// Optional lets a send settle unknown usage without asking the user.
+	Optional bool
+	// Unrestricted skips the pause, budget and unknown-usage checks.
+	Unrestricted bool
+}
+
+// TaskSendGate is the task-store invocation gate: pause, unknown usage, and budget are checked
+// before every provider send.
+type TaskSendGate struct {
+	SendGate
+	store       *TaskStore
+	operation   TaskGateOperation
+	model       ModelEntry
+	options     TaskGateOptions
+	nodeId      *string
+	unknown     bool
+	purpose     InvocationPurpose
+	total       TokenUsage
+	totalSource *UsageSource
+}
+
+// TaskGate opens the task-store invocation gate for one operation.
+func TaskGate(store *TaskStore, operation TaskGateOperation, model ModelEntry, options TaskGateOptions) *TaskSendGate {
+	gate := &TaskSendGate{store: store, operation: operation, model: model, options: options, purpose: InvocationCompletion}
+	if operation.NodeId != nil {
+		gate.nodeId = operation.NodeId
+	} else {
+		row := kernelRow(store.DB, "SELECT node_id FROM operations WHERE id=?", operation.Id)
+		if row != nil {
+			if value, ok := row["node_id"]; ok && value != nil {
+				nodeId := kernelString(value)
+				gate.nodeId = &nodeId
+			}
+		}
+	}
+	gate.SendGate = SendGate{
+		Dispatch: func(id string, reservation float64, send func() any) any {
+			return gate.dispatch(id, reservation, send)
+		},
+		Settle: func(id string, usage *TokenUsage) {
+			gate.settle(id, usage)
+		},
+	}
+	return gate
+}
+
+// hasNode reports whether the gate knows the node the operation runs on.
+func (gate *TaskSendGate) hasNode() bool {
+	return gate.nodeId != nil && *gate.nodeId != ""
+}
+
+// Check refuses a send the task is not allowed to make.
+func (gate *TaskSendGate) Check(reservation float64) {
+	if !jsSafeInteger(reservation) || reservation < 0 {
+		Raise("invalid_input", "A token reservation is required")
+	}
+	if gate.options.Unrestricted {
+		return
+	}
+	if gate.store.Task(gate.operation.TaskId).Paused != 0 {
+		Raise("paused", "Instance paused")
+	}
+	if gate.hasNode() &&
+		!UnknownUsageIsNonBlocking(gate.store, gate.operation.InstanceId) &&
+		kernelRow(gate.store.DB, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open' AND owner='user'", gate.operation.TaskId, *gate.nodeId) != nil {
+		Raise("unknown_usage", "Instance paused for unknown usage")
+	}
+	AssertWithinBudget(gate.store, gate.operation.InstanceId, int64(reservation))
+}
+
+// dispatch records the invocation and then lets the send happen.
+func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() any) any {
+	if id == "" {
+		Raise("invalid_input", "An invocation id is required")
+	}
+	gate.Check(reservation)
+	modelName := gate.model.ModelId
+	if modelName == "" {
+		modelName = gate.model.Id
+	}
+	gate.store.Transaction(func() {
+		if kernelRow(gate.store.DB, "SELECT id FROM invocations WHERE id=?", id) != nil {
+			Raise("invalid_input", "Invocation already dispatched")
+		}
+		// Freeze the underlying upstream identity, not just the mutable
+		// connection id: review independence reads this history later.
+		if _, err := gate.store.DB.Exec("INSERT INTO invocations(id,operation_id,instance_id,model,purpose) VALUES(?,?,?,?,?)",
+			id, gate.operation.Id, gate.operation.InstanceId, modelName, string(gate.purpose)); err != nil {
+			panic(err)
+		}
+	})
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			gate.settle(id, nil)
+			panic(recovered)
+		}
+	}()
+	return send()
+}
+
+// settle records the usage evidence of one invocation.
+func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
+	gate.store.Transaction(func() {
+		row := kernelRow(gate.store.DB, "SELECT usage FROM invocations WHERE id=?", id)
+		if row == nil {
+			Raise("not_found", "Unknown invocation")
+		}
+		var normalized *TokenUsage
+		if usage != nil {
+			value := NormalizeTokenUsage(*usage)
+			normalized = &value
+		}
+		source := UsageSourceOf(normalized)
+		if recorded, ok := row["usage"]; ok && recorded != nil {
+			existing, _ := recorded.(string)
+			if existing != CanonicalJSON(normalized) {
+				Raise("result_conflict", "Conflicting usage evidence")
+			}
+			return
+		}
+		accountable := normalized != nil &&
+			source != UsageUnknown &&
+			(source != UsageEstimated || gate.options.Unrestricted || UnknownUsageIsNonBlocking(gate.store, gate.operation.InstanceId))
+		var cost any
+		if accountable {
+			cost = EstimateCost(*normalized, gate.model.Cost, gate.model.Pricing)
+		} else {
+			cost = map[string]any{"unknown": true}
+		}
+		var recorded any
+		if normalized != nil {
+			recorded = CanonicalJSON(normalized)
+		}
+		if _, err := gate.store.DB.Exec("UPDATE invocations SET usage=?,cost=? WHERE id=?", recorded, CanonicalJSON(cost), id); err != nil {
+			panic(err)
+		}
+		if !accountable {
+			gate.unknown = true
+			if !gate.options.Optional &&
+				!gate.options.Unrestricted &&
+				gate.hasNode() &&
+				!UnknownUsageIsNonBlocking(gate.store, gate.operation.InstanceId) &&
+				kernelRow(gate.store.DB, "SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'", gate.operation.Id) == nil {
+				reason := "Agent returned no accountable usage"
+				if source == UsageEstimated {
+					reason = "Agent returned only estimated usage for a finite budget"
+				}
+				operationID := gate.operation.Id
+				InsertQuestion(gate.store, QuestionInput{
+					TaskId:      gate.operation.TaskId,
+					NodeId:      *gate.nodeId,
+					OperationId: &operationID,
+					Kind:        "unknown_usage",
+					Data:        map[string]any{"reason": reason, "usageSource": string(source)},
+				})
+			}
+			return
+		}
+		if normalized == nil {
+			return
+		}
+		gate.total.Input += normalized.Input
+		gate.total.Output += normalized.Output
+		gate.total.CacheRead += normalized.CacheRead
+		gate.total.CacheWrite += normalized.CacheWrite
+		if gate.totalSource == nil {
+			value := source
+			gate.totalSource = &value
+			return
+		}
+		merged := MergeUsageSource(*gate.totalSource, source)
+		gate.totalSource = &merged
+	})
+}
+
+// SetPurpose declares what the next sends are for.
+func (gate *TaskSendGate) SetPurpose(purpose InvocationPurpose) {
+	known := false
+	for _, candidate := range INVOCATION_PURPOSES {
+		if candidate == purpose {
+			known = true
+			break
+		}
+	}
+	if !known {
+		Raise("invalid_input", "Unknown invocation purpose "+string(purpose))
+	}
+	gate.purpose = purpose
+}
+
+// Total is the usage this gate accounted for, or nil when usage went unaccounted.
+func (gate *TaskSendGate) Total() *TokenUsage {
+	if gate.unknown {
+		return nil
+	}
+	total := gate.total
+	source := string(UsageAuthoritative)
+	if gate.totalSource != nil {
+		source = string(*gate.totalSource)
+	}
+	total.UsageSource = &source
+	return &total
+}
+
+// InvocationRow is one recorded provider invocation.
+type InvocationRow struct {
+	Id          string      `json:"id"`
+	OperationId string      `json:"operationId"`
+	InstanceId  string      `json:"instanceId"`
+	Model       string      `json:"model"`
+	Usage       *TokenUsage `json:"usage"`
+	UsageSource UsageSource `json:"usageSource"`
+	Cost        any         `json:"cost"`
+}
+
+// InvocationRows are the invocations one task recorded, oldest first.
+func InvocationRows(store *TaskStore, taskId string) []InvocationRow {
+	rows := kernelRows(store.DB, "SELECT i.id,i.operation_id,i.instance_id,i.model,i.usage,i.cost FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=? ORDER BY i.rowid", taskId)
+	out := []InvocationRow{}
+	for _, row := range rows {
+		entry := InvocationRow{
+			Id:          kernelString(row["id"]),
+			OperationId: kernelString(row["operation_id"]),
+			InstanceId:  kernelString(row["instance_id"]),
+			Model:       kernelString(row["model"]),
+		}
+		if recorded, ok := row["usage"].(string); ok && recorded != "" {
+			var usage TokenUsage
+			if err := json.Unmarshal([]byte(recorded), &usage); err != nil {
+				panic(err)
+			}
+			entry.Usage = &usage
+		}
+		entry.UsageSource = UsageSourceOf(entry.Usage)
+		if recorded, ok := row["cost"].(string); ok && recorded != "" {
+			var cost any
+			if err := json.Unmarshal([]byte(recorded), &cost); err != nil {
+				panic(err)
+			}
+			entry.Cost = cost
+		}
+		out = append(out, entry)
+	}
+	return out
+}

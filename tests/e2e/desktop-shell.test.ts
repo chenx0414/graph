@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { _electron } from 'playwright';
 import { build } from 'vite';
+import { ensureBackendBinary } from '../helpers/backend-binary.ts';
 
 const electronExecutable: string = createRequire(import.meta.url)('electron');
 const cleanup: (() => Promise<void>)[] = [];
@@ -24,6 +25,8 @@ async function shell(vendorOrigin?: string) {
   await mkdir(join(root, '.graph'));
   for (const directory of ['src', 'presets', 'docs']) await cp(join(process.cwd(), directory), join(source, directory), { recursive: true });
   await cp(join(process.cwd(), 'package.json'), join(source, 'package.json'));
+  await mkdir(join(source, 'dist'));
+  await cp(ensureBackendBinary(), join(source, 'dist/graphd'));
   if (vendorOrigin) {
     // Substitute only the external vendor transport in the fixture-owned
     // subprocess. All Graph HTTP, lifecycle, persistence and model owners run.
