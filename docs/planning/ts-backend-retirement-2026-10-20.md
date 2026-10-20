@@ -143,6 +143,36 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `e2e/rework-runtime.test.ts` 项目被移出配置后历史保留、拒绝新任务 | `tests/e2e/go-removed-project.test.ts` | 1 |
 | `console/attachments-payload.test.ts` 附件上限：文本文件进模型、超限被拒不落库、不支持的类型被指名拒绝 | `tests/e2e/go-attachments.test.ts` | 3 |
 | `tests/m5/http.test.ts` APP 桥接 RSI 重启队列：无令牌拒绝、队列形状、畸形 ack 拒绝、未知 id 不清空 | `tests/e2e/go-rsi-bridge.test.ts` | 2 |
+| `tests/e2e/rsi-shape.test.ts` RSI 真实应用：10 种错误形状被指名拒绝、真实 Git 提交、检查通过、无提交时如实报告、重载请求落地 | `tests/e2e/go-rsi-apply.test.ts` | 3 |
+
+## 低层 206 个文件的孤儿契约审计（结论）
+
+对 45 个高密度低层文件做了一次语义审计（读代码逐条核对，不靠标题匹配——标题匹配会产生 334 条误报）。结论：
+
+| 分类 | 条数 | 处置 |
+| --- | --- | --- |
+| Go 已有实现，只缺 E2E 证明（`yes`） | 101 | 每条写一条 Go E2E；Go 侧实现点已在审计里指明（file:line） |
+| Go 只能弱表达或不能表达（`partial`/`no`） | 16 | 先做 Go 设计决策，再决定写 E2E 还是连同 TS 实现一起退役 |
+| 只有 Web 控制台面（`no`，无 Go 面） | 3 | 走浏览器 keeper 轨道，不是 Go E2E：`m8/shell-tabs-ui`、`m8/skill-slash-ui`、`m8/drawer-artifacts-ui` |
+| 已被现有 Go E2E 覆盖 | 19 | 无需再写 |
+| 已被 149 条 daemon 层契约清单覆盖 | 23 | 无需再写（移植前需与官方清单对账，避免重复） |
+
+审计的重要结论：
+
+- **Go 没有「有意丢掉」的产品行为**。101 条 `yes` 项在 Go 侧都能找到实现点；缺口全部是「没有 E2E 证明」。
+- **16 条 `partial`/`no` 需要设计决策**，其中值得先看的几条：
+  - 「peer message pending 账本」（Go 没有等价物）：影响 `m1/execution` 的两条用量对账规则。
+  - 「host check 等待真实 merge 才准入」（Go 有集成/复查机械，但没有等价准入规则）：影响 `m8/kernel-git-integration` 的两条。
+  - 「plain directory 变成 Git 仓库」这一步在 Go 侧不可见：`m3/workspace-command` 的一条。
+  - 「legacy `graph.verify` 适配器不能劫持原生隔离评审模块」：Go 根本没有 legacy 覆盖路径，该规则在 Go 侧是空真的——按「实现耦合」退休，不是 Go 的义务。
+- **UI 半边要另找 keeper**：3 条纯控制台规则不能变成 Go E2E，它们随 Web 控制台的 TS 一起退役。
+
+## Go 侧补齐的能力（退役过程中发现的真实缺口）
+
+退役不是「删文件」，有两条能力在 Go 侧根本不存在，补齐后才谈得上删：
+
+1. **RSI 的 Agent 工具面没接线**（Batch 10 修掉）。Go 的 `RsiService` 一直存在（状态、重启队列、ack 都有），但 `PiAdapterRsi` 从未被构造——`apply_rsi_change` / `inspect_rsi_status` 对模型根本不存在。补的接线：`core_task_runtime.go` 新增 `piRsiChannel()`，把服务绑成 `PiAdapterRsi`；`runtime_pi_adapter.go` 在 HostTools 里按「master + full access + 有可用 checkout」三个条件暴露这两个工具，并把操作/会话身份带给收据。
+2. **形状提示只在 PiG 内核上生效**。`RsiChangeShapeHint` 是 Go 侧的 `PrepareArguments` 钩子，只有 Go 原生的 PiG 内核会调用它；TypeScript sidecar（`--kernel node`）拿不到这个 Go 函数，模型只会看到 schema 报错。**等 PiG 内核接管主会话后**，形状提示才与 TS 行为一致；在此之前 schema 报错仍然逐字段指名（`changes.0.edits.1.oldText: must have required properties ...`），契约「模型知道自己错在哪」成立。
 
 ## 执行批次
 
@@ -157,9 +187,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 7（已完成）**：项目移出配置。`tests/e2e/go-removed-project.test.ts`——证明历史仍然可读、项目从控制台消失、新任务被明确拒绝而不是被静默接受。
 - **Batch 8（已完成）**：消息的附件上限。`tests/e2e/go-attachments.test.ts`——证明限额内的文本文件随消息进到模型手里，超限文件被指名拒绝且不留消息，不支持的类型被指名拒绝。
 - **Batch 9（已完成）**：APP 桥接的重启队列。`tests/e2e/go-rsi-bridge.test.ts`——证明无令牌被拒、队列形状可读、畸形 ack 被拒、未知 id 不会清空任何东西。
-- **Batch 10（下一步）**：RSI 的真实应用流程（`tests/e2e/rsi-shape.test.ts`）——模型发出 `apply_rsi_change`、真实 Git 提交、检查通过、生成待重载请求，ack 在 daemon 尚未真正重载前不得清空。
+- **Batch 10（已完成）**：RSI 的真实应用流程。`tests/e2e/go-rsi-apply.test.ts`——模型发出 10 种错误形状的 `apply_rsi_change`，每一种都被逐字段指名（不落一个字节、不建分支、不提交）；改对之后真的改写真实 checkout、跑真实检查、提交到 `rsi/*` 分支；无改动的复查如实报告「没有产生提交」；`activate=true` 真的落下重载请求。
+  - 这一批先补了 Go 的能力：`PiAdapterRsi` 之前是死代码，模型压根看不到这两个工具（见上文「Go 侧补齐的能力」）。
+  - 用例跑在 `--kernel pig` 上：Go 原生的 PiG 内核才会调用 `PrepareArguments` 形状提示钩子。
 - **Batch 11（下一步）**：图布局几何契约（`tests/m5/graph.test.ts`）——Go 的布局走 node+elkjs，风险最高，尽早证明。
-- **Batch 12 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
+- **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
 ## 门禁与纪律

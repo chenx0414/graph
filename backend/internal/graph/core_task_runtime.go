@@ -1482,7 +1482,40 @@ func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 			channels.BootstrapToolPrompt = &prompt
 		}
 	}
+	if rsi := runtime.piRsiChannel(); rsi != nil {
+		channels.Rsi = rsi
+	}
 	return channels
+}
+
+// piRsiChannel binds the self-improvement service to the Agent session.
+//
+// The service is always there - it is the daemon that knows which checkout it
+// runs from - but a change needs a checkout to change. `available` says so, and
+// the tools read it: the status is worth reporting even without a checkout,
+// because it names the reason, while an apply without one has nothing to do.
+func (runtime *TaskRuntime) piRsiChannel() *PiAdapterRsi {
+	service, ok := runtime.rsi.(*RsiService)
+	if !ok || service == nil {
+		return nil
+	}
+	return &PiAdapterRsi{
+		Available: service.Available,
+		Status:    func(compare bool) any { return service.Status(compare) },
+		Apply: func(input any, context PiAdapterRsiContext) map[string]any {
+			receipt := service.Apply(input, RsiApplyContext{
+				OperationId:    context.OperationId,
+				Store:          runtime.store,
+				TaskId:         context.TaskId,
+				ConversationId: context.ConversationId,
+			})
+			record, _ := jsonClone(receipt).(map[string]any)
+			if record == nil {
+				record = map[string]any{}
+			}
+			return record
+		},
+	}
 }
 
 // graphManagement binds the graph control surface to one owner task. The

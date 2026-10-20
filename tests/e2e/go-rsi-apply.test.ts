@@ -1,0 +1,283 @@
+import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, expect, test } from 'vitest';
+import { launchCli } from '../helpers/cli-daemon.ts';
+
+/**
+ * The self-improvement surface, proven against a real checkout.
+ *
+ * The Agent that maintains Graph may change Graph itself: it edits files in
+ * the source checkout, runs the project's own checks and commits the result to
+ * a dedicated branch. A model that gets the shape of the call wrong is told
+ * exactly what is wrong - in the model's own terms - and nothing is changed
+ * while it is wrong. A call that is right changes the real Git history of a
+ * real repository, and a call that asks for a reload leaves a real reload
+ * request behind.
+ *
+ * The proof is the real Go process, a real Git checkout and a real check
+ * command. Nothing here is a stand-in for the improvement service.
+ */
+
+const cleanup: (() => Promise<void> | void)[] = [];
+afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
+
+interface ToolCall { id: string; name: string; arguments: string }
+
+/** The provider that plays the master: one scripted answer per master turn. */
+async function masterProvider(steps: ToolCall[][]) {
+  const observed = new Map<string, string>();
+  const requests: unknown[] = [];
+  let stage = 0;
+  let description = '';
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+      tools?: { function: { name: string; description: string } }[];
+      messages: { role: string; content: unknown; tool_call_id?: string }[];
+    };
+    requests.push(body);
+    const main = body.tools?.some(tool => tool.function.name === 'apply_rsi_change')
+      && body.messages.some(message => message.role === 'user'
+        && JSON.stringify(message.content).includes('RSI workflow'));
+    let calls: ToolCall[] = [];
+    if (main) {
+      description = body.tools!.find(tool => tool.function.name === 'apply_rsi_change')!.function.description;
+      for (const message of body.messages) {
+        if (message.role === 'tool' && message.tool_call_id) {
+          observed.set(message.tool_call_id, typeof message.content === 'string'
+            ? message.content
+            : JSON.stringify(message.content));
+        }
+      }
+      calls = steps[stage] ?? [];
+      stage++;
+    }
+    const delta = calls.length
+      ? {
+        role: 'assistant',
+        tool_calls: calls.map((call, index) => ({
+          index, id: call.id, type: 'function',
+          function: { name: call.name, arguments: call.arguments },
+        })),
+      }
+      : { role: 'assistant', content: main ? 'RSI workflow completed' : 'No suggestion' };
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({
+      choices: [{ index: 0, delta: {}, finish_reason: calls.length ? 'tool_calls' : 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 30 },
+    })}\n\n`);
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    observed, requests, port,
+    description: () => description,
+    async close() {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    },
+  };
+}
+
+async function fixture(stepsFor: (initialCommit: string) => ToolCall[][]) {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-rsi-apply-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const checkout = join(root, 'checkout');
+  await mkdir(checkout, { recursive: true });
+  const git = (args: string[]) => execFileSync('git', ['-C', checkout, ...args], { encoding: 'utf8' }).trim();
+  // The project's own gate: it reads the file the change writes, so a green run
+  // proves the change, not just the process.
+  const gate = "const fs=require('node:fs');if(!fs.existsSync('replace.txt')||fs.readFileSync('replace.txt','utf8')!=='corrected\\n')process.exit(1)";
+  await writeFile(join(checkout, 'package.json'), JSON.stringify({
+    name: 'rsi-apply-fixture', scripts: { check: `node -e "${gate}"` },
+  }));
+  await writeFile(join(checkout, 'replace.txt'), 'original\n');
+  await writeFile(join(checkout, 'delete.txt'), 'remove me\n');
+  await writeFile(join(checkout, 'mirror.txt'), 'revision content\n');
+  git(['init', '-q', '-b', 'main']);
+  git(['config', 'user.name', 'Fixture']);
+  git(['config', 'user.email', 'fixture@local']);
+  git(['add', '.']);
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local', 'commit', '-qm', 'initial']);
+  const initialCommit = git(['rev-parse', 'HEAD']);
+  await mkdir(join(root, 'project'), { recursive: true });
+  await mkdir(join(root, 'web'), { recursive: true });
+  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const provider = await masterProvider(stepsFor(initialCommit));
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: join(root, 'project') }],
+    credentials: { local: { secretRef: 'GRAPH_RSI_KEY' } },
+    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: `http://127.0.0.1:${provider.port}/v1`,
+      contextWindow: 32000, maxTokens: 4096, credentialId: 'local' }] },
+  }));
+  const daemon = await launchCli(root, {
+    configPath,
+    env: { GRAPH_RSI_ROOT: checkout, GRAPH_RSI_KEY: 'rsi-synthetic' },
+    extraArgs: ['--execute', '--kernel', 'pig'],
+  });
+  cleanup.push(() => daemon.close());
+  const request = async (path: string, init: RequestInit = {}) => {
+    const response = await daemon.request(path, init);
+    return { status: response.status, body: await response.json().catch(() => ({})) as unknown };
+  };
+  return { root, checkout, git, initialCommit, provider, daemon, request };
+}
+
+const base = { title: 'Correct native RSI call', problem: 'Exercise the real apply', activate: false };
+const check = {
+  command: 'node',
+  args: ['-e', "if(require('node:fs').readFileSync('replace.txt','utf8')!=='corrected\\n')process.exit(1)"],
+};
+
+const malformed: { id: string; args: unknown }[] = [
+  { id: 'nested-check', args: { ...base, changes: [{ path: 'a.ts', action: 'write', content: 'x', checks: [check] }] } },
+  { id: 'nested-edit', args: { ...base, changes: [{ path: 'a.ts', action: 'replace', edits: [{ oldText: 'a', newText: 'b' }, { path: 'b.ts', action: 'write', content: 'y' }] }] } },
+  { id: 'change-in-checks', args: { ...base, changes: [], checks: [{ path: 'a.ts', action: 'write', content: 'x' }] } },
+  { id: 'missing-first', args: { ...base, changes: [{ action: 'replace', edits: [{ oldText: 'a', newText: 'b' }] }] } },
+  { id: 'missing-second', args: { ...base, changes: [{ path: 'a.ts', action: 'write', content: 'x' }, { action: 'write', content: 'y' }] } },
+  { id: 'array-change', args: { ...base, changes: [[{ path: 'a.ts', action: 'write', content: 'x' }]] } },
+  { id: 'copy-no-revision', args: { ...base, changes: [{ path: 'mirror.txt', action: 'copy' }] } },
+  { id: 'copy-path-revision', args: { ...base, changes: [{ path: 'mirror.txt', action: 'copy', from: 'main:src/a.ts' }] } },
+  { id: 'blank-path', args: { ...base, changes: [{ path: '', action: 'delete' }] } },
+  { id: 'scalar', args: 'not an object' },
+];
+
+function script(initialCommit: string): ToolCall[][] {
+  const call = (id: string, args: unknown): ToolCall =>
+    ({ id, name: 'apply_rsi_change', arguments: JSON.stringify(args) });
+  return [
+    [call('corrected', {
+      ...base,
+      changes: [
+        { path: 'replace.txt', action: 'replace', edits: [{ oldText: 'original', newText: 'corrected' }] },
+        { path: 'delete.txt', action: 'delete' },
+        { path: 'mirror.txt', action: 'copy', from: initialCommit },
+      ],
+      checks: [check],
+    })],
+    [call('check-only', { ...base, changes: [], checks: [check] })],
+  ];
+}
+
+/** The call that asks the host to run the new code. */
+function activationScript(): ToolCall[][] {
+  return [[{
+    id: 'activate',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      title: 'Ask for the reload', problem: 'The change has to run', activate: true,
+      changes: [
+        { path: 'replace.txt', action: 'replace', edits: [{ oldText: 'original', newText: 'corrected' }] },
+        { path: 'activated.txt', action: 'write', content: 'reloaded\n' },
+      ],
+      checks: [check],
+    }),
+  }]];
+}
+
+test('a wrong self-improvement call is explained and changes nothing', async () => {
+  const f = await fixture(() => [malformed.map(entry => ({
+    id: entry.id, name: 'apply_rsi_change', arguments: JSON.stringify(entry.args),
+  }))]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-malformed' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  await expect.poll(() => f.provider.observed.size, { timeout: 90_000, interval: 250 })
+    .toBeGreaterThanOrEqual(malformed.length);
+
+  // Every wrong shape is named back to the model, down to the field that is
+  // wrong: the call the model can correct is the one it gets.
+  const observed = f.provider.observed;
+  expect(observed.get('nested-check'), 'nested-check').toMatch(/changes\[0\] is one file change[\s\S]*"checks" belongs at the top level/);
+  expect(observed.get('nested-edit'), 'nested-edit').toMatch(/changes\.0\.edits\.1\.oldText: must have required properties/);
+  expect(observed.get('change-in-checks'), 'change-in-checks').toMatch(/checks\.0\.command: must have required properties/);
+  expect(observed.get('missing-first'), 'missing-first').toMatch(/changes\.0\.path: must have required properties path/);
+  expect(observed.get('missing-second'), 'missing-second').toMatch(/changes\.1\.path: must have required properties path/);
+  expect(observed.get('array-change'), 'array-change').toMatch(/changes\.0: must be object/);
+  expect(observed.get('copy-no-revision'), 'copy-no-revision').toMatch(/changes\[0\]\.from must name the revision/);
+  expect(observed.get('copy-path-revision'), 'copy-path-revision').toMatch(/changes\[0\]\.from must be a revision only/);
+  expect(observed.get('blank-path'), 'blank-path').toMatch(/changes\[0\]\.path is required/);
+  expect(observed.get('scalar'), 'scalar').toMatch(/must be object/);
+
+  // The tool description tells the model the shapes it may use.
+  expect(f.provider.description()).toContain('"copy"');
+
+  // Nothing was changed while the calls were wrong: no branch, no commit, no file.
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+  expect(f.git(['branch', '--list', 'rsi/*'])).toBe('');
+  await expect(readFile(join(f.checkout, 'a.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await readFile(join(f.checkout, 'replace.txt'), 'utf8')).toBe('original\n');
+}, 180_000);
+
+test('a right self-improvement call commits the real checkout', async () => {
+  const f = await fixture(script);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-apply' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+  const conversationId = (started.body as { conversationId: string }).conversationId;
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('corrected'), { timeout: 90_000, interval: 250 }).toBe(true);
+  expect(observed.get('corrected')).toContain('"status":"applied"');
+  expect(await readFile(join(f.checkout, 'replace.txt'), 'utf8')).toBe('corrected\n');
+  await expect(readFile(join(f.checkout, 'delete.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await readFile(join(f.checkout, 'mirror.txt'), 'utf8')).toBe('revision content\n');
+  expect(f.git(['log', '--format=%s', '-1'])).toBe('rsi: Correct native RSI call');
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('2');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+  // The change lives on its own branch, not on the line the daemon runs.
+  expect(f.git(['branch', '--list', 'rsi/*'])).not.toBe('');
+
+  // A call that changes nothing says so instead of claiming a commit.
+  await expect.poll(() => observed.has('check-only'), { timeout: 90_000, interval: 250 }).toBe(true);
+  expect(observed.get('check-only')).toContain('没有产生提交');
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('2');
+
+  // The receipt is a message of the conversation, not a side channel.
+  const view = await f.request(`/api/conversations/${conversationId}`);
+  const messages = (view.body as { messages?: { kind: string; data?: { status?: string; validation?: { status: string }[] } }[] }).messages ?? [];
+  expect(messages.some(message => message.kind === 'rsi' && message.data?.status === 'applied'
+    && message.data.validation?.every(item => item.status === 'passed'))).toBe(true);
+}, 240_000);
+
+test('a self-improvement call that asks for a reload leaves a real reload request behind', async () => {
+  const f = await fixture(() => activationScript());
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-activate' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  await expect.poll(() => f.provider.observed.has('activate'), { timeout: 90_000, interval: 250 }).toBe(true);
+  expect(f.provider.observed.get('activate')).toContain('"restartRequired":true');
+
+  // The reload request names the commit that has to run.
+  await expect.poll(async () => {
+    try {
+      const raw = await readFile(join(f.root, 'state', 'rsi', 'restart.json'), 'utf8');
+      return JSON.parse(raw) as { commit?: string; branch?: string };
+    } catch {
+      return undefined;
+    }
+  }, { timeout: 60_000, interval: 250 }).toMatchObject({ commit: expect.any(String), branch: expect.stringContaining('rsi/') });
+}, 240_000);

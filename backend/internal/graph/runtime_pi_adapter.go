@@ -1247,6 +1247,22 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				tools.GraphManagement = supervisor.GraphManagement
 				tools.Catalog = channels.Catalog
 			}
+			// The self-improvement tools change the Graph source checkout, so they
+			// belong to the master alone and only to a session that may act on the
+			// host. The status stays available without a checkout - it names the
+			// reason there is none - while an apply needs one to change.
+			if channels != nil && channels.Rsi != nil && role == "master" && input.FullAccess {
+				tools.Rsi = &AgentToolsRsi{Status: channels.Rsi.Status}
+				if channels.Rsi.Available {
+					tools.Rsi.Apply = channels.Rsi.Apply
+				}
+				rsiContext := PiAdapterRsiContext{TaskId: operation.TaskId, OperationId: &operation.Id}
+				if conversation != nil {
+					conversationId := conversation.Id
+					rsiContext.ConversationId = &conversationId
+				}
+				tools.RsiContext = rsiContext
+			}
 			return AgentTools(tools)
 		}
 		operationInput.NativeToolsProvider = func(granted []string) []ToolDefinition {
