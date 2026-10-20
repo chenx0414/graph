@@ -4,7 +4,7 @@
 
 后端只保留 Go 一门实现语言。退役顺序固定为：先用真实 E2E 把 Go 侧缺的契约补齐，再按活跃引用删除 TypeScript 后端实现。删除不得削弱门禁——每条被删测试承载的独立契约，要么已有 Go E2E 证明，要么先补一条。
 
-依据：[ADR 0032](../adr/0032-go-backend-shared-durable-host.md)（Go 拥有 HTTP/SSE、图状态、凭据、准入与用量）、[ADR 0033](../adr/0033-pig-go-kernel.md)（PiG 内核迁移）。
+依据：[ADR 0032](../adr/0032-go-backend-shared-durable-host.md)（Go 拥有 HTTP/SSE、图状态、凭据、准入与用量）、[ADR 0033](../adr/0033-pig-go-kernel.md)（PiG 内核迁移）、[ADR 0034](../adr/0034-retire-typescript-backend.md)（退役路径与边界）。
 
 工作分支：`feature/retire-ts-backend`（独立工作树 `/Users/macmini/workspace/13-Graph-ts-retire`）。
 
