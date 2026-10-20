@@ -145,6 +145,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m5/http.test.ts` APP 桥接 RSI 重启队列：无令牌拒绝、队列形状、畸形 ack 拒绝、未知 id 不清空 | `tests/e2e/go-rsi-bridge.test.ts` | 2 |
 | `tests/e2e/rsi-shape.test.ts` RSI 真实应用：10 种错误形状被指名拒绝、真实 Git 提交、检查通过、无提交时如实报告、重载请求落地 | `tests/e2e/go-rsi-apply.test.ts` | 3 |
 | `tests/m5/graph.test.ts` 图布局几何：盒子在网格上、盒子尺寸合法、走线正交且首尾落在节点边界、走线不穿过节点、同源同目标的边各走各的通道、重画后仍是可画的图 | `tests/e2e/go-graph-layout.test.ts` | 1 |
+| `tests/m5/graph.test.ts` 嵌套子图：容器与成员都被画出来、回边落在成员而不是容器上、加节点不动原有节点、删节点后原有节点仍不动 | `tests/e2e/go-graph-nested.test.ts` | 3 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -170,10 +171,14 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 ## Go 侧补齐的能力（退役过程中发现的真实缺口）
 
-退役不是「删文件」，有两条能力在 Go 侧根本不存在，补齐后才谈得上删：
+退役不是「删文件」，有三条能力在 Go 侧根本不存在或根本是坏的，补齐后才谈得上删：
 
 1. **RSI 的 Agent 工具面没接线**（Batch 10 修掉）。Go 的 `RsiService` 一直存在（状态、重启队列、ack 都有），但 `PiAdapterRsi` 从未被构造——`apply_rsi_change` / `inspect_rsi_status` 对模型根本不存在。补的接线：`core_task_runtime.go` 新增 `piRsiChannel()`，把服务绑成 `PiAdapterRsi`；`runtime_pi_adapter.go` 在 HostTools 里按「master + full access + 有可用 checkout」三个条件暴露这两个工具，并把操作/会话身份带给收据。
 2. **形状提示只在 PiG 内核上生效**。`RsiChangeShapeHint` 是 Go 侧的 `PrepareArguments` 钩子，只有 Go 原生的 PiG 内核会调用它；TypeScript sidecar（`--kernel node`）拿不到这个 Go 函数，模型只会看到 schema 报错。**等 PiG 内核接管主会话后**，形状提示才与 TS 行为一致；在此之前 schema 报错仍然逐字段指名（`changes.0.edits.1.oldText: must have required properties ...`），契约「模型知道自己错在哪」成立。
+3. **嵌套子图在 Go 侧是坏的**（Batch 12 修掉）。两处同一族的错误：Go 端口把展开后的成员以**带类型**的值（`NodeDefinition` / `map[string]GraphIo`）塞进 `map[string]any`，随后又用 `.(map[string]any)` 断言读回来——断言失败，于是
+   - 子图的输入/输出引用（`inner.job`）解析不到，报 `Unknown subgraph input inner.job`；
+   - 指向子图成员的验收项读不到 `recipe`，报 `Acceptance works must name an agent reviewer`。
+   修法：展开出来的成员一律存成普通记录（`interfaceSpecAsMap`），引用解析同时认普通记录与带类型的端口表。**结论：子图功能此前在 Go 侧从未真正跑通过**，审计里那条「Go 已有实现」只是读代码读出来的。
 
 ## 执行批次
 
@@ -194,6 +199,9 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 11（已完成）**：图布局几何契约。`tests/e2e/go-graph-layout.test.ts`——真实 `graphd` + 真实 elkjs（`node_modules/elkjs` 在场）画出一张带「同源同目标四条边 + 一条回边」的图，证明盒子都在 16px 网格上、盒子尺寸合法、每条走线正交且首尾正好落在源/目标节点的边界、任何走线都不穿过任何节点、两条不同的走线不互相压住（共享引出段与共享到达段除外）、同源同目标的四条边各走各的通道；并发读两次得到同一份布局，重画之后仍然是一张可画的图。
   - 几何判据（网格、尺寸、正交、不穿越、通道分离）逐条对照 `tests/m5/graph.test.ts` 的 TS 判据，包括它那两条豁免（共享引出段、共享到达段）。
   - 例子里的 9 张图（`examples/graphs/*.json` 与 review pattern）暂未整体移植：本批用一张自带的图覆盖同一批几何规则；`examples/` 的文件本身在删除清单里，移植时要一并搬进 `tests/fixtures/` 或退休。
+- **Batch 12（已完成）**：嵌套子图的布局契约。`tests/e2e/go-graph-nested.test.ts`——一个可复用图被实例化进大图后，容器、实例与成员都被画出来，回到起点的回边落在**成员**（`outer/inner/work`）而不是容器上；加一个节点不动原有节点的位置，删掉它之后原有节点仍然不动。
+  - 这一批逼出了 Go 侧的两个真 bug（见上文「Go 侧补齐的能力」第 3 条）：**嵌套子图此前在 Go 侧根本无法定义**。
+  - 用例跑在 `--kernel pig` 上：TypeScript sidecar 会把 Go 工具的错误吞成一句「Tool returned an invalid content result」，PiG 内核才会把真实原因交回给模型。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

@@ -723,13 +723,17 @@ func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 				if nodes[name] != nil || modules[name] != nil {
 					interfaceSpecInvalid("Duplicate expanded node " + name)
 				}
-				nodes[name] = node
+				// The expanded members are held the way the rest of the
+				// definition is held: as plain records, so every reader of the
+				// definition - the acceptance criteria, the edge endpoints, the
+				// node validation - reads a member the way it reads a node.
+				nodes[name] = interfaceSpecAsMap(node)
 			}
 			for name, module := range expanded.Modules {
 				if nodes[name] != nil || modules[name] != nil {
 					interfaceSpecInvalid("Duplicate expanded module " + name)
 				}
-				modules[name] = module
+				modules[name] = interfaceSpecAsMap(module)
 			}
 			edges := definition["edges"].(map[string]any)
 			for name, edge := range expanded.Edges {
@@ -737,7 +741,7 @@ func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 				if edges[key] != nil {
 					interfaceSpecInvalid("Duplicate expanded edge " + key)
 				}
-				edges[key] = edge
+				edges[key] = interfaceSpecAsMap(edge)
 			}
 			bindings := definition["subgraphInstances"].(map[string]any)
 			bindings[id] = map[string]any{"template": templateName, "version": record["version"], "inputs": expanded.Inputs, "outputs": expanded.Outputs}
@@ -789,11 +793,25 @@ func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 			}
 			ports, _ := instance[side].(map[string]any)
 			mapped, _ := ports[port].(map[string]any)
-			if mapped == nil {
-				interfaceSpecInvalid("Unknown subgraph " + kind + " " + reference)
+			if mapped != nil {
+				text, _ := mapped[field].(string)
+				return text
 			}
-			text, _ := mapped[field].(string)
-			return text
+			// The expanded binding keeps its ports typed, so read them the way
+			// they are held: an instance input names the node it feeds, an
+			// instance output names the node it comes from.
+			switch typed := instance[side].(type) {
+			case map[string]GraphIo:
+				if port, ok := typed[port]; ok {
+					return port.To
+				}
+			case map[string]GraphOutput:
+				if port, ok := typed[port]; ok {
+					return port.From
+				}
+			}
+			interfaceSpecInvalid("Unknown subgraph " + kind + " " + reference)
+			return reference
 		}
 		edges := definition["edges"].(map[string]any)
 		for name, value := range edges {
