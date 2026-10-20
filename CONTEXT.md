@@ -186,3 +186,14 @@ Agent 正在执行时占用的全局并发配额，覆盖 main 与其多个 grap
 **预算作用域**：
 持久累计额度所归属的身份，用于保证同一 Agent 复跑、重试、恢复和切换配置后延续已用量。
 _Avoid_：单次执行额度（新 execution 不重置累计消耗）
+
+**PiG 内核**：
+Graph 的 Agent 执行内核采用 PiG（Pi in Go），即上游 Pi 的 Go 移植；durable 会话、任务与文档运行时由 PiG 的 `durable` 包承载，MCP 与 codemode 走 PiG 内置通道，不再由扩展承载。
+_Avoid_：把 PiG 当作可重写的实现（上游行为是契约，Go 是实现语言）
+
+**durable 命名空间**：
+正式 Graph 数据库中承载内核记录的表前缀（`graph_durable_`）。同一命名空间由唯一宿主持有，PiG 内核与宿主读写同一批物理表。
+_Avoid_：为 PiG 内核另建一份数据库（会切断既有会话历史）
+
+**内核钉住版本**：
+`backend/go.mod` 中 PiG 模块的确定版本，以及随之确定的上游 Pi 版本；更新走 `pnpm pig:update`，不静默改变运行中桌面应用的内核版本。

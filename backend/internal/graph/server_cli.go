@@ -37,6 +37,15 @@ func runCLI(args []string) (code int) {
 		fmt.Fprintln(os.Stdout, cliUsage)
 		return 0
 	}
+	if opts.kernelDatabase != "" {
+		// The kernel inspection reports the durable namespace of a real Graph
+		// database through the PiG kernel. It starts no console and dispatches
+		// nothing.
+		if err := PrintPigKernelReport(opts.kernelDatabase); err != nil {
+			return cliFail(err)
+		}
+		return 0
+	}
 	return serveDaemon(opts, env)
 }
 
@@ -90,10 +99,13 @@ type cliOptions struct {
 	dynamic         bool
 	help            bool
 	applicationRoot string
+	// kernelDatabase asks the PiG kernel to report the durable namespace of a
+	// real Graph database instead of starting the console.
+	kernelDatabase string
 }
 
 func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
-	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag string
+	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag, kernelFlag string
 	configSet, stateSet, homeSet, webSet, portSet, rootSet := false, false, false, false, false, false
 	execute, dynamic, viewOnly, help := false, false, false, false
 	for index := 0; index < len(argv); index++ {
@@ -118,6 +130,8 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 			portFlag, portSet = value(), true
 		case "--application-root":
 			rootFlag, rootSet = value(), true
+		case "--pig-kernel-inspect":
+			kernelFlag = value()
 		case "--execute":
 			execute = true
 		case "--dynamic":
@@ -176,6 +190,10 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	if rootSet {
 		root = resolvePath(cwd, rootFlag)
 	}
+	kernelDatabase := ""
+	if kernelFlag != "" {
+		kernelDatabase = resolvePath(cwd, kernelFlag)
+	}
 	mode := "view"
 	if execute {
 		mode = "execute"
@@ -190,6 +208,7 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 		dynamic:         dynamic,
 		help:            help,
 		applicationRoot: root,
+		kernelDatabase:  kernelDatabase,
 	}
 }
 
