@@ -10,4 +10,3 @@ export function externallyGated<T extends ToolDefinition>(tool: T): T {
 export function isExternallyGated(tool: ToolDefinition) {
   return Boolean((tool as { [EXTERNALLY_GATED]?: boolean })[EXTERNALLY_GATED]);
 }
-
