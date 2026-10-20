@@ -26,16 +26,20 @@ PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新�
 
 ## 实施状态（2026-10-20）
 
-内核选择由 `graphd --kernel node|pig` 显式决定，默认仍是 `node`：TypeScript 侧车仍承载恢复语义与图节点泳道，这两项尚未有 Go 侧等价物。
+内核选择由 `graphd --kernel node|pig` 显式决定，默认仍是 `node`：TypeScript 侧车仍承载图节点泳道，这一项尚未有 Go 侧等价物。
 
 已落地并有 E2E 的部分：
 
 - **主 Agent 常驻会话跑在 PiG 内核**（`backend/internal/pigkernel/session.go`、`backend/internal/graph/runtime_pig_session.go`）。内核进程内常驻，按身份寻址 durable 会话，装配方与工具，连原生 MCP，订阅内核事件。
 - **模型通道仍归 daemon**（`backend/internal/pigkernel/provider.go`）。PiG 的 provider 运行时接受任意 stream 实现，因此 daemon 把自己那条受控流交给内核：内核向 daemon 要答案，daemon 决定是否放行、花哪把凭据、记哪笔用量。内核因此拿不到一条绕过准入或预算的 provider 通道。
 - **原生工具由 daemon 提供**（`backend/internal/graph/runtime_pig_native_tools.go`）。TypeScript SDK 原本提供 read/write/edit/ls/find/grep 与 shell；PiG 内核不自带环境，这套工具在 Go 侧补齐，名字与声明与 SDK 一致，路径规则复用 Graph 既有的越界保护。
-- **两个内核不得同时写一份 durable 命名空间**：选 `pig` 时 daemon 不启动 TypeScript 侧车，需要侧车的路径（崩溃恢复引导、图节点泳道）显式报错，而不是静默争用同一批表。
+- **崩溃恢复由内核承担**（`backend/internal/pigkernel/recovery.go`、`backend/internal/graph/runtime_pig_recovery.go`）。daemon 崩溃后能恢复三种事实：
+  - **内核已完成、Graph 未确认的回合**：内核的提交回执（`graph_durable_submissions` 中 `status='done'`）就是凭据，daemon 用它结算该操作，**不再问模型一次**。
+  - **已受理但从未发出的输入**：用**受理时的配置**重发，而不是用目录里此刻的配置。冻结记录 `graph.frozen-executions` 保存模型、指令、工具与策略，凭据不落盘（只记下可复原的 header 名）。
+  - **已经抵达模型的回合**：不重放。凭据已花、副作用可能已发生，该操作停在 `unknown`，交由用户核对。
+- **两个内核不得同时写一份 durable 命名空间**：选 `pig` 时 daemon 不启动 TypeScript 侧车，需要侧车的路径（图节点泳道）显式报错，而不是静默争用同一批表。
 
-未落地、因此默认内核尚未翻转的部分：恢复语义（冻结执行、受理未发送输入、SDK 完成但 Graph 未确认的结算）、图节点泳道、codemode 启用、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+未落地、因此默认内核尚未翻转的部分：图节点泳道、codemode 启用、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
 
 MCP 的产品级通道已证明可用：Graph 的能力目录里绑定一个真实 MCP 服务器，模型直接收到 `mcp__<server>__<tool>` 声明并直呼该工具，没有网关工具、没有扩展事件总线（E2E `tests/e2e/pig-mcp-session.test.ts`）。
 

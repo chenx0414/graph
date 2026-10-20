@@ -552,8 +552,7 @@ func durablePublicConfig(config any) map[string]any {
 	for _, model := range models {
 		headers := asMap(model["headers"])
 		for name := range headers {
-			key := strings.ToLower(name)
-			if key == "authorization" || key == "proxy-authorization" || key == "cookie" || key == "set-cookie" || key == "x-api-key" || key == "api-key" || strings.HasSuffix(key, "token") || strings.HasSuffix(key, "secret") || strings.HasSuffix(key, "password") {
+			if isCredentialHeader(name) {
 				names[name] = true
 				delete(headers, name)
 			}
@@ -567,6 +566,17 @@ func durablePublicConfig(config any) map[string]any {
 	reference["headerCredentials"] = headers
 
 	return values
+}
+
+// isCredentialHeader reports whether one header carries a credential.
+//
+// A credential never belongs in a durable record: the record outlives the
+// process that wrote it, and the daemon keeps the live binding.
+func isCredentialHeader(name string) bool {
+	key := strings.ToLower(name)
+	return key == "authorization" || key == "proxy-authorization" || key == "cookie" || key == "set-cookie" ||
+		key == "x-api-key" || key == "api-key" ||
+		strings.HasSuffix(key, "token") || strings.HasSuffix(key, "secret") || strings.HasSuffix(key, "password")
 }
 
 func restoreDurableModelHeaders(configuration map[string]any, model *ModelEntry, directory []ModelEntry) {

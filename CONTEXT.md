@@ -196,8 +196,16 @@ _Avoid_：把 PiG 当作可重写的实现（上游行为是契约，Go 是实�
 _Avoid_：为 PiG 内核另建一份数据库（会切断既有会话历史）
 
 **内核选择**：
-daemon 运行 Agent 会话所用的内核（`graphd --kernel node|pig`）。`node` 是 TypeScript 侧车，承载恢复语义与图节点泳道；`pig` 是 Go 进程内的 PiG 内核，承载主 Agent 会话。两者互斥：同一份 durable 命名空间只能有一个内核写入。
+daemon 运行 Agent 会话所用的内核（`graphd --kernel node|pig`）。`node` 是 TypeScript 侧车，承载图节点泳道；`pig` 是 Go 进程内的 PiG 内核，承载主 Agent 会话与崩溃恢复。两者互斥：同一份 durable 命名空间只能有一个内核写入。
 _Avoid_：在同一进程里同时拉起两个内核（会争用同一批表并互相破坏记录）
+
+**冻结执行**：
+一次 Graph 执行的持久快照（`graph.frozen-executions` 文档），记录该执行用的模型、指令、工具与策略，以及它受理输入时的 admission id。凭据不落盘：记录只保存可复原的 header 名，值仍由 daemon 的活绑定提供。崩溃恢复靠它认出"该用哪份配置重发"。
+_Avoid_：用目录里此刻的配置重发已受理的输入（那不是它被受理时的配置，模型会收到不同的窗口与上限）
+
+**恢复凭据**：
+内核已完成、Graph 尚未确认的那一回合的证明（durable 提交记录 `status='done'` 及其答复条目）。daemon 用它结算操作，不再问模型一次。
+_Avoid_：因为 Graph 没收到确认就重发该回合（模型被问两次，凭据被花两次）
 
 **模型通道**：
 daemon 交给内核的那条受控 provider 流。内核向 daemon 要答案，daemon 决定是否放行、花哪把凭据、记哪笔用量，因此内核拿不到绕过准入或预算的模型请求通道。

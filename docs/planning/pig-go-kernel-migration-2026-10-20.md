@@ -14,32 +14,36 @@
 6. **产品级常驻会话已落地**：daemon 现在可以用 PiG 内核承载主 Agent 的会话。`backend/internal/pigkernel/session.go` 是常驻会话层：内核进程内常驻、按身份寻址 durable 会话、装配方与工具、连原生 MCP、订阅内核事件；`backend/internal/pigkernel/provider.go` 是模型通道桥——内核向 daemon 要答案，daemon 用自己的受控流作答，因此准入闸门、凭据、预算与用量账本一分未减，内核也拿不到一条绕过准入的 provider 通道。`backend/internal/graph/runtime_pig_session.go` 实现 `graph.AgentSessionTransport`，把 Graph 工具、Graph MCP 声明与系统提示接到内核上。E2E `tests/e2e/pig-session.test.ts` 用真实 daemon、真实 provider、真实 Graph 工具证明：主 Agent 的会话确实跑在 PiG 内核上（durable schema 版本 2、身份文档保持旧内核的 `{conversations:{...}}` 形状、重启后同一 durable 会话续写），且**没有启动任何 TypeScript 侧车进程**。
 7. **原生工具落到 Go**：TypeScript SDK 原本提供 read/write/edit/ls/find/grep 与 shell，PiG 内核不自带环境，因此 daemon 在 Go 侧补齐这套原生工具（`backend/internal/graph/runtime_pig_native_tools.go`），名字与声明与 SDK 一致，路径规则复用 Graph 既有的越界保护。
 8. **MCP 产品级通道已端到端证明**：`tests/e2e/pig-mcp-session.test.ts` 用真实 daemon、真实 MCP stdio 服务器与真实 provider 走完整条链路——Graph 定义绑定 MCP 能力 → daemon 解析出服务器声明 → PiG 内核原生连接服务器 → 模型收到 `mcp__wordcount__word_count` 声明（**没有** `mcp` 网关工具）→ 模型直呼该工具 → 服务器经协议作答 → 结果回到模型 → 最终答复。同时断言 durable 记录由 PiG 内核写入（schema 版本 2）。
+9. **崩溃恢复已移植到 PiG 内核**：`backend/internal/pigkernel/recovery.go` 持有冻结执行文档 `graph.frozen-executions`（与 TS 侧同形：冻结记录按 durable 会话存放，值是 JSON 字符串），`backend/internal/graph/runtime_pig_recovery.go` 是 daemon 侧的恢复引导。daemon 崩溃后按三种事实分别处理：
+   - **内核已完成、Graph 未确认**（`graph_durable_submissions` 中 `status='done'`）：用内核的回执结算该操作，不再问模型一次。
+   - **已受理但从未发出**：用**受理时的**配置重发（冻结记录保存模型、指令、工具与策略，凭据不落盘，只记下可复原的 header 名），内核按原 admission id 认出已受理的输入，不会第二次受理。
+   - **已经抵达模型**：不重放，操作停在 `unknown` 交用户核对。
+   E2E `tests/e2e/pig-durable-recovery.test.ts` 用真实 daemon、真实 provider 与真实 SQLite 触发器证明前两种与第三种：触发器让 Graph 的确认写入失败，内核仍完成回合，重启后 daemon 用回执结算且 provider 请求数不增加；另一个用例证明已受理未发出的输入用**原来的** `max_tokens` 重发（配置在宕机期间被改成 512，恢复仍用 256），而宕机时已在模型上的那一路既不重发也不结算、停在 `unknown`。
 
 ## 尚未完成的部分
 
-1. **恢复语义**：冻结执行、受理未发送输入、SDK 完成但 Graph 未确认的结算，必须先有 Go 侧等价物，再切换宿主；切换前的 TS 内核不能退出。PiG 内核路径因此**暂时没有崩溃恢复**：`--kernel pig` 下 daemon 不启动恢复引导，图节点泳道与恢复引导需要的 TypeScript 侧车会被显式拒绝（两个内核不得同时写同一份 durable 命名空间）。
-2. **图节点泳道仍在 TS 侧车**：`runtime_kernel_graph_lane.go` 的节点会话走的是 ResidentHost/Unix socket 协议，不是 `AgentSessionTransport`。PiG 路径下该泳道被显式拒绝，而不是让两个内核争同一批表。
-3. **MCP 原生化收尾**：删除 `pi-mcp-adapter` 扩展与运行时注册事件 `pi-mcp-adapter:runtime-register:v1`，前提是 PiG 内核成为默认内核；节点绑定到 MCP 能力的语义已由产品级 E2E 证明等价。
-4. **codemode 启用**：内核内置 `codemode` 与 `tool_search` 默认关闭，由 Graph 按需显式启用，不改变既有准入与沙箱策略。
-5. **pi 扩展模型**：PiG 的扩展是 Go/Rust/Python/Node 资源，与现有"沙箱内加载 TS pi 扩展"形态不等价；17 类 hook 与 `beforeTool`/`afterTool` 的对应能力尚未逐条核对，这是本次迁移最大的未验证项。
-6. **版本落差**：PiG 钉住 Pi 1.3.0，Graph 钉住 Pi 1.1.0。durable schema 已由 E2E 证明可以从 1 升到 2 并保留原记录，但运行语义差异仍未逐条核对。
+1. **图节点泳道仍在 TS 侧车**：`runtime_kernel_graph_lane.go` 的节点会话走的是 ResidentHost/Unix socket 协议，不是 `AgentSessionTransport`。PiG 路径下该泳道被显式拒绝，而不是让两个内核争同一批表。**这一项是默认内核翻转前的最后关口。**
+2. **MCP 原生化收尾**：删除 `pi-mcp-adapter` 扩展与运行时注册事件 `pi-mcp-adapter:runtime-register:v1`，前提是 PiG 内核成为默认内核；节点绑定到 MCP 能力的语义已由产品级 E2E 证明等价。
+3. **codemode 启用**：内核内置 `codemode` 与 `tool_search` 默认关闭，由 Graph 按需显式启用，不改变既有准入与沙箱策略。
+4. **pi 扩展模型**：PiG 的扩展是 Go/Rust/Python/Node 资源，与现有"沙箱内加载 TS pi 扩展"形态不等价；17 类 hook 与 `beforeTool`/`afterTool` 的对应能力尚未逐条核对，这是本次迁移最大的未验证项。
+5. **版本落差**：PiG 钉住 Pi 1.3.0，Graph 钉住 Pi 1.1.0。durable schema 已由 E2E 证明可以从 1 升到 2 并保留原记录，但运行语义差异仍未逐条核对。PiG 的原生恢复会**重发**未答复的 provider 请求，Graph 侧因此用自己的"是否已抵达模型"判断挡住重放；两种口径的其余差异仍需逐条核对。
 
 ## 切换顺序建议
 
 先让 Go 宿主接管同一份 `graph_durable_` 命名空间（已在数据层证明可行），再逐段替换会话行为；每段由现有真实 E2E（`tests/e2e/go-durable.test.ts` 等）把关。宿主协议若保持 Unix socket 行协议不变，切换可回退；正式切换后不保留旧内核回退执行入口（沿用 [ADR 0031](../adr/0031-pi-durable-agent-kernel.md) 的既有约定）。
 
-当前进度：数据层 → 会话层 → 模型与工具通道 → 原生工具均已落地并有 E2E；剩下的关口是恢复语义与图节点泳道，这两项决定默认内核能否翻转。
+当前进度：数据层 → 会话层 → 模型与工具通道 → 原生工具 → 崩溃恢复均已落地并有 E2E；剩下的关口是图节点泳道，它决定默认内核能否翻转。
 
 ## 内核选择
 
 迁移期间 daemon 可以显式选择内核，默认仍是 TypeScript 侧车：
 
 ```bash
-graphd --kernel node   # 默认：TypeScript durable 侧车（承载恢复语义与图节点泳道）
-graphd --kernel pig    # Go 进程内的 PiG 内核（主 Agent 会话；恢复与图节点泳道暂不可用）
+graphd --kernel node   # 默认：TypeScript durable 侧车（承载图节点泳道）
+graphd --kernel pig    # Go 进程内的 PiG 内核（主 Agent 会话 + 崩溃恢复；图节点泳道暂不可用）
 ```
 
-内核一经选择即在本进程内固定：选 PiG 时 daemon 不会启动 TypeScript 侧车，需要侧车的路径（图节点泳道、崩溃恢复引导）会明确报错而不是静默争用同一份 durable 命名空间。
+内核一经选择即在本进程内固定：选 PiG 时 daemon 不会启动 TypeScript 侧车，需要侧车的路径（图节点泳道）会明确报错而不是静默争用同一份 durable 命名空间。
 
 ## 内核诊断入口
 

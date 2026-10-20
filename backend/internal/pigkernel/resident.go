@@ -83,6 +83,14 @@ func extensionName(identity string) string {
 	return "graph-tools-" + digestOf(identity)
 }
 
+// ExtensionName is the name one identity's extension is installed under.
+//
+// The frozen execution names it, so a recovered turn finds the very same
+// extension the interrupted one had registered.
+func ExtensionName(identity string) string {
+	return extensionName(identity)
+}
+
 // providerName is the name one session's provider is registered under.
 func providerName(identity string) string {
 	return "graph-" + digestOf(identity)

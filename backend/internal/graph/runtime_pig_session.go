@@ -61,15 +61,15 @@ func agentKernelMode() string {
 
 // CreatePigAgentSessionTransport opens Agent sessions on the PiG kernel.
 func CreatePigAgentSessionTransport(store *TaskStore) AgentSessionTransport {
-	return &pigAgentTransport{database: store.Path}
+	return &pigAgentTransport{store: store}
 }
 
-type pigAgentTransport struct{ database string }
+type pigAgentTransport struct{ store *TaskStore }
 
 // Open opens one session on the PiG kernel.
 func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSession, error) {
 	options := pigkernel.SessionOptions{
-		Database:     transport.database,
+		Database:     transport.store.Path,
 		Identity:     request.Binding.InstanceId,
 		Model:        pigModelSpec(request.Model),
 		Provider:     pigProviderBridge(request),
@@ -86,7 +86,33 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 	if err != nil {
 		return nil, err
 	}
+	// The execution is frozen before the turn starts. The record is what the
+	// recovery reads when the daemon dies mid-turn: which execution the
+	// kernel was running, the model it was admitted with and the input it was
+	// waiting for. The durable conversation exists by now, so the record has
+	// a place to live.
+	if err := transport.freeze(request); err != nil {
+		_ = session.Close()
+		return nil, err
+	}
 	return &pigAgentSession{session: session, request: request}, nil
+}
+
+// freeze stores the frozen record of one execution.
+//
+// The invocations that existed before the execution are named in the record:
+// an invocation beyond them is a provider call this execution made, and the
+// turn must not be replayed.
+func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
+	if request.ExecutionId == "" || request.Binding.InstanceId == "" {
+		return nil
+	}
+	preAdmission := []string{}
+	for _, call := range kernelRows(transport.store.Db, "SELECT id FROM invocations WHERE operation_id=? AND usage IS NOT NULL", request.ExecutionId) {
+		preAdmission = append(preAdmission, kernelString(call["id"]))
+	}
+	record := pigFrozenExecution(request, preAdmission)
+	return pigkernel.FreezeExecution(context.Background(), transport.store.Path, request.Binding.InstanceId, record)
 }
 
 // pigProviderBridge is the daemon's model channel, seen from the kernel.
@@ -261,14 +287,14 @@ func (session *pigAgentSession) Inspect() AgentSessionInspect {
 	session.mutex.Lock()
 	defer session.mutex.Unlock()
 	session.inspect = AgentSessionInspect{
-		Binding:           session.request.Binding,
-		SessionId:         view.SessionId,
-		SessionFile:       view.SessionFile,
-		ActiveTools:       view.ActiveTools,
-		RegisteredTools:   view.RegisteredTools,
-		LoadedExtensions:  view.LoadedExtensions,
-		ExtensionErrors:   []AgentSessionExtensionError{},
-		Messages:          view.Messages,
+		Binding:          session.request.Binding,
+		SessionId:        view.SessionId,
+		SessionFile:      view.SessionFile,
+		ActiveTools:      view.ActiveTools,
+		RegisteredTools:  view.RegisteredTools,
+		LoadedExtensions: view.LoadedExtensions,
+		ExtensionErrors:  []AgentSessionExtensionError{},
+		Messages:         view.Messages,
 	}
 	if session.request.BundleDigest != "" {
 		session.inspect.BundleDigest = stringPointer(session.request.BundleDigest)

@@ -832,11 +832,13 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	// conversations. On the PiG kernel the durable namespace is the Go
 	// process's own, and the TypeScript sidecar must not open it: two kernels
 	// over one namespace would fight over the same tables. The PiG path
-	// therefore has no crash recovery yet - the gap is recorded in the
-	// migration plan, and the switch waits for the recovery semantics to move.
+	// therefore recovers on its own: the kernel's own receipts settle the
+	// turns it finished, and the turns it never sent are sent again.
 	if runtime.options.Kernel != AgentKernelPig {
 		recoverDurableCompletions(runtime.store)
 		runtime.bootstrapDurableRecovery()
+	} else {
+		runtime.bootstrapPigRecovery()
 	}
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
 	return runtime
