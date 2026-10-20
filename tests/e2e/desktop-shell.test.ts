@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { _electron } from 'playwright';
 import { build } from 'vite';
+import { vendorProxy } from '../helpers/vendor-proxy.ts';
 import { ensureBackendBinary } from '../helpers/backend-binary.ts';
 
 const electronExecutable: string = createRequire(import.meta.url)('electron');
@@ -27,20 +28,8 @@ async function shell(vendorOrigin?: string) {
   await cp(join(process.cwd(), 'package.json'), join(source, 'package.json'));
   await mkdir(join(source, 'dist'));
   await cp(ensureBackendBinary(), join(source, 'dist/graphd'));
-  if (vendorOrigin) {
-    // Substitute only the external vendor transport in the fixture-owned
-    // subprocess. All Graph HTTP, lifecycle, persistence and model owners run.
-    await writeFile(join(source, 'src/server/vendor-transport.mjs'), `
-      const nativeFetch = globalThis.fetch;
-      globalThis.fetch = (input, init) => {
-        const url = input instanceof Request ? input.url : String(input);
-        return nativeFetch(url.startsWith('https://openrouter.ai/api/v1/')
-          ? url.replace('https://openrouter.ai', ${JSON.stringify(vendorOrigin)}) : input, init);
-      };
-    `);
-    const cli = join(source, 'src/server/cli.ts');
-    await writeFile(cli, `import './vendor-transport.mjs';\n${await readFile(cli, 'utf8')}`);
-  }
+  const proxy = vendorOrigin ? await vendorProxy(root, ['openrouter.ai'], vendorOrigin) : undefined;
+  if (proxy) cleanup.push(() => proxy.close());
 
   await writeFile(join(root, '.graph/app-root'), `${source}\n`);
   await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: join(source, 'dist/web'), emptyOutDir: true } });
@@ -50,7 +39,7 @@ async function shell(vendorOrigin?: string) {
     // Chromium's test keychain prevents an OS password dialog in an isolated
     // HOME. These cases cover windows/processes, not keychain encryption.
     args: ['--use-mock-keychain', join(process.cwd(), 'desktop/main.mjs')],
-    env: { ...process.env, HOME: root, GRAPH_APP_USER_DATA: userData, GRAPH_RSI_ROOT: join(root, 'stale'), GRAPH_APP_DEBUG: '1', GRAPH_APP_SMOKE: '', ELECTRON_RUN_AS_NODE: '' },
+    env: { ...process.env, ...proxy?.env, HOME: root, GRAPH_APP_USER_DATA: userData, GRAPH_RSI_ROOT: join(root, 'stale'), GRAPH_APP_DEBUG: '1', GRAPH_APP_SMOKE: '', ELECTRON_RUN_AS_NODE: '' },
   });
   cleanup.push(() => app.close());
   let daemonLog = '';
