@@ -144,6 +144,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `console/attachments-payload.test.ts` 附件上限：文本文件进模型、超限被拒不落库、不支持的类型被指名拒绝 | `tests/e2e/go-attachments.test.ts` | 3 |
 | `tests/m5/http.test.ts` APP 桥接 RSI 重启队列：无令牌拒绝、队列形状、畸形 ack 拒绝、未知 id 不清空 | `tests/e2e/go-rsi-bridge.test.ts` | 2 |
 | `tests/e2e/rsi-shape.test.ts` RSI 真实应用：10 种错误形状被指名拒绝、真实 Git 提交、检查通过、无提交时如实报告、重载请求落地 | `tests/e2e/go-rsi-apply.test.ts` | 3 |
+| `tests/m5/graph.test.ts` 图布局几何：盒子在网格上、盒子尺寸合法、走线正交且首尾落在节点边界、走线不穿过节点、同源同目标的边各走各的通道、重画后仍是可画的图 | `tests/e2e/go-graph-layout.test.ts` | 1 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -190,7 +191,9 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 10（已完成）**：RSI 的真实应用流程。`tests/e2e/go-rsi-apply.test.ts`——模型发出 10 种错误形状的 `apply_rsi_change`，每一种都被逐字段指名（不落一个字节、不建分支、不提交）；改对之后真的改写真实 checkout、跑真实检查、提交到 `rsi/*` 分支；无改动的复查如实报告「没有产生提交」；`activate=true` 真的落下重载请求。
   - 这一批先补了 Go 的能力：`PiAdapterRsi` 之前是死代码，模型压根看不到这两个工具（见上文「Go 侧补齐的能力」）。
   - 用例跑在 `--kernel pig` 上：Go 原生的 PiG 内核才会调用 `PrepareArguments` 形状提示钩子。
-- **Batch 11（下一步）**：图布局几何契约（`tests/m5/graph.test.ts`）——Go 的布局走 node+elkjs，风险最高，尽早证明。
+- **Batch 11（已完成）**：图布局几何契约。`tests/e2e/go-graph-layout.test.ts`——真实 `graphd` + 真实 elkjs（`node_modules/elkjs` 在场）画出一张带「同源同目标四条边 + 一条回边」的图，证明盒子都在 16px 网格上、盒子尺寸合法、每条走线正交且首尾正好落在源/目标节点的边界、任何走线都不穿过任何节点、两条不同的走线不互相压住（共享引出段与共享到达段除外）、同源同目标的四条边各走各的通道；并发读两次得到同一份布局，重画之后仍然是一张可画的图。
+  - 几何判据（网格、尺寸、正交、不穿越、通道分离）逐条对照 `tests/m5/graph.test.ts` 的 TS 判据，包括它那两条豁免（共享引出段、共享到达段）。
+  - 例子里的 9 张图（`examples/graphs/*.json` 与 review pattern）暂未整体移植：本批用一张自带的图覆盖同一批几何规则；`examples/` 的文件本身在删除清单里，移植时要一并搬进 `tests/fixtures/` 或退休。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
