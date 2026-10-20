@@ -10,6 +10,7 @@
 2. **内核依赖与更新机制**：`backend/go.mod` 钉住 `github.com/MichaelKinsy/PiG v0.5.1`；`pnpm pig:update` 解析上游最新版本、改写钉住、整理依赖、重建后端并校验，失败时回滚到原状态。E2E：`tests/e2e/pig-kernel-update.test.ts`（真实网络、真实 Go 编译、真实回滚）。
 3. **数据接续已证明**：`backend/internal/pigkernel` 用 PiG 的 SQLite 端口直接接管正式数据库的 `graph_durable_` 命名空间（PiG 原生支持表前缀，不再需要 TS 侧那层 SQL 词法改写）。E2E：`tests/e2e/pig-kernel.test.ts` 证明 PiG 内核能按相同标识读出 daemon 写入的 durable 会话与条目，PiG 的迁移把 durable schema 从版本 1 升到 2，且不改动原记录。
 4. **内核能跑真实回合已证明**：`backend/internal/pigkernel/turn.go` 用 PiG 的 `durable/harness` 装配会话：daemon 决定模型、凭据、工具与准入，内核执行 provider 调用与工具往返，并把身份映射、提交与条目写回同一命名空间。E2E 同文件第二例用真实 HTTP 模型服务跑完"模型调用 `read` 工具 → daemon 读文件 → 结果回到模型 → 最终答复"，并断言 transcript 与提交都在 Graph 数据库里。
+5. **MCP 原生通道已证明**：`backend/internal/pigkernel/mcp.go` 用 PiG 的 `mcp` 客户端直连服务器（stdio 或可流式 HTTP），把服务器的工具按 PiG 原生命名 `mcp__<server>__<tool>` 注册为模型工具，调用直接走 MCP 协议。E2E `tests/e2e/pig-kernel-mcp.test.ts` 起了一个真实 stdio MCP 服务器：模型收到原生名的工具声明、发起调用、服务器作答、结果回到模型。Graph 既有的 MCP 声明（命令、参数、环境、url、header 与密钥解析）保持不变，只是换了承载它的通道。
 
 ## 尚未完成的部分
 

@@ -114,10 +114,12 @@ type cliOptions struct {
 	kernelModel    string
 	kernelPrompt   string
 	kernelIdentity string
+	// kernelMcp is a JSON file with the MCP servers a kernel turn connects.
+	kernelMcp string
 }
 
 func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
-	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag, kernelFlag, kernelModelFlag, kernelPromptFlag, kernelIdentityFlag string
+	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag, kernelFlag, kernelModelFlag, kernelPromptFlag, kernelIdentityFlag, kernelMcpFlag string
 	kernelMode := ""
 	configSet, stateSet, homeSet, webSet, portSet, rootSet := false, false, false, false, false, false
 	execute, dynamic, viewOnly, help := false, false, false, false
@@ -155,6 +157,8 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 			kernelPromptFlag = value()
 		case "--kernel-identity":
 			kernelIdentityFlag = value()
+		case "--kernel-mcp":
+			kernelMcpFlag = value()
 		case "--execute":
 			execute = true
 		case "--dynamic":
@@ -221,6 +225,10 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	if kernelIdentity == "" {
 		kernelIdentity = "graph-kernel-turn"
 	}
+	kernelMcpPath := ""
+	if kernelMcpFlag != "" {
+		kernelMcpPath = resolvePath(cwd, kernelMcpFlag)
+	}
 	mode := "view"
 	if execute {
 		mode = "execute"
@@ -240,6 +248,7 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 		kernelModel:     kernelModelFlag,
 		kernelPrompt:    kernelPromptFlag,
 		kernelIdentity:  kernelIdentity,
+		kernelMcp:       kernelMcpPath,
 	}
 }
 

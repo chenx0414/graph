@@ -25,10 +25,10 @@ import (
 
 // PigKernelConversation is one durable conversation the kernel found.
 type PigKernelConversation struct {
-	Id               int64 `json:"id"`
+	Id                int64 `json:"id"`
 	OwnerConversation int64 `json:"ownerConversation"`
-	OwnerTask        int64 `json:"ownerTask"`
-	Entries          int   `json:"entries"`
+	OwnerTask         int64 `json:"ownerTask"`
+	Entries           int   `json:"entries"`
 }
 
 // PigKernelReport is what the PiG kernel found in a Graph database.
@@ -113,6 +113,8 @@ type PigKernelTurnOptions struct {
 	Identity string
 	// Workspace is the directory the turn runs in.
 	Workspace string
+	// McpServers are the MCP servers the kernel connects natively.
+	McpServers []pigkernel.McpServerSpec
 	// Instructions are the system instructions of the session.
 	Instructions string
 }
@@ -141,15 +143,15 @@ func RunPigKernelTurn(config GraphConfig, options PigKernelTurnOptions) (pigkern
 	}
 	spec := pigkernel.ModelSpec{
 		ProviderID:    entry.Provider,
-		Id:           entry.ModelId,
-		Name:         entry.Id,
-		API:          api,
-		BaseURL:      entry.BaseUrl,
-		APIKey:       key,
-		Headers:      entry.Headers,
+		Id:            entry.ModelId,
+		Name:          entry.Id,
+		API:           api,
+		BaseURL:       entry.BaseUrl,
+		APIKey:        key,
+		Headers:       entry.Headers,
 		ContextWindow: entry.ContextWindow,
-		MaxTokens:    entry.MaxTokens,
-		Reasoning:    entry.Reasoning == nil || *entry.Reasoning,
+		MaxTokens:     entry.MaxTokens,
+		Reasoning:     entry.Reasoning == nil || *entry.Reasoning,
 	}
 	if spec.Id == "" {
 		spec.Id = entry.Id
@@ -163,6 +165,7 @@ func RunPigKernelTurn(config GraphConfig, options PigKernelTurnOptions) (pigkern
 		Identity:     options.Identity,
 		Model:        spec,
 		Tools:        tools,
+		McpServers:   options.McpServers,
 		Instructions: options.Instructions,
 		Prompt:       options.Prompt,
 	})
@@ -259,12 +262,17 @@ func PrintPigKernelTurn(opts cliOptions, env map[string]string) error {
 	if len(config.Projects) > 0 {
 		workspace = config.Projects[0].Root
 	}
+	servers, err := loadKernelMcpServers(opts.kernelMcp)
+	if err != nil {
+		return err
+	}
 	result, err := RunPigKernelTurn(config, PigKernelTurnOptions{
-		Database:  opts.kernelDatabase,
-		ModelId:   opts.kernelModel,
-		Prompt:    opts.kernelPrompt,
-		Identity:  opts.kernelIdentity,
-		Workspace: workspace,
+		Database:   opts.kernelDatabase,
+		ModelId:    opts.kernelModel,
+		Prompt:     opts.kernelPrompt,
+		Identity:   opts.kernelIdentity,
+		Workspace:  workspace,
+		McpServers: servers,
 	})
 	if err != nil {
 		return err
@@ -275,4 +283,67 @@ func PrintPigKernelTurn(opts cliOptions, env map[string]string) error {
 	}
 	fmt.Println(string(body))
 	return nil
+}
+
+// McpServerSpecFrom turns one Graph MCP server definition into the kernel's
+// own server specification.
+//
+// The definition is the one the Graph already builds for the adapter: the
+// command, the arguments, the environment, the url and the headers. Only the
+// transport changes: the kernel connects the server itself instead of handing
+// it to an extension.
+func McpServerSpecFrom(name string, definition *McpAdapterServerDefinition) pigkernel.McpServerSpec {
+	spec := pigkernel.McpServerSpec{Name: name}
+	if definition == nil {
+		return spec
+	}
+	spec.Command = definition.Command
+	spec.Args = definition.Args
+	spec.Env = definition.Env
+	spec.URL = definition.Url
+	spec.Headers = definition.Headers
+	return spec
+}
+
+// kernelMcpFile is the JSON file that names the MCP servers a kernel turn
+// connects. It is the same shape a capability manifest declares, so the
+// declarations a node already binds can be replayed against the kernel.
+type kernelMcpFile struct {
+	Servers []struct {
+		Name    string            `json:"name"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Cwd     string            `json:"cwd"`
+		Env     map[string]string `json:"env"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	} `json:"servers"`
+}
+
+// loadKernelMcpServers reads the MCP servers of a kernel turn.
+func loadKernelMcpServers(path string) ([]pigkernel.McpServerSpec, error) {
+	if path == "" {
+		return nil, nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var file kernelMcpFile
+	if err := json.Unmarshal(body, &file); err != nil {
+		return nil, fmt.Errorf("graph: the MCP server file is malformed: %w", err)
+	}
+	servers := []pigkernel.McpServerSpec{}
+	for _, server := range file.Servers {
+		servers = append(servers, pigkernel.McpServerSpec{
+			Name:    server.Name,
+			Command: server.Command,
+			Args:    server.Args,
+			Cwd:     server.Cwd,
+			Env:     server.Env,
+			URL:     server.URL,
+			Headers: server.Headers,
+		})
+	}
+	return servers, nil
 }

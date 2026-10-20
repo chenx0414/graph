@@ -27,17 +27,17 @@ import (
 // provider call itself: PiG's ai package speaks the provider protocols, while
 // the daemon decides which model, which key and which admission apply.
 type ModelSpec struct {
-	ProviderID     string
-	Id             string
-	Name           string
-	API            string
-	BaseURL        string
-	APIKey         string
-	Headers        map[string]string
-	ContextWindow  int
-	MaxTokens      int
-	Reasoning      bool
-	ThinkingLevel  string
+	ProviderID    string
+	Id            string
+	Name          string
+	API           string
+	BaseURL       string
+	APIKey        string
+	Headers       map[string]string
+	ContextWindow int
+	MaxTokens     int
+	Reasoning     bool
+	ThinkingLevel string
 }
 
 // ToolSpec is one tool the model may call during the turn.
@@ -60,6 +60,9 @@ type TurnOptions struct {
 	Model ModelSpec
 	// Tools are the tools the model may call.
 	Tools []ToolSpec
+	// McpServers are the MCP servers the kernel connects natively. Their tools
+	// reach the model under PiG's own `mcp__<server>__<tool>` names.
+	McpServers []McpServerSpec
 	// Instructions are the system instructions of the session.
 	Instructions string
 	// Prompt is the user input of the turn.
@@ -79,6 +82,7 @@ type TurnResult struct {
 	Text           string   `json:"text"`
 	StopReason     string   `json:"stopReason"`
 	ToolCalls      []string `json:"toolCalls"`
+	Tools          []string `json:"tools"`
 	Entries        int      `json:"entries"`
 }
 
@@ -105,8 +109,7 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	}
 	defer func() { _ = kernel.Close() }()
 
-	var toolMutex sync.Mutex
-	toolCalls := []string{}
+	recorder := &callRecorder{}
 	registrations := make([]*durable.ToolRegistration, 0, len(options.Tools))
 	for _, tool := range options.Tools {
 		spec := tool
@@ -117,9 +120,7 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 				Parameters:  spec.Parameters,
 			},
 			Execute: func(ctx context.Context, args any, _ durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
-				toolMutex.Lock()
-				toolCalls = append(toolCalls, spec.Name)
-				toolMutex.Unlock()
+				recorder.record(spec.Name)
 				decoded := map[string]any{}
 				if body, err := json.Marshal(args); err == nil {
 					_ = json.Unmarshal(body, &decoded)
@@ -135,15 +136,28 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 			},
 		})
 	}
+	// The MCP servers are connected by the kernel itself: the model reaches
+	// their tools directly, without a gateway tool and without an extension.
+	mcpConnections, mcpTools, err := connectMcpServers(ctx, options.McpServers, recorder)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	defer closeMcpServers(mcpConnections)
+	registrations = append(registrations, mcpTools...)
+
 	extension := &durable.Extension{Name: "graph-tools", Tools: registrations}
 	if err := registry.Install(extension); err != nil {
 		return TurnResult{}, err
 	}
 
+	// The model is offered the tools it may call, and the tools may call the
+	// same ones. PiG keeps the two lists apart: a tool that is only callable
+	// is never offered to the model.
 	conversation, err := conversationFor(ctx, kernel, options.Identity, harness.AgentChange{
 		Model:        harness.SetTo(durable.ModelRef{Provider: model.ProviderMeta.ProviderID, ModelId: model.ID}),
 		Instructions: harness.SetTo(options.Instructions),
 		Tools:        harness.SetTo(harness.ToolChange{List: registrations}),
+		ModelTools:   harness.SetTo(harness.ToolChange{List: registrations}),
 		Extensions:   harness.SetTo(harness.ExtensionChange{List: []*durable.Extension{extension}}),
 	})
 	if err != nil {
@@ -172,14 +186,17 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	if err != nil {
 		return TurnResult{}, err
 	}
-	toolMutex.Lock()
-	called := append([]string{}, toolCalls...)
-	toolMutex.Unlock()
+	called := recorder.calls()
+	offered := []string{}
+	for _, registration := range registrations {
+		offered = append(offered, registration.ToolSchema.Name)
+	}
 	result := TurnResult{
 		ConversationId: int64(conversation.Id()),
 		SubmissionId:   int64(settled.Id),
 		Status:         string(settled.Status),
 		ToolCalls:      called,
+		Tools:          offered,
 	}
 	if settled.Answer != nil {
 		text, stopReason, err := answerText(ctx, conversation, *settled.Answer)
@@ -294,7 +311,7 @@ func buildModels(spec ModelSpec) (durable.Models, *ai.Model) {
 		DisplayName: spec.Name,
 		Input:       []ai.ModelInputModality{"text"},
 		Capabilities: ai.ModelCapabilities{
-			ContextWindow:  spec.ContextWindow,
+			ContextWindow:   spec.ContextWindow,
 			MaxOutputTokens: spec.MaxTokens,
 			SupportsToolUse: true,
 		},
@@ -325,6 +342,25 @@ func buildModels(spec ModelSpec) (durable.Models, *ai.Model) {
 
 func boolPointer(value bool) *bool { return &value }
 
+// callRecorder records the tools a turn called. The harness runs tools on its
+// own goroutines, so the record is guarded.
+type callRecorder struct {
+	mutex sync.Mutex
+	names []string
+}
+
+func (recorder *callRecorder) record(name string) {
+	recorder.mutex.Lock()
+	defer recorder.mutex.Unlock()
+	recorder.names = append(recorder.names, name)
+}
+
+func (recorder *callRecorder) calls() []string {
+	recorder.mutex.Lock()
+	defer recorder.mutex.Unlock()
+	return append([]string{}, recorder.names...)
+}
+
 // newRequestId is one unique admission id.
 func newRequestId() string {
 	buffer := make([]byte, 16)
@@ -347,4 +383,3 @@ func conversationNumber(value any) (int64, bool) {
 	}
 	return 0, false
 }
-
