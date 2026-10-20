@@ -59,6 +59,15 @@
 | 依赖 TS 内部但不驱动 daemon | 206 | 实现耦合的低层测试，随实现一并退休；其中独立契约先迁入真实 E2E |
 | 不依赖 TS 后端 | 42 | 前端与纯工具测试，不受影响 |
 
+### 低层 206 个文件的处置规则
+
+低层测试全部**按驱动方式**耦合 TypeScript 实现：它们直接开 `openTaskRuntime` / `TaskStore` / durable 传输 / `catalog.*` 助手，而不是走公开面。因此：
+
+- **判定标准是「这份证明是否依赖将被删除的实现」**，不是「断言看起来像不像业务规则」。一份文件即使写着预算、用量、准入、验收，只要它开的是 TypeScript 运行时对象、断言的是私有字段或私有表记录，它就是实现耦合的证明，随实现一起退休。
+- **独立契约的迁移单位是「契约」，不是「文件」**。低层文件里出现的业务规则（预算、未知用量的阻塞、只写自己的 worktree、恢复后不重复投递……）必须在 Go 上重新被证明一次——这是**新写一条 Go E2E**，不是把 TS 测试改个驱动。
+- **风险集中在「只存在于低层、没有别处证明」的规则**。已派出的有界审计正在逐条核对这部分（45 个业务规则最密集的文件 × 35 文件矩阵 × 现有 Go E2E）。
+- 机械的标题匹配在这件事上没有用（产生 334 条误报），所以这一步必须按语义读代码。
+
 ## 覆盖矩阵
 
 Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约与 Go 侧状态的对应关系，逐条补齐后再动实现。
@@ -132,6 +141,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m5/http.test.ts` 暂停/恢复：暂停期间的消息不外发，恢复后放行，暂停跨重启保持 | `tests/e2e/go-pause-resume.test.ts` | 2 |
 | `console/conversation-queue.test.ts` 队列消息取消：可撤回、同一请求不重复撤回、不存在的消息报 missing | `tests/e2e/go-conversation-queue.test.ts` | 2 |
 | `e2e/rework-runtime.test.ts` 项目被移出配置后历史保留、拒绝新任务 | `tests/e2e/go-removed-project.test.ts` | 1 |
+| `console/attachments-payload.test.ts` 附件上限：文本文件进模型、超限被拒不落库、不支持的类型被指名拒绝 | `tests/e2e/go-attachments.test.ts` | 3 |
 
 ## 执行批次
 
@@ -144,10 +154,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 5（已完成）**：暂停与恢复。`tests/e2e/go-pause-resume.test.ts`——证明暂停期间到达的消息不会到达 provider、恢复后放行、暂停是任务的事实因而跨重启保持。
 - **Batch 6（已完成）**：队列消息的撤回。`tests/e2e/go-conversation-queue.test.ts`——证明排队中的消息可以撤回、同一请求不重复撤回、不存在的消息报 missing 而不是被编造。
 - **Batch 7（已完成）**：项目移出配置。`tests/e2e/go-removed-project.test.ts`——证明历史仍然可读、项目从控制台消失、新任务被明确拒绝而不是被静默接受。
-- **Batch 8（下一步）**：APP 桥接 RSI 重启队列（`tests/m5/http.test.ts`）。
-- **Batch 9（下一步）**：图布局几何契约（`tests/m5/graph.test.ts`）——Go 的布局走 node+elkjs，风险最高，尽早证明。
-- **Batch 10 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
-- **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 100+4 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
+- **Batch 8（已完成）**：消息的附件上限。`tests/e2e/go-attachments.test.ts`——证明限额内的文本文件随消息进到模型手里，超限文件被指名拒绝且不留消息，不支持的类型被指名拒绝。
+- **Batch 9（下一步）**：APP 桥接 RSI 重启队列（`tests/m5/http.test.ts`）。
+- **Batch 10（下一步）**：图布局几何契约（`tests/m5/graph.test.ts`）——Go 的布局走 node+elkjs，风险最高，尽早证明。
+- **Batch 11 起**：按覆盖矩阵逐文件移植，每个文件一个 keeper。
+- **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
 ## 门禁与纪律
 
