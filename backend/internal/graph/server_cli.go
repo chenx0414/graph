@@ -38,9 +38,15 @@ func runCLI(args []string) (code int) {
 		return 0
 	}
 	if opts.kernelDatabase != "" {
-		// The kernel inspection reports the durable namespace of a real Graph
-		// database through the PiG kernel. It starts no console and dispatches
+		// The kernel surfaces work on the durable namespace of a real Graph
+		// database through the PiG kernel. They start no console and dispatch
 		// nothing.
+		if opts.kernelMode == "turn" {
+			if err := PrintPigKernelTurn(opts, env); err != nil {
+				return cliFail(err)
+			}
+			return 0
+		}
 		if err := PrintPigKernelReport(opts.kernelDatabase); err != nil {
 			return cliFail(err)
 		}
@@ -102,10 +108,17 @@ type cliOptions struct {
 	// kernelDatabase asks the PiG kernel to report the durable namespace of a
 	// real Graph database instead of starting the console.
 	kernelDatabase string
+	// kernelMode is "inspect" or "turn": what the kernel does with the database.
+	kernelMode string
+	// kernelModel, kernelPrompt and kernelIdentity configure a kernel turn.
+	kernelModel    string
+	kernelPrompt   string
+	kernelIdentity string
 }
 
 func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
-	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag, kernelFlag string
+	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag, kernelFlag, kernelModelFlag, kernelPromptFlag, kernelIdentityFlag string
+	kernelMode := ""
 	configSet, stateSet, homeSet, webSet, portSet, rootSet := false, false, false, false, false, false
 	execute, dynamic, viewOnly, help := false, false, false, false
 	for index := 0; index < len(argv); index++ {
@@ -132,6 +145,16 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 			rootFlag, rootSet = value(), true
 		case "--pig-kernel-inspect":
 			kernelFlag = value()
+			kernelMode = "inspect"
+		case "--pig-kernel-turn":
+			kernelFlag = value()
+			kernelMode = "turn"
+		case "--kernel-model":
+			kernelModelFlag = value()
+		case "--kernel-prompt":
+			kernelPromptFlag = value()
+		case "--kernel-identity":
+			kernelIdentityFlag = value()
 		case "--execute":
 			execute = true
 		case "--dynamic":
@@ -194,6 +217,10 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	if kernelFlag != "" {
 		kernelDatabase = resolvePath(cwd, kernelFlag)
 	}
+	kernelIdentity := kernelIdentityFlag
+	if kernelIdentity == "" {
+		kernelIdentity = "graph-kernel-turn"
+	}
 	mode := "view"
 	if execute {
 		mode = "execute"
@@ -209,6 +236,10 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 		help:            help,
 		applicationRoot: root,
 		kernelDatabase:  kernelDatabase,
+		kernelMode:      kernelMode,
+		kernelModel:     kernelModelFlag,
+		kernelPrompt:    kernelPromptFlag,
+		kernelIdentity:  kernelIdentity,
 	}
 }
 

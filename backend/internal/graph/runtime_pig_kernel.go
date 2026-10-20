@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/harness"
@@ -91,6 +94,182 @@ func PrintPigKernelReport(database string) error {
 		return err
 	}
 	body, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(body))
+	return nil
+}
+
+// PigKernelTurnOptions configure one kernel turn run from the command line.
+type PigKernelTurnOptions struct {
+	// Database is the formal Graph database the durable records live in.
+	Database string
+	// ModelId is the configured model the turn sends to.
+	ModelId string
+	// Prompt is the user input of the turn.
+	Prompt string
+	// Identity is the stable identity of the session.
+	Identity string
+	// Workspace is the directory the turn runs in.
+	Workspace string
+	// Instructions are the system instructions of the session.
+	Instructions string
+}
+
+// RunPigKernelTurn runs one agent turn on the PiG kernel with the daemon's
+// own model and credential.
+//
+// The credential stays with the daemon: the configuration names an environment
+// variable, the daemon reads it, and only the resolved key reaches the kernel
+// for the provider call.
+func RunPigKernelTurn(config GraphConfig, options PigKernelTurnOptions) (pigkernel.TurnResult, error) {
+	entry, err := configuredModel(config, options.ModelId)
+	if err != nil {
+		return pigkernel.TurnResult{}, err
+	}
+	key, err := modelCredential(config, entry)
+	if err != nil {
+		return pigkernel.TurnResult{}, err
+	}
+	api := "openai-completions"
+	switch entry.Api {
+	case "anthropic-messages":
+		api = "anthropic-messages"
+	case "openai-responses":
+		api = "openai-responses"
+	}
+	spec := pigkernel.ModelSpec{
+		ProviderID:    entry.Provider,
+		Id:           entry.ModelId,
+		Name:         entry.Id,
+		API:          api,
+		BaseURL:      entry.BaseUrl,
+		APIKey:       key,
+		Headers:      entry.Headers,
+		ContextWindow: entry.ContextWindow,
+		MaxTokens:    entry.MaxTokens,
+		Reasoning:    entry.Reasoning == nil || *entry.Reasoning,
+	}
+	if spec.Id == "" {
+		spec.Id = entry.Id
+	}
+	tools := []pigkernel.ToolSpec{}
+	if options.Workspace != "" {
+		tools = append(tools, workspaceReadTool(options.Workspace))
+	}
+	return pigkernel.RunTurn(context.Background(), pigkernel.TurnOptions{
+		Database:     options.Database,
+		Identity:     options.Identity,
+		Model:        spec,
+		Tools:        tools,
+		Instructions: options.Instructions,
+		Prompt:       options.Prompt,
+	})
+}
+
+// configuredModel finds the configured model the turn sends to.
+func configuredModel(config GraphConfig, modelId string) (ConfiguredModel, error) {
+	if config.Models == nil {
+		return ConfiguredModel{}, fmt.Errorf("graph: no models are configured")
+	}
+	for _, entry := range config.Models.Entries {
+		if entry.Id == modelId {
+			return entry, nil
+		}
+	}
+	return ConfiguredModel{}, fmt.Errorf("graph: the model %s is not configured", modelId)
+}
+
+// modelCredential resolves the credential of a configured model.
+func modelCredential(config GraphConfig, entry ConfiguredModel) (string, error) {
+	if entry.CredentialId == "" {
+		return "", fmt.Errorf("graph: the model %s has no credential", entry.Id)
+	}
+	credential, ok := config.Credentials[entry.CredentialId]
+	if !ok {
+		return "", fmt.Errorf("graph: the credential %s is not configured", entry.CredentialId)
+	}
+	value, ok := os.LookupEnv(credential.SecretRef)
+	if !ok || value == "" {
+		return "", fmt.Errorf("graph: the credential %s has no value", entry.CredentialId)
+	}
+	return value, nil
+}
+
+// workspaceReadTool is the Graph's own read tool over one workspace.
+//
+// The daemon owns the tool: the kernel carries the model's call, the daemon
+// reads the file, and the result goes back to the model. The read is bounded
+// by the workspace, so the kernel cannot reach outside it.
+func workspaceReadTool(workspace string) pigkernel.ToolSpec {
+	root, err := filepath.Abs(workspace)
+	if err != nil {
+		root = workspace
+	}
+	return pigkernel.ToolSpec{
+		Name:        "read",
+		Description: "Read a file from the workspace.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string", "description": "The path of the file to read."},
+			},
+			"required": []any{"path"},
+		},
+		Execute: func(ctx context.Context, args map[string]any) (string, error) {
+			path, _ := args["path"].(string)
+			if path == "" {
+				return "", fmt.Errorf("read needs a path")
+			}
+			resolved := path
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(root, resolved)
+			}
+			resolved = filepath.Clean(resolved)
+			if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+				return "", fmt.Errorf("read is limited to the workspace")
+			}
+			body, err := os.ReadFile(resolved)
+			if err != nil {
+				return "", err
+			}
+			if len(body) > 64*1024 {
+				body = body[:64*1024]
+			}
+			return string(body), nil
+		},
+	}
+}
+
+// PrintPigKernelTurn runs one agent turn on the PiG kernel and reports it.
+//
+// The model, the credential and the workspace are the daemon's own: the
+// configuration names the model and the credential, and the project root is
+// the work copy the turn runs in.
+func PrintPigKernelTurn(opts cliOptions, env map[string]string) error {
+	if opts.kernelModel == "" {
+		return fmt.Errorf("graph: --kernel-model is required for a kernel turn")
+	}
+	if opts.kernelPrompt == "" {
+		return fmt.Errorf("graph: --kernel-prompt is required for a kernel turn")
+	}
+	config := LoadGraphConfig(opts.configPath)
+	workspace := ""
+	if len(config.Projects) > 0 {
+		workspace = config.Projects[0].Root
+	}
+	result, err := RunPigKernelTurn(config, PigKernelTurnOptions{
+		Database:  opts.kernelDatabase,
+		ModelId:   opts.kernelModel,
+		Prompt:    opts.kernelPrompt,
+		Identity:  opts.kernelIdentity,
+		Workspace: workspace,
+	})
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(result)
 	if err != nil {
 		return err
 	}
