@@ -49,6 +49,11 @@ type CapabilityOperationOptions struct {
 	NativeTools          []string
 	OnPermissionRequired func(CapabilityPermissionRequest)
 	HostTools            func(readRoots []string) []ToolDefinition
+	// NativeToolsProvider builds the native tools the granted native names
+	// stand for. It is set when the kernel runs without an SDK of its own:
+	// the TypeScript SDK provided read, write, edit, ls, find, grep and the
+	// shell, and nothing replaces them on the PiG kernel but the daemon.
+	NativeToolsProvider func(granted []string) []ToolDefinition
 }
 
 // CapabilityOperation is the tool surface and digests one turn binds to.
@@ -201,6 +206,17 @@ func OpenCapabilityBundle(options CapabilityBundleOptions) *CapabilityBundleVers
 	return version
 }
 
+// capabilityToolAllowed reports whether the surface already carries a tool of
+// that name.
+func capabilityToolAllowed(name string, tools []ToolDefinition) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func capabilityUnique(values []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -300,6 +316,20 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 		hostTools = options.HostTools(readRoots)
 	}
 	selected := SelectAgentToolSurface(append(hostTools, loaded.Tools...), options.NativeTools, options.DisabledTools, loaded.PiExtensionTools)
+	if options.NativeToolsProvider != nil {
+		// The native tools stand in for the Graph tools they supersede: they
+		// carry the names the SDK published, so the model's prompt and its
+		// habits hold, and the digest covers the surface the session really has.
+		native := options.NativeToolsProvider(selected.NativeTools)
+		for _, tool := range native {
+			if !capabilityToolAllowed(tool.Name, selected.Tools) {
+				selected.Tools = append(selected.Tools, tool)
+			}
+		}
+		sort.SliceStable(selected.Tools, func(left, right int) bool {
+			return selected.Tools[left].Name < selected.Tools[right].Name
+		})
+	}
 	folderSkills := AgentSkills(AgentSkillsScope{Folder: version.SkillFolder, Cwd: version.input.SkillCwd, ProjectRoot: version.input.SkillProjectRoot}).Skills
 	excluded := map[string]bool{}
 	for _, skill := range folderSkills {

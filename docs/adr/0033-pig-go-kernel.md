@@ -23,3 +23,22 @@
 ## 内核更新
 
 PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新由 `pnpm pig:update` 单命令完成：解析上游最新版本、写入钉住版本、整理依赖、重建后端并校验。更新不得静默改变运行中桌面应用的内核版本，切换仍需走既有验收。
+
+## 实施状态（2026-10-20）
+
+内核选择由 `graphd --kernel node|pig` 显式决定，默认仍是 `node`：TypeScript 侧车仍承载恢复语义与图节点泳道，这两项尚未有 Go 侧等价物。
+
+已落地并有 E2E 的部分：
+
+- **主 Agent 常驻会话跑在 PiG 内核**（`backend/internal/pigkernel/session.go`、`backend/internal/graph/runtime_pig_session.go`）。内核进程内常驻，按身份寻址 durable 会话，装配方与工具，连原生 MCP，订阅内核事件。
+- **模型通道仍归 daemon**（`backend/internal/pigkernel/provider.go`）。PiG 的 provider 运行时接受任意 stream 实现，因此 daemon 把自己那条受控流交给内核：内核向 daemon 要答案，daemon 决定是否放行、花哪把凭据、记哪笔用量。内核因此拿不到一条绕过准入或预算的 provider 通道。
+- **原生工具由 daemon 提供**（`backend/internal/graph/runtime_pig_native_tools.go`）。TypeScript SDK 原本提供 read/write/edit/ls/find/grep 与 shell；PiG 内核不自带环境，这套工具在 Go 侧补齐，名字与声明与 SDK 一致，路径规则复用 Graph 既有的越界保护。
+- **两个内核不得同时写一份 durable 命名空间**：选 `pig` 时 daemon 不启动 TypeScript 侧车，需要侧车的路径（崩溃恢复引导、图节点泳道）显式报错，而不是静默争用同一批表。
+
+未落地、因此默认内核尚未翻转的部分：恢复语义（冻结执行、受理未发送输入、SDK 完成但 Graph 未确认的结算）、图节点泳道、codemode 启用、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+
+MCP 的产品级通道已证明可用：Graph 的能力目录里绑定一个真实 MCP 服务器，模型直接收到 `mcp__<server>__<tool>` 声明并直呼该工具，没有网关工具、没有扩展事件总线（E2E `tests/e2e/pig-mcp-session.test.ts`）。
+
+## 与既有决策的冲突
+
+本决策取代 ADR 0032 的"Node 辅助进程承载共享 durable Harness"实现选择；ADR 0032 中"Go 拥有 HTTP/SSE、业务状态、凭据、准入与用量"的分工被保留并加强为"模型通道由 daemon 提供"。ADR 0006 关于 TypeScript 作为领域内核实现语言的选择，其内核部分由本决策取代；Web 与桌面壳仍为 TypeScript。

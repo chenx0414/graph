@@ -564,6 +564,11 @@ type PiAdapterOptions struct {
 	Channels *PiAdapterChannels
 	// Transport opens the Agent session.
 	Transport AgentSessionTransport
+	// DaemonNativeTools makes the daemon provide the native tools the
+	// TypeScript SDK used to publish. It is set when the kernel runs without
+	// an SDK of its own, so nothing else would offer read, write, edit, ls,
+	// find, grep and the shell to the model.
+	DaemonNativeTools bool
 }
 
 // CreatePiAdapter is the production Agent adapter: one Task Runtime operation opens a restored Pi
@@ -1172,6 +1177,9 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				}
 			},
 		}
+		// The native tools of the PiG kernel are the daemon's own: the kernel owns
+		// no environment, so the tools the SDK used to provide are built here.
+		var nativeToolInput *AgentToolsInput
 		operationInput.HostTools = func(readRoots []string) []ToolDefinition {
 			tools := AgentToolsInput{
 				Workspace: workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog,
@@ -1180,6 +1188,8 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 					return commands.Run(command, args, signal)
 				},
 			}
+			built := tools
+			nativeToolInput = &built
 			if role != "" {
 				tools.Role = role
 			}
@@ -1238,6 +1248,12 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				tools.Catalog = channels.Catalog
 			}
 			return AgentTools(tools)
+		}
+		operationInput.NativeToolsProvider = func(granted []string) []ToolDefinition {
+			if nativeToolInput == nil || !options.DaemonNativeTools {
+				return nil
+			}
+			return PigNativeTools(*nativeToolInput, granted)
 		}
 		capabilityOperation = contextAssembly.Bundle.OpenOperation(operationInput)
 	}()

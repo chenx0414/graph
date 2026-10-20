@@ -33,6 +33,15 @@ var durableOwners = struct {
 }{values: map[string]*durableOwner{}}
 
 func ensureDurableOwner(database string) (*durableOwner, error) {
+	if agentKernelMode() == AgentKernelPig {
+		// The PiG kernel owns the durable namespace in this process. The
+		// TypeScript sidecar would open the same tables with the same
+		// schema, and two kernels over one namespace corrupt each other's
+		// records. The paths that still need the sidecar - the graph node lane
+		// and the crash recovery - are refused here rather than silently
+		// fighting over the tables.
+		return nil, fmt.Errorf("The TypeScript durable sidecar is not available on the PiG kernel: the graph node lane and the crash recovery still need it")
+	}
 	durableOwners.Lock()
 	defer durableOwners.Unlock()
 	if owner := durableOwners.values[database]; owner != nil {

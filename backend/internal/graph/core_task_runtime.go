@@ -828,8 +828,16 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		Access:          runtime.resolvedAccessPolicy,
 		Artifacts:       runtime.artifacts,
 	})
-	recoverDurableCompletions(runtime.store)
-	runtime.bootstrapDurableRecovery()
+	// The recovery bootstrap belongs to the kernel that owns the durable
+	// conversations. On the PiG kernel the durable namespace is the Go
+	// process's own, and the TypeScript sidecar must not open it: two kernels
+	// over one namespace would fight over the same tables. The PiG path
+	// therefore has no crash recovery yet - the gap is recorded in the
+	// migration plan, and the switch waits for the recovery semantics to move.
+	if runtime.options.Kernel != AgentKernelPig {
+		recoverDurableCompletions(runtime.store)
+		runtime.bootstrapDurableRecovery()
+	}
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
 	return runtime
 }
@@ -1274,7 +1282,7 @@ func (runtime *TaskRuntime) graphHome() string {
 
 // fallbackAdapter builds the adapter that serves the built-in agent action.
 func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
-	return PiAdapterOptions{
+	options := PiAdapterOptions{
 		Store:        runtime.store,
 		InstancesDir: filepath.Join(runtime.stateDir, "instances"),
 		Catalog:      runtime.catalog,
@@ -1289,6 +1297,14 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		Network:      runtime.piNetwork(),
 		Channels:     runtime.piChannels(),
 	}
+	// The Agent kernel is the one the daemon was asked to run on. The PiG
+	// kernel keeps the durable conversations in the Go process; the
+	// TypeScript sidecar keeps them in a child process.
+	if runtime.options.Kernel == AgentKernelPig {
+		options.Transport = CreatePigAgentSessionTransport(runtime.store)
+		options.DaemonNativeTools = true
+	}
+	return options
 }
 func (runtime *TaskRuntime) fallbackAdapter() *ActionAdapter {
 	adapter := CreatePiAdapter(runtime.mainAdapterOptions())

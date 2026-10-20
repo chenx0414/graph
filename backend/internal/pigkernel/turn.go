@@ -48,6 +48,10 @@ type ToolSpec struct {
 	// Execute runs the tool. The daemon owns the admission and the side
 	// effects; the kernel only carries the call and its result.
 	Execute func(ctx context.Context, args map[string]any) (string, error)
+	// Result runs the tool and returns the SDK's own tool result. It is the
+	// faithful shape: a tool that returns an image or structured details
+	// keeps them. It wins over Execute when both are set.
+	Result func(ctx context.Context, args map[string]any) (any, error)
 }
 
 // TurnOptions configure one turn.
@@ -90,11 +94,16 @@ type TurnResult struct {
 //
 // The mapping is a durable document, so the identity of a session survives the
 // restart of the daemon and the kernel can find the very same transcript again.
-var identitiesDoc = durable.DefineDoc[map[string]int64](durable.DocDefinition[map[string]int64]{
-	CommonDocDefinition: durable.CommonDocDefinition[map[string]int64]{
+//
+// The document's shape is the one the TypeScript kernel wrote: the identities
+// live under `conversations`. Both kernels therefore address the same document
+// and find the same conversation, so a database the old kernel wrote keeps its
+// history when the new kernel takes it over.
+var identitiesDoc = durable.DefineDoc[map[string]any](durable.DocDefinition[map[string]any]{
+	CommonDocDefinition: durable.CommonDocDefinition[map[string]any]{
 		Kind:    "graph.identities",
 		Version: 1,
-		Initial: func() map[string]int64 { return map[string]int64{} },
+		Initial: func() map[string]any { return map[string]any{"conversations": map[string]any{}} },
 	},
 	DocumentSemantics: durable.DocumentSemantics{Scope: durable.ScopeSession},
 })
@@ -110,32 +119,7 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	defer func() { _ = kernel.Close() }()
 
 	recorder := &callRecorder{}
-	registrations := make([]*durable.ToolRegistration, 0, len(options.Tools))
-	for _, tool := range options.Tools {
-		spec := tool
-		registrations = append(registrations, &durable.ToolRegistration{
-			ToolSchema: ai.ToolSchema{
-				Name:        spec.Name,
-				Description: spec.Description,
-				Parameters:  spec.Parameters,
-			},
-			Execute: func(ctx context.Context, args any, _ durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
-				recorder.record(spec.Name)
-				decoded := map[string]any{}
-				if body, err := json.Marshal(args); err == nil {
-					_ = json.Unmarshal(body, &decoded)
-				}
-				text, err := spec.Execute(ctx, decoded)
-				if err != nil {
-					return durable.ToolExecutionResult{
-						Output:  []ai.ToolResultMessageContent{ai.TextContent{Text: "Tool failed: " + err.Error()}},
-						IsError: boolPointer(true),
-					}, nil
-				}
-				return durable.ToolExecutionResult{Output: []ai.ToolResultMessageContent{ai.TextContent{Text: text}}}, nil
-			},
-		})
-	}
+	registrations := toolRegistrations(options.Tools, recorder)
 	// The MCP servers are connected by the kernel itself: the model reaches
 	// their tools directly, without a gateway tool and without an extension.
 	mcpConnections, mcpTools, err := connectMcpServers(ctx, options.McpServers, recorder)
@@ -199,7 +183,7 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 		Tools:          offered,
 	}
 	if settled.Answer != nil {
-		text, stopReason, err := answerText(ctx, conversation, *settled.Answer)
+		text, stopReason, _, err := answerText(ctx, conversation, *settled.Answer)
 		if err != nil {
 			return TurnResult{}, err
 		}
@@ -223,11 +207,21 @@ func conversationFor(ctx context.Context, kernel *Kernel, identity string, chang
 	}
 	var conversationId durable.ConversationId
 	_, err = root.Commit(ctx, func(tx durable.Tx) (any, error) {
-		draft, err := durable.TxDoc[map[string]int64](tx, identitiesDoc)
+		draft, err := durable.TxDoc[map[string]any](tx, identitiesDoc)
 		if err != nil {
 			return nil, err
 		}
-		if value, found := draft.Lookup(identity); found {
+		conversations := draft.Object("conversations")
+		if conversations == nil {
+			if err := draft.Set("conversations", map[string]any{}); err != nil {
+				return nil, err
+			}
+			conversations = draft.Object("conversations")
+		}
+		if conversations == nil {
+			return nil, fmt.Errorf("pig kernel: the identity document has no conversation index")
+		}
+		if value, found := conversations.Lookup(identity); found {
 			if id, ok := conversationNumber(value); ok {
 				conversationId = durable.ConversationId(id)
 				return nil, nil
@@ -243,7 +237,7 @@ func conversationFor(ctx context.Context, kernel *Kernel, identity string, chang
 			return nil, err
 		}
 		conversationId = created.Id
-		return nil, draft.Set(identity, int64(created.Id))
+		return nil, conversations.Set(identity, int64(created.Id))
 	})
 	if err != nil {
 		return nil, err
@@ -264,9 +258,10 @@ func conversationFor(ctx context.Context, kernel *Kernel, identity string, chang
 }
 
 // answerText reads the assistant answer of a settled submission.
-func answerText(ctx context.Context, conversation harness.Conversation, answer durable.EntryId) (string, string, error) {
+func answerText(ctx context.Context, conversation harness.Conversation, answer durable.EntryId) (string, string, *Usage, error) {
 	var text string
 	var stopReason string
+	var usage *Usage
 	_, err := conversation.Commit(ctx, func(tx durable.Tx) (any, error) {
 		entry, err := tx.Entry(answer)
 		if err != nil {
@@ -281,6 +276,13 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 				continue
 			}
 			stopReason = string(assistant.StopReason)
+			if reported := assistant.Usage; reported.TotalTokens > 0 || reported.Input > 0 || reported.Output > 0 {
+				usage = &Usage{
+					Input: reported.Input, Output: reported.Output,
+					CacheRead: reported.CacheRead, CacheWrite: reported.CacheWrite,
+					Total: reported.TotalTokens,
+				}
+			}
 			parts := []string{}
 			for _, block := range assistant.Content {
 				if content, ok := block.(ai.TextContent); ok {
@@ -292,9 +294,81 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 		return nil, nil
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	return text, stopReason, nil
+	return text, stopReason, usage, nil
+}
+
+// toolRegistrations turns the tools one session may call into the
+// registrations the kernel offers.
+//
+// The tool bodies are the daemon's: the kernel carries the call and the
+// result, and the daemon decides whether the call is allowed and what it
+// does.
+func toolRegistrations(tools []ToolSpec, recorder *callRecorder) []*durable.ToolRegistration {
+	registrations := make([]*durable.ToolRegistration, 0, len(tools))
+	for _, tool := range tools {
+		spec := tool
+		registrations = append(registrations, &durable.ToolRegistration{
+			ToolSchema: ai.ToolSchema{
+				Name:        spec.Name,
+				Description: spec.Description,
+				Parameters:  spec.Parameters,
+			},
+			Execute: func(ctx context.Context, args any, _ durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
+				recorder.record(spec.Name)
+				decoded := map[string]any{}
+				if body, err := json.Marshal(args); err == nil {
+					_ = json.Unmarshal(body, &decoded)
+				}
+				if spec.Result != nil {
+					value, err := spec.Result(ctx, decoded)
+					if err != nil {
+						return durable.ToolExecutionResult{
+							Output:  []ai.ToolResultMessageContent{ai.TextContent{Text: "Tool failed: " + err.Error()}},
+							IsError: boolPointer(true),
+						}, nil
+					}
+					return toolExecutionResult(value), nil
+				}
+				text, err := spec.Execute(ctx, decoded)
+				if err != nil {
+					return durable.ToolExecutionResult{
+						Output:  []ai.ToolResultMessageContent{ai.TextContent{Text: "Tool failed: " + err.Error()}},
+						IsError: boolPointer(true),
+					}, nil
+				}
+				return durable.ToolExecutionResult{Output: []ai.ToolResultMessageContent{ai.TextContent{Text: text}}}, nil
+			},
+		})
+	}
+	return registrations
+}
+
+// toolExecutionResult reads the SDK's own tool result.
+//
+// The daemon's tools answer with the SDK's tool result shape: the content
+// blocks the model reads and the details the console shows. The kernel stores
+// exactly that, so nothing of the answer is lost on the way.
+func toolExecutionResult(value any) durable.ToolExecutionResult {
+	result := durable.ToolExecutionResult{}
+	if value == nil {
+		return result
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return result
+	}
+	message := &ai.ToolResultMessage{}
+	if err := json.Unmarshal(body, message); err != nil {
+		return result
+	}
+	result.Output = message.Content
+	if message.Details != nil {
+		result.Details = message.Details
+		result.HasDetails = true
+	}
+	return result
 }
 
 // buildModels registers the turn's model with PiG's model runtime.

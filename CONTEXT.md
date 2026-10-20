@@ -195,5 +195,17 @@ _Avoid_：把 PiG 当作可重写的实现（上游行为是契约，Go 是实�
 正式 Graph 数据库中承载内核记录的表前缀（`graph_durable_`）。同一命名空间由唯一宿主持有，PiG 内核与宿主读写同一批物理表。
 _Avoid_：为 PiG 内核另建一份数据库（会切断既有会话历史）
 
+**内核选择**：
+daemon 运行 Agent 会话所用的内核（`graphd --kernel node|pig`）。`node` 是 TypeScript 侧车，承载恢复语义与图节点泳道；`pig` 是 Go 进程内的 PiG 内核，承载主 Agent 会话。两者互斥：同一份 durable 命名空间只能有一个内核写入。
+_Avoid_：在同一进程里同时拉起两个内核（会争用同一批表并互相破坏记录）
+
+**模型通道**：
+daemon 交给内核的那条受控 provider 流。内核向 daemon 要答案，daemon 决定是否放行、花哪把凭据、记哪笔用量，因此内核拿不到绕过准入或预算的模型请求通道。
+_Avoid_：让内核自己发起 provider 请求（绕过准入与用量账本）
+
+**原生工具桥**：
+daemon 在 Go 侧提供的 read/write/edit/ls/find/grep 与 shell。TypeScript SDK 原本自带这套工具，PiG 内核不自带环境，桥接层以同样的名字与声明补齐，并复用 Graph 既有的路径越界保护。
+_Avoid_：在 PiG 路径上沿用 SDK 的原生工具（内核里没有它们，模型会调用到不存在的工具）
+
 **内核钉住版本**：
 `backend/go.mod` 中 PiG 模块的确定版本，以及随之确定的上游 Pi 版本；更新走 `pnpm pig:update`，不静默改变运行中桌面应用的内核版本。

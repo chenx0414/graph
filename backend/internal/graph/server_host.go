@@ -83,6 +83,9 @@ type GraphServerOptions struct {
 	Program       any
 	Rsi           any
 	Catalog       any
+	// Kernel selects the Agent kernel: "node" (the TypeScript durable
+	// sidecar) or "pig" (the Go PiG kernel). Empty is "node".
+	Kernel string
 }
 
 // GraphHost is the listening daemon and its drive loop.
