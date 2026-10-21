@@ -839,6 +839,11 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		runtime.bootstrapDurableRecovery()
 	}
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
+	// Tasks and conversations created while dispatch was disabled carry no
+	// master node. Once a master binding exists they get one and become
+	// driveable again; queued conversation messages stay pending until then.
+	// The same scan runs after a hot configuration apply.
+	runtime.RecoverMasters()
 	return runtime
 }
 
@@ -5193,7 +5198,12 @@ func (runtime *TaskRuntime) SyncProjects() {
 	})
 }
 
-// RecoverMasters creates master nodes for pending tasks after a hot configuration apply.
+// RecoverMasters creates master nodes for pending tasks.
+//
+// Tasks and conversations created while dispatch was disabled carry no master
+// node. Once a master binding exists they get one and become driveable again;
+// queued conversation messages stay pending until then. The same scan runs when
+// the runtime opens and after a hot configuration apply.
 func (runtime *TaskRuntime) RecoverMasters() int {
 	runtime.ensureOpen()
 	if runtime.master == nil || runtime.masterModel() == nil || runtime.masterDefinitionVersion() == nil {
@@ -5202,12 +5212,18 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 	created := 0
 	runtime.store.Transaction(func() any {
 		pending := kernelRows(runtime.store.Db, "SELECT id, project_id, phase FROM tasks WHERE phase IN ('discussing','chatting') ORDER BY created_seq")
+		allowed := runtime.allowedProjects()
+		recoverable := []map[string]any{}
 		for _, task := range pending {
 			phase := kernelString(task["phase"])
 			projectId := kernelString(task["project_id"])
-			if phase != "chatting" && !runtime.allowedProjects()[projectId] {
+			// A task whose project was removed from the configuration keeps its
+			// history but is not brought back to life. Conversation workspaces
+			// are host-owned and stay addressable.
+			if phase != "chatting" && !allowed[projectId] {
 				continue
 			}
+			recoverable = append(recoverable, task)
 			nodes := kernelRows(runtime.store.Db, "SELECT spec FROM nodes WHERE task_id=?", kernelString(task["id"]))
 			hasMaster := false
 			for _, node := range nodes {
@@ -5224,6 +5240,18 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 			runtime.createMasterNode(kernelString(task["id"]))
 			runtime.store.Event(kernelString(task["id"]), "task.master_recovered", map[string]any{"reason": "dispatch was disabled when the task was created"})
 			created++
+		}
+		// A recovered master is only dispatchable when the lane knows about
+		// it: without an active task the discussing lane stays empty.
+		active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
+		if active == "" {
+			for _, task := range recoverable {
+				if kernelString(task["phase"]) != "discussing" {
+					continue
+				}
+				kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", kernelString(task["id"]))
+				break
+			}
 		}
 		return nil
 	})

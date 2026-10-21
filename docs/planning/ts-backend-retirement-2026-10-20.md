@@ -181,6 +181,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
    - 子图的输入/输出引用（`inner.job`）解析不到，报 `Unknown subgraph input inner.job`；
    - 指向子图成员的验收项读不到 `recipe`，报 `Acceptance works must name an agent reviewer`。
    修法：展开出来的成员一律存成普通记录（`interfaceSpecAsMap`），引用解析同时认普通记录与带类型的端口表。**结论：子图功能此前在 Go 侧从未真正跑通过**，审计里那条「Go 已有实现」只是读代码读出来的。
+4. **一个没有凭据的模型能弄坏另一个模型的回合**（Batch 15 修掉）。主 Agent 回完话之后会额外发一次「下一条输入建议」的请求，而选这次请求用哪个模型时只看目录、不看凭据：目录里排第二的模型没有可用密钥，于是建议请求在取密钥时抛 `No credential bound for model unusable`，这个异常一路冒泡回主回合，主回合被判为 `operation.unknown`，master 被 park 成 pending 并开 recovery question——**用户已经收到的回复被收走**。两处修法：`piAdapterCallableModels` 只让凭据真的能解析的模型进入候选；`piAdapterGenerateSuggestion` 自己吞掉异常，把失败变成建议结果里的 `error`，绝不掀翻主回合。
+5. **派发被关掉时建的任务永远救不回来**（Batch 15 修掉）。TypeScript 在 `openTaskRuntime` 里就调用一次 `recoverMasterNodes()`，所以 view-only 期间建的任务在下一次 execute 启动时会被补上 master 节点；Go 只在热改配置时调 `RecoverMasters`，启动路径上根本不调——任务永远停在「没有 master 节点」的状态。而且 Go 的 `RecoverMasters` 也不像 TS 那样在补完节点后把第一个 discussing 任务设为 `active_task`，补出来的节点因此进了不了派发车道。修法：`OpenTaskRuntime` 末尾调用一次 `RecoverMasters()`；`RecoverMasters` 在没有 active task 时把第一个 discussing 任务设为 `active_task`。
 
 ## 执行批次
 
@@ -207,6 +209,9 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 13（已完成）**：凭据隔离与配置版本记账。`tests/e2e/go-credentials.test.ts`——两个端点各自只看到自己的 `Bearer` 密钥（换模型不串钥）；凭据被撤销后模型不再触达 provider；新任务在 `task.created` 事件里记下当时生效的配置版本。
   - **发现一处行为差异（待修）**：TypeScript 在模型没有可用凭据时让节点**失败并给出原因**（`no credential bound`）；Go 的分发闸门只是**等待**——对话停在 pending，`master` 为 null，用户看不到任何原因。已证明的部分（不外发、不假装答完）写进了用例；「给出原因」这一半还没有 Go 实现，列入待补。
 - **Batch 14（已完成）**：daemon 的启动契约。`tests/e2e/go-startup.test.ts`——直接驱动真实 `graphd` 二进制，把 `m8/startup.test.ts` 的 10 条契约整份移植：无效参数以 usage 退出（exit 2）；缺控制台、缺配置、缺模型、缺凭据、端口占用、状态目录被占各报自己的错误码；view-only 起得来、报得出启动状态、且一个回合都不派发；重建控制台不用重启进程；种子并编译出 main 配方；重启后同一状态目录里的任务还在；CLI 打印地址、SIGTERM 干净退出（exit 0）；配置拒绝未知引用与非法取值、相对项目根被解析成绝对路径；密钥只从被指名的环境变量取，配置接口永远不带明文。
+- **Batch 15（已完成）**：模型请求携带的东西。`tests/e2e/go-provider-headers.test.ts`——移植 `m8/provider-headers.test.ts` 的 4 条契约：配置的头真的到达 provider（连同该模型自己的 `Bearer`）；opencode-go 的路由头在连接测试和真实派发里都在；**一个解析不出凭据的模型只禁用自己的模型，不禁用别人的派发**（可用模型照常回完话，用户拿得到回复，没有 recovery question，没有 `operation.unknown`，而且那个不可用模型根本没有被问过）；**派发被关掉时建的任务在下一次 execute 启动时被救回来**（补出 master 节点、记下 `task.master_recovered`、真的向 provider 发请求、带着这一轮才有的密钥），而项目已被移出配置的那个任务保留历史但不被救活。
+  - 这一批逼出了 Go 侧的两个真 bug（见上文「Go 侧补齐的能力」第 4、5 条）：**一个没有凭据的模型能弄坏另一个模型的回合**，以及**派发被关掉时建的任务永远救不回来**。
+  - TS 的第 3 条用例走的是原生图的 worker 节点，Go 这边走的是会话的 master：master 回合之后多一次「输入建议」的请求，正是这条路径把 bug 逼了出来。断言按 Go 自己的语义写（`prompt_suggestion.decided` 的 `asked:false` / `model:null`），不照抄 TS 文本。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

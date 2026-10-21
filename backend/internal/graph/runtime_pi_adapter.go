@@ -2026,7 +2026,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	}
 	var suggestionEntry *ModelEntry
 	if turn.Conversation != nil && lastUserMessage != "" {
-		suggestionEntry = SelectPromptSuggestionModel(entry, options.Directory())
+		suggestionEntry = SelectPromptSuggestionModel(entry, piAdapterCallableModels(options.Directory(), input.ResolveBinding))
 	}
 	if suggestionEntry != nil && strings.TrimSpace(reply) != "" {
 		suggestionNodeId := operation.NodeId
@@ -2311,8 +2311,47 @@ func shouldCompactContextForEntry(entry ModelEntry, contextTokens *float64) bool
 	}{ContextWindow: entry.ContextWindow, MaxTokens: entry.MaxTokens}, contextTokens)
 }
 
+// piAdapterCallableModels keeps the models a turn could actually call.
+//
+// A model whose credential cannot be resolved is not a candidate for an
+// auxiliary call: choosing it would turn a missing key into a failure of the
+// work that is already running.
+func piAdapterCallableModels(directory []ModelEntry, resolve func(candidate ModelEntry) *PiAdapterBinding) []ModelEntry {
+	if resolve == nil {
+		return directory
+	}
+	callable := []ModelEntry{}
+	for _, candidate := range directory {
+		if piAdapterCallableModel(resolve, candidate) {
+			callable = append(callable, candidate)
+		}
+	}
+	return callable
+}
+
+// piAdapterCallableModel reports whether one model could be called right now.
+func piAdapterCallableModel(resolve func(candidate ModelEntry) *PiAdapterBinding, candidate ModelEntry) (callable bool) {
+	defer func() {
+		if recover() != nil {
+			callable = false
+		}
+	}()
+	return resolve(candidate) != nil
+}
+
 // piAdapterGenerateSuggestion asks one fresh model call for a composer line.
-func piAdapterGenerateSuggestion(options PiAdapterOptions, entry ModelEntry, gate *TaskSendGate, input piAdapterRunInput, userMessage string, reply string, signal *AbortSignal) *PromptSuggestionReply {
+//
+// The suggestion is an observer of the turn, never a step in it: a model whose
+// credential cannot be resolved, a provider that refuses and a transport that
+// fails are facts about the suggestion. None of them may take the reply the
+// user already received down with them, so the outcome is reported and the
+// turn continues.
+func piAdapterGenerateSuggestion(options PiAdapterOptions, entry ModelEntry, gate *TaskSendGate, input piAdapterRunInput, userMessage string, reply string, signal *AbortSignal) (outcome *PromptSuggestionReply) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			outcome = &PromptSuggestionReply{Error: promptErrorString(panicMessage(recovered))}
+		}
+	}()
 	store := options.Store
 	operation := input.Operation
 	systemPrompt := DEFAULT_PROMPT_SUGGESTION_PROMPT
