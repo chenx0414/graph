@@ -107,11 +107,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `m8/app-shell-ux.test.ts` | 32 | 0 | 32 | 0 | 0 |
 | `m8/credentials.test.ts` | 5 | 0 | 5 | 0 | 0 |
 | `m8/provider-headers.test.ts` | 4 | 0 | 4 | 0 | 0 |
-| `m8/recipe-compile.test.ts` | 9 | 0 | 7 | 2 | 0 |
+| `m8/recipe-compile.test.ts` | 9 | 7 | 0 | 2 | 0 |
 | `m8/settings-ui.test.ts` | 10 | 0 | 10 | 0 | 0 |
 | `m8/startup.test.ts` | 10 | 2 | 8 | 0 | 0 |
 | `m8/tool-failure-record.test.ts` | 1 | 0 | 1 | 0 | 0 |
-| **小计** | **176** | **5** | **149** | **16** | **7** |
+| **小计** | **176** | **12** | **142** | **16** | **7** |
 
 结论：**没有任何一条产品行为是 Go 模型有意丢掉的**（`dropped-in-go` 数量为 0）。所有空缺要么是「Go 侧还没有这条 E2E」，要么是「这条证明写的是 TS 内部实现」，要么是「Go 侧确实少一个能力」。
 
@@ -127,7 +127,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 ### 移植时的已知陷阱
 
 - **Go 的图布局不是纯 Go**：`backend/internal/graph/server_layout.go:317-357` 会 shell out 到 `node` + `elkjs`。几何类契约的 E2E 必须在 `node_modules/elkjs` 在场的环境里跑——这是最高风险的移植点。
-- **`DELETE` 的空 JSON body 400 是 Fastify 的产物**：`tests/m8/recipe-compile.test.ts:211-214` 断言 `DELETE` 带 `content-type: application/json` → 400、不带 → 200，Go 的 `net/http` 没有这条规则。Go 的用例要断言 Go 真实的删除语义，而不是照抄这个框架产物。
+- **`DELETE` 的空 JSON body 400 是 Fastify 的产物**：`tests/m8/recipe-compile.test.ts:211-214` 断言 `DELETE` 带 `content-type: application/json` → 400、不带 → 200，Go 的 `net/http` 没有这条规则。Go 的用例要断言 Go 真实的删除语义，而不是照抄这个框架产物。**Batch 34 已落定**：Go 的 `serveCombinationDelete` 根本不读请求体，于是带不带 `content-type` 都删得掉（200），配方文件里的那条配方真的消失。**这是 Go 更正确的语义，不向 TypeScript 对齐**——那条 400 断言是 Fastify 的内容类型解析器在路由之前就把空 body 拒了，与产品契约无关；TS 用例随实现一起退休。
 - **浏览器用例里的 mock 必须换成真实后端**：`tests/m8/app-shell-ux.test.ts` 有八条用例用 `page.route` 伪造应用自己的 `/api/conversations` 响应，还有两条注入了假的 `actions.master`。按仓库规则（只可替代外部服务，不能 mock 自有协作者），这些 fixture 不是有效 keeper——契约保留，证明方式换成真实 Go 进程 + 受控 provider。
 
 ### 已补的 Go E2E
@@ -163,6 +163,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m8/credentials.test.ts` 没有可解析凭据的模型在发出任何请求之前就被拒；一个模型都叫不动的会话被拒并说清原因、消息保留、密钥回来照跑；一个模型都叫不动的任务被问清原因、答复在理由还成立时被拒、密钥回来任务真跑 | `tests/e2e/go-credential-refusal.test.ts` | 3 |
 | `tests/e2e/thinking.test.ts` 思考档位（daemon 那一半）：目录面给出模型接受哪些档位、请求被钳制到模型真能接受的那一档、会话读回落档、provider 收到同一档；没有档位的模型与不认识该字段的 provider 都不发；Anthropic 模型收到的是思考预算而不是档位名 | `tests/e2e/go-thinking.test.ts` | 3 |
 | `tests/e2e/pricing.test.ts` 调用成本：有价模型报出金额与价格表、免费模型仍然点名价格表、没有费率如实说未知、旧式费率只报金额 | `tests/e2e/go-pricing.test.ts` | 1 |
+| `tests/m8/recipe-compile.test.ts` 配方面：保存即编译并发布定义、相同配方复用同一版本、引用不存在的配方被拒不落盘、旧 compile 端点仍可用、改描述时定义版本前进、删除后配方文件里的它消失、配方里的内联系统提示真的到达下一次操作 | `tests/e2e/go-recipe-compile.test.ts` | 3 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -179,7 +180,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 审计的重要结论：
 
 - **Go 没有「有意丢掉」的产品行为**。101 条 `yes` 项在 Go 侧都能找到实现点；缺口全部是「没有 E2E 证明」。
-- **已证明的进度**：批次 20 证明了 1 条（`node-budget` 的节点配额），批次 21 证明了 4 条（`node-queue` 整份：队列串行、重提额度、provider 真失败花掉自动重试额度、失败节点保留后来的输入），本批之后还剩 96 条 `yes` 没有 E2E 证明。
+- **已证明的进度**：批次 20 证明了 1 条（`node-budget` 的节点配额），批次 21 证明了 4 条（`node-queue` 整份：队列串行、重提额度、provider 真失败花掉自动重试额度、失败节点保留后来的输入），此后的批次又从这份清单里取走了图生命周期（图定义、图模块、图确认、补丁、节点 id）、目录面与密钥桥接、凭据缺口、思考档位与调用成本、Anthropic 预算、配方面（保存即编译、复用版本、内联提示到达操作）等簇。**「还剩 96 条」是批次 20 时的旧数字，已经过时**；清单剩余条数需要按当前批次重新点算（那份逐条审计结果没有落进仓库），所以在下一轮点算之前不再引用具体数字。
 - **16 条 `partial`/`no` 需要设计决策**，其中值得先看的几条：
   - 「peer message pending 账本」（Go 没有等价物）：影响 `m1/execution` 的两条用量对账规则。
   - 「host check 等待真实 merge 才准入」（Go 有集成/复查机械，但没有等价准入规则）：影响 `m8/kernel-git-integration` 的两条。
@@ -337,8 +338,14 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 33（已完成）**：Anthropic 传输的思考预算与 `max_tokens` 优先级。`tests/e2e/go-thinking.test.ts` 增补第 3 条用例（daemon 面那条与「对话中途换模型」那条是 Batch 31 的）：
   - **Anthropic 模型被问的是「思考预算」，不是档位名**（第 3 条）：目录给出的档位是 `low / medium / high / xhigh / max`（claude-opus-5-5），模型默认跑在**第二强**的那一档（`high`）；离开进程的那一发 Anthropic 请求带的是 **`thinking: {type: "enabled", budget_tokens: 16384, display: "summarized"}`**（high 档的预算就是 16384），**天花板是模型自己的 32000**，并且请求头带着 **`anthropic-beta: interleaved-thinking-2025-05-14`**（模型要在两次工具调用之间继续思考）。**没有档位的模型一个思考字段都不发**（请求体里没有 `thinking`），天花板就是它自己的 4096。回退这个修复后，这条用例在「请求带着预算」这一句上变红（`expected undefined to match object { type: 'enabled', …(2) }`），证明这条缺口是实的。
   - 顺带对齐两处语义：**`max_tokens` 的优先级**（调用方给的上限优先于模型自己的上限——「下一条输入建议」那种只想拿 160 token 的调用，在 Go 侧之前拿到的是模型的上限），以及**档位 `off` 的处理**（`off` 一律不发思考字段，而不是被钳制成一档最弱的思考）。
-- **Batch 34 起**：`read_system_capabilities` 的能力缺口、`harness-cost`、`recipe-compile`、`m8/app-shell-ux` 浏览器轨。
-- **已知差异（有意保留，排在 Batch 34 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
+- **Batch 34（已完成）**：配方面：保存即编译、版本与内联提示。`tests/e2e/go-recipe-compile.test.ts`（3 条）搬进 `tests/m8/recipe-compile.test.ts` 里**还没有被 Go 覆盖**的那 7 条契约（该文件另外两条——「编译失败保留配方并报 `compileError`」与「库界面不再有手动编译按钮」——分别是 mock 注入与源码断言，随 TS 实现一起退休）：
+  - **保存即编译并发布定义，相同配方复用同一版本**（第 1 条）：`POST /api/catalog/combinations` 存下配方就编译并发布定义（`worker@1`），目录面里同时看得见那条配方与那个定义；**再存一次同一条配方，复用的是同一个版本**（还是 `worker@1`，定义列表里仍然只有一条），而不是又发一版；**点名不存在的配方的配方被拒不落盘**（400，理由是 `Missing required capability missing-capability@1.0.0`，配方列表与定义列表里都没有它）；**旧的 compile 端点仍然可用**（`POST /api/catalog/combinations/worker/compile` 回 `worker@1`）。
+  - **改描述时定义版本前进，删除时配方真的从文件里消失**（第 2 条）：改描述是一次「同一条配方的另一次保存」，所以背后的定义必须跟着走（`worker@2`，目录面里的定义版本也是 2），配方文件里那条配方的描述同步更新；删除走的是控制台用的同一扇门（`DELETE /api/catalog/combinations/worker` → `{id: 'worker', deleted: true}`），配方文件里只剩 daemon 自己写下的 `main` 那条配方。
+  - **配方里的内联系统提示真的到达下一次操作**（第 3 条）：把 `main` 配方换成带内联系统提示（`You are a climate data specialist.`）的那一条，它被编进 `main@2`；随后那次真实对话的 provider 请求里，**领头的指令消息就带着这句身份**（角色是 Go 为这个 provider 选的那个：`developer` 或 `system`）。这条跑在 `--kernel pig` 上——提示由 Go 自己拼、请求由 Go 自己发，证明的是 Go 的语义而不是 TS sidecar 的渲染。
+  - **这一批没有逼出 Go 侧的真 bug**：配方的编译、版本与内联提示这几套语义在 Go 侧本来就成立，补的是证明。四次回退验证证明这些断言咬得住：让 `EnsureDefinition` 每次都发新版本 → 第 1 条变红（`worker@2` vs `worker@1`）；把描述从定义规格里去掉 → 第 2 条变红（`worker@1` vs `worker@2`）；让删除不落盘 → 第 2 条变红（`['main','worker']` vs `['main']`）；让保存不编译 → 第 1 条变红（`undefined` vs `worker@1`）；让内联提示被忽略 → 第 3 条变红（身份退回 bootstrap 那句「You are the Main Agent in Graph…」）。
+  - **两处结构性的差异（有意保留）**：**（一）** TS 那条「编译失败保留配方并报 `compileError`」在 Go 侧**结构上不可达**——Go 的校验与编译是同一个函数（`ValidateAgentCombination` → `CompileAgentCombinationDefinition`），过不了校验的配方在写盘之前就被拒（400），过得了校验的配方一定编译得过，于是 `compileError` 那条分支拿不到真实输入；**（二）** TS 那条「`DELETE` 带 JSON 头就 400」是 Fastify 的产物，Go 不读请求体，带不带 `content-type` 都删得掉。
+- **Batch 35 起**：`read_system_capabilities` 的能力缺口（daemon 从不装配 `SystemContext`，四个系统工具在 Go 侧不可用）、`harness-cost` 脚本的迁移或退休、`m8/app-shell-ux` 浏览器轨。
+- **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
