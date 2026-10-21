@@ -167,6 +167,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 审计的重要结论：
 
 - **Go 没有「有意丢掉」的产品行为**。101 条 `yes` 项在 Go 侧都能找到实现点；缺口全部是「没有 E2E 证明」。
+- **已证明的进度**：批次 20 证明了 1 条（`node-budget` 的节点配额），批次 21 证明了 4 条（`node-queue` 整份：队列串行、重提额度、provider 真失败花掉自动重试额度、失败节点保留后来的输入），本批之后还剩 96 条 `yes` 没有 E2E 证明。
 - **16 条 `partial`/`no` 需要设计决策**，其中值得先看的几条：
   - 「peer message pending 账本」（Go 没有等价物）：影响 `m1/execution` 的两条用量对账规则。
   - 「host check 等待真实 merge 才准入」（Go 有集成/复查机械，但没有等价准入规则）：影响 `m8/kernel-git-integration` 的两条。
@@ -192,6 +193,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 9. **沉淀开关永远读不到**（Batch 19 修掉）。Go 的**活配置是解析后的结构体**（`LiveConfig.Config()` 返回 `GraphConfig`），而沉淀设置的读取函数 `SedimentSettingsFrom` 只认 `map[string]any`：类型断言失败 → 永远拿回默认值（关闭）——配置面能存、能显、能校验，活运行时却当这个开关不存在，于是沉淀复审永远不发生。TypeScript 那边活配置是普通对象，同一段读取逻辑一直是对的。修法：`SedimentSettingsFrom` 认得解析后的 `GraphConfig`（直接取 `Skills.Sedimentation`），同时也继续认原始文档。
 10. **两个节点并行时 daemon 直接崩**（Batch 20 修掉）。Go 的图 lane（`runtime_kernel_graph_lane.go`）把每节点的会话、宿主、绑定、绑定摘要、恢复快照放在**几张普通 map** 里，而 `GraphRunner.Drain` 是**每个节点一个 goroutine**——一张图有两个节点同时开工时，两个 goroutine 写同一张 map，Go 的运行时直接判 `fatal error: concurrent map writes`，**整个 daemon 进程当场退出**（不是丢一次更新，是把服务打死）。TypeScript 是单线程事件循环，同一段逻辑没有这个窗口。修法：这几张表统一由一把 mutex 守护，所有读写走访问器（`sessionOf` / `setSession` / `hostOf` / `setHost` / `forgetNode` …），关图与关运行时也改成「先在锁内快照键，再在锁外销毁」。
 11. **provider 调用记录读不出状态与预留**（Batch 20 修掉）。`KernelProviderCall` 结构体**没有 JSON tag**，于是它序列化出来是 `Id` / `State` / `Reserved` 这些大写键；而读它的两处（节点运行视图 `KernelNodeRun` 的 `invocations`、`graph_inspect` 的 `provider_calls`）都按小写的 `state` / `reserved` / `executionId` 去读——读出来永远是空值。所以「这一发 provider 调用是不是还在飞、占了多少预留」在 Go 侧根本看不到，图视图与 `provider_calls` 查询都缺了 TypeScript 那边有的那一半事实。修法：给结构体补上与 TypeScript 同形的 JSON 名（`id` / `nodeId` / `executionId` / `reserved` / `state` / `usage` / `model` / `purpose` / `cost` / `createdAt` / `settledAt`）。
+12. **队列与执行历史读不出来**（Batch 21 修掉）。`QueueHistoryPage` / `ExecutionHistoryPage` / `ExecutionHistoryItem` / `ExecutionRow` 同样**没有 JSON tag**，序列化出来是 `Items` / `Cursor` / `RetriesUsed`；而 `graph_inspect` 的 `queue` 与 `executions` 查询、模型读到的工具结果，都按小写的 `items` / `cursor` / `retriesUsed` 去读。于是「图上排着哪些活、一次执行用掉了几次自动重试与几次重提」在 Go 侧只剩下一半事实：模型看到的是 `Items`，而按 `items` 读的人什么也读不到。修法：给这四个结构体补上与 TypeScript 同形的 JSON 名。
 
 ## 执行批次
 
@@ -243,6 +245,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **每个节点各记各的账**：无限额节点（`budget.tokens: null`）在同一时刻是 `unlimited: true`、`reserved: 0`、`used: 0`——另一个节点的预留不会漏进它的账本；它自己的回合按自己的用量结算（20_000_001）。
   - **只拒耗尽的那个节点**：第四个回合在预留时超限（150 + 200_000 > 200_100），节点变成 `blocked`、provider 一次也没被问第四次（3 次真实请求），并在图上 park 一个 `budget` 问题（`kind: budget`、`nodeId: finite`、`status: open`）等用户授权增量。
   - 这一批逼出了 Go 侧的两个真 bug（见上文「Go 侧补齐的能力」第 10、11 条）：**两个节点并行时 daemon 直接崩**（lane 的每节点表被并发写），**provider 调用记录读不出状态与预留**（结构体没有 JSON tag）。
+- **Batch 21（已完成）**：图生命周期：节点队列。`tests/e2e/go-node-queue.test.ts`（4 条）**整份**移植 `tests/e2e/node-queue.test.ts`，同样走会话面那条路径：
+  - **一个节点把投递、排队的聊天与后来的投递串成一条线**（第 1 条）：第一个投递在 provider 上被挂住时，节点 a 的队列是 `[delivery claimed, chat queued, delivery queued]`——后来的聊天与投递排在它后面，而不是插到它前面；另一个节点 b 不在这条队列里，它的执行已经 `completed`；挂住的那次调用里看不到后到的聊天文本；放行之后队列变成 `[delivery done, chat done, delivery done]`，节点 a 有三次 `completed` 的执行，provider 被问了 5 次（其中第 3 次的上下文里带着那条排队的聊天），图的结果是提交出去的两个值 1 与 3。
+  - **重提额度只花一次，且花掉的重提在重启后还在**（第 3 条）：节点没交出必需产出时，回合按额度被重提——默认额度 1，于是第一次重提之后节点 `failed`（`retries_used: 0`、`resubmits_used: 1`，provider 被问 2 次）；节点自己声明 `retry: {automatic: 4, resubmit: 2}` 时可以被修两次（`resubmits_used: 2`、`completed`，provider 被问 4 次）。两种情况下重启 daemon（同一个状态目录）之后记账原样保留，provider 也没有被再问一次。
+  - **provider 真失败会花掉自动重试额度**（第 4 条）：模型端真的返回 404 时，节点按额度自动重试——默认额度 2，于是节点 `failed`（`retries_used: 2`、`resubmits_used: 0`，provider 至少被问 3 次）；节点自己声明 `retry: {automatic: 4, resubmit: 1}` 时重试 4 次（`retries_used: 4`）。两种情况下重启 daemon 之后额度仍然花完，provider 没有被再问一次。
+  - **失败的节点在重启后保留后来的输入，由显式的 skip 与 resume 释放**（第 2 条）：节点 a 的第一个投递没交出必需产出而失败（`retry: {automatic: 0, resubmit: 0}`），后来的投递留在队列里，节点 b 不受影响地完成；重启 daemon 之后队列仍是 `[delivery failed, delivery queued]`，provider 没有被再问一次；显式 `skip` 掉失败的那个条目、再 `resume` 节点之后，排队的投递才跑起来并交出值 3（provider 共被问 3 次），而已提交的活不能再被 `retry`（被拒，错误码 `invalid_queue`）。
+  - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 12 条）：**队列与执行历史读不出来**（分页结构体没有 JSON tag）。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

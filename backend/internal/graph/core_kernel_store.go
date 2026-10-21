@@ -39,21 +39,25 @@ type DeliveryRow struct {
 }
 
 // ExecutionRow is one node attempt.
+//
+// The JSON names are the ones the graph views read: an execution history page
+// hands these records to a reader that asks for `retriesUsed`, not
+// `RetriesUsed`.
 type ExecutionRow struct {
-	Id              string
-	TaskId          string
-	NodeId          string
-	RevisionVersion int
-	Attempt         int
-	RetriesUsed     int
-	ResubmitsUsed   int
-	PendingGap      []string
-	TokenBudget     *TokenBudget
-	State           string
-	SubmissionId    *string
-	MissingRequired bool
-	StartedAt       int64
-	EndedAt         *int64
+	Id              string       `json:"id"`
+	TaskId          string       `json:"taskId"`
+	NodeId          string       `json:"nodeId"`
+	RevisionVersion int          `json:"revisionVersion"`
+	Attempt         int          `json:"attempt"`
+	RetriesUsed     int          `json:"retriesUsed"`
+	ResubmitsUsed   int          `json:"resubmitsUsed"`
+	PendingGap      []string     `json:"pendingGap"`
+	TokenBudget     *TokenBudget `json:"tokenBudget"`
+	State           string       `json:"state"`
+	SubmissionId    *string      `json:"submissionId"`
+	MissingRequired bool         `json:"missingRequired"`
+	StartedAt       int64        `json:"startedAt"`
+	EndedAt         *int64       `json:"endedAt"`
 }
 
 // SubmitOutput is one named output in a submission.
@@ -208,20 +212,20 @@ type HistoryQuery struct {
 
 // QueueHistoryPage is one queue page.
 type QueueHistoryPage struct {
-	Items []QueueRow
-	Next  *int64
+	Items []QueueRow `json:"items"`
+	Next  *int64     `json:"next"`
 }
 
 // ExecutionHistoryItem is one frozen execution plus its cursor.
 type ExecutionHistoryItem struct {
-	Cursor int64
+	Cursor int64 `json:"cursor"`
 	ExecutionRow
 }
 
 // ExecutionHistoryPage is one execution page.
 type ExecutionHistoryPage struct {
-	Items []ExecutionHistoryItem
-	Next  *int64
+	Items []ExecutionHistoryItem `json:"items"`
+	Next  *int64                 `json:"next"`
 }
 
 // KernelStore is the v2 durable layer on the shared task database.
