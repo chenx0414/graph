@@ -29,6 +29,7 @@
 13. **默认内核已翻到 PiG**：不带 `--kernel` 启动的 daemon 直接在 Go 进程内跑 PiG 内核（`backend/internal/graph/server_cli.go`、`runtime_pig_session.go`），不再拉起 TypeScript 侧车；`--kernel node` 保留为显式退路。E2E `tests/e2e/pig-default-kernel.test.ts` 用真实 daemon 证明默认路径下**没有启动任何侧车进程**且回合真的跑在 PiG 内核上（durable schema 版本 2、`graph_durable_conversations` 非空），显式 `--kernel node` 时侧车仍在、schema 仍是版本 1——退路没有被这次翻转弄断。
 14. **会话提示词由 daemon 拼装**：TypeScript SDK 原本在宿主侧追加项目上下文、可用技能清单与工作目录三块；PiG 内核不自带环境，这三块改由 daemon 按同样的顺序与形状补齐（`backend/internal/graph/runtime_pig_instructions.go`），模型在两个内核上看到同样的提示词。技能加载器按 SDK 语义自建：跟随符号链接目录、按规范化路径去重、同名先到先得、跳过没有描述的技能、排除 `disable-model-invocation` 的技能。E2E `tests/e2e/agent-skills.test.ts` 覆盖主 Agent 与图 worker 两条路径上的技能块。
 
+15. **恢复交接的竞态已修**："已受理未发"那一路把当时那份请求与输入交给真正的重发，交接判据必须是"捕获到的值"而不是"准备动作结束了"：两者同时就绪时 `select` 会随机挑一个，挑中"结束了"就会静默放弃这次恢复，让操作永远停在 `unknown`、且不留任何痕迹。修法是值优先（`backend/internal/graph/runtime_pig_recovery.go` 的 `pigRecoveryTake`），并在确实放弃时把原因写进 daemon 的错误流。这个缺陷在高负载下约四分之一的轮次复现，由 `tests/e2e/pig-durable-recovery.test.ts` 与 `tests/e2e/go-durable.test.ts` 抓住；修后连跑 14 轮同负载全绿。
 
 ## 尚未完成的部分
 

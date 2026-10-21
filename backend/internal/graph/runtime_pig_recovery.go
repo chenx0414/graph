@@ -125,22 +125,23 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 	options.Transport = capture
 	options.RecoverySnapshot = wrapper
 	finished := make(chan struct{})
+	var prepared OperationResult
+	var preparedOk bool
 	go func() {
 		defer close(finished)
 		defer catchPigRecoveryFailure("the interrupted turn could not be prepared")
 		adapter := CreatePiAdapter(options)
-		_ = adapter.Prepare(operation)()
+		prepared = adapter.Prepare(operation)()
+		preparedOk = true
 	}()
-	var request AgentSessionRequest
-	select {
-	case request = <-capture.request:
-	case <-finished:
+	request, ok := pigRecoveryTake(capture.request, finished)
+	if !ok {
+		reportPigRecoveryFailure("the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk))
 		return
 	}
-	var text string
-	select {
-	case text = <-capture.prompt:
-	case <-finished:
+	text, ok := pigRecoveryTake(capture.prompt, finished)
+	if !ok {
+		reportPigRecoveryFailure("the interrupted turn could not be sent again" + pigRecoveryReason(prepared, preparedOk))
 		return
 	}
 	go func() {
@@ -159,6 +160,43 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 		}
 		runtime.settlePigTurn(operation, turn)
 	}()
+}
+
+// pigRecoveryTake takes the value the capture produced.
+//
+// The value wins over the end of the attempt. The capture hands its facts
+// over before it ends, so a select between a value that is ready and a
+// signal that is closed would pick either one - and picking the end would
+// abandon the recovery of a turn that was never sent, with nothing to show
+// for it.
+func pigRecoveryTake[T any](values chan T, finished chan struct{}) (T, bool) {
+	var value T
+	select {
+	case value = <-values:
+		return value, true
+	default:
+	}
+	select {
+	case value = <-values:
+		return value, true
+	case <-finished:
+		return value, false
+	}
+}
+
+// pigRecoveryReason names why the capture could not produce a turn.
+func pigRecoveryReason(result OperationResult, ok bool) string {
+	if !ok || result.Outcome == "" || result.Outcome == "completed" {
+		return ""
+	}
+	message := ""
+	if output := asMap(result.Output); output != nil {
+		message, _ = output["error"].(string)
+	}
+	if message == "" {
+		return ": " + result.Outcome
+	}
+	return ": " + message
 }
 
 // reportPigRecoveryFailure writes one recovery failure to the daemon's error
