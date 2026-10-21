@@ -5758,11 +5758,14 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 		},
 	}
 	if runtime.systemCtx != nil {
-		// The preview must say what the next turn really gets. The health view
-		// and the proposal flow are not wired into a real turn yet, so they are
-		// not claimed here either.
+		// The preview must say what the next turn really gets. The four system
+		// tools travel together: the inventory, the health view, and the
+		// proposal flow that asks a person before the host is changed.
 		features.SystemContext = &AgentSystemFeatures{
-			SystemSummary: runtime.systemCtx.SystemSummary != nil,
+			SystemSummary:       runtime.systemCtx.SystemSummary != nil,
+			SystemDiagnostics:   true,
+			ProposeSystemChange: true,
+			ApplySystemChange:   true,
 		}
 	}
 	if runtime.rsi != nil {

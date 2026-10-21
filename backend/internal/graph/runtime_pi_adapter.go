@@ -1267,7 +1267,29 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			// host looks like, and they are the only ones that may ask for a
 			// change to the host itself.
 			if channels != nil && channels.SystemContext != nil && role == "master" {
-				tools.SystemContext = &AgentToolsSystemContext{SystemSummary: channels.SystemContext.SystemSummary}
+				tools.SystemContext = &AgentToolsSystemContext{
+					SystemSummary: channels.SystemContext.SystemSummary,
+					SystemDiagnostics: func() map[string]any {
+						scope := []string{operation.TaskId}
+						conversationId := ""
+						if conversation != nil {
+							conversationId = conversation.Id
+							scope = systemChangeScope(store, conversation, operation.TaskId)
+						}
+						return SystemDiagnostics(SystemDiagnosticsInput{
+							Store: store, Catalog: options.Catalog, TaskIds: scope, ConversationId: conversationId,
+						})
+					},
+					ProposeSystemChange: func(change AgentToolsSystemChange) map[string]any {
+						return ProposeSystemChange(store, operation.TaskId, operation.NodeId, input.AccessPolicy, SystemChangeProposal{
+							Title: change.Title, Problem: change.Problem, Change: change.Change,
+							Impact: change.Impact, Risk: change.Risk,
+						})
+					},
+					ApplySystemChange: func(proposalId string) map[string]any {
+						return ApplySystemChange(store, options.Catalog, operation.TaskId, operation.NodeId, proposalId)
+					},
+				}
 			}
 			return AgentTools(tools)
 		}
