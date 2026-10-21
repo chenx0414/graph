@@ -21,44 +21,15 @@ import (
 // tools under PiG's own `mcp__<server>__<tool>` names, so no gateway tool and
 // no adapter extension stand between the model and the server.
 
-// The Agent kernels the daemon can run on.
+// The Agent kernel the daemon runs on.
 //
-// The PiG kernel is the default: it carries the Agent sessions, the crash
-// recovery and the graph node lane inside this process. The TypeScript
-// sidecar is still reachable by name (`--kernel node`) while it is being
-// retired.
+// The PiG kernel carries the Agent sessions, the crash recovery and the graph
+// node lane inside this process. The TypeScript durable sidecar is retired
+// with the protocol layer that carried it, so there is one kernel.
 const (
-	// AgentKernelNode runs the Agent sessions in the TypeScript durable sidecar.
-	AgentKernelNode = "node"
 	// AgentKernelPig runs the Agent sessions in the Go PiG kernel.
 	AgentKernelPig = "pig"
 )
-
-// agentKernel is the kernel this process runs on.
-//
-// It is read by the paths that must not open the TypeScript sidecar while the
-// PiG kernel owns the durable namespace.
-var agentKernel = struct {
-	sync.RWMutex
-	value string
-}{value: AgentKernelPig}
-
-// SetAgentKernel records the kernel this process runs on.
-func SetAgentKernel(kernel string) {
-	agentKernel.Lock()
-	defer agentKernel.Unlock()
-	if kernel == "" {
-		kernel = AgentKernelPig
-	}
-	agentKernel.value = kernel
-}
-
-// agentKernelMode is the kernel this process runs on.
-func agentKernelMode() string {
-	agentKernel.RLock()
-	defer agentKernel.RUnlock()
-	return agentKernel.value
-}
 
 // CreatePigAgentSessionTransport opens Agent sessions on the PiG kernel.
 func CreatePigAgentSessionTransport(store *TaskStore, codemode CodemodeSettings) AgentSessionTransport {

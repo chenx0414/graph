@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
@@ -56,10 +55,6 @@ type KernelGraphLaneOptions struct {
 	Program *KernelGraphLaneProgram
 	Catalog *Catalog
 	Library *AgentContextLibrary
-	// AgentKernel is the kernel the node sessions run on: the TypeScript
-	// durable sidecar or the PiG kernel. The node lane is the last thing the
-	// sidecar still carries, so the switch is explicit.
-	AgentKernel string
 	// Codemode offers the kernel's codemode tool to the node sessions. It
 	// is off by default.
 	Codemode GraphCodemode
@@ -92,7 +87,7 @@ type KernelGraphLaneOptions struct {
 	// OnMainMessage answers a node's message to the main agent.
 	OnMainMessage func(graphId, nodeId, text, requestId string) any
 	// OnToolCall answers a tool the node called that the session does not offer.
-	OnToolCall func(graphId, nodeId, name string, args any) ResidentToolAnswer
+	OnToolCall func(graphId, nodeId, name string, args any) PiToolAnswer
 }
 
 // ModelForContext names the node a model is selected for.
@@ -108,60 +103,18 @@ type kernelGraphLaneNodeLocation struct {
 	Base      string
 }
 
-// kernelGraphLaneHostAdapter is the host one node runs on.
+// kernelGraphLaneNodeChannels are the node's own channels.
 //
-// The TypeScript sidecar and the PiG kernel are two homes for the same
-// contract: one resident host per node, reused across its turns.
-type kernelGraphLaneHostAdapter interface {
-	ExecutorHost
-	// Stop ends the resident process.
-	Stop() error
-	// Dispose ends the host for good.
-	Dispose() error
-}
-
-// kernelGraphLaneHost adapts one resident host to the executor's host contract.
-type kernelGraphLaneHost struct {
-	host *ResidentHost
-}
-
-// Start starts (or restarts) the resident process.
-func (adapter *kernelGraphLaneHost) Start() HostProcess {
-	inspect, err := adapter.host.Start()
-	if err != nil {
-		panic(err)
-	}
-	return HostProcess{ProcessId: inspect.ProcessId}
-}
-
-// Alive reports whether the resident process is still running.
-func (adapter *kernelGraphLaneHost) Alive() bool {
-	return adapter.host.Alive()
-}
-
-// Stop ends the resident process.
-func (adapter *kernelGraphLaneHost) Stop() error {
-	return adapter.host.Stop()
-}
-
-// Dispose ends the host for good.
-func (adapter *kernelGraphLaneHost) Dispose() error {
-	return adapter.host.Dispose()
-}
-
-// Turn runs one turn over the resident session.
-func (adapter *kernelGraphLaneHost) Turn(text string) TurnReport {
-	result, err := adapter.host.Turn(text)
-	if err != nil {
-		message := err.Error()
-		return TurnReport{Error: &message}
-	}
-	report := TurnReport{Done: true}
-	if result.Usage != nil {
-		accounted := result.Usage.Accounted != nil && *result.Usage.Accounted
-		report.Usage = &TurnUsage{Total: float64(result.Usage.Total), Accounted: accounted}
-	}
-	return report
+// The node's turn runs on the kernel, in this process. The telemetry it
+// records, the events it publishes and the tools it may call are the lane's,
+// and the kernel session reads them.
+type kernelGraphLaneNodeChannels struct {
+	// OnTelemetry records every tool call the node makes.
+	OnTelemetry func(call PiAdapterToolCall)
+	// OnEvent publishes one kernel event.
+	OnEvent func(event any)
+	// OnToolCall runs one tool the model called.
+	OnToolCall func(name string, args any) (PiToolAnswer, error)
 }
 
 // kernelGraphLaneNodeChannel is one node's provider channel.
@@ -391,7 +344,7 @@ func kernelGraphLaneSubmitTool() PiWorkerTool {
 func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	closing := false
 	restoring := map[string]map[string]any{}
-	hosts := map[string]kernelGraphLaneHostAdapter{}
+	hosts := map[string]*PigNodeHost{}
 	sessions := map[string]NodeSession{}
 	sessionRevisions := map[string]string{}
 	hostConfigs := map[string]string{}
@@ -748,7 +701,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			Bindings:           bindings,
 			// The PiG kernel has no SDK of its own, so the daemon provides the
 			// native tools the TypeScript SDK used to publish.
-			DaemonNativeTools: options.AgentKernel == AgentKernelPig,
+			DaemonNativeTools: true,
 		}
 		if options.Library != nil {
 			sessionOptions.Library = options.Library
@@ -1074,51 +1027,17 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				Raise("invalid_execution", "Node host has no admitted execution")
 			}
 			workerConfig.ExecutionId = graphDBString(execution, "id")
-			workerConfig.DurableDatabase = options.Kernel.Store.Path
-			body, _ := json.Marshal(workerConfig)
-			_ = json.Unmarshal(body, &workerConfig.DurableRequest)
-			policy := AgentSessionRequest{ReadRoots: session.Operation.ReadRoots, WriteRoots: session.Operation.WriteRoots, Env: session.Operation.Env, NetworkDomains: session.Operation.NetworkDomains, AllowUnrestrictedNetwork: session.Operation.AllowUnrestrictedNetwork, AllowLocalBinding: session.Operation.AllowLocalBinding, UnixSockets: session.Operation.UnixSockets}
-			access := kernelGraphLaneAccess(session.Environment)
-			if access != nil {
-				if access.Filesystem.Read == "host" {
-					policy.FilesystemAccess = "host"
-				} else {
-					policy.FilesystemAccess = "bounded"
-				}
-				policy.ProtectedPaths = access.ProtectedPaths
-				policy.AllowGitMetadataWritesAll = access.Filesystem.GitMetadata == "writable"
-				policy.AllowUnrestrictedNetwork = access.Network == "unrestricted"
-				policy.AllowAllUnixSockets = access.PiExtensions.UnixSockets == "all"
-				policy.AllowAppleEvents = access.PiExtensions.AppleEvents
-			}
-			workerConfig.DurableRequest["nodeExecutionConfiguration"] = map[string]any{"model": *model, "role": session.Role, "revision": revisionVersion, "base": environment.Base, "access": environment.Access}
-			workerConfig.DurableRequest["credentialReference"] = map[string]any{"modelId": model.Id, "provider": model.Provider, "credentialId": model.CredentialId}
-			workerConfig.DurableRequest["capabilityDescriptor"] = session.Operation.Descriptor
-			workerConfig.DurableRequest["executionId"] = workerConfig.ExecutionId
-			workerConfig.DurableRequest["readRoots"] = policy.ReadRoots
-			workerConfig.DurableRequest["writeRoots"] = policy.WriteRoots
-			workerConfig.DurableRequest["env"] = policy.Env
-			workerConfig.DurableRequest["networkDomains"] = policy.NetworkDomains
-			workerConfig.DurableRequest["allowUnrestrictedNetwork"] = policy.AllowUnrestrictedNetwork
-			workerConfig.DurableRequest["allowLocalBinding"] = policy.AllowLocalBinding
-			workerConfig.DurableRequest["unixSockets"] = policy.UnixSockets
-			workerConfig.DurableRequest["allowAllUnixSockets"] = policy.AllowAllUnixSockets
-			workerConfig.DurableRequest["allowAppleEvents"] = policy.AllowAppleEvents
-			workerConfig.DurableRequest["filesystemAccess"] = policy.FilesystemAccess
-			workerConfig.DurableRequest["protectedPaths"] = policy.ProtectedPaths
-			workerConfig.DurableRequest["allowGitMetadataWritesAll"] = policy.AllowGitMetadataWritesAll
+			workerConfig.NodeExecutionConfiguration = map[string]any{"model": *model, "role": session.Role, "revision": revisionVersion, "base": environment.Base, "access": environment.Access}
+			workerConfig.CredentialReference = map[string]any{"modelId": model.Id, "provider": model.Provider, "credentialId": model.CredentialId}
+			workerConfig.CapabilityDescriptor = session.Operation.Descriptor
 			if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
-				snapshot := asMap(frozen["snapshot"])
-				configuration := asMap(snapshot["configuration"])
-				policy := asMap(frozen["restoredPolicy"])
-				for key, value := range policy {
-					workerConfig.DurableRequest[key] = value
-				}
-				workerConfig.DurableRequest["model"] = snapshot["model"]
-				workerConfig.DurableRequest["systemPrompt"] = mapString(asMap(snapshot["agent"]), "instructions")
-				workerConfig.DurableRequest["nodeExecutionConfiguration"] = configuration["nodeExecutionConfiguration"]
-				workerConfig.DurableRequest["credentialReference"] = configuration["credentialReference"]
-				workerConfig.DurableRequest["capabilityDescriptor"] = frozen["restoredDescriptor"]
+				// The turn is sent again with the admission it was accepted
+				// with: the configuration it was admitted with, the credential
+				// it may spend and the capability surface it was given.
+				configuration := asMap(asMap(frozen["snapshot"])["configuration"])
+				workerConfig.NodeExecutionConfiguration = asMap(configuration["nodeExecutionConfiguration"])
+				workerConfig.CredentialReference = asMap(configuration["credentialReference"])
+				workerConfig.CapabilityDescriptor = frozen["restoredDescriptor"]
 			}
 			return workerConfig
 
@@ -1161,9 +1080,9 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			// The node's usage is the usage the daemon accounted for: the
 			// provider receipts of this execution. The kernel's own report has
 			// no evidence grade, so it never releases a reservation.
-			nodeUsage := func() *ResidentTurnUsage {
+			nodeUsage := func() *PiTurnUsage {
 				calls := options.Kernel.ProviderCalls(graphId, nodeId)
-				usage := ResidentTurnUsage{}
+				usage := PiTurnUsage{}
 				count := 0
 				for _, call := range calls {
 					if call.ExecutionId != workerConfig.ExecutionId {
@@ -1305,32 +1224,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				channel.inner = stream
 				return channel, nil
 			}
-			residentOptions := ResidentHostOptions{
-				DurableUsage: nodeUsage,
-				DurableInput: nodeInput,
-				Config: ResidentWorkerConfig{PiWorkerConfig: workerConfig, HostModel: true},
+			residentOptions := kernelGraphLaneNodeChannels{
 				OnTelemetry: func(call PiAdapterToolCall) {
 					defer func() { _ = recover() }()
 					options.Kernel.Store.RecordToolCall(ToolCallInput{InstanceID: session.Binding.InstanceId, Tool: call.Tool, Ms: call.Ms, IsError: call.IsError, Target: call.Target})
-				},
-				OnModelCall: func(raw any, hostSignal *AbortSignal, streamOptions WorkerModelOptions) (any, error) {
-					channel, err := nodeChannel(raw, hostSignal, streamOptions)
-					if err != nil {
-						return nil, err
-					}
-					frames := EncodeAssistantStream(channel)
-					settlement := channel.settlement()
-					result := map[string]any{"frames": frames, "settlement": settlement}
-					if !channel.unknown {
-						result["usage"] = map[string]any{
-							"input": channel.usage.Input, "output": channel.usage.Output, "cacheRead": channel.usage.CacheRead,
-							"cacheWrite": channel.usage.CacheWrite, "total": TokenUsageTotal(channel.usage), "accounted": true,
-						}
-					}
-					return result, nil
-				},
-				OnReady: func(inspect ResidentInspect) {
-					RecordNodeSession(options.Kernel.Store, workerConfig.Binding.InstanceId, inspect.SessionId, inspect.SessionFile)
 				},
 				// The node's `submit` runs in the host, over the real execution (HB-262): the lane
 				// wires that through `onToolCall` when it builds the runner.
@@ -1425,15 +1322,15 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						})
 					}
 				},
-				OnToolCall: func(name string, args any) (ResidentToolAnswer, error) {
+				OnToolCall: func(name string, args any) (PiToolAnswer, error) {
 					if name == "native_tool_start" || name == "native_tool_settle" {
 						call, _ := args.(map[string]any)
 						if call == nil {
-							return ResidentToolAnswer{Ok: false, Text: "Unknown native tool admission"}, nil
+							return PiToolAnswer{Ok: false, Text: "Unknown native tool admission"}, nil
 						}
 						callID := rsiText(call["id"])
 						if callID == "" {
-							return ResidentToolAnswer{Ok: false, Text: "Unknown native tool admission"}, nil
+							return PiToolAnswer{Ok: false, Text: "Unknown native tool admission"}, nil
 						}
 						toolName := rsiText(call["name"])
 						admitted := false
@@ -1444,11 +1341,11 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 							}
 						}
 						if !admitted {
-							return ResidentToolAnswer{Ok: false, Text: "Unknown native tool admission"}, nil
+							return PiToolAnswer{Ok: false, Text: "Unknown native tool admission"}, nil
 						}
 						if name == "native_tool_start" {
 							if _, ok := nativeCalls[callID]; ok {
-								return ResidentToolAnswer{Ok: false, Text: "Native tool already admitted"}, nil
+								return PiToolAnswer{Ok: false, Text: "Native tool already admitted"}, nil
 							}
 							id := graphUUID()
 							nativeGate.Dispatch(id, 0, func() any { return nil })
@@ -1456,12 +1353,12 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						} else {
 							id, ok := nativeCalls[callID]
 							if !ok {
-								return ResidentToolAnswer{Ok: false, Text: "Native tool has no admission"}, nil
+								return PiToolAnswer{Ok: false, Text: "Native tool has no admission"}, nil
 							}
 							nativeGate.Settle(id, &TokenUsage{})
 							delete(nativeCalls, callID)
 						}
-						return ResidentToolAnswer{Ok: true, Text: "ok"}, nil
+						return PiToolAnswer{Ok: true, Text: "ok"}, nil
 					}
 					var tool *ToolDefinition
 					if session.Operation != nil {
@@ -1476,7 +1373,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						if options.OnToolCall != nil {
 							return options.OnToolCall(graphId, nodeId, name, args), nil
 						}
-						return ResidentToolAnswer{Ok: false, Text: "the host does not offer a tool named " + name}, nil
+						return PiToolAnswer{Ok: false, Text: "the host does not offer a tool named " + name}, nil
 					}
 					id := graphUUID()
 					result := nativeGate.Dispatch(id, 0, func() any {
@@ -1491,7 +1388,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						return value
 					})
 					if failure, ok := result.(error); ok {
-						return ResidentToolAnswer{Ok: false, Text: failure.Error()}, nil
+						return PiToolAnswer{Ok: false, Text: failure.Error()}, nil
 					}
 					failed := false
 					if record, ok := result.(map[string]any); ok {
@@ -1501,10 +1398,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 							failed = true
 						}
 					}
-					return ResidentToolAnswer{Ok: !failed, Text: kernelGraphLaneJSON(result)}, nil
+					return PiToolAnswer{Ok: !failed, Text: kernelGraphLaneJSON(result)}, nil
 				},
 			}
-			if options.AgentKernel == AgentKernelPig {
+			{
 				// The node's own tools: the Graph's, the native ones the daemon
 				// provides in Go, and the `submit` the host executes against the
 				// real execution.
@@ -1551,9 +1448,9 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				}
 				nodeRequest := AgentSessionRequest{
 					ExecutionId:            workerConfig.ExecutionId,
-					ExecutionConfiguration: workerConfig.DurableRequest["nodeExecutionConfiguration"],
-					CapabilityDescriptor:   workerConfig.DurableRequest["capabilityDescriptor"],
-					CredentialReference:    workerConfig.DurableRequest["credentialReference"],
+					ExecutionConfiguration: workerConfig.NodeExecutionConfiguration,
+					CapabilityDescriptor:   workerConfig.CapabilityDescriptor,
+					CredentialReference:    workerConfig.CredentialReference,
 					Binding: AgentSessionBinding{
 						InstanceId: session.Binding.InstanceId, NodeId: session.Binding.NodeId,
 						DefinitionVersion: session.Binding.DefinitionVersion,
@@ -1621,10 +1518,6 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				hostConfigs[key] = signature
 				return host
 			}
-			host := NewResidentHost(residentOptions)
-			hosts[key] = &kernelGraphLaneHost{host: host}
-			hostConfigs[key] = signature
-			return &kernelGraphLaneHost{host: host}
 		},
 	})
 	if options.TokenBudget != nil && options.ReserveTokens != nil {
@@ -1634,7 +1527,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	if options.Artifacts != nil {
 		lane.options.Artifacts = func(graphId string) *ArtifactWorkspace { return options.Artifacts }
 	}
-	registerDurableNodeResolver(options.Kernel.Store.Path, func(wrapper map[string]any) (*DurableRecoveryBinding, error) {
+	registerNodeRecoveryResolver(options.Kernel.Store.Path, func(wrapper map[string]any) (*NodeRecoveryBinding, error) {
 		snapshot := asMap(wrapper["snapshot"])
 		id := mapString(snapshot, "executionId")
 		execution := options.Kernel.Execution(id)
@@ -1649,40 +1542,11 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		originalState := execution.State
 		kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state='running' WHERE id=?", id)
 		defer kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state=? WHERE id=?", originalState, id)
-		config := lane.options.Config(execution.TaskId, execution.NodeId, execution.RevisionVersion)
-		if options.AgentKernel == AgentKernelPig {
-			// The PiG kernel runs the node's turn in this process, so there
-			// is no sidecar admission to restore. The frozen configuration is
-			// what the re-run needs, and building the node's config from it
-			// is what puts that configuration in the lane.
-			return &DurableRecoveryBinding{Config: map[string]any{}}, nil
-		}
-		adapter, ok := lane.options.Host(execution.TaskId, execution.NodeId, config, execution.RevisionVersion).(*kernelGraphLaneHost)
-		if !ok {
-			// The PiG kernel runs the node's turn in this process, so the
-			// TypeScript sidecar has no admission to restore.
-			return nil, fmt.Errorf("The node %s of graph %s does not run on the TypeScript sidecar", execution.NodeId, execution.TaskId)
-		}
-		host := adapter.host
-		return &DurableRecoveryBinding{Config: host.options.Config.DurableRequest, Callback: func(kind string, params map[string]any) (any, error) {
-			if kind == "model" || kind == "tool" || kind == "native_gate" {
-				for {
-					if closing {
-						return nil, fmt.Errorf("Original node owner is closing")
-					}
-					row := options.Kernel.Execution(id)
-					task := options.Kernel.Store.Task(execution.TaskId)
-					if row == nil || phaseClosed(task.Phase) {
-						return nil, fmt.Errorf("Original node execution is closed")
-					}
-					if row.State == "running" && task.Paused == 0 && !options.Kernel.NodeState(execution.TaskId, execution.NodeId).Paused {
-						break
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
-			}
-			return host.durableCallback()(kind, params)
-		}, Close: func() { _ = host.Dispose() }}, nil
+		// The PiG kernel runs the node's turn in this process, so there is no
+		// sidecar admission to restore. The frozen configuration is what the
+		// re-run needs, and building the node's config from it is what puts
+		// that configuration in the lane.
+		return &NodeRecoveryBinding{Config: map[string]any{}}, nil
 	})
 	return lane
 }

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -118,3 +118,41 @@ test('a bound MCP server reaches the model through the PiG native channel', asyn
     await rm(root, { recursive: true, force: true });
   }
 }, 120000);
+
+// The built-in MCP extension is retired with the channel it carried.
+//
+// The old path was an npm extension that listened on a bus event and gave
+// the model a gateway tool. The product must not carry it any more: it is
+// not installed, and nothing in the product can register an MCP server at
+// runtime. The kernel connects the server itself, which is the only way a
+// server reaches the model now.
+test('the product carries no MCP extension of its own', async () => {
+  const manifest = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  expect(Object.keys(manifest.dependencies ?? {})).not.toContain('pi-mcp-adapter');
+  expect(Object.keys(manifest.devDependencies ?? {})).not.toContain('pi-mcp-adapter');
+
+  // The registration event was the extension's only way in. With it gone, no
+  // product source can hand a server to an extension.
+  const sources = await collect(join(process.cwd(), 'src'), join(process.cwd(), 'backend'));
+  for (const file of sources) {
+    const body = await readFile(file, 'utf8');
+    expect(body, `${file} still registers MCP servers at runtime`).not.toContain('pi-mcp-adapter:runtime-register:v1');
+  }
+});
+
+// collect is every source file under the given roots.
+async function collect(...roots: string[]): Promise<string[]> {
+  const files: string[] = [];
+  for (const root of roots) {
+    const entries = await readdir(root, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = join(root, entry.name);
+      if (entry.isDirectory()) files.push(...await collect(path));
+      else if (/\.(ts|tsx|mjs|go)$/.test(entry.name)) files.push(path);
+    }
+  }
+  return files;
+}

@@ -265,7 +265,7 @@ function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: Capab
         }
         window.dispatchEvent(new Event('graph:settings-changed'));
       }
-      setResults(current => ({ ...current, [key]: { ok: true, message: '已保存。MCP 连接由 pi-mcp-adapter 在会话内建立。' } }));
+      setResults(current => ({ ...current, [key]: { ok: true, message: '已保存。MCP 连接由内核在会话内建立。' } }));
       toast(`${item.name} 凭据已保存`, 'success');
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -309,7 +309,7 @@ function CapabilityConfigPanel({ items, filter, onFilterChange }: { items: Capab
               })}
             </div>
             <div className="capability-config-actions">
-              <span className="muted">{bridge ? '保存到本机钥匙串；连接由 pi-mcp-adapter 在会话内验证。' : '浏览器模式：请先设置对应环境变量。'}</span>
+              <span className="muted">{bridge ? '保存到本机钥匙串；连接由内核在会话内验证。' : '浏览器模式：请先设置对应环境变量。'}</span>
               <Button size="sm" icon="check" disabled={busy === key} onClick={() => void saveAndTest(item)}>
                 {busy === key ? '保存中…' : '保存凭据'}
               </Button>

@@ -92,17 +92,6 @@ async function emit(event, signal) {
   for (const extension of loaded.extensions) for (const handler of extension.handlers.get(event.type) ?? []) results.push(await handler(event, context(signal)));
   return results;
 }
-const registrations = [];
-const registeredServers = new Set();
-function registerServers() {
-  for (const server of config.servers) {
-    if (registeredServers.has(server.name)) continue;
-    const request = { version: 1, name: server.name, definition: server.definition };
-    bus.emit('pi-mcp-adapter:runtime-register:v1', request);
-    if (request.result?.ok) { registeredServers.add(server.name); registrations.push(request.result.registration); }
-    else if (request.result && !request.result.ok) throw new Error(`MCP adapter refused ${server.name}: ${request.result.error?.message}`);
-  }
-}
 const send = value => writeSync(3, `${JSON.stringify(value)}\n`);
 const controllers = new Map();
 async function handle(request) {
@@ -110,7 +99,7 @@ async function handle(request) {
   if (request.method === 'ready') {
     if (loaded.errors.length) throw new Error(loaded.errors.map(error => `${error.path}: ${error.error}`).join('\n'));
     const discovered = await emit({ type: 'resources_discover', cwd: config.workspace });
-    await emit({ type: 'session_start' }); registerServers();
+    await emit({ type: 'session_start' });
     return { loadedExtensions: loaded.extensions.map(extension => extension.path), extensionErrors: [], discoveredSkillPaths: [...new Set(discovered.flatMap(result => result?.skillPaths ?? []))], tools: [...tools.values()].map(({ definition: tool }) => ({ name: tool.name, label: tool.label, description: tool.description, parameters: tool.parameters, promptSnippet: tool.promptSnippet, promptGuidelines: tool.promptGuidelines })) };
   }
   if (request.method === 'event') { await emit(request.event); return null; }
@@ -133,7 +122,6 @@ async function handle(request) {
       if (result?.systemPrompt !== undefined) systemPrompt = result.systemPrompt;
       if (result?.message) messages.push(result.message);
     }
-    registerServers();
     return { systemPrompt, messages };
   }
   if (request.method === 'call') {
@@ -146,7 +134,6 @@ async function handle(request) {
   }
   if (request.method === 'close') {
     await emit({ type: 'session_shutdown' });
-    for (const registration of registrations) await registration.dispose();
     return null;
   }
   throw new Error(`Unknown plugin command ${request.method}`);

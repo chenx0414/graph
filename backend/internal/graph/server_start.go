@@ -29,9 +29,6 @@ type DaemonOptions struct {
 	Dynamic     bool
 	PresetsDir  string
 	PriceVerify func(PriceSnapshot) bool
-	// Kernel selects the Agent kernel: "node" (the TypeScript durable
-	// sidecar) or "pig" (the Go PiG kernel). Empty is "node".
-	Kernel string
 }
 
 // ApplyConfigResult is one config or secret apply.
@@ -143,10 +140,6 @@ func missingSecrets(config GraphConfig, entries []ConfiguredModel, env map[strin
 // StartGraphDaemon serves the console on loopback. It does not start the TypeScript server.
 func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	WidenProcessPath(nil)
-	// The kernel this process runs on is decided before anything opens the
-	// durable namespace: the paths that still need the TypeScript sidecar
-	// must refuse to run beside the PiG kernel.
-	SetAgentKernel(options.Kernel)
 	log := options.Log
 	if log == nil {
 		log = func(string) {}
@@ -584,7 +577,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	autoDrive := options.Mode == "execute" || options.Dynamic
 	server = OpenGraphServer(GraphServerOptions{
 		StateDir: stateDir, Projects: config.Projects, WebDir: options.WebDir, Port: &port, AutoDrive: &autoDrive,
-		Kernel:   options.Kernel,
 		Codemode: config.Codemode,
 		Models: struct {
 			Entries        []ConfiguredModel

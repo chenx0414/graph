@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -8,7 +9,77 @@ import (
 	"strings"
 )
 
-// McpAdapterServerDefinition is the server shape pi-mcp-adapter accepts.
+// The MCP servers a Graph definition binds.
+//
+// The declaration side is the Graph's: which servers a session may use and
+// which secrets they get. The connection side is the kernel's: the PiG kernel
+// connects every server itself and offers its tools under its own
+// `mcp__<server>__<tool>` names, so no extension stands between the model and
+// the server.
+
+// McpAdapterServerRef is one server handed to the kernel.
+type McpAdapterServerRef struct {
+	Name       string `json:"name"`
+	Definition any    `json:"definition"`
+}
+
+// McpAdapterFact is one bound capability that may be an MCP server.
+type McpAdapterFact struct {
+	Id      string
+	Version string
+	Kind    string
+	Path    string
+	Role    string
+}
+
+// McpAdapterServers reads capability.json and resolves transports. A declaration with no transport is skipped.
+func McpAdapterServers(facts []McpAdapterFact, secrets map[string]string) []McpAdapterServerRef {
+	servers := []McpAdapterServerRef{}
+	for _, fact := range facts {
+		if fact.Kind != "mcp" || (fact.Role != "" && fact.Role != "tool") || fact.Path == "" || strings.TrimSpace(fact.Id) == "" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(fact.Path, "capability.json"))
+		if err != nil {
+			panic(err)
+		}
+		var manifest any
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			panic(err)
+		}
+		declaration, _ := manifest.(map[string]any)
+		if declaration == nil {
+			declaration = map[string]any{}
+		}
+		input := McpAdapterServerDeclaration{}
+		if value, ok := declaration["command"]; ok {
+			input.Command = value
+		}
+		if value, ok := declaration["args"]; ok {
+			input.Args = value
+		}
+		if value, ok := declaration["url"]; ok {
+			input.Url = value
+		}
+		if value, ok := declaration["headers"]; ok {
+			input.Headers = value
+		}
+		if value, ok := declaration["headersEnv"]; ok {
+			input.HeadersEnv = value
+		}
+		if value, ok := declaration["env"]; ok {
+			input.Env = value
+		}
+		definition := McpAdapterServerDefinitionFrom(input, secrets, fact.Path)
+		if definition == nil {
+			continue
+		}
+		servers = append(servers, McpAdapterServerRef{Name: McpAdapterServerName(fact.Id), Definition: definition})
+	}
+	return servers
+}
+
+// McpAdapterServerDefinition is the server shape the kernel connects.
 type McpAdapterServerDefinition struct {
 	Command    string
 	Args       []string

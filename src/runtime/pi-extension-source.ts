@@ -103,9 +103,9 @@ async function packageManifestAt(start: string): Promise<Record<string, unknown>
 
 /**
  * Relative paths a package declares as its own runtime entry points but does not have on disk.
- * A truncated install — the incident this exists for: `zod` was present under
- * `node_modules` while its whole `v4/` directory was missing, so `pi-mcp-adapter` died with
- * `Cannot find module './v4/classic/external.js'` — is invisible to `existsSync` on the
+ * A truncated install — the incident this exists for: a package was present under
+ * `node_modules` while its whole `v4/` directory was missing, so the extension that needed it died
+ * with `Cannot find module './v4/classic/external.js'` — is invisible to `existsSync` on the
  * directory, so completeness has to be checked per declared target. Type declarations are
  * ignored here: a package may legitimately ship none, and a missing `.d.ts` never stops a load.
  */

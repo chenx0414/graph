@@ -444,7 +444,6 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
         ...(session.operation?.skillFolder ? { skillFolder: session.operation.skillFolder } : {}),
         piExtensionPaths: [...(session.operation?.piExtensionPaths ?? [])],
         piExtensionTools: [...(session.operation?.piExtensionTools ?? [])],
-        mcpAdapterServers: [...(session.operation?.mcpAdapterServers ?? [])],
         systemPrompt: session.systemPrompt,
         allowedToolNames: ['submit', ...session.allowedToolNames.filter(name => name !== 'submit')],
         bundleDigest: session.bundleDigest,
@@ -606,7 +605,7 @@ export function kernelGraphLane(options: KernelGraphLaneOptions): GraphLane {
             unixSockets: [...operation.unixSockets], allowAllUnixSockets: session.environment!.access.piExtensions.unixSockets === 'all',
             allowAppleEvents: session.environment!.access.piExtensions.appleEvents,
             piExtensionPaths: [...operation.piExtensionPaths], piExtensionTools: [...operation.piExtensionTools],
-            mcpAdapterServers: [...operation.mcpAdapterServers], allowedToolNames: frozen.allowedToolNames,
+            allowedToolNames: frozen.allowedToolNames,
             readOnly: session.role === 'reviewer', broker: nativeGate,
             stream: (_model, context, streamOptions) => {
               const output = new AssistantMessageEventStream();

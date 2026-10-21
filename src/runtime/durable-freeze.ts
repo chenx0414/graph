@@ -180,7 +180,7 @@ export async function freezeDurableResources(request: AgentSessionRequest) {
       allowUnrestrictedNetwork: request.allowUnrestrictedNetwork ?? false, allowLocalBinding: request.allowLocalBinding ?? false,
       unixSockets: request.unixSockets ?? [], allowAllUnixSockets: request.allowAllUnixSockets ?? false, allowAppleEvents: request.allowAppleEvents ?? false,
       bundleDigest: request.bundleDigest, toolPolicyDigest: request.toolPolicyDigest, runtimePolicyDigest: request.runtimePolicyDigest,
-      environmentKeys: Object.keys(request.env ?? {}).sort(), mcpServerNames: request.mcpAdapterServers?.map(server => server.name) ?? [],
+      environmentKeys: Object.keys(request.env ?? {}).sort(),
     },
   };
 }

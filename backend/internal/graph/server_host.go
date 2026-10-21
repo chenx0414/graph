@@ -83,9 +83,6 @@ type GraphServerOptions struct {
 	Program       any
 	Rsi           any
 	Catalog       any
-	// Kernel selects the Agent kernel: "pig" (the Go PiG kernel, the
-	// default) or "node" (the TypeScript durable sidecar). Empty is "pig".
-	Kernel string
 	// Codemode offers the kernel's codemode tool to the Agent sessions. It
 	// is off by default.
 	Codemode GraphCodemode

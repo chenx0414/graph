@@ -89,7 +89,7 @@ Options:
   --execute           Enable task dispatch; requires configured models and credentials
   --dynamic           With --execute: start before credentials resolve and activate them live
   --view-only         History, settings and graph only; never dispatches (default)
-  --kernel <name>     Agent kernel: pig (Go PiG kernel, default) or node (TypeScript durable sidecar)
+  --kernel <name>     Agent kernel: pig (the Go PiG kernel, the only one)
   -h, --help          Print this help
 
 Environment fallbacks: GRAPH_CONFIG, GRAPH_STATE_DIR, GRAPH_WEB_DIR, GRAPH_PORT.`
@@ -117,8 +117,6 @@ type cliOptions struct {
 	kernelIdentity string
 	// kernelMcp is a JSON file with the MCP servers a kernel turn connects.
 	kernelMcp string
-	// kernel is the Agent kernel the daemon runs its sessions on.
-	kernel string
 }
 
 func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
@@ -239,16 +237,15 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	if execute {
 		mode = "execute"
 	}
-	// The PiG kernel is the default: it runs the Agent sessions, the crash
-	// recovery and the graph node lane inside this process. The TypeScript
-	// sidecar stays reachable by name while it is being retired.
-	agentKernel := AgentKernelPig
+	// The PiG kernel is the only kernel. The TypeScript durable sidecar is
+	// retired with the protocol layer that carried it, so the flag stays only
+	// to tell an operator who still asks for the old kernel why it is gone.
 	switch agentKernelFlag {
-	case "":
-	case AgentKernelNode, AgentKernelPig:
-		agentKernel = agentKernelFlag
+	case "", AgentKernelPig:
+	case "node":
+		Raise("usage", "the TypeScript durable sidecar is retired: the PiG kernel is the only kernel, and --kernel node is no longer available")
 	default:
-		Raise("usage", "--kernel must be "+AgentKernelPig+" or "+AgentKernelNode)
+		Raise("usage", "--kernel must be "+AgentKernelPig)
 	}
 	return cliOptions{
 		configPath:      configPath,
@@ -266,7 +263,6 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 		kernelPrompt:    kernelPromptFlag,
 		kernelIdentity:  kernelIdentity,
 		kernelMcp:       kernelMcpPath,
-		kernel:          agentKernel,
 	}
 }
 
@@ -355,7 +351,7 @@ func serveDaemon(opts cliOptions, env map[string]string) int {
 	}
 	daemon := StartGraphDaemon(DaemonOptions{
 		ConfigPath: configPath, StateDir: opts.stateDir, WebDir: opts.webDir, GraphHome: opts.graphHome,
-		Port: opts.port, Mode: opts.mode, Env: env, Log: log, Dynamic: opts.dynamic, Kernel: opts.kernel,
+		Port: opts.port, Mode: opts.mode, Env: env, Log: log, Dynamic: opts.dynamic,
 	})
 	configLine := firstRunConfigLine
 	if daemon.ConfigPath != nil {

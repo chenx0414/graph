@@ -631,7 +631,7 @@ export function createPiAdapter(options: {
             const policy = frozen.configuration.policy;
             const descriptor = frozen.configuration.descriptor;
             if (!descriptor) throw new Error('Frozen main capability descriptor is missing');
-            const settings = restoreCapabilitySettings(descriptor.settings, options.capabilitySecrets?.() ?? {}) as { env: Record<string, string>; mcpAdapterServers: { name: string; definition: unknown }[] };
+            const settings = restoreCapabilitySettings(descriptor.settings, options.capabilitySecrets?.() ?? {}) as { env: Record<string, string> };
             commands = await openWorkspaceCommandRunner({ workspace, scratchDir: join(policy.stateDir, 'command-scratch'), gate, ...(accessPolicy ? { access: accessPolicy } : {}) });
             const resources = await restoreDurableResources(frozen.configuration);
             const extensions = await loadCapabilities({
@@ -651,7 +651,7 @@ export function createPiAdapter(options: {
               prompts: { system: '', tool: null }, report: [], skillPaths: policy.skillPaths, skillFolder: policy.skillFolder,
               readRoots: policy.readRoots, writeRoots: policy.writeRoots, env: settings.env, networkDomains: policy.networkDomains,
               allowUnrestrictedNetwork: policy.allowUnrestrictedNetwork, allowLocalBinding: policy.allowLocalBinding, unixSockets: policy.unixSockets,
-              piExtensionPaths: policy.piExtensionPaths, piExtensionTools: policy.piExtensionTools, mcpAdapterServers: settings.mcpAdapterServers,
+              piExtensionPaths: policy.piExtensionPaths, piExtensionTools: policy.piExtensionTools,
               close: extensions.close,
             };
           } else {
@@ -1073,7 +1073,6 @@ export function createPiAdapter(options: {
               allowGitMetadataWritesAll: accessPolicy.filesystem.gitMetadata === 'writable',
             } : {}),
             ...(capabilityOperation.piExtensionPaths.length ? { piExtensionPaths: [...capabilityOperation.piExtensionPaths] } : {}),
-            ...(capabilityOperation.mcpAdapterServers.length ? { mcpAdapterServers: [...capabilityOperation.mcpAdapterServers] } : {}),
             piExtensionTools: [...capabilityOperation.piExtensionTools],
             systemPrompt: composedPrompt.text,
             bundleDigest: capabilityOperation.bundleDigest,

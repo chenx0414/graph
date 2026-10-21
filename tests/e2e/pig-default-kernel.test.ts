@@ -15,8 +15,8 @@ const run = promisify(execFile);
 // sessions on the PiG kernel: the TypeScript sidecar must not be started, the
 // durable namespace must be the PiG one, and the session must really work.
 //
-// The escape hatch stays: `--kernel node` still selects the TypeScript
-// sidecar, so the old path remains reachable while it is being retired.
+// The sidecar itself is retired with the protocol layer that carried it, so
+// the old kernel is no longer a choice: `--kernel node` is refused by name.
 test('a daemon started without --kernel runs its Agent session on the PiG kernel', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-default-'));
   const project = join(root, 'project');
@@ -80,10 +80,10 @@ test('a daemon started without --kernel runs its Agent session on the PiG kernel
   }
 }, 120000);
 
-// The default may move, but the old kernel must stay reachable while it is
-// being retired: an operator who needs the TypeScript sidecar still has to be
-// able to ask for it by name.
-test('--kernel node still selects the TypeScript durable sidecar', async () => {
+// The old kernel is gone with the protocol layer that carried it. A daemon
+// asked for it must say so by name: two kernels over one durable namespace
+// would fight over the same tables, so the refusal is the safe answer.
+test('--kernel node is refused: the TypeScript durable sidecar is retired', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-node-kernel-'));
   const project = join(root, 'project');
   await mkdir(project);
@@ -93,38 +93,24 @@ test('--kernel node still selects the TypeScript durable sidecar', async () => {
   const provider = await openaiServer([
     { text: 'The node kernel answered.', usage: { prompt_tokens: 20, completion_tokens: 5 } },
   ]);
-  let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   try {
     const configPath = join(root, 'graph.config.json');
     await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: project }],
       credentials: { local: { secretRef: 'GRAPH_NODE_KERNEL_KEY' } },
       models: { entries: [{ id: 'main', provider: 'graph-main', grade: 'high', api: 'openai-completions',
         baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] } }));
-    daemon = await launchCli(root, { configPath, env: { GRAPH_NODE_KERNEL_KEY: 'synthetic-only' }, extraArgs: ['--execute', '--kernel', 'node'] });
-
-    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Answer the first question.', requestId: 'first' }) });
-    expect(created.status).toBe(200);
-    const { conversationId } = await created.json() as { conversationId: string };
-    const view = async () => await (await daemon!.request(`/api/conversations/${conversationId}`)).json();
-    await expect.poll(async () => (await view()).master?.status, { timeout: 30000 }).toBe('succeeded');
-
-    // The sidecar really carries this session: it is a child process of the
-    // daemon, and the durable namespace it writes is the TypeScript one.
-    const sidecars = await sidecarProcesses(daemon.child.pid!);
-    expect(sidecars.length).toBeGreaterThan(0);
-    expect(sidecars.join('\n')).toContain('durable-service');
-    const db = new DatabaseSync(join(root, 'state/tasks.sqlite'), { readOnly: true });
-    let schemaVersion: number;
-    try {
-      schemaVersion = (db.prepare('SELECT version FROM graph_durable_durable_schema WHERE singleton=1').get() as { version: number }).version;
-    } finally { db.close(); }
-    expect(schemaVersion).toBe(1);
+    // The sidecar is gone: the daemon must say so rather than start a second
+    // kernel over the same durable namespace.
+    const failure = await launchCli(root, { configPath, env: { GRAPH_NODE_KERNEL_KEY: 'synthetic-only' }, extraArgs: ['--execute', '--kernel', 'node'] })
+      .then(() => undefined, (error: Error) => error);
+    expect(failure).toBeDefined();
+    expect(failure!.message).toMatch(/sidecar/i);
+    expect(failure!.message).toMatch(/retired|only kernel|no longer/i);
   } finally {
-    await daemon?.close();
     await provider.close();
     await rm(root, { recursive: true, force: true });
   }
-}, 120000);
+}, 60000);
 
 // sidecarProcesses are the TypeScript durable sidecars the daemon started.
 //

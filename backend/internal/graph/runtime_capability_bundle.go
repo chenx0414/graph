@@ -401,9 +401,6 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	}
 	allowed = append(allowed, selected.NativeTools...)
 	allowed = append(allowed, selected.ExtensionTools...)
-	if len(serverNames) > 0 {
-		allowed = append(allowed, MCP_ADAPTER_PROXY_TOOL)
-	}
 	allowed = capabilitySortedCopy(capabilityUnique(allowed))
 	closeLoaded := loaded.Close
 	operation = CapabilityOperation{

@@ -54,7 +54,7 @@ export async function openDurablePlugins(request: AgentSessionRequest, options: 
   const runtime = graphNodeRuntime();
   const workspace = await realpath(request.workspace);
   await writeFile(configPath, JSON.stringify({ paths, workspace, systemPrompt: request.systemPrompt ?? '', model: request.model, thinkingLevel: request.thinkingLevel,
-    resourcePaths: request.frozenResourcePaths ?? [], context: options.context, allowedToolNames: request.piExtensionTools ?? [], servers: request.mcpAdapterServers ?? [] }), { mode: 0o600 });
+    resourcePaths: request.frozenResourcePaths ?? [], context: options.context, allowedToolNames: request.piExtensionTools ?? [] }), { mode: 0o600 });
   const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; update?: (value: unknown) => void }>();
   const started = Promise.withResolvers<RestrictedProcessControl>();
   const acquired = await acquireRestrictedExecutor();

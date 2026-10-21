@@ -50,7 +50,7 @@ func (runtime *TaskRuntime) recoverPigNodeExecution(frozen pigkernel.FrozenExecu
 		// The execution carries a submission, so the executor would refuse
 		// to start it again without proof that the turn is still there. The
 		// kernel's receipt is that proof.
-		markDurableNodeCompletion(runtime.store.Path, execution.Id)
+		markNodeCompletion(runtime.store.Path, execution.Id)
 		runtime.restorePigNode(frozen)
 		runtime.requeuePigNode(execution)
 	case pigNodeCalledProvider(runtime.kernel, execution, frozen):
@@ -70,7 +70,7 @@ func (runtime *TaskRuntime) recoverPigNodeExecution(frozen pigkernel.FrozenExecu
 // the access policy it was given.
 func (runtime *TaskRuntime) restorePigNode(frozen pigkernel.FrozenExecution) {
 	wrapper := pigNodeRestoredWrapper(frozen)
-	if _, err := PrepareDurableNodeRecovery(runtime.store.Path, wrapper); err != nil {
+	if _, err := PrepareNodeRecovery(runtime.store.Path, wrapper); err != nil {
 		reportPigRecoveryFailure("the interrupted node turn could not be restored: " + err.Error())
 	}
 }

@@ -105,8 +105,6 @@ export interface AgentSessionRequest {
   allowAppleEvents?: boolean;
   piExtensionPaths?: string[];
   piExtensionTools?: string[];
-  /** MCP servers the adapter registers for this session; dropping them leaves the gateway empty. */
-  mcpAdapterServers?: { name: string; definition: unknown }[];
   systemPrompt?: string;
   allowedToolNames?: string[];
   bundleDigest: string;

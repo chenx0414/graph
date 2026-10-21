@@ -45,7 +45,7 @@ type PigNodeHostOptions struct {
 	// RequestId is the admission identity of the next turn.
 	RequestId func() string
 	// Usage is the usage the host accounted for the turn.
-	Usage func() *ResidentTurnUsage
+	Usage func() *PiTurnUsage
 	// PreAdmission names the provider calls that existed before the turn. A
 	// call beyond them is one this turn made, and the turn must not be
 	// replayed.

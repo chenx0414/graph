@@ -442,7 +442,7 @@ func (k *KernelStore) StartExecution(taskID string, input StartExecutionRequest)
 	return k.Store.Transaction(func() any {
 		existing := k.Execution(input.ExecutionId)
 		if existing != nil {
-			if existing.TaskId != taskID || existing.NodeId != input.NodeId || (existing.SubmissionId != nil && !hasDurableNodeCompletion(k.Store.Path, input.ExecutionId)) || existing.State != "blocked" {
+			if existing.TaskId != taskID || existing.NodeId != input.NodeId || (existing.SubmissionId != nil && !hasNodeCompletion(k.Store.Path, input.ExecutionId)) || existing.State != "blocked" {
 				Raise("invalid_execution", "Execution cannot be started again")
 			}
 			g5Exec(k.Db, "UPDATE kernel_executions SET state='running',ended_at=NULL,run_since=?,waiting_since=NULL,waiting_slot=0 WHERE id=?", NowMillis(), input.ExecutionId)

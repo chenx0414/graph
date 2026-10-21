@@ -577,7 +577,7 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 	reserve := PI_SESSION_RESERVE
 	transport := options.Transport
 	if transport == nil {
-		transport = CreateDurableAgentSessionTransport(options.Store)
+		transport = CreatePigAgentSessionTransport(options.Store, CodemodeSettings{})
 	}
 	activeInstances := map[string]AgentSession{}
 	activeInstancesMu := sync.Mutex{}

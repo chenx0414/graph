@@ -829,17 +829,10 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		Artifacts:       runtime.artifacts,
 	})
 	// The recovery bootstrap belongs to the kernel that owns the durable
-	// conversations. On the PiG kernel the durable namespace is the Go
-	// process's own, and the TypeScript sidecar must not open it: two kernels
-	// over one namespace would fight over the same tables. The PiG path
-	// therefore recovers on its own: the kernel's own receipts settle the
-	// turns it finished, and the turns it never sent are sent again.
-	if runtime.options.Kernel != AgentKernelPig {
-		recoverDurableCompletions(runtime.store)
-		runtime.bootstrapDurableRecovery()
-	} else {
-		runtime.bootstrapPigRecovery()
-	}
+	// conversations. The PiG kernel keeps them in this process, so it
+	// recovers on its own: the kernel's own receipts settle the turns it
+	// finished, and the turns it never sent are sent again.
+	runtime.bootstrapPigRecovery()
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
 	return runtime
 }
@@ -1212,7 +1205,6 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		Access:        runtime.resolvedAccessPolicy,
 		Catalog:       runtime.catalog,
 		Library:       runtime.agentContextLibrary(),
-		AgentKernel:   runtime.options.Kernel,
 		Codemode:      runtime.options.Codemode,
 		TokenBudget:   runtime.laneTokenBudget,
 		ReserveTokens: &reserve,
@@ -1245,12 +1237,12 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		OnMainMessage: func(graphId, nodeId, text, requestId string) any {
 			return SendKernelMainMessage(runtime.kernel, graphId, nodeId, NodeMessageInput{Text: text, RequestID: requestId})
 		},
-		OnToolCall: func(graphId, nodeId, name string, args any) ResidentToolAnswer {
+		OnToolCall: func(graphId, nodeId, name string, args any) PiToolAnswer {
 			if name != "submit" {
-				return ResidentToolAnswer{Ok: false, Text: "the host does not offer a tool named " + name}
+				return PiToolAnswer{Ok: false, Text: "the host does not offer a tool named " + name}
 			}
 			ok, text := HostSubmitCall(runtime.kernel, graphId, nodeId, args)
-			return ResidentToolAnswer{Ok: ok, Text: text}
+			return PiToolAnswer{Ok: ok, Text: text}
 		},
 	}
 	if runtime.network != nil {
@@ -1301,13 +1293,10 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		Network:      runtime.piNetwork(),
 		Channels:     runtime.piChannels(),
 	}
-	// The Agent kernel is the one the daemon was asked to run on. The PiG
-	// kernel keeps the durable conversations in the Go process; the
-	// TypeScript sidecar keeps them in a child process.
-	if runtime.options.Kernel == AgentKernelPig {
-		options.Transport = CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
-		options.DaemonNativeTools = true
-	}
+	// The PiG kernel keeps the durable conversations in this process, and the
+	// daemon's own tools are the ones the kernel offers.
+	options.Transport = CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
+	options.DaemonNativeTools = true
 	return options
 }
 func (runtime *TaskRuntime) fallbackAdapter() *ActionAdapter {
@@ -1656,7 +1645,6 @@ func (runtime *TaskRuntime) Close() {
 		runtime.execution.Drain()
 		runtime.execution.SettleGraphShutdown()
 	}
-	closeDurableOwner(runtime.store.Path)
 	runtime.store.Close()
 }
 

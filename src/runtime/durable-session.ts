@@ -38,7 +38,6 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
           readRoots: [...policy.readRoots, resources.directory], writeRoots: policy.writeRoots, protectedPaths: [...policy.protectedPaths, resources.directory], readOnly: policy.readOnly,
           filesystemAccess: policy.filesystemAccess, allowGitMetadataWritesAll: policy.allowGitMetadataWritesAll, networkDomains: policy.networkDomains, allowUnrestrictedNetwork: policy.allowUnrestrictedNetwork,
           allowLocalBinding: policy.allowLocalBinding, unixSockets: policy.unixSockets, allowAllUnixSockets: policy.allowAllUnixSockets, allowAppleEvents: policy.allowAppleEvents,
-          ...(request.mcpAdapterServers ? { mcpAdapterServers: settings(request.mcpAdapterServers) as NonNullable<AgentSessionRequest['mcpAdapterServers']> } : {}),
           frozenResourcePaths: roots.map(source => ({ source, target: resources.pathFor(source) })),
         };
       }
