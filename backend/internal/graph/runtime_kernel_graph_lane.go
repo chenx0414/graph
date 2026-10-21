@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -312,6 +313,129 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	boundModels := map[string]ModelEntry{}
 	preparedReviewExecutions := map[string]string{}
 
+	// The lane serves every graph of this runtime and every node runs in its own
+	// goroutine, so the per-node tables above are shared state. A concurrent
+	// write to one of them is a fatal error in Go, not a lost update: two nodes
+	// of one graph preparing their sessions at the same time must not take the
+	// daemon down. Every access goes through the accessors below.
+	var stateMutex sync.Mutex
+	restoringOf := func(key string) map[string]any {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		return restoring[key]
+	}
+	setRestoring := func(key string, wrapper map[string]any) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		restoring[key] = wrapper
+	}
+	forgetRestoring := func(key string) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		delete(restoring, key)
+	}
+	hostOf := func(key string) (*ResidentHost, bool) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		host, ok := hosts[key]
+		return host, ok
+	}
+	hostConfigOf := func(key string) string {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		return hostConfigs[key]
+	}
+	setHost := func(key string, host *ResidentHost, signature string) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		hosts[key] = host
+		hostConfigs[key] = signature
+	}
+	forgetHost := func(key string) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		delete(hosts, key)
+		delete(hostConfigs, key)
+	}
+	sessionOf := func(key string) (NodeSession, bool) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		session, ok := sessions[key]
+		return session, ok
+	}
+	sessionRevisionOf := func(key string) string {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		return sessionRevisions[key]
+	}
+	setSession := func(key string, session NodeSession, configuration string) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		sessions[key] = session
+		sessionRevisions[key] = configuration
+	}
+	boundModelOf := func(key string) (ModelEntry, bool) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		model, ok := boundModels[key]
+		return model, ok
+	}
+	setBoundModel := func(key string, model ModelEntry) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		boundModels[key] = model
+	}
+	reviewExecutionOf := func(key string) string {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		return preparedReviewExecutions[key]
+	}
+	setReviewExecution := func(key string, executionID string) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		preparedReviewExecutions[key] = executionID
+	}
+	// hostKeys and sessionKeys snapshot the keys of one table so a caller can
+	// act on them outside the lock.
+	hostKeys := func() []string {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		keys := make([]string, 0, len(hosts))
+		for key := range hosts {
+			keys = append(keys, key)
+		}
+		return keys
+	}
+	sessionKeys := func() []string {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		keys := make([]string, 0, len(sessions))
+		for key := range sessions {
+			keys = append(keys, key)
+		}
+		return keys
+	}
+	// forgetNode drops every per-node entry of one key and returns its session.
+	forgetNode := func(key string) (NodeSession, bool) {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		session, ok := sessions[key]
+		delete(hosts, key)
+		delete(hostConfigs, key)
+		delete(boundModels, key)
+		delete(preparedReviewExecutions, key)
+		delete(sessions, key)
+		delete(sessionRevisions, key)
+		return session, ok
+	}
+	// resetLaneTables empties the tables that outlive a single graph.
+	resetLaneTables := func() {
+		stateMutex.Lock()
+		defer stateMutex.Unlock()
+		hostConfigs = map[string]string{}
+		boundModels = map[string]ModelEntry{}
+	}
+
 	nodeDefinition := func(graphId, nodeId string, revisionVersion *int) *NodeDefinition {
 		active := kernelRow(options.Kernel.Db, "SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
 		revision := revisionVersion
@@ -348,7 +472,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			}
 			Raise("invalid_workspace", "Node workspace cannot be opened: "+rsiPanicMessage(recovered))
 		}()
-		if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
+		if frozen := restoringOf(graphId + "/" + nodeId); frozen != nil {
 			policy := asMap(frozen["restoredPolicy"])
 			configuration := asMap(asMap(frozen["snapshot"])["configuration"])
 			return &kernelGraphLaneNodeLocation{Workspace: mapString(policy, "workspace"), Base: mapString(asMap(configuration["nodeExecutionConfiguration"]), "base")}
@@ -366,7 +490,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		reseed := false
 		if prepare && execution != nil && node != nil && node.Recipe != "" &&
 			options.Catalog.HasDefinition(node.Recipe) && options.Catalog.Definition(node.Recipe).Review &&
-			preparedReviewExecutions[key] != graphDBString(execution, "id") {
+			reviewExecutionOf(key) != graphDBString(execution, "id") {
 			reseed = kernelRow(options.Kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE execution_id=? LIMIT 1", graphDBString(execution, "id")) == nil
 		}
 		var copy *string
@@ -379,7 +503,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			copy = options.Git.Workspace(graphId, &instanceID, nodeId, "agent", action)
 		}
 		if copy != nil && reseed {
-			preparedReviewExecutions[key] = graphDBString(execution, "id")
+			setReviewExecution(key, graphDBString(execution, "id"))
 		}
 		if selected == "worktree" && copy == nil {
 			Raise("invalid_workspace", "Node requests a worktree; prepare this graph with a targetBranch first")
@@ -432,7 +556,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		return &workspace
 	}
 	nodeAccess := func(graphId, nodeId string, revisionVersion int) *ResolvedAccessPolicy {
-		if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
+		if frozen := restoringOf(graphId + "/" + nodeId); frozen != nil {
 			configuration := asMap(asMap(frozen["snapshot"])["configuration"])
 			body, _ := json.Marshal(asMap(configuration["nodeExecutionConfiguration"])["access"])
 			var access ResolvedAccessPolicy
@@ -461,13 +585,13 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			panic(errorString("Graph runtime is closing"))
 		}
 		key := graphId + "/" + nodeId
-		if frozen := restoring[key]; frozen != nil {
+		if frozen := restoringOf(key); frozen != nil {
 			active := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
 			if active != nil && mapString(active, "id") != mapString(asMap(frozen["snapshot"]), "executionId") {
-				delete(restoring, key)
+				forgetRestoring(key)
 			}
 		}
-		cached, hasCached := sessions[key]
+		cached, hasCached := sessionOf(key)
 		revision := options.Kernel.Revision(graphId, revisionVersion)
 		if revision == nil {
 			panic(errorString(fmt.Sprintf("graph %s has no revision to run", graphId)))
@@ -477,14 +601,14 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			recipe = node.Recipe
 		}
 		role := "worker"
-		if frozen := restoring[key]; frozen != nil {
+		if frozen := restoringOf(key); frozen != nil {
 			configuration := asMap(asMap(frozen["snapshot"])["configuration"])
 			role = mapString(asMap(configuration["nodeExecutionConfiguration"]), "role")
 		} else if recipe != "" && options.Catalog.Definition(recipe).Review {
 			role = "reviewer"
 		}
 		var prompts []string
-		if options.Library != nil && restoring[key] == nil {
+		if options.Library != nil && restoringOf(key) == nil {
 			definitionID := nodeId
 			if recipe != "" {
 				definitionID = strings.Split(recipe, "@")[0]
@@ -516,14 +640,14 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		configuration := CanonicalJSON(map[string]any{
 			"recipe": recipe, "prompts": prompts, "workspace": workspace, "access": access, "network": options.Network,
 		})
-		if hasCached && sessionRevisions[key] == configuration {
+		if hasCached && sessionRevisionOf(key) == configuration {
 			return cached
 		}
 		if hasCached {
-			if host, ok := hosts[key]; ok {
+			if host, ok := hostOf(key); ok {
 				_ = host.Stop()
 			}
-			delete(hosts, key)
+			forgetHost(key)
 			if cached.Close != nil {
 				cached.Close()
 			}
@@ -648,7 +772,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			}
 		}
 		sessionOptions := NodeSessionOptions{
-			Frozen:             restoring[key],
+			Frozen:             restoringOf(key),
 			RetainCapabilities: true,
 			Gate:               gate,
 			Access:             access,
@@ -695,8 +819,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				"previousAccessDigest": previousDigest, "accessDigest": accessDigest,
 			})
 		}
-		sessions[key] = session
-		sessionRevisions[key] = configuration
+		setSession(key, session, configuration)
 		if session.Operation != nil {
 			RecordCapabilityLoad(options.Kernel.Store, NodeCapabilityLoadInput{
 				TaskId: graphId, NodeId: nodeId, InstanceId: session.Binding.InstanceId,
@@ -834,37 +957,33 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			return execute()
 		},
 		CloseGraph: func(graphId string) {
-			for key := range hosts {
+			for _, key := range hostKeys() {
 				if !strings.HasPrefix(key, graphId+"/") {
 					continue
 				}
-				_ = hosts[key].Dispose()
-				delete(hosts, key)
-				delete(hostConfigs, key)
-				delete(boundModels, key)
-				delete(preparedReviewExecutions, key)
-				if session, ok := sessions[key]; ok && session.Close != nil {
+				if host, ok := hostOf(key); ok {
+					_ = host.Dispose()
+				}
+				if session, ok := forgetNode(key); ok && session.Close != nil {
 					session.Close()
 				}
-				delete(sessions, key)
-				delete(sessionRevisions, key)
 			}
 		},
 		Close: func() {
 			closing = true
-			for key, host := range hosts {
-				_ = host.Dispose()
-				delete(hosts, key)
+			for _, key := range hostKeys() {
+				if host, ok := hostOf(key); ok {
+					_ = host.Dispose()
+				}
+				forgetHost(key)
 			}
-			for key, session := range sessions {
-				if session.Close != nil {
+			for _, key := range sessionKeys() {
+				session, ok := forgetNode(key)
+				if ok && session.Close != nil {
 					session.Close()
 				}
-				delete(sessions, key)
-				delete(sessionRevisions, key)
 			}
-			hostConfigs = map[string]string{}
-			boundModels = map[string]ModelEntry{}
+			resetLaneTables()
 		},
 		// A node's declared deliverable is settled from its own work copy into the shared
 		// artifact store, so work the node produced is published without a tool call (§13.8).
@@ -875,7 +994,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			session := sessionFor(graphId, nodeId, revisionVersion)
 			recipe := session.Binding.DefinitionVersion
 			var model *ModelEntry
-			if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
+			if frozen := restoringOf(graphId + "/" + nodeId); frozen != nil {
 				configuration := asMap(asMap(frozen["snapshot"])["configuration"])
 				body, _ := json.Marshal(asMap(configuration["nodeExecutionConfiguration"])["model"])
 				var entry ModelEntry
@@ -890,7 +1009,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			if model == nil {
 				Raise("model_selection", "No eligible configured model for recipe "+recipe+"; review excludes recorded implementer models")
 			}
-			boundModels[graphId+"/"+nodeId] = *model
+			setBoundModel(graphId+"/"+nodeId, *model)
 			credential := options.CredentialFor(*model)
 			if credential == nil {
 				panic(errorString("no credential bound for model " + model.Id))
@@ -1018,7 +1137,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			workerConfig.DurableRequest["filesystemAccess"] = policy.FilesystemAccess
 			workerConfig.DurableRequest["protectedPaths"] = policy.ProtectedPaths
 			workerConfig.DurableRequest["allowGitMetadataWritesAll"] = policy.AllowGitMetadataWritesAll
-			if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
+			if frozen := restoringOf(graphId + "/" + nodeId); frozen != nil {
 				snapshot := asMap(frozen["snapshot"])
 				configuration := asMap(snapshot["configuration"])
 				policy := asMap(frozen["restoredPolicy"])
@@ -1037,15 +1156,15 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		// One resident process per node, reused across turns.
 		Host: func(graphId, nodeId string, config any, revisionVersion int) ExecutorHost {
 			key := graphId + "/" + nodeId
-			cached, hasCached := hosts[key]
+			cached, hasCached := hostOf(key)
 			signature := CanonicalJSON(config)
-			if hasCached && hostConfigs[key] == signature {
+			if hasCached && hostConfigOf(key) == signature {
 				return &kernelGraphLaneHost{host: cached}
 			}
 			if hasCached {
 				_ = cached.Stop()
 			}
-			session, hasSession := sessions[key]
+			session, hasSession := sessionOf(key)
 			if !hasSession {
 				panic(errorString("Resident host has no prepared session"))
 			}
@@ -1059,7 +1178,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			if !ok {
 				panic(errorString("Resident host has no prepared model connection"))
 			}
-			model, hasModel := boundModels[key]
+			model, hasModel := boundModelOf(key)
 			if !hasModel {
 				panic(errorString("Resident host has no prepared model connection"))
 			}
@@ -1396,8 +1515,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					return ResidentToolAnswer{Ok: !failed, Text: kernelGraphLaneJSON(result)}, nil
 				},
 			})
-			hosts[key] = host
-			hostConfigs[key] = signature
+			setHost(key, host, signature)
 			return &kernelGraphLaneHost{host: host}
 		},
 	})
@@ -1419,7 +1537,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			return nil, fmt.Errorf("Frozen node identity mismatch")
 		}
 		key := execution.TaskId + "/" + execution.NodeId
-		restoring[key] = wrapper
+		setRestoring(key, wrapper)
 		originalState := execution.State
 		kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state='running' WHERE id=?", id)
 		defer kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state=? WHERE id=?", originalState, id)

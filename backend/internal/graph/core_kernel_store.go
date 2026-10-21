@@ -151,18 +151,22 @@ type NodeBudgetState struct {
 }
 
 // KernelProviderCall is one actual provider send.
+//
+// The JSON names are the ones a reader of the graph sees: `provider_calls` and
+// the node run view both read these records as they are stored, and a record
+// without tags would answer `State` where the reader asks for `state`.
 type KernelProviderCall struct {
-	Id          string
-	NodeId      string
-	ExecutionId string
-	Reserved    int64
-	State       string
-	Usage       *TokenUsage
-	Model       *providerCallModel
-	Purpose     string
-	Cost        any
-	CreatedAt   int64
-	SettledAt   *int64
+	Id          string             `json:"id"`
+	NodeId      string             `json:"nodeId"`
+	ExecutionId string             `json:"executionId"`
+	Reserved    int64              `json:"reserved"`
+	State       string             `json:"state"`
+	Usage       *TokenUsage        `json:"usage"`
+	Model       *providerCallModel `json:"model"`
+	Purpose     string             `json:"purpose"`
+	Cost        any                `json:"cost"`
+	CreatedAt   int64              `json:"createdAt"`
+	SettledAt   *int64             `json:"settledAt"`
 }
 
 // ModuleInputRow is the latest value of one module input.

@@ -190,6 +190,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 7. **价格校验永远是网络请求，真实 E2E 指不到本地服务**（Batch 16 补掉）。Go 的 `DaemonOptions.PriceVerify` 一直存在，但生产路径永远走归档 `sourceUrl` 的网络抓取；TypeScript 那边靠 `startGraphDaemon` 的 `priceVerify` 注入点做确定性验证。补法：daemon 读 `GRAPH_PRICE_SOURCE_URL`，把校验指向另一张价格页（镜像、代理、本地服务），**校验语义不变**——页面仍然必须提到该模型，提不到就是验证失败，绝不静默改价。
 8. **先推理再调工具的回合会把自己覆盖掉，整回合失败**（Batch 18 修掉）。Go 的受控流把 **provider 的工具调用序号**当成了**消息内容块下标**：一个回合先吐 `reasoning_content`（占住内容块 0）再发 `tool_calls`（provider 序号也是 0）时，工具调用把 thinking 块整个覆盖掉，并让帧编码器撞上「同一个内容块开始了两次」，整个回合被判失败（`Assistant message block 0 starts more than once`）。TypeScript 那边由 Pi SDK 分配内容块下标，思考块与工具块本来就是两块，从来没有这个碰撞。修法：把「provider 的工具序号」与「消息内容块下标」分成两个数——`toolCalls` 仍按 provider 序号合并参数增量，另加 `toolBlocks` 记内容块下标；OpenAI 路径的工具调用占下一个空块，Anthropic 路径的块序号本来就是内容块下标，原样使用。
 9. **沉淀开关永远读不到**（Batch 19 修掉）。Go 的**活配置是解析后的结构体**（`LiveConfig.Config()` 返回 `GraphConfig`），而沉淀设置的读取函数 `SedimentSettingsFrom` 只认 `map[string]any`：类型断言失败 → 永远拿回默认值（关闭）——配置面能存、能显、能校验，活运行时却当这个开关不存在，于是沉淀复审永远不发生。TypeScript 那边活配置是普通对象，同一段读取逻辑一直是对的。修法：`SedimentSettingsFrom` 认得解析后的 `GraphConfig`（直接取 `Skills.Sedimentation`），同时也继续认原始文档。
+10. **两个节点并行时 daemon 直接崩**（Batch 20 修掉）。Go 的图 lane（`runtime_kernel_graph_lane.go`）把每节点的会话、宿主、绑定、绑定摘要、恢复快照放在**几张普通 map** 里，而 `GraphRunner.Drain` 是**每个节点一个 goroutine**——一张图有两个节点同时开工时，两个 goroutine 写同一张 map，Go 的运行时直接判 `fatal error: concurrent map writes`，**整个 daemon 进程当场退出**（不是丢一次更新，是把服务打死）。TypeScript 是单线程事件循环，同一段逻辑没有这个窗口。修法：这几张表统一由一把 mutex 守护，所有读写走访问器（`sessionOf` / `setSession` / `hostOf` / `setHost` / `forgetNode` …），关图与关运行时也改成「先在锁内快照键，再在锁外销毁」。
+11. **provider 调用记录读不出状态与预留**（Batch 20 修掉）。`KernelProviderCall` 结构体**没有 JSON tag**，于是它序列化出来是 `Id` / `State` / `Reserved` 这些大写键；而读它的两处（节点运行视图 `KernelNodeRun` 的 `invocations`、`graph_inspect` 的 `provider_calls`）都按小写的 `state` / `reserved` / `executionId` 去读——读出来永远是空值。所以「这一发 provider 调用是不是还在飞、占了多少预留」在 Go 侧根本看不到，图视图与 `provider_calls` 查询都缺了 TypeScript 那边有的那一半事实。修法：给结构体补上与 TypeScript 同形的 JSON 名（`id` / `nodeId` / `executionId` / `reserved` / `state` / `usage` / `model` / `purpose` / `cost` / `createdAt` / `settledAt`）。
 
 ## 执行批次
 
@@ -235,6 +237,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - 第三条契约（native 交付失败 → 通知 main → 用户决定进入新的显式输入）**暂时无法按原样移植**：它需要 supervisor 级别的 `graphCreate`/`graphSend`/`graphInspect`，而 Go daemon 的公开 HTTP 面与 TS daemon 一样只有 `graph/control`（pause/resume/skip/cancel…），没有建图与投递输入的入口。**可行的替代路径已经找到**：主 Agent 本身带着 `graph_create` / `graph_send` / `graph_inspect` / `graph_control` 四个图工具（`runtime_agent_tool_definitions.go`），所以「图生命周期 / 节点预算 / 节点队列 / 产物发布 / 图定义」这一簇可以改由**会话面**证明——让模型在真实对话里调这些工具，daemon 侧仍然是真实的图执行。图生命周期这一簇（约 30 条上下）按这条路走。
 - **Batch 19（已完成）**：自改进：沉淀开关与真实的沉淀复审。`tests/e2e/go-sediment-settings.test.ts`（1 条）移植 `tests/e2e/sediment-settings.test.ts`：控制台看到的默认值就是 `skills.sedimentation` 的默认值；把开关打开是一次真的保存，保存后的文档再存一次也认；六个非法取值（`enabled: 'yes'`、`afterToolCalls: 0`、`afterToolCalls: 2.5`、`budgetTokens: -1`、`model: '   '`、`model: 'nobody'`）各自按字段名被拒（400，且报的是 `skills.sedimentation.<字段>`），磁盘上的配置文件一个字节都没动；真的工具回合（模型用 `read` 读了项目里的文件）赚来一次真的复审——复审走用户选定的 reader 模型（`model: 'reader-model'`）、带 reader 自己的凭据（`Bearer reader-synthetic`）、带着主回合的回复。
   - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 9 条）：**沉淀开关永远读不到**，配置面与运行时脱节。
+- **Batch 20（已完成）**：图生命周期：节点配额。`tests/e2e/go-node-budget.test.ts`（1 条）移植 `tests/e2e/node-budget.test.ts` 的整条契约，走的是**会话面**那条替代路径——主 Agent 在真实对话里用 `graph_create` 建图、用 `graph_send` 投递输入，daemon 侧仍然是真实的图执行：
+  - **在途的回合持有预留**：节点回合开始前，Go 按 `DEFAULT_V2_RESERVE_TOKENS`（200_000，与 TS 同值）预留一个回合的额度；provider 被挂住时，节点视图里 `instance.reserved = 200_000`、`used = 0`，provider 调用是 `inflight` 且带预留。
+  - **结算后按真实用量记账**：回合结束释放预留、记下 provider 报的用量（40+10=50/回合），三个被接受的回合之后 `used = 150`、`reserved = 0`。
+  - **每个节点各记各的账**：无限额节点（`budget.tokens: null`）在同一时刻是 `unlimited: true`、`reserved: 0`、`used: 0`——另一个节点的预留不会漏进它的账本；它自己的回合按自己的用量结算（20_000_001）。
+  - **只拒耗尽的那个节点**：第四个回合在预留时超限（150 + 200_000 > 200_100），节点变成 `blocked`、provider 一次也没被问第四次（3 次真实请求），并在图上 park 一个 `budget` 问题（`kind: budget`、`nodeId: finite`、`status: open`）等用户授权增量。
+  - 这一批逼出了 Go 侧的两个真 bug（见上文「Go 侧补齐的能力」第 10、11 条）：**两个节点并行时 daemon 直接崩**（lane 的每节点表被并发写），**provider 调用记录读不出状态与预留**（结构体没有 JSON tag）。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
