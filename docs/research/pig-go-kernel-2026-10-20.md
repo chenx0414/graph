@@ -62,7 +62,9 @@
 | codemode | 无 | 内置 `codemode` + `tool_search` |
 | pi 扩展（用户插件） | Node worker 加载 TS 扩展 | 需另行设计（PiG 扩展为 Go/Rust/Python/Node 资源） |
 
-**必须诚实说明的未验证项**：PiG 的 pi 扩展模型与 Graph 现用的"沙箱内加载 TS pi 扩展并暴露 tool/hook"形态并不等价，`src/runtime/durable-plugin-worker.mjs` 支持的 17 类 hook 与 `beforeTool`/`afterTool` 拦截在 PiG 侧的对应能力尚未逐条核对。这是本次迁移最大的不确定性，不是三项能力核对能覆盖的部分。
+**必须诚实说明的未验证项**：PiG 的 pi 扩展模型与 Graph 现用的"沙箱内加载 TS pi 扩展并暴露 tool/hook"形态并不等价，`src/runtime/durable-plugin-worker.mjs` 支持的 hook 与 `beforeTool`/`afterTool` 拦截在 PiG 侧的对应能力需要单独核对。这是本次迁移最大的不确定性，不是三项能力核对能覆盖的部分。
+
+> **2026-10-21 补记**：这一项已逐条核对，结论与证据见 [ADR 0033](../adr/0033-pig-go-kernel.md) 与[迁移计划](../planning/pig-go-kernel-migration-2026-10-20.md)。要点：Graph 侧受控 hook 是 **15 个**（另有仅注册的 `session_checkpoint`），此前这里写的"17 类"从代码复现不出，以 15(+1) 为准；PiG 侧这 15 个 hook 全部 `wired`/`complete`，能力比 Graph 现有需求更全（`tool_call` 可拦截与终止、`tool_result` 可改写内容）；真实缺口在 Graph 侧未接线——PiG 的子进程扩展宿主在 `coding` 层，Graph 用的 `durable` 层够不到它。该段先做到"**按名拒绝**"：绑定 pi 扩展的能力在 PiG 上按回合失败拒绝并点名要解绑的能力，不静默丢弃。
 
 ## 结论
 

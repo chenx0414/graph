@@ -594,13 +594,20 @@ func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 	return "主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。" + conversationFailureSuffix(detail)
 }
 
+// turnFailureOutputKeys are the fields a failed turn carries its reason in.
+//
+// A run failure carries error, a setup failure carries setupError. Reading the
+// field is what keeps a setup failure from being described as a truncated
+// model output.
+var turnFailureOutputKeys = []string{"error", "setupError"}
+
 // TurnFailureReason reads the concrete reason behind a failed master turn plus the field it
 // came from: a run failure carries error, a setup failure carries setupError, and anything
 // else falls back to the raw result. Reading the field is what keeps a setup failure from
 // being described as a truncated model output.
 func TurnFailureReason(result OperationResult) TurnFailure {
 	output, _ := result.Output.(map[string]any)
-	for _, key := range []string{"error", "setupError"} {
+	for _, key := range turnFailureOutputKeys {
 		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
 			failureKind := TurnFailureRun
 			if key == "setupError" {

@@ -127,18 +127,22 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		request.InputRequestId = host.options.RequestId()
 	}
 	session, err := pigkernel.OpenSession(context.Background(), pigkernel.SessionOptions{
-		Database:     host.options.Database,
-		Identity:     request.Binding.InstanceId,
-		Model:        pigModelSpec(request.Model),
-		Provider:     host.provider(),
-		Tools:        pigNodeToolSpecs(request, host.options.Gate, host.options.Ungated),
-		McpServers:   pigMcpServers(request),
-		Instructions: pigSessionInstructions(request),
-		RequestId:    request.InputRequestId,
-		OnEvent:      host.options.OnEvent,
-		OnToolCall:   host.options.OnToolCall,
+		Database:       host.options.Database,
+		Identity:       request.Binding.InstanceId,
+		Model:          pigModelSpec(request.Model),
+		Provider:       host.provider(),
+		Tools:          pigNodeToolSpecs(request, host.options.Gate, host.options.Ungated),
+		McpServers:     pigMcpServers(request),
+		Instructions:   pigSessionInstructions(request),
+		ExtensionPaths: append([]string{}, request.PiExtensionPaths...),
+		RequestId:      request.InputRequestId,
+		OnEvent:        host.options.OnEvent,
+		OnToolCall:     host.options.OnToolCall,
 	})
 	if err != nil {
+		if errors.Is(err, pigkernel.ErrPiExtensionNotHosted) {
+			return pigNodeTurnError(piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths))
+		}
 		return pigNodeTurnError(err.Error())
 	}
 	host.mutex.Lock()

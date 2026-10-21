@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
@@ -191,7 +192,12 @@ func pigRecoveryReason(result OperationResult, ok bool) string {
 	}
 	message := ""
 	if output := asMap(result.Output); output != nil {
-		message, _ = output["error"].(string)
+		for _, key := range turnFailureOutputKeys {
+			if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
+				message = value
+				break
+			}
+		}
 	}
 	if message == "" {
 		return ": " + result.Outcome

@@ -17,7 +17,7 @@
 - **凭据留在 Go**：模型凭据、准入、用量账本继续留在 Go 进程；内核不得新增绕过权限或预算的模型请求通道。
 - **MCP 走原生通道**：删除内置 `pi-mcp-adapter` 扩展及其运行时注册事件 `pi-mcp-adapter:runtime-register:v1`，MCP 服务器由内核直接注册与连接；扩展退役前须确认节点绑定到 MCP 能力的语义由原生通道等价承接。
 - **codemode**：内核内置 `codemode` 与 `tool_search`，默认关闭，由 Graph 按需显式启用，不改变既有工具准入与沙箱策略。
-- **pi 扩展模型是未验证项**：PiG 的扩展是 Go/Rust/Python/Node 资源，与现有"沙箱内加载 TypeScript pi 扩展并暴露 tool/hook"形态不等价，17 类 hook 与 `beforeTool`/`afterTool` 拦截的对应能力需单独核对；在核对完成前不删除既有 TS 扩展路径。
+- **pi 扩展模型**：PiG 的扩展是 Go/Rust/Python/Node 资源，与现有"沙箱内加载 TypeScript pi 扩展并暴露 tool/hook"形态不等价。Graph 侧受控的 hook 是 **15 个**（`resources_discover`、`session_tree`、`input`、`session_start`、`session_shutdown`、`before_agent_start`、`agent_start`、`agent_end`、`turn_start`、`turn_end`、`message_start`、`message_update`、`message_end`、`tool_call`、`tool_result`），另有仅注册的 `session_checkpoint`；此前文档写的"17 类"从代码复现不出，以这 15(+1) 为准。与 PiG 侧的对应能力已逐条核对，结论见下方实施状态；在 PiG 真正承载扩展之前，既有 TS 扩展路径不删除。
 - **版本落差**：PiG 钉住 Pi 1.3.0，Graph 钉住 Pi 1.1.0。durable schema 与运行语义差异必须由迁移与恢复验收证明，不能由"PiG 是移植"推定。
 
 ## 内核更新
@@ -54,12 +54,20 @@ PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新�
 - **内置 pi-mcp 扩展已删除**。`pi-mcp-adapter` 不再是依赖（`package.json` 与 `pnpm-lock.yaml` 一起清掉，连带 26 个包），运行时注册事件 `pi-mcp-adapter:runtime-register:v1` 与它带的网关工具 `mcp` 一起消失，能力包不再把 MCP 服务器交给扩展，插件 worker 不再注册服务器。**MCP 只有一条路：内核自己连服务器**，模型拿到的是服务器自己的 `mcp__<server>__<tool>` 名字。
   - **声明侧保留**：Graph 仍解析 MCP 能力声明（命令、参数、环境、url、header 与密钥解析），Go 侧 `runtime_mcp_adapter_server.go` 与 TS 侧 `mcp-adapter-server.ts` 都在；变的只是承载它的通道。TypeScript 守护进程因此没有 MCP 网关了——那条退路上的会话看不到 MCP 工具，这是删除扩展的直接后果。
   - E2E `tests/e2e/pig-mcp-session.test.ts` 两例：一例用真实 MCP 服务器与真实 provider 证明原生通道仍然通（模型直呼 `mcp__wordcount__word_count`，没有网关工具），另一例证明产品不再自带这个扩展（依赖不在 `package.json` 里，产品源码里没有那个注册事件）。
+- **pi 扩展模型的等价性已核对，结论是 PiG 更全、缺口在 Graph 侧未接线**。逐条比对的结果：PiG 对 Pi 1.3.0 的扩展 API 有完整对等矩阵（`docs/extension-api-parity.md`），Graph 需要的 15 个 hook 全部 `wired`/`complete`，`tool_call` 可拦截与终止、`tool_result` 可改写内容，对应 Graph 的 `beforeTool`/`afterTool`；`message_start`/`message_update` 在 PiG 侧标 `partial`（PiG 自己的 D82：跨进程的部分消息观察差异）。Node 扩展走"Pi 兼容 default export"，结构上能承载 Graph 现有的 TS 扩展。**但 Graph 跑的是 `durable` + `harness`，PiG 的子进程扩展宿主却在 `coding` 层（`coding/extension/host/subprocess`），durable 层没有到它的桥**——模型能力齐备，承载通道没接上。
+  - 因此这一段先做到"**不静默丢弃**"：绑定 pi 扩展的能力在 PiG 上无法兑现时，**内核边界直接拒绝**（`backend/internal/pigkernel/session.go` 的 `ErrPiExtensionNotHosted`），拒绝里带被绑的扩展。daemon 把它变成**回合失败**而不是崩溃：模型根本没被问过，agent 从未启动，因此按**setup 失败**结算（`setupError`），错误消息点名要解绑的能力（`proof@1.0.0`）而不是给一串易变的路径——路径是机器细节，还会撞上"路径里恰好有个像网络错误的片段"的重试分类器。
+  - 节点泳道同样拒绝：节点在自己的内核回合里被拒，节点 `failed`，理由写进 `graph.node.failed`。这类拒绝是确定性的（扩展要么被加载要么没有），因此归入"重试也修不好"的终态，不浪费重试。
+  - E2E `tests/e2e/pig-pi-extension.test.ts`：真实 pi 扩展能力、真实绑定、真实 daemon。证明模型**一次都没被问**，对话里有一条指名道姓的错误消息，问题以 `execution_failed` 交给 main，这条回合只结算一次（不是无限重排队）。
+  - E2E `tests/e2e/pig-node-pi-extension.test.ts`：图节点那条路径——节点的配方绑定 pi 扩展，节点在自己的内核回合里被拒，节点 `failed` 且理由点名扩展。
+  - **尚未兑现的是"真支持"**：让 PiG 真正承载 TS pi 扩展，需要在 Go 侧接 PiG 的子进程扩展宿主、把扩展工具注册进 durable harness、接上拦截桥接，并处理 OS 策略与 Pi 1.1.0→1.3.0 的兼容风险。这是一项独立工程，本决策不夹带。
 
 节点泳道的崩溃恢复是最后一关口，已经补齐：节点的**活路径**与**恢复路径**都已在 PiG 内核上。崩溃恢复把该节点执行置为 `blocked`（与 TS 路径同一步）之后，PiG 路径按主 Agent 那套三分法继续——已受理未发出的用受理时的配置重发，已经到过模型的不重放，内核那一回合被停掉以免被调度器顺手再驱动一次。产品层面的关口同样过了：默认内核翻了过去，TypeScript 侧车与 `pi-mcp-adapter` 扩展随之删除。
 
+pi 扩展这条线也过了第一关：模型能力上 PiG 与 Graph 现有需求等价且更全（15/15 hook 全部 wired/complete），真实缺口在 Graph 侧未接线（durable 层够不到 PiG 的子进程扩展宿主）。这一段的交付是**按名拒绝**：绑定 pi 扩展的能力在 PiG 上不会被悄悄执行成"少了工具的回合"，而是回合失败、消息点名要解绑的能力。
+
 MCP 的产品级通道已证明可用：Graph 的能力目录里绑定一个真实 MCP 服务器，模型直接收到 `mcp__<server>__<tool>` 声明并直呼该工具，没有网关工具、没有扩展事件总线（E2E `tests/e2e/pig-mcp-session.test.ts`）。
 
-仍在迁移收尾阶段的部分：TypeScript 守护进程本身（`src/server`、`src/core/task-runtime.ts` 与 15 个 durable 运行时文件，m8 套件覆盖）的退役，以及 PiG 扩展模型与既有 17 类 TS pi 扩展 hook 的等价性核对。
+仍在迁移收尾阶段的部分：TypeScript 守护进程本身（`src/server`、`src/core/task-runtime.ts` 与 15 个 durable 运行时文件，m8 套件覆盖）的退役；让 PiG 真正承载 TS pi 扩展的接线工程；以及 Pi 1.1.0→1.3.0 的运行语义逐条核对。
 
 ## 与既有决策的冲突
 

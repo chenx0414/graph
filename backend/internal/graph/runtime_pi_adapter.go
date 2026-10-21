@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
 // The production Agent adapter: one Task Runtime operation opens a restored Pi instance and sends
@@ -1780,6 +1782,21 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	}
 	session, err := transport.Open(request)
 	if err != nil {
+		// A session that cannot be opened is a failed turn, not a crash.
+		//
+		// A crash here would leave the runtime with a turn it believes was
+		// never sent: the node goes back to pending and the same turn is
+		// dispatched again, forever, with the reason nowhere. A failed turn
+		// says what happened and lets the user decide.
+		if errors.Is(err, pigkernel.ErrPiExtensionNotHosted) {
+			// The model was never asked anything: the agent could not start
+			// at all, because the kernel hosts no Pi extension. That is a
+			// setup failure, and the runtime words it as one - the message
+			// says the agent never came up, not that it ran and gave up.
+			return OperationResult{Outcome: "failed", Output: map[string]any{
+				"setupError": piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths),
+			}, Usage: turn.Gate.Total()}
+		}
 		panic(err)
 	}
 	input.ActiveMu.Lock()

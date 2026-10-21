@@ -3,13 +3,26 @@ package pigkernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
+
+// ErrPiExtensionNotHosted is the refusal a session gets when it names a Pi
+// extension.
+//
+// The kernel hosts Graph's own tools and the native MCP channel. It hosts no
+// Pi extension: PiG's extension model is a subprocess wire, and the durable
+// harness the sessions run on does not reach it. A session that needs one
+// cannot be honored, and saying so is the only honest answer - a session that
+// quietly ran without the tools the model was promised would look like a
+// working one.
+var ErrPiExtensionNotHosted = errors.New("the PiG kernel hosts no Pi extension")
 
 // One resident session on the PiG kernel.
 //
@@ -41,6 +54,12 @@ type SessionOptions struct {
 	McpServers []McpServerSpec
 	// Instructions are the system instructions of the session.
 	Instructions string
+	// ExtensionPaths are the Pi extensions the session would load.
+	//
+	// The kernel hosts no Pi extension: PiG's extension model is a subprocess
+	// wire that the durable harness does not reach. A session that names one
+	// is refused rather than opened without it.
+	ExtensionPaths []string
 	// ThinkingLevel is the requested reasoning level.
 	ThinkingLevel string
 	// RequestId is the admission identity of the next input. The same id is
@@ -139,6 +158,9 @@ type Session struct {
 // The kernel of the database is opened once and kept: every session of that
 // database shares it, and so do the durable conversations they address.
 func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
+	if len(options.ExtensionPaths) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrPiExtensionNotHosted, strings.Join(options.ExtensionPaths, ", "))
+	}
 	resident, err := openResident(ctx, options.Database)
 	if err != nil {
 		return nil, err

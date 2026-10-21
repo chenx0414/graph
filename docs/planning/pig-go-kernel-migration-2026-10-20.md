@@ -38,17 +38,24 @@
     - **TypeScript 守护进程本身保留**：`src/server`、`src/core/task-runtime.ts` 与 15 个 durable 运行时文件仍在，m8 套件仍覆盖它们。退役它属于另一件事，本次不夹带。
     - E2E `tests/e2e/pig-default-kernel.test.ts` 与 `tests/e2e/pig-mcp-session.test.ts` 各增一例：前者证明 `--kernel node` 被拒（daemon 起不来，消息里有 sidecar/retired），后者证明产品不再自带 MCP 扩展（依赖不在 `package.json` 里，产品源码里没有那个注册事件）。
 
+17. **pi 扩展模型的等价性已核对，缺口在 Graph 侧未接线；这一段先做到"按名拒绝"**。逐条比对的结论：
+    - **Graph 侧受控 hook 是 15 个，不是 17 个**：`resources_discover`、`session_tree`、`input`、`session_start`、`session_shutdown`、`before_agent_start`、`agent_start`、`agent_end`、`turn_start`、`turn_end`、`message_start`、`message_update`、`message_end`、`tool_call`、`tool_result`，另有仅注册的 `session_checkpoint`。此前 ADR 与本文写的"17 类"从代码复现不出，以这 15(+1) 为准（依据：`src/runtime/durable-plugin-worker.mjs` 的受控 hook 清单）。
+    - **PiG 侧能力齐备且更全**：PiG 对 Pi 1.3.0 有完整扩展 API 对等矩阵（`docs/extension-api-parity.md`），这 15 个 hook 全部 `wired`/`complete`；`tool_call` 可拦截与终止、`tool_result` 可改写内容，对应 Graph 的 `beforeTool`/`afterTool`；`message_start`/`message_update` 标 `partial`（PiG 自己的 D82：跨进程的部分消息观察差异）。Node 扩展走"Pi 兼容 default export"，结构上能承载 Graph 现有的 TS 扩展。
+    - **真实缺口在承载通道**：Graph 跑的是 `durable` + `harness`，而 PiG 的子进程扩展宿主在 `coding` 层（`coding/extension/host/subprocess`），durable 层没有到它的桥。模型能力不缺，通道没接。
+    - **这一段的交付是"不静默丢弃"**：绑定 pi 扩展的能力在 PiG 上无法兑现时，内核边界直接拒绝（`backend/internal/pigkernel/session.go` 的 `ErrPiExtensionNotHosted`），daemon 把它变成**回合失败**而不是崩溃——模型一次都没被问过，agent 从未启动，因此按 **setup 失败**结算（`setupError`），消息点名要解绑的能力（`proof@1.0.0`）而不是给一串易变的路径（路径是机器细节，还会撞上"路径里恰好有个像网络错误的片段"的重试分类器，把确定性的拒绝变成重试循环）。节点泳道同样拒绝，节点 `failed`，理由写进 `graph.node.failed`；这类拒绝归入"重试也修不好"的终态，不浪费重试。
+    - E2E：`tests/e2e/pig-pi-extension.test.ts`（真实 pi 扩展能力 + 真实绑定 + 真实 daemon：模型一次都没被问、对话里有指名道姓的错误消息、问题以 `execution_failed` 交给 main、这条回合只结算一次）与 `tests/e2e/pig-node-pi-extension.test.ts`（图节点那条路径：节点在自己的内核回合里被拒、节点 `failed`、理由点名扩展）。
+
 ## 尚未完成的部分
 
 1. **TypeScript 守护进程本身的退役**（与侧车不同的一件事）：`src/server`、`src/core/task-runtime.ts`（2654 行，m8 套件依赖）与 15 个 durable 运行时文件仍在。侧车协议层与内置 MCP 扩展已删，但守护进程仍是可运行的第二套会话实现，退役它要连 m8 套件一起搬。
-2. **pi 扩展模型**：PiG 的扩展是 Go/Rust/Python/Node 资源，与现有"沙箱内加载 TS pi 扩展"形态不等价；17 类 hook 与 `beforeTool`/`afterTool` 的对应能力尚未逐条核对，这是本次迁移最大的未验证项。
+2. **让 PiG 真正承载 TS pi 扩展**：模型能力上 PiG 与 Graph 的 15 个受控 hook 等价且更全，缺的是承载通道——PiG 的子进程扩展宿主在 `coding` 层，`durable` 层没有桥。要真支持，需要在 Go 侧接那个宿主、把扩展工具注册进 durable harness、接上拦截桥接，并处理 OS 策略与 Pi 1.1.0→1.3.0 的兼容风险。在此之前，绑定 pi 扩展的能力在 PiG 上**按名拒绝**（见上第 17 条），不会被悄悄执行成"少了工具的回合"。
 3. **版本落差**：PiG 钉住 Pi 1.3.0，Graph 钉住 Pi 1.1.0。durable schema 已由 E2E 证明可以从 1 升到 2 并保留原记录，但运行语义差异仍未逐条核对。PiG 的原生恢复会**重发**未答复的 provider 请求，Graph 侧因此用自己的"是否已抵达模型"判断挡住重放；两种口径的其余差异仍需逐条核对。
 
 ## 切换顺序建议
 
 先让 Go 宿主接管同一份 `graph_durable_` 命名空间（已在数据层证明可行），再逐段替换会话行为；每段由现有真实 E2E（`tests/e2e/go-durable.test.ts` 等）把关。宿主协议若保持 Unix socket 行协议不变，切换可回退；正式切换后不保留旧内核回退执行入口（沿用 [ADR 0031](../adr/0031-pi-durable-agent-kernel.md) 的既有约定）。
 
-当前进度：数据层 → 会话层 → 模型与工具通道 → 原生工具 → 崩溃恢复（主 Agent）→ 图节点泳道的活路径与崩溃恢复 → **默认内核翻转** → **侧车与内置 MCP 扩展退役**均已落地并有 E2E；剩下的关口是 TypeScript 守护进程本身的退役，以及 PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+当前进度：数据层 → 会话层 → 模型与工具通道 → 原生工具 → 崩溃恢复（主 Agent）→ 图节点泳道的活路径与崩溃恢复 → **默认内核翻转** → **侧车与内置 MCP 扩展退役** → **pi 扩展等价性核对与按名拒绝**均已落地并有 E2E；剩下的关口是 TypeScript 守护进程本身的退役、让 PiG 真正承载 TS pi 扩展，以及 Pi 1.1.0→1.3.0 的运行语义逐条核对。
 
 ## 内核选择
 

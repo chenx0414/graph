@@ -1466,6 +1466,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					// prompt.
 					SkillPaths:          append([]string{}, workerConfig.SkillPaths...),
 					SkillFolder:         stringPointerValue(workerConfig.SkillFolder),
+					// The Pi extensions the node would load. The kernel hosts
+					// none, so a node that names one is refused rather than run
+					// without the tools it was bound.
+					PiExtensionPaths:    append([]string{}, workerConfig.PiExtensionPaths...),
 					ReadRoots:           readRoots,
 					WriteRoots:          writeRoots,
 					SystemPrompt:        session.SystemPrompt,
