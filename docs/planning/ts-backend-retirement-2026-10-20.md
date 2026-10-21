@@ -157,6 +157,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/e2e/graph-modules.test.ts` 路由级联与顺序；规则表达式；once 模块的持有与重开 | `tests/e2e/go-graph-modules.test.ts` | 3 |
 | `tests/e2e/artifact-publication.test.ts` 发布的版本不可变与 CAS；越界路径与符号链接被拒 | `tests/e2e/go-artifact-publication.test.ts` | 2 |
 | `tests/e2e/graph-confirmation.test.ts` 确认后的草稿画得出来、图真的跑起来；旧形状草稿变不成功能 | `tests/e2e/go-graph-confirmation.test.ts` | 2 |
+| `tests/e2e/providers.test.ts` provider 目录与探针：目录不泄密钥、探针说厂商协议、拒绝保留厂商原话、坏草稿按字段被拒 | `tests/e2e/go-provider-directory.test.ts` | 4 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -206,6 +207,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 16. **没写额度的预算被当成「不限额」**（Batch 25 修掉）。`budget: {}`（没有 `tokens` 键）在 Go 侧被当作「tokens 缺失 = 不限额」而接受；TypeScript 那边要求 `tokens` 必须在场（要么是非负整数，要么显式的 null）。一条漏写额度的预算因此会静悄悄地变成无限额度。修法：`tokens` 键必须存在，缺了就按 `budget.tokens must be a non-negative integer or null` 拒掉。
 17. **协议 schema 只认六个关键字，声明的协议几乎不约束任何东西**（Batch 25 修掉）。Go 手写的协议值检查（`interfaceSpecCheck`）只实现了 `type` / `required` / `properties` / `minLength` / `minimum` / `integer`；TypeScript 那边用 ajv 严格模式，`enum` / `const` / `items` / `minItems` / `maxItems` / `uniqueItems` / `additionalProperties` / `maxLength` / `maximum` / `pattern` 全部生效。后果很实际：**一个声明了严格协议的图，收到的却是任何值都被接受**——枚举值、数组元素、最少元素个数、多出来的字段，一概不检查。另一半缺口在定义侧：协议承诺的类型名没人认识时（`type: 'not-a-type'`）Go 侧照样把定义建出来，于是那张图收任何值都会被拒。修法：值检查补齐那十个关键字（含数组的元组写法与 `additionalProperties` 的 schema 写法）；定义侧要求 `type` 只能是 JSON Schema 认识的类型名，否则整份定义被拒（`Protocol <id> has an invalid schema: ...`）。
 18. **会话的草稿图永远是空的**（Batch 27 修掉）。`GET /api/conversations/{id}/draft-graph` 把提案的 `spec` 按 `map[string]any` 断言，而会话视图里的 `spec` 是 **`NativeProposal` 结构体**——断言当场失败，于是这份草稿**永远画不出来**：`nodes` 是空的、`layout.edges` 是空的、`interfaces` 是空的。控制台在确认之前看不到任何东西，用户只能对着「确认」按钮点头，却不知道要确认的是什么。TypeScript 那边把 `spec` 序列化成对象再取 `definition`，草稿是画得出来的。修法：按 `NativeProposal` 与 `map[string]any` 两种形态分别取定义，取不到就照旧返回空图。
+19. **任何合法的 provider 地址都被判为非法**（Batch 28 修掉）。Go 的 `isHttpURL` 用 `url.Parse` 解析地址后，把 `parsed.Scheme` 拿去和 `"http:"` / `"https:"` 比——而 Go 的 `url.URL.Scheme` **不带冒号**（值是 `http`），**这个比较永远不成立**。于是每一个带 Base URL 的 provider 草稿都被拒（`Base URL 必须是 http(s) 绝对地址`），**探针面整条路都不可用**：厂商的模型列表探不到、凭据验不了，`POST /api/providers/probe` 只会回 400。TypeScript 那边用 `new URL(value)`，`protocol` 是带冒号的 `http:`，比较成立。修法：scheme 不带冒号，比 `"http"` / `"https"`。
 
 ## 执行批次
 
@@ -295,7 +297,13 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **确认后的图真的跑起来了**（第 1 条）：主 Agent 提出的草稿**是一份画得出来的文档**——`GET /api/conversations/{id}/draft-graph` 给出三个节点（`a` / `b` / `gate`）、模块节点的 `kind: 'module'` 与 `action: 'route'`、一条 `a → b` 的布局边、以及一条 `a.out → b.in`、协议 `ping`、还没有投递的接口。用户确认（`POST /api/conversations/{id}/confirm`）后创建的功能任务是**同一份文档**：节点一样、布局边一样、接口一样，节点都等着（`status: 'idle'`），**什么都没跑**——直到有输入投递进去。主 Agent 醒来后的那次投递**落在命名输入上**（`a.in`，值 `{n: 0}`，状态 `accepted`），并排成一件要干的活（队列 `queued`）；链真的走通：`a` 与 `b` 各自完成，`a` 交回来的 `{n: 42}` 真的顺着 `ab` 那条边送到了 `b`。**同一个草稿确认两次不会叫醒 master 两次**。
   - **旧形状的草案变不成功能**（第 2 条）：旧形提案被 daemon **用工具自己的 schema 校验**拒掉，并点名缺了哪个字段（`Validation failed for tool "propose_graph": - proposal.definition: must have required properties definition`）；确认接口回 **400 `stale_proposal`**（没有可确认的当前草稿）；**没有产生任何功能任务**（任务列表里没有那条请求）。
   - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 18 条）：**会话的草稿图永远是空的**——`serveDraftGraph` 把提案的 `spec` 按 `map[string]any` 断言，而它是 `NativeProposal` 结构体，断言失败后草稿被画成空图。回退这个修复后，用例在草稿视图这一句上变红（`expected [] to deeply equal [ 'a', 'b', 'gate' ]`），证明这条缺口是实的。
-- **Batch 28 起**：会话面与产物面剩余的簇。
+- **Batch 28（已完成）**：provider 目录与探针。`tests/e2e/go-provider-directory.test.ts`（4 条）搬进 `tests/e2e/providers.test.ts` 里**还没有被别的 Go 用例覆盖**的那条契约（该文件另外两条——「保存的请求头与凭据可用性到达真实会话」与「view 模式下建的任务在下次 execute 启动时恢复且不派发被移出的项目」——分别已由 `tests/e2e/go-provider-headers.test.ts`（4 条）与 `tests/e2e/go-startup.test.ts` / `tests/e2e/go-removed-project.test.ts` 覆盖）：
+  - **目录说清了可以配什么，而且一个密钥都不给**（第 1 条）：目录点名了每一个内置厂商（`opencode-go` / `command-goat` / `grok` / `chatgpt` / `deepseek` / `custom`），每个厂商都说得出**自己要哪个环境变量**（`grok` 要 `GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN`、`opencode-go` 要 `GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY`）以及**能不能列模型**；**凭据在环境里就是「已配置」，不在就不是**（`deepseek` 已配置 / `grok` 没配置）；配置里声明的凭据按名字显示，连同它的并发限额（`credentials: { local: 2 }` / `sharedGroups: { team: 4 }`）；**密钥值一次也没出现**在回答里；**没有会话 cookie 的调用是 401**，`/api/app/*` 是 403（桌面桥接要令牌）。
+  - **探针说厂商自己的协议**（第 2 条）：先列模型、再发一次最小的对话请求证明凭据能用，两次都带着密钥而**回答里没有密钥**；厂商用别的形状列模型也读得懂（`['a', {model:'b',display_name:'Bee'}]` → `[{id:'a'},{id:'b',name:'Bee'}]`、`[{slug:'c'}]` → `[{id:'c'}]`、`{}` → `[]`）；**Anthropic 协议就是另一套协议**——`x-api-key` + `anthropic-version: 2023-06-01`、路径 `/v1/messages`、请求体 `{model, max_tokens: 1, messages:[{role:'user',content:'ping'}]}`，**一个 bearer token 都不带**；目录里「这个厂商不能列模型」那一条只是建议，**真的照问**；`probeModels: false` 时只发那一次对话请求。
+  - **厂商拒绝时保留它自己的话**（第 3 条）：403 / 429 带 `error.message` 时原样透出（`subscription does not allow listing`、`Rate limit reached`），没有消息体的 503 说 `HTTP 503`；**不是 JSON 的响应体也原样透出**（`upstream unavailable`、`quota exceeded`、`invalid model`）；**凭据解析不出来时点名那个环境变量**、回 `credentialConfigured: false`，而且**发出去的请求不带任何 authorization**；端点根本不在时是一次**失败的验证**（`ok: false`、`status: 0`），不是崩溃。
+  - **坏草稿按字段被拒，而且一个请求都没发出去**（第 4 条）：缺 `requestId`、空 `requestId`、自定义厂商缺 `baseUrl` / `api` / `label`、`ftp://` 地址、`responses` 格式、缺厂商名、`credentialRef` 不是环境变量名、平台 id 不存在——每一条都回 **400 `invalid_input`** 并**点名那个字段**；**这些拒绝一次都没到达厂商**；扁平写法（字段不套 `provider`）照样认；没写 `credentialRef` 时用默认的 `GRAPH_PROVIDER_API_KEY`（而它并不在环境里，于是 `credentialConfigured: false`）。
+  - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 19 条）：**任何合法的 provider 地址都被判为非法**——`isHttpURL` 把 Go 的 `url.URL.Scheme`（不带冒号）拿去和 `"http:"` 比，于是探针面整条路都只会回 400。回退这个修复后，第 2、3、4 条用例全部变红（`baseUrl: Base URL 必须是 http(s) 绝对地址`），证明这条缺口是实的。
+- **Batch 29 起**：会话面与产物面剩余的簇、`m8/app-shell-ux` 的浏览器轨、`harness-cost` 与 `recipe-compile`。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

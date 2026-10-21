@@ -172,7 +172,8 @@ func isHttpURL(value string) bool {
 	if err != nil {
 		return false
 	}
-	if parsed.Scheme != "http:" && parsed.Scheme != "https:" {
+	// url.URL.Scheme never carries the colon, so it is compared without one.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return false
 	}
 	return parsed.Host != ""
