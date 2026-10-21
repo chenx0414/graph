@@ -156,6 +156,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/e2e/graph-definitions.test.ts` 定义整体被拒并点名规则；接收协议真的约束值且好值原样通过 | `tests/e2e/go-graph-definitions.test.ts` | 2 |
 | `tests/e2e/graph-modules.test.ts` 路由级联与顺序；规则表达式；once 模块的持有与重开 | `tests/e2e/go-graph-modules.test.ts` | 3 |
 | `tests/e2e/artifact-publication.test.ts` 发布的版本不可变与 CAS；越界路径与符号链接被拒 | `tests/e2e/go-artifact-publication.test.ts` | 2 |
+| `tests/e2e/graph-confirmation.test.ts` 确认后的草稿画得出来、图真的跑起来；旧形状草稿变不成功能 | `tests/e2e/go-graph-confirmation.test.ts` | 2 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -204,6 +205,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 15. **显式的 null 被当成「没写」，整份坏定义被放行**（Batch 25 修掉）。Go 的定义校验按「值不是 nil」判断字段是否在场，于是 `model: null`、`instructions: null`、`retry: null`、`budget: null` 这些**显式的 null**（类型错误）全被跳过——TypeScript 那边 `settings.model !== undefined` 这类判断把 null 与「没写」分得很清楚，四种都被拒。后果不只是宽松：一张用 `model: null` 建出来的图**真的被创建了**，模型随后拿到的是一张自己没写对的图。修法：改成按「键在场」判断（`_, ok := settings["model"]`），在场就必须是对的类型。
 16. **没写额度的预算被当成「不限额」**（Batch 25 修掉）。`budget: {}`（没有 `tokens` 键）在 Go 侧被当作「tokens 缺失 = 不限额」而接受；TypeScript 那边要求 `tokens` 必须在场（要么是非负整数，要么显式的 null）。一条漏写额度的预算因此会静悄悄地变成无限额度。修法：`tokens` 键必须存在，缺了就按 `budget.tokens must be a non-negative integer or null` 拒掉。
 17. **协议 schema 只认六个关键字，声明的协议几乎不约束任何东西**（Batch 25 修掉）。Go 手写的协议值检查（`interfaceSpecCheck`）只实现了 `type` / `required` / `properties` / `minLength` / `minimum` / `integer`；TypeScript 那边用 ajv 严格模式，`enum` / `const` / `items` / `minItems` / `maxItems` / `uniqueItems` / `additionalProperties` / `maxLength` / `maximum` / `pattern` 全部生效。后果很实际：**一个声明了严格协议的图，收到的却是任何值都被接受**——枚举值、数组元素、最少元素个数、多出来的字段，一概不检查。另一半缺口在定义侧：协议承诺的类型名没人认识时（`type: 'not-a-type'`）Go 侧照样把定义建出来，于是那张图收任何值都会被拒。修法：值检查补齐那十个关键字（含数组的元组写法与 `additionalProperties` 的 schema 写法）；定义侧要求 `type` 只能是 JSON Schema 认识的类型名，否则整份定义被拒（`Protocol <id> has an invalid schema: ...`）。
+18. **会话的草稿图永远是空的**（Batch 27 修掉）。`GET /api/conversations/{id}/draft-graph` 把提案的 `spec` 按 `map[string]any` 断言，而会话视图里的 `spec` 是 **`NativeProposal` 结构体**——断言当场失败，于是这份草稿**永远画不出来**：`nodes` 是空的、`layout.edges` 是空的、`interfaces` 是空的。控制台在确认之前看不到任何东西，用户只能对着「确认」按钮点头，却不知道要确认的是什么。TypeScript 那边把 `spec` 序列化成对象再取 `definition`，草稿是画得出来的。修法：按 `NativeProposal` 与 `map[string]any` 两种形态分别取定义，取不到就照旧返回空图。
 
 ## 执行批次
 
@@ -289,7 +291,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **发布出去的是不可变的一个版本，过期的 compare-and-swap 被拒，同一个请求只发布一次**（产物第 1 条）：三种坏发布各自被指名（`schema must use kind@version syntax`、`must be a label`、`lowercase slug`）；第一次发布是版本 1，同一个 `requestId` 再发一次**仍然是版本 1**（不是两次发布）；接着是版本 2；一个还指望版本 1 的发布被拒（`Artifact head changed`）；文档只有一个头，停在版本 2，标签被规范化（`Known-Issue` → `known-issue`，中文标签原样保留），schema 记着 `source-list@1`；两个版本都读得回来，各自的字节没变；被拒的那次发布什么也没留下。
   - **越出工作副本的路径与符号链接都被拒，宿主字节一个字节都没回给模型**（产物第 2 条）：`../host-only.txt` 被拒（理由点名 `work copy`），指向它的符号链接被拒（`may not be a symbolic link`），宿主文件的内容**从未出现在模型的任何一次请求里**，也没有任何产物被发布。
   - 这一批**没有**逼出 Go 侧的真 bug：模块与产物这两套语义在 Go 侧本来就成立，补的是证明。
-- **Batch 27 起**：图确认（`tests/e2e/graph-confirmation.test.ts`）、会话面与产物面剩余的簇。
+- **Batch 27（已完成）**：图确认。`tests/e2e/go-graph-confirmation.test.ts`（2 条）搬进 `tests/e2e/graph-confirmation.test.ts` 的两条契约（W5 确认一个带 v2 定义的草稿会变成一张真跑得起来的图；W6 旧形状的草稿变不成功能任务）。这一簇走的是**会话面**那条路径：主 Agent 用 `propose_graph` 提案，用户在 HTTP 上确认，确认创建的功能任务再由主 Agent 用 `graph_send` 投递、节点真的跑起来：
+  - **确认后的图真的跑起来了**（第 1 条）：主 Agent 提出的草稿**是一份画得出来的文档**——`GET /api/conversations/{id}/draft-graph` 给出三个节点（`a` / `b` / `gate`）、模块节点的 `kind: 'module'` 与 `action: 'route'`、一条 `a → b` 的布局边、以及一条 `a.out → b.in`、协议 `ping`、还没有投递的接口。用户确认（`POST /api/conversations/{id}/confirm`）后创建的功能任务是**同一份文档**：节点一样、布局边一样、接口一样，节点都等着（`status: 'idle'`），**什么都没跑**——直到有输入投递进去。主 Agent 醒来后的那次投递**落在命名输入上**（`a.in`，值 `{n: 0}`，状态 `accepted`），并排成一件要干的活（队列 `queued`）；链真的走通：`a` 与 `b` 各自完成，`a` 交回来的 `{n: 42}` 真的顺着 `ab` 那条边送到了 `b`。**同一个草稿确认两次不会叫醒 master 两次**。
+  - **旧形状的草案变不成功能**（第 2 条）：旧形提案被 daemon **用工具自己的 schema 校验**拒掉，并点名缺了哪个字段（`Validation failed for tool "propose_graph": - proposal.definition: must have required properties definition`）；确认接口回 **400 `stale_proposal`**（没有可确认的当前草稿）；**没有产生任何功能任务**（任务列表里没有那条请求）。
+  - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 18 条）：**会话的草稿图永远是空的**——`serveDraftGraph` 把提案的 `spec` 按 `map[string]any` 断言，而它是 `NativeProposal` 结构体，断言失败后草稿被画成空图。回退这个修复后，用例在草稿视图这一句上变红（`expected [] to deeply equal [ 'a', 'b', 'gate' ]`），证明这条缺口是实的。
+- **Batch 28 起**：会话面与产物面剩余的簇。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

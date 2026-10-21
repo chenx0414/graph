@@ -1458,17 +1458,25 @@ func (app *GraphApp) serveDraftGraph(w http.ResponseWriter, r *http.Request) {
 	view := app.appConversationView(conversationID, r)
 	record, _ := view.(map[string]any)
 	proposal, _ := record["proposal"].(map[string]any)
-	var spec map[string]any
+	// The proposal holds its spec as the native proposal itself, not as a
+	// plain record: reading it as a record found nothing, and the draft was
+	// always drawn empty.
+	var definition any
 	if proposal != nil {
-		spec, _ = proposal["spec"].(map[string]any)
+		switch spec := proposal["spec"].(type) {
+		case NativeProposal:
+			definition = spec.Definition
+		case map[string]any:
+			value, ok := spec["definition"]
+			if !ok {
+				Raise("invalid_proposal", "A native graph definition is required")
+			}
+			definition = value
+		}
 	}
-	if spec == nil {
+	if definition == nil {
 		writeJSON(w, http.StatusOK, appGraphStructure{Containers: []appGraphContainer{}, Nodes: []appGraphNode{}, Loops: []any{}, Layout: appEmptyLayout()})
 		return
-	}
-	definition, ok := spec["definition"]
-	if !ok {
-		Raise("invalid_proposal", "A native graph definition is required")
 	}
 	parsed := ParseGraphDefinition(definition)
 	structure := app.appNativeGraphStructure(parsed, nil)
