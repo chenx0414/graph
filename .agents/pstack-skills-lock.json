@@ -241,6 +241,7 @@
     "renamed_skills": "An upstream id that already exists in .agents/skills/ is not overwritten: the upstream copy is installed as pstack-<id> and the local skill is kept. Affected ids: tdd, teach, create-verification-skill, maintain-verification-skill.",
     "reference_rewrite": "Inside the pstack corpus, every reference to a renamed skill is repointed at the pstack- prefixed id: the frontmatter name, the /<id> slash form (which also covers ../<id>/SKILL.md links) and the **<id>** prose form. Ordinary prose is untouched.",
     "pstack-tdd": "A project-rule note was added: the root CODING_STANDARDS.md allows only true E2E tests, and that rule wins over this skill preference for unit or integration tests.",
+    "poteto-mode": "A Graph-native model rule was added: the per-role model table and the thinking budget live in docs/agent/pstack-models.md, and the Cursor model slugs this skill names are not the models this project selects.",
     "disable-model-invocation": "Kept as upstream: 55 of the 56 skills stay out of the system prompt and are reachable through an explicit /skill:<name> selection; setup-pstack stays model-visible."
   },
   "not_installed": {
