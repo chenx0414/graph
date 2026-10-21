@@ -147,6 +147,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m5/graph.test.ts` 图布局几何：盒子在网格上、盒子尺寸合法、走线正交且首尾落在节点边界、走线不穿过节点、同源同目标的边各走各的通道、重画后仍是可画的图 | `tests/e2e/go-graph-layout.test.ts` | 1 |
 | `tests/m5/graph.test.ts` 嵌套子图：容器与成员都被画出来、回边落在成员而不是容器上、加节点不动原有节点、删节点后原有节点仍不动 | `tests/e2e/go-graph-nested.test.ts` | 3 |
 | `tests/m8/credentials.test.ts` 凭据隔离：两个端点各自只拿到自己的密钥、换模型不会串钥；凭据被撤销后模型不再触达 provider；新任务记下当时生效的配置版本 | `tests/e2e/go-credentials.test.ts` | 3 |
+| `tests/m8/startup.test.ts` 启动契约：无效参数/缺控制台/缺配置/缺模型/缺凭据/端口占用/状态目录被占各自报明确错误码；view-only 起得来且不派发；重建控制台不用重启；种子并编译 main 配方；重启保留任务；CLI 打印地址并干净退出；配置拒绝未知引用且相对项目根被解析；密钥只来自被指名的环境变量 | `tests/e2e/go-startup.test.ts` | 10 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -205,6 +206,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - 用例跑在 `--kernel pig` 上：TypeScript sidecar 会把 Go 工具的错误吞成一句「Tool returned an invalid content result」，PiG 内核才会把真实原因交回给模型。
 - **Batch 13（已完成）**：凭据隔离与配置版本记账。`tests/e2e/go-credentials.test.ts`——两个端点各自只看到自己的 `Bearer` 密钥（换模型不串钥）；凭据被撤销后模型不再触达 provider；新任务在 `task.created` 事件里记下当时生效的配置版本。
   - **发现一处行为差异（待修）**：TypeScript 在模型没有可用凭据时让节点**失败并给出原因**（`no credential bound`）；Go 的分发闸门只是**等待**——对话停在 pending，`master` 为 null，用户看不到任何原因。已证明的部分（不外发、不假装答完）写进了用例；「给出原因」这一半还没有 Go 实现，列入待补。
+- **Batch 14（已完成）**：daemon 的启动契约。`tests/e2e/go-startup.test.ts`——直接驱动真实 `graphd` 二进制，把 `m8/startup.test.ts` 的 10 条契约整份移植：无效参数以 usage 退出（exit 2）；缺控制台、缺配置、缺模型、缺凭据、端口占用、状态目录被占各报自己的错误码；view-only 起得来、报得出启动状态、且一个回合都不派发；重建控制台不用重启进程；种子并编译出 main 配方；重启后同一状态目录里的任务还在；CLI 打印地址、SIGTERM 干净退出（exit 0）；配置拒绝未知引用与非法取值、相对项目根被解析成绝对路径；密钥只从被指名的环境变量取，配置接口永远不带明文。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
