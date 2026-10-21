@@ -105,8 +105,8 @@ type NodeStateRow struct {
 
 // DirectDelivery is a main-agent input and its landing.
 type DirectDelivery struct {
-	Delivery DeliveryRow
-	Queue    *QueueRow
+	Delivery DeliveryRow `json:"delivery"`
+	Queue    *QueueRow   `json:"queue,omitempty"`
 }
 
 // AdmitNodeInput records the instance a node is admitted with.

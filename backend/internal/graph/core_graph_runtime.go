@@ -78,8 +78,13 @@ func (runtime *GraphRuntime) Create(definition any, request, projectId string) C
 	return created
 }
 
+// GraphPatchResult is what a published patch answers with.
+type GraphPatchResult struct {
+	Revision int `json:"revision"`
+}
+
 // Patch publishes a new revision. A stale base changes nothing.
-func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) struct{ Revision int } {
+func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphPatchResult {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
 	if phase == "completed" || phase == "stopping" || phase == "stopped" {
@@ -176,8 +181,8 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) struct
 			kernelExec(runtime.kernel.DB, "UPDATE kernel_nodes SET status='retired' WHERE task_id=? AND node_id=?", runtime.graphId, id)
 		}
 		runtime.kernel.Store.Event(runtime.graphId, "graph.patched", map[string]any{"revision": revision.Version, "previousRevision": latest.Version, "reason": changes.Reason})
-		return struct{ Revision int }{Revision: revision.Version}
-	}).(struct{ Revision int })
+		return GraphPatchResult{Revision: revision.Version}
+	}).(GraphPatchResult)
 }
 
 // State reads phase, pause, and the latest revision.
