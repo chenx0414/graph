@@ -40,27 +40,52 @@ type AssistantUsage struct {
 
 // AssistantContentBlock is one block of an assistant message: text, thinking or a tool call.
 type AssistantContentBlock struct {
-	Type              string         `json:"type"`
-	Text              string         `json:"text,omitempty"`
-	TextSignature     *string        `json:"textSignature,omitempty"`
-	Thinking          string         `json:"thinking,omitempty"`
-	ThinkingSignature *string        `json:"thinkingSignature,omitempty"`
-	Redacted          *bool          `json:"redacted,omitempty"`
-	Id                string         `json:"id,omitempty"`
-	Name              string         `json:"name,omitempty"`
-	Arguments         map[string]any `json:"arguments,omitempty"`
-	ThoughtSignature  *string        `json:"thoughtSignature,omitempty"`
-	Namespace         *string        `json:"namespace,omitempty"`
+	Type              string  `json:"type"`
+	Text              string  `json:"text,omitempty"`
+	TextSignature     *string `json:"textSignature,omitempty"`
+	Thinking          string  `json:"thinking,omitempty"`
+	ThinkingSignature *string `json:"thinkingSignature,omitempty"`
+	Redacted          *bool   `json:"redacted,omitempty"`
+	Id                string  `json:"id,omitempty"`
+	Name              string  `json:"name,omitempty"`
+	// Arguments is the tool call's argument value. It is not typed as an object
+	// because a model may send a call whose arguments are not an object at all:
+	// the SDK's validator names that mistake ("root: must be object") and
+	// shows what it received, and the runtime must not rewrite the mistake
+	// into an empty object before the validator ever sees it.
+	Arguments        any     `json:"arguments,omitempty"`
+	ThoughtSignature *string `json:"thoughtSignature,omitempty"`
+	Namespace        *string `json:"namespace,omitempty"`
+}
+
+// MarshalJSON writes one content block.
+//
+// A tool call always carries its arguments. The SDK validates a call against
+// the tool's schema and reads a missing value as a malformed call, so an
+// empty argument set - a tool that takes no parameters - must still travel
+// as `{}`. `omitempty` would drop exactly that, and the worker would see no
+// arguments at all. The other block kinds carry no arguments, so the shared
+// field stays out of their JSON.
+func (block AssistantContentBlock) MarshalJSON() ([]byte, error) {
+	type alias AssistantContentBlock
+	shadow := struct {
+		alias
+		Arguments any `json:"arguments,omitempty"`
+	}{alias: alias(block)}
+	if block.Type == "toolCall" {
+		shadow.Arguments = assistantToolCallArguments(block.Arguments)
+	}
+	return json.Marshal(shadow)
 }
 
 // AssistantToolCall is one tool call an assistant message carries.
 type AssistantToolCall struct {
-	Type             string         `json:"type"`
-	Id               string         `json:"id"`
-	Name             string         `json:"name"`
-	Arguments        map[string]any `json:"arguments"`
-	ThoughtSignature *string        `json:"thoughtSignature,omitempty"`
-	Namespace        *string        `json:"namespace,omitempty"`
+	Type             string  `json:"type"`
+	Id               string  `json:"id"`
+	Name             string  `json:"name"`
+	Arguments        any     `json:"arguments"`
+	ThoughtSignature *string `json:"thoughtSignature,omitempty"`
+	Namespace        *string `json:"namespace,omitempty"`
 }
 
 // AssistantMessage is the live assistant response the frames rebuild.
@@ -302,7 +327,10 @@ func (encoder *assistantMessageFrameEncoder) encode(event AssistantMessageEvent)
 		encoder.endBlock(eventIndex(event), "toolCall")
 		frame := &AssistantMessageFrame{
 			Type: "toolcall_end", ContentIndex: event.ContentIndex,
-			Id: &event.ToolCall.Id, Name: &event.ToolCall.Name, Arguments: event.ToolCall.Arguments,
+			Id: &event.ToolCall.Id, Name: &event.ToolCall.Name,
+			// The arguments value is never absent: a call that takes no
+			// parameters still travels as `{}`.
+			Arguments: assistantToolCallArguments(event.ToolCall.Arguments),
 		}
 		if event.ToolCall.ThoughtSignature != nil {
 			signature := *event.ToolCall.ThoughtSignature
@@ -464,7 +492,7 @@ func cloneAssistantThinkingBlock(block AssistantContentBlock) AssistantContentBl
 func cloneAssistantToolCall(block AssistantContentBlock) *AssistantToolCall {
 	clone := &AssistantToolCall{
 		Type: "toolCall", Id: block.Id, Name: block.Name,
-		Arguments: cloneAssistantArguments(block.Arguments),
+		Arguments: assistantToolCallArguments(block.Arguments),
 	}
 	if block.ThoughtSignature != nil {
 		value := *block.ThoughtSignature
@@ -477,20 +505,32 @@ func cloneAssistantToolCall(block AssistantContentBlock) *AssistantToolCall {
 	return clone
 }
 
-// cloneAssistantArguments copies one tool-call argument object.
-func cloneAssistantArguments(arguments map[string]any) map[string]any {
-	if arguments == nil {
-		return map[string]any{}
+// cloneAssistantArguments copies one tool-call argument value. A value that is
+// not an object is kept as it is: rewriting it would hide the model's mistake
+// from the validator that is meant to name it.
+func cloneAssistantArguments(arguments any) any {
+	typed, ok := arguments.(map[string]any)
+	if !ok {
+		return arguments
 	}
-	clone := make(map[string]any, len(arguments))
-	for key, value := range arguments {
+	clone := make(map[string]any, len(typed))
+	for key, value := range typed {
 		clone[key] = value
 	}
 	return clone
 }
 
+// assistantToolCallArguments is the argument value one tool call carries. A
+// tool call always has one: an empty object when the call carries none.
+func assistantToolCallArguments(arguments any) any {
+	if arguments == nil {
+		return map[string]any{}
+	}
+	return cloneAssistantArguments(arguments)
+}
+
 // assistantSerializedArguments serializes tool-call arguments.
-func assistantSerializedArguments(arguments map[string]any) string {
+func assistantSerializedArguments(arguments any) string {
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
@@ -505,13 +545,8 @@ func assistantSerializedArguments(arguments map[string]any) string {
 var assistantEmptyParsedToolArguments = assistantSerializedArguments(assistantParsedToolArguments(""))
 
 // assistantParsedToolArguments parses a possibly incomplete argument stream.
-func assistantParsedToolArguments(text string) map[string]any {
-	value := ParseStreamingJSON(text)
-	arguments, ok := value.(map[string]any)
-	if !ok {
-		return map[string]any{}
-	}
-	return arguments
+func assistantParsedToolArguments(text string) any {
+	return ParseStreamingJSON(text)
 }
 
 // assistantIsJsonPrefix reports whether current extends snapshot.
@@ -682,11 +717,10 @@ func ReplayAssistantStream(frames []AssistantMessageFrame, settlement AssistantM
 			if frame.Name != nil {
 				toolCall.Name = *frame.Name
 			}
-			if arguments, ok := frame.Arguments.(map[string]any); ok {
-				toolCall.Arguments = cloneAssistantArguments(arguments)
-			} else {
-				toolCall.Arguments = map[string]any{}
-			}
+			// The argument value travels as it is: a call whose arguments
+			// are not an object must reach the validator unchanged, so the
+			// validator can name the mistake.
+			toolCall.Arguments = assistantToolCallArguments(frame.Arguments)
 			if frame.ThoughtSignature != nil {
 				value := *frame.ThoughtSignature
 				toolCall.ThoughtSignature = &value
@@ -697,7 +731,7 @@ func ReplayAssistantStream(frames []AssistantMessageFrame, settlement AssistantM
 			}
 			setAssistantContent(live(), index, AssistantContentBlock{
 				Type: "toolCall", Id: toolCall.Id, Name: toolCall.Name,
-				Arguments:        cloneAssistantArguments(toolCall.Arguments),
+				Arguments:        assistantToolCallArguments(toolCall.Arguments),
 				ThoughtSignature: toolCall.ThoughtSignature, Namespace: toolCall.Namespace,
 			})
 			delete(toolJson, index)
@@ -804,7 +838,7 @@ func assistantFrameToolCallBlock(frame AssistantMessageFrame) AssistantContentBl
 	if frame.ToolCall != nil {
 		block.Id = frame.ToolCall.Id
 		block.Name = frame.ToolCall.Name
-		block.Arguments = cloneAssistantArguments(frame.ToolCall.Arguments)
+		block.Arguments = assistantToolCallArguments(frame.ToolCall.Arguments)
 		block.ThoughtSignature = frame.ToolCall.ThoughtSignature
 		block.Namespace = frame.ToolCall.Namespace
 	}

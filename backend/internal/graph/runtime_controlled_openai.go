@@ -1690,11 +1690,11 @@ func (stream *controlledStream) appendToolArguments(index int, text string) {
 }
 
 // controlledToolArguments parses the raw JSON arguments one tool call carries.
-func controlledToolArguments(text string) map[string]any {
-	value := ParseStreamingJSON(text)
-	arguments, ok := value.(map[string]any)
-	if !ok {
-		return map[string]any{}
-	}
-	return arguments
+//
+// The value is kept as it is. A model may send arguments that are not an
+// object at all, and the SDK's validator names that mistake and shows what it
+// received - rewriting it into an empty object here would hide the mistake
+// from the very place that explains it.
+func controlledToolArguments(text string) any {
+	return ParseStreamingJSON(text)
 }

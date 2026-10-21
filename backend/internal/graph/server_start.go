@@ -481,15 +481,20 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 				}
 			}
 			var current *string
-			if !stringIn(live.Revoked(), ref) {
+			// A revoked ref still has a current value: the absence of it. Keeping
+			// that apart from "this ref holds nothing" is what stops a late
+			// acknowledgement from resurrecting a key the user logged out of.
+			hasCurrent := stringIn(live.Revoked(), ref)
+			if !hasCurrent {
 				if stored, ok := live.Secrets()[ref]; ok {
 					copied := stored
 					current = &copied
+					hasCurrent = true
 				}
 			}
-			stale := (pending != nil && !sameSecret(pending.Value, acknowledged)) || (pending == nil && current != nil && !sameSecret(current, acknowledged))
+			stale := (pending != nil && !sameSecret(pending.Value, acknowledged)) || (pending == nil && hasCurrent && !sameSecret(current, acknowledged))
 			if stale {
-				if pending == nil && current != nil {
+				if pending == nil && hasCurrent {
 					secrets.Mark(ref, current)
 				}
 				result := statusCounts()

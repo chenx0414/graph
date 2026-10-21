@@ -213,6 +213,9 @@ test('a wrong self-improvement call is explained and changes nothing', async () 
   expect(observed.get('copy-path-revision'), 'copy-path-revision').toMatch(/changes\[0\]\.from must be a revision only/);
   expect(observed.get('blank-path'), 'blank-path').toMatch(/changes\[0\]\.path is required/);
   expect(observed.get('scalar'), 'scalar').toMatch(/must be object/);
+  // The mistake is shown, not rewritten: the call that carried a scalar is
+  // reported with the scalar it carried, not with an empty object.
+  expect(observed.get('scalar'), 'scalar').toContain('not an object');
 
   // The tool description tells the model the shapes it may use.
   expect(f.provider.description()).toContain('"copy"');
