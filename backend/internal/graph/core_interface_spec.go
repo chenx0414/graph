@@ -6,6 +6,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 const INTERFACE_SCHEMA_VERSION = 2
@@ -284,13 +285,15 @@ func interfaceSpecEndpointRef(definition map[string]any, endpoint, kind string) 
 }
 
 func interfaceSpecValidateSettings(scope string, settings map[string]any) {
-	if _, ok := settings["model"]; ok && settings["model"] != nil {
+	// A field that is present must carry the type the rule names. An explicit
+	// null is a type error, not an absent field: only an absent key inherits.
+	if _, ok := settings["model"]; ok {
 		model, isString := settings["model"].(string)
 		if !isString || strings.TrimSpace(model) == "" {
 			interfaceSpecInvalid(scope + " model must name a configured connection")
 		}
 	}
-	if _, ok := settings["retry"]; ok && settings["retry"] != nil {
+	if _, ok := settings["retry"]; ok {
 		retry, ok := settings["retry"].(map[string]any)
 		if !ok {
 			interfaceSpecInvalid(scope + " retry must be an object")
@@ -301,7 +304,7 @@ func interfaceSpecValidateSettings(scope string, settings map[string]any) {
 			}
 		}
 	}
-	if _, ok := settings["budget"]; ok && settings["budget"] != nil {
+	if _, ok := settings["budget"]; ok {
 		budget, ok := settings["budget"].(map[string]any)
 		if !ok {
 			interfaceSpecInvalid(scope + " budget.tokens must be a non-negative integer or null")
@@ -311,7 +314,12 @@ func interfaceSpecValidateSettings(scope string, settings map[string]any) {
 				interfaceSpecInvalid(scope + " budget.tokens must be a non-negative integer or null")
 			}
 		}
-		tokens := budget["tokens"]
+		// A budget that omits its quota does not ask for no quota: only an
+		// explicit null does.
+		tokens, present := budget["tokens"]
+		if !present {
+			interfaceSpecInvalid(scope + " budget.tokens must be a non-negative integer or null")
+		}
 		if tokens != nil && !interfaceSpecSafeNonNegative(tokens) {
 			interfaceSpecInvalid(scope + " budget.tokens must be a non-negative integer or null")
 		}
@@ -345,7 +353,7 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 	if strings.TrimSpace(task) == "" {
 		interfaceSpecInvalid("Node " + id + " requires a task")
 	}
-	if _, ok := node["instructions"]; ok && node["instructions"] != nil {
+	if _, ok := node["instructions"]; ok {
 		text, isString := node["instructions"].(string)
 		if !isString || strings.TrimSpace(text) == "" {
 			interfaceSpecInvalid("Node " + id + " instructions must be a non-empty string")
@@ -1063,6 +1071,20 @@ func interfaceSpecCompile(spec map[string]any) map[string]any {
 				panic(fmt.Errorf("keyword \"version\" value must be number"))
 			}
 		}
+		if key == "type" {
+			// A protocol that promises a type the validator does not know can
+			// never be satisfied. Refuse the definition here instead of
+			// accepting a graph whose every value is rejected later.
+			names, ok := interfaceSpecTypeNames(value)
+			if !ok {
+				panic(fmt.Errorf("keyword \"type\" value must be string or array of strings"))
+			}
+			for _, name := range names {
+				if !interfaceSpecTypeKnown(name) {
+					panic(fmt.Errorf("keyword \"type\" value must be a known type name"))
+				}
+			}
+		}
 	}
 	if len(interfaceSpecValidators) >= 1000 {
 		interfaceSpecValidators = interfaceSpecValidators[1:]
@@ -1120,11 +1142,106 @@ func interfaceSpecCheck(schema map[string]any, value any, path string) *interfac
 			return &interfaceSpecError{Keyword: "type", InstancePath: path, Message: "must be integer", Params: map[string]any{"type": "integer"}}
 		}
 	}
+	if expected, ok := schema["const"]; ok && !interfaceSpecJSONEqual(value, expected) {
+		return &interfaceSpecError{Keyword: "const", InstancePath: path, Message: "must be equal to constant"}
+	}
+	if allowed, ok := schema["enum"].([]any); ok {
+		matched := false
+		for _, item := range allowed {
+			if interfaceSpecJSONEqual(value, item) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return &interfaceSpecError{Keyword: "enum", InstancePath: path, Message: "must be equal to one of the allowed values"}
+		}
+	}
+	if limit, ok := schema["maxLength"].(float64); ok {
+		text, _ := value.(string)
+		if utf16Len(text) > int(limit) {
+			return &interfaceSpecError{Keyword: "maxLength", InstancePath: path, Message: fmt.Sprintf("must NOT have more than %v characters", limit)}
+		}
+	}
+	if limit, ok := schema["maximum"].(float64); ok {
+		number, ok := asFloat(value)
+		if ok && number > limit {
+			return &interfaceSpecError{Keyword: "maximum", InstancePath: path, Message: fmt.Sprintf("must be <= %v", limit)}
+		}
+	}
+	if pattern, ok := schema["pattern"].(string); ok {
+		text, isString := value.(string)
+		if isString {
+			matcher, err := interfaceSpecPattern(pattern)
+			if err != nil {
+				return &interfaceSpecError{Keyword: "pattern", InstancePath: path, Message: "must match pattern " + pattern}
+			}
+			if !matcher.MatchString(text) {
+				return &interfaceSpecError{Keyword: "pattern", InstancePath: path, Message: "must match pattern " + pattern}
+			}
+		}
+	}
+	if items, ok := value.([]any); ok {
+		if limit, ok := schema["minItems"].(float64); ok && float64(len(items)) < limit {
+			return &interfaceSpecError{Keyword: "minItems", InstancePath: path, Message: fmt.Sprintf("must NOT have fewer than %v items", limit)}
+		}
+		if limit, ok := schema["maxItems"].(float64); ok && float64(len(items)) > limit {
+			return &interfaceSpecError{Keyword: "maxItems", InstancePath: path, Message: fmt.Sprintf("must NOT have more than %v items", limit)}
+		}
+		if unique, _ := schema["uniqueItems"].(bool); unique {
+			seen := []string{}
+			for _, item := range items {
+				encoded := jsonStringify(item)
+				for _, held := range seen {
+					if held == encoded {
+						return &interfaceSpecError{Keyword: "uniqueItems", InstancePath: path, Message: "must NOT have duplicate items"}
+					}
+				}
+				seen = append(seen, encoded)
+			}
+		}
+		switch declared := schema["items"].(type) {
+		case map[string]any:
+			for index, item := range items {
+				if err := interfaceSpecCheck(declared, item, path+"/"+itoa(index)); err != nil {
+					return err
+				}
+			}
+		case []any:
+			// The tuple form: every position has its own schema.
+			for index, item := range items {
+				if index >= len(declared) {
+					break
+				}
+				child, _ := declared[index].(map[string]any)
+				if child == nil {
+					continue
+				}
+				if err := interfaceSpecCheck(child, item, path+"/"+itoa(index)); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		if record, ok := value.(map[string]any); ok {
+			additional, hasAdditional := schema["additionalProperties"]
+			additionalSchema, additionalIsSchema := additional.(map[string]any)
+			allowed, explicitlyClosed := additional.(bool)
 			for key, child := range record {
 				childSchema, ok := properties[key].(map[string]any)
 				if !ok {
+					// A property the schema does not name is only a problem
+					// when the schema closed itself to unknown properties.
+					if hasAdditional && additionalIsSchema {
+						if err := interfaceSpecCheck(additionalSchema, child, path+"/"+interfaceSpecEscape(key)); err != nil {
+							return err
+						}
+						continue
+					}
+					if hasAdditional && explicitlyClosed && !allowed {
+						return &interfaceSpecError{Keyword: "additionalProperties", InstancePath: path, Message: "must NOT have additional properties"}
+					}
 					continue
 				}
 				if err := interfaceSpecCheck(childSchema, child, path+"/"+interfaceSpecEscape(key)); err != nil {
@@ -1136,6 +1253,33 @@ func interfaceSpecCheck(schema map[string]any, value any, path string) *interfac
 	return nil
 }
 
+// interfaceSpecJSONEqual compares two JSON values by their canonical form.
+func interfaceSpecJSONEqual(left, right any) bool {
+	return jsonStringify(left) == jsonStringify(right)
+}
+
+// interfaceSpecPattern compiles one schema pattern and keeps it for the next
+// value that needs it.
+func interfaceSpecPattern(pattern string) (*regexp.Regexp, error) {
+	interfaceSpecPatternsMutex.Lock()
+	defer interfaceSpecPatternsMutex.Unlock()
+	if compiled, ok := interfaceSpecPatterns[pattern]; ok {
+		return compiled, nil
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	if len(interfaceSpecPatterns) >= 256 {
+		interfaceSpecPatterns = map[string]*regexp.Regexp{}
+	}
+	interfaceSpecPatterns[pattern] = compiled
+	return compiled, nil
+}
+
+var interfaceSpecPatterns = map[string]*regexp.Regexp{}
+var interfaceSpecPatternsMutex sync.Mutex
+
 func interfaceSpecHasKey(record map[string]any, key string) bool {
 	if record == nil {
 		return false
@@ -1146,6 +1290,31 @@ func interfaceSpecHasKey(record map[string]any, key string) bool {
 
 func interfaceSpecEscape(key string) string {
 	return strings.NewReplacer("~", "~0", "/", "~1").Replace(key)
+}
+
+// interfaceSpecTypeNames lists the type names a schema promises.
+func interfaceSpecTypeNames(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return []string{typed}, true
+	case []any:
+		names := []string{}
+		for _, item := range typed {
+			name, _ := item.(string)
+			names = append(names, name)
+		}
+		return names, true
+	}
+	return nil, false
+}
+
+// interfaceSpecTypeKnown reports whether the validator knows the type name.
+func interfaceSpecTypeKnown(name string) bool {
+	switch name {
+	case "object", "array", "string", "boolean", "null", "number", "integer":
+		return true
+	}
+	return false
 }
 
 func interfaceSpecTypeOK(name string, value any) bool {
