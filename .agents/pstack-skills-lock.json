@@ -1,0 +1,258 @@
+{
+  "repository": "https://github.com/cursor/plugins",
+  "path": "pstack",
+  "ref": "main",
+  "commit": "190d28736eff128ec94f502a22c7fe0c4b56cd37",
+  "version": "0.15.29",
+  "synced_on": "2026-10-21",
+  "license": "MIT",
+  "license_file": ".agents/pstack-LICENSE",
+  "skills": [
+    {
+      "name": "architect",
+      "path": "pstack/skills/architect"
+    },
+    {
+      "name": "arena",
+      "path": "pstack/skills/arena"
+    },
+    {
+      "name": "automate-me",
+      "path": "pstack/skills/automate-me"
+    },
+    {
+      "name": "benchmark-checklist",
+      "path": "pstack/skills/benchmark-checklist"
+    },
+    {
+      "name": "blast-radius",
+      "path": "pstack/skills/blast-radius"
+    },
+    {
+      "name": "bro",
+      "path": "pstack/skills/bro"
+    },
+    {
+      "name": "correct",
+      "path": "pstack/skills/correct"
+    },
+    {
+      "name": "create-formal-verification-skill",
+      "path": "pstack/skills/create-formal-verification-skill"
+    },
+    {
+      "name": "pstack-create-verification-skill",
+      "upstream_name": "create-verification-skill",
+      "path": "pstack/skills/create-verification-skill"
+    },
+    {
+      "name": "figure-it-out",
+      "path": "pstack/skills/figure-it-out"
+    },
+    {
+      "name": "how",
+      "path": "pstack/skills/how"
+    },
+    {
+      "name": "in-your-own-words",
+      "path": "pstack/skills/in-your-own-words"
+    },
+    {
+      "name": "interrogate",
+      "path": "pstack/skills/interrogate"
+    },
+    {
+      "name": "ketchup",
+      "path": "pstack/skills/ketchup"
+    },
+    {
+      "name": "maintain-formal-verification-skill",
+      "path": "pstack/skills/maintain-formal-verification-skill"
+    },
+    {
+      "name": "pstack-maintain-verification-skill",
+      "upstream_name": "maintain-verification-skill",
+      "path": "pstack/skills/maintain-verification-skill"
+    },
+    {
+      "name": "make-bot-ui",
+      "path": "pstack/skills/make-bot-ui"
+    },
+    {
+      "name": "no-comments",
+      "path": "pstack/skills/no-comments"
+    },
+    {
+      "name": "poteto-help",
+      "path": "pstack/skills/poteto-help"
+    },
+    {
+      "name": "poteto-mode",
+      "path": "pstack/skills/poteto-mode"
+    },
+    {
+      "name": "principle-attack-the-premise",
+      "path": "pstack/skills/principle-attack-the-premise"
+    },
+    {
+      "name": "principle-boundary-discipline",
+      "path": "pstack/skills/principle-boundary-discipline"
+    },
+    {
+      "name": "principle-build-the-lever",
+      "path": "pstack/skills/principle-build-the-lever"
+    },
+    {
+      "name": "principle-encode-lessons-in-structure",
+      "path": "pstack/skills/principle-encode-lessons-in-structure"
+    },
+    {
+      "name": "principle-exhaust-the-design-space",
+      "path": "pstack/skills/principle-exhaust-the-design-space"
+    },
+    {
+      "name": "principle-experience-first",
+      "path": "pstack/skills/principle-experience-first"
+    },
+    {
+      "name": "principle-explain-the-number",
+      "path": "pstack/skills/principle-explain-the-number"
+    },
+    {
+      "name": "principle-fix-root-causes",
+      "path": "pstack/skills/principle-fix-root-causes"
+    },
+    {
+      "name": "principle-foundational-thinking",
+      "path": "pstack/skills/principle-foundational-thinking"
+    },
+    {
+      "name": "principle-guard-the-context-window",
+      "path": "pstack/skills/principle-guard-the-context-window"
+    },
+    {
+      "name": "principle-laziness-protocol",
+      "path": "pstack/skills/principle-laziness-protocol"
+    },
+    {
+      "name": "principle-make-operations-idempotent",
+      "path": "pstack/skills/principle-make-operations-idempotent"
+    },
+    {
+      "name": "principle-migrate-callers-then-delete-legacy-apis",
+      "path": "pstack/skills/principle-migrate-callers-then-delete-legacy-apis"
+    },
+    {
+      "name": "principle-minimize-reader-load",
+      "path": "pstack/skills/principle-minimize-reader-load"
+    },
+    {
+      "name": "principle-model-the-domain",
+      "path": "pstack/skills/principle-model-the-domain"
+    },
+    {
+      "name": "principle-never-block-on-the-human",
+      "path": "pstack/skills/principle-never-block-on-the-human"
+    },
+    {
+      "name": "principle-outcome-oriented-execution",
+      "path": "pstack/skills/principle-outcome-oriented-execution"
+    },
+    {
+      "name": "principle-prove-it-works",
+      "path": "pstack/skills/principle-prove-it-works"
+    },
+    {
+      "name": "principle-redesign-from-first-principles",
+      "path": "pstack/skills/principle-redesign-from-first-principles"
+    },
+    {
+      "name": "principle-separate-before-serializing-shared-state",
+      "path": "pstack/skills/principle-separate-before-serializing-shared-state"
+    },
+    {
+      "name": "principle-sequence-verifiable-units",
+      "path": "pstack/skills/principle-sequence-verifiable-units"
+    },
+    {
+      "name": "principle-subtract-before-you-add",
+      "path": "pstack/skills/principle-subtract-before-you-add"
+    },
+    {
+      "name": "principle-test-behavior-not-implementation",
+      "path": "pstack/skills/principle-test-behavior-not-implementation"
+    },
+    {
+      "name": "principle-type-system-discipline",
+      "path": "pstack/skills/principle-type-system-discipline"
+    },
+    {
+      "name": "recall",
+      "path": "pstack/skills/recall"
+    },
+    {
+      "name": "reflect",
+      "path": "pstack/skills/reflect"
+    },
+    {
+      "name": "setup-pstack",
+      "path": "pstack/skills/setup-pstack"
+    },
+    {
+      "name": "sharpen",
+      "path": "pstack/skills/sharpen"
+    },
+    {
+      "name": "show-me-your-work",
+      "path": "pstack/skills/show-me-your-work"
+    },
+    {
+      "name": "swarm",
+      "path": "pstack/skills/swarm"
+    },
+    {
+      "name": "pstack-tdd",
+      "upstream_name": "tdd",
+      "path": "pstack/skills/tdd"
+    },
+    {
+      "name": "pstack-teach",
+      "upstream_name": "teach",
+      "path": "pstack/skills/teach"
+    },
+    {
+      "name": "technical-writing",
+      "path": "pstack/skills/technical-writing"
+    },
+    {
+      "name": "typescript-best-practices",
+      "path": "pstack/skills/typescript-best-practices"
+    },
+    {
+      "name": "unslop",
+      "path": "pstack/skills/unslop"
+    },
+    {
+      "name": "why",
+      "path": "pstack/skills/why"
+    }
+  ],
+  "local_adaptations": {
+    "renamed_skills": "An upstream id that already exists in .agents/skills/ is not overwritten: the upstream copy is installed as pstack-<id> and the local skill is kept. Affected ids: tdd, teach, create-verification-skill, maintain-verification-skill.",
+    "reference_rewrite": "Inside the pstack corpus, every reference to a renamed skill is repointed at the pstack- prefixed id: the frontmatter name, the /<id> slash form (which also covers ../<id>/SKILL.md links) and the **<id>** prose form. Ordinary prose is untouched.",
+    "pstack-tdd": "A project-rule note was added: the root CODING_STANDARDS.md allows only true E2E tests, and that rule wins over this skill preference for unit or integration tests.",
+    "disable-model-invocation": "Kept as upstream: 55 of the 56 skills stay out of the system prompt and are reachable through an explicit /skill:<name> selection; setup-pstack stays model-visible."
+  },
+  "not_installed": {
+    "agents": [
+      "pstack/agents/comment-sicko.md",
+      "pstack/agents/poteto-agent.md"
+    ],
+    "automation_skills": [
+      "pstack/automations/benny/skills/reproduce-and-fix-issues",
+      "pstack/automations/benny/skills/setup-benny",
+      "pstack/automations/benny/skills/triage-issue-reports"
+    ],
+    "reason": "Cursor subagent personas and Cursor automations; the request covered the 56 skills under pstack/skills/ only."
+  }
+}

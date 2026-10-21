@@ -11,7 +11,7 @@
 | 任务平台 | [issue-tracker.md](issue-tracker.md) | 操作 GitHub 任务或 PR 前 |
 | 分诊标签 | [triage-labels.md](triage-labels.md) | 分诊或修改分诊标签前 |
 | 检查操作 | [checks.md](checks.md) | 准备测试环境、更新证据或排障时 |
-| 技能与来源锁定 | `.agents/skills/`、`.agents/matt-skills-lock.json` | 更新技能或排查路由时 |
+| 技能与来源锁定 | `.agents/skills/`、`.agents/matt-skills-lock.json`、`.agents/pstack-skills-lock.json` | 更新技能或排查路由时 |
 
 `.agents/skills/`、来源锁文件和许可证纳入版本管理，并随 App 源码打包；其他本地 `.agents/` 内容继续忽略。技能变更提交后可随 clone 或更新获得。共享工程文档不依赖技能才能读取；运行中的会话与已发布 Agent 配方仍需按各自生命周期加载更新。
 

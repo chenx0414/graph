@@ -47,6 +47,8 @@ for (const [from, to] of [
   ['.agents/skills', '.agents/skills'],
   ['.agents/matt-skills-lock.json', '.agents/matt-skills-lock.json'],
   ['.agents/matt-skills-LICENSE', '.agents/matt-skills-LICENSE'],
+  ['.agents/pstack-skills-lock.json', '.agents/pstack-skills-lock.json'],
+  ['.agents/pstack-LICENSE', '.agents/pstack-LICENSE'],
   ['CODING_STANDARDS.md', 'CODING_STANDARDS.md'],
   ['CONTEXT.md', 'CONTEXT.md'],
   ['docs/agents', 'docs/agents'],
