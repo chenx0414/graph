@@ -1644,6 +1644,13 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state='running' WHERE id=?", id)
 		defer kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state=? WHERE id=?", originalState, id)
 		config := lane.options.Config(execution.TaskId, execution.NodeId, execution.RevisionVersion)
+		if options.AgentKernel == AgentKernelPig {
+			// The PiG kernel runs the node's turn in this process, so there
+			// is no sidecar admission to restore. The frozen configuration is
+			// what the re-run needs, and building the node's config from it
+			// is what puts that configuration in the lane.
+			return &DurableRecoveryBinding{Config: map[string]any{}}, nil
+		}
 		adapter, ok := lane.options.Host(execution.TaskId, execution.NodeId, config, execution.RevisionVersion).(*kernelGraphLaneHost)
 		if !ok {
 			// The PiG kernel runs the node's turn in this process, so the

@@ -35,11 +35,17 @@ import (
 // sent again must not wait for a daemon that is not up yet, and an operation
 // that is already settled must not be dispatched a second time.
 func (runtime *TaskRuntime) bootstrapPigRecovery() {
+	// The lane owns the restored configuration of a node, so it has to exist
+	// before the recovery restores one.
+	runtime.residentGraphLane()
 	executions, err := pigkernel.FrozenExecutions(context.Background(), runtime.store.Path)
 	if err != nil {
 		panic(fmt.Errorf("pig kernel: the frozen executions are not readable: %w", err))
 	}
 	for _, execution := range executions {
+		if runtime.recoverPigNodeExecution(execution) {
+			continue
+		}
 		runtime.recoverPigExecution(execution)
 	}
 }
@@ -71,7 +77,9 @@ func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecut
 	}
 	// A turn that reached the model is not replayed: the credential was spent
 	// and the side effects may have happened. The operation stays unknown and
-	// the user reconciles it.
+	// the user reconciles it. The kernel's own turn needs no stopping: the
+	// generation resumes from its checkpoint, and a request the model already
+	// received is not requested a second time.
 	if pigExecutionCalledProvider(runtime.store, operation, execution) {
 		return
 	}

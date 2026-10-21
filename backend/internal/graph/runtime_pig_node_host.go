@@ -356,11 +356,19 @@ func pigNodeRecoveredAttempt(kernel *KernelStore, identity string, executionId s
 	if !found || frozen.ExecutionId != executionId {
 		return 0
 	}
-	if kernelRow(kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE execution_id=? LIMIT 1", executionId) != nil {
-		return 0
-	}
 	receipt, err := pigkernel.ReadExecutionReceipt(context.Background(), kernel.Store.Path, frozen)
 	if err != nil || !receipt.Found || receipt.Status == "unanswered" {
+		return 0
+	}
+	// A turn the kernel finished keeps its attempt: the answer is retained,
+	// so the node runs again against the same admission and the model is not
+	// asked a second time.
+	if receipt.Completed {
+		return pigNodeAttemptOf(frozen.InputRequestId)
+	}
+	// A turn that reached the model keeps nothing: the credential was spent
+	// and the side effects may have happened, so the node waits for the user.
+	if pigNodeCalledProvider(kernel, &ExecutionRow{Id: executionId}, frozen) {
 		return 0
 	}
 	return pigNodeAttemptOf(frozen.InputRequestId)
