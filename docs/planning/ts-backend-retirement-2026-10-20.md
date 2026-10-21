@@ -158,6 +158,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/e2e/artifact-publication.test.ts` 发布的版本不可变与 CAS；越界路径与符号链接被拒 | `tests/e2e/go-artifact-publication.test.ts` | 2 |
 | `tests/e2e/graph-confirmation.test.ts` 确认后的草稿画得出来、图真的跑起来；旧形状草稿变不成功能 | `tests/e2e/go-graph-confirmation.test.ts` | 2 |
 | `tests/e2e/providers.test.ts` provider 目录与探针：目录不泄密钥、探针说厂商协议、拒绝保留厂商原话、坏草稿按字段被拒 | `tests/e2e/go-provider-directory.test.ts` | 4 |
+| `tests/e2e/catalog-tool-loading.test.ts` 目录面按需装载、装载之后真的执行、重启之后仍然可用 | `tests/e2e/go-catalog-tools.test.ts` | 2 |
+| `tests/e2e/secret-lifecycle.test.ts` 特权密钥桥接：写入等桌面端存、最新一次写入算数、浏览器看不到值、登出是一次删除、迟到的确认不许把密钥复活 | `tests/e2e/go-secret-lifecycle.test.ts` | 1 |
+| `tests/m8/credentials.test.ts` 没有可解析凭据的模型在发出任何请求之前就被拒；一个模型都叫不动的会话被拒并说清原因、消息保留、密钥回来照跑 | `tests/e2e/go-credential-refusal.test.ts` | 2 |
+| `tests/e2e/thinking.test.ts` 思考档位（daemon 那一半）：目录面给出模型接受哪些档位、请求被钳制到模型真能接受的那一档、会话读回落档、provider 收到同一档；没有档位的模型与不认识该字段的 provider 都不发 | `tests/e2e/go-thinking.test.ts` | 2 |
+| `tests/e2e/pricing.test.ts` 调用成本：有价模型报出金额与价格表、免费模型仍然点名价格表、没有费率如实说未知、旧式费率只报金额 | `tests/e2e/go-pricing.test.ts` | 1 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -212,6 +217,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 21. **撤销之后的迟到确认会把密钥复活**（Batch 29 修掉）。daemon 的密钥桥接里，「这个引用当前有没有值」被写成了「这个引用有没有被撤销过」：一旦某把密钥被撤销（登出），它的**当前值**就应该是「没有」；而迟到的那次持久化确认带着旧值回来时，代码把「已撤销」误当成「没有当前值」，于是**不判它过期**、也不重新排队删除，**那把用户已经登出的密钥又回来了**。TypeScript 那边把「已撤销」与「没值」分成两件事看。修法：把两者分开记——已撤销也算「有当前值」（值是「没有」），于是迟到的确认被判为过期，删除被重新排队，密钥不会复活。
 22. **模型发错的参数被悄悄改写成空对象**（Batch 29 修掉）。Go 的受控流在解析 provider 发来的工具参数时，把**不是对象**的参数一律换成 `{}`（`controlledToolArguments` 的 `map[string]any` 断言失败就退回空对象）。于是模型发来 `arguments: "not an object"` 时，worker 侧的校验看到的是**一个空对象**，报的是「缺 `title` 与 `problem`」——**模型犯的错被改写成了另一个错**，它收到的反馈与它真正写错的地方对不上。TypeScript 那边（Pi SDK）保留参数的原值，于是校验说的是 `root: must be object`，并把它收到的东西原样展示出来。修法：参数值不再被窄化成对象，原样过界；内容块自己序列化时保证**工具调用一定带参数**（空参数集是 `{}`），别的块种照旧不带。
 23. **没有可用凭据时，用户的请求被无声地吞掉**（Batch 30 修掉）。Go 的 master 模型取的是「目录里第一个凭据能解析的模型」；当一把都解析不了时它就是空的，于是 **master 节点根本不建**——会话里的那条用户消息永远停在 `pending`，`master` 为 null，没有任何事件、没有任何问题、没有任何原因，用户既看不到发生了什么，也无从下手。TypeScript 那边同样安静（两边的 `masterModel` 取法一致），但这是一处**能力缺口**：2026-10-21 定夺按「拒绝并给出原因」处理。修法：分发闸门在**根本没有回合可跑**时把原因说出来——会话里写一条系统错误消息，用的正是「本轮没有启动起来」那套现成话术，**用户的消息保留**（它从未被投递过），于是密钥一回来它就照常跑完。
+24. **用户选的思考档位根本没有到达 provider**（Batch 31 修掉）。Go 侧把档位算得**很清楚**（目录给出模型接受哪些档位、请求的档位被钳制到模型真能接受的那一个、会话读回自己落在哪一档），但**受控传输把 `options["reasoning"]` 整个丢掉了**：请求体里从头到尾没有 `reasoning_effort`。于是用户在控制台挑的「xhigh」到 provider 那里变成了「provider 的默认值」——控制台说一套、provider 做另一套，这正是 TypeScript 那边 `tests/e2e/thinking.test.ts` 钉住的那条契约（它断言请求体带 `reasoning_effort`）。TypeScript 那边由 Pi SDK 发出这个字段；PiG 内核这条路是 Go 自己发请求，于是这条缺口在 Go 原生路径上是实的。修法有三处：受控传输按 SDK 的规则算档位（先钳制，再按模型自己的档位表取该给 provider 的那个值），按 provider 的形状发字段（`reasoning_effort` / `thinking` / `reasoning`），并且**不认识这个字段的 provider 就不发**；PiG 的 provider 桥把会话的档位带进请求选项（此前内核把档位声明了却从不用，`SessionOptions.ThinkingLevel` 与 `Turn.ThinkingLevel` 是两个没人读的空壳）；厂商兼容规则从「指令角色」那处判断里抽成**一处检测**（`controlledCompatFor`），免得两处各判一半。
 
 ## 执行批次
 
@@ -317,7 +323,14 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **图节点自己的模型没有密钥 → 节点失败，原因就写在时间线上**（第 2 条）：主 Agent 建的图里有一个节点声明 `model: 'other'`，而 `'other'` **配了但没有密钥**（它的环境变量根本不在环境里）。那个节点**没有**被送到 provider（provider 收到的请求数是 0），节点的状态是 **`failed`**，时间线上有一条 **`graph.node.failed`**，它的 `reason` 点名了那个没有密钥的模型（`no credential bound`）。这一条在 Go 侧本来就是这样，**这一批补的是证明**。
   - **一个模型都叫不动的会话，被拒而且说清了原因，密钥回来就照跑**（第 1 条）：密钥先被真的撤销（走特权桥接），于是这条会话**没有 master 节点可跑**——修之前那条用户消息永远停在 `pending`，`master` 为 null，什么事件、什么问题、什么原因都没有，用户既看不到发生了什么也无从下手。修之后：**原因被说出来了**（系统错误消息里写着「主 Agent 本轮没有启动起来……原因：No credential bound for model local」），**消息被保留**（它从未被投递过，状态还是 `pending`），**provider 一个请求都没收到**。密钥回来之后（宿主请桌面端存，桌面端确认），**那条被保留的消息真的跑了**：master 出现了，消息变成 `delivered`，master 答了话，provider 收到 1 次请求。回退这个修复后，第 1 条用例在「系统错误消息出现」这一句上变红。
   - 这一批修掉了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 23 条）：**没有可用凭据时，用户的请求被无声地吞掉**。
-- **Batch 31 起**：任务面（`POST /api/tasks`）的同一处缺口——任务在没有可用凭据时停在 `discussing`，同样没有原因；它需要另一个通道（任务没有会话消息，只有一个问题面）与它自己的恢复语义，列在下一批。以及 `read_system_capabilities` 的能力缺口、`harness-cost`、`recipe-compile`、`m8/app-shell-ux` 浏览器轨。
+- **Batch 31（已完成）**：思考档位与调用成本。`tests/e2e/go-thinking.test.ts`（2 条）搬进 `tests/e2e/thinking.test.ts` 的 daemon 那一半（浏览器那一半是前端契约，前端不在退役范围里），`tests/e2e/go-pricing.test.ts`（1 条）搬进 `tests/e2e/pricing.test.ts` 的四条用例：
+  - **用户选的档位真的到达了 provider**（第 1 条，九个模型）：`/api/settings` 与 `/api/config` 说出每个模型接受哪些档位（grok 是 low/medium/high/xhigh、deepseek 是 low/high/max、只有一个档位的 nano-gpt 是 high、没有离散档位的 ling-3.0-flash 是空的）；请求的档位被**钳制**到模型真能接受的那一个（要 `max` 的 grok 落到 `xhigh`、要 `medium` 的 deepseek 落到 `high`、要 `off` 的 deepseek 落到 `low`、存的默认 `xhigh` 落到 `max` 或 `high`），会话的 `telemetry.thinkingLevel` 说的就是**落下来的那一档**；而**离开进程的那一发请求**带着同一档（`reasoning_effort`）。没有离散档位的模型**一个档位都不发**（请求体里没有 `reasoning_effort` 这个键，而不是空值）；不认识这个字段的 provider（xAI）也**不发**（`reasoning_effort` / `reasoning` / `thinking` 三个键都不在）。
+  - **对话的档位跟着用户挑的模型走**（第 2 条）：控制台改模型走的是 `POST /api/conversations/{id}/model`，改完之后新消息的那一发请求**用的是新模型与新档位**（deepseek-flash + `high`）；换成一个没有档位的模型之后，会话不再要档位（`thinkingLevel` 是 `off`，请求里没有 `reasoning_effort`），会话读回的也是 `off`。
+  - **一次调用到底花了多少**（`go-pricing.test.ts`，1 条）：有价模型按真用量算出金额（100 万输入 2 美元、50 万输出 4 美元、10 万缓存读 0.5 美元 = **4.05 美元**）并说清用的是哪张价格表；全零费率是**免费但仍然点名价格表**；没有费率就没有诚实的金额（`{unknown: true}`）；旧式费率（只有数字没有价格表）**金额仍然算得出来**（1.6 美元），只是不报价格表。这条在 Go 侧本来就是这样，**这一批补的是证明**——把期望值改成 4.06 用例就变红（`expected { amount: 4.05, … } to deeply equal { amount: 4.06, … }`），证明它读的是 daemon 真的算出来的数。
+  - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 24 条）：**思考档位在受控传输里被整个丢掉**，于是用户选的强度根本到不了 provider。
+- **Batch 32 起**：任务面（`POST /api/tasks`）的同一处缺口——任务在没有可用凭据时停在 `discussing`，同样没有原因；它需要另一个通道（任务没有会话消息，只有一个问题面）与它自己的恢复语义。
+- **已知差异（有意保留，待下一批处理）**：**Anthropic 传输的思考预算还没与 Pi 对齐**。Pi 对 Anthropic 走的是「预算式思考」（`thinking: {type: "enabled", budget_tokens: N}`，档位映射到 1024 / 2048 / 8192 / 16384，并且会调整 `max_tokens` 让答案至少留出 1024 token）；Go 的 Anthropic 传输**现在完全不发思考字段**，于是 Claude 模型的档位在 Go 侧仍然无效。之所以不在 Batch 31 里补：Pi 的这条规则依赖「调用方给的 `maxTokens` 上限」与「模型自己的 `maxTokens`」两者的优先级（`maxTokens = min(调用方上限 + 预算, 模型上限)`），而 Go 的受控传输目前**一律用模型的 `maxTokens`**，先得把这条优先级对齐，再谈预算表。TypeScript 那边没有对应 E2E 契约（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以它不是「删测试带出来的契约」，但它是一处**要收敛的行为差异**，排在 Batch 32 之前处理。
+- **Batch 33 起**：`read_system_capabilities` 的能力缺口、`harness-cost`、`recipe-compile`、`m8/app-shell-ux` 浏览器轨。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

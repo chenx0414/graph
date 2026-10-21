@@ -97,6 +97,7 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 // kernel never opens a provider channel of its own.
 func pigProviderBridge(request AgentSessionRequest) pigkernel.ProviderBridge {
 	return pigkernel.ProviderBridge{
+		Options: pigProviderOptions(request),
 		Stream: func(_ context.Context, transcript []map[string]any, options map[string]any) (pigkernel.EventStream, error) {
 			messages := make([]any, 0, len(transcript))
 			for _, message := range transcript {
@@ -106,6 +107,18 @@ func pigProviderBridge(request AgentSessionRequest) pigkernel.ProviderBridge {
 			return request.Stream(request.Model, context, options)
 		},
 	}
+}
+
+// pigProviderOptions are the provider options one session's channel carries.
+//
+// The thinking level belongs to the session: without it the channel would ask
+// the provider for no effort at all, and the strength the user chose would
+// never leave the process.
+func pigProviderOptions(request AgentSessionRequest) map[string]any {
+	if request.ThinkingLevel == nil || *request.ThinkingLevel == "" {
+		return nil
+	}
+	return map[string]any{"reasoning": *request.ThinkingLevel}
 }
 
 // pigToolSpecs are the Graph tools one session may call.

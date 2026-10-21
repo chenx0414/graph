@@ -773,6 +773,12 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		if tools := controlledOpenAITools(transcript); len(tools) > 0 {
 			body["tools"] = tools
 		}
+		// The thinking strength the user chose travels with the request: the
+		// provider is asked to think at that level, not at whatever it defaults
+		// to. A model that runs no thinking sends no effort at all.
+		for name, value := range ControlledThinkingFields(record, stream.options) {
+			body[name] = value
+		}
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -1091,36 +1097,77 @@ func controlledInstructionRole(model map[string]any) string {
 	if !reasoning {
 		return "system"
 	}
-	provider, _ := model["provider"].(string)
-	baseURL, _ := model["baseUrl"].(string)
-	modelID, _ := model["id"].(string)
-	if controlledSupportsDeveloperRole(provider, baseURL, modelID) {
+	if controlledCompatFor(model).supportsDeveloperRole {
 		return "developer"
 	}
 	return "system"
 }
 
-// controlledSupportsDeveloperRole reports whether the provider accepts the `developer`
-// role instead of `system`.
-func controlledSupportsDeveloperRole(provider, baseURL, modelID string) bool {
+// controlledCompat is what one provider accepts.
+//
+// A provider asked in the wrong way refuses the whole request: the instruction
+// role, the way a thinking strength is asked for, and whether the plain effort
+// field is understood at all. The SDK detects the provider's answer from its
+// name and its base URL, and so does this: one detection, one set of rules.
+type controlledCompat struct {
+	// supportsDeveloperRole reports whether the provider accepts the `developer`
+	// role instead of `system`.
+	supportsDeveloperRole bool
+	// supportsReasoningEffort reports whether the provider understands the plain
+	// `reasoning_effort` field.
+	supportsReasoningEffort bool
+	// thinkingFormat is the way this provider is asked for a thinking strength.
+	thinkingFormat string
+}
+
+// controlledCompatFor reads what the provider of one model accepts.
+func controlledCompatFor(model map[string]any) controlledCompat {
+	provider, _ := model["provider"].(string)
+	baseURL, _ := model["baseUrl"].(string)
+	modelID, _ := model["id"].(string)
 	lowered := strings.ToLower(baseURL)
 	isOpenRouter := provider == "openrouter" || strings.Contains(lowered, "openrouter.ai")
-	nonStandard := provider == "xai" || strings.Contains(lowered, "api.x.ai") ||
-		provider == "nvidia" || strings.Contains(lowered, "integrate.api.nvidia.com") ||
+	isGrok := provider == "xai" || strings.Contains(lowered, "api.x.ai")
+	isZai := provider == "zai" || provider == "zai-coding-cn" ||
+		strings.Contains(lowered, "api.z.ai") || strings.Contains(lowered, "open.bigmodel.cn")
+	isTogether := provider == "together" || strings.Contains(lowered, "api.together.ai") || strings.Contains(lowered, "api.together.xyz")
+	isMoonshot := provider == "moonshotai" || provider == "moonshotai-cn" || strings.Contains(lowered, "api.moonshot.")
+	isCloudflareAiGateway := provider == "cloudflare-ai-gateway" || strings.Contains(lowered, "gateway.ai.cloudflare.com")
+	isNvidia := provider == "nvidia" || strings.Contains(lowered, "integrate.api.nvidia.com")
+	isAntLing := provider == "ant-ling" || strings.Contains(lowered, "api.ant-ling.com")
+	isDeepSeek := provider == "deepseek" || strings.Contains(lowered, "deepseek.com")
+	nonStandard := isNvidia ||
 		provider == "cerebras" || strings.Contains(lowered, "cerebras.ai") ||
-		provider == "together" || strings.Contains(lowered, "api.together.ai") || strings.Contains(lowered, "api.together.xyz") ||
+		isGrok ||
+		isTogether ||
 		strings.Contains(lowered, "chutes.ai") ||
-		provider == "deepseek" || strings.Contains(lowered, "deepseek.com") ||
-		provider == "zai" || provider == "zai-coding-cn" || strings.Contains(lowered, "api.z.ai") || strings.Contains(lowered, "open.bigmodel.cn") ||
-		provider == "moonshotai" || provider == "moonshotai-cn" || strings.Contains(lowered, "api.moonshot.") ||
+		isDeepSeek ||
+		isZai ||
+		isMoonshot ||
 		provider == "opencode" || strings.Contains(lowered, "opencode.ai") ||
 		provider == "cloudflare-workers-ai" || strings.Contains(lowered, "api.cloudflare.com") ||
-		provider == "cloudflare-ai-gateway" || strings.Contains(lowered, "gateway.ai.cloudflare.com") ||
-		provider == "ant-ling" || strings.Contains(lowered, "api.ant-ling.com")
-	if isOpenRouter && (strings.HasPrefix(modelID, "anthropic/") || strings.HasPrefix(modelID, "openai/")) {
-		return true
+		isCloudflareAiGateway ||
+		isAntLing
+	format := "openai"
+	switch {
+	case isDeepSeek:
+		format = "deepseek"
+	case isZai:
+		format = "zai"
+	case isTogether:
+		format = "together"
+	case isAntLing:
+		format = "ant-ling"
+	case isOpenRouter:
+		format = "openrouter"
 	}
-	return !nonStandard && !isOpenRouter
+	openRouterDeveloper := isOpenRouter &&
+		(strings.HasPrefix(modelID, "anthropic/") || strings.HasPrefix(modelID, "openai/"))
+	return controlledCompat{
+		supportsDeveloperRole:   openRouterDeveloper || (!nonStandard && !isOpenRouter),
+		supportsReasoningEffort: !isGrok && !isZai && !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isAntLing,
+		thinkingFormat:          format,
+	}
 }
 
 // controlledOpenAIMessages turns a transcript into OpenAI messages.
