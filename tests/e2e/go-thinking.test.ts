@@ -32,6 +32,38 @@ interface Endpoint {
   close: () => Promise<void>;
 }
 
+/** An Anthropic-shaped endpoint: it answers in the Anthropic message stream. */
+async function anthropicEndpoint(text = 'Answered.'): Promise<Endpoint & { headers: Record<string, string>[] }> {
+  const bodies: Record<string, unknown>[] = [];
+  const headers: Record<string, string>[] = [];
+  const server: Server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    try { bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>); }
+    catch { bodies.push({}); }
+    headers.push(Object.fromEntries(Object.entries(request.headers)
+      .map(([name, value]) => [name, Array.isArray(value) ? value.join(', ') : value ?? ''])));
+    const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(frame({ type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant',
+      content: [], model: 'claude', usage: { input_tokens: 10, output_tokens: 1 } } }));
+    response.write(frame({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }));
+    response.write(frame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }));
+    response.write(frame({ type: 'content_block_stop', index: 0 }));
+    response.write(frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }));
+    response.write(frame({ type: 'message_stop' }));
+    response.end();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    baseUrl: `http://127.0.0.1:${port}/v1`,
+    bodies,
+    headers,
+    close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
+  };
+}
+
 async function endpoint(text = 'Answered.'): Promise<Endpoint> {
   const bodies: Record<string, unknown>[] = [];
   const server: Server = createServer(async (request, response) => {
@@ -270,4 +302,78 @@ test('a conversation keeps the strength of the model the user picks', async () =
   // The conversation reports the strength it actually runs at.
   const view = (await request(`/api/conversations/${conversationId}`)).json() as Promise<ConversationView>;
   expect((await view).telemetry).toMatchObject({ model: 'empty', thinkingLevel: 'off' });
+}, 180_000);
+
+test('an Anthropic model is asked for a thinking budget, and for none when it has no strengths', async () => {
+  const provider = await anthropicEndpoint('Budgeted answer.');
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-thinking-anthropic-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await mkdir(join(root, 'web'), { recursive: true });
+  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    credentials: { local: { secretRef: 'GRAPH_THINKING_KEY' } },
+    models: { entries: [
+      // A model the catalog names strengths for: it runs at its second
+      // strongest one, and that strength is a budget of tokens.
+      { id: 'claude', provider: 'anthropic', modelId: 'claude-opus-5-5', grade: 'high', api: 'anthropic-messages',
+        baseUrl: provider.baseUrl, contextWindow: 200_000, maxTokens: 32_000, credentialId: 'local' },
+      // A model the catalog names no strength for: it runs without one.
+      { id: 'plain', provider: 'llmgateway-providers', modelId: 'novita/ling-3.0-flash', grade: 'high', api: 'anthropic-messages',
+        baseUrl: provider.baseUrl, contextWindow: 32_000, maxTokens: 4_096, credentialId: 'local' },
+    ] },
+  }));
+  const daemon = await launchCli(root, {
+    configPath, env: { GRAPH_THINKING_KEY: 'thinking-key' }, extraArgs: ['--execute', '--kernel', 'pig'],
+  });
+  cleanup.push(() => daemon.close());
+  const request = async (path: string, init: RequestInit = {}) => await daemon.request(path, init);
+
+  const settings = await (await request('/api/settings')).json() as { models?: ModelRow[] };
+  const claude = (settings.models ?? []).find(model => model.id === 'claude');
+  expect(claude?.thinkingOptions?.map(option => option.level)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+
+  const created = await request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'claude', text: 'budget it', requestId: 'anthropic-budget' }),
+  });
+  const conversationId = (await created.json() as { conversationId: string }).conversationId;
+  await expect.poll(async () => {
+    const view = await request(`/api/conversations/${conversationId}`);
+    return ((await view.json()) as ConversationView).master?.status;
+  }, { timeout: 30_000, interval: 250 }).toBe('succeeded');
+
+  // The strength this model runs at is a budget of tokens, and the ceiling the
+  // answer is given is the model's own.
+  const sent = provider.bodies.find(body => {
+    const messages = (body.messages ?? []) as { role: string; content: unknown }[];
+    return messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('budget it'));
+  });
+  expect(sent, 'the Anthropic request was sent').toBeTruthy();
+  expect(sent!.thinking).toMatchObject({ type: 'enabled', budget_tokens: 16384, display: 'summarized' });
+  expect(sent!.max_tokens).toBe(32_000);
+  expect(provider.headers[0]?.['anthropic-beta']).toBe('interleaved-thinking-2025-05-14');
+
+  // A model with no strengths is asked for no budget at all.
+  const plain = await request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'plain', text: 'no budget', requestId: 'anthropic-plain' }),
+  });
+  const plainId = (await plain.json() as { conversationId: string }).conversationId;
+  await expect.poll(async () => {
+    const view = await request(`/api/conversations/${plainId}`);
+    return ((await view.json()) as ConversationView).master?.status;
+  }, { timeout: 30_000, interval: 250 }).toBe('succeeded');
+  const without = provider.bodies.find(body => {
+    const messages = (body.messages ?? []) as { role: string; content: unknown }[];
+    return messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('no budget'));
+  });
+  expect(without, 'the Anthropic request was sent').toBeTruthy();
+  expect(without).not.toHaveProperty('thinking');
+  expect(without!.max_tokens).toBe(4_096);
 }, 180_000);

@@ -746,6 +746,7 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 	body := map[string]any{}
 	transcript := controlledContextMessages(stream.context)
 	endpoint := strings.TrimSuffix(baseURL, "/")
+	thinkingEnabled := false
 	switch stream.api {
 	case "anthropic-messages":
 		endpoint += "/messages"
@@ -755,9 +756,18 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 			body["system"] = system
 		}
 		body["messages"] = controlledAnthropicMessages(transcript)
-		if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
+		// Anthropic is asked for a budget of thinking tokens rather than for a
+		// named strength, and the ceiling it answers under grows with it.
+		ceiling, thinking := ControlledAnthropicThinking(record, stream.options)
+		if ceiling > 0 {
+			body["max_tokens"] = ceiling
+		} else if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
 			body["max_tokens"] = tokens
 		}
+		for name, value := range thinking {
+			body[name] = value
+		}
+		thinkingEnabled = len(thinking) > 0
 		if tools := controlledAnthropicTools(transcript); len(tools) > 0 {
 			body["tools"] = tools
 		}
@@ -767,7 +777,7 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		body["stream"] = true
 		body["stream_options"] = map[string]any{"include_usage": true}
 		body["messages"] = controlledOpenAIMessages(transcript, controlledInstructionRole(record))
-		if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
+		if tokens := ControlledMaxTokens(record, stream.options); tokens > 0 {
 			body["max_tokens"] = tokens
 		}
 		if tools := controlledOpenAITools(transcript); len(tools) > 0 {
@@ -803,6 +813,13 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		}
 		if _, explicit := request.Header["Anthropic-Version"]; !explicit {
 			request.Header.Set("anthropic-version", "2023-06-01")
+		}
+		if thinkingEnabled {
+			// Interleaved thinking is what lets a model think again between two
+			// tool calls. A configuration that names its own beta wins.
+			if _, explicit := request.Header["Anthropic-Beta"]; !explicit {
+				request.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
+			}
 		}
 	default:
 		if _, explicit := request.Header["Authorization"]; !explicit {
