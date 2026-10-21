@@ -98,6 +98,9 @@ func (app *GraphApp) Close() {
 	if app.logins != nil {
 		app.logins.close()
 	}
+	// The Pi extensions the daemon hosted run in processes of their own; they
+	// stop with the daemon.
+	ClosePigExtensions()
 	if server != nil {
 		_ = server.Close()
 	}

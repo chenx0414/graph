@@ -12,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
 // The production Agent adapter: one Task Runtime operation opens a restored Pi instance and sends
@@ -1734,6 +1732,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		AllowAllUnixSockets:    input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.UnixSockets == "all",
 		AllowAppleEvents:       input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.AppleEvents,
 		PiExtensionPaths:       append([]string{}, turn.CapabilityOperation.PiExtensionPaths...),
+		ExtensionProcessAllowed: pigExtensionProcessAllowed(input.AccessPolicy),
 		McpAdapterServers:      append([]McpAdapterServerRef{}, turn.CapabilityOperation.McpAdapterServers...),
 		PiExtensionTools:       append([]string{}, turn.CapabilityOperation.PiExtensionTools...),
 		SystemPrompt:           turn.ComposedPrompt,
@@ -1788,13 +1787,14 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		// never sent: the node goes back to pending and the same turn is
 		// dispatched again, forever, with the reason nowhere. A failed turn
 		// says what happened and lets the user decide.
-		if errors.Is(err, pigkernel.ErrPiExtensionNotHosted) {
+		if errors.Is(err, errPiExtensionNotHosted) {
+			// The bound Pi extension could not be hosted for this session.
 			// The model was never asked anything: the agent could not start
-			// at all, because the kernel hosts no Pi extension. That is a
-			// setup failure, and the runtime words it as one - the message
-			// says the agent never came up, not that it ran and gave up.
+			// at all. That is a setup failure, and the runtime words it as
+			// one - the message says the agent never came up, not that it ran
+			// and gave up.
 			return OperationResult{Outcome: "failed", Output: map[string]any{
-				"setupError": piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths),
+				"setupError": piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths) + ": " + err.Error(),
 			}, Usage: turn.Gate.Total()}
 		}
 		panic(err)

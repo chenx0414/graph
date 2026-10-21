@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -7,42 +8,71 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 
 // A real Pi extension: the module a Pi extension package ships, loaded by Pi's
 // own extension loader. It registers one tool and watches every tool call.
-const extensionSource = `export default function (pi) {
+//
+// The extension runs in a Node process of its own, so the file it writes when
+// its tool really runs is the proof that the call reached the extension.
+const extensionSource = `import { writeFileSync } from 'node:fs';
+
+export default function (pi) {
   pi.registerTool({
     name: 'proof_tool',
     description: 'Return a fixed proof string.',
     parameters: { type: 'object', properties: {}, additionalProperties: false },
-    execute: async () => ({ content: [{ type: 'text', text: 'extension-proof' }] }),
+    execute: async () => {
+      if (process.env.GRAPH_PIG_PI_EXTENSION_MARKER) {
+        writeFileSync(process.env.GRAPH_PIG_PI_EXTENSION_MARKER, 'the extension ran');
+      }
+      return { content: [{ type: 'text', text: 'extension-proof' }] };
+    },
   });
   pi.on('tool_call', async () => undefined);
 }
 `;
 
-interface ConversationMessage { role?: string; kind?: string; text?: string }
-interface ConversationQuestion {
-  kind?: string; owner?: string; status?: string;
-  data?: { output?: { setupError?: string; error?: string }; retryVerdict?: string };
+// The same extension with a hook that refuses the call it watches. The tool
+// body must never run: the refusal happens before it.
+const guardedExtensionSource = `import { writeFileSync } from 'node:fs';
+
+export default function (pi) {
+  pi.registerTool({
+    name: 'guarded_tool',
+    description: 'A tool the extension refuses to run.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    execute: async () => {
+      if (process.env.GRAPH_PIG_PI_EXTENSION_MARKER) {
+        writeFileSync(process.env.GRAPH_PIG_PI_EXTENSION_MARKER, 'the extension ran');
+      }
+      return { content: [{ type: 'text', text: 'should never run' }] };
+    },
+  });
+  pi.on('tool_call', async (event) => {
+    if (event && event.toolName === 'guarded_tool') {
+      return { block: true, reason: 'the extension refuses this call' };
+    }
+    return undefined;
+  });
 }
+`;
+
+interface ConversationMessage { role?: string; kind?: string; text?: string }
 interface ConversationView {
   master?: { status?: string };
   messages?: ConversationMessage[];
-  questions?: ConversationQuestion[];
+  questions?: { kind?: string; owner?: string; status?: string; data?: { output?: { setupError?: string } } }[];
 }
-interface TaskEvent { type?: string }
 
-// A bound Pi extension must never disappear without a word.
-//
-// The PiG kernel carries Graph's own tools and the native MCP channel, but it
-// hosts no Pi extension yet: the extension model PiG ships is a subprocess
-// wire, and Graph's durable harness does not reach it. A capability that binds
-// a Pi extension therefore cannot be honored on this kernel - and the honest
-// answer to that is a refusal that names the extension, not a session that
-// quietly runs without the tools the model was promised.
-//
-// The turn must therefore fail, and the reason must say which capability to
-// unbind. What must never happen is a turn that succeeds as if the extension
-// were not bound at all.
-test('a bound Pi extension is refused by the PiG kernel rather than silently dropped', async () => {
+/** One daemon, one capability, one pi extension on disk. */
+async function withExtension(
+  source: string,
+  declaredTools: { name: string; description: string }[],
+  run: (context: {
+    daemon: Awaited<ReturnType<typeof launchCli>>;
+    provider: Awaited<ReturnType<typeof openaiServer>>;
+    project: string;
+    capabilityDirectory: string;
+  }) => Promise<void>,
+  access?: unknown,
+) {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-pi-extension-'));
   const project = join(root, 'project');
   const home = join(root, 'graph-home');
@@ -51,16 +81,14 @@ test('a bound Pi extension is refused by the PiG kernel rather than silently dro
   await mkdir(home);
   await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
 
-  // The capability the recipe binds: a real Pi extension on disk.
   const capabilityDirectory = join(home, 'capabilities', 'pi-extension', 'proof-1.0.0');
   await mkdir(capabilityDirectory, { recursive: true });
-  await writeFile(join(capabilityDirectory, 'index.mjs'), extensionSource);
+  await writeFile(join(capabilityDirectory, 'index.mjs'), source);
   await writeFile(join(capabilityDirectory, 'capability.json'), JSON.stringify({
     id: 'proof', kind: 'pi-extension', version: '1.0.0', name: 'Proof extension',
     entry: './index.mjs',
-    tools: [{ name: 'proof_tool', description: 'Return a fixed proof string.' }],
+    tools: declaredTools,
   }));
-  // The recipe the master definition is compiled from.
   await writeFile(join(home, 'agent-combinations.json'), JSON.stringify({
     version: 1,
     combinations: [{
@@ -70,64 +98,115 @@ test('a bound Pi extension is refused by the PiG kernel rather than silently dro
     }],
   }));
 
+  // The model calls the tool the extension registered: the extension is the
+  // authority on what it offers, and the call is the only way to reach it.
+  const called = declaredTools[0]?.name ?? 'proof_tool';
   const provider = await openaiServer([
-    { text: 'The proof tool is not needed.', usage: { prompt_tokens: 20, completion_tokens: 5 } },
+    { tools: [{ id: 'call-proof', name: called, arguments: JSON.stringify({}) }] },
+    { text: 'The extension answered.' },
   ]);
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   try {
     const configPath = join(root, 'graph.config.json');
     await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: project }],
       credentials: { local: { secretRef: 'GRAPH_PIG_PI_EXTENSION_KEY' } },
+      ...(access === undefined ? {} : { access }),
       models: { entries: [{ id: 'main', provider: 'graph-main', grade: 'high', api: 'openai-completions',
         baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] } }));
-    daemon = await launchCli(root, { configPath, env: { GRAPH_PIG_PI_EXTENSION_KEY: 'synthetic-only' }, extraArgs: ['--execute', '--kernel', 'pig'] });
+    daemon = await launchCli(root, { configPath, env: {
+      GRAPH_PIG_PI_EXTENSION_KEY: 'synthetic-only',
+      GRAPH_PIG_PI_EXTENSION_MARKER: join(capabilityDirectory, 'tool-ran.txt'),
+    }, extraArgs: ['--execute', '--kernel', 'pig'] });
+    await run({ daemon, provider, project, capabilityDirectory });
+  } finally {
+    await daemon?.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
 
+// A bound Pi extension really runs on the PiG kernel.
+//
+// The extension lives in a Node process of its own: the model is offered the
+// tool the extension registered, the call reaches the extension, and the
+// extension's own answer is what the model reads. Nothing about the extension
+// is simulated - the file it writes when its tool runs is the proof.
+test('a bound Pi extension runs its own tool on the PiG kernel', async () => {
+  await withExtension(extensionSource, [{ name: 'proof_tool', description: 'Return a fixed proof string.' }], async ({ daemon, provider, capabilityDirectory }) => {
     const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
     expect(compiled.status).toBe(200);
 
     const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the proof tool.', requestId: 'first' }) });
     expect(created.status).toBe(200);
     const { conversationId } = await created.json() as { conversationId: string };
-    const view = async () => await (await daemon!.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
+    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
+    await expect.poll(async () => (await view()).master?.status, { timeout: 60000, interval: 250 }).toBe('succeeded');
 
-    // The turn cannot be honored, and it says so. The failure arrives as an
-    // error message in the conversation.
+    // The model was offered the tool the extension registered.
+    const declared = (provider.requests[0] as { tools?: { function?: { name?: string } }[] }).tools ?? [];
+    expect(declared.map(tool => tool.function?.name)).toContain('proof_tool');
+    // The call reached the extension: it ran, and it wrote its own file.
+    expect(existsSync(join(capabilityDirectory, 'tool-ran.txt'))).toBe(true);
+    // The extension's own answer is what the model read.
+    expect(JSON.stringify(provider.requests[1])).toContain('extension-proof');
+    const answers = (await view()).messages?.filter(message => message.role === 'assistant') ?? [];
+    expect(answers.at(-1)?.text).toContain('The extension answered.');
+  });
+}, 120000);
+
+// The extension's own hook refuses a call, and the tool body never runs.
+//
+// The hook is Pi's own: a handler that returns {block: true, reason} refuses
+// the call. Graph keeps the admission - the extension owns the body of the
+// tool, not the right to call it.
+test('a Pi extension hook refuses a call before the tool body runs', async () => {
+  await withExtension(guardedExtensionSource, [{ name: 'guarded_tool', description: 'A tool the extension refuses to run.' }], async ({ daemon, provider, capabilityDirectory }) => {
+    const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
+    expect(compiled.status).toBe(200);
+
+    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the guarded tool.', requestId: 'first' }) });
+    expect(created.status).toBe(200);
+    const { conversationId } = await created.json() as { conversationId: string };
+    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
+    await expect.poll(async () => (await view()).master?.status, { timeout: 60000, interval: 250 }).toBe('succeeded');
+
+    // The model was offered the tool, and the extension's refusal is what it
+    // read instead of the tool's answer.
+    const declared = (provider.requests[0] as { tools?: { function?: { name?: string } }[] }).tools ?? [];
+    expect(declared.map(tool => tool.function?.name)).toContain('guarded_tool');
+    expect(JSON.stringify(provider.requests[1])).toContain('the extension refuses this call');
+    // The body never ran: the extension did not write its file.
+    expect(existsSync(join(capabilityDirectory, 'tool-ran.txt'))).toBe(false);
+  });
+}, 120000);
+
+// A session whose policy is narrower than the daemon's own reach may not
+// host a Pi extension.
+//
+// The extension's process has the daemon's reach: it reads and writes the host
+// and reaches the network. A session that may not do that itself may not host
+// an extension either - running one would widen the session behind its
+// policy's back. The refusal says so instead of running it anyway.
+test('a session with a narrow policy refuses the bound Pi extension by name', async () => {
+  await withExtension(extensionSource, [{ name: 'proof_tool', description: 'Return a fixed proof string.' }], async ({ daemon, provider }) => {
+    const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
+    expect(compiled.status).toBe(200);
+
+    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the proof tool.', requestId: 'first' }) });
+    expect(created.status).toBe(200);
+    const { conversationId } = await created.json() as { conversationId: string };
+    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
     await expect.poll(async () => (await view()).messages?.filter(message => message.kind === 'error').length,
-      { timeout: 30000, interval: 250 }).toBe(1);
-    const conversation = await view();
-    const failure = conversation.messages?.find(message => message.kind === 'error');
-    expect(failure?.role).toBe('system');
-    // The reason names the kind of capability and the one to unbind. A path
-    // would not do: the user has to change the recipe, not the filesystem.
+      { timeout: 60000, interval: 250 }).toBe(1);
+
+    // The model was never asked anything: the agent could not start.
+    expect(provider.requests).toHaveLength(0);
+    const failure = (await view()).messages?.find(message => message.kind === 'error');
     expect(failure?.text).toContain('Pi extension');
     expect(failure?.text).toContain('proof@1.0.0');
-
-    // The problem is parked for main to handle, with the same reason. The
-    // agent never started, so the runtime words it as a setup failure.
-    const question = conversation.questions?.find(entry => entry.kind === 'execution_failed');
+    // The problem is parked for main, with the reason.
+    const question = (await view()).questions?.find(entry => entry.kind === 'execution_failed');
     expect(question?.owner).toBe('main');
-    expect(question?.status).toBe('open');
-    expect(question?.data?.output?.setupError).toContain('proof@1.0.0');
-
-    // The agent produced no answer: the turn was refused before the model was
-    // consulted. Nothing was spent on a turn that could not run.
-    expect(conversation.messages?.some(message => message.role === 'assistant')).toBe(false);
-    expect(provider.requests).toHaveLength(0);
-
-    // The model was never offered the extension's tool, so the extension can
-    // never have been reached by the model.
-    for (const request of provider.requests as { tools?: { function?: { name?: string } }[] }[]) {
-      expect((request.tools ?? []).map(tool => tool.function?.name)).not.toContain('proof_tool');
-    }
-
-    // The refusal settles the turn. It is not re-dispatched in a loop: one
-    // operation, one intent, one failure.
-    const events = await (await daemon!.request(`/api/conversations/${conversationId}/events?limit=200`)).json() as TaskEvent[];
-    expect(events.filter(event => event.type === 'operation.intent')).toHaveLength(1);
-    expect(events.filter(event => event.type === 'operation.result')).toHaveLength(1);
-  } finally {
-    await daemon?.close();
-    await provider.close();
-    await rm(root, { recursive: true, force: true });
-  }
+    expect(question?.data?.output?.setupError).toContain('narrower than the daemon');
+  }, { mode: 'standard' });
 }, 120000);

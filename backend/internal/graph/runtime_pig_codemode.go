@@ -21,8 +21,8 @@ import (
 // direct call passes: the sandbox is a way to write the calls, not a way
 // around them.
 //
-// The tool is off by default. Graph offers it only when the configuration asks
-// for it, so a session that never asked for a sandbox never gets one.
+// The tool is on by default. The configuration turns it off when a deployment
+// wants the model to call its tools one by one.
 
 // CodemodeToolName is the name the codemode tool is offered under.
 const CodemodeToolName = "codemode"
@@ -45,7 +45,8 @@ func codemodeSettings(config GraphCodemode, stateDir string) CodemodeSettings {
 
 // CodemodeSettings configure the codemode tool of one session.
 type CodemodeSettings struct {
-	// Enabled offers the codemode tool. It is off by default.
+	// Enabled offers the codemode tool. It is on unless the configuration
+	// turns it off.
 	Enabled bool
 	// TimeoutMs is the deadline of one script, in milliseconds. Zero is the
 	// kernel's own default.

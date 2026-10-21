@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,28 +7,34 @@ import { expect, test } from 'vitest';
 import { git } from '../../src/git/git.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
 
-// A real Pi extension: the module a Pi extension package ships, loaded by Pi's
-// own extension loader.
-const extensionSource = `export default function (pi) {
+// The graph node lane hosts a Pi extension too.
+//
+// The node's recipe binds the extension, and the node's own turn runs on the
+// PiG kernel: the node's model is offered the tool the extension registered,
+// the call reaches the extension's own process, and the extension's answer is
+// what the node's model reads before it submits.
+const extensionSource = `import { writeFileSync } from 'node:fs';
+
+export default function (pi) {
   pi.registerTool({
     name: 'proof_tool',
     description: 'Return a fixed proof string.',
     parameters: { type: 'object', properties: {}, additionalProperties: false },
-    execute: async () => ({ content: [{ type: 'text', text: 'extension-proof' }] }),
+    execute: async () => {
+      if (process.env.GRAPH_PIG_PI_EXTENSION_MARKER) {
+        writeFileSync(process.env.GRAPH_PIG_PI_EXTENSION_MARKER, 'the extension ran');
+      }
+      return { content: [{ type: 'text', text: 'extension-proof' }] };
+    },
   });
 }
 `;
 
 interface ProviderTool { function?: { name?: string } }
-interface ProviderMessage { role?: string; content?: unknown; tool_calls?: { function?: { name?: string } }[] }
+interface ProviderMessage { role?: string; content?: unknown; tool_call_id?: string; tool_calls?: { function?: { name?: string } }[] }
 interface ProviderBody { tools?: ProviderTool[]; messages?: ProviderMessage[] }
+interface ProviderRequest { master: boolean; body: ProviderBody }
 
-// The graph node lane runs a node's turn on the PiG kernel.
-//
-// The node's recipe binds a Pi extension, and the kernel hosts none. The node
-// must therefore fail with a reason that names the extension - a node that
-// quietly ran without the tool it was bound is worse than a node that says it
-// cannot run.
 const PROPOSAL = {
   requirementVersion: 1,
   summary: '节点泳道',
@@ -45,7 +52,7 @@ const PROPOSAL = {
   },
 };
 
-/** A provider that proposes the graph and then dispatches the node's input. */
+/** A provider that proposes the graph, dispatches the node's input, and answers the node. */
 async function laneProvider() {
   const requests: ProviderRequest[] = [];
   let dispatched = false;
@@ -81,6 +88,23 @@ async function laneProvider() {
       response.end('data: [DONE]\n\n');
       return;
     }
+    if (!master) {
+      // The node's own turn: the extension's tool first, then the submission.
+      const called = (body.messages ?? []).some(message => message.tool_calls?.some(call => call.function?.name === 'proof_tool'));
+      if (!called) {
+        response.write(toolCall('call-proof', 'proof_tool', {}));
+        response.write(stop);
+        response.end('data: [DONE]\n\n');
+        return;
+      }
+      const submitted = (body.messages ?? []).some(message => message.tool_calls?.some(call => call.function?.name === 'submit'));
+      if (!submitted) {
+        response.write(toolCall('call-submit', 'submit', { outputs: { done: { enable: true, value: { text: 'Worker finished' } } } }));
+        response.write(stop);
+        response.end('data: [DONE]\n\n');
+        return;
+      }
+    }
     response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'Done.' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 5, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } } }));
     response.end('data: [DONE]\n\n');
@@ -94,9 +118,7 @@ async function laneProvider() {
   };
 }
 
-interface ProviderRequest { master: boolean; body: ProviderBody }
-
-test('a graph node whose recipe binds a Pi extension fails with the reason, on the PiG kernel', async () => {
+test('a graph node runs a bound Pi extension tool on the PiG kernel', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-node-extension-'));
   const project = join(root, 'project');
   const home = join(root, 'graph-home');
@@ -145,7 +167,10 @@ test('a graph node whose recipe binds a Pi extension fails with the reason, on t
         api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32000, maxTokens: 512,
         credentialId: 'local' }] },
     }));
-    daemon = await launchCli(root, { configPath, env: { GRAPH_NODE_EXTENSION_KEY: 'synthetic-node-extension-key' }, extraArgs: ['--execute', '--kernel', 'pig'] });
+    daemon = await launchCli(root, { configPath, env: {
+      GRAPH_NODE_EXTENSION_KEY: 'synthetic-node-extension-key',
+      GRAPH_PIG_PI_EXTENSION_MARKER: join(capabilityDirectory, 'tool-ran.txt'),
+    }, extraArgs: ['--execute', '--kernel', 'pig'] });
     async function request(path: string, method = 'GET', data?: unknown) {
       const response = await daemon!.request(path, { method, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       return { status: response.status, body: await response.json().catch(() => ({})) };
@@ -181,28 +206,38 @@ test('a graph node whose recipe binds a Pi extension fails with the reason, on t
     const taskId = (confirmed.body as { taskId: string }).taskId;
     expect(taskId).toBeTruthy();
 
-    // The node's turn cannot be honored, and it says why.
+    // The node's own turn has to finish: the node submits its output.
     let nodeStatus = '';
-    let failureReason = '';
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline) {
-      const events = await request(`/api/tasks/${taskId}/events?after=0&limit=400`);
-      const rows = (Array.isArray(events.body) ? events.body : []) as { type?: string; data?: { nodeId?: string; reason?: string } }[];
-      const failed = rows.find(event => event.type === 'graph.node.failed' && event.data?.nodeId === 'work');
-      if (failed) {
-        failureReason = failed.data?.reason ?? '';
-        break;
-      }
       const task = await request(`/api/tasks/${taskId}`);
       const nodes = (task.body as { nodes?: { id: string; status: string }[] }).nodes ?? [];
       nodeStatus = nodes.find(node => node.id === 'work')?.status ?? '';
-      if (nodeStatus === 'failed' || nodeStatus === 'succeeded') break;
+      if (nodeStatus === 'succeeded' || nodeStatus === 'failed') break;
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-    expect(failureReason, `the node never failed; its status was ${nodeStatus}`).not.toBe('');
-    // The reason names the extension and the capability to unbind.
-    expect(failureReason).toContain('Pi extension');
-    expect(failureReason).toContain('proof@1.0.0');
+    if (nodeStatus !== 'succeeded') {
+      const events = await request(`/api/tasks/${taskId}/events?after=0&limit=400`);
+      const lines = (Array.isArray(events.body) ? events.body : []).slice(-40)
+        .map((event: { cursor?: number; type?: string; data?: unknown }) =>
+          `${event.cursor ?? '?'} ${event.type ?? '?'} ${JSON.stringify(event.data ?? {}).slice(0, 240)}`);
+      expect(nodeStatus, `events:\n${lines.join('\n')}\ndaemon:\n${daemon?.stderr ?? ''}`).toBe('succeeded');
+    }
+    expect(nodeStatus).toBe('succeeded');
+
+    // The node's own request declares the tool the extension registered: the
+    // request that declares `submit` is the node's.
+    const nodeRequest = provider.requests.find(entry => (entry.body.tools ?? []).some(tool => tool.function?.name === 'submit'));
+    expect(nodeRequest, 'the node never asked the provider').toBeTruthy();
+    expect((nodeRequest!.body.tools ?? []).map(tool => tool.function?.name)).toContain('proof_tool');
+    // The call reached the extension: it ran, and it wrote its own file.
+    expect(existsSync(join(capabilityDirectory, 'tool-ran.txt'))).toBe(true);
+    // The extension's own answer is what the node's model read: the request
+    // that carries the result of the extension's call is the node's second.
+    const followUp = provider.requests.find(entry =>
+      (entry.body.messages ?? []).some(message => message.role === 'tool' && message.tool_call_id === 'call-proof'));
+    expect(followUp, 'the node never read the extension\'s answer').toBeTruthy();
+    expect(JSON.stringify(followUp!.body.messages)).toContain('extension-proof');
   } finally {
     await daemon?.close();
     await provider.close();

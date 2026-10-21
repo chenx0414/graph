@@ -260,7 +260,26 @@ func assistantMessage(value any) (*ai.AssistantMessage, error) {
 	if err := json.Unmarshal(body, message); err != nil {
 		return nil, fmt.Errorf("pig kernel: the assistant message is not readable: %w", err)
 	}
+	restoreToolCallArguments(message)
 	return message, nil
+}
+
+// restoreToolCallArguments gives every tool call of the message its arguments back.
+//
+// The daemon's own message shape leaves the arguments of a call with none out
+// of the JSON, and the kernel reads a tool call's arguments as a JSON value: a
+// missing value is the null that fails the object schema of every tool, so a
+// call that asked for nothing was refused for the shape of its asking. A call
+// with no arguments is a call with an empty object.
+func restoreToolCallArguments(message *ai.AssistantMessage) {
+	for index, block := range message.Content {
+		call, ok := block.(ai.ToolCall)
+		if !ok || call.Arguments != nil {
+			continue
+		}
+		call.Arguments = ai.JsonObject{}
+		message.Content[index] = call
+	}
 }
 
 // toolCall reads one tool call the daemon reported.
@@ -275,6 +294,9 @@ func toolCall(value any) (ai.ToolCall, error) {
 	}
 	if err := json.Unmarshal(body, &call); err != nil {
 		return call, fmt.Errorf("pig kernel: the tool call is not readable: %w", err)
+	}
+	if call.Arguments == nil {
+		call.Arguments = ai.JsonObject{}
 	}
 	return call, nil
 }

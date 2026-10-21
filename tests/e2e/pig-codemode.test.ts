@@ -7,7 +7,8 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 
 // The kernel has codemode built in: the model writes JavaScript that calls the
 // host's tools, and the script runs in the kernel's sandbox. Graph offers the
-// tool only when the configuration asks for it.
+// tool by default - the sandbox changes how a call is written, not whether it
+// is admitted - and the configuration can turn it off.
 //
 // The proof is a real daemon, a real provider and a real Graph tool: the model
 // is offered `codemode`, the model calls it, the script calls the host's own
@@ -19,7 +20,7 @@ const SCRIPT = [
   'text(written);',
 ].join('\n');
 
-test('the model runs a script in the kernel sandbox and the script calls the host tools', async () => {
+test('the model runs a script in the kernel sandbox without the configuration asking for it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-codemode-'));
   const project = join(root, 'project');
   await mkdir(project);
@@ -32,9 +33,9 @@ test('the model runs a script in the kernel sandbox and the script calls the hos
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   try {
     const configPath = join(root, 'graph.config.json');
+    // No codemode block at all: the sandbox is offered anyway.
     await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: project }],
       credentials: { local: { secretRef: 'GRAPH_PIG_CODEMODE_KEY' } },
-      codemode: { enabled: true },
       models: { entries: [{ id: 'main', provider: 'graph-codemode', grade: 'high', api: 'openai-completions',
         baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'local' }] } }));
     daemon = await launchCli(root, { configPath, env: { GRAPH_PIG_CODEMODE_KEY: 'synthetic-only' }, extraArgs: ['--execute', '--kernel', 'pig'] });
@@ -61,7 +62,7 @@ test('the model runs a script in the kernel sandbox and the script calls the hos
   }
 }, 120000);
 
-test('the codemode tool is absent unless the configuration asks for it', async () => {
+test('the codemode tool is absent when the configuration turns it off', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-codemode-off-'));
   const project = join(root, 'project');
   await mkdir(project);
@@ -75,6 +76,7 @@ test('the codemode tool is absent unless the configuration asks for it', async (
     const configPath = join(root, 'graph.config.json');
     await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: project }],
       credentials: { local: { secretRef: 'GRAPH_PIG_CODEMODE_KEY' } },
+      codemode: { enabled: false },
       models: { entries: [{ id: 'main', provider: 'graph-codemode', grade: 'high', api: 'openai-completions',
         baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'local' }] } }));
     daemon = await launchCli(root, { configPath, env: { GRAPH_PIG_CODEMODE_KEY: 'synthetic-only' }, extraArgs: ['--execute', '--kernel', 'pig'] });

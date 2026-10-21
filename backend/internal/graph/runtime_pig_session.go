@@ -43,28 +43,32 @@ type pigAgentTransport struct {
 
 // Open opens one session on the PiG kernel.
 func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSession, error) {
+	tools := pigToolSpecs(request, transport.codemode)
+	extensions, err := pigExtensionSpecs(context.Background(), request, request.Broker)
+	if err != nil {
+		return nil, err
+	}
+	tools = append(tools, extensions...)
 	options := pigkernel.SessionOptions{
-		Database:       transport.store.Path,
-		Identity:       request.Binding.InstanceId,
-		Model:          pigModelSpec(request.Model),
-		Provider:       pigProviderBridge(request),
-		Tools:          pigToolSpecs(request, transport.codemode),
-		McpServers:     pigMcpServers(request),
-		Instructions:   pigSessionInstructions(request),
-		ExtensionPaths: append([]string{}, request.PiExtensionPaths...),
-		RequestId:      request.InputRequestId,
-		OnEvent:        request.OnEvent,
+		Database:     transport.store.Path,
+		Identity:     request.Binding.InstanceId,
+		Model:        pigModelSpec(request.Model),
+		Provider:     pigProviderBridge(request),
+		Tools:        tools,
+		McpServers:   pigMcpServers(request),
+		Instructions: pigSessionInstructions(request),
+		RequestId:    request.InputRequestId,
+		OnEvent:      request.OnEvent,
 	}
 	if request.ThinkingLevel != nil {
 		options.ThinkingLevel = *request.ThinkingLevel
 	}
 	session, err := pigkernel.OpenSession(context.Background(), options)
 	if err != nil {
-		// A session that needs a Pi extension is refused by name: the kernel
-		// hosts Graph's own tools and the native MCP channel, and a capability
-		// that binds a Pi extension cannot be honored here. The refusal is
-		// returned, not raised: the caller turns it into a failed turn the user
-		// can read, rather than a crash the runtime silently recovers from.
+		// The refusal a session gets when a bound Pi extension cannot be
+		// hosted for it is returned, not raised: the caller turns it into a
+		// failed turn the user can read, rather than a crash the runtime
+		// silently recovers from.
 		return nil, err
 	}
 	// The execution is frozen before the turn starts. The record is what the

@@ -126,23 +126,30 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 	if host.options.RequestId != nil {
 		request.InputRequestId = host.options.RequestId()
 	}
+	tools := pigNodeToolSpecs(request, host.options.Gate, host.options.Ungated)
+	extensions, err := pigExtensionSpecs(context.Background(), request, host.options.Gate)
+	if err != nil {
+		// The refusal names the extension: a node that cannot host one has to
+		// say which one, so the user knows what to unbind.
+		if errors.Is(err, errPiExtensionNotHosted) {
+			return pigNodeTurnError(piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths) + ": " + err.Error())
+		}
+		return pigNodeTurnError(err.Error())
+	}
+	tools = append(tools, extensions...)
 	session, err := pigkernel.OpenSession(context.Background(), pigkernel.SessionOptions{
-		Database:       host.options.Database,
-		Identity:       request.Binding.InstanceId,
-		Model:          pigModelSpec(request.Model),
-		Provider:       host.provider(),
-		Tools:          pigNodeToolSpecs(request, host.options.Gate, host.options.Ungated),
-		McpServers:     pigMcpServers(request),
-		Instructions:   pigSessionInstructions(request),
-		ExtensionPaths: append([]string{}, request.PiExtensionPaths...),
-		RequestId:      request.InputRequestId,
-		OnEvent:        host.options.OnEvent,
-		OnToolCall:     host.options.OnToolCall,
+		Database:     host.options.Database,
+		Identity:     request.Binding.InstanceId,
+		Model:        pigModelSpec(request.Model),
+		Provider:     host.provider(),
+		Tools:        tools,
+		McpServers:   pigMcpServers(request),
+		Instructions: pigSessionInstructions(request),
+		RequestId:    request.InputRequestId,
+		OnEvent:      host.options.OnEvent,
+		OnToolCall:   host.options.OnToolCall,
 	})
 	if err != nil {
-		if errors.Is(err, pigkernel.ErrPiExtensionNotHosted) {
-			return pigNodeTurnError(piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths))
-		}
 		return pigNodeTurnError(err.Error())
 	}
 	host.mutex.Lock()

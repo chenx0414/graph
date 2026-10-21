@@ -38,9 +38,11 @@ type GraphModels struct {
 
 // GraphCodemode is the codemode block of the configuration.
 //
-// The kernel has codemode built in; Graph offers it only when the
-// configuration asks for it. Off by default: a session that never asked for
-// a sandbox never gets one.
+// The kernel has codemode built in, and Graph offers it by default: the
+// sandbox changes how a call is written, not whether it is admitted, so a
+// session that never asked for one still gets the same admission. The
+// configuration turns it off when a deployment wants the model to call
+// tools one by one.
 type GraphCodemode struct {
 	Enabled bool `json:"enabled"`
 	// TimeoutMs is the deadline of one script, in milliseconds. Zero is the
@@ -604,10 +606,12 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 
 // configParseCodemode reads the codemode block of the configuration.
 //
-// The block is optional and off by default: the kernel has codemode, but
-// Graph only offers it when the configuration says so.
+// The block is optional and the sandbox is on unless the configuration says
+// otherwise: the kernel has codemode, and the sandbox changes how a call is
+// written rather than whether it is admitted. `codemode.enabled: false` is
+// how a deployment asks for the model to call its tools one by one.
 func configParseCodemode(value any) GraphCodemode {
-	codemode := GraphCodemode{}
+	codemode := GraphCodemode{Enabled: true}
 	if value == nil {
 		return codemode
 	}

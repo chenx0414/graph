@@ -187,6 +187,13 @@ test('a graph node runs its turn on the PiG kernel, without the TypeScript sidec
     }
     expect(nodeStatus).toBe('succeeded');
 
+    // The node's own turn gets the sandbox as well: the default reaches the
+    // node lane, not only the master. The request that declares `submit` is
+    // the node's own.
+    const nodeRequest = provider.requests.find(entry => (entry.body.tools ?? []).some(tool => tool.function?.name === 'submit'));
+    expect(nodeRequest, 'the node never asked the provider').toBeTruthy();
+    expect((nodeRequest!.body.tools ?? []).map(tool => tool.function?.name)).toContain('codemode');
+
     // The node's session lives in the PiG durable namespace: the kernel that
     // holds the main agent's conversation holds the node's one too.
     const database = join(root, 'state/tasks.sqlite');

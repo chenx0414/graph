@@ -126,6 +126,13 @@ type AgentSessionRequest struct {
 	PiExtensionPaths []string
 	// PiExtensionTools are the tools the Pi extensions register.
 	PiExtensionTools []string
+	// ExtensionProcessAllowed says the session's policy is as wide as the
+	// daemon's own reach, so a Pi extension may run in a process of its own.
+	//
+	// The extension's process has the daemon's reach: it reads and writes the
+	// host and reaches the network. A session that may not do that itself may
+	// not host an extension either.
+	ExtensionProcessAllowed bool
 	// McpAdapterServers are the MCP servers the adapter registers.
 	McpAdapterServers []McpAdapterServerRef
 	// SystemPrompt is the Graph system prompt.

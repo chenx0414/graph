@@ -7,12 +7,12 @@ import (
 
 // The Pi extensions a request binds, and how a refusal names them.
 //
-// The PiG kernel hosts Graph's own tools and the native MCP channel. It hosts
-// no Pi extension: PiG's extension model is a subprocess wire, and Graph's
-// durable harness does not reach it. A capability that binds a Pi extension
-// therefore cannot be honored on this kernel - and the honest answer to that
-// is a refusal that names the capability, not a session that quietly runs
-// without the tools the model was promised.
+// The PiG kernel hosts Pi extensions: PiG's own extension host runs one in a
+// Node process of its own, and the daemon's bridge hands the extension's tools
+// to the model and its hooks to the call. A session that may not host one -
+// because its policy is narrower than the daemon's own reach, or because the
+// extension would not load - is refused by name, not quietly run without the
+// tools the model was promised.
 
 // piExtensionBindingNames names the Pi extension capabilities one request bound.
 //
@@ -67,13 +67,13 @@ func piExtensionPathName(path string) string {
 }
 
 // piExtensionRefusalText is what a user reads when a bound Pi extension
-// cannot run.
+// cannot be hosted for this session.
 //
 // The turn never reached the model, so the agent did not start: this is a
 // setup failure, and the runtime words it as one. The reason says which
-// capability to unbind.
+// capability to unbind; the specific cause follows it.
 func piExtensionRefusalText(descriptor any, paths []string) string {
-	text := "A bound Pi extension cannot be hosted by the PiG kernel: the kernel runs Graph's own tools and the native MCP channel, but no Pi extension."
+	text := "A bound Pi extension cannot be hosted for this session."
 	names := piExtensionBindingNames(descriptor, paths)
 	if len(names) > 0 {
 		text += " Unbind " + strings.Join(names, ", ") + " to run this agent."

@@ -1455,29 +1455,31 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						InstanceId: session.Binding.InstanceId, NodeId: session.Binding.NodeId,
 						DefinitionVersion: session.Binding.DefinitionVersion,
 					},
-					Workspace:           workerConfig.Workspace,
-					StateDir:            workerConfig.StateDir,
-					Model:               workerConfig.Model,
-					Tools:               nodeTools,
-					NativeTools:         nativeTools,
+					Workspace:   workerConfig.Workspace,
+					StateDir:    workerConfig.StateDir,
+					Model:       workerConfig.Model,
+					Tools:       nodeTools,
+					NativeTools: nativeTools,
 					// The skills the node may load: its own folder, the bound
 					// snapshots and the native folders. The kernel has no
 					// environment of its own, so the daemon puts them in the
 					// prompt.
-					SkillPaths:          append([]string{}, workerConfig.SkillPaths...),
-					SkillFolder:         stringPointerValue(workerConfig.SkillFolder),
+					SkillPaths:  append([]string{}, workerConfig.SkillPaths...),
+					SkillFolder: stringPointerValue(workerConfig.SkillFolder),
 					// The Pi extensions the node would load. The kernel hosts
-					// none, so a node that names one is refused rather than run
-					// without the tools it was bound.
-					PiExtensionPaths:    append([]string{}, workerConfig.PiExtensionPaths...),
-					ReadRoots:           readRoots,
-					WriteRoots:          writeRoots,
-					SystemPrompt:        session.SystemPrompt,
-					AllowedToolNames:    allowedToolNames,
-					BundleDigest:        session.BundleDigest,
-					ToolPolicyDigest:    session.ToolPolicyDigest,
-					RuntimePolicyDigest: session.RuntimePolicyDigest,
-					McpAdapterServers:   mcpServers,
+					// them in a process of their own, so a node may only bind
+					// one when its own policy is as wide as the daemon's reach.
+					PiExtensionPaths:        append([]string{}, workerConfig.PiExtensionPaths...),
+					PiExtensionTools:        append([]string{}, workerConfig.PiExtensionTools...),
+					ExtensionProcessAllowed: pigExtensionProcessAllowed(nodeAccessPolicy(session)),
+					ReadRoots:               readRoots,
+					WriteRoots:              writeRoots,
+					SystemPrompt:            session.SystemPrompt,
+					AllowedToolNames:        allowedToolNames,
+					BundleDigest:            session.BundleDigest,
+					ToolPolicyDigest:        session.ToolPolicyDigest,
+					RuntimePolicyDigest:     session.RuntimePolicyDigest,
+					McpAdapterServers:       mcpServers,
 				}
 				host := NewPigNodeHost(PigNodeHostOptions{
 					Database: options.Kernel.Store.Path,
