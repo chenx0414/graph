@@ -36,6 +36,18 @@ type GraphModels struct {
 	Preferences map[string][]string `json:"preferences"`
 }
 
+// GraphCodemode is the codemode block of the configuration.
+//
+// The kernel has codemode built in; Graph offers it only when the
+// configuration asks for it. Off by default: a session that never asked for
+// a sandbox never gets one.
+type GraphCodemode struct {
+	Enabled bool `json:"enabled"`
+	// TimeoutMs is the deadline of one script, in milliseconds. Zero is the
+	// kernel's own default.
+	TimeoutMs *int `json:"timeoutMs,omitempty"`
+}
+
 // ConfiguredModel is a ModelEntry that always names its credential.
 // ID, BaseURL, API, CredentialID and ModelID mirror the embedded entry for callers
 // that spell those fields the way server_start.go does.
@@ -59,6 +71,7 @@ type GraphConfig struct {
 	Access                AccessPolicy                `json:"access"`
 	Skills                GraphSkills                 `json:"skills"`
 	PiExtensionAutoUpdate bool                        `json:"piExtensionAutoUpdate"`
+	Codemode              GraphCodemode               `json:"codemode"`
 }
 
 // CredentialSecret is one resolved environment binding.
@@ -585,7 +598,28 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 			}
 			return true
 		}(),
+		Codemode: configParseCodemode(root["codemode"]),
 	}
+}
+
+// configParseCodemode reads the codemode block of the configuration.
+//
+// The block is optional and off by default: the kernel has codemode, but
+// Graph only offers it when the configuration says so.
+func configParseCodemode(value any) GraphCodemode {
+	codemode := GraphCodemode{}
+	if value == nil {
+		return codemode
+	}
+	record := asObject(value, "codemode")
+	if flag := configOptionalBool(record["enabled"], "codemode.enabled", mapHas(record, "enabled")); flag != nil {
+		codemode.Enabled = *flag
+	}
+	if current, present := record["timeoutMs"]; present && current != nil {
+		timeout := configPositiveInt(current, "codemode.timeoutMs")
+		codemode.TimeoutMs = &timeout
+	}
+	return codemode
 }
 
 // LoadGraphConfig reads and parses one file. A missing file is invalid_config.

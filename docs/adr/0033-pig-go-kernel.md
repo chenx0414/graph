@@ -39,8 +39,9 @@ PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新�
   - **已经抵达模型的回合**：不重放。凭据已花、副作用可能已发生，该操作停在 `unknown`，交由用户核对。
 - **两个内核不得同时写一份 durable 命名空间**：选 `pig` 时 daemon 不启动 TypeScript 侧车，需要侧车的路径显式报错，而不是静默争用同一批表。
 - **图节点泳道已迁到 PiG 内核**（`backend/internal/graph/runtime_pig_node_host.go`）。节点与主 Agent 共享同一个内核与同一份 durable 命名空间，各有各的身份与 durable 会话。模型通道、工具执行与准入闸门仍归 daemon：节点的工具（Graph 工具、`submit`、daemon 自带的原生工具）都在 Go 进程里执行，节点的模型调用走 daemon 自己那条受控流。E2E `tests/e2e/pig-node-lane.test.ts` 证明一整条图跑完：提案 → 确认 → 派发 → 节点在自己的内核回合里 `submit`，且没有启动任何 TypeScript 侧车进程。
+- **codemode 已接入，默认关闭**（`backend/internal/graph/runtime_pig_codemode.go`）。内核自带的 QuickJS 沙箱由 daemon 供主机侧：脚本能调用的就是该会话自己的工具，每一次调用仍走同一道准入闸门——沙箱改变的是调用怎么写，不是调用准不准。Graph 只在配置显式要求时提供这个工具（`graph.config.json` 的 `codemode.enabled`），没要求过的会话不会拿到沙箱。E2E `tests/e2e/pig-codemode.test.ts` 用真实 daemon、真实 provider 与真实宿主工具证明：模型收到 `codemode` 声明 → 调用它 → 脚本在沙箱里调用宿主的 `write` 工具 → 文件落在工作副本 → 答复带回脚本看到的内容；另一个用例证明没配置时模型根本看不到这个工具。
 
-未落地、因此默认内核尚未翻转的部分：图节点泳道的崩溃恢复、codemode 启用、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+未落地、因此默认内核尚未翻转的部分：图节点泳道的崩溃恢复、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
 
 节点泳道的崩溃恢复是最后一关口。节点的**活路径**已在 PiG 内核上，但 daemon 崩溃时正在跑的节点回合还没有等价的三分法处理：崩溃恢复把该节点执行置为 `blocked`（与 TS 路径同一步），但 TS 路径此后由侧车的恢复 pass 自动重发那一回合，PiG 路径还没有这一步。已具备的零件是节点回合的冻结执行、内核的提交回执，以及"内核仍持受理且从未抵达模型时保住那次 attempt"的判断。缺的是把"已受理未发出 → 用受理时的配置重发"接到节点的启动恢复上，并处理内核调度器在别的会话提交时顺带恢复该节点任务、可能重发已抵达模型的 provider 请求这一冲突。
 

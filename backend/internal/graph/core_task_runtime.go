@@ -1213,6 +1213,7 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		Catalog:       runtime.catalog,
 		Library:       runtime.agentContextLibrary(),
 		AgentKernel:   runtime.options.Kernel,
+		Codemode:      runtime.options.Codemode,
 		TokenBudget:   runtime.laneTokenBudget,
 		ReserveTokens: &reserve,
 		Directory:     runtime.liveEntries,
@@ -1304,7 +1305,7 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 	// kernel keeps the durable conversations in the Go process; the
 	// TypeScript sidecar keeps them in a child process.
 	if runtime.options.Kernel == AgentKernelPig {
-		options.Transport = CreatePigAgentSessionTransport(runtime.store)
+		options.Transport = CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
 		options.DaemonNativeTools = true
 	}
 	return options

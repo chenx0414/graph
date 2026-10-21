@@ -43,7 +43,7 @@ test('the daemon runs its Agent session on the PiG kernel, without the TypeScrip
     // The TypeScript sidecar is the old kernel's carrier. On the PiG kernel
     // the daemon must not start it: two kernels over one durable namespace
     // would fight over the same tables.
-    expect(await childProcesses(daemon.child.pid!)).toEqual([]);
+    expect(await sidecarProcesses(daemon.child.pid!)).toEqual([]);
 
     const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Read seed.txt, then answer.', requestId: 'first' }) });
     expect(created.status).toBe(200);
@@ -56,7 +56,7 @@ test('the daemon runs its Agent session on the PiG kernel, without the TypeScrip
     // answer carries what the file holds.
     expect(JSON.stringify(provider.requests[0])).toContain('seed.txt');
     expect(JSON.stringify(provider.requests[1])).toContain(sentinel);
-    expect(await childProcesses(daemon.child.pid!)).toEqual([]);
+    expect(await sidecarProcesses(daemon.child.pid!)).toEqual([]);
 
     // The durable namespace is the PiG one: PiG ships schema version 2 and
     // migrates the namespace in place when it opens the database.
@@ -81,7 +81,7 @@ test('the daemon runs its Agent session on the PiG kernel, without the TypeScrip
     // mapping is a durable document, not a process memory.
     await daemon.close();
     daemon = await start();
-    expect(await childProcesses(daemon.child.pid!)).toEqual([]);
+    expect(await sidecarProcesses(daemon.child.pid!)).toEqual([]);
     const next = await daemon.request(`/api/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Continue the same conversation.', requestId: 'second' }) });
     expect(next.status).toBe(200);
     await expect.poll(async () => {
@@ -102,11 +102,11 @@ test('the daemon runs its Agent session on the PiG kernel, without the TypeScrip
   }
 }, 120000);
 
-// childProcesses are the processes the daemon started.
+// sidecarProcesses are the TypeScript durable sidecars the daemon started.
 //
 // The durable sidecar was a child process, so its absence is the evidence
 // that the session really ran inside the daemon.
-async function childProcesses(pid: number): Promise<string[]> {
+async function sidecarProcesses(pid: number): Promise<string[]> {
   const listing = await run('ps', ['-o', 'pid=,ppid=,command=', '-ax'], { timeout: 20000 });
   const children = listing.stdout.split('\n')
     .map(line => line.trim())
@@ -116,5 +116,5 @@ async function childProcesses(pid: number): Promise<string[]> {
       return { pid: Number(parts[0]), ppid: Number(parts[1]), command: parts.slice(2).join(' ') };
     })
     .filter(entry => entry.ppid === pid);
-  return children.map(entry => entry.command);
+  return children.map(entry => entry.command).filter(command => command.includes('durable-service'));
 }

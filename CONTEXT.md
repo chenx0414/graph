@@ -219,5 +219,9 @@ _Avoid_：让内核自己发起 provider 请求（绕过准入与用量账本）
 daemon 在 Go 侧提供的 read/write/edit/ls/find/grep 与 shell。TypeScript SDK 原本自带这套工具，PiG 内核不自带环境，桥接层以同样的名字与声明补齐，并复用 Graph 既有的路径越界保护。
 _Avoid_：在 PiG 路径上沿用 SDK 的原生工具（内核里没有它们，模型会调用到不存在的工具）
 
+**codemode 沙箱**：
+内核自带的 QuickJS 沙箱，由 daemon 供主机侧。模型写一段 JavaScript，脚本能调用的就是该会话自己的工具，每一次调用仍走同一道准入闸门。Graph 默认不提供这个工具，只有配置显式要求时才有。
+_Avoid_：让脚本绕过准入闸门调工具（沙箱改变的是调用怎么写，不是调用准不准）
+
 **内核钉住版本**：
 `backend/go.mod` 中 PiG 模块的确定版本，以及随之确定的上游 Pi 版本；更新走 `pnpm pig:update`，不静默改变运行中桌面应用的内核版本。

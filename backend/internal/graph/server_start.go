@@ -584,7 +584,8 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	autoDrive := options.Mode == "execute" || options.Dynamic
 	server = OpenGraphServer(GraphServerOptions{
 		StateDir: stateDir, Projects: config.Projects, WebDir: options.WebDir, Port: &port, AutoDrive: &autoDrive,
-		Kernel: options.Kernel,
+		Kernel:   options.Kernel,
+		Codemode: config.Codemode,
 		Models: struct {
 			Entries        []ConfiguredModel
 			Preferences    map[string][]string

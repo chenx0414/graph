@@ -86,6 +86,9 @@ type GraphServerOptions struct {
 	// Kernel selects the Agent kernel: "node" (the TypeScript durable
 	// sidecar) or "pig" (the Go PiG kernel). Empty is "node".
 	Kernel string
+	// Codemode offers the kernel's codemode tool to the Agent sessions. It
+	// is off by default.
+	Codemode GraphCodemode
 }
 
 // GraphHost is the listening daemon and its drive loop.

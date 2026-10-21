@@ -60,6 +60,9 @@ type KernelGraphLaneOptions struct {
 	// durable sidecar or the PiG kernel. The node lane is the last thing the
 	// sidecar still carries, so the switch is explicit.
 	AgentKernel string
+	// Codemode offers the kernel's codemode tool to the node sessions. It
+	// is off by default.
+	Codemode GraphCodemode
 	// TokenBudget is the token budget a node runs under. Absent means unmetered - which is the
 	// right default for a program node, but NOT for an agent that can spend real tokens, so the
 	// runtime supplies one whenever limits are configured.
@@ -1539,6 +1542,13 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						return agentToolsText(answer.Text), nil
 					},
 				})
+				// The codemode tool reaches the node's own tools from a
+				// script. Its host table is the tool list as it stands now,
+				// so a script cannot start another script.
+				if options.Codemode.Enabled {
+					nodeTools = append(nodeTools, CodemodeTool(nodeTools, nativeGate,
+						codemodeSettings(options.Codemode, options.StateDir)))
+				}
 				nodeRequest := AgentSessionRequest{
 					ExecutionId:            workerConfig.ExecutionId,
 					ExecutionConfiguration: workerConfig.DurableRequest["nodeExecutionConfiguration"],

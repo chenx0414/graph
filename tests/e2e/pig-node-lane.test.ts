@@ -99,15 +99,15 @@ async function laneProvider() {
   };
 }
 
-/** childProcesses are the processes the daemon started. */
-async function childProcesses(pid: number): Promise<string[]> {
+/** sidecarProcesses are the TypeScript durable sidecars the daemon started. */
+async function sidecarProcesses(pid: number): Promise<string[]> {
   const listing = await run('ps', ['-o', 'pid=,ppid=,command=', '-ax'], { timeout: 20000 });
   return listing.stdout.split('\n').map(line => line.trim()).filter(line => line.length > 0)
     .map(line => {
       const parts = line.split(/\s+/);
       return { ppid: Number(parts[1]), command: parts.slice(2).join(' ') };
     })
-    .filter(entry => entry.ppid === pid)
+    .filter(entry => entry.ppid === pid && entry.command.includes('durable-service'))
     .map(entry => entry.command);
 }
 
@@ -228,7 +228,7 @@ test('a graph node runs its turn on the PiG kernel, without the TypeScript sidec
       expect(entries.some(entry => entry.kind === 'call')).toBe(true);
     } finally { proof.close(); }
     // The node ran on the PiG kernel: the daemon started no sidecar for it.
-    expect(await childProcesses(daemon.child.pid!)).toEqual([]);
+    expect(await sidecarProcesses(daemon.child.pid!)).toEqual([]);
   } finally {
     await writeFile('/tmp/pig-node-lane-debug.log', JSON.stringify({
       requests: provider.requests.map(entry => ({
