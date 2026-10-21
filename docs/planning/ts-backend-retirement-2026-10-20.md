@@ -221,6 +221,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - `tests/e2e/go-price-snapshot.test.ts`（2 条）移植 `console/price-snapshot.test.ts` 的两条 daemon 级契约：验证失败时旧金额原样保留、条目标成 stale（不填零、不静默改价）；验证通过时价格重新盖戳，下一次派发冻结的正是新版本（invocation 的 `priceRevision` 等于新 catalogRevision，金额按新费率算）。
   - 这一批先补了 Go 的能力（见上文「Go 侧补齐的能力」第 6、7 条）。
   - **一处行为差异（待定夺）**：Go 把 `503` 也当成容量答案重试（最多 3 次），TypeScript 只重试 `429`——TS 的理由是代理可能把上游的模糊失败翻译成 503，那种请求可能已经被计费。Go 每一次尝试都记成未知用量、不定价，所以「账本保留缺口、不编造用量」这条契约在两边都成立，但**到达 provider 的请求次数不同**。用例按 Go 自己的语义断言（容量答案重试且每次尝试都被记账），差异记在此处待定夺。
+- **Batch 17（已完成）**：主实例的预算记忆与在途计费。`tests/e2e/go-main-budget.test.ts`（4 条）移植 `tests/e2e/main-budget.test.ts` 的两条契约：
+  - **在途用量计入预算**（3 个变体，限额 2_050_000 / 2_052_256 / 2_060_000）：主操作预留 2M tokens，每次真实 provider 发送预留 contextWindow+maxTokens（32000+256）。第一条回复的 20,000 token 在操作结算之前就已经是权威事实，所以它必须计入**下一次**发送的判断——限额 2_050_000 时第二次发送被拒（total = 0 + 20_000 + 2_000_000 + 32_256 = 2_052_256 > 限额），操作变成 `interrupted`、master 被一个 budget question 挡住、用量 20,000 照记；限额 2_052_256 与 2_060_000 时第二次发送放行，操作 `succeeded`，用量 20_050。
+  - **换模型与重启都不清空记忆**（1 条）：实例记着自己用过哪些模型（`['first']`）、花过多少 token（53 = 主回合 50 + 输入建议 3）、预算 scope 的 id/used/limit/members；换成 unlimited 之后 `budget` 变 null 而 `used` 不动；daemon 重启后实例 id、scope id、used、unlimited 全部还在；后续两轮把 used 推到 106/159、`modelsUsed` 变成 `['first','next']`，而第一个模型只被问过一次、第二个模型两次、便宜模型三次（每轮一次输入建议）。
+  - **一条必须记住的 Go/TS 同构事实**：预算闸门（派发前 `AssertWithinBudget` 与发送前的 `TaskSendGate.Check`）**在全权访问（`mode: "full"`）下被跳过**——TS 的 `src/runtime/task-gate.ts:37` 与 `src/core/execution.ts:523` 就是这么写的，Go 的 `backend/internal/graph/runtime_task_gate.go:96` 与 `core_execution.go:933` 一模一样。TS 那条契约用的是 `standardAccessPolicy()`，所以 Go 用例必须显式写 `access: { mode: "standard" }`，否则闸门根本不会被问到，限额形同虚设。后续凡是「预算/用量/额度」类契约都要按这条配。
+  - `modelsUsed` 记的是 `modelId ?? id`（TS 的 `src/core/execution.ts:493` 与 Go 的 `core_execution.go:860` 同构），所以夹具要像 TS 那样让 `modelId` 与 `id` 相同，断言才是 `['first']`。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
