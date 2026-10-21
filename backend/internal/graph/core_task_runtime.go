@@ -1608,6 +1608,16 @@ func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 	if rsi := runtime.piRsiChannel(); rsi != nil {
 		channels.Rsi = rsi
 	}
+	if runtime.systemCtx != nil && runtime.systemCtx.SystemSummary != nil {
+		channels.SystemContext = &PiAdapterSystemContext{SystemSummary: func() map[string]any {
+			summary := runtime.systemCtx.SystemSummary()
+			record, _ := summary.(map[string]any)
+			if record == nil {
+				record = map[string]any{}
+			}
+			return record
+		}}
+	}
 	return channels
 }
 
@@ -5748,9 +5758,11 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 		},
 	}
 	if runtime.systemCtx != nil {
+		// The preview must say what the next turn really gets. The health view
+		// and the proposal flow are not wired into a real turn yet, so they are
+		// not claimed here either.
 		features.SystemContext = &AgentSystemFeatures{
-			SystemSummary:     runtime.systemCtx.SystemSummary != nil,
-			SystemDiagnostics: view != nil, ProposeSystemChange: view != nil, ApplySystemChange: view != nil,
+			SystemSummary: runtime.systemCtx.SystemSummary != nil,
 		}
 	}
 	if runtime.rsi != nil {

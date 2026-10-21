@@ -1263,6 +1263,12 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				}
 				tools.RsiContext = rsiContext
 			}
+			// The system tools belong to the master alone: they tell it what the
+			// host looks like, and they are the only ones that may ask for a
+			// change to the host itself.
+			if channels != nil && channels.SystemContext != nil && role == "master" {
+				tools.SystemContext = &AgentToolsSystemContext{SystemSummary: channels.SystemContext.SystemSummary}
+			}
 			return AgentTools(tools)
 		}
 		operationInput.NativeToolsProvider = func(granted []string) []ToolDefinition {

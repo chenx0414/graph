@@ -587,9 +587,43 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	secrets = CreateSecretPersist()
 	port := options.Port
 	autoDrive := options.Mode == "execute" || options.Dynamic
+	// The host inventory the main Agent may read. It is built when the tool is
+	// called, so it always describes the configuration as it is right now, and
+	// it never carries a secret value: a credential is reported as configured
+	// or not.
+	systemSummary := func() any {
+		inventory := SystemInventoryInput{
+			Models: live.Entries(),
+			CredentialConfigured: func(entry ConfiguredModel) bool {
+				return live.CredentialFor(entry) != nil
+			},
+			Access:          live.Access(),
+			Architectures:   GRAPH_ARCHITECTURES,
+			CapabilityRoot:  filepath.Join(userHome, "capabilities"),
+			ApplicationRoot: ApplicationRoot,
+			ApplicationMode: "source",
+			DocsRoot:        GraphDocumentationPathsOf(ApplicationRoot).Root,
+		}
+		if library := agentContext; library != nil {
+			inventory.AgentContextRoot = library.Root
+		}
+		if catalog := runtimeCatalog(server); catalog != nil {
+			inventory.Combinations = catalog.AgentCombinations()
+			for _, item := range catalog.AvailableAgentDefinitions() {
+				inventory.Definitions = append(inventory.Definitions, SystemDefinition{ID: item.Id, Version: item.Version})
+			}
+			inventory.Capabilities = catalog.Capabilities()
+		}
+		if snapshot, err := usage.Get(false); err == nil {
+			inventory.Plans = snapshot.Plans
+			inventory.Usage = snapshot.Summary
+		}
+		return SystemInventory(inventory)
+	}
 	server = OpenGraphServer(GraphServerOptions{
 		StateDir: stateDir, Projects: config.Projects, WebDir: options.WebDir, Port: &port, AutoDrive: &autoDrive,
-		Kernel: options.Kernel,
+		Kernel:        options.Kernel,
+		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},
 		Models: struct {
 			Entries        []ConfiguredModel
 			Preferences    map[string][]string

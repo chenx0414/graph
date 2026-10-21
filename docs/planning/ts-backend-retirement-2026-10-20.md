@@ -96,7 +96,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `e2e/providers.test.ts` | 3 | 0 | 3 | 0 | 0 |
 | `e2e/rework-runtime.test.ts` | 8 | 0 | 3 | 5 | 0 |
 | `e2e/rsi-shape.test.ts` | 1 | 0 | 1 | 0 | 0 |
-| `e2e/scoped-system-capabilities.test.ts` | 2 | 0 | 2 | 0 | 0 |
+| `e2e/scoped-system-capabilities.test.ts` | 2 | 2 | 0 | 0 | 0 |
 | `e2e/secret-lifecycle.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | `e2e/sediment-settings.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | `e2e/thinking.test.ts` | 1 | 0 | 1 | 0 | 0 |
@@ -111,11 +111,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `m8/settings-ui.test.ts` | 10 | 0 | 10 | 0 | 0 |
 | `m8/startup.test.ts` | 10 | 2 | 8 | 0 | 0 |
 | `m8/tool-failure-record.test.ts` | 1 | 0 | 1 | 0 | 0 |
-| **小计** | **176** | **12** | **142** | **16** | **7** |
+| **小计** | **176** | **14** | **140** | **16** | **7** |
 
 结论：**没有任何一条产品行为是 Go 模型有意丢掉的**（`dropped-in-go` 数量为 0）。所有空缺要么是「Go 侧还没有这条 E2E」，要么是「这条证明写的是 TS 内部实现」，要么是「Go 侧确实少一个能力」。
 
-### Go 侧确实缺的两个能力
+### Go 侧确实缺的能力
 
 1. **provider 传输证据不存在**。TypeScript 后端每次 provider 尝试都写一条 `provider.transport` 事件（`phase` 为 `fetch_started` / `response_headers` / `transport_error`，带 `requestSha256`、`responseIds`、`usageRecoverableFromTransport`；`src/runtime/pi-adapter.ts:1033`），并且发送 `x-opencode-request-id` 关联头。Go 侧只有 `provider.request_profile`（`backend/internal/graph/runtime_pi_adapter.go:1700`），没有 `provider.transport`、没有关联头。**行为**（传输失败记为未知用量、不静默重发、`reconcile_usage` 收敛）在 Go 里存在，**证据**不存在。`tests/e2e/provider-reconciliation.test.ts` 的 4 条契约因此无法移植——这 4 条要等 Go 补出证据面。
 2. **没有确定性的价格校验口子**。`DaemonOptions.PriceVerify` 存在（`backend/internal/graph/server_start.go:31`），但 `serveDaemon` 从不设置它（`backend/internal/graph/server_cli.go:353-356`），校验永远是 `defaultPriceVerify`——去拉归档里的 `sourceUrl`，测试无法指向本地服务。因此「校验成功会抬高版本号并被下一次调用冻结」这一条暂时无法写成真实 E2E。
@@ -123,6 +123,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 4. **编译失败没有可触发的真实输入**。Go 的 `SavedAgentCombination.CompileError` 由 `recover` 产生（`catalog_catalog.go:176-189`），但 TypeScript 侧那条测试是用 `vi.spyOn` 注入失败的（违反 E2E 规则：不能 mock 自有协作者）。要证明「编译失败时保留配方、不发布定义、报告错误」，需要一个真实能通过校验但编译不过的输入；目前没有找到自然触发点。
 5. **两处提示词文本断言不能照搬**。`tests/m3/production.test.ts` 断言的是 TypeScript 的原文（`src/runtime/agent-context.ts`），Go 的公共/主规则文本不同（`backend/internal/graph/runtime_agent_context.go:88,89`），照搬会失败。Go 的用例必须断言 Go 自己的规则文本。
 6. **提示词隔离契约在 Go 侧未验证**。TypeScript 用例断言工作节点的提示词不含其他节点的私有指引（`UNRELATED-PROTOCOL-`、`OTHER_NODE_PRIVATE_GUIDANCE`）；Go 的提示词装配在 `catalog_briefing.go` + `core_node_prompt.go`，没有找到显式的排除步骤。这条要靠一次真实的 Go 回合来确认是否仍然成立。
+7. **系统工具只剩一半**。主 Agent 的四个系统工具里，`read_system_capabilities`（宿主清单）在 Batch 35 补上了；`inspect_graph_system`（本对话的健康视图）、`propose_system_change` 与 `apply_system_change`（提案 → 用户批准 → 落地）**在 Go 侧仍未接线**：Go 侧只有工具体与参数定义（`runtime_agent_tools.go`），没有实现。TypeScript 那边三个都有实现（`src/runtime/pi-adapter.ts:441+`），但**只有 `tests/m8/system-self-improvement.test.ts` 覆盖它们，而那份测试直接开 `openTaskRuntime`**，属于实现耦合，随 TS 实现一起退休；`tests/m8/conversation-pi.test.ts`（同样实现耦合）只断言主 Agent 的工具表里有这四个名字。Batch 35 先把预览改诚实（预览不再声称有那三个工具），实现留给 Batch 36。
 
 ### 移植时的已知陷阱
 
@@ -164,6 +165,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/e2e/thinking.test.ts` 思考档位（daemon 那一半）：目录面给出模型接受哪些档位、请求被钳制到模型真能接受的那一档、会话读回落档、provider 收到同一档；没有档位的模型与不认识该字段的 provider 都不发；Anthropic 模型收到的是思考预算而不是档位名 | `tests/e2e/go-thinking.test.ts` | 3 |
 | `tests/e2e/pricing.test.ts` 调用成本：有价模型报出金额与价格表、免费模型仍然点名价格表、没有费率如实说未知、旧式费率只报金额 | `tests/e2e/go-pricing.test.ts` | 1 |
 | `tests/m8/recipe-compile.test.ts` 配方面：保存即编译并发布定义、相同配方复用同一版本、引用不存在的配方被拒不落盘、旧 compile 端点仍可用、改描述时定义版本前进、删除后配方文件里的它消失、配方里的内联系统提示真的到达下一次操作 | `tests/e2e/go-recipe-compile.test.ts` | 3 |
+| `tests/e2e/scoped-system-capabilities.test.ts` 主 Agent 读宿主清单：整份清单真的到达模型（配置模型、配方、定义、架构、订阅、能力、上下文、应用十段）、模型据其行事（把它找到的模型 id 写进工作区）、清单里没有密钥、按段发放时每次只回那一段且与整份一致 | `tests/e2e/go-system-capabilities.test.ts` | 2 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -344,7 +346,13 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **配方里的内联系统提示真的到达下一次操作**（第 3 条）：把 `main` 配方换成带内联系统提示（`You are a climate data specialist.`）的那一条，它被编进 `main@2`；随后那次真实对话的 provider 请求里，**领头的指令消息就带着这句身份**（角色是 Go 为这个 provider 选的那个：`developer` 或 `system`）。这条跑在 `--kernel pig` 上——提示由 Go 自己拼、请求由 Go 自己发，证明的是 Go 的语义而不是 TS sidecar 的渲染。
   - **这一批没有逼出 Go 侧的真 bug**：配方的编译、版本与内联提示这几套语义在 Go 侧本来就成立，补的是证明。四次回退验证证明这些断言咬得住：让 `EnsureDefinition` 每次都发新版本 → 第 1 条变红（`worker@2` vs `worker@1`）；把描述从定义规格里去掉 → 第 2 条变红（`worker@1` vs `worker@2`）；让删除不落盘 → 第 2 条变红（`['main','worker']` vs `['main']`）；让保存不编译 → 第 1 条变红（`undefined` vs `worker@1`）；让内联提示被忽略 → 第 3 条变红（身份退回 bootstrap 那句「You are the Main Agent in Graph…」）。
   - **两处结构性的差异（有意保留）**：**（一）** TS 那条「编译失败保留配方并报 `compileError`」在 Go 侧**结构上不可达**——Go 的校验与编译是同一个函数（`ValidateAgentCombination` → `CompileAgentCombinationDefinition`），过不了校验的配方在写盘之前就被拒（400），过得了校验的配方一定编译得过，于是 `compileError` 那条分支拿不到真实输入；**（二）** TS 那条「`DELETE` 带 JSON 头就 400」是 Fastify 的产物，Go 不读请求体，带不带 `content-type` 都删得掉。
-- **Batch 35 起**：`read_system_capabilities` 的能力缺口（daemon 从不装配 `SystemContext`，四个系统工具在 Go 侧不可用）、`harness-cost` 脚本的迁移或退休、`m8/app-shell-ux` 浏览器轨。
+- **Batch 35（已完成）**：主 Agent 读宿主清单。`tests/e2e/go-system-capabilities.test.ts`（2 条）搬进 `tests/e2e/scoped-system-capabilities.test.ts` 的两条契约，并补上了 Go 侧一处真实的能力缺口：
+  - **这一批先补了 Go 的能力**：`read_system_capabilities` 这条工具在 Go 侧**从来不可用**——工具体与参数定义都有（`runtime_agent_tools.go:727`、`runtime_agent_tool_definitions.go:237`），但 daemon 从不装配 `SystemContext`，运行时也从不把 channel 接进工具体，所以主 Agent 的工具表里**根本没有这个工具**。修法有三处：**（一）** 新增 `runtime_system_context.go`，按 Go 自己的数据装配清单（配置模型、访问策略、Agent 配方、已发布定义、图架构、订阅计划与汇总、能力库统计、Agent 上下文与应用根目录十段；**凭据只报「配了 / 没配」，不报值**）；**（二）** daemon 在 `server_start.go` 里按调用时刻装配这份清单（配置是活的，清单也是活的），经 `TaskRuntimeSystemContext` 交给运行时，再由 `piChannels()` 交给 pi adapter，pi adapter 只把它交给 **master**（子 Agent 看不到宿主清单）；**（三）** 预览不再声称主 Agent 有尚未接线的三个系统工具（健康视图与提案流）——预览说什么，下一回合就得真有什么。
+  - **整份清单真的到达模型，模型据其行事**（第 1 条）：主 Agent 的工具表里真的有 `read_system_capabilities`；模型调用它，拿到的是十段完整的清单（`configuredModels` 里有那个配好的模型、`agentCombinations` / `architectures` / `agentDefinitions` 都不是空壳、`application` 在），**清单里没有密钥**（`key-local` 不出现）；而且模型**真的拿它做事**——它从清单里读出模型 id，用 bash 把它写进工作区的 `selected-model.txt`。
+  - **按段发放时，每次只回那一段**（第 2 条）：开着 `GRAPH_SCOPED_SYSTEM_CAPABILITIES=1` 时，工具的参数里真的有 `section`；模型逐段问，**每次的回包只有那一段**，而且**那一段与整份清单里的同名段逐字相等**（十段都对得上）。
+  - **三次回退验证证明这些断言咬得住**：把 pi adapter 的接线拆掉 → 两条用例都变红（模型拿不到清单，工作区里写的是空串）；把 `section` 参数去掉 → 只有第 2 条变红；把清单里的架构段掏空 → 第 1 条在「这段不是空壳」上变红。
+  - **仍未接线的三个工具记在案**（见上文「Go 侧确实缺的能力」第 7 条）：健康视图与提案流留给 Batch 36；覆盖它们的那份 TS 测试是实现耦合的，随实现退休。
+- **Batch 36 起**：系统工具的后一半（`inspect_graph_system` / `propose_system_change` / `apply_system_change`）、`harness-cost` 脚本的迁移或退休、`m8/app-shell-ux` 浏览器轨。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
