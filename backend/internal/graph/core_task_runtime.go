@@ -1212,6 +1212,7 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		Access:        runtime.resolvedAccessPolicy,
 		Catalog:       runtime.catalog,
 		Library:       runtime.agentContextLibrary(),
+		AgentKernel:   runtime.options.Kernel,
 		TokenBudget:   runtime.laneTokenBudget,
 		ReserveTokens: &reserve,
 		Directory:     runtime.liveEntries,

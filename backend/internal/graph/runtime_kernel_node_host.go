@@ -52,6 +52,11 @@ type NodeSessionOptions struct {
 	InstancesDir       string
 	Gate               *SendGate
 	Library            *AgentContextLibrary
+	// DaemonNativeTools makes the daemon provide the native tools the
+	// TypeScript SDK used to publish. It is set when the kernel runs without
+	// an SDK of its own, so nothing else would offer read, write, edit, ls,
+	// find, grep and the shell to the model.
+	DaemonNativeTools bool
 }
 
 // NodeSessionBindings are the host tools a node may call.
@@ -141,6 +146,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 	if options.Gate != nil {
 		operationGate = *options.Gate
 	}
+	var nativeToolInput *AgentToolsInput
 	operationInput := CapabilityOperationOptions{
 		Workspace: options.Workspace, ScratchDir: scratchDir, Action: action, NativeTools: []string{"bash"},
 		DisabledTools: assembly.DisabledTools, Gate: operationGate, Access: options.Access,
@@ -222,6 +228,8 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 					return commands.Run(command, args, signal)
 				},
 			}
+			built := tools
+			nativeToolInput = &built
 			if options.Bindings != nil {
 				tools.Peers = options.Bindings.Peers
 				tools.Artifacts = options.Bindings.Artifacts
@@ -230,6 +238,12 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			}
 			return AgentTools(tools)
 		},
+	}
+	operationInput.NativeToolsProvider = func(granted []string) []ToolDefinition {
+		if nativeToolInput == nil || !options.DaemonNativeTools {
+			return nil
+		}
+		return PigNativeTools(*nativeToolInput, granted)
 	}
 	operation := assembly.Bundle.OpenOperation(operationInput)
 	composed := assembly.ForOperation(operation).Composed.Text

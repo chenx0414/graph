@@ -196,8 +196,12 @@ _Avoid_：把 PiG 当作可重写的实现（上游行为是契约，Go 是实�
 _Avoid_：为 PiG 内核另建一份数据库（会切断既有会话历史）
 
 **内核选择**：
-daemon 运行 Agent 会话所用的内核（`graphd --kernel node|pig`）。`node` 是 TypeScript 侧车，承载图节点泳道；`pig` 是 Go 进程内的 PiG 内核，承载主 Agent 会话与崩溃恢复。两者互斥：同一份 durable 命名空间只能有一个内核写入。
+daemon 运行 Agent 会话所用的内核（`graphd --kernel node|pig`）。`node` 是 TypeScript 侧车；`pig` 是 Go 进程内的 PiG 内核，承载主 Agent 会话、崩溃恢复与图节点泳道。两者互斥：同一份 durable 命名空间只能有一个内核写入。
 _Avoid_：在同一进程里同时拉起两个内核（会争用同一批表并互相破坏记录）
+
+**节点泳道**：
+一条图里每个节点的执行通道。节点按自己的实例身份寻址 durable 会话，与主 Agent 共享同一个内核，但各有各的 transcript 与准入 id；节点的工具与模型调用仍由 daemon 执行与放行。
+_Avoid_：让节点泳道另起一个内核或另一份数据库（会切断与主 Agent 共享的 durable 历史）
 
 **冻结执行**：
 一次 Graph 执行的持久快照（`graph.frozen-executions` 文档），记录该执行用的模型、指令、工具与策略，以及它受理输入时的 admission id。凭据不落盘：记录只保存可复原的 header 名，值仍由 daemon 的活绑定提供。崩溃恢复靠它认出"该用哪份配置重发"。

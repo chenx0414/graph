@@ -3,11 +3,14 @@ package graph
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
 // The production wiring of the v2 graph lane (Issue #1 §13.8).
@@ -53,6 +56,10 @@ type KernelGraphLaneOptions struct {
 	Program *KernelGraphLaneProgram
 	Catalog *Catalog
 	Library *AgentContextLibrary
+	// AgentKernel is the kernel the node sessions run on: the TypeScript
+	// durable sidecar or the PiG kernel. The node lane is the last thing the
+	// sidecar still carries, so the switch is explicit.
+	AgentKernel string
 	// TokenBudget is the token budget a node runs under. Absent means unmetered - which is the
 	// right default for a program node, but NOT for an agent that can spend real tokens, so the
 	// runtime supplies one whenever limits are configured.
@@ -98,6 +105,18 @@ type kernelGraphLaneNodeLocation struct {
 	Base      string
 }
 
+// kernelGraphLaneHostAdapter is the host one node runs on.
+//
+// The TypeScript sidecar and the PiG kernel are two homes for the same
+// contract: one resident host per node, reused across its turns.
+type kernelGraphLaneHostAdapter interface {
+	ExecutorHost
+	// Stop ends the resident process.
+	Stop() error
+	// Dispose ends the host for good.
+	Dispose() error
+}
+
 // kernelGraphLaneHost adapts one resident host to the executor's host contract.
 type kernelGraphLaneHost struct {
 	host *ResidentHost
@@ -117,6 +136,16 @@ func (adapter *kernelGraphLaneHost) Alive() bool {
 	return adapter.host.Alive()
 }
 
+// Stop ends the resident process.
+func (adapter *kernelGraphLaneHost) Stop() error {
+	return adapter.host.Stop()
+}
+
+// Dispose ends the host for good.
+func (adapter *kernelGraphLaneHost) Dispose() error {
+	return adapter.host.Dispose()
+}
+
 // Turn runs one turn over the resident session.
 func (adapter *kernelGraphLaneHost) Turn(text string) TurnReport {
 	result, err := adapter.host.Turn(text)
@@ -130,6 +159,60 @@ func (adapter *kernelGraphLaneHost) Turn(text string) TurnReport {
 		report.Usage = &TurnUsage{Total: float64(result.Usage.Total), Accounted: accounted}
 	}
 	return report
+}
+
+// kernelGraphLaneNodeChannel is one node's provider channel.
+//
+// It is the stream the kernel reads, with the cleanup the turn owes attached:
+// the store listener and the host's abort listener are released when the
+// answer is over. The refusal is the gate's own reason: a paused or
+// over-budget send is refused with the host's reason, so the answer carries
+// it instead of a bare transport error.
+type kernelGraphLaneNodeChannel struct {
+	inner   ModelEventStream
+	usage   TokenUsage
+	unknown bool
+	refusal *RuntimeError
+	release func()
+	done    bool
+}
+
+// Next returns the next event of the answer.
+func (channel *kernelGraphLaneNodeChannel) Next() (map[string]any, bool) {
+	event, ok := channel.inner.Next()
+	if !ok {
+		channel.finish()
+	}
+	return event, ok
+}
+
+// Result returns the settlement of the answer.
+func (channel *kernelGraphLaneNodeChannel) Result() map[string]any {
+	settlement := channel.inner.Result()
+	channel.finish()
+	return settlement
+}
+
+// settlement is the answer the caller reports.
+func (channel *kernelGraphLaneNodeChannel) settlement() map[string]any {
+	settlement := channel.Result()
+	// Provider SDKs wrap gate refusals as connection errors. Preserve the
+	// host's control reason so pause cannot consume automatic retries.
+	if channel.refusal != nil && settlement["stopReason"] == "error" {
+		settlement["errorMessage"] = channel.refusal.Message
+	}
+	return settlement
+}
+
+// finish releases the turn's listeners once the answer is over.
+func (channel *kernelGraphLaneNodeChannel) finish() {
+	if channel.done {
+		return
+	}
+	channel.done = true
+	if channel.release != nil {
+		channel.release()
+	}
 }
 
 // ModelFor selects against immutable implementer history, including aliases and routing cycles.
@@ -305,7 +388,7 @@ func kernelGraphLaneSubmitTool() PiWorkerTool {
 func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	closing := false
 	restoring := map[string]map[string]any{}
-	hosts := map[string]*ResidentHost{}
+	hosts := map[string]kernelGraphLaneHostAdapter{}
 	sessions := map[string]NodeSession{}
 	sessionRevisions := map[string]string{}
 	hostConfigs := map[string]string{}
@@ -660,6 +743,9 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			Workspace:          workspace,
 			InstancesDir:       options.InstancesDir,
 			Bindings:           bindings,
+			// The PiG kernel has no SDK of its own, so the daemon provides the
+			// native tools the TypeScript SDK used to publish.
+			DaemonNativeTools: options.AgentKernel == AgentKernelPig,
 		}
 		if options.Library != nil {
 			sessionOptions.Library = options.Library
@@ -1040,7 +1126,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			cached, hasCached := hosts[key]
 			signature := CanonicalJSON(config)
 			if hasCached && hostConfigs[key] == signature {
-				return &kernelGraphLaneHost{host: cached}
+				return cached
 			}
 			if hasCached {
 				_ = cached.Stop()
@@ -1069,154 +1155,173 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			purpose := "completion"
 			nativeGate := KernelToolGate(options.Kernel, graphId, nodeId, "tool", func() bool { return closing })
 			nativeCalls := map[string]string{}
-			host := NewResidentHost(ResidentHostOptions{
-				DurableUsage: func() *ResidentTurnUsage {
-					calls := options.Kernel.ProviderCalls(graphId, nodeId)
-					usage := ResidentTurnUsage{}
-					count := 0
-					for _, call := range calls {
-						if call.ExecutionId != workerConfig.ExecutionId {
-							continue
-						}
-						count++
-						if call.Usage == nil || (call.State != "settled" && call.State != "reconciled") {
-							return nil
-						}
-						usage.Input += call.Usage.Input
-						usage.Output += call.Usage.Output
-						usage.CacheRead += call.Usage.CacheRead
-						usage.CacheWrite += call.Usage.CacheWrite
-						usage.Total += call.Usage.Input + call.Usage.Output + call.Usage.CacheRead + call.Usage.CacheWrite
+			// The node's usage is the usage the daemon accounted for: the
+			// provider receipts of this execution. The kernel's own report has
+			// no evidence grade, so it never releases a reservation.
+			nodeUsage := func() *ResidentTurnUsage {
+				calls := options.Kernel.ProviderCalls(graphId, nodeId)
+				usage := ResidentTurnUsage{}
+				count := 0
+				for _, call := range calls {
+					if call.ExecutionId != workerConfig.ExecutionId {
+						continue
 					}
-					if count == 0 {
+					count++
+					if call.Usage == nil || (call.State != "settled" && call.State != "reconciled") {
 						return nil
 					}
-					accounted := true
-					usage.Accounted = &accounted
-					return &usage
-				},
-				DurableInput: func() string {
-					row := options.Kernel.Execution(workerConfig.ExecutionId)
-					if row == nil {
-						return ""
+					usage.Input += call.Usage.Input
+					usage.Output += call.Usage.Output
+					usage.CacheRead += call.Usage.CacheRead
+					usage.CacheWrite += call.Usage.CacheWrite
+					usage.Total += call.Usage.Input + call.Usage.Output + call.Usage.CacheRead + call.Usage.CacheWrite
+				}
+				if count == 0 {
+					return nil
+				}
+				accounted := true
+				usage.Accounted = &accounted
+				return &usage
+			}
+			// The node's admission identity carries the attempt, so a retry is
+			// a new admission and an interrupted turn keeps the one it had.
+			nodeInput := func() string {
+				row := options.Kernel.Execution(workerConfig.ExecutionId)
+				if row == nil {
+					return ""
+				}
+				suffix := ""
+				if row.ResubmitsUsed > 0 {
+					suffix = fmt.Sprintf(":resubmit:%d", row.ResubmitsUsed)
+				}
+				return fmt.Sprintf("%s:attempt:%d%s", row.Id, row.Attempt, suffix)
+			}
+			// The node's model channel: the controlled provider stream with the
+			// node's own gate in front of it. The daemon admits every send,
+			// spends the credential and records the usage; the kernel never
+			// opens a provider channel of its own.
+			nodeChannel := func(raw any, hostSignal *AbortSignal, streamOptions WorkerModelOptions) (*kernelGraphLaneNodeChannel, error) {
+				credential := options.CredentialFor(model)
+				if credential == nil {
+					panic(errorString("Bound model credential unavailable"))
+				}
+				context, _ := raw.(map[string]any)
+				if context == nil {
+					panic(errorString("Invalid model context"))
+				}
+				if _, ok := context["messages"].([]any); !ok {
+					panic(errorString("Invalid model context"))
+				}
+				channel := &kernelGraphLaneNodeChannel{}
+				gate := KernelProviderGate(options.Kernel, graphId, nodeId, nil, &model, &ProviderRecipe{
+					Definition: session.Binding.DefinitionVersion, Review: session.Role == "reviewer",
+				}, purpose)
+				observed := SendGate{
+					Dispatch: func(id string, reservation float64, send func() any) any {
+						defer func() {
+							recovered := recover()
+							if recovered == nil {
+								return
+							}
+							if failure, ok := recovered.(*RuntimeError); ok && (failure.Code == "paused" || failure.Code == "budget") {
+								channel.refusal = failure
+							}
+							panic(recovered)
+						}()
+						return gate.Dispatch(id, reservation, send)
+					},
+					Settle: func(id string, cost *TokenUsage) {
+						gate.Settle(id, cost)
+						if cost == nil {
+							channel.unknown = true
+							return
+						}
+						channel.usage.Input += cost.Input
+						channel.usage.Output += cost.Output
+						channel.usage.CacheRead += cost.CacheRead
+						channel.usage.CacheWrite += cost.CacheWrite
+					},
+				}
+				execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+				if execution == nil {
+					panic(errorString("No active execution"))
+				}
+				executionID := graphDBString(execution, "id")
+				abort := NewAbortSignal()
+				cancel := func() { abort.Abort() }
+				releases := []func(){}
+				if hostSignal != nil {
+					abortListener := hostSignal.AddEventListener("abort", cancel, true)
+					releases = append(releases, func() { hostSignal.RemoveEventListener(abortListener) })
+				}
+				unsubscribe := options.Kernel.Store.OnEvent(func(string) {
+					if options.Kernel.Store.Task(graphId).Phase == "stopping" {
+						abort.Abort()
 					}
-					suffix := ""
-					if row.ResubmitsUsed > 0 {
-						suffix = fmt.Sprintf(":resubmit:%d", row.ResubmitsUsed)
+				})
+				releases = append(releases, unsubscribe)
+				channel.release = func() {
+					for _, release := range releases {
+						release()
 					}
-					return fmt.Sprintf("%s:attempt:%d%s", row.Id, row.Attempt, suffix)
-				},
+				}
+				slot := kernelGraphLaneSlot(options, model, credential, executionID)
+				stream, err := ControlledOpenAIStream(observed, model, func(candidate ModelEntry) string {
+					binding := options.CredentialFor(candidate)
+					if binding == nil {
+						panic(errorString("Bound model credential unavailable"))
+					}
+					return binding.ApiKey
+				}, slot, model.Api, PiAdapterStreamOptions{
+					EstimateMissing: kernelGraphLaneUnlimited(options.Kernel, executionID),
+					OnRequest: func(callId string, profile map[string]any) {
+						// The TypeScript event spreads the profile into the event object,
+						// so the profile's own keys sit beside callId and model.
+						event := map[string]any{
+							"callId": callId, "executionId": executionID, "nodeId": nodeId, "model": model.Id,
+							"rates": model.Cost, "pricing": model.Pricing,
+						}
+						for name, value := range profile {
+							event[name] = value
+						}
+						options.Kernel.Store.Event(graphId, "provider.request_profile", event)
+					},
+					OnSend: func(sent PiAdapterSentRequest) {
+						tools := "[]"
+						if sent.ToolDeclarations != nil {
+							tools = kernelGraphLaneJSON(sent.ToolDeclarations)
+						}
+						kernelExec(options.Kernel.Db, "INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)",
+							graphId, nodeId, executionID, rsiStringValue(sent.SystemPrompt), tools, NowMillis())
+					},
+				})(ToPiModel(model), context, kernelGraphLaneStreamOptions(streamOptions, abort))
+				if err != nil {
+					channel.release()
+					return nil, err
+				}
+				channel.inner = stream
+				return channel, nil
+			}
+			residentOptions := ResidentHostOptions{
+				DurableUsage: nodeUsage,
+				DurableInput: nodeInput,
 				Config: ResidentWorkerConfig{PiWorkerConfig: workerConfig, HostModel: true},
 				OnTelemetry: func(call PiAdapterToolCall) {
 					defer func() { _ = recover() }()
 					options.Kernel.Store.RecordToolCall(ToolCallInput{InstanceID: session.Binding.InstanceId, Tool: call.Tool, Ms: call.Ms, IsError: call.IsError, Target: call.Target})
 				},
 				OnModelCall: func(raw any, hostSignal *AbortSignal, streamOptions WorkerModelOptions) (any, error) {
-					credential := options.CredentialFor(model)
-					if credential == nil {
-						panic(errorString("Bound model credential unavailable"))
-					}
-					context, _ := raw.(map[string]any)
-					if context == nil {
-						panic(errorString("Invalid model context"))
-					}
-					if _, ok := context["messages"].([]any); !ok {
-						panic(errorString("Invalid model context"))
-					}
-					usage := TokenUsage{}
-					unknown := false
-					var refusal *RuntimeError
-					gate := KernelProviderGate(options.Kernel, graphId, nodeId, nil, &model, &ProviderRecipe{
-						Definition: session.Binding.DefinitionVersion, Review: session.Role == "reviewer",
-					}, purpose)
-					observed := SendGate{
-						Dispatch: func(id string, reservation float64, send func() any) any {
-							defer func() {
-								recovered := recover()
-								if recovered == nil {
-									return
-								}
-								if failure, ok := recovered.(*RuntimeError); ok && (failure.Code == "paused" || failure.Code == "budget") {
-									refusal = failure
-								}
-								panic(recovered)
-							}()
-							return gate.Dispatch(id, reservation, send)
-						},
-						Settle: func(id string, cost *TokenUsage) {
-							gate.Settle(id, cost)
-							if cost == nil {
-								unknown = true
-								return
-							}
-							usage.Input += cost.Input
-							usage.Output += cost.Output
-							usage.CacheRead += cost.CacheRead
-							usage.CacheWrite += cost.CacheWrite
-						},
-					}
-					execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
-					if execution == nil {
-						panic(errorString("No active execution"))
-					}
-					executionID := graphDBString(execution, "id")
-					abort := NewAbortSignal()
-					cancel := func() { abort.Abort() }
-					abortListener := hostSignal.AddEventListener("abort", cancel, true)
-					unsubscribe := options.Kernel.Store.OnEvent(func(string) {
-						if options.Kernel.Store.Task(graphId).Phase == "stopping" {
-							abort.Abort()
-						}
-					})
-					slot := kernelGraphLaneSlot(options, model, credential, executionID)
-					defer func() {
-						unsubscribe()
-						hostSignal.RemoveEventListener(abortListener)
-					}()
-					stream, err := ControlledOpenAIStream(observed, model, func(candidate ModelEntry) string {
-						binding := options.CredentialFor(candidate)
-						if binding == nil {
-							panic(errorString("Bound model credential unavailable"))
-						}
-						return binding.ApiKey
-					}, slot, model.Api, PiAdapterStreamOptions{
-						EstimateMissing: kernelGraphLaneUnlimited(options.Kernel, executionID),
-						OnRequest: func(callId string, profile map[string]any) {
-							// The TypeScript event spreads the profile into the event object,
-							// so the profile's own keys sit beside callId and model.
-							event := map[string]any{
-								"callId": callId, "executionId": executionID, "nodeId": nodeId, "model": model.Id,
-								"rates": model.Cost, "pricing": model.Pricing,
-							}
-							for name, value := range profile {
-								event[name] = value
-							}
-							options.Kernel.Store.Event(graphId, "provider.request_profile", event)
-						},
-						OnSend: func(sent PiAdapterSentRequest) {
-							tools := "[]"
-							if sent.ToolDeclarations != nil {
-								tools = kernelGraphLaneJSON(sent.ToolDeclarations)
-							}
-							kernelExec(options.Kernel.Db, "INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)",
-								graphId, nodeId, executionID, rsiStringValue(sent.SystemPrompt), tools, NowMillis())
-						},
-					})(ToPiModel(model), context, kernelGraphLaneStreamOptions(streamOptions, abort))
+					channel, err := nodeChannel(raw, hostSignal, streamOptions)
 					if err != nil {
 						return nil, err
 					}
-					frames := EncodeAssistantStream(stream)
-					settlement := stream.Result()
-					// Provider SDKs wrap gate refusals as connection errors. Preserve the
-					// host's control reason so pause cannot consume automatic retries.
-					if refusal != nil && settlement["stopReason"] == "error" {
-						settlement["errorMessage"] = refusal.Message
-					}
+					frames := EncodeAssistantStream(channel)
+					settlement := channel.settlement()
 					result := map[string]any{"frames": frames, "settlement": settlement}
-					if !unknown {
+					if !channel.unknown {
 						result["usage"] = map[string]any{
-							"input": usage.Input, "output": usage.Output, "cacheRead": usage.CacheRead,
-							"cacheWrite": usage.CacheWrite, "total": TokenUsageTotal(usage), "accounted": true,
+							"input": channel.usage.Input, "output": channel.usage.Output, "cacheRead": channel.usage.CacheRead,
+							"cacheWrite": channel.usage.CacheWrite, "total": TokenUsageTotal(channel.usage), "accounted": true,
 						}
 					}
 					return result, nil
@@ -1395,8 +1500,113 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					}
 					return ResidentToolAnswer{Ok: !failed, Text: kernelGraphLaneJSON(result)}, nil
 				},
-			})
-			hosts[key] = host
+			}
+			if options.AgentKernel == AgentKernelPig {
+				// The node's own tools: the Graph's, the native ones the daemon
+				// provides in Go, and the `submit` the host executes against the
+				// real execution.
+				nodeTools := []ToolDefinition{}
+				nativeTools := []string{}
+				readRoots := []string{}
+				writeRoots := []string{}
+				mcpServers := []McpAdapterServerRef{}
+				allowedToolNames := []string{"submit"}
+				if session.Operation != nil {
+					nodeTools = append(nodeTools, session.Operation.Tools...)
+					nativeTools = append(nativeTools, session.Operation.NativeTools...)
+					readRoots = append(readRoots, session.Operation.ReadRoots...)
+					writeRoots = append(writeRoots, session.Operation.WriteRoots...)
+					mcpServers = append(mcpServers, session.Operation.McpAdapterServers...)
+				}
+				for _, name := range session.AllowedToolNames {
+					if name != "submit" {
+						allowedToolNames = append(allowedToolNames, name)
+					}
+				}
+				submit := kernelGraphLaneSubmitTool()
+				nodeTools = append(nodeTools, ToolDefinition{
+					Name:        submit.Name,
+					Label:       submit.Label,
+					Description: submit.Description,
+					Parameters:  asMap(submit.Parameters),
+					// The `submit` runs in the host, over the real execution
+					// (HB-262): the lane wires that through `onToolCall`.
+					Execute: func(_ string, params any) (any, error) {
+						answer, _ := residentOptions.OnToolCall("submit", params)
+						if !answer.Ok {
+							return nil, errors.New(answer.Text)
+						}
+						return agentToolsText(answer.Text), nil
+					},
+				})
+				nodeRequest := AgentSessionRequest{
+					ExecutionId:            workerConfig.ExecutionId,
+					ExecutionConfiguration: workerConfig.DurableRequest["nodeExecutionConfiguration"],
+					CapabilityDescriptor:   workerConfig.DurableRequest["capabilityDescriptor"],
+					CredentialReference:    workerConfig.DurableRequest["credentialReference"],
+					Binding: AgentSessionBinding{
+						InstanceId: session.Binding.InstanceId, NodeId: session.Binding.NodeId,
+						DefinitionVersion: session.Binding.DefinitionVersion,
+					},
+					Workspace:           workerConfig.Workspace,
+					StateDir:            workerConfig.StateDir,
+					Model:               workerConfig.Model,
+					Tools:               nodeTools,
+					NativeTools:         nativeTools,
+					ReadRoots:           readRoots,
+					WriteRoots:          writeRoots,
+					SystemPrompt:        session.SystemPrompt,
+					AllowedToolNames:    allowedToolNames,
+					BundleDigest:        session.BundleDigest,
+					ToolPolicyDigest:    session.ToolPolicyDigest,
+					RuntimePolicyDigest: session.RuntimePolicyDigest,
+					McpAdapterServers:   mcpServers,
+				}
+				host := NewPigNodeHost(PigNodeHostOptions{
+					Database: options.Kernel.Store.Path,
+					Request:  nodeRequest,
+					Gate:     nativeGate,
+					// The `submit` is the host's own tool: the host executes it
+					// against the real execution, so the node's tool gate does
+					// not stand in front of it.
+					Ungated: []string{"submit"},
+					// The kernel asks the daemon for the answer; the daemon's own
+					// controlled stream produces it.
+					Stream: func(_ any, context map[string]any, _ map[string]any) (ModelEventStream, error) {
+						channel, err := nodeChannel(context, nil, WorkerModelOptions{})
+						if err != nil {
+							return nil, err
+						}
+						return channel, nil
+					},
+					RequestId: nodeInput,
+					Usage:     nodeUsage,
+					PreAdmission: func() []string {
+						ids := []string{}
+						for _, call := range options.Kernel.ProviderCalls(graphId, nodeId) {
+							ids = append(ids, call.Id)
+						}
+						return ids
+					},
+					OnEvent: func(event map[string]any) {
+						residentOptions.OnEvent(event)
+					},
+					OnToolCall: func(call pigkernel.ToolCallRecord) {
+						residentOptions.OnTelemetry(PiAdapterToolCall{Tool: call.Name, IsError: call.IsError})
+					},
+					OnReady: func(sessionId string, sessionFile string) {
+						RecordNodeSession(options.Kernel.Store, session.Binding.InstanceId, sessionId, sessionFile)
+					},
+					RecoveredAttempt: func() int {
+						return pigNodeRecoveredAttempt(options.Kernel, session.Binding.InstanceId, workerConfig.ExecutionId)
+					},
+				})
+				hosts[key] = host
+				hostConfigs[key] = signature
+				return host
+			}
+			host := NewResidentHost(residentOptions)
+			hosts[key] = &kernelGraphLaneHost{host: host}
 			hostConfigs[key] = signature
 			return &kernelGraphLaneHost{host: host}
 		},
@@ -1424,7 +1634,12 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state='running' WHERE id=?", id)
 		defer kernelExec(options.Kernel.Db, "UPDATE kernel_executions SET state=? WHERE id=?", originalState, id)
 		config := lane.options.Config(execution.TaskId, execution.NodeId, execution.RevisionVersion)
-		adapter := lane.options.Host(execution.TaskId, execution.NodeId, config, execution.RevisionVersion).(*kernelGraphLaneHost)
+		adapter, ok := lane.options.Host(execution.TaskId, execution.NodeId, config, execution.RevisionVersion).(*kernelGraphLaneHost)
+		if !ok {
+			// The PiG kernel runs the node's turn in this process, so the
+			// TypeScript sidecar has no admission to restore.
+			return nil, fmt.Errorf("The node %s of graph %s does not run on the TypeScript sidecar", execution.NodeId, execution.TaskId)
+		}
 		host := adapter.host
 		return &DurableRecoveryBinding{Config: host.options.Config.DurableRequest, Callback: func(kind string, params map[string]any) (any, error) {
 			if kind == "model" || kind == "tool" || kind == "native_gate" {

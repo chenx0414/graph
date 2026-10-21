@@ -37,9 +37,12 @@ PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新�
   - **内核已完成、Graph 未确认的回合**：内核的提交回执（`graph_durable_submissions` 中 `status='done'`）就是凭据，daemon 用它结算该操作，**不再问模型一次**。
   - **已受理但从未发出的输入**：用**受理时的配置**重发，而不是用目录里此刻的配置。冻结记录 `graph.frozen-executions` 保存模型、指令、工具与策略，凭据不落盘（只记下可复原的 header 名）。
   - **已经抵达模型的回合**：不重放。凭据已花、副作用可能已发生，该操作停在 `unknown`，交由用户核对。
-- **两个内核不得同时写一份 durable 命名空间**：选 `pig` 时 daemon 不启动 TypeScript 侧车，需要侧车的路径（图节点泳道）显式报错，而不是静默争用同一批表。
+- **两个内核不得同时写一份 durable 命名空间**：选 `pig` 时 daemon 不启动 TypeScript 侧车，需要侧车的路径显式报错，而不是静默争用同一批表。
+- **图节点泳道已迁到 PiG 内核**（`backend/internal/graph/runtime_pig_node_host.go`）。节点与主 Agent 共享同一个内核与同一份 durable 命名空间，各有各的身份与 durable 会话。模型通道、工具执行与准入闸门仍归 daemon：节点的工具（Graph 工具、`submit`、daemon 自带的原生工具）都在 Go 进程里执行，节点的模型调用走 daemon 自己那条受控流。E2E `tests/e2e/pig-node-lane.test.ts` 证明一整条图跑完：提案 → 确认 → 派发 → 节点在自己的内核回合里 `submit`，且没有启动任何 TypeScript 侧车进程。
 
-未落地、因此默认内核尚未翻转的部分：图节点泳道、codemode 启用、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+未落地、因此默认内核尚未翻转的部分：图节点泳道的崩溃恢复、codemode 启用、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+
+节点泳道的崩溃恢复是最后一关口。节点的**活路径**已在 PiG 内核上，但 daemon 崩溃时正在跑的节点回合还没有等价的三分法处理：崩溃恢复把该节点执行置为 `blocked`（与 TS 路径同一步），但 TS 路径此后由侧车的恢复 pass 自动重发那一回合，PiG 路径还没有这一步。已具备的零件是节点回合的冻结执行、内核的提交回执，以及"内核仍持受理且从未抵达模型时保住那次 attempt"的判断。缺的是把"已受理未发出 → 用受理时的配置重发"接到节点的启动恢复上，并处理内核调度器在别的会话提交时顺带恢复该节点任务、可能重发已抵达模型的 provider 请求这一冲突。
 
 MCP 的产品级通道已证明可用：Graph 的能力目录里绑定一个真实 MCP 服务器，模型直接收到 `mcp__<server>__<tool>` 声明并直呼该工具，没有网关工具、没有扩展事件总线（E2E `tests/e2e/pig-mcp-session.test.ts`）。
 
