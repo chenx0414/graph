@@ -167,6 +167,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m8/recipe-compile.test.ts` 配方面：保存即编译并发布定义、相同配方复用同一版本、引用不存在的配方被拒不落盘、旧 compile 端点仍可用、改描述时定义版本前进、删除后配方文件里的它消失、配方里的内联系统提示真的到达下一次操作 | `tests/e2e/go-recipe-compile.test.ts` | 3 |
 | `tests/e2e/scoped-system-capabilities.test.ts` 主 Agent 读宿主清单：整份清单真的到达模型（配置模型、配方、定义、架构、订阅、能力、上下文、应用十段）、模型据其行事（把它找到的模型 id 写进工作区）、清单里没有密钥、按段发放时每次只回那一段且与整份一致 | `tests/e2e/go-system-capabilities.test.ts` | 2 |
 | `tests/m8/system-self-improvement.test.ts` 主 Agent 请宿主改自己：提案先成问题等人批准（未批准时连提议者自己也落不了地）、批准后能力真的进了资源库；全权策略下同一回合自动批准并落地；健康视图只看自己的会话 | `tests/e2e/go-system-change.test.ts` | 3 |
+| `tests/e2e/harness-cost.test.ts` 成本诊断：真实会话跑完两个工具、账本里的请求数与 token 数真的对上 provider 报的数、按冻结费率算出的金额真的对上、request profile 只讲形状不讲内容（用户的话、密钥、工具输出都不在里面） | `tests/e2e/go-harness-cost.test.ts` | 1 |
+| `tests/e2e/harness-cost.test.ts` 宿主注入指令的那三个开关：搜索规则只点名这次会话真的有的搜索工具、宿主不改写用户自己的规则、维护者身份是否把「项目失败」算成「harness 摩擦」、文档指针可以压缩但路径不丢 | `tests/e2e/go-agent-context.test.ts` | 5 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -359,7 +361,14 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **全权策略下同一回合落地**（第 2 条，默认策略）：提案的回执写着 `auto_approved`，master 同一回合就调用了应用，回执里的 `result.capability` 就是那个**可用**的能力，落地目录真实存在。
   - **健康视图只看自己的会话**（第 3 条）：健康视图的 `scope` 点名它自己的会话与任务；**另一个会话的任务不在里面**。
   - **三次回退验证证明这些断言咬得住**：去掉「必须已批准」这道闸 → 第 1 条变红（未批准的提案落了地）；不按策略自动批准 → 第 2 条变红（能力永远落不了地）；把健康视图的范围放宽到所有任务 → 第 3 条变红（另一个会话的任务漏进来了）。
-- **Batch 37 起**：`harness-cost` 脚本的迁移或退休、`m8/app-shell-ux` 浏览器轨、`m8/settings-ui`、`e2e/provider-metadata`、`console/schema-upgrade`、`e2e/command-output-preservation`、`e2e/project-branches`、`m3/production`。
+- **Batch 37（已完成）**：成本诊断与宿主注入指令的那三个开关。`tests/e2e/go-harness-cost.test.ts`（1 条）与 `tests/e2e/go-agent-context.test.ts`（5 条）搬进 `tests/e2e/harness-cost.test.ts` 里**还没有被 Go 覆盖**的契约：
+  - **`harness-cost.mjs` 这个脚本本身不依赖 TypeScript 后端**——它只用 `node:sqlite` 读 `tasks.sqlite`，读的是 daemon 自己写的账本（`tasks` / `events` / `invocations` / `operations` / `kernel_provider_calls` / `tool_calls`）。**Go 的表结构与它对得上**（`invocations.purpose` 是 schema v20 加的，`kernel_provider_calls` 的 `model` / `purpose` / `cost` 在 kernel v5 迁移里补齐），所以**脚本保留**，被改掉的是**它背后的那份测试**：原来那条测试开的是 TS daemon，现在改成驱动真实的 Go daemon。
+  - **账本里的数就是跑出来的那次数**（第 1 条）：一次真实会话里模型先跑 `bash` 写下 `proof.txt`、再跑 `read` 读回来；daemon 自己记账——**3 次 provider 请求**、**token 是 provider 报的那份**（每次 40 prompt 里 15 命中缓存，于是 3 次合计 `input 75 / output 30 / cacheRead 45`）、**金额按冻结费率算出来**（`0.0002925 USD`，拆开是 `input 0.00015` + `output 0.00012` + `cacheRead 0.0000225`）；`harness-cost.mjs` 跑在 daemon 关掉之后留下的那个 `tasks.sqlite` 上，读出来的就是这些数。**`request_profile` 只讲形状**：用户自己写的那句话、注入的密钥、`printf harness-proof` 的原文，一个都不在里面；连**工具结果**在报告里也只是字节数与归属的工具名，没有内容。
+  - **宿主注入指令的那三个开关**（第 2–5 条）：`GRAPH_MATCH_SEARCH_GUIDANCE=1` 时搜索规则**只点名这次会话真的有的搜索工具**（提示里列出的每一个名字，都在这一发请求的工具表里）；开关关着时**内建那条规则原样留着**；**用户自己的规则永不被改写**——即使用户把内建那行原封不动抄进了自己的 `rules/common.md`，宿主也不去动它（这是 `commonRules == DEFAULT_COMMON_RULES` 那道闸真正守着的东西）；`GRAPH_CLASSIFY_HARNESS_FRICTION=1` 时维护者身份才把「项目检查失败」算成 harness 摩擦，而「执行者与改进者是同一个 Agent」**一直**在；`GRAPH_COMPACT_DOCUMENTATION=1` 把文档指针压短，但**路径一个都不丢**。
+  - **七次回退验证证明这些断言咬得住**：把缓存费率从金额里去掉 → 成本断言变红（`0.00027` vs `0.0002925`）；让 request profile 带上原始请求体 → 隐私断言变红（`private-user-marker` 漏了出来）；不记工具遥测 → 工具统计断言变红（`expected undefined to match object { calls: 1, … }`）；不写绑定搜索列表 → 第 1 条变红；把「用户规则不许改写」那道闸去掉 → 「用户规则」那条变红（内建那行被替换掉了）；把分类版维护者身份换成默认版 → 摩擦那条变红；文档指针不再压缩 → 压缩那条变红。
+  - **这一批没有逼出 Go 侧的真 bug**：账本、费率、request profile 与三个开关在 Go 侧本来就成立，补的是证明。**与 TypeScript 的差异只有一处且是框架产物**：TS 那条测试里的 `DELETE` 语义与本批无关；本批唯一碰到的不一致是**指令消息的角色**（Go 发 `developer`，TS 侧按 `system` / `developer` 两者取），Go 用例断言的是 Go 自己发出去的那一发。
+  - **`m8/app-shell-ux` 浏览器轨仍未处理**，`harness-cost` 这一支到此为止；脚本继续保留，**它背后的 TS 测试随 TS 后端一起退休**。
+- **Batch 38 起**：`m8/app-shell-ux` 浏览器轨、`m8/settings-ui`、`e2e/provider-metadata`、`console/schema-upgrade`、`e2e/command-output-preservation`、`e2e/project-branches`、`m3/production`。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
