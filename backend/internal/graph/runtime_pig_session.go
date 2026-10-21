@@ -23,9 +23,10 @@ import (
 
 // The Agent kernels the daemon can run on.
 //
-// The TypeScript sidecar still owns the recovery semantics the daemon needs
-// before the switch, so the PiG kernel is selected explicitly until the
-// recovery path moves onto it as well.
+// The PiG kernel is the default: it carries the Agent sessions, the crash
+// recovery and the graph node lane inside this process. The TypeScript
+// sidecar is still reachable by name (`--kernel node`) while it is being
+// retired.
 const (
 	// AgentKernelNode runs the Agent sessions in the TypeScript durable sidecar.
 	AgentKernelNode = "node"
@@ -40,14 +41,14 @@ const (
 var agentKernel = struct {
 	sync.RWMutex
 	value string
-}{value: AgentKernelNode}
+}{value: AgentKernelPig}
 
 // SetAgentKernel records the kernel this process runs on.
 func SetAgentKernel(kernel string) {
 	agentKernel.Lock()
 	defer agentKernel.Unlock()
 	if kernel == "" {
-		kernel = AgentKernelNode
+		kernel = AgentKernelPig
 	}
 	agentKernel.value = kernel
 }
@@ -78,7 +79,7 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		Provider:     pigProviderBridge(request),
 		Tools:        pigToolSpecs(request, transport.codemode),
 		McpServers:   pigMcpServers(request),
-		Instructions: request.SystemPrompt,
+		Instructions: pigSessionInstructions(request),
 		RequestId:    request.InputRequestId,
 		OnEvent:      request.OnEvent,
 	}

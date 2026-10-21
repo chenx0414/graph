@@ -89,7 +89,7 @@ Options:
   --execute           Enable task dispatch; requires configured models and credentials
   --dynamic           With --execute: start before credentials resolve and activate them live
   --view-only         History, settings and graph only; never dispatches (default)
-  --kernel <name>     Agent kernel: node (TypeScript durable sidecar) or pig (Go PiG kernel)
+  --kernel <name>     Agent kernel: pig (Go PiG kernel, default) or node (TypeScript durable sidecar)
   -h, --help          Print this help
 
 Environment fallbacks: GRAPH_CONFIG, GRAPH_STATE_DIR, GRAPH_WEB_DIR, GRAPH_PORT.`
@@ -239,13 +239,16 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	if execute {
 		mode = "execute"
 	}
-	agentKernel := AgentKernelNode
+	// The PiG kernel is the default: it runs the Agent sessions, the crash
+	// recovery and the graph node lane inside this process. The TypeScript
+	// sidecar stays reachable by name while it is being retired.
+	agentKernel := AgentKernelPig
 	switch agentKernelFlag {
 	case "":
 	case AgentKernelNode, AgentKernelPig:
 		agentKernel = agentKernelFlag
 	default:
-		Raise("usage", "--kernel must be "+AgentKernelNode+" or "+AgentKernelPig)
+		Raise("usage", "--kernel must be "+AgentKernelPig+" or "+AgentKernelNode)
 	}
 	return cliOptions{
 		configPath:      configPath,

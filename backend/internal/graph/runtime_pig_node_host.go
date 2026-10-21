@@ -133,7 +133,7 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		Provider:     host.provider(),
 		Tools:        pigNodeToolSpecs(request, host.options.Gate, host.options.Ungated),
 		McpServers:   pigMcpServers(request),
-		Instructions: request.SystemPrompt,
+		Instructions: pigSessionInstructions(request),
 		RequestId:    request.InputRequestId,
 		OnEvent:      host.options.OnEvent,
 		OnToolCall:   host.options.OnToolCall,

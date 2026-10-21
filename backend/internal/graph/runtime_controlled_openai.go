@@ -62,6 +62,14 @@ func stringPointer(value string) *string {
 	return &value
 }
 
+// stringPointerValue reads an optional value as one text.
+func stringPointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 // ControlledProviderUsage parses the usage one provider reported.
 func ControlledProviderUsage(value any, api ModelApi) *TokenUsage {
 	if api == "anthropic-messages" {

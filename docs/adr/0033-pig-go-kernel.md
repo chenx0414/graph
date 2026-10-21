@@ -24,9 +24,9 @@
 
 PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新由 `pnpm pig:update` 单命令完成：解析上游最新版本、写入钉住版本、整理依赖、重建后端并校验。更新不得静默改变运行中桌面应用的内核版本，切换仍需走既有验收。
 
-## 实施状态（2026-10-20）
+## 实施状态（2026-10-21）
 
-内核选择由 `graphd --kernel node|pig` 显式决定，默认仍是 `node`：TypeScript 侧车仍承载图节点泳道，这一项尚未有 Go 侧等价物。
+内核选择由 `graphd --kernel node|pig` 显式决定，**默认已是 `pig`**：daemon 默认在 Go 进程内跑 PiG 内核，不再启动 TypeScript 侧车。`--kernel node` 仍可显式指定，作为迁移期间的最后退路。
 
 已落地并有 E2E 的部分：
 
@@ -45,8 +45,10 @@ PiG 以 Go 模块依赖引入，钉住版本记录在 `backend/go.mod`。更新�
   - **已经抵达模型**：不重放。队列项置 `failed`（而不是放回 `queued`），节点停在 `blocked` 等用户核对；要再花一次凭据必须是用户显式的重试。内核那一回合不需要额外停掉：生成任务从自己的检查点续跑，模型已经收到过的请求不会被再要一次——这一点由主 Agent 那条既有 E2E 证明（同一个内核里"已到模型"的那一路没有被重发）。
   E2E `tests/e2e/pig-node-recovery.test.ts` 用真实 daemon、真实 provider 与真实图把三种事实各证一遍：已受理未发出的输入用**原来的** `max_tokens` 重发（宕机期间目录里的值被改过，恢复仍用旧的），provider 只被问一次，节点跑完；内核已完成的那一回合（Graph 的写入被真实 SQLite 触发器打断）恢复后节点跑完而 provider 一个请求都没多；宕机时已在模型上的那一路不被重发，队列项停在 `failed` 且理由要用户核对。
 - **codemode 已接入，默认关闭**（`backend/internal/graph/runtime_pig_codemode.go`）。内核自带的 QuickJS 沙箱由 daemon 供主机侧：脚本能调用的就是该会话自己的工具，每一次调用仍走同一道准入闸门——沙箱改变的是调用怎么写，不是调用准不准。Graph 只在配置显式要求时提供这个工具（`graph.config.json` 的 `codemode.enabled`），没要求过的会话不会拿到沙箱。E2E `tests/e2e/pig-codemode.test.ts` 用真实 daemon、真实 provider 与真实宿主工具证明：模型收到 `codemode` 声明 → 调用它 → 脚本在沙箱里调用宿主的 `write` 工具 → 文件落在工作副本 → 答复带回脚本看到的内容；另一个用例证明没配置时模型根本看不到这个工具。
+- **默认内核已翻到 PiG**（`backend/internal/graph/server_cli.go`、`runtime_pig_session.go`）。不带 `--kernel` 启动的 daemon 直接在 Go 进程内跑 PiG 内核，不再拉起 TypeScript 侧车；`--kernel node` 保留为显式退路。E2E `tests/e2e/pig-default-kernel.test.ts` 用真实 daemon 证明两件事：默认路径下**没有启动任何侧车进程**且回合真的跑在 PiG 内核上（durable schema 版本 2、`graph_durable_conversations` 非空），显式 `--kernel node` 时侧车仍在、schema 仍是版本 1——退路没有被这次翻转弄断。
+- **会话提示词由 daemon 拼装**（`backend/internal/graph/runtime_pig_instructions.go`）。TypeScript SDK 原本在宿主侧追加项目上下文、可用技能清单与工作目录三块；PiG 内核不自带环境，这三块改由 daemon 按同样的顺序与形状补齐，因此模型在两个内核上看到同样的提示词。技能加载器按 SDK 语义自建：跟随符号链接目录、按规范化路径去重、同名先到先得、跳过没有描述的技能、排除 `disable-model-invocation` 的技能。E2E `tests/e2e/agent-skills.test.ts` 覆盖主 Agent 与图 worker 两条路径上的技能块。
 
-未落地、因此默认内核尚未翻转的部分：默认内核翻过去、删除 TypeScript 侧车与 `pi-mcp-adapter` 扩展、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
+未落地、因此仍在迁移收尾阶段的部分：删除 TypeScript 侧车与 `pi-mcp-adapter` 扩展、PiG 扩展模型与既有 TS pi 扩展的等价性核对。
 
 节点泳道的崩溃恢复是最后一关口，已经补齐：节点的**活路径**与**恢复路径**都已在 PiG 内核上。崩溃恢复把该节点执行置为 `blocked`（与 TS 路径同一步）之后，PiG 路径按主 Agent 那套三分法继续——已受理未发出的用受理时的配置重发，已经到过模型的不重放，内核那一回合被停掉以免被调度器顺手再驱动一次。剩下的关口是产品层面的：把默认内核翻过去，并随之删掉 TypeScript 侧车与 `pi-mcp-adapter` 扩展。
 

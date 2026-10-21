@@ -26,11 +26,14 @@
    - **已受理但从未发出**：用**受理时的**配置重发——冻结记录被翻译成 lane 认识的形状，恢复进 lane，节点重跑时用的是它当初被受理的那份模型、策略与工作副本。
    - **已经抵达模型**：不重放。队列项置 `failed`（而不是放回 `queued`），节点停在 `blocked` 等用户核对；要再花一次凭据必须是用户显式的重试。内核那一回合不需要额外停掉：生成任务从自己的检查点续跑，模型已经收到过的请求不会被再要一次——这一点由主 Agent 那条既有 E2E 证明（同一个内核里"已到模型"的那一路没有被重发）。
    E2E `tests/e2e/pig-node-recovery.test.ts` 用真实 daemon、真实 provider 与真实图把三种事实各证一遍：已受理未发出的输入用**原来的** `max_tokens` 重发（宕机期间目录里的 `max_tokens` 被改过，恢复仍用旧的），provider 只被问一次，节点跑完；内核已完成的那一回合（Graph 的写入被真实 SQLite 触发器打断）恢复后节点跑完而 provider 一个请求都没多；宕机时已在模型上的那一路不被重发，队列项停在 `failed` 且理由要用户核对。
+13. **默认内核已翻到 PiG**：不带 `--kernel` 启动的 daemon 直接在 Go 进程内跑 PiG 内核（`backend/internal/graph/server_cli.go`、`runtime_pig_session.go`），不再拉起 TypeScript 侧车；`--kernel node` 保留为显式退路。E2E `tests/e2e/pig-default-kernel.test.ts` 用真实 daemon 证明默认路径下**没有启动任何侧车进程**且回合真的跑在 PiG 内核上（durable schema 版本 2、`graph_durable_conversations` 非空），显式 `--kernel node` 时侧车仍在、schema 仍是版本 1——退路没有被这次翻转弄断。
+14. **会话提示词由 daemon 拼装**：TypeScript SDK 原本在宿主侧追加项目上下文、可用技能清单与工作目录三块；PiG 内核不自带环境，这三块改由 daemon 按同样的顺序与形状补齐（`backend/internal/graph/runtime_pig_instructions.go`），模型在两个内核上看到同样的提示词。技能加载器按 SDK 语义自建：跟随符号链接目录、按规范化路径去重、同名先到先得、跳过没有描述的技能、排除 `disable-model-invocation` 的技能。E2E `tests/e2e/agent-skills.test.ts` 覆盖主 Agent 与图 worker 两条路径上的技能块。
+
 
 ## 尚未完成的部分
 
-1. **默认内核尚未翻转**：`--kernel` 默认仍是 `node`。节点泳道的崩溃恢复是这一项的最后关口，已经补齐（见上第 12 条）；剩下的是把默认翻过去、删掉 TypeScript 侧车与 `pi-mcp-adapter` 扩展，并让既有 m8/durable 测试套件跟着走。
-2. **MCP 原生化收尾**：删除 `pi-mcp-adapter` 扩展与运行时注册事件 `pi-mcp-adapter:runtime-register:v1`，前提是 PiG 内核成为默认内核；节点绑定到 MCP 能力的语义已由产品级 E2E 证明等价。
+1. **TypeScript 侧车与 `pi-mcp-adapter` 扩展尚未删除**：默认内核已经翻到 PiG，删除是下一步；`src/core/task-runtime.ts`（2654 行，m8 套件依赖）与 `tests/durable/*`（5 文件 650 行）需要跟着走。
+2. **MCP 原生化收尾**：删除 `pi-mcp-adapter` 扩展与运行时注册事件 `pi-mcp-adapter:runtime-register:v1`，前提是 PiG 内核成为默认内核（已满足）；节点绑定到 MCP 能力的语义已由产品级 E2E 证明等价。
 3. **pi 扩展模型**：PiG 的扩展是 Go/Rust/Python/Node 资源，与现有"沙箱内加载 TS pi 扩展"形态不等价；17 类 hook 与 `beforeTool`/`afterTool` 的对应能力尚未逐条核对，这是本次迁移最大的未验证项。
 4. **版本落差**：PiG 钉住 Pi 1.3.0，Graph 钉住 Pi 1.1.0。durable schema 已由 E2E 证明可以从 1 升到 2 并保留原记录，但运行语义差异仍未逐条核对。PiG 的原生恢复会**重发**未答复的 provider 请求，Graph 侧因此用自己的"是否已抵达模型"判断挡住重放；两种口径的其余差异仍需逐条核对。
 
@@ -38,15 +41,15 @@
 
 先让 Go 宿主接管同一份 `graph_durable_` 命名空间（已在数据层证明可行），再逐段替换会话行为；每段由现有真实 E2E（`tests/e2e/go-durable.test.ts` 等）把关。宿主协议若保持 Unix socket 行协议不变，切换可回退；正式切换后不保留旧内核回退执行入口（沿用 [ADR 0031](../adr/0031-pi-durable-agent-kernel.md) 的既有约定）。
 
-当前进度：数据层 → 会话层 → 模型与工具通道 → 原生工具 → 崩溃恢复（主 Agent）→ 图节点泳道的活路径均已落地并有 E2E；剩下的关口是节点泳道的崩溃恢复，它决定默认内核能否翻转。
+当前进度：数据层 → 会话层 → 模型与工具通道 → 原生工具 → 崩溃恢复（主 Agent）→ 图节点泳道的活路径与崩溃恢复 → **默认内核翻转**均已落地并有 E2E；剩下的关口是删除 TypeScript 侧车与 `pi-mcp-adapter` 扩展，以及 PiG 扩展模型与既有 TS pi 扩展的等价性核对。
 
 ## 内核选择
 
-迁移期间 daemon 可以显式选择内核，默认仍是 TypeScript 侧车：
+迁移期间 daemon 可以显式选择内核，默认已是 Go 进程内的 PiG 内核：
 
 ```bash
-graphd --kernel node   # 默认：TypeScript durable 侧车
-graphd --kernel pig    # Go 进程内的 PiG 内核：主 Agent 会话、崩溃恢复与图节点泳道
+graphd --kernel pig    # 默认：Go 进程内的 PiG 内核：主 Agent 会话、崩溃恢复与图节点泳道
+graphd --kernel node   # 退路：TypeScript durable 侧车（迁移期间仍可用）
 ```
 
 内核一经选择即在本进程内固定：选 PiG 时 daemon 不会启动 TypeScript 侧车，需要侧车的路径会明确报错而不是静默争用同一份 durable 命名空间。

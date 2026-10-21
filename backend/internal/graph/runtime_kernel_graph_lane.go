@@ -1563,6 +1563,12 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					Model:               workerConfig.Model,
 					Tools:               nodeTools,
 					NativeTools:         nativeTools,
+					// The skills the node may load: its own folder, the bound
+					// snapshots and the native folders. The kernel has no
+					// environment of its own, so the daemon puts them in the
+					// prompt.
+					SkillPaths:          append([]string{}, workerConfig.SkillPaths...),
+					SkillFolder:         stringPointerValue(workerConfig.SkillFolder),
 					ReadRoots:           readRoots,
 					WriteRoots:          writeRoots,
 					SystemPrompt:        session.SystemPrompt,
