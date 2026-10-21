@@ -751,6 +751,28 @@ func RecordConversationInterruption(store *TaskStore, operation Operation, reaso
 	})
 }
 
+// RecordTurnRefusal tells the user that a master turn cannot start.
+//
+// A conversation whose master node does not exist has no turn to run: the
+// message that asked for it would wait for a reply that cannot come. The
+// message is kept - it was never delivered, so it still runs once a model can
+// be called - and the reason is given in the same words a turn that never
+// started uses. One notice per reason: a second one would only repeat the
+// first.
+func RecordTurnRefusal(store *TaskStore, conversationId string, reason string) {
+	text := TurnFailureText(reason, TurnFailureSetup)
+	if kernelRow(store.Db, "SELECT id FROM messages WHERE conversation_id=? AND role='system' AND kind='error' AND text=? LIMIT 1", conversationId, text) != nil {
+		return
+	}
+	AppendMessage(store, MessageInput{
+		ConversationID: conversationId,
+		Role:           MessageRoleSystem,
+		Kind:           "error",
+		Text:           text,
+		State:          MessageStateDone,
+	})
+}
+
 // ReleaseMessages queues the messages of a refused send again; a pre-send refusal proves
 // the model never saw the message. The state change is published so incremental caches
 // catch up.

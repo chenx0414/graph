@@ -1107,6 +1107,49 @@ func (runtime *TaskRuntime) masterDefinitionVersion() *string {
 	return &version
 }
 
+// masterRefusal reads the reason a master turn cannot start, or an empty
+// string when one can start.
+//
+// A turn needs a model that can be called, and the master model is the first
+// configured model whose credential resolves. No master model therefore means
+// that no model can be called at all: the turn would never start, and the
+// message that asked for it would wait for a reply that cannot come. The
+// reason names the model whose credential is missing, so the user knows what
+// to fix.
+func (runtime *TaskRuntime) masterRefusal() string {
+	if runtime.master == nil || runtime.masterModel() != nil {
+		return ""
+	}
+	entries := runtime.liveConfiguredEntries()
+	if len(entries) == 0 {
+		return "No configured model for a master agent"
+	}
+	for _, entry := range entries {
+		if runtime.liveCredentialFor(entry.ModelEntry) == nil {
+			return "No credential bound for model " + entry.Id
+		}
+	}
+	return "No credential bound for a master agent"
+}
+
+// refuseUndispatchableTurn records why a master turn cannot start.
+//
+// The refusal covers the case where there is no turn to run at all. A
+// conversation whose master node exists runs its turn, and that turn reports
+// its own failure; a conversation without one would simply wait for a reply
+// that cannot come, so the reason is given here instead.
+func (runtime *TaskRuntime) refuseUndispatchableTurn(conversationId string) {
+	reason := runtime.masterRefusal()
+	if reason == "" {
+		return
+	}
+	conversation := ConversationRowOf(runtime.store, conversationId)
+	if questionMasterNode(runtime.store, conversation.AnchorTaskId) != nil {
+		return
+	}
+	RecordTurnRefusal(runtime.store, conversationId, reason)
+}
+
 // configRevision reads the configuration revision recorded with new tasks.
 func (runtime *TaskRuntime) configRevision() *int {
 	if runtime.live != nil && runtime.live.Revision != nil {
@@ -3057,6 +3100,10 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 				cursor = *message.Cursor
 			}
 		}
+		// A turn that cannot start is told so: the message stays pending, but
+		// the user learns why nothing is happening instead of waiting for a
+		// reply that cannot come.
+		runtime.refuseUndispatchableTurn(conversationId)
 		return map[string]any{
 			"conversationId": conversationId,
 			"taskId":         taskId,
@@ -3255,6 +3302,10 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 			Data:           data,
 		})
 		RecoverMaster(runtime.store, conversation.AnchorTaskId, "message")
+		// A turn that cannot start is told so: the message stays pending, but
+		// the user learns why nothing is happening instead of waiting for a
+		// reply that cannot come.
+		runtime.refuseUndispatchableTurn(conversationId)
 		return map[string]any{
 			"conversationId": conversationId,
 			"messageId":      message.Id,
