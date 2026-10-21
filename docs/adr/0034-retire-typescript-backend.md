@@ -2,7 +2,7 @@
 
 2026-10-20。后端已由 Go 承担（ADR 0032、0033），仓库里仍并存一整套 TypeScript 后端实现与它的测试。本决策确定退役路径：**先用真实 E2E 把 Go 侧缺的契约补齐，再按活跃引用删除 TypeScript 实现**；删除不得削弱门禁。
 
-状态：2026-10-21。下面「Go 侧仍缺的能力」里的两处已在退役批次 16 补齐并各有真实 E2E 证明——`provider.transport` 传输证据面（`tests/e2e/go-provider-reconciliation.test.ts`）与确定性的价格校验口子（`tests/e2e/go-price-snapshot.test.ts`）。批次 17 又把主实例的预算契约整份搬进 Go（`tests/e2e/go-main-budget.test.ts`），并钉住了预算闸门只在非全权访问下生效这一事实——TypeScript 与 Go 在这一点上同构。批次 18 搬进会话面的回合收尾契约（`tests/e2e/go-conversation-runtime.test.ts`），并修掉了 Go 侧一个真 bug：先推理再调工具的回合会把自己的思考块覆盖掉、整回合失败。删除 TypeScript 实现本身尚未开始。
+状态：2026-10-21。下面「Go 侧仍缺的能力」里的两处已在退役批次 16 补齐并各有真实 E2E 证明——`provider.transport` 传输证据面（`tests/e2e/go-provider-reconciliation.test.ts`）与确定性的价格校验口子（`tests/e2e/go-price-snapshot.test.ts`）。批次 17 又把主实例的预算契约整份搬进 Go（`tests/e2e/go-main-budget.test.ts`），并钉住了预算闸门只在非全权访问下生效这一事实——TypeScript 与 Go 在这一点上同构。批次 18 搬进会话面的回合收尾契约（`tests/e2e/go-conversation-runtime.test.ts`），并修掉了 Go 侧一个真 bug：先推理再调工具的回合会把自己的思考块覆盖掉、整回合失败。批次 19 搬进自改进的沉淀契约（`tests/e2e/go-sediment-settings.test.ts`），并修掉了另一个真 bug：沉淀开关在活配置里永远读不到。删除 TypeScript 实现本身尚未开始。
 
 ## 依据
 

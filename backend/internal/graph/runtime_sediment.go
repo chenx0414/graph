@@ -38,7 +38,15 @@ type SedimentSettings struct {
 var DEFAULT_SEDIMENT_SETTINGS = SedimentSettings{Enabled: false, AfterToolCalls: 10, Model: nil, BudgetTokens: 40_000}
 
 // SedimentSettingsFrom reads a tolerant settings block. A missing block means the feature is off.
+//
+// The live configuration is a parsed document, so the switch is read from the
+// parsed skills block; a raw document is accepted too, because that is what a
+// caller hands over before the document is parsed. Both carry the switch under
+// skills.sedimentation.
 func SedimentSettingsFrom(config any) SedimentSettings {
+	if parsed, ok := config.(GraphConfig); ok {
+		return parsed.Skills.Sedimentation
+	}
 	block := sedimentBlock(config)
 	preferred := ""
 	if text, ok := block["model"].(string); ok {
