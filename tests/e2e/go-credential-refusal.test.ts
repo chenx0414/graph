@@ -108,6 +108,13 @@ async function answeringProvider(text: string) {
 }
 
 interface ConversationMessage { role: string; kind: string; text: string; state: string }
+interface TaskQuestion { id: string; kind: string; status: string; owner: string; data?: { reason?: string } }
+interface TaskView { request?: string; questions?: TaskQuestion[]; nodes?: { id: string; status: string }[] }
+
+/** The open question one task carries, read from the task view. */
+function taskQuestion(view: TaskView, kind: string): TaskQuestion | undefined {
+  return (view.questions ?? []).find(question => question.kind === kind);
+}
 
 test('a conversation that no model can be called is refused with the reason, and runs once a key is there', async () => {
   const provider = await answeringProvider('Answered.');
@@ -262,4 +269,97 @@ test('a graph node whose own model has no key fails with the reason and never re
 
   // The provider of that model was never asked: the call was refused first.
   expect(node.requests()).toBe(0);
+}, 240_000);
+
+test('a task that no model can be called is refused with the reason, and runs once a key is there', async () => {
+  const provider = await answeringProvider('Task answered.');
+  cleanup.push(() => provider.close());
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-task-refusal-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await mkdir(join(root, 'web'), { recursive: true });
+  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    models: { entries: [{
+      id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: provider.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local',
+    }] },
+  }));
+  const daemon = await launchCli(root, { configPath, env: { GRAPH_LOCAL_KEY: 'key-local' }, extraArgs: ['--execute'] });
+  cleanup.push(() => daemon.close());
+  const request = async (path: string, init: RequestInit = {}) => {
+    const response = await daemon.request(path, init);
+    return { status: response.status, body: await response.json().catch(() => ({})) as unknown };
+  };
+  const token = (await readFile(join(root, 'state', 'app-token'), 'utf8')).trim();
+  const bridge = async (body: Record<string, unknown>) => {
+    const response = await daemon.request('/api/app/secret', {
+      method: 'POST', headers: { 'x-graph-app-token': token }, body: JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json().catch(() => ({})) as { applied?: boolean; reason?: string } };
+  };
+
+  // The key is taken out of service: no model can be called.
+  const revoked = await bridge({ ref: 'GRAPH_LOCAL_KEY', value: null });
+  expect(revoked.status).toBe(200);
+
+  const begun = await request('/api/tasks', {
+    method: 'POST', body: JSON.stringify({ projectId: 'p', request: 'Do the thing', requestId: 'task-refusal' }),
+  });
+  expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+  const taskId = (begun.body as { taskId: string }).taskId;
+
+  // The task is kept - the request is the user's work - and the reason it
+  // cannot start is asked of the one who can fix it.
+  const view = (await request(`/api/tasks/${taskId}`)).body as TaskView;
+  expect(view.request).toBe('Do the thing');
+  const refusal = taskQuestion(view, 'model_unavailable');
+  expect(refusal, JSON.stringify(view.questions)).toBeTruthy();
+  expect(refusal!.owner).toBe('user');
+  expect(refusal!.status).toBe('open');
+  expect(refusal!.data?.reason ?? '').toContain('No credential bound for model local');
+  // The task waits in the inbox for that answer, and nothing was sent.
+  const listed = (await request('/api/tasks')).body as { id: string; openQuestions?: number }[];
+  expect(listed.find(task => task.id === taskId)?.openQuestions).toBe(1);
+  expect(provider.requests()).toBe(0);
+
+  // Answering while the reason still holds is refused, and says why.
+  const early = await request(`/api/tasks/${taskId}/answer`, {
+    method: 'POST', body: JSON.stringify({ questionId: refusal!.id, answer: { type: 'retry' }, requestId: 'answer-early' }),
+  });
+  expect(early.status).toBe(400);
+  expect(JSON.stringify(early.body)).toContain('No credential bound for model local');
+  const stillOpen = (await request(`/api/tasks/${taskId}`)).body as TaskView;
+  expect(taskQuestion(stillOpen, 'model_unavailable')?.status).toBe('open');
+
+  // The key comes back: the host asks the desktop to store it, the desktop confirms.
+  const stored = await bridge({ ref: 'GRAPH_LOCAL_KEY', value: 'key-local-again' });
+  expect(stored.body.applied, JSON.stringify(stored.body)).toBe(true);
+  const confirmed = await bridge({ ref: 'GRAPH_LOCAL_KEY', value: 'key-local-again', persisted: true });
+  expect(confirmed.body.applied, JSON.stringify(confirmed.body)).toBe(true);
+
+  // The task runs now: the master exists and the provider was really asked.
+  await expect.poll(async () => {
+    const tasks = (await request(`/api/tasks/${taskId}`)).body as TaskView;
+    return (tasks.nodes ?? []).find(node => node.id === 'master')?.status;
+  }, { timeout: 60_000, interval: 250 }).toBe('succeeded');
+  expect(provider.requests()).toBeGreaterThan(0);
+
+  // And the question that named the reason closed itself.
+  await expect.poll(async () => {
+    const tasks = (await request(`/api/tasks/${taskId}`)).body as TaskView;
+    return taskQuestion(tasks, 'model_unavailable')?.status;
+  }, { timeout: 30_000, interval: 250 }).toBe('resolved');
+
+  // The timeline says what the task was waiting for.
+  const events = await request(`/api/tasks/${taskId}/events?after=0&limit=200`);
+  const rows = (Array.isArray(events.body) ? events.body : []) as { type?: string; data?: { reason?: string } }[];
+  const recovered = rows.find(row => row.type === 'task.master_recovered');
+  expect(recovered, JSON.stringify(rows)).toBeTruthy();
+  expect(recovered!.data?.reason ?? '').toContain('No credential bound for model local');
 }, 240_000);

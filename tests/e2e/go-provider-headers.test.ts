@@ -283,12 +283,14 @@ test('tasks created while dispatch was disabled are recovered on the next execut
   expect(provider.authorizations[0]).toBe('Bearer recovery-key');
   expect(nodes.find(node => node.id === 'master')?.status).toBe('succeeded');
 
-  // The recovery is a fact in the record, not an invisible repair.
+  // The recovery is a fact in the record, not an invisible repair - and the
+  // record names what the task was waiting for. The view-only daemon had no
+  // key for the model, so that is the reason it gives.
   const taskEvents = await execute.request(`/api/tasks/${taskId}/events?after=0&limit=200`);
   const rows = await taskEvents.json() as { type: string; data: Record<string, unknown> }[];
   const recoveredEvent = rows.find(row => row.type === 'task.master_recovered');
   expect(recoveredEvent, 'the backfilled master is recorded').toBeTruthy();
-  expect(recoveredEvent!.data).toMatchObject({ reason: 'dispatch was disabled when the task was created' });
+  expect(recoveredEvent!.data).toMatchObject({ reason: 'No credential bound for model local' });
 
   // The task of a project that is gone keeps its history but is not recovered.
   const removed = await execute.request(`/api/tasks/${goneTaskId}`);

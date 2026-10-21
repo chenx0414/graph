@@ -881,6 +881,12 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			return nil
 		}
 		if kernelRow(l.store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'", taskId, nodeId) == nil {
+			// A question on a task that has no node has no node to re-pend: the
+			// task itself is what the answer was about, and it is already
+			// settled.
+			if kernelRow(l.store.Db, "SELECT id FROM nodes WHERE task_id=? AND id=?", taskId, nodeId) == nil {
+				return nil
+			}
 			current := kernelRow(l.store.Db, `SELECT o.state,o.result
           FROM operations o JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
           WHERE o.task_id=? AND o.node_id=? AND o.activation_id=n.activation_id

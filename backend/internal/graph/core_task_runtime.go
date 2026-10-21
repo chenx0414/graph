@@ -1117,7 +1117,10 @@ func (runtime *TaskRuntime) masterDefinitionVersion() *string {
 // reason names the model whose credential is missing, so the user knows what
 // to fix.
 func (runtime *TaskRuntime) masterRefusal() string {
-	if runtime.master == nil || runtime.masterModel() != nil {
+	if runtime.master == nil {
+		return "No configured definition for a master agent"
+	}
+	if runtime.masterModel() != nil {
 		return ""
 	}
 	entries := runtime.liveConfiguredEntries()
@@ -1148,6 +1151,78 @@ func (runtime *TaskRuntime) refuseUndispatchableTurn(conversationId string) {
 		return
 	}
 	RecordTurnRefusal(runtime.store, conversationId, reason)
+}
+
+// refuseUndispatchableTask asks the user why a task cannot start.
+//
+// A task needs a model that can be called. Without one it waits for a turn
+// that cannot come, and the person who asked for it has no way of knowing
+// that anything happened at all. The task is kept - the request is their work
+// - and the reason is asked of them, because they are the only one who can
+// fix it. The question closes itself once a model can be called again, and the
+// task runs then.
+func (runtime *TaskRuntime) refuseUndispatchableTask(taskId string) {
+	reason := runtime.masterRefusal()
+	if reason == "" {
+		return
+	}
+	InsertQuestion(runtime.store, QuestionInput{
+		TaskId: taskId,
+		Kind:   "model_unavailable",
+		Data:   map[string]any{"reason": reason},
+	})
+}
+
+// resolveUndispatchableQuestion closes the question that named why a task
+// could not start.
+//
+// The question is open because no model could be called. A master node exists
+// now, so the reason it named no longer holds and the question is answered
+// the way a released problem is. The reason it named is returned, so the
+// timeline can say why the task was waiting.
+func (runtime *TaskRuntime) resolveUndispatchableQuestion(taskId string) string {
+	questions := kernelRows(runtime.store.Db, "SELECT id,data FROM questions WHERE task_id=? AND kind='model_unavailable' AND status='open'", taskId)
+	reason := ""
+	for _, question := range questions {
+		kernelExec(runtime.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?",
+			CanonicalJSON(map[string]any{"type": "retry"}), question["id"])
+		if reason == "" {
+			reason = mapString(questionParseRecord(kernelString(question["data"])), "reason")
+		}
+	}
+	return reason
+}
+
+// answerUndispatchableTask handles the answer to a task that could not start.
+// The task has no master node because no model could be called when it was
+// created. A retry means "try again": when a model can be called now the
+// master is created and the task runs, and when none can the reason still
+// holds - so the answer is refused and the question stays open.
+func (runtime *TaskRuntime) answerUndispatchableTask(taskId, questionId string, answer Answer) {
+	if answer.Type != "retry" {
+		return
+	}
+	question := kernelRow(runtime.store.Db, "SELECT kind,status FROM questions WHERE id=? AND task_id=?", questionId, taskId)
+	if question == nil || kernelString(question["kind"]) != "model_unavailable" {
+		return
+	}
+	if kernelString(question["status"]) != "open" {
+		return
+	}
+	// A task whose master exists is the runtime's own retry: the master is
+	// re-pended and runs again.
+	if questionMasterNode(runtime.store, taskId) != nil {
+		return
+	}
+	if reason := runtime.masterRefusal(); reason != "" {
+		Raise("model_unavailable", reason)
+	}
+	runtime.createMasterNode(taskId)
+	active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
+	if active == "" {
+		kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)
+	}
+	runtime.store.Event(taskId, "task.master_recovered", map[string]any{"reason": "a model could be called again"})
 }
 
 // configRevision reads the configuration revision recorded with new tasks.
@@ -1845,6 +1920,10 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 			if active == "" {
 				kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)
 			}
+		} else {
+			// The task is kept - the request is the user's work - and the reason
+			// it cannot start is asked of the person who can fix it.
+			runtime.refuseUndispatchableTask(taskId)
 		}
 		return map[string]any{
 			"taskId": taskId,
@@ -2030,6 +2109,10 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": "answer", "taskId": task.taskId, "questionId": questionId, "answer": answer,
 	}, func() any {
+		// A task that could not start has no master node to re-pend: the answer
+		// is about the task itself, and it is settled before the runtime sees
+		// the question.
+		runtime.answerUndispatchableTask(task.taskId, questionId, answer)
 		runtime.execution.Answer(task.taskId, questionId, answer)
 		return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, "question.answered", map[string]any{"questionId": questionId, "answer": answer})}
 	})
@@ -5289,7 +5372,14 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 				continue
 			}
 			runtime.createMasterNode(kernelString(task["id"]))
-			runtime.store.Event(kernelString(task["id"]), "task.master_recovered", map[string]any{"reason": "dispatch was disabled when the task was created"})
+			// The reason the task could not start no longer holds, so the
+			// question that named it closes itself - and the timeline says
+			// what the task was waiting for.
+			reason := runtime.resolveUndispatchableQuestion(kernelString(task["id"]))
+			if reason == "" {
+				reason = "dispatch was disabled when the task was created"
+			}
+			runtime.store.Event(kernelString(task["id"]), "task.master_recovered", map[string]any{"reason": reason})
 			created++
 		}
 		// A recovered master is only dispatchable when the lane knows about
