@@ -151,6 +151,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m8/provider-headers.test.ts` 模型请求头与凭据隔离：配置的头到达 provider；opencode-go 的路由头在连接测试与真实派发都在；一个解析不出凭据的模型只禁用自己的模型；派发被关掉时建的任务在下一次 execute 启动时救回来 | `tests/e2e/go-provider-headers.test.ts` | 4 |
 | `tests/e2e/provider-reconciliation.test.ts` provider 对账证据：关联头即 invocation id；每次尝试留下 fetch_started/response_headers/transport_error 三相证据；请求体的 sha256 与 provider 收到的一致；provider 没答话时不编造用量、不定价；证据里没有密钥 | `tests/e2e/go-provider-reconciliation.test.ts` | 4 |
 | `tests/console/price-snapshot.test.ts` 价格刷新：验证失败保留旧金额并标 stale；验证通过重新盖戳且下一次派发冻结新版本 | `tests/e2e/go-price-snapshot.test.ts` | 2 |
+| Go 侧自有契约：局部补丁对后来那次提交的路由、过期修订不生效、坏补丁被拒、已受理的活在删边后仍然活着 | `tests/e2e/go-graph-patch.test.ts` | 1 |
+| Go 侧自有契约：节点 id 是字面文本（`bracket[1]` / `star*` / `question?`）；已提交过的产出不能再被重试花掉 | `tests/e2e/go-graph-node-identity.test.ts` | 1 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -263,6 +265,13 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **终态的图拒绝每一个执行闸门**（第 1 条的后半）：图 ended 之后，八个执行闸门（`pause` / `resume` / `pause(nodeId)` / `resume(nodeId)` / `reopen(moduleId)` / `retry` / `skip` / `cancel`）逐个被拒，错误码是 daemon 自己的 `invalid_graph`，理由点名「Ended graph cannot change its execution controls」；`withdraw_complete` 也被拒；补丁同样开不了这张图（模型读到「Ended graph cannot be patched」）；这些拒绝**没有动过队列**（前后的队列读回完全一样）。只有已经 `completed` 的图还认第二次 `complete`。
   - **公开模块输入整体校验、报出真实溯源、外部完成关闸后自己排空**（第 2 条）：不符合协议的值被整体拒绝并**指名到字段**（`route.job/n`），模块的输入仍然是 missing、没有任何投递被接受；符合的值被接受，投递自报家门（`source: 'direct'`、`edgeId: null`、`fromEndpoint: 'main'`、`toEndpoint: 'route.job'`、`protocol: 'number'`、`value: {n: 7}`、`revisionVersion: 1`）；完成请求之后外面再送就被拒；图在它接受的那一笔上排空（结果 `[{value: {n: 7}}]`、相位 `completed`），`graph.delivery.accepted` 事件**只有一条**。
   - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 14 条）：**投递与补丁的结果读不出来**（两处都缺 JSON tag，模型看到的是 `Delivery` / `Revision`）。
+- **Batch 24（已完成）**：图生命周期：局部补丁的路由与修订、字面节点 id。两条都是 Go 侧自有的契约（不在 101 条孤儿清单里），走会话面那条路径（主 Agent 用 `graph_create` / `graph_send` / `graph_inspect` / `graph_patch` 驱动图，闸门动作走 daemon 自己的 `POST /api/tasks/{taskId}/graph/control`）：
+  - **补丁落地在提交之前，就改那次提交的路由**（`tests/e2e/go-graph-patch.test.ts`）：节点 a 正在干活时把连接 `link` 关掉（修订 2），随后到达的提交**没有**送到节点 b（`link` 上没有任何投递，b 连一次回合都没被问过）；把连接重新打开（修订 3）再送一次输入，这次提交**真的**到了 b（投递 `value: {n: 7}`，接收端 `queued`）。这正是独立验收报告 F5 记的那条「动态禁用边不影响当前执行随后发生的首次提交」——Go 侧按**当前修订**取连接集合，这条契约现在被真实 E2E 钉住。
+  - **补丁的边界与它不动 revision 的证据**：基于过期修订（`baseRevision: 3`，当前已是 4）的补丁什么也不改，模型读到的是「current revision is 4」；同时给全量定义与局部 patch（`Supply exactly one full definition or local patch`）、patch 不是 JSON 对象（`Graph patch must be a JSON object`）、引用未知协议三种坏补丁各自被拒，且三者的修订号与被拒之前完全一样。
+  - **已受理的活在删边之后仍然活着**：还有工作在排队时删掉节点 b 被拒（`Cannot remove b`），b 的实例 id 不变；工作跑完之后再明确 `retire`，节点状态是 `retired`、实例 id 不变、历史条目一模一样，图落在补丁发布的那一版（修订 5）。
+  - **节点 id 是字面文本**（`tests/e2e/go-graph-node-identity.test.ts`）：四个节点 id 分别是 `plain` / `bracket[1]` / `star*` / `question?`——正是通配符会吃掉的那些字符。四张图各自建起来、各自被投递、各自跑起来（daemon 侧的执行 id 是 `exec-…-bracket[1]-2`、`exec-…-star*-3`、`exec-…-question?-4`），节点 id 一个都没有被当成模式；控制面按 nodeId 精确匹配，错的节点被拒、对的节点被接受。
+  - **已经提交过的产出不能再被重试花掉一遍**：节点先失败一次（没交出产出），重试让它交了产出、但它承诺的交付物始终没写出来，于是这一代仍是 `failed`（`generation: 1`，理由是「…was never written」）；此时它**已经交出去的值仍然在图上**（`results` 里能读回 `{marker: <节点 id>}`）；再对同一件工作 `retry`，daemon 用自己的错误码拒绝（`invalid_queue`、「Submitted work cannot be sent again」）；只有显式 `skip` 掉这件失败的工作，图才落回 `completed`。
+  - 这一批**没有**逼出 Go 侧的真 bug：两条契约在 Go 侧本来就成立，补的是证明。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
