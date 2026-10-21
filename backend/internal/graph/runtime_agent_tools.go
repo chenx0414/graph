@@ -1199,6 +1199,26 @@ func agentToolsText(value string) map[string]any {
 	}
 }
 
+// agentToolsFailure is the tool result a refusal answers with.
+//
+// The TypeScript daemon threw inside the tool body and the SDK turned that
+// throw into the error result the model reads, reason and all. The Go daemon
+// refuses from its own process, and a bare error crossing that boundary is
+// not a tool result at all: the worker would answer "Tool returned an invalid
+// content result" and the model would never learn why the call was refused.
+// The refusal travels as the result the worker already understands.
+func agentToolsFailure(failure error) map[string]any {
+	reason := "The tool call was refused"
+	if failure != nil {
+		reason = failure.Error()
+	}
+	return map[string]any{
+		"content": []any{map[string]any{"type": "text", "text": reason}},
+		"details": map[string]any{},
+		"isError": true,
+	}
+}
+
 // agentToolsImage is an image tool result.
 func agentToolsImage(data []byte, mimeType string) map[string]any {
 	return map[string]any{

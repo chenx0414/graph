@@ -194,6 +194,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 10. **两个节点并行时 daemon 直接崩**（Batch 20 修掉）。Go 的图 lane（`runtime_kernel_graph_lane.go`）把每节点的会话、宿主、绑定、绑定摘要、恢复快照放在**几张普通 map** 里，而 `GraphRunner.Drain` 是**每个节点一个 goroutine**——一张图有两个节点同时开工时，两个 goroutine 写同一张 map，Go 的运行时直接判 `fatal error: concurrent map writes`，**整个 daemon 进程当场退出**（不是丢一次更新，是把服务打死）。TypeScript 是单线程事件循环，同一段逻辑没有这个窗口。修法：这几张表统一由一把 mutex 守护，所有读写走访问器（`sessionOf` / `setSession` / `hostOf` / `setHost` / `forgetNode` …），关图与关运行时也改成「先在锁内快照键，再在锁外销毁」。
 11. **provider 调用记录读不出状态与预留**（Batch 20 修掉）。`KernelProviderCall` 结构体**没有 JSON tag**，于是它序列化出来是 `Id` / `State` / `Reserved` 这些大写键；而读它的两处（节点运行视图 `KernelNodeRun` 的 `invocations`、`graph_inspect` 的 `provider_calls`）都按小写的 `state` / `reserved` / `executionId` 去读——读出来永远是空值。所以「这一发 provider 调用是不是还在飞、占了多少预留」在 Go 侧根本看不到，图视图与 `provider_calls` 查询都缺了 TypeScript 那边有的那一半事实。修法：给结构体补上与 TypeScript 同形的 JSON 名（`id` / `nodeId` / `executionId` / `reserved` / `state` / `usage` / `model` / `purpose` / `cost` / `createdAt` / `settledAt`）。
 12. **队列与执行历史读不出来**（Batch 21 修掉）。`QueueHistoryPage` / `ExecutionHistoryPage` / `ExecutionHistoryItem` / `ExecutionRow` 同样**没有 JSON tag**，序列化出来是 `Items` / `Cursor` / `RetriesUsed`；而 `graph_inspect` 的 `queue` 与 `executions` 查询、模型读到的工具结果，都按小写的 `items` / `cursor` / `retriesUsed` 去读。于是「图上排着哪些活、一次执行用掉了几次自动重试与几次重提」在 Go 侧只剩下一半事实：模型看到的是 `Items`，而按 `items` 读的人什么也读不到。修法：给这四个结构体补上与 TypeScript 同形的 JSON 名。
+13. **工具的拒绝理由在跨进程边界上被整个丢掉**（Batch 22 修掉）。TypeScript 的工具体与 worker 在同一个进程里，工具抛错由 SDK 直接变成模型读到的错误结果，理由在。Go 的工具体在 daemon 进程里，worker（TypeScript sidecar）在另一个进程：daemon 把工具体抛出的 `RuntimeError` **当成一个普通的返回值**回传（`runtime_worker_requests.go` 的 tool 分支），于是 worker 收到的是 `{"Code":"invalid_input","Message":"…"}` 这样一坨没有 `content` 的东西——worker 自己的校验（`src/runtime/durable-tools.ts`）判定「这不是一个工具结果」，抛一句 **`Tool returned an invalid content result`**。模型最终看到的是这一句**通用**话术，拒绝的真实原因一个字都没有。后果很实际：模型无法从「创建请求 id 已用于别的定义」这类拒绝里学到任何东西，只能反复重试同一次调用。修法：daemon 在工具边界把拒绝**转成 worker 认得的工具结果**（`content` 里放原因，`isError: true`），理由原样回到模型面前。PiG 内核这条路本来就不受影响（它把错误文本包成 `Tool failed: <原因>`），修完之后两条路的语义一致。
 
 ## 执行批次
 
@@ -216,7 +217,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - 例子里的 9 张图（`examples/graphs/*.json` 与 review pattern）暂未整体移植：本批用一张自带的图覆盖同一批几何规则；`examples/` 的文件本身在删除清单里，移植时要一并搬进 `tests/fixtures/` 或退休。
 - **Batch 12（已完成）**：嵌套子图的布局契约。`tests/e2e/go-graph-nested.test.ts`——一个可复用图被实例化进大图后，容器、实例与成员都被画出来，回到起点的回边落在**成员**（`outer/inner/work`）而不是容器上；加一个节点不动原有节点的位置，删掉它之后原有节点仍然不动。
   - 这一批逼出了 Go 侧的两个真 bug（见上文「Go 侧补齐的能力」第 3 条）：**嵌套子图此前在 Go 侧根本无法定义**。
-  - 用例跑在 `--kernel pig` 上：TypeScript sidecar 会把 Go 工具的错误吞成一句「Tool returned an invalid content result」，PiG 内核才会把真实原因交回给模型。
+  - 用例跑在 `--kernel pig` 上（当时 TypeScript sidecar 会把 Go 工具的错误吞成一句「Tool returned an invalid content result」，PiG 内核才会把真实原因交回给模型；Batch 22 之后 sidecar 那条路也不再吞理由）。
 - **Batch 13（已完成）**：凭据隔离与配置版本记账。`tests/e2e/go-credentials.test.ts`——两个端点各自只看到自己的 `Bearer` 密钥（换模型不串钥）；凭据被撤销后模型不再触达 provider；新任务在 `task.created` 事件里记下当时生效的配置版本。
   - **发现一处行为差异（待修）**：TypeScript 在模型没有可用凭据时让节点**失败并给出原因**（`no credential bound`）；Go 的分发闸门只是**等待**——对话停在 pending，`master` 为 null，用户看不到任何原因。已证明的部分（不外发、不假装答完）写进了用例；「给出原因」这一半还没有 Go 实现，列入待补。
 - **Batch 14（已完成）**：daemon 的启动契约。`tests/e2e/go-startup.test.ts`——直接驱动真实 `graphd` 二进制，把 `m8/startup.test.ts` 的 10 条契约整份移植：无效参数以 usage 退出（exit 2）；缺控制台、缺配置、缺模型、缺凭据、端口占用、状态目录被占各报自己的错误码；view-only 起得来、报得出启动状态、且一个回合都不派发；重建控制台不用重启进程；种子并编译出 main 配方；重启后同一状态目录里的任务还在；CLI 打印地址、SIGTERM 干净退出（exit 0）；配置拒绝未知引用与非法取值、相对项目根被解析成绝对路径；密钥只从被指名的环境变量取，配置接口永远不带明文。
@@ -251,6 +252,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **provider 真失败会花掉自动重试额度**（第 4 条）：模型端真的返回 404 时，节点按额度自动重试——默认额度 2，于是节点 `failed`（`retries_used: 2`、`resubmits_used: 0`，provider 至少被问 3 次）；节点自己声明 `retry: {automatic: 4, resubmit: 1}` 时重试 4 次（`retries_used: 4`）。两种情况下重启 daemon 之后额度仍然花完，provider 没有被再问一次。
   - **失败的节点在重启后保留后来的输入，由显式的 skip 与 resume 释放**（第 2 条）：节点 a 的第一个投递没交出必需产出而失败（`retry: {automatic: 0, resubmit: 0}`），后来的投递留在队列里，节点 b 不受影响地完成；重启 daemon 之后队列仍是 `[delivery failed, delivery queued]`，provider 没有被再问一次；显式 `skip` 掉失败的那个条目、再 `resume` 节点之后，排队的投递才跑起来并交出值 3（provider 共被问 3 次），而已提交的活不能再被 `retry`（被拒，错误码 `invalid_queue`）。
   - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 12 条）：**队列与执行历史读不出来**（分页结构体没有 JSON tag）。
+- **Batch 22（已完成）**：图生命周期：建图请求的恢复与冲突。`tests/e2e/go-graph-create.test.ts`（1 条）移植 `tests/e2e/graph-create.test.ts` 的那条契约（**Git 准备失败后同一创建请求恢复、不铸第二个图**），走会话面那条路径——主 Agent 在真实对话里用 `graph_create` 建图：
+  - **准备失败不是丢了的请求**：目标分支还不存在时（真实 `git init -b other` 的仓库），建图请求返回 `state: 'blocked'`，理由指名分支（图在等分支，不是在等用户）；图是 `paused` 的。
+  - **修好之后同一个请求 id 捡回同一张图**：真的 `git branch main` 之后，同一个 `requestId` 再次调用 `graph_create` 命中 `replayed: true`，graphId 与当初那张一致，图不再 `paused`。
+  - **同一个请求 id 换内容被拒，且不动已有的图**：第三次 `graph_create` 带着不同的定义，模型读到的是**拒绝的真实理由**（`Creation requestId was already used with a different definition`），结果里**没有** graphId（被拒就不铸图），`graph_inspect` 看到的仍是原来那张图（名字还是 `Recover creation`），`GET /api/tasks` 里的图任务仍然只有那一张。
+  - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 13 条）：**工具的拒绝理由在跨进程边界上被整个丢掉**——模型看到的是一句通用话术 `Tool returned an invalid content result`，而不是拒绝它的理由。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

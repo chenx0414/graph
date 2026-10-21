@@ -141,7 +141,14 @@ func CreateWorkerRequests(options struct {
 					delete(toolAborts, id)
 				}
 			}()
-			return tool(id, params, ctx)
+			value := tool(id, params, ctx)
+			// A refusal is an answer the model reads, not a transport failure.
+			// The worker only understands tool results, so the reason travels
+			// as one instead of as a bare error.
+			if failure, ok := value.(error); ok {
+				return agentToolsFailure(failure)
+			}
+			return value
 		}
 		if operation == "tool_gate" {
 			name := mapString(request, "name")
