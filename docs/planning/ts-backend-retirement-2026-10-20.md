@@ -154,6 +154,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | Go 侧自有契约：局部补丁对后来那次提交的路由、过期修订不生效、坏补丁被拒、已受理的活在删边后仍然活着 | `tests/e2e/go-graph-patch.test.ts` | 1 |
 | Go 侧自有契约：节点 id 是字面文本（`bracket[1]` / `star*` / `question?`）；已提交过的产出不能再被重试花掉 | `tests/e2e/go-graph-node-identity.test.ts` | 1 |
 | `tests/e2e/graph-definitions.test.ts` 定义整体被拒并点名规则；接收协议真的约束值且好值原样通过 | `tests/e2e/go-graph-definitions.test.ts` | 2 |
+| `tests/e2e/graph-modules.test.ts` 路由级联与顺序；规则表达式；once 模块的持有与重开 | `tests/e2e/go-graph-modules.test.ts` | 3 |
+| `tests/e2e/artifact-publication.test.ts` 发布的版本不可变与 CAS；越界路径与符号链接被拒 | `tests/e2e/go-artifact-publication.test.ts` | 2 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -280,6 +282,14 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **坏定义逐条被点名，且不留半张图**（第 1 条）：五十四条坏定义——节点声明宿主命令、图输入指向不存在的端点、工作位置越界或基底未知、访问策略字段写错或没有 mode、边的启用位不是布尔、边指向不存在的端点、边两端协议版本不一致、边 id 是空白、schemaVersion 不支持、输出引用未声明的协议、提交要求未声明的产出、模型/重试/指令写错、执行默认值写错、验收项写错、协议 schema 非法、以及四种遗留字段（`context` / `dependsOn` / `when` / `container`）——每一条都被 daemon 用**自己的话**拒掉并点名那条规则（`Node worker is an agent; declare host commands in an operation module`、`Edge link enabled must be an explicit boolean`、`Graph defaults budget.tokens must be a non-negative integer or null`、`Acceptance a must name an agent reviewer`、`Protocol bad has an invalid schema: ...`、`Node worker has unsupported field context`…），**没有一张图被创建**（任务列表里一个都没有），**没有一个节点被问过**。
   - **协议真的约束值，好值原样通过**（第 2 条）：协议声明了 `enum` / `minItems` / `items.minimum` / `additionalProperties: false`，于是四个坏值（枚举外的状态、空数组、元素为 0、多一个字段）**在值落地前就被拒**（理由指名到字段：`worker.job/status: must be equal to one of the allowed values`、`worker.job/items: must NOT have fewer than 1 items`、`worker.job/items/0: must be >= 1`、`worker.job: must NOT have additional properties`），队列里一件工作都没有、节点一次也没被问；合规的值原样进了节点、节点把它原样交回来（图上的结果是 `{status: 'approved', items: [1]}`），图落回 `completed`。
   - 这一批逼出了 Go 侧的三个真 bug（见上文「Go 侧补齐的能力」第 15、16、17 条）：**显式的 null 被当成没写**（`model: null` 这类定义被真的建成了图）、**没写额度的预算被当成不限额**、**协议 schema 只认六个关键字**（声明了严格协议的图收任何值都收）。
+- **Batch 26（已完成）**：图模块与产物发布。`tests/e2e/go-graph-modules.test.ts`（3 条）搬进 `tests/e2e/graph-modules.test.ts` 的三条契约，`tests/e2e/go-artifact-publication.test.ts`（2 条）搬进 `tests/e2e/artifact-publication.test.ts` 的两条契约，同样走会话面那条路径：
+  - **每个路由都级联过去，值保持顺序，被关掉的边什么也不带**（模块第 1 条）：两个路由模块串成一条链（`gate.rework → second.review`），一个没匹配任何规则的值**一件工作都没变成**（队列是空的，节点一次也没被问）；两个匹配上的值按顺序排在队列上；`gate.rework` 这条边上真的有一笔 `source: 'module'` 的投递，关掉的 `off` 边上**一笔都没有**；级联进去的 `second` 模块确实收到了那个值；模块的每一次判断都说出了自己匹配的是哪条规则（`no rule matched` / `review.passed == false` / `review.passed == true`，规则版本都是 1）；节点后来被问了两次，一次一个值。
+  - **规则表达式读值、分辨「有」与「没有」、按声明顺序合并输出**（模块第 2 条）：十五条表达式逐条被钉住——`$exists` / `$missing`、字段比较（`==` / `>` / `>=`）、字符串比较、复合条件（`&&` / `||` / `!`）、以及一条指向不存在字段的规则（不匹配）。每条规则要么产出了 `{marker: 'matched'}`，要么什么都没有，两边都按它该有的样子被证明。
+  - **once 模块保留它握住的输入，只有被重新打开才再判断一次，输出从不重放**（模块第 3 条）：只到一个输入时模块**在等**（结果为空）；两个都到齐才判断一次并把两者配对；闩住之后再来输入**不再判断**（结果还是一条）；模块握着**更新过**的输入值；显式 `reopen` 只清闩、不判断、也不产出；之后的一次投递才让它再判断一次，用的是它握住的最新值；送进去的控制输入同样只重开、不产出（控制输入在模块视图里 `delivered: false`）；再下一次投递才产生第三条结果。
+  - **发布出去的是不可变的一个版本，过期的 compare-and-swap 被拒，同一个请求只发布一次**（产物第 1 条）：三种坏发布各自被指名（`schema must use kind@version syntax`、`must be a label`、`lowercase slug`）；第一次发布是版本 1，同一个 `requestId` 再发一次**仍然是版本 1**（不是两次发布）；接着是版本 2；一个还指望版本 1 的发布被拒（`Artifact head changed`）；文档只有一个头，停在版本 2，标签被规范化（`Known-Issue` → `known-issue`，中文标签原样保留），schema 记着 `source-list@1`；两个版本都读得回来，各自的字节没变；被拒的那次发布什么也没留下。
+  - **越出工作副本的路径与符号链接都被拒，宿主字节一个字节都没回给模型**（产物第 2 条）：`../host-only.txt` 被拒（理由点名 `work copy`），指向它的符号链接被拒（`may not be a symbolic link`），宿主文件的内容**从未出现在模型的任何一次请求里**，也没有任何产物被发布。
+  - 这一批**没有**逼出 Go 侧的真 bug：模块与产物这两套语义在 Go 侧本来就成立，补的是证明。
+- **Batch 27 起**：图确认（`tests/e2e/graph-confirmation.test.ts`）、会话面与产物面剩余的簇。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 
