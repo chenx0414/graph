@@ -188,6 +188,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 5. **派发被关掉时建的任务永远救不回来**（Batch 15 修掉）。TypeScript 在 `openTaskRuntime` 里就调用一次 `recoverMasterNodes()`，所以 view-only 期间建的任务在下一次 execute 启动时会被补上 master 节点；Go 只在热改配置时调 `RecoverMasters`，启动路径上根本不调——任务永远停在「没有 master 节点」的状态。而且 Go 的 `RecoverMasters` 也不像 TS 那样在补完节点后把第一个 discussing 任务设为 `active_task`，补出来的节点因此进了不了派发车道。修法：`OpenTaskRuntime` 末尾调用一次 `RecoverMasters()`；`RecoverMasters` 在没有 active task 时把第一个 discussing 任务设为 `active_task`。
 6. **provider 的传输证据面在 Go 侧根本不存在**（Batch 16 补掉）。TypeScript 每次 provider 尝试都写一条 `provider.transport` 事件（`fetch_started` / `response_headers` / `transport_error`，带 `requestSha256`、`responseIds`、`errorCodes`、`errorNames`、`usageRecoverableFromTransport`），并给 opencode-go 网关发一个 `x-opencode-request-id` 关联头；Go 侧只有 `provider.request_profile`，证据面缺失，ADR 0034 明确点名这是删 TS 实现前必须补的。补法：新增 `runtime_provider_transport.go`（观察的载体、请求体 sha256、响应相关 id、只带标识符的失败命名）；`ControlledGatedProviderFetch` 增加 `OnTransport` 与 `RequestIDHeader`；适配器在主回合、输入建议、技能沉淀三处都写事件。
 7. **价格校验永远是网络请求，真实 E2E 指不到本地服务**（Batch 16 补掉）。Go 的 `DaemonOptions.PriceVerify` 一直存在，但生产路径永远走归档 `sourceUrl` 的网络抓取；TypeScript 那边靠 `startGraphDaemon` 的 `priceVerify` 注入点做确定性验证。补法：daemon 读 `GRAPH_PRICE_SOURCE_URL`，把校验指向另一张价格页（镜像、代理、本地服务），**校验语义不变**——页面仍然必须提到该模型，提不到就是验证失败，绝不静默改价。
+8. **先推理再调工具的回合会把自己覆盖掉，整回合失败**（Batch 18 修掉）。Go 的受控流把 **provider 的工具调用序号**当成了**消息内容块下标**：一个回合先吐 `reasoning_content`（占住内容块 0）再发 `tool_calls`（provider 序号也是 0）时，工具调用把 thinking 块整个覆盖掉，并让帧编码器撞上「同一个内容块开始了两次」，整个回合被判失败（`Assistant message block 0 starts more than once`）。TypeScript 那边由 Pi SDK 分配内容块下标，思考块与工具块本来就是两块，从来没有这个碰撞。修法：把「provider 的工具序号」与「消息内容块下标」分成两个数——`toolCalls` 仍按 provider 序号合并参数增量，另加 `toolBlocks` 记内容块下标；OpenAI 路径的工具调用占下一个空块，Anthropic 路径的块序号本来就是内容块下标，原样使用。
 
 ## 执行批次
 
@@ -226,6 +227,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **换模型与重启都不清空记忆**（1 条）：实例记着自己用过哪些模型（`['first']`）、花过多少 token（53 = 主回合 50 + 输入建议 3）、预算 scope 的 id/used/limit/members；换成 unlimited 之后 `budget` 变 null 而 `used` 不动；daemon 重启后实例 id、scope id、used、unlimited 全部还在；后续两轮把 used 推到 106/159、`modelsUsed` 变成 `['first','next']`，而第一个模型只被问过一次、第二个模型两次、便宜模型三次（每轮一次输入建议）。
   - **一条必须记住的 Go/TS 同构事实**：预算闸门（派发前 `AssertWithinBudget` 与发送前的 `TaskSendGate.Check`）**在全权访问（`mode: "full"`）下被跳过**——TS 的 `src/runtime/task-gate.ts:37` 与 `src/core/execution.ts:523` 就是这么写的，Go 的 `backend/internal/graph/runtime_task_gate.go:96` 与 `core_execution.go:933` 一模一样。TS 那条契约用的是 `standardAccessPolicy()`，所以 Go 用例必须显式写 `access: { mode: "standard" }`，否则闸门根本不会被问到，限额形同虚设。后续凡是「预算/用量/额度」类契约都要按这条配。
   - `modelsUsed` 记的是 `modelId ?? id`（TS 的 `src/core/execution.ts:493` 与 Go 的 `core_execution.go:860` 同构），所以夹具要像 TS 那样让 `modelId` 与 `id` 相同，断言才是 `['first']`。
+- **Batch 18（已完成）**：会话面：回合失败与工具回合的收尾。`tests/e2e/go-conversation-runtime.test.ts`（2 条）移植 `tests/e2e/conversation-runtime.test.ts` 的前两条契约：
+  - **输出被截断的回合结算成一条可行动的提示**：模型把整段输出花在推理上并停在输出上限上时，回合必须结算——用户看到一条 `system`/`error` 消息（Go 自己的文案：「主 Agent 本轮的模型输出被截断，回复没有完成……」），操作结算为 `failed` 且记下真实原因（`Model response hit the output token limit before completing the reply`），master 被一个 main 自有的 `execution_failed` 问题 park 住（等用户下一次说话），而不是永远停在 dispatched。
+  - **工具回合即使连接不关闭也不拖住后续回合**：一轮里读四个 512KB 文件后照常回答；下一轮模型调 `artifact_publish` 而 provider 在 `[DONE]` 之后**不关闭连接**、工具本身又失败时，回合不能被拖住——工具错误回到模型、模型被再问一次、回合正常收尾，provider 真的被问了四次；那次被截断的调用仍按 provider 报的用量记账（`authoritative`，128/256）。
+  - 这一批逼出了 Go 侧的一个真 bug（见上文「Go 侧补齐的能力」第 8 条）：**先推理再调工具的回合会把自己覆盖掉**。
+  - 第三条契约（native 交付失败 → 通知 main → 用户决定进入新的显式输入）**暂时无法移植**：它需要 supervisor 级别的 `graphCreate`/`graphSend`/`graphInspect`，而 Go daemon 的公开 HTTP 面与 TS daemon 一样只有 `graph/control`（pause/resume/skip/cancel…），没有建图与投递输入的入口；等 Go 的图生命周期接口补齐后再写。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

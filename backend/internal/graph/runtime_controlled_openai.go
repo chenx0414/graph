@@ -530,7 +530,7 @@ func ControlledOpenAIStream(broker SendGate, candidate ModelEntry, resolveKey fu
 			// field and the plain tool list are folded into the leading system message
 			// first, the way the SDK's normalizeContext does it.
 			model: record, context: controlledNormalizeContext(context), options: options,
-			toolCalls: map[int]*controlledToolCall{},
+			toolCalls: map[int]*controlledToolCall{}, toolBlocks: map[int]int{},
 		}
 		return stream, nil
 	}
@@ -555,6 +555,7 @@ type controlledStream struct {
 	context      map[string]any
 	options      map[string]any
 	toolCalls    map[int]*controlledToolCall
+	toolBlocks   map[int]int
 	message      *AssistantMessage
 	events       []map[string]any
 	index        int
@@ -1514,7 +1515,7 @@ func (stream *controlledStream) handleAnthropicEvent(event map[string]any) {
 		case "tool_use":
 			id, _ := block["id"].(string)
 			name, _ := block["name"].(string)
-			stream.startToolCall(index, id, name)
+			stream.startToolCall(index, index, id, name)
 		}
 	case "content_block_delta":
 		delta, _ := event["delta"].(map[string]any)
@@ -1623,15 +1624,29 @@ func (stream *controlledStream) startThinking(index int) {
 }
 
 // startToolCall opens one tool call block.
-func (stream *controlledStream) startToolCall(index int, id string, name string) {
-	for len(stream.message.Content) <= index {
+//
+// The provider's tool-call index and the message's content index are two
+// different numbers. OpenAI numbers the calls of one turn (0, 1, ...) while
+// the message numbers its blocks, and a turn that reasons before it calls a
+// tool has a thinking block first: using the call's own number as the block
+// number would overwrite that reasoning and break the turn. Anthropic's block
+// index is already the content index, so the caller says which number it
+// means.
+func (stream *controlledStream) startToolCall(toolIndex int, contentIndex int, id string, name string) {
+	for len(stream.message.Content) <= contentIndex {
 		stream.message.Content = append(stream.message.Content, AssistantContentBlock{})
 	}
-	stream.message.Content[index] = AssistantContentBlock{Type: "toolCall", Id: id, Name: name, Arguments: map[string]any{}}
-	stream.toolCalls[index] = &controlledToolCall{id: id, name: name}
+	stream.message.Content[contentIndex] = AssistantContentBlock{Type: "toolCall", Id: id, Name: name, Arguments: map[string]any{}}
+	stream.toolCalls[toolIndex] = &controlledToolCall{id: id, name: name}
+	stream.toolBlocks[toolIndex] = contentIndex
 	stream.events = append(stream.events, map[string]any{
-		"type": "toolcall_start", "contentIndex": index, "partial": stream.partial(),
+		"type": "toolcall_start", "contentIndex": contentIndex, "partial": stream.partial(),
 	})
+}
+
+// startToolCallBlock opens one tool call in the next free content block.
+func (stream *controlledStream) startToolCallBlock(toolIndex int, id string, name string) {
+	stream.startToolCall(toolIndex, len(stream.message.Content), id, name)
 }
 
 // appendToolCall reads one OpenAI tool-call delta.
@@ -1641,7 +1656,7 @@ func (stream *controlledStream) appendToolCall(index int, entry map[string]any) 
 		id, _ := entry["id"].(string)
 		function, _ := entry["function"].(map[string]any)
 		name, _ := function["name"].(string)
-		stream.startToolCall(index, id, name)
+		stream.startToolCallBlock(index, id, name)
 		call = stream.toolCalls[index]
 	}
 	function, ok := entry["function"].(map[string]any)
@@ -1660,16 +1675,17 @@ func (stream *controlledStream) appendToolCall(index int, entry map[string]any) 
 func (stream *controlledStream) appendToolArguments(index int, text string) {
 	call, ok := stream.toolCalls[index]
 	if !ok {
-		stream.startToolCall(index, "", "")
+		stream.startToolCallBlock(index, "", "")
 		call = stream.toolCalls[index]
 	}
 	call.arguments.WriteString(text)
-	if index < 0 || index >= len(stream.message.Content) {
+	contentIndex, known := stream.toolBlocks[index]
+	if !known || contentIndex < 0 || contentIndex >= len(stream.message.Content) {
 		return
 	}
-	stream.message.Content[index].Arguments = controlledToolArguments(call.arguments.String())
+	stream.message.Content[contentIndex].Arguments = controlledToolArguments(call.arguments.String())
 	stream.events = append(stream.events, map[string]any{
-		"type": "toolcall_delta", "contentIndex": index, "delta": text, "partial": stream.partial(),
+		"type": "toolcall_delta", "contentIndex": contentIndex, "delta": text, "partial": stream.partial(),
 	})
 }
 
