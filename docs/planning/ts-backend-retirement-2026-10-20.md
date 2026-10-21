@@ -148,6 +148,9 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m5/graph.test.ts` 嵌套子图：容器与成员都被画出来、回边落在成员而不是容器上、加节点不动原有节点、删节点后原有节点仍不动 | `tests/e2e/go-graph-nested.test.ts` | 3 |
 | `tests/m8/credentials.test.ts` 凭据隔离：两个端点各自只拿到自己的密钥、换模型不会串钥；凭据被撤销后模型不再触达 provider；新任务记下当时生效的配置版本 | `tests/e2e/go-credentials.test.ts` | 3 |
 | `tests/m8/startup.test.ts` 启动契约：无效参数/缺控制台/缺配置/缺模型/缺凭据/端口占用/状态目录被占各自报明确错误码；view-only 起得来且不派发；重建控制台不用重启；种子并编译 main 配方；重启保留任务；CLI 打印地址并干净退出；配置拒绝未知引用且相对项目根被解析；密钥只来自被指名的环境变量 | `tests/e2e/go-startup.test.ts` | 10 |
+| `tests/m8/provider-headers.test.ts` 模型请求头与凭据隔离：配置的头到达 provider；opencode-go 的路由头在连接测试与真实派发都在；一个解析不出凭据的模型只禁用自己的模型；派发被关掉时建的任务在下一次 execute 启动时救回来 | `tests/e2e/go-provider-headers.test.ts` | 4 |
+| `tests/e2e/provider-reconciliation.test.ts` provider 对账证据：关联头即 invocation id；每次尝试留下 fetch_started/response_headers/transport_error 三相证据；请求体的 sha256 与 provider 收到的一致；provider 没答话时不编造用量、不定价；证据里没有密钥 | `tests/e2e/go-provider-reconciliation.test.ts` | 4 |
+| `tests/console/price-snapshot.test.ts` 价格刷新：验证失败保留旧金额并标 stale；验证通过重新盖戳且下一次派发冻结新版本 | `tests/e2e/go-price-snapshot.test.ts` | 2 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -183,6 +186,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
    修法：展开出来的成员一律存成普通记录（`interfaceSpecAsMap`），引用解析同时认普通记录与带类型的端口表。**结论：子图功能此前在 Go 侧从未真正跑通过**，审计里那条「Go 已有实现」只是读代码读出来的。
 4. **一个没有凭据的模型能弄坏另一个模型的回合**（Batch 15 修掉）。主 Agent 回完话之后会额外发一次「下一条输入建议」的请求，而选这次请求用哪个模型时只看目录、不看凭据：目录里排第二的模型没有可用密钥，于是建议请求在取密钥时抛 `No credential bound for model unusable`，这个异常一路冒泡回主回合，主回合被判为 `operation.unknown`，master 被 park 成 pending 并开 recovery question——**用户已经收到的回复被收走**。两处修法：`piAdapterCallableModels` 只让凭据真的能解析的模型进入候选；`piAdapterGenerateSuggestion` 自己吞掉异常，把失败变成建议结果里的 `error`，绝不掀翻主回合。
 5. **派发被关掉时建的任务永远救不回来**（Batch 15 修掉）。TypeScript 在 `openTaskRuntime` 里就调用一次 `recoverMasterNodes()`，所以 view-only 期间建的任务在下一次 execute 启动时会被补上 master 节点；Go 只在热改配置时调 `RecoverMasters`，启动路径上根本不调——任务永远停在「没有 master 节点」的状态。而且 Go 的 `RecoverMasters` 也不像 TS 那样在补完节点后把第一个 discussing 任务设为 `active_task`，补出来的节点因此进了不了派发车道。修法：`OpenTaskRuntime` 末尾调用一次 `RecoverMasters()`；`RecoverMasters` 在没有 active task 时把第一个 discussing 任务设为 `active_task`。
+6. **provider 的传输证据面在 Go 侧根本不存在**（Batch 16 补掉）。TypeScript 每次 provider 尝试都写一条 `provider.transport` 事件（`fetch_started` / `response_headers` / `transport_error`，带 `requestSha256`、`responseIds`、`errorCodes`、`errorNames`、`usageRecoverableFromTransport`），并给 opencode-go 网关发一个 `x-opencode-request-id` 关联头；Go 侧只有 `provider.request_profile`，证据面缺失，ADR 0034 明确点名这是删 TS 实现前必须补的。补法：新增 `runtime_provider_transport.go`（观察的载体、请求体 sha256、响应相关 id、只带标识符的失败命名）；`ControlledGatedProviderFetch` 增加 `OnTransport` 与 `RequestIDHeader`；适配器在主回合、输入建议、技能沉淀三处都写事件。
+7. **价格校验永远是网络请求，真实 E2E 指不到本地服务**（Batch 16 补掉）。Go 的 `DaemonOptions.PriceVerify` 一直存在，但生产路径永远走归档 `sourceUrl` 的网络抓取；TypeScript 那边靠 `startGraphDaemon` 的 `priceVerify` 注入点做确定性验证。补法：daemon 读 `GRAPH_PRICE_SOURCE_URL`，把校验指向另一张价格页（镜像、代理、本地服务），**校验语义不变**——页面仍然必须提到该模型，提不到就是验证失败，绝不静默改价。
 
 ## 执行批次
 
@@ -212,6 +217,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 15（已完成）**：模型请求携带的东西。`tests/e2e/go-provider-headers.test.ts`——移植 `m8/provider-headers.test.ts` 的 4 条契约：配置的头真的到达 provider（连同该模型自己的 `Bearer`）；opencode-go 的路由头在连接测试和真实派发里都在；**一个解析不出凭据的模型只禁用自己的模型，不禁用别人的派发**（可用模型照常回完话，用户拿得到回复，没有 recovery question，没有 `operation.unknown`，而且那个不可用模型根本没有被问过）；**派发被关掉时建的任务在下一次 execute 启动时被救回来**（补出 master 节点、记下 `task.master_recovered`、真的向 provider 发请求、带着这一轮才有的密钥），而项目已被移出配置的那个任务保留历史但不被救活。
   - 这一批逼出了 Go 侧的两个真 bug（见上文「Go 侧补齐的能力」第 4、5 条）：**一个没有凭据的模型能弄坏另一个模型的回合**，以及**派发被关掉时建的任务永远救不回来**。
   - TS 的第 3 条用例走的是原生图的 worker 节点，Go 这边走的是会话的 master：master 回合之后多一次「输入建议」的请求，正是这条路径把 bug 逼了出来。断言按 Go 自己的语义写（`prompt_suggestion.decided` 的 `asked:false` / `model:null`），不照抄 TS 文本。
+- **Batch 16（已完成）**：ADR 0034 点名的两个 Go 侧缺口。`tests/e2e/go-provider-reconciliation.test.ts`（4 条）移植 `e2e/provider-reconciliation.test.ts` 的四个变体：provider 收到的关联头就是那条 invocation 的 id；每次尝试都留下 `fetch_started`（请求体的 sha256 与 provider 真正收到的那份一致）、`response_headers`（状态码与 provider 回的相关 id）、`transport_error`（只带标识符，不带可能含 URL 的报文）三相证据；provider 答了话，用量就是 provider 自己报的数并被定价；provider 没答话，用量保持未知、每一次尝试都不定价——账本保留那个缺口，不编造用量；证据里没有密钥、没有 authorization、没有 cookie。
+  - `tests/e2e/go-price-snapshot.test.ts`（2 条）移植 `console/price-snapshot.test.ts` 的两条 daemon 级契约：验证失败时旧金额原样保留、条目标成 stale（不填零、不静默改价）；验证通过时价格重新盖戳，下一次派发冻结的正是新版本（invocation 的 `priceRevision` 等于新 catalogRevision，金额按新费率算）。
+  - 这一批先补了 Go 的能力（见上文「Go 侧补齐的能力」第 6、7 条）。
+  - **一处行为差异（待定夺）**：Go 把 `503` 也当成容量答案重试（最多 3 次），TypeScript 只重试 `429`——TS 的理由是代理可能把上游的模糊失败翻译成 503，那种请求可能已经被计费。Go 每一次尝试都记成未知用量、不定价，所以「账本保留缺口、不编造用量」这条契约在两边都成立，但**到达 provider 的请求次数不同**。用例按 Go 自己的语义断言（容量答案重试且每次尝试都被记账），差异记在此处待定夺。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
 

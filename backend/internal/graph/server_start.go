@@ -562,7 +562,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		}
 		verify := options.PriceVerify
 		if verify == nil {
-			verify = defaultPriceVerify
+			verify = priceVerifierFor(options.Env)
 		}
 		decisions := map[string]bool{}
 		for _, snapshot := range PRICE_SNAPSHOT {
@@ -879,9 +879,38 @@ func writeRevocations(path string, refs []string) error {
 }
 
 func defaultPriceVerify(snapshot PriceSnapshot) bool {
+	return verifyPricePage(snapshot.SourceUrl, snapshot.ModelId)
+}
+
+// priceVerifierFor reads where a price refresh verifies its entries.
+//
+// The archived official page is the default. An operator may point the daemon
+// at another page that carries the same prices - a mirror, a proxy, a local
+// service - without changing what the verification means: the page still has
+// to mention the model, and a page that does not is a failed verification,
+// never a silent re-stamp.
+func priceVerifierFor(env map[string]string) func(PriceSnapshot) bool {
+	source := ""
+	if env != nil {
+		source = strings.TrimSpace(env["GRAPH_PRICE_SOURCE_URL"])
+	}
+	if source == "" {
+		return defaultPriceVerify
+	}
+	return func(snapshot PriceSnapshot) bool {
+		return verifyPricePage(source, snapshot.ModelId)
+	}
+}
+
+// verifyPricePage reads one price page and says whether it still names the
+// model.
+//
+// A network or parse failure is a verification failure: an entry that cannot
+// be re-verified keeps its old amount and is marked stale.
+func verifyPricePage(sourceUrl string, modelId string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, snapshot.SourceUrl, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceUrl, nil)
 	if err != nil {
 		return false
 	}
@@ -898,7 +927,7 @@ func defaultPriceVerify(snapshot PriceSnapshot) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(body), snapshot.ModelId)
+	return strings.Contains(string(body), modelId)
 }
 
 func sameStrings(left, right []string) bool {

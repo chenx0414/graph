@@ -1723,6 +1723,13 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 					// gone: reporting only, a send is never blocked or rewritten.
 					ReportPromptIntegrity(filepath.Join(options.InstancesDir, instanceId), operation.Id, sent.SystemPrompt, nil)
 				},
+				OnTransport: func(observation ProviderTransportObservation) {
+					data := observation.Fields()
+					data["operationId"] = operation.Id
+					data["instanceId"] = instanceId
+					data["model"] = entry.Id
+					store.Event(operation.TaskId, "provider.transport", data)
+				},
 			}),
 			func() bool { return turn.Conversation != nil && !*turn.Compacting },
 			func(status string) {
@@ -2370,6 +2377,12 @@ func piAdapterGenerateSuggestion(options PiAdapterOptions, entry ModelEntry, gat
 	}{
 		Stream: ControlledOpenAIStream(piAdapterGateSendGate(gate), entry, input.ResolveKeyFor, input.SlotFor, entry.Api, PiAdapterStreamOptions{
 			EstimateMissing: true,
+			OnTransport: func(observation ProviderTransportObservation) {
+				data := observation.Fields()
+				data["operationId"] = operation.Id
+				data["model"] = entry.Id
+				store.Event(operation.TaskId, "provider.transport", data)
+			},
 			OnRequest: func(callId string, profile map[string]any) {
 				data := map[string]any{
 					"callId": callId, "operationId": operation.Id, "model": entry.Id, "rates": nil, "pricing": nil,
@@ -2462,6 +2475,12 @@ func piAdapterRunSediment(options PiAdapterOptions, input piAdapterRunInput, tur
 				func(model any, context map[string]any, streamOptions map[string]any) (map[string]any, error) {
 					stream, err := ControlledOpenAIStream(piAdapterGateSendGate(candidateGate), candidate, input.ResolveKeyFor, input.SlotFor, candidate.Api, PiAdapterStreamOptions{
 						EstimateMissing: true,
+						OnTransport: func(observation ProviderTransportObservation) {
+							data := observation.Fields()
+							data["operationId"] = operation.Id
+							data["model"] = candidate.Id
+							store.Event(operation.TaskId, "provider.transport", data)
+						},
 						OnRequest: func(callId string, profile map[string]any) {
 							data := map[string]any{
 								"callId": callId, "operationId": operation.Id, "model": candidate.Id, "rates": nil, "pricing": nil,
@@ -2552,6 +2571,8 @@ type PiAdapterStreamOptions struct {
 	OnRequest func(callId string, profile map[string]any)
 	// OnSend observes what the transport is about to send.
 	OnSend func(sent PiAdapterSentRequest)
+	// OnTransport observes what the provider attempt looked like from the outside.
+	OnTransport func(observation ProviderTransportObservation)
 }
 
 // PiAdapterSentRequest is what the transport is about to send.

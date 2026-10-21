@@ -45,6 +45,11 @@ type GatedProviderFetchOptions struct {
 	OnResponse func(id string, response *http.Response, release func())
 	// OnRequest is the best-effort observation after admission, once per actual transport attempt.
 	OnRequest func(id string)
+	// OnTransport observes every provider attempt after admission: what left, what came
+	// back and how it failed.
+	OnTransport func(observation ProviderTransportObservation)
+	// RequestIDHeader names the correlation header the provider may forward.
+	RequestIDHeader string
 }
 
 // controlledZeroUsage is the settlement of a send that produced no tokens.
@@ -315,6 +320,25 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 	}
 	for attempt := 1; ; attempt++ {
 		id := graphUUID()
+		requestSha256 := controlledRequestSha256(request)
+		// Correlation diagnostics never change a send or its usage evidence: a
+		// watcher that fails is not a reason to fail the turn.
+		observe := func(observation ProviderTransportObservation) {
+			if options.OnTransport == nil {
+				return
+			}
+			observation.CallID = id
+			observation.At = NowMillis()
+			observation.RequestSha256 = requestSha256
+			if options.RequestIDHeader != "" {
+				clientRequestID := id
+				observation.ClientRequestID = &clientRequestID
+			}
+			func() {
+				defer func() { _ = recover() }()
+				options.OnTransport(observation)
+			}()
+		}
 		sent := false
 		release := func() {}
 		if options.AcquireSlot != nil {
@@ -337,6 +361,10 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 					options.OnRequest(id)
 				}
 				sent = true
+				if options.RequestIDHeader != "" {
+					request.Header.Set(options.RequestIDHeader, id)
+				}
+				observe(ProviderTransportObservation{Phase: "fetch_started"})
 				fetch := options.FetchImpl
 				if fetch == nil {
 					fetch = func(req *http.Request) (*http.Response, error) { return HTTPClient.Do(req) }
@@ -363,6 +391,16 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 			if !sent {
 				return nil, failure
 			}
+			// The request left the process and no header came back: the provider
+			// may have received it and may have billed it. The usage stays
+			// unknown, and the failure is named by identifiers only.
+			recoverable := false
+			observe(ProviderTransportObservation{
+				Phase:                         "transport_error",
+				ErrorCodes:                    controlledTransportErrorCodes(failure),
+				ErrorNames:                    controlledTransportErrorNames(failure),
+				UsageRecoverableFromTransport: &recoverable,
+			})
 			code := controlledTransportCode(failure)
 			notSent := code != "" && controlledRetryableTransportCodes[code]
 			if notSent {
@@ -376,6 +414,15 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 			delay(500 * attempt)
 			continue
 		}
+		// The headers are the first thing the provider said about the request:
+		// a status is not token evidence, and a correlation id may come back
+		// with it.
+		status := response.StatusCode
+		observe(ProviderTransportObservation{
+			Phase:       "response_headers",
+			Status:      &status,
+			ResponseIDs: controlledResponseRequestIds(response.Header),
+		})
 		// A capacity answer (429 or 503) means the provider rejected the request before producing any
 		// token, exactly like an unsent connection: give the same logical send another attempt instead
 		// of failing the Agent turn. Other 5xx answers stay hard failures - they can be a provider bug
@@ -570,7 +617,9 @@ func (stream *controlledStream) run() {
 		reservation += float64(tokens)
 	}
 	transport, err := ControlledGatedProviderFetch(stream.broker, request, GatedProviderFetchOptions{
-		Reservation: reservation,
+		Reservation:     reservation,
+		RequestIDHeader: controlledRequestIDHeader(stream.candidate),
+		OnTransport:     stream.usageOptions.OnTransport,
 		FetchImpl: func(request *http.Request) (*http.Response, error) {
 			if stream.resolveKey != nil {
 				headers := ModelRequestHeaders(stream.candidate)

@@ -2,6 +2,8 @@
 
 2026-10-20。后端已由 Go 承担（ADR 0032、0033），仓库里仍并存一整套 TypeScript 后端实现与它的测试。本决策确定退役路径：**先用真实 E2E 把 Go 侧缺的契约补齐，再按活跃引用删除 TypeScript 实现**；删除不得削弱门禁。
 
+状态：2026-10-21。下面「Go 侧仍缺的能力」里的两处已在退役批次 16 补齐并各有真实 E2E 证明——`provider.transport` 传输证据面（`tests/e2e/go-provider-reconciliation.test.ts`）与确定性的价格校验口子（`tests/e2e/go-price-snapshot.test.ts`）。删除 TypeScript 实现本身尚未开始。
+
 ## 依据
 
 - **两套实现已经漂移**。Go 侧 183 个文件约 80k 行，TypeScript 侧同构模块约 41k 行，两边各自演化。CI 的绿色主要由 TypeScript 实现背书，实际跑生产的是 Go，而 Go 侧只有少量 E2E——覆盖不对称，漂移抓不到。
