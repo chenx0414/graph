@@ -18,6 +18,8 @@
 
 已在 `chore/comment-prune-2026-10-22` 落地，37 个文件、94 处操作，净减 151 行。全部改动只动注释行，没有一行代码逻辑变化。
 
+下表的行号是**删除前**的位置。删完之后那些行号指向的是旁边的代码，所以第二类一节用当前行号重新给了一遍。
+
 | 类别 | 代表位置 | 判断 |
 | --- | --- | --- |
 | 装饰性分隔条 | `src/core/kernel-store.ts` 7 处、`src/web/styles.css` 13 处、`src/web/composer-state.ts` 4 处、`src/web/ui.tsx` 4 处、`src/core/rule-engine.ts` 2 处 | 下面的符号自己说明了自己的分区 |
@@ -52,18 +54,18 @@
 
 ### 2.2 `TODO(port)` 的其余簇
 
-- `localeCompare` vs 字节序（5 处）：`git_git.go:325`、`catalog_file_capabilities.go:451`、`catalog_capability_library.go:201`、`runtime_tool_results.go:125`、`core_artifact_workspace.ts:214`。**重构**：抽一个显式比较器 `compareNames`，让「用字节序代替 locale 序」成为代码事实。
+- `localeCompare` vs 字节序（5 处）：`git_git.go:325`、`catalog_file_capabilities.go:451`、`catalog_capability_library.go:201`、`runtime_tool_results.go:125`、`core_artifact_workspace.go:214`。**重构**：抽一个显式比较器 `compareNames`，让「用字节序代替 locale 序」成为代码事实。
 - UTF-16 vs 字节/字符（3 处）：`core_artifact_workspace.go:160`、`core_node_run.go:91`、`runtime_tool_results.go:178`。其中 `runtime_tool_results.go:178` 暴露了一个**用户可见的谎**：头部写「N chars」而 `len(text)` 是字节数。**重构**：改用 `utf16.Encode` 计数，或把标签改成「N bytes」。
 
 ### 2.3 前端的 `hasProposal` 死字段
 
-`src/web/conversation-drawer.ts:31,40,50` 三条注释都在描述一个**没人读的字段** `DrawerSectionInput.hasProposal`——写它的调用方在 `src/web/Conversation.tsx:562`，读它的地方早就不存在了。**重构**：删掉字段和调用点参数，三条 stale 注释随之消失。
+`src/web/conversation-drawer.ts` 的三条注释都在描述一个**没人读的字段** `DrawerSectionInput.hasProposal`——写它的调用方在 `src/web/Conversation.tsx:562`，读它的地方早就不存在了。**重构**：删掉字段和调用点参数，三条 stale 注释随之消失。
 
 ### 2.4 `src/web/Settings.tsx` 的 models.dev 装载
 
-`Settings.tsx:61-68` 那一套手写 `ModelsDevModule` 类型加动态 `import()`，存在的唯一理由是「那个模块还没合并」。模块早已合并。**重构**：直接 `import { lookupModelMetadata } from '../catalog/models-dev.ts'`，`@ts-ignore` 和 `any[]` 类型一起消失。
+`Settings.tsx` 那一套手写 `ModelsDevModule` 类型加动态 `import()`，存在的唯一理由是「那个模块还没合并」。模块早已合并。**重构**：直接 `import { lookupModelMetadata } from '../catalog/models-dev.ts'`，`@ts-ignore` 和 `any[]` 类型一起消失。
 
-同文件的 `credentialConfigured` / `credentialRef` 优先级（`Settings.tsx:593-598`）用 6 行散文解释一个两项表达式的先后。**重构**：抽成 `credentialResolved(...)` 一个具名谓词。
+同文件的 `credentialConfigured` / `credentialRef` 优先级（`Settings.tsx:578-583`）用 6 行散文解释一个两项表达式的先后。**重构**：抽成 `credentialResolved(...)` 一个具名谓词。
 
 ### 2.5 死代码
 
@@ -82,7 +84,7 @@
 ### 2.7 测试与脚本
 
 - `src/runtime/tool-call-spool.ts` 的 `spoolToolCall` **没有任何生产调用方**，只有测试在用。`scripts/console-ui-e2e.ts:106,131,240,276` 围绕它写了 4 条注释，断言的是一条不存在的生产路径。**重构**：测试改走真实写入路径，或删掉 spool 断言。
-- `scripts/check-floating-promises.mjs:25-33,54-60` 的两段散文解释「为什么要用文本正则」。**重构**：换成 AST 判定（文件已经 import 了 `SyntaxKind.PropertyAccessExpression`），散文和它的自测夹具一起消失。
+- `scripts/check-floating-promises.mjs:25-33` 与 `:54-60` 的两段散文解释「为什么要用文本正则」。**重构**：换成 AST 判定（文件已经 import 了 `SyntaxKind.PropertyAccessExpression`），散文和它的自测夹具一起消失。
 - `scripts/matt-flow.mjs:33-35` 的 `flags` 集合：第 52 行把它 OR 回去，60 个字符的过滤逻辑永远不改变结果。**重构**：删 `flags`，改用 `argv.includes('--json')`。
 - `src/web/Settings.tsx:620,714` 的 `eslint-disable-next-line react-hooks/exhaustive-deps`：仓库里**没有 eslint 配置**，这两条抑制是空转。**重构**：按依赖关系整理 effect，去掉抑制。
 
@@ -93,7 +95,7 @@
 - **外部依赖强制**：`src/runtime/restricted-process.ts` 的 sandbox 握手、`@anthropic-ai/sandbox-runtime` 0.0.75 的引号方言、`src/runtime/durable-sqlite.ts` 的上游 schema、`src/runtime/prompt-options.ts` 的 Pi SDK 签名、`src/web/GraphCanvas.tsx:112-118` 的 React Flow 只渲染内置 edge 标签、`src/web/shared.tsx:52-53` 的 React `Activity` 重连语义、`desktop/preload.cjs` 的安全边界。
 - **平台与协议强制**：`backend/internal/graph/runtime_restricted_process.go` 的 mDNSResponder / Chrome `kern.hv_vmm_present` / `--test-isolation=none`、`server_config_watch.go:96` 的 fsnotify 不可用、`server_layout.go:330` 的 elkjs 无 Go 实现、`backend/internal/graph/runtime_pig_*` 的 PiG v0.5.1 行为。
 - **公开 API 契约**：`src/runtime/tool-results.ts:1` 的 `toolResultHook` 契约、`src/server/providers.ts:159-163` 的 `shouldProbeModels` 权威副本、`src/web/api.ts:25-27` 的 401 不可重试语义（附 HB-200）、`src/server/app.ts:182` 的探针不回传密钥。
-- **Issue 链接解释的约束**：`src/core/execution.ts:346`（HB-272）、`src/core/graph-lane.ts:128-132`（HB-262、HB-322）、`src/core/task-runtime.ts:41`（HB-190）、`src/core/environment-failure.ts` 的 HB-137、`backend/internal/graph/runtime_rsi.go:968`（HB-179）。
+- **Issue 链接解释的约束**：`src/core/execution.ts:346`（HB-272）、`src/core/graph-lane.ts:129`（HB-262）、`src/core/node-executor.ts:315`（HB-322）、`backend/internal/graph/core_task_runtime.go:49`（HB-190）、`src/core/task-runtime.ts`（HB-190 的 TS 一侧）、`src/core/environment-failure.ts:5` 的 HB-137、`backend/internal/graph/runtime_rsi.go:968`（HB-179）。
 
 ## 推进顺序
 
