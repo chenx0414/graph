@@ -127,7 +127,7 @@ node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tas
 | 优先 | 层/候选 | 估算与依据 | 质量风险 | 验证 | 回滚 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | **压缩阈值（会话上下文上限）** | 前缀均值随阈值线性缩放。阈值 128K → 缓存读取 −68.5% → 整树情景花费 −29.3%（$28.44 → $20.11）；96K → −32.1%。压缩调用读的总 token 不变 | 中：摘要更早替换，模型可回看的原始历史更少 | 固定任务集 A/B（§5） | 去掉环境变量 |
-| 2 | **压缩失败（9 次，6 次撞 token 上限）** | 根因已定位并修复：请求自己的输出预算被桥丢掉，摘要被按模型的整个上限要。失败一次 = 上下文停在 496K = 之后每个请求重付整段前缀 | 中：请求形状变化，需 PiG 支持 | E2E 已覆盖（`66f68d1`） | revert 该提交 |
+| 2 | **压缩失败（9 次，6 次撞 token 上限）** | 根因已定位并修复：请求自己的输出预算被桥丢掉，摘要被按模型的整个上限要。失败一次 = 上下文停在 496K = 之后每个请求重付整段前缀 | 中：请求形状变化，需 PiG 支持 | E2E 已覆盖（`129da7e`） | revert 该提交 |
 | 3 | **压缩调用的输入未命中缓存** | 20.4M 未缓存输入按 50×缓存价计价，$0.73 情景花费；让摘要请求复用会话前缀可把它变成缓存读取 | 中：请求形状变化，需 PiG 支持 | 同上 | 改回 |
 | 4 | **工具声明（46.9K 字符）** | 只占平均前缀 6.4%。全砍一半 → 缓存读取 −3.2% → 整树 −1.4% | 中高：模型可能需要首轮发现 | 前一周两个实验已证伪（浏览器 +39%、目录 +3.35%） | 已有 flag |
 | 5 | `<available_skills>`（8,035 字符） | 系统提示最大块，但只占前缀 0.8% | 中：技能发现变难 | 同 4 | 改回 |
@@ -142,7 +142,7 @@ node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tas
 
 四个独立提交，每个可单独 revert。
 
-### 4.1 `e4237a7` Replay the assistant turn the model wrote
+### 4.1 `6b2eca8` Replay the assistant turn the model wrote
 
 **问题**：daemon 拼请求时，助手回合只保留 text 和 toolCall。模型写下的 reasoning、Anthropic 给 reasoning 的签名、provider 自己留着的 redacted reasoning、以及 **Anthropic 传输上的 tool_use 块本身**，全部被丢掉。
 
@@ -160,7 +160,7 @@ node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tas
 
 **验证**：新 E2E `tests/e2e/provider-assistant-replay.test.ts` 跑真实 Go 后端 + 真实 PiG 内核 + 真实 bash 工具，打脚本 provider，断言 provider 收到的请求体。**改前两条都红，改后两条都绿。**
 
-### 4.2 `e647bee` Mark the cacheable prefix on the Anthropic transport
+### 4.2 `e18a65b` Mark the cacheable prefix on the Anthropic transport
 
 **问题**：Anthropic 自己不缓存前缀，只缓存断点标记的部分，其余按满额输入价计费。daemon 的 Anthropic 请求**一个断点都没有**——系统提示、工具声明、整段对话每一轮都按满额重新付一遍。
 
@@ -172,7 +172,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：同上 E2E 断言三个断点都在。
 
-### 4.3 `9846167` Let the environment name how far the context may grow
+### 4.3 `ff7b6da` Let the environment name how far the context may grow
 
 **问题**：会话在到达供应商窗口前才压缩，于是长到 50 万 token。压缩读取是任务花费里最大的单块，而主会话就是它挣来的地方。
 
@@ -182,7 +182,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：新 E2E `tests/e2e/compaction-context-ceiling.test.ts`——设上限时 provider 收到一次摘要请求（一个远未填满窗口的对话），不设时不收到。改前红，改后绿；默认路径两种情况都不变。
 
-### 4.4 `2180ff0` Price the whole tree and show the prefix every request carried
+### 4.4 `8d20548` Price the whole tree and show the prefix every request carried
 
 报告原来有"一个任务花了多少、请求去了哪里"，但没有价格由什么构成的两块：
 
@@ -192,7 +192,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 现有 CLI E2E 增加对应断言，10 项仍全绿。
 
-### 4.5 给摘要它需要的空间（`66f68d1`）
+### 4.5 给摘要它需要的空间（`129da7e`）
 
 压缩失败会把会话留在它想缩小的那段上下文里，之后每个请求都重新付整段前缀。记录在案的历史里有 **9 次压缩失败，其中 6 次是同一个原因**：摘要生成撞到输出上限，摘要不完整。
 
@@ -257,7 +257,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 3. **来源 × 计费类型的精确归因仍不可得。** 供应商只回整请求的缓存/输入用量；`provider.request_profile` 只有 12 份样本（生产路径 2026-10-20 之后没有 PiG 流量），且只到 section 字节，不按计费类型拆分。本轮 CLI 补的是"前缀大小"和"用途"两个可测维度。
 4. **节点泳道的压缩阈值没有同样的杠杆。** 节点泳道走内核的 `CompactionPolicy`（daemon 侧被显式关闭），本轮只覆盖 daemon 驱动的压缩。节点泳道占缓存读取 6.2%，优先级低，但结论不能直接套用。
 5. **压缩调用未命中缓存的原因没有查到底。** 摘要请求的系统提示与工具集与会话不同，前缀对不上——这在 PiG 内部，需要上游支持才能改。
-6. ~~压缩摘要的 9 次失败未修。~~ **已修**（§4.5）：根因是请求自己的输出预算被桥丢掉，摘要被按模型的整个上限要。已提交 `66f68d1`，E2E 覆盖。
+6. ~~压缩摘要的 9 次失败未修。~~ **已修**（§4.5）：根因是请求自己的输出预算被桥丢掉，摘要被按模型的整个上限要。已提交 `129da7e`，E2E 覆盖。
 7. **reasoning 回放会增加输入 token。** 回放的 reasoning 是会话前缀的一部分，按缓存价计（比未缓存输入便宜 50 倍），但仍是净增。本轮没有测它对总花费的影响——它换来的是模型能读回自己的计划。
 8. **模型、路由、effort、分工未动**，按目标书要求只提案。
 9. **主会话与开发 CLI 路径各有一份实现。** 本轮 Go 与 TS 两边都改了压缩阈值，其余只改了 Go 路径。两条路径的行为差异（提示词拼装、请求装配）没有统一审计。
@@ -265,10 +265,27 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 ---
 
+## 7. 验证
+
+**完整门禁**（`node --run check`，在 `feature/harness-token-efficiency-2026-10-22` 上，无并发改动）：289 个测试文件 / 1,554 项测试，288 文件通过、1 个跳过（浏览器环境依赖）；1,551 项通过、3 项跳过。类型检查、Go vet、基线检查（基线按增长规则自动升到 289/1554）、验收证据检查全部通过，验收证据未变。
+
+**每个修改都做过红灯验证**（把生产改动撤掉，E2E 必须红）：
+
+| 提交 | 红灯证据 |
+| --- | --- |
+| `6b2eca8` 助手回合回放 | 撤掉后 OpenAI 与 Anthropic 两条 E2E 都红（reasoning 不在下一轮请求里） |
+| `e18a65b` 缓存断点 | 撤掉后 Anthropic E2E 的三个断点断言红 |
+| `ff7b6da` 压缩上限 | 撤掉后"设了上限就压缩"那条红，"没设上限不压缩"那条始终绿 |
+| `129da7e` 摘要输出预算 | 撤掉后摘要请求带的是模型整个上限（8192 而不是它自己的额度） |
+
+**没有做**：真实模型的 A/B。压缩上限默认关闭，本轮交付的是可测量的机制、账本上的基线和一条按真实账本推演的收益，不是"每完成任务成本已下降"的证明。
+
+---
+
 ## 附：证据路径
 
 - 基线快照：`node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tasks.sqlite" > /tmp/graph-harness-baseline-2026-10-22.json`
 - 扩展后的基线（含前缀分布、用途、整树情景）：同命令，`/tmp/baseline-v2.json`
-- 提交：`e4237a7`（助手回合回放）、`e647bee`（缓存断点）、`9846167`（压缩上限）、`2180ff0`（成本计量）、`66f68d1`（摘要输出预算）
+- 提交：`6b2eca8`（助手回合回放）、`e18a65b`（缓存断点）、`ff7b6da`（压缩上限）、`8d20548`（成本计量）、`129da7e`（摘要输出预算）
 - 新 E2E：`tests/e2e/provider-assistant-replay.test.ts`、`tests/e2e/compaction-context-ceiling.test.ts`
 - 新夹具：`tests/fixtures/anthropic-server.ts`
