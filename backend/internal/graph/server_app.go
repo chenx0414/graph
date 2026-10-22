@@ -51,7 +51,7 @@ func CreateApp(runtime *TaskRuntime, options AppOptions) *GraphApp {
 	app := &GraphApp{
 		runtime: runtime,
 		options: options,
-		session: CreateSession(),
+		session: LoadOrCreateSession(appSessionStateDir(runtime)),
 		conns:   map[net.Conn]struct{}{},
 		// The layout cache is written on the first graph view, so it has to
 		// exist before the first request arrives.
@@ -693,6 +693,14 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	if app.options.WebDir != "" {
 		mux.HandleFunc("GET /assets/{path...}", app.serveAssets)
 	}
+}
+
+// appSessionStateDir is the state directory the session token belongs to.
+func appSessionStateDir(runtime *TaskRuntime) string {
+	if runtime == nil {
+		return ""
+	}
+	return runtime.stateDir
 }
 
 // serveHome reads the console shell on every request and sets the session

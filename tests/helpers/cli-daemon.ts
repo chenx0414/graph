@@ -14,6 +14,8 @@ export async function launchCli(root: string, options: {
   stateDir?: string;
   graphHome?: string;
   webDir?: string;
+  /** Pin the port. Zero asks the operating system for a free one. */
+  port?: number;
 } = {}) {
   const sourceRoot = options.sourceRoot ?? process.cwd();
   // A checkout that never built the backend would fail every assertion for a
@@ -24,7 +26,7 @@ export async function launchCli(root: string, options: {
     '--state-dir', options.stateDir ?? join(root, 'state'),
     '--graph-home', options.graphHome ?? join(root, 'graph-home'),
     '--web-dir', options.webDir ?? join(root, 'web'),
-    '--port', '0',
+    '--port', String(options.port ?? 0),
     '--application-root', resolve(sourceRoot),
     ...(options.configPath ? ['--config', options.configPath] : []),
     ...options.extraArgs ?? [],

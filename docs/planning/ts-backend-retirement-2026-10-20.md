@@ -108,7 +108,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `m8/credentials.test.ts` | 5 | 0 | 5 | 0 | 0 |
 | `m8/provider-headers.test.ts` | 4 | 0 | 4 | 0 | 0 |
 | `m8/recipe-compile.test.ts` | 9 | 7 | 0 | 2 | 0 |
-| `m8/settings-ui.test.ts` | 10 | 0 | 10 | 0 | 0 |
+| `m8/settings-ui.test.ts` | 10 | 10 | 0 | 0 | 0 |
 | `m8/startup.test.ts` | 10 | 2 | 8 | 0 | 0 |
 | `m8/tool-failure-record.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | **小计** | **176** | **14** | **140** | **16** | **7** |
@@ -176,6 +176,9 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/console/schema-upgrade.test.ts` 升级旧安装：真的旧状态目录被就地升级（同一个文件）且历史、账目、配置都还在、升级之后的同一个数据库里跑得起原生图；v23 给旧交接重新编号；v41 的草稿与确认来源在迁移与重开之后都还在 | `tests/e2e/go-schema-upgrade.test.ts` | 4 |
 | `tests/console/setup-wizard.test.ts` 浏览器轨：向导从干净起步连上一个平台、再加第二个、**保存本身不发请求** | 同文件改由 Go daemon 驱动（`tests/console/setup-wizard.test.ts`） | 1 |
 | `tests/e2e/provider-metadata.test.ts` 浏览器轨：模型编辑器吃目录数据并落盘完整元数据、账号的凭据身份/名字/限额各自独立、缺密钥与坏配置被拒且不落盘 | 同文件改由 Go daemon 驱动（`tests/e2e/provider-metadata.test.ts`） | 6 |
+| `tests/m8/settings-ui.test.ts` 浏览器轨：设置自动保存模型/凭据/限额且不泄密、厂商面板改账户并移除关联模型、账号切换跟着模型列表走、没有值的密钥不算已解析、厂商卡片字段可读、平台账户可改名 | 同文件改由 Go daemon 驱动（`tests/m8/settings-ui.test.ts`） | 9 |
+| `tests/m8/settings-ui.test.ts` 被运行中的图占用的模型不能删：指名拒绝、节点仍 idle、图修订仍钉着那个模型、配置版本不前进；停掉那张图之后同一份改动就通过 | `tests/e2e/go-model-binding-guard.test.ts` | 1 |
+| Go 侧自有契约：会话令牌属于安装而不是进程——daemon 被换掉之后，已经打开的控制台仍然能用（同一端口、同一状态目录、旧 cookie 依然有效） | `tests/e2e/go-session-across-restart.test.ts` | 1 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -398,7 +401,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **daemon 在自己的进程里，所以外部厂商要在网络层拦**：这条测试原先用**测试进程内**的 `globalThis.fetch` 拦截，把预设厂商 `https://opencode.ai/zen/go/v1` 重定向到本机的受控厂商；Go daemon 是**独立进程**，进程内拦截拦不到，于是请求真的打到了公网 opencode.ai。改法是走仓库里已有的 `tests/helpers/vendor-proxy.ts`（`vendorProxy`）：daemon 用**自己真实的代理与 CA 设置**（Go 的 transport 读 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`，并把 `NODE_EXTRA_CA_CERTS` 追加进系统根证书）把请求送到本机的受控厂商——CONNECT 只放行 `opencode.ai`，别的主机一律 502，**没有一个字节出网**。
   - **一次回退验证证明这些断言咬得住**：让受控厂商对所有请求回 500 → 「验证成功」变成「验证失败：ROLLBACK vendor refused」，厂商自己的话原样透出来（说明那句「验证成功」确实来自一次真实往返，不是前端自己写的文案）；两次驱动切换后 6 条 + 1 条**原样通过**，没有被改写的断言。
   - **这一批没有逼出 Go 侧的真 bug**：控制台与 provider 探针在 Go 侧本来就与 TypeScript 同构（探针说厂商自己的协议、拒绝时保留厂商原话、坏草稿按字段被拒），补的是证明。
-- **Batch 42 起**：`m8/app-shell-ux` 浏览器轨（32 条，深实现耦合：10 处 `src/` 导入，要先把造状态的夹具改成走 daemon 的公开面）、`m8/settings-ui`（10 条，3 处 `src/` 导入）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
+- **Batch 42（已完成）**：设置界面的浏览器轨与那个每进程随机的会话令牌。`tests/m8/settings-ui.test.ts` 的 10 条里，**9 条改由 Go daemon 驱动**（断言一个字都没改），**第 10 条是实现耦合的**（它直接开 `daemon.server.runtime`：`supervisor().propose()`、`runtime.modelsInUse()`、`graphInspect()`……），随 TS 实现退休，它的契约搬进新的 `tests/e2e/go-model-binding-guard.test.ts`；另外新增 `tests/e2e/go-session-across-restart.test.ts`：
+  - **被运行中的图占用的模型不能删，daemon 保留绑定**（第 1 条，新 Go E2E）：master 真的提出一张图（节点钉着 `local`），用户真的确认，节点真的停在 idle；把 `local` 从配置里拿掉这件事被**指名拒绝**（400 `config_in_use`，理由里点着那个模型名）；**daemon 保留它已经有的绑定**——节点还是 idle，**图的修订里仍然写着 `local`**（用 master 自己的 `graph_inspect` 工具读出来的），磁盘上的配置一个字节没动（版本号仍是 0）；**等那张图停掉之后**，同一份改动就通过了（版本号前进到 1，模型换成了 `replacement`）。TypeScript 那条测试直接读内部运行时，同一套语义现在走的是公开面：HTTP 提案确认 + 公开的图检查工具。
+  - **这一批逼出了 Go 侧一个真 bug**：**daemon 重启后，已经打开的控制台全线 401**。会话 cookie 是**每进程随机**的（`CreateSession()` 每次启动都换一张），而 daemon 被换掉之后——升级会换、桌面端在**同一个端口**上重启它也会换——浏览器手里还是旧进程的那张 cookie，于是控制台的每个请求都被拒，页面变成一片空白（`configured-models` 根本没渲染出来）。TypeScript 那边是**同样的设计**，只是 Node 每次恰好拿到不同端口，才没有暴露出来。修法：**会话令牌属于这份安装，不属于这个进程**——它落在状态目录里（0600，目录本身 0700），daemon 重启之后还是同一张 cookie，已经打开的控制台继续工作。
+  - **两次回退验证证明这些断言咬得住**：把令牌改回每进程随机 → 新用例变红（旧 cookie 拿到 401 而不是 200）；把受控厂商改成对所有请求回 500 → 「验证成功」变成「验证失败：ROLLBACK vendor refused」。
+  - **与 TypeScript 的差异**：会话令牌的持久化是 Go 侧**多出来**的一次修复（TypeScript 那边同样有这个毛病），其余语义两边同构。
+- **Batch 43 起**：`m8/app-shell-ux` 浏览器轨（32 条，10 处 `src/` 导入在造状态——要把造状态的夹具改成走 daemon 的公开面）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。

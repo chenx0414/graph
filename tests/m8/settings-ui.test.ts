@@ -6,9 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium, type Page } from 'playwright';
-import { startGraphDaemon, type GraphDaemon } from '../../src/server/start.ts';
-import type { NativeProposal } from '../../src/core/types.ts';
-import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -87,9 +85,9 @@ async function configFile(dir: string, baseUrl: string, extra: Record<string, un
   return path;
 }
 
-async function start(dir: string, path: string, port = 0): Promise<GraphDaemon> {
-  const daemon = await startGraphDaemon({ configPath: path, stateDir: join(dir, 'state'), webDir, port, mode: 'view', env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET }, log: () => undefined });
-  cleanup.push(() => daemon.close().catch(() => undefined));
+async function start(dir: string, path: string) {
+  const daemon = await launchCli(dir, { configPath: path, stateDir: join(dir, 'state'), webDir, env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET } });
+  cleanup.push(() => daemon.close());
   return daemon;
 }
 
@@ -307,7 +305,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
 
   // Persistence across a daemon restart on the same state and config.
   await daemon.close();
-  const restarted = await start(dir, path, 0);
+  const restarted = await start(dir, path);
   const restartedApi = await session(restarted.url);
   const configText = await (await restartedApi.get('/api/config')).text();
   // The settings page auto-saves, so a further save can land after the read above; what must
@@ -489,50 +487,6 @@ test('chat composer toggles full access with one click and settings no longer ho
   await page.getByTestId('full-access-toggle').waitFor();
 }, 120_000);
 
-test('removing a model bound to an unfinished task is refused and the daemon keeps the binding', async () => {
-  const dir = await temp('guard');
-  const stub = await stubProvider();
-  const path = await configFile(dir, stub.baseUrl);
-  const daemon = await start(dir, path);
-  const api = await session(daemon.url);
-  const { taskId: anchorTaskId, conversationId } = await daemon.server.runtime.conversations.create({ projectId: 'sample', text: 'Keep binding', requestId: 'begin' });
-  await daemon.server.runtime.supervisor(anchorTaskId).propose({
-    requirementVersion: 1, summary: 'Keep binding',
-    acceptance: [{ id: 'works', description: 'Works', checkNode: 'check' }],
-    definition: parseGraphDefinition({ schemaVersion: 2, name: 'Keep binding', protocols: { data: { type: 'object' } },
-      nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Keep the declared model', inputs: { job: { protocol: 'data' } }, outputs: {}, submission: {} } },
-      modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
-        operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
-      edges: {}, acceptance: [{ id: 'works', description: 'Works', kind: 'check', module: 'check' }] }),
-  }, 'proposal');
-  await daemon.server.runtime.projects.prepare({ projectId: 'sample', initialize: true, createBaseline: true, requestId: 'prepare' });
-  const { taskId } = await daemon.server.runtime.conversations.confirm(conversationId, { proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'accept' });
-  // This owner tests the feature's model binding, not a main response.
-  // Keep the anchor paused while draining the stopped feature graph.
-  await daemon.server.runtime.user.task(anchorTaskId).pause('pause-main');
-  const document = {
-    version: 1, projects: [{ id: 'sample', root: dir }],
-    models: { entries: [{ id: 'replacement', provider: 'stub', grade: 'medium', api: 'openai-completions', baseUrl: stub.baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] }, credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } }, limits: { credentials: { local: 1 } },
-  };
-  const refused = await api.post('/api/config', { expectedRevision: 0, document });
-  expect(refused.status).toBe(400);
-  expect(await refused.json()).toMatchObject({ code: 'config_in_use' });
-  const view = await daemon.server.runtime.user.task(taskId).view();
-  expect(view.nodes.find(node => node.id === 'work')?.status).toBe('idle');
-  expect(daemon.server.runtime.modelsInUse()).toContain('local');
-  const revision = await daemon.server.runtime.supervisor(taskId).graphInspect({ graphId: taskId, query: 'revision' }) as { nodes: { work: { model: string } } };
-  expect(revision.nodes.work.model).toBe('local');
-  expect((await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(0);
-  await daemon.server.runtime.supervisor(anchorTaskId).graphControl({ graphId: taskId, action: 'stop' });
-  await daemon.server.runtime.host.drive();
-  await daemon.server.runtime.supervisor(anchorTaskId).graphCreate({ definition: parseGraphDefinition({ schemaVersion: 2, name: 'Unavailable preference', protocols: {},
-    nodes: { waiting: { recipe: 'coder@1', model: 'unavailable', task: 'Use a configured fallback when started', inputs: {}, outputs: {}, submission: {} } }, modules: {}, edges: {} }) });
-  const saved = await api.post('/api/config', { expectedRevision: 0, document });
-  expect(saved.status).toBe(200);
-  expect((await (await api.get('/api/config')).json() as { revision: number }).revision).toBe(1);
-
-}, 60_000);
-
 test('settings imports detected subscription credentials without exposing their values', async () => {
   const dir = await temp('subscription-sync');
   const stub = await stubProvider();
@@ -581,11 +535,9 @@ test('switching the account in step one follows through to the model list in ste
     credentials: { 'alpha-account': { secretRef: 'GRAPH_ALPHA_KEY' }, 'beta-account': { secretRef: 'GRAPH_BETA_KEY' } },
     limits: { credentials: { 'alpha-account': 1, 'beta-account': 1 } },
   }, null, 2));
-  const daemon = await startGraphDaemon({
-    configPath: path, stateDir: join(dir, 'state'), webDir, port: 0, mode: 'view',
-    env: { HOME: dir, GRAPH_ALPHA_KEY: SECRET, GRAPH_BETA_KEY: SECRET }, log: () => undefined,
-  });
-  cleanup.push(() => daemon.close().catch(() => undefined));
+  const daemon = await launchCli(dir, { configPath: path, stateDir: join(dir, 'state'), webDir,
+    env: { HOME: dir, GRAPH_ALPHA_KEY: SECRET, GRAPH_BETA_KEY: SECRET } });
+  cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
@@ -613,11 +565,9 @@ test('an account whose own key has no value is not reported as resolved', async 
   });
   // The platform-level variable exists - which is exactly what let this card claim 凭据已解析 for an account
   // that has no value of its own. The only symptom of that lie is a model that silently never dispatches.
-  const daemon = await startGraphDaemon({
-    configPath: path, stateDir: join(dir, 'state'), webDir, port: 0, mode: 'view',
-    env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET, GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: SECRET }, log: () => undefined,
-  });
-  cleanup.push(() => daemon.close().catch(() => undefined));
+  const daemon = await launchCli(dir, { configPath: path, stateDir: join(dir, 'state'), webDir,
+    env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET, GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: SECRET } });
+  cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
@@ -637,11 +587,9 @@ test('the vendor card keeps its fields readable instead of crowding them', async
   const dir = await temp('card-crowding');
   const stub = await stubProvider();
   const path = await configFile(dir, stub.baseUrl);
-  const daemon = await startGraphDaemon({
-    configPath: path, stateDir: join(dir, 'state'), webDir, port: 0, mode: 'view',
-    env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET }, log: () => undefined,
-  });
-  cleanup.push(() => daemon.close().catch(() => undefined));
+  const daemon = await launchCli(dir, { configPath: path, stateDir: join(dir, 'state'), webDir,
+    env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET } });
+  cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
