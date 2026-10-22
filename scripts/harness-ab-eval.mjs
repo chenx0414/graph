@@ -19,10 +19,18 @@ const exec=promisify(execFile);
  * Usage:
  *   node scripts/harness-ab-eval.mjs /path/to/graph.config.json [case]
  *
+ * The cases are the frozen task inputs of scripts/harness-eval-cases.mjs, plus
+ * `big-output` here: the shared set does not force the agent to run the
+ * checker, and an agent that edits the configuration without running it never
+ * produces a large tool result at all.
+ *
  * Environment:
  *   GRAPH_AB_REPEATS      repetitions per variant (default 5)
  *   GRAPH_AB_VARIANTS     comma separated variants (default default,reuse)
- *   GRAPH_EVAL_TIMEOUT_MS the wall clock one run may take (default 180000)
+ *   GRAPH_AB_TURNS        follow-up turns of the same conversation (default 1)
+ *   GRAPH_AB_FOLLOWUP     0 to run the task once and stop (default on)
+ *   GRAPH_AB_KEEP         1 to keep the run's directory for inspection
+ *   GRAPH_EVAL_TIMEOUT_MS the wall clock one turn may take (default 180000)
  *
  * The credential of the provider comes from the environment the configuration
  * names; this script never reads a key of its own.
@@ -36,6 +44,9 @@ const VARIANTS = {
   // The ceiling at a level a one-shot task can reach: the mechanism is measured
   // on a short task instead of waiting for a session that grows for hours.
   'ceiling-low': { env: { GRAPH_REUSE_TASK_SETUP: '1', GRAPH_COMPACTION_CONTEXT_CEILING: '8192' } },
+  // A ceiling a long session can reach: the context of a session that keeps
+  // working passes a hundred thousand tokens long before the provider's window.
+  'ceiling-32k': { env: { GRAPH_REUSE_TASK_SETUP: '1', GRAPH_COMPACTION_CONTEXT_CEILING: '32768' } },
   'setup-only': { env: { GRAPH_REUSE_TASK_SETUP: '1' } },
   // The seam off: the result is carried as the tool produced it, and the
   // kernel's own truncation cuts it.
@@ -89,6 +100,14 @@ const FOLLOWUPS = {
   'big-output': '再跑一次检查，确认这次真的通过了。',
 };
 const withFollowUp = process.env.GRAPH_AB_FOLLOWUP !== '0';
+// The number of follow-up turns of the same conversation. A long conversation is
+// where the setup repeats and where the context grows: one turn is a task, many
+// turns are a session.
+// A master that is preparing or dispatching is still working: only a settled
+// master ends the wait.
+const SETTLED = ['succeeded', 'failed', 'blocked', 'interrupted', 'abandoned', 'waiting'];
+const turns = Number(process.env.GRAPH_AB_TURNS ?? 1);
+if (!Number.isSafeInteger(turns) || turns < 0) throw new Error('Invalid GRAPH_AB_TURNS');
 
 async function run(variant, index) {
   const root = await mkdtemp(join(tmpdir(), `graph-ab-${variant}-`));
@@ -116,20 +135,20 @@ async function run(variant, index) {
     while (Date.now() < until) {
       const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json();
       status = view.master?.status ?? 'unknown';
-      if (status !== 'pending' && status !== 'running' && status !== 'unknown') break;
+      if (SETTLED.includes(status)) break;
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    // The second turn of the same conversation.
-    if (withFollowUp && status === 'succeeded' && FOLLOWUPS[caseId]) {
+    // The follow-up turns of the same conversation.
+    for (let turn = 0; turn < turns && withFollowUp && status === 'succeeded' && FOLLOWUPS[caseId]; turn += 1) {
       const follow = await daemon.request(`/api/conversations/${conversationId}/messages`, {
-        method: 'POST', body: JSON.stringify({ text: FOLLOWUPS[caseId], requestId: `ab-${variant}-${index}-follow` }),
+        method: 'POST', body: JSON.stringify({ text: FOLLOWUPS[caseId], requestId: `ab-${variant}-${index}-follow-${turn}` }),
       });
       if (follow.status !== 200) throw new Error(`The follow-up was refused: ${follow.status}`);
       const untilFollow = Date.now() + deadlineMs;
       while (Date.now() < untilFollow) {
         const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json();
         status = view.master?.status ?? 'unknown';
-        if (status !== 'pending' && status !== 'running' && status !== 'unknown') break;
+        if (SETTLED.includes(status)) break;
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
