@@ -704,6 +704,16 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 	body := map[string]any{}
 	transcript := controlledContextMessages(stream.context)
 	endpoint := strings.TrimSuffix(baseURL, "/")
+	// The output budget of this request. The kernel asks for a summary with
+	// a budget of its own, and a request that asked for the model's whole
+	// output limit instead would write the summary until it was cut off.
+	maxTokens := 0
+	if value, ok := controlledSafeCount(record["maxTokens"]); ok && value > 0 {
+		maxTokens = int(value)
+	}
+	if value, ok := controlledSafeCount(stream.options["maxTokens"]); ok && value > 0 {
+		maxTokens = int(value)
+	}
 	switch stream.api {
 	case "anthropic-messages":
 		endpoint += "/messages"
@@ -713,8 +723,8 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 			body["system"] = system
 		}
 		body["messages"] = controlledAnthropicMessages(transcript)
-		if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
-			body["max_tokens"] = tokens
+		if maxTokens > 0 {
+			body["max_tokens"] = maxTokens
 		}
 		if tools := controlledAnthropicTools(transcript); len(tools) > 0 {
 			body["tools"] = tools
@@ -725,8 +735,8 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		body["stream"] = true
 		body["stream_options"] = map[string]any{"include_usage": true}
 		body["messages"] = controlledOpenAIMessages(transcript, controlledInstructionRole(record))
-		if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
-			body["max_tokens"] = tokens
+		if maxTokens > 0 {
+			body["max_tokens"] = maxTokens
 		}
 		if tools := controlledOpenAITools(transcript); len(tools) > 0 {
 			body["tools"] = tools

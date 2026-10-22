@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
@@ -46,10 +47,23 @@ type SessionOptions struct {
 	// RequestId is the admission identity of the next input. The same id is
 	// the same input, so a retried admission is never sent twice.
 	RequestId string
+	// Compaction are the compaction thresholds the daemon decided for this
+	// model. The kernel derives the summary's own output budget from the
+	// reserve, so thresholds the kernel never heard of are a summary that is
+	// cut short and a conversation that keeps far less than it should.
+	Compaction *CompactionThresholds
 	// OnEvent receives the kernel's events.
 	OnEvent func(event map[string]any)
 	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
+}
+
+// CompactionThresholds are the compaction thresholds of one model.
+type CompactionThresholds struct {
+	// ReserveTokens is the room the summary is written in.
+	ReserveTokens int
+	// KeepRecentTokens is the part of the conversation that survives.
+	KeepRecentTokens int
 }
 
 // ToolCallRecord is one executed tool call.
@@ -158,6 +172,13 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 	// The model is the daemon's: the kernel asks the daemon's own stream for
 	// the answer, and the daemon admits the send.
 	providerID := providerName(options.Identity)
+	// The daemon owns the compaction thresholds of the model this session
+	// runs on. The kernel resolves the policy by the model reference the
+	// agent holds, which is the registered provider and the model id.
+	if options.Compaction != nil {
+		RegisterCompactionPolicy(providerID+"/"+options.Model.Id,
+			options.Compaction.ReserveTokens, options.Compaction.KeepRecentTokens)
+	}
 	provider := ai.CreateProvider(ai.CreateProviderOptions{
 		ID: providerID,
 		Auth: ai.ProviderAuth{APIKey: &ai.APIKeyAuth{
@@ -300,10 +321,106 @@ func (session *Session) Compact(ctx context.Context, instructions string) error 
 	if err != nil {
 		return err
 	}
+	session.reportCompaction(ctx, result)
 	if result.State.Outcome != nil && result.State.Outcome.Status != durable.OutcomeCompleted {
 		return fmt.Errorf("pig kernel: the compaction did not complete")
 	}
+	// A compaction that compacted nothing is not a compaction. The kernel
+	// completes such a task with an empty result, and Pi reports it as an
+	// error, so the daemon is told the truth instead of announcing a context
+	// that is exactly as long as it was.
+	if result.State.Outcome != nil && !compactionCarriesSummary(result.State.Outcome.Result) {
+		return fmt.Errorf("Nothing to compact (session too small)")
+	}
 	return nil
+}
+
+// reportCompaction tells the daemon how the compaction ended.
+//
+// The kernel's own event carries the reason and the failure. The summary is
+// written into the conversation, so it is read there: the daemon persists it
+// as the entry that carries the compacted context forward. Without this the
+// daemon's compaction handling never runs, and a compaction that failed is
+// invisible.
+func (session *Session) reportCompaction(ctx context.Context, result durable.SettledTask[durable.JsonValue]) {
+	if session.OnEvent == nil {
+		return
+	}
+	report := map[string]any{"type": "compaction_end", "reason": "manual"}
+	outcome := result.State.Outcome
+	if outcome != nil && outcome.Status == durable.OutcomeCompleted {
+		if summary := session.compactionSummary(ctx); summary != "" {
+			report["result"] = map[string]any{"summary": summary}
+			session.OnEvent(report)
+			return
+		}
+		report["aborted"] = true
+		report["errorMessage"] = "Nothing to compact (session too small)"
+		session.OnEvent(report)
+		return
+	}
+	report["aborted"] = true
+	message := "compaction failed"
+	if outcome != nil && outcome.Error != nil && outcome.Error.Message != "" {
+		message = outcome.Error.Message
+	}
+	report["errorMessage"] = message
+	session.OnEvent(report)
+}
+
+// compactionSummary reads the summary the last compaction wrote.
+//
+// The summary is the compaction entry's own user message: the text the model
+// wrote is the whole content of the context that follows it.
+func (session *Session) compactionSummary(ctx context.Context) string {
+	entries, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id()}, 1000, nil)
+	if err != nil {
+		return ""
+	}
+	for index := len(entries.Items) - 1; index >= 0; index-- {
+		entry := entries.Items[index]
+		if entry.Kind != durable.CompactionEntry.Kind {
+			continue
+		}
+		for _, message := range entry.Model {
+			user, ok := message.(ai.UserMessage)
+			if !ok {
+				continue
+			}
+			blocks, ok := user.Content.(ai.UserContentBlocks)
+			if !ok {
+				continue
+			}
+			parts := []string{}
+			for _, block := range blocks {
+				if text, ok := block.(ai.TextContent); ok {
+					parts = append(parts, text.Text)
+				}
+			}
+			return strings.Join(parts, "\n")
+		}
+	}
+	return ""
+}
+
+// compactionCarriesSummary reports whether a compaction wrote a summary.
+//
+// The result names the entry the summary was written as, or the submission
+// that carries it. A compaction with neither compacted nothing.
+func compactionCarriesSummary(result *any) bool {
+	if result == nil || *result == nil {
+		return false
+	}
+	object, ok := (*result).(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, key := range []string{"entryId", "submissionId"} {
+		if value, found := object[key]; found && value != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Steer injects a message into the running turn.
@@ -438,6 +555,8 @@ func translateEvent(event harness.AgentEvent) []map[string]any {
 		return []map[string]any{{"type": "turn_start"}}
 	case harness.TurnEndEvent:
 		return []map[string]any{{"type": "turn_end"}}
+	case harness.CompactionStartEvent:
+		return []map[string]any{{"type": "compaction_start", "reason": string(value.Reason)}}
 	case harness.MessageStartEvent:
 		message := messageMap(value.Message)
 		return []map[string]any{{"type": "message_start", "message": message}}

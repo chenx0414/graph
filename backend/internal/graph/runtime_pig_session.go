@@ -112,6 +112,12 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 	if request.ThinkingLevel != nil {
 		options.ThinkingLevel = *request.ThinkingLevel
 	}
+	if request.Compaction != nil {
+		options.Compaction = &pigkernel.CompactionThresholds{
+			ReserveTokens:    request.Compaction.ReserveTokens,
+			KeepRecentTokens: request.Compaction.KeepRecentTokens,
+		}
+	}
 	return pigkernel.OpenSession(ctx, options)
 }
 

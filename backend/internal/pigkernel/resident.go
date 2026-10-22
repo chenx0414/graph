@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MichaelKinsy/PiG/ai"
+	"github.com/MichaelKinsy/PiG/durable"
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
 
@@ -64,6 +65,11 @@ func openResident(ctx context.Context, database string) (*resident, error) {
 // The provider retry and the context compaction belong to the daemon: it
 // decides whether a failed send is retried and when the context is compacted,
 // and the kernel must not do either behind its back.
+//
+// The compaction thresholds themselves are the daemon's too, and they are
+// registered per model when a session opens. The kernel reads the policy at
+// every use, so a policy registered for the model of the running session is
+// in force for that session's next compaction - and for no other one.
 func residentSettings() *harness.HarnessSettings {
 	retry := harness.RetryPolicyPatch{Enabled: boolPointer(false)}
 	compaction := harness.CompactionPolicyPatch{
@@ -71,8 +77,49 @@ func residentSettings() *harness.HarnessSettings {
 		ReserveTokens:    intPointer(1024),
 		KeepRecentTokens: intPointer(1024),
 		BackgroundTokens: intPointer(0),
+		ModelOverrides:   compactionPolicyOverrides(),
 	}
 	return &harness.HarnessSettings{Retry: &retry, Compaction: &compaction}
+}
+
+// compactionPolicies are the compaction thresholds the daemon decided, keyed
+// by the model reference the kernel resolves them with.
+var compactionPolicies = struct {
+	sync.Mutex
+	values map[string]durable.CompactionPolicyOverride
+}{values: map[string]durable.CompactionPolicyOverride{}}
+
+// RegisterCompactionPolicy records the compaction thresholds of one model.
+//
+// The reserve is the room the summary is written in and the keep-recent
+// window is the part of the conversation that survives the compaction. The
+// kernel derives the summary's own output budget from the reserve, so a
+// reserve the daemon never chose is a summary that is cut short.
+func RegisterCompactionPolicy(model string, reserve int, keep int) {
+	if model == "" || (reserve <= 0 && keep <= 0) {
+		return
+	}
+	override := durable.CompactionPolicyOverride{}
+	if reserve > 0 {
+		override.ReserveTokens = intPointer(reserve)
+	}
+	if keep > 0 {
+		override.KeepRecentTokens = intPointer(keep)
+	}
+	compactionPolicies.Lock()
+	compactionPolicies.values[model] = override
+	compactionPolicies.Unlock()
+}
+
+// compactionPolicyOverrides is the policy snapshot the kernel reads.
+func compactionPolicyOverrides() map[string]durable.CompactionPolicyOverride {
+	compactionPolicies.Lock()
+	defer compactionPolicies.Unlock()
+	out := make(map[string]durable.CompactionPolicyOverride, len(compactionPolicies.values))
+	for model, override := range compactionPolicies.values {
+		out[model] = override
+	}
+	return out
 }
 
 // extensionName is the name one session's extension is installed under.

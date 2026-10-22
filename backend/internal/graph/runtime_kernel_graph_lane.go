@@ -1007,7 +1007,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				Workspace:            workspace,
 				StateDir:             session.StateDir,
 				Model:                ToPiModel(*model),
-				ThinkingLevel:        "off",
+				// A node runs at the effort its own model accepts by default. The
+			// hardcoded "off" ran every sub-agent without reasoning, whatever
+			// the model it was given was made for.
+			ThinkingLevel:        string(EffectiveThinkingLevel(*model, nil)),
 				Compaction:           &compaction,
 				Tools:                tools,
 				NativeTools:          nativeTools,
@@ -1462,6 +1465,11 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					Workspace:   workerConfig.Workspace,
 					StateDir:    workerConfig.StateDir,
 					Model:       workerConfig.Model,
+					// The compaction thresholds the daemon decided for this
+					// node's model. The kernel writes the summary into the
+					// reserve and keeps the recent window, so thresholds it
+					// never heard of are a summary that is cut short.
+					Compaction:  workerConfig.Compaction,
 					Tools:       nodeTools,
 					NativeTools: nativeTools,
 					// The skills the node may load: its own folder, the bound

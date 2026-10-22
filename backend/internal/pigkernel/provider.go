@@ -60,7 +60,7 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 				pushFailure(output, model, err.Error())
 				return
 			}
-			source, err := bridge.Stream(ctx, transcript, bridge.Options)
+			source, err := bridge.Stream(ctx, transcript, bridgeRequestOptions(bridge.Options, options))
 			if err != nil {
 				pushFailure(output, model, err.Error())
 				return
@@ -90,6 +90,23 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 		return output, nil
 	}
 	return ai.ProviderAPIMap{api: &ai.ProviderStreams{Stream: stream, StreamSimple: stream}}
+}
+
+// bridgeRequestOptions merges the kernel's own request options into the
+// daemon's options.
+//
+// The kernel asks for a summary with a budget of its own: the summary is
+// written into that budget, and a request that asks for the model's whole
+// output limit instead writes the summary until it is cut off.
+func bridgeRequestOptions(base map[string]any, options ai.StreamOptions) map[string]any {
+	merged := map[string]any{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	if options.MaxTokens > 0 {
+		merged["maxTokens"] = options.MaxTokens
+	}
+	return merged
 }
 
 // TranscriptMessages reads the kernel's transcript as the SDK's own message

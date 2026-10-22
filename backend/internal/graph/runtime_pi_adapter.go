@@ -1273,9 +1273,15 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	// A stored level can predate a catalog refresh, or name a model the
 	// snapshot does not list: clamp it to a level this model accepts before
 	// the turn runs, using the same SDK rule the console displays.
+	//
+	// An operation without a conversation is a graph node: it has no stored
+	// level of its own, and running it without reasoning is not what its model
+	// was made for. It runs at the level the model accepts by default.
 	thinkingLevel := "off"
 	if conversation != nil && conversation.ThinkingLevel != nil {
 		thinkingLevel = *conversation.ThinkingLevel
+	} else {
+		thinkingLevel = string(EffectiveThinkingLevel(entry, nil))
 	}
 	model := ToPiModel(entry)
 	thinkingLevel = clampThinkingLevel(model.Reasoning, model.ThinkingLevelMap, thinkingLevel)
