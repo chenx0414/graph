@@ -17,6 +17,8 @@
 
 3. **节点预算一条写规则、一个 owner**（提交 `aeacc0e`）。节点花销原先有两种写法：provider 闸门按调用结算并累加，节点执行器按整轮结算并**覆盖**写列（而且是在事务外先读后写）。一列数字说不清自己装的是哪一种。现在 `CommitNodeUsage` 只增不覆，执行器交出的是那一轮的总量而不是"读到的值加总量"，闸门结算调用与对账路径结算未知调用都走同一个方法，闸门不再直接写 kernel 表。
 
+4. **"这个节点正在跑哪个 execution"归 store 回答**（提交 `cf00356`）。节点泳道向 kernel 表问了同一个问题九次：九个同样的 SELECT，散在泳道、provider 闸门与节点宿主里，其中一个读的还是同一行的另一个列。决定答案的规则——这个节点最新的 running execution——因此有九处要改、却没有一处可看。`KernelStore.RunningExecution` 回答它，返回的是 store 本来就在造的那份 `ExecutionRow`，泳道读的是有类型的字段而不是从 map 里掏。副本没了，回答问题的查询只有一份。
+
 ## 过程中查出来、**尚未处理**的问题
 
 1. **系统自模型在 Go daemon 里没有接线**。`GraphServerOptions.SystemContext` 从来没有被设过，因此 `read_system_capabilities`、`inspect_graph_system`、`propose_system_change`、`apply_system_change` 这四个工具对主 Agent 一直不可用。TypeScript 宿主是接了的（`src/server/start.ts:407` 传 `{ systemSummary }`），Go 端口迁移时漏掉。CONTEXT.md 的**系统自模型**把这项列为产品能力，所以这是一个功能缺口，不是设计取舍。补它需要一份 Go 侧的主机清单，属于功能实现而不是结构整理。
@@ -36,6 +38,7 @@
 | `601ec92` | 287 个文件里 285 通过、1 跳过、1 失败 | 唯一失败是 `tests/m1/recovery.test.ts`（15 秒超时、TypeScript 侧），单独重跑通过；同一份未改动 main 在同样条件下也失败 |
 | `c13be7a` | 287 个文件里 281 通过、1 跳过、5 失败 | 5 个失败文件单独重跑时 3 个转为通过；剩下 2 个在未改动的 main 上同样失败 |
 | `aeacc0e` | 满负载下 42 个文件失败 | 抽 6 个与本次改动无关的失败文件重跑，两个分支都是 61/61 通过；覆盖节点预算的 `tests/e2e/node-budget.test.ts`、`tests/m8/kernel-node-budget.test.ts`、`tests/m8/node-executor.test.ts` 在满负载那一次里就是通过的 |
-| `8c74ef8`（分支 HEAD） | **286 通过、1 跳过、0 失败**；"Suite matches the baseline (files 287, tests 1549)"；"Acceptance evidence is unchanged" | 在另一份干净 worktree 上跑本分支的已提交状态，机器空载（负载平均 7） |
+| `8c74ef8` | **286 通过、1 跳过、0 失败**；"Suite matches the baseline (files 287, tests 1549)"；"Acceptance evidence is unchanged" | 在另一份干净 worktree 上跑本分支的已提交状态，机器空载（负载平均 7） |
+| `cf00356` | 287 个文件里 283 通过、1 跳过、3 失败 | 3 个失败文件单独重跑，在本提交上 3 个全过；同一个 `tests/durable/recovery.test.ts` 在上一个提交 `ff8e580` 上同样失败 |
 
 `tests/e2e/node-budget.test.ts` 断言结算后节点的 `used: 50, reserved: 0`，正是第三条改动的两条路径。
