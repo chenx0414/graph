@@ -104,7 +104,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `m3/production.test.ts` | 11 | 0 | 11 | 0 | 0 |
 | `m5/graph.test.ts` | 4 | 0 | 4 | 0 | 0 |
 | `m5/http.test.ts` | 6 | 2 | 4 | 0 | 0 |
-| `m8/app-shell-ux.test.ts` | 32 | 0 | 32 | 0 | 0 |
+| `m8/app-shell-ux.test.ts` | 32 | 12 | 20 | 0 | 0 |
 | `m8/credentials.test.ts` | 5 | 0 | 5 | 0 | 0 |
 | `m8/provider-headers.test.ts` | 4 | 0 | 4 | 0 | 0 |
 | `m8/recipe-compile.test.ts` | 9 | 7 | 0 | 2 | 0 |
@@ -179,6 +179,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m8/settings-ui.test.ts` 浏览器轨：设置自动保存模型/凭据/限额且不泄密、厂商面板改账户并移除关联模型、账号切换跟着模型列表走、没有值的密钥不算已解析、厂商卡片字段可读、平台账户可改名 | 同文件改由 Go daemon 驱动（`tests/m8/settings-ui.test.ts`） | 9 |
 | `tests/m8/settings-ui.test.ts` 被运行中的图占用的模型不能删：指名拒绝、节点仍 idle、图修订仍钉着那个模型、配置版本不前进；停掉那张图之后同一份改动就通过 | `tests/e2e/go-model-binding-guard.test.ts` | 1 |
 | Go 侧自有契约：会话令牌属于安装而不是进程——daemon 被换掉之后，已经打开的控制台仍然能用（同一端口、同一状态目录、旧 cookie 依然有效） | `tests/e2e/go-session-across-restart.test.ts` | 1 |
+| `tests/m8/app-shell-ux.test.ts` 浏览器轨（32 条中的 12 条）：项目选择器真的把项目加进侧边栏、Agent Markdown 真的渲染、工具活动折在答案后面、流式增量逐步显影、重试流被清掉、模型与思考档位一起被记住、收件箱保留已解决的问题、新会话斜杠菜单不越界、设置页独立成页 | 同文件的部分用例改由 Go daemon 驱动（`tests/m8/app-shell-ux.test.ts`） | 12 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -406,7 +407,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **这一批逼出了 Go 侧一个真 bug**：**daemon 重启后，已经打开的控制台全线 401**。会话 cookie 是**每进程随机**的（`CreateSession()` 每次启动都换一张），而 daemon 被换掉之后——升级会换、桌面端在**同一个端口**上重启它也会换——浏览器手里还是旧进程的那张 cookie，于是控制台的每个请求都被拒，页面变成一片空白（`configured-models` 根本没渲染出来）。TypeScript 那边是**同样的设计**，只是 Node 每次恰好拿到不同端口，才没有暴露出来。修法：**会话令牌属于这份安装，不属于这个进程**——它落在状态目录里（0600，目录本身 0700），daemon 重启之后还是同一张 cookie，已经打开的控制台继续工作。
   - **两次回退验证证明这些断言咬得住**：把令牌改回每进程随机 → 新用例变红（旧 cookie 拿到 401 而不是 200）；把受控厂商改成对所有请求回 500 → 「验证成功」变成「验证失败：ROLLBACK vendor refused」。
   - **与 TypeScript 的差异**：会话令牌的持久化是 Go 侧**多出来**的一次修复（TypeScript 那边同样有这个毛病），其余语义两边同构。
-- **Batch 43 起**：`m8/app-shell-ux` 浏览器轨（32 条，10 处 `src/` 导入在造状态——要把造状态的夹具改成走 daemon 的公开面）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
+- **Batch 43（已完成）**：应用外壳的浏览器轨。`tests/m8/app-shell-ux.test.ts` 的 **32 条里有 12 条改由 Go daemon 驱动**（断言一个字都没改），另外 20 条**留在 TypeScript 的进程内服务器上**——它们要靠 `server.runtime.*` 造状态（提案、目录发布、会话创建），那是 TS 运行时的内部面，随实现一起退休：
+  - **12 条搬过去的原因很朴素**：它们本来就是在浏览器里 stub API 响应（`page.route`）来测控制台的渲染，daemon 只负责把控制台壳子端出来。于是驱动方换成真实的 Go daemon 之后，**断言一个字都没改**就成立了：项目选择器真的把项目加进侧边栏（配置真的落盘）、Agent 的 Markdown 真的渲染成表格、工具活动真的折在答案后面、流式增量真的逐步显影、重试流真的被清掉、模型与思考档位真的作为一次选择被记住、收件箱真的把已解决的问题留在历史里、新会话的斜杠菜单真的不越界、设置页真的是独立的一页。
+  - **这一批没有逼出 Go 侧的真 bug**：控制台这一层本来就与后端实现无关，Go 侧的 API 面足够。
+  - **一次回退验证证明这些断言咬得住**：让 Go 的配置保存直接报错 → 「项目选择器把项目加进侧边栏」那条变红（项目根本没进侧边栏）——那条断言真的在读 daemon 落盘的结果，不是自己画的界面。
+  - **仍留在案的 20 条**：它们的状态是用 TS 运行时的内部面造的（`runtime.conversations.create`、`runtime.supervisor().propose()`、`runtime.catalog.publishDefinition()`、`runtime.modelsInUse()`……）。要迁到 Go，得先给它们找到公开面的造状态路径（受控 provider + HTTP 提案确认），这是 Batch 44 的活。
+- **Batch 44 起**：`m8/app-shell-ux` 剩下的 20 条（造状态改走公开面）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。

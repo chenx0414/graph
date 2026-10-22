@@ -9,7 +9,7 @@ import { appendNodeEntry } from '../../src/core/node-run.ts';
 import { appendMessage } from '../../src/core/conversation.ts';
 import { TaskStore } from '../../src/core/store.ts';
 import { openGraphServer } from '../../src/server/host.ts';
-import { startGraphDaemon } from '../../src/server/start.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
 import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
@@ -50,6 +50,32 @@ async function gitProject(dir: string) {
   git(dir, ['add', '.']);
   git(dir, ['commit', '-q', '-m', 'init']);
   return dir;
+}
+
+/**
+ * The console, served by the real Go daemon.
+ *
+ * The console is a client: the daemon only has to serve the shell and answer
+ * the API. The models exist so the daemon starts; nothing here dispatches.
+ */
+async function consoleServer(root: string, options: { projects?: { id: string; root: string }[]; models?: number } = {}) {
+  const configPath = join(root, 'graph.config.json');
+  const entries = Array.from({ length: options.models ?? 1 }, (_, index) => ({
+    id: index === 0 ? 'local' : `model-${index + 1}`, provider: 'stub', grade: 'medium', api: 'openai-completions',
+    baseUrl: 'http://127.0.0.1:1/v1', contextWindow: 2048, maxTokens: 128, credentialId: 'local',
+  }));
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: options.projects ?? [{ id: 'alpha', root }],
+    credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' } },
+    models: { entries },
+  }, null, 2));
+  const daemon = await launchCli(root, {
+    configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, GRAPH_SYNTH_KEY: 'synthetic-shell-key' },
+  });
+  cleanup.push(() => daemon.close());
+  return daemon;
 }
 
 function workerCheckProposal(summary: string, check = 'check', criterion = 'ok'): NativeProposal {
@@ -809,18 +835,7 @@ test('the project picker adds a local project to the sidebar', async () => {
   const picked = join(root, 'picked');
   await mkdir(initial, { recursive: true });
   await mkdir(picked, { recursive: true });
-  const configPath = join(root, 'graph.config.json');
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'initial', root: initial }] }, null, 2));
-  const daemon = await startGraphDaemon({
-    configPath,
-    stateDir: join(root, 'state'),
-    webDir,
-    port: 0,
-    mode: 'view',
-    env: {},
-    log: () => undefined,
-  });
-  cleanup.push(() => daemon.close());
+  const daemon = await consoleServer(root, { projects: [{ id: 'initial', root: initial }] });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -849,13 +864,7 @@ test('the project picker adds a local project to the sidebar', async () => {
 
 test('agent markdown renders and tool activity appears before the final answer', async () => {
   const root = await temp('markdown');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -925,13 +934,7 @@ test('agent markdown renders and tool activity appears before the final answer',
 
 test('live tool activity groups and streamed markdown follow the transcript tail', async () => {
   const root = await temp('stream');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const messages = Array.from({ length: 24 }, (_, index) => ({
     id: `history-${index}`,
@@ -1036,13 +1039,7 @@ test('live tool activity groups and streamed markdown follow the transcript tail
 
 test('a coarse streamed delta is revealed progressively instead of landing as one block', async () => {
   const root = await temp('coarse-stream');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1125,13 +1122,7 @@ test('a coarse streamed delta is revealed progressively instead of landing as on
 
 test('interrupted retry streams are removed before the durable final answer', async () => {
   const root = await temp('retry-stream');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1196,13 +1187,7 @@ test('interrupted retry streams are removed before the durable final answer', as
 
 test('the composer model control switches model and thinking as one persisted selection', async () => {
   const root = await temp('model-control');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 2, enabledModelCount: 2 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root, { models: 2 });
   const selections: { model?: string; thinkingLevel?: string }[] = [];
 
   const browser = await chromium.launch({ headless: true });
@@ -1555,13 +1540,7 @@ test('the Main Agent recipe is visible with fixed system capabilities and an edi
 
 test('the inbox keeps resolved questions in history', async () => {
   const root = await temp('inbox-history');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1719,13 +1698,7 @@ test('the composer slash menu selects tools, switches model and queues compactio
 
 test('the new-chat slash menu stays inside the viewport and inserts an inline tool token', async () => {
   const root = await temp('new-chat-slash');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 0, enabledModelCount: 0 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1790,12 +1763,7 @@ test('the new-chat composer supports project mentions and attachments before sub
 
 test('the new-chat composer switches model and thinking before the conversation starts', async () => {
   const root = await temp('new-chat-model');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 2, enabledModelCount: 2 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root, { models: 2 });
   const creates: { text?: string; model?: string; thinkingLevel?: string }[] = [];
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1848,13 +1816,7 @@ test('the new-chat composer switches model and thinking before the conversation 
 
 test('settings opens as a second page with its own navigation and return control', async () => {
   const root = await temp('settings-shell');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1888,13 +1850,7 @@ test('settings opens as a second page with its own navigation and return control
 
 test('the compact shell keeps the new-chat composer inside the viewport', async () => {
   const root = await temp('compact');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root);
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
