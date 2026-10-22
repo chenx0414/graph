@@ -1585,6 +1585,30 @@ func (runtime *TaskRuntime) graphManagement(taskId string) AgentToolsGraphManage
 			}
 			return service.GraphSend(request)
 		},
+		HarnessCompare: func(input map[string]any) any {
+			nodeIds := []string{}
+			switch typed := input["nodeIds"].(type) {
+			case []string:
+				nodeIds = append(nodeIds, typed...)
+			case []any:
+				for _, item := range typed {
+					nodeIds = append(nodeIds, agentToolsString(item))
+				}
+			}
+			baseline, _ := input["baselineNodeId"].(string)
+			domain, _ := input["domain"].(string)
+			comparison := service.HarnessCompare(HarnessCompareInput{
+				GraphId:        agentToolsString(input["graphId"]),
+				NodeIds:        nodeIds,
+				BaselineNodeId: baseline,
+				Domain:         domain,
+			})
+			return comparison
+		},
+		HarnessExperience: func(input map[string]any) any {
+			domain, _ := input["domain"].(string)
+			return service.HarnessExperience(HarnessExperienceInput{Domain: domain})
+		},
 	}
 }
 

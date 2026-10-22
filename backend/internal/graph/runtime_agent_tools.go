@@ -48,6 +48,12 @@ type AgentToolsGraphManagement struct {
 	GraphInspect func(input map[string]any) any
 	GraphControl func(input map[string]any) any
 	GraphSend    func(input map[string]any) any
+	// HarnessCompare reads the behavioral contrast of the candidates of one
+	// task. It is the comparison half of the self-improvement loop and it
+	// lives with the graph facts it reads.
+	HarnessCompare func(input map[string]any) any
+	// HarnessExperience reads the lessons earlier tasks adopted per domain.
+	HarnessExperience func(input map[string]any) any
 }
 
 // AgentToolsSystemChange is one proposed change of the Graph host itself.
@@ -818,6 +824,76 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			}
 			return result
 		},
+		"compare_harness_candidates": func(id string, params map[string]any) any {
+			if input.GraphManagement.HarnessCompare == nil {
+				panic(errors.New("Harness comparison is unavailable in this session"))
+			}
+			nodeIds := []string{}
+			switch typed := params["nodeIds"].(type) {
+			case []any:
+				for _, item := range typed {
+					nodeIds = append(nodeIds, agentToolsString(item))
+				}
+			case []string:
+				nodeIds = append(nodeIds, typed...)
+			}
+			baseline := ""
+			if value, ok := params["baselineNodeId"].(string); ok {
+				baseline = strings.TrimSpace(value)
+			}
+			domain := ""
+			if value, ok := params["domain"].(string); ok {
+				domain = strings.TrimSpace(value)
+			}
+			comparison := input.GraphManagement.HarnessCompare(map[string]any{
+				"graphId":        agentToolsString(params["graphId"]),
+				"nodeIds":        nodeIds,
+				"baselineNodeId": baseline,
+				"domain":         domain,
+			})
+			return agentToolsText(stringifyJSON(comparison))
+		},
+		"record_harness_decision": func(id string, params map[string]any) any {
+			requestId := ""
+			if value, ok := params["requestId"].(string); ok {
+				requestId = strings.TrimSpace(value)
+			}
+			harness := ""
+			if value, ok := params["harness"].(string); ok {
+				harness = strings.TrimSpace(value)
+			}
+			domain := strings.TrimSpace(agentToolsString(params["domain"]))
+			// The lessons already adopted in this domain are the ones the new
+			// lesson joins, so they are read before it is written.
+			entries := []HarnessExperienceEntry{}
+			if input.GraphManagement.HarnessExperience != nil {
+				existing, ok := input.GraphManagement.HarnessExperience(map[string]any{"domain": domain}).(HarnessExperienceResult)
+				if ok {
+					entries = existing.Entries
+				}
+			}
+			result := harnessRecordDecision(&artifacts, entries, HarnessDecisionInput{
+				GraphId:   strings.TrimSpace(agentToolsString(params["graphId"])),
+				Domain:    domain,
+				Chosen:    strings.TrimSpace(agentToolsString(params["chosen"])),
+				Cue:       strings.TrimSpace(agentToolsString(params["cue"])),
+				Lesson:    strings.TrimSpace(agentToolsString(params["lesson"])),
+				Evidence:  strings.TrimSpace(agentToolsString(params["evidence"])),
+				Harness:   harness,
+				RequestId: requestId,
+			})
+			return agentToolsText(stringifyJSON(result))
+		},
+		"read_harness_experience": func(id string, params map[string]any) any {
+			domain := ""
+			if value, ok := params["domain"].(string); ok {
+				domain = strings.TrimSpace(value)
+			}
+			if input.GraphManagement.HarnessExperience == nil {
+				return agentToolsText(stringifyJSON(HarnessExperienceResult{}))
+			}
+			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessExperience(map[string]any{"domain": domain})))
+		},
 		"ask_user": func(id string, params map[string]any) any {
 			prompt := strings.TrimSpace(agentToolsStringOrEmpty(params["prompt"]))
 			why := strings.TrimSpace(agentToolsStringOrEmpty(params["why"]))
@@ -1047,6 +1123,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		Run:             input.Run != nil,
 		Fetch:           input.Fetch != nil,
 		Catalog:         input.Catalog != nil,
+		Harness:         input.GraphManagement.HarnessCompare != nil,
 	}
 	if artifacts.present {
 		access := artifacts.access
