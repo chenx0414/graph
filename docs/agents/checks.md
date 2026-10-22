@@ -12,6 +12,42 @@ GRAPH_UPDATE_EVIDENCE=1 node --run test
 
 随后检查 `git diff -- docs/planning/acceptance-evidence`，只提交有意更新的文件。
 
+## Pre-commit Hook
+
+仓库内提供 `.githooks/pre-commit`，与 [Pre-push Hook](#pre-push-hook) 共用同一个
+`.githooks` 目录，`git config core.hooksPath .githooks` 一次即全部启用。
+
+提交前检查**暂存区**里的文件大小：单个文件不得超过
+5,000 令牌（令牌 = 字节数 / 4，即 20,000 字节）。超出的文件无法在一个上下文窗口内读完、
+读完并改对，所以必须在入库前拆分。检查对象是暂存的 blob，不是工作区文件：暂存后又改过的
+文件，仍按将要提交的大小计算。
+
+被跳过的文件（不是代理编写的，拆分它们没有意义）：
+
+| 类别 | 例子 |
+| --- | --- |
+| 依赖锁文件 | `pnpm-lock.yaml`、`yarn.lock`、`go.sum`、`*-lock.json` |
+| 生成代码 | 带 `DO NOT EDIT` / `@generated` 头的文件 |
+| 生成数据 | `src/catalog/models-dev.snapshot.json`、`*.snapshot.json`、`perf/bench/*.json` 测量输出、`*.output.txt` |
+| 内置第三方 | `.agents/skills/`、`vendor/`、`node_modules/`、`dist/`、`build/` |
+| 二进制资源 | 图片、字体、压缩包、`*.sqlite` |
+
+确实无法拆分的文件，在文件顶部写明理由即可豁免（理由必须在同一行）：
+
+```
+// graph:allow-large-file: provider schema table, one row per field
+```
+
+手动检查暂存区，或检查指定文件：
+
+```sh
+node --run check:tokens              # 暂存区
+node scripts/check-file-tokens.mjs src/core/task-runtime.ts
+```
+
+这个检查不进 `node --run check`：仓库里已存在历史大文件，而它要拦的是**本次改动**新写大
+文件。`GRAPH_FILE_TOKEN_LIMIT` 可临时改上限（默认 5000）。
+
 ## Pre-push Hook
 
 仓库内提供 `.githooks/pre-push`，推送前执行完整检查。每个 clone 启用一次：

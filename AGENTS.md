@@ -6,3 +6,5 @@
 - 用 pstack 技能（`/skill:poteto-mode` 及其 playbook）给节点分配模型或思考档位前，读取 [pstack 角色与模型映射](docs/agent/pstack-models.md)。
 
 - 测试编写仅允许真正的 E2E，禁止新增或改写单元、集成测试；本规则适用于我和所有子 Agent。细则见 [测试编写规则](CODING_STANDARDS.md#测试编写规则)。
+
+- Keep every source file at or below 500 LOC. Tests, docs and CSS are exempt. Markdown is documentation, not source. Split a source file before completion if your change takes it over the limit.
