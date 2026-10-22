@@ -6,8 +6,8 @@
 
 ## 结论摘要
 
-1. **53 条里有 26 条落在 Graph 自己身上**：11 条本轮修掉（每条都有先红后绿的 E2E），3 条修了一半或只修了一个面，12 条确认为真实缺陷但不在本轮修复范围（逐条写明机制与修复位置）。
-2. 修掉的 11 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）。
+1. **53 条里有 25 条落在 Graph 自己身上**：12 条本轮修掉（每条都有先红后绿的 E2E），3 条修了一半或只修了一个面，10 条确认为真实缺陷但不在本轮修复范围（逐条写明机制与修复位置）。
+2. 修掉的 12 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）。
 3. **18 条在本栈里不存在或已被处理**（ALREADY-OK / N/A）：Graph 里没有 span/trace 机制、没有 poison 语义、没有依赖图边数上限、没有"七家 provider"（daemon 只讲 OpenAI Completions 与 Anthropic Messages 两种协议），死锁、并行审批、端口独占这些都有真实守卫。
 4. **4 条属于上游 PiG**（`github.com/MichaelKinsy/PiG v0.5.1`）或上游 npm 包，本仓库改不了，已按上游文件分组记录，便于一次性提给上游。
 5. **与 `feature/harness-token-efficiency-2026-10-22` 的重叠**已在第 6 节逐条列出：该分支已修的 4 条（#23/#40/#45 与任务说明包复用）在本分支上按 `main` 基线重新实现，两边合并时需要人工取舍。
@@ -40,11 +40,11 @@
 | 11 | ALREADY-OK | 低 | `core_execution.go:192-260` | 没找到锁序反转；父进程 retask 不持库锁 |
 | 12 | N/A | 低 | — | 以 #11 的死锁为前提；本栈没有这个死锁 |
 | 13 | OURS-GO → 未修（后续） | 中 | `runtime_pi_adapter.go` 控制目标 | 停止写入与正在停的那一步存在先后竞争 |
-| 14 | OURS-GO → 未修（后续） | 中 | `runtime_bounded_path.go:338-378` | `ls`/`find` 无默认上限，18MB 目录清单先在 Graph 堆里成型 |
+| 14 | **OURS-GO** → 已修 | 中 | `runtime_pig_native_limits.go`；`runtime_bounded_path.go` `listDirectoryLimited` | `ls`/`find`/`grep` 无默认上限，18MB 目录清单先在 Graph 堆里成型 |
 | 15 | N/A | 低 | PiG `durable/storage/jsonl` | Graph 用 SQLite 存储，没有 poison 语义 |
 | 16 | ALREADY-OK | 低 | `core_node_queue.go:110-125` | 失败项标记 failed 并暂停节点，不静默重投 |
 | 17 | ALREADY-OK | 低 | `core_wake_ledger.go:53-59,139-150` | 唤醒负载整体存取，没有 600 字符截断 |
-| 18 | OURS-TS → 未修（后续，遗留路径） | 中 | `src/core/node-prompt.ts:54-79` | 遗留 TS 路径整读会话文件 |
+| 18 | OURS-TS → 不再需要 | 中 | `src/core/node-prompt.ts:54-79` | 遗留 TS 路径整读会话文件；`feature/retire-ts-backend` 正在退役这条路径 |
 | 19 | ALREADY-OK | 低 | `core_store.go:464` 唯一约束；`core_wake_ledger.go:58-62` | 唤醒按 dedupe key 去重；上游 Install 按名替换 |
 | 20 | ALREADY-OK | 低 | `core_pause_continuation.go:18-31,45-50` | 恢复会遍历全部等待项，消费是全局的 |
 | 21 | ALREADY-OK | 低 | `runtime_tool_call_spool.go:76-105`；`runtime_pig_recovery.go:179-181` | 两条最近路径要么记录要么明确是 no-op |
@@ -62,7 +62,7 @@
 | 33 | **OURS-GO** → 已修 | 中 | 同上 | 空闲守卫此前根本不存在 |
 | 34 | **OURS-GO** → 已修 | 中 | `http_client.go:18`（`Timeout: 0`）→ 新读取边界 | 上游客户端此前没有读超时 |
 | 35 | ALREADY-OK | 低 | `server_app.go:611-612`；`runtime_rsi.go:2012-2018` | daemon 只"请求"重启，决定权在桌面端 |
-| 36 | ALREADY-OK（有残余） | 中 | `runtime_rsi.go:1352-1358` | 有真实代码闸门；残余：`force` 越过"无进行中操作"前置 |
+| 36 | ALREADY-OK（有残余） | 中 | `runtime_rsi.go:1352-1358`；ADR 0026 | 有真实代码闸门（请求方回合先结束）；残余：用户的确认仍是给模型的规则，不是代码检查，而 ADR 0026 把 `force` 定义为 agent 的工具 |
 | 37 | N/A | 低 | — | 本栈没有 span/trace 机制 |
 | 38 | N/A | 低 | PiG `telemetry/memory.go:64-70` | Graph 不 import `PiG/telemetry` |
 | 39 | ALREADY-OK（Graph 部分） | 中 | `pigkernel/provider.go` `restoreToolCallArguments`；`CONTEXT.md` 空参数工具调用 | 空参数调用已恢复为 `{}`；"null → no result"是上游 SDK 形状 |
@@ -70,10 +70,10 @@
 | 41 | OURS-GO → 未修（后续） | 中 | `runtime_pig_node_host.go:181-190`；`core_node_turn_driver.go:112-119` | 完成由"没有错误"推断，而非"有交付物" |
 | 42 | ALREADY-OK | 低 | `pigkernel/turn.go` `newRequestId`（16 字节随机） | Graph 的 id 不截断，不会一字符之差相撞 |
 | 43 | ALREADY-OK | 低 | `core_access_policy.go:249-255`；`core_rule_engine.go:498-501` | 没有 deny 规则语言；畸形输入一律 fail closed |
-| 44 | ALREADY-OK（报告形状）+ 残余 | 中 | `core_task_runtime.go` `configuredModel` | 未知模型被直接拒绝，不会落到 8k 窗口；残余见第 5 节 |
+| 44 | ALREADY-OK | 低 | `server_config.go:420` `configPositiveInt` | 未知模型被直接拒绝；连"配置了但没写 contextWindow"也会被配置校验拒绝（实测 `invalid_config: models.entries[0].contextWindow must be a positive integer`） |
 | 45 | **OURS-GO** → 已修 | 高 | `runtime_controlled_openai.go` Anthropic 分支 | 全链路没有任何 `cache_control`，Anthropic 缓存从未建立 |
 | 46 | OURS-GO → 未修（后续） | 中 | `runtime_agent_tool_definitions.go:198-246` | 实测 87.3% 的工具 schema 文本是散文 |
-| 47 | ALREADY-OK（机制不存在）+ 残余 | 中 | `runtime_tool_results.go:406-482`（无调用者） | 2000 字符是上游"压缩输入"截断，不是淘汰阈值；残余见第 5 节 |
+| 47 | ALREADY-OK（机制不存在）+ 在姊妹分支处理 | 中 | `runtime_tool_results.go:406-482`（无调用者） | 2000 字符是上游"压缩输入"截断，不是淘汰阈值；daemon 侧的工具结果溢出路径由 `feature/harness-token-efficiency-2026-10-22` 的 `20a366c` 处理 |
 | 48 | ALREADY-OK | 低 | `core_wake_ledger.go:106-117`；`runtime_agent_tool_definitions.go:224` | 有完成触发器（`get_task_status` 带 `waitForNode`），也没有 `sleep` 工具 |
 | 49 | ALREADY-OK | 低 | 同 #48 | 状态轮询是使用方式，不是缺失的机制 |
 | 50 | **OURS-GO** → 已修（部分） | 高 | `runtime_kernel_graph_lane.go:1010`；`runtime_pi_adapter.go:1276-1284` | 子 Agent 的思考档位被硬编码为 `off` |
@@ -83,7 +83,7 @@
 
 ---
 
-## 3. 本轮修掉的十一条
+## 3. 本轮修掉的十二条
 
 ### 3.1 #4 / #5 / #24 / #32 / #33 / #34 —— provider 流与请求（`c9fae98`）
 
@@ -127,7 +127,19 @@ daemon 决定何时压缩、摘要写在哪间屋子里，这两件事都没到�
 
 **未完成的部分（如实记录）**：daemon 决定的档位仍然没有上线——daemon 自己拼 provider 请求，没有放推理参数，而 Pi 把档位映射到各 provider 参数的规则有按 provider 分支的实现，Graph 尚未移植。这是这件事的下一段。
 
-### 3.6 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
+### 3.6 #14 —— 原生工具有上限，并说清自己丢了什么
+
+`ls`、`find`、`grep` 原来没有上限：目录清单读遍每一项，文件搜索收集每一个匹配，内容搜索收下每一行，于是一个十万文件的目录变成十八兆的回答——runtime 之后每个回合都背着它，而那已经是一个装不进 provider 窗口的请求。
+
+上限取上游 SDK 的：清单 500 项、文件搜索 1000 个匹配、内容搜索 100 个匹配、读文件 2000 行，每个回答 50KB。调用方可以要更多或更少，默认值是模型必须越过才能拿到的天花板。
+
+上限是在**收集过程中**生效的，不是收集完再截：目录分批读，清单花的是上限的内存而不是目录的内存；文件搜索走到上限就停，不再走完整棵树再排序。
+
+回答说清自己丢了什么、以及怎么看更多——一份被截断却看起来完整的回答比没有回答更糟：模型会以为自己已经看过那个目录。提示放在最前面，因为内核还会再截一次工具回答，截的是头部，填满预算的回答末尾的那句提示正是会没掉的部分。
+
+E2E `tests/e2e/harness-native-tool-bounds.test.ts` 给 daemon 一个 1200 个文件的目录和一个 3000 行的文件，证明清单、搜索与读取各自在自己的上限内作答，并各自说清自己被截断了。修复前跑过：清单原样返回，没有任何东西说它不是完整的。
+
+### 3.7 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
 
 daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：provider 从未被告知要保留什么，于是每个会话都为整段前缀重新付费。改后按 Pi 的做法在系统提示、最后一个工具声明、最后一条消息的最后一个块上各放一个断点。
 
@@ -141,6 +153,7 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 |---|---|---|
 | `tests/e2e/harness-tool-flow.test.ts` | provider 在回答完成前断开时，这一回合失败，那个工具没有执行；Anthropic 请求带着 tool call 与配对的结果；请求带着缓存断点 | 断开的那一回合报成功并执行了工具；Anthropic 请求里没有 tool call |
 | `tests/e2e/harness-compaction.test.ts` | 摘要是按 daemon 预留的 2000 token 房间请求的（1600），不是模型的整个输出上限；压缩被如实上报为 `session.compacted` | 摘要请求 4096 token；没有任何压缩上报 |
+| `tests/e2e/harness-native-tool-bounds.test.ts` | 清单、文件搜索与读取各自在自己的上限内作答，并各自说清自己被截断了 | 清单原样返回 1200 项，没有任何东西说它不是完整的 |
 
 两个文件都在修复前跑过，确认失败。
 
@@ -160,10 +173,9 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 | 47 | daemon 侧设计好的 4KB 溢出/摘要路径（`ToolResultHook`）在 Go 路径上没有调用者，工具结果只有上游 50KB 兜底 | `pigkernel/extensions.go` 注册工具时挂上 `ToolResultHook` |
 | 29 | 启动恢复每 boot 重跑同一个 doomed call：冻结记录不清理，也没有"恢复已尝试"标记 | `runtime_pig_recovery.go` + `pigkernel/recovery.go`：冻结记录加"已尝试/最后失败"字段，并让失败对用户可见 |
 | 13 | 停止写入与正在停的那一步存在先后竞争 | 控制目标与 operation 生命周期的写入顺序 |
-| 36 | `force: true` 绕过"无进行中操作"前置，会在其他 operation 还在跑时重启 daemon | `runtime_rsi.go` `RsiService.Status()`：`force` 也要满足排空 |
+| 36 | 用户的确认仍然只是给模型的规则，不是代码检查：模型可以在别的 operation 还在跑时 `force` 重载 daemon。ADR 0026 把 `force` 定义为 agent 的工具（"force 保留中断在途 operation 的原有语义"），所以收紧它是 ADR 决策，不是实现细节。工具的描述已写明这个后果与"先问用户" | 要么改 ADR 0026，要么在代码里要求一次可查证的确认（谁问、谁答、记在哪） |
 | 53 | 守护进程内从不跑保留策略：`events`/`invocations`/`kernel_*` 行随进程寿命增长 | `server_start.go` 周期调用 `ApplyRetention` |
-| 44 | 报告的形状不存在（未知模型被直接拒绝）；残余是"配置了模型但没写 contextWindow"会让压缩阈值退化，daemon 每回合都压缩 | 配置校验里给模型条目一个明确的 contextWindow 要求 |
-| 18 | 遗留 TS 路径整读会话文件（10MB）并在事件循环上同步解析 | `src/core/node-prompt.ts` 改增量读；`src/runtime/durable-history.ts` 不再复制整份 records |
+| 18 | 遗留 TS 路径整读会话文件（10MB）并在事件循环上同步解析 | `src/core/node-prompt.ts` 改增量读；`src/runtime/durable-history.ts` 不再复制整份 records。`feature/retire-ts-backend` 正在退役这条路径，可能不必再改 |
 
 ---
 
