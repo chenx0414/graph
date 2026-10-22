@@ -177,6 +177,17 @@ test('the Anthropic request carries the tool call and the result that answers it
     for (const call of requestedCalls(messages)) {
       expect(answeredCalls(messages).has(call.id), `the call ${call.id} has no result`).toBe(true);
     }
+
+    // The request tells the provider what to keep. The daemon builds the
+    // request itself, so without the breakpoints the provider's prompt cache
+    // is never written and every session pays for its prefix again.
+    const body = provider.requests[0]!.body;
+    const system = Array.isArray(body.system) ? body.system as { type?: string; cache_control?: unknown }[] : [];
+    expect(system.length, 'the system prompt is not a block list').toBeGreaterThan(0);
+    expect(system[0]!.cache_control, 'the system prompt has no cache breakpoint').toEqual({ type: 'ephemeral' });
+    const tools = (body.tools ?? []) as { cache_control?: unknown }[];
+    expect(tools.length, 'the request declares no tools').toBeGreaterThan(0);
+    expect(tools[tools.length - 1]!.cache_control, 'the last tool has no cache breakpoint').toEqual({ type: 'ephemeral' });
   } finally {
     await daemon?.close();
     await provider.close();

@@ -14,6 +14,59 @@ package graph
 
 const controlledMissingToolResult = "No result provided"
 
+// controlledAnthropicCacheControl is the breakpoint the Anthropic prompt
+// cache is written at.
+//
+// The daemon builds the provider request itself, so the breakpoints that
+// make the provider's prompt caching work have to be placed here. Pi places
+// three: on the system prompt, on the last tool declaration and on the last
+// block of the last message. Without them the provider is never told what to
+// keep, and every session pays for its whole prefix again.
+func controlledAnthropicCacheControl() map[string]any {
+	return map[string]any{"type": "ephemeral"}
+}
+
+// controlledAnthropicCachedTools marks the last tool declaration.
+func controlledAnthropicCachedTools(tools []any) []any {
+	if len(tools) == 0 {
+		return tools
+	}
+	last, ok := tools[len(tools)-1].(map[string]any)
+	if !ok {
+		return tools
+	}
+	last["cache_control"] = controlledAnthropicCacheControl()
+	return tools
+}
+
+// controlledAnthropicCacheBreakpoint marks the last block of the last message
+// the model reads, so the prefix in front of it is kept.
+func controlledAnthropicCacheBreakpoint(messages []any) {
+	for index := len(messages) - 1; index >= 0; index-- {
+		message, ok := messages[index].(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := message["role"].(string)
+		if role != "user" && role != "system" {
+			continue
+		}
+		content, ok := message["content"].([]any)
+		if !ok || len(content) == 0 {
+			return
+		}
+		last, ok := content[len(content)-1].(map[string]any)
+		if !ok {
+			return
+		}
+		switch last["type"] {
+		case "text", "image", "tool_result":
+			last["cache_control"] = controlledAnthropicCacheControl()
+		}
+		return
+	}
+}
+
 // controlledFlowCall is one tool call an assistant turn made.
 type controlledFlowCall struct {
 	ID   string
