@@ -129,7 +129,11 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	defer closeMcpServers(mcpConnections)
 	registrations = append(registrations, mcpTools...)
 
-	extension := &durable.Extension{Name: "graph-tools", Tools: registrations}
+	// The extension is installed under the name the identity owns, the same
+	// name the resident session path uses. Two derivations of one name would
+	// let the last writer replace the tool bodies the other conversation's
+	// durable selection still points at.
+	extension := &durable.Extension{Name: extensionName(options.Identity), Tools: registrations}
 	if err := registry.Install(extension); err != nil {
 		return TurnResult{}, err
 	}

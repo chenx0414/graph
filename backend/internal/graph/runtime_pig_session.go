@@ -93,8 +93,13 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 // supplies the tools and the channel. The credential stays in that channel.
 func openPigSession(ctx context.Context, database string, request AgentSessionRequest, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
 	options := pigkernel.SessionOptions{
-		Database:     database,
-		Identity:     request.Binding.InstanceId,
+		Database: database,
+		// The identity names the session's durable conversation and its tool
+		// registration. It is never empty: an empty identity would give every
+		// instance-less session the same conversation and the same registration
+		// name, so the last one to open would replace the tool bodies the
+		// earlier ones still point at.
+		Identity:     pigSessionIdentity(request),
 		Model:        pigModelSpec(request.Model),
 		Provider:     provider,
 		Tools:        tools,

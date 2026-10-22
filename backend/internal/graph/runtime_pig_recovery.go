@@ -343,6 +343,8 @@ func pigFrozenExecution(request AgentSessionRequest, preAdmission []string) map[
 		})
 	}
 	record := map[string]any{
+		// The identity is the Graph-side instance id: the recovery matches a
+		// frozen execution against the operation that was admitted with it.
 		"identity":                  request.Binding.InstanceId,
 		"executionId":               request.ExecutionId,
 		"inputRequestId":            request.InputRequestId,
@@ -353,7 +355,7 @@ func pigFrozenExecution(request AgentSessionRequest, preAdmission []string) map[
 			"instructions": request.SystemPrompt,
 			"cwd":          request.Workspace,
 		},
-		"extensionName": pigkernel.ExtensionName(request.Binding.InstanceId),
+		"extensionName": pigkernel.ExtensionName(pigSessionIdentity(request)),
 		"tools":         tools,
 		"policy":        policy,
 		"configuration": map[string]any{
