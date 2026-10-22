@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 )
@@ -259,6 +260,17 @@ func WriteHost(path, content string, options BoundedPathOptions) {
 
 // ListHost lists one host directory.
 func ListHost(path string, options BoundedPathOptions) []string {
+	names, _ := ListHostLimit(path, options, 0)
+	return names
+}
+
+// ListHostLimit lists one host directory up to a limit.
+//
+// The entries are read in batches, so a directory with a hundred thousand
+// files costs the memory of the limit and not of the directory. The second
+// answer says whether the directory holds more entries than were returned.
+// A limit of zero lists the whole directory.
+func ListHostLimit(path string, options BoundedPathOptions, limit int) ([]string, bool) {
 	target := resolveHostPath(path, "read", options)
 	info, err := os.Lstat(target)
 	if err != nil {
@@ -267,15 +279,7 @@ func ListHost(path string, options BoundedPathOptions) []string {
 	if !info.IsDir() {
 		panic(errors.New("Not a directory"))
 	}
-	entries, err := os.ReadDir(target)
-	if err != nil {
-		panic(err)
-	}
-	names := make([]string, len(entries))
-	for i, entry := range entries {
-		names[i] = entry.Name()
-	}
-	return names
+	return listDirectoryLimited(target, limit)
 }
 
 func openBounded(root, relative, mode string) *os.File {
@@ -356,6 +360,17 @@ func WriteBounded(root, relative, content string) {
 
 // ListBounded lists a workspace directory. The root itself skips lstat.
 func ListBounded(root, relative string) []string {
+	names, _ := ListBoundedLimit(root, relative, 0)
+	return names
+}
+
+// ListBoundedLimit lists a workspace directory up to a limit.
+//
+// The entries are read in batches, so a directory with a hundred thousand
+// files costs the memory of the limit and not of the directory. The second
+// answer says whether the directory holds more entries than were returned.
+// A limit of zero lists the whole directory.
+func ListBoundedLimit(root, relative string, limit int) ([]string, bool) {
 	target := ResolveBounded(root, relative, "read")
 	if target != root {
 		info, err := os.Lstat(target)
@@ -366,13 +381,40 @@ func ListBounded(root, relative string) []string {
 			panic(errors.New("Not a directory"))
 		}
 	}
-	entries, err := os.ReadDir(target)
+	return listDirectoryLimited(target, limit)
+}
+
+// listDirectoryLimited reads the entries of one directory up to a limit.
+//
+// The entries come back sorted: a directory is read in batches, and a batch
+// is not in the order the directory holds. The listing a model reads is
+// alphabetical, so it stays that way.
+func listDirectoryLimited(target string, limit int) ([]string, bool) {
+	directory, err := os.Open(target)
 	if err != nil {
 		panic(err)
 	}
-	names := make([]string, len(entries))
-	for i, entry := range entries {
-		names[i] = entry.Name()
+	defer directory.Close()
+	names := []string{}
+	more := false
+	for {
+		// A batch of entries is read at a time: the whole directory is never
+		// in memory at once.
+		batch, err := directory.ReadDir(256)
+		for _, entry := range batch {
+			if limit > 0 && len(names) >= limit {
+				more = true
+				break
+			}
+			names = append(names, entry.Name())
+		}
+		if more || err != nil {
+			break
+		}
+		if len(batch) == 0 {
+			break
+		}
 	}
-	return names
+	sort.Strings(names)
+	return names, more
 }
