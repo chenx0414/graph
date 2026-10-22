@@ -415,7 +415,28 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 44 起**：`m8/app-shell-ux` 剩下的 20 条（造状态改走公开面）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
-- **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
+- **Batch 44（进行中）**：`scripts/`、`examples/`、`perf/` 里 15 个 TS 工具消费者。删除集合已经算清：**102 个模块**（179 个后端文件 − 56 个运行时闭包 − 20 个仅前端可达 − 2 个启动器），另有 **211 个测试文件只依赖这些模块**（**没有一个是混合的**——它们要么整份依赖待删模块，要么整份不依赖），所以删除是「实现 + 其耦合测试」一起走的。**外部消费者只有 15 个文件**，逐个处置如下：
+  - **已迁移（本批，两处）**：`scripts/interface-e2e.ts`（它本来就通过 `src/server/cli.ts` 启动器驱动 **Go daemon**；改成直接读 daemon 发布的 `console.json`，跑通：onboarding、不误发消息、项目落盘、弹窗键盘可达、4 种宽度、5 条路由全过）与 `scripts/package-app.mjs`（四个纯函数内联，**逐个与原 TS 模块比对过**：`formatBytes` 8 个边界值、`MIN_FREE_BYTES`、告警文案（含自定义阈值）、`freeBytesAt` 全等）。
+  - **下一批逐个处置**（每条都有明确归属，不是「以后再说」）：
+
+    | 消费者 | 用到的 TS 模块 | 处置 | 理由 |
+    | --- | --- | --- | --- |
+    | `scripts/console-ui-e2e.ts` | `server/console-address`、`runtime/tool-call-spool` | 迁移 | 它直接往 **TS 的 SQLite** 写行来造状态，要改成走 Go 的公开面；spool 的目录约定两边本来就一致 |
+    | `scripts/harness-real-eval.mjs` | `server/start`、`server/console-address` | 迁移 | 它量的是 Go 侧那几个宿主开关（`GRAPH_COMPACT_DOCUMENTATION` 等），量的是 Go daemon；TS 运行时的调用要改成公开面 |
+    | `scripts/harness-worker-eval.mjs` | `server/start`、`core/interface-spec` | 迁移 | 同上 |
+    | `scripts/harness-eval-context.mjs` | `catalog/capability-library` | 迁移 | 冻结上下文快照的读写 |
+    | `scripts/branch-edge-e2e.mjs` | `server/start`、`core/store` | 迁移或退休 | 分支边界的真实验证 |
+    | `scripts/mcp-adapter-e2e.ts` | `core/task-runtime`、`core/store` | 迁移或退休 | MCP 适配器的契约由 Go 的 MCP 客户端承担（`tests/e2e/pig-mcp-session.test.ts`、`pig-kernel-mcp.test.ts`） |
+    | `scripts/skill-sediment-e2e.ts` | `runtime/sediment` | 迁移或退休 | 沉淀引擎在 Go 侧有自己的实现；开关语义已由 `tests/e2e/go-sediment-settings.test.ts` 证明 |
+    | `scripts/state-reclaim.ts` | `core/owner`、`core/state-retention` | **给 `graphd` 加 `reclaim` 子命令** | Go 侧**已经有** `PlanRetention` / `ApplyRetention`，但**一个调用方都没有**——这是 Go 侧真实的能力缺口：回收这件事在 Go 后端里存在，却没有任何入口能触发 |
+    | `scripts/create-review-module.ts` | `core/review-policy` | **给 `graphd` 加 `review-module` 子命令** | 同上：Go 侧有 `ReviewPolicyCode` / `ReviewPolicyInputs`，没有入口 |
+    | `examples/assemble-matt-team.ts` | `catalog/matt-team`、`catalog/capability-select`、`catalog/capability-library`、`catalog/catalog` | **给 `graphd` 加 `assemble-team` 子命令** | 同上：Go 侧有 `AssembleMattTeam`，没有入口 |
+    | `examples/m1-demo.ts` | `core/task-runtime`、`core/interface-spec` | 迁移或退休 | 演示 |
+    | `examples/m7-acceptance.ts` | `core/task-runtime`、`catalog/models`、`core/graph-acceptance`、`git/git` | 迁移或退休 | m7 验收 harness |
+    | `perf/bench/measure.ts` | `server/host`、`core/interface-spec` | 迁移 | 性能基准要量 Go daemon |
+
+  - **三个「Go 侧有实现、没有入口」是最要紧的发现**：回收、评审模块生成、团队组装这三件事，Go 后端里**代码都在**，但没有 CLI/HTTP 入口能触发它们——TypeScript 脚本是它们唯一的调用方。删除实现之前，这三个入口必须先补上（否则功能就此消失），而这正好是「先迁入再删」在 Go 侧的最后一课。
+- **收尾**：删除 102 个模块 + 211 个随实现退休的低层测试文件，更新 `package.json`、`tsconfig.json`、`tests/suite-baseline.json`（**缩减必须显式落账**）与文档。
 
 ## 门禁与纪律
 

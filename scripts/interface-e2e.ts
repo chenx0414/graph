@@ -3,11 +3,26 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, expect } from 'playwright/test';
-import { readConsoleAddress } from '../src/server/console-address.ts';
+
+/**
+ * Where the console is listening. The daemon publishes this file in its state
+ * directory once the socket is bound; nothing else records the port, because the
+ * daemon is started with `--port 0`.
+ */
+async function readConsoleAddress(stateDir) {
+  const raw = await readFile(join(stateDir, 'console.json'), 'utf8').catch(() => null);
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw);
+    return typeof value?.url === 'string' && value.url.startsWith('http') ? { url: value.url } : null;
+  } catch {
+    return null;
+  }
+}
 
 const repo = join(import.meta.dirname, '..');
 const root = await mkdtemp(join(tmpdir(), 'graph-interface-e2e-'));
