@@ -22,6 +22,21 @@ type ConversationRow struct {
 	BindingSinceSeq    int64   `json:"binding_since_seq"`
 }
 
+// ConversationMessage is one durable transcript row.
+type ConversationMessage struct {
+	Id          string         `json:"id"`
+	Seq         int            `json:"seq"`
+	Role        string         `json:"role"`
+	Kind        string         `json:"kind"`
+	Text        string         `json:"text"`
+	Data        map[string]any `json:"data"`
+	State       string         `json:"state"`
+	OperationId *string        `json:"operationId"`
+	Turn        int            `json:"turn"`
+	CreatedAt   int64          `json:"createdAt"`
+	UpdatedAt   int64          `json:"updatedAt"`
+}
+
 // MessageRow is one messages table row.
 type MessageRow struct {
 	Seq            int64   `json:"seq"`

@@ -474,3 +474,10 @@ func hostCommandNumber(value any) bool {
 	}
 	return false
 }
+
+func errorText(rec any) string {
+	if err, ok := rec.(error); ok {
+		return err.Error()
+	}
+	return stringifyJSON(rec)
+}
