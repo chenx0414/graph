@@ -1295,7 +1295,7 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 			}
 		}
 		provisional := intent.operation("", 0, 0)
-		briefing := Briefing(provisional, extra)
+		briefing, setupLength := Briefing(provisional, extra)
 		outputSchema := SchemaRef{Kind: "agent_result", Version: 1}
 		intent.Context.OutputSchema = &outputSchema
 		userRework := kernelRows(e.store.Db, "SELECT text,data FROM node_entries WHERE task_id=? AND node_id=? AND json_extract(data,'$.reworkActivation')=? ORDER BY seq", node.TaskId, node.Id, node.ActivationId)
@@ -1335,6 +1335,9 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 		}
 		joined := strings.Join(kept, "\n\n")
 		intent.Context.Briefing = &joined
+		if setupLength > 0 {
+			intent.Context.BriefingSetupLength = &setupLength
+		}
 		if agentContext != nil {
 			handoff := ContextHandoffPackage{
 				Mode:             agentContext.Mode,

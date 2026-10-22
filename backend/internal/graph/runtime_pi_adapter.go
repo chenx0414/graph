@@ -558,6 +558,8 @@ type PiAdapterOptions struct {
 	ModelRuntime *ModelRuntime
 	// Network is the reach the operation was granted.
 	Network *PiAdapterNetwork
+	// TaskSetups remembers which task setup a session already read.
+	TaskSetups *TaskSetupLedger
 	// CapabilitySecrets are the secrets a capability may read.
 	CapabilitySecrets func() map[string]string
 	// Channels are the host channels.
@@ -1855,9 +1857,15 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	// apply. Pi's own threshold/overflow compaction stays enabled as a
 	// backstop for a context Graph mis-estimated.
 	autoCompact := !compactRequested && shouldCompactContextForEntry(entry, lastContextTokens)
+	compacted := false
 	if compactRequested || autoCompact {
 		compactionErr := session.Compact(COMPACTION_INSTRUCTIONS)
 		if compactionErr == nil {
+			// The compaction replaced the context that held the task setup.
+			// The setup is sent again below, and the session has it again
+			// once that send succeeds.
+			compacted = true
+			options.TaskSetups.Forget(instanceId)
 			turn.FlushDeltas(true)
 			if *turn.GateRefusal != nil {
 				panic(*turn.GateRefusal)
@@ -1892,6 +1900,24 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		briefing = *operation.Context.Briefing
 	} else {
 		briefing = "Continue work for " + operation.NodeId
+	}
+	// The setup is the tail of the briefing: the description of the environment
+	// the task runs in. The session reads it once; the operation prompt would
+	// otherwise carry it into the transcript of every operation, and the
+	// transcript is read again by every request that follows.
+	setupText := ""
+	setupSent := false
+	if operation.Context.BriefingSetupLength != nil {
+		length := *operation.Context.BriefingSetupLength
+		if length > 0 && length <= len(briefing) {
+			setupText = briefing[len(briefing)-length:]
+		}
+	}
+	if setupText != "" && taskSetupReuseEnabled() && !compacted &&
+		options.TaskSetups.Sent(instanceId, inspected.SessionId, setupText) {
+		briefing = taskSetupOmittedPrompt(briefing, len(setupText))
+	} else {
+		setupSent = setupText != ""
 	}
 	if turn.PersistEntries {
 		AppendNodeEntry(store, NodeEntryInput{
@@ -1931,6 +1957,10 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		}()
 	}
 	result, err := session.Prompt(skillInjection.Text, userImages)
+	if err == nil && setupSent {
+		// The provider answered, so the session carries the setup.
+		options.TaskSetups.Record(instanceId, inspected.SessionId, setupText)
+	}
 	if err != nil {
 		panic(err)
 	}

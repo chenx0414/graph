@@ -641,6 +641,7 @@ type TaskRuntime struct {
 	network    *TaskRuntimeNetwork
 	rsi        any
 	autoWake   bool
+	taskSetups *TaskSetupLedger
 	Host       *TaskRuntimeHost
 	// graphLane is the resident v2 lane; laneTokenBudget is the live budget it
 	// runs its nodes under.
@@ -713,7 +714,7 @@ func runtimeCall(value any, args ...any) (any, bool) {
 // The TypeScript host spreads the same option object into openTaskRuntime; the
 // Go port reads the option bags it needs by name so the host may extend them.
 func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
-	runtime := &TaskRuntime{options: options, stateDir: options.StateDir, projects: options.Projects}
+	runtime := &TaskRuntime{options: options, stateDir: options.StateDir, projects: options.Projects, taskSetups: NewTaskSetupLedger()}
 	if options.AutoDrive != nil {
 		runtime.autoWake = *options.AutoDrive
 	}
@@ -1292,6 +1293,7 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		ModelRuntime: runtime.modelRuntime(),
 		Network:      runtime.piNetwork(),
 		Channels:     runtime.piChannels(),
+		TaskSetups:   runtime.taskSetups,
 	}
 	// The PiG kernel keeps the durable conversations in this process, and the
 	// daemon's own tools are the ones the kernel offers.

@@ -451,14 +451,17 @@ type RsiContinuation struct {
 }
 
 type OperationContext struct {
-	PreviousOutput  Json                  `json:"previousOutput"`
-	RsiContinuation *RsiContinuation      `json:"rsiContinuation,omitempty"`
-	Wakes           []OperationWake       `json:"wakes,omitempty"`
-	Answers         []OperationAnswer     `json:"answers"`
-	Messages        []OperationMessage    `json:"messages,omitempty"`
-	Briefing        *string               `json:"briefing,omitempty"`
-	AgentContext    *ResolvedAgentContext `json:"agentContext,omitempty"`
-	OutputSchema    *SchemaRef            `json:"outputSchema,omitempty"`
+	PreviousOutput  Json               `json:"previousOutput"`
+	RsiContinuation *RsiContinuation   `json:"rsiContinuation,omitempty"`
+	Wakes           []OperationWake    `json:"wakes,omitempty"`
+	Answers         []OperationAnswer  `json:"answers"`
+	Messages        []OperationMessage `json:"messages,omitempty"`
+	Briefing        *string            `json:"briefing,omitempty"`
+	// BriefingSetupLength is the length of the briefing's setup tail: the
+	// description of the environment the task runs in.
+	BriefingSetupLength *int                  `json:"briefingSetupLength,omitempty"`
+	AgentContext        *ResolvedAgentContext `json:"agentContext,omitempty"`
+	OutputSchema        *SchemaRef            `json:"outputSchema,omitempty"`
 }
 
 type InputVersion struct {
