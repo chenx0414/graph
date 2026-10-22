@@ -110,8 +110,8 @@ test('real config saves preserve model metadata and independent upstream connect
         && JSON.stringify(message.content).includes(`Use ${model} endpoint`));
     });
     expect(sent, `the ${model} endpoint never got its request`).toBeTruthy();
-    expect(sent).toMatchObject({ model: 'same-upstream' });
-    const index = provider.requests.indexOf(sent);
+    expect(sent!).toMatchObject({ model: 'same-upstream' });
+    const index = provider.requests.indexOf(sent!);
     expect(provider.authorizations[index]).toBe(`Bearer ${key}`);
   }
   const settings = await get<{ models: { id: string; modelId: string }[] }>('/api/settings');

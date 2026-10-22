@@ -2714,16 +2714,19 @@ func (runtime *TaskRuntime) Models() []map[string]any {
 	runtime.ensureOpen()
 	out := []map[string]any{}
 	for _, entry := range runtime.liveEntries() {
-		record := map[string]any{
-			"id":              entry.Id,
-			"provider":        entry.Provider,
-			"grade":           string(entry.Grade),
-			"api":             string(entry.Api),
-			"baseUrl":         entry.BaseUrl,
-			"contextWindow":   entry.ContextWindow,
-			"maxTokens":       entry.MaxTokens,
-			"tier":            string(ModelTierOf(entry.Grade)),
-			"thinkingOptions": ThinkingOptionsFor(entry),
+		// The settings view shows the configured model as the user wrote it:
+		// the upstream model id, the account it belongs to and what it costs
+		// are part of what the console renders. Each entry also carries the
+		// thinking strengths that model accepts, so no console control has to
+		// keep a level list of its own.
+		view := ModelEntryView{ModelEntry: entry, Tier: ModelTierOf(entry.Grade), ThinkingOptions: ThinkingOptionsFor(entry)}
+		raw, err := json.Marshal(view)
+		if err != nil {
+			panic(err)
+		}
+		record := map[string]any{}
+		if err := json.Unmarshal(raw, &record); err != nil {
+			panic(err)
 		}
 		out = append(out, record)
 	}
