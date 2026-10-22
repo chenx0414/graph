@@ -833,6 +833,10 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	// recovers on its own: the kernel's own receipts settle the turns it
 	// finished, and the turns it never sent are sent again.
 	runtime.bootstrapPigRecovery()
+	// The state the last run left behind is reclaimed before this one
+	// starts: a daemon that only reclaimed while it was running would let the
+	// state of every run before it grow for ever.
+	runtime.execution.sweepState()
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
 	return runtime
 }

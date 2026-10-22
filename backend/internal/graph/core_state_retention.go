@@ -104,6 +104,17 @@ func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 	return applied
 }
 
+// ApplyRetention deletes the doomed rows of one store.
+//
+// The deletes take the store's transaction lock, so they cannot interleave
+// with another writer's transaction: the reclaim runs inside a daemon that
+// keeps writing.
+func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
+	s.txMu.Lock()
+	defer s.txMu.Unlock()
+	return ApplyRetention(s.DB, options)
+}
+
 func applyRetentionLocked(db *sql.DB, sqlText retentionDoomed) (RetentionApplied, error) {
 	events, err := execChanges(db, fmt.Sprintf("DELETE FROM events WHERE cursor IN (SELECT id FROM (%s))", sqlText.events))
 	if err != nil {

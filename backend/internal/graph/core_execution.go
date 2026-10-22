@@ -2,6 +2,8 @@ package graph
 
 import (
 	"encoding/json"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +85,7 @@ type Execution struct {
 	stopping        bool
 	driveActive     int
 	sweptAt         int64
+	sweptStateAt    int64
 	activeGraphs    map[string]bool
 	running         int
 	changed         chan struct{}
@@ -556,6 +559,7 @@ func (e *Execution) reportGraphFailure(taskId string, failure any) {
 // Kick ensures a newly queued message is dispatched even if no drive loop is active.
 func (e *Execution) Kick() {
 	e.sweepWorkcopies()
+	e.sweepState()
 	e.mu.Lock()
 	active := e.driveActive
 	e.mu.Unlock()
@@ -565,6 +569,80 @@ func (e *Execution) Kick() {
 			e.Drive()
 		}()
 	}
+}
+
+// sweepState reclaims the rows the daemon will not need again.
+//
+// The offline reclaim tool needs the daemon to be closed, so a daemon that
+// runs for days keeps every event it ever wrote. The rules are the tool's:
+// the newest events of every task stay, the older history of a task that has
+// not moved for a day goes, and a task with work still in flight is left
+// alone.
+func (e *Execution) sweepState() {
+	now := NowMillis()
+	e.mu.Lock()
+	swept := e.sweptStateAt
+	e.mu.Unlock()
+	if now-swept < stateSweepIntervalMs() {
+		return
+	}
+	e.mu.Lock()
+	e.sweptStateAt = now
+	e.mu.Unlock()
+	func() {
+		defer func() { _ = recover() }()
+		e.store.ApplyRetention(RetentionOptions{
+			Now:                      now,
+			KeepEventsPerTask:        stateKeepEventsPerTask(),
+			KeepCapabilitiesPerNode:  stateKeepCapabilitiesPerNode,
+			KeepHandoffsPerOperation: stateKeepHandoffsPerOperation,
+			MinAgeMs:                 stateRetentionMinAgeMs(),
+		})
+	}()
+}
+
+// The rules the daemon reclaims its own state with. They are the offline
+// tool's rules, so the same state is kept whether the daemon is running or
+// not. The environment may narrow them, which is how an operator who wants
+// the state kept for longer says so.
+const (
+	stateDefaultSweepIntervalMs   = 3_600_000
+	stateDefaultRetentionMinAgeMs = 86_400_000
+	stateDefaultKeepEvents        = 200
+	stateKeepCapabilitiesPerNode  = 1
+	stateKeepHandoffsPerOperation = 1
+)
+
+// stateSweepIntervalMs is how often the daemon reclaims its own state.
+func stateSweepIntervalMs() int64 {
+	return stateEnvironmentMilliseconds("GRAPH_STATE_SWEEP_INTERVAL_MS", stateDefaultSweepIntervalMs)
+}
+
+// stateRetentionMinAgeMs is how long a task's history is kept.
+func stateRetentionMinAgeMs() int64 {
+	return stateEnvironmentMilliseconds("GRAPH_STATE_RETENTION_MIN_AGE_MS", stateDefaultRetentionMinAgeMs)
+}
+
+// stateKeepEventsPerTask is how many events of every task are kept.
+func stateKeepEventsPerTask() int {
+	value := stateEnvironmentMilliseconds("GRAPH_STATE_RETENTION_KEEP_EVENTS", stateDefaultKeepEvents)
+	if value < 0 {
+		return stateDefaultKeepEvents
+	}
+	return int(value)
+}
+
+// stateEnvironmentMilliseconds reads one millisecond setting from the environment.
+func stateEnvironmentMilliseconds(name string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
 }
 
 // sweepWorkcopies drops the work copies of a task that reached a terminal phase.
