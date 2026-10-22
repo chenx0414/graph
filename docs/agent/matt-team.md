@@ -10,10 +10,10 @@
 
 ## 装配并保存真实模板
 
-装配入口属于运行应用 Examples 路径中的 `assemble-matt-team.ts`；它和 `backend/internal/graph/catalog_matt_team.go` 随现有 App 源码打包，不依赖业务仓库的 scripts。下面命令中的路径替换成 system prompt 提供的运行应用 Examples 绝对路径，使用该应用的 Node 24：
+装配入口是 Go 后端自己的子命令 `graphd assemble-team`；它和 `backend/internal/graph/catalog_matt_team.go` 随现有 App 源码打包，不依赖业务仓库的 scripts。下面命令中的路径替换成 system prompt 提供的运行应用绝对路径：
 
 ```bash
-node <Examples>/assemble-matt-team.ts --url http://127.0.0.1:<port> --config /absolute/task-options.json --out /absolute/matt-team.json
+<Application>/dist/graphd assemble-team --url http://127.0.0.1:<port> --config /absolute/task-options.json --out /absolute/matt-team.json
 ```
 
 配置是一份 JSON。例如下列 check 运行项目自身的完整检查；没有该命令的项目必须改为实际验收命令，不能用 node --version 冒充功能通过：

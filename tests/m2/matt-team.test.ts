@@ -13,6 +13,7 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { assembleMattTeam } from '../../src/catalog/matt-team.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 import { git } from '../fixtures/native-git-acceptance.ts';
+import { ensureBackendBinary } from '../helpers/backend-binary.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -28,7 +29,7 @@ test('Matt assembly reports every missing capability before saving any role', as
   const configuration = join(root, 'missing-options.json'); const output = join(root, 'missing-team.json');
   await writeFile(configuration, JSON.stringify(options));
   const before = runtime.catalog.agentCombinations();
-  const failed = await promisify(execFile)(process.execPath, ['examples/assemble-matt-team.ts', '--url', url, '--config', configuration, '--out', output],
+  const failed = await promisify(execFile)(ensureBackendBinary(), ['assemble-team', '--url', url, '--config', configuration, '--out', output],
     { cwd: process.cwd() }).then(() => null, error => error as { code: number; stderr: string });
   expect(failed?.code).toBe(1);
   expect(failed?.stderr).toMatch(/planner.*codebase-design[\s\S]*worker.*tdd[\s\S]*standards.*code-review[\s\S]*spec.*code-review/);
@@ -58,7 +59,7 @@ test('the shipped assembly CLI compiles versioned recipes and saves reusable JSO
   const url = await app.listen({ host: '127.0.0.1', port: 0 });
   const configuration = join(root, 'team-options.json'); const output = join(root, 'team.json');
   await writeFile(configuration, JSON.stringify(options));
-  await promisify(execFile)(process.execPath, ['examples/assemble-matt-team.ts', '--url', url, '--config', configuration, '--out', output], { cwd: process.cwd() });
+  await promisify(execFile)(ensureBackendBinary(), ['assemble-team', '--url', url, '--config', configuration, '--out', output], { cwd: process.cwd() });
   const definition = parseGraphDefinition(JSON.parse(await readFile(output, 'utf8')));
   expect(definition.nodes.worker!.recipe).toBe('matt-team-worker@2');
   const persisted = JSON.stringify(definition);

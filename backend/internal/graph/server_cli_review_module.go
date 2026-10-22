@@ -137,12 +137,18 @@ func reviewModulePorts(names []string, protocol string) json.RawMessage {
 // writeNewEntry writes the module code to a path that does not exist yet. A
 // published code entry is never overwritten; a revision takes a new path.
 func writeNewEntry(entry string, code string) error {
-	file, err := os.OpenFile(entry, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	return writeNewFile(entry, code, 0o600)
+}
+
+// writeNewFile writes content to a path that does not exist yet. An existing
+// file is never overwritten.
+func writeNewFile(path string, content string, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	_, err = file.WriteString(code)
+	_, err = file.WriteString(content)
 	return err
 }
 
