@@ -121,7 +121,7 @@ func pigNodeCalledProvider(kernel *KernelStore, execution *ExecutionRow, frozen 
 	for _, call := range kernelRows(kernel.Db, "SELECT id FROM kernel_provider_calls WHERE execution_id=?", execution.Id) {
 		seen = append(seen, kernelString(call["id"]))
 	}
-	return pigCallsBeyond(durableStrings(frozen.Record["preAdmissionInvocationIds"]), seen)
+	return pigCallsBeyond(frozenExecutionOfRecord(frozen.Record).PreAdmissionInvocationIds, seen)
 }
 
 // pigNodeRestoredWrapper is the shape the lane reads a restored node from.
@@ -130,26 +130,6 @@ func pigNodeCalledProvider(kernel *KernelStore, execution *ExecutionRow, frozen 
 // executions carry it, and the PiG kernel's frozen records hold the same
 // facts under the kernel's own names. The translation is the whole point: the
 // node's re-run must use the configuration it was admitted with.
-func pigNodeRestoredWrapper(frozen pigkernel.FrozenExecution) map[string]any {
-	record := frozen.Record
-	configuration := asMap(record["configuration"])
-	snapshot := map[string]any{
-		"identity":    frozen.Identity,
-		"executionId": frozen.ExecutionId,
-		"model":       record["model"],
-		"agent":       record["agent"],
-		"configuration": map[string]any{
-			"policy": map[string]any{
-				"binding": map[string]any{"instanceId": frozen.Identity},
-			},
-			"nodeExecutionConfiguration": configuration["executionConfiguration"],
-			"credentialReference":        configuration["credentialReference"],
-			"descriptor":                 configuration["descriptor"],
-		},
-	}
-	return map[string]any{
-		"snapshot":           snapshot,
-		"restoredPolicy":     asMap(record["policy"]),
-		"restoredDescriptor": configuration["descriptor"],
-	}
+func pigNodeRestoredWrapper(frozen pigkernel.FrozenExecution) *FrozenExecutionRecovery {
+	return frozenExecutionRecovery(frozenExecutionOfRecord(frozen.Record), frozen.Identity)
 }

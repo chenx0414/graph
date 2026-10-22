@@ -38,7 +38,7 @@ type NodeSession struct {
 
 // NodeSessionOptions assembles one node from its immutable recipe.
 type NodeSessionOptions struct {
-	Frozen             map[string]any
+	Frozen             *FrozenExecutionRecovery
 	RetainCapabilities bool
 	Access             *ResolvedAccessPolicy
 	Bindings           *NodeSessionBindings
@@ -109,7 +109,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 	}
 	action := "work"
 	if options.Frozen != nil {
-		if mapString(asMap(asMap(options.Frozen["snapshot"])["configuration"])["nodeExecutionConfiguration"].(map[string]any), "role") == "reviewer" {
+		if mapString(asMap(options.Frozen.Record.Configuration.ExecutionConfiguration), "role") == "reviewer" {
 			action = "review"
 		}
 	} else if options.Catalog.Definition(recipe).Review {
@@ -122,7 +122,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 		assemblyInput.SkillProjectRoot = options.ProjectRoot
 	}
 	if options.Frozen != nil {
-		descriptor := asMap(options.Frozen["restoredDescriptor"])
+		descriptor := options.Frozen.Descriptor
 		body, _ := json.Marshal(descriptor["facts"])
 		facts := []ResolvedCapabilityFact{}
 		if err := json.Unmarshal(body, &facts); err != nil {

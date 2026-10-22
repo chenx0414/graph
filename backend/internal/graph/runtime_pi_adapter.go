@@ -1,5 +1,6 @@
 package graph
 
+// graph:allow-large-file: the Agent adapter ported from the TypeScript SDK in one piece; splitting it is its own task and is recorded in docs/planning/architecture-deepening-2026-10-22.md
 import (
 	"bytes"
 	"encoding/json"
@@ -536,7 +537,7 @@ type PiAdapterNetwork struct {
 
 // PiAdapterOptions are the inputs of the production Agent adapter.
 type PiAdapterOptions struct {
-	RecoverySnapshot map[string]any
+	RecoverySnapshot *FrozenExecutionRecovery
 	Store            *TaskStore
 	InstancesDir     string
 	Catalog          *Catalog
@@ -680,8 +681,8 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 			Raise("model_unavailable", "No configured model for this instance")
 		}
 		if options.RecoverySnapshot != nil {
-			configuration := asMap(asMap(options.RecoverySnapshot["snapshot"])["configuration"])
-			frozenModel := asMap(configuration["executionConfiguration"])["model"]
+			configuration := options.RecoverySnapshot.Record.Configuration
+			frozenModel := asMap(configuration.ExecutionConfiguration)["model"]
 			body, _ := json.Marshal(frozenModel)
 			var original ModelEntry
 			if err := json.Unmarshal(body, &original); err != nil {
@@ -845,8 +846,8 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		}
 		accessPolicy := operation.AccessPolicy
 		if options.RecoverySnapshot != nil {
-			configuration := asMap(asMap(options.RecoverySnapshot["snapshot"])["configuration"])
-			body, _ := json.Marshal(asMap(configuration["executionConfiguration"])["accessPolicy"])
+			configuration := options.RecoverySnapshot.Record.Configuration
+			body, _ := json.Marshal(asMap(configuration.ExecutionConfiguration)["accessPolicy"])
 			if string(body) != "null" {
 				var original ResolvedAccessPolicy
 				if err := json.Unmarshal(body, &original); err != nil {
@@ -1004,8 +1005,8 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 		panic(err)
 	}
 	if options.RecoverySnapshot != nil {
-		configuration := asMap(asMap(options.RecoverySnapshot["snapshot"])["configuration"])
-		body, _ := json.Marshal(asMap(configuration["executionConfiguration"])["spec"])
+		configuration := options.RecoverySnapshot.Record.Configuration
+		body, _ := json.Marshal(asMap(configuration.ExecutionConfiguration)["spec"])
 		if err := json.Unmarshal(body, &spec); err != nil {
 			panic(err)
 		}
@@ -1113,7 +1114,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			assemblyInput.SkillOwnedRoots = AgentSkillOwnedRoots(skillCapabilityRoot, filepath.Dir(options.InstancesDir))
 		}
 		if options.RecoverySnapshot != nil {
-			descriptor := asMap(options.RecoverySnapshot["restoredDescriptor"])
+			descriptor := options.RecoverySnapshot.Descriptor
 			body, _ := json.Marshal(descriptor["facts"])
 			facts := []ResolvedCapabilityFact{}
 			if err := json.Unmarshal(body, &facts); err != nil {
@@ -1761,23 +1762,21 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		request.FreshSession = true
 	}
 	if options.RecoverySnapshot != nil {
-		snapshot := asMap(options.RecoverySnapshot["snapshot"])
-		policy := asMap(options.RecoverySnapshot["restoredPolicy"])
-		request.SystemPrompt = mapString(asMap(snapshot["agent"]), "instructions")
-		request.Model = snapshot["model"]
-		request.Workspace = mapString(policy, "workspace")
-		request.StateDir = mapString(policy, "stateDir")
-		request.InputRequestId = mapString(snapshot, "inputRequestId")
-		request.SkillPaths = durableStrings(policy["skillPaths"])
-		request.SkillFolder = mapString(policy, "skillFolder")
-		request.PiExtensionPaths = durableStrings(policy["piExtensionPaths"])
-		request.ReadRoots = durableStrings(policy["readRoots"])
-		request.WriteRoots = durableStrings(policy["writeRoots"])
-		request.ProtectedPaths = durableStrings(policy["protectedPaths"])
-		request.CapabilityDescriptor = asMap(options.RecoverySnapshot["restoredDescriptor"])
-		configuration := asMap(snapshot["configuration"])
-		request.ExecutionConfiguration = configuration["executionConfiguration"]
-		request.CredentialReference = configuration["credentialReference"]
+		record := options.RecoverySnapshot.Record
+		request.SystemPrompt = record.Agent.Instructions
+		request.Model = record.Model
+		request.Workspace = record.Policy.Workspace
+		request.StateDir = record.Policy.StateDir
+		request.InputRequestId = record.InputRequestId
+		request.SkillPaths = record.Policy.SkillPaths
+		request.SkillFolder = record.Policy.SkillFolder
+		request.PiExtensionPaths = record.Policy.PiExtensionPaths
+		request.ReadRoots = record.Policy.ReadRoots
+		request.WriteRoots = record.Policy.WriteRoots
+		request.ProtectedPaths = record.Policy.ProtectedPaths
+		request.CapabilityDescriptor = options.RecoverySnapshot.Descriptor
+		request.ExecutionConfiguration = record.Configuration.ExecutionConfiguration
+		request.CredentialReference = record.Configuration.CredentialReference
 	}
 	session, err := transport.Open(request)
 	if err != nil {

@@ -2,7 +2,6 @@ package graph
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -95,7 +94,7 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 		ExecutionId:               execution.ExecutionId,
 		Identity:                  execution.Identity,
 		InputRequestId:            execution.InputRequestId,
-		PreAdmissionInvocationIds: durableStrings(execution.Record["preAdmissionInvocationIds"]),
+		PreAdmissionInvocationIds: frozenExecutionOfRecord(execution.Record).PreAdmissionInvocationIds,
 		FinalAssistantText:        receipt.Text,
 		StopReason:                receipt.StopReason,
 	})
@@ -111,11 +110,7 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 // The turn runs in the background: the daemon must come up even when the
 // model is slow, and the operation is unknown until the turn settles it.
 func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution pigkernel.FrozenExecution) {
-	wrapper := map[string]any{
-		"snapshot":           execution.Record,
-		"restoredPolicy":     asMap(execution.Record["policy"]),
-		"restoredDescriptor": asMap(asMap(execution.Record["configuration"])["descriptor"]),
-	}
+	wrapper := frozenExecutionRecovery(frozenExecutionOfRecord(execution.Record), execution.Identity)
 	capture := &pigRecoveryCapture{}
 	options := runtime.mainAdapterOptions()
 	options.Transport = capture
@@ -224,7 +219,7 @@ func pigExecutionCalledProvider(store *TaskStore, operation Operation, execution
 	for _, call := range kernelRows(store.Db, "SELECT id FROM invocations WHERE operation_id=?", operation.Id) {
 		seen = append(seen, kernelString(call["id"]))
 	}
-	return pigCallsBeyond(durableStrings(execution.Record["preAdmissionInvocationIds"]), seen)
+	return pigCallsBeyond(frozenExecutionOfRecord(execution.Record).PreAdmissionInvocationIds, seen)
 }
 
 // pigRecoveryCapture records the admission the adapter would open.
@@ -289,81 +284,7 @@ func (session *pigRecoverySession) Close() error { return nil }
 // waiting for. The credential never enters it: the daemon keeps the live
 // binding, and the record only names the headers it may restore.
 func pigFrozenExecution(request AgentSessionRequest, preAdmission []string) map[string]any {
-	model := map[string]any{}
-	if view, ok := request.Model.(piModelView); ok {
-		body, _ := json.Marshal(view)
-		_ = json.Unmarshal(body, &model)
-	} else if record := asMap(request.Model); record != nil {
-		model = record
-	}
-	configuration := map[string]any{}
-	if request.ExecutionConfiguration != nil {
-		body, _ := json.Marshal(request.ExecutionConfiguration)
-		_ = json.Unmarshal(body, &configuration)
-	}
-	credential := map[string]any{}
-	if request.CredentialReference != nil {
-		body, _ := json.Marshal(request.CredentialReference)
-		_ = json.Unmarshal(body, &credential)
-	}
-	// The credential headers never enter the durable record: the daemon owns
-	// the live binding, and the record only names the headers it may restore.
-	names := map[string]bool{}
-	for _, header := range []map[string]any{model, pigNestedMap(configuration, "model")} {
-		for _, name := range pigCredentialHeaders(header) {
-			names[name] = true
-		}
-	}
-	credentials := []string{}
-	for name := range names {
-		credentials = append(credentials, name)
-	}
-	sort.Strings(credentials)
-	policy := map[string]any{
-		"workspace":           request.Workspace,
-		"stateDir":            request.StateDir,
-		"skillPaths":          request.SkillPaths,
-		"skillFolder":         request.SkillFolder,
-		"piExtensionPaths":    request.PiExtensionPaths,
-		"readRoots":           request.ReadRoots,
-		"writeRoots":          request.WriteRoots,
-		"protectedPaths":      request.ProtectedPaths,
-		"filesystemAccess":    request.FilesystemAccess,
-		"nativeTools":         request.NativeTools,
-		"allowedToolNames":    request.AllowedToolNames,
-		"bundleDigest":        request.BundleDigest,
-		"toolPolicyDigest":    request.ToolPolicyDigest,
-		"runtimePolicyDigest": request.RuntimePolicyDigest,
-		"thinkingLevel":       request.ThinkingLevel,
-	}
-	tools := []map[string]any{}
-	for _, tool := range request.Tools {
-		tools = append(tools, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-		})
-	}
-	record := map[string]any{
-		"identity":                  request.Binding.InstanceId,
-		"executionId":               request.ExecutionId,
-		"inputRequestId":            request.InputRequestId,
-		"preAdmissionInvocationIds": preAdmission,
-		"model":                     model,
-		"agent": map[string]any{
-			"model":        model,
-			"instructions": request.SystemPrompt,
-			"cwd":          request.Workspace,
-		},
-		"extensionName": pigkernel.ExtensionName(request.Binding.InstanceId),
-		"tools":         tools,
-		"policy":        policy,
-		"configuration": map[string]any{
-			"executionConfiguration": configuration,
-			"credentialReference":    credential,
-			"headerCredentials":      credentials,
-			"descriptor":             request.CapabilityDescriptor,
-		},
-	}
-	return record
+	return frozenExecutionRecord(frozenExecutionOfRequest(request, preAdmission))
 }
 
 // pigNestedMap reads one nested object of a frozen record.

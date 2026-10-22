@@ -15,8 +15,8 @@ import "sync"
 
 var nodeRecoveryResolvers = struct {
 	sync.Mutex
-	values map[string]func(map[string]any) (*NodeRecoveryBinding, error)
-}{values: map[string]func(map[string]any) (*NodeRecoveryBinding, error){}}
+	values map[string]func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error)
+}{values: map[string]func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error){}}
 
 // NodeRecoveryBinding is what the lane learned about one restored node.
 type NodeRecoveryBinding struct {
@@ -29,14 +29,14 @@ type NodeRecoveryBinding struct {
 }
 
 // registerNodeRecoveryResolver records how a restored node is handed back.
-func registerNodeRecoveryResolver(database string, resolver func(map[string]any) (*NodeRecoveryBinding, error)) {
+func registerNodeRecoveryResolver(database string, resolver func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error)) {
 	nodeRecoveryResolvers.Lock()
 	defer nodeRecoveryResolvers.Unlock()
 	nodeRecoveryResolvers.values[database] = resolver
 }
 
 // PrepareNodeRecovery restores one node into the lane.
-func PrepareNodeRecovery(database string, wrapper map[string]any) (*NodeRecoveryBinding, error) {
+func PrepareNodeRecovery(database string, wrapper *FrozenExecutionRecovery) (*NodeRecoveryBinding, error) {
 	nodeRecoveryResolvers.Lock()
 	resolver := nodeRecoveryResolvers.values[database]
 	nodeRecoveryResolvers.Unlock()

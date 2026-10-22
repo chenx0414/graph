@@ -1,5 +1,6 @@
 package graph
 
+// graph:allow-large-file: the v2 lane wired in one piece; splitting it is its own task and is recorded in docs/planning/architecture-deepening-2026-10-22.md
 import (
 	"bytes"
 	"encoding/json"
@@ -343,7 +344,7 @@ func kernelGraphLaneSubmitTool() PiWorkerTool {
 // of the lane, so the same node keeps one resident process across the graph's turns (§7).
 func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	closing := false
-	restoring := map[string]map[string]any{}
+	restoring := map[string]*FrozenExecutionRecovery{}
 	hosts := map[string]*PigNodeHost{}
 	sessions := map[string]NodeSession{}
 	sessionRevisions := map[string]string{}
@@ -388,9 +389,8 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			Raise("invalid_workspace", "Node workspace cannot be opened: "+rsiPanicMessage(recovered))
 		}()
 		if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
-			policy := asMap(frozen["restoredPolicy"])
-			configuration := asMap(asMap(frozen["snapshot"])["configuration"])
-			return &kernelGraphLaneNodeLocation{Workspace: mapString(policy, "workspace"), Base: mapString(asMap(configuration["nodeExecutionConfiguration"]), "base")}
+			configuration := frozen.Record.Configuration
+			return &kernelGraphLaneNodeLocation{Workspace: frozen.Record.Policy.Workspace, Base: mapString(asMap(configuration.ExecutionConfiguration), "base")}
 		}
 		node := nodeDefinition(graphId, nodeId, revisionVersion)
 		selected := "auto"
@@ -472,8 +472,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	}
 	nodeAccess := func(graphId, nodeId string, revisionVersion int) *ResolvedAccessPolicy {
 		if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
-			configuration := asMap(asMap(frozen["snapshot"])["configuration"])
-			body, _ := json.Marshal(asMap(configuration["nodeExecutionConfiguration"])["access"])
+			body, _ := json.Marshal(asMap(frozen.Record.Configuration.ExecutionConfiguration)["access"])
 			var access ResolvedAccessPolicy
 			if err := json.Unmarshal(body, &access); err != nil {
 				panic(err)
@@ -502,7 +501,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		key := graphId + "/" + nodeId
 		if frozen := restoring[key]; frozen != nil {
 			active := options.Kernel.RunningExecution(graphId, nodeId)
-			if active != nil && active.Id != mapString(asMap(frozen["snapshot"]), "executionId") {
+			if active != nil && active.Id != frozen.Record.ExecutionId {
 				delete(restoring, key)
 			}
 		}
@@ -517,8 +516,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		}
 		role := "worker"
 		if frozen := restoring[key]; frozen != nil {
-			configuration := asMap(asMap(frozen["snapshot"])["configuration"])
-			role = mapString(asMap(configuration["nodeExecutionConfiguration"]), "role")
+			role = mapString(asMap(frozen.Record.Configuration.ExecutionConfiguration), "role")
 		} else if recipe != "" && options.Catalog.Definition(recipe).Review {
 			role = "reviewer"
 		}
@@ -918,8 +916,8 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			recipe := session.Binding.DefinitionVersion
 			var model *ModelEntry
 			if frozen := restoring[graphId+"/"+nodeId]; frozen != nil {
-				configuration := asMap(asMap(frozen["snapshot"])["configuration"])
-				body, _ := json.Marshal(asMap(configuration["nodeExecutionConfiguration"])["model"])
+				configuration := frozen.Record.Configuration
+				body, _ := json.Marshal(asMap(configuration.ExecutionConfiguration)["model"])
 				var entry ModelEntry
 				if err := json.Unmarshal(body, &entry); err != nil {
 					panic(err)
@@ -1034,10 +1032,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				// The turn is sent again with the admission it was accepted
 				// with: the configuration it was admitted with, the credential
 				// it may spend and the capability surface it was given.
-				configuration := asMap(asMap(frozen["snapshot"])["configuration"])
-				workerConfig.NodeExecutionConfiguration = asMap(configuration["nodeExecutionConfiguration"])
-				workerConfig.CredentialReference = asMap(configuration["credentialReference"])
-				workerConfig.CapabilityDescriptor = frozen["restoredDescriptor"]
+				configuration := frozen.Record.Configuration
+				workerConfig.NodeExecutionConfiguration = asMap(configuration.ExecutionConfiguration)
+				workerConfig.CredentialReference = asMap(configuration.CredentialReference)
+				workerConfig.CapabilityDescriptor = frozen.Descriptor
 			}
 			return workerConfig
 
@@ -1537,14 +1535,17 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	if options.Artifacts != nil {
 		lane.options.Artifacts = func(graphId string) *ArtifactWorkspace { return options.Artifacts }
 	}
-	registerNodeRecoveryResolver(options.Kernel.Store.Path, func(wrapper map[string]any) (*NodeRecoveryBinding, error) {
-		snapshot := asMap(wrapper["snapshot"])
-		id := mapString(snapshot, "executionId")
+	registerNodeRecoveryResolver(options.Kernel.Store.Path, func(wrapper *FrozenExecutionRecovery) (*NodeRecoveryBinding, error) {
+		id := wrapper.Record.ExecutionId
 		execution := options.Kernel.Execution(id)
 		if execution == nil {
 			return nil, nil
 		}
-		if mapString(asMap(asMap(snapshot["configuration"])["policy"])["binding"].(map[string]any), "instanceId") != mapString(snapshot, "identity") {
+		// The kernel reports the frozen identity out of the record it
+		// stored, so this reads the record's own identity twice over and
+		// cannot fail on a record the kernel wrote. It stays as the lane's
+		// refusal for a record that came from somewhere else.
+		if wrapper.Identity != wrapper.Record.Identity {
 			return nil, fmt.Errorf("Frozen node identity mismatch")
 		}
 		key := execution.TaskId + "/" + execution.NodeId
