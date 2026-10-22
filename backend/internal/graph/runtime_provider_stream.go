@@ -47,6 +47,7 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 	}
 	stream.events = append(stream.events, map[string]any{"type": "start", "partial": stream.partial()})
 	lines := newProviderLineReader(response.Body)
+	defer lines.close()
 	evidence := controlledUsageEvidence{}
 	terminated := false
 	var failure error
@@ -152,6 +153,9 @@ func (stream *controlledStream) brokenToolCall() error {
 type providerLineReader struct {
 	body  io.ReadCloser
 	lines chan providerLine
+	// done ends the background read when the stream is over. Without it the
+	// reader waits for a line nobody will take.
+	done chan struct{}
 }
 
 // providerLine is one line of a provider stream.
@@ -162,12 +166,20 @@ type providerLine struct {
 
 // newProviderLineReader starts reading the lines of a provider stream.
 func newProviderLineReader(body io.ReadCloser) *providerLineReader {
-	reader := &providerLineReader{body: body, lines: make(chan providerLine)}
+	reader := &providerLineReader{
+		body:  body,
+		lines: make(chan providerLine, 1),
+		done:  make(chan struct{}),
+	}
 	go func() {
 		buffered := bufio.NewReader(body)
 		for {
 			text, err := buffered.ReadString('\n')
-			reader.lines <- providerLine{text: text, err: err}
+			select {
+			case reader.lines <- providerLine{text: text, err: err}:
+			case <-reader.done:
+				return
+			}
 			if err != nil {
 				return
 			}
@@ -190,4 +202,9 @@ func (reader *providerLineReader) read(timeout time.Duration) (string, error) {
 	case <-timer.C:
 		return "", os.ErrDeadlineExceeded
 	}
+}
+
+// close ends the background read.
+func (reader *providerLineReader) close() {
+	close(reader.done)
 }
