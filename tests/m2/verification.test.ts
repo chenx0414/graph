@@ -8,6 +8,7 @@ import { openTaskRuntime } from '../../src/core/task-runtime.ts';
 import { parseGraphDefinition, type ModuleDefinition } from '../../src/core/interface-spec.ts';
 import { reviewPolicyInputs, type PublishedSubject, type ReviewDecision, type ReviewPolicy } from '../../src/core/review-policy.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
+import { ensureBackendBinary } from '../helpers/backend-binary.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
@@ -21,7 +22,7 @@ const publish = (name: string, content = `stable ${name} content`, requestId = n
 async function setup(config: ReviewPolicy, report: (refs: Record<string, PublishedSubject>) => Record<string, unknown>, options: { legacyOverride?: boolean; priorCandidate?: boolean; repeatSubject?: boolean; reviseSubject?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-native-review-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const entry = join(root, 'review-policy.mjs'); const configuration = join(root, 'review-policy.json'); await writeFile(configuration, JSON.stringify(config));
-  const generated = await promisify(execFile)(process.execPath, [join(process.cwd(), 'scripts/create-review-module.ts'), configuration, entry]);
+  const generated = await promisify(execFile)(ensureBackendBinary(), ['review-module', '--policy', configuration, '--entry', entry]);
   const module = JSON.parse(generated.stdout) as ModuleDefinition;
   let runtime!: Awaited<ReturnType<typeof openTaskRuntime>>; let graphId = '';
   const subjects = config.kind === 'jury' ? config.candidates.map(item => item.subject) : [config.subject];
@@ -132,7 +133,7 @@ test('native review configuration rejects duplicate dimensions and invalid modul
   const config = multiview(); config.dimensions.push({ id: 'correctness', required: false, report: 'review' });
   const configuration = join(root, 'invalid.json'); const entry = join(root, 'invalid.mjs');
   await writeFile(configuration, JSON.stringify(config));
-  const failed = await promisify(execFile)(process.execPath, [join(process.cwd(), 'scripts/create-review-module.ts'), configuration, entry])
+  const failed = await promisify(execFile)(ensureBackendBinary(), ['review-module', '--policy', configuration, '--entry', entry])
     .then(() => null, error => error as { code: number; stderr: string });
   expect(failed?.code).toBe(1); expect(failed?.stderr).toMatch(/Dimension IDs/);
   expect(await access(entry).then(() => true, () => false)).toBe(false);

@@ -33,9 +33,13 @@ func runCLI(args []string) (code int) {
 	}
 	env := osEnviron()
 	// The commands that are not the console: `graphd reclaim` reclaims a state
-	// directory without serving anything.
-	if len(args) > 0 && args[0] == "reclaim" {
+	// directory without serving anything, and `graphd review-module` turns a
+	// review policy into a command module.
+	switch {
+	case len(args) > 0 && args[0] == "reclaim":
 		return runReclaim(args[1:], cwd)
+	case len(args) > 0 && args[0] == "review-module":
+		return runReviewModule(args[1:], cwd)
 	}
 	opts := parseCLI(args, env, cwd)
 	if opts.help {

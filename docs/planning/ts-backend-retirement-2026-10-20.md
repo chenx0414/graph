@@ -180,6 +180,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m8/settings-ui.test.ts` 被运行中的图占用的模型不能删：指名拒绝、节点仍 idle、图修订仍钉着那个模型、配置版本不前进；停掉那张图之后同一份改动就通过 | `tests/e2e/go-model-binding-guard.test.ts` | 1 |
 | Go 侧自有契约：会话令牌属于安装而不是进程——daemon 被换掉之后，已经打开的控制台仍然能用（同一端口、同一状态目录、旧 cookie 依然有效） | `tests/e2e/go-session-across-restart.test.ts` | 1 |
 | `tests/console/state-retention.test.ts` 状态回收：命令先报「会删多少」且**报告时一个字节都不动**、被要求回收时删的正是报出来的那些、任务**出生与变更**那两条事件永远留着、回收前先备份、回收之后状态目录仍然能起 daemon、对话仍然读得到 | `tests/e2e/go-state-reclaim.test.ts` | 1 |
+| `tests/m2/verification.test.ts` 评审模块的生成与判断：命令写出的模块声明形状对、**已发布的代码入口不被覆盖**、坏策略在写文件之前被拒；生成的模块接进真实的图之后在真实的隔离容器里求值——必填维度失败是业务返工（`rework` 输出、评审人的话、要改的文件、未归属路径），必填输入没到齐时模块等着不动 | `tests/e2e/go-review-module.test.ts` | 1 |
 | `tests/m8/app-shell-ux.test.ts` 浏览器轨（32 条中的 12 条）：项目选择器真的把项目加进侧边栏、Agent Markdown 真的渲染、工具活动折在答案后面、流式增量逐步显影、重试流被清掉、模型与思考档位一起被记住、收件箱保留已解决的问题、新会话斜杠菜单不越界、设置页独立成页 | 同文件的部分用例改由 Go daemon 驱动（`tests/m8/app-shell-ux.test.ts`） | 12 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
@@ -430,7 +431,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
     | `scripts/mcp-adapter-e2e.ts` | `core/task-runtime`、`core/store` | 迁移或退休 | MCP 适配器的契约由 Go 的 MCP 客户端承担（`tests/e2e/pig-mcp-session.test.ts`、`pig-kernel-mcp.test.ts`） |
     | `scripts/skill-sediment-e2e.ts` | `runtime/sediment` | 迁移或退休 | 沉淀引擎在 Go 侧有自己的实现；开关语义已由 `tests/e2e/go-sediment-settings.test.ts` 证明 |
     | ~~`scripts/state-reclaim.ts`~~ | `core/owner`、`core/state-retention` | **已退休**（批次 45） | 能力搬进 `graphd reclaim`：Go 侧本来就有 `PlanRetention` / `ApplyRetention`，但**一个调用方都没有**——回收这件事在 Go 后端里存在，却没有任何入口能触发 |
-    | `scripts/create-review-module.ts` | `core/review-policy` | **给 `graphd` 加 `review-module` 子命令** | 同上：Go 侧有 `ReviewPolicyCode` / `ReviewPolicyInputs`，没有入口 |
+    | ~~`scripts/create-review-module.ts`~~ | `core/review-policy` | **已退休**（批次 46） | 能力搬进 `graphd review-module`：Go 侧本来就有 `ReviewPolicyCode` / `ReviewPolicyInputs`，但**一个调用方都没有**——评审模块生成这件事在 Go 后端里存在，却没有任何入口能触发 |
     | `examples/assemble-matt-team.ts` | `catalog/matt-team`、`catalog/capability-select`、`catalog/capability-library`、`catalog/catalog` | **给 `graphd` 加 `assemble-team` 子命令** | 同上：Go 侧有 `AssembleMattTeam`，没有入口 |
     | `examples/m1-demo.ts` | `core/task-runtime`、`core/interface-spec` | 迁移或退休 | 演示 |
     | `examples/m7-acceptance.ts` | `core/task-runtime`、`catalog/models`、`core/graph-acceptance`、`git/git` | 迁移或退休 | m7 验收 harness |
@@ -438,6 +439,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
   - **三个「Go 侧有实现、没有入口」是最要紧的发现**：回收、评审模块生成、团队组装这三件事，Go 后端里**代码都在**，但没有 CLI/HTTP 入口能触发它们——TypeScript 脚本是它们唯一的调用方。删除实现之前，这三个入口必须先补上（否则功能就此消失），而这正好是「先迁入再删」在 Go 侧的最后一课。
   - **第一个入口已经补上（批次 45）**：**`graphd reclaim`**。回收这件事在 Go 后端里本来就有（`PlanRetention` / `ApplyRetention`），但**一个调用方都没有**——`scripts/state-reclaim.ts` 是它唯一的入口，而那个脚本用的是 TypeScript 的表结构。现在命令是 Go 后端自己的：同一个状态目录上的真数据库、真锁（daemon 正在用这个目录就拒绝）、先备份再回收再 VACUUM。**`scripts/state-reclaim.ts` 随之退休**，`src/core/owner.ts` 与 `src/core/state-retention.ts` 少了一个消费者。新的 Go E2E 证明的是 TypeScript 那份测试承载的契约：**报告时一个字节都不动**、被要求回收时删的正是报出来的那些、**任务出生与变更那两条事件永远留着**、回收前有备份、回收之后状态目录仍然起得来 daemon、对话仍然读得到。**两次回退验证证明这些断言咬得住**：让试运行顺手回收 → 报告里出现了 `applied`（断言红）；让 `--apply` 不删 → 删了 0 条而不是报出来的 7 条（断言红）。
+  - **第二个入口已经补上（批次 46）**：**`graphd review-module`**。评审模块的生成规则（`ReviewPolicyCode` / `ReviewPolicyInputs` / 策略校验）本来就在 Go 后端里，但**一个调用方都没有**——`scripts/create-review-module.ts` 是它唯一的入口。现在命令是 Go 后端自己的：`graphd review-module --policy <policy.json> --entry <new-entry.mjs>` 写出隔离求值代码、打印普通 command 模块声明（`requiredInputs` / 端口协议 / `code.entry` + `code.version`）。**`scripts/create-review-module.ts` 随之退休**，`src/core/review-policy.ts` 少了一个消费者；仍需要生成器的 TS 测试（`tests/fixtures/native-patterns.ts`、`tests/m2/verification.test.ts`）改指这个 Go 命令，生成的模块两边都能跑。
+    - **这一批挖出一个真 bug**：Go 的 `RunModuleContainer` 在容器**成功退出时没有写退出码**（`Code` 留空），于是宿主把每一次成功的模块求值都当成「退出码未知」的失败——`graph.module.failed` 事件写着 `module process exited with null`，模块队列被暂停。**Go 侧的 command 模块此前从来没有成功跑过一次**（没有 Go E2E 覆盖这条路径，TypeScript 那边的测试又走的 TS 运行时）。修法：成功时把退出码写成 0。
+    - 新的 Go E2E（`tests/e2e/go-review-module.test.ts`，1 条）证明的是 TypeScript 那份测试承载的契约：命令写出的声明形状对、**已发布的代码入口不被覆盖**、坏策略在写文件之前就被拒；生成的模块接进**真实的图**之后在**真实的隔离容器**里求值——必填维度失败是业务返工（`rework` 输出、评审人的话、要改的文件、未归属路径），没到齐必填输入时模块等着不动。
+    - **两次回退验证证明这些断言咬得住**：把退出码修复回退 → 模块永远求值不出来（断言红）；让命令可以覆盖已发布的入口 → 「入口不被覆盖」那条断言红。
 - **收尾**：删除 102 个模块 + 211 个随实现退休的低层测试文件，更新 `package.json`、`tsconfig.json`、`tests/suite-baseline.json`（**缩减必须显式落账**）与文档。
 
 ## 门禁与纪律

@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseGraphDefinition, type ModuleDefinition } from '../../src/core/interface-spec.ts';
 import type { ReviewPolicy } from '../../src/core/review-policy.ts';
+import { ensureBackendBinary } from '../helpers/backend-binary.ts';
 
 /** Shared formal definitions: execution tests exercise them, HTTP tests inspect their actual geometry. */
 export async function nativeReviewPattern(root: string, kind: 'optimize' | 'adversarial' | 'multiview' | 'jury') {
@@ -13,7 +14,7 @@ export async function nativeReviewPattern(root: string, kind: 'optimize' | 'adve
   const policy = jury ? ranked([{ id: 'a', subject: 'a' }, { id: 'b', subject: 'b' }]) : kind === 'adversarial' ? { kind: 'adversarial' as const, subject: 'subject', reports: ['review'], criteria: ['works'], staleReview: 'wait' as const } : multi;
   async function generate(id: string, config: ReviewPolicy) {
     const configuration = join(root, `${id}.json`); await writeFile(configuration, JSON.stringify(config));
-    const generated = await promisify(execFile)(process.execPath, [join(process.cwd(), 'scripts/create-review-module.ts'), configuration, join(root, `${id}.mjs`)]);
+    const generated = await promisify(execFile)(ensureBackendBinary(), ['review-module', '--policy', configuration, '--entry', join(root, `${id}.mjs`)]);
     return JSON.parse(generated.stdout) as ModuleDefinition;
   }
   const data = { protocol: 'data' };

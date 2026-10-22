@@ -216,6 +216,12 @@ func RunModuleContainer(input ModuleContainerInput) ModuleContainerResult {
 		} else {
 			result.Stderr = waitErr.Error()
 		}
+	} else {
+		// A module that answered has an exit code of zero. Leaving the code
+		// empty made every successful evaluation look like an unknown exit,
+		// and the host reported it as a failed module.
+		code := 0
+		result.Code = &code
 	}
 	killMu.Lock()
 	started := killStarted
