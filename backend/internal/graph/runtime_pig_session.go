@@ -103,6 +103,7 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 		RequestId:    request.InputRequestId,
 		OnEvent:      onEvent,
 		OnToolCall:   onToolCall,
+		ToolResults:  toolResultRenderer(request.Binding.InstanceId, request.StateDir),
 	}
 	if request.ThinkingLevel != nil {
 		options.ThinkingLevel = *request.ThinkingLevel

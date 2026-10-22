@@ -53,8 +53,8 @@ type PiWorkerConfig struct {
 	// it was given. A turn that never reached the model is sent again with
 	// these, not with what the catalog holds now.
 	NodeExecutionConfiguration map[string]any `json:"nodeExecutionConfiguration,omitempty"`
-	CredentialReference         map[string]any `json:"credentialReference,omitempty"`
-	CapabilityDescriptor        any             `json:"capabilityDescriptor,omitempty"`
+	CredentialReference        map[string]any `json:"credentialReference,omitempty"`
+	CapabilityDescriptor       any            `json:"capabilityDescriptor,omitempty"`
 }
 
 // PiWorkerForkFrom is the immutable source leaf a new session is created from.

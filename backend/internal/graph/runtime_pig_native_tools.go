@@ -248,7 +248,7 @@ func pigEditTool(paths *pigNativePaths) ToolDefinition {
 			"properties": map[string]any{
 				"path": map[string]any{"type": "string", "description": "The file to edit."},
 				"edits": map[string]any{
-					"type": "array",
+					"type":        "array",
 					"description": "The replacements to apply, in order.",
 					"items": map[string]any{
 						"type": "object",

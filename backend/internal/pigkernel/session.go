@@ -50,6 +50,8 @@ type SessionOptions struct {
 	OnEvent func(event map[string]any)
 	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
+	// ToolResults rewrites a tool result before the model reads it.
+	ToolResults ToolResultRenderer
 }
 
 // ToolCallRecord is one executed tool call.
@@ -109,29 +111,29 @@ type Usage struct {
 
 // Session is one resident session on the kernel.
 type Session struct {
-	kernel      *Kernel
+	kernel       *Kernel
 	conversation harness.Conversation
-	extension   *durable.Extension
-	connections []*mcpConnection
-	recorder    *callRecorder
+	extension    *durable.Extension
+	connections  []*mcpConnection
+	recorder     *callRecorder
 
-	identity    string
-	model       ModelSpec
+	identity     string
+	model        ModelSpec
 	instructions string
-	toolNames   []string
-	loaded      []string
-	requestId   string
+	toolNames    []string
+	loaded       []string
+	requestId    string
 	// OnEvent receives the kernel's events.
 	OnEvent func(event map[string]any)
 	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
 
-	mutex         sync.Mutex
-	closed        bool
-	stopped       bool
+	mutex          sync.Mutex
+	closed         bool
+	stopped        bool
 	acceptingInput bool
-	interrupted   bool
-	continuation  chan struct{}
+	interrupted    bool
+	continuation   chan struct{}
 }
 
 // OpenSession opens one resident session on the kernel.
@@ -144,7 +146,7 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		return nil, err
 	}
 	recorder := &callRecorder{}
-	registrations := toolRegistrations(options.Tools, recorder)
+	registrations := toolRegistrations(options.Tools, recorder, options.ToolResults)
 	connections, mcpTools, err := connectMcpServers(ctx, options.McpServers, recorder)
 	if err != nil {
 		return nil, err
@@ -372,14 +374,14 @@ func (session *Session) Inspect() SessionInspect {
 		names = append(names, name)
 	}
 	return SessionInspect{
-		SessionId:       fmt.Sprintf("%d", session.conversation.Id()),
-		SessionFile:     fmt.Sprintf("durable:%d", session.conversation.Id()),
-		Model:           session.model.Id,
-		Messages:        []any{},
-		ActiveTools:     names,
-		RegisteredTools: names,
+		SessionId:        fmt.Sprintf("%d", session.conversation.Id()),
+		SessionFile:      fmt.Sprintf("durable:%d", session.conversation.Id()),
+		Model:            session.model.Id,
+		Messages:         []any{},
+		ActiveTools:      names,
+		RegisteredTools:  names,
 		LoadedExtensions: session.loaded,
-		ToolCalls:       session.recorder.calls(),
+		ToolCalls:        session.recorder.calls(),
 	}
 }
 
