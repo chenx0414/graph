@@ -1174,7 +1174,6 @@ func conversationReverseRows(rows []map[string]any) []map[string]any {
 	return reversed
 }
 
-// conversationNullableString reads a nullable text column.
 func conversationNullableString(value any) *string {
 	switch typed := value.(type) {
 	case string:

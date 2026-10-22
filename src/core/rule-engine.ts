@@ -53,8 +53,6 @@ export interface MergedOutput {
   reasons: string[];
 }
 
-// ---- lexer ------------------------------------------------------------------
-
 type Token =
   | { type: 'ref'; value: string }
   | { type: 'string'; value: string }
@@ -121,8 +119,6 @@ function tokenize(source: string): Token[] {
   }
   return tokens;
 }
-
-// ---- parser -----------------------------------------------------------------
 
 type Node =
   | { kind: 'literal'; value: Json }

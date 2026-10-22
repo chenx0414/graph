@@ -145,7 +145,6 @@ function checkReview() {
  * 不带 ref 时就看当前工作树（一个已经处于未解决冲突状态的合并）。
  */
 function checkMerge() {
-  // The merge stage takes no slug, so both positionals are refs.
   const ours = positionals[0];
   const theirs = positionals[1];
   const gitTry = (...args) => {
@@ -169,7 +168,6 @@ function checkMerge() {
         return record('merge', false, `ref 解析不到提交：${ref}`);
       }
     }
-    // merge-tree 只算结果、不动工作树；它退出非零恰恰就是找到冲突的时候。
     const probe = gitCapture('merge-tree', '--write-tree', ours, theirs);
     const conflicted = probe.out.trim();
     if (!conflicted) return record('merge', false, `${ours} 与 ${theirs} 无法比较（缺少共同祖先？）`);
@@ -180,7 +178,6 @@ function checkMerge() {
     return record('merge', true, `${files.length || '若干'} 个冲突路径：${[...new Set(files)].slice(0, 10).join(', ') || '(见 merge-tree 输出)'}`);
   }
 
-  // 没有 ref：看当前工作树是不是一个「有冲突的未完成合并」。
   if (gitTry('rev-parse', '-q', '--verify', 'MERGE_HEAD') === undefined) {
     return record('merge', false, '当前没有未完成的合并（缺少 MERGE_HEAD）；要么给两个 ref，要么先开始一次合并');
   }

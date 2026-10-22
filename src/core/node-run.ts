@@ -176,13 +176,11 @@ export function listNodeEntries(store: TaskStore, taskId: string, nodeId: string
     return { entries: map(rows), entryCount, limit: 1, hasOlder: false, hasNewer: false };
   }
   if (query.before !== undefined) {
-    // Backward page: the entries directly before the cursor, oldest-first.
     const rows = store.db.prepare(`SELECT ${columns} FROM node_entries
       WHERE task_id=? AND node_id=? AND seq<? ORDER BY seq DESC LIMIT ?`).all(taskId, nodeId, query.before, limit) as Parameters<typeof map>[0];
     return { entries: map(rows.reverse()), entryCount, limit, hasOlder: true, hasNewer: false };
   }
   if (query.after !== undefined) {
-    // Forward page from a known cursor.
     const after = Number.isSafeInteger(query.after) && query.after >= 0 ? query.after : 0;
     const rows = store.db.prepare(`SELECT ${columns} FROM node_entries
       WHERE task_id=? AND node_id=? AND seq>? ORDER BY seq LIMIT ?`).all(taskId, nodeId, after, limit) as Parameters<typeof map>[0];

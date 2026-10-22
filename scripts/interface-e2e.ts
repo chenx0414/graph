@@ -57,7 +57,6 @@ try {
   const dialog = page.getByRole('dialog', { name: '创建项目' });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('textbox', { name: '项目名称' })).toBeFocused();
-  // Keyboard stays inside the real modal even after cycling past both ends.
   for (let i = 0; i < 9; i += 1) {
     await page.keyboard.press('Tab');
     assert.equal(await dialog.evaluate(el => el.contains(document.activeElement) || document.activeElement === document.body), true, 'No background control may receive focus; Chromium may focus its browser chrome');

@@ -402,7 +402,6 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 			options.OnResponse(id, response, release)
 			return response, nil
 		}
-		// Capacity covers the whole body, not just the headers.
 		if response.Body != nil {
 			response.Body = &controlledReleaseBody{ReadCloser: response.Body, release: release}
 		} else {

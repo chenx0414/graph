@@ -1254,7 +1254,6 @@ func (app *GraphApp) serveCapabilityConfig(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-// serveTasks is the task list.
 func (app *GraphApp) serveTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.User().List())
 }
@@ -1980,7 +1979,6 @@ func (app *GraphApp) serveGraphModuleValues(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, app.runtime.GraphModule(r.PathValue("taskId"), r.PathValue("moduleId"), query))
 }
 
-// boolPointer returns a pointer to the value.
 func boolPointer(value bool) *bool { return &value }
 
 // serveGraphModuleTransition is one transition of a module.

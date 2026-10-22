@@ -5,7 +5,6 @@ import { selectCapabilityRecord } from '../src/catalog/capability-select.ts';
 import type { CapabilityRecord } from '../src/catalog/capability-library.ts';
 import type { SavedAgentCombination } from '../src/catalog/catalog.ts';
 
-// This entry ships with Graph's existing examples; it only compiles recipes and writes JSON.
 const args = process.argv.slice(2);
 const option = (name: string) => {
   const index = args.indexOf(name);

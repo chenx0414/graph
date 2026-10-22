@@ -456,7 +456,6 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
   for (const [id, node] of Object.entries(definition.nodes)) validateNode(definition, id, node);
   for (const [id, module] of Object.entries(definition.modules)) validateModule(definition, id, module);
 
-  // Every edge connects a declared output to a declared input, with matching protocols.
   for (const [id, edge] of Object.entries(definition.edges)) {
     if (!isRecord(edge) || typeof edge.enabled !== 'boolean') invalid(`Edge ${id} enabled must be an explicit boolean`);
     const from = endpointRef(definition, edge.from, 'output');
@@ -466,7 +465,6 @@ export function parseGraphDefinition(input: unknown, depth = 0): GraphDefinition
     assertSameProtocol(definition, from, to, `Edge ${id}`);
   }
 
-  // Graph-level public io maps onto declared node/module endpoints.
   for (const [name, io] of Object.entries(definition.inputs)) {
     const ref = endpointRef(definition, io.to, 'input');
     if (!ref) invalid(`Graph input ${name} names unknown endpoint ${io.to}`);

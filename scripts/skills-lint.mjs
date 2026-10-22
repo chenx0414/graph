@@ -116,7 +116,6 @@ function lintSkill(skill, { all }) {
       warnings.push({ rule: 'references-incident-named', message: `references/${reference} is named after an incident or a date; name it by topic` });
     }
   }
-  // Advisory rules encode taste, so they never apply to text somebody else wrote.
   if (skill.authored) {
     if (skill.description && !TRIGGER.test(skill.description)) {
       warnings.push({ rule: 'description-not-triggering', message: 'description never says when to use the skill; a model picks skills by that sentence' });

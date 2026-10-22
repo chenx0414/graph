@@ -58,14 +58,9 @@ import {
 } from './provider-form.ts';
 import type { DesktopBridge } from './setup.ts';
 
-// Lane one owns the vendored models.dev snapshot mapping. It is imported
-// lazily so this settings lane still typechecks and loads before that module is
-// merged; a missing mapping simply means metadata stays unknown and the user
-// fills the fields by hand.
 type ModelsDevModule = { lookupModelMetadata: (...args: any[]) => SnapshotMetadata | null | undefined };
 let modelsDevModule: Promise<ModelsDevModule> | null = null;
 function loadModelsDev(): Promise<ModelsDevModule> {
-  // @ts-ignore -- module added by the impl-catalog-snapshot lane
   return import('../catalog/models-dev.ts');
 }
 
@@ -286,10 +281,6 @@ function ArchivedConversations() {
   );
 }
 
-/**
- * Local rendering preferences. They live in `localStorage` (graph-pref-*) and
- * are never saved to the server config, so toggling one is instant and offline.
- */
 function PreferencesPage() {
   const { preferences, update } = usePreferences();
   return (
@@ -491,8 +482,6 @@ function probeModelsFrom(response: ProbeResponse): ProbeModel[] {
   return models;
 }
 
-/** Vendored models.dev mapping (lane one); a missing module simply means the
- * model's metadata stays unknown and the user fills the fields by hand. */
 async function lookupSnapshot(providerId: string, modelId: string): Promise<SnapshotMetadata | null> {
   try {
     modelsDevModule ??= loadModelsDev();
@@ -536,8 +525,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
   const [platformsNote, setPlatformsNote] = useState('');
   const [platformId, setPlatformId] = useState<string>(FALLBACK_PLATFORMS[0]!.id);
   const [custom, setCustom] = useState<ProviderDraft>(customDraft);
-  // One platform may hold several accounts, so its credential id and variable name
-  // can be overridden without retargeting the platform itself.
   const [account, setAccount] = useState<{ credentialId?: string; credentialRef?: string; label?: string }>({});
   const [key, setKey] = useState('');
   const [errors, setErrors] = useState<ProviderDraftErrors>({});
@@ -582,8 +569,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
 
   const selected = platformById(platforms, platformId);
   const isCustom = isCustomPlatform(platformId) || selected?.custom === true;
-  // The selected credential, not the platform, decides the name and variable: that is
-  // what lets an existing account of the platform be renamed here.
   const base: ProviderDraft = !isCustom && selected ? draftForCredential(selected, draft.credentials, account.credentialId ?? selected.id) : custom;
   const active: ProviderDraft = { ...base, ...account };
   const editAccount = (next: { credentialId?: string; credentialRef?: string; label?: string }) => {
@@ -617,7 +602,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     setNote('');
     const next = vendors.find(vendor => vendor.id === active.credentialId);
     if (next) setSelectedVendorId(next.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.credentialId]);
   const entries = draft.models?.entries ?? [];
   const activeEntries = entries.filter(entry => entry.credentialId === active.credentialId);
@@ -700,18 +684,12 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     }
   };
 
-  // Selecting a vendor auto-fetches its model list exactly once per switch. The
-  // effect depends on the resolved vendor source, not only the id, so a vendor
-  // that only becomes resolvable after the catalog/config loads still triggers.
-  // A vendor whose endpoint is not ready yet is NOT recorded, so it auto-probes
-  // once the endpoint arrives instead of being silently skipped.
   useEffect(() => {
     const vendor = selectedVendorId ? vendors.find(item => item.id === selectedVendorId) : undefined;
     const decision = autoProbeDecision(selectedVendorId, probedVendor.current, vendor?.baseUrl ?? '');
     if (!decision.probe || !vendor) return;
     probedVendor.current = decision.recorded;
     void runProbe(draftFromModelVendor(vendor), { verification: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedVendorId, vendors]);
 
   const saveProvider = async () => {
@@ -947,8 +925,6 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
               const parsed = raw === '' ? undefined : Number(raw);
               const cost = withCostField(target.cost, field, parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined);
               if (cost) target.cost = cost; else delete target.cost;
-              // A price is a set: only a complete one is known; a partial one is
-              // marked unknown (never written as 0).
               const currency = target.pricing?.currency ?? '';
               if (completeCost(target.cost) && currency) target.pricing = { currency, unit: 'per_million_tokens', status: 'known' };
               else if (completeCost(target.cost)) target.pricing = { currency: 'USD', unit: 'per_million_tokens', status: 'known', sourceUrl: 'manual' };

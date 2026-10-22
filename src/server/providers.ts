@@ -281,7 +281,6 @@ export function vendorErrorText(body: unknown, status: number): string {
       const raw = JSON.stringify(body);
       if (raw && raw !== '{}' && raw !== 'null') return raw;
     } catch {
-      // fall through to the HTTP status
     }
   }
   return `HTTP ${status}`;

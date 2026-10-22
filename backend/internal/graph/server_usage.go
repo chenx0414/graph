@@ -375,7 +375,6 @@ func usageText(value any) *string {
 	return &trimmed
 }
 
-// number reads a finite number from a JSON value.
 func number(value any) *float64 {
 	switch typed := value.(type) {
 	case float64:
@@ -440,7 +439,6 @@ func boolean(value any) *bool {
 	return nil
 }
 
-// clampPercent keeps a percentage inside 0..100.
 func clampPercent(value float64) float64 {
 	if value < 0 {
 		return 0

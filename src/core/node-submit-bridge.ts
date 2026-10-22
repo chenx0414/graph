@@ -207,10 +207,6 @@ export class NodeSubmitBridge {
     }
   }
 
-  /**
-   * The message a node sees on a refusal: short, field-level, and explicit that the
-   * work already done stands (§5, §7 — do not redo the implementation for a bad field).
-   */
   refusalMessage(receipt: BridgeReceipt): string {
     if (receipt.accepted) throw new RuntimeError('invalid_submit', 'There is no refusal to describe');
     return refusalText(receipt.defects);

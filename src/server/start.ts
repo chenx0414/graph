@@ -176,7 +176,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
     revoked: revokedRefs,
   });
 
-  // From here on, 用量 also sees the pushed/keychain secrets, not just the environment.
   liveSecrets = () => live.secrets();
   liveRevoked = () => live.revoked();
   /** Atomic multi-ref revocation persistence: a temp file plus rename means a
@@ -211,7 +210,6 @@ export async function startGraphDaemon(options: DaemonOptions): Promise<GraphDae
   let definitionsPublished = false;
 
   const activateDispatch = (server: Awaited<ReturnType<typeof openGraphServer>>) => {
-    // View-only CLI intent never starts dispatching because a config was saved.
     if (options.mode !== 'execute') return;
     server.startDrive();
     server.runtime.host.recoverMasters();

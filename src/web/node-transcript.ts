@@ -15,8 +15,6 @@ export function nodeMessages(entries: Entry[], operations: { id: string; state: 
   const newest = entries.at(-1)?.operationId;
   return entries.map(entry => {
     const operationId = entry.operationId ?? `legacy:${entry.id}`;
-    // A peer Agent's message arrived here like a prompt, so it reads as an incoming message rather
-    // than as something this node said. It stays marked with its sender so the chat can attribute it.
     const peerFrom = entry.role === 'assistant' && entry.data && entry.data.peer === true && typeof entry.data.from === 'string'
       ? entry.data.from as string
       : undefined;

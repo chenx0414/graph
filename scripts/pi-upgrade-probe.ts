@@ -38,7 +38,6 @@ async function main() {
       model: modelA as unknown as Model<never>, modelRuntime: await testModelRuntime(),
       systemPrompt: PROMPT,
       stream: ((model: Model<never>, context: TranscriptContext, options: never) => {
-        // Exactly what our recorder reads at the provider call site.
         sent.push(getCurrentSystemPrompt(context.messages));
         transcriptSystem.push(context.messages
           .filter(message => message.role === 'system' || message.role === 'developer')
@@ -67,7 +66,6 @@ async function main() {
       // rendered text the provider serializes.
       report.push(`  rendered replay covers the raw transcript text: ${text.length >= transcriptSystem[index]!.length}`);
     }
-    // The risk this probe exists for: the first request must keep the whole prompt.
     const first = sent[0]!;
     const complete = first.includes(RULES) && first.includes(DOCS) && first.includes('MAIN IDENTITY SENTINEL');
     report.push(`CONCLUSION complete prompt recorded: ${complete}`);

@@ -327,8 +327,6 @@ export class NodeExecutor {
         return 'done';
       }
 
-      // A reported missing-required gap is a RESUBMIT: inject it and re-turn the
-      // SAME execution, because the node's own work up to now is still valid.
       if (report && report.missing && report.missing.length > 0) {
         if (resubmitsUsed < budget.resubmitsAllowed) {
           resubmitsUsed += 1;
@@ -343,7 +341,6 @@ export class NodeExecutor {
         return this.fail(executionId, nodeId, seq, `required output(s) still missing: ${report.missing.join(', ')} — all ${budget.resubmitsAllowed} resubmit(s) were used and the node never enabled them`);
       }
 
-      // No submission and no gap: a RETRY, up to the retry budget.
       if (retriesUsed >= budget.retriesAllowed) {
         releaseHold();
         return this.fail(executionId, nodeId, seq, `no valid submission after ${attempt} attempt(s)`);

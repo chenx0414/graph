@@ -266,7 +266,6 @@ export function rsiRestartDecision(
   return { id };
 }
 
-/** Last non-empty lines, for bounded error dialogs. */
 /** Validate and apply one `graph:save-secret` request. `value === null` is an
  * explicit revocation and must be expressible through the IPC bridge; an empty
  * string is not a revocation and is rejected. */
@@ -285,6 +284,7 @@ export function applySecretRequest(
   return { ok: true, secrets: { ...secrets, [ref]: value.trim() }, revoked: false };
 }
 
+/** Last non-empty lines, for bounded error dialogs. */
 export function tailText(text: string, lines: number): string {
   return text.split('\n').filter(line => line.trim().length > 0).slice(-lines).join('\n');
 }

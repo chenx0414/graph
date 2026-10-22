@@ -221,9 +221,7 @@ export function selectionBlockedReason(input: CredentialResolution): string | nu
   return `凭据未解析：请设置环境变量 ${input.credentialRef || '（对应环境变量名）'}，或在桌面端把密钥保存到钥匙串后再选择模型`;
 }
 
-/** Test ids of the inline concurrency controls of one credential. B-1 moved both
- * caps inside the ① 配置厂商 card and removed the standalone 并发限制 region, so
- * the three ids are derived once here instead of being written out three times. */
+/** Test ids of the inline concurrency controls of one credential. */
 export function concurrencyControlIds(credentialId: string): { credential: string; groupId: string; groupLimit: string } {
   return {
     credential: `limit-credential-${credentialId}`,
@@ -295,7 +293,6 @@ export function draftForCredential(
   const label = stored?.displayName?.trim();
   return {
     ...draft,
-    // An account keeps the name its operator gave it; the platform label is only the default.
     ...(label ? { label } : {}),
     ...(existing && existing !== draft.credentialRef ? { credentialRef: existing } : {}),
   };
@@ -634,8 +631,6 @@ export function metadataToFields(metadata: SnapshotMetadata | null | undefined):
   };
 }
 
-/** A model entry under construction. Numeric fields stay optional so an
- * unmatched model shows blank inputs instead of a fake `0`. */
 /** A hand-edited price may be partially typed while the user works; a price is
  * only a value once all four sides are known. Partial sides are an error and are
  * never persisted as 0 (a zero would be billed as a real, free price). */
@@ -771,9 +766,6 @@ export type PersistedModelEntry = Omit<ModelEntry, 'contextWindow' | 'maxTokens'
  * grade, and a price only when all four sides are known. */
 export function draftToModelEntry(draft: ModelEntryDraft): PersistedModelEntry {
   const cost = completeCost(draft.cost);
-  // An unknown price is simply absent: the daemon requires a nonempty currency
-  // whenever a `pricing` object is present, and inventing a currency (or a 0)
-  // would both be a lie about the price. A known price always carries its own.
   const pricing = cost
     ? (draft.pricing && draft.pricing.status !== 'unknown'
         ? draft.pricing

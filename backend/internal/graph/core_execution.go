@@ -1436,7 +1436,6 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 	return operation, admitted
 }
 
-// stringField reads a string field of a JSON record.
 func stringField(record map[string]any, key string) string {
 	if value, ok := record[key].(string); ok {
 		return value

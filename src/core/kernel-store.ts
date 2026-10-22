@@ -326,8 +326,6 @@ export class KernelStore {
     }
   }
 
-  // ---- revisions (immutable) -------------------------------------------------
-
   /** §3/§8: publish an immutable revision. A version may never be overwritten. */
   publishRevision(taskId: string, input: { definition: GraphDefinition; reason: string; version?: number }): RevisionRow {
     if (!input.reason.trim()) throw new RuntimeError('invalid_definition', 'A revision reason is required');
@@ -374,8 +372,6 @@ export class KernelStore {
     });
   }
 
-  // ---- node / module admission ----------------------------------------------
-
   admitNode(taskId: string, revisionVersion: number, nodeId: string, input: { instanceId: string; kind?: string }): void {
     const revision = this.revision(taskId, revisionVersion);
     if (!revision) throw new RuntimeError('invalid_definition', `Unknown revision ${revisionVersion}`);
@@ -394,8 +390,6 @@ export class KernelStore {
     this.store.db.prepare('INSERT INTO kernel_modules(task_id,revision_version,module_id,module_type,trigger) VALUES(?,?,?,?,?)')
       .run(taskId, revisionVersion, moduleId, input.moduleType, input.trigger);
   }
-
-  // ---- executions ------------------------------------------------------------
 
   startExecution(taskId: string, input: { executionId: string; nodeId: string; revisionVersion: number; tokenBudget?: { budget: number; unlimited: boolean } }): ExecutionRow {
     return this.store.transaction(() => {
@@ -454,8 +448,6 @@ export class KernelStore {
     this.db.prepare('UPDATE kernel_executions SET attempt=attempt+1 WHERE id=?').run(executionId);
     return this.execution(executionId)!.attempt;
   }
-
-  // ---- submit (§6) -----------------------------------------------------------
 
   /**
    * One short transaction. Validates eligibility, the single-valid-submit rule and
@@ -720,8 +712,6 @@ export class KernelStore {
       .run(taskId, nodeId, 'delivery', this.content.encode(payload), Date.now());
   }
 
-  // ---- node queue and per-node retry state (§7) -------------------------------
-
   /** Append one input to a node's serial queue. Returns the accepted row. */
   /**
    * `enqueue` without its own transaction, for callers already inside one (materialisation
@@ -793,8 +783,6 @@ export class KernelStore {
       ? { attempts: row.attempts, resubmitsUsed: row.resubmits_used, retriesAllowed: row.retries_allowed, resubmitsAllowed: row.resubmits_allowed, paused: row.paused === 1, rebinds: row.rebinds }
       : { attempts: 0, resubmitsUsed: 0, retriesAllowed: null, resubmitsAllowed: null, paused: false, rebinds: 0 };
   }
-
-  // ---- metering (v2) ---------------------------------------------------------
 
   /** Explicit user policy; absent policies inherit the configured quota. */
   authorizedBudget(taskId: string, nodeId: string): { budget: number; unlimited: boolean } | null {
@@ -1048,8 +1036,6 @@ export class KernelStore {
       this.store.db.prepare('UPDATE kernel_node_state SET rebinds=rebinds+1 WHERE task_id=? AND node_id=?').run(taskId, nodeId);
     });
   }
-
-  // ---- module inputs and transitions -----------------------------------------
 
   moduleInput(taskId: string, moduleId: string, name: string): ModuleInputRow | null {
     const row = this.store.db.prepare('SELECT * FROM kernel_module_inputs WHERE task_id=? AND module_id=? AND name=?').get(taskId, moduleId, name) as

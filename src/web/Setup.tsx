@@ -126,7 +126,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
     }
     setBusy(true);
     try {
-      // 1) Keychain + running daemon first, so the key never enters the config file.
+      // Keychain first, so the key never enters the config file.
       if (bridge && key.trim()) {
         const stored = await bridge.saveSecret(secretRef, key.trim());
         if (!stored.stored) {
@@ -138,7 +138,6 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
           setStatus({ tone: 'info', text: `密钥已写入钥匙串，但守护进程尚未应用：${stored.message ?? '等待下次连接'}`, testid: 'setup-secret-pending' });
         }
       }
-      // 2) Persist and hot-apply the connection document, merging existing platforms.
       const current = (await api<{ revision: number; config: Record<string, unknown> }>('/api/config')).config;
       const document = buildTemplateConfigDocument(current, { providerId, api: apiType, baseUrl, credentialId, secretRef, models: chosenModels }, template.models.map(model => ({ id: model.id, grade: model.grade, contextWindow: model.contextWindow, maxTokens: model.maxTokens })));
       if (projectId && projectRoot) {

@@ -90,7 +90,6 @@ export type Settings_ = {
   agentCombinationError?: string | null;
 };
 
-
 const NODE_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   pending: 'neutral', ready: 'info', preparing: 'accent', running: 'accent',
   succeeded: 'success', failed: 'danger', blocked: 'warn', skipped: 'neutral',
@@ -102,10 +101,6 @@ function statusText(view: TaskView) {
   if (open.length) return open.map(question => describeQuestion(question.kind, question.data)).join('、');
   return TASK_LABEL[view.status] ?? view.status;
 }
-
-
-/** A preparing node whose credential has requests waiting is waiting for a
- * model slot, not executing on the provider. */
 
 function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
@@ -187,11 +182,8 @@ export function App() {
     return request ? `${prefix} · ${request}` : null;
   });
   const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
-  // A task's address always means its graph: the separate task page is gone.
   const taskMatch = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
-  // Where the user is standing decides which project the launcher's index opens on: the task in
-  // the address when there is one, otherwise the first configured project.
   const currentProjectId = tasks.find(task => task.id === selectedDrawerTaskId)?.projectId
     ?? (conversationMatch ? conversations?.find(item => item.id === conversationMatch[1])?.projectId : null)
     ?? settings?.projects[0]?.id
@@ -210,7 +202,6 @@ export function App() {
     const next = closeTab(tabs, id);
     setTabs(next);
     if (!wasActive) return;
-    // The front follows its neighbour; an emptied workspace falls back to the new-chat page.
     const active = next.tabs.find(tab => tab.id === next.activeId);
     const hash = active ? active.hash : '#/';
     setPath(hash.slice(1));

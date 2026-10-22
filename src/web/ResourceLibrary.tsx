@@ -41,9 +41,6 @@ type CapabilityConfigItem = {
 
 type CapabilitySort = 'alphabetical' | 'enabled' | 'popular';
 
-/* ------------------------------------------------- resource grouping */
-/* Group the catalog and configuration views by their effective configuration. */
-
 type LibraryEntryFilter = 'all' | 'configured' | 'unconfigured';
 
 interface LibraryEntryCounts {

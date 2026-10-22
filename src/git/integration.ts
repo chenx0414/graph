@@ -192,7 +192,6 @@ export class GitIntegration {
       ? (prep.detail as { fingerprint?: string } | null)?.fingerprint
       : undefined;
     if (recorded === current) return prep;
-    // The snapshot is stale (dirty, new commit, branch switch, deletion).
     return this.prepareProject(projectId, {});
   }
 

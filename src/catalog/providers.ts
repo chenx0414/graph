@@ -106,8 +106,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   },
 ];
 
-// Attach only archived, source-dated prices. Models without a verified entry
-// keep `cost`/`pricing` absent so the wizard shows "价格未知" instead of zero.
 for (const template of PROVIDER_TEMPLATES) {
   for (const model of template.models) {
     const snapshot = snapshotFor(template.id, model.id);

@@ -49,17 +49,6 @@ export const MAX_SCOPES = 64;
 export const MAX_SPILL_FILES = 256;
 const COUNTS_FILE = 'counts.json';
 
-/**
- * Per-tool ceilings on the model-visible text. Only `bash` and the system inventory are
- * listed: upstream `read` already continues with `offset` and upstream `edit` already
- * answers in one line, so a cap here would fight behaviour that is already the right shape.
- */
-/**
- * Per-tool ceilings on the model-visible text. Only the tools that can flood the prompt in a single
- * view are listed: `bash` (host output), the system inventory (one dump), and reading another
- * conversation (a whole session). Upstream `read` already continues with `offset` and upstream `edit`
- * already answers in one line, so a cap here would fight behaviour that is already the right shape.
- */
 const TOOL_TEXT_LIMITS: Record<string, number> = {
   bash: SHELL_OUTPUT_LIMIT,
   read_system_capabilities: SYSTEM_SUMMARY_LIMIT,

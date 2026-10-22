@@ -343,9 +343,6 @@ export function recordConversationOutput(store: TaskStore, operation: Operation,
   if (nodeSpec.role !== 'master') return;
   const conversation = conversationForTask(store, operation.taskId);
   if (!conversation) return;
-  // The marker is an explicit fact about the turn: a user message carries the same
-  // operation id and kind='chat', so a message query cannot be trusted to decide
-  // whether this turn already answered.
   const alreadyReplied = operationReplied(store, operation.id);
   const output = result.output && typeof result.output === 'object' && !Array.isArray(result.output)
     ? result.output as { [key: string]: Json }

@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
-/* ---------------------------------------------------------------- icons */
-
 export type IconName =
   | 'overview' | 'inbox' | 'catalog' | 'usage' | 'wizard' | 'settings' | 'graph' | 'task' | 'tool'
   | 'play' | 'pause' | 'check' | 'alert' | 'clock' | 'plus' | 'refresh'
@@ -52,8 +50,6 @@ export function Icon({ name, size = 16, className = '' }: { name: IconName; size
   );
 }
 
-/* ---------------------------------------------------------------- button */
-
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'default' | 'primary' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg';
@@ -69,8 +65,6 @@ export function Button({ variant = 'default', size = 'md', icon, className = '',
     </button>
   );
 }
-
-/* ---------------------------------------------------------------- cards */
 
 export function Card({ title, icon, subtitle, actions, children, className = '', testid, tone }: {
   title?: ReactNode; icon?: IconName; subtitle?: ReactNode; actions?: ReactNode;
@@ -138,8 +132,6 @@ export function Empty({ icon = 'box', title, hint }: { icon?: IconName; title: s
 export function Spinner({ label }: { label?: string }) {
   return <span className="muted"><span className="spinner" />{label ?? '加载中…'}</span>;
 }
-
-/* ---------------------------------------------------------------- toasts */
 
 type ToastTone = 'info' | 'success' | 'danger';
 type ToastItem = { id: number; message: string; tone: ToastTone };

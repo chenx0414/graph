@@ -14,7 +14,6 @@ const stateDir = join(root, 'state');
 await mkdir(stateDir, { recursive: true });
 const store = new TaskStore(join(stateDir, 'tasks.sqlite'));
 
-// A real router graph: gate -> (pass) ship | (fail) fix, with the router resolving from a field.
 const nodes = [
   { id: 'gate', kind: 'program', action: 'graph.command', routes: ['pass', 'fail'],
     input: { route: { byField: { path: 'verdict', values: { pass: 'pass', rework: 'fail' } } } } },
