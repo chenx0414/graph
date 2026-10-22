@@ -32,6 +32,11 @@ func runCLI(args []string) (code int) {
 		panic(err)
 	}
 	env := osEnviron()
+	// The commands that are not the console: `graphd reclaim` reclaims a state
+	// directory without serving anything.
+	if len(args) > 0 && args[0] == "reclaim" {
+		return runReclaim(args[1:], cwd)
+	}
 	opts := parseCLI(args, env, cwd)
 	if opts.help {
 		fmt.Fprintln(os.Stdout, cliUsage)
