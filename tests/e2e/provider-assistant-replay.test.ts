@@ -90,7 +90,11 @@ test('an anthropic answer keeps its signed reasoning and its tool call for the n
     }, { timeout: 30_000 }).toBe('succeeded');
     expect(await readFile(join(project, 'proof.txt'), 'utf8')).toBe('harness-proof');
 
-    const second = provider.requests[1]!.body as { messages: { role: string; content: { type: string; [key: string]: unknown }[] }[] };
+    const second = provider.requests[1]!.body as {
+      system?: { type: string; text: string; cache_control?: { type: string } }[];
+      messages: { role: string; content: { type: string; [key: string]: unknown }[] }[];
+      tools?: { name: string; cache_control?: { type: string } }[];
+    };
     const assistant = second.messages.find(message => message.role === 'assistant');
     expect(assistant).toBeDefined();
     const blocks = assistant!.content as { type: string; [key: string]: unknown }[];
@@ -100,6 +104,15 @@ test('an anthropic answer keeps its signed reasoning and its tool call for the n
     expect(blocks.find(block => block.type === 'tool_use')).toMatchObject({ id: 'tool-write', name: 'bash' });
     // The tool result still answers that call.
     expect(JSON.stringify(second.messages)).toContain('tool_result');
+
+    // Anthropic caches what a breakpoint marks. The three breakpoints are the
+    // system prompt, the tool declarations and the conversation so far.
+    expect(second.system).toHaveLength(1);
+    expect(second.system![0]).toMatchObject({ type: 'text', cache_control: { type: 'ephemeral' } });
+    expect(second.tools!.at(-1)).toMatchObject({ cache_control: { type: 'ephemeral' } });
+    expect(second.tools!.slice(0, -1).every(tool => tool.cache_control === undefined)).toBe(true);
+    const lastMessage = second.messages.at(-1)!;
+    expect(JSON.stringify(lastMessage.content)).toContain('"cache_control":{"type":"ephemeral"}');
   } finally {
     await daemon.close();
     await provider.close();
