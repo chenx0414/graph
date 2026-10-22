@@ -306,7 +306,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 ## 7. 验证
 
-**完整门禁**（`node --run check`，在 `feature/harness-token-efficiency-2026-10-22` 上，无并发改动）：289 个测试文件 / 1,555 项测试，288 文件通过、1 个跳过（浏览器环境依赖）；1,552 项通过、3 项跳过。类型检查、Go vet、基线检查（基线按增长规则自动升到 289/1555）、验收证据检查全部通过，验收证据未变。
+**完整门禁**（`node --run check`，在 `feature/harness-token-efficiency-2026-10-22` 上，无并发改动）：290 个测试文件 / 1,557 项测试，289 文件通过、1 个跳过（浏览器环境依赖）；1,554 项通过、3 项跳过。类型检查、Go vet、基线检查（基线按增长规则自动升到 290/1557）、验收证据检查全部通过，验收证据未变。
 
 **每个修改都做过红灯验证**（把生产改动撤掉，E2E 必须红）：
 
@@ -316,6 +316,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 | `e18a65b` 缓存断点 | 撤掉后 Anthropic E2E 的三个断点断言红 |
 | `ff7b6da` 压缩上限 | 撤掉后"设了上限就压缩"那条红，"没设上限不压缩"那条始终绿 |
 | `129da7e` 摘要输出预算 | 撤掉后摘要请求带的是模型整个上限（8192 而不是它自己的额度） |
+| `2037c4c` 任务说明包复用 | 打断复用逻辑后"开启开关"那条 E2E 红，"关闭开关"那条始终绿 |
 
 **没有做**：真实模型的 A/B。压缩上限默认关闭，本轮交付的是可测量的机制、账本上的基线和一条按真实账本推演的收益，不是"每完成任务成本已下降"的证明。
 
@@ -325,6 +326,6 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 - 基线快照：`node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tasks.sqlite" > /tmp/graph-harness-baseline-2026-10-22.json`
 - 扩展后的基线（含前缀分布、用途、整树情景）：同命令，`/tmp/baseline-v2.json`
-- 提交：`6b2eca8`（助手回合回放）、`e18a65b`（缓存断点）、`ff7b6da`（压缩上限）、`8d20548`（成本计量）、`129da7e`（摘要输出预算）
-- 新 E2E：`tests/e2e/provider-assistant-replay.test.ts`、`tests/e2e/compaction-context-ceiling.test.ts`
+- 提交：`6b2eca8`（助手回合回放）、`e18a65b`（缓存断点）、`ff7b6da`（压缩上限）、`8d20548`（成本计量）、`129da7e`（摘要输出预算）、`2037c4c`（任务说明包复用）、`f203a56`（一次两个工具调用的覆盖）
+- 新 E2E：`tests/e2e/provider-assistant-replay.test.ts`、`tests/e2e/compaction-context-ceiling.test.ts`、`tests/e2e/task-setup-reuse.test.ts`
 - 新夹具：`tests/fixtures/anthropic-server.ts`
