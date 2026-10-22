@@ -54,6 +54,8 @@ type AgentToolsGraphManagement struct {
 	HarnessCompare func(input map[string]any) any
 	// HarnessExperience reads the lessons earlier tasks adopted per domain.
 	HarnessExperience func(input map[string]any) any
+	// HarnessProbe runs one task under several harnesses and contrasts them.
+	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
 }
 
 // AgentToolsSystemChange is one proposed change of the Graph host itself.
@@ -894,6 +896,27 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			}
 			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessExperience(map[string]any{"domain": domain})))
 		},
+		"probe_harness": func(id string, params map[string]any) any {
+			if input.GraphManagement.HarnessProbe == nil {
+				panic(errors.New("Harness probing is unavailable in this session"))
+			}
+			variants, err := agentToolsHarnessVariants(params["variants"])
+			if err != nil {
+				panic(err)
+			}
+			timeout := 0
+			if value, ok := agentToolsNumber(params["timeoutMs"]); ok {
+				timeout = int(value)
+			}
+			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessProbe(HarnessProbeInput{
+				Task:      agentToolsStringOrEmpty(params["task"]),
+				Recipe:    agentToolsStringOrEmpty(params["recipe"]),
+				Model:     agentToolsStringOrEmpty(params["model"]),
+				Variants:  variants,
+				Domain:    agentToolsStringOrEmpty(params["domain"]),
+				TimeoutMs: timeout,
+			})))
+		},
 		"ask_user": func(id string, params map[string]any) any {
 			prompt := strings.TrimSpace(agentToolsStringOrEmpty(params["prompt"]))
 			why := strings.TrimSpace(agentToolsStringOrEmpty(params["why"]))
@@ -1409,6 +1432,42 @@ func agentToolsGraphSectionQuery(params map[string]any) GraphSectionQuery {
 		query.Limit = &limit
 	}
 	return query
+}
+
+// agentToolsHarnessVariants reads the variant list of a harness probe.
+func agentToolsHarnessVariants(value any) ([]HarnessProbeVariant, error) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, errors.New("variants must be a list of probe variants")
+	}
+	out := []HarnessProbeVariant{}
+	for _, item := range items {
+		record, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.New("every probe variant must be an object with a label")
+		}
+		variant := HarnessProbeVariant{
+			Label:   agentToolsStringOrEmpty(record["label"]),
+			Recipe:  agentToolsStringOrEmpty(record["recipe"]),
+			Model:   agentToolsStringOrEmpty(record["model"]),
+			Harness: map[string]string{},
+		}
+		if raw, present := record["harness"]; present && raw != nil {
+			harness, ok := raw.(map[string]any)
+			if !ok {
+				return nil, errors.New("a probe variant harness must be an object of prompt key to text")
+			}
+			for key, text := range harness {
+				content, ok := text.(string)
+				if !ok {
+					return nil, errors.New("a probe variant harness value must be a string")
+				}
+				variant.Harness[key] = content
+			}
+		}
+		out = append(out, variant)
+	}
+	return out, nil
 }
 
 // agentToolsOptionalString is one trimmed string argument, or none.

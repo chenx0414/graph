@@ -52,16 +52,22 @@ type NodeDeliverable struct {
 }
 
 type NodeDefinition struct {
-	Recipe       string                 `json:"recipe"`
-	Task         string                 `json:"task"`
-	Instructions string                 `json:"instructions,omitempty"`
-	Workspace    *NodeWorkspace         `json:"workspace,omitempty"`
-	Access       map[string]any         `json:"access,omitempty"`
-	Acceptance   []string               `json:"acceptance,omitempty"`
-	Submission   NodeSubmission         `json:"submission"`
-	Deliverable  *NodeDeliverable       `json:"deliverable,omitempty"`
-	Inputs       map[string]ProtocolRef `json:"inputs"`
-	Outputs      map[string]ProtocolRef `json:"outputs"`
+	Recipe       string `json:"recipe"`
+	Task         string `json:"task"`
+	Instructions string `json:"instructions,omitempty"`
+	// Harness overrides the prompt texts of this node only. The keys are prompt
+	// keys of the editable library (rules/<role>.md, tools/<role>.md,
+	// runtime/node.md, agents/<definition-id>.md); the values replace the text
+	// that would otherwise be read from the library. It is how one task can run
+	// under several harnesses at once.
+	Harness     map[string]string      `json:"harness,omitempty"`
+	Workspace   *NodeWorkspace         `json:"workspace,omitempty"`
+	Access      map[string]any         `json:"access,omitempty"`
+	Acceptance  []string               `json:"acceptance,omitempty"`
+	Submission  NodeSubmission         `json:"submission"`
+	Deliverable *NodeDeliverable       `json:"deliverable,omitempty"`
+	Inputs      map[string]ProtocolRef `json:"inputs"`
+	Outputs     map[string]ProtocolRef `json:"outputs"`
 	ExecutionSettings
 }
 
@@ -321,6 +327,57 @@ func interfaceSpecValidateSettings(scope string, settings map[string]any) {
 var interfaceSpecDeliverableSlug = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$`)
 var interfaceSpecSchemaKind = regexp.MustCompile(`^([a-z][a-z0-9._-]*)@([1-9]\d*)$`)
 
+// interfaceSpecHarnessRoles are the role files a node's harness may replace.
+var interfaceSpecHarnessRoles = map[string]bool{"common": true, "main": true, "worker": true, "reviewer": true}
+
+// interfaceSpecValidateHarness checks the prompt overrides of one node.
+//
+// The keys name prompt files of the editable library. Only those files are
+// replaceable: a harness changes what the agent is told, not what the host
+// enforces.
+func interfaceSpecValidateHarness(id string, raw any) {
+	record, ok := raw.(map[string]any)
+	if !ok {
+		interfaceSpecInvalid("Node " + id + " harness must be an object of prompt key to text")
+	}
+	if len(record) == 0 {
+		interfaceSpecInvalid("Node " + id + " harness must replace at least one prompt")
+	}
+	if len(record) > 6 {
+		interfaceSpecInvalid("Node " + id + " harness replaces at most 6 prompts")
+	}
+	for key, value := range record {
+		text, isString := value.(string)
+		if !isString || strings.TrimSpace(text) == "" {
+			interfaceSpecInvalid("Node " + id + " harness " + key + " must be a non-empty string")
+		}
+		if len(text) > 20_000 {
+			interfaceSpecInvalid("Node " + id + " harness " + key + " must be at most 20000 characters")
+		}
+		switch {
+		case strings.HasPrefix(key, "agents/") && strings.HasSuffix(key, ".md"):
+			if !interfaceSpecHarnessKeyAgent(key) {
+				interfaceSpecInvalid("Node " + id + " harness " + key + " must name an agent identity file")
+			}
+		case strings.HasPrefix(key, "rules/") && strings.HasSuffix(key, ".md"),
+			strings.HasPrefix(key, "tools/") && strings.HasSuffix(key, ".md"):
+			role := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(key, "rules/"), "tools/"), ".md")
+			if !interfaceSpecHarnessRoles[role] {
+				interfaceSpecInvalid("Node " + id + " harness " + key + " must name a common, main, worker or reviewer file")
+			}
+		case key == "runtime/node.md":
+		default:
+			interfaceSpecInvalid("Node " + id + " harness " + key + " is not a replaceable prompt file")
+		}
+	}
+}
+
+// interfaceSpecHarnessKeyAgent accepts an agent identity file name.
+func interfaceSpecHarnessKeyAgent(key string) bool {
+	id := strings.TrimSuffix(strings.TrimPrefix(key, "agents/"), ".md")
+	return id != "" && !strings.ContainsAny(id, "/\\ \t")
+}
+
 func interfaceSpecValidateNode(definition map[string]any, id string, node map[string]any) {
 	if node == nil {
 		interfaceSpecInvalid("Node " + id + " must be an object")
@@ -331,11 +388,15 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 	allowed := map[string]bool{
 		"recipe": true, "task": true, "instructions": true, "acceptance": true, "inputs": true, "outputs": true,
 		"submission": true, "model": true, "retry": true, "budget": true, "deliverable": true, "workspace": true, "access": true,
+		"harness": true,
 	}
 	for key := range node {
 		if !allowed[key] {
 			interfaceSpecInvalid("Node " + id + " has unsupported field " + key + "; use named interfaces and explicit edges for graph execution")
 		}
+	}
+	if harness, ok := node["harness"]; ok && harness != nil {
+		interfaceSpecValidateHarness(id, harness)
 	}
 	recipe, _ := node["recipe"].(string)
 	if strings.TrimSpace(recipe) == "" {

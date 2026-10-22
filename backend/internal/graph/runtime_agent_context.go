@@ -249,6 +249,24 @@ type AgentContextLibrary struct {
 	Root        string
 	ContextRoot string
 	defaults    resolvedAgentContextDefaults
+	// overlay replaces the text of the named prompts. It is how one node runs
+	// under a different harness than the rest: the replacement has to live in
+	// the library the session reads, not beside it.
+	overlay map[string]string
+}
+
+// WithOverlay returns a library that replaces the named prompts with the given
+// texts. The base library is untouched.
+func (library *AgentContextLibrary) WithOverlay(overlay map[string]string) *AgentContextLibrary {
+	if library == nil || len(overlay) == 0 {
+		return library
+	}
+	copied := *library
+	copied.overlay = make(map[string]string, len(overlay))
+	for key, text := range overlay {
+		copied.overlay[key] = text
+	}
+	return &copied
 }
 
 // NewAgentContextLibrary opens a prompt library with optional built-in overrides.
@@ -480,6 +498,11 @@ func (library *AgentContextLibrary) Prompt(key AgentPromptKey, variables ...map[
 	if len(variables) > 0 && variables[0] != nil {
 		values = variables[0]
 	}
+	if library.overlay != nil {
+		if text, ok := library.overlay[string(key)]; ok && strings.TrimSpace(text) != "" {
+			return agentContextTrimEnd(render(text, values)), nil
+		}
+	}
 	custom, hasCustom, err := library.Override(key)
 	if err != nil {
 		return "", err
@@ -501,6 +524,11 @@ func (library *AgentContextLibrary) AgentPrompt(definitionID string, fallback *s
 		ids = []string{"main", "master"}
 	}
 	for _, id := range ids {
+		if library.overlay != nil {
+			if text, ok := library.overlay["agents/"+id+".md"]; ok && strings.TrimSpace(text) != "" {
+				return agentContextTrimEnd(text)
+			}
+		}
 		custom, ok, err := agentContextReadOptional(agentPath(library.Root, id))
 		if err != nil {
 			panic(err)

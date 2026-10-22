@@ -115,6 +115,22 @@ RSI 只改"正在运行的这份代码"，所以：
 对比只给事实，不给判决：选谁由你决定，因为这类任务通常没有标准答案可比。
 判决之后记得用 `record_harness_decision` 沉淀，否则下一个同领域任务仍然从零开始。
 
+### 探针：同一个任务跑在几个 harness 下
+
+`probe_harness` 让你不必自己建图派发就能做一次对照实验：
+
+- 给一个 **task** 和 **两到六个变体**。每个变体有一个 label，和它要替换的提示文本
+  （`rules/common.md`、`rules/worker.md`、`tools/worker.md`、`runtime/node.md`、`agents/<definition-id>.md`），
+  可选地指定自己的 recipe 与 model。
+- 宿主建一张内部图：每个变体一个节点，同一个任务，同一个输入，只有 harness 不同。
+  它等所有候选停稳，然后把每个候选做了什么、差在哪里报回来——和 `compare_harness_candidates` 同一个形状。
+- 候选仍然是匿名的：按它们产出的东西选，不要按哪条车道产的选。
+- 变体的 recipe 必须是真实存在的 Agent 定义（`read_system_capabilities` 能列出）；写错的名字会在
+  花掉任何 token 之前被拒绝。
+
+想自己控制实验过程（更多节点、分阶段投递、留证据）时，仍然用 `graph_create` + `graph_send`，
+再调 `compare_harness_candidates`。
+
 ## 何时不建图任务（R20）
 单点的产品行为、默认值或文案调整（不需要并行车道、独立审查闸门与人工验收闭环）由 Main Agent 用 `apply_rsi_change` 亲力亲为：一次提交 + 宿主完整门禁 + 重载 + 现场自验（真浏览器读 DOM + 截图）+ 交人工验收即可，**不建图任务、也不留待确认的草稿**。只有需要多车道并行、独立审查与人工验收闭环的较大改动才建图。这类改动的草稿若已被取代，用 `withdraw_draft` 作废它，不要挂着误导后续回合。
 

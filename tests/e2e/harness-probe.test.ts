@@ -201,3 +201,132 @@ test('the main agent compares the candidates of one task without learning which 
   expect(memory.entries[0]!.cue).toContain('parse the same document');
   expect(memory.entries[0]!.evidence).toContain('two tool calls');
 }, 150_000);
+
+test('a harness probe runs one task under two harnesses and reports what each candidate did differently', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-harness-probe-run-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+
+  // The two candidates run the same task under different prompt texts. The
+  // scripted provider tells them apart by the text that replaced the node
+  // rules, so the test fails if the replacement never reaches the model.
+  const workerRequests: ProviderBody[] = [];
+  const worker = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as ProviderBody;
+    workerRequests.push(body);
+    const text = JSON.stringify(body);
+    const alpha = text.includes('VARIANT_ALPHA_RULE');
+    const beta = text.includes('VARIANT_BETA_RULE');
+    const steps = workerRequests.filter(seen => JSON.stringify(seen).includes(alpha ? 'VARIANT_ALPHA_RULE' : 'VARIANT_BETA_RULE')).length;
+    let calls: { id: string; name: string; args: unknown }[] = [];
+    if (alpha && steps === 1) calls = [{ id: 'alpha-list', name: 'list_dir', args: { path: '.' } }];
+    if (alpha && steps === 2) calls = [{ id: 'alpha-submit', name: 'submit', args: { outputs: { out: { enable: true, value: { ok: true, lane: 'alpha' } } } } }];
+    if (beta && steps === 1) calls = [{ id: 'beta-artifacts', name: 'artifact_list', args: { namespace: 'summaries' } }];
+    if (beta && steps === 2) calls = [{ id: 'beta-submit', name: 'submit', args: { outputs: { out: { enable: true, value: { ok: true, lane: 'beta' } } } } }];
+    if (calls.length) {
+      sse(response, { role: 'assistant', tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })) }, 'tool_calls');
+      return;
+    }
+    sse(response, { role: 'assistant', content: 'Candidate finished.' }, 'stop');
+  });
+  await new Promise<void>(resolve => worker.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { worker.closeAllConnections(); await new Promise<void>(resolve => worker.close(() => resolve())); });
+  const workerUrl = `http://127.0.0.1:${(worker.address() as AddressInfo).port}/v1`;
+
+  const observed = new Map<string, string>();
+  let probed = false;
+  const main = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as ProviderBody;
+    const isMain = body.tools?.some(tool => tool.function.name === 'probe_harness') ?? false;
+    let calls: { id: string; name: string; args: unknown }[] = [];
+    if (isMain) {
+      for (const message of body.messages) {
+        if (message.role === 'tool' && message.tool_call_id) {
+          observed.set(message.tool_call_id, typeof message.content === 'string' ? message.content : JSON.stringify(message.content));
+        }
+      }
+      if (!probed) {
+        probed = true;
+        calls = [{ id: 'probe', name: 'probe_harness', args: {
+          task: 'PARSE_THE_DOCUMENT',
+          recipe: 'coder@1',
+          model: 'worker',
+          domain: 'parser',
+          variants: [
+            { label: 'alpha', harness: { 'rules/worker.md': 'VARIANT_ALPHA_RULE' } },
+            { label: 'beta', harness: { 'rules/worker.md': 'VARIANT_BETA_RULE' } },
+          ],
+        } }];
+      }
+    }
+    if (calls.length) {
+      sse(response, { role: 'assistant', tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })) }, 'tool_calls');
+      return;
+    }
+    sse(response, { role: 'assistant', content: isMain ? 'Probe finished.' : 'No suggestion' }, 'stop');
+  });
+  await new Promise<void>(resolve => main.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { main.closeAllConnections(); await new Promise<void>(resolve => main.close(() => resolve())); });
+  const mainUrl = `http://127.0.0.1:${(main.address() as AddressInfo).port}/v1`;
+
+  const webDir = join(root, 'web');
+  await mkdir(webDir);
+  await writeFile(join(webDir, 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    access: fullAccessPolicy(),
+    credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
+    models: { entries: [
+      { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },
+      { id: 'worker', provider: 'graph-worker', grade: 'medium', api: 'openai-completions', baseUrl: workerUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },
+    ] },
+  }));
+  const daemon = await launchCli(root, { configPath, extraArgs: ['--execute'], env: { GRAPH_LOCAL_KEY: 'harness-probe-key' } });
+  cleanup.push(() => daemon.close());
+
+  const created = await daemon.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'Probe two harness variants for the parser task', requestId: 'harness-probe-run' }),
+  });
+  expect(created.status).toBe(200);
+
+  const resultOf = (name: string): string => {
+    for (const [id, value] of observed) if (id.endsWith(`-${name}`) || id === name) return value;
+    return '';
+  };
+  const deadline = Date.now() + 90000;
+  while (!resultOf('probe') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
+
+  // Both candidates really ran the same task, each under its own harness.
+  const workerBodies = JSON.stringify(workerRequests);
+  expect(workerBodies).toContain('VARIANT_ALPHA_RULE');
+  expect(workerBodies).toContain('VARIANT_BETA_RULE');
+  expect(workerBodies.match(/PARSE_THE_DOCUMENT/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+
+  const probe = JSON.parse(resultOf('probe') || '{}') as {
+    graphId: string;
+    candidates: { label: string; nodeId: string; anonId: string }[];
+    timedOut: boolean;
+    comparison: {
+      candidates: { anonId: string; nodeId: string; submitted: boolean; tools: string[] }[];
+      differences: Record<string, { field: string }[]>;
+    };
+  };
+  expect(probe.timedOut).toBe(false);
+  expect(probe.graphId).toBeTruthy();
+  expect(probe.candidates.map(candidate => candidate.label).sort()).toEqual(['alpha', 'beta']);
+  expect(probe.candidates.map(candidate => candidate.anonId).sort()).toEqual(['A', 'B']);
+  expect(probe.comparison.candidates).toHaveLength(2);
+  expect(probe.comparison.candidates.every(candidate => candidate.submitted)).toBe(true);
+  // The candidates behaved differently, and the contrast says where.
+  expect(probe.comparison.candidates[0]!.tools).not.toEqual(probe.comparison.candidates[1]!.tools);
+  const challenger = probe.comparison.candidates.find(candidate => candidate.anonId !== probe.comparison.candidates[0]!.anonId)!;
+  expect(probe.comparison.differences[challenger.anonId]?.some(difference => difference.field === 'tools')).toBe(true);
+}, 150_000);

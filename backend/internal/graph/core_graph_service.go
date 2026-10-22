@@ -17,6 +17,8 @@ type GraphManagement interface {
 	HarnessCompare(input HarnessCompareInput) HarnessComparison
 	// HarnessExperience reads the lessons earlier tasks adopted per domain.
 	HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult
+	// HarnessProbe runs one task under several harnesses and contrasts them.
+	HarnessProbe(input HarnessProbeInput) HarnessProbeResult
 }
 
 // GraphCreateInput creates an independently owned graph.

@@ -522,29 +522,37 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		} else if recipe != "" && options.Catalog.Definition(recipe).Review {
 			role = "reviewer"
 		}
+		// A node may replace the prompt texts it runs under. That is how one
+		// task runs under several harnesses at once: the harness is the
+		// difference between the candidates, the task is what they all answer.
+		library := options.Library
+		if node, ok := revision.Definition.Nodes[nodeId]; ok && len(node.Harness) > 0 {
+			library = options.Library.WithOverlay(node.Harness)
+		}
 		var prompts []string
-		if options.Library != nil && restoring[key] == nil {
+		if library != nil && restoring[key] == nil {
 			definitionID := nodeId
 			if recipe != "" {
 				definitionID = strings.Split(recipe, "@")[0]
 			}
-			common, err := options.Library.Prompt("rules/common.md")
+			common, err := library.Prompt("rules/common.md")
 			if err != nil {
 				panic(err)
 			}
-			rules, err := options.Library.Prompt("rules/" + role + ".md")
+			rules, err := library.Prompt("rules/" + role + ".md")
 			if err != nil {
 				panic(err)
 			}
-			tools, err := options.Library.Prompt("tools/" + role + ".md")
+			tools, err := library.Prompt("tools/" + role + ".md")
 			if err != nil {
 				panic(err)
 			}
-			runtime, err := options.Library.Prompt("runtime/node.md")
+			runtime, err := library.Prompt("runtime/node.md")
 			if err != nil {
 				panic(err)
 			}
-			prompts = []string{common, rules, tools, runtime, options.Library.AgentPrompt(definitionID, nil)}
+			identity := library.AgentPrompt(definitionID, nil)
+			prompts = []string{common, rules, tools, runtime, identity}
 		}
 		location := nodeLocation(graphId, nodeId, &revisionVersion, true)
 		if location == nil {
@@ -703,8 +711,8 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			// native tools the TypeScript SDK used to publish.
 			DaemonNativeTools: true,
 		}
-		if options.Library != nil {
-			sessionOptions.Library = options.Library
+		if library != nil {
+			sessionOptions.Library = library
 		}
 		if project := options.WorkspaceFor(graphId); project != nil {
 			sessionOptions.ProjectRoot = *project

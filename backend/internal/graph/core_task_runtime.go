@@ -1609,6 +1609,7 @@ func (runtime *TaskRuntime) graphManagement(taskId string) AgentToolsGraphManage
 			domain, _ := input["domain"].(string)
 			return service.HarnessExperience(HarnessExperienceInput{Domain: domain})
 		},
+		HarnessProbe: service.HarnessProbe,
 	}
 }
 

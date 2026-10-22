@@ -9,6 +9,9 @@ import (
 
 // The harness experience store keeps the lessons earlier tasks adopted per
 // domain, so the next task of that domain starts from what was learned.
+
+// HarnessExperienceEntry is one adopted lesson: what the situation looked like,
+// what to do about it, and what shows that it worked.
 type HarnessExperienceEntry struct {
 	Domain    string `json:"domain"`
 	Chosen    string `json:"chosen"`
@@ -22,6 +25,7 @@ type HarnessExperienceEntry struct {
 
 // HarnessComparison is the contrast of several candidates of one task.
 
+// HarnessDecisionInput records which candidate was adopted and why.
 type HarnessDecisionInput struct {
 	GraphId   string
 	Domain    string

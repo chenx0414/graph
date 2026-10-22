@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -63,9 +64,6 @@ type HarnessDifference struct {
 	Candidate string `json:"candidate"`
 }
 
-// HarnessExperienceEntry is one adopted lesson: what the situation looked like,
-// what to do about it, and what shows that it worked.
-
 type HarnessComparison struct {
 	GraphId string `json:"graphId"`
 	Domain  string `json:"domain,omitempty"`
@@ -79,7 +77,6 @@ type HarnessComparison struct {
 }
 
 // HarnessCompareInput asks for the contrast of some candidates of one graph.
-
 type HarnessCompareInput struct {
 	GraphId        string
 	NodeIds        []string
@@ -87,7 +84,210 @@ type HarnessCompareInput struct {
 	Domain         string
 }
 
-// HarnessDecisionInput records which candidate was adopted and why.
+// HarnessProbeVariant is one candidate harness of a probe: the same task, a
+// different set of prompt texts.
+type HarnessProbeVariant struct {
+	Label   string            `json:"label"`
+	Recipe  string            `json:"recipe,omitempty"`
+	Model   string            `json:"model,omitempty"`
+	Harness map[string]string `json:"harness,omitempty"`
+}
+
+// HarnessProbeInput asks the host to run one task under several harnesses.
+type HarnessProbeInput struct {
+	Task      string                `json:"task"`
+	Recipe    string                `json:"recipe,omitempty"`
+	Model     string                `json:"model,omitempty"`
+	Variants  []HarnessProbeVariant `json:"variants"`
+	Domain    string                `json:"domain,omitempty"`
+	TimeoutMs int                   `json:"timeoutMs,omitempty"`
+}
+
+// HarnessProbeCandidate names one variant of a probe and the node that ran it.
+type HarnessProbeCandidate struct {
+	Label  string `json:"label"`
+	NodeId string `json:"nodeId"`
+	AnonId string `json:"anonId"`
+}
+
+// HarnessProbeResult is the contrast a probe produced.
+type HarnessProbeResult struct {
+	GraphId    string                  `json:"graphId"`
+	Task       string                  `json:"task"`
+	Candidates []HarnessProbeCandidate `json:"candidates"`
+	Comparison HarnessComparison       `json:"comparison"`
+	WaitedMs   int64                   `json:"waitedMs"`
+	TimedOut   bool                    `json:"timedOut"`
+}
+
+// HARNESS_PROBE_MAX_VARIANTS bounds one probe. A contrast wider than this
+// stops being readable as a contrast.
+const HARNESS_PROBE_MAX_VARIANTS = 6
+
+// HarnessProbe runs one task under several harnesses and contrasts them.
+//
+// The host builds the probe graph itself: the variants differ only in the
+// prompt texts they run under, so the harness is the only variable left. The
+// probe waits for every candidate to settle and then reports the same contrast
+// compare_harness_candidates reports, so one comparison has one shape.
+func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) HarnessProbeResult {
+	task := strings.TrimSpace(input.Task)
+	if task == "" {
+		Raise("invalid_input", "A probe needs a task for every candidate to answer")
+	}
+	if len(input.Variants) < 2 {
+		Raise("invalid_input", "A probe needs at least two variants to compare")
+	}
+	if len(input.Variants) > HARNESS_PROBE_MAX_VARIANTS {
+		Raise("invalid_input", fmt.Sprintf("A probe takes at most %d variants", HARNESS_PROBE_MAX_VARIANTS))
+	}
+	recipe := strings.TrimSpace(input.Recipe)
+	nodes := map[string]any{}
+	labels := map[string]bool{}
+	nodeIds := []string{}
+	for _, variant := range input.Variants {
+		label := strings.TrimSpace(variant.Label)
+		if label == "" {
+			Raise("invalid_input", "Every probe variant needs a label")
+		}
+		if labels[label] {
+			Raise("invalid_input", "Probe variant labels must be distinct: "+label)
+		}
+		labels[label] = true
+		nodeId := harnessSlug(label)
+		if nodeId == "unknown" {
+			Raise("invalid_input", "Probe variant label must carry a name: "+label)
+		}
+		variantRecipe := strings.TrimSpace(variant.Recipe)
+		if variantRecipe == "" {
+			variantRecipe = recipe
+		}
+		if variantRecipe == "" {
+			Raise("invalid_input", "Every probe variant needs a recipe; read_system_capabilities lists the agent definitions")
+		}
+		node := map[string]any{
+			"recipe":     variantRecipe,
+			"task":       task,
+			"inputs":     map[string]any{"in": map[string]any{"protocol": "job"}},
+			"outputs":    map[string]any{"out": map[string]any{"protocol": "done"}},
+			"submission": map[string]any{"required": []any{"out"}},
+		}
+		model := strings.TrimSpace(variant.Model)
+		if model == "" {
+			model = strings.TrimSpace(input.Model)
+		}
+		if model != "" {
+			node["model"] = model
+		}
+		if len(variant.Harness) > 0 {
+			node["harness"] = variant.Harness
+		}
+		nodes[nodeId] = node
+		nodeIds = append(nodeIds, nodeId)
+	}
+	definition := map[string]any{
+		"schemaVersion": float64(INTERFACE_SCHEMA_VERSION),
+		"name":          "Harness probe",
+		"protocols": map[string]any{
+			"job":  map[string]any{"type": "object"},
+			"done": map[string]any{"type": "object"},
+		},
+		"nodes":   nodes,
+		"modules": map[string]any{},
+		"edges":   map[string]any{},
+		"inputs":  map[string]any{},
+		"outputs": map[string]any{},
+	}
+	// The definition is parsed, not trusted: an invalid harness key has to be
+	// refused before a single token is spent.
+	parsed := ParseGraphDefinition(definition)
+	created := service.GraphCreate(GraphCreateInput{Definition: parsed})
+	record := asMap(created)
+	graphId := ""
+	if record != nil {
+		graphId, _ = record["graphId"].(string)
+	}
+	if graphId == "" {
+		Raise("invalid_graph", "The probe graph could not be created")
+	}
+	for _, nodeId := range nodeIds {
+		node := nodeId
+		input := "in"
+		service.GraphSend(GraphSendInput{GraphId: graphId, NodeId: &node, Input: &input, Value: map[string]any{"task": task}})
+	}
+	timeout := int64(input.TimeoutMs)
+	if timeout <= 0 {
+		timeout = 300_000
+	}
+	if timeout > 900_000 {
+		timeout = 900_000
+	}
+	started := NowMillis()
+	timedOut := false
+	for {
+		if service.harnessProbeSettled(graphId) {
+			break
+		}
+		elapsed := NowMillis() - started
+		if elapsed >= timeout {
+			timedOut = true
+			break
+		}
+		// A candidate that never starts must not hold the Agent's turn for
+		// the whole timeout: a graph whose nodes cannot run says so quickly,
+		// and the honest answer is a candidate that did not run.
+		if elapsed >= 60_000 && !service.harnessProbeStarted(graphId) {
+			timedOut = true
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	comparison := service.HarnessCompare(HarnessCompareInput{
+		GraphId:        graphId,
+		NodeIds:        nodeIds,
+		BaselineNodeId: nodeIds[0],
+		Domain:         strings.TrimSpace(input.Domain),
+	})
+	anonByNode := map[string]string{}
+	for _, candidate := range comparison.Candidates {
+		anonByNode[candidate.NodeId] = candidate.AnonId
+	}
+	candidates := []HarnessProbeCandidate{}
+	for index, variant := range input.Variants {
+		nodeId := nodeIds[index]
+		candidates = append(candidates, HarnessProbeCandidate{
+			Label:  strings.TrimSpace(variant.Label),
+			NodeId: nodeId,
+			AnonId: anonByNode[nodeId],
+		})
+	}
+	return HarnessProbeResult{
+		GraphId:    graphId,
+		Task:       task,
+		Candidates: candidates,
+		Comparison: comparison,
+		WaitedMs:   NowMillis() - started,
+		TimedOut:   timedOut,
+	}
+}
+
+// harnessProbeStarted reports whether any candidate has begun to work.
+func (service *graphManagementService) harnessProbeStarted(graphId string) bool {
+	row := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_executions WHERE task_id=?", graphId)
+	return kernelInt(row["count"]) > 0
+}
+
+// harnessProbeSettled reports whether every candidate has stopped working.
+func (service *graphManagementService) harnessProbeSettled(graphId string) bool {
+	for _, node := range service.kernel.ListNodes(graphId) {
+		switch node.Status {
+		case "pending", "preparing", "running":
+			return false
+		}
+	}
+	queued := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')", graphId)
+	return kernelInt(queued["count"]) == 0
+}
 
 func harnessAnonID(index int) string {
 	out := ""
@@ -103,7 +303,6 @@ func harnessAnonID(index int) string {
 // harnessCandidateNames normalizes the requested candidate list: no blanks, no
 // duplicates, and a stable order so the anonymous ids do not shuffle between
 // two reads of the same comparison.
-
 func harnessCandidateNames(nodeIds []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
