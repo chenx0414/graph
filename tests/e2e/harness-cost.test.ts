@@ -128,6 +128,23 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
     expect(task.cacheHitRequestRate).toBe(1);
   }
   expect(report.requestProfiles.samples).toBe(cacheField === 'capacity-retry' ? 4 : 3);
+  // The report prices the whole tree and shows the prefix each request carried.
+  expect(report.summary.costByPurpose.completion.requests).toBe(cacheField === 'capacity-retry' ? 4 : 3);
+  // A request whose usage was never reported carries no evidence of its prefix.
+  const measured = cacheField === 'unreported' ? 0 : 3;
+  expect(report.summary.contextPerRequest.cacheRead.requests).toBe(measured);
+  if (measured) {
+    expect(report.summary.contextPerRequest.cacheRead.mean).toBe(15);
+    expect(report.summary.contextPerRequest.cacheRead.max).toBe(15);
+  } else {
+    expect(report.summary.contextPerRequest.cacheRead.mean).toBeNull();
+  }
+  if (cacheField === 'unreported') {
+    expect(report.summary.scenarioCost).toEqual({});
+  } else {
+    expect(report.summary.scenarioCost.USD.total).toBeGreaterThan(0);
+    expect(report.summary.scenarioCost.USD.byBillingType.cacheRead.tokens).toBe(45);
+  }
   expect(report.tools.find((tool: { tool: string }) => tool.tool === 'bash')).toMatchObject({ calls: 1, errors: 0, taskReach: 1 });
   // One executed bash result is resent on both later provider requests; read is sent once.
   expect(report.requestProfiles.toolResults.find((row:{tool:string})=>row.tool==='bash')).toMatchObject({requestViews:2,resultViews:2});

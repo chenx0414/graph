@@ -15,6 +15,9 @@ try {
   const profiles = exists('events') ? rows("SELECT task_id,data FROM events WHERE type='provider.request_profile'") : [];
   const profilesByCall = new Map(profiles.map(row => { const data = parse(row.data); return [data?.callId, data]; }));
   const billingCosts = {};
+  const pricedTokens = {};
+  const purposeTotals = {};
+  const contextPerRequest = { cacheRead: [], input: [], output: [] };
   const models = new Map();
   let callsWithFrozenRates = 0;
   const tasks = new Map(rows('SELECT id,phase FROM tasks').map(row => [row.id, {
@@ -49,30 +52,44 @@ try {
     task.requests++;
     task.purposes[call.purpose] = (task.purposes[call.purpose] ?? 0) + 1;
     task[call.lane === 'main' ? 'operations' : 'executions'].add(call.turn);
+    // The purpose tells what the call was for. A completion carries the task; a
+    // compaction carries the summary the task continues from; the rest are the
+    // helpers around it.
+    const purpose = purposeTotals[call.purpose] ??= { requests: 0, tokens: Object.fromEntries(billing.map(key => [key, 0])), costs: {} };
+    purpose.requests++;
     if (!usage || billing.some(key => !Number.isFinite(usage[key]) || usage[key] < 0)) task.unknownUsage++;
     else {
       if (usage.usageSource === 'estimated') task.estimatedUsage++;
       if (usage.usageSource === 'unknown') task.unknownUsage++;
-      for (const key of billing) task.tokens[key] += usage[key];
+      for (const key of billing) { task.tokens[key] += usage[key]; purpose.tokens[key] += usage[key]; }
       task.measuredRequests++;
       const cacheEvidence = usage.usageSource === undefined || usage.usageSource === 'authoritative' || usage.usageSource === 'account_delta';
       if (cacheEvidence && usage.input + usage.cacheRead + usage.cacheWrite > 0) {
         task.cacheMeasuredRequests++;
         if (usage.cacheRead > 0) task.cacheHitRequests++;
         for (const key of ['input', 'cacheRead', 'cacheWrite']) task.cacheEvidenceTokens[key] += usage[key];
+        // The cached read of a request is the prefix that request carried. It is
+        // the largest share of what a task costs, and its size is what the
+        // compaction threshold decides.
+        contextPerRequest.cacheRead.push(usage.cacheRead);
+        contextPerRequest.input.push(usage.input);
+        contextPerRequest.output.push(usage.output);
       }
       const rates = frozen?.cost ?? profile?.rates;
       const pricing = frozen?.pricing ?? profile?.pricing;
       if (cacheEvidence && rates && billing.every(key => Number.isFinite(rates[key]) && rates[key] >= 0)) {
         callsWithFrozenRates++;
-        const totals = billingCosts[pricing?.currency ?? 'unspecified'] ??= Object.fromEntries(billing.map(key => [key, 0]));
-        for (const key of billing) totals[key] += usage[key] * rates[key] / 1_000_000;
+        const currency = pricing?.currency ?? 'unspecified';
+        const totals = billingCosts[currency] ??= Object.fromEntries(billing.map(key => [key, 0]));
+        const priced = pricedTokens[currency] ??= Object.fromEntries(billing.map(key => [key, 0]));
+        for (const key of billing) { totals[key] += usage[key] * rates[key] / 1_000_000; priced[key] += usage[key]; }
       }
     }
     const cost = parse(call.cost);
     if (typeof cost?.amount === 'number' && Number.isFinite(cost.amount)) {
       const currency = cost.currency ?? 'unspecified';
       task.costs[currency] = (task.costs[currency] ?? 0) + cost.amount;
+      purpose.costs[currency] = (purpose.costs[currency] ?? 0) + cost.amount;
     } else task.unknownCost++;
   }
   const sources = {};
@@ -114,6 +131,40 @@ try {
   for (const task of completed) for (const [currency, amount] of Object.entries(task.costs)) {
     completedCosts[currency] = (completedCosts[currency] ?? 0) + amount;
   }
+  // The distribution of the prefix a request carried. The cached read of a
+  // request is that prefix, and the prefix is what a compaction threshold moves.
+  const quantile = (values, fraction) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+  };
+  const perRequest = key => ({
+    requests: contextPerRequest[key].length,
+    mean: contextPerRequest[key].length
+      ? Math.round(contextPerRequest[key].reduce((sum, value) => sum + value, 0) / contextPerRequest[key].length) : null,
+    median: quantile(contextPerRequest[key], 0.5),
+    p90: quantile(contextPerRequest[key], 0.9),
+    max: contextPerRequest[key].length ? Math.max(...contextPerRequest[key]) : null,
+  });
+  // The priced calls show what a token of each billing type cost. Applying those
+  // rates to every recorded token prices the whole tree in one currency - a
+  // scenario, not an invoice: the calls without a frozen price keep their tokens
+  // in the report and their money is not known.
+  const totalTokens = Object.fromEntries(billing.map(key => [key, outputTasks.reduce((sum, task) => sum + task.tokens[key], 0)]));
+  const scenarioCost = {};
+  for (const [currency, priced] of Object.entries(pricedTokens)) {
+    const amounts = billingCosts[currency] ?? {};
+    const perBilling = {};
+    let total = 0;
+    for (const key of billing) {
+      if (!priced[key]) continue;
+      const rate = (amounts[key] ?? 0) / priced[key];
+      const amount = rate * totalTokens[key];
+      perBilling[key] = { rate, tokens: totalTokens[key], amount };
+      total += amount;
+    }
+    if (Object.keys(perBilling).length) scenarioCost[currency] = { byBillingType: perBilling, total };
+  }
   console.log(JSON.stringify({
     schemaVersion: 1,
     caveats: [
@@ -126,11 +177,16 @@ try {
       'Tool reach uses tasks with retained tool telemetry; retention can differ from invocation retention.',
       'Tool rows reflect SQLite only; worker spools must first be ingested through the public tool statistics read. Empty rows do not establish zero tool use.',
       'Cache metrics and costByBillingType exclude estimated/unknown provenance; local estimates cannot establish cache misses.',
+      'scenarioCost applies the rates the priced calls used to every recorded token; it is a scenario, not an invoice, and it prices the calls whose price is unknown at the rate of the calls whose price is known.',
+      'contextPerRequest covers the requests whose cache usage is authoritative; a request whose usage was estimated or unknown is not in it.',
     ],
     summary: {
       tasks: outputTasks.length, completedTasks: completed.length,
       completedKnownCosts: completedCosts,
       costByBillingType: { callsWithFrozenRates, amounts: billingCosts },
+      costByPurpose: Object.fromEntries(Object.entries(purposeTotals).sort((a, b) => b[1].requests - a[1].requests)),
+      scenarioCost,
+      contextPerRequest: { cacheRead: perRequest('cacheRead'), input: perRequest('input'), output: perRequest('output') },
       costPerCompletedTask: completed.length && completed.every(task => !task.unknownCost && !task.unknownUsage && !task.estimatedUsage)
         ? Object.fromEntries(Object.entries(completedCosts).map(([currency, amount]) => [currency, amount / completed.length])) : null,
       requests: outputTasks.reduce((sum, task) => sum + task.requests, 0),
