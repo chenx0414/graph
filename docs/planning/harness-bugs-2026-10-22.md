@@ -1,0 +1,197 @@
+# Graph harness 缺陷分诊与修复：2026-10-22
+
+分支 `fix/harness-bugs-2026-10-22`（基于 `main` 的 `9aed752`）。
+
+输入：`/Users/macmini/Downloads/harness_bugs.md` 的 53 条 harness 缺陷清单。
+
+## 结论摘要
+
+1. **53 条里有 9 条是 Graph 自己的（live）Go daemon 里的真实缺陷，本轮修掉了 7 条**，每条都有能先红后绿的 E2E：
+   被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#4/#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1/#5）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）。
+2. **17 条在本栈里不存在或已被处理**（ALREADY-OK / N/A）：Graph 里没有 span/trace 机制、没有 poison 语义、没有依赖图边数上限、没有"七家 provider"（daemon 只讲 OpenAI Completions 与 Anthropic Messages 两种协议）。
+3. **11 条属于上游 PiG**（`github.com/MichaelKinsy/PiG v0.5.1`）或上游 npm 包，本仓库改不了，已按上游文件分组记录，便于一次性提给上游。
+4. **16 条是 Graph 自己的真实缺陷，但不在本轮修复范围**，逐条写明了机制、修复位置与风险（重试预算吃掉补交、工具目录无上限、每事件一次写库、工具 schema 九成是散文、启动清扫重跑同一 doomed call、`force` 越过排空前置、守护进程内保留策略不运行，等等）。
+5. **与 `feature/harness-token-efficiency-2026-10-22` 的重叠**已在第 6 节逐条列出：该分支已修的 4 条（#23/#40/#45 与任务说明包复用）在本分支上按 `main` 基线重新实现，两边合并时需要人工取舍。
+
+---
+
+## 1. 分诊方法
+
+- 生产 live 路径是 Go 二进制 `dist/graphd`（`desktop/main.mjs:27`、`src/server/cli.ts`），不是 `src/**` 的 TypeScript 实现；`src/**` 只剩开发者/CLI 侧车。分诊以 Go daemon 为准。
+- 上游内核是 PiG v0.5.1（`~/go/pkg/mod/github.com/!michael!kinsy/!pi!g@v0.5.1`），只读；`node_modules/@earendil-works/pi-{ai,coding-agent}` 同理。
+- 清单里的每一条都是**待验证的假设**，不是事实。每条都要在代码里找到对应的机制，给出 `file:line` 证据，再判定归属：本仓库可修（OURS-GO / OURS-TS）、上游所有（UPSTREAM-PIG / UPSTREAM-TS）、本栈不存在（N/A）、已被处理（ALREADY-OK）。
+- 修一律遵守工程规范：只写真正的 E2E（真实 daemon + 真实 SQLite + 受控 provider），先证明修复前失败、修复后通过。
+
+---
+
+## 2. 判定汇总（53 条）
+
+| # | 判定 | 严重度 | 证据 | 机制 / 结论 |
+|---|---|---|---|---|
+| 1 | **OURS-GO** → 已修 | 高 | `runtime_controlled_openai.go` 请求渲染；`runtime_tool_flow.go` | 悬空 tool call 无结果，provider 拒绝此后每个请求 |
+| 2 | UPSTREAM-PIG | 中 | PiG `coding/extension/host/subprocess/host.go:1268` | 扩展宿主 Load 的就绪握手；Graph 无 worker 进程可等 |
+| 3 | ALREADY-OK | 低 | `core_kernel_store.go` `kernel_queue`；`core_kernel_recovery.go:55` | 回合有持久队列；残余：claimed 行无租约 |
+| 4 | **OURS-GO** → 已修 | 高 | `runtime_provider_stream.go` `readEvents` | 读错误与流结束同形，半截参数被修复成空对象 |
+| 5 | **OURS-GO 部分** → 已修 + UPSTREAM-PIG | 中 | `runtime_provider_stream.go`；PiG `ai/` 40+ provider | Graph 只讲两种协议，已要求终止标记；其余在上游 |
+| 6 | ALREADY-OK（Graph）/ UPSTREAM（其余） | 中 | `runtime_controlled_openai.go` `controlledOpenAIUsage` | Graph 侧 `Input: input - cache`，缓存 token 不重复计费 |
+| 7 | ALREADY-OK | 低 | `runtime_controlled_openai.go:114`；`runtime_compaction.go:176` | 工具结果只落一次；E2E 断言 `resultViews:1` |
+| 8 | OURS-GO → 未修（后续） | 中 | `core_node_executor.go:306-314,377-395,381` | 任意失败都扣重试预算；补交额度被 `maxSafeInteger` 绕过 |
+| 9 | ALREADY-OK（上游守卫）+ 已修可观测性 | 中 | PiG `harness/compaction.go:505`；`runtime_provider_stream.go` 压缩事件 | 空摘要上游会失败；压缩事件此前到不了 daemon |
+| 10 | ALREADY-OK | 低 | `core_node_executor.go:266-315` | 子 Agent 死亡是响亮的：`graph.node.failed` + 唤醒 master |
+| 11 | ALREADY-OK | 低 | `core_execution.go:192-260` | 没找到锁序反转；父进程 retask 不持库锁 |
+| 12 | N/A | 低 | — | 以 #11 的死锁为前提；本栈没有这个死锁 |
+| 13 | OURS-GO → 未修（后续） | 中 | `runtime_pi_adapter.go` 控制目标 | 停止写入与正在停的那一步存在先后竞争 |
+| 14 | OURS-GO → 未修（后续） | 中 | `runtime_bounded_path.go:338-378` | `ls`/`find` 无默认上限，18MB 目录清单先在 Graph 堆里成型 |
+| 15 | N/A | 低 | PiG `durable/storage/jsonl` | Graph 用 SQLite 存储，没有 poison 语义 |
+| 16 | ALREADY-OK | 低 | `core_node_queue.go:110-125` | 失败项标记 failed 并暂停节点，不静默重投 |
+| 17 | ALREADY-OK | 低 | `core_wake_ledger.go:53-59,139-150` | 唤醒负载整体存取，没有 600 字符截断 |
+| 18 | OURS-TS → 未修（后续，遗留路径） | 中 | `src/core/node-prompt.ts:54-79` | 遗留 TS 路径整读会话文件 |
+| 19 | ALREADY-OK | 低 | `core_store.go:464` 唯一约束；`core_wake_ledger.go:58-62` | 唤醒按 dedupe key 去重；上游 Install 按名替换 |
+| 20 | ALREADY-OK | 低 | `core_pause_continuation.go:18-31,45-50` | 恢复会遍历全部等待项，消费是全局的 |
+| 21 | ALREADY-OK | 低 | `runtime_tool_call_spool.go:76-105`；`runtime_pig_recovery.go:179-181` | 两条最近路径要么记录要么明确是 no-op |
+| 22 | OURS-GO → 未修（后续） | 中 | `runtime_pi_adapter.go:1445-1499`；`core_store.go:628-645` | 每个事件一次 INSERT + 一次通知 |
+| 23 | **OURS-GO** → 已修 | 高 | `runtime_compaction.go:19-55`；`pigkernel/resident.go` | daemon 算出的阈值从未交给内核，内核用自己的 1024 |
+| 24 | **OURS-GO** → 已修 | 高 | `runtime_provider_stream.go` `brokenToolCall` | 半截 JSON 参数被修复成 `{}` 后照常调用 |
+| 25 | **OURS-GO** → 已修 | 中 | `pigkernel/session.go` `RegisterCompactionPolicy`；`runtime_pig_session.go` | 注册名按实例派生，换 worker 即丢注册 |
+| 26 | N/A | 低 | — | Graph 没有能力依赖图，也没有边数上限 |
+| 27 | UPSTREAM-PIG | 中 | PiG `mcp/streamable_http.go:29-31,655-697` | Graph 无 websocket；唯一重连环在上游 MCP 传输 |
+| 28 | UPSTREAM-PIG | 中 | PiG `mcp/streamable_http.go:580-624` | 上游只重放读侧，POST 不重发 |
+| 29 | OURS-GO → 未修（后续） | 中 | `runtime_pig_recovery.go:37-51,113-152` | 启动恢复每 boot 重跑同一个 doomed call，冻结记录不清理 |
+| 30 | ALREADY-OK | 低 | `core_task_runtime.go:4705-4776` | 唯一阻塞等待有 600s 上限且报 `timeout` |
+| 31 | ALREADY-OK | 低 | `core_wake_ledger.go:119-121,153-156` | 并行审批合并为一个唤醒；节点状态守卫挡住第二次派发 |
+| 32 | **OURS-GO** → 已修 | 中 | `runtime_provider_stream.go` `providerLineReader` | keepalive 不算活动；空闲计时器 5 分钟 |
+| 33 | **OURS-GO** → 已修 | 中 | 同上 | 空闲守卫此前根本不存在 |
+| 34 | **OURS-GO** → 已修 | 中 | `http_client.go:18`（`Timeout: 0`）→ 新读取边界 | 上游客户端此前没有读超时 |
+| 35 | ALREADY-OK | 低 | `server_app.go:611-612`；`runtime_rsi.go:2012-2018` | daemon 只"请求"重启，决定权在桌面端 |
+| 36 | ALREADY-OK（有残余） | 中 | `runtime_rsi.go:1352-1358` | 有真实代码闸门；残余：`force` 越过"无进行中操作"前置 |
+| 37 | N/A | 低 | — | 本栈没有 span/trace 机制 |
+| 38 | N/A | 低 | PiG `telemetry/memory.go:64-70` | Graph 不 import `PiG/telemetry` |
+| 39 | ALREADY-OK（Graph 部分） | 中 | `pigkernel/provider.go` `restoreToolCallArguments`；`CONTEXT.md` 空参数工具调用 | 空参数调用已恢复为 `{}`；"null → no result"是上游 SDK 形状 |
+| 40 | **OURS-GO** → 已修 | 高 | `pigkernel/session.go` `Compact`/`reportCompaction`；`pigkernel/provider.go` `bridgeRequestOptions` | 空结果被读成成功；摘要预算被丢；压缩事件从未翻译 |
+| 41 | OURS-GO → 未修（后续） | 中 | `runtime_pig_node_host.go:181-190`；`core_node_turn_driver.go:112-119` | 完成由"没有错误"推断，而非"有交付物" |
+| 42 | ALREADY-OK | 低 | `pigkernel/turn.go` `newRequestId`（16 字节随机） | Graph 的 id 不截断，不会一字符之差相撞 |
+| 43 | ALREADY-OK | 低 | `core_access_policy.go:249-255`；`core_rule_engine.go:498-501` | 没有 deny 规则语言；畸形输入一律 fail closed |
+| 44 | ALREADY-OK（报告形状）+ 残余 | 中 | `core_task_runtime.go` `configuredModel` | 未知模型被直接拒绝，不会落到 8k 窗口；残余见第 5 节 |
+| 45 | **OURS-GO** → 已修 | 高 | `runtime_controlled_openai.go` Anthropic 分支 | 全链路没有任何 `cache_control`，Anthropic 缓存从未建立 |
+| 46 | OURS-GO → 未修（后续） | 中 | `runtime_agent_tool_definitions.go:198-246` | 实测 87.3% 的工具 schema 文本是散文 |
+| 47 | ALREADY-OK（机制不存在）+ 残余 | 中 | `runtime_tool_results.go:406-482`（无调用者） | 2000 字符是上游"压缩输入"截断，不是淘汰阈值；残余见第 5 节 |
+| 48 | ALREADY-OK | 低 | `core_wake_ledger.go:106-117`；`runtime_agent_tool_definitions.go:224` | 有完成触发器（`get_task_status` 带 `waitForNode`），也没有 `sleep` 工具 |
+| 49 | ALREADY-OK | 低 | 同 #48 | 状态轮询是使用方式，不是缺失的机制 |
+| 50 | **OURS-GO** → 已修（部分） | 高 | `runtime_kernel_graph_lane.go:1010`；`runtime_pi_adapter.go:1276-1284` | 子 Agent 的思考档位被硬编码为 `off` |
+| 51 | **OURS-GO** → 已修 | 高 | `runtime_pig_session.go` `pigSessionIdentity`；`pigkernel/turn.go` | 空 identity 让所有无实例会话共用一个注册名 |
+| 52 | ALREADY-OK | 低 | `server_app.go:78-90`；`server_host.go:134-152` | 端口独占绑定，第二个 daemon 起不来 |
+| 53 | ALREADY-OK（有残余） | 中 | `core_state_retention.go:73-121` | 没有 trace 文件；残余：保留策略只在离线工具里跑 |
+
+---
+
+## 3. 本轮修掉的七条
+
+### 3.1 #4 / #5 / #24 / #32 / #33 / #34 —— provider 流与请求（`c9fae98`）
+
+daemon 自己拼 provider 请求、自己读 provider 的回答。两处判断是错的：
+
+- **流结束与读失败同形。** 读循环遇到 transport 错误时直接 break，`finishReason` 缺省成 `"stop"`，于是"provider 在回答完成前断开"被当成一次成功回合。若断在半截工具调用上，参数被 `ParseStreamingJSON` 修复成 `{}`，工具就带着空参数执行了，而回合报成功。
+- **失败没有变成失败。** daemon 只认 `stopReason == "error"`；内核把"没能回答"报成 unanswered submission（另一种 reason），于是一个什么都没产出的 operation 被结算成成功。
+
+改法：流必须以其协议自己的终止标记结束（OpenAI 的 `[DONE]` 或 finish reason，Anthropic 的 `message_stop`）；provider 说完了怎么结束就信它，即便没发标记。参数没成 JSON 的工具调用让这次发送失败。内核报"没能回答"同样按失败结算，并把原因带进对话。
+
+另外补了上游同款边界：读取有 5 分钟空闲上限，**keepalive 不算活动**（这正是 #32 说的缺陷），provider 不再回话时这次发送失败，而不是把回合、凭据槽和节点永久挂住。
+
+### 3.2 #1 —— provider 收到的请求必须是 provider 接受的请求（`c9fae98`）
+
+daemon 自己渲染 transcript，于是：assistant 的 tool call 没有配对的结果、结果没有配对的 call，两种都被 provider 拒绝。Anthropic 路径更糟——tool call 本身被丢掉，provider 看到的是"一个它从没被告知过的 call 的结果"，此后每个请求都带着这条断链。
+
+改法按 Pi 在发请求前的做法：没有结果的 call 用 `No result provided` 补上，不配对的结果丢掉；Anthropic 的 assistant 回合带 `tool_use` 块、结果放在一个 `tool_result` 用户回合里。
+
+### 3.3 #51 / #25 —— 每个会话有自己的身份（`65f9595`）
+
+会话身份同时决定两件事：transcript 所在的 durable conversation，以及工具体注册用的 extension 名。daemon 两者都从 operation 的 instance id 派生，而没有实例的 operation 没有 instance id。
+
+**空身份不是中性名字**：所有这类 operation 共用同一个 conversation 和同一个注册名。注册表按名安装、按名替换，于是最后打开的那个把先前会话仍然指向的工具体换掉了——后来的会话用前一个会话的工作区与策略执行工具，重启也修不好（durable 里存的是名字，注册表里存的是对象）。
+
+改法：身份回落到 execution id；冻结记录记同一个身份，恢复的回合因此找回当初注册的 extension。CLI turn 路径那套写死的名字（`"graph-tools"`）也去掉了，现在只有一处派生注册名。
+
+### 3.4 #23 / #40 —— 压缩要有 daemon 预留的那间屋子，并且如实上报（`f5f37dd`）
+
+daemon 决定何时压缩、摘要写在哪间屋子里，这两件事都没到内核，内核跑的是自己的默认值（reserve 1024）：
+
+- 摘要是被写进 reserve 的（内核用 `floor(0.8 × reserve)` 得出摘要自己的输出预算）。1024 的 reserve 意味着 819 token 的预算，而 daemon 的指令要求约 1500 token —— 摘要装不下自己被要求写的内容，写到一半被切断。
+- 摘要请求还带着模型的整个输出上限，因为桥接把内核的每次请求选项丢在了地上。
+- 什么都没压缩的压缩被报成压缩成功：内核用空结果完成这种任务，桥接读成成功，daemon 宣布"上下文已压缩"，而上下文一 token 没短。
+- 压缩事件从未被翻译，daemon 侧的压缩处理是死代码，压缩失败完全不可见。
+
+改法：daemon 的阈值在会话打开时按模型注册，内核按 agent 持有的模型引用解析策略；摘要请求带着内核给的预算；空结果被如实报成"无需压缩"；两个压缩事件被翻译，摘要从内核写入的 conversation 里读出来。
+
+### 3.5 #50 —— 子 Agent 按它自己的模型该有的强度运行（`f5f37dd`）
+
+每个子 Agent 都以 `thinkingLevel=off` 运行：图节点泳道把它写进 worker 配置，operation 路径在没有 conversation 可读档位时也用它——而节点本来就没有自己的 conversation。改后档位取该节点模型默认接受的档位，并按该模型支持的档位夹紧。
+
+**未完成的部分（如实记录）**：daemon 决定的档位仍然没有上线——daemon 自己拼 provider 请求，没有放推理参数，而 Pi 把档位映射到各 provider 参数的规则有按 provider 分支的实现，Graph 尚未移植。这是这件事的下一段。
+
+### 3.6 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
+
+daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：provider 从未被告知要保留什么，于是每个会话都为整段前缀重新付费。改后按 Pi 的做法在系统提示、最后一个工具声明、最后一条消息的最后一个块上各放一个断点。
+
+---
+
+## 4. E2E 证据
+
+只写真正的 E2E：真实 daemon 二进制、真实 SQLite 状态库、真实工具体，只有外部 provider 被脚本化替代。
+
+| 文件 | 证明什么 | 修复前 |
+|---|---|---|
+| `tests/e2e/harness-tool-flow.test.ts` | provider 在回答完成前断开时，这一回合失败，那个工具没有执行；Anthropic 请求带着 tool call 与配对的结果；请求带着缓存断点 | 断开的那一回合报成功并执行了工具；Anthropic 请求里没有 tool call |
+| `tests/e2e/harness-compaction.test.ts` | 摘要是按 daemon 预留的 2000 token 房间请求的（1600），不是模型的整个输出上限；压缩被如实上报为 `session.compacted` | 摘要请求 4096 token；没有任何压缩上报 |
+
+两个文件都在修复前跑过，确认失败。
+
+---
+
+## 5. 确认为真实但本轮未修的（逐条记录）
+
+这些是 Graph 自己的缺陷，但改动面比本轮大，或需要与正在进行的其它工作协调。每条给出机制与修复位置。
+
+| # | 机制 | 修复位置 |
+|---|---|---|
+| 8 | 任意回合错误都扣重试预算；预算耗尽时即使补交额度还没用也直接判失败；`NoteNodeResubmit(..., maxSafeInteger)` 绕过了持久护栏 | `core_node_executor.go` `runOne`：预算耗尽时先看补交额度；把真实额度传给 `NoteNodeResubmit` |
+| 41 | 完成由"没有错误"推断：内核没报错就算 `Done:true`，节点没有声明必需输出时驱动也返回 `Done:true` | `runtime_pig_node_host.go` + `core_node_turn_driver.go`：由真实提交或非空回答推导完成 |
+| 14 | `ListBounded`/`ReadBoundedBytes` 无上限，`ls`/`find` 没有默认 limit，18MB 目录清单先在 Graph 堆里成型 | `runtime_bounded_path.go`；`runtime_pig_native_tools.go` 给目录类工具默认 limit |
+| 22 | 每个流事件一次 INSERT + 一次通知；工具调用还额外两次事件与一次活动写 | `runtime_pi_adapter.go` 合并 `message.tool` 起止；`core_store.go` 合并活动写 |
+| 46 | 48 个工具声明里 15,229 字符描述对 2,225 字符参数，87.3% 是散文 | `runtime_agent_tool_definitions.go`：描述压成一句操作说明，长协议移进 `<docs>` |
+| 47 | daemon 侧设计好的 4KB 溢出/摘要路径（`ToolResultHook`）在 Go 路径上没有调用者，工具结果只有上游 50KB 兜底 | `pigkernel/extensions.go` 注册工具时挂上 `ToolResultHook` |
+| 29 | 启动恢复每 boot 重跑同一个 doomed call：冻结记录不清理，也没有"恢复已尝试"标记 | `runtime_pig_recovery.go` + `pigkernel/recovery.go`：冻结记录加"已尝试/最后失败"字段，并让失败对用户可见 |
+| 13 | 停止写入与正在停的那一步存在先后竞争 | 控制目标与 operation 生命周期的写入顺序 |
+| 36 | `force: true` 绕过"无进行中操作"前置，会在其他 operation 还在跑时重启 daemon | `runtime_rsi.go` `RsiService.Status()`：`force` 也要满足排空 |
+| 53 | 守护进程内从不跑保留策略：`events`/`invocations`/`kernel_*` 行随进程寿命增长 | `server_start.go` 周期调用 `ApplyRetention` |
+| 44 | 报告的形状不存在（未知模型被直接拒绝）；残余是"配置了模型但没写 contextWindow"会让压缩阈值退化，daemon 每回合都压缩 | 配置校验里给模型条目一个明确的 contextWindow 要求 |
+| 18 | 遗留 TS 路径整读会话文件（10MB）并在事件循环上同步解析 | `src/core/node-prompt.ts` 改增量读；`src/runtime/durable-history.ts` 不再复制整份 records |
+
+---
+
+## 6. 与 `feature/harness-token-efficiency-2026-10-22` 的重叠
+
+该分支尚未合入 `main`，本分支按 `main` 基线独立推进。重叠如下，合并时需要人工取舍：
+
+| 清单条目 | token-efficiency 分支上的状态 | 本分支 |
+|---|---|---|
+| #23 压缩阈值没到内核 | `ff7b6da` 让环境变量命名上下文上限 | 本分支按模型注册 daemon 的压缩阈值（同一根因，另一条路） |
+| #40 摘要预算被丢 | `129da7e` 给摘要它自己要的空间 | 本分支经 `bridgeRequestOptions` 传内核的每次请求预算 |
+| #45 Anthropic 缓存断点 | `e18a65b` 在 Anthropic 传输上标记可缓存前缀 | 本分支在系统提示/最后工具/最后消息放断点 |
+| #9 压缩事件到不了 daemon | 未覆盖 | 本分支翻译两个压缩事件 |
+
+两边改的是同一段代码的不同位置（`runtime_controlled_openai.go`、`pigkernel/provider.go`、`pigkernel/session.go`），合并时会冲突，建议先合其中一支。
+
+---
+
+## 7. 上游（PiG v0.5.1）需要知道的事
+
+这些不是 Graph 能改的，按上游文件分组：
+
+- **`durable/harness/compaction.go`** —— `completeCompaction` 用"完成 + 空结果"表示"什么都没压缩"，与真的压缩无法区分；`CompactionEndEvent` 只有 `{taskId, reason, error}`，没有 summary、tokensBefore、estimatedTokensAfter（daemon 读的正是缺的这些）。
+- **`durable/harness/agent.go`** —— `selectExtensions` 把无法解析的 extension 名**静默丢掉**，既不报错也不记事件。Graph 侧因此出现过"模型被承诺了工具却拿不到"。
+- **`durable/harness/generation.go`** —— assistant 条目在工具结果之前提交，`ConvertPartial` 只把流式 partial 转成 aborted 条目，已提交的 assistant 条目会带着没有结果的 tool call 留在 transcript 里。
+- **`coding/extension/host/subprocess`** —— `Host.Load` 必须在返回前保证扩展的工具注册可见。
+- **`mcp/streamable_http.go`** —— 响应流断开后只重放读侧，POSTed 的请求不重发；重连有上限但仍会打断在途调用。
+- **`ai/` provider 层** —— 其余 provider 的"连接关闭即结束"与"缓存 token 重复计费"在这里，Graph 只讲两种协议，无法代为修。
+
+Graph 侧的缓解：把 `MCP response stream failed` 当作可重试的环境失败（`core_environment_failure.go` 已分类 `ECONNRESET`），并在桥接层给在途调用补一次幂等重试。
