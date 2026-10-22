@@ -42,8 +42,8 @@ func (runtime *TaskRuntime) recoverPigNodeExecution(frozen pigkernel.FrozenExecu
 	if err != nil {
 		panic(fmt.Errorf("pig kernel: the admission of %s is not readable: %w", frozen.ExecutionId, err))
 	}
-	switch {
-	case receipt.Completed:
+	switch classifyPigTurn(receipt, pigNodeCalledProvider(runtime.kernel, execution, frozen)) {
+	case pigTurnKernelDone:
 		// The kernel finished the turn. The node runs again against the same
 		// admission and the kernel answers from what it kept.
 		//
@@ -53,11 +53,9 @@ func (runtime *TaskRuntime) recoverPigNodeExecution(frozen pigkernel.FrozenExecu
 		markNodeCompletion(runtime.store.Path, execution.Id)
 		runtime.restorePigNode(frozen)
 		runtime.requeuePigNode(execution)
-	case pigNodeCalledProvider(runtime.kernel, execution, frozen):
-		// The turn was at the model. It is not sent again.
+	case pigTurnReachedModel:
 		runtime.stopPigNode(execution)
 	default:
-		// The turn was accepted and never sent. It is sent again.
 		runtime.restorePigNode(frozen)
 	}
 	return true
@@ -119,16 +117,11 @@ func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
 // started. A call beyond them is one this turn made, and the turn must not
 // be sent again.
 func pigNodeCalledProvider(kernel *KernelStore, execution *ExecutionRow, frozen pigkernel.FrozenExecution) bool {
-	pre := map[string]bool{}
-	for _, id := range durableStrings(frozen.Record["preAdmissionInvocationIds"]) {
-		pre[id] = true
-	}
+	seen := []string{}
 	for _, call := range kernelRows(kernel.Db, "SELECT id FROM kernel_provider_calls WHERE execution_id=?", execution.Id) {
-		if !pre[kernelString(call["id"])] {
-			return true
-		}
+		seen = append(seen, kernelString(call["id"]))
 	}
-	return false
+	return pigCallsBeyond(durableStrings(frozen.Record["preAdmissionInvocationIds"]), seen)
 }
 
 // pigNodeRestoredWrapper is the shape the lane reads a restored node from.

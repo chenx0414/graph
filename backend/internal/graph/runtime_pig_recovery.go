@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
@@ -72,19 +71,18 @@ func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecut
 	if err != nil {
 		panic(fmt.Errorf("pig kernel: the admission of %s is not readable: %w", execution.ExecutionId, err))
 	}
-	if receipt.Completed {
+	switch classifyPigTurn(receipt, pigExecutionCalledProvider(runtime.store, operation, execution)) {
+	case pigTurnKernelDone:
 		runtime.settlePigCompletion(operation, execution, receipt)
-		return
+	case pigTurnReachedModel:
+		// The credential was spent and the side effects may have happened.
+		// The operation stays unknown and the user reconciles it. The kernel's
+		// own turn needs no stopping: the generation resumes from its
+		// checkpoint, and a request the model already received is not
+		// requested a second time.
+	default:
+		runtime.reattachPigExecution(operation, execution)
 	}
-	// A turn that reached the model is not replayed: the credential was spent
-	// and the side effects may have happened. The operation stays unknown and
-	// the user reconciles it. The kernel's own turn needs no stopping: the
-	// generation resumes from its checkpoint, and a request the model already
-	// received is not requested a second time.
-	if pigExecutionCalledProvider(runtime.store, operation, execution) {
-		return
-	}
-	runtime.reattachPigExecution(operation, execution)
 }
 
 // settlePigCompletion settles an operation from the kernel's own receipt.
@@ -118,71 +116,39 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 		"restoredPolicy":     asMap(execution.Record["policy"]),
 		"restoredDescriptor": asMap(asMap(execution.Record["configuration"])["descriptor"]),
 	}
-	capture := &pigRecoveryCapture{
-		request: make(chan AgentSessionRequest, 1),
-		prompt:  make(chan string, 1),
-	}
+	capture := &pigRecoveryCapture{}
 	options := runtime.mainAdapterOptions()
 	options.Transport = capture
 	options.RecoverySnapshot = wrapper
-	finished := make(chan struct{})
 	var prepared OperationResult
 	var preparedOk bool
-	go func() {
-		defer close(finished)
+	func() {
 		defer catchPigRecoveryFailure("the interrupted turn could not be prepared")
-		adapter := CreatePiAdapter(options)
-		prepared = adapter.Prepare(operation)()
+		prepared = CreatePiAdapter(options).Prepare(operation)()
 		preparedOk = true
 	}()
-	request, ok := pigRecoveryTake(capture.request, finished)
-	if !ok {
+	// The adapter records the admission and returns. The value is on the
+	// capture when Prepare returns, so nothing races a closed channel.
+	if !capture.opened || !capture.prompted {
 		reportPigRecoveryFailure("the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk))
-		return
-	}
-	text, ok := pigRecoveryTake(capture.prompt, finished)
-	if !ok {
-		reportPigRecoveryFailure("the interrupted turn could not be sent again" + pigRecoveryReason(prepared, preparedOk))
 		return
 	}
 	go func() {
 		defer catchPigRecoveryFailure("the interrupted turn could not be sent again")
 		transport := CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
-		session, err := transport.Open(request)
+		session, err := transport.Open(capture.request)
 		if err != nil {
 			reportPigRecoveryFailure("the interrupted turn could not be opened: " + err.Error())
 			return
 		}
 		defer func() { _ = session.Close() }()
-		turn, err := session.Prompt(text, nil)
+		turn, err := session.Prompt(capture.prompt, nil)
 		if err != nil {
 			reportPigRecoveryFailure("the interrupted turn could not be sent again: " + err.Error())
 			return
 		}
 		runtime.settlePigTurn(operation, turn)
 	}()
-}
-
-// pigRecoveryTake takes the value the capture produced.
-//
-// The value wins over the end of the attempt. The capture hands its facts
-// over before it ends, so a select between a value that is ready and a
-// signal that is closed would pick either one - and picking the end would
-// abandon the recovery of a turn that was never sent, with nothing to show
-// for it.
-func pigRecoveryTake[T any](values chan T, finished chan struct{}) (T, bool) {
-	var value T
-	select {
-	case value = <-values:
-		return value, true
-	default:
-	}
-	select {
-	case value = <-values:
-		return value, true
-	case <-finished:
-		return value, false
-	}
 }
 
 // pigRecoveryReason names why the capture could not produce a turn.
@@ -254,33 +220,29 @@ func (runtime *TaskRuntime) settlePigTurn(operation Operation, turn AgentSession
 // started. An invocation beyond them is a provider call this execution made,
 // and the turn must not be replayed.
 func pigExecutionCalledProvider(store *TaskStore, operation Operation, execution pigkernel.FrozenExecution) bool {
-	pre := map[string]bool{}
-	for _, id := range durableStrings(execution.Record["preAdmissionInvocationIds"]) {
-		pre[id] = true
-	}
+	seen := []string{}
 	for _, call := range kernelRows(store.Db, "SELECT id FROM invocations WHERE operation_id=?", operation.Id) {
-		if !pre[kernelString(call["id"])] {
-			return true
-		}
+		seen = append(seen, kernelString(call["id"]))
 	}
-	return false
+	return pigCallsBeyond(durableStrings(execution.Record["preAdmissionInvocationIds"]), seen)
 }
 
-// pigRecoveryCapture catches the session an adapter would open.
+// pigRecoveryCapture records the admission the adapter would open.
 //
-// The PiG kernel lives in this process, so the recovery opens the session
-// itself and replays the turn. The capture records what the adapter built -
-// the request and the input it would have sent - and hands back a session
-// that does nothing.
+// The PiG kernel lives in this process, so the recovery opens the real
+// session itself. The capture keeps the request and the prompt, and its
+// prompt tells the adapter to stop before a turn is sent.
 type pigRecoveryCapture struct {
-	request chan AgentSessionRequest
-	prompt  chan string
-	once    sync.Once
+	request  AgentSessionRequest
+	prompt   string
+	opened   bool
+	prompted bool
 }
 
 // Open records the session the adapter would open.
 func (capture *pigRecoveryCapture) Open(request AgentSessionRequest) (AgentSession, error) {
-	capture.once.Do(func() { capture.request <- request })
+	capture.request = request
+	capture.opened = true
 	return &pigRecoverySession{capture: capture}, nil
 }
 
@@ -292,13 +254,14 @@ type pigRecoverySession struct {
 	capture *pigRecoveryCapture
 }
 
-// Prompt records the input the adapter would send.
+// Prompt records the input the adapter would send and stops the adapter.
+//
+// The stop reason is the signal that this was a recording, not a turn. The
+// adapter returns the admission instead of settling an empty answer.
 func (session *pigRecoverySession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
-	select {
-	case session.capture.prompt <- text:
-	default:
-	}
-	return AgentSessionTurn{}, nil
+	session.capture.prompt = text
+	session.capture.prompted = true
+	return AgentSessionTurn{StopReason: stringPointer("admitted")}, nil
 }
 
 // Compact does nothing.

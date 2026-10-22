@@ -137,18 +137,7 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		return pigNodeTurnError(err.Error())
 	}
 	tools = append(tools, extensions...)
-	session, err := pigkernel.OpenSession(context.Background(), pigkernel.SessionOptions{
-		Database:     host.options.Database,
-		Identity:     request.Binding.InstanceId,
-		Model:        pigModelSpec(request.Model),
-		Provider:     host.provider(),
-		Tools:        tools,
-		McpServers:   pigMcpServers(request),
-		Instructions: pigSessionInstructions(request),
-		RequestId:    request.InputRequestId,
-		OnEvent:      host.options.OnEvent,
-		OnToolCall:   host.options.OnToolCall,
-	})
+	session, err := openPigSession(context.Background(), host.options.Database, request, host.provider(), tools, host.options.OnEvent, host.options.OnToolCall)
 	if err != nil {
 		return pigNodeTurnError(err.Error())
 	}
@@ -374,13 +363,10 @@ func pigNodeRecoveredAttempt(kernel *KernelStore, identity string, executionId s
 	// A turn the kernel finished keeps its attempt: the answer is retained,
 	// so the node runs again against the same admission and the model is not
 	// asked a second time.
-	if receipt.Completed {
+	switch classifyPigTurn(receipt, pigNodeCalledProvider(kernel, &ExecutionRow{Id: executionId}, frozen)) {
+	case pigTurnReachedModel:
+		return 0
+	default:
 		return pigNodeAttemptOf(frozen.InputRequestId)
 	}
-	// A turn that reached the model keeps nothing: the credential was spent
-	// and the side effects may have happened, so the node waits for the user.
-	if pigNodeCalledProvider(kernel, &ExecutionRow{Id: executionId}, frozen) {
-		return 0
-	}
-	return pigNodeAttemptOf(frozen.InputRequestId)
 }

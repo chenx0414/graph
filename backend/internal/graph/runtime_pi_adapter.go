@@ -1728,21 +1728,21 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			(input.AccessPolicy != nil && input.AccessPolicy.Network == "unrestricted"),
 		AllowLocalBinding: turn.CapabilityOperation.AllowLocalBinding ||
 			(input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.LocalBinding),
-		UnixSockets:            append([]string{}, turn.CapabilityOperation.UnixSockets...),
-		AllowAllUnixSockets:    input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.UnixSockets == "all",
-		AllowAppleEvents:       input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.AppleEvents,
-		PiExtensionPaths:       append([]string{}, turn.CapabilityOperation.PiExtensionPaths...),
+		UnixSockets:             append([]string{}, turn.CapabilityOperation.UnixSockets...),
+		AllowAllUnixSockets:     input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.UnixSockets == "all",
+		AllowAppleEvents:        input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.AppleEvents,
+		PiExtensionPaths:        append([]string{}, turn.CapabilityOperation.PiExtensionPaths...),
 		ExtensionProcessAllowed: pigExtensionProcessAllowed(input.AccessPolicy),
-		McpAdapterServers:      append([]McpAdapterServerRef{}, turn.CapabilityOperation.McpAdapterServers...),
-		PiExtensionTools:       append([]string{}, turn.CapabilityOperation.PiExtensionTools...),
-		SystemPrompt:           turn.ComposedPrompt,
-		BundleDigest:           turn.CapabilityOperation.BundleDigest,
-		LegacyCapabilityDigest: stringPointer(turn.CapabilityOperation.LegacyPromptDigest),
-		ToolPolicyDigest:       turn.CapabilityOperation.ToolPolicyDigest,
-		RuntimePolicyDigest:    turn.CapabilityOperation.RuntimePolicyDigest,
-		Broker:                 turn.ObservedGate,
-		NativeTools:            append([]string{}, turn.CapabilityOperation.NativeTools...),
-		AllowWorkspaceChange:   turn.Conversation != nil,
+		McpAdapterServers:       append([]McpAdapterServerRef{}, turn.CapabilityOperation.McpAdapterServers...),
+		PiExtensionTools:        append([]string{}, turn.CapabilityOperation.PiExtensionTools...),
+		SystemPrompt:            turn.ComposedPrompt,
+		BundleDigest:            turn.CapabilityOperation.BundleDigest,
+		LegacyCapabilityDigest:  stringPointer(turn.CapabilityOperation.LegacyPromptDigest),
+		ToolPolicyDigest:        turn.CapabilityOperation.ToolPolicyDigest,
+		RuntimePolicyDigest:     turn.CapabilityOperation.RuntimePolicyDigest,
+		Broker:                  turn.ObservedGate,
+		NativeTools:             append([]string{}, turn.CapabilityOperation.NativeTools...),
+		AllowWorkspaceChange:    turn.Conversation != nil,
 		// Auto-compaction stays on for workers, reviewers and the master;
 		// thresholds follow the model that will receive the summary.
 		Compaction: piAdapterCompactionSettings(entry),
@@ -1928,6 +1928,11 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	result, err := session.Prompt(skillInjection.Text, userImages)
 	if err != nil {
 		panic(err)
+	}
+	// A recovery records the admission and stops. The real session sends the
+	// prompt; this adapter must not settle an empty answer of its own.
+	if result.StopReason != nil && *result.StopReason == "admitted" {
+		return OperationResult{Outcome: "admitted", Usage: turn.Gate.Total()}
 	}
 	turn.FlushDeltas(true)
 	if *turn.GateRefusal != nil {

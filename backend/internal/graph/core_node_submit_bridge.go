@@ -3,7 +3,6 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -25,37 +24,57 @@ type BridgeReceipt struct {
 	MissingRequired []string       `json:"missingRequired"`
 }
 
-func classifySubmit(err *RuntimeError) (defects []SubmitDefect, missingRequired []string) {
-	message := err.Message
-	if match := regexp.MustCompile(`^Required output\(s\) not enabled: (.+)$`).FindStringSubmatch(message); match != nil {
-		parts := splitTrim(match[1])
-		return []SubmitDefect{{Code: "missing_required_output", Path: strings.Join(parts, ", "), Expected: "enable:true", Got: "enable:false or absent"}}, parts
-	}
-	if match := regexp.MustCompile(`^Output (\S+) does not satisfy (\S+): (.+)$`).FindStringSubmatch(message); match != nil {
-		return []SubmitDefect{{Code: "output_protocol_mismatch", Path: match[1], Expected: match[2] + ": " + match[3], Got: "the value you sent"}}, []string{}
-	}
-	if match := regexp.MustCompile(`^Node \S+ has no output (\S+)$`).FindStringSubmatch(message); match != nil {
-		return []SubmitDefect{{Code: "unknown_output", Path: match[1], Expected: "a declared output of this node", Got: match[1]}}, []string{}
-	}
-	if match := regexp.MustCompile(`^Delivery (\S+) to (\S+) does not satisfy (\S+): (.+)$`).FindStringSubmatch(message); match != nil {
-		return []SubmitDefect{{Code: "target_protocol_mismatch", Path: match[2], Expected: match[3] + ": " + match[4], Got: "the value the edge would carry"}}, []string{}
-	}
-	if match := regexp.MustCompile(`^Execution (\S+) already submitted`).FindStringSubmatch(message); match != nil {
-		return []SubmitDefect{{Code: "already_submitted", Path: match[1], Expected: "one valid submission per execution", Got: "a second, different submission"}}, []string{}
-	}
-	if match := regexp.MustCompile(`^Execution (\S+) is (\S+)`).FindStringSubmatch(message); match != nil {
-		return []SubmitDefect{{Code: "execution_not_running", Path: match[1], Expected: "a running execution", Got: match[2]}}, []string{}
-	}
-	return []SubmitDefect{{Code: err.Code, Path: "(submission)", Expected: "a valid submission", Got: message}}, []string{}
+// SubmitRefusal is the structured refusal of one submission.
+//
+// The module that writes the delivery raises it. The bridge reads the defects
+// as they were decided; it does not parse an English sentence to learn them.
+type SubmitRefusal struct {
+	Defects []SubmitDefect
+	Missing []string
 }
 
-func splitTrim(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		out = append(out, strings.TrimSpace(part))
+func (refusal *SubmitRefusal) Error() string {
+	return RefusalText(refusal.Defects)
+}
+
+func refuseSubmit(defects []SubmitDefect, missing []string) {
+	panic(&SubmitRefusal{Defects: defects, Missing: missing})
+}
+
+func refuseMessage(message string) {
+	refuseSubmit([]SubmitDefect{{
+		Code: "invalid_submit", Path: "(submission)",
+		Expected: "a valid submission", Got: message,
+	}}, nil)
+}
+
+func refuseMissingOutputs(names []string) {
+	refuseSubmit([]SubmitDefect{{
+		Code: "missing_required_output", Path: strings.Join(names, ", "),
+		Expected: "enable:true", Got: "enable:false or absent",
+	}}, names)
+}
+
+func submitDefectsOf(recovered any) (defects []SubmitDefect, missing []string, ok bool) {
+	switch failure := recovered.(type) {
+	case *SubmitRefusal:
+		defects = failure.Defects
+		missing = failure.Missing
+		ok = true
+	case *RuntimeError:
+		defects = []SubmitDefect{{
+			Code: failure.Code, Path: "(submission)",
+			Expected: "a valid submission", Got: failure.Message,
+		}}
+		ok = true
 	}
-	return out
+	if defects == nil {
+		defects = []SubmitDefect{}
+	}
+	if missing == nil {
+		missing = []string{}
+	}
+	return defects, missing, ok
 }
 
 // RefusalText is the short field-level refusal. The work already done stands.
@@ -142,21 +161,35 @@ func jsType(value any) string {
 	}
 }
 
-// HostSubmitCall is the host side of one submit tool call.
-func HostSubmitCall(kernel *KernelStore, taskId, nodeId string, args any) (ok bool, text string) {
-	execution, found := graphDBRow(kernel.Store.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1", taskId, nodeId)
-	if !found {
+// SubmitNodeCall submits one tool call against the execution that admitted it.
+//
+// The execution is the one the turn was frozen with. A later row for the same
+// node is a different turn, and this call does not belong to it.
+func SubmitNodeCall(kernel *KernelStore, executionID string, args any) (ok bool, text string) {
+	if executionID == "" {
 		return false, "no execution is running for this node"
 	}
 	call := ReadSubmitCall(args)
 	if call.defect != nil {
 		return false, RefusalText([]SubmitDefect{*call.defect})
 	}
-	receipt := NewNodeSubmitBridge(kernel, graphDBString(execution, "id")).Submit(SubmitRequest{Outputs: call.outputs, SubmissionId: "v2-" + graphDBString(execution, "id")})
+	receipt := NewNodeSubmitBridge(kernel, executionID).Submit(SubmitRequest{Outputs: call.outputs, SubmissionId: "v2-" + executionID})
 	if receipt.Accepted {
 		return true, jsonStringify(map[string]any{"accepted": true, "deliveries": len(receipt.Deliveries)})
 	}
 	return false, RefusalText(receipt.Defects)
+}
+
+// HostSubmitCall is the host side of one submit tool call.
+//
+// It addresses the latest execution of the node. A lane that already knows
+// the admitted execution calls SubmitNodeCall with that execution instead.
+func HostSubmitCall(kernel *KernelStore, taskId, nodeId string, args any) (ok bool, text string) {
+	execution, found := graphDBRow(kernel.Store.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1", taskId, nodeId)
+	if !found {
+		return false, "no execution is running for this node"
+	}
+	return SubmitNodeCall(kernel, graphDBString(execution, "id"), args)
 }
 
 type NodeSubmitBridge struct {
@@ -182,19 +215,21 @@ type bridgeSubmitRequest struct {
 func (b *NodeSubmitBridge) Submit(request SubmitRequest) BridgeReceipt {
 	var receipt SubmitReceipt
 	failed := false
-	var caught *RuntimeError
+	var defects []SubmitDefect
+	var missing []string
 	func() {
 		defer func() {
 			recovered := recover()
 			if recovered == nil {
 				return
 			}
-			re, ok := recovered.(*RuntimeError)
+			parsed, gap, ok := submitDefectsOf(recovered)
 			if !ok {
 				panic(recovered)
 			}
 			failed = true
-			caught = re
+			defects = parsed
+			missing = gap
 		}()
 		receipt = b.kernel.Submit(b.ExecutionId, request)
 	}()
@@ -206,7 +241,6 @@ func (b *NodeSubmitBridge) Submit(request SubmitRequest) BridgeReceipt {
 			Deliveries: receipt.Deliveries, Defects: []SubmitDefect{}, MissingRequired: []string{},
 		}
 	}
-	defects, missing := classifySubmit(caught)
 	if len(missing) > 0 {
 		raw, err := json.Marshal(missing)
 		if err != nil {

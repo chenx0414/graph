@@ -556,40 +556,49 @@ func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitRe
 	return k.Store.Transaction(func() any {
 		execution := k.Execution(executionID)
 		if execution == nil {
-			Raise("invalid_submit", "Unknown execution "+executionID)
+			refuseMessage("Unknown execution " + executionID)
 		}
 		existing, ok := g5One(k.Db, "SELECT id, content_digest FROM kernel_submissions WHERE execution_id=?", executionID)
 		if ok {
 			return k.replayOrRefuse(*execution, request, g5Str(existing["id"]), g5Str(existing["content_digest"]))
 		}
 		if execution.State != "running" {
-			Raise("invalid_submit", "Execution "+execution.Id+" is "+execution.State+" and has no submission to replay")
+			refuseSubmit([]SubmitDefect{{
+				Code: "execution_not_running", Path: execution.Id,
+				Expected: "a running execution", Got: execution.State,
+			}}, nil)
 		}
 		k.assertOutputsOpen(execution.TaskId)
 		revision := k.Revision(execution.TaskId, execution.RevisionVersion)
 		node, nodeOK := revision.Definition.Nodes[execution.NodeId]
 		if !nodeOK {
-			Raise("invalid_submit", "Execution node "+execution.NodeId+" is not in revision "+kernelItoa(int64(revision.Version)))
+			refuseMessage("Execution node " + execution.NodeId + " is not in revision " + kernelItoa(int64(revision.Version)))
 		}
 		if request.Outputs == nil {
-			Raise("invalid_submit", "outputs must be a named object")
+			refuseMessage("outputs must be a named object")
 		}
 		// TODO(port): output and edge walks are sorted; TypeScript Object.entries keeps insertion order.
 		for _, name := range portKeys(request.Outputs) {
 			output := request.Outputs[name]
 			declared, declaredOK := node.Outputs[name]
 			if !declaredOK {
-				Raise("invalid_submit", "Node "+execution.NodeId+" has no output "+name)
+				refuseSubmit([]SubmitDefect{{
+					Code: "unknown_output", Path: name,
+					Expected: "a declared output of this node", Got: name,
+				}}, nil)
 			}
 			if !output.Enable {
 				continue
 			}
 			spec, specOK := revision.Definition.Protocols[declared.Protocol]
 			if !specOK {
-				Raise("invalid_submit", "Output "+name+" references undeclared protocol "+declared.Protocol)
+				refuseMessage("Output " + name + " references undeclared protocol " + declared.Protocol)
 			}
 			if defect := ValidateProtocolValue(spec, output.Value, execution.NodeId+"."+name); defect != nil && *defect != "" {
-				Raise("invalid_submit", "Output "+name+" does not satisfy "+declared.Protocol+": "+*defect)
+				refuseSubmit([]SubmitDefect{{
+					Code: "output_protocol_mismatch", Path: name,
+					Expected: declared.Protocol + ": " + *defect, Got: "the value you sent",
+				}}, nil)
 			}
 		}
 		queue, queued := g5One(k.Db, "SELECT kind FROM kernel_queue WHERE task_id=? AND node_id=? AND state='claimed' LIMIT 1", execution.TaskId, execution.NodeId)
@@ -608,7 +617,7 @@ func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitRe
 				}
 			}
 			if !enabledAny {
-				Raise("invalid_submit", "Required output(s) not enabled: "+strings.Join(anyOf, ", "))
+				refuseMissingOutputs(anyOf)
 			}
 		}
 		missing := []string{}
@@ -619,7 +628,7 @@ func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitRe
 			}
 		}
 		if len(missing) > 0 {
-			Raise("invalid_submit", "Required output(s) not enabled: "+strings.Join(missing, ", "))
+			refuseMissingOutputs(missing)
 		}
 		connections := k.LatestRevision(execution.TaskId)
 		type target struct {
@@ -652,11 +661,14 @@ func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitRe
 					ref, found = targetModule.Inputs[port]
 				}
 				if !found {
-					Raise("invalid_submit", "Edge "+edgeID+" targets unknown input "+edge.To)
+					refuseMessage("Edge " + edgeID + " targets unknown input " + edge.To)
 				}
 				if spec, specOK := connections.Definition.Protocols[ref.Protocol]; specOK {
 					if defect := ValidateProtocolValue(spec, output.Value, edge.To); defect != nil && *defect != "" {
-						Raise("invalid_submit", "Delivery "+edgeID+" to "+edge.To+" does not satisfy "+ref.Protocol+": "+*defect)
+						refuseSubmit([]SubmitDefect{{
+							Code: "target_protocol_mismatch", Path: edge.To,
+							Expected: ref.Protocol + ": " + *defect, Got: "the value the edge would carry",
+						}}, nil)
 					}
 				}
 				targets = append(targets, target{edgeID: edgeID, to: edge.To, value: output.Value, protocol: ref.Protocol})
@@ -702,7 +714,10 @@ func (k *KernelStore) replayOrRefuse(execution ExecutionRow, request SubmitReque
 		_, landed := g5One(k.Db, "SELECT 1 FROM kernel_graph_results WHERE task_id=? AND source_id=? LIMIT 1", execution.TaskId, request.SubmissionId)
 		return SubmitReceipt{SubmissionId: request.SubmissionId, Replayed: true, Deliveries: deliveries, NoRecipients: len(deliveries) == 0 && !landed}
 	}
-	Raise("invalid_submit", "Execution "+execution.Id+" already submitted; only one valid submission per execution is allowed")
+	refuseSubmit([]SubmitDefect{{
+		Code: "already_submitted", Path: execution.Id,
+		Expected: "one valid submission per execution", Got: "a second, different submission",
+	}}, nil)
 	return SubmitReceipt{}
 }
 

@@ -49,21 +49,7 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		return nil, err
 	}
 	tools = append(tools, extensions...)
-	options := pigkernel.SessionOptions{
-		Database:     transport.store.Path,
-		Identity:     request.Binding.InstanceId,
-		Model:        pigModelSpec(request.Model),
-		Provider:     pigProviderBridge(request),
-		Tools:        tools,
-		McpServers:   pigMcpServers(request),
-		Instructions: pigSessionInstructions(request),
-		RequestId:    request.InputRequestId,
-		OnEvent:      request.OnEvent,
-	}
-	if request.ThinkingLevel != nil {
-		options.ThinkingLevel = *request.ThinkingLevel
-	}
-	session, err := pigkernel.OpenSession(context.Background(), options)
+	session, err := openPigSession(context.Background(), transport.store.Path, request, pigProviderBridge(request), tools, request.OnEvent, nil)
 	if err != nil {
 		// The refusal a session gets when a bound Pi extension cannot be
 		// hosted for it is returned, not raised: the caller turns it into a
@@ -98,6 +84,30 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 	}
 	record := pigFrozenExecution(request, preAdmission)
 	return pigkernel.FreezeExecution(context.Background(), transport.store.Path, request.Binding.InstanceId, record)
+}
+
+// openPigSession admits one PiG session.
+//
+// The main agent and a graph node open the same session: identity, model,
+// tools, MCP, instructions, and the daemon's model channel. The caller
+// supplies the tools and the channel. The credential stays in that channel.
+func openPigSession(ctx context.Context, database string, request AgentSessionRequest, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
+	options := pigkernel.SessionOptions{
+		Database:     database,
+		Identity:     request.Binding.InstanceId,
+		Model:        pigModelSpec(request.Model),
+		Provider:     provider,
+		Tools:        tools,
+		McpServers:   pigMcpServers(request),
+		Instructions: pigSessionInstructions(request),
+		RequestId:    request.InputRequestId,
+		OnEvent:      onEvent,
+		OnToolCall:   onToolCall,
+	}
+	if request.ThinkingLevel != nil {
+		options.ThinkingLevel = *request.ThinkingLevel
+	}
+	return pigkernel.OpenSession(ctx, options)
 }
 
 // pigProviderBridge is the daemon's model channel, seen from the kernel.

@@ -1323,6 +1323,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					}
 				},
 				OnToolCall: func(name string, args any) (PiToolAnswer, error) {
+					if name == "submit" {
+						ok, text := SubmitNodeCall(options.Kernel, workerConfig.ExecutionId, args)
+						return PiToolAnswer{Ok: ok, Text: text}, nil
+					}
 					if name == "native_tool_start" || name == "native_tool_settle" {
 						call, _ := args.(map[string]any)
 						if call == nil {
