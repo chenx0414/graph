@@ -1,4 +1,4 @@
-# 代码库结构深化：类型化宿主 seam、抽掉死副本、节点预算一本账（2026-10-22）
+# 代码库结构深化：类型化宿主 seam、抽掉死副本、节点预算一本账、冻结执行一个类型（2026-10-22）
 
 目标：由浅入深地改进代码库结构。分支 `feature/architecture-deepening`，基线 main `9aed752`（"Share the PiG turn facts between recovery and submit"）。
 
@@ -19,6 +19,10 @@
 
 4. **"这个节点正在跑哪个 execution"归 store 回答**（提交 `cf00356`）。节点泳道向 kernel 表问了同一个问题九次：九个同样的 SELECT，散在泳道、provider 闸门与节点宿主里，其中一个读的还是同一行的另一个列。决定答案的规则——这个节点最新的 running execution——因此有九处要改、却没有一处可看。`KernelStore.RunningExecution` 回答它，返回的是 store 本来就在造的那份 `ExecutionRow`，泳道读的是有类型的字段而不是从 map 里掏。副本没了，回答问题的查询只有一份。
 
+5. **冻结执行有了一个类型，恢复读的是同一份记录**（提交 `62b5f81`）。冻结执行原本没有类型：写的人拼出一张约七十个键的 map，读的人各自从里面挑自己要的——主 Agent 会话的恢复、节点泳道的恢复、泳道自己的读、以及 provider 调用判定，各有一份"工作副本在哪""这次是哪个 execution"的写法。写的人加了字段而某个读的人忘了，字段就无声丢掉，而恢复正是"把已受理的输入用此刻的配置重发"发生的地方，也正是 ADR 0033 点名禁止的那件事。现在 `FrozenExecution` 说明一份冻结执行装什么，它的 policy / agent / tools / configuration 说明每一部分装什么；写的人造这个类型，持久形态由它导出，因此磁盘格式与读的人不会各走各的。恢复以 `FrozenExecutionRecovery` 把记录交下去，adapter、节点宿主与泳道读的是有类型的字段而不是从 map 里掏。
+   - **持久格式没有变**：一次探针把旧写者产出的记录与类型化写者产出的记录逐字节比对——完整请求、带 model view 的请求、空请求、没有 tools 的请求四种情况，JSON 完全一致，连 null 都一样。改动之前冻结的执行仍然读得出来。
+   - **两个被类型化照出来的问题，都不在这一步里改**（见下）。
+
 ## 过程中查出来、**尚未处理**的问题
 
 1. **系统自模型在 Go daemon 里没有接线**。`GraphServerOptions.SystemContext` 从来没有被设过，因此 `read_system_capabilities`、`inspect_graph_system`、`propose_system_change`、`apply_system_change` 这四个工具对主 Agent 一直不可用。TypeScript 宿主是接了的（`src/server/start.ts:407` 传 `{ systemSummary }`），Go 端口迁移时漏掉。CONTEXT.md 的**系统自模型**把这项列为产品能力，所以这是一个功能缺口，不是设计取舍。补它需要一份 Go 侧的主机清单，属于功能实现而不是结构整理。
@@ -27,7 +31,13 @@
 
 3. **嵌套事务会死锁，而 `TaskStore.Transaction` 的注释说它会 join**。实现先拿事务锁再看深度，所以从另一个事务里再开一个事务会等一把外层正持有的锁，host 就停在那里。用真实 store 跑的一次探针证实了这一点（探针已删除）。注释现在改成写实际行为，并写明：要在别人事务里跑的 store 方法不该自己开事务（单条语句本身就是原子的），需要多条语句的方法按仓库既有的 `InCurrentTransaction` 命名，让调用方持有事务。**这是下一条候选（把运行时层的裸 SQL 收进 KernelStore）的前置条件**——那些 store 方法会从运行时自己的事务里被调用。
 
-4. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
+4. **冻结策略存了 15 个字段，恢复只还原 8 个**。`FrozenExecutionPolicy` 记下工作副本、状态目录、skills、扩展、读写根、保护路径、文件系统可达范围、原生工具、可调工具、能力/工具/运行时策略摘要与思考档位共 15 项，而恢复只读回其中 8 项：文件系统可达范围、原生工具、可调工具、三个策略摘要与思考档位都**没有**被还原。因此一次被重新发出的回合，用的是**此刻**的文件系统可达范围、此刻的工具清单、此刻的策略摘要与此刻的思考档位。CONTEXT.md 的**冻结执行**明写"记录该次执行用的模型、指令、工具与策略"，并把"用目录里此刻的配置重发已受理的输入"列为禁止——记录里存着这些事实，恢复没有读回来。补上是修一个功能缺陷，但它改变恢复路径的行为，而恢复路径没有能证明这一点的 E2E，因此本轮只写在这里。
+
+5. **泳道的 "Frozen node identity mismatch" 拒绝是空转的**。内核把冻结身份直接从它存的那份记录里读出来（`recordString(record, "identity")`），所以旧代码拿 `configuration.policy.binding.instanceId` 与 `snapshot.identity` 比的是同一个字段的两个副本，永远相等。现在类型化之后比较的是 `wrapper.Identity` 与 `wrapper.Record.Identity`——仍然是同一个值，但至少不再伪装成两个独立事实。要让它有意义，得拿记录里的身份与**执行那一行**所属的实例比；那是新加的判定，会改变恢复的行为，同样没有 E2E 能证明，因此没有加。
+
+6. **两个历史大文件挡住了运行时层的任何改动**。仓库新加的提交守卫按**暂存的 blob** 量大小（上限 5,000 令牌 ≈ 20,000 字节），因此任何一次改动只要碰到 `runtime_pi_adapter.go`（97KB）或 `runtime_kernel_graph_lane.go`（67KB）就被拦下，尽管守卫自己的说明写的是"仓库里已存在历史大文件，而它要拦的是**本次改动**新写大文件"——实现比说明严。拆分方案已经量过：适配器可以纯搬移地拆成 9 个文件（模型与 provider、通道类型、选项、operation、turn、文本、上下文、类型），只剩 `piAdapterRunOperation` 与 `piAdapterRunTurn` 两个函数体超预算，需要把里面的闭包提成有类型的状态；泳道更硬：`KernelGraphLane` 一个函数就 49KB、`sessionFor` 一个函数 43KB，要搬出约 24KB，等于把泳道重新按职责拆一遍。这是运行时层最深的一次结构整理，值得单独一个任务，不适合搭在别的事后面顺手做。本轮给这两个文件加了 `graph:allow-large-file` 标注并写明理由，拆分计划记在这里。
+
+7. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
 
 ## 门禁证据
 
@@ -40,5 +50,6 @@
 | `aeacc0e` | 满负载下 42 个文件失败 | 抽 6 个与本次改动无关的失败文件重跑，两个分支都是 61/61 通过；覆盖节点预算的 `tests/e2e/node-budget.test.ts`、`tests/m8/kernel-node-budget.test.ts`、`tests/m8/node-executor.test.ts` 在满负载那一次里就是通过的 |
 | `8c74ef8` | **286 通过、1 跳过、0 失败**；"Suite matches the baseline (files 287, tests 1549)"；"Acceptance evidence is unchanged" | 在另一份干净 worktree 上跑本分支的已提交状态，机器空载（负载平均 7） |
 | `cf00356` | 287 个文件里 283 通过、1 跳过、3 失败 | 3 个失败文件单独重跑，在本提交上 3 个全过；同一个 `tests/durable/recovery.test.ts` 在上一个提交 `ff8e580` 上同样失败 |
+| `62b5f81` | 287 个文件里 280 通过、1 跳过、6 失败 | 6 个失败文件单独重跑，在本提交上 6 个全过（51/51）；覆盖本次改动的 `tests/e2e/pig-durable-recovery.test.ts`、`tests/e2e/pig-node-recovery.test.ts`、`tests/e2e/pig-node-lane.test.ts` 在满门禁那一次里就是通过的 |
 
 `tests/e2e/node-budget.test.ts` 断言结算后节点的 `used: 50, reserved: 0`，正是第三条改动的两条路径。
