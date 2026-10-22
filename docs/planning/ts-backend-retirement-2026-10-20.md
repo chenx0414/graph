@@ -83,7 +83,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `console/price-snapshot.test.ts` | 5 | 0 | 1 | 3 | 1 |
 | `console/pricing.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | `console/schema-upgrade.test.ts` | 4 | 0 | 4 | 0 | 0 |
-| `console/setup-wizard.test.ts` | 1 | 0 | 1 | 0 | 0 |
+| `console/setup-wizard.test.ts` | 1 | 1 | 0 | 0 | 0 |
 | `e2e/browser-tool-loading.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | `e2e/catalog-tool-loading.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | `e2e/command-output-preservation.test.ts` | 2 | 0 | 2 | 0 | 0 |
@@ -91,7 +91,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `e2e/harness-cost.test.ts` | 10 | 0 | 10 | 0 | 0 |
 | `e2e/pricing.test.ts` | 1 | 0 | 1 | 0 | 0 |
 | `e2e/project-branches.test.ts` | 4 | 0 | 3 | 1 | 0 |
-| `e2e/provider-metadata.test.ts` | 6 | 0 | 6 | 0 | 0 |
+| `e2e/provider-metadata.test.ts` | 6 | 6 | 0 | 0 | 0 |
 | `e2e/provider-reconciliation.test.ts` | 4 | 0 | 0 | 0 | 4 |
 | `e2e/providers.test.ts` | 3 | 0 | 3 | 0 | 0 |
 | `e2e/rework-runtime.test.ts` | 8 | 0 | 3 | 5 | 0 |
@@ -174,6 +174,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/e2e/command-output-preservation.test.ts` 公开的图命令：超出内联视图的字节一个不少地留在文件里（字节数与摘要对得上）、重启之后复用已结算的文件而不重跑 | `tests/e2e/go-command-output.test.ts` | 1 |
 | `tests/e2e/project-branches.test.ts` 分支命名：十个任务名变成可读、安全、互不相同的 git 分支名、工作副本目录名不占用别人的路径、用户自己的仓库停在他选的分支上 | `tests/e2e/go-project-branches.test.ts` | 1 |
 | `tests/console/schema-upgrade.test.ts` 升级旧安装：真的旧状态目录被就地升级（同一个文件）且历史、账目、配置都还在、升级之后的同一个数据库里跑得起原生图；v23 给旧交接重新编号；v41 的草稿与确认来源在迁移与重开之后都还在 | `tests/e2e/go-schema-upgrade.test.ts` | 4 |
+| `tests/console/setup-wizard.test.ts` 浏览器轨：向导从干净起步连上一个平台、再加第二个、**保存本身不发请求** | 同文件改由 Go daemon 驱动（`tests/console/setup-wizard.test.ts`） | 1 |
+| `tests/e2e/provider-metadata.test.ts` 浏览器轨：模型编辑器吃目录数据并落盘完整元数据、账号的凭据身份/名字/限额各自独立、缺密钥与坏配置被拒且不落盘 | 同文件改由 Go daemon 驱动（`tests/e2e/provider-metadata.test.ts`） | 6 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
 
@@ -391,7 +393,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **真实 CLI 以不限额默认启动，并拒绝零或负的默认**（第 2 条，`tests/e2e/config-contracts.test.ts` 的第二条**本来就驱动 Go**，本批把它搬进 Go 名下的文件，让它不再跟 TS daemon 的那条测试同处一室）：不限额时 `limits.defaultBudgetTokens` 是 `null`；写成 `0` 或 `-1` 时，进程**在服务之前**就退出，报错点名 `limits.defaultBudgetTokens` 与「positive integer」。
   - **失败的工具调用把原因留在节点记录里**（第 3 条）：模型去读一个不存在的文件，工具失败；节点自己的记录（`GET /api/tasks/{graphId}/nodes/work/run`）里那条 result **标了 `isError`**，**而且带着原因**（`message` 是个非空字符串，记录正文里也有它）——**不是一个只能标「失败」的布尔值**；成功的调用不会被穿成失败。TypeScript 那条测试是直接开 `openTaskRuntime` 读内部记录（实现耦合），这一条走的是公开的节点记录接口。
   - **三次回退验证证明这些断言咬得住**：让 settings 视图丢掉上游模型名与账号 → 第 1 条变红；让图泳道不记录失败原因 → 第 3 条变红（`message` 变成 `undefined`）。
-- **Batch 41 起**：`m8/app-shell-ux` 浏览器轨、`m8/settings-ui`、`e2e/provider-metadata`（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
+- **Batch 41（已完成）**：浏览器轨改由 Go daemon 驱动。`tests/console/setup-wizard.test.ts`（1 条）与 `tests/e2e/provider-metadata.test.ts`（6 条）**没有重写**——只是把驱动方从 TS daemon 换成真实的 Go daemon（`tests/helpers/cli-daemon.ts` 的 `launchCli`）：
+  - **浏览器轨不必重写**：这两份测试跑的是**同一套真实控制台**（真实 Chromium、真实 web 构建、真实配置文件落盘），它们当初驱动的只是 TS daemon。把 `startGraphDaemon` 换成 `launchCli` 之后，**断言一个字都没改**就成立了——这说明控制台这一层本来就与后端实现无关。为支持这一点，给 `launchCli` 加了 `stateDir` / `graphHome` / `webDir` 三个覆盖项（调用方自己备好的目录：已构建的控制台、留着的状态目录）。
+  - **daemon 在自己的进程里，所以外部厂商要在网络层拦**：这条测试原先用**测试进程内**的 `globalThis.fetch` 拦截，把预设厂商 `https://opencode.ai/zen/go/v1` 重定向到本机的受控厂商；Go daemon 是**独立进程**，进程内拦截拦不到，于是请求真的打到了公网 opencode.ai。改法是走仓库里已有的 `tests/helpers/vendor-proxy.ts`（`vendorProxy`）：daemon 用**自己真实的代理与 CA 设置**（Go 的 transport 读 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`，并把 `NODE_EXTRA_CA_CERTS` 追加进系统根证书）把请求送到本机的受控厂商——CONNECT 只放行 `opencode.ai`，别的主机一律 502，**没有一个字节出网**。
+  - **一次回退验证证明这些断言咬得住**：让受控厂商对所有请求回 500 → 「验证成功」变成「验证失败：ROLLBACK vendor refused」，厂商自己的话原样透出来（说明那句「验证成功」确实来自一次真实往返，不是前端自己写的文案）；两次驱动切换后 6 条 + 1 条**原样通过**，没有被改写的断言。
+  - **这一批没有逼出 Go 侧的真 bug**：控制台与 provider 探针在 Go 侧本来就与 TypeScript 同构（探针说厂商自己的协议、拒绝时保留厂商原话、坏草稿按字段被拒），补的是证明。
+- **Batch 42 起**：`m8/app-shell-ux` 浏览器轨（32 条，深实现耦合：10 处 `src/` 导入，要先把造状态的夹具改成走 daemon 的公开面）、`m8/settings-ui`（10 条，3 处 `src/` 导入）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。

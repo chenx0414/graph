@@ -10,6 +10,10 @@ export async function launchCli(root: string, options: {
   configPath?: string;
   env?: NodeJS.ProcessEnv;
   extraArgs?: string[];
+  /** Own directories when the caller already has them (a built console, a kept state dir). */
+  stateDir?: string;
+  graphHome?: string;
+  webDir?: string;
 } = {}) {
   const sourceRoot = options.sourceRoot ?? process.cwd();
   // A checkout that never built the backend would fail every assertion for a
@@ -17,8 +21,10 @@ export async function launchCli(root: string, options: {
   if (!process.env.GRAPH_DAEMON_BIN) ensureBackendBinary();
   const bin = findGraphd([process.cwd(), sourceRoot, ...graphdSearchStarts()]);
   const args = [
-    '--state-dir', join(root, 'state'), '--graph-home', join(root, 'graph-home'),
-    '--web-dir', join(root, 'web'), '--port', '0',
+    '--state-dir', options.stateDir ?? join(root, 'state'),
+    '--graph-home', options.graphHome ?? join(root, 'graph-home'),
+    '--web-dir', options.webDir ?? join(root, 'web'),
+    '--port', '0',
     '--application-root', resolve(sourceRoot),
     ...(options.configPath ? ['--config', options.configPath] : []),
     ...options.extraArgs ?? [],

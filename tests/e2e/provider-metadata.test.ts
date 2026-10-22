@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
-import { startGraphDaemon } from '../../src/server/start.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
+import { vendorProxy } from '../helpers/vendor-proxy.ts';
 
 let webDir: string;
 const cleanup: (() => Promise<void>)[] = [];
@@ -36,7 +37,8 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}/v1`;
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY', displayName: 'Gateway' } }, models: { entries: [{ id: 'seed', provider: 'custom', grade: 'high', api: 'openai-completions', baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] } }));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-catalog-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-catalog-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -113,19 +115,18 @@ test('provider account edits keep credential identity, names and concurrency whi
   await new Promise<void>(resolve => vendor.listen(0, '127.0.0.1', resolve));
   cleanup.push(async () => { vendor.closeAllConnections(); await new Promise<void>(resolve => vendor.close(() => resolve())); });
   const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}`;
-  const nativeFetch = globalThis.fetch;
-  // Redirect only the external preset vendor transport; real daemon routes and business handlers remain in control.
-  globalThis.fetch = (input, init) => {
-    const url = input instanceof Request ? input.url : String(input);
-    return nativeFetch(url.startsWith('https://opencode.ai/zen/go/v1/') ? url.replace('https://opencode.ai/zen/go/v1', baseUrl) : input, init);
-  };
-  cleanup.push(async () => { globalThis.fetch = nativeFetch; });
+  // The daemon owns its own process, so the preset vendor endpoint is redirected
+  // at the network layer: the daemon's real proxy and CA settings carry the
+  // request to this controlled vendor.
+  const proxy = await vendorProxy(root, ['opencode.ai'], baseUrl);
+  cleanup.push(() => proxy.close());
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: {
     'opencode-go': { secretRef: 'GRAPH_CUSTOM_FIRST', displayName: '工作账户', platform: 'opencode-go', sharedLimitGroupId: 'old-group' },
     'opencode-go-2': { secretRef: 'GRAPH_CUSTOM_SECOND', displayName: '备用账户', platform: 'opencode-go' },
   }, limits: { credentials: { 'opencode-go': 3 }, sharedGroups: { 'old-group': 8 } }, models: { entries: [{ id: 'go-model', provider: 'opencode-go', modelId: 'space-bunny-free', grade: 'high', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 32000, maxTokens: 256, credentialId: 'opencode-go' }] } }));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, GRAPH_CUSTOM_FIRST: 'first-synthetic-key', GRAPH_CUSTOM_SECOND: 'second-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'preset-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_3: 'third-synthetic-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, ...proxy.env, GRAPH_CUSTOM_FIRST: 'first-synthetic-key', GRAPH_CUSTOM_SECOND: 'second-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'preset-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_3: 'third-synthetic-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -204,7 +205,8 @@ test('real provider fields reject missing keys and malformed custom configuratio
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } } }));
   const original = await readFile(configPath, 'utf8');
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -273,7 +275,8 @@ test('the setup wizard keeps two connections to one upstream model and repeated 
   const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}/v1`;
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }] }));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, OPENAI_API_KEY: 'first-setup-key', ANTHROPIC_API_KEY: 'second-setup-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, OPENAI_API_KEY: 'first-setup-key', ANTHROPIC_API_KEY: 'second-setup-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
