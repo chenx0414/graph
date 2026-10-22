@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -406,14 +405,14 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			return
 		}
 		server.StartDrive()
-		callRuntimeHost(server.Runtime, "RecoverMasters")
+		server.Runtime.Host.RecoverMasters()
 	}
 	approve := func(candidate GraphConfig, revision int) ApplyResult {
 		verdict := live.Check(candidate, revision)
 		if !verdict.Applied {
 			return verdict
 		}
-		if err := portRecover(func() { callRuntimeHost(server.Runtime, "CheckProjects", candidate.Projects) }); err != nil {
+		if err := portRecover(func() { server.Runtime.Host.CheckProjects(candidate.Projects) }); err != nil {
 			return ApplyResult{Applied: false, Reason: liveReason(err.Error())}
 		}
 		return ApplyResult{Applied: true}
@@ -436,7 +435,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		result := live.Apply(saved.Config, saved.Revision)
 		if result.Applied {
 			syncProviders()
-			callRuntimeHost(server.Runtime, "SyncProjects")
+			server.Runtime.Host.SyncProjects()
 			scheduler.Wake()
 			publishDefinitions()
 			activate()
@@ -578,47 +577,27 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	server = OpenGraphServer(GraphServerOptions{
 		StateDir: stateDir, Projects: config.Projects, WebDir: options.WebDir, Port: &port, AutoDrive: &autoDrive,
 		Codemode: config.Codemode,
-		Models: struct {
-			Entries        []ConfiguredModel
-			Preferences    map[string][]string
-			APIKey         string
-			ModelRuntime   *ModelRuntime
-			ModelScheduler any
-			CredentialFor  func(ConfiguredModel) *ResolvedCredential
-		}{
+		Models: &TaskRuntimeModels{
 			Entries: live.Entries(), Preferences: live.Preferences(), ModelRuntime: modelRuntime, ModelScheduler: scheduler,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },
 		},
-		Live: struct {
-			Revision            func() int
-			Config              func() GraphConfig
-			Entries             func() []ConfiguredModel
-			Preferences         func() map[string][]string
-			CredentialFor       func(ConfiguredModel) *ResolvedCredential
-			MasterModel         func() string
-			DefaultBudgetTokens func() *int
-			Projects            func() []ProjectConfig
-		}{
+		Live: &TaskRuntimeLive{
 			Revision: live.Revision, Config: live.Config, Entries: live.Entries, Preferences: live.Preferences,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },
 			MasterModel:   live.MasterModel, DefaultBudgetTokens: live.DefaultBudgetTokens, Projects: live.Projects,
 		},
-		Master: struct {
-			Action            string
-			Model             func() string
-			DefinitionVersion func() string
-		}{Action: "master", Model: live.MasterModel, DefinitionVersion: currentMasterDefinitionVersion},
-		Catalog: struct {
-			CapabilityRoot      string
-			RecipesPath         string
-			BootstrapPrompts    map[string]string
-			BootstrapToolPrompt string
-		}{
+		Master: &TaskRuntimeMaster{
+			Action: "master", Model: live.MasterModel, DefinitionVersion: currentMasterDefinitionVersion,
+		},
+		Catalog: &TaskRuntimeCatalog{
 			CapabilityRoot: filepath.Join(userHome, "capabilities"), RecipesPath: filepath.Join(userHome, "agent-combinations.json"),
 			BootstrapPrompts: bootstrap.Prompts, BootstrapToolPrompt: bootstrap.ToolPrompt,
 		},
-		Limits: struct{ DefaultBudgetTokens func() *int }{DefaultBudgetTokens: live.DefaultBudgetTokens},
+		Limits: &TaskRuntimeLimits{DefaultBudgetTokens: live.DefaultBudgetTokens},
 		Access: live.Access, Usage: usage, Rsi: rsi, AgentContext: agentContext,
+		// SystemContext is deliberately left unset: the daemon has no host
+		// inventory to offer the main Agent yet, so the system tools stay
+		// unavailable rather than reporting an empty one.
 		StartupInfo: func() StartupInfo {
 			status := live.Status()
 			revision := live.Revision()
@@ -658,11 +637,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			Rsi: &AppRsiService{
 				Status: func(compare bool) any { return rsi.Status(compare) },
 				Ack: func(id string) any {
-					result, ok := runtimeMethod(server.Runtime, "AckRsiRestart", id)
-					if !ok {
-						Raise("rsi_unavailable", "RSI is unavailable")
-					}
-					return result
+					return server.Runtime.Host.AckRsiRestart(id)
 				},
 			},
 			Snapshot: func() any { return statusCounts() },
@@ -709,7 +684,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 					go func() {
 						if err := portRecover(func() {
 							syncProviders()
-							callRuntimeHost(server.Runtime, "SyncProjects")
+							server.Runtime.Host.SyncProjects()
 							scheduler.Wake()
 							publishDefinitions()
 							activate()
@@ -791,11 +766,10 @@ func runtimeCatalog(host *GraphHost) *Catalog {
 	if host == nil {
 		return nil
 	}
-	runtime, ok := host.Runtime.(*TaskRuntime)
-	if !ok || runtime == nil {
+	if host.Runtime == nil {
 		return nil
 	}
-	return runtime.catalog
+	return host.Runtime.catalog
 }
 
 // ensureMainRecipe keeps the 'main' Agent combination in the shape the master
@@ -947,25 +921,6 @@ func stringIn(values []string, needle string) bool {
 	return false
 }
 
-func callRuntimeHost(runtime any, method string, args ...any) {
-	host := runtimeHostValue(runtime)
-	if !host.IsValid() {
-		panic(fmt.Errorf("graph runtime host is unavailable"))
-	}
-	fn := host.MethodByName(method)
-	if !fn.IsValid() && host.CanAddr() {
-		fn = host.Addr().MethodByName(method)
-	}
-	if !fn.IsValid() {
-		panic(fmt.Errorf("graph runtime host has no %s", method))
-	}
-	in := make([]reflect.Value, len(args))
-	for i, arg := range args {
-		in[i] = reflect.ValueOf(arg)
-	}
-	fn.Call(in)
-}
-
 // cliCwd is the working directory this process runs in. The RSI root falls back to it
 // when no explicit root is configured.
 func cliCwd() string {
@@ -974,24 +929,4 @@ func cliCwd() string {
 		return "."
 	}
 	return wd
-}
-
-func runtimeHostValue(runtime any) reflect.Value {
-	value := reflect.ValueOf(runtime)
-	if !value.IsValid() || (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) && value.IsNil() {
-		return reflect.Value{}
-	}
-	if value.Kind() == reflect.Interface {
-		value = value.Elem()
-	}
-	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return reflect.Value{}
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
-		return reflect.Value{}
-	}
-	return value.FieldByName("Host")
 }

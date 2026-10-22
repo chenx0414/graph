@@ -239,38 +239,17 @@ func appEventCursor(r *http.Request) int {
 
 // appConfigStore is the configuration store the console reads and writes.
 func (app *GraphApp) appConfigStore() *ConfigStore {
-	if app.options.ConfigStore == nil {
-		return nil
-	}
-	store, ok := app.options.ConfigStore.(*ConfigStore)
-	if !ok {
-		return nil
-	}
-	return store
+	return app.options.ConfigStore
 }
 
 // appUsageService is the subscription-usage service the console reads.
 func (app *GraphApp) appUsageService() UsageService {
-	if app.options.Usage == nil {
-		return nil
-	}
-	service, ok := app.options.Usage.(UsageService)
-	if !ok {
-		return nil
-	}
-	return service
+	return app.options.Usage
 }
 
 // appAgentContextLibrary is the prompt library the console edits.
 func (app *GraphApp) appAgentContextLibrary() *AgentContextLibrary {
-	if app.options.AgentContext == nil {
-		return nil
-	}
-	library, ok := app.options.AgentContext.(*AgentContextLibrary)
-	if !ok {
-		return nil
-	}
-	return library
+	return app.options.AgentContext
 }
 
 // appConfigEnv is the environment the configuration store resolves secrets in.
@@ -615,15 +594,15 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tool-stats/clear", app.serveToolStatsClear)
 	mux.HandleFunc("GET /api/skill-stats", app.serveSkillStats)
 	mux.HandleFunc("POST /api/skills/promote", app.serveSkillPromote)
-	if app.options.ConfigStore != nil {
-		mux.HandleFunc("GET /api/config", app.serveConfig)
-		mux.HandleFunc("POST /api/config", app.serveConfigSave)
-		if app.options.AppServices != nil && app.options.AppServices.RefreshPrices != nil {
-			mux.HandleFunc("POST /api/pricing/refresh", app.servePricingRefresh)
-		}
-		if app.options.ConfigTest != nil {
-			mux.HandleFunc("POST /api/config/test", app.serveConfigTest)
-		}
+	// The configuration routes exist whether or not a configuration file was
+	// opened: a daemon without one answers with the reason, not with a 404.
+	mux.HandleFunc("GET /api/config", app.serveConfig)
+	mux.HandleFunc("POST /api/config", app.serveConfigSave)
+	if app.options.AppServices != nil && app.options.AppServices.RefreshPrices != nil {
+		mux.HandleFunc("POST /api/pricing/refresh", app.servePricingRefresh)
+	}
+	if app.options.ConfigTest != nil {
+		mux.HandleFunc("POST /api/config/test", app.serveConfigTest)
 	}
 	mux.HandleFunc("GET /api/settings", app.serveSettings)
 	mux.HandleFunc("GET /api/capabilities/config", app.serveCapabilityConfig)
@@ -770,18 +749,12 @@ func (app *GraphApp) serveStartup(w http.ResponseWriter, r *http.Request) {
 
 // appAgentContextPreview is the prompt library preview of one conversation.
 func (app *GraphApp) appAgentContextPreview(conversationID string) any {
-	provider, ok := any(app.runtime).(interface {
-		AgentContextPreview(conversationID *string) any
-	})
-	if !ok {
-		Raise("internal", "The task runtime does not expose the agent context preview yet")
-	}
 	var id *string
 	if conversationID != "" {
 		copied := conversationID
 		id = &copied
 	}
-	return provider.AgentContextPreview(id)
+	return app.runtime.AgentContextPreview(id)
 }
 
 // serveAgentContext is the prompt library preview.
@@ -1941,12 +1914,6 @@ func (app *GraphApp) serveOperations(w http.ResponseWriter, r *http.Request) {
 // serveGraphControl applies one graph control action.
 func (app *GraphApp) serveGraphControl(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
-	provider, ok := any(app.runtime).(interface {
-		ControlGraph(taskID string, input GraphControlInput) any
-	})
-	if !ok {
-		Raise("internal", "The task runtime does not expose the graph control yet")
-	}
 	input := GraphControlInput{
 		Action: appBodyString(body, "action"),
 	}
@@ -1959,7 +1926,7 @@ func (app *GraphApp) serveGraphControl(w http.ResponseWriter, r *http.Request) {
 	if value, ok := appBodyInt(body, "seq"); ok {
 		input.Seq = &value
 	}
-	writeJSON(w, http.StatusOK, provider.ControlGraph(r.PathValue("taskId"), input))
+	writeJSON(w, http.StatusOK, app.runtime.ControlGraph(r.PathValue("taskId"), input))
 }
 
 // serveGraphModule explains one module of a graph.
@@ -2399,13 +2366,7 @@ func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
 		return nil
 	}
 	definition := detail.(CatalogDefinition)
-	provider, ok := any(app.runtime).(interface {
-		Talent(id string, version *int, allVersions bool) any
-	})
-	if !ok {
-		return nil
-	}
-	view, ok := provider.Talent(id, &version, false).(map[string]any)
+	view, ok := app.runtime.Talent(id, &version, false).(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -2626,11 +2587,7 @@ func (app *GraphApp) serveCatalogRefresh(w http.ResponseWriter, r *http.Request)
 
 // servePiExtensionUpdates lists the Pi extensions with a newer version.
 func (app *GraphApp) servePiExtensionUpdates(w http.ResponseWriter, r *http.Request) {
-	provider, ok := any(app.runtime).(interface{ PiExtensionUpdates() any })
-	if !ok {
-		Raise("internal", "The task runtime does not expose the Pi extension updates yet")
-	}
-	writeJSON(w, http.StatusOK, provider.PiExtensionUpdates())
+	writeJSON(w, http.StatusOK, app.runtime.PiExtensionUpdates())
 }
 
 // servePiPackages browses the official Pi package channel.
@@ -2650,13 +2607,7 @@ func (app *GraphApp) servePiPackages(w http.ResponseWriter, r *http.Request) {
 
 // servePiExtensionUpdate installs or upgrades one Pi extension.
 func (app *GraphApp) servePiExtensionUpdate(w http.ResponseWriter, r *http.Request) {
-	provider, ok := any(app.runtime).(interface {
-		UpdatePiExtension(id string, version string) any
-	})
-	if !ok {
-		Raise("internal", "The task runtime does not expose the Pi extension update yet")
-	}
-	writeJSON(w, http.StatusOK, provider.UpdatePiExtension(r.PathValue("id"), r.PathValue("version")))
+	writeJSON(w, http.StatusOK, app.runtime.UpdatePiExtension(r.PathValue("id"), r.PathValue("version")))
 }
 
 // serveCombinationSave stores one agent combination.
@@ -2708,12 +2659,6 @@ func (app *GraphApp) serveCombinationCompile(w http.ResponseWriter, r *http.Requ
 
 // serveDefinition is the talent view of one definition.
 func (app *GraphApp) serveDefinition(w http.ResponseWriter, r *http.Request) {
-	provider, ok := any(app.runtime).(interface {
-		Talent(id string, version *int, allVersions bool) any
-	})
-	if !ok {
-		Raise("internal", "The task runtime does not expose the talent view yet")
-	}
 	var version *int
 	if raw := r.URL.Query().Get("version"); raw != "" {
 		value, err := strconv.Atoi(raw)
@@ -2722,5 +2667,5 @@ func (app *GraphApp) serveDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		version = &value
 	}
-	writeJSON(w, http.StatusOK, provider.Talent(r.PathValue("definitionId"), version, r.URL.Query().Get("scope") == "all"))
+	writeJSON(w, http.StatusOK, app.runtime.Talent(r.PathValue("definitionId"), version, r.URL.Query().Get("scope") == "all"))
 }

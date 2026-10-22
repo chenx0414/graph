@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -480,8 +479,8 @@ type TaskRuntimeModels struct {
 	Entries        []ConfiguredModel
 	Preferences    map[string][]string
 	APIKey         string
-	ModelRuntime   any
-	ModelScheduler any
+	ModelRuntime   *ModelRuntime
+	ModelScheduler *ModelScheduler
 	CredentialFor  func(ConfiguredModel) *ResolvedCredential
 }
 
@@ -520,19 +519,6 @@ type TaskRuntimeLimits struct {
 // TaskRuntimeSystemContext is the read-only host inventory of one runtime.
 type TaskRuntimeSystemContext struct {
 	SystemSummary func() any
-}
-
-// TaskRuntimeProgram is the confirmed program check environment of one runtime.
-type TaskRuntimeProgram struct {
-	ReadPaths       []string
-	Env             map[string]string
-	NodeModulesPath string
-}
-
-// TaskRuntimeNetwork is the network policy of one runtime.
-type TaskRuntimeNetwork struct {
-	RetrievalDomains []string
-	McpDomains       []string
 }
 
 // TaskRuntimeHost is the host side of one runtime.
@@ -635,11 +621,9 @@ type TaskRuntime struct {
 	catalogOpt *TaskRuntimeCatalog
 	limits     *TaskRuntimeLimits
 	access     func() AccessPolicy
-	agentCtx   any
+	agentCtx   *AgentContextLibrary
 	systemCtx  *TaskRuntimeSystemContext
-	program    *TaskRuntimeProgram
-	network    *TaskRuntimeNetwork
-	rsi        any
+	rsi        *RsiService
 	autoWake   bool
 	Host       *TaskRuntimeHost
 	// graphLane is the resident v2 lane; laneTokenBudget is the live budget it
@@ -648,70 +632,7 @@ type TaskRuntime struct {
 	laneTokenBudget *TokenBudget
 }
 
-// runtimeField reads one field of an option bag carried as any.
-func runtimeField(value any, name string) (any, bool) {
-	if value == nil {
-		return nil, false
-	}
-	reflected := reflect.ValueOf(value)
-	for reflected.Kind() == reflect.Pointer || reflected.Kind() == reflect.Interface {
-		if reflected.IsNil() {
-			return nil, false
-		}
-		reflected = reflected.Elem()
-	}
-	if reflected.Kind() != reflect.Struct {
-		return nil, false
-	}
-	field := reflected.FieldByName(name)
-	if !field.IsValid() || !field.CanInterface() {
-		return nil, false
-	}
-	return field.Interface(), true
-}
-
-// runtimeMethod calls one method of an option bag carried as any.
-func runtimeMethod(value any, name string, args ...any) (any, bool) {
-	if value == nil {
-		return nil, false
-	}
-	reflected := reflect.ValueOf(value)
-	method := reflected.MethodByName(name)
-	if !method.IsValid() {
-		return nil, false
-	}
-	parameters := make([]reflect.Value, 0, len(args))
-	for _, argument := range args {
-		if argument == nil {
-			parameters = append(parameters, reflect.Zero(reflect.TypeOf((*any)(nil)).Elem()))
-			continue
-		}
-		parameters = append(parameters, reflect.ValueOf(argument))
-	}
-	defer func() { _ = recover() }()
-	results := method.Call(parameters)
-	if len(results) == 0 {
-		return nil, true
-	}
-	return results[0].Interface(), true
-}
-
-// runtimeCall calls a function value of an option bag.
-func runtimeCall(value any, args ...any) (any, bool) {
-	if value == nil {
-		return nil, false
-	}
-	callable, ok := value.(func() any)
-	if !ok {
-		return nil, false
-	}
-	return callable(), true
-}
-
 // OpenTaskRuntime opens the backend runtime over one state directory.
-//
-// The TypeScript host spreads the same option object into openTaskRuntime; the
-// Go port reads the option bags it needs by name so the host may extend them.
 func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	runtime := &TaskRuntime{options: options, stateDir: options.StateDir, projects: options.Projects}
 	if options.AutoDrive != nil {
@@ -726,19 +647,32 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	}
 	runtime.stateDir = resolved
 
-	runtime.models = taskRuntimeModelsOf(options.Models)
-	runtime.live = taskRuntimeLiveOf(options.Live)
-	runtime.master = taskRuntimeMasterOf(options.Master)
-	runtime.catalogOpt = taskRuntimeCatalogOf(options.Catalog)
-	runtime.limits = taskRuntimeLimitsOf(options.Limits)
+	// The option bags stay non-nil so a runtime opened without one still has
+	// an empty configuration to read.
+	runtime.models = options.Models
+	if runtime.models == nil {
+		runtime.models = &TaskRuntimeModels{}
+	}
+	runtime.live = options.Live
+	if runtime.live == nil {
+		runtime.live = &TaskRuntimeLive{}
+	}
+	runtime.master = options.Master
+	if runtime.master == nil {
+		runtime.master = &TaskRuntimeMaster{}
+	}
+	runtime.catalogOpt = options.Catalog
+	if runtime.catalogOpt == nil {
+		runtime.catalogOpt = &TaskRuntimeCatalog{}
+	}
+	runtime.limits = options.Limits
+	if runtime.limits == nil {
+		runtime.limits = &TaskRuntimeLimits{}
+	}
 	runtime.agentCtx = options.AgentContext
 	runtime.rsi = options.Rsi
-	if access, ok := options.Access.(func() AccessPolicy); ok {
-		runtime.access = access
-	}
-	if system, ok := options.SystemContext.(*TaskRuntimeSystemContext); ok {
-		runtime.systemCtx = system
-	}
+	runtime.access = options.Access
+	runtime.systemCtx = options.SystemContext
 
 	releaseOwner := AcquireOwner(filepath.Join(runtime.stateDir, "owner.sqlite"))
 	store, err := OpenSQLite(filepath.Join(runtime.stateDir, "tasks.sqlite"))
@@ -794,8 +728,8 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	runtime.artifacts = NewArtifactWorkspace(runtime.store, filepath.Join(runtime.stateDir, "artifact-workspace"))
 
 	runtime.scheduler = CreateModelScheduler()
-	if scheduler, ok := runtime.models.ModelScheduler.(*ModelScheduler); ok && scheduler != nil {
-		runtime.scheduler = scheduler
+	if runtime.models != nil && runtime.models.ModelScheduler != nil {
+		runtime.scheduler = runtime.models.ModelScheduler
 	}
 	if runtime.models != nil {
 		runtime.store.Transaction(func() any {
@@ -835,146 +769,6 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	runtime.bootstrapPigRecovery()
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
 	return runtime
-}
-
-// taskRuntimeModelsOf reads the static model configuration.
-func taskRuntimeModelsOf(value any) *TaskRuntimeModels {
-	models := &TaskRuntimeModels{}
-	entries, _ := runtimeField(value, "Entries")
-	if list, ok := entries.([]ConfiguredModel); ok {
-		models.Entries = list
-	}
-	preferences, _ := runtimeField(value, "Preferences")
-	if list, ok := preferences.(map[string][]string); ok {
-		models.Preferences = list
-	}
-	apiKey, _ := runtimeField(value, "APIKey")
-	if text, ok := apiKey.(string); ok {
-		models.APIKey = text
-	}
-	if runtime, ok := runtimeField(value, "ModelRuntime"); ok {
-		models.ModelRuntime = runtime
-	}
-	if scheduler, ok := runtimeField(value, "ModelScheduler"); ok {
-		models.ModelScheduler = scheduler
-	}
-	credential, _ := runtimeField(value, "CredentialFor")
-	if resolver, ok := credential.(func(ConfiguredModel) *ResolvedCredential); ok {
-		models.CredentialFor = resolver
-	}
-	return models
-}
-
-// taskRuntimeLiveOf reads the hot-reloadable configuration view.
-func taskRuntimeLiveOf(value any) *TaskRuntimeLive {
-	live := &TaskRuntimeLive{}
-	if revision, ok := runtimeField(value, "Revision"); ok {
-		if resolver, ok := revision.(func() int); ok {
-			live.Revision = resolver
-		}
-	}
-	if config, ok := runtimeField(value, "Config"); ok {
-		if resolver, ok := config.(func() GraphConfig); ok {
-			live.Config = resolver
-		}
-	}
-	if entries, ok := runtimeField(value, "Entries"); ok {
-		if resolver, ok := entries.(func() []ConfiguredModel); ok {
-			live.Entries = resolver
-		}
-	}
-	if preferences, ok := runtimeField(value, "Preferences"); ok {
-		if resolver, ok := preferences.(func() map[string][]string); ok {
-			live.Preferences = resolver
-		}
-	}
-	if credential, ok := runtimeField(value, "CredentialFor"); ok {
-		if resolver, ok := credential.(func(ConfiguredModel) *ResolvedCredential); ok {
-			live.CredentialFor = resolver
-		}
-	}
-	if model, ok := runtimeField(value, "MasterModel"); ok {
-		if resolver, ok := model.(func() string); ok {
-			live.MasterModel = resolver
-		}
-	}
-	if budget, ok := runtimeField(value, "DefaultBudgetTokens"); ok {
-		if resolver, ok := budget.(func() *int); ok {
-			live.DefaultBudgetTokens = resolver
-		}
-	}
-	if projects, ok := runtimeField(value, "Projects"); ok {
-		if resolver, ok := projects.(func() []ProjectConfig); ok {
-			live.Projects = resolver
-		}
-	}
-	return live
-}
-
-// taskRuntimeMasterOf reads the master Agent binding.
-func taskRuntimeMasterOf(value any) *TaskRuntimeMaster {
-	master := &TaskRuntimeMaster{}
-	if action, ok := runtimeField(value, "Action"); ok {
-		if text, ok := action.(string); ok {
-			master.Action = text
-		}
-	}
-	if model, ok := runtimeField(value, "Model"); ok {
-		switch resolver := model.(type) {
-		case func() string:
-			master.Model = resolver
-		case string:
-			text := resolver
-			master.Model = func() string { return text }
-		}
-	}
-	if version, ok := runtimeField(value, "DefinitionVersion"); ok {
-		switch resolver := version.(type) {
-		case func() string:
-			master.DefinitionVersion = resolver
-		case string:
-			text := resolver
-			master.DefinitionVersion = func() string { return text }
-		}
-	}
-	return master
-}
-
-// taskRuntimeCatalogOf reads the capability library configuration.
-func taskRuntimeCatalogOf(value any) *TaskRuntimeCatalog {
-	catalog := &TaskRuntimeCatalog{}
-	if root, ok := runtimeField(value, "CapabilityRoot"); ok {
-		if text, ok := root.(string); ok {
-			catalog.CapabilityRoot = text
-		}
-	}
-	if path, ok := runtimeField(value, "RecipesPath"); ok {
-		if text, ok := path.(string); ok {
-			catalog.RecipesPath = text
-		}
-	}
-	if prompts, ok := runtimeField(value, "BootstrapPrompts"); ok {
-		if list, ok := prompts.(map[string]string); ok {
-			catalog.BootstrapPrompts = list
-		}
-	}
-	if prompt, ok := runtimeField(value, "BootstrapToolPrompt"); ok {
-		if text, ok := prompt.(string); ok {
-			catalog.BootstrapToolPrompt = text
-		}
-	}
-	return catalog
-}
-
-// taskRuntimeLimitsOf reads the default budget limits.
-func taskRuntimeLimitsOf(value any) *TaskRuntimeLimits {
-	limits := &TaskRuntimeLimits{}
-	if budget, ok := runtimeField(value, "DefaultBudgetTokens"); ok {
-		if resolver, ok := budget.(func() *int); ok {
-			limits.DefaultBudgetTokens = resolver
-		}
-	}
-	return limits
 }
 
 // taskRuntimeGrants renders the sorted, deduplicated grant list of one project.
@@ -1130,12 +924,7 @@ func (runtime *TaskRuntime) dispatchAllowed() bool {
 	if runtime.rsi == nil {
 		return true
 	}
-	result, ok := runtimeMethod(runtime.rsi, "HasPendingRestart")
-	if !ok {
-		return true
-	}
-	pending, ok := result.(bool)
-	return !ok || !pending
+	return !runtime.rsi.HasPendingRestart()
 }
 
 // executionSystemContext is the host inventory the main Agent may read.
@@ -1245,27 +1034,13 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 			return PiToolAnswer{Ok: ok, Text: text}
 		},
 	}
-	if runtime.network != nil {
-		options.Network = &KernelGraphLaneNetwork{RetrievalDomains: runtime.network.RetrievalDomains}
-	}
-	if runtime.program != nil {
-		program := &KernelGraphLaneProgram{ReadPaths: runtime.program.ReadPaths, Env: runtime.program.Env}
-		if runtime.program.NodeModulesPath != "" {
-			path := runtime.program.NodeModulesPath
-			program.NodeModulesPath = &path
-		}
-		options.Program = program
-	}
 	runtime.graphLane = KernelGraphLane(options)
 	return runtime.graphLane
 }
 
 // agentContextLibrary is the prompt library of this runtime, when it has one.
 func (runtime *TaskRuntime) agentContextLibrary() *AgentContextLibrary {
-	if library, ok := runtime.agentCtx.(*AgentContextLibrary); ok {
-		return library
-	}
-	return nil
+	return runtime.agentCtx
 }
 
 // graphHome is the root the capability library lives under.
@@ -1290,7 +1065,6 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		Scheduler:    runtime.scheduler,
 		Sediment:     runtime.sedimentSettings,
 		ModelRuntime: runtime.modelRuntime(),
-		Network:      runtime.piNetwork(),
 		Channels:     runtime.piChannels(),
 	}
 	// The PiG kernel keeps the durable conversations in this process, and the
@@ -1368,16 +1142,7 @@ func (runtime *TaskRuntime) modelRuntime() *ModelRuntime {
 	if runtime.models == nil {
 		return nil
 	}
-	registry, _ := runtime.models.ModelRuntime.(*ModelRuntime)
-	return registry
-}
-
-// piNetwork is the network reach one operation is granted.
-func (runtime *TaskRuntime) piNetwork() *PiAdapterNetwork {
-	if runtime.network == nil {
-		return nil
-	}
-	return &PiAdapterNetwork{RetrievalDomains: runtime.network.RetrievalDomains, McpDomains: runtime.network.McpDomains}
+	return runtime.models.ModelRuntime
 }
 
 // sedimentSettings reads the post-operation skill review settings live.
@@ -1465,8 +1230,8 @@ func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 			}}
 		},
 	}
-	if library, ok := runtime.agentCtx.(*AgentContextLibrary); ok {
-		channels.AgentContext = library
+	if runtime.agentCtx != nil {
+		channels.AgentContext = runtime.agentCtx
 	}
 	if runtime.catalogOpt != nil {
 		channels.BootstrapPrompts = runtime.catalogOpt.BootstrapPrompts
@@ -5195,10 +4960,7 @@ func (runtime *TaskRuntime) AckRsiRestart(id string) any {
 	if runtime.rsi == nil {
 		Raise("rsi_unavailable", "RSI is unavailable")
 	}
-	result, ok := runtimeMethod(runtime.rsi, "AckRestart", id, runtime.store)
-	if !ok {
-		Raise("rsi_unavailable", "RSI is unavailable")
-	}
+	result := runtime.rsi.AckRestart(id, runtime.store)
 	record, _ := jsonRecord(result)
 	if record != nil {
 		if cleared, ok := record["cleared"].(bool); ok && cleared && runtime.autoWake {
@@ -5493,11 +5255,7 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	fullAccess := IsFullAccess(runtime.CurrentAccessPolicy())
 	rsiAvailable := false
 	if runtime.rsi != nil {
-		if result, ok := runtimeMethod(runtime.rsi, "Status", false); ok {
-			if status, isStatus := result.(RsiStatus); isStatus {
-				rsiAvailable = status.Available
-			}
-		}
+		rsiAvailable = runtime.rsi.Status(false).Available
 	}
 	assemblyInput := AgentContextAssemblyOptions{
 		CapabilityBundleOptions: CapabilityBundleOptions{
