@@ -45,14 +45,40 @@ export function isSummaryLeakRetry(output: unknown) {
     && 'retryCode' in output && output.retryCode === 'session_summary_leak');
 }
 
+/** The ceiling the environment names, or zero when it names none.
+ *
+ * The provider's window is the limit the session has to respect, and the session
+ * compacts just before it would overflow. That keeps every token the conversation
+ * ever produced and bills the whole of it again on every request of the next
+ * cycle. A ceiling asks for the same compaction with less history behind it: the
+ * summary the session continues from is the same size either way, and the tokens
+ * the compaction call reads are the same tokens either way, because a session that
+ * compacts four times as often summarizes four times as little each time. Only the
+ * prefix every request carries shrinks.
+ *
+ * It is off unless the environment names a ceiling, because how much history a
+ * task needs is the task's own business. */
+export const COMPACTION_CONTEXT_CEILING = 'GRAPH_COMPACTION_CONTEXT_CEILING';
+
+export function compactionContextCeiling(env: Record<string, string | undefined> = process.env) {
+  const raw = (env[COMPACTION_CONTEXT_CEILING] ?? '').trim();
+  if (!raw) return 0;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 /** The recorded context no longer fits the window once its reserve is set aside. */
 export function shouldCompactContext(
   entry: Pick<ModelEntry, 'contextWindow' | 'maxTokens'>,
   contextTokens: number | null,
+  env: Record<string, string | undefined> = process.env,
 ) {
   if (contextTokens === null || !Number.isFinite(contextTokens)) return false;
   const { reserveTokens } = compactionSettings(entry);
-  return contextTokens > Math.max(1, Math.floor(entry.contextWindow) - reserveTokens);
+  let limit = Math.max(1, Math.floor(entry.contextWindow) - reserveTokens);
+  const ceiling = compactionContextCeiling(env);
+  if (ceiling > 0 && ceiling < limit) limit = ceiling;
+  return contextTokens > limit;
 }
 
 export interface RecordedContextUsage {
