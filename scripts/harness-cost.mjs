@@ -120,16 +120,36 @@ try {
     COUNT(DISTINCT task_id) AS tasks FROM tool_calls GROUP BY tool ORDER BY calls DESC`) : [];
   const toolDenominator = exists('tool_calls') ? rows('SELECT COUNT(DISTINCT task_id) AS n FROM tool_calls')[0].n : 0;
   // The tool errors of one model: which tools a model fails with, and how often.
-  // The call and the send share the instance, so the error rate belongs to the
-  // model that made the call.
-  const modelToolRows = exists('tool_calls') && exists('invocations') ? rows(`SELECT i.model AS model, t.tool AS tool,
-    COUNT(*) AS calls, SUM(t.is_error) AS errors FROM tool_calls t JOIN invocations i ON i.instance_id=t.instance_id
-    GROUP BY i.model, t.tool ORDER BY calls DESC`) : [];
+  // The call belongs to an instance and the instance names the models that sent
+  // for it. An instance that sent with one model is attributed to it; an instance
+  // whose model changed is left un attributed rather than counted twice.
+  // The same model is written with and without its provider prefix, depending on
+  // which kernel sent it. The bare name is the model.
+  const modelName = value => {
+    const text = String(value ?? '');
+    const slash = text.lastIndexOf('/');
+    return slash < 0 ? text : text.slice(slash + 1);
+  };
+  const instanceModels = new Map();
+  if (exists('invocations')) {
+    for (const row of rows('SELECT instance_id, model FROM invocations WHERE instance_id IS NOT NULL')) {
+      const models = instanceModels.get(row.instance_id) ?? new Set();
+      models.add(modelName(row.model));
+      instanceModels.set(row.instance_id, models);
+    }
+  }
   const modelToolErrors = {};
-  for (const row of modelToolRows) {
-    const model = modelToolErrors[row.model] ??= { calls: 0, errors: 0, tools: {} };
-    model.calls += row.calls; model.errors += row.errors;
-    model.tools[row.tool] = { calls: row.calls, errors: row.errors };
+  let mixedInstanceCalls = 0;
+  if (exists('tool_calls')) {
+    for (const row of rows('SELECT tool, is_error, instance_id FROM tool_calls')) {
+      const models = instanceModels.get(row.instance_id);
+      const model = models && models.size === 1 ? [...models][0] : null;
+      if (!model) { mixedInstanceCalls += 1; continue; }
+      const entry = modelToolErrors[model] ??= { calls: 0, errors: 0, tools: {} };
+      entry.calls += 1; entry.errors += row.is_error ? 1 : 0;
+      const tool = entry.tools[row.tool] ??= { calls: 0, errors: 0 };
+      tool.calls += 1; tool.errors += row.is_error ? 1 : 0;
+    }
   }
   const outputTasks = observedTasks.map(task => ({ ...task,
     operations: task.operations.size, executions: task.executions.size,
@@ -195,7 +215,7 @@ try {
       'Main conversations and child graphs remain separate task rows; completion costs exclude unallocated main planning.',
       'Tool reach uses tasks with retained tool telemetry; retention can differ from invocation retention.',
       'Tool rows reflect SQLite only; worker spools must first be ingested through the public tool statistics read. Empty rows do not establish zero tool use.',
-      'A tool error belongs to the model whose instance made the call; the join is on the instance, so a call made by a model that also served another model is attributed to the first.',
+      'A tool error is attributed to the model of the instance that made the call. A session that changed its model belongs to no single model, so its calls are counted in unattributedToolCalls instead: the ledger records the instance of a call, not the model in effect when it was made.',
       'Cache metrics and costByBillingType exclude estimated/unknown provenance; local estimates cannot establish cache misses.',
       'scenarioCost applies the rates the priced calls used to every recorded token; it is a scenario, not an invoice, and it prices the calls whose price is unknown at the rate of the calls whose price is known.',
       'contextPerRequest covers the requests whose cache usage is authoritative; a request whose usage was estimated or unknown is not in it.',
@@ -206,6 +226,7 @@ try {
       costByBillingType: { callsWithFrozenRates, amounts: billingCosts },
       costByPurpose: Object.fromEntries(Object.entries(purposeTotals).sort((a, b) => b[1].requests - a[1].requests)),
       compactions,
+      unattributedToolCalls: mixedInstanceCalls,
       scenarioCost,
       contextPerRequest: { cacheRead: perRequest('cacheRead'), input: perRequest('input'), output: perRequest('output') },
       costPerCompletedTask: completed.length && completed.every(task => !task.unknownCost && !task.unknownUsage && !task.estimatedUsage)
