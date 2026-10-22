@@ -211,7 +211,15 @@ for (let index = 0; index < repeats; index += 1) {
   // minute lands on both sides of the comparison.
   const order = index % 2 === 0 ? variantNames : [...variantNames].reverse();
   for (const variant of order) {
-    const result = await run(variant, index);
+    let result;
+    try {
+      result = await run(variant, index);
+    } catch (error) {
+      // A run that could not finish is a result: the machine was too loaded, or
+      // the provider went away. It is recorded, not retried and not hidden.
+      console.error(`[ab] ${variant} #${index} did not finish: ${error?.message ?? error}`);
+      result = { variant, index, status: 'failed', verified: false, durationMs: 0, requests: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: null, costByBillingType: null, context: null, compactions: null, tools: [], unknownCost: 0, verification: String(error?.message ?? error).slice(0, 300) };
+    }
     runs.push(result);
     const tokens = result.tokens ?? {};
     console.log(`${variant.padEnd(8)} #${index} status=${result.status} verified=${result.verified} requests=${result.requests} ` +

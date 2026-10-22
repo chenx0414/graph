@@ -119,6 +119,18 @@ try {
   const toolRows = exists('tool_calls') ? rows(`SELECT tool,COUNT(*) AS calls,SUM(is_error) AS errors,
     COUNT(DISTINCT task_id) AS tasks FROM tool_calls GROUP BY tool ORDER BY calls DESC`) : [];
   const toolDenominator = exists('tool_calls') ? rows('SELECT COUNT(DISTINCT task_id) AS n FROM tool_calls')[0].n : 0;
+  // The tool errors of one model: which tools a model fails with, and how often.
+  // The call and the send share the instance, so the error rate belongs to the
+  // model that made the call.
+  const modelToolRows = exists('tool_calls') && exists('invocations') ? rows(`SELECT i.model AS model, t.tool AS tool,
+    COUNT(*) AS calls, SUM(t.is_error) AS errors FROM tool_calls t JOIN invocations i ON i.instance_id=t.instance_id
+    GROUP BY i.model, t.tool ORDER BY calls DESC`) : [];
+  const modelToolErrors = {};
+  for (const row of modelToolRows) {
+    const model = modelToolErrors[row.model] ??= { calls: 0, errors: 0, tools: {} };
+    model.calls += row.calls; model.errors += row.errors;
+    model.tools[row.tool] = { calls: row.calls, errors: row.errors };
+  }
   const outputTasks = observedTasks.map(task => ({ ...task,
     operations: task.operations.size, executions: task.executions.size,
     cacheUnmeasuredRequests: task.requests - task.cacheMeasuredRequests,
@@ -183,6 +195,7 @@ try {
       'Main conversations and child graphs remain separate task rows; completion costs exclude unallocated main planning.',
       'Tool reach uses tasks with retained tool telemetry; retention can differ from invocation retention.',
       'Tool rows reflect SQLite only; worker spools must first be ingested through the public tool statistics read. Empty rows do not establish zero tool use.',
+      'A tool error belongs to the model whose instance made the call; the join is on the instance, so a call made by a model that also served another model is attributed to the first.',
       'Cache metrics and costByBillingType exclude estimated/unknown provenance; local estimates cannot establish cache misses.',
       'scenarioCost applies the rates the priced calls used to every recorded token; it is a scenario, not an invoice, and it prices the calls whose price is unknown at the rate of the calls whose price is known.',
       'contextPerRequest covers the requests whose cache usage is authoritative; a request whose usage was estimated or unknown is not in it.',
@@ -205,7 +218,10 @@ try {
       toolResultProfileSamples,toolResultUnprofiledSamples:profiles.length-toolResultProfileSamples,toolResults:[...toolResults.values()].sort((a,b)=>b.bytes-a.bytes),
       meanEstimatedStaticTokens: profiles.length ? ((sources.system?.estimatedTokens ?? 0) + (sources.tools?.estimatedTokens ?? 0)) / profiles.length : null },
     tools: toolRows.map(tool => ({ ...tool, errorRate: tool.errors / tool.calls, taskReach: toolDenominator ? tool.tasks / toolDenominator : null })),
-    models: [...models.values()],
+    models: [...models.values()].map(model => ({
+      ...model,
+      toolErrors: modelToolErrors[model.model] ?? null,
+    })),
     tasks: outputTasks,
   }, null, 2));
   db.exec('COMMIT');
