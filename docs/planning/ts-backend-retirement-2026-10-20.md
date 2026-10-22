@@ -455,8 +455,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
     | master 收到紧凑规则、没有那段被删掉的工作流提示 | 部分已有：`go-agent-context.test.ts`（搜索规则只点名真有的工具、宿主不改写用户规则、文档指针可压缩）。**`<rules>` 段与 R14 那条具体文案没有 Go E2E——仍在案** |
     | 后续用户消息真的送到 master 的 provider | 已有：`go-pause-resume.test.ts` + `go-conversation-queue.test.ts` |
     | 一个 Pi 回合可以超过单次预留而不被挡住 | 已有：`go-harness-cost.test.ts`（账本里的请求数与 token 数对得上）+ `go-node-budget.test.ts`（预留与结算各记一次） |
-    | **未知的用量挡住下一次 provider 调用** | **没有 Go E2E——仍在案**（Go 侧有 `unknown_usage` 的问题路由与 `reconcile_usage` 入口） |
-    | **原生对账把已知与缺失的调用各记一次，在 main 处理之前输入一直挡着** | **没有 Go E2E——仍在案** |
+    | **未知的用量挡住下一次 provider 调用** | 批次 50 补上：`go-unknown-usage.test.ts` 第 1 条 |
+    | **原生对账把已知与缺失的调用各记一次，在 main 处理之前输入一直挡着** | 批次 50 补上：`go-unknown-usage.test.ts` 第 1 条（对账同一值是同一答案、不同值被拒） |
     | 超出预算的请求不能发下一次调用 | 已有：`go-main-budget.test.ts` + `go-node-budget.test.ts` |
     | 原生 worker 收到图的检查命令与验收 | 批次 49 补上：`go-node-lane.test.ts` 第 1 条 |
     | 原生 reviewer 收到并发出版本化的独立评审 schema | 批次 49 补上：`go-node-lane.test.ts` 第 2 条 |
@@ -465,8 +465,15 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
     | （附带）`read_graph` 的分页与修订推进 | Go 侧有 `read_graph` 工具但**没有 Go E2E——仍在案** |
 
     **仍在案 4 条**：master 的提案工具面、`<rules>` 段的具体文案、未知用量挡住下一次调用、原生对账各记一次。**下一批（批次 50）做这四条**——前两条与后两条各自成一条 Go E2E。
+    - **批次 50 做完了后两条**：见下面的批次 50 条目。**仍在案 2 条**：master 的提案工具面、`<rules>` 段的具体文案（下一批做）。
   - **节点泳道的两条契约已经有 Go keeper（批次 49）**：`tests/m3/production.test.ts` 里最要紧的两条——**worker 只写自己的工作副本**、**reviewer 发出版本化的独立评审报告**——此前在 Go 侧没有任何证明。新的 `tests/e2e/go-node-lane.test.ts`（2 条）用真实的 daemon、真实的图、真实的 worker 钉住它们：worker 写的文件在它自己的工作副本里（`state/worktrees/<任务>/work`）、**不在用户的项目里**；它被告知了 `test/specific.test.js` 这条检查与 `Specific command is successful` 这条验收，而**图的其余部分（无关的协议）没有进它的提示**；reviewer 的提示里真的有 `FINAL REVIEW REQUIREMENTS`、`graph.review@1` 与 `{commit,passed,reason}`，它发出来的报告让那条 review 验收真的变成 `passed`。**两次回退验证证明这些断言咬得住**：从节点提示里删掉 `GRAPH ACCEPTANCE` → 「检查与验收到达 worker」那条断言红；让评审证据查不到 → 「报告让验收通过」那条断言红。
     - **仍需留意**：Go 侧的 `ToolResultHook` / `RenderToolResult` 依旧是死代码——现在这份行为由侧车提供。**等 PiG 内核接管主会话时，这层必须接回 Go 自己**，否则紧凑视图与「整份在磁盘上」会随侧车一起消失。
+  - **未知的用量挡住下一次调用、原生对账各记一次（批次 50）**：这两条契约此前在 Go 侧**根本没有证明**，而且一上手就发现**Go 与 TypeScript 不 isomorphic**：Go 的受控流在拿不到用量时，把这次调用结算成一份**全零的记录**（`{input:0,output:0,usageSource:"unknown"}`），而 TypeScript 结算成**没有证据**（`null`）。全零记录等于宣称「这次调用免费」，于是 `kernel_provider_calls.state` 永远是 `settled`——**Go 侧的「未知用量闸门」与 `reconcile_usage` 入口此前一次都没被真正走到过**（`reconcile_usage` 在 Go 里只会被 "Only unknown usage can be reconciled" 拒掉）。修法：拿不到用量就结算成「没有证据」（`runtime_controlled_openai.go`），闸门与对账入口才第一次真的通上。
+    - 新的 Go E2E（`tests/e2e/go-unknown-usage.test.ts`，1 条）用真实的 daemon、真实的图、真实的 provider 钉住它们：一个**声明了自己预算**的节点（预算有限，未知用量才必须挡住下一次发送），worker 答了两次话——**第一次说了价，第二次没说**：账上真的分得清，**有价的那次记成 `settled`（带着 provider 报的数字）、没价的那次记成 `unknown`（`usage` 为 null），各记一次**；**工具闸先拒绝**（"Node usage must be reconciled before tool dispatch"）、**下一次 provider 发送真的被拒绝**（`graph.provider.refused`，"Reconcile unknown provider usage before another send"），provider **只被问了两次**；节点真的停在 "turn reported no usage; its reservation is held until reconciled"。main 通过 `graph_control` 的 `reconcile_usage` 对账：**同值再来一次是同一答案**（`replayed: true`）、**不同值被拒**（"already reconciled differently"）、缺价的那次最后真的记成 `reconciled` 且带着对账后的用量，而**有价的那次原样不动**；**账上也只算了一次**——节点的 `used` 是 70（有价那次 50 + 对账那次 20），对账再记一遍就会变成 90。
+    - **两次回退验证证明这些断言咬得住**（两次分别红在**不同的断言**上）：把「拿不到用量就结算成没有证据」这条修复回退 → 账上那次调用不再是 `unknown`（断言红）；把 provider 闸门里「有未知调用就不许再发」这条去掉 → provider 被问了第三次（断言红）。
+    - **一处不必改的差异**：TypeScript 的 `task-gate.ts` 查的是 `owner='user'` 的 `unknown_usage` 问题，而 `question-routing.ts` 把 `unknown_usage` 归给 `main`——两边都这样，**Go 与 TypeScript 同构**，不是移植引入的偏差，本批不动它。
+    - **顺手修掉一条既有竞态**：`go-model-binding-guard.test.ts` 在「停掉图之后模型就能拿走了」这一步**没等图真的停下**——`stop` 只是被接受（阶段变成 `stopping`），模型要等泳道把它落定成 `stopped` 才被释放（两边同构：`kernelModelsInUse` 只排除 `completed`/`stopped`/`abandoned`）。全量门禁重载时这条偶发变红。改成**等图真的停稳**再断言，而不是改 daemon 的语义。
+    - **与旧 DEV-018 的关系**：`docs/archive/go-port-2026-10-20/DEVIATIONS.md` 的 DEV-018 记的是「provider 不报用量的那一轮被估算计价，而不是当作未知用量」。本批修的是**另一处**：Go 把「没有证据」写成了**一份全零的记录**，于是账上永远看不出「未定价」。估算那条路（`EstimateMissing`）本批没动，**仍然只在 TypeScript 同样估算的地方估算**（节点预算不限额时）。归档文档按约定保留原文，不改；这里记下这一层关系。**留一处更窄的差异**：Go 的估算读的是**已经被读完的响应体**，所以输出 token 估成 0（TypeScript 读的是响应体的克隆）——只影响不限额节点的金额精度，不影响契约。
   - **第三个入口已经补上（批次 47）**：**`graphd assemble-team`**。团队装配（`AssembleMattTeam`）本来就在 Go 后端里，但**一个调用方都没有**——`examples/assemble-matt-team.ts` 是它唯一的入口。现在命令是 Go 后端自己的：`graphd assemble-team --url <console> --config <task.json> --out <new-team.json>` 打开本地控制台的会话、读它真实的能力库、把每个角色**发布**成一条配方，再把团队写成一份普通的 v2 图定义。**`examples/assemble-matt-team.ts` 随之退休**，`src/catalog/matt-team.ts` 少了一个消费者；仍需要装配器的 TS 测试（`tests/m2/matt-team.test.ts`）改指这个 Go 命令——**Go 命令对着 TS 的 HTTP 面也跑得通**，这本身就是「它讲的是真的公开 API」的旁证。
     - 新的 Go E2E（`tests/e2e/go-assemble-team.test.ts`，2 条）证明的是 TypeScript 那份测试承载的契约：**缺的每一个角色都在保存任何东西之前被点名**（planner/codebase-design → worker/tdd → standards/code-review → spec/code-review）、一个配方都没发布、定义文件也没有落地；装配成功时四个角色的配方真的进了控制台的目录，定义点名的是**已发布的版本**（同名旧配方让 worker 变成 `@2`），已存在的定义文件不被覆盖。
 - **收尾**：删除 102 个模块 + 211 个随实现退休的低层测试文件，更新 `package.json`、`tsconfig.json`、`tests/suite-baseline.json`（**缩减必须显式落账**）与文档。

@@ -202,6 +202,12 @@ test('a model a running graph depends on cannot be removed, and the daemon keeps
     // Once the graph is stopped, nothing depends on that model any more.
     const stopped = await post(`/api/tasks/${taskId}/graph/control`, { action: 'stop' });
     expect(stopped.status, JSON.stringify(stopped.body)).toBe(200);
+    // The stop is accepted first and settles after: the graph only lets the
+    // model go once it has really stopped.
+    await expect.poll(async () => {
+      const view = await request(`/api/tasks/${taskId}`);
+      return (view.body as { status?: string }).status;
+    }, { timeout: 30_000, interval: 250 }).toBe('stopped');
     const saved = await post('/api/config', { expectedRevision: 0, document: withoutLocal });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     const after = await request('/api/config');

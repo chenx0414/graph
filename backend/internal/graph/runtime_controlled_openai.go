@@ -1433,9 +1433,11 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 			}
 		}
 	}
-	if usage == nil {
-		usage = &TokenUsage{UsageSource: stringPointer(string(UsageUnknown))}
-	}
+	// A provider that does not say what the call cost leaves the cost unknown.
+	// It settles as no evidence at all, not as a zero-filled record: a zero
+	// record is a claim that the call was free, and the ledger has to be able
+	// to tell "free" apart from "not said". A gate that keeps unknown usage
+	// apart is what lets the next send wait for a reconciliation.
 	stream.settle(usage)
 	reason := stream.finishReason
 	if reason == "" {
