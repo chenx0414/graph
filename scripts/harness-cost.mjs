@@ -126,6 +126,13 @@ try {
     cacheReadFraction: task.cacheEvidenceTokens.input + task.cacheEvidenceTokens.cacheRead + task.cacheEvidenceTokens.cacheWrite > 0
       ? task.cacheEvidenceTokens.cacheRead / (task.cacheEvidenceTokens.input + task.cacheEvidenceTokens.cacheRead + task.cacheEvidenceTokens.cacheWrite) : null,
   }));
+  // The compactions the run made: the summary the session continues from.
+  const compactionEvents = exists('events')
+    ? rows("SELECT type FROM events WHERE type IN ('session.compacted','session.compaction_failed')") : [];
+  const compactions = {
+    completed: compactionEvents.filter(row => row.type === 'session.compacted').length,
+    failed: compactionEvents.filter(row => row.type === 'session.compaction_failed').length,
+  };
   const completed = outputTasks.filter(task => task.phase === 'completed');
   const completedCosts = {};
   for (const task of completed) for (const [currency, amount] of Object.entries(task.costs)) {
@@ -185,6 +192,7 @@ try {
       completedKnownCosts: completedCosts,
       costByBillingType: { callsWithFrozenRates, amounts: billingCosts },
       costByPurpose: Object.fromEntries(Object.entries(purposeTotals).sort((a, b) => b[1].requests - a[1].requests)),
+      compactions,
       scenarioCost,
       contextPerRequest: { cacheRead: perRequest('cacheRead'), input: perRequest('input'), output: perRequest('output') },
       costPerCompletedTask: completed.length && completed.every(task => !task.unknownCost && !task.unknownUsage && !task.estimatedUsage)
