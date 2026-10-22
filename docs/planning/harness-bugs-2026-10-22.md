@@ -194,3 +194,16 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 - **`ai/` provider 层** —— 其余 provider 的"连接关闭即结束"与"缓存 token 重复计费"在这里，Graph 只讲两种协议，无法代为修。
 
 Graph 侧的缓解：把 `MCP response stream failed` 当作可重试的环境失败（`core_environment_failure.go` 已分类 `ECONNRESET`），并在桥接层给在途调用补一次幂等重试。
+
+---
+
+## 8. 分支基线与新的文件大小闸门
+
+本分支的基线是 `main` 的 `9aed752`，也就是本轮开始时 `main` 的位置；`feature/harness-token-efficiency-2026-10-22`、`feature/architecture-deepening`、`chore/comment-prune-2026-10-22` 与本分支同基线。本轮进行中 `main` 前进了两个提交（harness2 方法融合，以及新增的"单文件不得超过 5,000 令牌"提交前闸门 `03d6af2`）。
+
+新的闸门按暂存 blob 量每个文件。本轮改动对它的关系：
+
+- `backend/internal/pigkernel/session.go` 原本 16,644 字节，本轮的压缩代码把它推到 20,997 字节（越过 20,000 字节的线）。压缩代码因此拆到新的 `backend/internal/pigkernel/compaction.go`，该文件回到 17,026 字节。
+- `backend/internal/graph/runtime_controlled_openai.go`（47,852 字节）、`runtime_pi_adapter.go`（98,514 字节）、`runtime_kernel_graph_lane.go`（69,678 字节）在本轮之前就已经远超预算。本轮把读取 provider 流的部分拆到新的 `runtime_provider_stream.go`，`runtime_controlled_openai.go` 反而小了 2.3KB；但闸门量的是整个文件，所以合并这个分支仍需要人来决定：拆分这三份文件（正在进行中的 comment-prune 工作），或按闸门文档里的 `// graph:allow-large-file: <理由>` 在文件顶部说明。
+
+这三条文件在本轮之前就已越界，本轮没有让它们更糟；但闸门是新的，所以合并会被它挡住，这一点记录在此。
