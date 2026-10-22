@@ -122,7 +122,7 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 				}
 				graphDBExec(kernel.Store.Db, "UPDATE kernel_provider_calls SET state=?,usage=?,cost=?,settled_at=? WHERE id=?", state, usageJSON, costJSON, NowMillis(), id)
 				if usage != nil {
-					graphDBExec(kernel.Store.Db, "UPDATE kernel_node_state SET used=used+? WHERE task_id=? AND node_id=?", TokenUsageTotal(*usage), graphId, nodeId)
+					kernel.CommitNodeUsage(graphId, nodeId, TokenUsageTotal(*usage))
 				}
 				task := graphId
 				var usageValue any
@@ -169,11 +169,11 @@ func ReconcileKernelUsage(kernel *KernelStore, graphId, callId string, usage Tok
 		}
 		graphDBExec(kernel.Store.Db, "UPDATE kernel_provider_calls SET state='reconciled',usage=?,cost=?,settled_at=? WHERE id=?",
 			jsonStringify(usage), jsonStringify(EstimateCost(usage, frozen.Cost, frozen.Pricing)), NowMillis(), callId)
-		graphDBExec(kernel.Store.Db, "UPDATE kernel_node_state SET used=used+? WHERE task_id=? AND node_id=?", TokenUsageTotal(usage), graphId, graphDBString(call, "node_id"))
+		kernel.CommitNodeUsage(graphId, graphDBString(call, "node_id"), TokenUsageTotal(usage))
 		_, pending := graphDBRow(kernel.Store.Db, "SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state IN ('inflight','unknown') LIMIT 1", graphId, graphDBString(call, "node_id"))
 		_, running := graphDBRow(kernel.Store.Db, "SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' LIMIT 1", graphId, graphDBString(call, "node_id"))
 		if !pending && !running {
-			graphDBExec(kernel.Store.Db, "UPDATE kernel_node_state SET reserved=0 WHERE task_id=? AND node_id=?", graphId, graphDBString(call, "node_id"))
+			kernel.SettleNodeReservation(graphId, graphDBString(call, "node_id"))
 			graphDBExec(kernel.Store.Db, "UPDATE kernel_executions SET token_reservation=0 WHERE task_id=? AND node_id=? AND state!='running'", graphId, graphDBString(call, "node_id"))
 		}
 		task := graphId

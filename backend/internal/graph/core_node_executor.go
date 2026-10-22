@@ -314,7 +314,7 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			continue
 		}
 		if metering != nil && (report.Usage == nil || !report.Usage.Accounted) && report.Usage != nil && isSafeInteger(report.Usage.Total) && report.Usage.Total > 0 {
-			e.kernel.CommitNodeUsage(e.graphId, nodeId, e.kernel.BudgetState(e.graphId, nodeId, metering.limit).Used+report.Usage.Total)
+			e.kernel.CommitNodeUsage(e.graphId, nodeId, int64(report.Usage.Total))
 		}
 		if metering != nil && report.Usage == nil {
 			if e.hasValidSubmission(executionId) {

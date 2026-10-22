@@ -1303,13 +1303,25 @@ func (k *KernelStore) RequestBudget(taskID, nodeID, executionID, reason string) 
 	})
 }
 
-// CommitNodeUsage stores a reported total when it is a new safe integer.
-func (k *KernelStore) CommitNodeUsage(taskID, nodeID string, total float64) {
-	if !isSafeInteger(total) || total < 0 {
+// CommitNodeUsage adds a reported amount to what the node already spent.
+//
+// The node budget has one write rule: a reported amount is added to the
+// spend, never written over it. The provider gate settles one call at a
+// time and the node executor settles a whole turn, and both come through
+// here so the two of them cannot disagree about what a node has used.
+func (k *KernelStore) CommitNodeUsage(taskID, nodeID string, amount int64) {
+	if !isSafeInteger(amount) || amount < 0 {
 		return
 	}
 	k.ensureNodeState(taskID, nodeID)
-	g5Exec(k.Db, "UPDATE kernel_node_state SET used=?,last_committed=? WHERE task_id=? AND node_id=?", int64(total), int64(total), taskID, nodeID)
+	g5Exec(k.Db, "UPDATE kernel_node_state SET used=used+?,last_committed=used+? WHERE task_id=? AND node_id=?", amount, amount, taskID, nodeID)
+}
+
+// SettleNodeReservation releases the hold a node keeps on its budget once no
+// provider call and no execution of that node is still waiting.
+func (k *KernelStore) SettleNodeReservation(taskID, nodeID string) {
+	k.ensureNodeState(taskID, nodeID)
+	g5Exec(k.Db, "UPDATE kernel_node_state SET reserved=0 WHERE task_id=? AND node_id=?", taskID, nodeID)
 }
 
 func (k *KernelStore) ensureNodeState(taskID, nodeID string) {
