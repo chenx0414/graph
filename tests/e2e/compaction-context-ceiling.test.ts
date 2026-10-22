@@ -104,3 +104,67 @@ test('without a ceiling the session compacts only when the window is full', asyn
     await rm(root, { recursive: true, force: true });
   }
 }, 120_000);
+
+test('the summary is asked for the room the handoff needs, and it fits', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-compaction-ceiling-'));
+  const project = join(root, 'project');
+  await mkdir(project);
+  await mkdir(join(root, 'web'));
+  await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
+  // A handoff of about two thousand tokens: longer than a small summary budget,
+  // shorter than a real one.
+  const handoff = `## Goal\nWrite the proof file.\n\n## Constraints & Preferences\n(none)\n\n## Progress\n### Done\n- [x] Wrote the proof file.\n${'- [x] Checked the proof file.\n'.repeat(160)}\n### In Progress\n(none)\n\n## Next Steps\n(none)`;
+  const provider = await openaiServer([
+    { tools: [{ id: 'write-proof', name: 'bash', arguments: JSON.stringify({ command: 'printf harness-proof > proof.txt' }) }] },
+    { text: 'The proof file is ready.' },
+    { text: handoff, truncateToMaxTokens: true },
+    { text: 'The proof file says harness-proof.' },
+  ]);
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1, projects: [{ id: 'p', root: project }],
+    credentials: { local: { secretRef: 'GRAPH_CEILING_TEST_KEY' } },
+    models: { entries: [{ id: 'main', modelId: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: provider.model.baseUrl, contextWindow: 512_000, maxTokens: 8_192, credentialId: 'local' }] },
+  }));
+  const daemon = await launchCli(root, {
+    env: { GRAPH_CEILING_TEST_KEY: 'synthetic-only', GRAPH_COMPACTION_CONTEXT_CEILING: '20' },
+    extraArgs: ['--execute'],
+    configPath,
+  });
+  try {
+    const created = await daemon.request('/api/conversations', {
+      method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Write the proof file.', requestId: 'summary-first' }),
+    });
+    const { conversationId } = await created.json() as { conversationId: string };
+    await expect.poll(async () => {
+      const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json();
+      return view.master?.status;
+    }, { timeout: 30_000 }).toBe('succeeded');
+    await daemon.request(`/api/conversations/${conversationId}/messages`, {
+      method: 'POST', body: JSON.stringify({ text: 'Now read it back.', requestId: 'summary-second' }),
+    });
+    await expect.poll(async () => {
+      const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json();
+      return view.master?.status;
+    }, { timeout: 30_000 }).toBe('succeeded');
+  } finally {
+    await daemon.close();
+  }
+  try {
+    // The summary was asked for with its own budget, not with the model's whole
+    // limit: the daemon asked the provider for the room the caller asked for.
+    const summary = provider.requests.find(request => JSON.stringify(request).includes(SUMMARY_REQUEST)) as { max_tokens?: number } | undefined;
+    expect(summary).toBeDefined();
+    expect(summary!.max_tokens).toBeGreaterThanOrEqual(1500);
+    expect(summary!.max_tokens).toBeLessThan(8_192);
+
+    // And the handoff fit, so the compaction replaced the history instead of
+    // leaving the session with the context it was trying to shrink.
+    const last = provider.requests[provider.requests.length - 1] as { messages?: { role: string; content: unknown }[] };
+    expect(JSON.stringify(last.messages)).toContain('## Goal');
+  } finally {
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 120_000);

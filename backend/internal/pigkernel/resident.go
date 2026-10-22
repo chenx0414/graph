@@ -64,11 +64,23 @@ func openResident(ctx context.Context, database string) (*resident, error) {
 // The provider retry and the context compaction belong to the daemon: it
 // decides whether a failed send is retried and when the context is compacted,
 // and the kernel must not do either behind its back.
+//
+// The reserve is what the kernel spends on a summary: the summary may use
+// four fifths of it. The daemon asks its summarizer for a handoff of roughly
+// 1,500 tokens, so a reserve of 1,024 - which leaves 819 - is smaller than
+// the request the daemon makes. A summarizer that runs out of output is
+// refused as an incomplete summary, the compaction fails, and the session
+// keeps the context it was trying to shrink: every request after that pays
+// for the whole prefix again. The reserve is set so the summary the daemon
+// asks for fits.
+//
+// The kernel's own threshold stays off: the daemon decides when a context is
+// compacted, and the reserve is not the daemon's threshold.
 func residentSettings() *harness.HarnessSettings {
 	retry := harness.RetryPolicyPatch{Enabled: boolPointer(false)}
 	compaction := harness.CompactionPolicyPatch{
 		Enabled:          boolPointer(false),
-		ReserveTokens:    intPointer(1024),
+		ReserveTokens:    intPointer(4096),
 		KeepRecentTokens: intPointer(1024),
 		BackgroundTokens: intPointer(0),
 	}

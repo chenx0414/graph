@@ -24,6 +24,11 @@ export interface ResponsePlan {
   /** Emit content but never the final usage or terminator, until the connection closes. */
   holdBeforeUsage?: boolean;
   beforeReply?: () => Promise<void> | void;
+  /**
+   * Answer the way a provider that respects its output budget does: cut the
+   * answer at the request's max_tokens and report that it ran out of room.
+   */
+  truncateToMaxTokens?: boolean;
 }
 /**
  * A scripted provider: one plan per request, in arrival order.
@@ -74,6 +79,16 @@ export async function openaiServer(plans: ResponsePlan[]) {
       delta.content = plan.text ?? 'Local response';
     }
     const finishReason = plan.finishReason ?? (plan.tools ? 'tool_calls' : 'stop');
+    // A provider that respects its output budget cuts the answer and says so.
+    let reportedFinish = finishReason;
+    if (plan.truncateToMaxTokens && typeof delta.content === 'string') {
+      const requested = (requests[requests.length - 1] as { max_tokens?: number }).max_tokens;
+      const room = typeof requested === 'number' ? Math.max(0, requested * 4) : Infinity;
+      if (delta.content.length > room) {
+        delta.content = delta.content.slice(0, room);
+        reportedFinish = 'length';
+      }
+    }
     if (plan.chunks) {
       for (const chunk of plan.chunks) {
         res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { role: 'assistant', content: chunk }, finish_reason: null }] })}\n\n`);
@@ -85,7 +100,7 @@ export async function openaiServer(plans: ResponsePlan[]) {
       res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     }
     if (plan.holdBeforeUsage) return;
-    res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
+    res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: reportedFinish }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
     if (plan.holdOpen) res.write('data: [DONE]\n\n');
     else res.end('data: [DONE]\n\n');
   });

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
 // Pause and usage gate around one actual provider send. CallBroker satisfies this.
@@ -705,6 +707,15 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 	body := map[string]any{}
 	transcript := controlledContextMessages(stream.context)
 	endpoint := strings.TrimSuffix(baseURL, "/")
+	// The caller may ask for less room than the model's own limit: a summary asks
+	// for a bounded handoff, and a provider that is asked for the model's whole
+	// limit answers with as much as it can and runs out of room.
+	limit := int64(0)
+	if requested, ok := controlledSafeCount(stream.options[pigkernel.MaxTokensOption]); ok && requested > 0 {
+		limit = requested
+	} else if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
+		limit = tokens
+	}
 	switch stream.api {
 	case "anthropic-messages":
 		endpoint += "/messages"
@@ -714,8 +725,8 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 			body["system"] = controlledAnthropicSystem(system)
 		}
 		body["messages"] = controlledAnthropicCachedMessages(controlledAnthropicMessages(transcript))
-		if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
-			body["max_tokens"] = tokens
+		if limit > 0 {
+			body["max_tokens"] = limit
 		}
 		if tools := controlledAnthropicTools(transcript); len(tools) > 0 {
 			body["tools"] = controlledAnthropicCachedTools(tools)
@@ -726,8 +737,8 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		body["stream"] = true
 		body["stream_options"] = map[string]any{"include_usage": true}
 		body["messages"] = controlledOpenAIMessages(transcript, controlledInstructionRole(record))
-		if tokens, ok := controlledSafeCount(record["maxTokens"]); ok && tokens > 0 {
-			body["max_tokens"] = tokens
+		if limit > 0 {
+			body["max_tokens"] = limit
 		}
 		if tools := controlledOpenAITools(transcript); len(tools) > 0 {
 			body["tools"] = tools

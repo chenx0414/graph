@@ -30,6 +30,28 @@ type EventStream interface {
 // StreamFunc sends one transcript to the model and returns its answer stream.
 type StreamFunc func(ctx context.Context, transcript []map[string]any, options map[string]any) (EventStream, error)
 
+// MaxTokensOption is the option one request's own output budget travels under.
+//
+// The kernel knows how much room a request may take: a summary asks for a
+// bounded handoff, a conversation turn asks for the model's own limit. The
+// budget belongs to the request, so it travels with the request.
+const MaxTokensOption = "maxTokens"
+
+// requestOptions are the options one request reaches the daemon with.
+//
+// The kernel's own options for the request come first; the daemon's standing
+// options fill in what the request did not say.
+func requestOptions(bridge ProviderBridge, options ai.StreamOptions) map[string]any {
+	merged := map[string]any{}
+	for key, value := range bridge.Options {
+		merged[key] = value
+	}
+	if options.MaxTokens > 0 {
+		merged[MaxTokensOption] = options.MaxTokens
+	}
+	return merged
+}
+
 // ProviderBridge is the daemon's model channel, seen from the kernel.
 type ProviderBridge struct {
 	// Stream sends the transcript to the model the daemon chose.
@@ -60,7 +82,7 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 				pushFailure(output, model, err.Error())
 				return
 			}
-			source, err := bridge.Stream(ctx, transcript, bridge.Options)
+			source, err := bridge.Stream(ctx, transcript, requestOptions(bridge, options))
 			if err != nil {
 				pushFailure(output, model, err.Error())
 				return
