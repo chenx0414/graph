@@ -490,6 +490,22 @@ func (k *KernelStore) Execution(executionID string) *ExecutionRow {
 	if !ok {
 		return nil
 	}
+	return kernelExecutionRow(row)
+}
+
+// RunningExecution is the execution a node is running right now, if it has
+// one. The lane used to ask the table this same question in eight places,
+// each with its own copy of the query.
+func (k *KernelStore) RunningExecution(taskID, nodeID string) *ExecutionRow {
+	row, ok := g5One(k.Db, "SELECT * FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", taskID, nodeID)
+	if !ok {
+		return nil
+	}
+	return kernelExecutionRow(row)
+}
+
+// kernelExecutionRow reads one execution row.
+func kernelExecutionRow(row map[string]any) *ExecutionRow {
 	var submission *string
 	if row["submission_id"] != nil {
 		text := g5Str(row["submission_id"])

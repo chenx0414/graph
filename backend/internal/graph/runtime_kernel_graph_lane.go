@@ -352,10 +352,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	preparedReviewExecutions := map[string]string{}
 
 	nodeDefinition := func(graphId, nodeId string, revisionVersion *int) *NodeDefinition {
-		active := kernelRow(options.Kernel.Db, "SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+		active := options.Kernel.RunningExecution(graphId, nodeId)
 		revision := revisionVersion
 		if revision == nil && active != nil {
-			value := int(graphDBInt(active, "revision_version"))
+			value := active.RevisionVersion
 			revision = &value
 		}
 		var definition *GraphDefinition
@@ -399,14 +399,14 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		}
 		admitted := kernelRow(options.Kernel.Db, "SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?", graphId, nodeId)
 		key := graphId + "/" + nodeId
-		execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+		execution := options.Kernel.RunningExecution(graphId, nodeId)
 		// Prepare each new review against the current integration. Retries, recovery
 		// after a provider call, and settlement retain the tree already observed.
 		reseed := false
 		if prepare && execution != nil && node != nil && node.Recipe != "" &&
 			options.Catalog.HasDefinition(node.Recipe) && options.Catalog.Definition(node.Recipe).Review &&
-			preparedReviewExecutions[key] != graphDBString(execution, "id") {
-			reseed = kernelRow(options.Kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE execution_id=? LIMIT 1", graphDBString(execution, "id")) == nil
+			preparedReviewExecutions[key] != execution.Id {
+			reseed = kernelRow(options.Kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE execution_id=? LIMIT 1", execution.Id) == nil
 		}
 		var copy *string
 		if selected != "project" && options.Git != nil && admitted != nil {
@@ -418,7 +418,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			copy = options.Git.Workspace(graphId, &instanceID, nodeId, "agent", action)
 		}
 		if copy != nil && reseed {
-			preparedReviewExecutions[key] = graphDBString(execution, "id")
+			preparedReviewExecutions[key] = execution.Id
 		}
 		if selected == "worktree" && copy == nil {
 			Raise("invalid_workspace", "Node requests a worktree; prepare this graph with a targetBranch first")
@@ -501,8 +501,8 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		}
 		key := graphId + "/" + nodeId
 		if frozen := restoring[key]; frozen != nil {
-			active := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
-			if active != nil && mapString(active, "id") != mapString(asMap(frozen["snapshot"]), "executionId") {
+			active := options.Kernel.RunningExecution(graphId, nodeId)
+			if active != nil && active.Id != mapString(asMap(frozen["snapshot"]), "executionId") {
 				delete(restoring, key)
 			}
 		}
@@ -595,20 +595,20 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 			bindings.CommitWorkspace = func(paths []string, message string) any {
 				return options.Git.Exclusive(graphId, func() any {
 					task := options.Kernel.Store.Task(graphId)
-					execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+					execution := options.Kernel.RunningExecution(graphId, nodeId)
 					if execution == nil || closing || task.Paused != 0 || options.Kernel.NodeState(graphId, nodeId).Paused || phaseClosed(task.Phase) {
 						Raise("paused", "Workspace commit is closed")
 					}
 					unknown := kernelRow(options.Kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state='unknown' LIMIT 1", graphId, nodeId)
 					if unknown != nil {
-						row := options.Kernel.Execution(graphDBString(execution, "id"))
+						row := options.Kernel.Execution(execution.Id)
 						if row == nil || row.TokenBudget == nil || !row.TokenBudget.Unlimited {
 							Raise("budget", "Reconcile unknown provider usage before committing work")
 						}
 					}
 					admitted := kernelGraphLaneAdmittedNode(options.Kernel, graphId, nodeId)
 					return options.Git.CommitWorkspace(GitCommitInput{
-						Id: graphDBString(execution, "id"), TaskId: graphId, NodeId: nodeId, InstanceId: admitted.InstanceId,
+						Id: execution.Id, TaskId: graphId, NodeId: nodeId, InstanceId: admitted.InstanceId,
 						Recipe: recipe, Workspace: workspace, Paths: paths, Message: message,
 					})
 				})
@@ -655,17 +655,17 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					return artifacts.Read(graphId, id, version, maxBytes, "")
 				},
 				Retire: func(id string, version int, reason string, requestId string) ArtifactRecord {
-					execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+					execution := options.Kernel.RunningExecution(graphId, nodeId)
 					if execution == nil {
 						panic(errorString("No active execution"))
 					}
 					admitted := kernelGraphLaneAdmittedNode(options.Kernel, graphId, nodeId)
 					return artifacts.Retire(graphId, id, version, reason, requestId, ArtifactProducer{
-						NodeId: nodeId, InstanceId: admitted.InstanceId, OperationId: graphDBString(execution, "id"), ActivationId: graphDBString(execution, "id"),
+						NodeId: nodeId, InstanceId: admitted.InstanceId, OperationId: execution.Id, ActivationId: execution.Id,
 					})
 				},
 				Publish: func(input PublishArtifactInput) ArtifactRecord {
-					execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+					execution := options.Kernel.RunningExecution(graphId, nodeId)
 					if execution == nil {
 						panic(errorString("No active execution"))
 					}
@@ -674,7 +674,7 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					published.TaskId = graphId
 					published.Workspace = workspace
 					published.Producer = ArtifactProducer{
-						NodeId: nodeId, InstanceId: admitted.InstanceId, OperationId: graphDBString(execution, "id"), ActivationId: graphDBString(execution, "id"),
+						NodeId: nodeId, InstanceId: admitted.InstanceId, OperationId: execution.Id, ActivationId: execution.Id,
 					}
 					return artifacts.Publish(published)
 				},
@@ -1022,11 +1022,11 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 				ToolPolicyDigest:     session.ToolPolicyDigest,
 				RuntimePolicyDigest:  session.RuntimePolicyDigest,
 			}
-			execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+			execution := options.Kernel.RunningExecution(graphId, nodeId)
 			if execution == nil {
 				Raise("invalid_execution", "Node host has no admitted execution")
 			}
-			workerConfig.ExecutionId = graphDBString(execution, "id")
+			workerConfig.ExecutionId = execution.Id
 			workerConfig.NodeExecutionConfiguration = map[string]any{"model": *model, "role": session.Role, "revision": revisionVersion, "base": environment.Base, "access": environment.Access}
 			workerConfig.CredentialReference = map[string]any{"modelId": model.Id, "provider": model.Provider, "credentialId": model.CredentialId}
 			workerConfig.CapabilityDescriptor = session.Operation.Descriptor
@@ -1164,11 +1164,11 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 						channel.usage.CacheWrite += cost.CacheWrite
 					},
 				}
-				execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+				execution := options.Kernel.RunningExecution(graphId, nodeId)
 				if execution == nil {
 					panic(errorString("No active execution"))
 				}
-				executionID := graphDBString(execution, "id")
+				executionID := execution.Id
 				abort := NewAbortSignal()
 				cancel := func() { abort.Abort() }
 				releases := []func(){}
@@ -1236,10 +1236,10 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 					if data == nil {
 						return
 					}
-					execution := kernelRow(options.Kernel.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
+					execution := options.Kernel.RunningExecution(graphId, nodeId)
 					executionID := (*string)(nil)
 					if execution != nil {
-						value := graphDBString(execution, "id")
+						value := execution.Id
 						executionID = &value
 					}
 					switch rsiText(data["type"]) {

@@ -158,11 +158,11 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			tools := AgentToolsInput{
 				Workspace: options.Workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog, Access: options.Access,
 				ReadGraph: func(input GraphSectionQuery) any {
-					execution, found := g5One(options.Kernel.Db, "SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", options.GraphId, options.NodeId)
-					if !found {
+					execution := options.Kernel.RunningExecution(options.GraphId, options.NodeId)
+					if execution == nil {
 						Raise("invalid_execution", "Graph definition reads require an active execution")
 					}
-					definition := options.Kernel.Revision(options.GraphId, int(g5Int(execution["revision_version"]))).Definition
+					definition := options.Kernel.Revision(options.GraphId, execution.RevisionVersion).Definition
 					section := input.Section
 					if section != "nodes" && section != "modules" && section != "edges" && section != "protocols" && section != "acceptance" && section != "inputs" && section != "outputs" {
 						Raise("invalid_query", "Unknown graph definition section")
@@ -222,7 +222,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 					if input.Id == nil && after+len(selected) < len(entries) {
 						next = after + len(selected)
 					}
-					return map[string]any{"graphId": options.GraphId, "revision": g5Int(execution["revision_version"]), "section": section, "total": len(entries), "items": items, "nextAfter": next}
+					return map[string]any{"graphId": options.GraphId, "revision": execution.RevisionVersion, "section": section, "total": len(entries), "items": items, "nextAfter": next}
 				},
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
 					return commands.Run(command, args, signal)

@@ -43,12 +43,12 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					panic(recovered)
 				}()
 				kernel.Store.Transaction(func() any {
-					execution, ok := graphDBRow(kernel.Store.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", graphId, nodeId)
-					if !ok {
+					execution := kernel.RunningExecution(graphId, nodeId)
+					if execution == nil {
 						Raise("invalid_adapter", "Provider send has no active execution")
 					}
 					frozen := limit
-					if row := kernel.Execution(graphDBString(execution, "id")); row != nil && row.TokenBudget != nil {
+					if row := kernel.Execution(execution.Id); row != nil && row.TokenBudget != nil {
 						frozen = row.TokenBudget
 					}
 					state, _ := graphDBRow(kernel.Store.Db, "SELECT used,paused FROM kernel_node_state WHERE task_id=? AND node_id=?", graphId, nodeId)
@@ -89,7 +89,7 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 						modelJSON = string(raw)
 					}
 					graphDBExec(kernel.Store.Db, "INSERT INTO kernel_provider_calls(id,task_id,node_id,execution_id,reserved,state,created_at,model,purpose) VALUES(?,?,?,?,?,?,?,?,?)",
-						id, graphId, nodeId, graphDBString(execution, "id"), reservation, "inflight", NowMillis(), modelJSON, purpose)
+						id, graphId, nodeId, execution.Id, reservation, "inflight", NowMillis(), modelJSON, purpose)
 					return nil
 				})
 			}()
