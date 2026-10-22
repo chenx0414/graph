@@ -1094,7 +1094,8 @@ func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 			out = append(out, map[string]any{"role": instructionRole, "content": text})
 		}
 	}
-	for _, item := range messages {
+	for index := 0; index < len(messages); index++ {
+		item := messages[index]
 		message, ok := item.(map[string]any)
 		if !ok {
 			continue
@@ -1102,18 +1103,19 @@ func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 		role, _ := message["role"].(string)
 		switch role {
 		case "toolResult":
-			out = append(out, map[string]any{
-				"role": "tool", "tool_call_id": message["toolCallId"],
-				"content": ControlledTextFromContent(message["content"]),
-			})
+			// The result is rendered with the assistant turn that asked for it.
+			continue
 		case "system", "developer":
 			continue
 		case "assistant":
-			assistant, ok := controlledOpenAIAssistant(message)
-			if !ok {
+			results, next := controlledToolResults(messages, index+1)
+			assistant, toolMessages := controlledOpenAIAssistant(message, results)
+			index = next - 1
+			if assistant == nil {
 				continue
 			}
 			out = append(out, assistant)
+			out = append(out, toolMessages...)
 		default:
 			out = append(out, map[string]any{"role": "user", "content": ControlledTextFromContent(message["content"])})
 		}
@@ -1121,58 +1123,11 @@ func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 	return out
 }
 
-// controlledOpenAIAssistant renders one assistant message the way the SDK does.
-//
-// The assistant keeps its own role: a model that reads its own tool call back as a
-// user turn does not recognize the call it made, and a tool result without the
-// assistant turn that asked for it is a request no provider accepts. The text is
-// the content, and every tool call the message made is an OpenAI tool call.
-func controlledOpenAIAssistant(message map[string]any) (map[string]any, bool) {
-	text := ""
-	calls := []any{}
-	content, _ := message["content"].([]any)
-	for _, item := range content {
-		block, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		kind, _ := block["type"].(string)
-		switch kind {
-		case "text":
-			if value, ok := block["text"].(string); ok {
-				text += value
-			}
-		case "toolCall":
-			id, _ := block["id"].(string)
-			name, _ := block["name"].(string)
-			if name == "" {
-				continue
-			}
-			calls = append(calls, map[string]any{
-				"id": id, "type": "function",
-				"function": map[string]any{"name": name, "arguments": stringifyJSON(block["arguments"])},
-			})
-		}
-	}
-	if text == "" && len(calls) == 0 {
-		// The SDK skips an assistant message that carries neither text nor a tool
-		// call; an empty one is a request no provider accepts.
-		return nil, false
-	}
-	assistant := map[string]any{"role": "assistant", "content": nil}
-	if text != "" {
-		assistant["content"] = text
-	}
-	if len(calls) > 0 {
-		assistant["tool_calls"] = calls
-	}
-	return assistant, true
-}
-
 // controlledAnthropicMessages turns a transcript into Anthropic messages.
 func controlledAnthropicMessages(messages []any) []any {
 	out := []any{}
-	for _, item := range messages {
+	for index := 0; index < len(messages); index++ {
+		item := messages[index]
 		message, ok := item.(map[string]any)
 		if !ok {
 			continue
@@ -1180,15 +1135,17 @@ func controlledAnthropicMessages(messages []any) []any {
 		role, _ := message["role"].(string)
 		switch role {
 		case "toolResult":
-			out = append(out, map[string]any{
-				"role": "user",
-				"content": []any{map[string]any{
-					"type": "tool_result", "tool_use_id": message["toolCallId"],
-					"content": ControlledTextFromContent(message["content"]),
-				}},
-			})
+			// The result is rendered with the assistant turn that asked for it.
+			continue
 		case "assistant":
-			out = append(out, map[string]any{"role": "assistant", "content": ControlledTextFromContent(message["content"])})
+			results, next := controlledToolResults(messages, index+1)
+			assistant, resultMessages := controlledAnthropicAssistant(message, results)
+			index = next - 1
+			if assistant == nil {
+				continue
+			}
+			out = append(out, assistant)
+			out = append(out, resultMessages...)
 		case "system", "developer":
 			continue
 		default:
@@ -1286,6 +1243,12 @@ func modelIDOf(model map[string]any) string {
 }
 
 // readEvents reads the provider event stream.
+//
+// A stream that ends without its terminator was cut: the provider closed the
+// connection, or the transport failed, before the answer was complete. Such a
+// stream is a failed send, not a successful turn whose missing text happens
+// to parse as an empty answer. Reporting it as a success is what let a
+// half-written tool call reach the tools as a call with no arguments.
 func (stream *controlledStream) readEvents(response *http.Response) {
 	defer response.Body.Close()
 	stream.message = &AssistantMessage{
@@ -1296,6 +1259,8 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 	stream.events = append(stream.events, map[string]any{"type": "start", "partial": stream.partial()})
 	reader := bufio.NewReader(response.Body)
 	evidence := controlledUsageEvidence{}
+	terminated := false
+	var failure error
 	for {
 		line, err := reader.ReadString('\n')
 		if line != "" {
@@ -1303,6 +1268,7 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 			if strings.HasPrefix(trimmed, "data:") {
 				payload := strings.TrimSpace(trimmed[5:])
 				if payload == "[DONE]" {
+					terminated = true
 					break
 				}
 				if payload != "" {
@@ -1314,7 +1280,14 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 				}
 			}
 		}
-		if evidence.terminal || err != nil {
+		if evidence.terminal {
+			terminated = true
+			break
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				failure = err
+			}
 			break
 		}
 	}
@@ -1331,6 +1304,16 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 		usage = &TokenUsage{UsageSource: stringPointer(string(UsageUnknown))}
 	}
 	stream.settle(usage)
+	if failure == nil && !terminated && !stream.finishReasonReported() {
+		failure = errors.New("The provider closed the stream before the answer was complete")
+	}
+	if failure == nil {
+		failure = stream.brokenToolCall()
+	}
+	if failure != nil {
+		stream.fail(failure)
+		return
+	}
 	reason := stream.finishReason
 	if reason == "" {
 		reason = "stop"
@@ -1339,6 +1322,33 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 	stream.events = append(stream.events, map[string]any{
 		"type": "done", "reason": reason, "message": asMap(stream.message),
 	})
+}
+
+// finishReasonReported reports whether the provider said how the turn ended.
+//
+// The OpenAI protocol ends a chunk with a finish reason, and a provider that
+// never sends the `[DONE]` marker still says so there. Anthropic says it in
+// `message_delta` and closes the message with `message_stop`.
+func (stream *controlledStream) finishReasonReported() bool {
+	return stream.finishReason != ""
+}
+
+// brokenToolCall reports the tool call whose arguments never became JSON.
+//
+// The arguments of a tool call arrive as a stream of text. A call whose text
+// is cut short used to be repaired into an empty object, so the tool ran with
+// no arguments at all and the turn was reported as a success.
+func (stream *controlledStream) brokenToolCall() error {
+	for _, call := range stream.toolCalls {
+		text := strings.TrimSpace(call.arguments.String())
+		if text == "" {
+			continue
+		}
+		if _, ok := decodeJSONValue(text); !ok {
+			return fmt.Errorf("The provider cut the arguments of the %s tool call", call.name)
+		}
+	}
+	return nil
 }
 
 // estimateUsage estimates the usage one response used when the provider reported none.

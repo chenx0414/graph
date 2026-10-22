@@ -1947,6 +1947,14 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		}
 		return OperationResult{Outcome: "failed", Output: map[string]any{"error": message}, Usage: turn.Gate.Total()}
 	}
+	// A turn the kernel could not answer is a failure too. The kernel reports
+	// it as an unanswered submission with its own reason, and a turn that
+	// produced no answer must not be settled as one that did: that is how a
+	// provider stream that ended before the answer was complete became a
+	// successful turn with nothing in it.
+	if result.ErrorMessage != nil && strings.TrimSpace(*result.ErrorMessage) != "" {
+		return OperationResult{Outcome: "failed", Output: map[string]any{"error": *result.ErrorMessage}, Usage: turn.Gate.Total()}
+	}
 	if result.StopReason != nil && *result.StopReason == "aborted" {
 		Raise("interrupted", "用户打断了当前模型思考或工具调用")
 	}

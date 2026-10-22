@@ -1,0 +1,189 @@
+package graph
+
+// The tool flow one provider request carries.
+//
+// A provider accepts a request only when every tool call has a result and
+// every result answers a call. The transcript is durable, so a turn that was
+// interrupted between the assistant turn and its tool result leaves a call
+// with no result forever: every later request on that identity carries the
+// gap, and the provider refuses them all.
+//
+// Pi closes such a call with a "No result provided" placeholder before it
+// sends the request (the kernel's `ai/tool_flow.go`). The daemon renders the
+// transcript itself, so it closes the gap the same way.
+
+const controlledMissingToolResult = "No result provided"
+
+// controlledFlowCall is one tool call an assistant turn made.
+type controlledFlowCall struct {
+	ID   string
+	Name string
+}
+
+// controlledToolResults reads the tool results that follow one assistant turn.
+//
+// A result that answers no call of the turn is an orphan. A provider rejects
+// a result whose call it never saw, so the orphan is dropped and the call
+// that never got its result is closed with the placeholder.
+func controlledToolResults(messages []any, from int) (map[string]map[string]any, int) {
+	results := map[string]map[string]any{}
+	index := from
+	for index < len(messages) {
+		message, ok := messages[index].(map[string]any)
+		if !ok {
+			break
+		}
+		if role, _ := message["role"].(string); role != "toolResult" {
+			break
+		}
+		id, _ := message["toolCallId"].(string)
+		if id != "" {
+			if _, seen := results[id]; !seen {
+				results[id] = message
+			}
+		}
+		index++
+	}
+	return results, index
+}
+
+// controlledOpenAIAssistant renders one assistant turn and the results that answer it.
+//
+// The tool messages follow the assistant in the order of its calls: the real
+// result where the turn has one, and the placeholder where it does not. A
+// call without an id or a name cannot be replayed to any provider, so it and
+// the result that names it are left out.
+func controlledOpenAIAssistant(message map[string]any, results map[string]map[string]any) (map[string]any, []any) {
+	text := ""
+	calls := []any{}
+	pending := []controlledFlowCall{}
+	content, _ := message["content"].([]any)
+	for _, item := range content {
+		block, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := block["type"].(string)
+		switch kind {
+		case "text":
+			if value, ok := block["text"].(string); ok {
+				text += value
+			}
+		case "toolCall":
+			id, _ := block["id"].(string)
+			name, _ := block["name"].(string)
+			if id == "" || name == "" {
+				continue
+			}
+			calls = append(calls, map[string]any{
+				"id": id, "type": "function",
+				"function": map[string]any{"name": name, "arguments": stringifyJSON(block["arguments"])},
+			})
+			pending = append(pending, controlledFlowCall{ID: id, Name: name})
+		}
+	}
+	if text == "" && len(calls) == 0 {
+		// The SDK skips an assistant message that carries neither text nor a tool
+		// call; an empty one is a request no provider accepts.
+		return nil, nil
+	}
+	assistant := map[string]any{"role": "assistant", "content": nil}
+	if text != "" {
+		assistant["content"] = text
+	}
+	if len(calls) > 0 {
+		assistant["tool_calls"] = calls
+	}
+	return assistant, controlledOpenAIToolMessages(pending, results)
+}
+
+// controlledOpenAIToolMessages renders the tool messages one assistant turn answers with.
+func controlledOpenAIToolMessages(calls []controlledFlowCall, results map[string]map[string]any) []any {
+	out := []any{}
+	for _, call := range calls {
+		if result, ok := results[call.ID]; ok {
+			out = append(out, map[string]any{
+				"role": "tool", "tool_call_id": call.ID,
+				"content": ControlledTextFromContent(result["content"]),
+			})
+			continue
+		}
+		out = append(out, map[string]any{
+			"role": "tool", "tool_call_id": call.ID, "content": controlledMissingToolResult,
+		})
+	}
+	return out
+}
+
+// controlledAnthropicAssistant renders one assistant turn and the results that answer it.
+//
+// Anthropic takes the tool calls as `tool_use` blocks of the assistant turn,
+// and every result of that turn as one user turn of `tool_result` blocks. A
+// turn that carried a tool call and lost its result is closed with the
+// placeholder, so the request the provider sees is a flow it accepts.
+func controlledAnthropicAssistant(message map[string]any, results map[string]map[string]any) (map[string]any, []any) {
+	blocks := []any{}
+	text := ""
+	calls := []controlledFlowCall{}
+	content, _ := message["content"].([]any)
+	for _, item := range content {
+		block, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := block["type"].(string)
+		switch kind {
+		case "text":
+			if value, ok := block["text"].(string); ok && value != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": value})
+			}
+		case "thinking":
+			// A signed reasoning block is replayed as itself. An unsigned one
+			// is plain text: a provider refuses a reasoning block it cannot
+			// verify, and the reasoning is still worth sending.
+			value, _ := block["thinking"].(string)
+			signature, _ := block["thinkingSignature"].(string)
+			if signature != "" {
+				blocks = append(blocks, map[string]any{"type": "thinking", "thinking": value, "signature": signature})
+				continue
+			}
+			text += value
+		case "toolCall":
+			id, _ := block["id"].(string)
+			name, _ := block["name"].(string)
+			if id == "" || name == "" {
+				continue
+			}
+			input := map[string]any{}
+			if value, ok := block["arguments"].(map[string]any); ok {
+				input = value
+			}
+			blocks = append(blocks, map[string]any{"type": "tool_use", "id": id, "name": name, "input": input})
+			calls = append(calls, controlledFlowCall{ID: id, Name: name})
+		}
+	}
+	if text != "" {
+		blocks = append([]any{map[string]any{"type": "text", "text": text}}, blocks...)
+	}
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	assistant := map[string]any{"role": "assistant", "content": blocks}
+	if len(calls) == 0 {
+		return assistant, nil
+	}
+	results2 := []any{}
+	for _, call := range calls {
+		if result, ok := results[call.ID]; ok {
+			results2 = append(results2, map[string]any{
+				"type": "tool_result", "tool_use_id": call.ID,
+				"content": ControlledTextFromContent(result["content"]),
+			})
+			continue
+		}
+		results2 = append(results2, map[string]any{
+			"type": "tool_result", "tool_use_id": call.ID, "content": controlledMissingToolResult,
+		})
+	}
+	return assistant, []any{map[string]any{"role": "user", "content": results2}}
+}
