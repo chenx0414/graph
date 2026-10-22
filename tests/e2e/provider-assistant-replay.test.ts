@@ -120,6 +120,56 @@ test('an anthropic answer keeps its signed reasoning and its tool call for the n
   }
 }, 120_000);
 
+test('a turn that calls two tools keeps both calls and both answers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-assistant-replay-'));
+  const project = join(root, 'project');
+  await mkdir(project);
+  await mkdir(join(root, 'web'));
+  await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
+  const provider = await openaiServer([
+    {
+      thinking: 'Both files are needed before the answer.',
+      tools: [
+        { id: 'write-one', name: 'bash', arguments: JSON.stringify({ command: 'printf one > one.txt' }) },
+        { id: 'write-two', name: 'bash', arguments: JSON.stringify({ command: 'printf two > two.txt' }) },
+      ],
+    },
+    { text: 'Both proof files are ready.' },
+  ]);
+  const daemon = await launchCli(root, { env: { GRAPH_ASSISTANT_REPLAY_KEY: 'synthetic-only' }, extraArgs: ['--execute'], configPath: await config(root, project, {
+    id: 'main', modelId: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+    baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local',
+  }) });
+  try {
+    const created = await daemon.request('/api/conversations', {
+      method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Write one.txt and two.txt.', requestId: 'replay-two-tools' }),
+    });
+    const { conversationId } = await created.json() as { conversationId: string };
+    await expect.poll(async () => {
+      const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json();
+      return view.master?.status;
+    }, { timeout: 30_000 }).toBe('succeeded');
+    expect(await readFile(join(project, 'one.txt'), 'utf8')).toBe('one');
+    expect(await readFile(join(project, 'two.txt'), 'utf8')).toBe('two');
+
+    const second = provider.requests[1] as { messages: WireMessage[] };
+    const assistant = second.messages.find(message => message.role === 'assistant');
+    const calls = assistant!.tool_calls ?? [];
+    // Both calls are still there, each with its own arguments.
+    expect(calls).toHaveLength(2);
+    expect(JSON.stringify(calls[0])).toContain('one.txt');
+    expect(JSON.stringify(calls[1])).toContain('two.txt');
+    // The reasoning before them survived both of them.
+    expect(assistant!.reasoning_content).toBe('Both files are needed before the answer.');
+    // Both answers came back.
+    expect(second.messages.filter(message => message.role === 'tool')).toHaveLength(2);
+  } finally {
+    await daemon.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 120_000);
+
 async function config(root: string, project: string, model: Record<string, unknown>) {
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
