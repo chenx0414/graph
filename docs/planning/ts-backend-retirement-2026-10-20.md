@@ -169,6 +169,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 | `tests/m8/system-self-improvement.test.ts` 主 Agent 请宿主改自己：提案先成问题等人批准（未批准时连提议者自己也落不了地）、批准后能力真的进了资源库；全权策略下同一回合自动批准并落地；健康视图只看自己的会话 | `tests/e2e/go-system-change.test.ts` | 3 |
 | `tests/e2e/harness-cost.test.ts` 成本诊断：真实会话跑完两个工具、账本里的请求数与 token 数真的对上 provider 报的数、按冻结费率算出的金额真的对上、request profile 只讲形状不讲内容（用户的话、密钥、工具输出都不在里面） | `tests/e2e/go-harness-cost.test.ts` | 1 |
 | `tests/e2e/harness-cost.test.ts` 宿主注入指令的那三个开关：搜索规则只点名这次会话真的有的搜索工具、宿主不改写用户自己的规则、维护者身份是否把「项目失败」算成「harness 摩擦」、文档指针可以压缩但路径不丢 | `tests/e2e/go-agent-context.test.ts` | 5 |
+| `tests/e2e/command-output-preservation.test.ts` 公开的图命令：超出内联视图的字节一个不少地留在文件里（字节数与摘要对得上）、重启之后复用已结算的文件而不重跑 | `tests/e2e/go-command-output.test.ts` | 1 |
+| `tests/e2e/project-branches.test.ts` 分支命名：十个任务名变成可读、安全、互不相同的 git 分支名、工作副本目录名不占用别人的路径、用户自己的仓库停在他选的分支上 | `tests/e2e/go-project-branches.test.ts` | 1 |
 | `tests/console/schema-upgrade.test.ts` 升级旧安装：真的旧状态目录被就地升级（同一个文件）且历史、账目、配置都还在、升级之后的同一个数据库里跑得起原生图；v23 给旧交接重新编号；v41 的草稿与确认来源在迁移与重开之后都还在 | `tests/e2e/go-schema-upgrade.test.ts` | 4 |
 
 ## 低层 206 个文件的孤儿契约审计（结论）
@@ -376,7 +378,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
   - **v23 先给旧交接重新编号，再立起「一个任务一个版本」**（第 3 条）：`v22` 夹具里三条 `context_handoffs` 的 version **全都是 1**，升级之后它们变成 **1 / 2 / 3**——唯一索引 `context_handoffs_task_version` 能立起来，靠的就是这步重新编号。（`tests/fixtures/legacy/v22-tasks.sqlite` 是**用 Go 自己的 v1–v22 迁移脚本重放**出来的夹具，来源记在 `provenance.json` 里。）
   - **v41 的草稿与确认来源在迁移与重开之后都还在**（第 4 条）：先把当前 schema 的草稿列**拿掉**（`draft_revision` / `draft_digest` / `archived_at` / `deleted_at`），把 `user_version` 设回 41，于是下一次启动必须把它们迁移回来——**连开两次都成立**：提案行原样回来（`draft_revision` 回到 1，其余是 null），确认行也原样回来（`draft_revision` 是 null）。
   - **两次回退验证证明这些断言咬得住**：把 Go 的退役改回「删除」→ 第 1 条变红（旧任务 404，不再是 `stopped`）；让退役顺手删掉旧调用的账目 → 第 1 条变红（金额不见了）。
-- **Batch 39 起**：`m8/app-shell-ux` 浏览器轨、`m8/settings-ui`、`e2e/provider-metadata`、`e2e/command-output-preservation`、`e2e/project-branches`、`m3/production`。
+- **Batch 39（已完成）**：大输出保全与分支命名。`tests/e2e/go-command-output.test.ts`（1 条）与 `tests/e2e/go-project-branches.test.ts`（1 条）搬进 `tests/e2e/command-output-preservation.test.ts` 与 `tests/e2e/project-branches.test.ts` 里的**分支命名那条**契约：
+  - **公开的图命令把超出内联视图的每一个字节都留下来**（第 1 条）：模块是一次真实的 `workspace.command`（打印 32MB+123 字节再打一个尾部标记，另写一条 stderr）；**发布出去的内联 stdout 有界**（≤ 32KB），**完整的流在文件里**（文件字节数与 provider 报的数一致、sha256 对得上、尾部标记真的在文件末尾，stderr 文件就是那行错误）；**重启之后没有重跑**——同一个操作还是 `settled`，同一份回执、同一个路径、同一个摘要，文件里的字节一个没变。这一条与 TypeScript 同构：两边都是「内联只留一段、整份在文件里、重启复用已结算的文件」。**这一批没有逼出 Go 侧的真 bug**：Go 的内联视图（宿主命令保留头部 32MB）与 TypeScript 的宿主命令一致，发布出去的视图两边都是**最后 32KB**。
+  - **图与 worker 的分支名可读、安全、唯一，且不占用别人的路径**（第 2 条）：十个任务名（中文、英文混排、纯符号、只有一个生僻字、超长的名字、两个同名任务）各自变成一个 **git 认得的分支名**（`graph/task/<slug>-<短 id>`，slug ≤ 40 字符，中文转拼音、英文小写、符号归一、无可用字符时叫 `task`）；**十个分支互不相同**（哪怕两个任务读起来一样，短的 id 不同）；工作副本目录名就是 `<slug>-<短 id>`，里面 `git branch --show-current` 报的正是那条分支；**被占用的目录名不会被覆盖**——先把 `worker`、`worker-2`、`worker-3` 占住，worker 的工作副本就叫 `worker-4`，占用目录里那份文件**原样还在**；worker 自己的分支是 `graph/copy/<slug>-<短 id>/worker`；**用户自己的仓库还停在他选的那条分支上**（`feature/current`）。
+  - **四次回退验证证明这些断言咬得住**：让宿主命令不再把流写进文件 → 第 1 条变红（文件是 0 字节）；让工作副本的目录名不再唯一 → 第 2 条变红（worker 拿不到工作副本）；让 slug 不再转拼音 → 第 2 条变红；（本批未改动 Go 实现，全部回退都在 Go 侧做的。）
+  - **仍留在案的两条**：**（一）** `tests/e2e/command-output-preservation.test.ts` 的**第二条**（原生 shell 的大输出：第一眼是压缩过的、整份输出落在文件里、重启之后还读得到）**在 Go 侧还没有对应实现**——Go 的 `runtime_tool_results.go`（工具结果落盘与「Full output」提示）**整份是死代码**，`ToolResultHook` 从来没有被调用，`GRAPH_COMPACT_SHELL_RESULTS` 只在 `runtime_durable_config.go` 里被读进来却没人用；这条要等接线之后才能补 Go 用例。**（二）** `tests/e2e/project-branches.test.ts` 的**第二条**（浏览器里的确认框读到的是真实的项目分支证据、用户的改动被保留）是**浏览器轨**，与 `m8/app-shell-ux`、`m8/settings-ui` 一起处理。
+- **Batch 40 起**：`m8/app-shell-ux` 浏览器轨、`m8/settings-ui`、`e2e/provider-metadata`、`m3/production`、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
 - **收尾**：迁移或退休 `scripts/`、`examples/` 里的 TS 工具，删除 102 个模块，更新 `package.json`、`tsconfig.json`、门禁与文档。
