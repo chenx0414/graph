@@ -118,12 +118,18 @@ node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tas
 | 类别 | 条数 | 占比 | 典型 |
 | --- | ---: | ---: | --- |
 | **预期** | ~161 | 86% | 路径越界 / 路径受策略保护（27）、用户暂停或中止（37）、浏览器扩展起不来或忙（36）、MCP 缺 task grant（7）、参数写错（缺 graphId、缺 path、edits 定位不到、schema 不是 kind@version）、幂等与并发护栏（requestId 复用、artifact head 变了、重复提交） |
-| **harness 缺陷** | 14 | 7% | 三个同源：**宿主在工具还在飞的时候关了**——"Plugin helper is closed"（7）、"Pi host channel closed"（2）、"Runtime is closed"（2）；外加工具结果计数器的原子写 ENOENT（5，已在 2026-10-10 审计里单独修过） |
+| **harness 缺陷** | 5 | 3% | 工具结果计数器的原子写 ENOENT（5，已在 2026-10-10 审计里单独修过）。**原先还记着 11 条"宿主已关闭"类的，这一版把它们移走了**——理由见下 |
 | 环境/外部 | ~13 | 7% | 浏览器临时 profile 目录无权（11）、沙箱 spawn EPERM（2）、SDK 损坏（2）、网络 fetch failed（1） |
 
-**能修的几类里，三类是同一个竞态**：宿主在工具调用还在飞的时候被关掉，模型收到的是一句它无法据此行动的内部消息。11 条，占全部工具错误的 6%。
+**原先记着的 11 条"宿主已关闭"类，这一版移出"harness 缺陷"了**——按持久记录逐条查完之后，它们**没有一条来自 live 路径**（查询：`graph_durable_entries.record` 里按消息文本搜）：
 
-其中 7 条（"Plugin helper is closed"）来自**已退役的 TypeScript 插件宿主**（`src/runtime/durable-plugin.ts:92`），Go 内核路径没有这条消息。另外 4 条（"Runtime is closed" / "Pi host channel closed"）在 Go 侧仍有对应物（`core_task_runtime.go:1654` 的 `ensureOpen`），但那一处是**运行时就该拒绝**的守卫：`Close()` 先 `Drain()` 再释放，晚到的工作被拒是对的。真正要修的是"模型收到这句话却无从判断发生了什么"——修法是让消息说清"宿主已关闭，本次调用未执行"，而不是改关闭顺序。
+| 消息 | 持久记录里的形态 | 条数 | 来自哪 |
+| --- | --- | ---: | --- |
+| `Plugin helper is closed` | `pi.tool-result` 7 + `pi.assistant` 5 | 12 | **已退役的 TypeScript 插件宿主**（`src/runtime/durable-plugin.ts:92`）。**Go 侧根本没有这条消息**——全仓只有 TS 那两行会产生它 |
+| `Pi host channel closed` | `graph.legacy-history` 11 + `graph.imported-history` 14 | 25 | **导入的历史**（2026-09-18 的旧会话）。在记录里的形态是**宿主轮次失败**（`stopReason: "error"`、`errorMessage`），**不是工具错误** |
+| `Runtime is closed` | `graph.legacy-history` 3 + `graph.imported-history` 2 | 5 | **同样是导入的历史**。transcript 里唯一那 4 条，是 2026-09-28 一次调查的记录，**结论是缺陷被撤回**：测试自己在 `cleanup` 里关了 runtime，master 循环还在 `drive()`，于是记录到 `RuntimeError: Runtime is closed`——那次的原话是"**这是我测试的错，不是产品的错**" |
+
+所以这一类在**活路径上是一次都没有的**。Go 侧确实还有同样的守卫（`core_task_runtime.go:1660` 的 `ensureOpen`），但那是**运行时就该拒绝**的守卫：`Close()` 先 `Drain()` 再释放，晚到的工作被拒是对的。**原来提的修法（把消息改成"宿主已关闭，本次调用未执行"）因此没有可修的实例，不做**——改一条活路径上从未出现过的消息，是拿一个测不出的改动去换一个报告里的分类。
 
 **不是缺陷但值得记的**：浏览器扩展 36 条错误（占全部的 19%）里，11 条是"临时 profile 目录无权"——**扩展需要的临时目录没有被访问策略授予**。这可能是策略漏了一条路径，也可能是有意的隔离；改它是一次安全决定，所以本轮只记录、不动手。
 
