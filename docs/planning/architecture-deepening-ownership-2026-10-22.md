@@ -40,6 +40,21 @@
     - **主会话的 `PrepareArguments` panic 转成错误值**。`PrepareToolArguments` 确实会 panic（参数不合法时），而它在 `Execute` 之外跑；主会话原先让它逃出去、连回合一并带走。工具表里写着这个 daemon 自己的做法——"the host turns that refusal into the tool error the model reads, instead of losing the turn"——节点泳道一直照做，主会话现在也照做。
     - **证据**：一份真图里的节点先读一个文件再提交。那次 read 走的正是节点的工具闸门，因此它就是统计表该记下的那次调用。**这个 E2E 在父提交上失败**（read 根本不出现），在这个提交上通过。
 
+#### 第二十三步的细节：两条工具表曾经差在哪
+
+TypeScript 原件在 `src/runtime/durable-tools.ts:160-172` 恢复时只做了一件事：**把整份冻结策略盖回请求上**。
+
+| | TypeScript 原件 | Go 主会话（改之前） | Go 节点泳道（改之前） |
+| --- | --- | --- | --- |
+| **id** | 同一个 id 既给 broker 也给工具 | **两个 id** | 同一个 id ✓ |
+| **遥测** | 每次调用都记，在 `finally` 里 | 记，但 **panic 时不记** | **完全不记** |
+| **panic** | 重新抛出 | 重新抛出（`PrepareArguments` 的 panic 逃出去） | 转成错误值 |
+| **外部闸门** | 只看 `externallyGated` 标记 | 只看标记 ✓ | 标记 + 一份名字清单 |
+
+**先前记的一处是错的，这里更正**："`submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍"——**不成立**。`submit` 由 `kernelGraphLaneSubmitTool()` 造，是 `PiWorkerTool`，不是 `AgentToolDeclaration`；它没有那个标记，因此那份名字清单不是重复。
+
+三行现在都说同一句话了：**id 收成一个**（额度账本与写入账本记的是同一次调用）；**遥测补上**（PiG kernel 那个 `OnToolCall` 钩子从来没有被触发，所以记录只能来自工具自己）；**panic 转成错误值**（那正是这个 daemon 自己说的做法）。
+
 ## 查出来、尚未处理的问题
 
 它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。

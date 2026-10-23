@@ -18,8 +18,13 @@
    - **两条恢复路径的差别也不同**。**节点泳道**把解算好的**访问策略**从冻结记录里取回来（`runtime_kernel_graph_lane_node.go` 的 `nodeAccess` 读 `Record.Configuration.ExecutionConfiguration["access"]`），把模型也从冻结记录里取回来——所以节点的可达范围与模型**是**冻住的。**主 Agent 会话**（`runtime_pi_adapter_turn.go:167` 起的还原块）只还原了那八个：读写根是冻住的，但**访问策略本身**取自此刻的配置。因此缺口集中在主 Agent 会话这一侧。
    - **还有一个 Go 端口特有的事实**：`request.FilesystemAccess` 在 Go daemon 里被赋值、被冻进记录，但**没有任何地方读它**——真正的强制走的是 `runner.access`（访问策略）与读写根（`runtime_restricted_run.go:44`）。所以"文件系统可达范围没有被还原"这句话在 Go 侧的实际后果，是**访问策略取自此刻**，而不是那个字段本身。
    - **七个没被还原的字段里，只有一部分在 Go daemon 里真的活着**。逐个查过读点：`request.AllowedToolNames` 在 `runtime_pig_extensions.go:60` 被读（它决定这个会话能看到哪些 Pi 扩展工具），`request.ThinkingLevel` 在 `runtime_pig_session.go:107` 被读（会话的思考档位），三个摘要在 `runtime_pig_session.go:327` 起被读（会话的 inspect 记录，即给控制台看的那份）。而 `request.NativeTools` 与 `request.FilesystemAccess` **在 Go 侧没有任何读点**——它们被赋值、被冻进记录，然后就没有然后了。因此真正要修的是**三个**：可调工具、思考档位与三个摘要；另两个是 Go 端口搬过来却没接上的死字段。
-   - **要补上，需要先决定补多少**：还原 Go 已冻的那七个字段（`nativeTools`、`allowedToolNames`、`filesystemAccess`、三个摘要、`thinkingLevel`）不需要改持久格式；而把原件有、Go 的策略类型里根本没有的那几个（网络域、本地绑定、unix socket、apple event、只读、三个延迟工具标志）补齐，就要给冻结记录**加字段**——那是一次持久格式的扩展，尽管对旧记录是向后兼容的。
-   - **仍然缺一份能证明它的 E2E**。能写出来的形状已经清楚：两个会话，第一个的主 Agent 占着凭据槽不放，第二个的主 Agent 因此被受理但从未发出——此时记录已冻结（`transport.Open` 先开会话、**后**冻记录，`runtime_pig_session.go:52` 与 `:65`）；杀掉守护进程、改配置、重启，第二个主 Agent 被重新发出，断言它带的是**冻结时**的那一套。写出来需要一个两会话的 E2E 夹具（现有的 `tests/e2e/pig-node-recovery.test.ts` 只覆盖节点那一侧，而节点那一侧本来就是冻住的）。
+   - **把"哪几个字段真的在动"逐个查过之后，这一件缩小成了六行**。Go 的 `AgentSessionRequest`（`runtime_agent_session.go`）**带着原件那份策略的全部字段**——原件恢复时盖回去的二十来个字段，Go 这一侧一个不缺。缺的是**冻结策略那个类型**冻了哪些、以及恢复时读回哪些。
+     - **冻了、没读回的字段里，真正在 Go daemon 里被读的有五个**：`AllowedToolNames`（`runtime_pig_extensions.go:60`，它决定这次会话能看到哪些扩展工具）、`ThinkingLevel`（`runtime_pig_session.go:107`）、以及三个摘要（`runtime_pig_session.go:349` 起，进会话的 inspect 记录）。**这五个是真正的缺口**。
+     - **另外有一个被读、却根本没冻**：`PiExtensionTools`（`runtime_pig_extensions.go:56`）——它是被读的那一组扩展工具的**候选集**，而 `AllowedToolNames` 是**过滤器**。只还原过滤器，候选集仍然取自此刻。
+     - **其余的字段在 Go daemon 里一个读点都没有**：`FilesystemAccess`、`NativeTools`、`NetworkDomains`、`AllowUnrestrictedNetwork`、`AllowLocalBinding`、`UnixSockets`、`AllowAllUnixSockets`、`AllowAppleEvents`、`ReadOnly`。它们被赋值（`runtime_pi_adapter_turn.go:160` 等），然后就没有然后了——**Go 这一侧真正强制可达范围的是解算好的访问策略与读写根**（`runtime_restricted_run.go:44` 用的是 `command.Filesystem`，而那个来自 `runner.access`），不是这些字段。还原它们在 Go 里是化妆，原件还原它们是因为 TS 宿主靠它们强制。
+   - **所以要定的只剩两件事**：**还原那五个**（不改持久格式，它们已经冻在记录里），还是**连 `PiExtensionTools` 一起冻**（要给冻结记录**加一个字段**——对旧记录向后兼容，旧记录没有就是空）。前者是一个五行的还原，后者是一次持久格式的扩展。
+   - **仍然缺一份能证明它的 E2E**。能写出来的形状已经清楚：两个会话，第一个的主 Agent 占着凭据槽不放，第二个的主 Agent 因此被受理但从未发出——此时记录已冻结（`transport.Open` 先开会话、**后**冻记录，`runtime_pig_session.go:52` 与 `:65`）；杀掉守护进程、改配置、重启，第二个主 Agent 被重新发出，断言它带的是**冻结时**的那一套。
+   - **可观察的量是哪一个也已经找出来了**：`AllowedToolNames` 决定这次会话能看到哪些 Pi 扩展工具，而**扩展工具的名字出现在 provider 请求的 `tools` 数组里**——E2E 直接看得见。三个摘要进的是会话的 inspect 记录；`ThinkingLevel` 在 Go kernel 里只被存下来、不进 provider 请求体，因此它只能靠别的量间接证明。写出来需要一个两会话的 E2E 夹具（现有的 `tests/e2e/pig-node-recovery.test.ts` 只覆盖节点那一侧，而节点那一侧本来就是冻住的）。
    - **注意这份 E2E 只能与修复一起进**：它断言的是**应当如此**的行为，在现状下会失败，而门禁必须一直是绿的。所以这一件要么整件做（E2E + 修复 + 一次行为变更），要么整件不做——这正是它需要一次决定而不是一次整理的原因。补上是修一个功能缺陷，但它改变恢复路径的行为，因此本轮只写在这里。
 
 5. **泳道的 "Frozen node identity mismatch" 拒绝是空转的**。内核把冻结身份直接从它存的那份记录里读出来（`recordString(record, "identity")`），所以旧代码拿 `configuration.policy.binding.instanceId` 与 `snapshot.identity` 比的是同一个字段的两个副本，永远相等。现在类型化之后比较的是 `wrapper.Identity` 与 `wrapper.Record.Identity`——仍然是同一个值，但至少不再伪装成两个独立事实。要让它有意义，得拿记录里的身份与**执行那一行**所属的实例比；那是新加的判定，会改变恢复的行为，同样没有 E2E 能证明，因此没有加。
@@ -31,23 +36,8 @@
    - **结果**：包里超过上限的文件从 33 个降到 4 个，其中三个带着写明理由的标注；**其余每一个要么低于上限、要么在文件头说明了自己为什么不是**。
    - **该怎么处理，是一个决定而不是一次整理**：把这些文件按职责拆开是安全的，但要拆函数的那几个（工具表）要先定 id、遥测、panic 三处分歧；数据文件则需要守卫承认"文件的大小不一定来自职责"。另一个办法是让守卫真的实现它说明里许诺的那份豁免——只拦本次改动新写的大文件——那是改守卫本身，等于改一条 ADR 写下的规矩。本轮两件都没做。
 
-7. **两条路的工具准入规则本来是一份，被端口分成两份 —— 已经合成**（提交 `426bd2cb`）。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。
+7. **两条路的工具准入规则本来是一份，被端口分成两份 —— 已经合成**（提交 `426bd2cb`）。主会话与节点泳道各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。三处分歧（id、遥测、panic）在这一轮合成了一件事，比较的细节记在[后半程](architecture-deepening-ownership-2026-10-22.md)的第二十三步里。
 
-   - **这一轮把那张表拆开了，于是这三处分歧第一次能并排看**（`AgentTools` 那 1,033 行的函数拆成十二个文件，全部是纯搬移，54 个 handler 的函数体逐字节未变）。原件在 `src/runtime/durable-tools.ts:160-172`：
-
-   | | TypeScript 原件 | Go 主会话 | Go 节点泳道 | 证据指向 |
-   | --- | --- | --- | --- | --- |
-   | **id** | 同一个 id 既给 broker 也给工具 | **两个 id**：`piWorkerGatedTool` 给 broker 一个 `graphUUID()`，给工具另一个 | 同一个 id ✓ | 应为**一个**：gate 的 id 记进 `invocations`（额度账本按它结算），工具的 id 记进写入账本的 `ToolCallID`——两个 id 就没法把额度记录与写入记录对起来 |
-   | **遥测** | 每次调用都记，在 `finally` 里，panic 也记 | 记，但 **panic 时不记**（记在 `gated(...)` 返回之后） | **完全不记** | 应为**每次都记**，panic 也记 |
-   | **panic** | 重新抛出 | 重新抛出——但 `PrepareArguments` 的 panic 逃出去 | 转成错误值 | Go daemon 自己的哲学是**转成错误值**（工具表里写着"the host turns that refusal into the tool error the model reads, instead of losing the turn"）。`PrepareToolArguments` 确实会 panic（参数不合法时 `panic(errors.New(problem))`，`runtime_pi_worker_config.go:102`），而它在 `Execute` 之外跑——所以**主会话是那个不一致的一方**，节点泳道才与 Go daemon 自己的哲学一致 |
-   | **外部闸门** | 只看 `externallyGated` 标记 | 只看标记 ✓ | 标记 + 一份名字清单 | 节点泳道的 `submit` 是 `PiWorkerTool`（`runtime_pi_worker_config.go:14`），**那个类型根本没有 `ExternallyGated` 字段**——名字清单不是重复标记，而是那种类型里唯一能说这件事的办法 |
-
-   - **先前记的一处是错的，这里更正**："`submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍"——**不成立**。`submit` 由 `kernelGraphLaneSubmitTool()` 造，是 `PiWorkerTool`，不是 `AgentToolDeclaration`；它没有那个标记，因此那份名字清单不是重复。
-   - **三行现在都说同一句话了**（提交 `426bd2cb`）：
-     - **id 收成一个**。主会话原先给闸门一个 id、给工具另一个，于是**额度账本数的那次调用与写入账本记的那次调用是两条对不上的记录**。节点泳道与原件本来就只用一个 id。主会话现在也只用一个——两个账本记的是同一次调用。
-     - **遥测补上**。节点泳道原先**一条都不报**：PiG kernel 自己那个 `OnToolCall` 钩子**从来没有被触发**（它被一路传下去，却没有任何地方调用它），所以记录只能来自工具自己——主会话那样做的，节点泳道现在也这样做。
-     - **panic 转成错误值**。`PrepareToolArguments` 确实会 panic（参数不合法时 `panic(errors.New(problem))`），而它在 `Execute` 之外跑。主会话原先让它逃出去、连回合一并带走；节点泳道把它变成模型读得到的工具错误——**那正是这个 daemon 自己说的做法**（工具表里写着"the host turns that refusal into the tool error the model reads, instead of losing the turn"）。主会话现在也一样。
-   - **证据**：一份真图——主 Agent 提案、用户确认、master 派发节点的输入、节点在提交之前先读一个工作副本里的文件。那次 read 走的正是节点的工具闸门，因此它就是统计表该记下的那次调用。**这个 E2E 在父提交上是失败的**（read 根本不出现），在这个提交上通过。
 
 8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
 
