@@ -45,6 +45,21 @@ node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficie
 **能重跑的工具**：
 
 - `scripts/harness-cost.mjs` — 只读快照计量（请求数、计费类型、**来源 × 计费类型的交叉**、用途、前缀分布、整树情景计价、压缩次数、工具错误归属）
+
+**错误文本不在账本里，要查它在持久记录里**（§2.7 那 11 条就是这么查出来的）：
+
+```sh
+node -e '
+const {DatabaseSync}=require("node:sqlite");
+const db=new DatabaseSync(process.env.HOME+"/Library/Application Support/Graph/state/tasks.sqlite",{readOnly:true});
+for(const n of ["Plugin helper is closed","Pi host channel closed","Runtime is closed"]){
+  const rows=db.prepare("select record from graph_durable_entries where record like ?").all("%"+n+"%");
+  const kinds={}; for(const r of rows){const k=JSON.parse(r.record).kind; kinds[k]=(kinds[k]||0)+1;}
+  console.log(n, rows.length, kinds);
+}'
+```
+
+**每一种消息按记录种类分组之后，"来自哪条路径"自己就显出来了**：`pi.tool-result` 是工具结果，`graph.legacy-history` 与 `graph.imported-history` 是导入的历史。
 - `scripts/harness-prefix-counterfactual.mjs` — 真实请求序列上的前缀推演：
 
   ```sh
