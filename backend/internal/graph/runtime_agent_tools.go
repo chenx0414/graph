@@ -56,6 +56,8 @@ type AgentToolsGraphManagement struct {
 	HarnessExperience func(input map[string]any) any
 	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
+	// HarnessDecision records the adopted candidate and the lesson it taught.
+	HarnessDecision func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
 	// HarnessEvidence reads the evidence of the caller's own run.
 	HarnessEvidence func(input HarnessEvidenceInput) HarnessEvidenceResult
 }
@@ -879,7 +881,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 					entries = existing.Entries
 				}
 			}
-			result := harnessRecordDecision(&artifacts, entries, HarnessDecisionInput{
+			result := input.GraphManagement.HarnessDecision(&artifacts, entries, HarnessDecisionInput{
 				GraphId:   strings.TrimSpace(agentToolsStringOrEmpty(params["graphId"])),
 				Domain:    domain,
 				Axis:      axis,

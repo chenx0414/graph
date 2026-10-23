@@ -17,6 +17,8 @@ type GraphManagement interface {
 	HarnessCompare(input HarnessCompareInput) HarnessComparison
 	// HarnessExperience reads the lessons earlier tasks adopted per domain.
 	HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult
+	// HarnessDecision records the adopted candidate and the lesson it taught.
+	HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
 	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe(input HarnessProbeInput) HarnessProbeResult
 	// HarnessEvidence reads the evidence of the caller's own run: the

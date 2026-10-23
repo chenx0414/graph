@@ -3,6 +3,7 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -290,6 +291,45 @@ func harnessPromote(store *harnessArtifactStore, published ArtifactRecord, reque
 		Version:    published.Version,
 		RequestId:  requestId,
 	}), nil
+}
+
+// harnessAnonIDPattern matches an anonymous candidate id.
+var harnessAnonIDPattern = regexp.MustCompile(`^[A-Z]{1,2}$`)
+
+// harnessResolveChosen turns an anonymous candidate id into the node that ran
+// it.
+//
+// The letter only means something inside the comparison it came from. A lesson
+// that is read months later has to say which candidate was adopted, and the
+// node id is what a reader can still understand.
+func (service *graphManagementService) harnessResolveChosen(graphId string, chosen string) string {
+	chosen = strings.TrimSpace(chosen)
+	if graphId == "" || !harnessAnonIDPattern.MatchString(chosen) {
+		return chosen
+	}
+	nodeIds := []string{}
+	for _, row := range kernelRows(service.kernel.Db, "SELECT node_id FROM kernel_nodes WHERE task_id=? ORDER BY node_id", graphId) {
+		nodeIds = append(nodeIds, kernelString(row["node_id"]))
+	}
+	if len(nodeIds) == 0 {
+		return chosen
+	}
+	index := 0
+	for _, letter := range chosen {
+		index = index*26 + int(letter-'A') + 1
+	}
+	index--
+	if index < 0 || index >= len(nodeIds) {
+		return chosen
+	}
+	return nodeIds[index]
+}
+
+// HarnessDecision records which candidate was adopted and the lesson that came
+// with it.
+func (service *graphManagementService) HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
+	input.Chosen = service.harnessResolveChosen(input.GraphId, input.Chosen)
+	return harnessRecordDecision(store, entries, input)
 }
 
 // harnessRecordDecision appends one adopted lesson to a domain's store and

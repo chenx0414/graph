@@ -251,7 +251,7 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 			{"graphId", tbOptional(tbString(map[string]any{"description": "Graph the compared candidates belong to, when the lesson came from a comparison."}))},
 			{"domain", tbString(map[string]any{"description": "Domain the lesson belongs to; later tasks in this domain find it."})},
 			{"axis", tbOptional(tbString(map[string]any{"description": "general (the lesson holds for every kind of work, and every domain finds it) or specific (it holds for this domain only). Claims the general axis only when the evidence shows it."}))},
-			{"chosen", tbString(map[string]any{"description": "The anonymous candidate id that was adopted, as compare_harness_candidates reported it."})},
+			{"chosen", tbString(map[string]any{"description": "The candidate that was adopted, as compare_harness_candidates reported it. The anonymous id is fine: the host resolves it to the candidate that actually ran, so the lesson still names it later."})},
 			{"cue", tbString(map[string]any{"description": "What the situation looked like when this lesson applies."})},
 			{"lesson", tbString(map[string]any{"description": "What to do about it."})},
 			{"evidence", tbString(map[string]any{"description": "What shows the lesson worked."})},

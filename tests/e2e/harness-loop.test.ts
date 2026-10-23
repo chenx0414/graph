@@ -94,7 +94,7 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
           break;
         case 3:
           calls = [{ id: 'decide', name: 'record_harness_decision', args: {
-            domain: 'parser', axis: 'general', chosen: 'A',
+            domain: 'parser', axis: 'general', chosen: 'B',
             cue: 'A file that is not there.',
             lesson: 'Read the file list before reading a file.',
             evidence: 'The general candidate listed the directory first.',
