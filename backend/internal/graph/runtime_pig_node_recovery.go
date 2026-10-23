@@ -82,9 +82,8 @@ func (runtime *TaskRuntime) restorePigNode(frozen pigkernel.FrozenExecution) {
 // The model is not asked again.
 func (runtime *TaskRuntime) requeuePigNode(execution *ExecutionRow) {
 	runtime.store.Transaction(func() any {
-		kernelExec(runtime.store.Db, "UPDATE kernel_executions SET state='blocked' WHERE id=? AND state='failed'", execution.Id)
-		kernelExec(runtime.store.Db, "UPDATE kernel_queue SET state='queued',reason='Original kernel receipt retained for settlement' WHERE task_id=? AND node_id=? AND state='failed'",
-			execution.TaskId, execution.NodeId)
+		runtime.kernel.BlockFailedExecution(execution.Id)
+		runtime.kernel.RequeueFailedItem(execution.TaskId, execution.NodeId, "Original kernel receipt retained for settlement")
 		return nil
 	})
 }
@@ -100,9 +99,8 @@ func (runtime *TaskRuntime) requeuePigNode(execution *ExecutionRow) {
 // second time.
 func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
 	runtime.store.Transaction(func() any {
-		kernelExec(runtime.store.Db, "UPDATE kernel_queue SET state='failed',reason=? WHERE task_id=? AND node_id=? AND state IN ('queued','claimed')",
-			pigNodeStoppedReason, execution.TaskId, execution.NodeId)
-		kernelExec(runtime.store.Db, "UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?", execution.TaskId, execution.NodeId)
+		runtime.kernel.FailQueuedItem(execution.TaskId, execution.NodeId, pigNodeStoppedReason)
+		runtime.kernel.ParkNode(execution.TaskId, execution.NodeId)
 		kernelExec(runtime.store.Db, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", execution.TaskId)
 		runtime.store.Event(execution.TaskId, "graph.node.recovery.stopped", map[string]any{
 			"executionId": execution.Id, "nodeId": execution.NodeId, "reason": pigNodeStoppedReason,
@@ -118,8 +116,8 @@ func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
 // be sent again.
 func pigNodeCalledProvider(kernel *KernelStore, execution *ExecutionRow, frozen pigkernel.FrozenExecution) bool {
 	seen := []string{}
-	for _, call := range kernelRows(kernel.Db, "SELECT id FROM kernel_provider_calls WHERE execution_id=?", execution.Id) {
-		seen = append(seen, kernelString(call["id"]))
+	for _, call := range kernel.ProviderCallsOfExecution(execution.Id) {
+		seen = append(seen, call.Id)
 	}
 	return pigCallsBeyond(frozenExecutionOfRecord(frozen.Record).PreAdmissionInvocationIds, seen)
 }

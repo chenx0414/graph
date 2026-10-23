@@ -125,3 +125,14 @@ func (k *KernelStore) FinishQueued(taskID string, seq int64, state string) {
 }
 
 // NodeState returns retry counters, creating nothing until a later write.
+
+// RequeueFailedItem puts a failed queue item back, with the reason it was
+// put back.
+func (k *KernelStore) RequeueFailedItem(taskID, nodeID, reason string) {
+	g5Exec(k.Db, "UPDATE kernel_queue SET state='queued',reason=? WHERE task_id=? AND node_id=? AND state='failed'", reason, taskID, nodeID)
+}
+
+// FailQueuedItem fails the queue items of a node that will not run again.
+func (k *KernelStore) FailQueuedItem(taskID, nodeID, reason string) {
+	g5Exec(k.Db, "UPDATE kernel_queue SET state='failed',reason=? WHERE task_id=? AND node_id=? AND state IN ('queued','claimed')", reason, taskID, nodeID)
+}

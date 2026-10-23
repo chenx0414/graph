@@ -123,3 +123,9 @@ func (k *KernelStore) HasRunningExecution(taskID, nodeID string) bool {
 func (k *KernelStore) ClearExecutionTokenReservation(taskID, nodeID string) {
 	g5Exec(k.Db, "UPDATE kernel_executions SET token_reservation=0 WHERE task_id=? AND node_id=? AND state!='running'", taskID, nodeID)
 }
+
+// ProviderCallsOfExecution are the provider calls one execution made.
+func (k *KernelStore) ProviderCallsOfExecution(executionID string) []KernelProviderCall {
+	rows := g5Query(k.Db, "SELECT id,node_id,execution_id,reserved,state,usage,model,purpose,cost,created_at,settled_at FROM kernel_provider_calls WHERE execution_id=?", executionID)
+	return k.providerCallsFrom(rows)
+}

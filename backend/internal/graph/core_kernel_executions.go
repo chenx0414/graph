@@ -404,3 +404,9 @@ func (k *KernelStore) replayOrRefuse(execution ExecutionRow, request SubmitReque
 }
 
 // DeliverDirect accepts one external input and lands it.
+
+// BlockFailedExecution parks an execution that failed, so the recovery can
+// settle it rather than send it again.
+func (k *KernelStore) BlockFailedExecution(executionID string) {
+	g5Exec(k.Db, "UPDATE kernel_executions SET state='blocked' WHERE id=? AND state='failed'", executionID)
+}

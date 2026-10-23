@@ -122,3 +122,9 @@ func (k *KernelStore) NoteNodeRebind(taskID, nodeID string) {
 }
 
 // ModuleInput reads one module input.
+
+// ParkNode parks a node without a reason of its own. The recovery records why
+// the node stopped; the node's own state only says it is not running.
+func (k *KernelStore) ParkNode(taskID, nodeID string) {
+	g5Exec(k.Db, "UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?", taskID, nodeID)
+}
