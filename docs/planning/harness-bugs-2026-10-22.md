@@ -6,8 +6,8 @@
 
 ## 结论摘要
 
-1. **53 条里有 24 条落在 Graph 自己身上**：15 条本轮修掉（其中 13 条有先红后绿的 E2E，#8 与 #29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），5 条确认为真实缺陷但不在本轮修复范围（#13/#22/#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。
-2. 修掉的 15 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）、补交额度按 execution 而不是按 node 计（#8）。
+1. **53 条里有 24 条落在 Graph 自己身上**：16 条本轮修掉（其中 14 条有先红后绿的 E2E，#8 与 #29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），4 条确认为真实缺陷但不在本轮修复范围（#22/#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。
+2. 修掉的 16 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）、补交额度按 execution 而不是按 node 计（#8）、被停的那一步在任务停掉之后又写自己的结论（#13）。
 3. **25 条在本栈里不存在或已被处理**（ALREADY-OK 20 条 + N/A 5 条）：Graph 里没有 span/trace 机制、没有 poison 语义、没有依赖图边数上限、没有"七家 provider"（daemon 只讲 OpenAI Completions 与 Anthropic Messages 两种协议），死锁、并行审批、端口独占这些都有真实守卫。
 4. **4 条属于上游 PiG**（`github.com/MichaelKinsy/PiG v0.5.1`）或上游 npm 包，本仓库改不了，已按上游文件分组记录，便于一次性提给上游。
 5. **与 `feature/harness-token-efficiency-2026-10-22` 的重叠**已在第 6 节逐条列出：该分支已修的 4 条（#23/#40/#45 与任务说明包复用）在本分支上按 `main` 基线重新实现，两边合并时需要人工取舍。
@@ -39,7 +39,7 @@
 | 10 | ALREADY-OK | 低 | `core_node_executor.go:266-315` | 子 Agent 死亡是响亮的：`graph.node.failed` + 唤醒 master |
 | 11 | ALREADY-OK | 低 | `core_execution.go:192-260` | 没找到锁序反转；父进程 retask 不持库锁 |
 | 12 | N/A | 低 | — | 以 #11 的死锁为前提；本栈没有这个死锁 |
-| 13 | OURS-GO → 未修（后续） | 中 | `runtime_pi_adapter.go` 控制目标 | 停止写入与正在停的那一步存在先后竞争 |
+| 13 | **OURS-GO** → 已修 | 中 | `core_kernel_store.go` `settleNodeAfterStop` | 停止写入与正在停的那一步存在先后竞争：被停的那一步在任务已停之后又写下自己的结论 |
 | 14 | **OURS-GO** → 已修 | 中 | `runtime_pig_native_limits.go`；`runtime_bounded_path.go` `listDirectoryLimited` | `ls`/`find`/`grep` 无默认上限，18MB 目录清单先在 Graph 堆里成型 |
 | 15 | N/A | 低 | PiG `durable/storage/jsonl` | Graph 用 SQLite 存储，没有 poison 语义 |
 | 16 | ALREADY-OK | 低 | `core_node_queue.go:110-125` | 失败项标记 failed 并暂停节点，不静默重投 |
@@ -83,7 +83,7 @@
 
 ---
 
-## 3. 本轮修掉的十五条
+## 3. 本轮修掉的十六条
 
 ### 3.1 #4 / #5 / #24 / #32 / #33 / #34 —— provider 流与请求（`c9fae98`）
 
@@ -167,7 +167,15 @@ E2E `tests/e2e/harness-state-retention.test.ts` 跑一次对话，数出它的�
 
 node 队列、node 提交与唤醒通知的 E2E 都通过。跨 execution 的情形还没有 E2E：它需要同一个 node 的第二个 execution，也就是一次生命周期层面的瞬时重试，夹具得精确地触发环境失败的分类。
 
-### 3.10 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
+### 3.10 #13 —— 被停的那一步不能在任务停掉之后写下自己的结论（`958eb145`）
+
+停止会取消排队的工作，并等在途的 execution 收尾。而那一步是分两次写的：先写 execution，再写 node——所以一个 node 可以在它所属的任务已经停下之后写下"succeeded"或"failed"。停止按钮被它正在停的那一步盖掉了。
+
+任务正在停止（或已经停下）时，它的 node 现在报的是停止本身：它被停放着，事件说明工作被取消。被取消的那一步没有资格在取消它的停止之上写一个结论。
+
+E2E `tests/e2e/harness-stop-clobber.test.ts` 把一个 worker 的回合吊着，在 node 运行中停止 graph，然后才放开那个回合。node 报的是取消，不是它自己的失败。修复前跑过：它报的是 `failed`。
+
+### 3.11 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
 
 daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：provider 从未被告知要保留什么，于是每个会话都为整段前缀重新付费。改后按 Pi 的做法在系统提示、最后一个工具声明、最后一条消息的最后一个块上各放一个断点。
 
@@ -183,6 +191,7 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 | `tests/e2e/harness-compaction.test.ts` | 摘要是按 daemon 预留的 2000 token 房间请求的（1600），不是模型的整个输出上限；压缩被如实上报为 `session.compacted` | 摘要请求 4096 token；没有任何压缩上报 |
 | `tests/e2e/harness-native-tool-bounds.test.ts` | 清单、文件搜索与读取各自在自己的上限内作答，并各自说清自己被截断了 | 清单原样返回 1200 项，没有任何东西说它不是完整的 |
 | `tests/e2e/harness-state-retention.test.ts` | daemon 回收上一次运行留下的状态：重启后任务留下的事件不超过规则允许的数量 | daemon 把 17 个事件全留着 |
+| `tests/e2e/harness-stop-clobber.test.ts` | 被停的那一步在任务停掉之后不写自己的结论：node 报的是取消 | node 报 `failed`——它自己的结论盖掉了停止 |
 
 两个文件都在修复前跑过，确认失败。
 
@@ -213,7 +222,6 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 | 22 | 每个流事件一次 INSERT + 一次通知；工具调用还额外两次事件与一次活动写 | `runtime_pi_adapter.go` 合并 `message.tool` 起止；`core_store.go` 合并活动写 |
 | 46 | 48 个工具声明里 15,229 字符描述对 2,225 字符参数，87.3% 是散文 | `runtime_agent_tool_definitions.go`：描述压成一句操作说明，长协议移进 `<docs>` |
 | 47 | daemon 侧设计好的 4KB 溢出/摘要路径（`ToolResultHook`）在 Go 路径上没有调用者，工具结果只有上游 50KB 兜底 | `pigkernel/extensions.go` 注册工具时挂上 `ToolResultHook` |
-| 13 | 停止写入与正在停的那一步存在先后竞争 | 控制目标与 operation 生命周期的写入顺序 |
 | 36 | 用户的确认仍然只是给模型的规则，不是代码检查：模型可以在别的 operation 还在跑时 `force` 重载 daemon。ADR 0026 把 `force` 定义为 agent 的工具（"force 保留中断在途 operation 的原有语义"），所以收紧它是 ADR 决策，不是实现细节。工具的描述已写明这个后果与"先问用户" | 要么改 ADR 0026，要么在代码里要求一次可查证的确认（谁问、谁答、记在哪） |
 | 18 | 遗留 TS 路径整读会话文件（10MB）并在事件循环上同步解析 | `src/core/node-prompt.ts` 改增量读；`src/runtime/durable-history.ts` 不再复制整份 records。`feature/retire-ts-backend` 正在退役这条路径，可能不必再改 |
 
