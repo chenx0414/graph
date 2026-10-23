@@ -131,10 +131,9 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 		assemblyInput.FrozenFacts = facts
 	}
 	assembly := OpenAgentContextAssembly(assemblyInput)
-	row, ok := g5One(options.Kernel.Db, "SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?", options.GraphId, options.NodeId)
 	instanceID := kernelNodeInstanceID(options.GraphId, options.NodeId)
-	if ok {
-		instanceID = g5Str(row["instance_id"])
+	if admitted, found := options.Kernel.NodeInstanceID(options.GraphId, options.NodeId); found {
+		instanceID = admitted
 	}
 	scratchDir := filepath.Join(options.InstancesDir, instanceID, "capability-scratch")
 	gate := kernelPassthroughGate()

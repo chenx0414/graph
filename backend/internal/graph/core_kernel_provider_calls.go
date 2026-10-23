@@ -113,6 +113,12 @@ func (k *KernelStore) HasPendingProviderCall(taskID, nodeID string) bool {
 	return ok
 }
 
+// HasUnknownProviderCall reports whether a node has usage nobody can account for.
+func (k *KernelStore) HasUnknownProviderCall(taskID, nodeID string) bool {
+	_, ok := g5One(k.Db, "SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state='unknown' LIMIT 1", taskID, nodeID)
+	return ok
+}
+
 // HasRunningExecution reports whether a node has an execution that is running.
 func (k *KernelStore) HasRunningExecution(taskID, nodeID string) bool {
 	_, ok := g5One(k.Db, "SELECT 1 FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' LIMIT 1", taskID, nodeID)

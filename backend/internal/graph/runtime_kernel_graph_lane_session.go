@@ -118,8 +118,7 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 				if execution == nil || state.closing || task.Paused != 0 || state.options.Kernel.NodeState(graphId, nodeId).Paused || phaseClosed(task.Phase) {
 					Raise("paused", "Workspace commit is closed")
 				}
-				unknown := kernelRow(state.options.Kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state='unknown' LIMIT 1", graphId, nodeId)
-				if unknown != nil {
+				if state.options.Kernel.HasUnknownProviderCall(graphId, nodeId) {
 					row := state.options.Kernel.Execution(execution.Id)
 					if row == nil || row.TokenBudget == nil || !row.TokenBudget.Unlimited {
 						Raise("budget", "Reconcile unknown provider usage before committing work")

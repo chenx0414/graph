@@ -64,6 +64,20 @@ func (k *KernelStore) deliveryFrom(row map[string]any) DeliveryRow {
 	}
 }
 
+// DeliveryEdges are the endpoint pairs a task has received work over.
+//
+// Disabling an edge cannot erase the identity of work already received
+// over it, so the lane asks which pairs work has travelled over before
+// it decides what the graph is connected to.
+func (k *KernelStore) DeliveryEdges(taskID string) []DeliveryEdge {
+	rows := g5Query(k.Db, "SELECT from_endpoint,to_endpoint FROM kernel_deliveries WHERE task_id=?", taskID)
+	out := make([]DeliveryEdge, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, DeliveryEdge{From: g5Str(row["from_endpoint"]), To: g5Str(row["to_endpoint"])})
+	}
+	return out
+}
+
 // DeliveriesForEdge lists deliveries through one edge, newest first.
 func (k *KernelStore) DeliveriesForEdge(taskID, edgeID string) []DeliveryRow {
 	rows := g5Query(k.Db, "SELECT * FROM kernel_deliveries WHERE task_id=? AND edge_id=? ORDER BY seq DESC", taskID, edgeID)

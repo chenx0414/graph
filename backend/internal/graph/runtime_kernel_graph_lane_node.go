@@ -57,7 +57,7 @@ func (state *kernelGraphLaneState) nodeLocation(graphId, nodeId string, revision
 	if node != nil && node.Workspace != nil {
 		selected = node.Workspace.Base
 	}
-	admitted := kernelRow(state.options.Kernel.Db, "SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?", graphId, nodeId)
+	instanceID, admitted := state.options.Kernel.NodeInstanceID(graphId, nodeId)
 	key := graphId + "/" + nodeId
 	execution := state.options.Kernel.RunningExecution(graphId, nodeId)
 	// Prepare each new review against the current integration. Retries, recovery
@@ -66,11 +66,10 @@ func (state *kernelGraphLaneState) nodeLocation(graphId, nodeId string, revision
 	if prepare && execution != nil && node != nil && node.Recipe != "" &&
 		state.options.Catalog.HasDefinition(node.Recipe) && state.options.Catalog.Definition(node.Recipe).Review &&
 		state.preparedReviewExecutions[key] != execution.Id {
-		reseed = kernelRow(state.options.Kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE execution_id=? LIMIT 1", execution.Id) == nil
+		reseed = len(state.options.Kernel.ProviderCallsOfExecution(execution.Id)) == 0
 	}
 	var copy *string
-	if selected != "project" && state.options.Git != nil && admitted != nil {
-		instanceID := graphDBString(admitted, "instance_id")
+	if selected != "project" && state.options.Git != nil && admitted {
 		action := "work"
 		if reseed {
 			action = "review"

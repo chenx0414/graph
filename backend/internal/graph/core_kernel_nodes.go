@@ -21,6 +21,20 @@ func (k *KernelStore) NodeStatus(taskID, nodeID string) string {
 	}
 	return g5Str(row["status"])
 }
+
+// NodeInstanceID is the instance a node was admitted with.
+//
+// The lane and the node host both ask which instance a node runs in. The
+// lane asked the table with SQL of its own; the host asked it with
+// another query. They now ask here.
+func (k *KernelStore) NodeInstanceID(taskID, nodeID string) (string, bool) {
+	row, ok := g5One(k.Db, "SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?", taskID, nodeID)
+	if !ok {
+		return "", false
+	}
+	return g5Str(row["instance_id"]), true
+}
+
 func (k *KernelStore) blockedWake(taskID, nodeID, reason string) {
 	row, ok := g5One(k.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1", taskID, nodeID)
 	wake := BlockedNodeWake{NodeID: nodeID, Reason: reason}

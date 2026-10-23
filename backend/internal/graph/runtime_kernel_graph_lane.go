@@ -135,9 +135,8 @@ func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForCo
 		for _, edge := range definition.Edges {
 			connect(edge.From, edge.To)
 		}
-		deliveries := kernelRows(options.Kernel.Db, "SELECT from_endpoint,to_endpoint FROM kernel_deliveries WHERE task_id=?", context.GraphId)
-		for _, delivery := range deliveries {
-			connect(graphDBString(delivery, "from_endpoint"), graphDBString(delivery, "to_endpoint"))
+		for _, delivery := range options.Kernel.DeliveryEdges(context.GraphId) {
+			connect(delivery.From, delivery.To)
 		}
 		visited := map[string]bool{}
 		var visit func(id string)

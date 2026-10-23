@@ -33,6 +33,12 @@ type DeliveryRow struct {
 	CreatedAt       int64   `json:"createdAt"`
 }
 
+// DeliveryEdge is one endpoint pair that work has travelled over.
+type DeliveryEdge struct {
+	From string
+	To   string
+}
+
 // ExecutionRow is one node attempt.
 type ExecutionRow struct {
 	Id              string
