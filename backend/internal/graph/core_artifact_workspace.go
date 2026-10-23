@@ -211,8 +211,7 @@ func artifactNormalizeTags(value []string) []string {
 		seen[tag] = true
 		tags = append(tags, tag)
 	}
-	// TODO(port): TypeScript sorts tags with localeCompare. This sorts by UTF-8 bytes.
-	sort.Strings(tags)
+	sort.Slice(tags, func(i, j int) bool { return lessByByteOrder(tags[i], tags[j]) })
 	if len(tags) > 20 {
 		Raise("invalid_artifact", "An artifact may have at most 20 tags")
 	}

@@ -322,8 +322,7 @@ func ProjectPathEntries(root string, options projectPathOptions) []ProjectPathEn
 			if err != nil {
 				return
 			}
-			// TODO(port): localeCompare; byte order is not locale order.
-			sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+			sort.Slice(entries, func(i, j int) bool { return lessByByteOrder(entries[i].Name(), entries[j].Name()) })
 			for _, entry := range entries {
 				path := entry.Name()
 				if base != "" {

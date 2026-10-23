@@ -448,8 +448,7 @@ func ScanNativeSkills(skillsDir, owner string, origin CapabilityOrigin) []Capabi
 		}
 		panic(err)
 	}
-	// TODO(port): JavaScript localeCompare is not byte order.
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	sort.Slice(entries, func(i, j int) bool { return lessByByteOrder(entries[i].Name(), entries[j].Name()) })
 	records := []CapabilityRecord{}
 	for _, entry := range entries {
 		info, err := entry.Info()

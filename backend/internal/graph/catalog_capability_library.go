@@ -198,7 +198,6 @@ func GroupCapabilitiesByName(records []CapabilityRecord) []CapabilityRecord {
 	}
 	for _, key := range order {
 		bucket := groups[key]
-		// TODO(port): JavaScript localeCompare is not byte order.
 		sort.SliceStable(bucket, func(i, j int) bool {
 			left, right := bucket[i], bucket[j]
 			leftRank, rightRank := capabilityOriginRank(left), capabilityOriginRank(right)
@@ -208,7 +207,7 @@ func GroupCapabilitiesByName(records []CapabilityRecord) []CapabilityRecord {
 			if len(left.Id) != len(right.Id) {
 				return len(left.Id) < len(right.Id)
 			}
-			return left.Id < right.Id
+			return lessByByteOrder(left.Id, right.Id)
 		})
 		winner := bucket[0]
 		if len(bucket) == 1 {

@@ -122,8 +122,7 @@ func toolResultStable(value any) string {
 		for key := range typed {
 			keys = append(keys, key)
 		}
-		// TODO(port): localeCompare key order. Byte order is the stand-in.
-		sort.Strings(keys)
+		sort.Slice(keys, func(i, j int) bool { return lessByByteOrder(keys[i], keys[j]) })
 		parts := make([]string, len(keys))
 		for i, key := range keys {
 			parts[i] = key + ":" + toolResultStable(typed[key])
