@@ -8,7 +8,7 @@
 
 1. **53 条的去向**：本轮动了 20 条（17 条整条修掉，3 条只修了一个面：#5、#9、#50）；确认为真实缺陷但不在本轮修复范围的 1 条（#36，ADR 决策）；因为 TS 路径正在被退役而不必再改的 1 条（#18）；这一轮查下来在本栈里不成立、改判 ALREADY-OK 的 2 条（#22、#41）；剩下 29 条分给已有的真实守卫（21 条 ALREADY-OK）、本栈不存在的机制（5 条 N/A）与上游（3 条 UPSTREAM-PIG，另有 #5 的其余部分也在上游）。
 
-   20 条里，11 条有先红后绿的 E2E（#4/#24/#1/#45 与 #5 的 Graph 侧一支、#23/#40/#9 一支、#14、#53、#13、#46）；另外 9 条（#32/#33/#34、#50、#25/#51、#8、#29）没有专属的先红后绿证明——既有的 E2E 仍然全绿，是回归的护栏，但没有一条断言盯住这次的修复。
+   20 条里，15 条有先红后绿的 E2E（#4/#24/#1/#45 与 #5 的 Graph 侧一支、#23/#40/#9 一支、#32/#33/#34、#14、#53、#13、#46）；另外 5 条（#50、#25/#51、#8、#29）没有专属的先红后绿证明——既有的 E2E 仍然全绿，是回归的护栏，但没有一条断言盯住这次的修复。
 
 2. **动到的 20 条是**：被切断的 provider 流被当成成功回合（#4）、流没有以其协议自己的终止标记结束也算成功（#5 的 Graph 侧）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩“成功”其实什么都没压缩（#40）、压缩事件到不了 daemon（#9）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）、补交额度按 execution 而不是按 node 计（#8）、被停的那一步在任务停掉之后又写自己的结论（#13）、工具 schema 里八成是散文（#46）。
 
@@ -72,8 +72,8 @@
 | 29 | **OURS-GO** → 已修（E2E 待补） | 中 | `runtime_pig_recovery.go`；`pigkernel/recovery.go` `MarkRecoveryAttempt` | 启动恢复每 boot 重跑同一个 doomed call，冻结记录不清理 |
 | 30 | ALREADY-OK | 低 | `core_task_runtime.go:4705-4776` | 唯一阻塞等待有 600s 上限且报 `timeout` |
 | 31 | ALREADY-OK | 低 | `core_wake_ledger.go:119-121,153-156` | 并行审批合并为一个唤醒；节点状态守卫挡住第二次派发 |
-| 32 | **OURS-GO** → 已修 | 中 | `runtime_provider_stream.go` `providerLineReader` | keepalive 不算活动；空闲计时器 5 分钟 |
-| 33 | **OURS-GO** → 已修 | 中 | 同上 | 空闲守卫此前根本不存在 |
+| 32 | **OURS-GO** → 已修 | 中 | `runtime_provider_stream.go` `providerLineReader` | keepalive 不算活动；空闲计时器 5 分钟；上限触发后连接也被取消，回合真的被释放 |
+| 33 | **OURS-GO** → 已修 | 中 | 同上 | 空闲守卫此前根本不存在；补上之后发现失败路径还会去读那个还在输出的 body，回合仍旧挂着 |
 | 34 | **OURS-GO** → 已修 | 中 | `http_client.go:18`（`Timeout: 0`）→ 新读取边界 | 上游客户端此前没有读超时 |
 | 35 | ALREADY-OK | 低 | `server_app.go:611-612`；`runtime_rsi.go:2012-2018` | daemon 只"请求"重启，决定权在桌面端 |
 | 36 | ALREADY-OK（有残余） | 中 | `runtime_rsi.go:1352-1358`；ADR 0026 | 有真实代码闸门（请求方回合先结束）；残余：用户的确认仍是给模型的规则，不是代码检查，而 ADR 0026 把 `force` 定义为 agent 的工具 |
@@ -109,6 +109,12 @@ daemon 自己拼 provider 请求、自己读 provider 的回答。两处判断�
 改法：流必须以其协议自己的终止标记结束（OpenAI 的 `[DONE]` 或 finish reason，Anthropic 的 `message_stop`）；provider 说完了怎么结束就信它，即便没发标记。参数没成 JSON 的工具调用让这次发送失败。内核报"没能回答"同样按失败结算，并把原因带进对话。
 
 另外补了上游同款边界：读取有 5 分钟空闲上限，**keepalive 不算活动**（这正是 #32 说的缺陷），provider 不再回话时这次发送失败，而不是把回合、凭据槽和节点永久挂住。
+
+**这条边界后来发现自己漏了一半。** 空闲上限确实触发了（读循环拿到超时，发送被判失败），但回合仍然挂在"运行中"：provider 停了话，连接却还开着，于是两处仍在等它——失败之后估用量要**把 body 读到末尾**（`io.ReadAll`），关闭 body 也要把剩下的排空。两处都等的是同一个还在说话的 provider，于是"provider 不再回话就释放回合"这件事没有真的发生。
+
+补法：这次请求带一个可取消的上下文，读失败时先取消它（连接随即断掉，排空与读取都立刻返回），并且**不再从一个还在输出的 body 里估用量**——用量记为未知，走 daemon 既有的"用量未知"那套账。空闲上限也变成可配的（`GRAPH_PROVIDER_STREAM_IDLE_TIMEOUT`，默认仍是 5 分钟），这样"上限会触发"这件事能被端到端地证明，而不是只能等五分钟。
+
+E2E `tests/e2e/harness-provider-idle.test.ts` 拿真实 daemon 与受控 provider 做两件事：一个 provider 只发 keepalive、不发任何事件，回合必须在上限之内失败并说清是 provider 停了；另一个 provider 每半秒发一个事件、整段回答比上限还长，回合必须成功——上限数的是事件，不是墙上的时间。修复前跑过：只发 keepalive 的那个把回合挂住，E2E 等到超时才失败。
 
 ### 3.2 #1 —— provider 收到的请求必须是 provider 接受的请求（`c9fae98`）
 
@@ -226,9 +232,10 @@ E2E `tests/e2e/harness-tool-schema.test.ts` 拿真实 daemon 与受控 provider�
 | `tests/e2e/harness-native-tool-bounds.test.ts` | 清单、文件搜索与读取各自在自己的上限内作答，并各自说清自己被截断了 | 清单原样返回 1200 项，没有任何东西说它不是完整的 |
 | `tests/e2e/harness-state-retention.test.ts` | daemon 回收上一次运行留下的状态：重启后任务留下的事件不超过规则允许的数量 | daemon 把 17 个事件全留着 |
 | `tests/e2e/harness-stop-clobber.test.ts` | 被停的那一步在任务停掉之后不写自己的结论：node 报的是取消 | node 报 `failed`——它自己的结论盖掉了停止 |
+| `tests/e2e/harness-provider-idle.test.ts` | provider 只发 keepalive 时回合在上限之内失败（而不是把回合挂住）；provider 持续发事件时不会被上限误杀 | 只发 keepalive 的 provider 把回合挂住，E2E 等到超时 |
 | `tests/e2e/harness-tool-schema.test.ts` | provider 收到的工具 schema 不是散文占多数：描述比参数 schema 短、总量有上限；四条防止误用的规则仍在（发布只能给内容或路径其一、确认必须用户明说、git 只读、图提案指向文档） | 描述 10,098 字符（基线 backend 上 9,860），比参数 schema（8,521）还长 |
 
-这六个文件都在修复前跑过，确认失败。
+这七个文件都在修复前跑过，确认失败。
 
 ---
 

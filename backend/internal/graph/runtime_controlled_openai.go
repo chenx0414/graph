@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -522,6 +523,10 @@ type controlledStream struct {
 	settled      bool
 	invocation   string
 	finishReason string
+	// cancelRequest ends the provider request. It is called when the provider
+	// stops answering: the connection is still open then, and everything that
+	// reads the rest of it would wait for the provider to stop talking.
+	cancelRequest func()
 }
 
 // Next returns the next event of the provider stream.
@@ -569,6 +574,9 @@ func (stream *controlledStream) run() {
 		stream.fail(err)
 		return
 	}
+	ctx, cancelRequest := context.WithCancel(request.Context())
+	stream.cancelRequest = cancelRequest
+	request = request.WithContext(ctx)
 	reservation := float64(0)
 	if window, ok := controlledSafeCount(record["contextWindow"]); ok {
 		reservation = float64(window)

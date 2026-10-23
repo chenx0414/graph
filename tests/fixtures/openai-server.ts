@@ -25,6 +25,12 @@ export interface ResponsePlan {
   holdBeforeUsage?: boolean;
   /** Close the connection before the finish reason and the terminator: the answer never arrived. */
   cut?: boolean;
+  /** Hold the connection open and send keepalive comments only: the provider never answers. */
+  keepalive?: boolean;
+  /** How often the keepalive comment is sent, in milliseconds. */
+  keepaliveEveryMs?: number;
+  /** Wait this many milliseconds between the chunks of the answer. */
+  pace?: number;
   beforeReply?: () => Promise<void> | void;
 }
 /**
@@ -62,6 +68,14 @@ export async function openaiServer(plans: ResponsePlan[]) {
       return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (plan.keepalive) {
+      // The provider holds the connection open and says nothing but keepalive
+      // comments. A comment is transport, not an event: the model never
+      // answers, and the answer never starts.
+      const timer = setInterval(() => res.write(': ping\n\n'), plan.keepaliveEveryMs ?? 200);
+      res.on('close', () => clearInterval(timer));
+      return;
+    }
     for (const comment of plan.comments ?? []) res.write(`: ${comment}\n\n`);
     const delta: Record<string, unknown> = { role: 'assistant' };
     if (plan.thinking) delta.reasoning_content = plan.thinking;
@@ -78,6 +92,7 @@ export async function openaiServer(plans: ResponsePlan[]) {
     const finishReason = plan.finishReason ?? (plan.tools ? 'tool_calls' : 'stop');
     if (plan.chunks) {
       for (const chunk of plan.chunks) {
+        if (plan.pace) await new Promise(resolve => setTimeout(resolve, plan.pace));
         res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { role: 'assistant', content: chunk }, finish_reason: null }] })}\n\n`);
       }
       if (plan.tools) {

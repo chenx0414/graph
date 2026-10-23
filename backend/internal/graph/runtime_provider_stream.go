@@ -29,7 +29,23 @@ import (
 // distinguishes a compaction that compacted nothing from one that did.
 
 // providerStreamIdleTimeout is how long a provider stream may say nothing.
-const providerStreamIdleTimeout = 5 * time.Minute
+//
+// The upstream kernel ends such a stream after five minutes, and so does the
+// daemon. The environment variable narrows the bound for a provider that is
+// known to be slow, and lets the test that proves the bound fires run in
+// seconds instead of minutes.
+func providerStreamIdleTimeout() time.Duration {
+	const fallback = 5 * time.Minute
+	raw := strings.TrimSpace(os.Getenv("GRAPH_PROVIDER_STREAM_IDLE_TIMEOUT"))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
 
 // readEvents reads the provider event stream.
 //
@@ -51,9 +67,11 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 	evidence := controlledUsageEvidence{}
 	terminated := false
 	var failure error
+	bodyOpen := false
 	lastEvent := time.Now()
+	idle := providerStreamIdleTimeout()
 	for {
-		line, err := lines.read(providerStreamIdleTimeout - time.Since(lastEvent))
+		line, err := lines.read(idle - time.Since(lastEvent))
 		if line != "" {
 			trimmed := strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(trimmed, "data:") {
@@ -79,14 +97,25 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				failure = errors.New("The provider stopped sending before the answer was complete")
+				bodyOpen = true
 			} else if !errors.Is(err, io.EOF) {
 				failure = err
+				bodyOpen = true
 			}
 			break
 		}
 	}
+	// A provider that stopped answering is still holding the connection open,
+	// and everything that reads the rest of the body would wait for it: the
+	// estimate below reads the body to its end, and closing the body drains
+	// what is left of it. Both would hold the turn, the credential slot and
+	// the node for exactly as long as the provider keeps talking, so the
+	// request is cancelled first and the body is not read again.
+	if bodyOpen {
+		stream.cancelRequest()
+	}
 	usage := evidence.result(stream.api)
-	if usage == nil {
+	if usage == nil && !bodyOpen {
 		if stream.usageOptions.EstimateMissing {
 			estimated := stream.estimateUsage(response)
 			if estimated != nil {

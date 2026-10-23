@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
@@ -294,6 +295,12 @@ func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, e
 	}
 	if settled.Status != durable.SubmissionDone {
 		turn.ErrorMessage = fmt.Sprintf("The durable input was not answered: %s", settled.Status)
+		// The reason the turn could not be answered is what the user needs to
+		// see: "unanswered" on its own says that the turn ended without an
+		// answer, not that the provider stopped sending halfway through it.
+		if detail, ok := settled.Detail.(string); ok && strings.TrimSpace(detail) != "" {
+			turn.ErrorMessage += ": " + detail
+		}
 	}
 	turn.Inspect = session.Inspect()
 	return turn, nil
