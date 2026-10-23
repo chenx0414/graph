@@ -17,6 +17,7 @@ try {
   const billingCosts = {};
   const pricedTokens = {};
   const purposeTotals = {};
+  const purposeCosts = {};
   const contextPerRequest = { cacheRead: [], input: [], output: [] };
   const models = new Map();
   let callsWithFrozenRates = 0;
@@ -82,7 +83,16 @@ try {
         const currency = pricing?.currency ?? 'unspecified';
         const totals = billingCosts[currency] ??= Object.fromEntries(billing.map(key => [key, 0]));
         const priced = pricedTokens[currency] ??= Object.fromEntries(billing.map(key => [key, 0]));
-        for (const key of billing) { totals[key] += usage[key] * rates[key] / 1_000_000; priced[key] += usage[key]; }
+        // The same call counted twice: once by what it was for, once by what it
+        // was made of. A source without a billing type says nothing about the
+        // price - the same tokens cost very differently cached and uncached.
+        const byPurpose = purposeCosts[call.purpose] ??= {};
+        const perType = byPurpose[currency] ??= Object.fromEntries(billing.map(key => [key, 0]));
+        for (const key of billing) {
+          totals[key] += usage[key] * rates[key] / 1_000_000;
+          priced[key] += usage[key];
+          perType[key] += usage[key] * rates[key] / 1_000_000;
+        }
       }
     }
     const cost = parse(call.cost);
@@ -204,6 +214,28 @@ try {
     }
     if (Object.keys(perBilling).length) scenarioCost[currency] = { byBillingType: perBilling, total };
   }
+  // The same scenario, source by source: what each source of spend would
+  // cost if every token it used were priced at the rate the priced calls used.
+  // This is where the whole tree's money goes, split by what it was for and
+  // by what it was made of.
+  const scenarioCostByPurpose = {};
+  for (const [purpose, entry] of Object.entries(purposeTotals)) {
+    const perCurrency = {};
+    for (const [currency, priced] of Object.entries(pricedTokens)) {
+      const amounts = billingCosts[currency] ?? {};
+      const perBilling = {};
+      let total = 0;
+      for (const key of billing) {
+        if (!priced[key]) continue;
+        const rate = (amounts[key] ?? 0) / priced[key];
+        const amount = rate * entry.tokens[key];
+        perBilling[key] = { rate, tokens: entry.tokens[key], amount };
+        total += amount;
+      }
+      if (Object.keys(perBilling).length) perCurrency[currency] = { byBillingType: perBilling, total };
+    }
+    if (Object.keys(perCurrency).length) scenarioCostByPurpose[purpose] = perCurrency;
+  }
   console.log(JSON.stringify({
     schemaVersion: 1,
     caveats: [
@@ -218,6 +250,7 @@ try {
       'A tool error is attributed to the model of the instance that made the call. A session that changed its model belongs to no single model, so its calls are counted in unattributedToolCalls instead: the ledger records the instance of a call, not the model in effect when it was made.',
       'Cache metrics and costByBillingType exclude estimated/unknown provenance; local estimates cannot establish cache misses.',
       'scenarioCost applies the rates the priced calls used to every recorded token; it is a scenario, not an invoice, and it prices the calls whose price is unknown at the rate of the calls whose price is known.',
+      'costByPurposeAndBillingType crosses the purpose of a call with the billing type that prices it, using the rates frozen on that call; a purpose with no priced call is absent rather than zero.',
       'contextPerRequest covers the requests whose cache usage is authoritative; a request whose usage was estimated or unknown is not in it.',
     ],
     summary: {
@@ -225,6 +258,12 @@ try {
       completedKnownCosts: completedCosts,
       costByBillingType: { callsWithFrozenRates, amounts: billingCosts },
       costByPurpose: Object.fromEntries(Object.entries(purposeTotals).sort((a, b) => b[1].requests - a[1].requests)),
+      // What each source of spend cost, split by the billing type that prices
+      // it. The tokens behind each cell are in costByPurpose.
+      costByPurposeAndBillingType: purposeCosts,
+      // The same cross over the whole tree, every recorded token priced at the
+      // rate the priced calls used. A scenario, not an invoice.
+      scenarioCostByPurpose,
       compactions,
       unattributedToolCalls: mixedInstanceCalls,
       scenarioCost,

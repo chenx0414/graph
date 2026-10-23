@@ -100,7 +100,7 @@ node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficie
 
 **能重跑的工具**：
 
-- `scripts/harness-cost.mjs` — 只读快照计量（请求数、计费类型、用途、前缀分布、整树情景计价、压缩次数、工具错误归属）
+- `scripts/harness-cost.mjs` — 只读快照计量（请求数、计费类型、**来源 × 计费类型的交叉**、用途、前缀分布、整树情景计价、压缩次数、工具错误归属）
 - `scripts/harness-prefix-counterfactual.mjs` — 真实请求序列上的前缀推演：
 
   ```sh

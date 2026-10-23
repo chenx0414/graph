@@ -191,6 +191,17 @@ const CHECKS = [
     }],
   },
   {
+    name: '来源 × 计费类型的交叉',
+    subject: 'Price the whole tree and show the prefix every request carried',
+    proves: '每一笔花费按来源和计费类型两个维度分开',
+    e2e: 'tests/e2e/harness-cost.test.ts',
+    edits: [{
+      file: 'scripts/harness-cost.mjs',
+      from: `      costByPurposeAndBillingType: purposeCosts,`,
+      to: `      costByPurposeAndBillingType: {},`,
+    }],
+  },
+  {
     name: '工具结果落盘',
     subject: 'Give the tool result the handle the model needs to read the rest',
     proves: '大结果落盘后模型拿到的是句柄而不是被切断的原文',
@@ -296,7 +307,9 @@ for (const check of CHECKS) {
       writeFileSync(path, text.replace(edit.from, edit.to));
       touched.add(edit.file);
     }
-    buildBackend();
+    // Only a Go change needs the backend rebuilt: the E2E drives the real
+    // binary, and a script the daemon never loads does not.
+    if (check.edits?.some(edit => edit.file.endsWith('.go'))) buildBackend();
     const run1 = runE2E(check.e2e, check.name, check.env);
     const red = run1.code !== 0 && run1.failed.length > 0;
     if (!red) failures += 1;
@@ -309,7 +322,7 @@ for (const check of CHECKS) {
     say(`| \`${commitFor(check.subject)}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | **出错**：${error?.message ?? error} |`);
   } finally {
     for (const file of touched) run('git', ['checkout', '--', file]);
-    if (touched.size) buildBackend();
+    if (check.edits?.some(edit => edit.file.endsWith('.go'))) buildBackend();
   }
 }
 
