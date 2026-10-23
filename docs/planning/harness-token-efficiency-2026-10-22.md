@@ -1,6 +1,6 @@
 # Graph harness 价格加权成本：2026-10-22
 
-分支 `feature/harness-token-efficiency-2026-10-22`（从 `main` 另开，每次 `main` 前进就 rebase 一次；正文写的数字对应 `main` 的 `f1daaa8f`）。
+分支 `feature/harness-token-efficiency-2026-10-22`（从 `main` 另开，每次 `main` 前进就 rebase 一次；正文写的数字对应 `main` 的 `c913632a`）。
 本轮目标：降低**每个完成任务**的价格加权成本，质量不下降。
 
 **报告里引用的提交号都是 rebase 之后的当前分支上的号**（`git branch --contains <hash>` 能查到）。用 `node scripts/report-commit-links.mjs docs/planning/harness-token-efficiency-2026-10-22*.md` 可以在再次 rebase 后自动把它们重指向。
