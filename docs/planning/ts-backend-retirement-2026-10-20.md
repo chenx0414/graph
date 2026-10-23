@@ -505,6 +505,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 **所以缺口在 Go 这一侧**：daemon 被 SIGKILL 时，**那条 socketpair 的父端没有关上**，worker 收不到 EOF，于是 `disconnect → cancel → kill(-pid)` 那条链根本没被触发。试着给 worker 加一道**不依赖 channel** 的兜底（盯住主人的 pid，主人被 reparent 就收手），**不可靠**：三轮测量里时好时坏，说明这条兜底在 daemon 这一侧也没能稳定生效。**因此 keeper 与这个兜底都没有落**：keeper 是红的（它证明的是真实缺口，不能以失败状态进门禁），兜底是没被证实的（不能拿一条时好时坏的修复去换一条契约）。
 
+**还有两处必须说清楚「未证实」**：① 之前说「worker 的四个处理函数一个都没触发」，依据是**没找到** worker 的日志——但**从没确认过 worker 的工作目录**，日志完全可能落在别处，所以「处理函数没触发」**没有成立**；② 说「daemon 硬杀了 worker」也不对——`runtime_host_command.go` 里**根本没有 `Process.Kill()`**（只有 `killTree()`，那是给 worker 发一条 'cancel' 消息），Go 并没有硬杀它。**所以 worker 是自己走的**，走的时候没有把命令带走。
+
+**于是要分辨的就是这两种**：(a) worker 收到了 'disconnect'，它的 `cancel` 也跑了，但 `process.kill(-pid, 'SIGKILL')` **没能杀掉命令那一组**（命令是 worker 用 `detached: true` 起的，独占一个进程组）；(b) worker 是以别的方式结束的，命令压根没收到任何信号。(a) 与 (b) 的判据很干净：**让 worker 把日志写进它自己知道的那个目录——命令的工作目录（`prepared.cwd`）**，命令就在那儿跑，日志就在那儿；再顺带记下 worker 自己的 pid、它的 ppid、以及它起的那个命令的 pid。**命令的 ppid 是 daemon** 这件事也一并解释：worker 退出后，命令被 reparent 到了 daemon（而 daemon 还活着），所以后来 daemon 被 SIGKILL，命令就成了孤儿。
+
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
 
 **因此修法的方向变了**：要让命令的寿命真正绑在 daemon 上，得让**命令自己**（或它的直接主人）在 daemon 消失时收手——例如把命令放进 worker 的进程组、由 worker 持有它的 pid 并在主人消失时连坐；或者让 daemon 在关停时连命令的进程组一起收（但 SIGKILL 没有这个机会）。**具体怎么改要先看 Go 到底是怎么起这个命令的**：`runtime_host_command.go:201` 看起来只起了 worker 一个进程，而 ps 显示命令的直接主人是 daemon——这两件事对不上，**先把这个对不上弄清楚**（谁 fork 了命令、worker 什么时候没的），再定修法。
