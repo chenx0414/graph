@@ -16,9 +16,13 @@
 
    - 第一条：**判定“这是环境的问题”的正则写的是 Node 主机的话**（`ECONNREFUSED`、`socket hang up`），而 Go 主机说的是 `connection refused`、`connection reset by peer`——Go 侧一次网络失败都没被判成环境失败，harness 自己承诺的那两次自动重试因此一次都没跑过。已修（`f2f44b5d`）。
 
-   - 第二条：**领取路径只从“已排队”的行里领**——执行器的 claim 读的是 `kernel_queue ... state='queued'`，而生命周期的重试把 node 重新置为 pending、把 activation 的轮次加一，**却把队列里那一项留在 failed**，于是那个 pending 的 node 什么也领不到，重试也就永远不发生。TypeScript 主机（这个 daemon 的原型）做的是同一件事，所以这个洞在原型里也有，不只是移植时带来的。
+   - 第二条：**承诺的自动重试不是立刻发生的**。节点的回合因为 provider 忙（HTTP 503）失败时，harness 确实还会再跑一次这个 node——但要等 10 到 40 秒，而且走的不是那条承诺的自动重试，而是 graph 层把输入重新投递了一遍（事件里能看到一个新的队列项 `exec-…-work-2`）。有几次它一分钟之内根本没恢复：node 以“required output(s) still missing”失败——重试那一轮的提交被拒了。
 
-     这条修过一版（`846bca64`，把队列项放回 queued），因为怕它变成“同一份输入送两遍”而退回（`b67b700e`）；换一种写法再修一版（`b0cd2c8a`），端到端的证明仍然没有：夹具修对之后重跑，node 依旧没在等待时间内落终态。顺着它把顺序查清楚了，答案却在修法本身：worker 先上报自己的结果，执行器随后才把队列项写成 failed，于是**生命周期做重试的时候队列项还是 `claimed`、不是 `failed`**，而重试刚放回去的 pending 也被随后那次失败写抵消（node 与队列项一起被写回 failed）。重新入队的那一版因此撤回（`f9e74a37`）：真正的修法是给这两处写入定顺序，那会动到每一个节点的失败路径，是一件有意识的工程，不该在收尾时上。
+     代码上的原因是**两处写入在赛跑**：生命周期的瞬时重试把 node 重新置为 pending、把 activation 的轮次加一（`nodes` 表），执行器的失败写随后才落下（`kernel_nodes.status='failed'`、队列项写成 failed、节点队列被暂停）。重装被覆盖掉了，于是被重新武装的 node 什么也领不到；最后把它推着往前走的是 graph 层的重新投递——那是一次竞态，不是 harness 承诺的重试。TypeScript 主机（这个 daemon 的原型）做的是同一件事，所以这个洞在原型里也有，不只是移植时带来的。
+
+     这条修过三版，都撤回了。头两版（`846bca64` → `b67b700e`，`b0cd2c8a` → `f9e74a37`）是把队列项放回 queued，撤回的理由是端到端证明没有：夹具修对之后重跑，node 依旧没在等待时间内落终态；顺着它把顺序查清楚了，答案却在修法本身——生命周期做重试的时候队列项还是 `claimed`、不是 `failed`。第三版（未提交）换了个思路：让执行器的失败写让位于重装——重装过的 node 不写 failed，改为把工作重新入队（并把 generation 加一，下一次尝试是一个新的 execution）、node 留在 idle。这一版**证明不了**：能构造出来的场景（provider 连着三次 503、第四次正常）根本走不到执行器的失败写，回合的失败不经过那条路，改了它量不出任何差别；而那个场景的端到端测试本身还是竞态的——九次里有一次，重试那一轮的提交被拒，node 以“required output(s) still missing”失败。
+
+     所以这一条仍然是开着的，下一步不是再改一处写入，而是**把回合的失败与生命周期的结算合成一个决定**：失败写与重装写现在是两个人在赛跑，应该由同一个地方一次写完（谁在写失败，谁就知道该不该重装）。
 
 4. **#41 查下来在本栈里不成立**：清单写的是"子 Agent 打到回合上限却报完成"。本栈没有回合上限——内核的 `MaxTurns` 默认是 0（不限），daemon 从不设置它——所以那个场景不会发生；"没能回答"的回合本分支已经按失败结算（`c9fae98c`）；节点声明了必需输出时由 `settleDeliverable` 核对，图也不因为节点成功就隐式完成（`docs/agent/graph-v2.md:242`）。改过一轮又退了（`0c9b3a9e` → `5222d84d`）：那个改动让空回合的节点迟迟不落到终态，发一个可能把节点挂住的改动比留着这个缺陷更糟。剩下的残余只有一条很窄的：回合成功结束但没有内容，而节点又没有声明必需输出——契约里节点把必需输出写在 `submission` 里，没声明就没有可缺的东西。
 
@@ -201,7 +205,9 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 
 ### 3.12 清单之外：Go 主机的网络失败从来没被判成环境失败（`f2f44b5d`）
 
-判定“这是环境的问题，不是代码的错”的正则写的是 Node 主机的话：`ECONNREFUSED`、`ENOTFOUND`、`socket hang up`、`ETIMEDOUT`。Go 主机说的是 `connection refused`、`no such host`、`connection reset by peer`、`i/o timeout`——一条都不匹配。于是 Go 侧没有任何一次网络失败被判成环境失败，harness 自己承诺的两次自动重试一次都没跑过：node 被交给了 main，而不是被重试。
+判定“这是环境的问题，不是代码的错”的正则写的是 Node 主机的话：`ECONNREFUSED`、`ENOTFOUND`、`socket hang up`、`ETIMEDOUT`。Go 主机说的是 `connection refused`、`no such host`、`connection reset by peer`、`i/o timeout`——一条都不匹配。于是 Go 侧没有任何一次网络失败被判成环境失败，生命周期那条承诺的自动重试分支一次都没进过：失败被直接交回 main，而不是先被判成环境问题再试一次。
+
+（这条分支与执行器的失败写之间还压着第二个洞，见摘要第 3 条：那条后来查清了——重试确实会发生，但不是立刻发生，走的是 graph 层把输入重新投递一遍。）
 
 正则现在同时认这两种说法，并加上 provider 侧的 `429` 与 `5xx`。分类集中在 `core_environment_failure.go` 一处，下游的重试与可观测性都读它。
 
