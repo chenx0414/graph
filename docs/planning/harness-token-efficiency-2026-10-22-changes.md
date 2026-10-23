@@ -6,7 +6,7 @@
 
 四个独立提交，每个可单独 revert。
 
-### 4.1 `496017be` Replay the assistant turn the model wrote
+### 4.1 `84aa5953` Replay the assistant turn the model wrote
 
 **问题**：daemon 拼请求时，助手回合只保留 text 和 toolCall。模型写下的 reasoning、Anthropic 给 reasoning 的签名、provider 自己留着的 redacted reasoning、以及 **Anthropic 传输上的 tool_use 块本身**，全部被丢掉。
 
@@ -24,7 +24,7 @@
 
 **验证**：新 E2E `tests/e2e/provider-assistant-replay.test.ts` 跑真实 Go 后端 + 真实 PiG 内核 + 真实 bash 工具，打脚本 provider，断言 provider 收到的请求体。**改前两条都红，改后两条都绿。**
 
-### 4.2 `5dfaa2f4` Mark the cacheable prefix on the Anthropic transport
+### 4.2 `8c99026b` Mark the cacheable prefix on the Anthropic transport
 
 **问题**：Anthropic 自己不缓存前缀，只缓存断点标记的部分，其余按满额输入价计费。daemon 的 Anthropic 请求**一个断点都没有**——系统提示、工具声明、整段对话每一轮都按满额重新付一遍。
 
@@ -36,7 +36,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：同上 E2E 断言三个断点都在。
 
-### 4.3 `47bc0701` Let the environment name how far the context may grow
+### 4.3 `aba58473` Let the environment name how far the context may grow
 
 **问题**：会话在到达供应商窗口前才压缩，于是长到 50 万 token。压缩读取是任务花费里最大的单块，而主会话就是它挣来的地方。
 
@@ -46,7 +46,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：新 E2E `tests/e2e/compaction-context-ceiling.test.ts`——设上限时 provider 收到一次摘要请求（一个远未填满窗口的对话），不设时不收到。改前红，改后绿；默认路径两种情况都不变。
 
-### 4.4 `f328ca31` Price the whole tree and show the prefix every request carried
+### 4.4 `a6fcef44` Price the whole tree and show the prefix every request carried
 
 报告原来有"一个任务花了多少、请求去了哪里"，但没有价格由什么构成的两块：
 
@@ -56,7 +56,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 现有 CLI E2E 增加对应断言，10 项仍全绿。
 
-### 4.5 给摘要它需要的空间（`8153fccf`）
+### 4.5 给摘要它需要的空间（`9080f89a`）
 
 压缩失败会把会话留在它想缩小的那段上下文里，之后每个请求都重新付整段前缀。记录在案的历史里有 **9 次压缩失败，其中 6 次是同一个原因**：摘要生成撞到输出上限，摘要不完整。
 
