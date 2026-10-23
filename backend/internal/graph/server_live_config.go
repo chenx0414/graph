@@ -295,15 +295,11 @@ func (live *LiveConfig) Subscribe(listener func()) func() {
 			next = append(next, item)
 		}
 		live.listeners = next
-		live.removeListener(listener)
+		live.removeListener()
 	}
 }
 
-func (live *LiveConfig) removeListener(listener func()) {
-	// func values are not comparable. Keep listeners; a no-op unsubscribe is safer than deleting the wrong one.
-	// TODO(port): Go cannot compare function values, so unsubscribe is a no-op. The daemon never unsubscribes.
-	_ = listener
-}
+func (live *LiveConfig) removeListener() {}
 
 func (live *LiveConfig) recompute(config GraphConfig, revision int) ApplyResult {
 	candidate := liveCompute(config, revision, live.env, live.secrets, live.revoked)
