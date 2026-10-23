@@ -110,3 +110,37 @@ func (s *TaskStore) SetTaskTargetSha(taskID, sha string) {
 func (s *TaskStore) SetTaskIntegrationAndTarget(taskID, integrationSha, targetSha string) {
 	kernelExec(s.DB, "UPDATE tasks SET integration_sha=?,target_sha=? WHERE id=?", integrationSha, targetSha, taskID)
 }
+
+// The task creations. Each kind of task is created with the columns it
+// carries, and the store keeps that shape in one place.
+
+// CreateGraphTask creates the task of a new graph.
+func (s *TaskStore) CreateGraphTask(id, projectID, request string, createdSeq int64) {
+	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq,phase) VALUES(?,?,?,?,?,?,?)", id, projectID, request, 1, 0, createdSeq, "running")
+}
+
+// CreateSubgraphTask creates the task of a graph under a conversation.
+func (s *TaskStore) CreateSubgraphTask(id, projectID string, conversationID any, request string, createdSeq int64, targetBranch any) {
+	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,conversation_id,request,requirement_version,latest_proposal,created_seq,phase,target_branch) VALUES(?,?,?,?,1,0,?,?,?)",
+		id, projectID, conversationID, request, createdSeq, "running", targetBranch)
+}
+
+// CreateMasterTask creates the task of one master turn.
+func (s *TaskStore) CreateMasterTask(id, projectID, request string, createdSeq int64) {
+	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)", id, projectID, request, createdSeq)
+}
+
+// CreateConversationTask creates the task a conversation is anchored to.
+func (s *TaskStore) CreateConversationTask(id, projectID, request, phase string, createdSeq int64, conversationID string) {
+	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,phase,created_seq,conversation_id) VALUES(?,?,?,1,?,?,?)",
+		id, projectID, request, phase, createdSeq, conversationID)
+}
+
+// CreateConfirmedTask creates the task of a confirmed proposal.
+//
+// The first proposal of a task is the one that is accepted, so the latest
+// and the accepted proposal are both the first.
+func (s *TaskStore) CreateConfirmedTask(id, projectID, request string, requirementVersion int64, targetBranch any, phase string, createdSeq int64, conversationID any, decisionDigest any) {
+	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,?,1,1,?,?,?,1,?,?)",
+		id, projectID, request, requirementVersion, targetBranch, phase, createdSeq, conversationID, decisionDigest)
+}

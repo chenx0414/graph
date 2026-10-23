@@ -1529,7 +1529,7 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 		}
 		taskId := graphUUID()
 		sequence := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM tasks")["count"]) + 1
-		kernelExec(runtime.store.Db, "INSERT INTO tasks(id,project_id,request,created_seq) VALUES(?,?,?,?)", taskId, input.ProjectId, input.Request, sequence)
+		runtime.store.CreateMasterTask(taskId, input.ProjectId, input.Request, sequence)
 		if runtime.master != nil && runtime.masterModel() != nil && runtime.masterDefinitionVersion() != nil {
 			spec := NodeSpec{
 				Id:                "master",
@@ -2712,8 +2712,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		if len([]rune(title)) > 120 {
 			title = string([]rune(title)[:120])
 		}
-		kernelExec(runtime.store.Db, "INSERT INTO tasks(id,project_id,request,requirement_version,phase,created_seq,conversation_id) VALUES(?,?,?,1,?,?,?)",
-			taskId, workspaceProjectId, title, "chatting", sequence, conversationId)
+		runtime.store.CreateConversationTask(taskId, workspaceProjectId, title, "chatting", sequence, conversationId)
 		kernelExec(runtime.store.Db, "INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES(?,?,?,?,?,?,?)",
 			conversationId, projectId, workspaceProjectId, taskId, title, sequence, NowMillis())
 		if runtime.master != nil && runtime.masterModel() != nil {
@@ -3154,8 +3153,7 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		if active == "" {
 			phase = "running"
 		}
-		kernelExec(runtime.store.Db, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,?,1,1,?,?,?,1,?,?)",
-			taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, phase, sequence, conversationId, row["decision_snapshot"])
+		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, phase, sequence, conversationId, row["decision_snapshot"])
 		kernelExec(runtime.store.Db, "INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)",
 			taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
 		MaterializeGraph(runtime.kernel, taskId, ParseGraphDefinition(proposal.Definition), "Confirmed conversation draft")

@@ -69,7 +69,7 @@ func (runtime *GraphRuntime) Create(definition any, request, projectId string) C
 		if runtime.taskRow() != nil {
 			Raise("invalid_graph", "Graph "+runtime.graphId+" already exists")
 		}
-		kernelExec(runtime.kernel.Store.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,created_seq,phase) VALUES(?,?,?,?,?,?,?)", runtime.graphId, projectId, request, 1, 0, NowMillis(), "running")
+		runtime.kernel.Store.CreateGraphTask(runtime.graphId, projectId, request, NowMillis())
 		revision := runtime.kernel.InsertRevision(runtime.graphId, parsed, "create")
 		result := CreatedGraph{GraphId: runtime.graphId, Definition: parsed}
 		result.Revision.Version = revision.Version

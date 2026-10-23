@@ -165,8 +165,7 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 			if parent.ConversationID != nil {
 				conversationId = *parent.ConversationID
 			}
-			kernelExec(service.kernel.Db, "INSERT INTO tasks(id,project_id,conversation_id,request,requirement_version,latest_proposal,created_seq,phase,target_branch) VALUES(?,?,?,?,1,0,?,?,?)",
-				graphId, parent.ProjectID, conversationId, definition.Name, NowMillis(), "running", targetBranchValue)
+			service.kernel.Store.CreateSubgraphTask(graphId, parent.ProjectID, conversationId, definition.Name, NowMillis(), targetBranchValue)
 			if hasTargetBranch {
 				service.kernel.Store.PauseTask(graphId)
 			}
