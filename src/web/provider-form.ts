@@ -298,6 +298,35 @@ export function draftForCredential(
   };
 }
 
+/** What the daemon knows about one credential's value. */
+export interface CredentialValueState {
+  /** The daemon's per-credential answer: did the account's own variable resolve? */
+  credentialState?: boolean | undefined;
+  /** Whether the keychain holds a value for this account. */
+  keyResolved?: boolean | undefined;
+  /** The platform-wide flag, used only when the account has no answer of its own. */
+  platformConfigured?: boolean | undefined;
+}
+
+/**
+ * Whether one account's credential is resolved.
+ *
+ * The daemon's per-credential answer outranks the platform flag: one platform
+ * may hold several accounts, so another account's variable says nothing about
+ * this one. Without that precedence the card reports 凭据已解析 for an account
+ * that has no value, and the only symptom is a model that silently never
+ * dispatches, because its credential is dropped before the model list is built.
+ */
+export function credentialResolved(
+  credentialId: string,
+  resolution: CredentialValueState,
+): boolean {
+  const perCredential = resolution.credentialState;
+  if (perCredential === false && !resolution.keyResolved) return false;
+  if (perCredential === true || resolution.keyResolved) return true;
+  return Boolean(resolution.platformConfigured);
+}
+
 /** The slice of a config document the model step needs: the credentials that
 exist and the models already attached to them. */
 export interface ModelVendorConfig {
