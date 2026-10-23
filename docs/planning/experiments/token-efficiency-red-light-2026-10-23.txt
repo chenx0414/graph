@@ -1,17 +1,17 @@
 # 红灯验证：撤掉生产改动，E2E 必须红
 
 分支：feature/harness-token-efficiency-2026-10-22
-时间：2026-10-23T10:31:03.992Z
+时间：2026-10-23T11:35:26.921Z
 
 | 改动 | 撤掉的是什么 | E2E | 结果 |
 | --- | --- | --- | --- |
-| `0b4ac8ab` 助手回合如实回放 | 模型写下的 reasoning 回到下一轮请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an openai answer keeps its reasoning and its tool call for the next request） |
-| `c25aa469` Anthropic 缓存断点 | 系统提示、工具声明、对话三处断点在请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an anthropic answer keeps its signed reasoning and its tool call for the next request） |
-| `8366b8f8` 压缩上限 | 环境变量命名的上限让会话提前压缩 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：a named ceiling compacts the session before the provider window would） |
-| `5c32221a` 摘要输出预算 | 摘要请求带的是它自己的额度，不是模型的整个上限 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：the summary is asked for the room the handoff needs, and it fits） |
-| `17aa68df` 任务说明包复用 | 开启开关后第二轮不再重发任务说明 | `tests/e2e/task-setup-reuse.test.ts` | **红**（1 项失败：with the switch the session keeps the task setup it already read） |
-| `88cc7298` 来源 × 计费类型的交叉 | 每一笔花费按来源和计费类型两个维度分开 | `tests/e2e/harness-cost.test.ts` | **红**（1 项失败：boundSearch=false/matchSearch=true/customRules=false/classifyFriction=true/compactDocs=false/cache=standard: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI） |
-| `9039e148` 工具结果落盘 | 大结果落盘后模型拿到的是句柄而不是被切断的原文 | `tests/e2e/tool-result-spill.test.ts` | **红**（1 项失败：a large command result is written to a file and the model is given the handle） |
+| `81083e55` 助手回合如实回放 | 模型写下的 reasoning 回到下一轮请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an openai answer keeps its reasoning and its tool call for the next request） |
+| `90805741` Anthropic 缓存断点 | 系统提示、工具声明、对话三处断点在请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an anthropic answer keeps its signed reasoning and its tool call for the next request） |
+| `a65a462a` 压缩上限 | 环境变量命名的上限让会话提前压缩 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：a named ceiling compacts the session before the provider window would） |
+| `57cd34bd` 摘要输出预算 | 摘要请求带的是它自己的额度，不是模型的整个上限 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：the summary is asked for the room the handoff needs, and it fits） |
+| `36c1430a` 任务说明包复用 | 开启开关后第二轮不再重发任务说明 | `tests/e2e/task-setup-reuse.test.ts` | **红**（1 项失败：with the switch the session keeps the task setup it already read） |
+| `ada5dc8b` 来源 × 计费类型的交叉 | 每一笔花费按来源和计费类型两个维度分开 | `tests/e2e/harness-cost.test.ts` | **红**（1 项失败：boundSearch=false/matchSearch=true/customRules=false/classifyFriction=true/compactDocs=false/cache=standard: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI） |
+| `06314481` 工具结果落盘 | 大结果落盘后模型拿到的是句柄而不是被切断的原文 | `tests/e2e/tool-result-spill.test.ts` | **红**（1 项失败：a large command result is written to a file and the model is given the handle） |
 
 ## 还原之后
 
