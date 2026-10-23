@@ -526,7 +526,13 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 **关键在于：受限进程才是命令的监管人**（超时、取消、主人断开，都由它执行）——但**它没有待在命令跑完**。于是命令成了 launchd 的孩子，**没有任何人负责结束它**：daemon 死它不死，监管人死它也不死。而这条链上真正「该负责」的是受限进程——它本来就是那个角色。
 
-**因此修法的方向定下来了**：**受限进程必须活到它起的命令结束**（它本来就是监管人，退出等于把监管丢了），并且**主人（daemon）消失时它要能把命令收掉**。落点有两处，都在 `src/runtime/restricted-process.ts`：一是别让进程在命令还在跑的时候退出；二是命令在跑的时候，别把 IPC channel unref 掉（`channelIdle()` 那条路正是监管通道）。
+**但真正的机制比这更靠后一层，而且已经查清（测量 + 代码互证）**：Go 侧的沙箱宿主命令走的是一条**全是 exec 的链**——`backend/internal/graph/runtime_restricted_process.go:721` 的 `spawnAndWait` 起 `/bin/sh -c`（`Setpgid: true`）→ 它 exec `sandbox-exec` → 它 exec 内层 `/bin/sh -c` → 它 exec **命令本身**。**exec 会把进程换成目标，pid 不变**，所以整条链只有一个进程：**命令的父进程就是 Go daemon 本身**。测量也对得上：daemon 活着时它是 daemon 的孩子，daemon 被 SIGKILL 之后它被 reparent 给 launchd（ppid=1 ✓），**从此没有任何人负责结束它**。Go 的 `spawnAndWait` 确实在等结果 ✓，但**它自己就是那个监管人**——daemon 一死，监管也跟着没了。
+
+（顺带排除两条：TS 侧车那条 `restricted-process.ts` 的路径**没有参与**——给它装日志，它只有一行「干净退出」，**连「即将起命令」都没有**；Go 的 `host-command-worker.mjs` 那条路径也没参与——worker 的日志两次都空。真正在跑的是 Go 自己那份 `runtime_restricted_process.go` ✓。）
+
+**因此修法只有一个形状**：**命令和 daemon 之间必须隔着一个能比 daemon 活得久的监管人**。仓库里已经有这个形状——`src/runtime/host-command-worker.mjs`：它是独立进程，靠 IPC channel 知道主人没了（channel 的父端随 daemon 一起关掉 → 它收到 disconnect → `cancel` → 杀掉命令那一组）✓，隔离实验里这条路是通的 ✓。所以要么让沙箱路径也走同样的监管人，要么让命令自己盯着 daemon 的 pid。
+
+**keeper 照旧**：让 check 模块的产出合法，命令真的活着，然后 SIGKILL daemon，断言心跳在有界时间内停。
 
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
 
