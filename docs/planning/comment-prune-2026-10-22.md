@@ -284,6 +284,27 @@ main 在守卫生效之后仍然持续提交同一批超大文件——`backend/
 
 剩下的 31 处里有 11 处形状与「map 顺序」相似，但说的都不是「把键排一下」：`encoding/json` 的键序、CanonicalJSON 的内容相等、`sections` 按名读取、请求指纹的键序、Pi SDK 的流对象没被移植。这些是事实，删掉就丢了信息，所以留着。
 
+### 复核清单：每个数字对应的命令
+
+这份文档里的每个数字都配一条能跑的命令。读者不必相信本文档，跑一遍就能对上。
+
+| 数字 | 命令 | 当前输出 |
+| --- | --- | --- |
+| 单元 1 的规模 | `git show --numstat --format="" 045d6a3f \| awk '$3 !~ /^docs\/planning/ {a+=$1;d+=$2;n++} END {print n, a, d}'` | `37 3 176`（净减 173） |
+| 单元 1 的源文件 hunk 数 | `git show --format='' -U0 045d6a3f -- . ':(exclude)docs/planning/comment-prune-2026-10-22.md' \| grep -c '^@@'` | `92` |
+| 注释行数（毛删/新增/净减） | 按「去掉缩进后以 `//`、`#`、`/*`、`*` 开头的非空行，块注释内部行计入」逐文件数，见 2.1 节那张表 | 改名 14/1/13、合并 14/0/14、合计 28/1/27 |
+| `TODO(port)` 代码范围 | `git grep -h 'TODO(port)' main -- backend/ src/ \| wc -l` ／ `grep -rh 'TODO(port)' backend/ src/ \| wc -l` | `58` ／ `31` |
+| 排序键调用点 | `grep -rn 'sortedKeys(\|anySortedKeys(' backend/ --include='*.go' \| grep -v keyutil.go \| wc -l` | `35` |
+| provider-form.ts 相对 main 的增量 | `echo $(( $(git cat-file -s HEAD:src/web/provider-form.ts) - $(git cat-file -s main:src/web/provider-form.ts) ))` | `581` |
+| 每个提交需要的 token 上限 | `git show <commit>:<file> \| wc -c` 除以 4 取上整；守卫本身是 `node scripts/check-file-tokens.mjs <file>` | 见「提交钩子」那节的表 |
+| 等价证明（TS/JS） | 对改前改后各跑一次 esbuild 转译后逐字节比对 | 31 个文件、31 份产物相同 |
+| 等价证明（Go） | `go build -trimpath` 编译两个提交后 `go tool objdump` 逐函数比对 | 40209 个函数、40208 个相同 |
+| 并行推进的时间证据 | `git log --format='%h %ai %s' main..HEAD --reverse` | 单元 2–6 落在 15:18:34–15:39:14 且交错；单元 7 从 15:54:45 起 |
+| 分支状态 | `git rev-list --left-right --count main...HEAD` | `0	36`（落后 0、领先 36） |
+| 套件规模 | `git show HEAD:tests/suite-baseline.json` | `files 296, tests 1533` |
+
+口径本身也写明了，不靠读者猜：「注释行」的定义在 2.1 节和上面这张表里各写一次；「`TODO(port)`」的代码范围与全仓范围都给出；单元 1 的 hunk 数区分「源文件」与「含本文档」；token 上限一律是「暂存区那个 blob 的大小 ÷ 4，向上取整」。
+
 ### 第 1 步的行为等价证明
 
 注释删除不改变行为，但「删了注释所以行为没变」这句话本身需要证据，不能只靠断言。三条独立证据：
