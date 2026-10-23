@@ -583,7 +583,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     if (isCustom) setCustom(current => ({ ...current, ...next }));
     else setAccount(current => ({ ...current, ...next }));
   };
-  const resolved = credentialResolved(active.credentialId, {
+  const resolved = credentialResolved({
     credentialState: credentialState[active.credentialId],
     keyResolved: keyResolved[active.credentialId],
     platformConfigured: selected?.credentialConfigured,

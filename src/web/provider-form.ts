@@ -317,10 +317,7 @@ export interface CredentialValueState {
  * that has no value, and the only symptom is a model that silently never
  * dispatches, because its credential is dropped before the model list is built.
  */
-export function credentialResolved(
-  credentialId: string,
-  resolution: CredentialValueState,
-): boolean {
+export function credentialResolved(resolution: CredentialValueState): boolean {
   const perCredential = resolution.credentialState;
   if (perCredential === false && !resolution.keyResolved) return false;
   if (perCredential === true || resolution.keyResolved) return true;
