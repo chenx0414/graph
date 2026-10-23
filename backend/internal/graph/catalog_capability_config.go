@@ -120,11 +120,10 @@ func CapabilityConfigViewOf(record CapabilityRecord, values map[string]string) (
 			Env: env, Label: capabilityConfigFieldName(env), Secret: capabilityConfigSecret(env, reason), Reason: reason,
 		})
 	}
-	// TODO(port): manifest object key order is sorted; TypeScript walked insertion order.
-	for _, header := range portKeys(stringMap(manifest["headersEnv"])) {
+	for _, header := range sortedKeys(stringMap(manifest["headersEnv"])) {
 		add(stringMap(manifest["headersEnv"])[header], "请求头 "+header)
 	}
-	for _, name := range portKeys(stringMap(manifest["env"])) {
+	for _, name := range sortedKeys(stringMap(manifest["env"])) {
 		for _, env := range capabilityConfigEnvRefs(stringMap(manifest["env"])[name]) {
 			add(env, "环境变量 "+name)
 		}

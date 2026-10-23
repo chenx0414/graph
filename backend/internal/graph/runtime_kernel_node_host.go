@@ -184,7 +184,6 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 							entries = append(entries, kernelSectionEntry{id: value.Id, value: value})
 						}
 					} else {
-						// TODO(port): definition section walks are sorted; TypeScript Object.entries keeps insertion order.
 						entries = kernelSectionEntries(definition, section)
 					}
 					selected := []kernelSectionEntry{}
@@ -282,27 +281,27 @@ func kernelSectionEntries(definition GraphDefinition, section string) []kernelSe
 	out := []kernelSectionEntry{}
 	switch section {
 	case "nodes":
-		for _, id := range portKeys(definition.Nodes) {
+		for _, id := range sortedKeys(definition.Nodes) {
 			out = append(out, kernelSectionEntry{id, definition.Nodes[id]})
 		}
 	case "modules":
-		for _, id := range portKeys(definition.Modules) {
+		for _, id := range sortedKeys(definition.Modules) {
 			out = append(out, kernelSectionEntry{id, definition.Modules[id]})
 		}
 	case "edges":
-		for _, id := range portKeys(definition.Edges) {
+		for _, id := range sortedKeys(definition.Edges) {
 			out = append(out, kernelSectionEntry{id, definition.Edges[id]})
 		}
 	case "protocols":
-		for _, id := range portKeys(definition.Protocols) {
+		for _, id := range sortedKeys(definition.Protocols) {
 			out = append(out, kernelSectionEntry{id, definition.Protocols[id]})
 		}
 	case "inputs":
-		for _, id := range portKeys(definition.Inputs) {
+		for _, id := range sortedKeys(definition.Inputs) {
 			out = append(out, kernelSectionEntry{id, definition.Inputs[id]})
 		}
 	case "outputs":
-		for _, id := range portKeys(definition.Outputs) {
+		for _, id := range sortedKeys(definition.Outputs) {
 			out = append(out, kernelSectionEntry{id, definition.Outputs[id]})
 		}
 	}

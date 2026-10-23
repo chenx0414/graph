@@ -3,6 +3,7 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -111,7 +112,7 @@ func (runtime *ModuleRuntime) compile(moduleId string) compiledModule {
 		}
 	}
 	runtime.compiled = &compiledModule{
-		trigger: trigger, requiredInputs: required, rules: rules, inputNames: mapKeysAny(record["inputs"]), updatedAt: signature,
+		trigger: trigger, requiredInputs: required, rules: rules, inputNames: anySortedKeys(record["inputs"]), updatedAt: signature,
 	}
 	return *runtime.compiled
 }
@@ -179,7 +180,7 @@ func (runtime *ModuleRuntime) acceptControl(moduleId, inputName string, value an
 // Deliver stores one input and judges it.
 func (runtime *ModuleRuntime) Deliver(moduleId, inputName string, value any) ModuleEvaluation {
 	record := moduleRecord(runtime.module(moduleId))
-	if _, ok := mapKeysSet(record["inputs"])[inputName]; !ok {
+	if !slices.Contains(anySortedKeys(record["inputs"]), inputName) {
 		Raise("invalid_input", fmt.Sprintf("Module %s has no input %s", moduleId, inputName))
 	}
 	if control := runtime.acceptControl(moduleId, inputName, value); control != nil {
@@ -319,7 +320,7 @@ func (runtime *ModuleRuntime) deliverEvaluated(moduleId, inputName string, value
 func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName string, value any, evaluate moduleEvalFn, implementationVersion int, deliveryId string) ModuleEvaluation {
 	module := runtime.module(moduleId)
 	record := moduleRecord(module)
-	if _, ok := mapKeysSet(record["inputs"])[inputName]; !ok {
+	if !slices.Contains(anySortedKeys(record["inputs"]), inputName) {
 		Raise("invalid_input", fmt.Sprintf("Module %s has no input %s", moduleId, inputName))
 	}
 	control, _ := record["control"].(map[string]any)
@@ -335,7 +336,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 	}
 	runtime.kernel.SetModuleInput(runtime.taskId, moduleId, inputName, value, moduleRuntimeSource("deliver"))
 	inputs := map[string]any{}
-	for _, name := range mapKeysAny(record["inputs"]) {
+	for _, name := range anySortedKeys(record["inputs"]) {
 		row := runtime.kernel.ModuleInput(runtime.taskId, moduleId, name)
 		if row != nil && row.Delivered {
 			inputs[name] = row.Value
@@ -509,26 +510,6 @@ func stringListAny(value any) []string {
 		}
 	}
 	return out
-}
-
-func mapKeysAny(value any) []string {
-	record, ok := value.(map[string]any)
-	if !ok {
-		return nil
-	}
-	keys := make([]string, 0, len(record))
-	for key := range record {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-func mapKeysSet(value any) map[string]bool {
-	set := map[string]bool{}
-	for _, key := range mapKeysAny(value) {
-		set[key] = true
-	}
-	return set
 }
 
 func moduleLimits(value any) *ModuleLimits {

@@ -234,12 +234,7 @@ func ExplainModule(kernel *KernelStore, taskID, moduleID string, query ModuleHis
 			declared = module.Inputs
 		}
 	}
-	names := make([]string, 0, len(declared))
-	for name := range declared {
-		names = append(names, name)
-	}
-	// TODO(port): TypeScript Object.entries keeps definition insertion order.
-	sort.Strings(names)
+	names := sortedKeys(declared)
 	inputs := []InputExplanation{}
 	for _, name := range names {
 		spec := declared[name]

@@ -256,7 +256,7 @@ func talentStats(list []TalentSample) TalentStats {
 			currencies[currency] = true
 		}
 	}
-	names := portKeys(currencies)
+	names := sortedKeys(currencies)
 	sort.Strings(names)
 	var finished []TalentSample
 	for _, sample := range list {
@@ -376,8 +376,7 @@ func TalentDetail(store *TaskStore, id string, version *int, capability func(id,
 	}
 	prompts := []any{}
 	if promptMap, ok := chosen.Spec["prompts"].(map[string]any); ok {
-		// TODO(port): prompt role order is sorted; TypeScript used object insertion order.
-		for _, role := range portKeys(promptMap) {
+		for _, role := range sortedKeys(promptMap) {
 			bound, _ := promptMap[role].(map[string]any)
 			if bound == nil {
 				continue

@@ -353,7 +353,6 @@ func (driver *NodeTurnDriver) graphOverview(definition GraphDefinition) nodeTurn
 		Inputs:  map[string]GraphIo{},
 		Outputs: map[string]GraphOutput{},
 	}
-	// TODO(port): TypeScript kept the definition's insertion order; Go maps sort by key.
 	for _, id := range sortedKeys(definition.Nodes) {
 		if len(overview.Nodes) >= 20 {
 			break

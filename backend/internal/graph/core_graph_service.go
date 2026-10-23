@@ -182,11 +182,10 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 				service.ownerTaskId, requestId, graphId, content, createState)
 			kernelExec(service.kernel.Db, "INSERT INTO kernel_graph_owners(task_id,owner_task_id) VALUES(?,?)", graphId, service.ownerTaskId)
 			revision := service.kernel.InsertRevision(graphId, definition, "create")
-			// TODO(port): Go maps have no insertion order; the node ids are sorted.
-			for _, id := range portKeys(definition.Nodes) {
+			for _, id := range sortedKeys(definition.Nodes) {
 				service.kernel.AdmitNode(graphId, revision.Version, id, AdmitNodeInput{InstanceId: graphUUID()})
 			}
-			for _, id := range portKeys(definition.Modules) {
+			for _, id := range sortedKeys(definition.Modules) {
 				module := definition.Modules[id]
 				service.kernel.AdmitModule(graphId, revision.Version, id, AdmitModuleInput{ModuleType: module.Type, Trigger: module.Trigger})
 			}

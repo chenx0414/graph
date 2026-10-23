@@ -88,16 +88,6 @@ func KernelGraphView(kernel *KernelStore, graphID string) any {
 
 func boolPtr(value bool) *bool { return &value }
 
-func sortedKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	// TODO(port): TypeScript Object.keys keeps insertion order.
-	sort.Strings(keys)
-	return keys
-}
-
 // KernelConversationNodes reads native node cards without session pages.
 func KernelConversationNodes(kernel *KernelStore, graphID string) []any {
 	rows := kernelRows(kernel.DB, `SELECT n.node_id,n.spec,n.status,b.role,b.model_id,s.used,e.token_budget

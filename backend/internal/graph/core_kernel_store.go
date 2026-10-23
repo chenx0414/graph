@@ -577,8 +577,7 @@ func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitRe
 		if request.Outputs == nil {
 			refuseMessage("outputs must be a named object")
 		}
-		// TODO(port): output and edge walks are sorted; TypeScript Object.entries keeps insertion order.
-		for _, name := range portKeys(request.Outputs) {
+		for _, name := range sortedKeys(request.Outputs) {
 			output := request.Outputs[name]
 			declared, declaredOK := node.Outputs[name]
 			if !declaredOK {
@@ -637,14 +636,14 @@ func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitRe
 		}
 		targets := []target{}
 		enabled := []string{}
-		for _, name := range portKeys(request.Outputs) {
+		for _, name := range sortedKeys(request.Outputs) {
 			if request.Outputs[name].Enable {
 				enabled = append(enabled, name)
 			}
 		}
 		for _, name := range enabled {
 			output := request.Outputs[name]
-			for _, edgeID := range portKeys(connections.Definition.Edges) {
+			for _, edgeID := range sortedKeys(connections.Definition.Edges) {
 				edge := connections.Definition.Edges[edgeID]
 				if edge.From != execution.NodeId+"."+name || !edge.Enabled {
 					continue
@@ -820,8 +819,7 @@ func (k *KernelStore) RecordModuleDelivery(taskID, moduleID, edgeID, fromEndpoin
 }
 
 func (k *KernelStore) publishGraphOutputs(taskID, endpoint string, value any, sourceID string, revision *RevisionRow) {
-	// TODO(port): graph output walks are sorted; TypeScript Object.entries keeps insertion order.
-	for _, name := range portKeys(revision.Definition.Outputs) {
+	for _, name := range sortedKeys(revision.Definition.Outputs) {
 		output := revision.Definition.Outputs[name]
 		if output.From != endpoint {
 			continue
@@ -864,8 +862,7 @@ func (k *KernelStore) BroadcastModule(taskID, moduleID string, outputs map[strin
 			module                                  bool
 		}
 		targets := []target{}
-		// TODO(port): module output and edge walks are sorted; TypeScript Object.entries keeps insertion order.
-		for _, name := range portKeys(outputs) {
+		for _, name := range sortedKeys(outputs) {
 			value := outputs[name]
 			output, outputOK := module.Outputs[name]
 			if !outputOK {
@@ -878,7 +875,7 @@ func (k *KernelStore) BroadcastModule(taskID, moduleID string, outputs map[strin
 			if defect := ValidateProtocolValue(protocol, value, moduleID+"."+name); defect != nil && *defect != "" {
 				Raise("invalid_output", *defect)
 			}
-			for _, edgeID := range portKeys(revision.Definition.Edges) {
+			for _, edgeID := range sortedKeys(revision.Definition.Edges) {
 				edge := revision.Definition.Edges[edgeID]
 				if !edge.Enabled || edge.From != moduleID+"."+name {
 					continue
@@ -906,7 +903,7 @@ func (k *KernelStore) BroadcastModule(taskID, moduleID string, outputs map[strin
 		if sourceID == "" {
 			sourceID = graphUUID()
 		}
-		for _, name := range portKeys(outputs) {
+		for _, name := range sortedKeys(outputs) {
 			k.publishGraphOutputs(taskID, moduleID+"."+name, outputs[name], sourceID, revision)
 		}
 		seqRow, _ := g5One(k.Db, "SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?", taskID)
