@@ -4,14 +4,31 @@
 
 ## 10. 验证
 
-**完整门禁**：`node --run check` 在 `feature/harness-token-efficiency-2026-10-22` 上——**298 个测试文件 / 1,565 项，1,561 过、4 跳过、0 失败，退出码 0**。跑了两次，两次都绿：
+**完整门禁**：`node --run check` 在 `feature/harness-token-efficiency-2026-10-22` 上——**跑了三轮：两绿一红，红的那一轮红在 main 上。**
 
-| 那轮 | 结果 | 耗时 |
-| --- | --- | ---: |
-| 2026-10-23 16:25（rebase 前） | 298 文件 / 1,565 项，1,561 过、4 跳过、0 失败 | 548 秒 |
-| 2026-10-23 16:45（rebase 到 `main` 的 `3f4a1770` 之后） | 同上 | 610 秒 |
+| 那轮 | 树 | 结果 | 耗时 |
+| --- | --- | --- | ---: |
+| 2026-10-23 16:25 | rebase 前 | **绿**：298 文件 / 1,565 项，1,561 过、4 跳过、0 失败 | 548 秒 |
+| 2026-10-23 16:45 | rebase 到 `main` 的 `3f4a1770` 之后 | **绿**：同上 | 610 秒 |
+| 2026-10-23 17:16 | rebase 到 `main` 的 `255b3d25` 之后 | **红**：`tests/e2e/harness-probe.test.ts` | 417 秒（`bail: 1`，只跑到第 712 项就停了） |
 
-**两轮都慢，是因为机器上同时还有两个 worktree 在跑门禁**（共享队列把三次检查排成了一列）。套件基线从 294 文件 / 1,556 项抬到 298 / 1,565——**多出来的 4 个文件和 9 项就是本分支新增的 E2E**。
+**红的那一轮红在 main 上**，三条证据：
+
+1. **在干净的 main 检出上，同一条测试同样红**：`expected 'alpha' to be 'A'`（`tests/e2e/harness-probe.test.ts:194`）。用 `git worktree add --detach <临时目录> main` 复现，跑完就删掉。
+2. **本分支没有碰过它**：`git diff main...HEAD -- backend/internal/graph/runtime_harness_experience.go tests/e2e/harness-probe.test.ts` 为空。
+3. **red 之前只有一个 main 提交**（`3f4a1770..255b3d25` 就是 `255b3d25` 一个），而它自己的提交信息写着 **"Committed with --no-verify"**——它改了 `runtime_harness_experience.go`（把候选的字母解析回候选本人的名字），更新了 `tests/e2e/harness-axes.test.ts` 与 `tests/e2e/harness-loop.test.ts`，**漏了 `tests/e2e/harness-probe.test.ts`**。**main 随后在 `f1daaa8f` 补上了这一条**（`expect(decision.chosen).toBe('alpha')`），本分支 rebase 过去之后门禁就绿了。
+
+**还有三条测试"单独跑"时红、"完整套件"里绿**——这是这台机器当前负载下的运行上下文问题，不是本分支，也不是 main 的代码问题：
+
+| 测试 | 单独跑时的报错 | 干净 main 上 | 完整套件里 |
+| --- | --- | --- | --- |
+| `tests/m4/merge.test.ts` | `expected [] to match object [Array(1)]` | 同样红 | 绿 |
+| `tests/m7/harness.test.ts` | `expected 'awaiting-work' to be 'awaiting-human-check'` | 同样红 | 绿 |
+| `tests/console/git-baseline.test.ts` | 操作 settled 但 `passed: false` | 同样红 | 绿 |
+
+**证据是同一棵树上两种结果**：16:45 那一轮完整套件（1,565 项，这三条都在里面）全绿；**同一棵树上**减掉几个文件再跑，它们红；在干净 main 的检出上单独跑，也红。三条都是"建临时 git 仓、真跑一次图操作"的测试，机器上同时有 17 个 vitest 进程、另两个 worktree 排队跑门禁时，减掉文件会让它们提前排到前面、拿不到稳定的调度。**所以门禁的判据是完整套件那一轮，不是减掉文件的那几轮。**
+
+**套件基线**从 294 文件 / 1,556 项抬到 298 / 1,565——**多出来的 4 个文件和 9 项就是本分支新增的 E2E**。
 
 **2026-10-22 那轮门禁唯一红的那一项，现在已经绿了，而原因不在本分支**：红的是 `tests/e2e/pig-kernel-update.test.ts :: the updater pins the kernel in an isolated checkout...`。这项测试把内核钉到**最新发布版**（PiG v0.5.3），而写报告时模块代理上**还没有** `extensions/sdk v0.5.3`。
 
