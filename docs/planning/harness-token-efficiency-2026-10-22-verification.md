@@ -32,16 +32,26 @@
 
 **最后又在本分支当前的代码上重跑了两组，逐次原始账本进了仓库**（[§5.7 一轮 n=6/组 12 次运行、§5.8 八轮 n=2/组 6 次运行](harness-token-efficiency-2026-10-22-ab-rerun.md)，**18/18 通过行为检查**）：**前缀 −18.2%（t=−2.13，显著）/ −25.2%（八轮）**，一轮那组**未缓存输入 +40.4%（t=+2.40，显著）**、花费 +14%（t=+1.30，测不出），八轮那组未缓存输入 −16.0%、花费 −12.2%（n=2，区间太宽）。这两组第一次把接缝的机制量了出来——它省的是前缀，顺手把省下的字节从缓存桶挪进了未缓存桶，**钱的净效果取决于模型回读多少**。
 
-**每个修改都做过红灯验证**（把生产改动撤掉，E2E 必须红）：
+**每个修改都做过红灯验证**（把生产改动撤掉，E2E 必须红）——**这一条现在可以重跑了**：
 
-| 提交 | 红灯证据 |
-| --- | --- |
-| `496017be` 助手回合回放 | 撤掉后 OpenAI 与 Anthropic 两条 E2E 都红（reasoning 不在下一轮请求里）；只撤掉"工具块索引"这一处，两条 reasoning 断言同样红 |
-| `5dfaa2f4` 缓存断点 | 撤掉后 Anthropic E2E 的三个断点断言红 |
-| `47bc0701` 压缩上限 | 撤掉后"设了上限就压缩"那条红，"没设上限不压缩"那条始终绿 |
-| `8153fccf` 摘要输出预算 | 撤掉后摘要请求带的是模型整个上限（8192 而不是它自己的额度） |
-| `1b323d24` 任务说明包复用 | 打断复用逻辑后"开启开关"那条 E2E 红，"关闭开关"那条始终绿 |
-| `7072a98c` 工具结果落盘 | 撤掉接缝后大输出直接内联，E2E 的"模型拿到句柄"断言红 |
+```sh
+node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficiency-red-light-2026-10-23.txt
+```
+
+脚本逐个把生产改动从源码里拿掉、**重建 Go 后端**（E2E 跑的是真二进制，不重建就等于没撤）、跑对应 E2E、要求它变红，再把源码放回去重建；最后把四个 E2E 一起重跑，要求全绿。**它拒绝在有未提交改动时启动**（还原用的是 `git checkout`，会丢工作）。
+
+录下来的那一轮在 `docs/planning/experiments/token-efficiency-red-light-2026-10-23.txt`：
+
+| 提交 | 撤掉的是什么 | 红灯证据 |
+| --- | --- | --- |
+| `496017be` 助手回合回放 | reasoning 块回到请求里 | `provider-assistant-replay` 的 openai 那条红 |
+| `5dfaa2f4` 缓存断点 | 系统提示、工具声明、对话三处断点 | `provider-assistant-replay` 的 anthropic 那条红 |
+| `47bc0701` 压缩上限 | 环境变量命名的上限 | `compaction-context-ceiling` 的"设了上限就压缩"那条红 |
+| `8153fccf` 摘要输出预算 | 摘要请求用自己的额度 | `compaction-context-ceiling` 的"摘要拿到它需要的空间"那条红 |
+| `1b323d24` 任务说明包复用 | 会话记住已读过的说明 | `task-setup-reuse` 的"开启开关"那条红 |
+| `7072a98c` 工具结果落盘 | 大结果落盘成句柄 | `tool-result-spill` 的"模型拿到句柄"那条红 |
+
+**六处全部按预期变红；还原后四个 E2E 文件 9 项全绿**（跑完一遍之后 `git diff -- backend/` 为空，源码一个字节都没变）。
 
 **还欠着的**：三个杠杆在**生产形状的负载**（长会话、上下文接近窗口）上的钱仍然没有测出来——本轮所有 A/B 都在脚本化任务上跑，而短任务里缓存读取只占花费的 8%；8 轮长会话那组上下文只到 16–34K，离生产的 496K 还差一个数量级。**接缝那一项还多欠一条**：它在"模型把落盘内容读回来"时会把缓存字节变成未缓存输入（§5.7），这个转换在生产负载上有多大，取决于模型实际会不会回读——**这一点本轮没有量**。这是下一轮该做的事（§5.2 的"负载形状"一节）。
 
@@ -52,6 +62,7 @@
 - `docs/planning/experiments/token-efficiency-prefix-counterfactual-2026-10-22.json` — §5.6 真实请求序列推演的逐项账本（由下面的脚本生成）
 - `docs/planning/experiments/token-efficiency-ab-one-turn-2026-10-23.json` — §5.7 重跑的 **12 次运行逐次原始账本**（花费、token、前缀、压缩次数、行为检查结果）
 - `docs/planning/experiments/token-efficiency-ab-long-session-2026-10-23.json` — §5.8 长会话组的逐次原始账本
+- `docs/planning/experiments/token-efficiency-red-light-2026-10-23.txt` — 红灯验证的实录（每一处生产改动撤掉之后，哪一条 E2E 变红了）
 
 **能重跑的工具**：
 
@@ -66,6 +77,7 @@
   ```
 
 - `scripts/harness-ab-eval.mjs` — Go 后端 + 真实 provider + 独立行为检查；`GRAPH_AB_OUT=<path>` 把逐次账本写出来，`GRAPH_AB_KEEP=1` 保留每次运行的目录
+- `scripts/harness-red-light.mjs` — 红灯验证：逐个撤掉生产改动、重建后端、要求对应 E2E 变红、再还原并要求全绿
 - `scripts/report-commit-links.mjs` — rebase 之后把本报告引用的提交号重指向当前分支（找不到对应提交就报错，不猜）
 
 **不进仓的中间产物**（只读快照，可随时重生成）：
