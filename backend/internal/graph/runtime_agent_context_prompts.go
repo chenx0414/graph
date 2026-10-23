@@ -102,6 +102,11 @@ func (library *AgentContextLibrary) Prompt(key AgentPromptKey, variables ...map[
 			return agentContextTrimEnd(render(text, values)), nil
 		}
 	}
+	if library.overlay != nil {
+		if text, ok := library.overlay[string(key)]; ok && strings.TrimSpace(text) != "" {
+			return agentContextTrimEnd(render(text, values)), nil
+		}
+	}
 	custom, hasCustom, err := library.Override(key)
 	if err != nil {
 		return "", err

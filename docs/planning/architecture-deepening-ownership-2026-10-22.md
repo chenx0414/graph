@@ -55,6 +55,16 @@ TypeScript 原件在 `src/runtime/durable-tools.ts:160-172` 恢复时只做了�
 
 三行现在都说同一句话了：**id 收成一个**（额度账本与写入账本记的是同一次调用）；**遥测补上**（PiG kernel 那个 `OnToolCall` 钩子从来没有被触发，所以记录只能来自工具自己）；**panic 转成错误值**（那正是这个 daemon 自己说的做法）。
 
+24. **main 又前进了十三个提交，合进来了**（提交 `fb90aea5`）。那十三个提交全是 harness 的活：不同 harness 下跑的候选、它们教出来的经验、一次运行留下的证据，以及把证据读回去的循环。其中四个文件是本分支拆过或改写过的，因此起了冲突。
+
+    **四处冲突是同一种形状**：main 往一个本分支已经拆开的文件里加东西，因此解法不是把文件合回去，而是**把 main 的新增放到那个声明现在所在的地方**：
+    - `runtime_agent_tools.go` 的 graph management 多了一个 `HarnessDecision` 字段，决定候选的 handler 改成走它而不直接调 helper。**字段进放类型的文件，handler 进放 harness handler 的文件。**
+    - `runtime_harness_probe.go` 学会了**关掉自己建的图**并报告它停在哪个阶段。**字段进类型文件，关图、相位与两个助手进比较文件。**
+    - `runtime_agent_context.go` 多了一个 overlay，让一个节点可以跑在与其余节点不同的 harness 下。**字段与方法进 library 文件，overlay 对 Prompt 的作用进提示词文件，main 那两段新的提示词常量进放常量的文件。**
+    - `core_task_runtime.go` 负责接线 graph management 那个面，新的决定字段进了**放接线的那个文件**。
+
+    **这次合并在本分支之上只动了十个文件，加七十八行、删六行**——就是 main 那四处改动，本分支的活一件没丢。合并跳过了文件大小守卫，理由与前一次合并相同：守卫量的是暂存的 blob，而一次合并会把 main 自己的文件暂存进来（`src/runtime/agent-context.ts` 47KB，逐字节是 main 的）；本分支自己改的 Go 文件都在上限之下。
+
 ## 查出来、尚未处理的问题
 
 它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。

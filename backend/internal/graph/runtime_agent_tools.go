@@ -53,6 +53,10 @@ type AgentToolsGraphManagement struct {
 	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
 	// HarnessEvidence reads the evidence of the caller's own run.
 	HarnessEvidence func(input HarnessEvidenceInput) HarnessEvidenceResult
+	// HarnessDecision records the adopted candidate and the lesson it taught.
+	HarnessDecision func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
+	// HarnessFriction records friction the project met but has not solved.
+	HarnessFriction func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
 }
 
 // AgentToolsSystemChange is one proposed change of the Graph host itself.

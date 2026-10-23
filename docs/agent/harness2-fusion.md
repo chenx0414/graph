@@ -108,7 +108,9 @@ Harness² 的跑分框架不需要移植，它的**方法**可以拆成三个 Gr
   - `compare_harness_candidates`：对比一个图里同一任务的多个候选节点；
   - `record_harness_decision`：记录采纳哪个候选、以及那条经验；
   - `read_harness_experience`：读某领域已采纳的经验（不带领域则列出有哪些领域）。
-- 实现：`backend/internal/graph/runtime_harness_probe.go`，
+- 实现：探针驱动在 `backend/internal/graph/runtime_harness_probe.go`，对比读数在
+  `runtime_harness_compare.go`，经验库在 `runtime_harness_experience.go`（教训）
+  与 `runtime_harness_knowledge.go`（摩擦与领域），
   工具声明在 `backend/internal/graph/runtime_agent_tool_definitions.go`，
   接线在 `backend/internal/graph/core_task_runtime.go` 与 `runtime_agent_tools.go`。
 - 事实来源：`kernel_executions`（状态/耗时）、`kernel_submissions`（提交了什么）、
@@ -134,15 +136,17 @@ Harness² 的跑分框架不需要移植，它的**方法**可以拆成三个 Gr
   配套的 `NodeDefinition.harness` 让同一张图里两个节点跑同一任务、不同 harness；
   `AgentContextLibrary.WithOverlay` 让覆盖落在**会话真正读的那份库**上，
   而不是只落在记录用的快照里。
-- **P3：双轴提案（已落地）**。探针的每个变体带一个轴：`general`（这条改动应当对任何一类
+- **P3：双轴提案与接续（已落地）**。探针的每个变体带一个轴：`general`（这条改动应当对任何一类
   工作都成立）或 `specific`（只对当前领域成立）。裁决时同一条教训落在同轴的 scope 里：
   `general` 的 scope 被**每个领域**读到，`specific` 的只留在本领域。
   Harness² 的 INV/DOM 两轴在这里换了个说法：INV 不再是"一份更通用的 harness 树"，
-  而是"一条每个领域都能用上的教训"。合成（把两轴的赢家合并成一份 harness）仍待做。
-- **P4：经验进上下文（通用轴已落地）**。宿主在装配主 Agent 的 system prompt 时自动注入
+  而是"一条每个领域都能用上的教训"。
+  **接续**也落地了：采纳的教训留住它跑在什么 harness 下，探针可以以它为基线，
+  于是每一轮是在上一轮的赢家上试一个改动。
+- **P4：经验进上下文（已落地）**。宿主在装配主 Agent 的 system prompt 时自动注入
   一段 `Lessons earlier runs of this project learned`（生成型部件，排在 host 规则之前），
-  内容是**通用** scope 的教训，每条一行：情况 → 做法 → 依据。领域教训仍需用工具读：
-  宿主不知道一个任务属于哪个领域（`tasks` 表没有这个字段），所以只注入天然不需要领域的通用轴。
+  每条一行：情况 → 做法 → 依据。注入的是**该项目声明的领域**的教训 + **通用** scope 的教训；
+  领域由 `declare_harness_domain` 声明并按项目保存，宿主读回后才知道该带哪一 scope。
   这也让"通用轴"从口号变成事实：一条对任何工作都成立的经验，现在**在每个任务开工前就在场**。
 - **P5：把评测脚本接进闭环**。`harness-real-eval.mjs` 目前是离线脚本；
   把它变成"改完 harness 之后自动重跑冻结用例"的门禁，

@@ -87,13 +87,13 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
           break;
         case 1:
           calls = [{ id: 'decide-general', name: 'record_harness_decision', args: {
-            graphId, domain: 'parser', axis: 'general', chosen: 'A',
+            graphId, domain: 'parser', axis: 'general', chosen: 'B',
             cue: 'Any task can hit this.', lesson: 'Check the input shape before writing.', evidence: 'The general candidate avoided the mistake.',
           } }];
           break;
         case 2:
           calls = [{ id: 'decide-specific', name: 'record_harness_decision', args: {
-            graphId, domain: 'parser', axis: 'specific', chosen: 'B',
+            graphId, domain: 'parser', axis: 'specific', chosen: 'A',
             cue: 'This parser has a known trap.', lesson: 'Read the whole document first.', evidence: 'The domain candidate read the document first.',
           } }];
           break;
@@ -147,33 +147,39 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
   // The probe reports which axis each candidate was claimed on.
   const probe = JSON.parse(resultOf('probe') || '{}') as {
     candidates: { label: string; axis: string; anonId: string }[];
-    comparison: { candidates: { nodeId: string; tools: string[]; outputValues: Record<string, string> }[] };
+    comparison: { candidates: { nodeId: string; tools: string[]; outputValues: Record<string, string>; harness: Record<string, string> }[] };
   };
   expect(probe.candidates.map(candidate => candidate.label).sort()).toEqual(['domain-way', 'general-way']);
   expect(probe.candidates.find(candidate => candidate.label === 'general-way')!.axis).toBe('general');
   expect(probe.candidates.find(candidate => candidate.label === 'domain-way')!.axis).toBe('specific');
   // The two candidates produced different answers under their different harness.
   expect(probe.comparison.candidates[0]!.outputValues.out).not.toEqual(probe.comparison.candidates[1]!.outputValues.out);
+  // The comparison says which harness each candidate ran under, so a later
+  // composition of the two has something to compose.
+  const runtimes = probe.comparison.candidates.map(candidate => candidate.harness['rules/worker.md']);
+  expect(runtimes.sort()).toEqual(['DOMAIN_VARIANT_RULE', 'GENERAL_VARIANT_RULE']);
 
   // Both decisions are recorded, each in the scope its axis names.
-  const generalDecision = JSON.parse(resultOf('decide-general') || '{}') as { axis: string; scope: string; entries: { axis: string }[] };
+  const generalDecision = JSON.parse(resultOf('decide-general') || '{}') as { axis: string; scope: string; entries: { axis: string; chosen: string }[] };
   expect(generalDecision.axis).toBe('general');
   expect(generalDecision.scope).toBe('general');
-  const specificDecision = JSON.parse(resultOf('decide-specific') || '{}') as { axis: string; scope: string; entries: { axis: string }[] };
+  // The anonymous letter only means something inside the comparison it came
+  // from: the record names the candidate, so a later reader still understands it.
+  expect(generalDecision.entries[0]!.chosen).toBe('general-way');
+  const specificDecision = JSON.parse(resultOf('decide-specific') || '{}') as { axis: string; scope: string; entries: { axis: string; chosen: string }[] };
   expect(specificDecision.axis).toBe('specific');
   expect(specificDecision.scope).toBe('parser');
+  expect(specificDecision.entries[0]!.chosen).toBe('domain-way');
 
   // The domain finds both: its own lesson and the general one.
-  const parser = JSON.parse(resultOf('read-parser') || '{}') as { entries: { axis: string; lesson: string }[]; general: { axis: string; lesson: string }[] };
-  expect(parser.entries).toHaveLength(1);
-  expect(parser.entries[0]!.axis).toBe('specific');
-  expect(parser.general).toHaveLength(1);
-  expect(parser.general[0]!.axis).toBe('general');
+  const parser = JSON.parse(resultOf('read-parser') || '{}') as { entries: { axis: string; lesson: string }[] };
+  // One list: the domain's own entries and the ones that hold for every domain.
+  expect(parser.entries).toHaveLength(2);
+  expect(parser.entries.map(entry => entry.axis).sort()).toEqual(['general', 'specific']);
 
   // Another domain finds the general lesson and not the domain one.
-  const billing = JSON.parse(resultOf('read-billing') || '{}') as { entries: { axis: string }[]; general: { axis: string; lesson: string }[] };
-  expect(billing.entries ?? []).toHaveLength(0);
-  expect(billing.general).toHaveLength(1);
-  expect(billing.general[0]!.axis).toBe('general');
-  expect(billing.general[0]!.lesson).toContain('input shape');
+  const billing = JSON.parse(resultOf('read-billing') || '{}') as { entries: { axis: string; lesson: string }[] };
+  expect(billing.entries ?? []).toHaveLength(1);
+  expect(billing.entries[0]!.axis).toBe('general');
+  expect(billing.entries[0]!.lesson).toContain('input shape');
 }, 300_000);

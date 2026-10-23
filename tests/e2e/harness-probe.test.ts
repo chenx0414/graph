@@ -189,9 +189,12 @@ test('the main agent compares the candidates of one task without learning which 
   // A comparison of an untouched domain carries no lessons yet.
   expect(comparison.experience).toEqual([]);
 
-  const decision = JSON.parse(resultOf('record_harness_decision') || '{}') as { domain: string; chosen: string; entries: { cue: string; lesson: string; evidence: string }[] };
+  const decision = JSON.parse(resultOf('record_harness_decision') || '{}') as { domain: string; chosen: string; entries: { chosen: string; cue: string; lesson: string; evidence: string }[] };
   expect(decision.domain).toBe('parser');
-  expect(decision.chosen).toBe('A');
+  // The record names the candidate, not the letter it wore inside the
+  // comparison: a lesson read later has to say what was chosen.
+  expect(decision.chosen).toBe('alpha');
+  expect(decision.entries[0]!.chosen).toBe('alpha');
   expect(decision.entries).toHaveLength(1);
   expect(decision.entries[0]!.lesson).toContain('careful candidate');
 

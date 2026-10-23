@@ -129,10 +129,16 @@ func (runtime *TaskRuntime) graphManagement(taskId string) AgentToolsGraphManage
 		},
 		HarnessExperience: func(input map[string]any) any {
 			domain, _ := input["domain"].(string)
-			return service.HarnessExperience(HarnessExperienceInput{Domain: domain})
+			// A scope names the one store to read. The recording path needs it:
+			// it appends to that store, and a read that answered with another
+			// scope would make it write over what is already there.
+			scope, _ := input["scope"].(string)
+			return service.HarnessExperience(HarnessExperienceInput{Domain: domain, Scope: scope})
 		},
 		HarnessProbe:    service.HarnessProbe,
 		HarnessEvidence: service.HarnessEvidence,
+		HarnessFriction: service.HarnessFriction,
+		HarnessDecision: service.HarnessDecision,
 	}
 }
 

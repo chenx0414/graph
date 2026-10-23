@@ -94,7 +94,7 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
           break;
         case 3:
           calls = [{ id: 'decide', name: 'record_harness_decision', args: {
-            domain: 'parser', axis: 'general', chosen: 'A',
+            domain: 'parser', axis: 'general', chosen: 'B',
             cue: 'A file that is not there.',
             lesson: 'Read the file list before reading a file.',
             evidence: 'The general candidate listed the directory first.',
@@ -137,7 +137,10 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
   expect(first.status).toBe(200);
 
   const waitFor = async (id: string): Promise<string> => {
-    const deadline = Date.now() + 90000;
+    // The probe waits for its candidates, and it gives up on its own after
+    // 180 seconds. The window here has to be wider than that, or a loaded
+    // machine would fail the test before the probe could answer.
+    const deadline = Date.now() + 240000;
     while (!results.get(id) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
     return results.get(id) ?? '';
   };
@@ -153,10 +156,14 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
 
   // 2. The probe ran both harnesses on the same task and contrasted them.
   const probe = JSON.parse(await waitFor('probe') || '{}') as {
+    graphPhase: string;
     candidates: { label: string; axis: string }[];
     comparison: { candidates: { outputValues: Record<string, string> }[] };
   };
   expect(probe.candidates.map(candidate => candidate.axis).sort()).toEqual(['general', 'specific']);
+  // The probe closes its own graph: an experiment is not a project entry that
+  // runs forever.
+  expect(probe.graphPhase).not.toBe('running');
   expect(probe.comparison.candidates[0]!.outputValues.out).not.toEqual(probe.comparison.candidates[1]!.outputValues.out);
 
   // 3. The decision was kept, on the general axis.
@@ -178,4 +185,4 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
   const later = prompts.filter(entry => entry.user.includes('Do unrelated work')).map(entry => entry.system).join('\n');
   expect(later).toContain('Lessons earlier runs of this project learned');
   expect(later).toContain('Read the file list before reading a file.');
-}, 200_000);
+}, 420_000);

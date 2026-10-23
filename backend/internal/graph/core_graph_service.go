@@ -8,11 +8,15 @@ type GraphManagement interface {
 	GraphInspect(input GraphInspectInput) any
 	GraphControl(input GraphControlInput) any
 	GraphSend(input GraphSendInput) any
+	// HarnessFriction records friction the project met but has not solved.
+	HarnessFriction(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
 	// HarnessCompare reads the behavioral contrast of the candidates of one
 	// task. It belongs to the graph facts it reads, so it lives here.
 	HarnessCompare(input HarnessCompareInput) HarnessComparison
 	// HarnessExperience reads the lessons earlier tasks adopted per domain.
 	HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult
+	// HarnessDecision records the adopted candidate and the lesson it taught.
+	HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
 	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe(input HarnessProbeInput) HarnessProbeResult
 	// HarnessEvidence reads the evidence of the caller's own run: the
