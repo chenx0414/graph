@@ -128,7 +128,6 @@ type Session struct {
 
 	mutex         sync.Mutex
 	closed        bool
-	stopped       bool
 	acceptingInput bool
 	interrupted   bool
 	continuation  chan struct{}
@@ -359,9 +358,6 @@ func (session *Session) Interrupt(ctx context.Context, text *string) error {
 
 // Stop soft-stops the running turn. The session and its transcript are kept.
 func (session *Session) Stop(ctx context.Context) error {
-	session.mutex.Lock()
-	session.stopped = true
-	session.mutex.Unlock()
 	return session.conversation.Abort(ctx, &durable.ConversationAbortOptions{})
 }
 
@@ -403,13 +399,6 @@ func (session *Session) admissionId() string {
 		return session.requestId
 	}
 	return session.identity
-}
-
-// stopped reports whether the turn was stopped before the provider call.
-func (session *Session) stoppedNow() bool {
-	session.mutex.Lock()
-	defer session.mutex.Unlock()
-	return session.stopped
 }
 
 // emit reports one kernel event to the daemon.

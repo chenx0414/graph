@@ -71,9 +71,6 @@ type TurnOptions struct {
 	Instructions string
 	// Prompt is the user input of the turn.
 	Prompt string
-	// Gate admits the model send. It runs before the provider call and fails
-	// the turn when the daemon refuses.
-	Gate func() error
 	// OnEvent receives the kernel's events.
 	OnEvent func(event string)
 }
@@ -148,12 +145,6 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 		return TurnResult{}, err
 	}
 
-	// The host admits the turn before anything is sent.
-	if options.Gate != nil {
-		if err := options.Gate(); err != nil {
-			return TurnResult{}, err
-		}
-	}
 	// The request id deduplicates an admission: the same input must not be
 	// admitted twice, and a second, different input needs its own id.
 	requestId := options.Identity + ":turn:" + newRequestId()

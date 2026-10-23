@@ -34,9 +34,6 @@ type StreamFunc func(ctx context.Context, transcript []map[string]any, options m
 type ProviderBridge struct {
 	// Stream sends the transcript to the model the daemon chose.
 	Stream StreamFunc
-	// Stopped reports whether the turn was stopped before the send. A stopped
-	// turn never reaches the provider.
-	Stopped func() bool
 	// Options are the provider options the daemon's stream expects.
 	Options map[string]any
 }
@@ -51,10 +48,6 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 	stream := func(ctx context.Context, model *ai.Model, request ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
 		output := ai.NewAssistantMessageEventStream()
 		go func() {
-			if bridge.Stopped != nil && bridge.Stopped() {
-				pushFailure(output, model, "Turn stopped at the tool boundary")
-				return
-			}
 			transcript, err := TranscriptMessages(request)
 			if err != nil {
 				pushFailure(output, model, err.Error())
