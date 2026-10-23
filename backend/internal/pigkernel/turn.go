@@ -187,7 +187,7 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 		Tools:          offered,
 	}
 	if settled.Answer != nil {
-		text, stopReason, _, _, err := answerText(ctx, conversation, *settled.Answer)
+		text, stopReason, _, err := answerText(ctx, conversation, *settled.Answer)
 		if err != nil {
 			return TurnResult{}, err
 		}
@@ -262,11 +262,10 @@ func conversationFor(ctx context.Context, kernel *Kernel, identity string, chang
 }
 
 // answerText reads the assistant answer of a settled submission.
-func answerText(ctx context.Context, conversation harness.Conversation, answer durable.EntryId) (string, string, *Usage, bool, error) {
+func answerText(ctx context.Context, conversation harness.Conversation, answer durable.EntryId) (string, string, *Usage, error) {
 	var text string
 	var stopReason string
 	var usage *Usage
-	answered := false
 	_, err := conversation.Commit(ctx, func(tx durable.Tx) (any, error) {
 		entry, err := tx.Entry(answer)
 		if err != nil {
@@ -279,11 +278,6 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 			assistant, ok := message.(ai.AssistantMessage)
 			if !ok {
 				continue
-			}
-			// An answer with no content is an answer that says nothing: the
-			// turn happened, but it produced no work for the caller to read.
-			if len(assistant.Content) > 0 {
-				answered = true
 			}
 			stopReason = string(assistant.StopReason)
 			if reported := assistant.Usage; reported.TotalTokens > 0 || reported.Input > 0 || reported.Output > 0 {
@@ -304,9 +298,9 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 		return nil, nil
 	})
 	if err != nil {
-		return "", "", nil, false, err
+		return "", "", nil, err
 	}
-	return text, stopReason, usage, answered, nil
+	return text, stopReason, usage, nil
 }
 
 // toolRegistrations turns the tools one session may call into the

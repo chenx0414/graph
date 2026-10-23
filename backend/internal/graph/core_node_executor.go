@@ -18,13 +18,10 @@ type HostProcess struct {
 
 // TurnReport is what one turn reported back.
 type TurnReport struct {
-	Error *string
-	Done  bool
-	// Answered reports whether the turn produced an answer at all. A turn
-	// that ended without one is not a finished turn, however quietly it ended.
-	Answered bool
-	Missing  []string
-	Usage    *TurnUsage
+	Error   *string
+	Done    bool
+	Missing []string
+	Usage   *TurnUsage
 }
 
 type TurnUsage struct {
