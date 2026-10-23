@@ -126,6 +126,19 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **行为没有变**：拆分后逐行比对（排序后逐行 diff）与拆分前**完全一致**，构建、`go vet`、`gofmt` 与本分支的 9 项 E2E 全绿。
 
+**还有 6 个文件本分支也改了，它们本来就超预算**——如实记在这里，不藏：
+
+| 文件 | 改前行数 | 改后行数 | 本分支加了多少 |
+| --- | ---: | ---: | ---: |
+| `backend/internal/graph/core_task_runtime.go` | 5,612 | 5,614 | +2 |
+| `backend/internal/graph/runtime_pi_adapter.go` | 2,620 | 2,650 | +30 |
+| `backend/internal/graph/core_execution.go` | 1,461 | 1,464 | +3 |
+| `backend/internal/graph/core_types.go` | 544 | 547 | +3 |
+| `backend/internal/graph/runtime_pig_native_tools.go` | 529 | 529 | 0 |
+| `backend/internal/pigkernel/session.go` | 518 | 520 | +2 |
+
+**这些文件在本分支动手之前就超了 500 行、也超了 20,000 字节的预算**（仓库里有 40 多个这样的文件），本分支的改动没有把它们推过线——按规则"如果你的改动把它推过了线就拆"，**这里不适用**。**但如果今后有人再改它们，提交前的闸门会拒绝**，除非先拆开或者在文件头写明 `graph:allow-large-file:` 的理由。**这是下一轮该还的债，不是本轮的。**
+
 ---
 
 ## 6. Flagged 变更的测试计划
