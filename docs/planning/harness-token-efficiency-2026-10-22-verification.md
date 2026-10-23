@@ -72,7 +72,7 @@
 node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficiency-red-light-2026-10-23.txt
 ```
 
-脚本逐个把生产改动从源码里拿掉、**重建 Go 后端**（E2E 跑的是真二进制，不重建就等于没撤）、跑对应 E2E、要求它变红，再把源码放回去重建；最后把四个 E2E 一起重跑，要求全绿。**它拒绝在有未提交改动时启动**（还原用的是 `git checkout`，会丢工作）。
+脚本逐个把生产改动从源码里拿掉、**重建 Go 后端**（E2E 跑的是真二进制，不重建就等于没撤；改的是脚本就不用重建）、跑对应 E2E、要求它变红，再把源码放回去重建；最后把五个 E2E 一起重跑，要求全绿。**它拒绝在有未提交改动时启动**（还原用的是 `git checkout`，会丢工作）。**提交按标题查**（`scripts/report-commit-links.mjs` 同一套办法），所以 rebase 之后它自己不会过期。
 
 录下来的那一轮在 `docs/planning/experiments/token-efficiency-red-light-2026-10-23.txt`：
 
@@ -83,9 +83,10 @@ node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficie
 | `8366b8f8` 压缩上限 | 环境变量命名的上限 | `compaction-context-ceiling` 的"设了上限就压缩"那条红 |
 | `5c32221a` 摘要输出预算 | 摘要请求用自己的额度 | `compaction-context-ceiling` 的"摘要拿到它需要的空间"那条红 |
 | `17aa68df` 任务说明包复用 | 会话记住已读过的说明 | `task-setup-reuse` 的"开启开关"那条红 |
+| `88cc7298` 来源 × 计费类型的交叉 | 每一笔花费按两个维度分开 | `harness-cost` 的 CLI 那条红 |
 | `9039e148` 工具结果落盘 | 大结果落盘成句柄 | `tool-result-spill` 的"模型拿到句柄"那条红 |
 
-**六处全部按预期变红；还原后四个 E2E 文件 9 项全绿**（跑完一遍之后 `git diff -- backend/` 为空，源码一个字节都没变）。
+**七处全部按预期变红；还原后五个 E2E 文件 19 项全绿**（跑完一遍之后 `git diff -- backend/` 为空，源码一个字节都没变）。
 
 **还欠着的**：三个杠杆在**生产形状的负载**（长会话、上下文接近窗口）上的钱仍然没有测出来——本轮所有 A/B 都在脚本化任务上跑，而短任务里缓存读取只占花费的 8%；8 轮长会话那组上下文只到 16–34K，离生产的 496K 还差一个数量级。**接缝那一项还多欠一条**：它在"模型把落盘内容读回来"时会把缓存字节变成未缓存输入（§5.7），这个转换在生产负载上有多大，取决于模型实际会不会回读——**这一点本轮没有量**。这是下一轮该做的事（§5.2 的"负载形状"一节）。
 
