@@ -51,6 +51,9 @@ const VARIANTS = {
   // The seam off: the result is carried as the tool produced it, and the
   // kernel's own truncation cuts it.
   'no-seam': { env: { GRAPH_TOOL_RESULT_SEAM: '0' } },
+  // The seam off and a ceiling: the context grows the way it grew before the
+  // seam, and the ceiling is what keeps it from reaching the window.
+  'no-seam-ceiling': { env: { GRAPH_TOOL_RESULT_SEAM: '0', GRAPH_COMPACTION_CONTEXT_CEILING: '32768' } },
 };
 
 if (process.argv.length < 3 || process.argv.length > 4) {
