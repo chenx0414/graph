@@ -3,6 +3,7 @@
   "caveats": [
     "This is a calculation over a real ledger, not a measurement: no model was run.",
     "The seam model keeps a result under 4000 characters and replaces a bigger one with a 1024 character summary; it ignores the per-tool limits and the rule that the first two reads of a result are not summarised, so it overstates the saving.",
+    "The seam model assumes the model does not read the spilled file back. When it does, those bytes arrive as uncached input, which is priced far above a cached read, and the saving shrinks or reverses.",
     "The setup reuse model drops a briefing that repeats one already sent, comparing the briefings by size rather than by content.",
     "The static prefix is the size the real requests carried, entered as a parameter.",
     "The saving of one request is multiplied by the number of requests in the real task, which is where a per-request saving becomes a per-task saving."

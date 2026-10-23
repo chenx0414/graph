@@ -1,0 +1,330 @@
+{
+  "case": "big-output",
+  "model": "command-goat:deepseek/deepseek-v4.1-flash",
+  "repeats": 2,
+  "summary": {
+    "default": {
+      "runs": 2,
+      "verified": 2,
+      "verifiedRate": 1,
+      "meanCost": 0.014340779999999997,
+      "meanRequests": 33,
+      "meanInput": 49186,
+      "meanOutput": 9296,
+      "meanCacheRead": 461760,
+      "meanContextTokens": 13964.5,
+      "meanDurationMs": 139925,
+      "toolErrors": 0,
+      "meanCompactions": 0,
+      "failedCompactions": 0
+    },
+    "no-seam": {
+      "runs": 2,
+      "verified": 2,
+      "verifiedRate": 1,
+      "meanCost": 0.016343901,
+      "meanRequests": 31.5,
+      "meanInput": 58579.5,
+      "meanOutput": 9730,
+      "meanCacheRead": 572992,
+      "meanContextTokens": 18664,
+      "meanDurationMs": 163715,
+      "toolErrors": 0,
+      "meanCompactions": 0,
+      "failedCompactions": 0
+    },
+    "no-seam-ceiling": {
+      "runs": 2,
+      "verified": 2,
+      "verifiedRate": 1,
+      "meanCost": 0.016139214,
+      "meanRequests": 29.5,
+      "meanInput": 75865,
+      "meanOutput": 5999,
+      "meanCacheRead": 386688,
+      "meanContextTokens": 12360.5,
+      "meanDurationMs": 118030,
+      "toolErrors": 0,
+      "meanCompactions": 0,
+      "failedCompactions": 0
+    }
+  },
+  "runs": [
+    {
+      "variant": "default",
+      "index": 0,
+      "status": "succeeded",
+      "verified": true,
+      "durationMs": 137000,
+      "requests": 31,
+      "tokens": {
+        "input": 35300,
+        "output": 7754,
+        "cacheRead": 418560,
+        "cacheWrite": 0
+      },
+      "cost": 0.011203079999999999,
+      "costByBillingType": {
+        "input": {
+          "rate": 1.4999999999999997e-7,
+          "tokens": 35300,
+          "amount": 0.0052949999999999985
+        },
+        "output": {
+          "rate": 6e-7,
+          "tokens": 7754,
+          "amount": 0.0046524
+        },
+        "cacheRead": {
+          "rate": 3.0000000000000004e-9,
+          "tokens": 418560,
+          "amount": 0.0012556800000000001
+        }
+      },
+      "context": {
+        "requests": 31,
+        "mean": 13502,
+        "median": 13568,
+        "p90": 19712,
+        "max": 21504
+      },
+      "compactions": {
+        "completed": 0,
+        "failed": 0
+      },
+      "tools": [],
+      "unknownCost": 0,
+      "verification": ""
+    },
+    {
+      "variant": "no-seam",
+      "index": 0,
+      "status": "succeeded",
+      "verified": true,
+      "durationMs": 166472,
+      "requests": 28,
+      "tokens": {
+        "input": 66766,
+        "output": 8723,
+        "cacheRead": 641920,
+        "cacheWrite": 0
+      },
+      "cost": 0.017174460000000003,
+      "costByBillingType": {
+        "input": {
+          "rate": 1.5000000000000002e-7,
+          "tokens": 66766,
+          "amount": 0.010014900000000002
+        },
+        "output": {
+          "rate": 6.000000000000001e-7,
+          "tokens": 8723,
+          "amount": 0.0052338
+        },
+        "cacheRead": {
+          "rate": 3e-9,
+          "tokens": 641920,
+          "amount": 0.0019257599999999999
+        }
+      },
+      "context": {
+        "requests": 28,
+        "mean": 22926,
+        "median": 25088,
+        "p90": 32768,
+        "max": 33536
+      },
+      "compactions": {
+        "completed": 0,
+        "failed": 0
+      },
+      "tools": [],
+      "unknownCost": 0,
+      "verification": ""
+    },
+    {
+      "variant": "no-seam-ceiling",
+      "index": 0,
+      "status": "succeeded",
+      "verified": true,
+      "durationMs": 157130,
+      "requests": 38,
+      "tokens": {
+        "input": 89033,
+        "output": 8354,
+        "cacheRead": 568320,
+        "cacheWrite": 0
+      },
+      "cost": 0.020072310000000003,
+      "costByBillingType": {
+        "input": {
+          "rate": 1.5000000000000002e-7,
+          "tokens": 89033,
+          "amount": 0.013354950000000003
+        },
+        "output": {
+          "rate": 6e-7,
+          "tokens": 8354,
+          "amount": 0.0050124
+        },
+        "cacheRead": {
+          "rate": 3e-9,
+          "tokens": 568320,
+          "amount": 0.00170496
+        }
+      },
+      "context": {
+        "requests": 38,
+        "mean": 14956,
+        "median": 13440,
+        "p90": 39552,
+        "max": 40192
+      },
+      "compactions": {
+        "completed": 0,
+        "failed": 0
+      },
+      "tools": [],
+      "unknownCost": 0,
+      "verification": ""
+    },
+    {
+      "variant": "no-seam-ceiling",
+      "index": 1,
+      "status": "succeeded",
+      "verified": true,
+      "durationMs": 78930,
+      "requests": 21,
+      "tokens": {
+        "input": 62697,
+        "output": 3644,
+        "cacheRead": 205056,
+        "cacheWrite": 0
+      },
+      "cost": 0.012206117999999998,
+      "costByBillingType": {
+        "input": {
+          "rate": 1.5e-7,
+          "tokens": 62697,
+          "amount": 0.00940455
+        },
+        "output": {
+          "rate": 6.000000000000001e-7,
+          "tokens": 3644,
+          "amount": 0.0021864000000000002
+        },
+        "cacheRead": {
+          "rate": 3e-9,
+          "tokens": 205056,
+          "amount": 0.000615168
+        }
+      },
+      "context": {
+        "requests": 21,
+        "mean": 9765,
+        "median": 11264,
+        "p90": 14592,
+        "max": 15360
+      },
+      "compactions": {
+        "completed": 0,
+        "failed": 0
+      },
+      "tools": [],
+      "unknownCost": 0,
+      "verification": ""
+    },
+    {
+      "variant": "no-seam",
+      "index": 1,
+      "status": "succeeded",
+      "verified": true,
+      "durationMs": 160958,
+      "requests": 35,
+      "tokens": {
+        "input": 50393,
+        "output": 10737,
+        "cacheRead": 504064,
+        "cacheWrite": 0
+      },
+      "cost": 0.015513342000000001,
+      "costByBillingType": {
+        "input": {
+          "rate": 1.5e-7,
+          "tokens": 50393,
+          "amount": 0.00755895
+        },
+        "output": {
+          "rate": 6e-7,
+          "tokens": 10737,
+          "amount": 0.0064421999999999995
+        },
+        "cacheRead": {
+          "rate": 3e-9,
+          "tokens": 504064,
+          "amount": 0.001512192
+        }
+      },
+      "context": {
+        "requests": 35,
+        "mean": 14402,
+        "median": 14208,
+        "p90": 22144,
+        "max": 24448
+      },
+      "compactions": {
+        "completed": 0,
+        "failed": 0
+      },
+      "tools": [],
+      "unknownCost": 0,
+      "verification": ""
+    },
+    {
+      "variant": "default",
+      "index": 1,
+      "status": "succeeded",
+      "verified": true,
+      "durationMs": 142850,
+      "requests": 35,
+      "tokens": {
+        "input": 63072,
+        "output": 10838,
+        "cacheRead": 504960,
+        "cacheWrite": 0
+      },
+      "cost": 0.017478479999999998,
+      "costByBillingType": {
+        "input": {
+          "rate": 1.4999999999999997e-7,
+          "tokens": 63072,
+          "amount": 0.009460799999999998
+        },
+        "output": {
+          "rate": 5.999999999999999e-7,
+          "tokens": 10838,
+          "amount": 0.006502799999999999
+        },
+        "cacheRead": {
+          "rate": 3.0000000000000004e-9,
+          "tokens": 504960,
+          "amount": 0.0015148800000000001
+        }
+      },
+      "context": {
+        "requests": 35,
+        "mean": 14427,
+        "median": 13952,
+        "p90": 23168,
+        "max": 24832
+      },
+      "compactions": {
+        "completed": 0,
+        "failed": 0
+      },
+      "tools": [],
+      "unknownCost": 0,
+      "verification": ""
+    }
+  ]
+}
