@@ -6,7 +6,7 @@
 
 ## 结论摘要
 
-1. **53 条里有 24 条落在 Graph 自己身上**：16 条本轮修掉（其中 14 条有先红后绿的 E2E，#8 与 #29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），4 条确认为真实缺陷但不在本轮修复范围（#22/#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。
+1. **53 条里有 23 条落在 Graph 自己身上**：16 条本轮修掉（其中 14 条有先红后绿的 E2E，#8 与 #29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），3 条确认为真实缺陷但不在本轮修复范围（#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。另有一条（#22）这一轮查下来在本栈里不成立，改判 ALREADY-OK。
 
    #41 改过一轮又退了：改动本身是对的（内核知道模型有没有回答，驱动却不用这个信号），但那一轮让空回合的节点迟迟不落到终态，分不清它是在重试还是被停放着。发一个可能把节点挂住的改动比留着这个缺陷更糟，所以退回并把问题写清楚。
 2. 修掉的 16 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）、补交额度按 execution 而不是按 node 计（#8）、被停的那一步在任务停掉之后又写自己的结论（#13）。
@@ -50,7 +50,7 @@
 | 19 | ALREADY-OK | 低 | `core_store.go:464` 唯一约束；`core_wake_ledger.go:58-62` | 唤醒按 dedupe key 去重；上游 Install 按名替换 |
 | 20 | ALREADY-OK | 低 | `core_pause_continuation.go:18-31,45-50` | 恢复会遍历全部等待项，消费是全局的 |
 | 21 | ALREADY-OK | 低 | `runtime_tool_call_spool.go:76-105`；`runtime_pig_recovery.go:179-181` | 两条最近路径要么记录要么明确是 no-op |
-| 22 | OURS-GO → 未修（后续） | 中 | `runtime_pi_adapter.go:1445-1499`；`core_store.go:628-645` | 每个事件一次 INSERT + 一次通知 |
+| 22 | ALREADY-OK（上游形状） | 低 | `runtime_pi_adapter.go:1324-1340`；`core_conversation.go:388-422` | 每个 token 一次 span 与每个事件一次持久化：Graph 不 import PiG 的 telemetry（没有 span），delta 的写入被 60ms 合并，活动行只写变化的那几条 |
 | 23 | **OURS-GO** → 已修 | 高 | `runtime_compaction.go:19-55`；`pigkernel/resident.go` | daemon 算出的阈值从未交给内核，内核用自己的 1024 |
 | 24 | **OURS-GO** → 已修 | 高 | `runtime_provider_stream.go` `brokenToolCall` | 半截 JSON 参数被修复成 `{}` 后照常调用 |
 | 25 | **OURS-GO** → 已修 | 中 | `pigkernel/session.go` `RegisterCompactionPolicy`；`runtime_pig_session.go` | 注册名按实例派生，换 worker 即丢注册 |
@@ -221,7 +221,7 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 |---|---|---|
 | 41 | 完成由"没有错误"推断：内核没报错就算 `Done:true`，节点没有声明必需输出时驱动也返回 `Done:true` | 内核其实知道模型有没有回答（`answerText` 拿得到回答的内容），驱动没有用这个信号。改过一轮（`0c9b3a9e`）：让回合带着"有没有回答"，驱动只在回答过时才收尾。那一轮**退了**（`5222d84d`）：空回合的节点没有在 E2E 等待的时间内落到终态，分不清它是在重试还是被停放着——与其发一个可能把节点挂住的改动，不如把这个缺陷记下来。真正要回答的问题是：空回合应该重试、判失败还是停放，以及停放的节点怎么报告自己 |
 | 14 | `ListBounded`/`ReadBoundedBytes` 无上限，`ls`/`find` 没有默认 limit，18MB 目录清单先在 Graph 堆里成型 | `runtime_bounded_path.go`；`runtime_pig_native_tools.go` 给目录类工具默认 limit |
-| 22 | 每个流事件一次 INSERT + 一次通知；工具调用还额外两次事件与一次活动写 | `runtime_pi_adapter.go` 合并 `message.tool` 起止；`core_store.go` 合并活动写 |
+| 22 | **这一条在本栈里不成立，改判 ALREADY-OK**：`message.tool` 的起止各写一条事件（每回合几条，不是每 token），delta 的写入被 60ms 合并成一次 upsert（`runtime_pi_adapter.go:1329`），活动行只写变化过的那几条（`core_conversation.go:419-422`），事件表又由本分支的回收扫描（#53）按每个任务 200 条封顶。剩下的"每 token 一次"只是内核交给 daemon 的一次内存事件交接，而 Graph 根本没有 import PiG 的 telemetry 包，也就是说清单里说的 span 在这个栈里不存在 | 无需改：写放大已经被合并与回收两条路堵住了 |
 | 46 | 48 个工具声明里 15,229 字符描述对 2,225 字符参数，87.3% 是散文 | `runtime_agent_tool_definitions.go`：描述压成一句操作说明，长协议移进 `<docs>` |
 | 47 | daemon 侧设计好的 4KB 溢出/摘要路径（`ToolResultHook`）在 Go 路径上没有调用者，工具结果只有上游 50KB 兜底 | `pigkernel/extensions.go` 注册工具时挂上 `ToolResultHook` |
 | 36 | 用户的确认仍然只是给模型的规则，不是代码检查：模型可以在别的 operation 还在跑时 `force` 重载 daemon。ADR 0026 把 `force` 定义为 agent 的工具（"force 保留中断在途 operation 的原有语义"），所以收紧它是 ADR 决策，不是实现细节。工具的描述已写明这个后果与"先问用户" | 要么改 ADR 0026，要么在代码里要求一次可查证的确认（谁问、谁答、记在哪） |
