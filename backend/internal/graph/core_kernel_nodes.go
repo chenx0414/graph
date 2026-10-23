@@ -22,6 +22,16 @@ func (k *KernelStore) NodeStatus(taskID, nodeID string) string {
 	return g5Str(row["status"])
 }
 
+// RecordNodeBinding stores the session binding a node runs with.
+//
+// The binding is what the node was sent: its model, its prompt, its
+// tools, its state directory, its role and the environment it works in.
+// A later binding for the same node replaces it.
+func (k *KernelStore) RecordNodeBinding(taskID, nodeID, modelID, systemPrompt, tools, stateDir, role, environment string) {
+	g5Exec(k.Db, "INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir,role,environment) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir,role=excluded.role,environment=excluded.environment",
+		taskID, nodeID, modelID, systemPrompt, tools, stateDir, role, environment)
+}
+
 // NodeInstanceID is the instance a node was admitted with.
 //
 // The lane and the node host both ask which instance a node runs in. The

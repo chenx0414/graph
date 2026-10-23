@@ -64,6 +64,13 @@ func (k *KernelStore) deliveryFrom(row map[string]any) DeliveryRow {
 	}
 }
 
+// RecordCompletionDelivery records the commit a task's finished work was
+// delivered with. A task has one such commit; a later delivery replaces it.
+func (k *KernelStore) RecordCompletionDelivery(taskID, commitSHA string) {
+	g5Exec(k.Db, "INSERT INTO kernel_completion_delivery(task_id,commit_sha,created_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET commit_sha=excluded.commit_sha,created_at=excluded.created_at",
+		taskID, commitSHA, NowMillis())
+}
+
 // DeliveryEdges are the endpoint pairs a task has received work over.
 //
 // Disabling an edge cannot erase the identity of work already received

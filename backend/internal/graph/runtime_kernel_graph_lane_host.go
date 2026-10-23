@@ -179,8 +179,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 				if sent.ToolDeclarations != nil {
 					tools = kernelGraphLaneJSON(sent.ToolDeclarations)
 				}
-				kernelExec(state.options.Kernel.Db, "INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)",
-					graphId, nodeId, executionID, rsiStringValue(sent.SystemPrompt), tools, NowMillis())
+				state.options.Kernel.RecordPrompt(graphId, nodeId, executionID, rsiStringValue(sent.SystemPrompt), tools)
 			},
 		})(ToPiModel(model), context, kernelGraphLaneStreamOptions(streamOptions, abort))
 		if err != nil {
@@ -242,8 +241,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 				} else if data["tools"] != nil {
 					tools = kernelGraphLaneJSON(data["tools"])
 				}
-				kernelExec(state.options.Kernel.Db, "INSERT INTO kernel_prompts(task_id,node_id,execution_id,system_prompt,tools,created_at) VALUES(?,?,?,?,?,?)",
-					graphId, nodeId, rsiStringValue(executionID), rsiText(data["systemPrompt"]), tools, NowMillis())
+				state.options.Kernel.RecordPrompt(graphId, nodeId, rsiStringValue(executionID), rsiText(data["systemPrompt"]), tools)
 			case "message_end":
 				message, _ := data["message"].(map[string]any)
 				if message == nil || rsiText(message["role"]) != "assistant" {

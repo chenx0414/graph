@@ -308,8 +308,8 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		key := execution.TaskId + "/" + execution.NodeId
 		state.restoring[key] = wrapper
 		originalState := execution.State
-		kernelExec(state.options.Kernel.Db, "UPDATE kernel_executions SET state='running' WHERE id=?", id)
-		defer kernelExec(state.options.Kernel.Db, "UPDATE kernel_executions SET state=? WHERE id=?", originalState, id)
+		state.options.Kernel.SetExecutionState(id, "running")
+		defer state.options.Kernel.SetExecutionState(id, originalState)
 		// The PiG kernel runs the node's turn in this process, so there is no
 		// sidecar admission to restore. The frozen configuration is what the
 		// re-run needs, and building the node's config from it is what puts

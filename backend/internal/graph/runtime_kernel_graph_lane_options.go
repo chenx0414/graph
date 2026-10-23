@@ -25,8 +25,7 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				}
 				result := state.options.Git.TryDeliver(graphId, acceptance.Commit)
 				if result.Status == "merged" {
-					kernelExec(state.options.Kernel.Db, "INSERT INTO kernel_completion_delivery(task_id,commit_sha,created_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET commit_sha=excluded.commit_sha,created_at=excluded.created_at",
-						graphId, *acceptance.Commit, NowMillis())
+					state.options.Kernel.RecordCompletionDelivery(graphId, *acceptance.Commit)
 					return nil
 				}
 				state.options.Kernel.Store.Event(graphId, "graph.delivery.pending", map[string]any{
@@ -253,8 +252,7 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				environment.Base = session.Environment.Base
 				environment.Access = session.Environment.Access
 			}
-			kernelExec(state.options.Kernel.Db, "INSERT INTO kernel_node_bindings(task_id,node_id,model_id,system_prompt,tools,state_dir,role,environment) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(task_id,node_id) DO UPDATE SET model_id=excluded.model_id,system_prompt=excluded.system_prompt,tools=excluded.tools,state_dir=excluded.state_dir,role=excluded.role,environment=excluded.environment",
-				graphId, nodeId, model.Id, session.SystemPrompt, kernelGraphLaneJSON(session.AllowedToolNames), session.StateDir, session.Role, kernelGraphLaneJSON(environment))
+			state.options.Kernel.RecordNodeBinding(graphId, nodeId, model.Id, session.SystemPrompt, kernelGraphLaneJSON(session.AllowedToolNames), session.StateDir, session.Role, kernelGraphLaneJSON(environment))
 			compaction := CompactionSettingsFor(struct {
 				ContextWindow int
 				MaxTokens     int

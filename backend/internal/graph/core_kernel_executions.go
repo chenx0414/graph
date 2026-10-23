@@ -138,6 +138,15 @@ func (k *KernelStore) BlockQueued(taskID string, seq int64) {
 	g5Exec(k.Db, "UPDATE kernel_queue SET state='queued' WHERE task_id=? AND seq=? AND state='claimed'", taskID, seq)
 }
 
+// SetExecutionState records the state of one execution.
+//
+// The lane sets an execution to running while it restores a frozen turn
+// and puts the old state back afterwards. That is a fact about the
+// execution, so the store records it.
+func (k *KernelStore) SetExecutionState(executionID, state string) {
+	g5Exec(k.Db, "UPDATE kernel_executions SET state=? WHERE id=?", state, executionID)
+}
+
 // FinishExecution records a terminal execution state.
 func (k *KernelStore) FinishExecution(executionID, state string) {
 	finish := func() {
