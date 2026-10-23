@@ -22,14 +22,8 @@
 
 8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
 
-## 剩下最大的一个归属缺口：`tasks` 的 phase 由 12 个文件、34 处自己写
+## `tasks` 表的归属缺口已经补上
 
-kernel 层的表已经各有 owner：provider 调用、module operation、预算、执行、队列、节点都在 store 里，运行时层问它。**还没有 owner 的是 `tasks` 这张表**——它是 graph 的生命周期表，phase 与 paused 却由 12 个文件里的 34 处自己写：
+kernel 层的表与 `tasks` 表现在都有 owner 了。`tasks` 的生命周期（phase、paused）原先由 12 个文件里的 34 处自己写，phase 的词汇散在十六个地方而不是一处；它的五种创建方式（一个 graph、一个对话下的 graph、一次主管回合、一个对话锚定的 task、一个已确认提案的 task）也各自写着 SQL。现在这些全是 store 的方法，创建的方法名说的是"创建什么"而不是"有哪些列"，<span>core_task_lifecycle.go</span> 是这张表唯一的写入口。
 
-- `core_execution.go`、`core_graph_lane.go`、`core_graph_runtime.go`、`core_graph_service.go`
-- `core_kernel_deliveries.go`、`core_kernel_recovery.go`、`core_operation_lifecycle.go`、`core_task_queue.go`、`core_task_runtime.go`
-- `runtime_pig_node_recovery.go`、`git_integration.go`
-
-同样的表也散着 `requirement_version`、`latest_proposal`、`accepted_proposal`、`integration_branch`、`target_sha` 等列的写入。给 `tasks` 一组生命周期方法（`SetTaskPhase` / `StartTaskPhase` / `BlockTaskPhase` …）是这件事的形状，但它是 graph 的核心状态机，改动面比前面几步都宽，值得单独一个任务，而不是搭在别的事后面顺手做。
-
-比它小一号的同类：运行时层还剩约二十处直接读 kernel 表，分散在执行名额（`runtime_execution_slots.go`）、harness 的探针与证据、以及工具闸门里。**执行名额那处是跨两份 store 的事实**（旧的 `operations` 表与新的 `kernel_executions` 表一起数），它天然不属于任何一份 store，因此留在那个模块里是合理的，不是绕过。
+剩下的同类：运行时层还剩约二十处直接读 kernel 表，分散在执行名额（`runtime_execution_slots.go`）、harness 的探针与证据、以及工具闸门里。**执行名额那处是跨两份 store 的事实**（旧的 `operations` 表与新的 `kernel_executions` 表一起数），它天然不属于任何一份 store，因此留在那个模块里是合理的，不是绕过。
