@@ -57,6 +57,7 @@
 | `91936956` + `5bb621bc`（拆 store、闸门与 broker 归 store） | **293 通过、1 跳过、0 失败**（1552 个测试） | 拆 store 之前另有 10 个 kernel 路径的 E2E（node-budget、kernel-node-budget、node-executor、pig-node-recovery、pig-node-lane、graph-modules、kernel-git-integration、loops、faults、execution）跑过一遍 67/67 通过；改 broker 之后另有 8 个模块路径的 E2E 跑过一遍 58/58 通过 |
 | `cf1135b8`（节点恢复归 store） | 见下一行 | 改之前另有 6 个恢复路径的 E2E（pig-node-recovery、pig-durable-recovery、node-executor、recovery、faults、pig-node-lane）跑过一遍 41/41 通过 |
 | `037a66f6`（拆 kernel views） | **293 通过、1 跳过、0 失败**（1552 个测试） | 拆 views 之前另有 6 个视图路径的 E2E（go-graph-view、pig-node-lane、kernel-git-integration、execution、graph-final-acceptance、node-executor）跑过一遍 51/51 通过 |
+| `cf1135b8` + `213bfa9f`（节点恢复归 store、记下剩下的归属缺口） | **293 通过、1 跳过、0 失败**（1552 个测试） | 改之前另有 6 个恢复路径的 E2E（pig-node-recovery、pig-durable-recovery、node-executor、recovery、faults、pig-node-lane）跑过一遍 41/41 通过 |
 
 **kernel 层与运行时层现在没有任何一个文件超过守卫上限**：最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。
 
