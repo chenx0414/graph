@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TaskStore } from '../../src/core/store.ts';
 import {
-  TOOL_CALL_SPOOL_DIR, clearToolCallSpools, ingestToolCallSpools, spoolToolCall, toolCallSpoolPath,
+  TOOL_CALL_SPOOL_DIR, clearToolCallSpools, ingestToolCallSpools, toolCallSpoolPath,
 } from '../../src/runtime/tool-call-spool.ts';
 
 function open() {
@@ -13,8 +13,21 @@ function open() {
   return { stateDir, store: new TaskStore(join(stateDir, 'tasks.sqlite')) };
 }
 
-// A worker lane writes its calls where the daemon can see them, and reading the statistics is what
-// folds them in. The whole outward behaviour of the spool is: file in, attributed rows out, once.
+/**
+ * Lay down one spool file the way a lane leaves it on disk: one JSON record per line, current
+ * timestamps (the statistics prune anything older than the retention window, so a line dated in
+ * 1970 would be gone before it could be asserted). The write path itself is not here to be
+ * asserted; what is under test is the fold: file in, attributed rows out, once.
+ */
+async function writeSpool(stateDir: string, instanceId: string, calls: { tool: string; ms: number; isError: boolean; target?: string }[]): Promise<void> {
+  await mkdir(join(stateDir, TOOL_CALL_SPOOL_DIR), { recursive: true });
+  await writeFile(
+    toolCallSpoolPath(stateDir, instanceId),
+    calls.map(call => `${JSON.stringify({ instanceId, ...call, ms: Math.max(0, Math.round(call.ms)), at: Date.now(), ...(call.target ? { target: call.target } : {}) })}\n`).join(''),
+  );
+}
+
+// A lane's spool is what the daemon can see, and reading the statistics is what folds it in.
 test('folds a worker lane spool into the statistics, and only once', async () => {
   const { stateDir, store } = open();
   store.transaction(() => {
@@ -22,8 +35,10 @@ test('folds a worker lane spool into the statistics, and only once', async () =>
     store.db.prepare("INSERT INTO tasks(id,project_id,request,created_seq) VALUES('t','p','tool-call spool',1)").run();
     store.db.prepare("INSERT INTO nodes(task_id,id,spec,instance_id) VALUES('t','lane','{\"role\":\"coder\"}','worker-1')").run();
   });
-  await spoolToolCall(stateDir, 'worker-1', { tool: 'bash', ms: 40, isError: false });
-  await spoolToolCall(stateDir, 'worker-1', { tool: 'edit', ms: 90, isError: true });
+  await writeSpool(stateDir, 'worker-1', [
+    { tool: 'bash', ms: 40, isError: false },
+    { tool: 'edit', ms: 90, isError: true },
+  ]);
 
   expect(await ingestToolCallSpools(store, stateDir)).toBe(2);
   // The stored offset is the record: the same file cannot be counted twice.
@@ -34,9 +49,7 @@ test('folds a worker lane spool into the statistics, and only once', async () =>
 });
 
 // A worker appends while the daemon reads, so the last line is often half written. It must wait,
-// not arrive as a broken row or as a dropped one. Fixture timestamps are current: the statistics
-// prune anything older than the retention window, so a line dated in 1970 would be gone before it
-// could be asserted.
+// not arrive as a broken row or as a dropped one.
 test('waits for a half-written line instead of counting it', async () => {
   const { stateDir, store } = open();
   const file = toolCallSpoolPath(stateDir, 'worker-2');
@@ -53,11 +66,13 @@ test('waits for a half-written line instead of counting it', async () => {
 // than slicing into the middle of a different line.
 test('a truncated spool is read from the start rather than trusted', async () => {
   const { stateDir, store } = open();
-  await spoolToolCall(stateDir, 'worker-3', { tool: 'agent_browser', ms: 5, isError: false });
-  await spoolToolCall(stateDir, 'worker-3', { tool: 'ffgrep', ms: 6, isError: false });
+  await writeSpool(stateDir, 'worker-3', [
+    { tool: 'agent_browser', ms: 5, isError: false },
+    { tool: 'ffgrep', ms: 6, isError: false },
+  ]);
   expect(await ingestToolCallSpools(store, stateDir)).toBe(2);
 
-  await writeFile(toolCallSpoolPath(stateDir, 'worker-3'), `${JSON.stringify({ instanceId: 'worker-3', tool: 'grep', ms: 7, isError: false, at: Date.now() })}\n`);
+  await writeSpool(stateDir, 'worker-3', [{ tool: 'grep', ms: 7, isError: false }]);
   expect(await ingestToolCallSpools(store, stateDir)).toBe(1);
   expect(store.toolCallStats().find(entry => entry.tool === 'grep')).toMatchObject({ calls: 1 });
 });
@@ -66,7 +81,7 @@ test('a truncated spool is read from the start rather than trusted', async () =>
 // would quietly resurrect the calls the user just deleted.
 test('clearing the sample removes the spool, so nothing is re-ingested', async () => {
   const { stateDir, store } = open();
-  await spoolToolCall(stateDir, 'worker-4', { tool: 'bash', ms: 5, isError: false });
+  await writeSpool(stateDir, 'worker-4', [{ tool: 'bash', ms: 5, isError: false }]);
   await ingestToolCallSpools(store, stateDir);
   store.clearToolCalls();
   store.forgetToolCallSpools();
@@ -76,12 +91,14 @@ test('clearing the sample removes the spool, so nothing is re-ingested', async (
   expect(store.toolCallStats()).toEqual([]);
 });
 
-// Telemetry observes turns; it never gets to break one. An unwritable spool is a missing sample.
-test('an unwritable spool stays silent instead of failing the turn', async () => {
+// Telemetry observes turns; it never gets to break one. A spool path that cannot be read at all -
+// something that is not a directory - is a missing sample, and the read still answers.
+test('an unreadable spool path stays silent instead of failing the read', async () => {
   const root = mkdtempSync(join(tmpdir(), 'tool-spool-'));
   await writeFile(join(root, 'not-a-dir'), 'x');
-  await expect(spoolToolCall(join(root, 'not-a-dir', 'nested'), 'worker-5', { tool: 'bash', ms: 1, isError: false }))
-    .resolves.toBeUndefined();
+  const store = new TaskStore(join(root, 'tasks.sqlite'));
+  await expect(ingestToolCallSpools(store, join(root, 'not-a-dir', 'nested'))).resolves.toBe(0);
+  expect(store.toolCallStats()).toEqual([]);
 });
 
 // Two readers can ask at the same moment — the console fetches the tool numbers and the skill
@@ -89,8 +106,10 @@ test('an unwritable spool stays silent instead of failing the turn', async () =>
 // and it did before this guard existed.
 test('two concurrent reads fold a spool exactly once', async () => {
   const { stateDir, store } = open();
-  await spoolToolCall(stateDir, 'worker-6', { tool: 'read', ms: 7, isError: false, target: '/tmp/skill/SKILL.md' });
-  await spoolToolCall(stateDir, 'worker-6', { tool: 'bash', ms: 3, isError: false });
+  await writeSpool(stateDir, 'worker-6', [
+    { tool: 'read', ms: 7, isError: false, target: '/tmp/skill/SKILL.md' },
+    { tool: 'bash', ms: 3, isError: false },
+  ]);
 
   const [first, second] = await Promise.all([
     ingestToolCallSpools(store, stateDir),
@@ -111,8 +130,10 @@ test('two concurrent reads fold a spool exactly once', async () => {
 test('folds a lane spool written inside the instance directory the lane was given', async () => {
   const { stateDir, store } = open();
   const instanceDir = join(stateDir, 'instances', 'worker-5');
-  await spoolToolCall(instanceDir, 'worker-5', { tool: 'read', ms: 30, isError: false, target: '/p/.agents/skills/heartbeat/SKILL.md' });
-  await spoolToolCall(instanceDir, 'worker-5', { tool: 'bash', ms: 11, isError: false });
+  await writeSpool(instanceDir, 'worker-5', [
+    { tool: 'read', ms: 30, isError: false, target: '/p/.agents/skills/heartbeat/SKILL.md' },
+    { tool: 'bash', ms: 11, isError: false },
+  ]);
 
   expect(await ingestToolCallSpools(store, stateDir)).toBe(2);
   // One convention, one offset: the instance file is not counted again either.
@@ -123,7 +144,7 @@ test('folds a lane spool written inside the instance directory the lane was give
 // Clearing from the console means the sample is gone, wherever it was written.
 test('clearing the sample also removes what a lane spooled in its instance directory', async () => {
   const { stateDir, store } = open();
-  await spoolToolCall(join(stateDir, 'instances', 'worker-6'), 'worker-6', { tool: 'bash', ms: 9, isError: false });
+  await writeSpool(join(stateDir, 'instances', 'worker-6'), 'worker-6', [{ tool: 'bash', ms: 9, isError: false }]);
   expect(await ingestToolCallSpools(store, stateDir)).toBe(1);
   store.clearToolCalls();
   store.forgetToolCallSpools();

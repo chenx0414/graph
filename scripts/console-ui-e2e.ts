@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
 import { readConsoleAddress } from '../src/server/console-address.ts';
-import { TOOL_CALL_SPOOL_DIR, toolCallSpoolPath } from '../src/runtime/tool-call-spool.ts';
+import { TaskStore } from '../src/core/store.ts';
 import { openaiServer } from '../tests/fixtures/openai-server.ts';
 
 const repo = join(import.meta.dirname, '..');
@@ -56,9 +56,8 @@ await mkdir(workspace, { recursive: true });
 await mkdir(join(workspace, '.agents', 'skills', 'e2e-skill'), { recursive: true });
 await writeFile(join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md'), '---\nname: e2e-skill\ncreated-by: graph-agent\ndescription: Seeded fixture skill for the console E2E run. Use when the console tool page is asserted.\n---\n');
 await mkdir(home, { recursive: true });
-// A scripted provider, so this daemon can run one real master turn: the master lane records its tool
-// calls in-process (`pi-adapter` → `recordToolCall`) instead of through the worker spool the sections
-// below seed, and only a real turn can show that write reaching the page (HB-88).
+// A scripted provider, so this daemon can run one real master turn: the last section proves the
+// write the master lane really makes (`pi-adapter` → `recordToolCall`) reaching the page (HB-88).
 const provider = await openaiServer([
   { tools: [{ id: 'master-bash', name: 'bash', arguments: JSON.stringify({ command: 'echo master-direct-write' }) }] },
   { text: '记录已写入。' },
@@ -75,7 +74,7 @@ await writeFile(config, JSON.stringify({
 const daemon = spawn(process.execPath, [
   join(repo, 'src', 'server', 'cli.ts'),
   // `--execute` is what lets this daemon dispatch at all (the default is view-only, history and settings
-  // only): without it the real turn in the last section never runs and its spool file is never written.
+  // only): without it the real turn in the last section never runs and no call of its own is recorded.
   '--execute', '--state-dir', state, '--graph-home', home, '--web-dir', web, '--port', '0', '--config', config,
 ], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GRAPH_E2E_KEY: 'scripted-local-key' } });
 let daemonLog = '';
@@ -103,41 +102,35 @@ try {
     await new Promise(done => setTimeout(done, 250));
   }
 
-  // Seed through the worker spool, not by inserting rows: the page must show what the new
-  // ingest path produces, and a worker lane is the only writer that uses it.
-  const db = new DatabaseSync(join(state, 'tasks.sqlite'));
+  // Seed the rows the tool page reads, through the store's own writer: `recordToolCall` is what the
+  // real lane seams call (`pi-adapter`, `kernel-graph-lane`), so the numbers below are the ones the
+  // product computes from a real write rather than a hand-inserted row.
+  const store = new TaskStore(join(state, 'tasks.sqlite'));
   // The master's own question (ask_user) records kind 'waiting' with requestType
   // 'user_decision' (operation-lifecycle block() + pi-adapter askedQuestion), so the card is
   // seeded with that exact shape rather than a convenient stand-in.
-  const task = db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES(?,?,?,?,?,?,?,?)');
+  const task = store.db.prepare('INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,phase,paused,created_seq) VALUES(?,?,?,?,?,?,?,?)');
   task.run('hb80-asked', 'e2e', '决策卡片的真浏览器断言', 1, 0, 'running', 0, 2);
   task.run('hb80-empty', 'e2e', '没有待处理问题的任务', 1, 0, 'running', 0, 3);
-  db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)')
+  store.db.prepare('INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)')
     .run('hb80-asked', 'n-e2e', JSON.stringify({ role: 'master' }), 'inst-e2e');
-  db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)').run(
+  store.db.prepare('INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)').run(
     'q-hb80', 'hb80-asked', 'n-e2e', null, 'waiting',
     JSON.stringify({ requestType: 'user_decision', prompt: '要不要把这条先改成检测？', why: '答案会改变实现' }),
     'user',
   );
-  db.close();
 
-  const spooled = [
+  const seeded = [
     { tool: 'bash', ms: 120, isError: false },
     { tool: 'bash', ms: 300, isError: true },
     { tool: 'agent_browser', ms: 8_000, isError: false },
     // One call that touched a skill file: this is what makes the skill show as read.
     { tool: 'read', ms: 4, isError: false, target: join(workspace, '.agents', 'skills', 'e2e-skill', 'SKILL.md') },
   ];
-  // Seed through the worker spool, not by inserting rows, and at the directory a lane really
-  // writes: a lane receives its own instance directory as its stateDir, so the file sits under it
-  // (the instance id matches the node's, exactly as production does it). Seeding the daemon's own
-  // root instead is what once hid a reader that never looked where the lanes write.
-  const laneDir = join(state, 'instances', 'inst-e2e');
-  await mkdir(join(laneDir, TOOL_CALL_SPOOL_DIR), { recursive: true });
-  await writeFile(
-    toolCallSpoolPath(laneDir, 'inst-e2e'),
-    spooled.map(call => `${JSON.stringify({ instanceId: 'inst-e2e', ...call, at: Date.now() })}\n`).join(''),
-  );
+  // The instance id is the node's own, exactly as a lane records it, so the seeded rows are
+  // attributed to the master Agent by the same resolution a real call goes through.
+  for (const call of seeded) store.recordToolCall({ instanceId: 'inst-e2e', ...call });
+  store.db.close();
 
   browser = await chromium.launch();
   const page = await browser.newPage();
@@ -237,10 +230,8 @@ try {
   await page.getByTestId('no-questions').waitFor({ timeout: 10_000 });
   check('无问题的任务显示空态', await page.getByTestId('no-questions').count(), 1);
 
-  // ── 一次真回合的遥测（HB-88）：上面那段种的是 spool 字节，这一段让守护进程真的跑一个回合。
-  // 现场先纠了一个错的前提：daemon 里 master 也跑在 worker 进程里，工具调用落进 spool，而 spool
-  // 只在「有人读统计」时才被吸入——所以并不是两条通路，而是同一条通路的两端；这段证明它能被真的
-  // 回合喂饱，而且页面看到的确实是那次回合产生的字节。
+  // ── 一次真回合的遥测（HB-88）：上面那段用真实写入路径种下四行，这一段让守护进程自己跑一个回合，
+  // 好证明清空之后页面上唯一的那一行来自那个回合，而不是种子。
   const created = await page.evaluate(async () => {
     const response = await fetch('/api/conversations', {
       method: 'POST',
@@ -253,9 +244,10 @@ try {
   check('控制台 HTTP 面能创建会话（即起一个真回合）', created.status, 200);
   check('创建会话返回了 conversationId', created.conversationId.length > 0, true);
 
-  // Tool calls only reach the table when someone reads the statistics, and loading this page is that
-  // read. Poll the page, not the database: the database is the result of what the page does. And reload
-  // rather than goto() - the same URL with a hash does not navigate, which once read as "no ingest".
+  // The turn is still running when this section starts, so the row it produces only shows up once the
+  // lane has written it and this page has read the statistics. Poll the page, not the database: the
+  // database is the result of what the page does. And reload rather than goto() - the same URL with a
+  // hash does not navigate, which once read as "no telemetry".
   await page.goto(`${url}/#/tools`, { waitUntil: 'domcontentloaded' });
   const telemetryDeadline = Date.now() + 90_000;
   let row = '';
@@ -273,11 +265,11 @@ try {
   }
   checkContains('那行是 bash（真回合真的调了它）', row, 'bash');
   checkContains('角色是「主 Agent」（master 车道）', row, '主 Agent');
-  // The row came from the turn's own spool file, so this read really performed the ingest.
+  // Read the table back to prove the row is in the store itself, not only in the rendered page.
   const ingested = new DatabaseSync(join(state, 'tasks.sqlite'));
   const stored = ingested.prepare('SELECT tool, role, count(*) AS calls FROM tool_calls GROUP BY tool, role').all() as { tool: string; role: string | null; calls: number }[];
   ingested.close();
-  check('吸入后表里恰好一行：bash / master', stored, [{ tool: 'bash', role: 'master', calls: 1 }]);
+  check('真回合之后表里恰好一行：bash / master', stored, [{ tool: 'bash', role: 'master', calls: 1 }]);
   const telemetryShot = join(screenshots, 'tool-stats-real-turn.png');
   await page.screenshot({ path: telemetryShot, fullPage: true });
   console.log(`截图 ${telemetryShot}`);

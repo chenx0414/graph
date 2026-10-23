@@ -1,19 +1,14 @@
 /**
- * Worker lanes run in a child process that holds no store, so their tool calls cannot be
- * written by the daemon's own seam. They are spooled to a file inside the state directory
- * the worker was already given, and folded into `tool_calls` on the next read.
+ * A tool call reaches `tool_calls` through the store's own writer, in process. A lane that holds only
+ * a file leaves a spool line instead, and reading the statistics folds those files in - this module
+ * is the file side of that: where a spool can be, the offset that makes folding it idempotent, clearing.
  *
- * That directory is the lane's own instance directory: a lane receives its session directory as
- * `stateDir`, so its spool lands at `<stateDir>/instances/<instanceId>/tool-calls/`. The daemon's
- * own root is read as well, because a lane handed the root (a host-run check, a fixture) writes
- * there. Both places are the same convention seen from two ends; reading only the root reported
- * zero calls for every lane while the samples sat on disk.
- *
- * A file, not a new protocol: the worker already writes only inside that directory, and an
- * append cannot block the turn it observes. Losing a sample is acceptable; breaking a tool
- * call is not, so every write here swallows its own failure.
+ * Both the daemon's own root and one directory per instance are read. A lane receives its session
+ * directory as its state dir, so its spool lands at `<stateDir>/instances/<instanceId>/tool-calls/`;
+ * a lane handed the root writes there instead. One convention from two ends, and reading only the
+ * root reported zero calls for every lane while the samples sat on disk.
  */
-import { appendFile, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { readFile, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TaskStore } from '../core/store.ts';
 
@@ -21,31 +16,10 @@ export const TOOL_CALL_SPOOL_DIR = 'tool-calls';
 export const INSTANCES_DIR = 'instances';
 const RETAIN_DAYS = 90;
 
-/** Where one worker instance spools its calls. */
+/** The file one instance's spool is read from: `<stateDir>/tool-calls/<instanceId>.jsonl`. */
 export function toolCallSpoolPath(stateDir: string, instanceId: string): string {
   // An instance id is a uuid today; a file name is not the place to rely on that.
   return join(stateDir, TOOL_CALL_SPOOL_DIR, `${instanceId.replace(/[^A-Za-z0-9._-]/g, '_')}.jsonl`);
-}
-
-/** Called from the worker's tool-call seam. Never throws: telemetry must not break a turn. */
-export async function spoolToolCall(
-  stateDir: string,
-  instanceId: string,
-  call: { tool: string; ms: number; isError: boolean; target?: string | null },
-): Promise<void> {
-  try {
-    await mkdir(join(stateDir, TOOL_CALL_SPOOL_DIR), { recursive: true });
-    await appendFile(toolCallSpoolPath(stateDir, instanceId), `${JSON.stringify({
-      instanceId,
-      tool: call.tool,
-      ms: Math.max(0, Math.round(call.ms)),
-      isError: call.isError,
-      at: Date.now(),
-      ...(call.target ? { target: call.target } : {}),
-    })}\n`);
-  } catch {
-    // An unwritable spool is a missing sample, never a failed tool call.
-  }
 }
 
 function parseSpooledLine(line: string): { instanceId: string; tool: string; ms: number; isError: boolean; at: number; target: string | null } | null {
