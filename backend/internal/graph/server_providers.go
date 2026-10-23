@@ -26,11 +26,11 @@ const ModelApiOpenAICompletions ModelApi = "openai-completions"
 // ModelApiAnthropicMessages is the Anthropic Messages transport.
 const ModelApiAnthropicMessages ModelApi = "anthropic-messages"
 
-// PlatformPreset is one first-class provider Graph can configure with a
+// PlatformPresetRecord is one first-class provider Graph can configure with a
 // single credential. Presets carry the endpoint and transport defaults so the
 // wizard only has to collect a KEY (or subscription token), while `自定义`
 // collects all fields.
-type PlatformPreset struct {
+type PlatformPresetRecord struct {
 	OAuthProvider  string                 `json:"oauthProvider,omitempty"`
 	ID             string                 `json:"id"`
 	Label          string                 `json:"label"`
@@ -68,7 +68,7 @@ var PROVIDER_ROUTES = ProviderRoutes{List: "/api/providers", Probe: "/api/provid
 // fallback for any other OpenAI/Anthropic-compatible endpoint. Credential env
 // names are shared with the usage adapters (src/server/usage.ts) so one key
 // configures both.
-var PLATFORM_PRESETS = []PlatformPreset{
+var PLATFORM_PRESETS = []PlatformPresetRecord{
 	{
 		ID: "opencode-go", Label: "OpenCode Go", API: ModelApiOpenAICompletions,
 		BaseURL: "https://opencode.ai/zen/go/v1", CredentialRef: "GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY",
@@ -109,7 +109,7 @@ func init() {
 		if template.ID == "custom" {
 			ref = "GRAPH_PROVIDER_API_KEY"
 		}
-		preset := PlatformPreset{ID: template.ID, Label: template.Label, API: ModelApi(template.API), BaseURL: template.BaseURL, CredentialRef: ref, CredentialKind: ProviderCredentialKindAPIKey, ModelsListSupported: true, DocsURL: stringPointer(template.DocsURL), Notes: template.Notes}
+		preset := PlatformPresetRecord{ID: template.ID, Label: template.Label, API: ModelApi(template.API), BaseURL: template.BaseURL, CredentialRef: ref, CredentialKind: ProviderCredentialKindAPIKey, ModelsListSupported: true, DocsURL: stringPointer(template.DocsURL), Notes: template.Notes}
 		if template.ID == "openrouter" {
 			preset.OAuthProvider = "openrouter"
 		}
@@ -127,9 +127,7 @@ var PLATFORM_CREDENTIAL_REFS = func() map[string]string {
 	return refs
 }()
 
-// PlatformPresetByID is platformPreset. Go cannot name the function
-// PlatformPreset while the struct keeps that exported type name.
-func PlatformPresetByID(id string) *PlatformPreset {
+func PlatformPreset(id string) *PlatformPresetRecord {
 	for index := range PLATFORM_PRESETS {
 		if PLATFORM_PRESETS[index].ID == id {
 			return &PLATFORM_PRESETS[index]
@@ -235,9 +233,9 @@ func ValidateProviderDraft(input any) ProviderDraftValidation {
 		rawID = strings.TrimSpace(value)
 		hasRawID = true
 	}
-	var preset *PlatformPreset
+	var preset *PlatformPresetRecord
 	if hasRawID {
-		preset = PlatformPresetByID(rawID)
+		preset = PlatformPreset(rawID)
 	}
 	custom := preset == nil || preset.ID == CUSTOM_PLATFORM_ID
 	// The `custom` preset only carries UI hints; its required fields must come

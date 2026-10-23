@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// DeployDrift is how the checkout the app runs from compares to the development checkout
+// DeployDriftReport is how the checkout the app runs from compares to the development checkout
 // of the same repository.
 //
 // "The app runs the code I am editing" is an assumption, not a fact: the daemon loads its source from
@@ -16,7 +16,7 @@ import (
 // the two still agreed. The answer is the content of the two working trees as git sees them - one `git status`
 // of each worktree, read through the other checkout's index - so only tracked files are compared, and a read
 // never refreshes an index.
-type DeployDrift struct {
+type DeployDriftReport struct {
 	// Root is the development checkout this was compared against.
 	Root string `json:"root"`
 	// Files are tracked by both checkouts, different content.
@@ -204,11 +204,8 @@ func DevelopmentCandidates(root string, env map[string]string) []string {
 	return found
 }
 
-// DeployDriftOf compares the deployed checkout with the development checkout.
-//
-// The TypeScript export is `deployDrift`; the Go name carries the `Of` suffix because the type
-// `DeployDrift` already owns the bare name.
-func DeployDriftOf(deployedRoot, developmentRoot string) DeployDrift {
+// DeployDrift compares the deployed checkout with the development checkout.
+func DeployDrift(deployedRoot, developmentRoot string) DeployDriftReport {
 	hereDeleted, hereChanged, hereOK := deployComparedPaths(deployedRoot, developmentRoot)
 	thereDeleted, thereChanged, thereOK := deployComparedPaths(developmentRoot, deployedRoot)
 	files := map[string]bool{}
@@ -291,7 +288,7 @@ func DeployDriftOf(deployedRoot, developmentRoot string) DeployDrift {
 		sortedExtra = append(sortedExtra, path)
 	}
 	sort.Strings(sortedExtra)
-	return DeployDrift{
+	return DeployDriftReport{
 		Root:         resolved,
 		Files:        sortedFiles,
 		Missing:      sortedMissing,

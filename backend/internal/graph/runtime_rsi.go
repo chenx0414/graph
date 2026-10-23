@@ -151,7 +151,7 @@ type RsiSyncState struct {
 	Expected  []RsiSyncEntry `json:"expected"`
 	LocalOnly int            `json:"localOnly"`
 	// Deploy is how the checkout the app runs from compares to the development checkout.
-	Deploy *DeployDrift `json:"deploy,omitempty"`
+	Deploy *DeployDriftReport `json:"deploy,omitempty"`
 	// Note is one line a reader can act on without reading the list.
 	Note string `json:"note"`
 	// deployCompared records that the caller asked for the checkout comparison. TypeScript
@@ -1523,10 +1523,10 @@ func rsiParseCount(value string) (int, bool) {
 //
 // Several checkouts of the same repository can sit in one place; the one this checkout still agrees
 // with most closely is the useful answer, and it is named in the note so the reader knows which.
-func (service *RsiService) rsiDeployState(root string) *DeployDrift {
-	drifts := []DeployDrift{}
+func (service *RsiService) rsiDeployState(root string) *DeployDriftReport {
+	drifts := []DeployDriftReport{}
 	for _, candidate := range DevelopmentCandidates(root, nil) {
-		drifts = append(drifts, DeployDriftOf(root, candidate))
+		drifts = append(drifts, DeployDrift(root, candidate))
 	}
 	if len(drifts) == 0 {
 		return nil

@@ -5,16 +5,16 @@ import (
 	"strings"
 )
 
-type GraphNodeVisualKind string
+type GraphNodeVisualKindValue string
 
 const (
-	GraphNodeVisualAgent   GraphNodeVisualKind = "agent"
-	GraphNodeVisualTool    GraphNodeVisualKind = "tool"
-	GraphNodeVisualHuman   GraphNodeVisualKind = "human"
-	GraphNodeVisualGate    GraphNodeVisualKind = "gate"
-	GraphNodeVisualRoute   GraphNodeVisualKind = "route"
-	GraphNodeVisualJoin    GraphNodeVisualKind = "join"
-	GraphNodeVisualProgram GraphNodeVisualKind = "program"
+	GraphNodeVisualAgent   GraphNodeVisualKindValue = "agent"
+	GraphNodeVisualTool    GraphNodeVisualKindValue = "tool"
+	GraphNodeVisualHuman   GraphNodeVisualKindValue = "human"
+	GraphNodeVisualGate    GraphNodeVisualKindValue = "gate"
+	GraphNodeVisualRoute   GraphNodeVisualKindValue = "route"
+	GraphNodeVisualJoin    GraphNodeVisualKindValue = "join"
+	GraphNodeVisualProgram GraphNodeVisualKindValue = "program"
 )
 
 type GraphNodeLike struct {
@@ -28,9 +28,7 @@ type GraphNodeBox struct {
 	Height int `json:"height"`
 }
 
-// GraphNodeVisualKindOf is graphNodeVisualKind. The type and the function cannot share one Go name.
-// TODO(port): callers of the TypeScript function use this Of suffix.
-func GraphNodeVisualKindOf(node GraphNodeLike) GraphNodeVisualKind {
+func GraphNodeVisualKind(node GraphNodeLike) GraphNodeVisualKindValue {
 	if node.Kind == "agent" {
 		return GraphNodeVisualAgent
 	}
@@ -53,7 +51,7 @@ func GraphNodeVisualKindOf(node GraphNodeLike) GraphNodeVisualKind {
 }
 
 func GraphNodeSuffix(node GraphNodeLike) string {
-	if GraphNodeVisualKindOf(node) == GraphNodeVisualHuman {
+	if GraphNodeVisualKind(node) == GraphNodeVisualHuman {
 		return "human check"
 	}
 	if node.Kind == "agent" {

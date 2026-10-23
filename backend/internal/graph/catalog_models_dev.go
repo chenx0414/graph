@@ -70,7 +70,7 @@ type ModelsDevSnapshot struct {
 	Providers   map[string]ModelsDevProvider `json:"providers"`
 }
 
-type CatalogProvenance struct {
+type CatalogProvenanceRecord struct {
 	SourceUrl       string
 	RetrievedAt     string
 	CatalogRevision string
@@ -271,9 +271,7 @@ func BuiltinModelsDevSnapshot() ModelsDevSnapshot {
 	return *modelsDevCached
 }
 
-// CatalogProvenanceOf is catalogProvenance. The result type already uses that name.
-// TODO(port): the TypeScript function and interface share one name.
-func CatalogProvenanceOf(snapshot any) CatalogProvenance {
+func CatalogProvenance(snapshot any) CatalogProvenanceRecord {
 	if snapshot == nil {
 		return catalogProvenanceFromSnapshot(BuiltinModelsDevSnapshot())
 	}
@@ -283,8 +281,8 @@ func CatalogProvenanceOf(snapshot any) CatalogProvenance {
 	return catalogProvenanceFromSnapshot(NormalizeModelsDevSnapshot(snapshot))
 }
 
-func catalogProvenanceFromSnapshot(source ModelsDevSnapshot) CatalogProvenance {
-	provenance := CatalogProvenance{
+func catalogProvenanceFromSnapshot(source ModelsDevSnapshot) CatalogProvenanceRecord {
+	provenance := CatalogProvenanceRecord{
 		SourceUrl:   source.SourceUrl,
 		Attribution: source.Attribution,
 	}

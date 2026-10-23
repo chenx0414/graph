@@ -16,7 +16,7 @@ type ProviderTemplateModel struct {
 	Pricing       *ModelPricing `json:"pricing,omitempty"`
 }
 
-type ProviderTemplate struct {
+type ProviderTemplateRecord struct {
 	ID                string                  `json:"id"`
 	Label             string                  `json:"label"`
 	API               string                  `json:"api"`
@@ -27,7 +27,7 @@ type ProviderTemplate struct {
 	Models            []ProviderTemplateModel `json:"models"`
 }
 
-var PROVIDER_TEMPLATES = []ProviderTemplate{
+var PROVIDER_TEMPLATES = []ProviderTemplateRecord{
 	{
 		ID: "openai", Label: "OpenAI", API: "openai-completions",
 		BaseURL: "https://api.openai.com/v1", CredentialRefHint: "OPENAI_API_KEY",
@@ -102,9 +102,7 @@ func init() {
 	}
 }
 
-// ProviderTemplateByID is providerTemplate. Go cannot name the function ProviderTemplate
-// while the struct keeps that exported type name.
-func ProviderTemplateByID(id string) *ProviderTemplate {
+func ProviderTemplate(id string) *ProviderTemplateRecord {
 	for i := range PROVIDER_TEMPLATES {
 		if PROVIDER_TEMPLATES[i].ID == id {
 			return &PROVIDER_TEMPLATES[i]
@@ -113,9 +111,9 @@ func ProviderTemplateByID(id string) *ProviderTemplate {
 	return nil
 }
 
-// TemplateModelEntry is the config entry for one template model; unknown prices stay absent.
+// TemplateModelEntryRecord is the config entry for one template model; unknown prices stay absent.
 // Field order matches the TypeScript object literal.
-type TemplateModelEntry struct {
+type TemplateModelEntryRecord struct {
 	ID            string        `json:"id"`
 	Provider      string        `json:"provider"`
 	Grade         string        `json:"grade"`
@@ -129,9 +127,8 @@ type TemplateModelEntry struct {
 	Pricing       *ModelPricing `json:"pricing,omitempty"`
 }
 
-// TemplateModelEntryFor is templateModelEntry. The result struct occupies TemplateModelEntry.
-func TemplateModelEntryFor(template ProviderTemplate, model ProviderTemplateModel, credentialID string) TemplateModelEntry {
-	return TemplateModelEntry{
+func TemplateModelEntry(template ProviderTemplateRecord, model ProviderTemplateModel, credentialID string) TemplateModelEntryRecord {
+	return TemplateModelEntryRecord{
 		ID: model.ID, Provider: template.ID, Grade: model.Grade, API: template.API,
 		BaseURL: template.BaseURL, ContextWindow: model.ContextWindow, MaxTokens: model.MaxTokens,
 		Input: model.Input, CredentialID: credentialID, Cost: model.Cost, Pricing: model.Pricing,
