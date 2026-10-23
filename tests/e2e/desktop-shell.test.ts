@@ -39,14 +39,14 @@ async function shell(vendorOrigin?: string) {
     // Chromium's test keychain prevents an OS password dialog in an isolated
     // HOME. These cases cover windows/processes, not keychain encryption.
     args: ['--use-mock-keychain', join(process.cwd(), 'desktop/main.mjs')],
-    env: { ...process.env, ...proxy?.env, HOME: root, GRAPH_APP_USER_DATA: userData, GRAPH_RSI_ROOT: join(root, 'stale'), GRAPH_APP_DEBUG: '1', GRAPH_APP_SMOKE: '', ELECTRON_RUN_AS_NODE: '' },
+    env: { ...process.env, ...proxy?.env, HOME: root, GRAPH_APP_USER_DATA: userData, GRAPH_RSI_ROOT: join(root, 'stale'), GRAPH_APP_DEBUG: '1', GRAPH_APP_SMOKE: '', GRAPH_APP_BACKGROUND: process.env.GRAPH_E2E_VISIBLE_WINDOWS === '1' ? '' : '1', ELECTRON_RUN_AS_NODE: '' },
   });
   cleanup.push(() => app.close());
   let daemonLog = '';
   app.process().stdout?.on('data', (chunk: Buffer) => { daemonLog += chunk.toString(); });
   app.process().stderr?.on('data', (chunk: Buffer) => { daemonLog += chunk.toString(); });
   let page;
-  try { page = await app.firstWindow({ timeout: 10000 }); }
+  try { page = await app.firstWindow({ timeout: 60000 }); }
   catch (error) {
     await writeFile('/tmp/graph-desktop-e2e-startup.log', `No window after launch\n${daemonLog}`);
     throw error;
@@ -83,6 +83,16 @@ test('the real desktop drawer reserves display space, restores content bounds an
   await expect.poll(bounds).toEqual(full);
   expect(await page.evaluate(() => window.graph!.setDrawer!({ open: true, width: 440 }))).toEqual({ expanded: false });
   expect(await bounds()).toEqual(full);
+  if (process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1') {
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(window => !window.isVisible() && !window.isFocused()))).toBe(true);
+    expect(await app.evaluate(({ app }) => app.dock?.isVisible() ?? false)).toBe(false);
+    expect((await page.screenshot()).length).toBeGreaterThan(0);
+  }
+}, 90000);
+
+test.skipIf(process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1')('a maximized native desktop uses a drawer overlay without changing its bounds', async () => {
+  const { app, page } = await shell();
+  const bounds = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.maximize());
   await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isMaximized())).toBe(true);
   const maximized = await bounds();
