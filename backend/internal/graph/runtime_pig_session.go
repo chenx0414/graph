@@ -12,10 +12,8 @@ import (
 
 // The PiG kernel is the Agent kernel of the daemon.
 //
-// The division of labour is the one the daemon already kept. The daemon owns
-// the model channel, the tool bodies, the admission gate, the budget and the
-// credential; the kernel owns the execution history: the transcript, the
-// admissions, the tool calls and their results.
+// The division of labour is documented in docs/architecture.md, section
+// daemon 与内核的分工.
 //
 // The MCP servers are connected by the kernel itself. The model reaches their
 // tools under PiG's own `mcp__<server>__<tool>` names, so no gateway tool and

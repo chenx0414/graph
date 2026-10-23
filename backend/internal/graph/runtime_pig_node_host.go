@@ -16,9 +16,8 @@ import (
 //
 // A node's turn is the same turn the main agent runs: its own identity, its own
 // transcript, its own admission, all in the same durable namespace and on the
-// same kernel. The daemon keeps what it always kept - the model channel, the
-// tool bodies, the admission gate and the budget - and the kernel keeps the
-// execution history.
+// same kernel. The division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 //
 // The node opens one session per turn, the way the TypeScript sidecar did: the
 // admission identity of a turn carries the attempt, so a retry is a new
