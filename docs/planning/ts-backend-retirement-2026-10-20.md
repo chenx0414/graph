@@ -548,6 +548,12 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 **而这条路的形状与 TypeScript 自己的 `restricted-process.ts` 一致**（那边也是 `detached` 一路 exec ✓，命令同样会变成孤儿 ✓）——**所以「命令能在 daemon 死后继续跑」这件事，TypeScript 那边也一样** ✓，**它不是退役带来的回归** ✓。它是一个**两边都有的老问题**，在 Go 侧记成一条独立发现（沙箱路径的命令没有主人）✓；**退役的契约说的是不带座位的那条路** ✓，那条路（`RunHostCommand` + worker 监管人 ✓）**还没单独测过** ✓。
 
+**最后一块拼图（下一轮直接照着写 keeper）**：契约对应的那条路——**不带座位**的 `RunHostCommand`（`runtime_kernel_operation_broker.go:338` ✓，由 `host-command-worker.mjs` 当监管人 ✓）——在今天的默认链路上**走不到**：节点默认跑在 **TS 侧车**里 ✓，它的命令走侧车自己的受限进程（**带座位** ✓）；Go 那份 `RunHostCommand` 是给 **PiG 内核**（`--kernel pig` ✓）的原生工具用的 ✓，而默认是 `--kernel node` ✓。
+
+**所以 keeper 该这么写**：**用 `--kernel pig` 起 daemon** ✓ → 让节点用它的原生 `bash` 工具跑一个长命令 ✓（那才是 `RunHostCommand` ✓）→ 等它真的在跑（心跳 ✓）→ SIGKILL daemon → 断言心跳在有界时间内停 ✓。**如果这条路上命令跟着死了**（worker 的 IPC channel 随 daemon 一起关 → worker 收到 disconnect → `cancel` → 杀掉命令那一组 ✓，隔离实验已证明这条链通 ✓），那么**契约在 Go 侧本来就成立** ✓，只需要把 keeper 落下来；**如果它没死** ✓，修法就是给 PiG 内核那条路也配一个监管人 ✓（`host-command-worker.mjs` 就是现成的形状 ✓）。
+
+**同时记下一条与退役无关的老问题**（两边都有 ✓）：**沙箱路径**（模块的 `workspace.command` → Go 的受限进程 → 一路 exec ✓）里，**命令在 daemon 死后会继续跑** ✓（它成了 launchd 的孩子 ✓）。TypeScript 那边是同一形状 ✓，所以不是退役带来的回归 ✓，但它是一个真实的老问题 ✓，值得单独立一条（命令需要一个能比 daemon 活得久的监管人 ✓）。
+
 **keeper 照旧**：让 check 模块的产出合法，命令真的活着，然后 SIGKILL daemon，断言心跳在有界时间内停。
 
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
