@@ -345,7 +345,7 @@ func (e *Execution) Abandon(taskId string, reason *string, allowMasterTurn bool)
 	}
 	resolved := kernelChanges(e.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND status='open'",
 		CanonicalJSON(map[string]any{"type": "abandoned", "reason": reasonValue(reason)}), taskId)
-	kernelExec(e.store.Db, "UPDATE tasks SET phase='abandoned' WHERE id=?", taskId)
+	e.store.AbandonTask(taskId)
 	cursor := e.store.Event(taskId, "task.abandoned", map[string]any{"reason": reasonValue(reason), "resolvedQuestions": resolved})
 	ReleaseTaskSlot(e.store, taskId)
 	return cursor

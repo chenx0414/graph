@@ -114,7 +114,7 @@ func (k *KernelStore) publishGraphOutputs(taskID, endpoint string, value any, so
 		k.Store.Event(taskID, "graph.output", map[string]any{"output": name, "sourceId": sourceID, "resultId": resultID, "revision": revision.Version})
 		if revision.Definition.Completion != nil && revision.Definition.Completion.On == name {
 			g5Exec(k.Db, "INSERT INTO kernel_lifecycle(task_id,completion_requested) VALUES(?,1) ON CONFLICT(task_id) DO UPDATE SET completion_requested=1", taskID)
-			g5Exec(k.Db, "UPDATE tasks SET phase='completing' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", taskID)
+			k.Store.CompleteTaskPhase(taskID)
 		}
 	}
 }

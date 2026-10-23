@@ -15,7 +15,7 @@ func RecoverKernelExecutions(kernel *KernelStore) int {
 			taskId := kernelString(operation["task_id"])
 			moduleId := kernelString(operation["module_id"])
 			kernel.SetNodeQueuePaused(taskId, moduleId, true)
-			kernelExec(kernel.Db, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", taskId)
+			kernel.Store.BlockTaskPhase(taskId)
 			WakeForBlockedNode(kernel.Store, taskId, BlockedNodeWake{
 				NodeID:      moduleId,
 				Reason:      "Host operation interrupted after dispatch; inspect side effects before resuming",
@@ -58,7 +58,7 @@ func RecoverKernelExecutions(kernel *KernelStore) int {
 			nodeId := kernelString(row["node_id"])
 			kernel.SetNodeQueuePaused(taskId, nodeId, true)
 			kernelExec(kernel.Db, "UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?", taskId, nodeId)
-			kernelExec(kernel.Db, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", taskId)
+			kernel.Store.BlockTaskPhase(taskId)
 			kernel.Store.Event(taskId, "graph.execution.interrupted", map[string]any{
 				"executionId": kernelString(row["id"]),
 				"nodeId":      nodeId,

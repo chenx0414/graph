@@ -1623,7 +1623,7 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 		if paused {
 			pausedValue = 1
 		}
-		kernelExec(runtime.store.Db, "UPDATE tasks SET paused=? WHERE id=?", pausedValue, task.taskId)
+		runtime.store.SetTaskPaused(task.taskId, pausedValue != 0)
 		if paused {
 			OpenPause(runtime.store, task.taskId)
 			active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
@@ -1752,7 +1752,7 @@ func (task *TaskRuntimeTask) Say(text string, requestId string) Receipt {
 		if current.AcceptedProposal != nil {
 			Raise("requirements_locked", "Confirmed requirements need an explicit impact review")
 		}
-		kernelExec(runtime.store.Db, "UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?", task.taskId)
+		runtime.store.BumpRequirementVersion(task.taskId)
 		for _, row := range kernelRows(runtime.store.Db, "SELECT id,status,spec FROM nodes WHERE task_id=?", task.taskId) {
 			var spec NodeSpec
 			if err := json.Unmarshal([]byte(kernelString(row["spec"])), &spec); err != nil {
@@ -1820,8 +1820,7 @@ func (task *TaskRuntimeTask) Accept(input TaskRuntimeAcceptInput) Receipt {
 		if active == "" || active == task.taskId {
 			phase = "running"
 		}
-		kernelExec(runtime.store.Db, "UPDATE tasks SET accepted_proposal=?,target_branch=?,phase=?,graph_version=1 WHERE id=?",
-			input.ProposalVersion, input.TargetBranch, phase, task.taskId)
+		runtime.store.AcceptProposal(task.taskId, input.ProposalVersion, input.TargetBranch, phase)
 		if active == "" || active == task.taskId {
 			kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", task.taskId)
 		}
@@ -3046,13 +3045,13 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 			return map[string]any{"conversationId": conversationId, "taskId": conversation.AnchorTaskId, "changed": false, "cursor": nil}
 		}
 		kernelExec(runtime.store.Db, "UPDATE conversations SET project_id=? WHERE id=?", projectId, conversationId)
-		kernelExec(runtime.store.Db, "UPDATE tasks SET project_id=? WHERE id=?", projectId, conversation.AnchorTaskId)
+		runtime.store.SetTaskProject(conversation.AnchorTaskId, projectId)
 		invalidated := false
 		if previous != nil {
 			// A draft was investigated against the old project; switching the
 			// project makes every existing draft unconfirmable, not just hidden.
 			invalidated = true
-			kernelExec(runtime.store.Db, "UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?", conversation.AnchorTaskId)
+			runtime.store.BumpRequirementVersion(conversation.AnchorTaskId)
 			kernelExec(runtime.store.Db, "UPDATE conversations SET binding_since_seq=COALESCE((SELECT MAX(seq) FROM messages WHERE conversation_id=?),0) WHERE id=?", conversationId, conversationId)
 			AppendMessage(runtime.store, MessageInput{
 				ConversationID: conversationId,
@@ -3163,7 +3162,7 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		if phase == "running" {
 			kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)
 		}
-		kernelExec(runtime.store.Db, "UPDATE tasks SET requirement_version=requirement_version+1 WHERE id=?", anchor.ID)
+		runtime.store.BumpRequirementVersion(anchor.ID)
 		kernelExec(runtime.store.Db, "INSERT INTO conversation_acceptances(conversation_id,proposal_version,task_id,target_branch,accepted_at,draft_revision) VALUES(?,?,?,?,?,?)",
 			conversationId, input.ProposalVersion, taskId, input.TargetBranch, NowMillis(), kernelInt(row["draft_revision"]))
 		AppendMessage(runtime.store, MessageInput{
@@ -3245,7 +3244,7 @@ func (conversations *TaskRuntimeConversations) RestoreDraft(conversationId strin
 		kernelExec(runtime.store.Db, "UPDATE proposals SET archived_at=NULL WHERE task_id=? AND version=?", anchor.ID, input.ProposalVersion)
 		newer := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS n FROM proposals WHERE task_id=? AND version>? AND deleted_at IS NULL AND archived_at IS NULL", anchor.ID, input.ProposalVersion)["n"])
 		if newer == 0 && kernelInt(row["requirement_version"]) == anchor.RequirementVersion {
-			kernelExec(runtime.store.Db, "UPDATE tasks SET latest_proposal=? WHERE id=?", input.ProposalVersion, anchor.ID)
+			runtime.store.SetTaskLatestProposal(anchor.ID, input.ProposalVersion)
 		}
 		return map[string]any{
 			"conversationId":  conversationId,
@@ -4081,7 +4080,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 			if paused {
 				pausedValue = 1
 			}
-			kernelExec(runtime.store.Db, "UPDATE tasks SET paused=? WHERE id=?", pausedValue, target)
+			runtime.store.SetTaskPaused(target, pausedValue != 0)
 			if paused {
 				OpenPause(runtime.store, target)
 				active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
@@ -4341,7 +4340,7 @@ func (supervisor *TaskRuntimeSupervisor) Propose(input TaskRuntimeProposeInput) 
 				supervisor.taskId, version, input.ProposalVersion, spec, snapshot, draftRevision, digest)
 		}
 		if task.LatestProposal != int64(version) {
-			kernelExec(runtime.store.Db, "UPDATE tasks SET latest_proposal=? WHERE id=?", version, supervisor.taskId)
+			runtime.store.SetTaskLatestProposal(supervisor.taskId, version)
 		}
 		eventType := "proposal.created"
 		if inPlace {
@@ -4390,7 +4389,7 @@ func (supervisor *TaskRuntimeSupervisor) WithdrawDraft(input TaskRuntimeWithdraw
 			Raise("already_accepted", "This draft was already confirmed")
 		}
 		next := input.ProposalVersion + 1
-		kernelExec(runtime.store.Db, "UPDATE tasks SET latest_proposal=? WHERE id=?", next, supervisor.taskId)
+		runtime.store.SetTaskLatestProposal(supervisor.taskId, next)
 		reason := ""
 		if input.Reason != nil {
 			reason = strings.TrimSpace(*input.Reason)

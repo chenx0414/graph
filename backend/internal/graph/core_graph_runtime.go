@@ -199,7 +199,7 @@ func (runtime *GraphRuntime) State() *GraphStateRow {
 }
 
 func (runtime *GraphRuntime) setPhase(phase GraphPhase) {
-	kernelExec(runtime.kernel.Store.DB, "UPDATE tasks SET phase=? WHERE id=?", string(phase), runtime.graphId)
+	runtime.kernel.Store.SetTaskPhase(runtime.graphId, string(phase))
 	if phase == "completed" || phase == "stopped" {
 		FinishNativePauses(runtime.kernel.Store, runtime.graphId, nil)
 		ReleaseTaskSlot(runtime.kernel.Store, runtime.graphId)
@@ -411,7 +411,7 @@ func (runtime *GraphRuntime) Stop() GraphStateRow {
 		return *runtime.State()
 	}
 	FinishNativePauses(runtime.kernel.Store, runtime.graphId, nil)
-	kernelExec(runtime.kernel.DB, "UPDATE tasks SET phase='stopping',paused=0 WHERE id=?", runtime.graphId)
+	runtime.kernel.Store.StopTask(runtime.graphId)
 	kernelExec(runtime.kernel.DB, "UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?", runtime.graphId)
 	kernelExec(runtime.kernel.DB, "UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)", runtime.graphId)
 	kernelExec(runtime.kernel.Store.DB, "UPDATE kernel_queue SET state='done',reason='cancelled by stop' WHERE task_id=? AND state='queued'", runtime.graphId)

@@ -168,7 +168,7 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 			kernelExec(service.kernel.Db, "INSERT INTO tasks(id,project_id,conversation_id,request,requirement_version,latest_proposal,created_seq,phase,target_branch) VALUES(?,?,?,?,1,0,?,?,?)",
 				graphId, parent.ProjectID, conversationId, definition.Name, NowMillis(), "running", targetBranchValue)
 			if hasTargetBranch {
-				kernelExec(service.kernel.Db, "UPDATE tasks SET paused=1 WHERE id=?", graphId)
+				service.kernel.Store.PauseTask(graphId)
 			}
 			createState := "ready"
 			if hasTargetBranch {
@@ -206,14 +206,14 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 			service.prepare(graphId, *input.TargetBranch)
 			service.kernel.Store.Transaction(func() any {
 				kernelExec(service.kernel.Db, "UPDATE kernel_create_requests SET state='ready',error=NULL WHERE owner_task_id=? AND request_id=?", service.ownerTaskId, requestId)
-				kernelExec(service.kernel.Db, "UPDATE tasks SET paused=0,phase='running' WHERE id=?", graphId)
+				service.kernel.Store.ResumeTask(graphId)
 				return nil
 			})
 		}()
 		if failed {
 			service.kernel.Store.Transaction(func() any {
 				kernelExec(service.kernel.Db, "UPDATE kernel_create_requests SET state='failed',error=? WHERE owner_task_id=? AND request_id=?", reason, service.ownerTaskId, requestId)
-				kernelExec(service.kernel.Db, "UPDATE tasks SET paused=1,phase='blocked' WHERE id=?", graphId)
+				service.kernel.Store.BlockTask(graphId)
 				service.kernel.Store.Event(graphId, "graph.preparation.failed", map[string]any{"reason": reason, "requestId": requestId})
 				return nil
 			})
@@ -397,7 +397,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			kernelExec(service.kernel.Db, "UPDATE kernel_module_operations SET state='cancelled' WHERE id=?", operationId)
 			kernelExec(service.kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryId)
 			service.kernel.SetNodeQueuePaused(input.GraphId, moduleId, false)
-			kernelExec(service.kernel.Db, "UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked' AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)", input.GraphId, input.GraphId)
+			service.kernel.Store.CompleteBlockedTask(input.GraphId)
 			service.kernel.Store.Event(input.GraphId, "graph.operation.cancelled", map[string]any{
 				"operationId": operationId,
 				"deliveryId":  deliveryId,
@@ -459,11 +459,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 				kernelExec(service.kernel.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'", input.GraphId, target)
 			}
 		} else {
-			flag := 0
-			if paused {
-				flag = 1
-			}
-			kernelExec(service.kernel.Db, "UPDATE tasks SET paused=? WHERE id=?", flag, input.GraphId)
+			service.kernel.Store.SetTaskPaused(input.GraphId, paused)
 		}
 		targetNode := ""
 		if hasTarget {
@@ -504,7 +500,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			kernelExec(service.kernel.Db, "UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?", input.GraphId, nodeId)
 			SetNativePause(service.kernel.Store, input.GraphId, false, nodeId, 0)
 			kernelExec(service.kernel.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status IN ('blocked','failed')", input.GraphId, nodeId)
-			kernelExec(service.kernel.Db, "UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked' AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)", input.GraphId, input.GraphId)
+			service.kernel.Store.CompleteBlockedTask(input.GraphId)
 			service.kernel.Store.Event(input.GraphId, "graph.queue."+input.Action, map[string]any{"seq": seq, "nodeId": nodeId})
 			return nil
 		})

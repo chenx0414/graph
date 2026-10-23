@@ -876,8 +876,7 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			kernelRow(l.store.Db, "SELECT 1 FROM kernel_revisions WHERE task_id=? LIMIT 1", taskId) != nil {
 			open := kernelRow(l.store.Db, "SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1", taskId)
 			if open == nil {
-				kernelExec(l.store.Db, `UPDATE tasks SET phase='completing' WHERE id=? AND phase='blocked'
-          AND EXISTS(SELECT 1 FROM kernel_lifecycle WHERE task_id=? AND completion_requested=1)`, taskId, taskId)
+				l.store.CompleteBlockedTask(taskId)
 			}
 			return nil
 		}

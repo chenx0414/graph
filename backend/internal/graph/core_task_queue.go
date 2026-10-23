@@ -25,7 +25,7 @@ func ReleaseTaskSlot(store *TaskStore, taskId string) *string {
 		return nil
 	}
 	id := next["id"].(string)
-	kernelExec(store.DB, "UPDATE tasks SET phase='running' WHERE id=?", id)
+	store.SetTaskPhase(id, "running")
 	store.Event(id, "task.started", map[string]any{})
 	return &id
 }

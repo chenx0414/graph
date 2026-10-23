@@ -384,7 +384,7 @@ func (integration *GitIntegration) PrepareTask(taskId, targetBranch string) {
 		sha = *head
 	}
 	integration.store.Transaction(func() any {
-		graphDBExec(integration.store.Db, "UPDATE tasks SET integration_branch=?,integration_sha=?,target_sha=? WHERE id=?", branch, sha, *targetSha, taskId)
+		integration.store.SetTaskIntegration(taskId, branch, sha, *targetSha)
 		graphDBExec(integration.store.Db, "INSERT OR REPLACE INTO worktrees VALUES(?,?,?,?,?)", "integration:"+taskId, taskId, "integration", integrationPath, branch)
 		integration.store.Event(taskId, "git.prepared", map[string]any{"branch": branch, "targetBranch": targetBranch, "targetSha": *targetSha})
 		return nil
@@ -614,7 +614,7 @@ func (integration *GitIntegration) Integrate(operation GitIntegrateInput) *GitMe
 		return &merged
 	}
 	integration.store.Transaction(func() any {
-		graphDBExec(integration.store.Db, "UPDATE tasks SET integration_sha=? WHERE id=?", merged.Sha, operation.TaskId)
+		integration.store.SetTaskIntegrationSha(operation.TaskId, merged.Sha)
 		graphDBExec(integration.store.Db, "INSERT INTO git_commits VALUES(?,?,?,?,?)", merged.Sha, operation.TaskId, operation.NodeId, operation.Id, "integration")
 		return nil
 	})
@@ -648,7 +648,7 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 		}}
 	}
 	if *targetSha == *integrationSha {
-		graphDBExec(integration.store.Db, "UPDATE tasks SET target_sha=? WHERE id=?", *integrationSha, taskId)
+		integration.store.SetTaskTargetSha(taskId, *integrationSha)
 		return GitDeliverResult{Status: "merged"}
 	}
 	if task.TargetSha != nil && *targetSha != *task.TargetSha {
@@ -696,7 +696,7 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 		}
 	}
 	integration.store.Transaction(func() any {
-		graphDBExec(integration.store.Db, "UPDATE tasks SET target_sha=? WHERE id=?", *integrationSha, taskId)
+		integration.store.SetTaskTargetSha(taskId, *integrationSha)
 		graphDBExec(integration.store.Db, "UPDATE git_ops SET state='succeeded',result=? WHERE id=?", CanonicalJSON(map[string]any{"sha": *integrationSha}), opId)
 		return nil
 	})
@@ -725,7 +725,7 @@ func (integration *GitIntegration) Restore(taskId string) *GitDeliverResult {
 	}
 	current := integration.store.Task(taskId)
 	if head != nil && current.IntegrationSha != nil && *head != *current.IntegrationSha {
-		graphDBExec(integration.store.Db, "UPDATE tasks SET integration_sha=? WHERE id=?", *head, taskId)
+		integration.store.SetTaskIntegrationSha(taskId, *head)
 	}
 	if current.Phase != "running" || current.IntegrationBranch == nil || current.TargetBranch == nil {
 		return nil
@@ -733,7 +733,7 @@ func (integration *GitIntegration) Restore(taskId string) *GitDeliverResult {
 	targetSha := RevParse(*repo, *current.TargetBranch)
 	if targetSha != nil && head != nil && *targetSha == *head {
 		graphDBExec(integration.store.Db, "UPDATE git_ops SET state='succeeded' WHERE task_id=? AND kind='deliver' AND state IN ('intent','dispatched')", taskId)
-		graphDBExec(integration.store.Db, "UPDATE tasks SET target_sha=? WHERE id=?", *head, taskId)
+		integration.store.SetTaskTargetSha(taskId, *head)
 		return &GitDeliverResult{Status: "merged"}
 	}
 	return nil
@@ -745,7 +745,7 @@ func (integration *GitIntegration) recheckAgainstTarget(taskId, integrationPath,
 		return GitDeliverResult{Status: "blocked", Data: map[string]any{"kind": "git_conflict", "conflicts": moved.Conflicts, "reason": "Target branch changed"}}
 	}
 	integration.store.Transaction(func() any {
-		graphDBExec(integration.store.Db, "UPDATE tasks SET integration_sha=?,target_sha=? WHERE id=?", moved.Sha, targetSha, taskId)
+		integration.store.SetTaskIntegrationAndTarget(taskId, moved.Sha, targetSha)
 		return nil
 	})
 	return GitDeliverResult{Status: "recheck"}

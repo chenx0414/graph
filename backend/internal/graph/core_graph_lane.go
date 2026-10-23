@@ -93,7 +93,7 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 	if revision == nil {
 		return RunResult{Drained: true}
 	}
-	graphDBExec(lane.db(), "UPDATE tasks SET phase='running' WHERE id=? AND phase='idle'", graphId)
+	lane.options.Kernel.Store.StartTaskPhase(graphId, "running", "idle")
 	options := GraphRunnerOptions{
 		Kernel: kernel, GraphId: graphId, Signal: lane.shutdown,
 		Submit: func(string) *TurnInjection { return nil },
@@ -152,7 +152,7 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 			lane.options.CloseGraph(graphId)
 		}
 	} else if !intent && result.Drained {
-		graphDBExec(lane.db(), "UPDATE tasks SET phase='idle' WHERE id=? AND phase='running'", graphId)
+		lane.options.Kernel.Store.StartTaskPhase(graphId, "idle", "running")
 	}
 	return result
 }

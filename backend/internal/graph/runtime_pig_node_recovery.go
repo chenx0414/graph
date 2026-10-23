@@ -101,7 +101,7 @@ func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
 	runtime.store.Transaction(func() any {
 		runtime.kernel.FailQueuedItem(execution.TaskId, execution.NodeId, pigNodeStoppedReason)
 		runtime.kernel.ParkNode(execution.TaskId, execution.NodeId)
-		kernelExec(runtime.store.Db, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", execution.TaskId)
+		runtime.store.BlockTaskPhase(execution.TaskId)
 		runtime.store.Event(execution.TaskId, "graph.node.recovery.stopped", map[string]any{
 			"executionId": execution.Id, "nodeId": execution.NodeId, "reason": pigNodeStoppedReason,
 		})
