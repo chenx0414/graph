@@ -23,6 +23,8 @@
    - **持久格式没有变**：一次探针把旧写者产出的记录与类型化写者产出的记录逐字节比对——完整请求、带 model view 的请求、空请求、没有 tools 的请求四种情况，JSON 完全一致，连 null 都一样。改动之前冻结的执行仍然读得出来。
    - **两个被类型化照出来的问题，都不在这一步里改**（见下）。
 
+6. **主 Agent 会话与节点泳道共用一个模型通道**（提交 `92a46ac2`）。两条路各写了一份"daemon 的模型通道"：同一段把 transcript 转成 messages、再交给 daemon 自己那条受控 provider 流的代码，在主会话里一份、在节点宿主里一份。差别只有一个——节点那侧忽略内核每次调用带来的 options，改用节点被受理时的 options。现在通道只有一个：`pigProviderBridge` 接收 stream、model 与一个"用哪份 options"的决定。主会话传 nil（用内核的），节点泳道传自己的。两个调用点因此不可能再各写一份。
+
 ## 过程中查出来、**尚未处理**的问题
 
 1. **系统自模型在 Go daemon 里没有接线**。`GraphServerOptions.SystemContext` 从来没有被设过，因此 `read_system_capabilities`、`inspect_graph_system`、`propose_system_change`、`apply_system_change` 这四个工具对主 Agent 一直不可用。TypeScript 宿主是接了的（`src/server/start.ts:407` 传 `{ systemSummary }`），Go 端口迁移时漏掉。CONTEXT.md 的**系统自模型**把这项列为产品能力，所以这是一个功能缺口，不是设计取舍。补它需要一份 Go 侧的主机清单，属于功能实现而不是结构整理。
@@ -37,7 +39,9 @@
 
 6. **两个历史大文件挡住了运行时层的任何改动**。仓库新加的提交守卫按**暂存的 blob** 量大小（上限 5,000 令牌 ≈ 20,000 字节），因此任何一次改动只要碰到 `runtime_pi_adapter.go`（97KB）或 `runtime_kernel_graph_lane.go`（67KB）就被拦下，尽管守卫自己的说明写的是"仓库里已存在历史大文件，而它要拦的是**本次改动**新写大文件"——实现比说明严。拆分方案已经量过：适配器可以纯搬移地拆成 9 个文件（模型与 provider、通道类型、选项、operation、turn、文本、上下文、类型），只剩 `piAdapterRunOperation` 与 `piAdapterRunTurn` 两个函数体超预算，需要把里面的闭包提成有类型的状态；泳道更硬：`KernelGraphLane` 一个函数就 49KB、`sessionFor` 一个函数 43KB，要搬出约 24KB，等于把泳道重新按职责拆一遍。这是运行时层最深的一次结构整理，值得单独一个任务，不适合搭在别的事后面顺手做。本轮给这两个文件加了 `graph:allow-large-file` 标注并写明理由，拆分计划记在这里。
 
-7. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
+7. **两条路的工具准入规则本来是一份，被端口分成两份**。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。两个 Go 端口各自漂移开：节点泳道另加了一份"按名字豁免闸门"的清单（`Ungated: []string{"submit"}`），而 `submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍；节点那侧用闸门的 id 调工具（与原件相同），主会话却用另一个 id；节点那侧不记工具调用遥测（原件记）；节点那侧把 panic 转成错误值（原件是重新抛出）。把两条路合成一个工具表模块之前要先定这些：哪个 id 是对的、节点要不要记遥测、panic 该不该变成错误值。牵涉每一次工具调用的准入与额度结算，因此本轮只做到模型通道那一步，工具表那一步连同它要回答的问题一起写在这里。
+
+8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
 
 ## 门禁证据
 
