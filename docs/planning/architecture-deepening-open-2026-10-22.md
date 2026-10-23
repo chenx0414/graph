@@ -21,3 +21,15 @@
 7. **两条路的工具准入规则本来是一份，被端口分成两份**。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。两个 Go 端口各自漂移开：节点泳道另加了一份"按名字豁免闸门"的清单（`Ungated: []string{"submit"}`），而 `submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍；节点那侧用闸门的 id 调工具（与原件相同），主会话却用另一个 id；节点那侧不记工具调用遥测（原件记）；节点那侧把 panic 转成错误值（原件是重新抛出）。把两条路合成一个工具表模块之前要先定这些：哪个 id 是对的、节点要不要记遥测、panic 该不该变成错误值。牵涉每一次工具调用的准入与额度结算，因此本轮只做到模型通道那一步，工具表那一步连同它要回答的问题一起写在这里。
 
 8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
+
+## 剩下最大的一个归属缺口：`tasks` 的 phase 由 12 个文件、34 处自己写
+
+kernel 层的表已经各有 owner：provider 调用、module operation、预算、执行、队列、节点都在 store 里，运行时层问它。**还没有 owner 的是 `tasks` 这张表**——它是 graph 的生命周期表，phase 与 paused 却由 12 个文件里的 34 处自己写：
+
+- `core_execution.go`、`core_graph_lane.go`、`core_graph_runtime.go`、`core_graph_service.go`
+- `core_kernel_deliveries.go`、`core_kernel_recovery.go`、`core_operation_lifecycle.go`、`core_task_queue.go`、`core_task_runtime.go`
+- `runtime_pig_node_recovery.go`、`git_integration.go`
+
+同样的表也散着 `requirement_version`、`latest_proposal`、`accepted_proposal`、`integration_branch`、`target_sha` 等列的写入。给 `tasks` 一组生命周期方法（`SetTaskPhase` / `StartTaskPhase` / `BlockTaskPhase` …）是这件事的形状，但它是 graph 的核心状态机，改动面比前面几步都宽，值得单独一个任务，而不是搭在别的事后面顺手做。
+
+比它小一号的同类：运行时层还剩约二十处直接读 kernel 表，分散在执行名额（`runtime_execution_slots.go`）、harness 的探针与证据、以及工具闸门里。**执行名额那处是跨两份 store 的事实**（旧的 `operations` 表与新的 `kernel_executions` 表一起数），它天然不属于任何一份 store，因此留在那个模块里是合理的，不是绕过。
