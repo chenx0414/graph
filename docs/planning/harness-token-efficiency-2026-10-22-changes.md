@@ -6,7 +6,7 @@
 
 **七处独立提交，每个可单独 revert**：六处改运行时（§4.1、§4.2、§4.3、§4.5、§4.6、§4.7），一处改计量工具（§4.4）。
 
-### 4.1 `81083e55` Replay the assistant turn the model wrote
+### 4.1 `896c4267` Replay the assistant turn the model wrote
 
 **问题**：daemon 拼请求时，助手回合只保留 text 和 toolCall。模型写下的 reasoning、Anthropic 给 reasoning 的签名、provider 自己留着的 redacted reasoning、以及 **Anthropic 传输上的 tool_use 块本身**，全部被丢掉。
 
@@ -24,7 +24,7 @@
 
 **验证**：新 E2E `tests/e2e/provider-assistant-replay.test.ts` 跑真实 Go 后端 + 真实 PiG 内核 + 真实 bash 工具，打脚本 provider，断言 provider 收到的请求体。**改前两条都红，改后两条都绿。**
 
-### 4.2 `90805741` Mark the cacheable prefix on the Anthropic transport
+### 4.2 `564b2e1f` Mark the cacheable prefix on the Anthropic transport
 
 **问题**：Anthropic 自己不缓存前缀，只缓存断点标记的部分，其余按满额输入价计费。daemon 的 Anthropic 请求**一个断点都没有**——系统提示、工具声明、整段对话每一轮都按满额重新付一遍。
 
@@ -36,7 +36,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：同上 E2E 断言三个断点都在。
 
-### 4.3 `a65a462a` Let the environment name how far the context may grow
+### 4.3 `4da24e67` Let the environment name how far the context may grow
 
 **问题**：会话在到达供应商窗口前才压缩，于是长到 50 万 token。压缩读取是任务花费里最大的单块，而主会话就是它挣来的地方。
 
@@ -46,7 +46,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：新 E2E `tests/e2e/compaction-context-ceiling.test.ts`——设上限时 provider 收到一次摘要请求（一个远未填满窗口的对话），不设时不收到。改前红，改后绿；默认路径两种情况都不变。
 
-### 4.4 `bc4ce52b` Price the whole tree and show the prefix every request carried
+### 4.4 `e8d8db21` Price the whole tree and show the prefix every request carried
 
 报告原来有"一个任务花了多少、请求去了哪里"，但没有价格由什么构成的两块：
 
@@ -56,7 +56,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 现有 CLI E2E 增加对应断言，10 项仍全绿。
 
-### 4.5 给摘要它需要的空间（`57cd34bd`）
+### 4.5 给摘要它需要的空间（`da6b399c`）
 
 压缩失败会把会话留在它想缩小的那段上下文里，之后每个请求都重新付整段前缀。记录在案的历史里有 **9 次压缩失败，其中 6 次是同一个原因**：摘要生成撞到输出上限，摘要不完整。
 
@@ -85,7 +85,7 @@ live 对话的前缀能到 50 万 token 量级，同一段前缀每个 operation
 
 **验证**：新 E2E `tests/e2e/task-setup-reuse.test.ts` 跑真实后端两次：开关关闭时第二次 operation 的提示词仍带说明；开启时第一次带、第二次不带，并留有"说明未变"的标记。把复用逻辑打断后，开启那条 E2E 变红，关闭那条始终绿。
 
-### 4.7 让工具结果落盘，模型拿着句柄读剩下的部分（`06314481` 接缝、`b34cc161` 开关）
+### 4.7 让工具结果落盘，模型拿着句柄读剩下的部分（`eaf21599` 接缝、`b8a99fdf` 开关）
 
 **问题**：工具结果大到装不下时，内核自己截断——**截掉的那部分就没了**。命令输出恰恰是编码 Agent 最需要留住的东西，而 bash 一家就占上下文的 35%。目标书第 5 节要的就是这个：大的输出写进文件，回一个路径、大小和一小段尾巴，让 Agent 自己去 tail、grep、按范围读。
 
