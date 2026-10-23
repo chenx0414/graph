@@ -29,33 +29,4 @@
 
 8. **把 main 合了进来**（提交 `ef6a3e39`）。main 在这一轮里继续往前走，harness 那一摊工作落到了 main 上，而它改的正是本分支已经重写过的两个文件。合并因此不是整文件的两版，而是两处小搬迁：节点的 harness overlay（一个节点可以替换自己跑在哪些提示词之下）跟着会话装配搬到 `runtime_kernel_graph_lane_session.go`，主 Agent 的经验上下文跟着 operation 搬到 `runtime_pi_adapter_operation.go`。行为与 main 一字不差，变的只是它们住在哪个文件。这次提交跳过了文件大小守卫，原因是守卫在这里分辨不出来：它量的是暂存的 blob，而一次合并会把 main 自己的文件暂存进来（`core_task_runtime.go` 有 198KB），那些文件 main 上已经有了。在本分支里拆它们等于分叉 main 的工作而不是保留它，所以这一次提交跳过守卫，守卫报出的十个文件全是 main 的、原样未动。
 
-9. **kernel store 也按职责拆开了**（提交 `91936956`）。store 长大成了一个 68KB 的文件，修订、节点、执行、投递、队列、模块、预算与 provider 调用全在里面。每一件现在有自己的文件，store 自己只留下 store 本身：类型、迁移与事务。拆分逐行比对过，从原文件搬走的行一行没少。
-
-10. **provider 闸门与 operation broker 都不再直接写 kernel 表**（提交 `91936956` 与 `5bb621bc`）。provider 闸门原本用自己写的 SQL 读写 `kernel_provider_calls` 与 `kernel_node_state`，于是这两张表的形状有两个地方知道：拥有它们的 store，和并不拥有它们的闸门。现在闸门问 store：节点花了多少、手上压着哪些调用、某个调用是否还开着；开、结算、对账一个调用也都走 store。闸门对 kernel 表的 SQL 没有了——一条都没有。operation broker 同样：`kernel_module_operations` 归 store 管，它问 store 某个投递已经带着哪个操作、准备一个、标记已发、释放 worker、记录遗留、结算它、判它失败，以及某个投递来自哪个执行。broker 剩下的四处读是 task store 的表，不是 kernel 的。
-   - 顺带去掉了第二份重复结构：闸门原本另有一个 struct 专门从 model 列里读回 cost 与 pricing，而 model 记录里本来就带着它们，现在读的就是 store 那个类型。
-   - 有一处故意比以前宽松：一行读不出来的 provider call 的 model 列，现在让 model 留空，而不是把 daemon 带下去——闸门一直忽略这个错误，store 原来会 panic。
-
-
-11. **`tasks` 表有了 owner**（提交 `f45dcef2` 与 `d426952d`）。这张表是 graph 的生命周期表，phase 与 paused 原本由 12 个文件里的 34 处自己写，phase 的词汇散在十六个地方而不是一处；五种创建方式也各自写着 SQL。现在生命周期与创建都是 store 的方法，创建的方法名说的是"创建什么"而不是"有哪些列"。**这张表在整棵树里只有一个写入口**。
-
-12. **任务闸门不再自己写 SQL**（提交 `2a5b23fb`）。闸门读三张表：问 operation 跑在哪个节点上，问节点或 operation 是否被一个开着的问题卡住（usage 说不清的那种），问一次调用是不是已经发出过，把调用开出去，读回它记下的 usage，再把 usage 与 cost 写回去。这些表的形状因此有两个地方知道：拥有它们的 store，和并不拥有它们的闸门——改一列要同时找两处。现在 store 回答这些问题，闸门只问：`OperationNode` 答"这个 operation 在哪个节点上"，`OpenUnknownUsageQuestion` 与 `OpenUnknownUsageQuestionForOperation` 答"它被卡住了吗"，`InvocationExists` 答"这次调用是不是已经发过"，`OpenInvocation` 开一次，`InvocationUsage` 读回记下的 usage，`RecordInvocationUsage` 写下去。**闸门里一条 SQL 都没有了**，它读到的是有类型的答案而不是从 map 里掏出来的值。
-    - **一处细节值得写下来**：store 把记下的 usage 以指针交回来，因为 usage 列是 NULL 的调用是**还没结算**，不是"记下了一个空的 usage"——后者会让第一次结算拿闸门刚拿到的证据跟自己撞出一个冲突。旧代码是检查值是否为 nil 来分辨这两者，现在仍然这样分辨。
-    - **证据**：一次探针把闸门推过完整条路径——发出、结算、同一份证据结算两次、不同的证据结算一次、结算一个没人开过的调用、结算一个 usage 从没记过的调用、靠 store 找到自己节点的闸门、卡住闸门的问题、归 agent 所有因而不卡闸门的问题、没人能算清的 usage、以及一个 task 记下的调用行。探针在这个提交上跑了一遍，在它的父提交上又跑了一遍，**两遍打印出同样的 26 行**。探针已删除——仓库只允许真正的 E2E。
-    - **这一次守卫没有例外**：闸门 7,167 字节、新的 store 文件 4,320 字节，都远低于 20,000 字节的上限。
-
-13. **工具闸门也问 store**（提交 `2c7d7e5a`）。闸门决定一次宿主工具能不能跑，而它是用自己写的 SQL 读三张 kernel 表来决定的：这个节点在跑哪个 execution、这个节点花了多少、是不是被暂停、哪些 provider 调用还占着预留。它是最后一个这样决定预算的模块——provider 闸门、节点泳道与 operation broker 早就已经问 store 了。现在它问：`RunningExecution` 答"在跑哪个 execution"，`NodeUsage` 答"花了多少、是否暂停"，`PendingProviderCalls` 答"哪些调用还占着预留"。闸门自己的 SQL 没有了。
-    - **一处差异值得写下来，因为它是唯一一处**：闸门原先问"在跑哪个 execution"时**没有说它要哪一个**——那条查询既没有顺序也没有限制，因此一个节点有不止一个 running execution 时，它拿到的是数据库碰巧给的那一行。另外九个问这个问题的地方说的都是同一句话——**这个节点最新的 running execution**——store 的 `RunningExecution` 也是这么说的。闸门现在也这么说了，这意味着它不会再在节点跑着 A 的时候去查 B 的预算。**九份副本与这第十份，现在是一份规则**。
-    - **证据**：一次探针把闸门推过十种情况——没有 running execution、有 running execution、正在关闭的节点、被暂停的节点、正在停止的 task、花光了预算的节点、算进预算的在途 provider 预留、没人算得清的 usage、无限额预算、以及无效的预留。在这个改动上跑一遍，在它的父提交上又跑一遍，**两遍打印出同样的 11 行**。探针已删除。
-
-14. **节点泳道读表也走 store**（提交 `8d750d38`）。泳道用自己写的 SQL 读四张 kernel 表：某个 task 收到过哪些边上的工作、某个节点被受理时用的是哪个 instance、某个节点是不是有算不清的 usage、某个 execution 到底有没有发过 provider 调用。节点宿主又问了节点表第五个问题，用的是同一个查询的另一份拷贝。现在它们问 store：`NodeInstanceID` 答"这个节点跑在哪个 instance 上"（泳道与宿主共用同一个查询，两份拷贝变成一份）、`DeliveryEdges` 答"工作沿哪些端点对走过"（这样禁用一条边不会抹掉已经收到过的工作的身份）、`HasUnknownProviderCall` 答"这个节点有没有算不清的 usage"，而 store 原有的 `ProviderCallsOfExecution` 答"这个 execution 有没有发过 provider 调用"。**背后的查询就是原来那些查询，同样的谓词、同样的顺序**。
-
-15. **节点泳道写表也走 store**（提交 `bac1d6bf`）。泳道用自己写的 SQL 写四张 kernel 表：一个节点被送出的提示词（同一段 INSERT 写了两遍，两处送提示词的地方各一份）、一个节点跑着的会话绑定、一个 task 的完成工作被交付用的那个 commit，以及恢复一个冻结回合期间某个 execution 的状态。现在这些都归 store：`RecordPrompt` 记提示词与工具表，`RecordNodeBinding` 记模型、提示词、工具、状态目录、角色与环境，`RecordCompletionDelivery` 记交付用的 commit，`SetExecutionState` 记一个 execution 的状态（泳道在恢复冻结回合时把 execution 置为 running、事后把旧状态放回去——这本来就是关于 execution 的事实）。
-    - **到这一步，kernel 表只由拥有它们的 store 抵达**。泳道、节点宿主、工具闸门、provider 闸门、operation broker 与节点恢复都问它。store 之外只有两个文件还写着 kernel 表的名字：harness 的探针与证据（它们读很多表来汇报一个图，是诊断面），以及执行名额（它把旧的 `operations` 表与新的 `kernel_executions` 表一起数——这件事天然不属于任何一份 store）。
-
-## 查出来、尚未处理的问题
-
-它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。
-
-## 门禁证据
-
-每一次门禁的结果记在另一份文档里：[架构深化门禁证据](architecture-deepening-gate-2026-10-22.md)。
+后半程（表的归属，以及继续按职责拆文件）记在另一份文档里：[架构深化的后半程](architecture-deepening-ownership-2026-10-22.md)。
