@@ -18,6 +18,8 @@
 
 **最后一轮是交付这一版时的结果**：套件基线与 `files 298, tests 1565` 一致，验收证据未变。
 
+**这个数不是抄出来的，是被守着的**：`tests/suite-baseline.json` 记着套件的规模（main 上是 294 文件 / 1,556 项；本分支新增 4 个 E2E 文件和 9 项之后抬到 298 / 1,565），`scripts/check-test-baseline.mjs` 每次门禁都拿它跟实际跑出来的数比，**少一项就红**——HB-255 立这道闸门就是因为"有人交了源码却没交测试，套件悄悄从 1622 掉到 1609，门禁一声不吭"。**所以"298 文件 / 1,565 项"不是一个可以随口写的数**：谁跑出一个比它小的套件，门禁当场就拦下来。核验这一版时有人报"干净全量是 960 项"——**960 远小于 main 自己的 1,556**，那样的运行过不了基线检查，**所以那不是一次完整套件**。
+
 **18:53 那一轮的红是负载超时，不是代码**：那一条测试自己有一个 90 秒的轮询上限（`tests/e2e/harness-probe.test.ts:307`：`while (!resultOf('probe') && Date.now() < deadline)`），它撞上限时探针还没跑完，于是断言看到的是"一个请求都没收到"（`expected '[]' to contain 'VARIANT_ALPHA_RULE'`）。**同一棵树**在 18:44 是绿的，19:03 重跑也是绿的；**同一条测试**单独跑只要 1.9 秒（套件里那一轮是 90 秒）。这一轮跑的时候共享检出 13-Graph 也在跑它自己的门禁——两个完整套件抢同一台机器。
 
 **本分支没有碰过这条路径**：`git diff main...HEAD -- backend/internal/graph/runtime_harness_probe.go tests/e2e/harness-probe.test.ts` 为空。`4d33d34c` 只改了 `docs/agent/INDEX.md` 一行。
