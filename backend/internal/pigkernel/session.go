@@ -101,6 +101,10 @@ type SessionInspect struct {
 type SessionTurn struct {
 	// Text is the assistant answer.
 	Text string
+	// Answered reports whether the model answered at all. A turn that ended
+	// without an answer is a turn that produced nothing, and a caller that
+	// treats it as a finished turn reports work that was never done.
+	Answered bool
 	// StopReason is the reason the answer ended.
 	StopReason string
 	// ErrorMessage is the failure, when the turn failed.
@@ -282,10 +286,11 @@ func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, e
 	}
 	turn := SessionTurn{StopReason: string(settled.Status)}
 	if settled.Answer != nil {
-		text, stopReason, usage, err := answerText(ctx, session.conversation, *settled.Answer)
+		text, stopReason, usage, answered, err := answerText(ctx, session.conversation, *settled.Answer)
 		if err != nil {
 			return SessionTurn{}, err
 		}
+		turn.Answered = answered
 		turn.Text = text
 		if stopReason != "" {
 			turn.StopReason = stopReason

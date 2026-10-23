@@ -272,7 +272,7 @@ func ReadExecutionReceipt(ctx context.Context, database string, execution Frozen
 	if conversation == nil {
 		return receipt, nil
 	}
-	text, stopReason, usage, err := answerText(ctx, conversation, *record.Answer)
+	text, stopReason, usage, _, err := answerText(ctx, conversation, *record.Answer)
 	if err != nil {
 		return ExecutionReceipt{}, err
 	}

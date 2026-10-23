@@ -178,7 +178,7 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 	if err != nil {
 		return pigNodeTurnError(err.Error())
 	}
-	report := TurnReport{Done: true}
+	report := TurnReport{Done: true, Answered: turn.Answered}
 	if turn.ErrorMessage != "" {
 		return pigNodeTurnError(turn.ErrorMessage)
 	}

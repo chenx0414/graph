@@ -110,13 +110,16 @@ func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *Tu
 		return TurnReport{Done: false, Usage: usage}
 	}
 	if input != nil && input.Kind == "chat" {
-		return TurnReport{Done: true, Usage: usage}
+		return TurnReport{Done: turn.Answered, Usage: usage}
 	}
 	required := driver.requiredOutputs(executionId)
 	if input != nil && len(required) > 0 {
 		return TurnReport{Done: false, Missing: required, Usage: usage}
 	}
-	return TurnReport{Done: input != nil, Usage: usage}
+	// A turn that produced no answer is not a finished turn. A node that
+	// reports "done" for a turn that said nothing reports work that was never
+	// done, and the graph moves on as if it had been.
+	return TurnReport{Done: input != nil && turn.Answered, Usage: usage}
 }
 
 // submissionExists reports whether the kernel holds a submission for this execution.
