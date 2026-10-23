@@ -1,7 +1,7 @@
 # 红灯验证：撤掉生产改动，E2E 必须红
 
 分支：feature/harness-token-efficiency-2026-10-22
-时间：2026-10-23T10:18:30.802Z
+时间：2026-10-23T10:29:40.069Z
 
 | 改动 | 撤掉的是什么 | E2E | 结果 |
 | --- | --- | --- | --- |
@@ -10,10 +10,11 @@
 | `8366b8f8` 压缩上限 | 环境变量命名的上限让会话提前压缩 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：a named ceiling compacts the session before the provider window would） |
 | `5c32221a` 摘要输出预算 | 摘要请求带的是它自己的额度，不是模型的整个上限 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：the summary is asked for the room the handoff needs, and it fits） |
 | `17aa68df` 任务说明包复用 | 开启开关后第二轮不再重发任务说明 | `tests/e2e/task-setup-reuse.test.ts` | **红**（1 项失败：with the switch the session keeps the task setup it already read） |
+| `707addea` 来源 × 计费类型的交叉 | 每一笔花费按来源和计费类型两个维度分开 | `tests/e2e/harness-cost.test.ts` | **红**（1 项失败：boundSearch=false/matchSearch=true/customRules=false/classifyFriction=true/compactDocs=false/cache=standard: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI） |
 | `9039e148` 工具结果落盘 | 大结果落盘后模型拿到的是句柄而不是被切断的原文 | `tests/e2e/tool-result-spill.test.ts` | **红**（1 项失败：a large command result is written to a file and the model is given the handle） |
 
 ## 还原之后
 
-还原后重跑 4 个 E2E 文件：**绿**（9 项）
+还原后重跑 5 个 E2E 文件：**绿**（19 项）
 
 **结论：每一处生产改动都是它那条 E2E 变红的原因，还原后全部变绿。**

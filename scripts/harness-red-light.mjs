@@ -192,7 +192,7 @@ const CHECKS = [
   },
   {
     name: '来源 × 计费类型的交叉',
-    subject: 'Price the whole tree and show the prefix every request carried',
+    subject: 'Cross the source of the spend with the billing type that prices it',
     proves: '每一笔花费按来源和计费类型两个维度分开',
     e2e: 'tests/e2e/harness-cost.test.ts',
     edits: [{
