@@ -1246,9 +1246,31 @@ func (k *KernelStore) blockedWake(taskID, nodeID, reason string) {
 
 // FailNode records a terminal failure and wakes the master.
 func (k *KernelStore) FailNode(taskID, nodeID, reason string) {
+	if k.settleNodeAfterStop(taskID, nodeID) {
+		k.Store.Event(taskID, "graph.node.cancelled", map[string]any{"nodeId": nodeID, "reason": reason})
+		return
+	}
 	g5Exec(k.Db, "UPDATE kernel_nodes SET status='failed' WHERE task_id=? AND node_id=?", taskID, nodeID)
 	k.Store.Event(taskID, "graph.node.failed", map[string]any{"nodeId": nodeID, "reason": reason})
 	k.blockedWake(taskID, nodeID, reason)
+}
+
+// settleNodeAfterStop parks a node of a task that is stopping.
+//
+// The second answer says whether the task is stopping. A node that is parked
+// keeps no verdict of its own: the stop cancelled its work, and the step that
+// was cancelled must not write one.
+func (k *KernelStore) settleNodeAfterStop(taskID, nodeID string) bool {
+	row, found := g5One(k.Db, "SELECT phase FROM tasks WHERE id=?", taskID)
+	if !found {
+		return false
+	}
+	phase := kernelString(row["phase"])
+	if phase != "stopping" && phase != "stopped" {
+		return false
+	}
+	g5Exec(k.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?", taskID, nodeID)
+	return true
 }
 
 // NoteQueueFailure keeps a failure reason on the queue row.
@@ -1258,6 +1280,10 @@ func (k *KernelStore) NoteQueueFailure(taskID string, seq int64, reason string) 
 
 // CompleteNode marks a node succeeded.
 func (k *KernelStore) CompleteNode(taskID, nodeID string) {
+	if k.settleNodeAfterStop(taskID, nodeID) {
+		k.Store.Event(taskID, "graph.node.cancelled", map[string]any{"nodeId": nodeID})
+		return
+	}
 	g5Exec(k.Db, "UPDATE kernel_nodes SET status='succeeded' WHERE task_id=? AND node_id=?", taskID, nodeID)
 }
 
