@@ -30,9 +30,8 @@ function fail(message) {
 }
 
 const argv = process.argv.slice(2);
-// Flags whose value must not be mistaken for a positional argument. The original parser took the
-// first non-`--` token as the slug, so `--stage merge` read "merge" as the slug; the merge stage
-// takes no slug at all and made that latent bug visible.
+// Flags whose value must not be mistaken for a positional argument: without this, `--stage merge`
+// reads "merge" as the slug, and the merge stage takes no slug at all.
 const VALUE_FLAGS = new Set(['stage', 'tickets', 'root']);
 const positionals = [];
 for (let index = 0; index < argv.length; index += 1) {
@@ -48,8 +47,7 @@ const readOption = name => {
   const index = argv.indexOf(`--${name}`);
   return index === -1 ? undefined : argv[index + 1];
 };
-const flags = new Set(argv.filter(value => value.startsWith('--') && !argv.some((other, i) => i > 0 && argv[i - 1] === value)));
-const asJson = flags.has('--json') || argv.includes('--json');
+const asJson = argv.includes('--json');
 const stage = readOption('stage') ?? 'implement';
 const ticketsFile = readOption('tickets');
 const root = resolve(readOption('root') ?? process.cwd());
