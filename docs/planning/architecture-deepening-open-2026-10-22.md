@@ -31,7 +31,19 @@
    - **结果**：包里超过上限的文件从 33 个降到 4 个，其中三个带着写明理由的标注；**其余每一个要么低于上限、要么在文件头说明了自己为什么不是**。
    - **该怎么处理，是一个决定而不是一次整理**：把这些文件按职责拆开是安全的，但要拆函数的那几个（工具表）要先定 id、遥测、panic 三处分歧；数据文件则需要守卫承认"文件的大小不一定来自职责"。另一个办法是让守卫真的实现它说明里许诺的那份豁免——只拦本次改动新写的大文件——那是改守卫本身，等于改一条 ADR 写下的规矩。本轮两件都没做。
 
-7. **两条路的工具准入规则本来是一份，被端口分成两份**。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。两个 Go 端口各自漂移开：节点泳道另加了一份"按名字豁免闸门"的清单（`Ungated: []string{"submit"}`），而 `submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍；节点那侧用闸门的 id 调工具（与原件相同），主会话却用另一个 id；节点那侧不记工具调用遥测（原件记）；节点那侧把 panic 转成错误值（原件是重新抛出）。把两条路合成一个工具表模块之前要先定这些：哪个 id 是对的、节点要不要记遥测、panic 该不该变成错误值。牵涉每一次工具调用的准入与额度结算，因此本轮只做到模型通道那一步，工具表那一步连同它要回答的问题一起写在这里。
+7. **两条路的工具准入规则本来是一份，被端口分成两份**。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。
+
+   - **这一轮把那张表拆开了，于是这三处分歧第一次能并排看**（`AgentTools` 那 1,033 行的函数拆成十二个文件，全部是纯搬移，54 个 handler 的函数体逐字节未变）。原件在 `src/runtime/durable-tools.ts:160-172`：
+
+   | | TypeScript 原件 | Go 主会话 | Go 节点泳道 | 证据指向 |
+   | --- | --- | --- | --- | --- |
+   | **id** | 同一个 id 既给 broker 也给工具 | **两个 id**：`piWorkerGatedTool` 给 broker 一个 `graphUUID()`，给工具另一个 | 同一个 id ✓ | 应为**一个**：gate 的 id 记进 `invocations`（额度账本按它结算），工具的 id 记进写入账本的 `ToolCallID`——两个 id 就没法把额度记录与写入记录对起来 |
+   | **遥测** | 每次调用都记，在 `finally` 里，panic 也记 | 记，但 **panic 时不记**（记在 `gated(...)` 返回之后） | **完全不记** | 应为**每次都记**，panic 也记 |
+   | **panic** | 重新抛出 | 重新抛出——但 `PrepareArguments` 的 panic 逃出去 | 转成错误值 | Go daemon 自己的哲学是**转成错误值**（工具表里写着"the host turns that refusal into the tool error the model reads, instead of losing the turn"）。`PrepareToolArguments` 确实会 panic（参数不合法时 `panic(errors.New(problem))`，`runtime_pi_worker_config.go:102`），而它在 `Execute` 之外跑——所以**主会话是那个不一致的一方**，节点泳道才与 Go daemon 自己的哲学一致 |
+   | **外部闸门** | 只看 `externallyGated` 标记 | 只看标记 ✓ | 标记 + 一份名字清单 | 节点泳道的 `submit` 是 `PiWorkerTool`（`runtime_pi_worker_config.go:14`），**那个类型根本没有 `ExternallyGated` 字段**——名字清单不是重复标记，而是那种类型里唯一能说这件事的办法 |
+
+   - **先前记的一处是错的，这里更正**："`submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍"——**不成立**。`submit` 由 `kernelGraphLaneSubmitTool()` 造，是 `PiWorkerTool`，不是 `AgentToolDeclaration`；它没有那个标记，因此那份名字清单不是重复。
+   - **所以要定的其实是三件事，都很窄**：主会话的 id 收成一个（与节点泳道、与原件一致）；节点泳道补上遥测（与原件一致）；主会话在 `PrepareArguments` 的 panic 上与节点泳道一致（转成错误值）。三件都只动一次工具调用的准入与结算，不动工具表本身。牵涉每一次工具调用的准入与额度结算，因此本轮只做到拆表那一步，合成那一步连同它要回答的问题一起写在这里。
 
 8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
 

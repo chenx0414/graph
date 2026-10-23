@@ -29,4 +29,4 @@
 
 8. **把 main 合了进来**（提交 `ef6a3e39`）。main 在这一轮里继续往前走，harness 那一摊工作落到了 main 上，而它改的正是本分支已经重写过的两个文件。合并因此不是整文件的两版，而是两处小搬迁：节点的 harness overlay（一个节点可以替换自己跑在哪些提示词之下）跟着会话装配搬到 `runtime_kernel_graph_lane_session.go`，主 Agent 的经验上下文跟着 operation 搬到 `runtime_pi_adapter_operation.go`。行为与 main 一字不差，变的只是它们住在哪个文件。这次提交跳过了文件大小守卫，原因是守卫在这里分辨不出来：它量的是暂存的 blob，而一次合并会把 main 自己的文件暂存进来（`core_task_runtime.go` 有 198KB），那些文件 main 上已经有了。在本分支里拆它们等于分叉 main 的工作而不是保留它，所以这一次提交跳过守卫，守卫报出的十个文件全是 main 的、原样未动。
 
-后半程（表的归属，以及继续按职责拆文件）记在另一份文档里：[架构深化的后半程](architecture-deepening-ownership-2026-10-22.md)。
+后半程记在另外两份文档里：表的归属在[架构深化的后半程](architecture-deepening-ownership-2026-10-22.md)，二十九次拆分在[拆分战役](architecture-deepening-splits-2026-10-22.md)。
