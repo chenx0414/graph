@@ -39,7 +39,7 @@ const outPath = outIndex >= 0 ? process.argv[outIndex + 1] : null;
 const CHECKS = [
   {
     name: '助手回合如实回放',
-    commit: '496017be',
+    subject: 'Replay the assistant turn the model wrote',
     proves: '模型写下的 reasoning 回到下一轮请求里',
     e2e: 'tests/e2e/provider-assistant-replay.test.ts',
     edits: [{
@@ -65,7 +65,7 @@ const CHECKS = [
   },
   {
     name: 'Anthropic 缓存断点',
-    commit: '5dfaa2f4',
+    subject: 'Mark the cacheable prefix on the Anthropic transport',
     proves: '系统提示、工具声明、对话三处断点在请求里',
     e2e: 'tests/e2e/provider-assistant-replay.test.ts',
     edits: [{
@@ -126,7 +126,7 @@ const CHECKS = [
   },
   {
     name: '压缩上限',
-    commit: '47bc0701',
+    subject: 'Let the environment name how far the context may grow',
     proves: '环境变量命名的上限让会话提前压缩',
     e2e: 'tests/e2e/compaction-context-ceiling.test.ts',
     edits: [{
@@ -147,7 +147,7 @@ const CHECKS = [
   },
   {
     name: '摘要输出预算',
-    commit: '8153fccf',
+    subject: 'Give the summarizer the room the handoff needs',
     proves: '摘要请求带的是它自己的额度，不是模型的整个上限',
     e2e: 'tests/e2e/compaction-context-ceiling.test.ts',
     edits: [{
@@ -168,7 +168,7 @@ const CHECKS = [
   },
   {
     name: '任务说明包复用',
-    commit: '1b323d24',
+    subject: 'Let the session keep the task setup it already read',
     proves: '开启开关后第二轮不再重发任务说明',
     e2e: 'tests/e2e/task-setup-reuse.test.ts',
     edits: [{
@@ -192,13 +192,28 @@ const CHECKS = [
   },
   {
     name: '工具结果落盘',
-    commit: '7072a98c',
+    subject: 'Give the tool result the handle the model needs to read the rest',
     proves: '大结果落盘后模型拿到的是句柄而不是被切断的原文',
     e2e: 'tests/e2e/tool-result-spill.test.ts',
     // The seam has an off switch, so taking it away needs no edit at all.
     env: { GRAPH_TOOL_RESULT_SEAM: '0' },
   },
 ];
+
+/**
+ * The commit that carries a change, by its subject.
+ *
+ * A rebase rewrites every hash, so the subject is the stable name and the
+ * hash is looked up when the script runs.
+ */
+function commitFor(subject) {
+  const found = run('git', ['log', '--format=%H%x00%s', `${run('git', ['merge-base', 'main', 'HEAD'])}..HEAD`])
+    .stdout.split('\n')
+    .map(line => line.split('\0'))
+    .find(([, text]) => text === subject);
+  if (!found) throw new Error(`No commit on the branch is titled: ${subject}`);
+  return found[0].slice(0, 8);
+}
 
 const lines = [];
 function say(text = '') {
@@ -287,10 +302,10 @@ for (const check of CHECKS) {
     const detail = red
       ? `**红**（${run1.failed.length} 项失败：${run1.failed.slice(0, 2).join('；')}${run1.failed.length > 2 ? ' …' : ''}）`
       : `**没红**（退出码 ${run1.code}，失败 ${run1.failed.length} 项）`;
-    say(`| \`${check.commit}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | ${detail} |`);
+    say(`| \`${commitFor(check.subject)}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | ${detail} |`);
   } catch (error) {
     failures += 1;
-    say(`| \`${check.commit}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | **出错**：${error?.message ?? error} |`);
+    say(`| \`${commitFor(check.subject)}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | **出错**：${error?.message ?? error} |`);
   } finally {
     for (const file of touched) run('git', ['checkout', '--', file]);
     if (touched.size) buildBackend();
