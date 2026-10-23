@@ -17,13 +17,22 @@
 5. **泳道的 "Frozen node identity mismatch" 拒绝是空转的**。内核把冻结身份直接从它存的那份记录里读出来（`recordString(record, "identity")`），所以旧代码拿 `configuration.policy.binding.instanceId` 与 `snapshot.identity` 比的是同一个字段的两个副本，永远相等。现在类型化之后比较的是 `wrapper.Identity` 与 `wrapper.Record.Identity`——仍然是同一个值，但至少不再伪装成两个独立事实。要让它有意义，得拿记录里的身份与**执行那一行**所属的实例比；那是新加的判定，会改变恢复的行为，同样没有 E2E 能证明，因此没有加。
 
 6. **提交守卫的实现比它自己的说明严**。守卫按**暂存的 blob** 量大小，因此任何一次改动只要碰到一个超过 20,000 字节的文件就被拦下——尽管说明写的是"仓库里已存在历史大文件，而它要拦的是**本次改动**新写大文件"。实现与说明的这一处出入，曾经让运行时层完全无法改动。上面第七步把两个历史大文件拆开后，这一处就不再挡路；但守卫本身仍会把任何历史大文件挡在门外，而它并没有实现说明里许诺的那份豁免。
+   - **量过一遍之后，这件事比原先记的更大**：`backend/internal/graph` 这个包里**有 33 个文件超过 20,000 字节的上限**——`core_task_runtime.go` 197KB、`server_app.go` 96KB、`runtime_capabilities.go` 82KB、`server_usage.go` 80KB、`runtime_rsi.go` 78KB 往下排。**它们一个都没有 `graph:allow-large-file` 标注**，所以今天改动这 33 个文件里的任何一个，守卫都会拦下来，除非像本分支前几次那样用 `--no-verify` 并在提交信息里说明。第七步拆的是当时挡路的两个（97KB 的 adapter 与 67KB 的泳道），拆完之后 kernel 层与节点泳道那几个文件确实都低于上限了——但包里其余的大文件一直都在。
+   - **该怎么处理，是一个决定而不是一次整理**：把这些文件按职责拆开，第十五步那种"store 归 store、闸门归闸门"的搬移是安全的，但 33 个文件加起来是很大的工作量，而且其中有些（`core_pinyin_table.go` 41KB、`core_task_runtime.go` 197KB）装的是数据而不是职责。另一个办法是让守卫真的实现它说明里许诺的那份豁免——只拦本次改动新写的大文件——那是改守卫本身，等于改一条 ADR 写下的规矩。本轮两件都没做。
 
 7. **两条路的工具准入规则本来是一份，被端口分成两份**。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。两个 Go 端口各自漂移开：节点泳道另加了一份"按名字豁免闸门"的清单（`Ungated: []string{"submit"}`），而 `submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍；节点那侧用闸门的 id 调工具（与原件相同），主会话却用另一个 id；节点那侧不记工具调用遥测（原件记）；节点那侧把 panic 转成错误值（原件是重新抛出）。把两条路合成一个工具表模块之前要先定这些：哪个 id 是对的、节点要不要记遥测、panic 该不该变成错误值。牵涉每一次工具调用的准入与额度结算，因此本轮只做到模型通道那一步，工具表那一步连同它要回答的问题一起写在这里。
 
 8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
 
-## `tasks` 表的归属缺口已经补上
+## `tasks` 表与任务闸门的归属缺口已经补上
 
 kernel 层的表与 `tasks` 表现在都有 owner 了。`tasks` 的生命周期（phase、paused）原先由 12 个文件里的 34 处自己写，phase 的词汇散在十六个地方而不是一处；它的五种创建方式（一个 graph、一个对话下的 graph、一次主管回合、一个对话锚定的 task、一个已确认提案的 task）也各自写着 SQL。现在这些全是 store 的方法，创建的方法名说的是"创建什么"而不是"有哪些列"，<span>core_task_lifecycle.go</span> 是这张表唯一的写入口。
 
-剩下的同类：运行时层还剩约二十处直接读 kernel 表，分散在执行名额（`runtime_execution_slots.go`）、harness 的探针与证据、以及工具闸门里。**执行名额那处是跨两份 store 的事实**（旧的 `operations` 表与新的 `kernel_executions` 表一起数），它天然不属于任何一份 store，因此留在那个模块里是合理的，不是绕过。
+任务闸门也不再自己写 SQL。它读的 `operations`、`questions`、`invocations` 三张表的形状原本有两个地方知道：拥有它们的 store，和并不拥有它们的闸门。现在 <span>core_task_invocations.go</span> 回答闸门问的每一个问题，闸门里一条 SQL 都没有了。
+
+**kernel 表现在也只由 store 抵达**。工具闸门（第十五步之前）、节点泳道的读与写（第十五步之前）都各自写着 SQL 问这些表；现在它们问 store，store 之外只有两个文件还写着 kernel 表的名字：
+
+- **harness 的探针与证据**（`runtime_harness_probe.go`、`runtime_harness_evidence.go`）。它们读很多表来汇报一个图——节点、执行、队列、条目、提问、事件、provider 调用——是一个诊断面而不是一个决策面。它要读的那些表分属不同的 store，因此它天然横跨多份 store，而不是绕过它们。
+- **执行名额**（`runtime_execution_slots.go`）。它把旧的 `operations` 表与新的 `kernel_executions` 表一起数，是**跨两份 store 的事实**，因此留在那个模块里是合理的。
+
+剩下的同类：`invocations` 与 `questions` 这两张表在整棵树里都还没有唯一写入口——闸门这一侧已收进 store，但预算账本、节点执行器、operation 生命周期、harness 证据、pi adapter 等十来个文件仍各自写着 SQL 写这两张表。它们要不要也归到 store 一处，是下一步可以做的事；本轮没有做，是因为它们各自写的列与语义并不相同（有的写 usage，有的只读成本），一次收拢要先说清每张表的规则。

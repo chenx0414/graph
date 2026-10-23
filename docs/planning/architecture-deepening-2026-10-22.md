@@ -38,32 +38,24 @@
 
 11. **`tasks` 表有了 owner**（提交 `f45dcef2` 与 `d426952d`）。这张表是 graph 的生命周期表，phase 与 paused 原本由 12 个文件里的 34 处自己写，phase 的词汇散在十六个地方而不是一处；五种创建方式也各自写着 SQL。现在生命周期与创建都是 store 的方法，创建的方法名说的是"创建什么"而不是"有哪些列"。**这张表在整棵树里只有一个写入口**。
 
+12. **任务闸门不再自己写 SQL**（提交 `2a5b23fb`）。闸门读三张表：问 operation 跑在哪个节点上，问节点或 operation 是否被一个开着的问题卡住（usage 说不清的那种），问一次调用是不是已经发出过，把调用开出去，读回它记下的 usage，再把 usage 与 cost 写回去。这些表的形状因此有两个地方知道：拥有它们的 store，和并不拥有它们的闸门——改一列要同时找两处。现在 store 回答这些问题，闸门只问：`OperationNode` 答"这个 operation 在哪个节点上"，`OpenUnknownUsageQuestion` 与 `OpenUnknownUsageQuestionForOperation` 答"它被卡住了吗"，`InvocationExists` 答"这次调用是不是已经发过"，`OpenInvocation` 开一次，`InvocationUsage` 读回记下的 usage，`RecordInvocationUsage` 写下去。**闸门里一条 SQL 都没有了**，它读到的是有类型的答案而不是从 map 里掏出来的值。
+    - **一处细节值得写下来**：store 把记下的 usage 以指针交回来，因为 usage 列是 NULL 的调用是**还没结算**，不是"记下了一个空的 usage"——后者会让第一次结算拿闸门刚拿到的证据跟自己撞出一个冲突。旧代码是检查值是否为 nil 来分辨这两者，现在仍然这样分辨。
+    - **证据**：一次探针把闸门推过完整条路径——发出、结算、同一份证据结算两次、不同的证据结算一次、结算一个没人开过的调用、结算一个 usage 从没记过的调用、靠 store 找到自己节点的闸门、卡住闸门的问题、归 agent 所有因而不卡闸门的问题、没人能算清的 usage、以及一个 task 记下的调用行。探针在这个提交上跑了一遍，在它的父提交上又跑了一遍，**两遍打印出同样的 26 行**。探针已删除——仓库只允许真正的 E2E。
+    - **这一次守卫没有例外**：闸门 7,167 字节、新的 store 文件 4,320 字节，都远低于 20,000 字节的上限。
+
+13. **工具闸门也问 store**（提交 `2c7d7e5a`）。闸门决定一次宿主工具能不能跑，而它是用自己写的 SQL 读三张 kernel 表来决定的：这个节点在跑哪个 execution、这个节点花了多少、是不是被暂停、哪些 provider 调用还占着预留。它是最后一个这样决定预算的模块——provider 闸门、节点泳道与 operation broker 早就已经问 store 了。现在它问：`RunningExecution` 答"在跑哪个 execution"，`NodeUsage` 答"花了多少、是否暂停"，`PendingProviderCalls` 答"哪些调用还占着预留"。闸门自己的 SQL 没有了。
+    - **一处差异值得写下来，因为它是唯一一处**：闸门原先问"在跑哪个 execution"时**没有说它要哪一个**——那条查询既没有顺序也没有限制，因此一个节点有不止一个 running execution 时，它拿到的是数据库碰巧给的那一行。另外九个问这个问题的地方说的都是同一句话——**这个节点最新的 running execution**——store 的 `RunningExecution` 也是这么说的。闸门现在也这么说了，这意味着它不会再在节点跑着 A 的时候去查 B 的预算。**九份副本与这第十份，现在是一份规则**。
+    - **证据**：一次探针把闸门推过十种情况——没有 running execution、有 running execution、正在关闭的节点、被暂停的节点、正在停止的 task、花光了预算的节点、算进预算的在途 provider 预留、没人算得清的 usage、无限额预算、以及无效的预留。在这个改动上跑一遍，在它的父提交上又跑一遍，**两遍打印出同样的 11 行**。探针已删除。
+
+14. **节点泳道读表也走 store**（提交 `8d750d38`）。泳道用自己写的 SQL 读四张 kernel 表：某个 task 收到过哪些边上的工作、某个节点被受理时用的是哪个 instance、某个节点是不是有算不清的 usage、某个 execution 到底有没有发过 provider 调用。节点宿主又问了节点表第五个问题，用的是同一个查询的另一份拷贝。现在它们问 store：`NodeInstanceID` 答"这个节点跑在哪个 instance 上"（泳道与宿主共用同一个查询，两份拷贝变成一份）、`DeliveryEdges` 答"工作沿哪些端点对走过"（这样禁用一条边不会抹掉已经收到过的工作的身份）、`HasUnknownProviderCall` 答"这个节点有没有算不清的 usage"，而 store 原有的 `ProviderCallsOfExecution` 答"这个 execution 有没有发过 provider 调用"。**背后的查询就是原来那些查询，同样的谓词、同样的顺序**。
+
+15. **节点泳道写表也走 store**（提交 `bac1d6bf`）。泳道用自己写的 SQL 写四张 kernel 表：一个节点被送出的提示词（同一段 INSERT 写了两遍，两处送提示词的地方各一份）、一个节点跑着的会话绑定、一个 task 的完成工作被交付用的那个 commit，以及恢复一个冻结回合期间某个 execution 的状态。现在这些都归 store：`RecordPrompt` 记提示词与工具表，`RecordNodeBinding` 记模型、提示词、工具、状态目录、角色与环境，`RecordCompletionDelivery` 记交付用的 commit，`SetExecutionState` 记一个 execution 的状态（泳道在恢复冻结回合时把 execution 置为 running、事后把旧状态放回去——这本来就是关于 execution 的事实）。
+    - **到这一步，kernel 表只由拥有它们的 store 抵达**。泳道、节点宿主、工具闸门、provider 闸门、operation broker 与节点恢复都问它。store 之外只有两个文件还写着 kernel 表的名字：harness 的探针与证据（它们读很多表来汇报一个图，是诊断面），以及执行名额（它把旧的 `operations` 表与新的 `kernel_executions` 表一起数——这件事天然不属于任何一份 store）。
+
 ## 查出来、尚未处理的问题
 
 它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。
 
 ## 门禁证据
 
-`node --run check`（`check:backend` + `typecheck` + `lint` + `test:report` + `check:baseline` + `check:evidence`）在本分支各步之后运行。这台机器上同时有五个会话在跑各自的门禁，负载平均一度到 83，满负载下 `node --run check` 会有大批用例如超时失败——因此每一次失败都逐项与**未改动的 main**在同一台机器、同样负载下对照过：
-
-| 提交 | 门禁 | 结论 |
-| --- | --- | --- |
-| `601ec92` | 287 个文件里 285 通过、1 跳过、1 失败 | 唯一失败是 `tests/m1/recovery.test.ts`（15 秒超时、TypeScript 侧），单独重跑通过；同一份未改动 main 在同样条件下也失败 |
-| `c13be7a` | 287 个文件里 281 通过、1 跳过、5 失败 | 5 个失败文件单独重跑时 3 个转为通过；剩下 2 个在未改动的 main 上同样失败 |
-| `aeacc0e` | 满负载下 42 个文件失败 | 抽 6 个与本次改动无关的失败文件重跑，两个分支都是 61/61 通过；覆盖节点预算的 `tests/e2e/node-budget.test.ts`、`tests/m8/kernel-node-budget.test.ts`、`tests/m8/node-executor.test.ts` 在满负载那一次里就是通过的 |
-| `8c74ef8` | **286 通过、1 跳过、0 失败**；"Suite matches the baseline (files 287, tests 1549)"；"Acceptance evidence is unchanged" | 在另一份干净 worktree 上跑本分支的已提交状态，机器空载（负载平均 7） |
-| `cf00356` | 287 个文件里 283 通过、1 跳过、3 失败 | 3 个失败文件单独重跑，在本提交上 3 个全过；同一个 `tests/durable/recovery.test.ts` 在上一个提交 `ff8e580` 上同样失败 |
-| `62b5f81` | 287 个文件里 280 通过、1 跳过、6 失败 | 6 个失败文件单独重跑，在本提交上 6 个全过（51/51）；覆盖本次改动的 `tests/e2e/pig-durable-recovery.test.ts`、`tests/e2e/pig-node-recovery.test.ts`、`tests/e2e/pig-node-lane.test.ts` 在满门禁那一次里就是通过的 |
-| `92a46ac2` | **286 通过、1 跳过、0 失败**（1546 个测试） | 在一份干净 worktree 上跑本分支的已提交状态，与**未改动的 main 同时跑**（同一台机器、同一套 vitest 配置、同样 `--bail=0`）：未改动的 main 同样是 0 失败（287 通过、1 跳过），两边的判定一致 |
-| `ae2f51b2`（拆分运行时层） | **286 通过、1 跳过、0 失败**（1546 个测试） | 同样与未改动的 main 同时跑：main 也是 0 失败（292 通过、1 跳过、1551 个测试；main 又前进了几个提交，所以文件数更多）。拆分前另有 11 个泳道与回合的 E2E 文件先跑过一遍，76/76 通过 |
-| `ef6a3e39`（合入 main） | 294 个文件里 292 通过、1 跳过、1 失败 | 唯一失败是 `tests/e2e/command-output-preservation.test.ts`，满负载下超时；单独重跑时它在 main 与本分支上都通过（3/3） |
-| `91936956` + `5bb621bc`（拆 store、闸门与 broker 归 store） | **293 通过、1 跳过、0 失败**（1552 个测试） | 拆 store 之前另有 10 个 kernel 路径的 E2E（node-budget、kernel-node-budget、node-executor、pig-node-recovery、pig-node-lane、graph-modules、kernel-git-integration、loops、faults、execution）跑过一遍 67/67 通过；改 broker 之后另有 8 个模块路径的 E2E 跑过一遍 58/58 通过 |
-| `cf1135b8`（节点恢复归 store） | 见下一行 | 改之前另有 6 个恢复路径的 E2E（pig-node-recovery、pig-durable-recovery、node-executor、recovery、faults、pig-node-lane）跑过一遍 41/41 通过 |
-| `037a66f6`（拆 kernel views） | **293 通过、1 跳过、0 失败**（1552 个测试） | 拆 views 之前另有 6 个视图路径的 E2E（go-graph-view、pig-node-lane、kernel-git-integration、execution、graph-final-acceptance、node-executor）跑过一遍 51/51 通过 |
-| `cf1135b8` + `213bfa9f`（节点恢复归 store、记下剩下的归属缺口） | **293 通过、1 跳过、0 失败**（1552 个测试） | 改之前另有 6 个恢复路径的 E2E（pig-node-recovery、pig-durable-recovery、node-executor、recovery、faults、pig-node-lane）跑过一遍 41/41 通过 |
-
-**kernel 层与运行时层现在没有任何一个文件超过守卫上限**：最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。
-
-门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
-
-`tests/e2e/node-budget.test.ts` 断言结算后节点的 `used: 50, reserved: 0`，正是第三条改动的两条路径。
+每一次门禁的结果记在另一份文档里：[架构深化门禁证据](architecture-deepening-gate-2026-10-22.md)。
