@@ -58,12 +58,6 @@ import {
 } from './provider-form.ts';
 import type { DesktopBridge } from './setup.ts';
 
-type ModelsDevModule = { lookupModelMetadata: (...args: any[]) => SnapshotMetadata | null | undefined };
-let modelsDevModule: Promise<ModelsDevModule> | null = null;
-function loadModelsDev(): Promise<ModelsDevModule> {
-  return import('../catalog/models-dev.ts');
-}
-
 type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 type RawModel = {
   id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
@@ -482,6 +476,19 @@ function probeModelsFrom(response: ProbeResponse): ProbeModel[] {
   return models;
 }
 
+/**
+ * The models.dev snapshot module, loaded on demand.
+ *
+ * The module reads the vendored snapshot at import time, so it stays a
+ * dynamic import: a snapshot that cannot be read must leave the metadata
+ * unknown, not fail the page that asked for it.
+ */
+type ModelsDevModule = typeof import('../catalog/models-dev.ts');
+let modelsDevModule: Promise<ModelsDevModule> | null = null;
+function loadModelsDev(): Promise<ModelsDevModule> {
+  return import('../catalog/models-dev.ts');
+}
+
 async function lookupSnapshot(providerId: string, modelId: string): Promise<SnapshotMetadata | null> {
   try {
     modelsDevModule ??= loadModelsDev();
@@ -590,6 +597,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     setVerification(null);
     setErrors({});
   }, [active.credentialId]);
+  // ② 选择模型 has its own vendor picker: only credentials the config already
+  // holds (or the daemon resolved) are listed; everything else stays hidden.
+  const vendors = modelVendorsFrom(draft, platforms);
   // 切账户（凭据 id）之后，② 的模型列表必须跟着走：那些行是从另一个账户的端点取回来的，留在屏幕上就等于
   // 把 A 的模型按到 B 头上（保存时写进 B）。列表属于账户，所以切到同名厂商让它重新获取一次。
   const shownAccount = useRef<string | undefined>(undefined);
@@ -602,12 +612,9 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     setNote('');
     const next = vendors.find(vendor => vendor.id === active.credentialId);
     if (next) setSelectedVendorId(next.id);
-  }, [active.credentialId]);
+  }, [active.credentialId, vendors]);
   const entries = draft.models?.entries ?? [];
   const activeEntries = entries.filter(entry => entry.credentialId === active.credentialId);
-  // ② 选择模型 has its own vendor picker: only credentials the config already
-  // holds (or the daemon resolved) are listed; everything else stays hidden.
-  const vendors = modelVendorsFrom(draft, platforms);
   const selectedVendor = vendors.find(vendor => vendor.id === selectedVendorId);
   const vendorDraft = selectedVendor ? draftFromModelVendor(selectedVendor) : undefined;
   const vendorBlockedReason = selectedVendor && !selectedVendor.baseUrl.trim()
@@ -649,7 +656,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     }
   };
 
-  const runProbe = async (target: ProviderDraft, options: { modelId?: string; updateList?: boolean; verification?: boolean } = {}) => {
+  const runProbe = useCallback(async (target: ProviderDraft, options: { modelId?: string; updateList?: boolean; verification?: boolean } = {}) => {
     const updateList = options.updateList !== false;
     const updateVerification = options.verification !== false;
     setBusy(true);
@@ -682,7 +689,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const vendor = selectedVendorId ? vendors.find(item => item.id === selectedVendorId) : undefined;
@@ -690,7 +697,7 @@ function ProviderWorkbench({ draft, credentialState, bridge, mutate, openGuide, 
     if (!decision.probe || !vendor) return;
     probedVendor.current = decision.recorded;
     void runProbe(draftFromModelVendor(vendor), { verification: false });
-  }, [selectedVendorId, vendors]);
+  }, [selectedVendorId, vendors, runProbe]);
 
   const saveProvider = async () => {
     const found = validateProviderDraft(active, { custom: isCustom, hasKey: Boolean(key.trim()) || resolved });
