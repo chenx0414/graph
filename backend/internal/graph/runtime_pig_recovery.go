@@ -81,8 +81,31 @@ func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecut
 		// checkpoint, and a request the model already received is not
 		// requested a second time.
 	default:
+		// A recovery that already failed is not tried again: the same send
+		// would fail the same way after every boot, and the operation would
+		// stay unknown for ever.
+		if reason, failed := pigkernel.RecoveryFailure(execution.Record); failed {
+			runtime.reportPigRecoveryBlocked(operation, reason)
+			return
+		}
 		runtime.reattachPigExecution(operation, execution)
 	}
+}
+
+// reportPigRecoveryBlocked records that a recovery could not send a turn.
+//
+// The operation stays unknown - the turn may have reached the model - but the
+// reason is durable and the user sees it, so the wait is a decision and not
+// a silence.
+func (runtime *TaskRuntime) reportPigRecoveryBlocked(operation Operation, reason string) {
+	message := "The interrupted turn could not be sent again: " + reason
+	runtime.store.Transaction(func() any {
+		runtime.store.Event(operation.TaskId, "graph.recovery.blocked", map[string]any{
+			"operationId": operation.Id, "nodeId": operation.NodeId, "reason": message,
+		})
+		return nil
+	})
+	reportPigRecoveryFailure(message)
 }
 
 // settlePigCompletion settles an operation from the kernel's own receipt.
@@ -111,6 +134,14 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 // The turn runs in the background: the daemon must come up even when the
 // model is slow, and the operation is unknown until the turn settles it.
 func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution pigkernel.FrozenExecution) {
+	// The attempt is recorded before it happens: a turn that is attempted and
+	// fails must not be attempted again after the next boot.
+	runtime.store.Transaction(func() any {
+		runtime.store.Event(operation.TaskId, "graph.recovery.attempted", map[string]any{
+			"operationId": operation.Id, "nodeId": operation.NodeId,
+		})
+		return nil
+	})
 	wrapper := map[string]any{
 		"snapshot":           execution.Record,
 		"restoredPolicy":     asMap(execution.Record["policy"]),
@@ -130,7 +161,9 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 	// The adapter records the admission and returns. The value is on the
 	// capture when Prepare returns, so nothing races a closed channel.
 	if !capture.opened || !capture.prompted {
-		reportPigRecoveryFailure("the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk))
+		reason := "the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk)
+		runtime.markPigRecoveryFailure(execution, reason)
+		reportPigRecoveryFailure(reason)
 		return
 	}
 	go func() {
@@ -138,16 +171,31 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 		transport := CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
 		session, err := transport.Open(capture.request)
 		if err != nil {
-			reportPigRecoveryFailure("the interrupted turn could not be opened: " + err.Error())
+			reason := "the interrupted turn could not be opened: " + err.Error()
+			runtime.markPigRecoveryFailure(execution, reason)
+			reportPigRecoveryFailure(reason)
 			return
 		}
 		defer func() { _ = session.Close() }()
 		turn, err := session.Prompt(capture.prompt, nil)
 		if err != nil {
-			reportPigRecoveryFailure("the interrupted turn could not be sent again: " + err.Error())
+			reason := "the interrupted turn could not be sent again: " + err.Error()
+			runtime.markPigRecoveryFailure(execution, reason)
+			reportPigRecoveryFailure(reason)
 			return
 		}
 		runtime.settlePigTurn(operation, turn)
+	}()
+}
+
+// markPigRecoveryFailure records that a recovery could not send a turn.
+//
+// The record is what the next boot reads: a recovery that already failed is
+// not tried again, so the same doomed send does not run after every restart.
+func (runtime *TaskRuntime) markPigRecoveryFailure(execution pigkernel.FrozenExecution, reason string) {
+	func() {
+		defer func() { _ = recover() }()
+		_ = pigkernel.MarkRecoveryAttempt(context.Background(), runtime.store.Path, execution.ConversationId, reason)
 	}()
 }
 
