@@ -6,8 +6,8 @@
 
 ## 结论摘要
 
-1. **53 条里有 25 条落在 Graph 自己身上**：12 条本轮修掉（每条都有先红后绿的 E2E），3 条修了一半或只修了一个面，10 条确认为真实缺陷但不在本轮修复范围（逐条写明机制与修复位置）。
-2. 修掉的 12 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）。
+1. **53 条里有 25 条落在 Graph 自己身上**：14 条本轮修掉（其中 13 条有先红后绿的 E2E，#29 的 E2E 待补），3 条修了一半或只修了一个面，8 条确认为真实缺陷但不在本轮修复范围（逐条写明机制与修复位置）。
+2. 修掉的 14 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）。
 3. **18 条在本栈里不存在或已被处理**（ALREADY-OK / N/A）：Graph 里没有 span/trace 机制、没有 poison 语义、没有依赖图边数上限、没有"七家 provider"（daemon 只讲 OpenAI Completions 与 Anthropic Messages 两种协议），死锁、并行审批、端口独占这些都有真实守卫。
 4. **4 条属于上游 PiG**（`github.com/MichaelKinsy/PiG v0.5.1`）或上游 npm 包，本仓库改不了，已按上游文件分组记录，便于一次性提给上游。
 5. **与 `feature/harness-token-efficiency-2026-10-22` 的重叠**已在第 6 节逐条列出：该分支已修的 4 条（#23/#40/#45 与任务说明包复用）在本分支上按 `main` 基线重新实现，两边合并时需要人工取舍。
@@ -55,7 +55,7 @@
 | 26 | N/A | 低 | — | Graph 没有能力依赖图，也没有边数上限 |
 | 27 | UPSTREAM-PIG | 中 | PiG `mcp/streamable_http.go:29-31,655-697` | Graph 无 websocket；唯一重连环在上游 MCP 传输 |
 | 28 | UPSTREAM-PIG | 中 | PiG `mcp/streamable_http.go:580-624` | 上游只重放读侧，POST 不重发 |
-| 29 | OURS-GO → 未修（后续） | 中 | `runtime_pig_recovery.go:37-51,113-152` | 启动恢复每 boot 重跑同一个 doomed call，冻结记录不清理 |
+| 29 | **OURS-GO** → 已修（E2E 待补） | 中 | `runtime_pig_recovery.go`；`pigkernel/recovery.go` `MarkRecoveryAttempt` | 启动恢复每 boot 重跑同一个 doomed call，冻结记录不清理 |
 | 30 | ALREADY-OK | 低 | `core_task_runtime.go:4705-4776` | 唯一阻塞等待有 600s 上限且报 `timeout` |
 | 31 | ALREADY-OK | 低 | `core_wake_ledger.go:119-121,153-156` | 并行审批合并为一个唤醒；节点状态守卫挡住第二次派发 |
 | 32 | **OURS-GO** → 已修 | 中 | `runtime_provider_stream.go` `providerLineReader` | keepalive 不算活动；空闲计时器 5 分钟 |
@@ -79,11 +79,11 @@
 | 50 | **OURS-GO** → 已修（部分） | 高 | `runtime_kernel_graph_lane.go:1010`；`runtime_pi_adapter.go:1276-1284` | 子 Agent 的思考档位被硬编码为 `off` |
 | 51 | **OURS-GO** → 已修 | 高 | `runtime_pig_session.go` `pigSessionIdentity`；`pigkernel/turn.go` | 空 identity 让所有无实例会话共用一个注册名 |
 | 52 | ALREADY-OK | 低 | `server_app.go:78-90`；`server_host.go:134-152` | 端口独占绑定，第二个 daemon 起不来 |
-| 53 | ALREADY-OK（有残余） | 中 | `core_state_retention.go:73-121` | 没有 trace 文件；残余：保留策略只在离线工具里跑 |
+| 53 | **OURS-GO** → 已修 | 中 | `core_execution.go` `sweepState`；`core_state_retention.go` | 没有 trace 文件；残余：保留策略只在离线工具里跑，守护进程自己从不回收 |
 
 ---
 
-## 3. 本轮修掉的十二条
+## 3. 本轮修掉的十四条
 
 ### 3.1 #4 / #5 / #24 / #32 / #33 / #34 —— provider 流与请求（`c9fae98`）
 
@@ -139,7 +139,25 @@ daemon 决定何时压缩、摘要写在哪间屋子里，这两件事都没到�
 
 E2E `tests/e2e/harness-native-tool-bounds.test.ts` 给 daemon 一个 1200 个文件的目录和一个 3000 行的文件，证明清单、搜索与读取各自在自己的上限内作答，并各自说清自己被截断了。修复前跑过：清单原样返回，没有任何东西说它不是完整的。
 
-### 3.7 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
+### 3.7 #53 —— 守护进程回收自己的状态（`b6352ec`）
+
+回收规则本来就有，但只作为离线工具存在：它要拿 daemon 的 owner 锁，所以对着运行中的 Graph 拥有的状态它直接拒绝。于是跑了几天的 daemon 把自己写过的每一个事件都留着，而它之前每一次运行留下的状态就一直长下去。
+
+daemon 现在用同一套规则回收：每个任务最新的事件留下，不足一天没有动静的任务的旧历史去掉，还在进行中的任务不动。回收在 daemon 启动时跑一次——上一次运行留下的状态在这一次写入之前就被回收——之后每小时一次。
+
+删除走 store 自己的事务锁，所以不会和另一个写者交错：回收是在一个一直在写的 daemon 里面跑的。环境变量可以收紧规则（间隔、最小保留时间、每个任务保留多少事件），既是留给运维的口子，也是让一次运行就能看见回收的办法。
+
+E2E `tests/e2e/harness-state-retention.test.ts` 跑一次对话，数出它的任务留下多少事件，重启 daemon 再数一次：第二次的数字是规则允许的数字。修复前跑过：daemon 把 17 个事件全留着。
+
+### 3.8 #29 —— 每次启动都重跑同一个 doomed call 的启动恢复（`e98cc98`）
+
+启动恢复会重发一个没有到达模型的回合。当这次重发不可能成功——它被受理时的配置已经不在了，或者它绑定的扩展无法承载——恢复失败，把原因写进 daemon 的错误流，然后返回。冻结记录还在，于是下一次启动做一模一样的尝试，再下一次也是。
+
+尝试现在记在冻结记录里，而冻结记录正是恢复读的那个持久事实。一次尝试已经失败过的恢复不再重发：operation 保持 unknown，原因进事件流，daemon 说出来，而不是只往 stderr 里写一句。
+
+既有的恢复 E2E（`pig-node-recovery`、`pig-durable-recovery`、`go-durable`）全部通过。新场景——一个被受理但从未发出的回合、它的恢复又不可能成功——还没有 E2E：它需要第二个对话占住凭据槽位，那个夹具还没搭起来。
+
+### 3.9 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
 
 daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：provider 从未被告知要保留什么，于是每个会话都为整段前缀重新付费。改后按 Pi 的做法在系统提示、最后一个工具声明、最后一条消息的最后一个块上各放一个断点。
 
@@ -154,6 +172,7 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 | `tests/e2e/harness-tool-flow.test.ts` | provider 在回答完成前断开时，这一回合失败，那个工具没有执行；Anthropic 请求带着 tool call 与配对的结果；请求带着缓存断点 | 断开的那一回合报成功并执行了工具；Anthropic 请求里没有 tool call |
 | `tests/e2e/harness-compaction.test.ts` | 摘要是按 daemon 预留的 2000 token 房间请求的（1600），不是模型的整个输出上限；压缩被如实上报为 `session.compacted` | 摘要请求 4096 token；没有任何压缩上报 |
 | `tests/e2e/harness-native-tool-bounds.test.ts` | 清单、文件搜索与读取各自在自己的上限内作答，并各自说清自己被截断了 | 清单原样返回 1200 项，没有任何东西说它不是完整的 |
+| `tests/e2e/harness-state-retention.test.ts` | daemon 回收上一次运行留下的状态：重启后任务留下的事件不超过规则允许的数量 | daemon 把 17 个事件全留着 |
 
 两个文件都在修复前跑过，确认失败。
 
@@ -171,10 +190,8 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 | 22 | 每个流事件一次 INSERT + 一次通知；工具调用还额外两次事件与一次活动写 | `runtime_pi_adapter.go` 合并 `message.tool` 起止；`core_store.go` 合并活动写 |
 | 46 | 48 个工具声明里 15,229 字符描述对 2,225 字符参数，87.3% 是散文 | `runtime_agent_tool_definitions.go`：描述压成一句操作说明，长协议移进 `<docs>` |
 | 47 | daemon 侧设计好的 4KB 溢出/摘要路径（`ToolResultHook`）在 Go 路径上没有调用者，工具结果只有上游 50KB 兜底 | `pigkernel/extensions.go` 注册工具时挂上 `ToolResultHook` |
-| 29 | 启动恢复每 boot 重跑同一个 doomed call：冻结记录不清理，也没有"恢复已尝试"标记 | `runtime_pig_recovery.go` + `pigkernel/recovery.go`：冻结记录加"已尝试/最后失败"字段，并让失败对用户可见 |
 | 13 | 停止写入与正在停的那一步存在先后竞争 | 控制目标与 operation 生命周期的写入顺序 |
 | 36 | 用户的确认仍然只是给模型的规则，不是代码检查：模型可以在别的 operation 还在跑时 `force` 重载 daemon。ADR 0026 把 `force` 定义为 agent 的工具（"force 保留中断在途 operation 的原有语义"），所以收紧它是 ADR 决策，不是实现细节。工具的描述已写明这个后果与"先问用户" | 要么改 ADR 0026，要么在代码里要求一次可查证的确认（谁问、谁答、记在哪） |
-| 53 | 守护进程内从不跑保留策略：`events`/`invocations`/`kernel_*` 行随进程寿命增长 | `server_start.go` 周期调用 `ApplyRetention` |
 | 18 | 遗留 TS 路径整读会话文件（10MB）并在事件循环上同步解析 | `src/core/node-prompt.ts` 改增量读；`src/runtime/durable-history.ts` 不再复制整份 records。`feature/retire-ts-backend` 正在退役这条路径，可能不必再改 |
 
 ---
