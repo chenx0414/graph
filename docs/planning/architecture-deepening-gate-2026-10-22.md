@@ -26,6 +26,9 @@
 | `2c7d7e5a` + `8d750d38` + `bac1d6bf`（工具闸门、泳道读与写归 store） | **293 通过、1 跳过、0 失败**（1552 个测试） | 同一份干净 worktree 上跑最终 head（`bac1d6bf`），672 秒，机器负载平均 10；改之前另有 9 个泳道与恢复路径的 E2E（pig-node-lane、pig-node-recovery、pig-durable-recovery、node-budget、graph-modules、graph-lane、graph-lane-run、kernel-node-budget、node-executor）跑过一遍 50/50 通过 |
 | `32fb586a`（questions 表归 store） | 294 个文件里 293 通过、1 跳过、**1 失败** | 唯一失败是 `tests/e2e/harness-prompt.test.ts`（"a lesson claimed on the general axis…"），满负载下的超时型失败；**单独重跑通过**，它讲的是经验沉淀，与本轮改动无关 |
 | `e7971253`（拆能力文件） | **293 通过、1 跳过、0 失败**（1552 个测试） | 在一份干净 worktree 上跑已提交状态（708 秒），**与未改动的 main 同时跑**（700 秒，同样负载）：main 也是 293 通过、1 跳过、1552 个测试、0 失败，**两边的判定一致**；上一轮那个 harness-prompt 的失败在这一次两边的完整套里都没有再出现 |
+| `293716eb`（再拆五个文件：用量、自改进、提示词库、受控 provider、对话） | **293 通过、1 跳过、0 失败**（1552 个测试）；"Suite matches the baseline (files 294, tests 1556)" | 在一份干净 worktree 上跑最终 head（`293716eb`），604 秒；`check:backend`、`typecheck`、`lint`、`check:baseline`、`check:evidence` 同时全部通过 |
+
+**六次拆分全部是纯搬移**：每一次都用两种方式证明过——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。
 
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
 
