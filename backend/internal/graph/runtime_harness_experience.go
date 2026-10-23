@@ -130,6 +130,46 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 	return result
 }
 
+// HARNESS_EXPERIENCE_PROMPT_MAX bounds how many lessons travel in a prompt.
+const HARNESS_EXPERIENCE_PROMPT_MAX = 5
+
+// harnessExperiencePrompt renders the lessons that hold for every kind of work
+// as a short block for the system prompt.
+//
+// Only the general scope travels: a lesson claimed for every kind of work
+// belongs to every task, and a domain lesson needs a domain the host does not
+// know. The block states what happened and what it was based on; it never
+// states a conclusion the host would enforce.
+func harnessExperiencePrompt(artifacts *ArtifactWorkspace, taskId string) string {
+	if artifacts == nil || taskId == "" {
+		return ""
+	}
+	entries := harnessExperienceEntries(artifacts, taskId, HARNESS_GENERAL_SCOPE)
+	if len(entries) == 0 {
+		return ""
+	}
+	lines := []string{}
+	for _, entry := range entries {
+		if len(lines) >= HARNESS_EXPERIENCE_PROMPT_MAX {
+			break
+		}
+		cue := harnessEvidenceBound(entry.Cue, 200)
+		lesson := harnessEvidenceBound(entry.Lesson, 300)
+		if cue == "" || lesson == "" {
+			continue
+		}
+		line := "- " + cue + " -> " + lesson
+		if entry.Evidence != "" {
+			line += " (because " + harnessEvidenceBound(entry.Evidence, 160) + ")"
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Lessons earlier runs of this project learned:\n" + strings.Join(lines, "\n")
+}
+
 // harnessExperienceScope is the scope a lesson lands in: the general scope for
 // a general lesson, the domain's own scope for a specific one.
 func harnessExperienceScope(domain, axis string) string {

@@ -880,7 +880,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 				}
 			}
 			result := harnessRecordDecision(&artifacts, entries, HarnessDecisionInput{
-				GraphId:   strings.TrimSpace(agentToolsString(params["graphId"])),
+				GraphId:   strings.TrimSpace(agentToolsStringOrEmpty(params["graphId"])),
 				Domain:    domain,
 				Axis:      axis,
 				Chosen:    strings.TrimSpace(agentToolsString(params["chosen"])),

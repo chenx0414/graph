@@ -1122,6 +1122,11 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			assemblyInput.FrozenFacts = facts
 			assemblyInput.SkillFolder = ""
 		}
+		if role == "master" && options.Artifacts != nil {
+			// The main Agent is the one that improves the harness, so it is the
+			// one that starts with what earlier runs learned.
+			assemblyInput.ExperienceContext = harnessExperiencePrompt(options.Artifacts, operation.TaskId)
+		}
 		contextAssembly = OpenAgentContextAssembly(assemblyInput)
 		capabilityRoot := ""
 		if role == "master" && options.Catalog != nil && options.Catalog.CapabilityRootPath() != "" {

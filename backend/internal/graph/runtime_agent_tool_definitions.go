@@ -248,7 +248,7 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 			{"domain", tbOptional(tbString(map[string]any{"description": "Domain the task belongs to; its adopted lessons come back with the comparison."}))},
 		}, []string{"graphId", "nodeIds"}), Available: main && features.Harness},
 		{Name: "record_harness_decision", Label: "Record harness decision", Description: "Record which candidate was adopted for a task and the lesson that comes with it, and promote it to the project so the next task of the same domain finds it. The lesson needs three parts: the cue (what the situation looked like), the lesson (what to do about it) and the evidence (what shows it worked). A decision without all three is refused: an unsupported lesson teaches the next task nothing. The stored set is read back in the result.", Parameters: tbObject([]tbField{
-			{"graphId", tbString(map[string]any{"description": "Graph the compared candidates belong to."})},
+			{"graphId", tbOptional(tbString(map[string]any{"description": "Graph the compared candidates belong to, when the lesson came from a comparison."}))},
 			{"domain", tbString(map[string]any{"description": "Domain the lesson belongs to; later tasks in this domain find it."})},
 			{"axis", tbOptional(tbString(map[string]any{"description": "general (the lesson holds for every kind of work, and every domain finds it) or specific (it holds for this domain only). Claims the general axis only when the evidence shows it."}))},
 			{"chosen", tbString(map[string]any{"description": "The anonymous candidate id that was adopted, as compare_harness_candidates reported it."})},
@@ -257,7 +257,7 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 			{"evidence", tbString(map[string]any{"description": "What shows the lesson worked."})},
 			{"harness", tbOptional(tbString(map[string]any{"description": "The harness change that produced the adopted behavior."}))},
 			{"requestId", tbOptional(tbString(nil))},
-		}, []string{"graphId", "domain", "chosen", "cue", "lesson", "evidence"}), Available: main && features.Harness},
+		}, []string{"domain", "chosen", "cue", "lesson", "evidence"}), Available: main && features.Harness},
 		{Name: "read_harness_experience", Label: "Read harness experience", Description: "Read the lessons earlier tasks adopted: the cue that triggered them, what to do, and the evidence that supported them. With a domain you get that domain's own lessons and the general ones - a lesson claimed on the general axis holds for every kind of work, so it reaches this domain too. Read it before working on a task whose kind of work was done before, so the harness starts from what was learned instead of from scratch. With no domain it lists the scopes that hold lessons.", Parameters: tbObject([]tbField{
 			{"domain", tbOptional(tbString(map[string]any{"description": "Domain to read. Omit it to list the domains that hold lessons."}))},
 		}, nil), Available: main && features.Harness},
