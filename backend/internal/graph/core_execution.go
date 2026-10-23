@@ -343,8 +343,7 @@ func (e *Execution) Abandon(taskId string, reason *string, allowMasterTurn bool)
 	if busy {
 		Raise("task_busy", "Pause the task and wait for its running work to settle before abandoning it")
 	}
-	resolved := kernelChanges(e.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND status='open'",
-		CanonicalJSON(map[string]any{"type": "abandoned", "reason": reasonValue(reason)}), taskId)
+	resolved := e.store.ResolveTaskQuestions(taskId, map[string]any{"type": "abandoned", "reason": reasonValue(reason)})
 	e.store.AbandonTask(taskId)
 	cursor := e.store.Event(taskId, "task.abandoned", map[string]any{"reason": reasonValue(reason), "resolvedQuestions": resolved})
 	ReleaseTaskSlot(e.store, taskId)

@@ -577,7 +577,7 @@ func (l *OperationLifecycle) Reconcile(id string, reconcile func(operation Opera
 				Raise("invalid_reconciliation", "Cannot retry an operation with a known result or a live worker")
 			}
 			l.markNotSent(l.operationRow(id), operationNotSentOptions{ResetNode: true})
-			kernelExec(l.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'", CanonicalJSON(evidence), id)
+			l.store.ResolveOperationQuestions(id, evidence)
 			CloseUserWaitForOperation(l.store, id)
 		} else {
 			active := 0
@@ -864,7 +864,7 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 		if kind == "human_check" && answer.Type == "acknowledge" {
 			l.store.Event(taskId, "human.accepted", map[string]any{"questionId": questionId, "nodeId": nodeId})
 		}
-		kernelExec(l.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?", CanonicalJSON(answer), questionId)
+		l.store.ResolveQuestion(questionId, answer)
 		CloseUserWait(l.store, taskId, nodeId)
 		WakeForAnswer(l.store, taskId, map[string]any{
 			"questionId": questionId,
@@ -931,8 +931,7 @@ func (l *OperationLifecycle) Escalate(taskId, questionId, prompt string) {
 		if err := json.Unmarshal([]byte(kernelString(row["data"])), &source); err != nil {
 			panic(err)
 		}
-		kernelExec(l.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?",
-			CanonicalJSON(map[string]any{"type": "escalated", "prompt": prompt}), questionId)
+		l.store.ResolveQuestion(questionId, map[string]any{"type": "escalated", "prompt": prompt})
 		defects := []any{}
 		if record, ok := jsonRecord(source); ok {
 			if value, ok := record["defects"]; ok {
@@ -1049,8 +1048,7 @@ func (l *OperationLifecycle) recordInterruptedUsage(row map[string]any, answer A
 			cost = entry.Cost
 			pricing = entry.Pricing
 		}
-		kernelExec(l.store.Db, "UPDATE invocations SET usage=?,cost=? WHERE id=?",
-			CanonicalJSON(usage), CanonicalJSON(EstimateCost(usage, cost, pricing)), kernelString(unknown[0]["id"]))
+		l.store.RecordInvocationUsage(kernelString(unknown[0]["id"]), CanonicalJSON(usage), CanonicalJSON(EstimateCost(usage, cost, pricing)))
 	}
 	knownRows := kernelRows(l.store.Db, "SELECT usage FROM invocations WHERE operation_id=? AND usage IS NOT NULL", kernelString(row["id"]))
 	known := sumKnownUsage(knownRows)
@@ -1163,8 +1161,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 		RecordConversationOutput(l.store, operation, result)
 		kernelExec(l.store.Db, "UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?", CanonicalJSON(result), operation.Id)
 		kernelExec(l.store.Db, "UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)
-		kernelExec(l.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND kind='recovery' AND status='open'",
-			CanonicalJSON(map[string]any{"result": result}), operation.Id)
+		l.store.ResolveOperationRecoveryQuestions(operation.Id, map[string]any{"result": result})
 		CloseUserWaitForOperation(l.store, operation.Id)
 		if kernelRow(l.store.Db, "SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'", operation.Id) == nil {
 			reason := "Agent returned no accountable usage"
@@ -1238,8 +1235,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 		CommitUsage(l.store, *operation.InstanceId, total)
 		RecordCurrentModelUse(l.store, *operation.InstanceId)
 	}
-	kernelExec(l.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND status='open'",
-		CanonicalJSON(map[string]any{"result": result}), operation.Id)
+	l.store.ResolveOperationQuestions(operation.Id, map[string]any{"result": result})
 	CloseUserWaitForOperation(l.store, operation.Id)
 	autoApprovedPermission := result.Outcome == "waiting" && result.Question != nil && result.Question.Grant != nil &&
 		operation.AccessPolicy != nil && operation.AccessPolicy.AutoApprove.Permission
@@ -1518,7 +1514,7 @@ func (lifecycle *OperationLifecycle) acceptDurableCompletion(receipt durableComp
 		}
 		usage := sumKnownUsage(calls)
 		kernelExec(lifecycle.store.Db, "UPDATE operations SET state='dispatched',worker_active=1,waiting_slot=0 WHERE id=?", operation.Id)
-		kernelExec(lifecycle.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE operation_id=? AND kind='recovery' AND status='open'", CanonicalJSON(map[string]any{"proof": "Original durable input has its completed SDK receipt; unresolved usage remains unknown", "inputRequestId": receipt.InputRequestId}), operation.Id)
+		lifecycle.store.ResolveOperationRecoveryQuestions(operation.Id, map[string]any{"proof": "Original durable input has its completed SDK receipt; unresolved usage remains unknown", "inputRequestId": receipt.InputRequestId})
 		CloseUserWaitForOperation(lifecycle.store, operation.Id)
 		kernelExec(lifecycle.store.Db, "UPDATE nodes SET status='running' WHERE task_id=? AND id=? AND activation_id=?", operation.TaskId, operation.NodeId, operation.ActivationId)
 		kernelExec(lifecycle.store.Db, "UPDATE activations SET state='running' WHERE id=?", operation.ActivationId)

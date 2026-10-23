@@ -195,7 +195,7 @@ func RecoverMaster(store *TaskStore, taskId, reason string) bool {
 			}
 		}
 		for _, question := range released {
-			kernelExec(store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?", CanonicalJSON(map[string]any{"type": "retry"}), question["id"])
+			store.ResolveQuestion(kernelString(question["id"]), map[string]any{"type": "retry"})
 		}
 		if reason == "configuration" || (master.Status != "preparing" && master.Status != "running" && master.Status != "blocked") {
 			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", taskId, master.Id)
@@ -233,8 +233,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 	// main-owned problem (invisible to the user) and is parked from the
 	// scheduler until an explicit retry or configuration recovery releases it.
 	selfOwned := master != nil && anchorTaskId == input.TaskId && master.Id == input.NodeId
-	kernelExec(store.Db, "INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)",
-		id, input.TaskId, input.NodeId, questionOptionalOperationId(input.OperationId), input.Kind, CanonicalJSON(input.Data), string(owner))
+	store.OpenQuestion(id, input.TaskId, input.NodeId, questionOptionalOperationId(input.OperationId), input.Kind, input.Data, owner)
 
 	if input.AutoAnswer != nil {
 		if input.Kind == "permission" && input.AutoAnswer.Answer.Type == "grant" {
@@ -244,7 +243,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 			}
 			kernelExec(store.Db, "INSERT OR IGNORE INTO task_grants VALUES(?,?)", input.TaskId, input.AutoAnswer.Answer.Grant)
 		}
-		kernelExec(store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?", CanonicalJSON(input.AutoAnswer.Answer), id)
+		store.ResolveQuestion(id, input.AutoAnswer.Answer)
 		if input.AutoAnswer.Resume != nil && *input.AutoAnswer.Resume {
 			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", input.TaskId, input.NodeId)
 			kernelExec(store.Db, "UPDATE activations SET state='pending' WHERE id=(SELECT activation_id FROM nodes WHERE task_id=? AND id=?)", input.TaskId, input.NodeId)
@@ -401,7 +400,7 @@ func ApproveHumanCheck(store *TaskStore, questionId, note string) bool {
 			updated[key] = value
 		}
 		updated["preReview"] = map[string]any{"approved": true, "note": note}
-		kernelExec(store.Db, "UPDATE questions SET data=? WHERE id=?", CanonicalJSON(updated), questionId)
+		store.AmendQuestionData(questionId, updated)
 		store.Event(kernelString(row["task_id"]), "human.prereview_approved", map[string]any{
 			"questionId": questionId,
 			"nodeId":     kernelString(row["node_id"]),

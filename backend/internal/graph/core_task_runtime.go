@@ -1693,8 +1693,7 @@ func (task *TaskRuntimeTask) SetBudget(input TaskRuntimeBudgetInput) Receipt {
 	}, func() any {
 		if runtime.kernel.LatestRevision(task.taskId) != nil {
 			runtime.kernel.SetAuthorizedBudget(task.taskId, input.NodeId, input.Tokens)
-			changes := kernelChanges(runtime.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'",
-				CanonicalJSON(map[string]any{"type": "set_budget", "tokens": input.Tokens}), task.taskId, input.NodeId)
+			changes := runtime.store.ResolveNodeBudgetQuestions(task.taskId, input.NodeId, map[string]any{"type": "set_budget", "tokens": input.Tokens})
 			if changes > 0 {
 				CloseUserWait(runtime.store, task.taskId, input.NodeId)
 			}
@@ -1708,8 +1707,7 @@ func (task *TaskRuntimeTask) SetBudget(input TaskRuntimeBudgetInput) Receipt {
 			Raise("not_found", "Unknown agent node")
 		}
 		SetBudget(runtime.store, kernelString(instance["id"]), input.Tokens)
-		changes := kernelChanges(runtime.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'",
-			CanonicalJSON(map[string]any{"type": "set_budget", "tokens": input.Tokens}), task.taskId, input.NodeId)
+		changes := runtime.store.ResolveNodeBudgetQuestions(task.taskId, input.NodeId, map[string]any{"type": "set_budget", "tokens": input.Tokens})
 		if changes > 0 {
 			CloseUserWait(runtime.store, task.taskId, input.NodeId)
 			stillOpen := kernelRow(runtime.store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'", task.taskId, input.NodeId)
@@ -4158,8 +4156,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 				Raise("not_found", "Unknown agent node")
 			}
 			SetBudget(runtime.store, kernelString(instance["id"]), input.Tokens)
-			kernelExec(runtime.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'",
-				CanonicalJSON(map[string]any{"type": "set_budget", "tokens": input.Tokens}), target, nodeId)
+			runtime.store.ResolveNodeBudgetQuestions(target, nodeId, map[string]any{"type": "set_budget", "tokens": input.Tokens})
 			event := map[string]any{"nodeId": nodeId, "tokens": input.Tokens, "actor": "agent"}
 			if warning != nil {
 				event["warning"] = *warning
@@ -4787,8 +4784,7 @@ func (supervisor *TaskRuntimeSupervisor) ReviewHumanCheck(input TaskRuntimeRevie
 				"rejected": true,
 			},
 		})
-		kernelExec(runtime.store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?",
-			CanonicalJSON(map[string]any{"type": "reject", "reason": input.Note}), input.QuestionId)
+		runtime.store.ResolveQuestion(input.QuestionId, map[string]any{"type": "reject", "reason": input.Note})
 		return map[string]any{"questionId": input.QuestionId, "approved": false, "sentBack": true}
 	})
 	record, _ := jsonRecord(result)

@@ -332,7 +332,7 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 				continue
 			}
 			var commit any = currentCommit
-			kernelExec(runtime.kernel.DB, "UPDATE questions SET status='resolved',answer=? WHERE id=? AND status='open'", CanonicalJSON(map[string]any{"type": "superseded", "reason": "Integration commit changed", "commitSha": commit}), question["id"])
+			runtime.kernel.Store.ResolveOpenQuestion(kernelString(question["id"]), map[string]any{"type": "superseded", "reason": "Integration commit changed", "commitSha": commit})
 			var previousCommitValue any = previousCommit
 			runtime.kernel.Store.Event(runtime.graphId, "graph.acceptance.superseded", map[string]any{"questionId": kernelString(question["id"]), "acceptanceId": acceptanceId, "previousCommit": previousCommitValue, "commit": commit})
 		}
