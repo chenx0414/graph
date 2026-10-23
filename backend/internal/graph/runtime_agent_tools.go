@@ -56,6 +56,8 @@ type AgentToolsGraphManagement struct {
 	HarnessExperience func(input map[string]any) any
 	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
+	// HarnessEvidence reads the evidence of the caller's own run.
+	HarnessEvidence func(input HarnessEvidenceInput) HarnessEvidenceResult
 }
 
 // AgentToolsSystemChange is one proposed change of the Graph host itself.
@@ -895,6 +897,21 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 				return agentToolsText(stringifyJSON(HarnessExperienceResult{}))
 			}
 			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessExperience(map[string]any{"domain": domain})))
+		},
+		"read_harness_evidence": func(id string, params map[string]any) any {
+			if input.GraphManagement.HarnessEvidence == nil {
+				panic(errors.New("Reading harness evidence is unavailable in this session"))
+			}
+			limit := 0
+			if value, ok := agentToolsNumber(params["limit"]); ok {
+				limit = int(value)
+			}
+			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessEvidence(HarnessEvidenceInput{
+				GraphId: agentToolsStringOrEmpty(params["graphId"]),
+				NodeId:  agentToolsStringOrEmpty(params["nodeId"]),
+				Kind:    agentToolsStringOrEmpty(params["kind"]),
+				Limit:   limit,
+			})))
 		},
 		"probe_harness": func(id string, params map[string]any) any {
 			if input.GraphManagement.HarnessProbe == nil {

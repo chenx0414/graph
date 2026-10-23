@@ -138,11 +138,17 @@ Harness² 的跑分框架不需要移植，它的**方法**可以拆成三个 Gr
   把它变成"改完 harness 之后自动重跑冻结用例"的门禁，
   就能把"代码级 RSI 的确定性门禁"扩展到"harness 级改动的行为门禁"。
 
-## 一个必须一起修的缺口
+## 已补的缺口：Agent 读自己的证据
 
 RSI 身份文本要求 Agent"观察自己的轨迹、工具错误、被挡住的 operation 与检查结果"
 （`backend/internal/graph/runtime_agent_context.go` 的 `DEFAULT_MAIN_RSI_IDENTITY`），
-但**没有任何工具让 Agent 读到这些**：`events` 表、`node_entries` 与 Pi transcript 都已落盘，
-却没有面向 Agent 的读接口。本次对比工具读的是同一批事实（宿主侧读，Agent 只看结论），
-所以"Agent 自己能看轨迹"仍然待补。它是 Harness²"证据即文件"原则在 Graph 的直接对应物，
-也是 P2 之前必须先补的一块。
+但此前**没有任何工具让 Agent 读到这些**：`events` 表、`node_entries` 与 Pi transcript
+都已落盘，却没有面向 Agent 的读接口。
+
+现在 `read_harness_evidence` 把这些事实读成一份摘要：每个节点走了多少步、哪些工具调用
+失败了（以及能拿到的原因）、最后答复是什么；被挡住或失败的节点及原因；当前挂着的内部问题；
+最近一次应用改动的检查结果；这次运行的请求数与 token。它只给事实，不给判决。
+
+两条记录形状都读：图里的节点写 `node_entries`（带工具名、结果与失败原因），
+会话里的主 Agent 不写 transcript，它的工具调用在 `message.tool` 事件里（带工具名与错误标记）。
+这是 Harness²"证据即文件"原则在 Graph 的直接对应物。
