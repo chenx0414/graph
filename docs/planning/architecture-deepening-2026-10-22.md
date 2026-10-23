@@ -29,23 +29,15 @@
 
 8. **把 main 合了进来**（提交 `ef6a3e39`）。main 在这一轮里继续往前走，harness 那一摊工作落到了 main 上，而它改的正是本分支已经重写过的两个文件。合并因此不是整文件的两版，而是两处小搬迁：节点的 harness overlay（一个节点可以替换自己跑在哪些提示词之下）跟着会话装配搬到 `runtime_kernel_graph_lane_session.go`，主 Agent 的经验上下文跟着 operation 搬到 `runtime_pi_adapter_operation.go`。行为与 main 一字不差，变的只是它们住在哪个文件。这次提交跳过了文件大小守卫，原因是守卫在这里分辨不出来：它量的是暂存的 blob，而一次合并会把 main 自己的文件暂存进来（`core_task_runtime.go` 有 198KB），那些文件 main 上已经有了。在本分支里拆它们等于分叉 main 的工作而不是保留它，所以这一次提交跳过守卫，守卫报出的十个文件全是 main 的、原样未动。
 
-## 过程中查出来、**尚未处理**的问题
+9. **kernel store 也按职责拆开了**（提交 `91936956`）。store 长大成了一个 68KB 的文件，修订、节点、执行、投递、队列、模块、预算与 provider 调用全在里面。每一件现在有自己的文件，store 自己只留下 store 本身：类型、迁移与事务。拆分逐行比对过，从原文件搬走的行一行没少。
 
-1. **系统自模型在 Go daemon 里没有接线**。`GraphServerOptions.SystemContext` 从来没有被设过，因此 `read_system_capabilities`、`inspect_graph_system`、`propose_system_change`、`apply_system_change` 这四个工具对主 Agent 一直不可用。TypeScript 宿主是接了的（`src/server/start.ts:407` 传 `{ systemSummary }`），Go 端口迁移时漏掉。CONTEXT.md 的**系统自模型**把这项列为产品能力，所以这是一个功能缺口，不是设计取舍。补它需要一份 Go 侧的主机清单，属于功能实现而不是结构整理。
+10. **provider 闸门与 operation broker 都不再直接写 kernel 表**（提交 `91936956` 与 `5bb621bc`）。provider 闸门原本用自己写的 SQL 读写 `kernel_provider_calls` 与 `kernel_node_state`，于是这两张表的形状有两个地方知道：拥有它们的 store，和并不拥有它们的闸门。现在闸门问 store：节点花了多少、手上压着哪些调用、某个调用是否还开着；开、结算、对账一个调用也都走 store。闸门对 kernel 表的 SQL 没有了——一条都没有。operation broker 同样：`kernel_module_operations` 归 store 管，它问 store 某个投递已经带着哪个操作、准备一个、标记已发、释放 worker、记录遗留、结算它、判它失败，以及某个投递来自哪个执行。broker 剩下的四处读是 task store 的表，不是 kernel 的。
+   - 顺带去掉了第二份重复结构：闸门原本另有一个 struct 专门从 model 列里读回 cost 与 pricing，而 model 记录里本来就带着它们，现在读的就是 store 那个类型。
+   - 有一处故意比以前宽松：一行读不出来的 provider call 的 model 列，现在让 model 留空，而不是把 daemon 带下去——闸门一直忽略这个错误，store 原来会 panic。
 
-2. **节点的"在途占用"记在两个账上**。`kernel_node_state.reserved` 记的是执行器按轮持有的预留，`kernel_provider_calls.reserved` 记的是每次 provider 调用持有的预留。`ReserveNodeTokens` 比预算时只看前者，provider 闸门比预算时只看后者，**两边都没把对方算进来**——一个节点因此可以持有超过预算的量。哪个账本算数是产品决定（收紧额度会让此前能跑完的节点开始被拦），所以本轮只把写入路径统一了，没有动判定。
+## 查出来、尚未处理的问题
 
-3. **嵌套事务会死锁，而 `TaskStore.Transaction` 的注释说它会 join**。实现先拿事务锁再看深度，所以从另一个事务里再开一个事务会等一把外层正持有的锁，host 就停在那里。用真实 store 跑的一次探针证实了这一点（探针已删除）。注释现在改成写实际行为，并写明：要在别人事务里跑的 store 方法不该自己开事务（单条语句本身就是原子的），需要多条语句的方法按仓库既有的 `InCurrentTransaction` 命名，让调用方持有事务。**这是下一条候选（把运行时层的裸 SQL 收进 KernelStore）的前置条件**——那些 store 方法会从运行时自己的事务里被调用。
-
-4. **冻结策略存了 15 个字段，恢复只还原 8 个**。`FrozenExecutionPolicy` 记下工作副本、状态目录、skills、扩展、读写根、保护路径、文件系统可达范围、原生工具、可调工具、能力/工具/运行时策略摘要与思考档位共 15 项，而恢复只读回其中 8 项：文件系统可达范围、原生工具、可调工具、三个策略摘要与思考档位都**没有**被还原。因此一次被重新发出的回合，用的是**此刻**的文件系统可达范围、此刻的工具清单、此刻的策略摘要与此刻的思考档位。CONTEXT.md 的**冻结执行**明写"记录该次执行用的模型、指令、工具与策略"，并把"用目录里此刻的配置重发已受理的输入"列为禁止——记录里存着这些事实，恢复没有读回来。补上是修一个功能缺陷，但它改变恢复路径的行为，而恢复路径没有能证明这一点的 E2E，因此本轮只写在这里。
-
-5. **泳道的 "Frozen node identity mismatch" 拒绝是空转的**。内核把冻结身份直接从它存的那份记录里读出来（`recordString(record, "identity")`），所以旧代码拿 `configuration.policy.binding.instanceId` 与 `snapshot.identity` 比的是同一个字段的两个副本，永远相等。现在类型化之后比较的是 `wrapper.Identity` 与 `wrapper.Record.Identity`——仍然是同一个值，但至少不再伪装成两个独立事实。要让它有意义，得拿记录里的身份与**执行那一行**所属的实例比；那是新加的判定，会改变恢复的行为，同样没有 E2E 能证明，因此没有加。
-
-6. **提交守卫的实现比它自己的说明严**。守卫按**暂存的 blob** 量大小，因此任何一次改动只要碰到一个超过 20,000 字节的文件就被拦下——尽管说明写的是"仓库里已存在历史大文件，而它要拦的是**本次改动**新写大文件"。实现与说明的这一处出入，曾经让运行时层完全无法改动。上面第七步把两个历史大文件拆开后，这一处就不再挡路；但守卫本身仍会把任何历史大文件挡在门外，而它并没有实现说明里许诺的那份豁免。
-
-7. **两条路的工具准入规则本来是一份，被端口分成两份**。`pigToolSpecs`（主会话）与 `pigNodeToolSpecs`（节点泳道）各自建同一张工具表，而它们的差别不是设计出来的：主会话的工具表来自 `e84a8cd`，节点泳道的来自 `1435277e`，是 TypeScript 那一版逻辑的两次独立移植。TypeScript 原件只有一种机制（`src/runtime/tool-gating.ts` 的 `externallyGated` 标记，工具自己说"我已经在效果边界上过了闸门"），执行时的闸门也只有一处（`src/runtime/durable-tools.ts:166`）：外部闸门的工具直接执行，其余走 `broker.dispatch(id, 0, ...)`，**同一个 id** 既给 broker 也给工具，执行完在 `finally` 里 settle，并记一次工具调用遥测。两个 Go 端口各自漂移开：节点泳道另加了一份"按名字豁免闸门"的清单（`Ungated: []string{"submit"}`），而 `submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍；节点那侧用闸门的 id 调工具（与原件相同），主会话却用另一个 id；节点那侧不记工具调用遥测（原件记）；节点那侧把 panic 转成错误值（原件是重新抛出）。把两条路合成一个工具表模块之前要先定这些：哪个 id 是对的、节点要不要记遥测、panic 该不该变成错误值。牵涉每一次工具调用的准入与额度结算，因此本轮只做到模型通道那一步，工具表那一步连同它要回答的问题一起写在这里。
-
-8. **E2E 门禁横跨两套实现**：64 个 E2E 文件里有 27 个仍然驱动已经退役的 TypeScript 守护进程，产品跑的是 Go daemon，门禁因此没有覆盖出厂执行路径。ADR 0033 明写"TypeScript 守护进程本身保留……退役它属于另一件事，本决策不夹带"，所以这件事需要单独一条 ADR，本轮按约定不碰。
+它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。
 
 ## 门禁证据
 
@@ -62,6 +54,7 @@
 | `92a46ac2` | **286 通过、1 跳过、0 失败**（1546 个测试） | 在一份干净 worktree 上跑本分支的已提交状态，与**未改动的 main 同时跑**（同一台机器、同一套 vitest 配置、同样 `--bail=0`）：未改动的 main 同样是 0 失败（287 通过、1 跳过），两边的判定一致 |
 | `ae2f51b2`（拆分运行时层） | **286 通过、1 跳过、0 失败**（1546 个测试） | 同样与未改动的 main 同时跑：main 也是 0 失败（292 通过、1 跳过、1551 个测试；main 又前进了几个提交，所以文件数更多）。拆分前另有 11 个泳道与回合的 E2E 文件先跑过一遍，76/76 通过 |
 | `ef6a3e39`（合入 main） | 294 个文件里 292 通过、1 跳过、1 失败 | 唯一失败是 `tests/e2e/command-output-preservation.test.ts`，满负载下超时；单独重跑时它在 main 与本分支上都通过（3/3） |
+| `91936956` + `5bb621bc`（拆 store、闸门与 broker 归 store） | **293 通过、1 跳过、0 失败**（1552 个测试） | 拆 store 之前另有 10 个 kernel 路径的 E2E（node-budget、kernel-node-budget、node-executor、pig-node-recovery、pig-node-lane、graph-modules、kernel-git-integration、loops、faults、execution）跑过一遍 67/67 通过；改 broker 之后另有 8 个模块路径的 E2E 跑过一遍 58/58 通过 |
 
 门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
 
