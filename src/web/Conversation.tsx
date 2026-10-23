@@ -559,7 +559,6 @@ export function ConversationPanel({ id, settings, onChanged, drawerOpen = defaul
       current: drawerSection,
       selectedTaskId,
       taskIds: view.tasks.map(task => task.id),
-      hasProposal: draftCards,
     });
     // A live draft always surfaces, so an overturned draft replaces the old one on
     // screen. Archived-only content must not hijack the task section (the entry

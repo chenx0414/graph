@@ -28,8 +28,6 @@ export interface DrawerSectionInput {
   selectedTaskId: string | null;
   /** Every task id that currently exists, in display order. */
   taskIds: readonly string[];
-  /** Whether the conversation already has a proposal / draft. */
-  hasProposal: boolean;
 }
 
 export interface DrawerSectionResolution {
@@ -38,19 +36,15 @@ export interface DrawerSectionResolution {
 }
 
 /**
- * Sticky drawer-section resolution. The user's choice wins: once the task
- * navigation is open it stays open even while a proposal exists or the task
- * list is still loading. It only falls back to the draft page when the chosen
- * task has disappeared, or when there is nothing to select and no proposal to
- * show. A proposal must never force the task section back to the draft page —
- * that was the bug that made the task navigation unclickable.
+ * Sticky drawer-section resolution. The user's choice always wins: the draft
+ * page is never yanked away, and the task navigation stays reachable even while
+ * it is still empty — the "no tasks yet" note lives there, so falling back to
+ * the draft page would make that note unreachable. The task section only
+ * reconciles its selected task: it keeps it while the task still exists, and
+ * otherwise adopts the first one, or none.
  */
 export function resolveDrawerSection(input: DrawerSectionInput): DrawerSectionResolution {
   const { current, selectedTaskId, taskIds } = input;
-  // The user's own choice always wins. Both sections are legitimate: the draft page is never
-  // yanked away, and the task navigation stays reachable even while it is still empty — the
-  // "no tasks yet" note lives there, so sending the user back to the draft page would make that
-  // note unreachable. `hasProposal` deliberately no longer overrides either choice.
   if (current === 'draft') return { section: 'draft', taskId: selectedTaskId };
   // Task navigation: keep the chosen task while it still exists, otherwise adopt the first one;
   // with no tasks at all the section stays put and renders its empty note.

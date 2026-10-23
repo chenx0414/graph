@@ -134,54 +134,52 @@ describe('drawer panel policy', () => {
 });
 
 describe('drawer section resolution (the task navigation must stay open)', () => {
-  test('clicking the task navigation stays on task even when a proposal exists', () => {
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 't1', taskIds: ['t1', 't2'], hasProposal: true }))
+  test('clicking the task navigation stays on task with the selected task', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 't1', taskIds: ['t1', 't2'] }))
       .toEqual({ section: 'task', taskId: 't1' });
   });
 
-  test('a proposal never forces the still-loading task list back to the draft page', () => {
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: true }))
+  test('a still-loading task list never falls back to the draft page', () => {
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [] }))
       .toEqual({ section: 'task', taskId: null });
   });
 
   test('a disappeared selected task keeps the task navigation and adopts the next task', () => {
     // Never yank the user out of the section they picked: the empty note lives in the task
     // section, and a stale selection is replaced rather than used as a reason to go back.
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: [], hasProposal: true }))
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: [] }))
       .toEqual({ section: 'task', taskId: null });
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: ['t2'], hasProposal: false }))
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: 'gone', taskIds: ['t2'] }))
       .toEqual({ section: 'task', taskId: 't2' });
   });
 
   test('the task navigation stays reachable while it is still empty', () => {
     // The "no tasks yet" note is rendered inside the task section, so the policy must not send
-    // the user back to the draft page just because no task exists yet and no proposal is there.
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: false }))
+    // the user back to the draft page just because no task exists yet.
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [] }))
       .toEqual({ section: 'task', taskId: null });
-    for (const hasProposal of [true, false]) {
-      for (const taskIds of [[], ['t1']]) {
-        expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds, hasProposal }).section).toBe('task');
-        expect(resolveDrawerSection({ current: 'draft', selectedTaskId: 't1', taskIds, hasProposal }).section).toBe('draft');
-      }
+    for (const taskIds of [[], ['t1']]) {
+      expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds }).section).toBe('task');
+      expect(resolveDrawerSection({ current: 'draft', selectedTaskId: 't1', taskIds }).section).toBe('draft');
     }
   });
 
   test('with tasks but no selection, task is shown and the first task is selected', () => {
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: ['t1', 't2'], hasProposal: true }))
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: ['t1', 't2'] }))
       .toEqual({ section: 'task', taskId: 't1' });
   });
 
   test('opening the task navigation with no tasks keeps it open', () => {
     // The "no tasks yet" note is rendered inside the task section, so the section must stay put
-    // even with zero tasks and no proposal; only the component's initial state is the draft page.
-    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [], hasProposal: false }))
+    // even with zero tasks; only the component's initial state is the draft page.
+    expect(resolveDrawerSection({ current: 'task', selectedTaskId: null, taskIds: [] }))
       .toEqual({ section: 'task', taskId: null });
-    expect(resolveDrawerSection({ current: 'draft', selectedTaskId: null, taskIds: [], hasProposal: false }))
+    expect(resolveDrawerSection({ current: 'draft', selectedTaskId: null, taskIds: [] }))
       .toEqual({ section: 'draft', taskId: null });
   });
 
   test('the draft page stays put and is never yanked away', () => {
-    expect(resolveDrawerSection({ current: 'draft', selectedTaskId: 't1', taskIds: ['t1'], hasProposal: true }))
+    expect(resolveDrawerSection({ current: 'draft', selectedTaskId: 't1', taskIds: ['t1'] }))
       .toEqual({ section: 'draft', taskId: 't1' });
   });
 });
