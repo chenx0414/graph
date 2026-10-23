@@ -99,6 +99,8 @@ func jsonStringify(value any) string {
 	return string(raw)
 }
 
+// utf16Len counts UTF-16 code units, which is what TypeScript's string.length
+// counts. Limits carried over from the TypeScript contract are measured in it.
 func utf16Len(value string) int {
 	return len(utf16.Encode([]rune(value)))
 }

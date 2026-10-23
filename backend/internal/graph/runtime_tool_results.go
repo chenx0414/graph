@@ -174,8 +174,10 @@ func SummarizeToolResult(text, handle string, limit int) string {
 	if text == "" {
 		lineCount = 1
 	}
-	// TODO(port): TypeScript string.length is UTF-16 code units. This uses byte length.
-	header := "[large tool result: " + itoa(len(text)) + " chars, " + itoa(lineCount) + " lines]"
+	// The two "chars" numbers below are UTF-16 code units, never bytes:
+	// docs/agent/execution-model.md promises a non-ASCII result is longer on disk.
+	total := utf16Len(text)
+	header := "[large tool result: " + itoa(total) + " chars, " + itoa(lineCount) + " lines]"
 	trailer := "handle: " + handle + "\nRead the whole result with the read tool (offset/limit) on that path."
 	room := limit - len(header) - len(trailer) - 64
 	if room < 0 {
@@ -184,11 +186,11 @@ func SummarizeToolResult(text, handle string, limit int) string {
 	tailBudget := room / 3
 	head := toolBoundSide(text, room-tailBudget, false)
 	tail := toolBoundSide(text, tailBudget, true)
-	dropped := len(text) - len(head) - len(tail)
+	dropped := total - utf16Len(head) - utf16Len(tail)
 	if dropped < 0 {
 		dropped = 0
 	}
-	marker := "... omitted " + itoa(dropped) + " of " + itoa(len(text)) + " chars ..."
+	marker := "... omitted " + itoa(dropped) + " of " + itoa(total) + " chars ..."
 	summary := strings.Join([]string{header, head, marker, tail, trailer}, "\n")
 	if len(summary) > limit {
 		return summary[:limit]

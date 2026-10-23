@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"unicode/utf16"
 )
 
 const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
@@ -152,13 +151,8 @@ func artifactWorkspaceWithin(root, target string) bool {
 	return target == root || strings.HasPrefix(target, root+sep)
 }
 
-func artifactUTF16Len(value string) int {
-	return len(utf16.Encode([]rune(value)))
-}
-
 func artifactRequiredText(value, field string, max int) string {
-	// TODO(port): TypeScript string.length counts UTF-16 code units. This does too.
-	if strings.TrimSpace(value) == "" || artifactUTF16Len(value) > max {
+	if strings.TrimSpace(value) == "" || utf16Len(value) > max {
 		Raise("invalid_artifact", field+" must be a nonempty string of at most "+itoa(max)+" characters")
 	}
 	return strings.TrimSpace(value)

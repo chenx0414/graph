@@ -88,7 +88,6 @@ func AppendNodeEntry(store *TaskStore, input NodeEntryInput) int64 {
 	truncated := textBytes > 4096
 	text := input.Text
 	if truncated {
-		// TODO(port): TypeScript sliced UTF-16 code units; this slices runes.
 		text = truncateRunes(input.Text, 512)
 	}
 	store.Event(input.TaskID, "node.entry", nodeEntryEvent{
