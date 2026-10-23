@@ -54,7 +54,7 @@ node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tas
 | --- | ---: | ---: | ---: | ---: |
 | completion | $0.158202 | $0.421190 | $0.732424 | **$1.311816** |
 
-**只有 `completion` 这一行有价格**：压缩、prompt_suggestion、skill_sediment 那 716 次调用**没有冻结价格**，所以交叉表里没有它们——**它们的���是未知的，不是零**。
+**只有 `completion` 这一行有价格**：压缩、prompt_suggestion、skill_sediment 那 716 次调用**没有冻结价格**，所以交叉表里没有它们——**它们的花费是未知的，不是零**。
 
 **整棵树的情景**（每个 token 按有价格的调用用过的费率计价；$28.44 的拆分）：
 
