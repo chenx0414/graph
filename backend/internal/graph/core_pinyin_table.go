@@ -1,5 +1,7 @@
 package graph
 
+// graph:allow-large-file: the pinyin table, one row per character
+
 // Pinyin table from src/core/pinyin-table.ts. First reading wins.
 var pinyinTable = map[string]string{
 	"\u963f": "a",

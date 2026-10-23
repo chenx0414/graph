@@ -1,5 +1,7 @@
 package graph
 
+// graph:allow-large-file: the tool schema table, one declaration per tool
+
 import (
 	"errors"
 	"os"
