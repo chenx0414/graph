@@ -78,13 +78,13 @@ node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficie
 
 | 提交 | 撤掉的是什么 | 红灯证据 |
 | --- | --- | --- |
-| `0b4ac8ab` 助手回合回放 | reasoning 块回到请求里 | `provider-assistant-replay` 的 openai 那条红 |
-| `c25aa469` 缓存断点 | 系统提示、工具声明、对话三处断点 | `provider-assistant-replay` 的 anthropic 那条红 |
-| `8366b8f8` 压缩上限 | 环境变量命名的上限 | `compaction-context-ceiling` 的"设了上限就压缩"那条红 |
-| `5c32221a` 摘要输出预算 | 摘要请求用自己的额度 | `compaction-context-ceiling` 的"摘要拿到它需要的空间"那条红 |
-| `17aa68df` 任务说明包复用 | 会话记住已读过的说明 | `task-setup-reuse` 的"开启开关"那条红 |
-| `88cc7298` 来源 × 计费类型的交叉 | 每一笔花费按两个维度分开 | `harness-cost` 的 CLI 那条红 |
-| `9039e148` 工具结果落盘 | 大结果落盘成句柄 | `tool-result-spill` 的"模型拿到句柄"那条红 |
+| `4695486c` 助手回合回放 | reasoning 块回到请求里 | `provider-assistant-replay` 的 openai 那条红 |
+| `513ba448` 缓存断点 | 系统提示、工具声明、对话三处断点 | `provider-assistant-replay` 的 anthropic 那条红 |
+| `42bb086e` 压缩上限 | 环境变量命名的上限 | `compaction-context-ceiling` 的"设了上限就压缩"那条红 |
+| `6dd1bbb1` 摘要输出预算 | 摘要请求用自己的额度 | `compaction-context-ceiling` 的"摘要拿到它需要的空间"那条红 |
+| `45d39fd5` 任务说明包复用 | 会话记住已读过的说明 | `task-setup-reuse` 的"开启开关"那条红 |
+| `38179f0a` 来源 × 计费类型的交叉 | 每一笔花费按两个维度分开 | `harness-cost` 的 CLI 那条红 |
+| `3fa4119f` 工具结果落盘 | 大结果落盘成句柄 | `tool-result-spill` 的"模型拿到句柄"那条红 |
 
 **七处全部按预期变红；还原后五个 E2E 文件 19 项全绿**（跑完一遍之后 `git diff -- backend/` 为空，源码一个字节都没变）。
 
@@ -120,7 +120,7 @@ node scripts/harness-red-light.mjs --out docs/planning/experiments/token-efficie
 - 基线快照：`node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tasks.sqlite" > /tmp/graph-harness-baseline-2026-10-22.json`
 - 扩展后的基线（含前缀分布、用途、整树情景）：同命令，`/tmp/baseline-v2.json`
 
-**提交（改动）**：`0b4ac8ab`（助手回合回放）、`c25aa469`（缓存断点）、`8366b8f8`（压缩上限）、`707addea`（成本计量）、`5c32221a`（摘要输出预算）、`17aa68df`（任务说明包复用）、`9039e148`（工具结果落盘与句柄）、`1c9d374f`（压缩次数计数）、`c9a4390a`（接缝可测的开关）、`9db11b6c`（一次两个工具调用的覆盖）、`c42f92b5`（按模型的工具错误归属）
-**提交（记录）**：`2ac68651`（地图、基线、排序）、`152dbcac`（A/B 脚本）、`eb784f78`（长会话）、`4621c421` 与 `f1353967`（接缝幅度的更正）、`d45df0cb`（提案与已核对项）
+**提交（改动）**：`4695486c`（助手回合回放）、`513ba448`（缓存断点）、`42bb086e`（压缩上限）、`b8efa8eb`（成本计量）、`6dd1bbb1`（摘要输出预算）、`45d39fd5`（任务说明包复用）、`3fa4119f`（工具结果落盘与句柄）、`beffcd15`（压缩次数计数）、`e3b68f07`（接缝可测的开关）、`559fb490`（一次两个工具调用的覆盖）、`2d8c61c7`（按模型的工具错误归属）
+**提交（记录）**：`07c20cc4`（地图、基线、排序）、`634f8c12`（A/B 脚本）、`e7a71913`（长会话）、`f6bbe456` 与 `75f96e30`（接缝幅度的更正）、`74f43086`（提案与已核对项）
 **新 E2E**：`tests/e2e/provider-assistant-replay.test.ts`（助手回合回放，含一次两个工具调用）、`tests/e2e/compaction-context-ceiling.test.ts`（压缩上限）、`tests/e2e/task-setup-reuse.test.ts`（任务说明包复用）、`tests/e2e/tool-result-spill.test.ts`（工具结果落盘与句柄）
 **新夹具**：`tests/fixtures/anthropic-server.ts`
