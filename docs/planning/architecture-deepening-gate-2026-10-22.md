@@ -30,6 +30,12 @@
 
 **六次拆分全部是纯搬移**：每一次都用两种方式证明过——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。
 
+| 提交 | 门禁 | 结论 |
+| --- | --- | --- |
+| `e7971253` … `45f43f73`（二十三次拆分） | **293 通过、1 跳过、0 失败**（1552 个测试）；"Suite matches the baseline (files 294, tests 1556)"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑最终 head（`45f43f73`），543 秒；`check:backend`、`typecheck`、`lint`、`check:baseline`、`check:evidence` 同时全部通过。二十九次拆分合起来动了 285 个 Go 文件，因此这一次门禁跑的是整个拆分战役之后的状态 |
+
+**二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
+
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
 
 门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
