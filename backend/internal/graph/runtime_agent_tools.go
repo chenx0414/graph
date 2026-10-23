@@ -576,8 +576,33 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			return agentToolsText(stringifyJSON(receipt))
 		},
 		"validate_proposal": func(id string, params map[string]any) any {
-			proposal := agentToolsNativeProposal(params["proposal"])
-			return agentToolsText(stringifyJSON(input.Supervisor.ValidateProposal(proposal)))
+			// The master asks whether a proposal would be accepted. A refusal
+			// is the answer to that question, not a failed tool call: the
+			// model has to read which rule refused it and try again.
+			answer := any(nil)
+			refusal := func() (failure *RuntimeError) {
+				defer func() {
+					recovered := recover()
+					if recovered == nil {
+						return
+					}
+					if err, ok := recovered.(*RuntimeError); ok {
+						failure = err
+						return
+					}
+					panic(recovered)
+				}()
+				proposal := agentToolsNativeProposal(params["proposal"])
+				answer = input.Supervisor.ValidateProposal(proposal)
+				return nil
+			}()
+			if refusal != nil {
+				return agentToolsText(stringifyJSON(map[string]any{
+					"valid": false,
+					"error": map[string]any{"code": refusal.Code, "message": refusal.Message},
+				}))
+			}
+			return agentToolsText(stringifyJSON(answer))
 		},
 		"get_graph_state": func(id string, params map[string]any) any {
 			return agentToolsText(stringifyJSON(input.Supervisor.GraphState()))

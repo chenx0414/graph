@@ -451,8 +451,8 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
     | 契约 | 处置 |
     | --- | --- |
-    | production master 收到工具、提出一张图、后续用户消息能叫醒它 | 已有：`go-graph-confirmation.test.ts`（草稿→确认→图真的跑起来）+ `go-pause-resume.test.ts`（后续消息真的到达）。**但 master 自己的 `validate_proposal` / `propose_graph` 工具面（坏提案被指名拒、旧形状被拒）没有 Go E2E——仍在案** |
-    | master 收到紧凑规则、没有那段被删掉的工作流提示 | 部分已有：`go-agent-context.test.ts`（搜索规则只点名真有的工具、宿主不改写用户规则、文档指针可压缩）。**`<rules>` 段与 R14 那条具体文案没有 Go E2E——仍在案** |
+    | production master 收到工具、提出一张图、后续用户消息能叫醒它 | 已有：`go-graph-confirmation.test.ts`（草稿→确认→图真的跑起来）+ `go-pause-resume.test.ts`（后续消息真的到达）。master 自己的 `validate_proposal` / `propose_graph` 工具面（坏提案被指名拒、旧形状被拒）由批次 51 补上：`go-master-surface.test.ts` 第 2 条 |
+    | master 收到紧凑规则、没有那段被删掉的工作流提示 | 已有：`go-agent-context.test.ts`（搜索规则只点名真有的工具、宿主不改写用户规则、文档指针可压缩）+ 批次 51 的 `go-master-surface.test.ts` 第 1 条（`<rules>` 段、R14 那条文案、被删掉的工作流提示真的不在） |
     | 后续用户消息真的送到 master 的 provider | 已有：`go-pause-resume.test.ts` + `go-conversation-queue.test.ts` |
     | 一个 Pi 回合可以超过单次预留而不被挡住 | 已有：`go-harness-cost.test.ts`（账本里的请求数与 token 数对得上）+ `go-node-budget.test.ts`（预留与结算各记一次） |
     | **未知的用量挡住下一次 provider 调用** | 批次 50 补上：`go-unknown-usage.test.ts` 第 1 条 |
@@ -462,12 +462,17 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
     | 原生 reviewer 收到并发出版本化的独立评审 schema | 批次 49 补上：`go-node-lane.test.ts` 第 2 条 |
     | 原生 worker 只写自己隔离的工作副本 | 批次 49 补上：`go-node-lane.test.ts` 第 1 条 |
     | HTTP 生产 master 能先讨论再提出 | 已有：`go-graph-confirmation.test.ts` |
-    | （附带）`read_graph` 的分页与修订推进 | Go 侧有 `read_graph` 工具但**没有 Go E2E——仍在案** |
+    | （附带）`read_graph` 的分页与修订推进 | 批次 51 补上：`go-read-graph.test.ts`（命名对象整份读出、分页游标、修订推进） |
 
-    **仍在案 4 条**：master 的提案工具面、`<rules>` 段的具体文案、未知用量挡住下一次调用、原生对账各记一次。**下一批（批次 50）做这四条**——前两条与后两条各自成一条 Go E2E。
-    - **批次 50 做完了后两条**：见下面的批次 50 条目。**仍在案 2 条**：master 的提案工具面、`<rules>` 段的具体文案（下一批做）。
+    **原先在案 4 条**：master 的提案工具面、`<rules>` 段的具体文案、未知用量挡住下一次调用、原生对账各记一次。
+    - **批次 50 做完了后两条**：见下面的批次 50 条目。**批次 51 做完了前两条**：见下面的批次 51 条目。**`tests/m3/production.test.ts` 这 11 条至此全部有 Go keeper——仍在案 0 条。**
   - **节点泳道的两条契约已经有 Go keeper（批次 49）**：`tests/m3/production.test.ts` 里最要紧的两条——**worker 只写自己的工作副本**、**reviewer 发出版本化的独立评审报告**——此前在 Go 侧没有任何证明。新的 `tests/e2e/go-node-lane.test.ts`（2 条）用真实的 daemon、真实的图、真实的 worker 钉住它们：worker 写的文件在它自己的工作副本里（`state/worktrees/<任务>/work`）、**不在用户的项目里**；它被告知了 `test/specific.test.js` 这条检查与 `Specific command is successful` 这条验收，而**图的其余部分（无关的协议）没有进它的提示**；reviewer 的提示里真的有 `FINAL REVIEW REQUIREMENTS`、`graph.review@1` 与 `{commit,passed,reason}`，它发出来的报告让那条 review 验收真的变成 `passed`。**两次回退验证证明这些断言咬得住**：从节点提示里删掉 `GRAPH ACCEPTANCE` → 「检查与验收到达 worker」那条断言红；让评审证据查不到 → 「报告让验收通过」那条断言红。
     - **仍需留意**：Go 侧的 `ToolResultHook` / `RenderToolResult` 依旧是死代码——现在这份行为由侧车提供。**等 PiG 内核接管主会话时，这层必须接回 Go 自己**，否则紧凑视图与「整份在磁盘上」会随侧车一起消失。
+  - **master 的提案工具面、`<rules>` 段文案、`read_graph` 的分页与修订推进（批次 51）**：这三条约 49 点算出来的「仍在案」至此全部补上，**`tests/m3/production.test.ts` 的 11 条在 Go 侧全部有 keeper**。
+    - **又逼出 Go 侧一个真差异**：`validate_proposal` 在 TypeScript 那边把「不合法」当成**答案**（`{valid:false, error:{code, message}}`），在 Go 侧却是**工具失败**——模型读到的是一句报错，而不是「哪条规则拒了它、该怎么改」。工具说明自己写着 "Returns valid:true or valid:false with a concise error"，Go 说的却不是这件事。修法：Go 的 `validate_proposal` 把拒绝收成同构的答案（`runtime_agent_tools.go`）。
+    - 新的 Go E2E（`tests/e2e/go-master-surface.test.ts`，2 条）：master 真的收到 `<rules>` 段（共享规则在前）、真的收到 R14 那条文案、**被删掉的 `<workflow>` 提示与旧形状 `proposalJson` 真的不在**；然后 master 先问「这份提案会被接受吗」——**不合法的那份被指名拒**（`{valid:false, error:{code:'invalid_proposal'}}`）、合法的那份答 `{valid:true, requirementVersion:1}`、**旧形状被拒且说清它要什么**、**新形状真的落成草稿**（版本 1、摘要与定义都在、节点就是那一个），而**落草稿之前只有 master 自己**。
+    - 新的 Go E2E（`tests/e2e/go-read-graph.test.ts`，1 条）：一张**六十一个节点**的图上，节点真的**把点名的对象整份读出来**（概览里省掉的私有指导都在里面）、**真的分页**（`total: 61`、`nextAfter: 57`、七条按 id 排序的那一页）、**变更落在第一次执行进行当中**时——**那次执行读到的仍是它自己冻结的那一版**（`revision: 1`），**下一次执行才读到改过的那一版**（`revision: 2`）。
+    - **四次回退验证证明这些断言咬得住**（分别红在不同的断言上）：回退 `validate_proposal` 的修复 → 不合法的那份变成工具失败（断言红）；从提示里去掉 `<rules>` 段 → 「规则段」那条断言红；让 `read_graph` 读**最新**修订而不是**本次执行冻结的**修订 → 「revision: 1」那条断言红；让分页无视游标 → 「分页」那条断言红。
   - **未知的用量挡住下一次调用、原生对账各记一次（批次 50）**：这两条契约此前在 Go 侧**根本没有证明**，而且一上手就发现**Go 与 TypeScript 不 isomorphic**：Go 的受控流在拿不到用量时，把这次调用结算成一份**全零的记录**（`{input:0,output:0,usageSource:"unknown"}`），而 TypeScript 结算成**没有证据**（`null`）。全零记录等于宣称「这次调用免费」，于是 `kernel_provider_calls.state` 永远是 `settled`——**Go 侧的「未知用量闸门」与 `reconcile_usage` 入口此前一次都没被真正走到过**（`reconcile_usage` 在 Go 里只会被 "Only unknown usage can be reconciled" 拒掉）。修法：拿不到用量就结算成「没有证据」（`runtime_controlled_openai.go`），闸门与对账入口才第一次真的通上。
     - 新的 Go E2E（`tests/e2e/go-unknown-usage.test.ts`，1 条）用真实的 daemon、真实的图、真实的 provider 钉住它们：一个**声明了自己预算**的节点（预算有限，未知用量才必须挡住下一次发送），worker 答了两次话——**第一次说了价，第二次没说**：账上真的分得清，**有价的那次记成 `settled`（带着 provider 报的数字）、没价的那次记成 `unknown`（`usage` 为 null），各记一次**；**工具闸先拒绝**（"Node usage must be reconciled before tool dispatch"）、**下一次 provider 发送真的被拒绝**（`graph.provider.refused`，"Reconcile unknown provider usage before another send"），provider **只被问了两次**；节点真的停在 "turn reported no usage; its reservation is held until reconciled"。main 通过 `graph_control` 的 `reconcile_usage` 对账：**同值再来一次是同一答案**（`replayed: true`）、**不同值被拒**（"already reconciled differently"）、缺价的那次最后真的记成 `reconciled` 且带着对账后的用量，而**有价的那次原样不动**；**账上也只算了一次**——节点的 `used` 是 70（有价那次 50 + 对账那次 20），对账再记一遍就会变成 90。
     - **两次回退验证证明这些断言咬得住**（两次分别红在**不同的断言**上）：把「拿不到用量就结算成没有证据」这条修复回退 → 账上那次调用不再是 `unknown`（断言红）；把 provider 闸门里「有未知调用就不许再发」这条去掉 → provider 被问了第三次（断言红）。
