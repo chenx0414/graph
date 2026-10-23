@@ -4,19 +4,22 @@
 
 ## 10. 验证
 
-**完整门禁**：`node --run check` 在 `feature/harness-token-efficiency-2026-10-22` 上——**跑了三轮：两绿一红，红的那一轮红在 main 上。**
+**完整门禁**：`node --run check` 在 `feature/harness-token-efficiency-2026-10-22` 上——**跑了四轮：三绿一红，红的那一轮红在 main 上，而 main 随后自己修好了。**
 
 | 那轮 | 树 | 结果 | 耗时 |
 | --- | --- | --- | ---: |
 | 2026-10-23 16:25 | rebase 前 | **绿**：298 文件 / 1,565 项，1,561 过、4 跳过、0 失败 | 548 秒 |
-| 2026-10-23 16:45 | rebase 到 `main` 的 `3f4a1770` 之后 | **绿**：同上 | 610 秒 |
-| 2026-10-23 17:16 | rebase 到 `main` 的 `f1daaa8f` 之后 | **红**：`tests/e2e/harness-probe.test.ts` | 417 秒（`bail: 1`，只跑到第 712 项就停了） |
+| 2026-10-23 16:45 | rebase 到 main 的 `3f4a1770` 之后 | **绿**：同上 | 610 秒 |
+| 2026-10-23 17:16 | rebase 到 main 那个用 `--no-verify` 提交的改动之后（它后来被改写成 `f1daaa8f`） | **红**：`tests/e2e/harness-probe.test.ts` | 417 秒（`bail: 1`，只跑到第 712 项就停了） |
+| 2026-10-23 18:05 | rebase 到 main 的 `f1daaa8f` 之后 | **绿**：298 文件 / 1,565 项，1,561 过、4 跳过、0 失败，退出码 0 | 579 秒 |
+
+**最后一轮是交付这一版时的结果**：套件基线与 `files 298, tests 1565` 一致，验收证据未变。
 
 **红的那一轮红在 main 上**，三条证据：
 
 1. **在干净的 main 检出上，同一条测试同样红**：`expected 'alpha' to be 'A'`（`tests/e2e/harness-probe.test.ts:194`）。用 `git worktree add --detach <临时目录> main` 复现，跑完就删掉。
 2. **本分支没有碰过它**：`git diff main...HEAD -- backend/internal/graph/runtime_harness_experience.go tests/e2e/harness-probe.test.ts` 为空。
-3. **red 之前只有一个 main 提交**（`3f4a1770..f1daaa8f` 就是 `f1daaa8f` 一个），而它自己的提交信息写着 **"Committed with --no-verify"**——它改了 `runtime_harness_experience.go`（把候选的字母解析回候选本人的名字），更新了 `tests/e2e/harness-axes.test.ts` 与 `tests/e2e/harness-loop.test.ts`，**漏了 `tests/e2e/harness-probe.test.ts`**。**main 随后在 `f1daaa8f` 补上了这一条**（`expect(decision.chosen).toBe('alpha')`），本分支 rebase 过去之后门禁就绿了。
+3. **red 之前只有一个 main 提交**，而它自己的提交信息写着 **"Committed with --no-verify"**——它改了 `runtime_harness_experience.go`（把候选的字母解析回候选本人的名字），更新了 `tests/e2e/harness-axes.test.ts` 与 `tests/e2e/harness-loop.test.ts`，**漏了 `tests/e2e/harness-probe.test.ts`**。**main 随后把这个提交改写了**：现在的 `f1daaa8f` 里那条断言是 `expect(decision.chosen).toBe('alpha')`，本分支 rebase 过去之后门禁就绿了。
 
 **还有三条测试"单独跑"时红、"完整套件"里绿**——这是这台机器当前负载下的运行上下文问题，不是本分支，也不是 main 的代码问题：
 
