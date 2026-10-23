@@ -34,6 +34,9 @@
 | --- | --- | --- |
 | `e7971253` … `45f43f73`（二十三次拆分） | **293 通过、1 跳过、0 失败**（1552 个测试）；"Suite matches the baseline (files 294, tests 1556)"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑最终 head（`45f43f73`），543 秒；`check:backend`、`typecheck`、`lint`、`check:baseline`、`check:evidence` 同时全部通过。二十九次拆分合起来动了 285 个 Go 文件，因此这一次门禁跑的是整个拆分战役之后的状态 |
 | `98d18e59`（拆工具表） | 294 个文件里 293 通过、1 跳过、**1 失败** | 唯一失败是 `tests/e2e/pig-kernel-update.test.ts`（"the backend pins a published PiG kernel…"），**满负载下的网络超时**：该测试驱动 `scripts/pig-kernel-update.mjs` 走**真实的模块代理**与真实的 Go 工具链（它自己的注释写着"nothing here fakes a release, a download or a compiler result"），全程不启动 daemon；它在完整套里花了 14,370 毫秒，**单独重跑只花 1,683 毫秒并通过**。拆工具表只改了 Go 文件的布局，与这个测试无关 |
+| `98d18e59`（拆工具表，重跑） | 294 个文件里 293 通过、1 跳过、**1 失败** | 唯一失败换成了另一个：`tests/e2e/go-wake-notification.test.ts`（"a confirmed graph wakes main with the graph id"，31,682 毫秒，超时），**单独重跑只花 3,228 毫秒并通过**。两次运行各有一个不同的超时，两次单独重跑都通过 |
+| `426bd2cb`（两条工具表合成同一套规则） | **294 通过、1 跳过、0 失败**（1553 个测试）；"Suite baseline increased to files 295, tests 1557"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑最终 head，632 秒。新增的 `tests/e2e/pig-node-tool-telemetry.test.ts` 就在这一套里——**它在父提交上失败**（节点那次 read 根本不出现在统计表里），在这个提交上通过 |
+| 未改动的 main（同一台机器、同样负载） | **293 通过、1 跳过、0 失败**（1552 个测试） | 与本分支的两次运行同时跑，main 一次都没失败；本分支那两次失败都是满负载下的超时，且两次单独重跑都通过 |
 
 **二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
 

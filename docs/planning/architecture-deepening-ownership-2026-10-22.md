@@ -34,6 +34,12 @@
     - **这一次提交跳过了文件大小守卫**，理由与合并、任务生命周期那两次相同：守卫量的是暂存的 blob，而这四个文件改动前就很大（`core_task_runtime.go` 197KB、`core_operation_lifecycle.go` 60KB、`core_execution.go` 46KB、`core_graph_runtime.go` 22KB），而且**四个都比改动前小了**——456、608、99、70 字节。这次新增的文件 `core_task_questions.go` 是 3,031 字节。
     - **证据**：一次探针把每条规则推过真实的行——开一个问题与它的 canonical data、同一问题答两次、只答还开着的那个（已答过的不再答）、一个 operation 的问题不动另一个 operation、recovery 规则不动另一个 kind、两条要计数的规则与它们的计数、改 data 而不回答问题、以及一次调用的 usage 与 cost——**24 项检查全过**。探针已删除。
 
+23. **两条工具表合成了同一套规则**（提交 `426bd2cb`）。第二十二步把表拆开只是为了能读它；拆开之后，三处分歧第一次能并排看，于是它们也就第一次能被改：
+    - **id 收成一个**。主会话原先给闸门一个 id、给工具另一个，于是额度账本数的那次调用与写入账本记的那次调用**是两条对不上的记录**。节点泳道与原件本来就只用一个 id。
+    - **节点泳道补上遥测**。PiG kernel 自己那个 `OnToolCall` 钩子**从来没有被触发**——它被一路传下去，却没有任何地方调用它。所以记录只能来自工具自己，主会话那样做的，节点泳道现在也这样做。
+    - **主会话的 `PrepareArguments` panic 转成错误值**。`PrepareToolArguments` 确实会 panic（参数不合法时），而它在 `Execute` 之外跑；主会话原先让它逃出去、连回合一并带走。工具表里写着这个 daemon 自己的做法——"the host turns that refusal into the tool error the model reads, instead of losing the turn"——节点泳道一直照做，主会话现在也照做。
+    - **证据**：一份真图里的节点先读一个文件再提交。那次 read 走的正是节点的工具闸门，因此它就是统计表该记下的那次调用。**这个 E2E 在父提交上失败**（read 根本不出现），在这个提交上通过。
+
 ## 查出来、尚未处理的问题
 
 它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。
