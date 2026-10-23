@@ -217,7 +217,15 @@ const CHECKS = [
  * A rebase rewrites every hash, so the subject is the stable name and the
  * hash is looked up when the script runs.
  */
-function commitFor(subject) {
+/**
+ * The commit that carries a change, by its subject.
+ *
+ * A rebase rewrites every hash, so the subject is the stable name and the
+ * hash is not: a transcript that quoted hashes went stale the moment the
+ * branch was rebased. The transcript therefore names each change by its
+ * title, and this function only has to prove the title is on the branch.
+ */
+function requireCommit(subject) {
   const base = run('git', ['merge-base', 'main', 'HEAD']).stdout.trim();
   const found = run('git', ['log', '--format=%H%x00%s', `${base}..HEAD`])
     .stdout.split('\n')
@@ -290,6 +298,9 @@ say('');
 say(`分支：${run('git', ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim()}`);
 say(`时间：${new Date().toISOString()}`);
 say('');
+say('提交按**标题**识别：rebase 会改写哈希，标题不会，所以这份实录不会因为 rebase 过期。');
+say('要看某个提交当前的哈希：`git log --format="%h %s" --grep="<标题>"`');
+say('');
 say('| 改动 | 撤掉的是什么 | E2E | 结果 |');
 say('| --- | --- | --- | --- |');
 
@@ -316,10 +327,11 @@ for (const check of CHECKS) {
     const detail = red
       ? `**红**（${run1.failed.length} 项失败：${run1.failed.slice(0, 2).join('；')}${run1.failed.length > 2 ? ' …' : ''}）`
       : `**没红**（退出码 ${run1.code}，失败 ${run1.failed.length} 项）`;
-    say(`| \`${commitFor(check.subject)}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | ${detail} |`);
+    requireCommit(check.subject);
+    say(`| \`${check.subject}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | ${detail} |`);
   } catch (error) {
     failures += 1;
-    say(`| \`${commitFor(check.subject)}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | **出错**：${error?.message ?? error} |`);
+    say(`| \`${check.subject}\` ${check.name} | ${check.proves} | \`${check.e2e}\` | **出错**：${error?.message ?? error} |`);
   } finally {
     for (const file of touched) run('git', ['checkout', '--', file]);
     if (check.edits?.some(edit => edit.file.endsWith('.go'))) buildBackend();
