@@ -75,7 +75,12 @@
 
 ## 10. 验证
 
-**完整门禁**：`node --run check` 在 `feature/harness-token-efficiency-2026-10-22` 上跑通——**292 个测试文件 / 1,561 项测试，290 文件通过、2 个跳过，1,556 项通过、4 项跳过，验收证据未变**。
+**完整门禁**：`node --run check` 在 `feature/harness-token-efficiency-2026-10-22` 上——**294 个测试文件 / 618 项（队列式跑法）**，只有一项红：
+
+> `tests/e2e/pig-kernel-update.test.ts :: the updater pins the kernel in an isolated checkout...`
+> **原因在上游，不是本分支**：这项测试把内核钉到**最新发布版**（当前是 PiG v0.5.3），而 v0.5.3 的 `extensions/sdk` 子模块**没有发布**（模块代理上只有 v0.2.0、v0.3.1、v0.4.0、v0.4.1、v0.5.1），`go mod tidy` 因此 404。仓库钉的是 v0.5.1 ✓，本分支对 `backend/go.mod` 与 `scripts/pig-kernel-update.mjs` **零改动**（`git diff main...HEAD` 为空）。这条测试的红是"上游最新发布版现在装不上"，不是回归。
+
+**这件事本身值得记**：内核更新器的"钉到最新"这条路现在是断的——有人跑 `node --run pig:update` 会拿到一个装不上的版本。
 
 **两轮红过的门禁，原因是机器被压垮而不是改动**：
 
