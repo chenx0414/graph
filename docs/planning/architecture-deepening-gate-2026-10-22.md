@@ -33,6 +33,7 @@
 | 提交 | 门禁 | 结论 |
 | --- | --- | --- |
 | `e7971253` … `45f43f73`（二十三次拆分） | **293 通过、1 跳过、0 失败**（1552 个测试）；"Suite matches the baseline (files 294, tests 1556)"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑最终 head（`45f43f73`），543 秒；`check:backend`、`typecheck`、`lint`、`check:baseline`、`check:evidence` 同时全部通过。二十九次拆分合起来动了 285 个 Go 文件，因此这一次门禁跑的是整个拆分战役之后的状态 |
+| `98d18e59`（拆工具表） | 294 个文件里 293 通过、1 跳过、**1 失败** | 唯一失败是 `tests/e2e/pig-kernel-update.test.ts`（"the backend pins a published PiG kernel…"），**满负载下的网络超时**：该测试驱动 `scripts/pig-kernel-update.mjs` 走**真实的模块代理**与真实的 Go 工具链（它自己的注释写着"nothing here fakes a release, a download or a compiler result"），全程不启动 daemon；它在完整套里花了 14,370 毫秒，**单独重跑只花 1,683 毫秒并通过**。拆工具表只改了 Go 文件的布局，与这个测试无关 |
 
 **二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
 
