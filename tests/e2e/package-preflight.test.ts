@@ -23,10 +23,8 @@ test.skipIf(process.platform !== 'darwin').each([
     await run('hdiutil', ['attach', '-nobrowse', '-noautoopen', '-mountpoint', volume, image], { timeout: 30_000 });
     mounted = true;
     await mkdir(join(volume, 'scripts'));
-    await mkdir(join(volume, 'src/runtime'), { recursive: true });
     await mkdir(join(volume, 'dist/web'), { recursive: true });
     await copyFile(join(process.cwd(), 'scripts/package-app.mjs'), join(volume, 'scripts/package-app.mjs'));
-    await copyFile(join(process.cwd(), 'src/runtime/disk-space.ts'), join(volume, 'src/runtime/disk-space.ts'));
     await copyFile(join(process.cwd(), 'package.json'), join(volume, 'package.json'));
     await writeFile(join(volume, 'dist/web/index.html'), '<!doctype html><title>Packaging input</title>');
     // Missing shipped resources are an external input failure. Reaching that

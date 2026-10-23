@@ -199,12 +199,18 @@ export async function createDurableSessionTransport(store: TaskStore): Promise<A
           if (closed || !acceptingInput) throw new RuntimeError('no_active_operation', 'The main turn is no longer accepting interruption'); interrupted = true;
           const next = text ? Promise.withResolvers<Submission>() : undefined;
           continuation = next?.promise;
+          // The abort is a request, not a wait: a provider that never answers
+          // would otherwise hold the control surface hostage, because the
+          // turn only winds down once the transport gives up. The caller
+          // learns the outcome from the turn's own result.
+          const aborting = conversation.abort(BACKGROUND_CONTEXT);
+          if (!next) { void aborting.catch(() => {}); return; }
           try {
-            await conversation.abort(BACKGROUND_CONTEXT);
-            if (next) next.resolve(await conversation.submit({ type: 'input', content: text!, requestId: `${restoring?.originalInputRequestId ?? request.inputRequestId ?? request.executionId}:continuation:${randomUUID()}` }, BACKGROUND_CONTEXT));
+            await aborting;
+            next.resolve(await conversation.submit({ type: 'input', content: text!, requestId: `${restoring?.originalInputRequestId ?? request.inputRequestId ?? request.executionId}:continuation:${randomUUID()}` }, BACKGROUND_CONTEXT));
           } catch (error) { next?.reject(error); throw error; }
         },
-        async stop() { if (closed) return; bridge.stop(); if (!bridge.runningTools) await conversation.abort(BACKGROUND_CONTEXT); },
+        async stop() { if (closed) return; bridge.stop(); if (!bridge.runningTools) void conversation.abort(BACKGROUND_CONTEXT).catch(() => {}); },
         async close() { closed = true; await bridge.close(); },
       };
   };

@@ -2,6 +2,8 @@
 
 依赖项目现有 Node、Playwright、Chromium，不需要 Python 或新增 npm 包。
 
+> **2026-10-23：测量脚本 `measure.ts` 随 TypeScript 后端退休。** 它原来用 `openGraphServer()` 在本进程里开一整套 TypeScript 运行时，再从内部 API 建会话与图；TypeScript 后端删掉之后，这条内部 API 没有了，而 daemon 的公开面没有「程序化建图」的口子（建图是主 Agent 的 `propose_graph` 工具），所以脚本无法照搬。**基线比较（前后两个 web 构建的 A/B）与 `check.ts` 的像素门限都还在，上面的命令要等测量脚本按 Go daemon 重写之后才能再跑**。这一步记在退役计划里。
+
 ```sh
 node --run build:web
 # 参数必须是分别保留的前后构建；不是在两个不同时间各测一次。

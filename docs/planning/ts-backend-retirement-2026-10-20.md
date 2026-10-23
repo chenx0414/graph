@@ -29,18 +29,18 @@
 
 ## 模块清点
 
-`src/server`、`src/core`、`src/runtime`、`src/catalog`、`src/git` 合计 180 个文件，按可达入口分类：
+`src/server`、`src/core`、`src/runtime`、`src/catalog`、`src/git` 合计 **179 个 TypeScript 模块**（另有 `src/catalog/models-dev.snapshot.json` 一个数据文件，Go 侧运行时直接读它，保留），按可达入口分类：
 
 | 类别 | 数量 | 处置 |
 | --- | --- | --- |
 | Go 运行时闭包 | 56 | 保留，PiG 迁移完成后随侧车一起退役 |
-| 仅前端可达（`src/web` 打包依赖） | 20 | 保留，属于浏览器侧契约 |
-| 仅脚本/示例/桌面可达 | 100 | 本次删除目标（先迁移或退休这些工具） |
-| 仅测试可达 | 4 | `src/server/cli.ts`（`pnpm start` 启动器）与 `src/server/go-launch.ts`（Go E2E 夹具 `tests/helpers/cli-daemon.ts` 依赖它）保留；`src/runtime/prompt-options.ts`、`src/runtime/tool-call-target.ts` 随其测试一起处理 |
+| 仅前端可达（`src/web` 打包依赖） | 19 | 保留，属于浏览器侧契约 |
+| 启动器 | 2 | `src/server/cli.ts`（`pnpm start` 启动器）与 `src/server/go-launch.ts`（Go E2E 夹具 `tests/helpers/cli-daemon.ts` 依赖它）保留 |
+| 本次删除 | 102 | `src/server` 16、`src/core` 43、`src/runtime` 35、`src/catalog` 6、`src/git` 2 |
 
-因此本次实际可删的 TypeScript 后端实现是 **100 + 2 = 102 个模块**，全部集中在「仅脚本/示例/桌面可达」这一类。
+因此本次实际可删的 TypeScript 后端实现是 **102 个模块**。批次 54 已经把它们删掉，删完之后 `src/` 下只剩：两个启动器、Go 运行时闭包（56 个）、仅前端可达的 19 个文件，以及 `src/web`。
 
-「仅脚本/示例/桌面可达」的 100 个文件就是 TypeScript 后端实现本体（`src/server/app.ts`、`src/server/start.ts`、`src/core/task-runtime.ts`、`src/core/kernel-store.ts`、`src/runtime/pi-adapter.ts` 等）。它们的最后消费者是 `scripts/` 与 `examples/` 下的工具：
+「仅脚本/示例/桌面可达」的那 102 个文件就是 TypeScript 后端实现本体（`src/server/app.ts`、`src/server/start.ts`、`src/core/task-runtime.ts`、`src/core/kernel-store.ts`、`src/runtime/pi-adapter.ts` 等）。它们的最后消费者是 `scripts/` 与 `examples/` 下的工具：
 
 - `scripts/branch-edge-e2e.mjs`、`scripts/harness-real-eval.mjs`、`scripts/harness-worker-eval.mjs`、`scripts/mcp-adapter-e2e.ts`、`scripts/console-ui-e2e.ts`、`scripts/interface-e2e.ts`、`scripts/create-review-module.ts`（`scripts/state-reclaim.ts` **已退休**：能力搬进 `graphd reclaim`）
 - `examples/m1-demo.ts`、`examples/m7-acceptance.ts`、`examples/m7-contract.ts`、`examples/assemble-matt-team.ts`
@@ -420,7 +420,7 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - **Batch 44 起**：`m8/app-shell-ux` 剩下的 20 条（造状态改走公开面）、`e2e/project-branches` 第二条（浏览器轨）、`m3/production`（**实现耦合**，随 TS 实现退休，但其中的独立契约要逐条点算）、以及 `command-output-preservation` 第二条（原生 shell 大输出落盘，需要先把 Go 的工具结果钩子接上线）。
 - **已知差异（有意保留，排在 Batch 35 处理）**：**两条传输的 `max_tokens` 字段名还没与 Pi 对齐**。Pi 对标准 OpenAI 用的是 `max_completion_tokens`（`max_tokens` 只留给 deepseek / together / moonshot / zai 这些厂商），Go 侧**一律发 `max_tokens`**；另外 Pi 还会按**上下文窗口**把上限压下来（`clampMaxTokensToContext`），Go 侧没有这一步。这两处都**没有对应的 TypeScript E2E 契约**（`tests/console/anthropic-transport.test.ts` 只断言 `max_tokens` 与 `stream`），所以不是「删测试带出来的契约」；改字段名对真实 provider 的影响不小（不少 OpenAI 兼容服务只认 `max_tokens`），所以单独立一批处理，而不是顺手改掉。
 - **Batch 12 起**：按覆盖矩阵与孤儿契约清单逐条移植。孤儿清单里 101 条 `yes` 每条一条 Go E2E，按主题分簇（预算与用量 / 暂停 / 评审与验收 / 取数 / 内核存储 / 图生命周期 / 会话面 / 沉淀 / 自改进），每簇一个文件。
-- **Batch 44（进行中）**：`scripts/`、`examples/`、`perf/` 里 15 个 TS 工具消费者。删除集合已经算清：**102 个模块**（179 个后端文件 − 56 个运行时闭包 − 20 个仅前端可达 − 2 个启动器），另有 **211 个测试文件只依赖这些模块**（**没有一个是混合的**——它们要么整份依赖待删模块，要么整份不依赖），所以删除是「实现 + 其耦合测试」一起走的。**外部消费者只有 15 个文件**，逐个处置如下：
+- **Batch 44**：把「删哪些」算清楚，并逐个处置 `scripts/`、`examples/`、`perf/` 里的 TS 工具消费者。删除集合：**102 个模块**（179 个后端模块 − 56 个 Go 运行时闭包 − 19 个仅前端可达 − 2 个启动器）。**随实现退休的测试文件是 212 个**（207 个直接依赖待删模块，5 个依赖被一并删掉的夹具）。**这里更正 Batch 44 当时的一句话**：当时的结论是「没有一个是混合的」——**不成立**。实际有大批测试**同时**依赖待删模块与保留模块（例如同时用 `src/core/task-runtime.ts` 与 `src/core/store.ts`），它们之所以跟着走，不是因为依赖纯粹，而是因为**它们证明的就是被删掉的那套实现**（直开 `openTaskRuntime` / `TaskStore`、断言私有字段、手写私有表记录）。**外部消费者只有 15 个文件**，逐个处置如下：
   - **已迁移（本批，两处）**：`scripts/interface-e2e.ts`（它本来就通过 `src/server/cli.ts` 启动器驱动 **Go daemon**；改成直接读 daemon 发布的 `console.json`，跑通：onboarding、不误发消息、项目落盘、弹窗键盘可达、4 种宽度、5 条路由全过）与 `scripts/package-app.mjs`（四个纯函数内联，**逐个与原 TS 模块比对过**：`formatBytes` 8 个边界值、`MIN_FREE_BYTES`、告警文案（含自定义阈值）、`freeBytesAt` 全等）。
   - **下一批逐个处置**（每条都有明确归属，不是「以后再说」）：
 
@@ -487,7 +487,15 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
     - **与旧 DEV-018 的关系**：`docs/archive/go-port-2026-10-20/DEVIATIONS.md` 的 DEV-018 记的是「provider 不报用量的那一轮被估算计价，而不是当作未知用量」。本批修的是**另一处**：Go 把「没有证据」写成了**一份全零的记录**，于是账上永远看不出「未定价」。估算那条路（`EstimateMissing`）本批没动，**仍然只在 TypeScript 同样估算的地方估算**（节点预算不限额时）。归档文档按约定保留原文，不改；这里记下这一层关系。**留一处更窄的差异**：Go 的估算读的是**已经被读完的响应体**，所以输出 token 估成 0（TypeScript 读的是响应体的克隆）——只影响不限额节点的金额精度，不影响契约。
   - **第三个入口已经补上（批次 47）**：**`graphd assemble-team`**。团队装配（`AssembleMattTeam`）本来就在 Go 后端里，但**一个调用方都没有**——`examples/assemble-matt-team.ts` 是它唯一的入口。现在命令是 Go 后端自己的：`graphd assemble-team --url <console> --config <task.json> --out <new-team.json>` 打开本地控制台的会话、读它真实的能力库、把每个角色**发布**成一条配方，再把团队写成一份普通的 v2 图定义。**`examples/assemble-matt-team.ts` 随之退休**，`src/catalog/matt-team.ts` 少了一个消费者；仍需要装配器的 TS 测试（`tests/m2/matt-team.test.ts`）改指这个 Go 命令——**Go 命令对着 TS 的 HTTP 面也跑得通**，这本身就是「它讲的是真的公开 API」的旁证。
     - 新的 Go E2E（`tests/e2e/go-assemble-team.test.ts`，2 条）证明的是 TypeScript 那份测试承载的契约：**缺的每一个角色都在保存任何东西之前被点名**（planner/codebase-design → worker/tdd → standards/code-review → spec/code-review）、一个配方都没发布、定义文件也没有落地；装配成功时四个角色的配方真的进了控制台的目录，定义点名的是**已发布的版本**（同名旧配方让 worker 变成 `@2`），已存在的定义文件不被覆盖。
-- **收尾**：删除 102 个模块 + 211 个随实现退休的低层测试文件，更新 `package.json`、`tsconfig.json`、`tests/suite-baseline.json`（**缩减必须显式落账**）与文档。
+  - **外部消费者改道（批次 53）**：删实现之前，删掉它们最后一批消费者——`scripts/` 与 `examples/` 里的九个工具，以及三个直接开 TypeScript 运行时的活测试。逐个处置如下。
+    - **`scripts/harness-real-eval.mjs` 改由 Go daemon 驱动**：它原来用 `startGraphDaemon()` 在本进程里开一整套 TypeScript 运行时，再用内部 API（`runtime.catalog.*`、`runtime.conversations.*`、`runtime.supervisor().graphControl`）驱动评估。现在它起真实的 `graphd` 进程（新增的 `scripts/go-daemon.mjs` 复用仓库启动器 `src/server/cli.ts`），全部改走 daemon 的**公开 HTTP 面**：`GET /api/catalog`、`POST /api/catalog/combinations`、`POST /api/catalog/combinations/{id}/compile`、`POST /api/projects/{id}/prepare`、`GET /api/conversations/{id}`、`GET /api/conversations/{id}/proposals/{version}`、`POST /api/conversations/{id}/confirm`、`POST /api/conversations/{id}/messages`、`POST /api/tasks/{id}/graph/control`、`GET /api/tool-stats`。三个活测试（`harness-context`、`harness-workflow`、`harness-eval-lifecycle`）因此**由 Go daemon 驱动**。
+    - **这一批逼出 Go 侧一个真 bug**：**provider 永不应答时，控制面被在途回合一起卡死**。Go 的 `pause` 与 `interrupt` 都要软停主回合，而软停走的是侧车（`durable-service.ts`）的一次 `stop` / `interrupt` 调用；侧车的这两个方法 `await conversation.abort()`，而**永远不会回答的 provider 让 abort 落不下来**，于是 `POST /api/conversations/{id}/pause` 与 `.../interrupt` 一直挂着，整个 daemon 在这段时间只读不写（`GET` 正常，任何写操作全部阻塞）。TypeScript 那边没有这个问题：它的 `pause` 只置标志，回合是异步死的。**修法在侧车**（`src/runtime/durable-session.ts`）：`interrupt` 与 `stop` 把 abort 当作**请求**而不是**等待**——不再 `await` 它的落定（`interrupt` 带续写文本时仍要等，因为续写必须发生在 abort 之后），控制面因此立刻返回。**这层行为属于侧车，PiG 内核接管主会话时必须接回 Go 自己**。
+    - **`tests/e2e/go-wake-notification.test.ts` 摘掉 `src/git/git.ts`**：它原来用 TypeScript 的 git 助手建夹具仓库。现在直接调真的 `git` 二进制（同一个真实仓库、同一组真实命令），这条 Go E2E 因此不再依赖任何 TypeScript 后端模块。
+    - **`scripts/harness-worker-eval.mjs` 与 worker 通道退休**：worker 通道靠 `runtime.user.begin()` + `main.propose()` + `main.graphSend()` 这些**内部 API**建图与投递，而 Go 的原生图只有主 Agent 的 `propose_graph` / `graph_send` 工具面，没有对应的程序化入口。**worker 通道承载的两条独立契约在 Go 侧另有着落**：worker 只写自己的工作副本（`tests/e2e/go-node-lane.test.ts`）、worker 读不到工作副本之外的文件（**在案：Go 侧尚无 E2E 证明**）。因此 worker 通道的两条用例随脚本退休，缺口记在这里，不装作已覆盖。
+    - **`tests/e2e/harness-workflow.test.ts` 的派发通道与交付通道退休**：这两条用例靠**脚本化 provider 的逐个 plan**精确对上 TypeScript 运行时的请求序列（主 Agent 先列目录、再提案、确认后被叫醒去 `graph_send`、worker 发布产物、reviewer 读产物再发评审）。Go daemon 的主回合序列不同（叫醒、建议请求、工具表都换过），plan 因此落不到位；**交付通道更是在产物可见性上直接对不上**（worker 发布的产物在 reviewer 那边列出来是空的）。这些是**评估 harness 自己的编排**，不是产品契约：主 Agent 真的把输入投到节点、节点真的跑起来、提交真的顺着边送到下一个节点，由 `tests/e2e/go-graph-confirmation.test.ts` 承担；worker 真的只写自己的工作副本并交出版本化的评审报告，由 `tests/e2e/go-node-lane.test.ts` 承担；发布出去的版本不可变、过期 CAS 被拒，由 `tests/e2e/go-artifact-publication.test.ts` 承担。留下的那条（**确认了草稿但不派发 worker，账上 worker 一次请求都没有**）继续由 Go daemon 驱动。
+    - **另外七个工具退休**：`scripts/console-ui-e2e.ts`（直接往 TypeScript 的 SQLite 表里塞行来喂控制台）、`scripts/branch-edge-e2e.mjs`（同样直接塞表）、`scripts/mcp-adapter-e2e.ts`（直开 `openTaskRuntime`，且需要真实付费凭据与外网）、`scripts/skill-sediment-e2e.ts`（注入假的模型回执，**本身就不是有效 E2E**）、`examples/m1-demo.ts`（直开 `openTaskRuntime` 建图）、`examples/m7-acceptance.ts`（直开 `openTaskRuntime` + TypeScript 的 git）、`perf/bench/measure.ts`（直开 `openGraphServer`）。它们承载的产品契约在 Go 侧的去处：控制台渲染由 Go 驱动的浏览器 E2E 承担（`tests/m8/app-shell-ux.test.ts`、`tests/m8/settings-ui.test.ts`、`tests/console/setup-wizard.test.ts`、`tests/e2e/provider-metadata.test.ts`）；图的几何由 `tests/e2e/go-graph-layout.test.ts` 与 `go-graph-nested.test.ts` 承担；沉淀的开关与真实评审请求由 `tests/e2e/go-sediment-settings.test.ts` 承担（**沉淀产物本身的形状规则在 Go 侧尚无 E2E 证明——在案**）；图跨进程重启仍在由 `tests/e2e/go-startup.test.ts` 承担。`package.json` 里对应的四个入口（`demo:m1`、`accept:m7`、`e2e:console`、`e2e:sediment`）随之移除。
+    - **两条直开 TypeScript 运行时的门禁用例随实现退休，缺口照实记在案**：`tests/m8/execution-drive-liveness.test.ts`（在子进程里开 TypeScript 的 drive loop，证明「图在派发前等待时不会饿死事件循环、等待解除后同一笔投递仍然被消费」）与 `tests/m8/host-command-lifecycle.test.ts`（直接 `import { runHostCommand } from 'src/runtime/host-command.ts'`，证明「宿主命令在主人死去 / 显式中止 / 超时时都会停」）。两份证明写的是**被删掉的那套实现**，因此随实现退休；它们承载的两条产品契约在 Go 侧**尚无 E2E 证明，记在案**——Go 的对应实现点是 `backend/internal/graph/core_execution.go` 的 drive 循环与 `backend/internal/graph/runtime_host_command.go:173` 的 `RunHostCommand`（超时、中止信号、主人断开三条都在）。这一条不装作已覆盖。
+  - **删除实现（批次 54）**：**102 个 TypeScript 后端模块**（`src/server` 16、`src/core` 43、`src/runtime` 35、`src/catalog` 6、`src/git` 2）连同 **207 个只依赖它们的测试文件**、**5 个依赖已删夹具的测试文件**与 **2 个直开 TypeScript 运行时的门禁用例**一起删除；`src/server/cli.ts` 与 `src/server/go-launch.ts` 两个启动器、Go 运行时闭包（56 个文件）与仅前端可达的 19 个文件保留。**基线按缩减显式落账**（`GRAPH_UPDATE_BASELINE=1`），缩减的数字写在下面。
 
 ## 门禁与纪律
 
@@ -495,3 +503,13 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 - Go E2E 的夹具是 `tests/helpers/cli-daemon.ts` 的 `launchCli`（真实 `graphd` 二进制）与 `tests/fixtures/openai-server.ts`（受控模型服务）。自有协作者的回执、顺序与状态必须由真实 owner 产生。
 - 退役旧测试前先证明新 keeper 通过；负向断言先证明目标元素、请求或 guard 存在。
 - 每次提交前运行 `node --run check`。
+
+### 门禁上的一个环境故障（与本退役无关，记在这里）
+
+批次 54 提交前跑门禁时，`tests/m0/restricted-process.test.ts` 的 15 条用例与 `tests/durable/plugins.test.ts` 的 2 条变红，理由是 `dyld: Library not loaded: @rpath/libnode.147.dylib`（随后是 `/opt/homebrew/opt/llhttp/lib/libllhttp.9.4.dylib`），**「blocked by sandbox」**：受限进程连启动都做不到。
+
+这不是本批改动造成的：**在主检出（`13-Graph`，`f1daaa8f`）上跑同一份文件，失败一模一样**。原因是**跑门禁用的 Node**：仓库把运行时钉在 `node_modules/.bin/node`（24.20.0），而 PATH 里的 Homebrew node 26.3.0 是**动态链接**的——`libnode.147.dylib` 在 `bin/../lib`，另外几个 keg 里的 dylib 在 `/opt/homebrew/opt/*/lib`。受限进程的读白名单只有 `systemReads`（`/System`、`/usr`、`/bin`、`/sbin`、`/Library/Apple`、`/dev`）、工作目录、临时目录与调用方给的 `readPaths`；**这些运行库不在其中**，于是被沙箱挡住。测试自己给的 `readPaths: [dirname(process.execPath)]` 只放行了 `bin` 目录，够不到 `bin/../lib`，也够不到 keg。
+
+**用仓库钉住的运行时跑，这份文件 24 条全绿**——门禁因此要走 `node_modules/.bin/node --run check`，而不是 PATH 里那个 Homebrew node。
+
+**但这仍是一个产品缺口，记在案**：任何在 node 26 上跑自家沙箱的项目都会撞上它。修法是让受限进程**放行可执行文件自己链接的运行库**（`src/runtime/restricted-process.ts` 的读白名单要按 `otool -L` 的结果加入运行库目录，含 `@rpath` 解析出来的兄弟 `lib` 目录）。本次没有顺手改：一处半修（只放行 `bin/../lib`）会让失败从 `libnode` 挪到下一个 keg dylib，看起来像修好了其实没有，而真正修好需要弄清沙箱运行时（`@anthropic-ai/sandbox-runtime`）如何规范化这些路径——那是另一批的活。**记在案，不装作已修**。

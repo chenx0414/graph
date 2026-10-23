@@ -8,7 +8,7 @@ import { PROVIDER_PRESETS } from '../catalog/providers.ts';
  * from `<baseUrl>/models` with the metadata mapped from the vendored models.dev
  * snapshot.
  *
- * The field names here mirror the daemon contract in `src/server/providers.ts`:
+ * The field names here mirror the daemon contract in `backend/internal/graph/server_providers.go`:
  * the display name is `label`, the credential reference is `credentialRef`
  * (never `name` / `secretRef`), and the probe body carries a `requestId`
  * idempotency key. This module stays presentational: it never reads the DOM,
@@ -41,7 +41,7 @@ export const PROVIDER_COMPATIBILITIES: readonly { id: ModelApi; label: string }[
 export type CredentialKind = 'api-key' | 'subscription';
 
 /** One entry of the platform catalog served by `GET /api/providers`
- * (`PlatformView` in src/server/providers.ts). */
+ * (`PlatformView` in backend/internal/graph/server_providers.go). */
 export interface PlatformPreset {
   id: string;
   label: string;
@@ -180,7 +180,7 @@ function validHttpUrl(value: string): boolean {
 
 /**
  * Field-keyed validation for step 1, matching the daemon's own wording in
- * `src/server/providers.ts` (which remains the authority). Presets only need a
+ * `backend/internal/graph/server_providers.go` (which remains the authority). Presets only need a
  * key (or a resolvable credentialRef); a custom provider also needs a label,
  * base URL and compatibility mode.
  */
