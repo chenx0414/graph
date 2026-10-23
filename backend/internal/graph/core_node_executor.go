@@ -203,7 +203,12 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 	recovered := e.kernel.Execution(executionId)
 	attempt := recovered.Attempt
 	retriesUsed := recovered.RetriesUsed
-	resubmitsUsed := recovered.ResubmitsUsed
+	// The resubmit allowance is the node's, not this execution's. The node's
+	// durable counter is the one that survives a restart, and the contract
+	// says a reopened database does not refresh the automatic allowance: a
+	// node that used its one resubmit has used it, whichever execution it
+	// used it in.
+	resubmitsUsed := e.kernel.NodeState(e.graphId, nodeId).ResubmitsUsed
 	var injection *TurnInjection
 	if len(recovered.PendingGap) > 0 {
 		injection = &TurnInjection{Missing: recovered.PendingGap}
@@ -378,7 +383,10 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			if resubmitsUsed < budget.ResubmitsAllowed {
 				resubmitsUsed++
 				e.kernel.NoteExecutionContinuation(executionId, "resubmit", report.Missing)
-				e.kernel.NoteNodeResubmit(e.graphId, nodeId, int(maxSafeInteger))
+				// The durable counter is the node's, so it is counted with the
+				// node's allowance: the guard that was written for it can
+				// finally hold.
+				e.kernel.NoteNodeResubmit(e.graphId, nodeId, budget.ResubmitsAllowed)
 				graphDBExec(e.kernel.Store.Db, "UPDATE kernel_executions SET missing_required=1 WHERE id=?", executionId)
 				injection = &TurnInjection{Missing: report.Missing}
 				continue
