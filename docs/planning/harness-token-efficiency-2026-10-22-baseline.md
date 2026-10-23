@@ -94,7 +94,7 @@ node scripts/harness-cost.mjs "$HOME/Library/Application Support/Graph/state/tas
 
 **能修的几类里，三类是同一个竞态**：宿主在工具调用还在飞的时候被关掉，模型收到的是一句它无法据此行动的内部消息。11 条，占全部工具错误的 6%。
 
-其中 7 条（"Plugin helper is closed"）来自**已退役的 TypeScript 插件宿主**（`src/runtime/durable-plugin.ts:92`），Go 内核路径没有这条消息。另外 4 条（"Runtime is closed" / "Pi host channel closed"）在 Go 侧仍有对应物（`core_task_runtime.go:1633` 的 `ensureOpen`），但那一处是**运行时就该拒绝**的守卫：`Close()` 先 `Drain()` 再释放，晚到的工作被拒是对的。真正要修的是"模型收到这句话却无从判断发生了什么"——修法是让消息说清"宿主已关闭，本次调用未执行"，而不是改关闭顺序。
+其中 7 条（"Plugin helper is closed"）来自**已退役的 TypeScript 插件宿主**（`src/runtime/durable-plugin.ts:92`），Go 内核路径没有这条消息。另外 4 条（"Runtime is closed" / "Pi host channel closed"）在 Go 侧仍有对应物（`core_task_runtime.go:1654` 的 `ensureOpen`），但那一处是**运行时就该拒绝**的守卫：`Close()` 先 `Drain()` 再释放，晚到的工作被拒是对的。真正要修的是"模型收到这句话却无从判断发生了什么"——修法是让消息说清"宿主已关闭，本次调用未执行"，而不是改关闭顺序。
 
 **不是缺陷但值得记的**：浏览器扩展 36 条错误（占全部的 19%）里，11 条是"临时 profile 目录无权"——**扩展需要的临时目录没有被访问策略授予**。这可能是策略漏了一条路径，也可能是有意的隔离；改它是一次安全决定，所以本轮只记录、不动手。
 
