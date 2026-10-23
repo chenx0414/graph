@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 )
 
 const layoutGRID = 16
@@ -85,91 +84,6 @@ func layoutSnap(value float64) float64 {
 	return layoutRound(value/layoutGRID) * layoutGRID
 }
 
-func layoutNodeSize(node LayoutNode) (float64, float64) {
-	// TODO(port): call GraphNodeSize once its parameter type is the shared presentation node.
-	label := layoutNodeLabel(node)
-	estimated := layoutTextWidth(label) + 74
-	width := math.Min(384, math.Max(160, math.Ceil(float64(estimated)/32)*32))
-	height := 64.0
-	if estimated > 384 {
-		height = 96
-	}
-	return width, height
-}
-
-func layoutTextWidth(value string) int {
-	sum := 0
-	for _, character := range value {
-		if character > 255 {
-			sum += 13
-		} else {
-			sum += 7
-		}
-	}
-	return sum
-}
-
-func layoutNodeLabel(node LayoutNode) string {
-	suffix := layoutNodeSuffix(node)
-	prefix := strings.ToLower(node.ID)
-	lower := strings.ToLower(suffix)
-	if lower == prefix || strings.HasPrefix(lower, prefix+" ") {
-		return suffix
-	}
-	return node.ID + " " + suffix
-}
-
-func layoutNodeSuffix(node LayoutNode) string {
-	kind := layoutVisualKind(node)
-	if kind == "human" {
-		return "human check"
-	}
-	if node.Kind == "agent" {
-		return "agent"
-	}
-	if node.Action == "graph.verify" {
-		return "gate"
-	}
-	if node.Action == "graph.command" {
-		return "tool"
-	}
-	if node.Action == "route" {
-		return "route"
-	}
-	if node.Action == "join" {
-		return "join"
-	}
-	if node.Kind == "program" {
-		return "tool"
-	}
-	return node.Kind
-}
-
-func layoutVisualKind(node LayoutNode) string {
-	if node.Kind == "agent" {
-		return "agent"
-	}
-	if node.Action == "graph.human_check" {
-		return "human"
-	}
-	if node.Action == "graph.verify" {
-		return "gate"
-	}
-	if node.Action == "route" {
-		return "route"
-	}
-	if node.Action == "join" {
-		return "join"
-	}
-	if node.Action == "graph.command" {
-		return "tool"
-	}
-	if node.Kind == "program" {
-		return "tool"
-	}
-	return "program"
-}
-
 // LayoutGraph places nodes with elkjs, then draws orthogonal connectors in Go.
 func LayoutGraph(input LayoutInput, previous *LayoutPrevious) GraphLayout {
 	containers := input.Containers
@@ -201,7 +115,8 @@ func LayoutGraph(input LayoutInput, previous *LayoutPrevious) GraphLayout {
 	layerSpacing := strconv.Itoa(64 + 32*maxDegree)
 	var build func(string) map[string]any
 	box := func(node LayoutNode) map[string]any {
-		width, height := layoutNodeSize(node)
+		size := GraphNodeSize(GraphNodeLike{Id: node.ID, Kind: node.Kind, Action: node.Action})
+		width, height := float64(size.Width), float64(size.Height)
 		return map[string]any{
 			"id": node.ID, "width": width, "height": height,
 			"layoutOptions": map[string]any{"elk.portConstraints": "FIXED_POS"},
