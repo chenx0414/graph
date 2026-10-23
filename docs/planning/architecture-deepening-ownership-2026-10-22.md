@@ -57,6 +57,47 @@
     - **要拆的是函数，不是文件**：`runtime_agent_tools.go` 的 1,033 行全在一个 `AgentTools` 函数里——它造的是那张工具表。搬文件救不了它。`core_interface_spec.go`（421 行）与 `server_start.go`（586 行）同理。**而 `AgentTools` 恰好就是"工具表合成一个模块"那一件要处理的地方**：那张表大到没人能拿两份来比，这大概就是主会话与节点泳道两份工具表各自漂移开的原因。这一件因此没有在本轮硬拆。
     - **是数据而不是职责**：`core_pinyin_table.go` 2,273 行但最长的函数只有 9 行——它是一张拼音表。`runtime_agent_tool_definitions.go` 367 行却有 49KB，因为里面是 JSON schema 的字面量。这两个文件要的不是拆分，而是另一种豁免。
 
+20. **二十三个历史大文件按职责拆开了**（提交 `e7971253` 起到 `45f43f73`）。第十九步量出来的三类，这一轮把它们做完了：
+
+    | 原文件 | 大小 | 拆成 |
+    | --- | --- | --- |
+    | `core_task_runtime.go` | 197KB | 20 个文件 |
+    | `server_app.go` | 96KB | 17 个文件（按 HTTP 面） |
+    | `runtime_agent_tools.go` | 62KB | **没拆**——见下 |
+    | `core_operation_lifecycle.go` | 60KB | 10 个文件 |
+    | `runtime_restricted_process.go` | 58KB | 8 个文件 |
+    | `runtime_agent_context.go` | 57KB | 7 个文件 |
+    | `core_conversation.go` | 51KB | 9 个文件 |
+    | `runtime_controlled_openai.go` | 50KB | 8 个文件 |
+    | `core_store.go` | 48KB | 10 个文件 |
+    | `core_artifact_workspace.go` | 46KB | 7 个文件 |
+    | `core_execution.go` | 46KB | 6 个文件 |
+    | `core_interface_spec.go` | 44KB | 6 个文件 |
+    | `runtime_assistant_stream_frames.go` | 37KB | 7 个文件 |
+    | `core_node_run.go` | 33KB | 6 个文件 |
+    | `git_integration.go` | 31KB | 5 个文件 |
+    | `server_start.go` | 30KB | 4 个文件 |
+    | `runtime_pi_extension_source.go` | 29KB | 9 个文件 |
+    | `catalog_capability_library.go` | 28KB | 6 个文件 |
+    | `git_git.go` | 27KB | 8 个文件 |
+    | `server_providers.go` | 27KB | 5 个文件 |
+    | `server_config.go` | 23KB | 4 个文件 |
+    | `core_graph_runtime.go` | 22KB | 6 个文件 |
+    | `server_layout.go` | 22KB | 5 个文件 |
+    | `runtime_harness_probe.go` | 22KB | 4 个文件 |
+    | `catalog_file_capabilities.go` | 21KB | 4 个文件 |
+    | `core_graph_service.go` | 21KB | 5 个文件 |
+    | `runtime_agent_context_assembly.go` | 21KB | 6 个文件 |
+    | `core_module_runtime.go` | 20KB | 5 个文件 |
+
+    - **每一次都是纯搬移，而且每一次都用两种方式证明过**：脚本在写任何文件之前先确认各段接起来与原文件逐字节相同；写完之后再用另一段代码独立地比对一次。两遍都报 `identical: True`。二十九次拆分没有一次靠推理。
+    - **守卫每一次都正常跑过，没有例外也没有 `--no-verify`**。二十三次提交里，一次都没用。
+    - **两个大函数没有拆**：任务视图（285 行）与对话视图（324 行）各自搬进自己的文件——一个只造一样东西的读模型就是一样东西。`admit`（355 行）、`ParseGraphDefinition`（400 行）、`StartGraphDaemon`（585 行）同理。前两个搬得动，第三个搬不动：它的闭包——活的密钥、被吊销的密钥、provider 同步、能力密钥、配置应用、密钥推送、价格刷新——互相捕获，拆它是一次重写而不是一次搬移，因此那个文件用仓库自己的 `graph:allow-large-file` 标注说清楚为什么。
+    - **两个数据文件用同一个标注**：`core_pinyin_table.go`（一张拼音表）与 `runtime_agent_tool_definitions.go`（一张工具 schema 表）。它们的大小不来自职责混杂。仓库自己的文档 `docs/agents/checks.md` 给的就是这个形式。
+    - **结果是：包里超过上限的文件从 33 个降到 4 个**（其中一个带标注、两个带标注），**其余每一个要么低于上限、要么在文件头说明了自己为什么不是**。
+
+21. **还剩一个，是有意留下的**。`runtime_agent_tools.go` 的 62KB 里，1,033 行全在一个 `AgentTools` 函数里——它造的是那张工具表。搬文件救不了它，而它恰好就是"工具表合成一个模块"要处理的那一张：**那张表大到没人能拿两份来比**，这大概就是主会话与节点泳道两份工具表各自漂移开的原因。这件要等 id、遥测、panic 三处分歧定下来才能动。
+
 ## 查出来、尚未处理的问题
 
 它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。
