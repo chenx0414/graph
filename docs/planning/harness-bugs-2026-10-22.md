@@ -188,6 +188,20 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 
 ---
 
+## 4.1 验证状态
+
+分支在 2026-10-23 13:17 跑过一次完整检查，全绿：290 个测试文件、1551 个测试、退出码 0（`node --run check`）。此后补了 #8 的补交额度修复。
+
+之后的几次全量运行被环境挡住，原因与本分支无关，逐条都做过对照：
+
+- `tests/e2e/pig-kernel-update.test.ts`：上游 PiG 在这段时间里发布了 v0.5.3（此前是 v0.5.2），仓库钉的是 v0.5.1，"钉住的是最新版"这条断言因此失败；该测试还会去拉新版本并构建。
+- `tests/m4/acceptance.test.ts`：把本分支的 backend 换成基线版本后同样失败（"a native Git work-check graph without an independent reviewer cannot deliver"），是既有失败。
+- `tests/console/git-baseline.test.ts` 与 `tests/m7/harness.test.ts`：在机器同时跑着好几个 worktree 的套件时不稳定；同样这三个文件在基线与本分支上跑出的失败集合完全一致。
+
+换句话说：本分支没有引入回归，但"全绿"这句话只有 13:17 那一次是完整跑出来的。
+
+---
+
 ## 5. 确认为真实但本轮未修的（逐条记录）
 
 这些是 Graph 自己的缺陷，但改动面比本轮大，或需要与正在进行的其它工作协调。每条给出机制与修复位置。
