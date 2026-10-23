@@ -48,6 +48,10 @@ type HarnessCandidateFacts struct {
 	ToolCalls    int               `json:"toolCalls"`
 	ToolErrors   int               `json:"toolErrors"`
 	Tools        []string          `json:"tools"`
+	// Harness is the prompt text this candidate ran under, when the node
+	// replaced it. It says why two candidates behaved differently, which is
+	// what a later composition of the two needs.
+	Harness      map[string]string `json:"harness,omitempty"`
 	InputTokens  int64             `json:"inputTokens"`
 	OutputTokens int64             `json:"outputTokens"`
 	ElapsedMs    int64             `json:"elapsedMs"`
@@ -452,8 +456,18 @@ func (service *graphManagementService) HarnessCompare(input HarnessCompareInput)
 func (service *graphManagementService) harnessCandidateFacts(graphId string, nodeIds []string) []HarnessCandidateFacts {
 	executions := map[string]*HarnessCandidateFacts{}
 	order := []string{}
+	revision := service.kernel.LatestRevision(graphId)
 	for _, nodeId := range nodeIds {
-		executions[nodeId] = &HarnessCandidateFacts{NodeId: nodeId, Status: "not-run", Outputs: []string{}, Tools: []string{}}
+		facts := &HarnessCandidateFacts{NodeId: nodeId, Status: "not-run", Outputs: []string{}, Tools: []string{}}
+		if revision != nil {
+			if node, ok := revision.Definition.Nodes[nodeId]; ok && len(node.Harness) > 0 {
+				facts.Harness = map[string]string{}
+				for key, text := range node.Harness {
+					facts.Harness[key] = text
+				}
+			}
+		}
+		executions[nodeId] = facts
 		order = append(order, nodeId)
 	}
 	rows := kernelRows(service.kernel.Db, "SELECT node_id,state,started_at,ended_at FROM kernel_executions WHERE task_id=? ORDER BY rowid", graphId)

@@ -147,13 +147,17 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
   // The probe reports which axis each candidate was claimed on.
   const probe = JSON.parse(resultOf('probe') || '{}') as {
     candidates: { label: string; axis: string; anonId: string }[];
-    comparison: { candidates: { nodeId: string; tools: string[]; outputValues: Record<string, string> }[] };
+    comparison: { candidates: { nodeId: string; tools: string[]; outputValues: Record<string, string>; harness: Record<string, string> }[] };
   };
   expect(probe.candidates.map(candidate => candidate.label).sort()).toEqual(['domain-way', 'general-way']);
   expect(probe.candidates.find(candidate => candidate.label === 'general-way')!.axis).toBe('general');
   expect(probe.candidates.find(candidate => candidate.label === 'domain-way')!.axis).toBe('specific');
   // The two candidates produced different answers under their different harness.
   expect(probe.comparison.candidates[0]!.outputValues.out).not.toEqual(probe.comparison.candidates[1]!.outputValues.out);
+  // The comparison says which harness each candidate ran under, so a later
+  // composition of the two has something to compose.
+  const runtimes = probe.comparison.candidates.map(candidate => candidate.harness['rules/worker.md']);
+  expect(runtimes.sort()).toEqual(['DOMAIN_VARIANT_RULE', 'GENERAL_VARIANT_RULE']);
 
   // Both decisions are recorded, each in the scope its axis names.
   const generalDecision = JSON.parse(resultOf('decide-general') || '{}') as { axis: string; scope: string; entries: { axis: string; chosen: string }[] };
