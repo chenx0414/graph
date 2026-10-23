@@ -37,6 +37,7 @@
 | `98d18e59`（拆工具表，重跑） | 294 个文件里 293 通过、1 跳过、**1 失败** | 唯一失败换成了另一个：`tests/e2e/go-wake-notification.test.ts`（"a confirmed graph wakes main with the graph id"，31,682 毫秒，超时），**单独重跑只花 3,228 毫秒并通过**。两次运行各有一个不同的超时，两次单独重跑都通过 |
 | `426bd2cb`（两条工具表合成同一套规则） | **294 通过、1 跳过、0 失败**（1553 个测试）；"Suite baseline increased to files 295, tests 1557"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑最终 head，632 秒。新增的 `tests/e2e/pig-node-tool-telemetry.test.ts` 就在这一套里——**它在父提交上失败**（节点那次 read 根本不出现在统计表里），在这个提交上通过 |
 | 未改动的 main（同一台机器、同样负载） | **293 通过、1 跳过、0 失败**（1552 个测试） | 与本分支的两次运行同时跑，main 一次都没失败；本分支那两次失败都是满负载下的超时，且两次单独重跑都通过 |
+| `6df12b5c`（main 又合了一次 harness 的活） | **296 通过、1 跳过、0 失败**（1556 个测试） | 在一份干净 worktree 上跑合并后的 head，541 秒。**同样的查法**：main 新增的每一行都拿到合并后的树里去找，找不到的数是零（只剩 baseline 的计数，那由门禁自己重算）。合并之后 **main 是本分支的祖先** |
 | `45b66d4c`（合入 main 的十三个 harness 提交） | **296 通过、1 跳过、0 失败**（1556 个测试）；"Suite baseline increased to files 297, tests 1560"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑合并后的 head，547 秒。**合并本身是查过的**：main 自分支分叉以来新增的每一行都拿到合并后的树里去找，**找不到的是零**（第一次合并时是 174 行）。第一次合并后完整套里有一个失败（`tests/e2e/harness-axes.test.ts` 读不到候选跑在哪个 harness 下），那正是漏掉的那处改动 |
 
 **二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
