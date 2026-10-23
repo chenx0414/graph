@@ -5,7 +5,7 @@
 
 **报告里引用的提交号都是 rebase 之后的当前分支上的号**（`git branch --contains <hash>` 能查到）。用 `node scripts/report-commit-links.mjs docs/planning/harness-token-efficiency-2026-10-22*.md` 可以在再次 rebase 后自动把它们重指向。
 
-本报告分八篇：**[基线](harness-token-efficiency-2026-10-22-baseline.md)**（量到什么）· **[已做的修改](harness-token-efficiency-2026-10-22-changes.md)**（做了什么、怎么验证）· **[真实模型 A/B](harness-token-efficiency-2026-10-22-ab.md)**（量到的与量不到的）· **[A/B 重跑](harness-token-efficiency-2026-10-22-ab-rerun.md)**（把账本放进仓库之后又测到的东西）· **[提案与缺口](harness-token-efficiency-2026-10-22-proposals.md)**（只提案的那部分与还欠着的部分）· **[验证与证据](harness-token-efficiency-2026-10-22-verification.md)**（门禁、每处改动的红灯证据、证据文件的位置）· **[内核版本追踪](harness-token-efficiency-2026-10-22-kernel.md)**（上游内核什么时候发了什么、报告里那句警告当时对不对）。
+本报告分九篇：**[基线](harness-token-efficiency-2026-10-22-baseline.md)**（量到什么）· **[已做的修改](harness-token-efficiency-2026-10-22-changes.md)**（做了什么、怎么验证）· **[真实模型 A/B](harness-token-efficiency-2026-10-22-ab.md)**（量到的与量不到的）· **[A/B 重跑](harness-token-efficiency-2026-10-22-ab-rerun.md)**（把账本放进仓库之后又测到的东西）· **[提案与缺口](harness-token-efficiency-2026-10-22-proposals.md)**（只提案的那部分与还欠着的部分）· **[验证与证据](harness-token-efficiency-2026-10-22-verification.md)**（门禁跑了多少轮、哪一轮红了、为什么红）· **[证据与工具](harness-token-efficiency-2026-10-22-evidence.md)**（每处改动的红灯证据、证据文件的位置、能重跑的工具）· **[内核版本追踪](harness-token-efficiency-2026-10-22-kernel.md)**（上游内核什么时候发了什么、报告里那句警告当时对不对）。
 
 结论摘要：
 
