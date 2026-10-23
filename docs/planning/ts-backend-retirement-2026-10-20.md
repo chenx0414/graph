@@ -544,6 +544,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 **所以 keeper 应该这么写**：让**节点自己的 `bash` 工具**去跑一个长命令（不是 check 模块 ✓），等它真的在跑（心跳 ✓），SIGKILL daemon，断言心跳在有界时间内停。**如果原生 `bash` 工具是直接起命令（没有监管人），它就会像沙箱那条一样成孤儿** ✓——那时的修法就是给它一个监管人（`host-command-worker.mjs` 已经是这个形状 ✓）。
 
+**再更正一处「我给谁装了日志」**：前几轮我给 **TS 的 `restricted-process.ts`** 装日志（它只有一行「干净退出」、没有「即将起命令」），于是我以为「起命令的不是它」——**但真正在跑的是 Go 自己那份 `runtime_restricted_process.go`**（我**没**给它装过日志 ✓，所以当然没有记录 ✓）。**结论不变、依据换了**：起命令的是 **Go 的受限进程** ✓ → 一路 exec（`/bin/sh -c` → `sandbox-exec` → 内层 `/bin/sh -c` → 命令 ✓，`runtime_restricted_process.go:721` ✓）→ **命令的父进程就是 Go daemon 本身** ✓。
+
+**而这条路的形状与 TypeScript 自己的 `restricted-process.ts` 一致**（那边也是 `detached` 一路 exec ✓，命令同样会变成孤儿 ✓）——**所以「命令能在 daemon 死后继续跑」这件事，TypeScript 那边也一样** ✓，**它不是退役带来的回归** ✓。它是一个**两边都有的老问题**，在 Go 侧记成一条独立发现（沙箱路径的命令没有主人）✓；**退役的契约说的是不带座位的那条路** ✓，那条路（`RunHostCommand` + worker 监管人 ✓）**还没单独测过** ✓。
+
 **keeper 照旧**：让 check 模块的产出合法，命令真的活着，然后 SIGKILL daemon，断言心跳在有界时间内停。
 
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
