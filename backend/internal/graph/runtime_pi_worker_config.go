@@ -53,8 +53,8 @@ type PiWorkerConfig struct {
 	// it was given. A turn that never reached the model is sent again with
 	// these, not with what the catalog holds now.
 	NodeExecutionConfiguration map[string]any `json:"nodeExecutionConfiguration,omitempty"`
-	CredentialReference         map[string]any `json:"credentialReference,omitempty"`
-	CapabilityDescriptor        any             `json:"capabilityDescriptor,omitempty"`
+	CredentialReference        map[string]any `json:"credentialReference,omitempty"`
+	CapabilityDescriptor       any            `json:"capabilityDescriptor,omitempty"`
 }
 
 // PiWorkerForkFrom is the immutable source leaf a new session is created from.
@@ -107,7 +107,14 @@ func piWorkerGatedTool(tool ToolDefinition, gate SendGate) func(id string, param
 		}
 	}
 	return func(id string, params map[string]any, signal context.Context) any {
-		callId := graphUUID()
+		// The gate and the tool share one id.
+		//
+		// The id the gate holds is the invocation the budget ledger counts;
+		// the id the tool holds is the tool call the write ledger captures.
+		// Two ids make them two records that cannot be joined. One id makes
+		// them the same call - which is what the TypeScript host does, and
+		// what the node lane already does.
+		callId := id
 		result := gate.Dispatch(callId, 0, func() any {
 			value, err := tool.Execute(id, params)
 			if err != nil {

@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -151,7 +152,27 @@ func pigToolSpecs(request AgentSessionRequest, codemode CodemodeSettings) []pigk
 			Name:        definition.Name,
 			Description: definition.Description,
 			Parameters:  asMap(definition.Parameters),
-			Result: func(ctx context.Context, args map[string]any) (any, error) {
+			Result: func(ctx context.Context, args map[string]any) (result any, err error) {
+				// A refusal is not a dead turn.
+				//
+				// Preparing the arguments happens outside the tool's own
+				// handler, so its refusal would otherwise escape the tool and
+				// take the turn with it. The node lane turns it into the
+				// tool error the model reads; the main session does the same.
+				defer func() {
+					recovered := recover()
+					if recovered == nil {
+						return
+					}
+					switch failure := recovered.(type) {
+					case *RuntimeError:
+						result, err = nil, failure
+					case error:
+						result, err = nil, failure
+					default:
+						err = errors.New(fmt.Sprint(recovered))
+					}
+				}()
 				prepared := any(args)
 				if definition.PrepareArguments != nil {
 					prepared = definition.PrepareArguments(prepared)

@@ -428,6 +428,19 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			Model:       workerConfig.Model,
 			Tools:       nodeTools,
 			NativeTools: nativeTools,
+			// Every tool call this node makes is reported, the way the main
+			// session reports its own. The write is guarded here: a
+			// statistics table must never be able to break a turn.
+			OnToolCall: func(call PiAdapterToolCall) {
+				defer func() { _ = recover() }()
+				target := any(nil)
+				if call.Target != nil {
+					target = call.Target
+				}
+				state.options.Kernel.Store.RecordToolCall(ToolCallInput{
+					InstanceID: session.Binding.InstanceId, Tool: call.Tool, Ms: call.Ms, IsError: call.IsError, Target: target,
+				})
+			},
 			// The skills the node may load: its own folder, the bound
 			// snapshots and the native folders. The kernel has no
 			// environment of its own, so the daemon puts them in the

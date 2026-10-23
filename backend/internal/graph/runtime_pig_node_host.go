@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
@@ -278,6 +279,7 @@ func pigNodeToolSpecs(request AgentSessionRequest, gate SendGate, ungated []stri
 					return definition.Execute(graphUUID(), params)
 				}
 				id := graphUUID()
+				started := time.Now()
 				value := gate.Dispatch(id, 0, func() any {
 					defer gate.Settle(id, &TokenUsage{})
 					result, executeErr := definition.Execute(id, params)
@@ -286,9 +288,15 @@ func pigNodeToolSpecs(request AgentSessionRequest, gate SendGate, ungated []stri
 					}
 					return result
 				})
+				// Every tool call this node makes is reported, the way the
+				// main session reports its own and the way the TypeScript
+				// host reports every call: the statistics table is how a
+				// user sees what the agents actually did.
 				if failure, ok := value.(error); ok {
+					recordPigToolCall(request, definition.Name, started, true)
 					return nil, failure
 				}
+				recordPigToolCall(request, definition.Name, started, false)
 				return value, nil
 			},
 		})
