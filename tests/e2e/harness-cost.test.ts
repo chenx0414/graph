@@ -132,17 +132,18 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   expect(report.summary.costByPurpose.completion.requests).toBe(cacheField === 'capacity-retry' ? 4 : 3);
   // The same spend counted by source and by billing type: what each source
   // cost, split by the type that prices it.
-  const cross = report.summary.costByPurposeAndBillingType as Record<string, Record<string, Record<string, number>>>;
+  const cross = report.summary.costByPurposeAndBillingType as Record<string, Record<string, Record<string, number>> | undefined>;
   if (cacheField === 'unreported') {
     // No call carried a frozen rate, so no source can be priced.
     expect(cross.completion).toBeUndefined();
   } else {
-    expect(cross.completion.USD.input).toBeCloseTo(0.00015, 10);
-    expect(cross.completion.USD.output).toBeCloseTo(0.00012, 10);
-    expect(cross.completion.USD.cacheRead).toBeCloseTo(0.0000225, 10);
-    expect(cross.completion.USD.cacheWrite).toBe(0);
+    const priced = cross.completion!.USD!;
+    expect(priced.input).toBeCloseTo(0.00015, 10);
+    expect(priced.output).toBeCloseTo(0.00012, 10);
+    expect(priced.cacheRead).toBeCloseTo(0.0000225, 10);
+    expect(priced.cacheWrite).toBe(0);
     // The cross adds up to the whole tree priced by billing type.
-    const crossed = Object.values(cross.completion.USD).reduce((sum: number, value: number) => sum + value, 0);
+    const crossed = Object.values(priced).reduce((sum: number, value: number) => sum + value, 0);
     expect(crossed).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
   }
   // A request whose usage was never reported carries no evidence of its prefix.
@@ -162,11 +163,12 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
     expect(report.summary.scenarioCost.USD.byBillingType.cacheRead.tokens).toBe(45);
     // The scenario, source by source: every source of spend, split by the
     // billing type that prices it.
-    const byPurpose = report.summary.scenarioCostByPurpose as Record<string, { USD: { byBillingType: Record<string, { tokens: number; amount: number }>; total: number } }>;
-    expect(byPurpose.completion.USD.byBillingType.cacheRead.tokens).toBe(45);
-    expect(byPurpose.completion.USD.total).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
+    const byPurpose = report.summary.scenarioCostByPurpose as Record<string, { USD: { byBillingType: Record<string, { tokens: number; amount: number }>; total: number } } | undefined>;
+    const completion = byPurpose.completion!.USD!;
+    expect(completion.byBillingType.cacheRead!.tokens).toBe(45);
+    expect(completion.total).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
     // The sources add up to the tree.
-    const summed = Object.values(byPurpose).reduce((sum: number, entry: { USD: { total: number } }) => sum + entry.USD.total, 0);
+    const summed = Object.values(byPurpose).reduce((sum: number, entry) => sum + entry!.USD!.total, 0);
     expect(summed).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
   }
   expect(report.tools.find((tool: { tool: string }) => tool.tool === 'bash')).toMatchObject({ calls: 1, errors: 0, taskReach: 1 });
