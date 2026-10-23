@@ -1,16 +1,16 @@
 # 红灯验证：撤掉生产改动，E2E 必须红
 
 分支：feature/harness-token-efficiency-2026-10-22
-时间：2026-10-23T10:16:14.563Z
+时间：2026-10-23T10:18:30.802Z
 
 | 改动 | 撤掉的是什么 | E2E | 结果 |
 | --- | --- | --- | --- |
-| `496017be` 助手回合如实回放 | 模型写下的 reasoning 回到下一轮请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an openai answer keeps its reasoning and its tool call for the next request） |
-| `5dfaa2f4` Anthropic 缓存断点 | 系统提示、工具声明、对话三处断点在请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an anthropic answer keeps its signed reasoning and its tool call for the next request） |
-| `47bc0701` 压缩上限 | 环境变量命名的上限让会话提前压缩 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：a named ceiling compacts the session before the provider window would） |
-| `8153fccf` 摘要输出预算 | 摘要请求带的是它自己的额度，不是模型的整个上限 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：the summary is asked for the room the handoff needs, and it fits） |
-| `1b323d24` 任务说明包复用 | 开启开关后第二轮不再重发任务说明 | `tests/e2e/task-setup-reuse.test.ts` | **红**（1 项失败：with the switch the session keeps the task setup it already read） |
-| `7072a98c` 工具结果落盘 | 大结果落盘后模型拿到的是句柄而不是被切断的原文 | `tests/e2e/tool-result-spill.test.ts` | **红**（1 项失败：a large command result is written to a file and the model is given the handle） |
+| `0b4ac8ab` 助手回合如实回放 | 模型写下的 reasoning 回到下一轮请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an openai answer keeps its reasoning and its tool call for the next request） |
+| `c25aa469` Anthropic 缓存断点 | 系统提示、工具声明、对话三处断点在请求里 | `tests/e2e/provider-assistant-replay.test.ts` | **红**（1 项失败：an anthropic answer keeps its signed reasoning and its tool call for the next request） |
+| `8366b8f8` 压缩上限 | 环境变量命名的上限让会话提前压缩 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：a named ceiling compacts the session before the provider window would） |
+| `5c32221a` 摘要输出预算 | 摘要请求带的是它自己的额度，不是模型的整个上限 | `tests/e2e/compaction-context-ceiling.test.ts` | **红**（1 项失败：the summary is asked for the room the handoff needs, and it fits） |
+| `17aa68df` 任务说明包复用 | 开启开关后第二轮不再重发任务说明 | `tests/e2e/task-setup-reuse.test.ts` | **红**（1 项失败：with the switch the session keeps the task setup it already read） |
+| `9039e148` 工具结果落盘 | 大结果落盘后模型拿到的是句柄而不是被切断的原文 | `tests/e2e/tool-result-spill.test.ts` | **红**（1 项失败：a large command result is written to a file and the model is given the handle） |
 
 ## 还原之后
 
