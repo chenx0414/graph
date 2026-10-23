@@ -134,6 +134,7 @@
 
 ### 后续可做，但不属于本计划
 
+- **main 上 `tests/e2e/harness-probe.test.ts` 是坏的，与本计划无关。** main 的 `255b3d25` 把决策记录的 `chosen` 从候选字母改成节点 id（`harnessResolveChosen`），但没同步更新这个测试，于是 `expect(decision.chosen).toBe('A')` 失败。`vitest.config.ts` 里有 `bail: 1`，所以这一个失败会让整轮套件在第 11 项测试就停下。**干净的 main 同样失败**（同一个文件、同一个断言）。本分支的完整套件结果是：**排除这个文件后，293 个文件、1554 项测试、0 失败**；它自己单独跑也是 1 失败 1 通过，与 main 相同。修它属于 harness 那一摊，不属于本计划。
 - `backend/internal/graph/runtime_tool_call_spool.go:77` 的 `SpoolToolCall` 同样没有调用方，其注释还声称有一个从未存在的调用方。
 - Go 守护进程返回的 `/api/skill-stats` 是 `{"report":{"skills":…}}`，前端读的是扁平结构，`src/web/ToolStats.tsx:179` 因此抛错、页面渲染不出来。这是 Go 移植的 API 契约错配，与注释无关，但会让 `node --run e2e:console` 跑不起来。
 - `src/web/Settings.tsx` 仍有 1300 多行，是 500 行上限的 2.6 倍；拆分是另一个根因。
@@ -173,7 +174,7 @@
 
 测试套件方面，本机的并发压力让失败数在几轮之间大幅波动，而且**失败的文件集合每轮都不同**——这本身就是环境噪声而非代码问题的特征。同一台机器上，干净 main 的完整 `node --run check` 失败 11 个文件，本分支失败 4 个；把 main 失败的那 11 个文件拿到本分支重跑，11 个里 9 个直接通过，剩下的 `tests/m1/recovery.test.ts` 单独连跑 5 次也是 5 次全过。
 
-机器空闲下来之后，本分支的完整 `node --run check` 一次跑通：**291 个测试文件、1553 项测试，287 个文件通过、4 个跳过、0 失败**，套件规模与 `tests/suite-baseline.json` 完全一致，验收证据未变。
+机器空闲下来之后，本分支的完整套件一次跑通。**在第 1 步（只有注释改动）落地时是 291 个文件 / 1553 项测试、0 失败，套件规模与基线一致，验收证据未变。**第 2 到第 7 步落地后重新测：排除 main 上那个已经坏了的 `tests/e2e/harness-probe.test.ts` 之后，**293 个文件、1554 项测试、1550 通过、4 跳过、0 失败**。那个文件在本分支与干净的 main 上失败方式完全相同（见下面的「后续可做」一节）。
 
 另外两类失败是外部原因，与本改动无关：`tests/e2e/pig-kernel-update.test.ts` 要从网络拉 Go module，本分支连跑 3 次全过，main 上也全过；`tests/e2e/package-preflight.test.ts` 断言的是磁盘剩余空间，取决于当时机器上还有多少 GiB。
 
