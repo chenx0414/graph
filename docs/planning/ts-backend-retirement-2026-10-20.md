@@ -532,6 +532,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 **因此修法只有一个形状**：**命令和 daemon 之间必须隔着一个能比 daemon 活得久的监管人**。仓库里已经有这个形状——`src/runtime/host-command-worker.mjs`：它是独立进程，靠 IPC channel 知道主人没了（channel 的父端随 daemon 一起关掉 → 它收到 disconnect → `cancel` → 杀掉命令那一组）✓，隔离实验里这条路是通的 ✓。所以要么让沙箱路径也走同样的监管人，要么让命令自己盯着 daemon 的 pid。
 
+**但这里要分清两条路径（这决定了改哪里、也决定了该测什么）**：Go 侧有**两种**跑命令的方式——**节点自己的 `bash` 工具**走 `runtime_restricted_process.go`（沙箱里跑，`/bin/sh -c` + `sandbox-exec` 一路 exec，**命令的父进程就是 daemon**）；**图的 `workspace.command` 模块**走 `runtime_kernel_operation_broker.go:338` 的 `RunHostCommand`（**不走沙箱**，由 `host-command-worker.mjs` 当监管人）。**退役的那条 TypeScript 契约（`host-command.ts`：「宿主命令像宿主自己那样跑，不带座位」）说的是后者** ✓——而探针里的 check 模块走的正是后者 ✓，所以**测的是对的那条路** ✓。
+
+那条路上：Go 起 worker ✓ → worker 起命令（`detached`，独占进程组 ✓）→ **worker 随即退出** ✓ → 命令被 reparent 给 launchd（ppid=1 ✓）→ **没有任何人负责结束它** ✓。worker 为什么会退，是这条路上最后要查的一步（它的日志两次都空，说明它没走到我装日志的地方；这本身也是一条线索）。**修法也因此收窄到一处**：worker 必须活到它起的命令结束（它就是那个监管人），或者 Go 不能在命令还在跑的时候关掉那条监管通道。
+
 **keeper 照旧**：让 check 模块的产出合法，命令真的活着，然后 SIGKILL daemon，断言心跳在有界时间内停。
 
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
