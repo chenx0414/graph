@@ -509,6 +509,10 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 **于是要分辨的就是这两种**：(a) worker 收到了 'disconnect'，它的 `cancel` 也跑了，但 `process.kill(-pid, 'SIGKILL')` **没能杀掉命令那一组**（命令是 worker 用 `detached: true` 起的，独占一个进程组）；(b) worker 是以别的方式结束的，命令压根没收到任何信号。(a) 与 (b) 的判据很干净：**让 worker 把日志写进它自己知道的那个目录——命令的工作目录（`prepared.cwd`）**，命令就在那儿跑，日志就在那儿；再顺带记下 worker 自己的 pid、它的 ppid、以及它起的那个命令的 pid。**命令的 ppid 是 daemon** 这件事也一并解释：worker 退出后，命令被 reparent 到了 daemon（而 daemon 还活着），所以后来 daemon 被 SIGKILL，命令就成了孤儿。
 
+**最硬的一条线索拿到了**：给侧车 worker 装上日志（记录它自己的 pid、ppid、它起的命令的 pid，以及 disconnect / cancel / 命令 close 三个事件），日志**先写进命令的工作目录、再改写 `/tmp`**——**两次都一个字都没有**。而命令确实被起了（心跳在涨）、确实是从这个仓库的 `src/runtime/host-command-worker.mjs` 起的路径（`hostCommandWorkerPath()` 指向它）。**所以：起那个命令的进程，不是 `host-command-worker.mjs`。**
+
+**于是要问的换成这一个**：宿主命令到底是谁起的。Go 侧看着是 `runtime_host_command.go:201` 起了 worker（`exec.Command(execPath, hostCommandWorkerPath())`），可进程表说命令的直接主人是 **daemon**、worker 不在树里。**中间这一层还有别人**：候选是 **TS 侧车的 shell 执行器**（`src/runtime/durable-tools.ts` 里那个 `shell`，它经受限进程起命令，命令是 `detached` 起的独占进程组）——那样命令的「主人」就不是 worker，而是那条链上更靠上的某一环。下一步就是把这个环找出来：**daemon 活着的时候，逐个进程问「我的孩子里有没有那个 hold.cjs」**（顺着 ppid 往上走），谁起的就清楚了；命令的寿命也就该绑在谁身上。
+
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
 
 **因此修法的方向变了**：要让命令的寿命真正绑在 daemon 上，得让**命令自己**（或它的直接主人）在 daemon 消失时收手——例如把命令放进 worker 的进程组、由 worker 持有它的 pid 并在主人消失时连坐；或者让 daemon 在关停时连命令的进程组一起收（但 SIGKILL 没有这个机会）。**具体怎么改要先看 Go 到底是怎么起这个命令的**：`runtime_host_command.go:201` 看起来只起了 worker 一个进程，而 ps 显示命令的直接主人是 daemon——这两件事对不上，**先把这个对不上弄清楚**（谁 fork 了命令、worker 什么时候没的），再定修法。
