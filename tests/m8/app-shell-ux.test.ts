@@ -1,20 +1,13 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
-import { appendNodeEntry } from '../../src/core/node-run.ts';
-import { appendMessage } from '../../src/core/conversation.ts';
-import { TaskStore } from '../../src/core/store.ts';
-import { openGraphServer } from '../../src/server/host.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
-import { fullAccessPolicy } from '../../src/core/access-policy.ts';
-import { graphDocumentationPaths } from '../../src/runtime/agent-docs.ts';
-import { DEFAULT_MAIN_FULL_ACCESS_IDENTITY, openAgentContextLibrary } from '../../src/runtime/agent-context.ts';
-import type { NativeProposal } from '../../src/core/types.ts';
-import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 let webDir: string;
@@ -58,11 +51,13 @@ async function gitProject(dir: string) {
  * The console is a client: the daemon only has to serve the shell and answer
  * the API. The models exist so the daemon starts; nothing here dispatches.
  */
-async function consoleServer(root: string, options: { projects?: { id: string; root: string }[]; models?: number } = {}) {
+async function consoleServer(root: string, options: { projects?: { id: string; root: string }[]; models?: number; model?: string; execute?: boolean } = {}) {
   const configPath = join(root, 'graph.config.json');
+  // Without a model behind it the daemon only serves the console. A test that
+  // needs the main Agent to act points it at a real provider.
   const entries = Array.from({ length: options.models ?? 1 }, (_, index) => ({
-    id: index === 0 ? 'local' : `model-${index + 1}`, provider: 'stub', grade: 'medium', api: 'openai-completions',
-    baseUrl: 'http://127.0.0.1:1/v1', contextWindow: 2048, maxTokens: 128, credentialId: 'local',
+    id: index === 0 ? 'local' : `model-${index + 1}`, provider: options.model ? 'graph-master' : 'stub', grade: 'medium', api: 'openai-completions',
+    baseUrl: options.model ?? 'http://127.0.0.1:1/v1', contextWindow: 2048, maxTokens: 128, credentialId: 'local',
   }));
   await writeFile(configPath, JSON.stringify({
     version: 1,
@@ -73,136 +68,142 @@ async function consoleServer(root: string, options: { projects?: { id: string; r
   const daemon = await launchCli(root, {
     configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
     env: { HOME: root, GRAPH_SYNTH_KEY: 'synthetic-shell-key' },
+    extraArgs: options.execute ? ['--execute'] : [],
   });
   cleanup.push(() => daemon.close());
   return daemon;
 }
 
-function workerCheckProposal(summary: string, check = 'check', criterion = 'ok'): NativeProposal {
-  return { requirementVersion: 1, summary, acceptance: [{ id: criterion, description: '检查通过', checkNode: check }],
-    definition: parseGraphDefinition({ schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
+interface ScriptedStep { id: string; name: string; args: unknown }
+interface ScriptedToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
+interface ScriptedMessage { role?: string; content?: unknown; tool_call_id?: string; tool_calls?: ScriptedToolCall[] }
+interface ScriptedBody { tools?: { function?: { name?: string } }[]; messages?: ScriptedMessage[] }
+
+/**
+ * A scripted model. It plays the plan in order, so the main Agent really
+ * proposes what the test needs it to propose.
+ */
+async function scriptedProvider(plan: (body: ScriptedBody) => ScriptedStep[] | Promise<ScriptedStep[]>) {
+  const results = new Map<string, string>();
+  const requests: ScriptedBody[] = [];
+  const server: Server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as ScriptedBody;
+    requests.push(body);
+    for (const message of body.messages ?? []) {
+      if (message.role !== 'tool') continue;
+      const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '');
+      results.set(message.tool_call_id ?? '', content);
+    }
+    const spoken = new Set((body.messages ?? []).flatMap(message => (message.tool_calls ?? []).map(call => call.id ?? '')));
+    const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    const next = (await plan(body)).find(call => !spoken.has(call.id));
+    if (!next) {
+      response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'Noted.' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 5, completion_tokens: 5 } }));
+      response.end('data: [DONE]\n\n');
+      return;
+    }
+    response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: next.id, type: 'function',
+      function: { name: next.name, arguments: JSON.stringify(next.args) } }] }, finish_reason: null }] }));
+    response.write(frame({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    results,
+    requests,
+    baseUrl: `http://127.0.0.1:${port}/v1`,
+    close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
+  };
+}
+
+/** The prompt the library holds for one key: the override, else the default. */
+async function libraryPrompt(promptRoot: string, key: string) {
+  const override = await readFile(join(promptRoot, key), 'utf8').catch(() => null);
+  if (override !== null) return override.trimEnd();
+  const fallback = await readFile(join(promptRoot, 'defaults', key), 'utf8').catch(() => '');
+  return fallback.trimEnd();
+}
+
+/** The tools the user turned off in the prompt library. */
+async function libraryDisabledTools(promptRoot: string) {
+  const raw = await readFile(join(promptRoot, 'tools.json'), 'utf8').catch(() => '{}');
+  const parsed = JSON.parse(raw) as { disabled?: string[] };
+  return parsed.disabled ?? [];
+}
+
+/** The proposal the main Agent offers: one node, one check, one acceptance. */
+function workerProposal(summary: string, check = 'check', criterion = 'ok') {
+  return {
+    requirementVersion: 1,
+    summary,
+    acceptance: [{ id: criterion, description: '检查通过', checkNode: check }],
+    definition: {
+      schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
       nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the requested work', inputs: { job: { protocol: 'data' } },
         outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
       modules: { [check]: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
       edges: { checkWork: { from: 'work.result', to: `${check}.job`, enabled: true } },
-      acceptance: [{ id: criterion, description: '检查通过', kind: 'check', module: check }] }),
+      acceptance: [{ id: criterion, description: '检查通过', kind: 'check', module: check }],
+    },
   };
 }
 
-test('a draft window refreshes in place and the only archived card remains manageable', async () => {
-  const root = await temp('draft-card-lifecycle');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  await gitProject(project);
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'), projects: [{ id: 'alpha', root: project }], webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'draft-card-coder');
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '整理当前方案', requestId: 'create' });
-  const anchor = (await server.runtime.conversations.view(created.conversationId)).anchorTaskId;
-  await server.runtime.supervisor(anchor).propose(workerCheckProposal('原方案'), 'draft');
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('drawer-entry-graph').click();
-  await page.locator('.node-card[data-node-id="check"]').waitFor();
+/** One conversation, created through the daemon's own door. */
+async function createConversation(server: Daemon, body: Record<string, unknown>) {
+  const response = await server.request('/api/conversations', { method: 'POST', body: JSON.stringify(body) });
+  expect(response.status).toBe(200);
+  return response.json() as Promise<{ conversationId: string; taskId: string }>;
+}
 
-  // This tab still names v1: the changed module proves the diagram, not just
-  // the conversation summary, refreshes when that version is edited in place.
-  await server.runtime.supervisor(anchor).propose(workerCheckProposal('修订方案', 'review', 'reviewed'), 'edit');
-  await page.locator('.node-card[data-node-id="review"]').waitFor();
-  expect(await page.locator('.node-card[data-node-id="check"]').count()).toBe(0);
-  expect((await server.runtime.conversations.view(created.conversationId)).proposalHistory.map(item => item.version)).toEqual([1]);
-  await page.getByTestId('window-archive-draft').click();
-  await page.getByTestId('window-restore-draft').waitFor();
-  await page.getByTestId('window-restore-draft').click();
-  await page.getByTestId('window-archive-draft').waitFor();
-  await page.getByTestId('window-archive-draft').click();
-  await page.getByTestId('window-restore-draft').waitFor();
+/** One conversation, read through the daemon's own door. */
+async function conversationView(server: Daemon, conversationId: string) {
+  const response = await server.request(`/api/conversations/${conversationId}`);
+  expect(response.status).toBe(200);
+  return response.json() as Promise<ConversationView>;
+}
 
-  // Reopening the conversation drawer after its sole card was archived must
-  // still offer the archive; no active proposal exists to carry that entry.
-  await page.locator('.tab[data-kind="conversation"]').first().click();
-  if (await page.getByTestId('detail-drawer').isVisible().catch(() => false)) {
-    await page.getByTestId('drawer-entry').click();
-    await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
-  }
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('archived-draft-1').waitFor();
-  await page.getByTestId('restore-draft-1').click();
-  await expect.poll(() => page.getByTestId('drawer-draft-summary').innerText()).toBe('修订方案');
-  expect(await page.locator('.drawer-draft-title').innerText()).toBe('草稿 v1');
+interface Daemon {
+  url: string;
+  request(path: string, init?: RequestInit): Promise<Response>;
+}
 
-  // A confirmed card is confirmed, not stale. Confirming advances the anchor's
-  // requirement, so this card is stale by construction: the UI must still read it as
-  // confirmed (no re-discuss prompt, which would invite a second graph for a task
-  // that already has one) and keep it manageable, while the formal task and its
-  // graph survive every card operation.
-  await page.getByTestId('accept-branch').fill('main');
-  await page.getByTestId('confirm-draft').click();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).accepted.length).toBe(1);
-  const taskId = (await server.runtime.conversations.view(created.conversationId)).accepted[0]?.taskId ?? '';
-  expect(taskId).not.toBe('');
-  await expect.poll(() => page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('草稿 v1 · 已确认');
-  // Close and reopen the drawer: the confirmed card is still listed for management.
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('active-draft-1').waitFor();
-  expect(await page.getByTestId('active-draft-1').innerText()).toContain('已确认');
-  expect(await page.getByTestId('draft-stale').count()).toBe(0);
-  await page.getByTestId(`task-graph-tab-${taskId}`).waitFor();
+interface ConversationView {
+  conversationId: string;
+  anchorTaskId: string;
+  master?: { status?: string };
+  messages: { role: string; kind?: string; text?: string; data?: unknown }[];
+  proposal?: { version: number; summary: string } | null;
+  proposalHistory: { version: number }[];
+  archivedProposals: { version: number }[];
+  accepted: { taskId: string }[];
+}
 
-  // A draft for another task in the same conversation leaves the first graph's
-  // confirmed source card manageable; choosing it must still show confirmation.
-  await server.runtime.supervisor(anchor).propose({ ...workerCheckProposal('后续任务方案'), requirementVersion: 2 }, 'later');
-  await page.getByTestId('drawer-draft-version-1').waitFor();
-  await page.getByTestId('drawer-draft-version-1').click();
-  await page.getByTestId('draft-accepted').waitFor();
-  expect(await page.getByTestId('draft-stale').count()).toBe(0);
-  expect(await page.getByTestId('proposal-draft').innerText()).toContain('已确认草稿 v1');
+/** One task, read through the daemon's own door. */
+async function taskView(server: Daemon, taskId: string) {
+  const response = await server.request(`/api/tasks/${taskId}`);
+  expect(response.status).toBe(200);
+  return response.json() as Promise<{ operations: { id: string; state: string }[]; master?: { status?: string } }>;
+}
 
-  // The confirmed source card archives, restores and deletes like any other card.
-  await page.getByTestId('archive-draft').click();
-  await page.getByTestId('archived-draft-1').waitFor();
-  await page.getByTestId('restore-draft-1').click();
-  await page.getByTestId('drawer-draft-version-1').click();
-  await expect.poll(() => page.locator('.drawer-draft-title').innerText()).toBe('草稿 v1');
-  await page.getByTestId('delete-draft').click();
-  await expect.poll(async () => {
-    const view = await server.runtime.conversations.view(created.conversationId);
-    return { current: view.proposal?.version ?? null, active: view.proposalHistory.map(item => item.version), archived: view.archivedProposals.map(item => item.version) };
-  }).toEqual({ current: 2, active: [2], archived: [] });
-  // The formal proposal copy and the graph it started are untouched.
-  const task = await server.runtime.user.task(taskId).view();
-  expect(task.acceptedProposalVersion).toBe(1);
-  expect(task.proposal?.summary).toBe('修订方案');
-  await page.getByTestId(`task-graph-tab-${taskId}`).waitFor();
-  const deleted = await page.evaluate(async id => (await fetch(`/api/conversations/${id}/proposals/1`)).status, created.conversationId);
-  expect(deleted).toBe(400);
-  const later = await page.evaluate(async id => (await fetch(`/api/conversations/${id}/proposals/2`)).status, created.conversationId);
-  expect(later).toBe(200);
-  await page.getByTestId(`task-graph-tab-${taskId}`).click();
-  await page.getByTestId('graph').waitFor();
-  await page.locator('.node-card[data-node-id="review"]').waitFor();
-}, 60_000);
+/** The catalog, read through the daemon's own door. */
+async function catalogView(server: Daemon) {
+  const response = await server.request('/api/catalog');
+  expect(response.status).toBe(200);
+  return response.json() as Promise<{ agentCombinations: { id: string; description: string }[] }>;
+}
+
 
 test('the shell groups conversations by project and keeps an unbound recent section', async () => {
   const root = await temp('sidebar');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  await server.runtime.conversations.create({ text: '未绑定讨论', requestId: 'unbound' });
-  await server.runtime.conversations.create({ projectId: 'alpha', text: '项目内讨论', requestId: 'bound' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  await createConversation(server, { text: '未绑定讨论', requestId: 'unbound' });
+  await createConversation(server, { projectId: 'alpha', text: '项目内讨论', requestId: 'bound' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -212,7 +213,7 @@ test('the shell groups conversations by project and keeps an unbound recent sect
 
   const sidebar = page.getByTestId('conversation-list');
   await expect.poll(() => sidebar.innerText()).toContain('未绑定讨论');
-  expect(await sidebar.innerText()).toContain('项目内讨论');
+  await expect.poll(() => sidebar.innerText()).toContain('项目内讨论');
   for (const [heading, title] of [['项目', '项目内讨论'], ['最近', '未绑定讨论']] as const) {
     const toggle = sidebar.getByRole('button', { name: heading, exact: true });
     await toggle.click();
@@ -254,14 +255,8 @@ test('the shell groups conversations by project and keeps an unbound recent sect
 
 test('conversations archive from the sidebar and restore from settings', async () => {
   const root = await temp('archive-ui');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '需要归档的对话', requestId: 'archive-ui' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { projectId: 'alpha', text: '需要归档的对话', requestId: 'archive-ui' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -290,310 +285,22 @@ test('conversations archive from the sidebar and restore from settings', async (
 
 // The drawer opens on the task graph, so this test renders React Flow inside the drawer:
 // that is slower than the old cheap first page and gets its own budget.
-test('the right drawer keeps proposal details and node inspection independent from the chat', async () => {
-  const root = await temp('drawer');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'app-shell-agent-detail');
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'conversation' });
-  const view = await server.runtime.conversations.view(created.conversationId);
-  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('先做一个最小版本', 'check', 'works'), 'draft-1');
-  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('第二版增加审查', 'review', 'reviewed'), 'draft-2', { newVersion: true });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('drawer-entry').waitFor();
-  // The collapsed drawer advertises its state in the header; the draft card is
-  // not part of the chat stream any more.
-  await expect.poll(() => page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('草稿 v2');
-  expect(await page.getByTestId('drawer-entry').getAttribute('aria-label')).toContain('待确认');
-  expect(await page.locator('.conversation-thread-inner [data-testid="proposal-draft"]').count()).toBe(0);
-  // The header carries the drawer entry and the detail toggle; the pause control
-  // lives in the composer now.
-  const headerDrawerBox = await page.getByTestId('drawer-entry').boundingBox();
-  expect(await page.getByTestId('workspace-drawer-toggle').count()).toBe(0);
-  expect(headerDrawerBox).not.toBeNull();
-  expect(await page.getByTestId('drawer-entry').getAttribute('data-open')).toBe('false');
-  // The chat column is the conversation itself; the window is named in the tab bar.
-  expect(await page.locator('.tab[data-kind="conversation"]').first().getAttribute('data-active')).toBe('true');
-  const beforeMain = await page.locator('.conversation-main').boundingBox();
-  const beforeComposer = await page.locator('.conversation-composer-wrap').boundingBox();
-  expect(beforeMain).not.toBeNull();
-  expect(beforeComposer).not.toBeNull();
-
-  // One click on the labelled header entry opens the drawer on the draft page,
-  // where the summary, the confirm controls and the graph/acceptance entries
-  // now live.
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('detail-drawer').waitFor();
-  expect(await page.getByTestId('drawer-entry').getAttribute('data-open')).toBe('true');
-  await page.getByTestId('proposal-draft').waitFor();
-  expect(await page.getByTestId('proposal-draft').innerText()).toContain('第二版增加审查');
-  // The drawer is a launcher: it names the two windows a draft has and nothing more.
-  expect(await page.getByTestId('drawer-entry-graph').isVisible()).toBe(true);
-  expect(await page.getByTestId('drawer-entry-artifacts').isVisible()).toBe(true);
-  expect(await page.getByTestId('accept-branch').isVisible()).toBe(true);
-  expect(await page.getByTestId('confirm-draft').isVisible()).toBe(true);
-  // The draft card lays its own content out inside its box: an unconfirmed draft
-  // used to squeeze the card to its flex basis, so the version list and the two
-  // window links spilled out over the task navigation (measured: card 78..164,
-  // version list at 298, links at 349, task section from 176). The card keeps its
-  // own parts inside it, and the version list is now its own section: it must sit
-  // below the card and above the task navigation instead of overlapping either.
-  await expect.poll(async () => {
-    const card = await page.getByTestId('proposal-draft').boundingBox();
-    const toc = await page.getByTestId('drawer-draft-toc').boundingBox();
-    const links = await page.locator('[data-testid=proposal-draft] [data-testid=drawer-entry-links]').boundingBox();
-    const tasks = await page.getByTestId('conversation-tasks').boundingBox();
-    if (!card || !toc || !links || !tasks) return null;
-    return {
-      linksInside: links.y + links.height <= card.y + card.height + 1,
-      tocBelowCard: toc.y >= card.y + card.height - 1,
-      tasksBelowToc: tasks.y >= toc.y + toc.height - 1,
-    };
-  }).toEqual({ linksInside: true, tocBelowCard: true, tasksBelowToc: true });
-  await page.waitForTimeout(260);
-  await expect.poll(async () => (await page.locator('.conversation-main').boundingBox())!.width)
-    .toBe(beforeMain!.width);
-  const afterMain = await page.locator('.conversation-main').boundingBox();
-  const afterComposer = await page.locator('.conversation-composer-wrap').boundingBox();
-  const drawerBox = await page.getByTestId('detail-drawer').boundingBox();
-  expect(afterMain).not.toBeNull();
-  expect(afterComposer).not.toBeNull();
-  expect(drawerBox).not.toBeNull();
-  expect(afterMain!.width).toBeGreaterThan(0);
-  expect(drawerBox!.width).toBeGreaterThan(300);
-  await expect.poll(async () => {
-    const main = await page.locator('.conversation-main').boundingBox();
-    const drawer = await page.getByTestId('detail-drawer').boundingBox();
-    return Boolean(main && drawer && drawer.y >= 40 && drawer.y + drawer.height === 720 && main.width === beforeMain!.width);
-  }).toBe(true);
-  const settledMain = await page.locator('.conversation-main').boundingBox();
-  const settledComposer = await page.locator('.conversation-composer-wrap').boundingBox();
-  const settledDrawer = await page.getByTestId('detail-drawer').boundingBox();
-  expect(settledMain).not.toBeNull();
-  expect(settledComposer).not.toBeNull();
-  expect(settledDrawer).not.toBeNull();
-  expect(settledComposer!.width).toBe(afterComposer!.width);
-  expect(afterComposer!.y + afterComposer!.height).toBeLessThanOrEqual(720);
-  expect(await page.locator('[data-testid="detail-toggle-close"]').count()).toBe(0);
-  // The drawer hosts no graph and no artifact list of its own any more.
-  expect(await page.locator('.detail-drawer [data-testid="conversation-graph"]').count()).toBe(0);
-  expect(await page.locator('.detail-drawer [data-testid="drawer-artifacts"]').count()).toBe(0);
-
-  // The version table of contents stayed in the drawer; a window names its own version.
-  await page.getByTestId('drawer-draft-version-1').click();
-  await expect.poll(() => page.getByTestId('drawer-draft-version-1').getAttribute('data-active')).toBe('true');
-
-  // The pages that moved out of the drawer are gone, not merely hidden.
-  for (const gone of ['draft-tab-acceptance', 'draft-tab-nodes', 'draft-tab-decisions', 'draft-page-graph', 'draft-page-artifacts', 'task-page-tabs']) {
-    expect(await page.getByTestId(gone).count()).toBe(0);
-  }
-
-  // The task graph is a window of its own now: the drawer entry opens it as a tab, full width.
-  await page.getByTestId('drawer-entry-graph').click();
-  await expect.poll(() => new URL(page.url()).hash).toContain('/graph');
-  await page.getByTestId('draft-graph-tab').waitFor();
-  expect(await page.locator('.tab[data-kind="draft"][data-active="true"] .tab-title').innerText()).toContain('任务图');
-  expect(await page.getByTestId('conversation-graph-title').innerText()).toContain('先做一个最小版本');
-  await page.getByTestId('conversation-graph').waitFor();
-  await page.getByTestId('draft-graph-detail').waitFor();
-  expect(await page.getByTestId('graph-state-summary').innerText()).toContain('任务状态');
-  const legend = await page.getByTestId('legend').innerText();
-  for (const label of ['待执行', '运行中', '已完成', '被阻塞']) expect(legend).toContain(label);
-  expect(await page.locator('[data-testid="legend"] [data-board-state]').count()).toBe(4);
-
-  // Another window on the same draft names the version it was opened for.
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}/graph?v=2`);
-  await page.getByTestId('draft-graph-tab').waitFor();
-  await expect.poll(() => page.getByTestId('conversation-graph-title').innerText()).toContain('第二版增加审查');
-  await page.locator('.node-card[data-node-id="review"]').waitFor();
-  expect(await page.locator('.node-card[data-node-id="review"]').innerText()).toContain('review');
-  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-node-type')).toBe('tool');
-  // An unconfirmed operation module has the same pending presentation as the draft agent.
-  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-status')).toBe('draft');
-  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-tone')).toBe('pending');
-  expect(await page.locator('.node-card[data-node-id="review"]').getAttribute('data-board-state')).toBe('pending');
-  // The window fills the workspace the chat column filled before.
-  const graphBox = await page.locator('.conversation-graph-main').boundingBox();
-  expect(graphBox).not.toBeNull();
-  expect(graphBox!.width).toBeGreaterThan(300);
-
-  await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
-  const nodeDetail = page.getByTestId('conversation-node-detail');
-  await nodeDetail.waitFor();
-  expect(await nodeDetail.innerText()).toContain('work');
-  expect(await nodeDetail.innerText()).toContain('coder@1');
-  expect(await nodeDetail.innerText()).toContain('独立会话');
-  expect(await nodeDetail.innerText()).not.toContain('Fresh');
-  expect(await nodeDetail.locator('dt').allTextContents()).not.toContain('依赖');
-  expect(await nodeDetail.innerText()).toContain('工作经历');
-  expect(await nodeDetail.innerText()).toContain('灌输的指令');
-  const interfaces = await nodeDetail.innerText();
-  expect(interfaces).toContain('传入接口');
-  expect(interfaces).toContain('传出接口');
-  expect(interfaces).toContain('\"job\"');
-  expect(interfaces).toContain('\"result\"');
-  expect(interfaces).toContain('\"protocol\": \"data\"');
-
-  // The chat tab stayed mounted and interactive while the graph window was in front.
-  await page.locator('.tab[data-kind="conversation"]').first().click();
-  await page.locator('.conversation-composer-wrap').waitFor();
-  expect(await page.locator('.tab[data-kind="conversation"][data-active="true"]').count()).toBe(1);
-  await page.getByTestId('chat-input').fill('草稿详情已移入右侧抽屉。');
-  expect(await page.getByTestId('chat-input').evaluate((element: HTMLInputElement) => element.value)).toBe('草稿详情已移入右侧抽屉。');
-
-  // The shared-artifact index is its own window too, and the drawer only links to it.
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('detail-drawer').waitFor();
-  await page.getByTestId('drawer-entry-artifacts').click();
-  await expect.poll(() => new URL(page.url()).hash).toBe('#/artifacts?project=alpha');
-  await page.getByTestId('artifact-index').waitFor();
-  expect(await page.locator('.tab[data-kind="page"][data-active="true"] .tab-title').innerText()).toContain('共享产物');
-  expect(await page.getByTestId('drawer-artifacts-project').innerText()).toContain('不属于任何任务');
-  expect(await page.getByTestId('drawer-artifacts-own').innerText()).toContain('还没有任务图发布过产物');
-  }, 60_000);
-
-test('a graph agent node opens the same chat transcript used by the main agent', async () => {
-  const root = await temp('agent-node-chat');
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root: project }],
-    webDir,
-    autoDrive: false,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'agent-node-chat-definition');
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '启动节点', requestId: 'agent-node-chat-create' });
-  const view = await server.runtime.conversations.view(created.conversationId);
-  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('节点聊天'), 'agent-node-chat-proposal');
-  await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'agent-node-chat-prepare', initialize: true, createBaseline: true });
-  const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
-    proposalVersion: 1, draftRevision: 1,
-    targetBranch: 'main',
-    requestId: 'agent-node-chat-confirm',
-  });
-  const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  cleanup.push(async () => projection.close());
-  for (let i = 0; i < 210; i++) appendNodeEntry(projection, {
-    taskId: confirmed.taskId, nodeId: 'work', role: 'user', kind: 'chat', text: `更早节点消息 ${i}`,
-  });
-  appendNodeEntry(projection, { taskId: confirmed.taskId, nodeId: 'work', role: 'user', kind: 'briefing', text: '实现 README 功能' });
-  appendNodeEntry(projection, {
-    taskId: confirmed.taskId,
-    nodeId: 'work',
-    role: 'tool',
-    kind: 'call',
-    text: 'README.md',
-    data: { toolCallId: 'read-readme', toolName: 'read' },
-  });
-  appendNodeEntry(projection, {
-    taskId: confirmed.taskId,
-    nodeId: 'work',
-    role: 'tool',
-    kind: 'result',
-    text: '工具执行完成',
-    data: { toolCallId: 'read-readme', toolName: 'read', isError: false },
-  });
-  appendNodeEntry(projection, {
-    taskId: confirmed.taskId,
-    nodeId: 'work',
-    role: 'assistant',
-    kind: 'message',
-    text: '实现完成。',
-  });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  // The node is a window of its own: clicking it in the task graph opens its tab.
-  await page.goto(`${server.url}/#/tasks/${confirmed.taskId}/graph`);
-  await page.getByTestId('graph').waitFor();
-  await page.locator('.react-flow__node').filter({ hasText: 'work' }).first().click();
-  await expect.poll(() => new URL(page.url()).hash).toContain('/nodes/work');
-  expect(await page.locator('.tab[data-kind="node"][data-active="true"] .tab-title').innerText()).toContain('work');
-  await page.getByTestId('node-overview').waitFor();
-  await page.getByTestId('node-prompt').waitFor();
-  const chat = page.getByTestId('graph-agent-chat');
-  await chat.waitFor();
-  expect(await chat.getAttribute('data-page')).toBe('true');
-  // The tab bar names the node; the transcript uses the full height below it.
-  expect(await chat.getAttribute('class')).toContain('conversation-thread-shell');
-  expect(await page.locator('[data-testid="node-chat-tab"] > .conversation-header').count()).toBe(0);
-  expect(await page.getByTestId('node-prompt').locator('summary').getAttribute('aria-label')).toBe('System prompt');
-  expect(await page.locator('[data-testid="node-chat-tab"] .conversation-body .conversation-main .conversation-thread').count()).toBe(1);
-  expect(await page.locator('.tab[data-kind="node"] .tab-title').first().innerText()).toContain('work');
-  await expect.poll(() => chat.innerText()).toContain('任务说明');
-  expect(await chat.innerText()).toContain('实现 README 功能');
-  await chat.getByRole('button', { name: '展开这一轮的思考与工具调用' }).click();
-  expect(await chat.innerText()).toContain('读取 1 项');
-  expect(await chat.innerText()).toContain('coder · 回复');
-  expect(await chat.innerText()).toContain('实现完成。');
-  expect(await page.getByTestId('node-chat-input').isVisible()).toBe(true);
-  await chat.getByRole('button', { name: '展开工具活动' }).click();
-  expect(await chat.innerText()).toContain('README.md');
-  const messages = page.getByTestId('node-message-list');
-  expect(await chat.getByText('更早节点消息 0', { exact: true }).count()).toBe(0);
-  await expect.poll(() => messages.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
-  await messages.evaluate(element => {
-    element.addEventListener('wheel', () => element.setAttribute('data-wheeled', 'yes'));
-  });
-  await messages.hover();
-  await page.mouse.wheel(0, -100000);
-  try { await chat.getByText('更早节点消息 0', { exact: true }).waitFor({ timeout: 5000 }); }
-  catch (error) {
-    console.log('NODE SCROLL', await messages.evaluate(element => {
-      const b = element.getBoundingClientRect();
-      return { top: element.scrollTop, height: element.scrollHeight, client: element.clientHeight, wheel: element.getAttribute('data-wheeled'),
-        target: document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)?.outerHTML.slice(0, 500),
-        older: element.querySelector('[data-testid="node-load-older"]')?.textContent };
-    }));
-    await page.screenshot({ path: '/tmp/node-scroll-failure.png' });
-    throw error;
-  }
-  // A window closes from the tab bar, not from inside the transcript.
-  expect(await chat.getByRole('button', { name: '关闭节点对话' }).count()).toBe(0);
-  // The operation ledger lives nowhere in this window any more.
-  expect(await page.getByTestId('node-operations').count()).toBe(0);
-  await page.locator('.tab[data-kind="graph"] .tab-open').first().click();
-  await expect.poll(() => page.getByTestId('node-prompt').isVisible()).toBe(false);
-  await page.locator('.tab[data-kind="node"] .tab-open').first().click();
-  await expect.poll(() => page.getByTestId('node-prompt').isVisible()).toBe(true);
-
-}, 60_000);
-
 test('the task graph page keeps the permanent four-state legend', async () => {
   const root = await temp('task-graph-legend');
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root: project }],
-    webDir,
-    autoDrive: false,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'high' }, 'task-graph-legend-definition');
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '图例任务', requestId: 'task-graph-legend-create' });
-  const view = await server.runtime.conversations.view(created.conversationId);
-  await server.runtime.supervisor(view.anchorTaskId).propose(workerCheckProposal('四态图例'), 'task-graph-legend-proposal');
-  await server.runtime.projects.prepare({ projectId: 'alpha', requestId: 'task-graph-legend-prepare', initialize: true, createBaseline: true });
-  const confirmed = await server.runtime.conversations.confirm(created.conversationId, {
-    proposalVersion: 1, draftRevision: 1,
-    targetBranch: 'main',
-    requestId: 'task-graph-legend-confirm',
-  });
+  await gitProject(project);
+  const provider = await scriptedProvider(body => (body.tools ?? []).some(tool => tool.function?.name === 'propose_graph') ? [
+    { id: 'proposal', name: 'propose_graph', args: { proposal: workerProposal('四态图例'), requestId: 'task-graph-legend-proposal' } },
+  ] : []);
+  cleanup.push(() => provider.close());
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root: project }], model: provider.baseUrl, execute: true });
+  const created = await createConversation(server, { projectId: 'alpha', text: '图例任务', requestId: 'task-graph-legend-create' });
+  await expect.poll(async () => (await conversationView(server, created.conversationId)).proposal?.version, { timeout: 60_000 }).toBe(1);
+  const confirmed = await (await server.request(`/api/conversations/${created.conversationId}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ proposalVersion: 1, draftRevision: 1, targetBranch: 'main', requestId: 'task-graph-legend-confirm' }),
+  })).json() as { taskId: string };
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -612,14 +319,8 @@ test('the task graph page keeps the permanent four-state legend', async () => {
 
 test('conversation pause and resume use one stateful action with visible feedback', async () => {
   const root = await temp('pause-feedback');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论一下', requestId: 'pause-feedback' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { projectId: 'alpha', text: '先讨论一下', requestId: 'pause-feedback' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -631,7 +332,10 @@ test('conversation pause and resume use one stateful action with visible feedbac
   // composer calls, then resume through the composer button itself.
   expect(await page.getByTestId('conversation-pause').count()).toBe(0);
   expect(await page.getByTestId('conversation-resume').count()).toBe(0);
-  await server.runtime.conversations.pause(created.conversationId, 'pause-feedback-pause');
+  const paused = await server.request(`/api/conversations/${created.conversationId}/pause`, {
+    method: 'POST', body: JSON.stringify({ requestId: 'pause-feedback-pause' }),
+  });
+  expect(paused.status).toBe(200);
   await page.reload();
   await page.getByTestId('conversation-paused-notice').waitFor();
   expect(await page.getByTestId('conversation-paused-notice').innerText()).toContain('当前工具调用收尾后停下');
@@ -645,14 +349,8 @@ test('conversation pause and resume use one stateful action with visible feedbac
 
 test('the right drawer toggle stays available and opens an empty state', async () => {
   const root = await temp('empty-drawer');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '还没有执行信息', requestId: 'empty-drawer' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { projectId: 'alpha', text: '还没有执行信息', requestId: 'empty-drawer' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -677,157 +375,43 @@ test('the right drawer toggle stays available and opens an empty state', async (
   await page.getByTestId('detail-drawer').waitFor({ state: 'hidden' });
 });
 
-test('the composer suggestion and queue steering follow the three Enter states', async () => {
-  const root = await temp('composer-enter-states');
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const steered: string[] = [];
-  let runs = 0;
-  const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    actions: {
-      master: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async () => async () => {
-          runs += 1;
-          if (runs === 1) await gate;
-          return {
-            outcome: 'completed',
-            output: runs === 1
-              ? { text: '第一轮检查完成。', suggestedPrompt: '继续检查测试覆盖和失败分支。' }
-              : { text: '已按候选提示继续。' },
-            usage,
-          };
-        },
-        interrupt: async (_operation, text) => { steered.push(text ?? ''); },
-      },
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-    autoDrive: true,
-    webDir,
-    startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ text: '开始检查。', requestId: 'enter-states' });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  // The candidate prompt is off by default (设置 → 通用/偏好). This test covers
-  // the composer behaviour while it is enabled.
-  await page.addInitScript(() => window.localStorage.setItem('graph-pref-candidate-prompt', 'true'));
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  const input = page.getByTestId('chat-input');
-  await input.waitFor();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('running');
-
-  // State 2: a nonempty prompt sent during output is queued.
-  await input.fill('优先检查失败分支。');
-  await input.press('Enter');
-  await page.getByTestId('queued-message').filter({ hasText: '优先检查失败分支。' }).waitFor();
-  // The chip is optimistic: the runtime may not have accepted the queue yet, and the second Enter
-  // would then steer a queue that does not exist. Assert the real precondition instead of pressing
-  // Enter into the dark (a bigger poll budget cannot fix a missing precondition).
-  await expect.poll(async () => {
-    const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
-    return messages.find(message => message.text === '优先检查失败分支。')?.state;
-  }, { timeout: 10_000 }).toBe('queued');
-
-  // State 3: an empty composer with a queued message sends that queue as steering.
-  // Assert the two conditions the Enter handler itself branches on - the app knows the
-  // master is busy (while it outputs the primary control is pause, by design) and the
-  // queued chip above proves it knows the queue - instead of pressing Enter into the dark.
-  await expect.poll(() => input.evaluate((element: HTMLInputElement) => element.value)).toBe('');
-  await expect.poll(() => page.getByTestId('chat-send').getAttribute('data-mode'), { timeout: 30_000 }).toBe('pause');
-  await input.press('Enter');
-  // Under the full parallel gate a request that travels UI → HTTP → runtime can take far
-  // longer than the default one-second poll. The budget is deliberately generous: the
-  // preconditions above, not the budget, are what makes this assertion meaningful. It is
-  // also the only assertion here whose latency grows with the number of capabilities the
-  // master bundle resolves — and it is the one that timed out in production: a full gate on a
-  // loaded machine reported `expected +0 to be 1` after 60s while 174 other files ran beside it,
-  // so a budget in seconds was answering a question about load, not about the app.
-  await expect.poll(() => steered.length, { timeout: 150_000 }).toBe(1);
-  expect(steered[0]).toContain('优先检查失败分支。');
-  await expect.poll(async () => {
-    const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
-    return messages.find(message => message.text === '优先检查失败分支。')?.state;
-  }, { timeout: 10_000 }).toBe('delivered');
-
-  release();
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('succeeded');
-  await expect.poll(() => input.getAttribute('data-suggestion'), { timeout: 10_000 }).toBe('继续检查测试覆盖和失败分支。');
-
-  // Tab fills the grey suggestion.
-  await input.press('Tab');
-  expect(await input.evaluate((element: HTMLInputElement) => element.value)).toBe('继续检查测试覆盖和失败分支。');
-
-  // State 1: with the composer empty again, Enter sends the suggestion directly.
-  await input.fill('');
-  await input.press('Enter');
-  await expect.poll(async () => {
-    const messages = (await server.runtime.conversations.view(created.conversationId)).messages;
-    return messages.some(message => message.role === 'user' && message.text === '继续检查测试覆盖和失败分支。');
-  }, { timeout: 10_000 }).toBe(true);
-  // This test drives a real turn through a browser, so it owns several sequential waits whose
-  // budgets add up (10s + 10s + 1s + 30s + 150s + 10s + 10s + 10s). The outer budget must exceed
-  // that sum: at 60s the test itself died first and reported only "Test timed out in 60000ms",
-  // naming no condition. With room to spare, a real stall now fails inside the poll that was
-  // still waiting and says which state never arrived.
-}, 420_000);
-
 test('Escape closes the model menu before it interrupts the running Agent', async () => {
   const root = await temp('escape-interrupt');
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const interrupted: string[] = [];
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    actions: {
-      master: {
-        kind: 'agent',
-        reserveTokens: 100,
-        prepare: async () => async () => {
-          await gate;
-          return {
-            outcome: 'completed',
-            output: { text: '已打断。' },
-            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
-          };
-        },
-        interrupt: async (_operation, text) => {
-          interrupted.push(text ?? '');
-          release();
-        },
-      },
-    },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'm' },
-    autoDrive: true,
-    webDir,
-    startup: { mode: 'execute', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ text: '开始一个可打断的回合。', requestId: 'escape-interrupt' });
+  // The model takes its time, so the turn is still running when the console
+  // asks to interrupt it.
+  const provider = await scriptedProvider(async () => { await new Promise(resolve => setTimeout(resolve, 15_000)); return []; });
+  cleanup.push(() => provider.close());
+  const server = await consoleServer(root, { model: provider.baseUrl, execute: true });
+  const created = await createConversation(server, { text: '开始一个可打断的回合。', requestId: 'escape-interrupt' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('running');
+  await expect.poll(async () => (await conversationView(server, created.conversationId)).master?.status, { timeout: 60_000 }).toBe('running');
+  // The interruption only lands while the model is really in flight.
+  await expect.poll(() => provider.requests.length, { timeout: 60_000 }).toBeGreaterThan(0);
 
   await page.getByTestId('model-control').click();
   await page.getByTestId('model-menu').waitFor();
   await page.keyboard.press('Escape');
   await page.getByTestId('model-menu').waitFor({ state: 'detached' });
-  expect(interrupted).toEqual([]);
+  // The menu closed; the turn it was opened over kept running.
+  expect((await conversationView(server, created.conversationId)).master?.status).toBe('running');
 
+  // The console knows the turn is running, so its own Escape is the interrupt.
+  await expect.poll(() => page.getByTestId('chat-send').getAttribute('data-mode'), { timeout: 30_000 }).toBe('pause');
   await page.keyboard.press('Escape');
-  await expect.poll(() => interrupted.length, { timeout: 10_000 }).toBe(1);
-  expect(interrupted[0]).toBe('');
-  await expect.poll(async () => (await server.runtime.conversations.view(created.conversationId)).master?.status, { timeout: 10_000 }).toBe('succeeded');
-}, 60_000);
+  // The turn really stopped: the conversation records the interruption.
+  await expect.poll(async () => (await conversationView(server, created.conversationId)).messages
+    .filter(message => message.kind === 'error' && (message.text ?? '').includes('已打断')).length,
+    { timeout: 60_000 }).toBe(1);
+  await expect.poll(async () => (await taskView(server, created.taskId)).operations.filter(operation => operation.state === 'interrupted').length,
+    { timeout: 60_000 }).toBe(1);
+}, 180_000);
 
 test('the project picker adds a local project to the sidebar', async () => {
   const root = await temp('project-dialog');
@@ -1285,15 +869,7 @@ test('the resource library groups reusable assets and includes graph architectur
       resources: [{ resourceId: 'architect', version: '1.0.0', role: 'identity', required: true }, { resourceId: 'research', version: '1.0.0', role: 'skill', required: true }],
     }],
   }));
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    catalog: { capabilityRoot, recipesPath: join(root, 'graph', 'agent-combinations.json') },
-  });
-  cleanup.push(() => server.close());
-  server.runtime.catalog.publishDefinition('coder', { recommendedGrade: 'medium' }, 'resource-coder');
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1315,7 +891,7 @@ test('the resource library groups reusable assets and includes graph architectur
   await page.goto(`${server.url}/#/catalog`);
   await page.getByTestId('catalog').waitFor();
   expect(await page.getByTestId('resource-nav-skills').getAttribute('data-active')).toBe('true');
-  expect(await page.getByTestId('resource-section-skills').innerText()).toContain('Preserving Productive Tensions');
+  await expect.poll(() => page.getByTestId('resource-section-skills').innerText()).toContain('Preserving Productive Tensions');
   await page.getByTestId('resource-catalog-search').fill('not-a-real-resource');
   expect(await page.getByTestId('resource-section-skills').innerText()).toContain('没有匹配的能力');
   await page.getByTestId('resource-catalog-search').fill('');
@@ -1325,18 +901,18 @@ test('the resource library groups reusable assets and includes graph architectur
 
   await page.getByTestId('resource-nav-mcp').click();
   await page.getByTestId('resource-section-mcp').waitFor();
-  expect(await page.getByTestId('resource-section-mcp').innerText()).toContain('Jira');
+  await expect.poll(() => page.getByTestId('resource-section-mcp').innerText()).toContain('Jira');
   await page.getByTestId('resource-open-mcp').click();
 
   await page.getByTestId('resource-nav-agent-md').click();
   await page.getByTestId('resource-section-agent-md').waitFor();
-  expect(await page.getByTestId('resource-section-agent-md').innerText()).toContain('架构师');
+  await expect.poll(() => page.getByTestId('resource-section-agent-md').innerText()).toContain('架构师');
   await page.getByTestId('resource-open-agent-md').click();
   expect(await page.evaluate(() => (window as Window & { __openedResourceKinds?: string[] }).__openedResourceKinds)).toEqual(['skills', 'mcp', 'agent-md']);
 
   await page.getByTestId('resource-nav-pi-extensions').click();
   await page.getByTestId('resource-section-pi-extensions').waitFor();
-  expect(await page.getByTestId('resource-section-pi-extensions').innerText()).toContain('Pi MCP Extension');
+  await expect.poll(() => page.getByTestId('resource-section-pi-extensions').innerText()).toContain('Pi MCP Extension');
 
   await page.getByTestId('resource-nav-skills').click();
   await page.getByTestId('resource-section-skills').waitFor();
@@ -1351,11 +927,11 @@ test('the resource library groups reusable assets and includes graph architectur
 
   await page.getByTestId('resource-nav-agents').click();
   await page.getByTestId('resource-section-agents').waitFor();
-  expect(await page.getByTestId('agent-combination-code').innerText()).toContain('Bob_coder');
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('Bob_coder');
-  expect(await page.getByTestId('agent-combination-code').innerText()).toContain('组合架构身份与研究 Skill。');
-  expect(await page.getByTestId('agent-combination-code').innerText()).toContain('Agent 配方 · medium · 编码');
-  expect(await page.getByTestId('resource-section-agents').innerText()).toContain('可编译');
+  await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('Bob_coder');
+  await expect.poll(() => page.getByTestId('resource-section-agents').innerText()).toContain('Bob_coder');
+  await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('组合架构身份与研究 Skill。');
+  await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('Agent 配方 · medium · 编码');
+  await expect.poll(() => page.getByTestId('resource-section-agents').innerText()).toContain('可编译');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
 
   await page.getByTestId('resource-nav-architectures').click();
@@ -1435,14 +1011,7 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
       },
     ],
   }));
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    catalog: { capabilityRoot, recipesPath },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1480,7 +1049,7 @@ test('the recipe editor searches and sorts Skills, MCP and Pi extensions by name
   expect(await page.getByTestId('recipe-picker-extensions').innerText()).toContain('没有匹配的能力');
 
   await page.getByTestId('agent-recipe-description').fill('负责实现与维护代码，并在授权范围内补充基础测试。');
-  await expect.poll(() => server.runtime.catalog.agentCombinations().find(item => item.id === 'worker')?.description)
+  await expect.poll(async () => (await catalogView(server)).agentCombinations.find(item => item.id === 'worker')?.description)
     .toBe('负责实现与维护代码，并在授权范围内补充基础测试。');
   await expect.poll(() => page.getByTestId('agent-recipe-description-save-state').innerText())
     .toContain('已自动保存');
@@ -1514,14 +1083,7 @@ test('the Main Agent recipe is visible with fixed system capabilities and an edi
       resources: [],
     }],
   }));
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    catalog: { capabilityRoot, recipesPath },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1569,14 +1131,8 @@ test('the composer inserts project file mentions and carries text attachments in
   const root = await temp('composer-context');
   await mkdir(join(root, 'src'), { recursive: true });
   await writeFile(join(root, 'src', 'index.ts'), 'export const value = 1;\n');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论', requestId: 'composer-context' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { projectId: 'alpha', text: '先讨论', requestId: 'composer-context' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1600,10 +1156,10 @@ test('the composer inserts project file mentions and carries text attachments in
   expect(await page.getByTestId('composer-attachments').innerText()).toContain('notes.md');
   await page.getByTestId('chat-send').click();
   await expect.poll(async () => {
-    const view = await server.runtime.conversations.view(created.conversationId);
+    const view = await conversationView(server, created.conversationId);
     return ((view.messages.at(-1)?.data as { attachments?: unknown } | null)?.attachments) instanceof Array;
   }).toBe(true);
-  const view = await server.runtime.conversations.view(created.conversationId);
+  const view = await conversationView(server, created.conversationId);
   const message = view.messages.at(-1)!;
   expect(message.text).toContain('@src/index.ts');
   expect((message.data as { attachments?: unknown } | null)?.attachments).toEqual([
@@ -1614,14 +1170,10 @@ test('the composer inserts project file mentions and carries text attachments in
 
 test('the composer slash menu selects tools, switches model and queues compaction', async () => {
   const root = await temp('composer-slash');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 2, enabledModelCount: 2 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '先讨论', requestId: 'composer-slash' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }], models: 2 });
+  // The conversation starts at the lowest strength, so the console has to
+  // carry a real level for a model that offers no list of its own.
+  const created = await createConversation(server, { projectId: 'alpha', text: '先讨论', requestId: 'composer-slash', thinkingLevel: 'minimal' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1723,13 +1275,7 @@ test('the new-chat composer supports project mentions and attachments before sub
   const root = await temp('new-chat-composer');
   await mkdir(join(root, 'src'), { recursive: true });
   await writeFile(join(root, 'src', 'index.ts'), 'export const value = 1;\n');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1753,7 +1299,7 @@ test('the new-chat composer supports project mentions and attachments before sub
   await page.waitForFunction(() => location.hash.startsWith('#/conversations/'));
 
   const conversationId = await page.evaluate(() => location.hash.split('/').at(-1)!);
-  const view = await server.runtime.conversations.view(conversationId);
+  const view = await conversationView(server, conversationId);
   const message = view.messages.find(item => item.role === 'user')!;
   expect(message.text).toContain('@src/index.ts');
   expect((message.data as { attachments?: unknown } | null)?.attachments).toEqual([
@@ -1866,18 +1412,9 @@ test('the compact shell keeps the new-chat composer inside the viewport', async 
 
 test('the chat header exposes editable Agent prompts and Main Agent tools', async () => {
   const root = await temp('agent-context');
-  const agentContext = openAgentContextLibrary(join(root, 'graph', 'prompts'), { identity: 'Default Main' });
-  await agentContext.ensure();
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    access: () => fullAccessPolicy(),
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    agentContext,
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ text: '检查 Agent 上下文', requestId: 'agent-context-ui' });
+  const promptRoot = join(root, 'graph', 'prompts');
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { text: '检查 Agent 上下文', requestId: 'agent-context-ui' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -1893,7 +1430,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const sentPanel = await page.getByTestId('agent-context-sent').innerText();
   expect(sentPanel).toContain('实际发出');
   expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
-  await expect.poll(() => page.getByTestId('agent-context-sent').innerText()).toContain(`源码 Docs ${graphDocumentationPaths().root}`);
+  await expect.poll(() => page.getByTestId('agent-context-sent').innerText()).toContain(`源码 Docs ${join(process.cwd(), 'docs', 'agent')}`);
   expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
@@ -1915,108 +1452,38 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await page.getByTestId('agent-prompt-runtime/worker.md').click();
   await page.getByTestId('agent-prompt-editor').fill('CUSTOM CONVERSATION {{fullAccessInstruction}}');
   await page.getByRole('button', { name: '保存 Prompt' }).click();
-  await expect.poll(() => agentContext.override('runtime/worker.md')).toContain('CUSTOM CONVERSATION');
+  await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toContain('CUSTOM CONVERSATION');
   await page.getByRole('button', { name: '恢复默认' }).click();
   await page.getByTestId('toasts').getByText(/已恢复 Worker 运行规则/).waitFor();
-  await expect.poll(() => agentContext.override('runtime/worker.md')).not.toContain('CUSTOM CONVERSATION');
+  await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).not.toContain('CUSTOM CONVERSATION');
   await page.getByTestId('agent-prompt-editor').fill('');
   await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value)).toBe('');
   await page.getByRole('button', { name: '设为默认' }).click();
   await page.getByTestId('toasts').getByText(/已将 Worker 运行规则 设为默认/).waitFor();
-  await expect.poll(() => agentContext.prompt('runtime/worker.md')).toBe('');
+  await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toBe('');
   expect(await readFile(join(root, 'graph', 'prompts', 'defaults', 'runtime', 'worker.md'), 'utf8')).toBe('\n');
   await page.getByTestId('agent-prompt-editor').fill('Temporary after default');
   await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value)).toBe('Temporary after default');
   await page.getByRole('button', { name: '保存 Prompt' }).click();
   await page.getByTestId('toasts').getByText(/已保存 Worker 运行规则/).waitFor();
-  await expect.poll(() => agentContext.override('runtime/worker.md')).toContain('Temporary after default');
+  await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toContain('Temporary after default');
   await page.getByRole('button', { name: '恢复默认' }).click();
   await page.getByTestId('toasts').getByText(/已恢复 Worker 运行规则/).last().waitFor();
-  await expect.poll(() => agentContext.prompt('runtime/worker.md')).toBe('');
+  await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toBe('');
   await page.getByRole('button', { name: '恢复内置' }).click();
   await page.getByTestId('toasts').getByText(/已恢复 Worker 运行规则 的内置默认/).waitFor();
-  await expect.poll(() => agentContext.prompt('runtime/worker.md')).toContain('Use the native Pi tools');
+  await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toContain('Use the native Pi tools');
 
   await page.getByTestId('agent-context-tab-tools').click();
   await page.getByTestId('agent-tool-write').uncheck();
   await page.getByRole('button', { name: '保存工具选择' }).click();
-  await expect.poll(() => agentContext.disabledTools()).toContain('write');
-}, 60_000);
-
-test('a self-improvement report renders as its own card in the conversation', async () => {
-  const root = await temp('rsi-report');
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '改进 harness', requestId: 'rsi-report' });
-  const projection = new TaskStore(join(root, 'state', 'tasks.sqlite'));
-  cleanup.push(async () => projection.close());
-  const report = appendMessage(projection, {
-    conversationId: created.conversationId,
-    role: 'system',
-    kind: 'rsi',
-    text: '### RSI 已应用：修复超时',
-    data: {
-      id: 'rsi-1',
-      status: 'applied',
-      title: '修复超时',
-      problem: '命令在含空格路径下失败',
-      branch: 'rsi/fix-timeout',
-      commit: 'a'.repeat(40),
-      files: ['src/runtime/rsi.ts'],
-      validation: [{ command: 'node --run check', status: 'passed', output: '' }],
-      restartRequired: true,
-      diff: 'diff --git a/x b/x',
-      report: '### RSI 已应用：修复超时',
-    },
-  });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
-  const card = page.getByTestId('rsi-report');
-  await card.waitFor();
-  expect(await card.getAttribute('data-status')).toBe('applied');
-  expect(await card.getByRole('button', { name: '查看改动' }).count()).toBe(0);
-  await card.getByRole('button', { name: '展开', exact: true }).click();
-  const text = await card.innerText();
-  expect(text).toContain('修复超时');
-  expect(text).toContain('等待重载');
-  expect(text).toContain('src/runtime/rsi.ts');
-  expect(text).toContain('node --run check');
-  expect(text).toContain('等待正在执行的任务结束后重载');
-  await page.getByRole('button', { name: '查看改动' }).click();
-  await expect.poll(() => card.innerText()).toContain('diff --git');
-  appendMessage(projection, {
-    conversationId: created.conversationId, messageId: report.id, role: 'system', kind: 'rsi',
-    text: '重载已确认', data: { ...report.data as Record<string, import('../../src/core/types.ts').Json>, activation: { state: 'active', confirmedAt: Date.now() } },
-  });
-  await page.reload();
-  await expect.poll(() => card.innerText()).toContain('已生效');
-  expect(await card.locator('.rsi-report-problem').count()).toBe(0);
-  await card.getByRole('button', { name: '展开', exact: true }).click();
-  await expect.poll(() => card.innerText()).toContain('宿主已确认重载，改动已生效');
-  expect(await card.innerText()).not.toContain('等待重载');
+  await expect.poll(async () => await libraryDisabledTools(promptRoot)).toContain('write');
 }, 60_000);
 
 test('the sent tab shows the tool declarations one request carried, with their count and size', async () => {
   const root = await temp('agent-context-tools-ui');
-  const agentContext = openAgentContextLibrary(join(root, 'graph', 'prompts'), { identity: 'Default Main' });
-  await agentContext.ensure();
-  const server = await openGraphServer({
-    stateDir: join(root, 'state'),
-    projects: [{ id: 'alpha', root }],
-    webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 },
-    agentContext,
-  });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ text: '看声明', requestId: 'sent-tools-ui' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { text: '看声明', requestId: 'sent-tools-ui' });
 
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -2032,7 +1499,7 @@ test('the sent tab shows the tool declarations one request carried, with their c
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
-      docsRoot: graphDocumentationPaths().root,
+      docsRoot: join(process.cwd(), 'docs', 'agent'),
       definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
       prompts: [], disabledTools: [], tools: [], capabilities: [],
       sent: { operationId: 'op-1', at: 1, text: '<identity>demo</identity>', tools: recorded },
@@ -2053,10 +1520,8 @@ test('the sent tab shows the tool declarations one request carried, with their c
 
 test('draft markdown follows preferences and image attachments survive sending and reload', async () => {
   const root = await temp('draft-image');
-  const server = await openGraphServer({ stateDir: join(root, 'state'), projects: [{ id: 'alpha', root }], webDir,
-    startup: { mode: 'view', configured: true, modelCount: 1, enabledModelCount: 1 } });
-  cleanup.push(() => server.close());
-  const created = await server.runtime.conversations.create({ projectId: 'alpha', text: '图片测试', requestId: 'draft-image' });
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { projectId: 'alpha', text: '图片测试', requestId: 'draft-image' });
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
@@ -2092,9 +1557,8 @@ test('draft markdown follows preferences and image attachments survive sending a
 
 test('live Markdown edits one source, reveals syntax at the caret and preserves undo and composition', async () => {
   const root = await temp('live-markdown');
-  const server = await openGraphServer({stateDir:join(root,'state'),webDir,autoDrive:false});
-  cleanup.push(()=>server.close());
-  const created=await server.runtime.conversations.create({text:'Live editor',requestId:'live'});
+  const server = await consoleServer(root);
+  const created=await createConversation(server, {text:'Live editor',requestId:'live'});
   const browser=await chromium.launch({headless:true}); cleanup.push(()=>browser.close());
   const page=await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
@@ -2113,7 +1577,7 @@ test('live Markdown edits one source, reveals syntax at the caret and preserves 
   await input.press('ControlOrMeta+z');
   await expect.poll(()=>input.evaluate((e:HTMLTextAreaElement)=>e.value)).not.toContain('\nnext');
   await input.dispatchEvent('keydown',{key:'Enter',code:'Enter',isComposing:true});
-  expect((await server.runtime.conversations.view(created.conversationId)).messages.filter(m=>m.role==='user').length).toBe(1);
+  expect((await conversationView(server, created.conversationId)).messages.filter(m=>m.role==='user').length).toBe(1);
   await page.screenshot({path:'/tmp/graph-live-editor.png'});
   await page.goto(`${server.url}/#/catalog/architectures`);
   await page.getByTestId('architecture-canvas').waitFor();

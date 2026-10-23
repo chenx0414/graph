@@ -627,6 +627,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks", app.serveTasks)
 	mux.HandleFunc("GET /api/inbox", app.serveInbox)
 	mux.HandleFunc("GET /api/projects/{projectId}/entries", app.serveProjectEntries)
+	mux.HandleFunc("POST /api/projects/{projectId}/prepare", app.serveProjectPrepare)
 	mux.HandleFunc("GET /api/conversations", app.serveConversations)
 	mux.HandleFunc("POST /api/conversations", app.serveConversationCreate)
 	mux.HandleFunc("GET /api/conversations/{conversationId}", app.serveConversation)
@@ -1284,6 +1285,20 @@ func (app *GraphApp) serveProjectEntries(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"entries": app.runtime.ProjectEntries(projectID, query, limit)})
 }
 
+// serveProjectPrepare prepares one project for work. The console asks for it
+// when the user prepares the Git baseline of a project by hand.
+func (app *GraphApp) serveProjectPrepare(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	initialize, _ := body["initialize"].(bool)
+	createBaseline, _ := body["createBaseline"].(bool)
+	writeJSON(w, http.StatusOK, app.runtime.Prepare(TaskRuntimeProjectPrepareInput{
+		ProjectId:      r.PathValue("projectId"),
+		RequestId:      appBodyString(body, "requestId"),
+		Initialize:     initialize,
+		CreateBaseline: createBaseline,
+	}))
+}
+
 // serveConversations is the conversation list.
 func (app *GraphApp) serveConversations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().List(appQueryBool(r, "archived")))
@@ -1465,17 +1480,26 @@ func (app *GraphApp) serveDraftGraph(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	view := app.appConversationView(conversationID, r)
 	record, _ := view.(map[string]any)
-	proposal, _ := record["proposal"].(map[string]any)
 	// The proposal holds its spec as the native proposal itself, not as a
 	// plain record: reading it as a record found nothing, and the draft was
-	// always drawn empty.
+	// always drawn empty. A named version is the one the console opened.
+	proposal := record["proposal"]
+	if value, ok := appQueryInt(r, "version"); ok {
+		if value < 1 {
+			Raise("invalid_input", "version must be a positive integer")
+		}
+		proposal = app.runtime.Conversations().Proposal(conversationID, value)
+	}
 	var definition any
-	if proposal != nil {
-		switch spec := proposal["spec"].(type) {
+	switch spec := proposal.(type) {
+	case NativeProposal:
+		definition = spec.Definition
+	case map[string]any:
+		switch inner := spec["spec"].(type) {
 		case NativeProposal:
-			definition = spec.Definition
+			definition = inner.Definition
 		case map[string]any:
-			value, ok := spec["definition"]
+			value, ok := inner["definition"]
 			if !ok {
 				Raise("invalid_proposal", "A native graph definition is required")
 			}

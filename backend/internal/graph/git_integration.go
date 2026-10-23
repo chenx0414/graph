@@ -11,14 +11,14 @@ import (
 
 // ProjectPreparation is the recorded Git readiness of one project.
 type ProjectPreparation struct {
-	ProjectId     string
-	State         string
-	RepoRoot      *string
-	ProjectSubdir *string
-	Branch        *string
-	BaselineSha   *string
-	Detail        any
-	UpdatedAt     int64
+	ProjectId     string  `json:"projectId"`
+	State         string  `json:"state"`
+	RepoRoot      *string `json:"repoRoot"`
+	ProjectSubdir *string `json:"projectSubdir"`
+	Branch        *string `json:"branch"`
+	BaselineSha   *string `json:"baselineSha"`
+	Detail        any     `json:"detail"`
+	UpdatedAt     int64   `json:"updatedAt"`
 }
 
 type gitPreparationFields struct {
