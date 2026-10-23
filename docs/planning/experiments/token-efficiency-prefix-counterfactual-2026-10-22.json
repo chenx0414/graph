@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "caveats": [
+    "This is a calculation over a real ledger, not a measurement: no model was run.",
+    "The seam model keeps a result under 4000 characters and replaces a bigger one with a 1024 character summary; it ignores the per-tool limits and the rule that the first two reads of a result are not summarised, so it overstates the saving.",
+    "The setup reuse model drops a briefing that repeats one already sent, comparing the briefings by size rather than by content.",
+    "The static prefix is the size the real requests carried, entered as a parameter.",
+    "The saving of one request is multiplied by the number of requests in the real task, which is where a per-request saving becomes a per-task saving."
+  ],
+  "source": {
+    "db": "/Users/macmini/Library/Application Support/Graph/state/tasks.sqlite",
+    "conversationId": 3303,
+    "taskId": "52e92a78-9139-4cb1-9a2a-ab2bc822ac3a",
+    "durableEntries": 2087,
+    "events": 2085
+  },
+  "assumptions": {
+    "staticPrefixChars": 62804,
+    "cachedReadUsdPerMillion": 0.003,
+    "charsPerToken": 4
+  },
+  "sample": {
+    "requests": 1043,
+    "contextChars": 487735435,
+    "contextTokens": 121933859
+  },
+  "task": {
+    "requests": 28010,
+    "cacheReadTokens": 3263080429,
+    "cacheReadUsd": 9.789241287000001
+  },
+  "tree": {
+    "requests": 85481,
+    "cacheReadTokens": 4158156303,
+    "cacheReadUsd": 12.474468908999999
+  },
+  "variants": {
+    "seam": {
+      "label": "tool result seam",
+      "sample": {
+        "requests": 1043,
+        "savedTokens": 16686328,
+        "savedFraction": 0.13684736890195398
+      },
+      "task": {
+        "requests": 28010,
+        "cacheReadTokens": 3263080429,
+        "savedTokens": 448115091,
+        "savedFraction": 0.13732885252152024,
+        "savedUsd": 1.344345273
+      }
+    },
+    "setupReuse": {
+      "label": "task setup reuse",
+      "sample": {
+        "requests": 1043,
+        "savedTokens": 11835958,
+        "savedFraction": 0.09706867412657848
+      },
+      "task": {
+        "requests": 28010,
+        "cacheReadTokens": 3263080429,
+        "savedTokens": 317857319,
+        "savedFraction": 0.09741020055010112,
+        "savedUsd": 0.9535719570000001
+      }
+    },
+    "both": {
+      "label": "both",
+      "sample": {
+        "requests": 1043,
+        "savedTokens": 28522286,
+        "savedFraction": 0.23391604302853247
+      },
+      "task": {
+        "requests": 28010,
+        "cacheReadTokens": 3263080429,
+        "savedTokens": 765972410,
+        "savedFraction": 0.23473905307162135,
+        "savedUsd": 2.29791723
+      }
+    }
+  }
+}
