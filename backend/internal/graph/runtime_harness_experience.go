@@ -8,25 +8,40 @@ import (
 	"strings"
 )
 
-// The harness experience store keeps the lessons earlier tasks adopted per
-// domain, so the next task of that domain starts from what was learned.
-
-// HarnessExperienceEntry is one adopted lesson: what the situation looked like,
-// what to do about it, and what shows that it worked.
+// The harness experience store holds what a project has learned about its own
+// harness: the friction it has met and the lessons it has adopted. They are one
+// body of knowledge at two stages - something noticed, and something that
+// worked - so they live in one store and are read by one tool.
 //
-// Axis says how far the lesson reaches. A general lesson holds for every kind
-// of work and is found by every domain; a specific lesson holds for the domain
-// it was learned in and is found only there.
+// Only the adopted lessons travel into a prompt. A friction is a suspicion; a
+// lesson is what the project saw happen. Injecting both would put guesses in
+// front of the next task as if they were facts.
+
+// HarnessExperienceEntry is one piece of harness knowledge: what the situation
+// looked like, what to do about it, and what shows that it worked.
+//
+// Axis says how far it reaches. A general lesson holds for every kind of work
+// and is found by every domain; a specific lesson holds for the domain it was
+// learned in and is found only there.
+//
+// Kind says which stage it is at: a friction is noticed, a lesson is adopted.
+// Status says where a friction stands.
 type HarnessExperienceEntry struct {
-	Domain    string `json:"domain"`
-	Axis      string `json:"axis"`
-	Chosen    string `json:"chosen"`
-	Cue       string `json:"cue"`
-	Lesson    string `json:"lesson"`
-	Evidence  string `json:"evidence"`
-	Harness   string `json:"harness,omitempty"`
-	GraphId   string `json:"graphId,omitempty"`
-	CreatedAt int64  `json:"createdAt"`
+	Domain   string `json:"domain"`
+	Axis     string `json:"axis"`
+	Kind     string `json:"kind"`
+	Status   string `json:"status"`
+	Chosen   string `json:"chosen,omitempty"`
+	Cue      string `json:"cue"`
+	Lesson   string `json:"lesson,omitempty"`
+	Evidence string `json:"evidence,omitempty"`
+	Harness  string `json:"harness,omitempty"`
+	// Overlay is the prompt text the adopted candidate ran under. A later
+	// probe can start from it, so each round builds on the last winner
+	// instead of every round starting from nothing.
+	Overlay   map[string]string `json:"overlay,omitempty"`
+	GraphId   string            `json:"graphId,omitempty"`
+	CreatedAt int64             `json:"createdAt"`
 }
 
 // The two axes a lesson can be claimed on.
@@ -41,14 +56,14 @@ const (
 // domain reads it, which is what makes a general lesson general.
 const HARNESS_GENERAL_SCOPE = "general"
 
-// HarnessComparison is the contrast of several candidates of one task.
-
 // HarnessDecisionInput records which candidate was adopted and why.
 type HarnessDecisionInput struct {
 	GraphId string
 	Domain  string
 	// Axis is general or specific. It decides the scope the lesson lands in.
-	Axis      string
+	Axis string
+	// Overlay is the prompt text the adopted candidate ran under.
+	Overlay   map[string]string
 	Chosen    string
 	Cue       string
 	Lesson    string
@@ -101,12 +116,12 @@ type HarnessExperienceInput struct {
 
 type HarnessExperienceResult struct {
 	Domain string `json:"domain,omitempty"`
-	// Scopes names the scopes that hold lessons.
+	// Scopes names the scopes that hold knowledge.
 	Scopes []string `json:"scopes,omitempty"`
-	// Entries are the lessons of the scope that was read.
+	// Entries are everything the domain should know: its own entries and the
+	// ones that hold for every domain. One list, because it is one body of
+	// knowledge; each entry says which axis it belongs to.
 	Entries []HarnessExperienceEntry `json:"entries,omitempty"`
-	// General are the lessons that hold for every domain.
-	General []HarnessExperienceEntry `json:"general,omitempty"`
 }
 
 // HarnessExperience reads the lessons earlier tasks adopted.
@@ -126,8 +141,10 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 		result.Entries = harnessExperienceEntries(service.artifacts, service.ownerTaskId, scope)
 		return result
 	}
-	result.Entries = harnessExperienceEntries(service.artifacts, service.ownerTaskId, harnessSlug(domain))
-	result.General = harnessExperienceEntries(service.artifacts, service.ownerTaskId, HARNESS_GENERAL_SCOPE)
+	result.Entries = append(
+		harnessExperienceEntries(service.artifacts, service.ownerTaskId, harnessSlug(domain)),
+		harnessExperienceEntries(service.artifacts, service.ownerTaskId, HARNESS_GENERAL_SCOPE)...,
+	)
 	return result
 }
 
@@ -145,7 +162,13 @@ func harnessExperiencePrompt(artifacts *ArtifactWorkspace, taskId string) string
 	if artifacts == nil || taskId == "" {
 		return ""
 	}
-	entries := harnessExperienceEntries(artifacts, taskId, HARNESS_GENERAL_SCOPE)
+	// The lessons that reach a task are the ones of the kind of work the
+	// project declared, plus the ones that hold for every kind of work.
+	entries := []HarnessExperienceEntry{}
+	if domain := harnessDeclaredDomain(artifacts, taskId); domain != "" {
+		entries = append(entries, harnessAdoptedLessons(harnessExperienceEntries(artifacts, taskId, harnessSlug(domain)))...)
+	}
+	entries = append(entries, harnessAdoptedLessons(harnessExperienceEntries(artifacts, taskId, HARNESS_GENERAL_SCOPE))...)
 	if len(entries) == 0 {
 		return ""
 	}
@@ -179,8 +202,6 @@ func harnessExperienceScope(domain, axis string) string {
 	}
 	return harnessSlug(domain)
 }
-
-// harnessCandidateFacts collects the recorded behavior of each candidate.
 
 func harnessExperienceName(domain string) string {
 	return HARNESS_EXPERIENCE_PREFIX + "-" + harnessSlug(domain)
@@ -329,6 +350,7 @@ func (service *graphManagementService) harnessResolveChosen(graphId string, chos
 // with it.
 func (service *graphManagementService) HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
 	input.Chosen = service.harnessResolveChosen(input.GraphId, input.Chosen)
+	input.Overlay = service.harnessCandidateOverlay(input.GraphId, input.Chosen)
 	return harnessRecordDecision(store, entries, input)
 }
 
@@ -370,11 +392,14 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	entry := HarnessExperienceEntry{
 		Domain:    domain,
 		Axis:      axis,
+		Kind:      HARNESS_KIND_LESSON,
+		Status:    HARNESS_STATUS_ADOPTED,
 		Chosen:    chosen,
 		Cue:       cue,
 		Lesson:    lesson,
 		Evidence:  evidence,
 		Harness:   strings.TrimSpace(input.Harness),
+		Overlay:   input.Overlay,
 		GraphId:   input.GraphId,
 		CreatedAt: NowMillis(),
 	}

@@ -258,6 +258,19 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 			{"harness", tbOptional(tbString(map[string]any{"description": "The harness change that produced the adopted behavior."}))},
 			{"requestId", tbOptional(tbString(nil))},
 		}, []string{"domain", "chosen", "cue", "lesson", "evidence"}), Available: main && features.Harness},
+		{Name: "record_harness_friction", Label: "Record harness friction", Description: "Record friction the harness has: a situation that cost time, misled the work, or went wrong - before it is solved. It lands in the same store as the adopted lessons, so the two read as one body of knowledge: this is what we met, that is what we did about it. A friction is a suspicion, not a lesson: only adopted lessons travel into the prompts of later tasks, so recording one never puts a guess in front of the next task. Give the cue (the situation that happened) and why it matters. When a change addresses it, record the same cue again with status fixed and the reference that fixed it.", Parameters: tbObject([]tbField{
+			{"domain", tbString(map[string]any{"description": "Domain the friction belongs to; later tasks in this domain find it."})},
+			{"cue", tbString(map[string]any{"description": "The situation in which the friction showed up."})},
+			{"why", tbString(map[string]any{"description": "Why it matters - what it cost or what it led to."})},
+			{"axis", tbOptional(tbString(map[string]any{"description": "general (it is not about one kind of work) or specific (it is about this domain only)."}))},
+			{"status", tbOptional(tbString(map[string]any{"description": "open, fixed or rejected. Record the same cue again to move it."}))},
+			{"ref", tbOptional(tbString(map[string]any{"description": "What fixed it, for example the commit that did."}))},
+			{"requestId", tbOptional(tbString(nil))},
+		}, []string{"domain", "cue", "why"}), Available: main && features.Harness},
+		{Name: "declare_harness_domain", Label: "Declare the harness domain", Description: "Tell the host what kind of work this project is, so the lessons of that domain reach the tasks that follow. The domain is one name - parser, billing, code review - and it is recorded for the project, not for one task: the kind of work a project does does not change with the conversation. Once it is declared, every later task of the project starts with the lessons of that domain and with the general ones. Declare it when the kind of work becomes clear, and declare it again if the project turns out to do more than one kind of work.", Parameters: tbObject([]tbField{
+			{"domain", tbString(map[string]any{"description": "The name of the kind of work this project does."})},
+			{"requestId", tbOptional(tbString(nil))},
+		}, []string{"domain"}), Available: main && features.Harness},
 		{Name: "read_harness_experience", Label: "Read harness experience", Description: "Read the lessons earlier tasks adopted: the cue that triggered them, what to do, and the evidence that supported them. With a domain you get that domain's own lessons and the general ones - a lesson claimed on the general axis holds for every kind of work, so it reaches this domain too. Read it before working on a task whose kind of work was done before, so the harness starts from what was learned instead of from scratch. With no domain it lists the scopes that hold lessons.", Parameters: tbObject([]tbField{
 			{"domain", tbOptional(tbString(map[string]any{"description": "Domain to read. Omit it to list the domains that hold lessons."}))},
 		}, nil), Available: main && features.Harness},
@@ -277,6 +290,7 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 				{"model", tbOptional(tbString(map[string]any{"description": "Model this candidate runs on; defaults to the probe's model."}))},
 			}, []string{"label"}))},
 			{"recipe", tbOptional(tbString(map[string]any{"description": "Agent definition every candidate runs under unless its variant names one. read_system_capabilities lists them."}))},
+			{"baseHarness", tbOptional(tbString(map[string]any{"description": "adopted to start every candidate from the harness this project already adopted, so the round tests a change on top of the last winner instead of beside it."}))},
 			{"model", tbOptional(tbString(map[string]any{"description": "Model every candidate runs on unless its variant names one."}))},
 			{"domain", tbOptional(tbString(map[string]any{"description": "Domain the task belongs to; its adopted lessons come back with the contrast."}))},
 			{"timeoutMs", tbOptional(tbNumber())},

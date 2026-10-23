@@ -192,10 +192,15 @@ test('unknown prompt keys and invalid tool names are refused', async () => {
 // The harness identity is the only durable instruction the Main Agent gets about its own
 // improvement work, and a compacted context is exactly when it matters. These assertions pin
 // the two requirements so removing either one is a visible test failure, not a silent drift.
-test('the harness identity records a durable backlog and reports it without being asked', () => {
-  // The backlog must live outside the model context, under a named artifact.
-  expect(DEFAULT_MAIN_RSI_IDENTITY).toContain('harness-backlog');
+test('the harness identity records durable harness knowledge and reports it without being asked', () => {
+  // The knowledge must live outside the model context, in the store that
+  // holds both the friction met and the lessons adopted.
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toContain('record_harness_friction');
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toContain('record_harness_decision');
   expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/compacted/);
+  // Only what was adopted may travel into a later task; a friction is a
+  // suspicion and the identity has to say so.
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/Only the adopted lessons travel/);
   // Finishing a work item must include an unprompted report and a proposal.
   expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/unprompted/);
   expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/propose/);

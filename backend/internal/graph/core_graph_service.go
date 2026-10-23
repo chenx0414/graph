@@ -19,6 +19,8 @@ type GraphManagement interface {
 	HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult
 	// HarnessDecision records the adopted candidate and the lesson it taught.
 	HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
+	// HarnessFriction records friction the project met but has not solved.
+	HarnessFriction(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
 	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe(input HarnessProbeInput) HarnessProbeResult
 	// HarnessEvidence reads the evidence of the caller's own run: the

@@ -172,16 +172,14 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
   expect(specificDecision.entries[0]!.chosen).toBe('domain-way');
 
   // The domain finds both: its own lesson and the general one.
-  const parser = JSON.parse(resultOf('read-parser') || '{}') as { entries: { axis: string; lesson: string }[]; general: { axis: string; lesson: string }[] };
-  expect(parser.entries).toHaveLength(1);
-  expect(parser.entries[0]!.axis).toBe('specific');
-  expect(parser.general).toHaveLength(1);
-  expect(parser.general[0]!.axis).toBe('general');
+  const parser = JSON.parse(resultOf('read-parser') || '{}') as { entries: { axis: string; lesson: string }[] };
+  // One list: the domain's own entries and the ones that hold for every domain.
+  expect(parser.entries).toHaveLength(2);
+  expect(parser.entries.map(entry => entry.axis).sort()).toEqual(['general', 'specific']);
 
   // Another domain finds the general lesson and not the domain one.
-  const billing = JSON.parse(resultOf('read-billing') || '{}') as { entries: { axis: string }[]; general: { axis: string; lesson: string }[] };
-  expect(billing.entries ?? []).toHaveLength(0);
-  expect(billing.general).toHaveLength(1);
-  expect(billing.general[0]!.axis).toBe('general');
-  expect(billing.general[0]!.lesson).toContain('input shape');
+  const billing = JSON.parse(resultOf('read-billing') || '{}') as { entries: { axis: string; lesson: string }[] };
+  expect(billing.entries ?? []).toHaveLength(1);
+  expect(billing.entries[0]!.axis).toBe('general');
+  expect(billing.entries[0]!.lesson).toContain('input shape');
 }, 300_000);

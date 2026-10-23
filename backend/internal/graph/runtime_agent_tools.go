@@ -58,6 +58,8 @@ type AgentToolsGraphManagement struct {
 	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
 	// HarnessDecision records the adopted candidate and the lesson it taught.
 	HarnessDecision func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
+	// HarnessFriction records friction the project met but has not solved.
+	HarnessFriction func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
 	// HarnessEvidence reads the evidence of the caller's own run.
 	HarnessEvidence func(input HarnessEvidenceInput) HarnessEvidenceResult
 }
@@ -894,6 +896,77 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			})
 			return agentToolsText(stringifyJSON(result))
 		},
+		"record_harness_friction": func(id string, params map[string]any) any {
+			if input.GraphManagement.HarnessFriction == nil {
+				panic(errors.New("Recording harness friction is unavailable in this session"))
+			}
+			requestId := ""
+			if value, ok := params["requestId"].(string); ok {
+				requestId = strings.TrimSpace(value)
+			}
+			ref := ""
+			if value, ok := params["ref"].(string); ok {
+				ref = strings.TrimSpace(value)
+			}
+			domain := strings.TrimSpace(agentToolsStringOrEmpty(params["domain"]))
+			axis := harnessAxis(agentToolsStringOrEmpty(params["axis"]))
+			scope := harnessExperienceScope(domain, axis)
+			entries := []HarnessExperienceEntry{}
+			if input.GraphManagement.HarnessExperience != nil {
+				existing, ok := input.GraphManagement.HarnessExperience(map[string]any{"scope": scope}).(HarnessExperienceResult)
+				if ok {
+					entries = existing.Entries
+				}
+			}
+			result := input.GraphManagement.HarnessFriction(&artifacts, entries, HarnessFrictionInput{
+				Domain:    domain,
+				Axis:      axis,
+				Cue:       strings.TrimSpace(agentToolsStringOrEmpty(params["cue"])),
+				Why:       strings.TrimSpace(agentToolsStringOrEmpty(params["why"])),
+				Status:    strings.TrimSpace(agentToolsStringOrEmpty(params["status"])),
+				Ref:       ref,
+				RequestId: requestId,
+			})
+			return agentToolsText(stringifyJSON(result))
+		},
+		"declare_harness_domain": func(id string, params map[string]any) any {
+			if !artifacts.present || artifacts.publish == nil {
+				panic(errors.New("Declaring the harness domain is unavailable in this session"))
+			}
+			domain := strings.TrimSpace(agentToolsStringOrEmpty(params["domain"]))
+			if domain == "" {
+				panic(errors.New("A domain is required: the lessons of that domain reach the tasks that follow"))
+			}
+			requestId := ""
+			if value, ok := params["requestId"].(string); ok {
+				requestId = strings.TrimSpace(value)
+			}
+			if requestId == "" {
+				requestId = "harness-domain-" + harnessSlug(domain)
+			}
+			content := domain
+			published := artifacts.publish(PublishArtifactInput{
+				Namespace: HARNESS_EXPERIENCE_NAMESPACE,
+				Name:      HARNESS_DOMAIN_ARTIFACT,
+				Content:   &content,
+				MediaType: "text/plain",
+				Title:     "Harness domain: " + domain,
+				Summary:   "The kind of work this project does: " + domain,
+				RequestId: requestId,
+				Metadata:  map[string]any{"domain": harnessSlug(domain)},
+			})
+			promoted := published
+			if artifacts.promote != nil {
+				if record, promoteErr := harnessPromote(&artifacts, published, requestId+"-promote"); promoteErr == nil {
+					promoted = record
+				}
+			}
+			return agentToolsText(stringifyJSON(map[string]any{
+				"domain":     domain,
+				"artifactId": promoted.ArtifactId,
+				"version":    promoted.Version,
+			}))
+		},
 		"read_harness_experience": func(id string, params map[string]any) any {
 			domain := ""
 			if value, ok := params["domain"].(string); ok {
@@ -932,12 +1005,13 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 				timeout = int(value)
 			}
 			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessProbe(HarnessProbeInput{
-				Task:      agentToolsStringOrEmpty(params["task"]),
-				Recipe:    agentToolsStringOrEmpty(params["recipe"]),
-				Model:     agentToolsStringOrEmpty(params["model"]),
-				Variants:  variants,
-				Domain:    agentToolsStringOrEmpty(params["domain"]),
-				TimeoutMs: timeout,
+				Task:        agentToolsStringOrEmpty(params["task"]),
+				Recipe:      agentToolsStringOrEmpty(params["recipe"]),
+				Model:       agentToolsStringOrEmpty(params["model"]),
+				BaseHarness: agentToolsStringOrEmpty(params["baseHarness"]),
+				Variants:    variants,
+				Domain:      agentToolsStringOrEmpty(params["domain"]),
+				TimeoutMs:   timeout,
 			})))
 		},
 		"ask_user": func(id string, params map[string]any) any {
