@@ -536,6 +536,14 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 那条路上：Go 起 worker ✓ → worker 起命令（`detached`，独占进程组 ✓）→ **worker 随即退出** ✓ → 命令被 reparent 给 launchd（ppid=1 ✓）→ **没有任何人负责结束它** ✓。worker 为什么会退，是这条路上最后要查的一步（它的日志两次都空，说明它没走到我装日志的地方；这本身也是一条线索）。**修法也因此收窄到一处**：worker 必须活到它起的命令结束（它就是那个监管人），或者 Go 不能在命令还在跑的时候关掉那条监管通道。
 
+**最后再分清一次「契约对应哪条路」**（这一步决定 keeper 该怎么写）：退役的那条契约是 TypeScript 的 `host-command.ts`——「宿主命令像宿主自己那样跑，**不带座位**」——它的对应物是 **Go 的 `RunHostCommand`** ✓，而它服务的是**节点自己的 `bash` 工具**（`runtime_kernel_node_host.go` 给节点挂了 `NativeTools: ["bash"]` ✓，走 operation broker ✓）。**探针里的 check 模块走的是另一条**——图的 `workspace.command` 模块 → 受限进程（**带座位** ✓）→ 那条 exec 链 → 命令的父进程是 daemon ✓。**所以探针量的是沙箱那条路，不是契约那条路** ✓。
+
+两条路的现状因此是：
+- **沙箱那条（模块的 `workspace.command`）**：命令的父进程就是 daemon ✓，daemon 一死它成孤儿 ✓。**这条与 TypeScript 自己的 `restricted-process.ts` 同构**（那边也是一路 exec ✓），**所以它不是退役带来的回归** ✓。
+- **契约那条（节点的 `bash` 工具 → `RunHostCommand` → `host-command-worker.mjs`）**：**有监管人** ✓（worker ✓，靠 IPC channel 知道主人没了 ✓，隔离实验里这条路是通的 ✓）——**但 Go 的原生 `bash` 工具是不是也走它，尚未验证**。
+
+**所以 keeper 应该这么写**：让**节点自己的 `bash` 工具**去跑一个长命令（不是 check 模块 ✓），等它真的在跑（心跳 ✓），SIGKILL daemon，断言心跳在有界时间内停。**如果原生 `bash` 工具是直接起命令（没有监管人），它就会像沙箱那条一样成孤儿** ✓——那时的修法就是给它一个监管人（`host-command-worker.mjs` 已经是这个形状 ✓）。
+
 **keeper 照旧**：让 check 模块的产出合法，命令真的活着，然后 SIGKILL daemon，断言心跳在有界时间内停。
 
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
