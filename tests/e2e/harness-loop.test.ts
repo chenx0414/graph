@@ -137,7 +137,10 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
   expect(first.status).toBe(200);
 
   const waitFor = async (id: string): Promise<string> => {
-    const deadline = Date.now() + 90000;
+    // The probe waits for its candidates, and it gives up on its own after
+    // 180 seconds. The window here has to be wider than that, or a loaded
+    // machine would fail the test before the probe could answer.
+    const deadline = Date.now() + 240000;
     while (!results.get(id) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
     return results.get(id) ?? '';
   };
@@ -182,4 +185,4 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
   const later = prompts.filter(entry => entry.user.includes('Do unrelated work')).map(entry => entry.system).join('\n');
   expect(later).toContain('Lessons earlier runs of this project learned');
   expect(later).toContain('Read the file list before reading a file.');
-}, 200_000);
+}, 420_000);
