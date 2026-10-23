@@ -7,6 +7,8 @@
 ## 结论摘要
 
 1. **53 条里有 24 条落在 Graph 自己身上**：16 条本轮修掉（其中 14 条有先红后绿的 E2E，#8 与 #29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），4 条确认为真实缺陷但不在本轮修复范围（#22/#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。
+
+   #41 改过一轮又退了：改动本身是对的（内核知道模型有没有回答，驱动却不用这个信号），但那一轮让空回合的节点迟迟不落到终态，分不清它是在重试还是被停放着。发一个可能把节点挂住的改动比留着这个缺陷更糟，所以退回并把问题写清楚。
 2. 修掉的 16 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）、补交额度按 execution 而不是按 node 计（#8）、被停的那一步在任务停掉之后又写自己的结论（#13）。
 3. **25 条在本栈里不存在或已被处理**（ALREADY-OK 20 条 + N/A 5 条）：Graph 里没有 span/trace 机制、没有 poison 语义、没有依赖图边数上限、没有"七家 provider"（daemon 只讲 OpenAI Completions 与 Anthropic Messages 两种协议），死锁、并行审批、端口独占这些都有真实守卫。
 4. **4 条属于上游 PiG**（`github.com/MichaelKinsy/PiG v0.5.1`）或上游 npm 包，本仓库改不了，已按上游文件分组记录，便于一次性提给上游。
@@ -67,7 +69,7 @@
 | 38 | N/A | 低 | PiG `telemetry/memory.go:64-70` | Graph 不 import `PiG/telemetry` |
 | 39 | ALREADY-OK（Graph 部分） | 中 | `pigkernel/provider.go` `restoreToolCallArguments`；`CONTEXT.md` 空参数工具调用 | 空参数调用已恢复为 `{}`；"null → no result"是上游 SDK 形状 |
 | 40 | **OURS-GO** → 已修 | 高 | `pigkernel/session.go` `Compact`/`reportCompaction`；`pigkernel/provider.go` `bridgeRequestOptions` | 空结果被读成成功；摘要预算被丢；压缩事件从未翻译 |
-| 41 | OURS-GO → 未修（后续） | 中 | `runtime_pig_node_host.go:181-190`；`core_node_turn_driver.go:112-119` | 完成由"没有错误"推断，而非"有交付物" |
+| 41 | OURS-GO → 未修（试过一次，退回） | 中 | `core_node_turn_driver.go`；`pigkernel/turn.go` `answerText` | 完成由"没有错误"推断，而非"有交付物"：模型什么都没说的回合也算做完 |
 | 42 | ALREADY-OK | 低 | `pigkernel/turn.go` `newRequestId`（16 字节随机） | Graph 的 id 不截断，不会一字符之差相撞 |
 | 43 | ALREADY-OK | 低 | `core_access_policy.go:249-255`；`core_rule_engine.go:498-501` | 没有 deny 规则语言；畸形输入一律 fail closed |
 | 44 | ALREADY-OK | 低 | `server_config.go:420` `configPositiveInt` | 未知模型被直接拒绝；连"配置了但没写 contextWindow"也会被配置校验拒绝（实测 `invalid_config: models.entries[0].contextWindow must be a positive integer`） |
@@ -217,7 +219,7 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 
 | # | 机制 | 修复位置 |
 |---|---|---|
-| 41 | 完成由"没有错误"推断：内核没报错就算 `Done:true`，节点没有声明必需输出时驱动也返回 `Done:true` | `runtime_pig_node_host.go` + `core_node_turn_driver.go`：由真实提交或非空回答推导完成 |
+| 41 | 完成由"没有错误"推断：内核没报错就算 `Done:true`，节点没有声明必需输出时驱动也返回 `Done:true` | 内核其实知道模型有没有回答（`answerText` 拿得到回答的内容），驱动没有用这个信号。改过一轮（`0c9b3a9e`）：让回合带着"有没有回答"，驱动只在回答过时才收尾。那一轮**退了**（`5222d84d`）：空回合的节点没有在 E2E 等待的时间内落到终态，分不清它是在重试还是被停放着——与其发一个可能把节点挂住的改动，不如把这个缺陷记下来。真正要回答的问题是：空回合应该重试、判失败还是停放，以及停放的节点怎么报告自己 |
 | 14 | `ListBounded`/`ReadBoundedBytes` 无上限，`ls`/`find` 没有默认 limit，18MB 目录清单先在 Graph 堆里成型 | `runtime_bounded_path.go`；`runtime_pig_native_tools.go` 给目录类工具默认 limit |
 | 22 | 每个流事件一次 INSERT + 一次通知；工具调用还额外两次事件与一次活动写 | `runtime_pi_adapter.go` 合并 `message.tool` 起止；`core_store.go` 合并活动写 |
 | 46 | 48 个工具声明里 15,229 字符描述对 2,225 字符参数，87.3% 是散文 | `runtime_agent_tool_definitions.go`：描述压成一句操作说明，长协议移进 `<docs>` |
