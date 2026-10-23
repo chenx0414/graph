@@ -110,7 +110,10 @@ RSI 只改"正在运行的这份代码"，所以：
   传 `domain` 会同时带回该领域已采纳的经验。
 - `record_harness_decision`：记录采纳了哪个候选，以及这条教训的**线索、做法与依据**。
   三者缺一不可——没有依据的教训会教坏下一个任务。记录会被提升到项目作用域。
-- `read_harness_experience`：读某领域已采纳的经验；不带领域则列出有哪些领域。
+  `axis` 决定这条教训**能走多远**：`general` 表示它对任何一类工作都成立（于是每个领域都能读到它），
+  `specific` 表示它只在这个领域成立。不写默认 `specific`——跨领域的分量要靠证据去claim，不能顺手写。
+- `read_harness_experience`：读某领域已采纳的经验：它自己的 `entries` 加上普遍适用的 `general`；
+  不带领域则列出有哪些 scope。
 
 对比只给事实，不给判决：选谁由你决定，因为这类任务通常没有标准答案可比。
 判决之后记得用 `record_harness_decision` 沉淀，否则下一个同领域任务仍然从零开始。
@@ -137,6 +140,9 @@ RSI 要基于证据，而不是基于回忆。`read_harness_evidence` 把这次�
 - 给一个 **task** 和 **两到六个变体**。每个变体有一个 label，和它要替换的提示文本
   （`rules/common.md`、`rules/worker.md`、`tools/worker.md`、`runtime/node.md`、`agents/<definition-id>.md`），
   可选地指定自己的 recipe 与 model。
+- **一次提两个轴**：一个 `axis: "general"`（这条改动应当对任何一类工作都成立），
+  一个 `axis: "specific"`（只对当前领域成立）。对比会告诉你哪一轴真的划算，
+  而赢的那一轴决定这条教训将来能被谁读到。
 - 宿主建一张内部图：每个变体一个节点，同一个任务，同一个输入，只有 harness 不同。
   它等所有候选停稳，然后把每个候选做了什么、差在哪里报回来——和 `compare_harness_candidates` 同一个形状。
 - 候选仍然是匿名的：按它们产出的东西选，不要按哪条车道产的选。

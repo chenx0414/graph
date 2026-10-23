@@ -130,8 +130,11 @@ Harness² 的跑分框架不需要移植，它的**方法**可以拆成三个 Gr
   配套的 `NodeDefinition.harness` 让同一张图里两个节点跑同一任务、不同 harness；
   `AgentContextLibrary.WithOverlay` 让覆盖落在**会话真正读的那份库**上，
   而不是只落在记录用的快照里。
-- **P3：双轴提案与合成**。Harness² 的 INV（通用不变式）与 DOM（领域特化）两轴提案，
-  再从两者合成，比 Graph 现在一次性改动的收敛性更好。探针已经把"比较"这一步备好了，缺的是"怎么提"。
+- **P3：双轴提案（已落地）**。探针的每个变体带一个轴：`general`（这条改动应当对任何一类
+  工作都成立）或 `specific`（只对当前领域成立）。裁决时同一条教训落在同轴的 scope 里：
+  `general` 的 scope 被**每个领域**读到，`specific` 的只留在本领域。
+  Harness² 的 INV/DOM 两轴在这里换了个说法：INV 不再是"一份更通用的 harness 树"，
+  而是"一条每个领域都能用上的教训"。合成（把两轴的赢家合并成一份 harness）仍待做。
 - **P4：经验进上下文**。把领域经验接到 prompt 组装里（类似 harness-backlog 的注入方式），
   让下一个任务在开工前就带着上一轮的教训，而不必先调用工具。
 - **P5：把评测脚本接进闭环**。`harness-real-eval.mjs` 目前是离线脚本；

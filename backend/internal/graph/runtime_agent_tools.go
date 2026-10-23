@@ -867,11 +867,14 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 				harness = strings.TrimSpace(value)
 			}
 			domain := strings.TrimSpace(agentToolsString(params["domain"]))
-			// The lessons already adopted in this domain are the ones the new
-			// lesson joins, so they are read before it is written.
+			axis := harnessAxis(agentToolsStringOrEmpty(params["axis"]))
+			// The lessons already adopted in the scope this lesson lands in
+			// are the ones it joins, so they are read before it is written.
 			entries := []HarnessExperienceEntry{}
 			if input.GraphManagement.HarnessExperience != nil {
-				existing, ok := input.GraphManagement.HarnessExperience(map[string]any{"domain": domain}).(HarnessExperienceResult)
+				existing, ok := input.GraphManagement.HarnessExperience(map[string]any{
+					"scope": harnessExperienceScope(domain, axis),
+				}).(HarnessExperienceResult)
 				if ok {
 					entries = existing.Entries
 				}
@@ -879,6 +882,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			result := harnessRecordDecision(&artifacts, entries, HarnessDecisionInput{
 				GraphId:   strings.TrimSpace(agentToolsString(params["graphId"])),
 				Domain:    domain,
+				Axis:      axis,
 				Chosen:    strings.TrimSpace(agentToolsString(params["chosen"])),
 				Cue:       strings.TrimSpace(agentToolsString(params["cue"])),
 				Lesson:    strings.TrimSpace(agentToolsString(params["lesson"])),
@@ -1465,6 +1469,7 @@ func agentToolsHarnessVariants(value any) ([]HarnessProbeVariant, error) {
 		}
 		variant := HarnessProbeVariant{
 			Label:   agentToolsStringOrEmpty(record["label"]),
+			Axis:    agentToolsStringOrEmpty(record["axis"]),
 			Recipe:  agentToolsStringOrEmpty(record["recipe"]),
 			Model:   agentToolsStringOrEmpty(record["model"]),
 			Harness: map[string]string{},

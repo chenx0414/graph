@@ -86,8 +86,13 @@ type HarnessCompareInput struct {
 
 // HarnessProbeVariant is one candidate harness of a probe: the same task, a
 // different set of prompt texts.
+//
+// Axis says how far the variant's lesson would reach. A general variant tries
+// a change that should hold for every kind of work; a specific variant tries
+// one that holds for this domain only.
 type HarnessProbeVariant struct {
 	Label   string            `json:"label"`
+	Axis    string            `json:"axis,omitempty"`
 	Recipe  string            `json:"recipe,omitempty"`
 	Model   string            `json:"model,omitempty"`
 	Harness map[string]string `json:"harness,omitempty"`
@@ -106,6 +111,7 @@ type HarnessProbeInput struct {
 // HarnessProbeCandidate names one variant of a probe and the node that ran it.
 type HarnessProbeCandidate struct {
 	Label  string `json:"label"`
+	Axis   string `json:"axis"`
 	NodeId string `json:"nodeId"`
 	AnonId string `json:"anonId"`
 }
@@ -257,6 +263,7 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 		nodeId := nodeIds[index]
 		candidates = append(candidates, HarnessProbeCandidate{
 			Label:  strings.TrimSpace(variant.Label),
+			Axis:   harnessAxis(variant.Axis),
 			NodeId: nodeId,
 			AnonId: anonByNode[nodeId],
 		})
@@ -275,6 +282,17 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 func (service *graphManagementService) harnessProbeStarted(graphId string) bool {
 	row := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_executions WHERE task_id=?", graphId)
 	return kernelInt(row["count"]) > 0
+}
+
+// harnessAxis is the axis of a claim: general or specific. A claim that does
+// not say stays specific, because a lesson only earns every domain's
+// attention when it is claimed for every domain.
+func harnessAxis(axis string) string {
+	normalized := strings.ToLower(strings.TrimSpace(axis))
+	if normalized == HARNESS_AXIS_GENERAL {
+		return HARNESS_AXIS_GENERAL
+	}
+	return HARNESS_AXIS_SPECIFIC
 }
 
 // harnessProbeSettled reports whether every candidate has stopped working.
@@ -382,9 +400,14 @@ func (service *graphManagementService) HarnessCompare(input HarnessCompareInput)
 		comparison.Differences[candidate.AnonId] = harnessDifferences(baseFacts, candidate)
 	}
 	if comparison.Domain != "" {
-		// The lessons of this domain travel with the comparison: a new
-		// candidate is judged against what earlier tasks learned.
-		comparison.Experience = harnessExperienceEntries(service.artifacts, service.ownerTaskId, comparison.Domain)
+		// The lessons travel with the comparison: a new candidate is judged
+		// against what earlier tasks learned. The domain's own lessons come
+		// first, then the general ones - a general lesson holds for every
+		// kind of work, so it reaches this domain too.
+		comparison.Experience = append(
+			harnessExperienceEntries(service.artifacts, service.ownerTaskId, harnessSlug(comparison.Domain)),
+			harnessExperienceEntries(service.artifacts, service.ownerTaskId, HARNESS_GENERAL_SCOPE)...,
+		)
 	}
 	return comparison
 }

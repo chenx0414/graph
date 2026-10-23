@@ -12,8 +12,13 @@ import (
 
 // HarnessExperienceEntry is one adopted lesson: what the situation looked like,
 // what to do about it, and what shows that it worked.
+//
+// Axis says how far the lesson reaches. A general lesson holds for every kind
+// of work and is found by every domain; a specific lesson holds for the domain
+// it was learned in and is found only there.
 type HarnessExperienceEntry struct {
 	Domain    string `json:"domain"`
+	Axis      string `json:"axis"`
 	Chosen    string `json:"chosen"`
 	Cue       string `json:"cue"`
 	Lesson    string `json:"lesson"`
@@ -23,12 +28,26 @@ type HarnessExperienceEntry struct {
 	CreatedAt int64  `json:"createdAt"`
 }
 
+// The two axes a lesson can be claimed on.
+const (
+	// HARNESS_AXIS_GENERAL is a lesson that holds for every kind of work.
+	HARNESS_AXIS_GENERAL = "general"
+	// HARNESS_AXIS_SPECIFIC is a lesson that holds for one domain.
+	HARNESS_AXIS_SPECIFIC = "specific"
+)
+
+// HARNESS_GENERAL_SCOPE is the scope the general lessons live in. Every
+// domain reads it, which is what makes a general lesson general.
+const HARNESS_GENERAL_SCOPE = "general"
+
 // HarnessComparison is the contrast of several candidates of one task.
 
 // HarnessDecisionInput records which candidate was adopted and why.
 type HarnessDecisionInput struct {
-	GraphId   string
-	Domain    string
+	GraphId string
+	Domain  string
+	// Axis is general or specific. It decides the scope the lesson lands in.
+	Axis      string
 	Chosen    string
 	Cue       string
 	Lesson    string
@@ -41,6 +60,8 @@ type HarnessDecisionInput struct {
 
 type HarnessDecisionResult struct {
 	Domain     string                   `json:"domain"`
+	Axis       string                   `json:"axis"`
+	Scope      string                   `json:"scope"`
 	Chosen     string                   `json:"chosen"`
 	Entries    []HarnessExperienceEntry `json:"entries"`
 	ArtifactId string                   `json:"artifactId"`
@@ -70,28 +91,52 @@ type harnessExperienceReader interface {
 
 type HarnessExperienceInput struct {
 	Domain string
+	// Scope reads one scope only. Empty means the domain's own scope.
+	Scope string
 }
 
 // HarnessExperienceResult is what one read returns. With no domain it names
 // the domains that hold lessons.
 
 type HarnessExperienceResult struct {
-	Domain  string                   `json:"domain,omitempty"`
-	Domains []string                 `json:"domains,omitempty"`
+	Domain string `json:"domain,omitempty"`
+	// Scopes names the scopes that hold lessons.
+	Scopes []string `json:"scopes,omitempty"`
+	// Entries are the lessons of the scope that was read.
 	Entries []HarnessExperienceEntry `json:"entries,omitempty"`
+	// General are the lessons that hold for every domain.
+	General []HarnessExperienceEntry `json:"general,omitempty"`
 }
 
-// HarnessExperience reads the lessons earlier tasks adopted per domain.
-
+// HarnessExperience reads the lessons earlier tasks adopted.
+//
+// With a domain it returns that domain's own lessons and the general ones:
+// a lesson claimed on the general axis is found by every domain, which is the
+// whole point of claiming it that way. With a scope it returns one scope only,
+// which is what the recording path needs before it appends to it.
 func (service *graphManagementService) HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult {
+	scope := strings.TrimSpace(input.Scope)
 	domain := strings.TrimSpace(input.Domain)
-	if domain == "" {
-		return HarnessExperienceResult{Domains: harnessExperienceDomains(service.artifacts, service.ownerTaskId)}
+	if scope == "" && domain == "" {
+		return HarnessExperienceResult{Scopes: harnessExperienceScopes(service.artifacts, service.ownerTaskId)}
 	}
-	return HarnessExperienceResult{
-		Domain:  domain,
-		Entries: harnessExperienceEntries(service.artifacts, service.ownerTaskId, domain),
+	result := HarnessExperienceResult{Domain: domain}
+	if scope != "" {
+		result.Entries = harnessExperienceEntries(service.artifacts, service.ownerTaskId, scope)
+		return result
 	}
+	result.Entries = harnessExperienceEntries(service.artifacts, service.ownerTaskId, harnessSlug(domain))
+	result.General = harnessExperienceEntries(service.artifacts, service.ownerTaskId, HARNESS_GENERAL_SCOPE)
+	return result
+}
+
+// harnessExperienceScope is the scope a lesson lands in: the general scope for
+// a general lesson, the domain's own scope for a specific one.
+func harnessExperienceScope(domain, axis string) string {
+	if axis == HARNESS_AXIS_GENERAL {
+		return HARNESS_GENERAL_SCOPE
+	}
+	return harnessSlug(domain)
 }
 
 // harnessCandidateFacts collects the recorded behavior of each candidate.
@@ -125,15 +170,15 @@ func harnessSlug(domain string) string {
 	return slug
 }
 
-// harnessExperienceEntries reads the lessons of one domain, newest store
+// harnessExperienceEntries reads the lessons of one scope, newest store
 // first. The project scope wins over the task scope: a lesson another task
 // already promoted is the lesson this task must see.
 
-func harnessExperienceEntries(reader harnessExperienceReader, taskId, domain string) []HarnessExperienceEntry {
+func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope string) []HarnessExperienceEntry {
 	if reader == nil {
 		return []HarnessExperienceEntry{}
 	}
-	name := harnessExperienceName(domain)
+	name := harnessExperienceName(scope)
 	page := reader.List(ArtifactQuery{
 		TaskId:    taskId,
 		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
@@ -165,9 +210,9 @@ func harnessExperienceEntries(reader harnessExperienceReader, taskId, domain str
 	return entries
 }
 
-// harnessExperienceDomains lists the domains that hold lessons.
+// harnessExperienceScopes lists the scopes that hold lessons.
 
-func harnessExperienceDomains(reader harnessExperienceReader, taskId string) []string {
+func harnessExperienceScopes(reader harnessExperienceReader, taskId string) []string {
 	if reader == nil {
 		return []string{}
 	}
@@ -178,17 +223,17 @@ func harnessExperienceDomains(reader harnessExperienceReader, taskId string) []s
 		Limit:     intPointer(50),
 	})
 	seen := map[string]bool{}
-	domains := []string{}
+	scopes := []string{}
 	for _, artifact := range page.Artifacts {
-		domain := strings.TrimPrefix(artifact.Name, HARNESS_EXPERIENCE_PREFIX)
-		if domain == "" || seen[domain] {
+		scope := strings.TrimPrefix(artifact.Name, HARNESS_EXPERIENCE_PREFIX+"-")
+		if scope == "" || seen[scope] {
 			continue
 		}
-		seen[domain] = true
-		domains = append(domains, domain)
+		seen[scope] = true
+		scopes = append(scopes, scope)
 	}
-	sort.Strings(domains)
-	return domains
+	sort.Strings(scopes)
+	return scopes
 }
 
 // harnessPromote promotes one artifact version, turning a refusal into an
@@ -234,8 +279,17 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	if len(entries) >= HARNESS_EXPERIENCE_MAX_ENTRIES {
 		Raise("invalid_input", fmt.Sprintf("This domain already holds %d lessons; retire the oldest before adding one", HARNESS_EXPERIENCE_MAX_ENTRIES))
 	}
+	axis := strings.TrimSpace(input.Axis)
+	if axis == "" {
+		axis = HARNESS_AXIS_SPECIFIC
+	}
+	if axis != HARNESS_AXIS_GENERAL && axis != HARNESS_AXIS_SPECIFIC {
+		Raise("invalid_input", "A lesson is claimed on the general or the specific axis")
+	}
+	scope := harnessExperienceScope(domain, axis)
 	entry := HarnessExperienceEntry{
 		Domain:    domain,
+		Axis:      axis,
 		Chosen:    chosen,
 		Cue:       cue,
 		Lesson:    lesson,
@@ -256,14 +310,14 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	}
 	published := store.publish(PublishArtifactInput{
 		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
-		Name:      harnessExperienceName(domain),
+		Name:      harnessExperienceName(scope),
 		Content:   &content,
 		MediaType: "application/json",
 		Schema:    HARNESS_EXPERIENCE_SCHEMA,
-		Title:     "Harness lessons: " + domain,
-		Summary:   fmt.Sprintf("%d lesson(s) adopted in %s", len(entries), domain),
+		Title:     "Harness lessons: " + scope,
+		Summary:   fmt.Sprintf("%d lesson(s) adopted in %s", len(entries), scope),
 		RequestId: requestId,
-		Metadata:  map[string]any{"domain": harnessSlug(domain), "chosen": chosen},
+		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "chosen": chosen},
 	})
 	promoted := published
 	if store.promote != nil {
@@ -276,6 +330,8 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	}
 	return HarnessDecisionResult{
 		Domain:     domain,
+		Axis:       axis,
+		Scope:      scope,
 		Chosen:     chosen,
 		Entries:    entries,
 		ArtifactId: promoted.ArtifactId,
