@@ -6,8 +6,8 @@
 
 ## 结论摘要
 
-1. **53 条里有 24 条落在 Graph 自己身上**：14 条本轮修掉（其中 13 条有先红后绿的 E2E，#29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），6 条确认为真实缺陷但不在本轮修复范围（#8/#13/#22/#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。
-2. 修掉的 14 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）。
+1. **53 条里有 24 条落在 Graph 自己身上**：15 条本轮修掉（其中 13 条有先红后绿的 E2E，#8 与 #29 的 E2E 待补），3 条修了一半或只修了一个面（#5/#9/#50），5 条确认为真实缺陷但不在本轮修复范围（#13/#22/#36/#41/#46，逐条写明机制与修复位置），1 条因为 TS 路径正在被退役而不必再改（#18）。
+2. 修掉的 15 条是：被切断的 provider 流被当成成功回合（#4）、半截的工具参数被当成空参数调用（#24）、provider 不再回话时回合永远挂住（#32/#33/#34）、悬空的 tool call 毒化之后每一个请求（#1）、daemon 自己算的压缩阈值从来没交给内核（#23）、压缩"成功"其实什么都没压缩（#40）、子 Agent 永远以 `thinkingLevel=off` 运行（#50 的选档部分）、Anthropic 从来没有显式缓存断点（#45）、两个组件各自持久化同一个注册名导致工具体被换掉（#25/#51）、目录清单与搜索没有上限，一个 18MB 的目录能变成一次回答（#14）、守护进程自己从不回收状态（#53）、启动恢复每 boot 重跑同一个 doomed call（#29）、补交额度按 execution 而不是按 node 计（#8）。
 3. **25 条在本栈里不存在或已被处理**（ALREADY-OK 20 条 + N/A 5 条）：Graph 里没有 span/trace 机制、没有 poison 语义、没有依赖图边数上限、没有"七家 provider"（daemon 只讲 OpenAI Completions 与 Anthropic Messages 两种协议），死锁、并行审批、端口独占这些都有真实守卫。
 4. **4 条属于上游 PiG**（`github.com/MichaelKinsy/PiG v0.5.1`）或上游 npm 包，本仓库改不了，已按上游文件分组记录，便于一次性提给上游。
 5. **与 `feature/harness-token-efficiency-2026-10-22` 的重叠**已在第 6 节逐条列出：该分支已修的 4 条（#23/#40/#45 与任务说明包复用）在本分支上按 `main` 基线重新实现，两边合并时需要人工取舍。
@@ -34,7 +34,7 @@
 | 5 | **OURS-GO 部分** → 已修 + UPSTREAM-PIG | 中 | `runtime_provider_stream.go`；PiG `ai/` 40+ provider | Graph 只讲两种协议，已要求终止标记；其余在上游 |
 | 6 | ALREADY-OK（Graph）/ UPSTREAM（其余） | 中 | `runtime_controlled_openai.go` `controlledOpenAIUsage` | Graph 侧 `Input: input - cache`，缓存 token 不重复计费 |
 | 7 | ALREADY-OK | 低 | `runtime_controlled_openai.go:114`；`runtime_compaction.go:176` | 工具结果只落一次；E2E 断言 `resultViews:1` |
-| 8 | OURS-GO → 未修（后续） | 中 | `core_node_executor.go:306-314,377-395,381` | 任意失败都扣重试预算；补交额度被 `maxSafeInteger` 绕过 |
+| 8 | **OURS-GO** → 已修（E2E 待补） | 中 | `core_node_executor.go` `resubmitsUsed`；`docs/agent/graph-v2.md:190` | 补交额度按 execution 计而不是按 node 计，新 execution 就刷新一次额度；持久护栏被 `maxSafeInteger` 绕过 |
 | 9 | ALREADY-OK（上游守卫）+ 已修可观测性 | 中 | PiG `harness/compaction.go:505`；`runtime_provider_stream.go` 压缩事件 | 空摘要上游会失败；压缩事件此前到不了 daemon |
 | 10 | ALREADY-OK | 低 | `core_node_executor.go:266-315` | 子 Agent 死亡是响亮的：`graph.node.failed` + 唤醒 master |
 | 11 | ALREADY-OK | 低 | `core_execution.go:192-260` | 没找到锁序反转；父进程 retask 不持库锁 |
@@ -83,7 +83,7 @@
 
 ---
 
-## 3. 本轮修掉的十四条
+## 3. 本轮修掉的十五条
 
 ### 3.1 #4 / #5 / #24 / #32 / #33 / #34 —— provider 流与请求（`c9fae98`）
 
@@ -157,7 +157,17 @@ E2E `tests/e2e/harness-state-retention.test.ts` 跑一次对话，数出它的�
 
 既有的恢复 E2E（`pig-node-recovery`、`pig-durable-recovery`、`go-durable`）全部通过。新场景——一个被受理但从未发出的回合、它的恢复又不可能成功——还没有 E2E：它需要第二个对话占住凭据槽位，那个夹具还没搭起来。
 
-### 3.9 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
+### 3.9 #8 —— 补交额度是 node 的，不是 execution 的（`9c72c02c`）
+
+契约是明确的（`docs/agent/graph-v2.md:190`）：节点声明 `retry:{automatic,resubmit}`，缺省是 2 次异常重试、1 次缺项补交；`docs/agent/issue-1-implementation-progress.md:20` 写着"重开数据库不刷新自动额度"。
+
+执行器却按 execution 的计数器决定。execution 是短的——一次瞬时重试、一次续跑、一次重启——每一个新的都从零开始，于是用掉过一次补交额度的 node，每换一个 execution 就拿到一份新额度。那个为记住 node 的补交次数而写的持久计数器，被一个关掉了的护栏写进去，然后没有任何人读它。
+
+决定现在读 node 的持久计数器，计数器也按 node 的额度计数——为它写的那个护栏这才算数。用掉额度的 node 会得到和别处一样的说法：额度用完了。而不是每次都拿到一份新的。
+
+node 队列、node 提交与唤醒通知的 E2E 都通过。跨 execution 的情形还没有 E2E：它需要同一个 node 的第二个 execution，也就是一次生命周期层面的瞬时重试，夹具得精确地触发环境失败的分类。
+
+### 3.10 #45 —— Anthropic 显式缓存断点（`f5f37dd`）
 
 daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：provider 从未被告知要保留什么，于是每个会话都为整段前缀重新付费。改后按 Pi 的做法在系统提示、最后一个工具声明、最后一条消息的最后一个块上各放一个断点。
 
@@ -184,7 +194,6 @@ daemon 自己拼 Anthropic 请求，全链路没有任何 `cache_control`：prov
 
 | # | 机制 | 修复位置 |
 |---|---|---|
-| 8 | 任意回合错误都扣重试预算；预算耗尽时即使补交额度还没用也直接判失败；`NoteNodeResubmit(..., maxSafeInteger)` 绕过了持久护栏 | `core_node_executor.go` `runOne`：预算耗尽时先看补交额度；把真实额度传给 `NoteNodeResubmit` |
 | 41 | 完成由"没有错误"推断：内核没报错就算 `Done:true`，节点没有声明必需输出时驱动也返回 `Done:true` | `runtime_pig_node_host.go` + `core_node_turn_driver.go`：由真实提交或非空回答推导完成 |
 | 14 | `ListBounded`/`ReadBoundedBytes` 无上限，`ls`/`find` 没有默认 limit，18MB 目录清单先在 Graph 堆里成型 | `runtime_bounded_path.go`；`runtime_pig_native_tools.go` 给目录类工具默认 limit |
 | 22 | 每个流事件一次 INSERT + 一次通知；工具调用还额外两次事件与一次活动写 | `runtime_pi_adapter.go` 合并 `message.tool` 起止；`core_store.go` 合并活动写 |
