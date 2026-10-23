@@ -118,7 +118,10 @@ type HarnessProbeCandidate struct {
 
 // HarnessProbeResult is the contrast a probe produced.
 type HarnessProbeResult struct {
-	GraphId    string                  `json:"graphId"`
+	GraphId string `json:"graphId"`
+	// GraphPhase is where the probe's own graph ended up. A probe is an
+	// experiment, not a deliverable, so it closes itself.
+	GraphPhase string                  `json:"graphPhase"`
 	Task       string                  `json:"task"`
 	Candidates []HarnessProbeCandidate `json:"candidates"`
 	Comparison HarnessComparison       `json:"comparison"`
@@ -275,8 +278,10 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 			AnonId: anonByNode[nodeId],
 		})
 	}
+	harnessCloseProbeGraph(service, graphId)
 	return HarnessProbeResult{
 		GraphId:    graphId,
+		GraphPhase: harnessGraphPhase(service, graphId),
 		Task:       task,
 		Candidates: candidates,
 		Comparison: comparison,
@@ -295,6 +300,23 @@ func (service *graphManagementService) harnessProbeProgress(graphId string) stri
 	queued := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')", graphId)
 	parts = append(parts, "queued="+itoa(int(kernelInt(queued["count"]))))
 	return strings.Join(parts, ",")
+}
+
+// harnessCloseProbeGraph closes the graph the probe built. The candidates have
+// settled, so the experiment is over; leaving the graph running would keep a
+// project entry that never ends.
+func harnessCloseProbeGraph(service *graphManagementService, graphId string) {
+	defer func() { _ = recover() }()
+	service.GraphControl(GraphControlInput{GraphId: graphId, Action: "complete"})
+}
+
+// harnessGraphPhase is where a graph stands.
+func harnessGraphPhase(service *graphManagementService, graphId string) string {
+	row := kernelRow(service.kernel.Db, "SELECT phase FROM tasks WHERE id=?", graphId)
+	if row == nil {
+		return ""
+	}
+	return kernelString(row["phase"])
 }
 
 // harnessAxis is the axis of a claim: general or specific. A claim that does

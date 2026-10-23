@@ -153,10 +153,14 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
 
   // 2. The probe ran both harnesses on the same task and contrasted them.
   const probe = JSON.parse(await waitFor('probe') || '{}') as {
+    graphPhase: string;
     candidates: { label: string; axis: string }[];
     comparison: { candidates: { outputValues: Record<string, string> }[] };
   };
   expect(probe.candidates.map(candidate => candidate.axis).sort()).toEqual(['general', 'specific']);
+  // The probe closes its own graph: an experiment is not a project entry that
+  // runs forever.
+  expect(probe.graphPhase).not.toBe('running');
   expect(probe.comparison.candidates[0]!.outputValues.out).not.toEqual(probe.comparison.candidates[1]!.outputValues.out);
 
   // 3. The decision was kept, on the general axis.
