@@ -18,11 +18,8 @@ import (
 // identity's view of that kernel: its model, its tools, its instructions and
 // its events.
 //
-// The division of labour is the one the daemon already keeps. The kernel owns
-// the execution history - the transcript, the admissions, the tool calls and
-// their results. The daemon owns the model channel, the tool bodies, the
-// admission gate and the budget. Neither one can spend a credential or call a
-// tool the other did not allow.
+// The division of labour between the daemon and the kernel is documented in
+// docs/architecture.md, section daemon 与内核的分工.
 
 // SessionOptions configure one resident session.
 type SessionOptions struct {

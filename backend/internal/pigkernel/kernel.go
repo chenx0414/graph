@@ -23,8 +23,8 @@ const DurablePrefix = "graph_durable_"
 //
 // The harness owns the durable conversation, task and document runtime: one
 // session per Graph database, with the model and tool calls the Graph policy
-// admits. The daemon keeps every business fact, credential and budget rule; the
-// kernel keeps the execution history.
+// admits. The daemon/kernel division of labour is documented in
+// docs/architecture.md, section daemon 与内核的分工.
 type Kernel struct {
 	database *sqliteDatabase
 	storage  *pigsqlite.SqliteStorage

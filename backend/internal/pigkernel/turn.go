@@ -16,10 +16,8 @@ import (
 
 // One agent turn on the PiG kernel.
 //
-// The Graph daemon owns every business fact, credential and admission rule;
-// the kernel owns the execution history. A turn therefore arrives with the
-// model, the tools and the prompt already decided by the daemon, and leaves
-// with the answer and the durable records that produced it.
+// The daemon/kernel division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 
 // ModelSpec is the model a turn runs on, described in the daemon's terms.
 //
@@ -45,8 +43,8 @@ type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
-	// Execute runs the tool. The daemon owns the admission and the side
-	// effects; the kernel only carries the call and its result.
+	// Execute runs the tool. The daemon/kernel division of labour is
+	// documented in docs/architecture.md, section daemon 与内核的分工.
 	Execute func(ctx context.Context, args map[string]any) (string, error)
 	// Result runs the tool and returns the SDK's own tool result. It is the
 	// faithful shape: a tool that returns an image or structured details

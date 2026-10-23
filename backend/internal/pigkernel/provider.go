@@ -8,13 +8,15 @@ import (
 	"github.com/MichaelKinsy/PiG/ai"
 )
 
-// The daemon owns the model channel; the kernel owns the execution history.
+// The provider stream the daemon owns.
 //
 // PiG's provider runtime accepts any stream implementation, so the daemon can
-// hand the kernel its own controlled stream: the one that admits the send,
-// spends the credential, records the usage and refuses a request the budget
-// does not allow. The kernel therefore never owns an ungated provider channel,
-// and the Graph admission rules keep their force over every send.
+// hand the kernel its own controlled stream. The kernel therefore never owns
+// an ungated provider channel, and the Graph admission rules keep their force
+// over every send.
+//
+// The daemon/kernel division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 
 // EventStream is the provider answer stream the daemon owns.
 //
