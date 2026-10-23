@@ -1145,13 +1145,6 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 					CanonicalJSON(result), operation.Id)
 				kernelExec(l.store.Db, "UPDATE nodes SET status='pending',output=?,stall_count=stall_count+1,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?",
 					CanonicalJSON(result.Output), operation.Id, operation.TaskId, operation.NodeId)
-				// The node is armed again, so the work has to be queued again too.
-				// The failed queue item is what the executor claims, and it stays
-				// failed unless it is put back: a node that is pending with nothing
-				// queued waits for ever, and the retry the harness promised never
-				// runs.
-				kernelExec(l.store.Db, "UPDATE kernel_queue SET state='queued',reason=? WHERE task_id=? AND node_id=? AND state='failed'",
-					"Requeued by the harness after an environment failure", operation.TaskId, operation.NodeId)
 				kernelExec(l.store.Db, "UPDATE activations SET state='pending',round=round+1 WHERE id=?", operation.ActivationId)
 				l.store.Event(operation.TaskId, "node.transient_retry", map[string]any{
 					"nodeId":      operation.NodeId,
