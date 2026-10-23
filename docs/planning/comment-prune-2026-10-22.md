@@ -36,9 +36,9 @@
 - `src/core/question-routing.ts:18-19` 保留「消息重试比配置恢复更窄」这半句，删掉复述 `QuestionPolicy` 类型的半句。
 - `src/web/Setup.tsx:129` 保留「先写钥匙串，密钥就不进配置文件」这半句（这是安全性质的顺序约束），删掉 `1)` 步骤编号。
 
-## 第二类：先重构、再删注释（本计划的推进项）
+## 第二类：先重构、再删注释（已按单元落地）
 
-这些是仓库真正的技术债。**注释不是问题，注释描述的东西才是。** 按一个根因一个单元来推进，每个单元独立成一次可验证的提交。
+这些是仓库真正的技术债。**注释不是问题，注释描述的东西才是。** 按一个根因一个单元推进，每个单元独立成一次可验证的提交。下文每节标注了落地结果。
 
 ### 2.1 Go 侧的命名根因（最大的一块，收益也最大）
 
@@ -48,45 +48,54 @@
 
 **重构**：把这 7 个**类型**改名（`…Record` / `…Spec` / `…View`），函数恢复裸名。10 行注释自然消失。
 
-同时 `backend/internal/graph` 有 **4 个近乎相同的排序键辅助函数**：`mapKeys`（`core_confirm_graph.go:40`）、`mapKeysAny`（`core_module_runtime.go:514`）、`portKeys`（`core_control_targets.go:30`）、`sortedKeys`（`core_kernel_views.go:91`）。**重构**：合成一个泛型 `sortedKeys[V any](map[string]V) []string`，带一句「Go map 迭代无序，所有定义遍历必须走这里」的文档。
+**已落地**：类型改名为 `CatalogProvenanceRecord`、`ProviderTemplateRecord`、`TemplateModelEntryRecord`、`PlatformPresetRecord`、`GraphNodeVisualKindValue`、`RetryDecisionRecord`、`DeployDriftReport`，函数恢复 `CatalogProvenance`、`ProviderTemplate`、`TemplateModelEntry`、`PlatformPreset`、`GraphNodeVisualKind`、`DeployDrift`（`RetryDecision` 的函数本来就叫这个名字，方向与计划相反）。
 
-这一个单元可以一次消掉 **21 处 `TODO(port)` 标记**（16 处 map 顺序 + 5 处 `localeCompare`），并且消除 3 个重复实现。
+同时 `backend/internal/graph` 有 **5 个近乎相同的排序键辅助函数**：`mapKeys`（`core_confirm_graph.go:40`）、`mapKeysAny` 与 `mapKeysSet`（`core_module_runtime.go:514,526`）、`portKeys`（`core_control_targets.go:30`）、`sortedKeys`（`core_kernel_views.go:91`）。**重构**：合成一个泛型 `sortedKeys[V any](map[string]V) []string`，带一句「Go map 迭代无序，所有定义遍历必须走这里」的文档。
+
+**已落地**：合并进 `backend/internal/graph/keyutil.go` 的 `sortedKeys` 与 `anySortedKeys`，35 处调用点全部更新，4 个旧函数删除。`mapKeysAny` 原本不排序，合并前逐个核对了它的 3 个调用点都与顺序无关，行为不变。这个单元消掉 **12 处 map 顺序 `TODO(port)`**（不是计划的 16 处——另外 10 处形状相似但说的是新文档表达不了的事实，保留）。
 
 ### 2.2 `TODO(port)` 的其余簇
 
-- `localeCompare` vs 字节序（5 处）：`git_git.go:325`、`catalog_file_capabilities.go:451`、`catalog_capability_library.go:201`、`runtime_tool_results.go:125`、`core_artifact_workspace.go:214`。**重构**：抽一个显式比较器 `compareNames`，让「用字节序代替 locale 序」成为代码事实。
-- UTF-16 vs 字节/字符（3 处）：`core_artifact_workspace.go:160`、`core_node_run.go:91`、`runtime_tool_results.go:178`。其中 `runtime_tool_results.go:178` 暴露了一个**用户可见的谎**：头部写「N chars」而 `len(text)` 是字节数。**重构**：改用 `utf16.Encode` 计数，或把标签改成「N bytes」。
+- `localeCompare` vs 字节序（5 处）：`git_git.go:325`、`catalog_file_capabilities.go:451`、`catalog_capability_library.go:201`、`runtime_tool_results.go:125`、`core_artifact_workspace.go:214`。**重构**：抽一个显式比较器，让「用字节序代替 locale 序」成为代码事实。**已落地**：`lessByByteOrder` 放在 `textutil.go`，5 处全部改用它，5 个 `TODO(port)` 删除；字节序与 `sort.Strings` 相同，行为不变。
+- UTF-16 vs 字节/字符（3 处）：`core_artifact_workspace.go:160`、`core_node_run.go:91`、`runtime_tool_results.go:178`。其中 `runtime_tool_results.go:178` 暴露了一个**用户可见的谎**：头部写「N chars」而 `len(text)` 是字节数。**重构**：按 UTF-16 计数。**已落地**：
+  - `artifactRequiredText` 上的标记其实描述的是 `artifactUTF16Len`，而后者与包内 `utf16Len` 逐字重复。删掉重复实现，改调 `utf16Len`，事实只在 helper 的文档里说一次。
+  - `core_node_run.go` 的标记直接删除：裁剪走 `truncateRunes`，名字与文档已经说明单位，而 `node.entry` 另有 `TextBytes` 存字节。
+  - **「N chars」这个谎已修**：头部与「omitted X of N」都改为按 UTF-16 码元计数，与 TypeScript 端口一致。ASCII 结果完全不变；非 ASCII 的数字变小（CJK 65 字节从「65 chars」变成「25 chars」）。头尾的字节预算不变，因为 `limit` 本来就按字节算。
 
 ### 2.3 前端的 `hasProposal` 死字段
 
 `src/web/conversation-drawer.ts` 的三条注释都在描述一个**没人读的字段** `DrawerSectionInput.hasProposal`——写它的调用方在 `src/web/Conversation.tsx:562`，读它的地方早就不存在了。**重构**：删掉字段和调用点参数，三条 stale 注释随之消失。
 
+**已落地**：字段、调用点参数与三条注释都删了。`tests/m8/conversation-drawer.test.ts` 里传这个参数的地方一并改掉，断言没有放松——被删掉的那条不变式（「结果忽略 `hasProposal`」）现在由 TypeScript 的多余属性检查来保证，比原来更强。
+
 ### 2.4 `src/web/Settings.tsx` 的 models.dev 装载
 
-`Settings.tsx` 那一套手写 `ModelsDevModule` 类型加动态 `import()`，存在的唯一理由是「那个模块还没合并」。模块早已合并。**重构**：直接 `import { lookupModelMetadata } from '../catalog/models-dev.ts'`，`@ts-ignore` 和 `any[]` 类型一起消失。
+`Settings.tsx` 那一套手写 `ModelsDevModule` 类型加动态 `import()`，存在的唯一理由是「那个模块还没合并」。模块早已合并。
+
+**已落地（与计划不同）**：`@ts-ignore` 与 `any[]` 消失了，但**导入保持动态**。该模块在导入期就读快照，且那个顶层 `await fetch` 没有任何保护；改成静态导入会把它挪到 Settings chunk 的模块求值期。真实浏览器里挡住快照资源后实测：基线的 chunk 仍能求值，静态导入版本不能——一个缺文件的 vendored 资源会拖垮整个设置页。现在类型用 `typeof import('../catalog/models-dev.ts')` 声明，两个 typecheck 都不再需要抑制。
 
 同文件的 `credentialConfigured` / `credentialRef` 优先级（`Settings.tsx:578-583`）用 6 行散文解释一个两项表达式的先后。**重构**：抽成 `credentialResolved(...)` 一个具名谓词。
 
 ### 2.5 死代码
 
-- `backend/internal/graph/server_live_config.go:302-304`：`removeListener` 的 `listener` 参数没人用，`_ = listener` 解释为什么。**重构**：删参数，删两行注释。
-- `backend/internal/graph/runtime_handoff_response.go:300-302`：`if` 和 `else` 两个分支体完全一样，还挂着一个 `TODO(port): replay through ReplayAssistantStream once frame structs exist` 的空头支票。**重构**：合并分支，删 TODO。
-- `backend/internal/graph/core_graph_acceptance.go:115`：`TODO(port)` 注释挂在一个永远 `return false` 的死分支上。**重构**：删死分支。
-- `backend/internal/graph/server_layout.go:88-97` 的 `layoutNodeSize` 与 `core_graph_presentation.go:101-108` 的 `GraphNodeSize` 逐行重复。**重构**：删前者，调后者。
-- `backend/internal/graph/runtime_pig_*`：`TurnOptions.Gate`、`ProviderBridge.Stopped`、`(*Session).stoppedNow` 三个符号在整个 `backend/**` 里从未被调用，它们各自的注释在描述一条走不到的路径。**重构**：删字段、删方法、删注释。
-- `backend/internal/pigkernel/sqlite.go:45,134` 的注释说「单连接」，代码却是 `SetMaxOpenConns(4)`。**重构**：统一到一个值，注释随之改对或消失。
+- `backend/internal/graph/server_live_config.go:302-304`：`removeListener` 的 `listener` 参数没人用，`_ = listener` 解释为什么。**重构**：删参数，删两行注释。**已落地**。
+- `backend/internal/graph/runtime_handoff_response.go:300-302`：`if` 和 `else` 两个分支体完全一样，还挂着一个 `TODO(port): replay through ReplayAssistantStream once frame structs exist` 的空头支票。**重构**：合并分支，删 TODO。**已落地**。注意这个 TODO 的前提是错的——`ReplayAssistantStream` 与 `AssistantMessageFrame` 在 Go 里已经存在，但 Go 端口确实没有像 TypeScript 那样回放。**这是真实的移植缺口，值得单独开 issue。**
+- `backend/internal/graph/core_graph_acceptance.go:115`：`TODO(port)` 注释挂在一个永远 `return false` 的死分支上。**重构**：删死分支。**已落地**：改成比较归一化后的身份字符串。用 `*string` 而不是 `string`——空串身份与缺失身份在 `string` 下会相等，而原行为对 `("",<非字符串>)` 返回 `false`。改动前用 361 组输入（含 `""`、nil、数字、布尔、map、slice、struct）比对，新旧零差异，且不会对不可比较的动态类型 panic。
+- `backend/internal/graph/server_layout.go:88-97` 的 `layoutNodeSize` 与 `core_graph_presentation.go:101-108` 的 `GraphNodeSize` 逐行重复。**重构**：删前者，调后者。**已落地**：删除前用一个临时包内校验器比对了 15 种 id × 9 种 kind × 7 种 action 的全组合，外加 CJK、unicode 与超长文本的宽度情形，共 888 组，标签、宽、高全部无差异。
+- `backend/internal/pigkernel/` 的 `TurnOptions.Gate`、`ProviderBridge.Stopped`、`(*Session).stoppedNow` 三个符号在整个 `backend/**` 里从未被调用，它们各自的注释在描述一条走不到的路径。**重构**：删字段、删方法、删注释。**已落地**。`stoppedNow` 删掉后 `Session.stopped` 变成只写，连带 `Stop` 里空转的加锁一并去掉。
+- `backend/internal/pigkernel/sqlite.go:45,134` 的注释说「单连接」，代码却是 `SetMaxOpenConns(4)`。**未做**：统一到一个值会改变连接池行为，是另一个根因。
 
 ### 2.6 重复的注释块
 
-- `backend/internal/pigkernel/` 5 个文件（`kernel.go`、`turn.go`、`session.go`、`extensions.go`、`mcp.go`、`provider.go`）把同一段「daemon 拥有业务事实，kernel 拥有执行历史」的所有权划分抄了 5 遍。**重构**：这段话进 `docs/architecture.md`，每个导出类型留一句。
-- `src/server/source-identity.ts:5-17`（13 行）、`src/server/go-launch.ts:5-14`、`src/server/console-port.ts:4`、`src/server/console-address.ts:4`（10 行）、`src/runtime/capabilities.ts:1044`、`src/runtime/conversation-tools.ts:3-11`：动机散文。**重构**：把「为什么存在」变成一个符号名或一段架构文档，散文随之消失。
+- `backend/internal/pigkernel/` 6 个文件（`kernel.go`、`turn.go`、`session.go`、`extensions.go`、`mcp.go`、`provider.go`）把同一段「daemon 拥有业务事实，kernel 拥有执行历史」的所有权划分抄了 6 遍。**重构**：这段话进 `docs/architecture.md`，每个导出类型留一句。**已落地**：段落写进 `docs/architecture.md` 的新一节「daemon 与内核的分工」，代码里 7 处改成指针。`backend/internal/graph` 的 `runtime_pig_session.go` 与 `runtime_pig_node_host.go` 还有两段，也一并改了——否则同一段话仍然抄着 9 遍。
+- `src/server/source-identity.ts:5-17`（13 行）、`src/server/go-launch.ts:5-14`、`src/server/console-port.ts:4`、`src/server/console-address.ts:4`（10 行）、`src/runtime/capabilities.ts:1044`、`src/runtime/conversation-tools.ts:3-11`：动机散文。**重构**：把「为什么存在」变成一个符号名或一段架构文档，散文随之消失。**未做**：这批散在 `src/server` 与 `src/runtime`，每个都牵一个独立的小重构，合并成一个单元就不再是「一个根因」。
 
 ### 2.7 测试与脚本
 
-- `src/runtime/tool-call-spool.ts` 的 `spoolToolCall` **没有任何生产调用方**，只有测试在用。`scripts/console-ui-e2e.ts:106,131,240,276` 围绕它写了 4 条注释，断言的是一条不存在的生产路径。**重构**：测试改走真实写入路径，或删掉 spool 断言。
-- `scripts/check-floating-promises.mjs:25-33` 与 `:54-60` 的两段散文解释「为什么要用文本正则」。**重构**：换成 AST 判定（文件已经 import 了 `SyntaxKind.PropertyAccessExpression`），散文和它的自测夹具一起消失。
-- `scripts/matt-flow.mjs:33-35` 的 `flags` 集合：第 52 行把它 OR 回去，60 个字符的过滤逻辑永远不改变结果。**重构**：删 `flags`，改用 `argv.includes('--json')`。
-- `src/web/Settings.tsx:620,714` 的 `eslint-disable-next-line react-hooks/exhaustive-deps`：仓库里**没有 eslint 配置**，这两条抑制是空转。**重构**：按依赖关系整理 effect，去掉抑制。
+- `src/runtime/tool-call-spool.ts` 的 `spoolToolCall` **没有任何生产调用方**，只有测试在用。`scripts/console-ui-e2e.ts:106,131,240,276` 围绕它写了 4 条注释，断言的是一条不存在的生产路径。**重构**：测试改走真实写入路径，或删掉 spool 断言。**已落地**：查清了调用图——TS 侧最后一个调用方是 `src/runtime/pi-worker.ts`，在迁移到 pi-durable 1.1.0（提交 `685d88dc`）时随进程内 agent loop 一起被删；Go 侧的 `SpoolToolCall` 同样没有调用方。真正的写入方是 `store.recordToolCall`，由 `pi-adapter.ts` 与 `kernel-graph-lane.ts` 在进程内调用。写路径确实是死的，于是删掉；E2E 改用 `TaskStore.recordToolCall` 播种——就是生产代码用的那个方法。页面断言未变，数字也一致。ingest 读路径保留，它仍在被调用，也仍能收拢旧 lane 留下的文件。
+- `scripts/check-floating-promises.mjs:25-33` 与 `:54-60` 的两段散文解释「为什么要用文本正则」。**重构**：换成 AST 判定（文件已经 import 了 `SyntaxKind.PropertyAccessExpression`），散文和它的自测夹具一起消失。**已落地**：两个文本正则都换成了语法树判定，散文收成 `rootCall` 上的一段事实说明。**等价性是证明过的**：在全仓上旧脚本与新脚本都报零违规；在覆盖每一种写法的夹具上旧脚本报 9 处、新脚本报 13 处，`comm -23` 显示**旧的一处都没丢**，新增的 4 处是旧脚本看不到的真阳性。
+- `scripts/matt-flow.mjs:33-35` 的 `flags` 集合：第 52 行把它 OR 回去，60 个字符的过滤逻辑永远不改变结果。**重构**：删 `flags`，改用 `argv.includes('--json')`。**已落地**：穷举 7381 种 argv 组合（长度 0-4，取自 `--json`、`--stage`、`merge`、一个 slug 和两个取值 token），新旧零差异。`VALUE_FLAGS` 与它的理由保留——没有那个集合，现在的解析器确实会把「merge」当成 slug。
+- `src/web/Settings.tsx:620,714` 的 `eslint-disable-next-line react-hooks/exhaustive-deps`：仓库里**没有 eslint 配置**，这两条抑制是空转。**重构**：按依赖关系整理 effect，去掉抑制。**已落地**（注释在第 1 步已删，这里补的是依赖表本身）：账号切换的 effect 补上它读的 `vendors`；自动探测的 effect 把 `runProbe` 收成 `useCallback(..., [])` 后加进依赖表。两个 effect 都不再需要抑制，而且 `useEffect` 总是调用最新的闭包，所以原来也不是读到冻结的值——依赖表不完整，不是行为错乱。
 
 ## 第三类：必须保留
 
@@ -99,17 +108,36 @@
 
 ## 推进顺序
 
-按「一个根因一个单元、每个单元独立可验证」排：
+按「一个根因一个单元、每个单元独立可验证」排。**第 1 到第 7 步已全部落地**，每个单元一个根因一次提交：
 
-1. **本分支已落地**：直接可删的 94 处注释。行为不变，`node --run check` 通过。
-2. **Go 命名单元**：7 个类型改名 + 4 个排序辅助函数合一。消掉 31 行注释，并消除 3 个重复实现。改动面最大，但每处都是机械改名。
-3. **Go 死代码单元**：`server_live_config.go` 的死参数、`runtime_handoff_response.go` 的重复分支、`core_graph_acceptance.go` 的死分支、`server_layout.go` 的重复函数、`runtime_pig_*` 的三个未调用符号。
-4. **前端单元**：`hasProposal` 死字段、`Settings.tsx` 的 models.dev 静态导入与凭据谓词、`eslint-disable` 两条。
-5. **`localeCompare` / UTF-16 单元**：抽比较器 + 修「chars 与字节」这个用户可见的谎。
-6. **pigkernel 所有权段落单元**：同一段话进架构文档。
-7. **测试与脚本单元**：spool 无生产调用方、floating-promises 改 AST、`matt-flow` 删 `flags`。
+| 步 | 单元 | 落地结果 |
+| --- | --- | --- |
+| 1 | 直接可删的注释 | 94 处、37 个文件，行为不变 |
+| 2 | Go 命名单元 | 7 个类型改名让函数拿回裸名；**5 个**排序辅助函数合一（原计划写 4 个，树里是 5 个） |
+| 3 | Go 死代码单元 | `removeListener` 死参数、重复的终止分支、死分支、重复的 `layoutNodeSize` |
+| 4 | 前端单元 | `hasProposal` 死字段、models.dev 模块类型、两个 effect 的依赖表 |
+| 5 | `localeCompare` / UTF-16 单元 | 字节序比较器；「N chars」改按 UTF-16 计数 |
+| 6 | pigkernel 所有权段落 | 段落进 `docs/architecture.md`，代码里 7 处改成指针 |
+| 7 | 测试与脚本单元 | spool 写路径（无生产调用方）、floating-promises 改 AST、`matt-flow` 删 `flags` |
 
-第 2 到第 6 步之间没有依赖，可以并行分给多个节点；第 7 步要等第 4 步的 `Settings.tsx` 改动落地后再动同一批文件。
+第 2 到第 6 步之间没有依赖，实际按 5 个并行节点推进；第 7 步等第 4 步的 `Settings.tsx` 改动落地后再动同一批文件。
+
+### 计划落地时与代码不符的地方
+
+计划是在审计时写的，落地时发现几处与树里的实际情况不符。**以代码为准**，计划已更正：
+
+- **排序辅助函数是 5 个不是 4 个**：`mapKeys`、`mapKeysAny`、`mapKeysSet`、`portKeys`、`sortedKeys`。`mapKeysAny` 从不排序，合并前逐个核对了它的 3 个调用点都与顺序无关。
+- **`RetryDecision` 的命名方向反了**：树里函数已经叫 `RetryDecision`，带后缀的是结构体 `RetryDecisionResult`，所以只改了结构体。
+- **map 顺序标记是 12 处不是 16 处**：另外 10 处形状相似但说的是新文档表达不了的事实（`encoding/json` 的键序、CanonicalJSON 的内容相等、确实不排序的遍历），保留。
+- **所有权段落不止 5 处**：`backend/internal/graph` 的 `runtime_pig_session.go` 与 `runtime_pig_node_host.go` 也各有一段，第 6 步一并改成指针。
+- **models.dev 不能改成静态导入**：计划写的是静态导入。落地时实测发现该模块在导入期就读快照（一个没有保护的顶层 `await fetch`），静态导入会把这次读取挪到 Settings chunk 的模块求值期——真实浏览器里挡住快照资源后，基线的 chunk 仍能求值，静态导入版本不能。改成保留动态导入、只把手写的 `ModelsDevModule`（`(...args: any[])`）换成 `typeof import()`，`@ts-ignore` 随之消失。
+
+### 后续可做，但不属于本计划
+
+- `backend/internal/graph/runtime_tool_call_spool.go:77` 的 `SpoolToolCall` 同样没有调用方，其注释还声称有一个从未存在的调用方。
+- Go 守护进程返回的 `/api/skill-stats` 是 `{"report":{"skills":…}}`，前端读的是扁平结构，`src/web/ToolStats.tsx:179` 因此抛错、页面渲染不出来。这是 Go 移植的 API 契约错配，与注释无关，但会让 `node --run e2e:console` 跑不起来。
+- `src/web/Settings.tsx` 仍有 1300 多行，是 500 行上限的 2.6 倍；拆分是另一个根因。
+- `scripts/check-floating-promises.mjs` 的输出仍写「No unawaited expect()…」，虽然守卫现在也管组合方法。
 
 ### 审计是怎么做的
 
