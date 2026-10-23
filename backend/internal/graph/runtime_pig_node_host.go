@@ -137,7 +137,9 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		return pigNodeTurnError(err.Error())
 	}
 	tools = append(tools, extensions...)
-	session, err := openPigSession(context.Background(), host.options.Database, request, host.provider(), tools, host.options.OnEvent, host.options.OnToolCall)
+	session, err := openPigSession(context.Background(), host.options.Database, request,
+		pigProviderBridge(host.options.Stream, host.options.Request.Model, func(map[string]any) map[string]any { return host.providerOptions() }),
+		tools, host.options.OnEvent, host.options.OnToolCall)
 	if err != nil {
 		return pigNodeTurnError(err.Error())
 	}
@@ -214,26 +216,13 @@ func (host *PigNodeHost) Dispose() error {
 	return session.Close()
 }
 
-// provider is the daemon's model channel, seen from the kernel.
-//
-// The kernel asks for the answer; the daemon's own stream produces it. The
-// daemon's stream is the one that admits the send, spends the credential and
-// records the usage, so the kernel never opens a provider channel of its own.
-func (host *PigNodeHost) provider() pigkernel.ProviderBridge {
+// providerOptions are the provider options the node's turn runs with.
+func (host *PigNodeHost) providerOptions() map[string]any {
 	options := map[string]any{}
 	if host.options.StreamOptions != nil {
 		options = host.options.StreamOptions()
 	}
-	return pigkernel.ProviderBridge{
-		Stream: func(_ context.Context, transcript []map[string]any, _ map[string]any) (pigkernel.EventStream, error) {
-			messages := make([]any, 0, len(transcript))
-			for _, message := range transcript {
-				messages = append(messages, message)
-			}
-			context := map[string]any{"messages": messages}
-			return host.options.Stream(host.options.Request.Model, context, options)
-		},
-	}
+	return options
 }
 
 // pigNodeTurnError is the report of a turn that failed.

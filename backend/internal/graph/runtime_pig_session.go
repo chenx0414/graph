@@ -49,7 +49,7 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		return nil, err
 	}
 	tools = append(tools, extensions...)
-	session, err := openPigSession(context.Background(), transport.store.Path, request, pigProviderBridge(request), tools, request.OnEvent, nil)
+	session, err := openPigSession(context.Background(), transport.store.Path, request, pigProviderBridge(request.Stream, request.Model, nil), tools, request.OnEvent, nil)
 	if err != nil {
 		// The refusal a session gets when a bound Pi extension cannot be
 		// hosted for it is returned, not raised: the caller turns it into a
@@ -116,15 +116,24 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 // daemon's stream is the one that admits the send, spends the credential,
 // records the usage and refuses a request the budget does not allow, so the
 // kernel never opens a provider channel of its own.
-func pigProviderBridge(request AgentSessionRequest) pigkernel.ProviderBridge {
+//
+// options decides which provider options the turn runs with. Nil means the
+// kernel's own per-call options; a function means the caller replaces them.
+// The node lane replaces them - it runs the turn with the options it was
+// admitted with.
+func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[string]any) map[string]any) pigkernel.ProviderBridge {
 	return pigkernel.ProviderBridge{
-		Stream: func(_ context.Context, transcript []map[string]any, options map[string]any) (pigkernel.EventStream, error) {
+		Stream: func(_ context.Context, transcript []map[string]any, kernelOptions map[string]any) (pigkernel.EventStream, error) {
 			messages := make([]any, 0, len(transcript))
 			for _, message := range transcript {
 				messages = append(messages, message)
 			}
 			context := map[string]any{"messages": messages}
-			return request.Stream(request.Model, context, options)
+			effective := kernelOptions
+			if options != nil {
+				effective = options(kernelOptions)
+			}
+			return stream(model, context, effective)
 		},
 	}
 }
