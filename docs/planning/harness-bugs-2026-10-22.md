@@ -226,7 +226,7 @@ E2E `tests/e2e/harness-tool-schema.test.ts` 拿真实 daemon 与受控 provider�
 | `tests/e2e/harness-native-tool-bounds.test.ts` | 清单、文件搜索与读取各自在自己的上限内作答，并各自说清自己被截断了 | 清单原样返回 1200 项，没有任何东西说它不是完整的 |
 | `tests/e2e/harness-state-retention.test.ts` | daemon 回收上一次运行留下的状态：重启后任务留下的事件不超过规则允许的数量 | daemon 把 17 个事件全留着 |
 | `tests/e2e/harness-stop-clobber.test.ts` | 被停的那一步在任务停掉之后不写自己的结论：node 报的是取消 | node 报 `failed`——它自己的结论盖掉了停止 |
-| `tests/e2e/harness-tool-schema.test.ts` | provider 收到的工具 schema 不是散文占多数：描述比参数 schema 短、总量有上限；四条防止误用的规则仍在（发布只能给内容或路径其一、确认必须用户明说、git 只读、图提案指向文档） | 描述 10,098 字符，比参数 schema（8,521）还长 |
+| `tests/e2e/harness-tool-schema.test.ts` | provider 收到的工具 schema 不是散文占多数：描述比参数 schema 短、总量有上限；四条防止误用的规则仍在（发布只能给内容或路径其一、确认必须用户明说、git 只读、图提案指向文档） | 描述 10,098 字符（基线 backend 上 9,860），比参数 schema（8,521）还长 |
 
 这六个文件都在修复前跑过，确认失败。
 
@@ -234,17 +234,19 @@ E2E `tests/e2e/harness-tool-schema.test.ts` 拿真实 daemon 与受控 provider�
 
 ## 4.1 验证状态
 
-分支在 2026-10-23 13:17 跑过一次完整检查，全绿：290 个测试文件、1551 个测试、退出码 0（`node --run check`）。此后本分支又补了三样东西：#8 的补交额度修复、环境失败的分类（`f2f44b5d`），以及重试路径的两轮尝试（两轮都已撤回，见摘要第 3 条）。
+分支在 2026-10-23 16:06 跑过一次完整检查，全绿：292 个测试文件、1556 个测试、退出码 0。此后本分支又补了 #8 的补交额度修复、环境失败的分类（`f2f44b5d`）、#46 的工具 schema 压缩，以及重试路径的两轮尝试（两轮都已撤回，见摘要第 3 条）。
 
-受影响的 12 个测试文件最近合跑过一遍：20 个测试全绿（五个新写的 E2E，加上 node 队列、node 提交、唤醒通知、节点泳道与三支恢复 E2E）。
+受影响的测试文件最近合跑过：#46 之后跑过 6 个文件 23 个测试（工具 schema、工具流、提案形状、产物发布、上下文装配、生产链路），全绿；再早一轮是 12 个文件 20 个测试全绿（五个新写的 E2E，加上 node 队列、node 提交、唤醒通知、节点泳道与三支恢复 E2E）。
 
-全量的几次运行被环境挡住，原因与本分支无关，逐条都做过对照：
+之后再跑的一次全量有 96 个失败（34 个文件），失败的样子是进程起不来：`dyld: Library not loaded: @rpath/libnode.147.dylib`、临时文件 ENOENT、节点停在 `blocked` 而不是 `completed`。这一轮**做过对照**：把 backend 换回本分支提交前的版本，失败集合一模一样（37/37 同名）；再换回基线 `9aed752` 的 backend，失败集合仍然一模一样（37/37 同名）。也就是说这不是本分支引入的回归，是这台机器当下的环境（几个 worktree 同时在跑套件）造成的。
+
+更早几次全量被环境挡住，原因同样与本分支无关：
 
 - `tests/e2e/pig-kernel-update.test.ts`：上游 PiG 在这段时间里发布了 v0.5.3（此前是 v0.5.2），仓库钉的是 v0.5.1，"钉住的是最新版"这条断言因此失败；该测试还会去拉新版本并构建。
 - `tests/m4/acceptance.test.ts`：把本分支的 backend 换成基线版本后同样失败（"a native Git work-check graph without an independent reviewer cannot deliver"），是既有失败。
 - `tests/console/git-baseline.test.ts` 与 `tests/m7/harness.test.ts`：在机器同时跑着好几个 worktree 的套件时不稳定；同样这三个文件在基线与本分支上跑出的失败集合完全一致。
 
-换句话说：本分支没有引入回归，但"全绿"这句话只有 13:17 那一次是完整跑出来的。
+换句话说：本分支没有引入回归，但"全绿"这句话只有 16:06 那一次是完整跑出来的。
 
 ---
 
