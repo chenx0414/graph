@@ -207,7 +207,7 @@ const CHECKS = [
  * hash is looked up when the script runs.
  */
 function commitFor(subject) {
-  const base = run('git', ['merge-base', 'main', 'HEAD']).stdout;
+  const base = run('git', ['merge-base', 'main', 'HEAD']).stdout.trim();
   const found = run('git', ['log', '--format=%H%x00%s', `${base}..HEAD`])
     .stdout.split('\n')
     .map(line => line.split('\0'))
