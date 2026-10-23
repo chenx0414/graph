@@ -1,7 +1,7 @@
 import {execFile} from 'node:child_process';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {promisify} from 'node:util';
 import {cases} from './harness-eval-cases.mjs';
 import {launchCli} from '../tests/helpers/cli-daemon.ts';
@@ -30,6 +30,7 @@ const exec=promisify(execFile);
  *   GRAPH_AB_TURNS        follow-up turns of the same conversation (default 1)
  *   GRAPH_AB_FOLLOWUP     0 to run the task once and stop (default on)
  *   GRAPH_AB_KEEP         1 to keep the run's directory for inspection
+ *   GRAPH_AB_OUT          path the per-run ledger is written to
  *   GRAPH_EVAL_TIMEOUT_MS the wall clock one turn may take (default 180000)
  *
  * The credential of the provider comes from the environment the configuration
@@ -252,4 +253,15 @@ for (const name of variantNames) {
     failedCompactions: own.reduce((sum, run) => sum + (run.compactions?.failed ?? 0), 0),
   };
 }
-console.log(JSON.stringify({ case: caseId, model: model.id, repeats, summary, runs }, null, 2));
+const ledger = { case: caseId, model: model.id, repeats, summary, runs };
+// The ledger is the evidence of the comparison: every run, its own cost and
+// its own behaviour check. Printed it is easy to lose, so it can be written
+// where the reader of the report will find it.
+const output = JSON.stringify(ledger, null, 2);
+if (process.env.GRAPH_AB_OUT) {
+  const target = process.env.GRAPH_AB_OUT;
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, output + '\n');
+  console.error(`[ab] ledger written to ${target}`);
+}
+console.log(output);
