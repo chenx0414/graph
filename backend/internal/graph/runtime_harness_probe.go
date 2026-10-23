@@ -223,13 +223,15 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 	}
 	timeout := int64(input.TimeoutMs)
 	if timeout <= 0 {
-		timeout = 300_000
+		timeout = 180_000
 	}
 	if timeout > 900_000 {
 		timeout = 900_000
 	}
 	started := NowMillis()
 	timedOut := false
+	progress := ""
+	quietSince := started
 	for {
 		if service.harnessProbeSettled(graphId) {
 			break
@@ -239,10 +241,15 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 			timedOut = true
 			break
 		}
-		// A candidate that never starts must not hold the Agent's turn for
-		// the whole timeout: a graph whose nodes cannot run says so quickly,
-		// and the honest answer is a candidate that did not run.
-		if elapsed >= 60_000 && !service.harnessProbeStarted(graphId) {
+		// The probe holds the Agent's turn, so it must not wait for a
+		// candidate that is going nowhere. When nothing about the candidates
+		// has changed for a while, the honest answer is what has happened so
+		// far - a candidate that did not finish is a fact too.
+		signature := service.harnessProbeProgress(graphId)
+		if signature != progress {
+			progress = signature
+			quietSince = NowMillis()
+		} else if NowMillis()-quietSince >= 30_000 {
 			timedOut = true
 			break
 		}
@@ -278,10 +285,16 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 	}
 }
 
-// harnessProbeStarted reports whether any candidate has begun to work.
-func (service *graphManagementService) harnessProbeStarted(graphId string) bool {
-	row := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_executions WHERE task_id=?", graphId)
-	return kernelInt(row["count"]) > 0
+// harnessProbeProgress is a short description of what the candidates are doing.
+// It changes while they work and stops changing when they are stuck.
+func (service *graphManagementService) harnessProbeProgress(graphId string) string {
+	parts := []string{}
+	for _, row := range kernelRows(service.kernel.Db, "SELECT node_id,state FROM kernel_executions WHERE task_id=? ORDER BY node_id", graphId) {
+		parts = append(parts, kernelString(row["node_id"])+"="+kernelString(row["state"]))
+	}
+	queued := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')", graphId)
+	parts = append(parts, "queued="+itoa(int(kernelInt(queued["count"]))))
+	return strings.Join(parts, ",")
 }
 
 // harnessAxis is the axis of a claim: general or specific. A claim that does

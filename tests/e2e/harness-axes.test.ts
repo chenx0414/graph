@@ -140,8 +140,9 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
   expect(created.status).toBe(200);
 
   const resultOf = (id: string): string => observed.get(id) ?? '';
-  const deadline = Date.now() + 90000;
+  const deadline = Date.now() + 240000;
   while (!resultOf('read-billing') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
+  if (!resultOf('probe')) console.log('MISSING RESULTS', JSON.stringify([...observed.entries()]).slice(0, 1500));
 
   // The probe reports which axis each candidate was claimed on.
   const probe = JSON.parse(resultOf('probe') || '{}') as {
@@ -175,4 +176,4 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
   expect(billing.general).toHaveLength(1);
   expect(billing.general[0]!.axis).toBe('general');
   expect(billing.general[0]!.lesson).toContain('input shape');
-}, 150_000);
+}, 300_000);

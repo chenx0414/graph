@@ -50,6 +50,10 @@ Graph 真正缺的只有三件：
 
 一句话概括：**把"改进 harness"变成"对比同一任务在不同 harness 下的行为，再把赢家沉淀下来"。**
 
+这条链在 Graph 里已经闭合，并且有**一次跑完的 E2E**（`tests/e2e/harness-loop.test.ts`）：
+一次失败的工具调用 → 读自己的证据 → 两个 harness 的探针对比 → 按通用轴记录裁决 →
+下一个任务的 system prompt 里已经在场。
+
 ## Graph 现状（与融合相关的部分）
 
 - **可编辑 harness 面**：`~/.graph/prompts/` 下 12 个文件（`agents/main.md`、`tools/{main,worker,reviewer}.md`、
