@@ -522,7 +522,11 @@ Go 侧已有的 E2E（17 个文件）承担 keeper；下表登记 TS 侧契约�
 
 （顺便更正上一版：「命令的父进程是 daemon」这个读法**也是错的**——那次的 ps 过滤词是 `hold.cjs`，**匹配到了别的会话的同名进程**，读到的 ppid 属于别人的进程。这一版用唯一文件名重测，才是对的。）
 
-**于是要问的换成这一个**：宿主命令到底是谁起的。Go 侧看着是 `runtime_host_command.go:201` 起了 worker（`exec.Command(execPath, hostCommandWorkerPath())`），可进程表说命令的直接主人是 **daemon**、worker 不在树里。**中间这一层还有别人**：候选是 **TS 侧车的 shell 执行器**（`src/runtime/durable-tools.ts` 里那个 `shell`，它经受限进程起命令，命令是 `detached` 起的独占进程组）——那样命令的「主人」就不是 worker，而是那条链上更靠上的某一环。下一步就是把这个环找出来：**daemon 活着的时候，逐个进程问「我的孩子里有没有那个 hold.cjs」**（顺着 ppid 往上走），谁起的就清楚了；命令的寿命也就该绑在谁身上。
+**命令的「主人」是谁，代码这边已经能读出来了**（这是读码结论，与上面的测量互为印证）：**TS 侧车的 shell 执行器**（`src/runtime/durable-tools.ts` 里那个 `shell`）→ **受限进程**（`src/runtime/restricted-process.ts`）→ 它用 `detached: true` 起 `/bin/sh -c "<launch>"` → 那条命令。
+
+**关键在于：受限进程才是命令的监管人**（超时、取消、主人断开，都由它执行）——但**它没有待在命令跑完**。于是命令成了 launchd 的孩子，**没有任何人负责结束它**：daemon 死它不死，监管人死它也不死。而这条链上真正「该负责」的是受限进程——它本来就是那个角色。
+
+**因此修法的方向定下来了**：**受限进程必须活到它起的命令结束**（它本来就是监管人，退出等于把监管丢了），并且**主人（daemon）消失时它要能把命令收掉**。落点有两处，都在 `src/runtime/restricted-process.ts`：一是别让进程在命令还在跑的时候退出；二是命令在跑的时候，别把 IPC channel unref 掉（`channelIdle()` 那条路正是监管通道）。
 
 **下一步的线索已经拿到了**（注意：之前几次用 `ps` 不带 `-A`，它只列当前终端的进程，于是「进程不见了」全是 ps 用法错误，不是事实）：用 `ps -A` 看整棵树，**命令的父进程是 daemon 本身**（它的 ppid 与侧车的 ppid 相同），**而那个 worker 根本不在树里**。也就是说，**命令不是被 worker 领养的**——daemon 一死，它就成了孤儿，继续跑；worker 那条 `disconnect → cancel` 的链压根没机会接手。
 
