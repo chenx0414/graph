@@ -6,7 +6,7 @@
 
 ## 结论摘要
 
-1. **53 条的去向**：本轮动了 20 条（17 条整条修掉，3 条只修了一个面：#5、#9、#50）；确认为真实缺陷但不在本轮修复范围的 1 条（#36，ADR 决策）；因为 TS 路径正在被退役而不必再改的 1 条（#18）；这一轮查下来在本栈里不成立、改判 ALREADY-OK 的 2 条（#22、#41）；剩下 29 条分给已有的真实守卫（21 条 ALREADY-OK）、本栈不存在的机制（5 条 N/A）与上游（3 条 UPSTREAM-PIG，另有 #5 的其余部分也在上游）。
+1. **53 条的去向**：本轮动了 20 条（17 条整条修掉，3 条只修了一个面：#5、#9、#50）；确认为真实缺陷但经决定保持现状的 1 条（#36：ADR 0026 不动，只把工具描述里的后果写清楚）；因为 TS 路径正在被退役而不必再改的 1 条（#18）；这一轮查下来在本栈里不成立、改判 ALREADY-OK 的 2 条（#22、#41）；剩下 29 条分给已有的真实守卫（21 条 ALREADY-OK）、本栈不存在的机制（5 条 N/A）与上游（3 条 UPSTREAM-PIG，另有 #5 的其余部分也在上游）。
 
    20 条里，15 条有先红后绿的 E2E（#4/#24/#1/#45 与 #5 的 Graph 侧一支、#23/#40/#9 一支、#32/#33/#34、#14、#53、#13、#46）；另外 5 条（#50、#25/#51、#8、#29）没有专属的先红后绿证明——既有的 E2E 仍然全绿，是回归的护栏，但没有一条断言盯住这次的修复。
 
@@ -76,7 +76,7 @@
 | 33 | **OURS-GO** → 已修 | 中 | 同上 | 空闲守卫此前根本不存在；补上之后发现失败路径还会去读那个还在输出的 body，回合仍旧挂着 |
 | 34 | **OURS-GO** → 已修 | 中 | `http_client.go:18`（`Timeout: 0`）→ 新读取边界 | 上游客户端此前没有读超时 |
 | 35 | ALREADY-OK | 低 | `server_app.go:611-612`；`runtime_rsi.go:2012-2018` | daemon 只"请求"重启，决定权在桌面端 |
-| 36 | ALREADY-OK（有残余） | 中 | `runtime_rsi.go:1352-1358`；ADR 0026 | 有真实代码闸门（请求方回合先结束）；残余：用户的确认仍是给模型的规则，不是代码检查，而 ADR 0026 把 `force` 定义为 agent 的工具 |
+| 36 | ALREADY-OK（有残余，**已决定保持现状**） | 中 | `runtime_rsi.go:1352-1358`；ADR 0026 | 有真实代码闸门（请求方回合先结束）；残余：用户的确认仍是给模型的规则，不是代码检查，而 ADR 0026 把 `force` 定义为 agent 的工具。2026-10-23 决定：ADR 0026 不动，只把工具描述里的后果写清楚 |
 | 37 | N/A | 低 | — | 本栈没有 span/trace 机制 |
 | 38 | N/A | 低 | PiG `telemetry/memory.go:64-70` | Graph 不 import `PiG/telemetry` |
 | 39 | ALREADY-OK（Graph 部分） | 中 | `pigkernel/provider.go` `restoreToolCallArguments`；`CONTEXT.md` 空参数工具调用 | 空参数调用已恢复为 `{}`；"null → no result"是上游 SDK 形状 |
@@ -265,7 +265,7 @@ E2E `tests/e2e/harness-tool-schema.test.ts` 拿真实 daemon 与受控 provider�
 
 | # | 机制 | 修复位置 |
 |---|---|---|
-| 36 | 用户的确认仍然只是给模型的规则，不是代码检查：模型可以在别的 operation 还在跑时 `force` 重载 daemon。ADR 0026 把 `force` 定义为 agent 的工具（"force 保留中断在途 operation 的原有语义"），所以收紧它是 ADR 决策，不是实现细节。工具的描述已写明这个后果与"先问用户" | 要么改 ADR 0026，要么在代码里要求一次可查证的确认（谁问、谁答、记在哪） |
+| 36 | 用户的确认仍然只是给模型的规则，不是代码检查：模型可以在别的 operation 还在跑时 `force` 重载 daemon。ADR 0026 把 `force` 定义为 agent 的工具（"force 保留中断在途 operation 的原有语义"），所以收紧它是 ADR 决策，不是实现细节。工具的描述已写明这个后果与"先问用户" | **2026-10-23 已决定：保持现状**。ADR 0026 不动，工具描述里写明后果（`force reloads even while other operations run, so ask the user before you use it: a forced reload interrupts the work still in flight`）。要改成可查证的确认（谁问、谁答、记在哪）时，那是另一次 ADR 决定 |
 | 18 | 遗留 TS 路径整读会话文件（10MB）并在事件循环上同步解析 | `src/core/node-prompt.ts` 改增量读；`src/runtime/durable-history.ts` 不再复制整份 records。`feature/retire-ts-backend` 正在退役这条路径，可能不必再改 |
 
 另有四条不再属于这一类：
