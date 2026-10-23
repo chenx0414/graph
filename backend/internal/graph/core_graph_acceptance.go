@@ -106,14 +106,22 @@ func graphAcceptanceHasKey(record map[string]any, key string) bool {
 	return ok
 }
 
-func graphAcceptanceIdentityEqual(left, right any) bool {
-	leftText, leftOK := left.(string)
-	rightText, rightOK := right.(string)
-	if leftOK || rightOK {
-		return leftOK && rightOK && leftText == rightText
+// graphAcceptanceIdentity is a decoded model identity as text. An identity that
+// is not a string is absent, because TypeScript compares parsed values with ===
+// and two separately parsed objects are never the same object.
+func graphAcceptanceIdentity(value any) *string {
+	text, ok := value.(string)
+	if !ok {
+		return nil
 	}
-	// TODO(port): TypeScript compares parsed model identities with ===, which is reference equality for objects.
-	return false
+	return &text
+}
+
+func graphAcceptanceIdentityEqual(left, right *string) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return *left == *right
 }
 
 // GraphAcceptance reads operation, publication, and actual-send records.
@@ -256,7 +264,7 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 					matched := call.Model != nil && call.Model.Recipe != nil && call.Model.Recipe.Review && call.Model.Recipe.Definition == recipe && (call.State == "settled" || call.State == "reconciled")
 					if matched {
 						for _, work := range implementers {
-							if work.Model.Id == call.Model.Id || graphAcceptanceIdentityEqual(work.Model.Identity, call.Model.Identity) {
+							if work.Model.Id == call.Model.Id || graphAcceptanceIdentityEqual(graphAcceptanceIdentity(work.Model.Identity), graphAcceptanceIdentity(call.Model.Identity)) {
 								matched = false
 							}
 						}
