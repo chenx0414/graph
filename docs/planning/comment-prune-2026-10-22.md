@@ -2,7 +2,7 @@
 
 本轮用 `/poteto-mode` 生成 `/swarm`，按 `/no-comments` 的 Comment Sicko 标准审计全仓注释，产出本计划并在新分支 `chore/comment-prune-2026-10-22` 上落地第一批删除。
 
-审计由 6 个并行节点分片完成，覆盖 `src/core`、`src/runtime`、`src/web` + `src/server`、`src/catalog` + `src/git`、`scripts` + `desktop` + `examples`、`backend/internal/graph`、`backend/internal/pigkernel` + `backend/cmd` + `tests`。每条结论都带 `file:line`，主会话对高影响项逐条复核，剔除不成立的判断。
+审计由 **7 个**并行节点分片完成，覆盖 `src/core`、`src/runtime`、`src/web` + `src/server`、`src/catalog` + `src/git`、`scripts` + `desktop` + `examples`、`backend/internal/graph`、`backend/internal/pigkernel` + `backend/cmd` + `tests`。每条结论都带 `file:line`，主会话对高影响项逐条复核，剔除不成立的判断。
 
 ## 结论先行
 
@@ -48,13 +48,13 @@
 
 - `catalog_models_dev.go:274-275`、`catalog_providers.go:105,132`、`server_providers.go:130`、`core_graph_presentation.go:31-32`、`core_transient_retry.go:14`、`runtime_deploy_drift.go:209`
 
-**重构**：把这 7 个**类型**改名（`…Record` / `…Spec` / `…View`），函数恢复裸名。10 行注释自然消失。
+**重构**：把这 7 个**类型**改名（`…Record` / `…Spec` / `…View`），函数恢复裸名。注释自然消失。
 
-**已落地**：类型改名为 `CatalogProvenanceRecord`、`ProviderTemplateRecord`、`TemplateModelEntryRecord`、`PlatformPresetRecord`、`GraphNodeVisualKindValue`、`RetryDecisionRecord`、`DeployDriftReport`，函数恢复 `CatalogProvenance`、`ProviderTemplate`、`TemplateModelEntry`、`PlatformPreset`、`GraphNodeVisualKind`、`DeployDrift`（`RetryDecision` 的函数本来就叫这个名字，方向与计划相反）。
+**已落地**：类型改名为 `CatalogProvenanceRecord`、`ProviderTemplateRecord`、`TemplateModelEntryRecord`、`PlatformPresetRecord`、`GraphNodeVisualKindValue`、`RetryDecisionRecord`、`DeployDriftReport`，函数恢复 `CatalogProvenance`、`ProviderTemplate`、`TemplateModelEntry`、`PlatformPreset`、`GraphNodeVisualKind`、`DeployDrift`（`RetryDecision` 的函数本来就叫这个名字，方向与计划相反）。**这一改名本身删掉 13 行注释**（7 个文件，实测注释行净减 13；计划写的是 10 行）。
 
 同时 `backend/internal/graph` 有 **5 个近乎相同的排序键辅助函数**：`mapKeys`（`core_confirm_graph.go:40`）、`mapKeysAny` 与 `mapKeysSet`（`core_module_runtime.go:514,526`）、`portKeys`（`core_control_targets.go:30`）、`sortedKeys`（`core_kernel_views.go:91`）。**重构**：合成一个泛型 `sortedKeys[V any](map[string]V) []string`，带一句「Go map 迭代无序，所有定义遍历必须走这里」的文档。
 
-**已落地**：合并进 `backend/internal/graph/keyutil.go` 的 `sortedKeys` 与 `anySortedKeys`，35 处调用点全部更新，**5 个**旧函数（`mapKeys`、`mapKeysAny`、`mapKeysSet`、`portKeys`、旧 `sortedKeys`）删除。`mapKeysAny` 原本不排序，合并前逐个核对了它的 3 个调用点都与顺序无关，行为不变。这个单元消掉 **12 处 map 顺序 `TODO(port)`**（不是计划的 16 处——另外 10 处形状相似但说的是新文档表达不了的事实，保留）。
+**已落地**：合并进 `backend/internal/graph/keyutil.go` 的 `sortedKeys` 与 `anySortedKeys`，35 处调用点全部更新，**5 个**旧函数（`mapKeys`、`mapKeysAny`、`mapKeysSet`、`portKeys`、旧 `sortedKeys`）删除。`mapKeysAny` 原本不排序，合并前逐个核对了它的 3 个调用点都与顺序无关，行为不变。这个单元消掉 **12 处 map 顺序 `TODO(port)`**（不是计划的 16 处——另外 10 处形状相似但说的是新文档表达不了的事实，保留）。**合并这一步另外删掉 14 行注释**（10 个文件），与上面改名的 13 行合计 27 行。
 
 ### 2.2 `TODO(port)` 的其余簇
 
@@ -78,6 +78,10 @@
 
 同文件的 `credentialConfigured` / `credentialRef` 优先级（`Settings.tsx:578-583`）用 6 行散文解释一个两项表达式的先后。**重构**：抽成 `credentialResolved(...)` 一个具名谓词。
 
+**已落地**：谓词落在 `src/web/provider-form.ts` 的 `credentialResolved(resolution)`，`Settings.tsx` 改成调它，那 6 行散文删掉。**等价性是穷举证明过的**：把 `credentialState`、`keyResolved`、`platformConfigured` 三个事实各自的三种取值（true/false/undefined）组合起来，再乘上 3 个凭据 id（旧表达式是按 id 索引的，id 也必须一起纳入），共 **81 组**，逐组比对新旧表达式，结果完全一致。`credentialResolved` 成了 2.4 里第二个具名符号——原来两个 `if` 分支的先后顺序，现在由一个函数名说明。
+
+顺带删掉的是这个谓词里**没人读的 `credentialId` 参数**：函数体从头到尾没有碰过它，这和第 3 单元在 Go 侧删掉的 `removeListener` 的死参数是同一类 wart。调用点本来就在对象字面量里写着 `active.credentialId`，参数是多余的。
+
 ### 2.5 死代码
 
 - `backend/internal/graph/server_live_config.go:302-304`：`removeListener` 的 `listener` 参数没人用，`_ = listener` 解释为什么。**重构**：删参数，删两行注释。**已落地**。
@@ -89,7 +93,7 @@
 
 ### 2.6 重复的注释块
 
-- `backend/internal/pigkernel/` 6 个文件（`kernel.go`、`turn.go`、`session.go`、`extensions.go`、`mcp.go`、`provider.go`）把同一段「daemon 拥有业务事实，kernel 拥有执行历史」的所有权划分抄了 6 遍。**重构**：这段话进 `docs/architecture.md`，每个导出类型留一句。**已落地**：段落写进 `docs/architecture.md` 的新一节「daemon 与内核的分工」，代码里 7 处改成指针。`backend/internal/graph` 的 `runtime_pig_session.go` 与 `runtime_pig_node_host.go` 还有两段，也一并改了——否则同一段话仍然抄着 9 遍。
+- `backend/internal/pigkernel/` 6 个文件（`kernel.go`、`turn.go`、`session.go`、`extensions.go`、`mcp.go`、`provider.go`）把同一段「daemon 拥有业务事实，kernel 拥有执行历史」的所有权划分抄了 6 遍。**重构**：这段话进 `docs/architecture.md`，每个导出类型留一句。**已落地**：段落写进 `docs/architecture.md` 的新一节「daemon 与内核的分工」，代码里 **7 处**改成指针。`backend/internal/graph` 的 `runtime_pig_session.go` 与 `runtime_pig_node_host.go` 还有两段，也一并改了——否则同一段话仍然抄着 9 遍。**树里现在共 9 处指针**（pigkernel 7 处 + graph 包 2 处，实测逐处数过），注释行净减 10 行（pigkernel -7、graph 包 -3）。
 - `src/server/source-identity.ts:5-17`（13 行）、`src/server/go-launch.ts:5-14`、`src/server/console-port.ts:4`、`src/server/console-address.ts:4`（10 行）、`src/runtime/capabilities.ts:1044`、`src/runtime/conversation-tools.ts:3-11`：动机散文。**重构**：把「为什么存在」变成一个符号名或一段架构文档，散文随之消失。**未做**：这批散在 `src/server` 与 `src/runtime`，每个都牵一个独立的小重构，合并成一个单元就不再是「一个根因」。
 
 ### 2.7 测试与脚本
@@ -110,20 +114,21 @@
 
 ## 推进顺序
 
-按「一个根因一个单元、每个单元独立可验证」排。**第 1 到第 7 步已全部落地**，每个单元一个根因一次提交：
+按「一个根因一个单元、每个单元独立可验证」排。**第 1 到第 9 步已全部落地**，每个单元一个根因一次提交：
 
 | 步 | 单元 | 落地结果 |
 | --- | --- | --- |
 | 1 | 直接可删的注释 | 37 个文件、93 处 hunk（142 行注释行），净减 173 行，行为不变 |
 | 2 | Go 命名单元 | 7 个类型改名让函数拿回裸名；**5 个**排序辅助函数合一（原计划写 4 个，树里是 5 个） |
 | 3 | Go 死代码单元 | `removeListener` 死参数、重复的终止分支、死分支、重复的 `layoutNodeSize` |
-| 4 | 前端单元 | `hasProposal` 死字段、models.dev 模块类型、两个 effect 的依赖表 |
+| 4 | 前端单元 | `hasProposal` 死字段、models.dev 模块类型、**凭据谓词 `credentialResolved`**、两个 effect 的依赖表 |
 | 5 | `localeCompare` / UTF-16 单元 | 字节序比较器；「N chars」改按 UTF-16 计数 |
-| 6 | pigkernel 所有权段落 | 段落进 `docs/architecture.md`，代码里 7 处改成指针 |
+| 6 | pigkernel 所有权段落 | 段落进 `docs/architecture.md`，代码里 **9 处**改成指针（pigkernel 7 处 + graph 包 2 处） |
 | 7 | 测试与脚本单元 | spool 写路径（无生产调用方）、floating-promises 改 AST、`matt-flow` 删 `flags` |
 | 8 | 测试规则补救（审查后补，计划里没有这一项） | 契约迁进真 E2E，退休两个被改写的旧测试，并删掉只被它们养活的 test-facing seam |
+| 9 | 数字与死参数复核（审查后补，计划里没有这一项） | 删掉凭据谓词里没人读的 `credentialId` 参数；把审计表、推进顺序表、覆盖节里对不上的数字按实测改正，并把第 4 步漏记的凭据谓词补进落地记录 |
 
-第 2 到第 6 步之间没有依赖，实际按 5 个并行节点推进；第 7 步等第 4 步的 `Settings.tsx` 改动落地后再动同一批文件。第 8 步是审查之后补的：它不改产品行为，只把第 4、7 步动过的测试改写换回合规的写法（见「测试规则的补救」一节）。
+第 2 到第 6 步之间没有依赖，实际按 5 个并行节点推进；第 7 步等第 4 步的 `Settings.tsx` 改动落地后再动同一批文件。第 8、9 步是审查之后补的：第 8 步把第 4、7 步动过的测试改写换回合规的写法（见「测试规则的补救」一节），第 9 步把计划里对不上的数字按实测改回来，并清掉谓词自己的死参数。
 
 ### 计划落地时与代码不符的地方
 
@@ -136,6 +141,10 @@
 - **models.dev 不能改成静态导入**：计划写的是静态导入。落地时实测发现该模块在导入期就读快照（一个没有保护的顶层 `await fetch`），静态导入会把这次读取挪到 Settings chunk 的模块求值期——真实浏览器里挡住快照资源后，基线的 chunk 仍能求值，静态导入版本不能。改成保留动态导入、只把手写的 `ModelsDevModule`（`(...args: any[])`）换成 `typeof import()`，`@ts-ignore` 随之消失。
 - **「94 处、净减 151 行」这两个数字对不上 diff**：实测是 37 个源文件、93 处 hunk（90 段连续注释块、142 行注释行）、净减 **173** 行。94 是审计时各节点汇报的合计，跟 diff 里的任何一种计数都对不上；151 也与 numstat 不符。两个数字都换成了能复算的。
 - **第 1 类那节表格自己枚举的只有 62 处**，加上两处按语义改写的共 64 处，和 94 也对不上。表格保留原样（它给的是代表位置，不是全量清单），但正文的数字不再引用它。
+- **第 4 步的「凭据谓词」在落地记录里漏了**：计划的推进顺序第 4 步明写「`Settings.tsx` 的 models.dev 静态导入与**凭据谓词**、`eslint-disable` 两条」，2.4 节也写着「**重构**：抽成 `credentialResolved(...)` 一个具名谓词」，但落地结果那一段只记了 models.dev，谓词既没写「已落地」，也没进推进顺序表——读起来像被丢掉了。代码其实在 `42809db1` 就落地了，第 9 步补上记录：谓词在 `src/web/provider-form.ts`，`Settings.tsx` 调它，6 行散文删掉，81 组输入穷举证明等价。
+- **谓词自己带了一个没人读的参数**：`credentialResolved(credentialId, resolution)` 的 `credentialId` 从头到尾没被函数体碰过。调用点本来就在对象字面量里写着 `active.credentialId`，参数是多余的——和第 3 单元在 Go 侧删掉的 `removeListener` 的死参数是同一类 wart。第 9 步把它删了，等价性重新穷举过。
+- **审计那节的分片规模整体写小了**：节点 3、4、5、6、7 的文件数按审计基线 `a254ec92^` 逐个数出来是 96 / 19 / 52 / 182 / 334，原来写的是 79 / 17 / 40 / 178 / 326。另外「6 个节点」其实是 **7 个分片**。节点 6 的「3223 个注释块」是那个节点自己的解析器报的数，用统一口径复算是 2716 段 / 5342 行，复现不了就不写了。
+- **改名的注释行数是 13 不是 10**：2.1 节原写「10 行注释自然消失」。实测改名那一次提交净减 13 行注释（7 个文件），合并 5 个排序键辅助函数那次再减 14 行（10 个文件），两个提交合计 27 行。
 
 ### 后续可做，但不属于本计划
 
@@ -147,17 +156,19 @@
 
 ### 审计是怎么做的
 
-6 个节点并行，各管一片，互不重叠：
+**7 个**节点并行，各管一片，互不重叠（下面这张表的文件数是对审计基线 `a254ec92^` 也就是审计当时那棵树逐个数出来的）：
 
 | 节点 | 范围 | 读法 |
 | --- | --- | --- |
-| 1 | `src/core` | 65 个文件全部逐行读 |
+| 1 | `src/core` | 65 个 `.ts`/`.tsx` 文件全部逐行读 |
 | 2 | `src/runtime` | 70 个 `.ts` 文件全部逐行读（5 个 `.mjs`/`.cjs` 不在分片内） |
-| 3 | `src/web` + `src/server` | 79 个文件全部列出注释，19 + 9 个逐行读 |
-| 4 | `src/catalog` + `src/git` | 17 个文件全部逐行读 |
-| 5 | `scripts` + `desktop` + `examples` | 40 个文件全部逐行读 |
-| 6 | `backend/internal/graph` | 178 个非测试 `.go` 全文机械解析 3223 个注释块，其中约 180 个在代码上下文里逐个判断 |
-| 7 | `backend/internal/pigkernel` + `backend/cmd` + `tests` | Go 侧 9 个文件全读；`tests/**` 326 个文件全量模式扫描，5 个注释密集文件逐行读 |
+| 3 | `src/web` + `src/server` | **96** 个文件全部列出注释，19 + 9 个逐行读（web 78 + server 18） |
+| 4 | `src/catalog` + `src/git` | **19** 个文件全部逐行读（catalog 17 + git 2） |
+| 5 | `scripts` + `desktop` + `examples` | **52** 个文件全部逐行读（scripts 35 + desktop 7 + examples 10） |
+| 6 | `backend/internal/graph` | **182** 个非测试 `.go` 全文机械解析，其中约 180 个注释块在代码上下文里逐个判断 |
+| 7 | `backend/internal/pigkernel` + `backend/cmd` + `tests` | Go 侧 **10** 个文件全读（pigkernel 9 + cmd 1）；`tests/**` **334** 个文件全量模式扫描，5 个注释密集文件逐行读 |
+
+节点 3、4、5、6、7 的文件数原先写小了（79/17/40/178/9/326），另外「6 个节点」其实是 7 个分片——都按实测改了。节点 6 原来写的「3223 个注释块」是那个节点自己的机械解析器报的数，用这里统一的口径（连续注释行算一段）复算出来是 **2716 段 / 5342 行**，不是 3223；复现不了的那个数就不写了。
 
 每个节点报的每条结论都带 `file:line`。主会话对高影响项逐条复核：把注释删掉后剩下的代码是否真的自解释、重复文档的「另一处」是否真的存在、声称的外部依赖是否真的是外部依赖。复核中否掉了一类结论——「注释解释了紧邻代码的意图」不成立为删除理由，除非紧邻代码确实已经说明。
 
@@ -234,6 +245,6 @@ rebase 本身（19:27）用 `core.hooksPath=/dev/null` 关掉了钩子，所以�
 
 ## 覆盖与缺口
 
-- `tests/**` 全部 326 个文件做了模式扫描，其中 5 个注释密集的文件逐行读了上下文；其余 190 个低密度文件只扫描模式、读了文件头，未逐行判断。`tests/fixtures/**`（20 个文件）只扫未读。
+- `tests/**` 全部 **334** 个文件做了模式扫描（审计基线 `a254ec92^` 上的实测），其中 5 个注释密集的文件逐行读了上下文；其余 190 个低密度文件只扫描模式、读了文件头，未逐行判断。`tests/fixtures/**`（**31** 个文件）只扫未读。
 - `src/web` 有 30 多个文件只做了清单扫描和抽样，未逐行判断；其注释风格以导出符号的契约 JSDoc 为主，抽样未发现 meat。
-- 注释密度本身不构成问题（删除后）：`src/core` 2130 行注释 / 65 文件，`src/runtime` 1839 / 74，`backend` 5673 / 191。大部分是有价值的契约与外部约束说明。
+- 注释密度本身不构成问题（删除后）：`src/core` **2130** 行注释 / 65 文件，`src/runtime` **1841** / 75，`backend` **5768** / 193。口径是：去掉缩进后以 `//`、`#`、`/*`、`*` 开头的非空行（块注释内部行计入），文件按 `.ts`/`.tsx`（src/core）、`.ts`/`.mjs`/`.cjs`（src/runtime）、`.go`（backend）计，在分支尖端实测。大部分是有价值的契约与外部约束说明。
