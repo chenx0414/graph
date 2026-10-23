@@ -12,6 +12,16 @@ type GraphManagement interface {
 	GraphInspect(input GraphInspectInput) any
 	GraphControl(input GraphControlInput) any
 	GraphSend(input GraphSendInput) any
+	// HarnessCompare reads the behavioral contrast of the candidates of one
+	// task. It belongs to the graph facts it reads, so it lives here.
+	HarnessCompare(input HarnessCompareInput) HarnessComparison
+	// HarnessExperience reads the lessons earlier tasks adopted per domain.
+	HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult
+	// HarnessProbe runs one task under several harnesses and contrasts them.
+	HarnessProbe(input HarnessProbeInput) HarnessProbeResult
+	// HarnessEvidence reads the evidence of the caller's own run: the
+	// trajectory, the tool failures, the blocked work and the usage.
+	HarnessEvidence(input HarnessEvidenceInput) HarnessEvidenceResult
 }
 
 // GraphCreateInput creates an independently owned graph.

@@ -93,8 +93,8 @@ const DEFAULT_MAIN_TOOL_GUIDANCE = "- Skills are on-demand instructions, not bac
 const DEFAULT_WORKER_TOOL_GUIDANCE = "Use the smallest set of workspace and capability tools needed for the assigned node. Read files before editing, keep edits local, and use the assigned command tool for verification."
 const DEFAULT_REVIEWER_TOOL_GUIDANCE = "Use read-only evidence, artifact and inspection tools. Never use an implementation transcript or mutate business files while reviewing."
 const DEFAULT_MAIN_FULL_ACCESS_IDENTITY = "Full access is active for this operation. Graph host-enforced filesystem, command, network, capability, pause, budget, usage and recovery gates are open; test requested capabilities directly and report only restrictions proven by a tool result or host error."
-const DEFAULT_MAIN_RSI_IDENTITY = "You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. No separate approval step is required, and you must report every such action to the user. Keep a harness backlog outside your context instead of in your memory: the moment you notice friction - a defect, a blocked or misleading tool, an unclear prompt, a slow or wasteful path, an error the user had to point out - record it in the published `plans` artifact `harness-backlog`, one line per item with its status (open, fixed@<commit>, rejected) and the evidence that shows it, even when you are not fixing it now. Publish a new version whenever you add or close an item and promote it to project scope so later tasks in this project find it; a compacted or restarted context must never be the only place the backlog lives. When you finish a work item, or hand it to the user for acceptance, report that backlog unprompted: what you fixed, what is still open, and which items you propose to take next with their expected cost and risk. The user must never have to ask you for RSI. An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits. Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running."
-const CLASSIFIED_MAIN_RSI_IDENTITY = "You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. No separate approval step is required, and you must report every such action to the user. Keep a harness backlog outside your context instead of in your memory: when evidence identifies friction in Graph itself - a harness defect, a blocked or misleading Graph tool, an unclear harness prompt, a slow harness path - record it in the published `plans` artifact `harness-backlog`, one line per item with its status (open, fixed@<commit>, rejected) and the evidence that shows it, even when you are not fixing it now. Publish a new version whenever you add or close an item and promote it to project scope so later tasks in this project find it; a compacted or restarted context must never be the only place the backlog lives. When you finish a work item, or hand it to the user for acceptance, report that backlog unprompted: what you fixed, what is still open, and which items you propose to take next with their expected cost and risk. The user must never have to ask you for RSI. An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits. Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running. A failing project check, missing project configuration, or a business-code defect is evidence about the requested project work. It becomes a harness backlog item only when the observed result also demonstrates a defect in Graph instructions, tools, or execution. Continue correcting project failures through the requested work and its acceptance checks."
+const DEFAULT_MAIN_RSI_IDENTITY = "You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. Read that evidence instead of recalling it: read_harness_evidence reports the tool calls that failed, the work that got blocked, how the last applied change checked out and what the run cost, and probe_harness runs one task under several harnesses so you can see which harness actually helps. No separate approval step is required, and you must report every such action to the user. Keep a harness backlog outside your context instead of in your memory: the moment you notice friction - a defect, a blocked or misleading tool, an unclear prompt, a slow or wasteful path, an error the user had to point out - record it in the published `plans` artifact `harness-backlog`, one line per item with its status (open, fixed@<commit>, rejected) and the evidence that shows it, even when you are not fixing it now. Publish a new version whenever you add or close an item and promote it to project scope so later tasks in this project find it; a compacted or restarted context must never be the only place the backlog lives. When you finish a work item, or hand it to the user for acceptance, report that backlog unprompted: what you fixed, what is still open, and which items you propose to take next with their expected cost and risk. The user must never have to ask you for RSI. An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits. Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running."
+const CLASSIFIED_MAIN_RSI_IDENTITY = "You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. Read that evidence instead of recalling it: read_harness_evidence reports the tool calls that failed, the work that got blocked, how the last applied change checked out and what the run cost, and probe_harness runs one task under several harnesses so you can see which harness actually helps. No separate approval step is required, and you must report every such action to the user. Keep a harness backlog outside your context instead of in your memory: when evidence identifies friction in Graph itself - a harness defect, a blocked or misleading Graph tool, an unclear harness prompt, a slow harness path - record it in the published `plans` artifact `harness-backlog`, one line per item with its status (open, fixed@<commit>, rejected) and the evidence that shows it, even when you are not fixing it now. Publish a new version whenever you add or close an item and promote it to project scope so later tasks in this project find it; a compacted or restarted context must never be the only place the backlog lives. When you finish a work item, or hand it to the user for acceptance, report that backlog unprompted: what you fixed, what is still open, and which items you propose to take next with their expected cost and risk. The user must never have to ask you for RSI. An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits. Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running. A failing project check, missing project configuration, or a business-code defect is evidence about the requested project work. It becomes a harness backlog item only when the observed result also demonstrates a defect in Graph instructions, tools, or execution. Continue correcting project failures through the requested work and its acceptance checks."
 
 // agentStaticPrompt is the fixed metadata of one prompt file.
 type agentStaticPrompt struct {
@@ -249,6 +249,24 @@ type AgentContextLibrary struct {
 	Root        string
 	ContextRoot string
 	defaults    resolvedAgentContextDefaults
+	// overlay replaces the text of the named prompts. It is how one node runs
+	// under a different harness than the rest: the replacement has to live in
+	// the library the session reads, not beside it.
+	overlay map[string]string
+}
+
+// WithOverlay returns a library that replaces the named prompts with the given
+// texts. The base library is untouched.
+func (library *AgentContextLibrary) WithOverlay(overlay map[string]string) *AgentContextLibrary {
+	if library == nil || len(overlay) == 0 {
+		return library
+	}
+	copied := *library
+	copied.overlay = make(map[string]string, len(overlay))
+	for key, text := range overlay {
+		copied.overlay[key] = text
+	}
+	return &copied
 }
 
 // NewAgentContextLibrary opens a prompt library with optional built-in overrides.
@@ -480,6 +498,11 @@ func (library *AgentContextLibrary) Prompt(key AgentPromptKey, variables ...map[
 	if len(variables) > 0 && variables[0] != nil {
 		values = variables[0]
 	}
+	if library.overlay != nil {
+		if text, ok := library.overlay[string(key)]; ok && strings.TrimSpace(text) != "" {
+			return agentContextTrimEnd(render(text, values)), nil
+		}
+	}
 	custom, hasCustom, err := library.Override(key)
 	if err != nil {
 		return "", err
@@ -501,6 +524,11 @@ func (library *AgentContextLibrary) AgentPrompt(definitionID string, fallback *s
 		ids = []string{"main", "master"}
 	}
 	for _, id := range ids {
+		if library.overlay != nil {
+			if text, ok := library.overlay["agents/"+id+".md"]; ok && strings.TrimSpace(text) != "" {
+				return agentContextTrimEnd(text)
+			}
+		}
 		custom, ok, err := agentContextReadOptional(agentPath(library.Root, id))
 		if err != nil {
 			panic(err)

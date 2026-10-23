@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    maxWorkers: 2,
+    bail: 1,
     include: ['tests/**/*.test.ts'],
     // Gives every test one spelling for the temp directory, whatever TMPDIR the runner was started with.
     setupFiles: ['tests/setup.ts'],

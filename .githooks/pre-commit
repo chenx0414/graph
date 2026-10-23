@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+# Resolve the guard from this hook's own location, so the check runs against
+# the repository that owns the hook no matter which directory git starts in.
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$hook_dir/../scripts/check-file-tokens.mjs"

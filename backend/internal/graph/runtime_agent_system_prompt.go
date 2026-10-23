@@ -59,14 +59,18 @@ type AgentCapabilityPromptEntry struct {
 
 // ComposeAgentSystemPromptInput is what Graph itself renders into the system prompt.
 type ComposeAgentSystemPromptInput struct {
-	Identity             string
-	IdentityContext      string
-	HarnessContext       string
-	DefinitionVersion    string
-	ToolGuidance         string
-	RulesCommon          string
-	RulesRole            string
-	RulesRuntime         string
+	Identity          string
+	IdentityContext   string
+	HarnessContext    string
+	DefinitionVersion string
+	ToolGuidance      string
+	RulesCommon       string
+	RulesRole         string
+	RulesRuntime      string
+	// ExperienceContext carries the lessons earlier runs of this project
+	// learned. It is context, not a rule: it says what happened, never what
+	// the host enforces.
+	ExperienceContext    string
 	Docs                 GraphDocumentationPaths
 	Role                 string
 	CompactDocumentation bool
@@ -112,6 +116,14 @@ func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgent
 	host := AGENT_TESTING_POLICY
 	if input.Role != "main" {
 		host += "\n\nThis directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree."
+	}
+	if input.ExperienceContext != "" {
+		// The lessons sit before the host rules: they are what earlier runs
+		// learned, and the host's own rules stay the last word.
+		rulesParts = append(rulesParts, AgentPromptPart{
+			ID: "rules.experience", Title: "Lessons earlier runs learned", Origin: "generated",
+			Content: input.ExperienceContext, Source: "harness experience",
+		})
 	}
 	rulesParts = append(rulesParts, AgentPromptPart{ID: "rules.host", Title: "Host rules", Origin: "generated", Content: host})
 	rules := promptSection("rules", "Rules", rulesParts)

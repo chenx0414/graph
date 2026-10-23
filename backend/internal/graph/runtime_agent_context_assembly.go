@@ -43,6 +43,9 @@ type AgentContextAssemblyOptions struct {
 	Retrieval bool
 	// Rsi lets the main Agent change this Graph checkout.
 	Rsi bool
+	// ExperienceContext carries the lessons earlier runs of this project
+	// learned, so the Agent starts with them instead of rediscovering them.
+	ExperienceContext string
 }
 
 // AgentContextComposition is the prompt and the tool surface of one operation.
@@ -81,6 +84,8 @@ type AgentContextAssembly struct {
 	fullAccess   bool
 	rsi          bool
 	catalog      *Catalog
+	// experience carries the lessons earlier runs of this project learned.
+	experience string
 }
 
 // OpenAgentContextAssembly resolves the prompt, the rules and the tool surface
@@ -179,7 +184,8 @@ func OpenAgentContextAssembly(input AgentContextAssemblyOptions) *AgentContextAs
 		Bundle: bundle, DisabledTools: disabledTools, Role: role, DefinitionVersion: definitionVersion,
 		DocsRoot: docs.Root, common: common, roleRules: roleRules, toolGuidance: toolGuidance,
 		runtimeRules: runtimeRules, bootstrap: bootstrap, fullAccess: input.FullAccess, rsi: input.Rsi,
-		catalog: input.Catalog,
+		experience: input.ExperienceContext,
+		catalog:    input.Catalog,
 	}
 }
 
@@ -396,6 +402,7 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 	if assembly.runtimeRules != nil {
 		composeInput.RulesRuntime = *assembly.runtimeRules
 	}
+	composeInput.ExperienceContext = assembly.experience
 	if assembly.fullAccess && assembly.Role == "main" {
 		composeInput.IdentityContext = DEFAULT_MAIN_FULL_ACCESS_IDENTITY
 	}

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+[ "${3:-0}" = 1 ] || exit 0
+exec python3 "$(dirname "$0")/../scripts/install-check-policy.py"

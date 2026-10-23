@@ -33,8 +33,15 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 	} else if recipe != "" && state.options.Catalog.Definition(recipe).Review {
 		role = "reviewer"
 	}
+	// A node may replace the prompt texts it runs under. That is how one
+	// task runs under several harnesses at once: the harness is the
+	// difference between the candidates, the task is what they all answer.
+	library := state.options.Library
+	if node, ok := revision.Definition.Nodes[nodeId]; ok && len(node.Harness) > 0 {
+		library = state.options.Library.WithOverlay(node.Harness)
+	}
 	var prompts []string
-	if state.options.Library != nil && state.restoring[key] == nil {
+	if library != nil && state.restoring[key] == nil {
 		definitionID := nodeId
 		if recipe != "" {
 			definitionID = strings.Split(recipe, "@")[0]
@@ -43,19 +50,20 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		if err != nil {
 			panic(err)
 		}
-		rules, err := state.options.Library.Prompt("rules/" + role + ".md")
+		rules, err := library.Prompt("rules/" + role + ".md")
 		if err != nil {
 			panic(err)
 		}
-		tools, err := state.options.Library.Prompt("tools/" + role + ".md")
+		tools, err := library.Prompt("tools/" + role + ".md")
 		if err != nil {
 			panic(err)
 		}
-		runtime, err := state.options.Library.Prompt("runtime/node.md")
+		runtime, err := library.Prompt("runtime/node.md")
 		if err != nil {
 			panic(err)
 		}
-		prompts = []string{common, rules, tools, runtime, state.options.Library.AgentPrompt(definitionID, nil)}
+		identity := library.AgentPrompt(definitionID, nil)
+		prompts = []string{common, rules, tools, runtime, identity}
 	}
 	location := state.nodeLocation(graphId, nodeId, &revisionVersion, true)
 	if location == nil {
@@ -214,8 +222,8 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		// native tools the TypeScript SDK used to publish.
 		DaemonNativeTools: true,
 	}
-	if state.options.Library != nil {
-		sessionOptions.Library = state.options.Library
+	if library != nil {
+		sessionOptions.Library = library
 	}
 	if project := state.options.WorkspaceFor(graphId); project != nil {
 		sessionOptions.ProjectRoot = *project

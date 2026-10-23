@@ -30,6 +30,12 @@ main 使用 `archive_draft({proposalVersion,requestId})`、`restore_draft({propo
 
 历史定义可省略 instructions；声明时只接受非空字符串。首次说明包发送本节点完整指令，其他节点的概览不复制指令。用 `graph_patch` 更新 `nodes.<id>.instructions`，当前 execution 与补交保持冻结内容，下一次 execution 使用完整的新配置。现有节点 prompt/config 查看入口区分实际执行与下一轮配置，聊天记录保留每轮实际说明。
 
+## 节点的 harness 覆盖
+
+节点可以声明 `harness`：一个「提示键 → 文本」的映射，替换该节点运行时读到的提示文本。键只能是可编辑库的提示文件：`agents/<definition-id>.md`、`rules/{common,main,worker,reviewer}.md`、`tools/{common,main,worker,reviewer}.md` 之外的角色文件、`runtime/node.md`；值必须是非空文本。
+
+`harness` 改变的是"这个 Agent 被告知什么"，不改变宿主强制的权限、闸门与预算，也不改变该节点能调用哪些工具。同一张图里两个节点声明同一个任务、不同的 `harness`，就是同一任务在两个 harness 下各跑一次——这正是对比 harness 改动的实验形状。要跑这样的实验，用 `probe_harness`：宿主会建图、派发、等待并直接给出行为对比。
+
 ## 节点工作目录与权限
 
 节点可选声明 `workspace:{base:"auto"|"project"|"worktree",path?:"相对目录"}` 与 `access:{mode:"standard"|"full",...}`。省略时沿用宿主权限，工作目录在已准备 Git 的 graph 中使用节点自己的 worktree，否则使用项目目录。`project` 明确选择项目；`worktree` 要求创建 graph 时已指定 targetBranch。path 必须是所选根下已存在的目录，禁止绝对路径、父目录越界与指向根外的符号链接。

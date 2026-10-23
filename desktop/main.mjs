@@ -1,22 +1,19 @@
 import { drawerWindowBounds } from './drawer-window.ts';
+import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
+import { currentAppPaths, findPackagedDaemon, readJson, secretsFromKeychain } from './runtime-files.mjs';
 /**
- * Electron main process for the Graph desktop app.
- *
- * The app owns the daemon lifecycle: it starts the existing CLI daemon as a
- * Node child process (ELECTRON_RUN_AS_NODE keeps the runtime identical), waits
- * for the loopback address on stdout, and loads the console into a window.
- * Secrets never enter the config file: they are decrypted from the keychain
- * into the child process environment only.
+ * Owns desktop windows, the Go daemon and the keychain bridge.
+ * Secrets pass through the daemon environment and stay out of config files.
  */
-import { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell, screen } from 'electron';
+import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell, screen } from 'electron';
 import { spawn } from 'node:child_process';
 import { stopDaemonProcess } from './daemon-process.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  consoleRoute, restoreConsoleRoute, consoleReloadAction, absolutePaths, appRootFilePath, applySecretRequest, daemonArgs, ensureConfigFile, isLoopbackUrl, loadRawSecretEntries, loadSecrets,
-  parseBannerAddress, resolveAppPaths, resolveSourceRoot, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
+  restoreConsoleRoute, consoleReloadAction, applySecretRequest, daemonArgs, ensureConfigFile, loadRawSecretEntries,
+  parseBannerAddress, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
   taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
 
@@ -24,28 +21,12 @@ app.setName('Graph');
 if (process.env.GRAPH_APP_USER_DATA) app.setPath('userData', resolve(process.env.GRAPH_APP_USER_DATA));
 const devRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The APP backend is the Go binary, not node on src/server/cli.ts. */
-function findPackagedDaemon(sourceRoot) {
-  if (process.env.GRAPH_DAEMON_BIN && existsSync(process.env.GRAPH_DAEMON_BIN)) return resolve(process.env.GRAPH_DAEMON_BIN);
-  const starts = [sourceRoot, devRoot, process.cwd()];
-  const seen = new Set();
-  for (const start of starts) {
-    let dir = resolve(start);
-    for (let depth = 0; depth < 12; depth += 1) {
-      if (seen.has(dir)) break;
-      seen.add(dir);
-      const candidate = join(dir, 'dist', 'graphd');
-      if (existsSync(candidate)) return candidate;
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-  throw new Error('dist/graphd is missing. Build backend/cmd/graphd into dist/graphd.');
-}
 const withDevTools = process.argv.includes('--dev');
 const verbose = withDevTools || Boolean(process.env.GRAPH_APP_DEBUG);
 const smoke = Boolean(process.env.GRAPH_APP_SMOKE);
+const background = process.env.GRAPH_APP_BACKGROUND === '1' || smoke
+  || (process.env.VITEST === 'true' && process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1');
+if (background && process.platform === 'darwin') app.setActivationPolicy('accessory');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -65,7 +46,6 @@ if (!app.requestSingleInstanceLock()) {
   let secretsPath = null;
   let stdout = '';
   let stderr = '';
-  let smokeLogged = false;
   let notificationState = { primed: false, questions: {}, status: {} };
   let taskPoll = null;
   let secretPoll = null;
@@ -74,105 +54,18 @@ if (!app.requestSingleInstanceLock()) {
   let tray = null;
   let openQuestionTotal = 0;
 
-  const readJson = path => {
-    try {
-      return JSON.parse(readFileSync(path, 'utf8'));
-    } catch {
-      return undefined;
-    }
-  };
-
   function openWindow(url) {
-    window = new BrowserWindow({
-      width: 1320, height: 880, show: false, title: 'Graph',
-      backgroundColor: '#0b1020',
-      titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 14, y: 16 },
-      webPreferences: {
-        contextIsolation: true, nodeIntegration: false, sandbox: true,
-        preload: join(devRoot, 'desktop/preload.cjs'),
+    window = createConsoleWindow({
+      url: consoleUrl(url), devRoot, withDevTools, verbose, smoke, background,
+      onRoute: route => {
+        lastRoute = route;
+        try { writeFileSync(routePath, JSON.stringify(route)); } catch { /* optional UI state */ }
       },
+      onClosed: () => { window = null; drawerBase = null; },
     });
-    // Suppress Electron's native window-close accelerator for workspace shortcuts;
-    // keydown still reaches the renderer, including while the composer has focus.
-    window.webContents.on('before-input-event', (_event, input) => {
-      const shortcut = (input.meta || input.control) && !input.alt && !input.shift
-        && /^(w|[1-9])$/i.test(input.key);
-      const settings = /#\/(settings|setup)(?:[?/#]|$)/.test(window.webContents.getURL());
-      window.webContents.setIgnoreMenuShortcuts(shortcut && !settings);
-    });
-    window.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-      if (!isMainFrame) return;
-      const route = consoleRoute(url);
-      if (!route) return;
-      lastRoute = route;
-      try { writeFileSync(routePath, JSON.stringify(route)); } catch { /* optional UI state */ }
-    });
-    window.on('ready-to-show', () => {
-      window.show();
-      if (withDevTools) window.webContents.openDevTools({ mode: 'detach' });
-      if (smoke && !smokeLogged) {
-        smokeLogged = true;
-        process.stdout.write(`APP_SMOKE_OK ${url}\n`);
-      }
-    });
-    window.webContents.on('did-finish-load', () => {
-      if (smoke) setTimeout(() => app.quit(), 600);
-    });
-    window.webContents.on('will-navigate', (event, target) => {
-      if (!isLoopbackUrl(target)) event.preventDefault();
-    });
-    window.webContents.setWindowOpenHandler(({ url: target }) => {
-      if (isLoopbackUrl(target)) return { action: 'allow' };
-      void shell.openExternal(target);
-      return { action: 'deny' };
-    });
-    window.on('closed', () => {
-      if (verbose) console.log('[app] window closed');
-      window = null;
-      drawerBase = null;
-    });
-    window.webContents.on('did-start-navigation', (_event, target) => {
-      if (verbose) console.log(`[app] nav start ${target}`);
-    });
-    window.webContents.on('did-fail-load', (_event, code, description, target) => {
-      if (verbose) console.log(`[app] nav fail ${code} ${description} ${target}`);
-    });
-    window.webContents.on('render-process-gone', (_event, details) => {
-      if (verbose) console.log(`[app] renderer gone ${details.reason}`);
-    });
-    void window.loadURL(consoleUrl(url));
   }
 
-  function secretsFromKeychain(paths) {
-    const codec = {
-      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-      encryptString: value => safeStorage.encryptString(value),
-      decryptString: value => safeStorage.decryptString(value),
-    };
-    return loadSecrets(paths.secretsPath, codec, path => readFileSync(path, 'utf8'));
-  }
-
-  function currentPaths() {
-    // The app runs the checkout named by the app root file: it is the product line, and it is also
-    // the tree a self-improvement change edits and `app:build` rebuilds, so a build can never drop
-    // a product feature. The file is the durable setting because a launch from Finder carries no
-    // environment; GRAPH_RSI_ROOT stays the override for a dev run.
-    const appPath = app.isPackaged ? app.getAppPath() : devRoot;
-    const base = resolveAppPaths({ appPath, isPackaged: app.isPackaged, userData: app.getPath('userData') });
-    const rootFile = appRootFilePath(base.graphHome);
-    const fileRoot = existsSync(rootFile) ? readFileSync(rootFile, 'utf8') : undefined;
-    const sourceRoot = resolveSourceRoot({
-      fileRoot,
-      envRoot: process.env.GRAPH_RSI_ROOT,
-      // Only redirect to a checkout that can actually serve the console, so a
-      // half-prepared checkout cannot leave the app with a blank window.
-      canServe: root => existsSync(join(root, 'src/server/cli.ts')) && existsSync(join(root, 'dist/web/index.html')),
-    });
-    return absolutePaths(sourceRoot
-      ? resolveAppPaths({ appPath, isPackaged: app.isPackaged, userData: app.getPath('userData'), sourceRoot })
-      : base);
-  }
+  const currentPaths = () => currentAppPaths(devRoot);
 
   /**
    * Secrets the Agent wrote through the bridge live only in the daemon until the
@@ -231,7 +124,7 @@ if (!app.requestSingleInstanceLock()) {
     // Sandboxed helpers cannot start the Electron binary (no Helper apps), so
     // the packaged app ships a real node and points every helper at it.
     const bundledNode = join(paths.root, 'runtime/node');
-    const daemonBin = findPackagedDaemon(paths.sourceRoot);
+    const daemonBin = findPackagedDaemon(paths.sourceRoot, devRoot);
     const startedChild = spawn(daemonBin, [...args, '--application-root', paths.sourceRoot], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(existsSync(bundledNode) ? { GRAPH_APP_NODE: bundledNode } : {}), ...secrets },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -275,14 +168,15 @@ if (!app.requestSingleInstanceLock()) {
         return;
       }
       if (!readyUrl) {
-        dialog.showErrorBox('Graph daemon failed to start', tailText(stderr || stdout, 12) || `exit ${code ?? signal}`);
+        reportDaemonError('Graph daemon failed to start', tailText(stderr || stdout, 12) || `exit ${code ?? signal}`, background);
         app.quit();
         return;
       }
-      dialog.showErrorBox('Graph daemon stopped', `exit ${code ?? signal}\n${tailText(stderr, 8)}`);
+      reportDaemonError('Graph daemon stopped', `exit ${code ?? signal}\n${tailText(stderr, 8)}`, background);
       app.quit();
     });
   }
+
   function showConsole(url) {
     const target = consoleUrl(url);
     if (!window) {
@@ -348,6 +242,7 @@ if (!app.requestSingleInstanceLock()) {
       return { expanded: result.expanded };
     });
     ipcMain.handle('graph:pick-directory', async () => {
+      if (background) return null;
       const result = await dialog.showOpenDialog(window ?? undefined, { properties: ['openDirectory', 'createDirectory'] });
       return result.canceled ? null : result.filePaths[0] ?? null;
     });
@@ -357,6 +252,7 @@ if (!app.requestSingleInstanceLock()) {
       }
       const path = resourceDirectory(currentPaths().graphHome, kind);
       mkdirSync(path, { recursive: true });
+      if (background) return { opened: false, path, message: 'Desktop is running in background mode' };
       const message = await shell.openPath(path);
       return message ? { opened: false, path, message } : { opened: true, path };
     });
@@ -422,13 +318,15 @@ if (!app.requestSingleInstanceLock()) {
     if (!/^[A-Za-z0-9_-]+$/.test(taskId)) return;
     if (!window && readyUrl) openWindow(readyUrl);
     if (!window) return;
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    if (!background) {
+      if (window.isMinimized()) window.restore();
+      window.focus();
+    }
     void window.webContents.executeJavaScript(`location.hash = ${JSON.stringify(`#/tasks/${taskId}`)}`).catch(() => undefined);
   }
 
   function notifyDecision(decision) {
-    if (!Notification.isSupported()) return;
+    if (background || !Notification.isSupported()) return;
     const notification = new Notification({ title: decision.title, body: decision.body });
     notification.on('click', () => focusTask(decision.taskId));
     notification.show();
@@ -517,7 +415,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function createTray() {
-    if (tray) return;
+    if (background || tray) return;
     const iconPath = trayIconPath(currentPaths().root);
     if (!existsSync(iconPath)) return;
     tray = new Tray(nativeImage.createFromPath(iconPath));
@@ -532,6 +430,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   app.on('second-instance', () => {
+    if (background) return;
     if (window) {
       if (window.isMinimized()) window.restore();
       window.focus();
@@ -541,6 +440,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('activate', () => {
+    if (background) return;
     if (!window && readyUrl) openWindow(readyUrl);
   });
 
@@ -559,6 +459,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(() => {
+    if (background) app.dock?.hide();
     registerBridge();
     createTray();
     startDaemon();
