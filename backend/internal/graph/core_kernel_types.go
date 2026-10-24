@@ -221,6 +221,15 @@ type ExecutionHistoryPage struct {
 	Next  *int64
 }
 
+// CreateRequest is one request to create an independently owned graph.
+type CreateRequest struct {
+	OwnerTaskID string
+	RequestID   string
+	GraphID     string
+	Content     string
+	State       string
+}
+
 // KernelStore is the v2 durable layer on the shared task database.
 type KernelStore struct {
 	Store                   *TaskStore

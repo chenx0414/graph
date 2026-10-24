@@ -52,10 +52,10 @@ type TaskRuntimeTaskStatusInput struct {
 func (supervisor *TaskRuntimeSupervisor) TaskStatus(input TaskRuntimeTaskStatusInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
-	owned := kernelRow(runtime.store.Db, "SELECT owner_task_id FROM kernel_graph_owners WHERE task_id=?", *input.TaskId)
+	ownerTaskID, owned := runtime.kernel.GraphOwner(*input.TaskId)
 	target := supervisor.taskId
 	if input.TaskId != nil {
-		if owned != nil && kernelString(owned["owner_task_id"]) == supervisor.taskId {
+		if owned && ownerTaskID == supervisor.taskId {
 			target = *input.TaskId
 		} else {
 			target = taskRuntimeConversationTarget(runtime.store, supervisor.taskId, input.TaskId, "A status query")

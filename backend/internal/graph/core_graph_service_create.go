@@ -13,13 +13,13 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 	}
 	hasTargetBranch := input.TargetBranch != nil && *input.TargetBranch != ""
 	content := CanonicalJSON(map[string]any{"definition": definition, "targetBranch": targetBranchValue})
-	previous := kernelRow(service.kernel.Db, "SELECT graph_id,content,state FROM kernel_create_requests WHERE owner_task_id=? AND request_id=?", service.ownerTaskId, requestId)
-	if previous != nil && kernelString(previous["content"]) != content {
+	previous := service.kernel.FindCreateRequest(service.ownerTaskId, requestId)
+	if previous != nil && previous.Content != content {
 		Raise("invalid_input", "Creation requestId was already used with a different definition")
 	}
 	graphId := graphUUID()
 	if previous != nil {
-		graphId = kernelString(previous["graph_id"])
+		graphId = previous.GraphID
 	}
 	parent := service.owner()
 	created := GraphCreateResult{}
@@ -43,9 +43,8 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 			if hasTargetBranch {
 				createState = "preparing"
 			}
-			kernelExec(service.kernel.Db, "INSERT INTO kernel_create_requests(owner_task_id,request_id,graph_id,content,state) VALUES(?,?,?,?,?)",
-				service.ownerTaskId, requestId, graphId, content, createState)
-			kernelExec(service.kernel.Db, "INSERT INTO kernel_graph_owners(task_id,owner_task_id) VALUES(?,?)", graphId, service.ownerTaskId)
+			service.kernel.RecordCreateRequest(service.ownerTaskId, requestId, graphId, content, createState)
+			service.kernel.RecordGraphOwner(graphId, service.ownerTaskId)
 			revision := service.kernel.InsertRevision(graphId, definition, "create")
 			// TODO(port): Go maps have no insertion order; the node ids are sorted.
 			for _, id := range portKeys(definition.Nodes) {
@@ -59,7 +58,7 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 			return GraphCreateResult{GraphId: graphId, Definition: definition, Revision: revision.Version}
 		}).(GraphCreateResult)
 	}
-	if hasTargetBranch && (previous == nil || kernelString(previous["state"]) != "ready") {
+	if hasTargetBranch && (previous == nil || previous.State != "ready") {
 		reason := ""
 		failed := false
 		func() {
@@ -74,14 +73,14 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 			}
 			service.prepare(graphId, *input.TargetBranch)
 			service.kernel.Store.Transaction(func() any {
-				kernelExec(service.kernel.Db, "UPDATE kernel_create_requests SET state='ready',error=NULL WHERE owner_task_id=? AND request_id=?", service.ownerTaskId, requestId)
+				service.kernel.MarkCreateRequestReady(service.ownerTaskId, requestId)
 				service.kernel.Store.ResumeTask(graphId)
 				return nil
 			})
 		}()
 		if failed {
 			service.kernel.Store.Transaction(func() any {
-				kernelExec(service.kernel.Db, "UPDATE kernel_create_requests SET state='failed',error=? WHERE owner_task_id=? AND request_id=?", reason, service.ownerTaskId, requestId)
+				service.kernel.MarkCreateRequestFailed(service.ownerTaskId, requestId, reason)
 				service.kernel.Store.BlockTask(graphId)
 				service.kernel.Store.Event(graphId, "graph.preparation.failed", map[string]any{"reason": reason, "requestId": requestId})
 				return nil

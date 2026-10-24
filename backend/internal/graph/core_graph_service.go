@@ -110,7 +110,7 @@ func (service *graphManagementService) owner() TaskRow {
 
 func (service *graphManagementService) runtime(graphId string) *GraphRuntime {
 	target := service.kernel.Store.Task(graphId)
-	binding := kernelRow(service.kernel.Db, "SELECT owner_task_id FROM kernel_graph_owners WHERE task_id=?", graphId)
+	bindingOwner, _ := service.kernel.GraphOwner(graphId)
 	owner := service.owner()
 	ownerConversation := ""
 	if owner.ConversationID != nil {
@@ -120,7 +120,7 @@ func (service *graphManagementService) runtime(graphId string) *GraphRuntime {
 	if target.ConversationID != nil {
 		targetConversation = *target.ConversationID
 	}
-	if graphId != service.ownerTaskId && kernelString(binding["owner_task_id"]) != service.ownerTaskId &&
+	if graphId != service.ownerTaskId && bindingOwner != service.ownerTaskId &&
 		(ownerConversation == "" || targetConversation != ownerConversation) {
 		Raise("permission", "Graph belongs to another conversation")
 	}
