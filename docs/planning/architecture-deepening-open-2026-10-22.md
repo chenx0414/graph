@@ -51,14 +51,13 @@ kernel 层的表与 `tasks` 表现在都有 owner 了。`tasks` 的生命周期�
 | 表 | 写在哪 | 散在几个文件 |
 | --- | --- | --- |
 | `git_ops` | git 集成模块 + 任务运行时 | 3 |
-| `conversations` | 对话运行时 | 3 |
-| `proposals` | 对话确认 + 主管 | 2 |
-| `messages` | 对话失败 + 对话用量 | 2 |
 | `runtime` | operation 快照 + 任务队列 + 对话确认 + 任务运行时 | 4 |
 | `worktrees` | git 集成模块 | 3 |
 | `projects` | 对话 + 派发 + 打开运行时 | 3 |
 | `context_handoffs` | 上下文 + 保留期 + schema | 3 |
 | `artifacts` | 产出生命周期 + 产出发布 | 2 |
+
+（对话域那三张——`conversations`、`proposals`、`messages`——已经在这一轮有了主人。）
 
 **还有一批表本来就只有一个主人**（`wake_intents`、`rsi_continuations`、`pause_continuations`、`tool_calls`、`tool_call_spools`、`git_commits`、`agent_context_bindings`）——它们不是 store 的表，而是**各自模块自己的表**，一个文件写、一处不散。它们因此**不需要搬家**，但守卫要知道它们的主人是谁。
 

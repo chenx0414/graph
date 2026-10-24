@@ -62,5 +62,6 @@
 
 | `0b9bad7e` + `c87ad1ea`（`operations` 表（一次 operation）也有了主人；守卫认得两种主人） | 302 个文件里 **301 通过、1 跳过、0 失败**（1565 个测试）；"Suite matches the baseline (files 302, tests 1565)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 **全绿**。`operations` 原先由 **11 个文件**各自写着 SQL，是 v1 里散得最开的一张表；守卫现在逐个点名了**模块自己的表**（`wake_intents`、`tool_calls`、`git_commits` 等），它们本来就只由一个文件写 |
 门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
+| `e3f37853` + `670ab552`（对话域的三张表都有了主人） | 302 个文件里 **301 通过、1 跳过、0 失败**（1565 个测试）；"Suite matches the baseline (files 302, tests 1565)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 **全绿**。`conversations`（3 个文件）、`proposals`（2 个）、`messages`（2 个）一组一起做——**这一组是彼此相关的** |
 
 `tests/e2e/node-budget.test.ts` 断言结算后节点的 `used: 50, reserved: 0`，正是第三条改动的两条路径。
