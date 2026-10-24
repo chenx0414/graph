@@ -78,7 +78,7 @@ func operationSnapshotOf(row map[string]any) *OperationSnapshot {
 // Recover enters a new runtime generation and conservatively recovers prior work.
 func (l *OperationLifecycle) Recover() int {
 	return l.transaction(func() any {
-		kernelExec(l.store.Db, "UPDATE runtime SET generation=generation+1")
+		l.store.BumpRuntimeGeneration()
 		row := kernelRow(l.store.Db, "SELECT generation FROM runtime")
 		generation := int(kernelInt(row["generation"]))
 		l.generation = generation

@@ -64,7 +64,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			// The host-owned scratch workspace keeps an unbound conversation on
 			// the ordinary project/grant path without granting any real root.
 			root := filepath.Join(runtime.stateDir, "conversations", conversationId)
-			kernelExec(runtime.store.Db, "INSERT INTO projects(id,root,grants) VALUES(?,?,?)", "conversation:"+conversationId, root, "[]")
+			runtime.store.RegisterProject("conversation:"+conversationId, root, "[]")
 			workspaceProjectId = "conversation:" + conversationId
 		}
 		taskId := graphUUID()

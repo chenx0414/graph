@@ -59,7 +59,7 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 			runtime.store.CreateActivation(taskId, spec.Id, 0)
 			active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
 			if active == "" {
-				kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)
+				runtime.store.SetRuntimeActiveTask(taskId)
 			}
 		}
 		return map[string]any{
@@ -333,7 +333,7 @@ func (task *TaskRuntimeTask) Accept(input TaskRuntimeAcceptInput) Receipt {
 		}
 		runtime.store.AcceptProposal(task.taskId, input.ProposalVersion, input.TargetBranch, phase)
 		if active == "" || active == task.taskId {
-			kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", task.taskId)
+			runtime.store.SetRuntimeActiveTask(task.taskId)
 		}
 		return map[string]any{
 			"taskId":          task.taskId,

@@ -65,6 +65,13 @@ const OWNED = new Map([
   ['git_commits', 'git_integration_commit.go'],
   ['git_ops', 'core_git_operations.go'],
   ['worktrees', 'core_git_operations.go'],
+  ['runtime', 'core_task_runtime_state.go'],
+  ['projects', 'core_task_projects.go'],
+  ['artifacts', 'core_artifact_rows.go'],
+  ['artifact_links', 'core_artifact_rows.go'],
+  ['context_handoffs', 'core_context.go'],
+  ['commands', 'core_store_events.go'],
+  ['task_grants', 'core_task_grants.go'],
 ]);
 
 /** The kernel tables are owned by the store's own files. */
@@ -77,7 +84,7 @@ const KERNEL_OWNER = /^core_kernel_/;
  * several lines, so the pattern allows whitespace between the verb and the
  * table name.
  */
-const WRITE = /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+[`"']?([a-z_]+)/gi;
+const WRITE = /(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+[`"']?([a-z_]+)/gi;
 
 /**
  * Removes comments, so a sentence about a table is not read as a statement

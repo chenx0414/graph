@@ -87,7 +87,7 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 			if previous != nil && (kernelString(previous["root"]) != root || (project.Grants != nil && kernelString(previous["grants"]) != grants)) {
 				Raise("project_conflict", "Persisted project root and base grants cannot change during restore")
 			}
-			kernelExec(runtime.store.Db, "INSERT OR IGNORE INTO projects VALUES(?,?,?)", project.Id, root, grants)
+			runtime.store.KeepProject(project.Id, root, grants)
 		}
 		return nil
 	})

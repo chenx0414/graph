@@ -66,11 +66,11 @@ func (runtime *TaskRuntime) SyncProjects() {
 			grants := taskRuntimeGrants(project.Grants)
 			previous := kernelRow(runtime.store.Db, "SELECT root FROM projects WHERE id=?", project.Id)
 			if previous == nil {
-				kernelExec(runtime.store.Db, "INSERT INTO projects VALUES(?,?,?)", project.Id, root, grants)
+				runtime.store.RegisterProject(project.Id, root, grants)
 				continue
 			}
 			if kernelString(previous["root"]) != root {
-				kernelExec(runtime.store.Db, "UPDATE projects SET root=? WHERE id=?", root, project.Id)
+				runtime.store.MoveProjectRoot(project.Id, root)
 			}
 		}
 		return nil

@@ -62,7 +62,7 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		runtime.store.RecordProposal(taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
 		MaterializeGraph(runtime.kernel, taskId, ParseGraphDefinition(proposal.Definition), "Confirmed conversation draft")
 		if phase == "running" {
-			kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)
+			runtime.store.SetRuntimeActiveTask(taskId)
 		}
 		runtime.store.BumpRequirementVersion(anchor.ID)
 		kernelExec(runtime.store.Db, "INSERT INTO conversation_acceptances(conversation_id,proposal_version,task_id,target_branch,accepted_at,draft_revision) VALUES(?,?,?,?,?,?)",
