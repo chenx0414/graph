@@ -56,6 +56,7 @@
 
 | `f77e7674`（节点的那一轮（`activations` 表）也有了主人） | 301 个文件里 299 通过、1 跳过、**1 失败**（1564 个测试） | 唯一失败是 `tests/e2e/harness-composition.test.ts`（"a second probe starts from the harness the project already adopted"），满负载下的超时：它在完整套里花了 **120,346 毫秒**却没拿到比较结果，**单独重跑只花 1,010 毫秒并通过**。它讲的是 harness 探针的比较，与本轮改动无关（本轮改的是**谁写哪张表**） |
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
+| `f77e7674`（节点的那一轮，**再跑一次**） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 500 秒，**这一次全绿**。上一轮那个 `harness-composition` 的超时因此确认是满负载下的抖动（它单独跑只要 1,010 毫秒），与本轮改动无关 |
 
 门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
 
