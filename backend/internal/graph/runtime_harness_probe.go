@@ -15,8 +15,10 @@ const (
 	// HARNESS_EXPERIENCE_PREFIX marks the artifacts that hold the lessons. It
 	// is also the query prefix, so it has to be a slug on its own.
 	HARNESS_EXPERIENCE_PREFIX = "harness-experience"
-	// HARNESS_EXPERIENCE_SCHEMA is the identity of the stored shape.
-	HARNESS_EXPERIENCE_SCHEMA = "graph.harness-experience@1"
+	// HARNESS_EXPERIENCE_SCHEMA is the identity of the stored shape. The
+	// second version made the friction and the lesson two stages of one
+	// record; the first is still read.
+	HARNESS_EXPERIENCE_SCHEMA = "graph.harness-experience@2"
 	// HARNESS_MAX_CANDIDATES bounds one comparison. A contrast wider than this
 	// stops being readable as a contrast.
 	HARNESS_MAX_CANDIDATES = 12

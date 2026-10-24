@@ -14,13 +14,9 @@ import (
 // two stages, so they share one store - but only a lesson travels into a
 // prompt, because a guess is not a fact.
 
-// The two kinds of harness knowledge.
-const (
-	// HARNESS_KIND_FRICTION is something the project met and has not solved.
-	HARNESS_KIND_FRICTION = "friction"
-	// HARNESS_KIND_LESSON is something the project adopted, with evidence.
-	HARNESS_KIND_LESSON = "lesson"
-)
+// HARNESS_KIND_FRICTION is the old name for the stage a record is at before
+// it was solved. It is read for the records written under the first shape.
+const HARNESS_KIND_FRICTION = "friction"
 
 // Where a piece of harness knowledge stands.
 const (
@@ -82,15 +78,168 @@ func (service *graphManagementService) harnessAdoptedOverlay(taskId, domain stri
 }
 
 // harnessAdoptedLessons keeps the lessons a project adopted. A friction is a
-// suspicion and does not travel into a prompt.
+// suspicion and does not travel into a prompt, and a lesson without the
+// evidence that it worked is not a lesson yet.
 func harnessAdoptedLessons(entries []HarnessExperienceEntry) []HarnessExperienceEntry {
 	out := []HarnessExperienceEntry{}
 	for _, entry := range entries {
-		if entry.Kind == HARNESS_KIND_LESSON && entry.Status == HARNESS_STATUS_ADOPTED {
+		if entry.Status == HARNESS_STATUS_ADOPTED && entry.Lesson != "" && entry.Evidence != "" {
 			out = append(out, entry)
 		}
 	}
 	return out
+}
+
+// HarnessDecisionInput records which candidate was adopted and why.
+type HarnessDecisionInput struct {
+	GraphId string
+	Domain  string
+	// Axis is general or specific. It decides the scope the lesson lands in.
+	Axis string
+	// Overlay is the prompt text the adopted candidate ran under.
+	Overlay   map[string]string
+	Chosen    string
+	Cue       string
+	Lesson    string
+	Evidence  string
+	Harness   string
+	RequestId string
+}
+
+// HarnessDecisionResult is what a recorded decision returns.
+
+type HarnessDecisionResult struct {
+	Domain     string                   `json:"domain"`
+	Axis       string                   `json:"axis"`
+	Scope      string                   `json:"scope"`
+	Chosen     string                   `json:"chosen"`
+	Entries    []HarnessExperienceEntry `json:"entries"`
+	ArtifactId string                   `json:"artifactId"`
+	Version    int                      `json:"version"`
+}
+
+// HarnessDecision records which candidate was adopted and the lesson that came
+// with it.
+func (service *graphManagementService) HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
+	input.Chosen = service.harnessResolveChosen(input.GraphId, input.Chosen)
+	input.Overlay = service.harnessCandidateOverlay(input.GraphId, input.Chosen)
+	return harnessRecordDecision(store, entries, input)
+}
+
+// harnessRecordDecision appends one adopted lesson to a domain's store and
+// promotes it, so the next task of that domain finds it.
+
+func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
+	if store == nil || !store.present || store.publish == nil {
+		Raise("invalid_input", "The artifact surface is unavailable, so a lesson cannot be stored")
+	}
+	domain := strings.TrimSpace(input.Domain)
+	if domain == "" {
+		Raise("invalid_input", "A domain is required: the lesson is only useful where it can be found again")
+	}
+	chosen := strings.TrimSpace(input.Chosen)
+	if chosen == "" {
+		Raise("invalid_input", "The chosen candidate is required")
+	}
+	cue := strings.TrimSpace(input.Cue)
+	lesson := strings.TrimSpace(input.Lesson)
+	evidence := strings.TrimSpace(input.Evidence)
+	if cue == "" || lesson == "" || evidence == "" {
+		Raise("invalid_input", "A lesson needs a cue, a lesson and the evidence that supports it")
+	}
+	if len(cue) > 2000 || len(lesson) > 4000 || len(evidence) > 4000 {
+		Raise("invalid_input", "A cue is at most 2000 characters, a lesson and its evidence at most 4000")
+	}
+	if len(entries) >= HARNESS_EXPERIENCE_MAX_ENTRIES {
+		Raise("invalid_input", fmt.Sprintf("This domain already holds %d lessons; retire the oldest before adding one", HARNESS_EXPERIENCE_MAX_ENTRIES))
+	}
+	axis := strings.TrimSpace(input.Axis)
+	if axis == "" {
+		axis = HARNESS_AXIS_SPECIFIC
+	}
+	if axis != HARNESS_AXIS_GENERAL && axis != HARNESS_AXIS_SPECIFIC {
+		Raise("invalid_input", "A lesson is claimed on the general or the specific axis")
+	}
+	scope := harnessExperienceScope(domain, axis)
+	entry := HarnessExperienceEntry{
+		Domain:    domain,
+		Axis:      axis,
+		Status:    HARNESS_STATUS_ADOPTED,
+		Chosen:    chosen,
+		Cue:       cue,
+		Lesson:    lesson,
+		Evidence:  evidence,
+		Harness:   strings.TrimSpace(input.Harness),
+		Overlay:   input.Overlay,
+		GraphId:   input.GraphId,
+		CreatedAt: NowMillis(),
+	}
+	// The cue is the identity of the record. A lesson for a cue that already
+	// has a record completes it instead of standing next to it: the friction
+	// and the lesson are one piece of knowledge at two stages, and the note
+	// the friction carries stays where a reader can see the whole story.
+	merged := []HarnessExperienceEntry{}
+	completed := false
+	for _, existing := range entries {
+		if existing.Cue == cue && !completed {
+			existing.Domain = domain
+			existing.Axis = axis
+			existing.Status = HARNESS_STATUS_ADOPTED
+			existing.Chosen = chosen
+			existing.Lesson = lesson
+			existing.Evidence = evidence
+			existing.Harness = strings.TrimSpace(input.Harness)
+			existing.Overlay = input.Overlay
+			existing.GraphId = input.GraphId
+			existing.Kind = ""
+			merged = append(merged, existing)
+			completed = true
+			continue
+		}
+		merged = append(merged, existing)
+	}
+	if !completed {
+		merged = append(merged, entry)
+	}
+	entries = merged
+	body, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		Raise("invalid_input", "The lesson set could not be serialized")
+	}
+	content := string(body)
+	requestId := strings.TrimSpace(input.RequestId)
+	if requestId == "" {
+		requestId = "harness-decision-" + harnessSlug(domain) + "-" + itoa(int(entry.CreatedAt))
+	}
+	published := store.publish(PublishArtifactInput{
+		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
+		Name:      harnessExperienceName(scope),
+		Content:   &content,
+		MediaType: "application/json",
+		Schema:    HARNESS_EXPERIENCE_SCHEMA,
+		Title:     "Harness lessons: " + scope,
+		Summary:   fmt.Sprintf("%d lesson(s) adopted in %s", len(entries), scope),
+		RequestId: requestId,
+		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "chosen": chosen},
+	})
+	promoted := published
+	if store.promote != nil {
+		// A task that belongs to no project keeps the lesson in its own scope:
+		// there is no project scope to promote it to, and a lesson that was
+		// already written must not be lost to that.
+		if record, promoteErr := harnessPromote(store, published, requestId+"-promote"); promoteErr == nil {
+			promoted = record
+		}
+	}
+	return HarnessDecisionResult{
+		Domain:     domain,
+		Axis:       axis,
+		Scope:      scope,
+		Chosen:     chosen,
+		Entries:    entries,
+		ArtifactId: promoted.ArtifactId,
+		Version:    promoted.Version,
+	}
 }
 
 // HarnessFriction records friction the project met but has not solved, in the
@@ -180,22 +329,27 @@ func harnessRecordFriction(store *harnessArtifactStore, entries []HarnessExperie
 	entry := HarnessExperienceEntry{
 		Domain:    domain,
 		Axis:      axis,
-		Kind:      HARNESS_KIND_FRICTION,
 		Status:    status,
 		Cue:       cue,
-		Lesson:    why,
-		Evidence:  strings.TrimSpace(input.Ref),
+		Note:      why,
+		Ref:       strings.TrimSpace(input.Ref),
 		CreatedAt: NowMillis(),
 	}
+	// The cue is the identity of the record: the same situation is one record
+	// whatever stage it is at. A lesson that already belonged to it stays in
+	// the record as the history of what was tried, and the status says where
+	// the situation stands now.
 	merged := []HarnessExperienceEntry{}
 	updated := false
 	for _, existing := range entries {
-		if existing.Kind == HARNESS_KIND_FRICTION && existing.Cue == cue {
-			if updated {
-				continue
-			}
-			entry.CreatedAt = existing.CreatedAt
-			merged = append(merged, entry)
+		if existing.Cue == cue && !updated {
+			existing.Domain = domain
+			existing.Axis = axis
+			existing.Status = status
+			existing.Note = why
+			existing.Ref = strings.TrimSpace(input.Ref)
+			existing.Kind = ""
+			merged = append(merged, existing)
 			updated = true
 			continue
 		}
@@ -225,7 +379,7 @@ func harnessRecordFriction(store *harnessArtifactStore, entries []HarnessExperie
 		Title:     "Harness knowledge: " + scope,
 		Summary:   fmt.Sprintf("%d entry/entries in %s", len(merged), scope),
 		RequestId: requestId,
-		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "kind": HARNESS_KIND_FRICTION},
+		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "status": status},
 	})
 	promoted := published
 	if store.promote != nil {
