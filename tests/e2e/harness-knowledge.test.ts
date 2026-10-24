@@ -118,10 +118,10 @@ test('friction and adopted lessons live in one store, and only the adopted ones 
   // adopted. The second lesson joins the first: a store that only kept the last
   // entry would have lost the one before it.
   const read = JSON.parse(results.get('read') || '{}') as {
-    entries: { kind: string; status: string; axis: string; cue: string; lesson: string }[];
+    entries: { status: string; axis: string; cue: string; lesson: string }[];
   };
-  const friction = read.entries.find(entry => entry.kind === 'friction');
-  const lessons = read.entries.filter(entry => entry.kind === 'lesson');
+  const friction = read.entries.find(entry => entry.status === 'open');
+  const lessons = read.entries.filter(entry => entry.status === 'adopted');
   const lesson = lessons.find(entry => entry.cue.includes('trailing line'));
   expect(friction).toBeTruthy();
   expect(friction!.status).toBe('open');

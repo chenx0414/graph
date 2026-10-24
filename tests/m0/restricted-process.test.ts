@@ -697,7 +697,10 @@ test('dependency installation and its lifecycle script work within grants withou
     fs.writeFileSync('proof.json', JSON.stringify({ installed:true, outsideDenied:denied }));
   `);
   await promisify(execFile)('/usr/bin/tar', ['-czf', join(workspace, 'dependency.tgz'), '-C', join(root, 'source'), 'package']);
-  await writeFile(join(workspace, 'package.json'), '{"private":true}');
+  // npm 12 blocks install scripts unless the project allows them by name, so
+  // the project asks for this one script to run. The sandbox is still what
+  // the script has to live with.
+  await writeFile(join(workspace, 'package.json'), '{"private":true,"allowScripts":{"file:dependency.tgz":true}}');
   const npmPath = await realpath((await promisify(execFile)('/usr/bin/which', ['npm'])).stdout.trim());
   const broker = new CallBroker(join(root, 'calls.sqlite'), 'agent-1');
   const result = await executor.run({

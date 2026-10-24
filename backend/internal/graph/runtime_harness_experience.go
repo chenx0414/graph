@@ -9,39 +9,75 @@ import (
 )
 
 // The harness experience store holds what a project has learned about its own
-// harness: the friction it has met and the lessons it has adopted. They are one
-// body of knowledge at two stages - something noticed, and something that
-// worked - so they live in one store and are read by one tool.
+// harness. A record is one situation - the cue - at one stage. A record with
+// only a cue is a friction: something the project met. A record that also
+// carries a lesson and the evidence for it is an adopted lesson. One record,
+// two stages: a lesson completes the friction it belongs to instead of
+// standing next to it.
 //
 // Only the adopted lessons travel into a prompt. A friction is a suspicion; a
 // lesson is what the project saw happen. Injecting both would put guesses in
 // front of the next task as if they were facts.
 
-// HarnessExperienceEntry is one piece of harness knowledge: what the situation
-// looked like, what to do about it, and what shows that it worked.
+// HarnessExperienceEntry is one piece of harness knowledge: the situation, and
+// what the project knows about it.
 //
 // Axis says how far it reaches. A general lesson holds for every kind of work
 // and is found by every domain; a specific lesson holds for the domain it was
 // learned in and is found only there.
 //
-// Kind says which stage it is at: a friction is noticed, a lesson is adopted.
-// Status says where a friction stands.
+// Status says where the record stands: open while the situation is unsolved,
+// adopted once a lesson with its evidence belongs to it, rejected when the
+// project judged it not worth solving.
 type HarnessExperienceEntry struct {
-	Domain   string `json:"domain"`
-	Axis     string `json:"axis"`
-	Kind     string `json:"kind"`
-	Status   string `json:"status"`
-	Chosen   string `json:"chosen,omitempty"`
-	Cue      string `json:"cue"`
-	Lesson   string `json:"lesson,omitempty"`
+	Domain string `json:"domain"`
+	Axis   string `json:"axis"`
+	Status string `json:"status"`
+	// Cue is the situation, and the identity of the record: one record per
+	// scope and cue.
+	Cue string `json:"cue"`
+	// Note says why the situation matters. It belongs to the friction.
+	Note string `json:"note,omitempty"`
+	// Lesson is what to do about the situation.
+	Lesson string `json:"lesson,omitempty"`
+	// Evidence is what shows the lesson worked.
 	Evidence string `json:"evidence,omitempty"`
-	Harness  string `json:"harness,omitempty"`
+	// Ref points at what addressed the situation: a commit, a legacy id.
+	Ref string `json:"ref,omitempty"`
+	// Source says where the record came from: the store, or the retired
+	// backlog artifact the project used before.
+	Source string `json:"source,omitempty"`
+	// Chosen names the candidate a lesson was adopted from.
+	Chosen string `json:"chosen,omitempty"`
+	// Harness is the harness change that produced the adopted behavior.
+	Harness string `json:"harness,omitempty"`
 	// Overlay is the prompt text the adopted candidate ran under. A later
 	// probe can start from it, so each round builds on the last winner
 	// instead of every round starting from nothing.
 	Overlay   map[string]string `json:"overlay,omitempty"`
 	GraphId   string            `json:"graphId,omitempty"`
 	CreatedAt int64             `json:"createdAt"`
+	// Kind is the old name for the stage. It is read for the records written
+	// before the two stages became one, and never written.
+	Kind string `json:"kind,omitempty"`
+}
+
+// harnessNormalizeEntry brings a record written before the two stages became
+// one into the current shape. The old friction kept its note in the lesson
+// field and what addressed it in the evidence field.
+func harnessNormalizeEntry(entry HarnessExperienceEntry) HarnessExperienceEntry {
+	if entry.Kind != HARNESS_KIND_FRICTION {
+		return entry
+	}
+	if entry.Note == "" {
+		entry.Note = entry.Lesson
+	}
+	if entry.Ref == "" {
+		entry.Ref = entry.Evidence
+	}
+	entry.Lesson = ""
+	entry.Evidence = ""
+	return entry
 }
 
 // The two axes a lesson can be claimed on.
@@ -55,34 +91,6 @@ const (
 // HARNESS_GENERAL_SCOPE is the scope the general lessons live in. Every
 // domain reads it, which is what makes a general lesson general.
 const HARNESS_GENERAL_SCOPE = "general"
-
-// HarnessDecisionInput records which candidate was adopted and why.
-type HarnessDecisionInput struct {
-	GraphId string
-	Domain  string
-	// Axis is general or specific. It decides the scope the lesson lands in.
-	Axis string
-	// Overlay is the prompt text the adopted candidate ran under.
-	Overlay   map[string]string
-	Chosen    string
-	Cue       string
-	Lesson    string
-	Evidence  string
-	Harness   string
-	RequestId string
-}
-
-// HarnessDecisionResult is what a recorded decision returns.
-
-type HarnessDecisionResult struct {
-	Domain     string                   `json:"domain"`
-	Axis       string                   `json:"axis"`
-	Scope      string                   `json:"scope"`
-	Chosen     string                   `json:"chosen"`
-	Entries    []HarnessExperienceEntry `json:"entries"`
-	ArtifactId string                   `json:"artifactId"`
-	Version    int                      `json:"version"`
-}
 
 // harnessArtifactStore is the artifact surface the harness tools use. The
 // session's artifact service fills in the producer, so a lesson is written the
@@ -141,10 +149,15 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 		result.Entries = harnessExperienceEntries(service.artifacts, service.ownerTaskId, scope)
 		return result
 	}
+	// One list: the domain's own records, the ones that hold for every domain,
+	// and the friction the retired backlog artifact still holds. The backlog is
+	// the project's own history, so it belongs where the rest of its knowledge
+	// is read from.
 	result.Entries = append(
 		harnessExperienceEntries(service.artifacts, service.ownerTaskId, harnessSlug(domain)),
 		harnessExperienceEntries(service.artifacts, service.ownerTaskId, HARNESS_GENERAL_SCOPE)...,
 	)
+	result.Entries = append(result.Entries, harnessBacklogEntries(service.artifacts, service.ownerTaskId)...)
 	return result
 }
 
@@ -179,14 +192,13 @@ func harnessExperiencePrompt(artifacts *ArtifactWorkspace, taskId string) string
 		}
 		cue := harnessEvidenceBound(entry.Cue, 200)
 		lesson := harnessEvidenceBound(entry.Lesson, 300)
-		if cue == "" || lesson == "" {
+		evidence := harnessEvidenceBound(entry.Evidence, 160)
+		// The three parts are one thing: a situation, what to do, and what
+		// shows it worked. Without the evidence there is nothing to inject.
+		if cue == "" || lesson == "" || evidence == "" {
 			continue
 		}
-		line := "- " + cue + " -> " + lesson
-		if entry.Evidence != "" {
-			line += " (because " + harnessEvidenceBound(entry.Evidence, 160) + ")"
-		}
-		lines = append(lines, line)
+		lines = append(lines, "- "+cue+" -> "+lesson+" (because "+evidence+")")
 	}
 	if len(lines) == 0 {
 		return ""
@@ -269,6 +281,9 @@ func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope stri
 	if err := json.Unmarshal(body, &entries); err != nil {
 		return []HarnessExperienceEntry{}
 	}
+	for index, entry := range entries {
+		entries[index] = harnessNormalizeEntry(entry)
+	}
 	return entries
 }
 
@@ -344,102 +359,4 @@ func (service *graphManagementService) harnessResolveChosen(graphId string, chos
 		return chosen
 	}
 	return nodeIds[index]
-}
-
-// HarnessDecision records which candidate was adopted and the lesson that came
-// with it.
-func (service *graphManagementService) HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
-	input.Chosen = service.harnessResolveChosen(input.GraphId, input.Chosen)
-	input.Overlay = service.harnessCandidateOverlay(input.GraphId, input.Chosen)
-	return harnessRecordDecision(store, entries, input)
-}
-
-// harnessRecordDecision appends one adopted lesson to a domain's store and
-// promotes it, so the next task of that domain finds it.
-
-func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
-	if store == nil || !store.present || store.publish == nil {
-		Raise("invalid_input", "The artifact surface is unavailable, so a lesson cannot be stored")
-	}
-	domain := strings.TrimSpace(input.Domain)
-	if domain == "" {
-		Raise("invalid_input", "A domain is required: the lesson is only useful where it can be found again")
-	}
-	chosen := strings.TrimSpace(input.Chosen)
-	if chosen == "" {
-		Raise("invalid_input", "The chosen candidate is required")
-	}
-	cue := strings.TrimSpace(input.Cue)
-	lesson := strings.TrimSpace(input.Lesson)
-	evidence := strings.TrimSpace(input.Evidence)
-	if cue == "" || lesson == "" || evidence == "" {
-		Raise("invalid_input", "A lesson needs a cue, a lesson and the evidence that supports it")
-	}
-	if len(cue) > 2000 || len(lesson) > 4000 || len(evidence) > 4000 {
-		Raise("invalid_input", "A cue is at most 2000 characters, a lesson and its evidence at most 4000")
-	}
-	if len(entries) >= HARNESS_EXPERIENCE_MAX_ENTRIES {
-		Raise("invalid_input", fmt.Sprintf("This domain already holds %d lessons; retire the oldest before adding one", HARNESS_EXPERIENCE_MAX_ENTRIES))
-	}
-	axis := strings.TrimSpace(input.Axis)
-	if axis == "" {
-		axis = HARNESS_AXIS_SPECIFIC
-	}
-	if axis != HARNESS_AXIS_GENERAL && axis != HARNESS_AXIS_SPECIFIC {
-		Raise("invalid_input", "A lesson is claimed on the general or the specific axis")
-	}
-	scope := harnessExperienceScope(domain, axis)
-	entry := HarnessExperienceEntry{
-		Domain:    domain,
-		Axis:      axis,
-		Kind:      HARNESS_KIND_LESSON,
-		Status:    HARNESS_STATUS_ADOPTED,
-		Chosen:    chosen,
-		Cue:       cue,
-		Lesson:    lesson,
-		Evidence:  evidence,
-		Harness:   strings.TrimSpace(input.Harness),
-		Overlay:   input.Overlay,
-		GraphId:   input.GraphId,
-		CreatedAt: NowMillis(),
-	}
-	entries = append(entries, entry)
-	body, err := json.MarshalIndent(entries, "", "  ")
-	if err != nil {
-		Raise("invalid_input", "The lesson set could not be serialized")
-	}
-	content := string(body)
-	requestId := strings.TrimSpace(input.RequestId)
-	if requestId == "" {
-		requestId = "harness-decision-" + harnessSlug(domain) + "-" + itoa(int(entry.CreatedAt))
-	}
-	published := store.publish(PublishArtifactInput{
-		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
-		Name:      harnessExperienceName(scope),
-		Content:   &content,
-		MediaType: "application/json",
-		Schema:    HARNESS_EXPERIENCE_SCHEMA,
-		Title:     "Harness lessons: " + scope,
-		Summary:   fmt.Sprintf("%d lesson(s) adopted in %s", len(entries), scope),
-		RequestId: requestId,
-		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "chosen": chosen},
-	})
-	promoted := published
-	if store.promote != nil {
-		// A task that belongs to no project keeps the lesson in its own scope:
-		// there is no project scope to promote it to, and a lesson that was
-		// already written must not be lost to that.
-		if record, promoteErr := harnessPromote(store, published, requestId+"-promote"); promoteErr == nil {
-			promoted = record
-		}
-	}
-	return HarnessDecisionResult{
-		Domain:     domain,
-		Axis:       axis,
-		Scope:      scope,
-		Chosen:     chosen,
-		Entries:    entries,
-		ArtifactId: promoted.ArtifactId,
-		Version:    promoted.Version,
-	}
 }
