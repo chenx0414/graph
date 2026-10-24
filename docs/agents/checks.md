@@ -90,7 +90,7 @@ node scripts/check-file-tokens.mjs src/core/task-runtime.ts
 | 表 | 主人 |
 | --- | --- |
 | `kernel_` 开头的那批 | `KernelStore`（`core_kernel_*.go`） |
-| `tasks`、`questions`、`invocations`、`nodes`、`activations` | `TaskStore`（`core_task_lifecycle.go`、`core_task_questions.go`、`core_task_invocations.go`、`core_task_nodes.go`、`core_task_activations.go`） |
+| `tasks`、`questions`、`invocations`、`nodes`、`activations`、`instances` | `TaskStore`（`core_task_lifecycle.go`、`core_task_questions.go`、`core_task_invocations.go`、`core_task_nodes.go`、`core_task_activations.go`、`core_task_instances.go`） |
 
 形状由 store 知道，其他地方只问 store 要答案、要 store 去写。任何在 store 之外写这些表的
 地方都是第二个主人，一列要改就得在两个地方都改。

@@ -108,7 +108,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 				}
 				spec.Model = &selected.Id
 				runtime.store.SetNodeSpec(taskId, "master", CanonicalJSON(spec))
-				kernelExec(runtime.store.Db, "UPDATE instances SET model=? WHERE id=?", selected.Id, kernelString(master["instance_id"]))
+				runtime.store.SetInstanceModel(kernelString(master["instance_id"]), selected.Id)
 			}
 			effective := selected
 			if effective == nil {

@@ -98,8 +98,7 @@ func (runtime *TaskRuntime) insertInstance(id, taskId, nodeId string, definition
 	} else {
 		amount = *budget
 	}
-	kernelExec(runtime.store.Db, "INSERT INTO instances(id,task_id,node_id,definition_version,model,budget,unlimited) VALUES(?,?,?,?,?,?,?)",
-		id, taskId, nodeId, definitionVersion, model, amount, unlimited)
+	runtime.store.CreateInstance(id, taskId, nodeId, definitionVersion, model, amount, unlimited)
 	return id
 }
 

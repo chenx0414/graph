@@ -63,7 +63,7 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 		if spec.DefinitionVersion != nil {
 			definitionVersion = *spec.DefinitionVersion
 		}
-		kernelExec(e.store.Db, "UPDATE instances SET model=?,definition_version=? WHERE id=?", selected.Id, definitionVersion, *node.InstanceId)
+		e.store.SetInstanceModelAndDefinition(*node.InstanceId, selected.Id, instanceDefinitionVersion(definitionVersion))
 		identity := selected.Id
 		if selected.ModelId != "" {
 			identity = selected.ModelId
