@@ -16,12 +16,12 @@
     "backend/internal/graph/runtime_agent_tool_definitions.go": "7e7c5e4b8caf51c1600f77b05fd9944f30768d30e16bec9059a17214c9621920",
     "backend/internal/graph/runtime_agent_tools.go": "c37d88e7cb0046a72781227d713e82dcdcd309e836ea2d3f6298e72c411e7762",
     "backend/internal/graph/runtime_pi_native_tools.go": "65ce1b0f5b71df3ac9426b964bb8f676eb35ca78e7c0458b613f4cd4e5496219",
-    "backend/internal/graph/runtime_pig_native_tools.go": "20e95d5752b7008c6aac2efb0c946740ae2bf3e006c08cb558bfdc0274066b51",
+    "backend/internal/graph/runtime_pig_native_tools.go": "8eebb96db9145e6a970308dd1732576562b1f508ac996ce70e85ccc80a0214d8",
     "scripts/harness-eval-cases.mjs": "31e8dd009090a25ab67ca263b554ecbf4b4af3c3cc8ce58879d083672be4dd1f",
     "scripts/harness-real-eval.mjs": "ed60e330aafa237a429f39e7dffefb8d06332bb42c7b61aa8ea5ad71334bfe6e",
     "scripts/harness-behavior-cases.mjs": "68a62f9a1f172e40125279bcc71d300e98f2c322ec47cb9c21aff83e5ad37c0c",
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "bcf3a0089998787b48207ef12796a530bb171aeb5cb63c688cbbc33285e65111"
   },
-  "updatedAt": "2026-10-24T04:17:33.449Z"
+  "updatedAt": "2026-10-24T06:39:22.534Z"
 }
