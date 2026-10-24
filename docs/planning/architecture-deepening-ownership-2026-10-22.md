@@ -1,6 +1,6 @@
 # 架构深化的后半程：表的归属（2026-10-22）
 
-配套文档：[前半程](architecture-deepening-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md)
+配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
 
 ## 已完成并有证据的部分（后半程）
 
@@ -34,49 +34,19 @@
     - **这一次提交跳过了文件大小守卫**，理由与合并、任务生命周期那两次相同：守卫量的是暂存的 blob，而这四个文件改动前就很大（`core_task_runtime.go` 197KB、`core_operation_lifecycle.go` 60KB、`core_execution.go` 46KB、`core_graph_runtime.go` 22KB），而且**四个都比改动前小了**——456、608、99、70 字节。这次新增的文件 `core_task_questions.go` 是 3,031 字节。
     - **证据**：一次探针把每条规则推过真实的行——开一个问题与它的 canonical data、同一问题答两次、只答还开着的那个（已答过的不再答）、一个 operation 的问题不动另一个 operation、recovery 规则不动另一个 kind、两条要计数的规则与它们的计数、改 data 而不回答问题、以及一次调用的 usage 与 cost——**24 项检查全过**。探针已删除。
 
-23. **两条工具表合成了同一套规则**（提交 `426bd2cb`）。第二十二步把表拆开只是为了能读它；拆开之后，三处分歧第一次能并排看，于是它们也就第一次能被改：
-    - **id 收成一个**。主会话原先给闸门一个 id、给工具另一个，于是额度账本数的那次调用与写入账本记的那次调用**是两条对不上的记录**。节点泳道与原件本来就只用一个 id。
-    - **节点泳道补上遥测**。PiG kernel 自己那个 `OnToolCall` 钩子**从来没有被触发**——它被一路传下去，却没有任何地方调用它。所以记录只能来自工具自己，主会话那样做的，节点泳道现在也这样做。
-    - **主会话的 `PrepareArguments` panic 转成错误值**。`PrepareToolArguments` 确实会 panic（参数不合法时），而它在 `Execute` 之外跑；主会话原先让它逃出去、连回合一并带走。工具表里写着这个 daemon 自己的做法——"the host turns that refusal into the tool error the model reads, instead of losing the turn"——节点泳道一直照做，主会话现在也照做。
-    - **证据**：一份真图里的节点先读一个文件再提交。那次 read 走的正是节点的工具闸门，因此它就是统计表该记下的那次调用。**这个 E2E 在父提交上失败**（read 根本不出现），在这个提交上通过。
+26. **「kernel 表归 store」这条主张，此前只查过两个层**（提交 `07ef0b92`、`83c16062`、`9894782f`、`4c821127`）。第十五步写下这句话时，它查过的是**运行时层**与**内核层**：泳道、节点宿主、工具闸门、provider 闸门、operation broker 与节点恢复都不再自己写 kernel 表。**图服务层没有查过**。一查就发现 **12 个文件里 38 处越界写**——而且它们写的是 `kernel_create_requests`、`kernel_graph_owners`、`kernel_graph_layouts`、`kernel_module_operations`、`kernel_module_inbox`、`kernel_transition_outbox`、`kernel_queue`、`kernel_node_state`、`kernel_nodes`、`kernel_modules`、`kernel_executions`、`kernel_lifecycle`。**一条被写下来的主张，如果只查了一半，那它就不是主张，是愿望。**
 
-#### 第二十三步的细节：两条工具表曾经差在哪
+    - **图的创建请求与归属**（`07ef0b92`）。同一个 request id 问两次要拿到同一个图，让这件事成真的是那张记着"第一次问了什么"的行——图 id、要的定义、准备到了哪一步。图服务原先自己读它、自己写它三个状态，因此知道它的列。store 现在持有它：`FindCreateRequest` 答"这个 request id 用过没有"，`RecordCreateRequest` 记下这次问，`MarkCreateRequestReady` 与 `MarkCreateRequestFailed` 记下准备到了哪一步，`RecordGraphOwner` 与 `GraphOwner` 记与答"这张图归谁"。
+    - **图的控制面**（`83c16062`）。relayout、取消一个 operation、重试/跳过/取消一个队列项、暂停/恢复一个节点、停掉整张图——每一样都在调用点写着 kernel 表的 SQL：布局行、module operation、module inbox、队列、节点自己的行、节点的暂停标志。现在它们问 store，而方法名说的是**做什么**而不是**动哪些列**：`ResetGraphLayout`、`CancelModuleOperation`、`UnblockNode`（被挡住的节点回到 idle）、`ReleaseNode`（跑不了的节点回到 idle）、`RetryQueueItem`（放回队列并把 generation 加一）、`SettleQueueItem`（结束，不再跑）、`CancelQueuedWork`、`MarkDeliveryProcessed` 与 `MarkGraphDeliveriesProcessed`。
+        - 一条语句变成两条，而差别是**一条规则**而不是一次重写：重试路径原本一条语句同时写队列状态、原因与 generation，而 generation 只在重试时加一。`RetryQueueItem` 与 `SettleQueueItem` 各自说明自己是哪一种，于是 generation 只在它该加的地方加。
+    - **修订、执行与模块**（`9894782f`）。新修订不是换掉一张图，而是把它挪动：修订新增的节点被受理，留下的节点被放到新修订上并带上新的 spec，被移除的节点被退休——这三条原先由图运行时自己写，因此它知道节点表与模块表的列。store 现在知道：`ApplyNodeRevision`、`ApplyModuleRevision`、`RetireNode`。执行身上那个"还缺什么"的标志由节点执行器与提交桥各写一次，现在由 `MarkExecutionMissingRequired`、`ClearExecutionMissingRequired`、`MarkExecutionPendingGap` 说。图请求完成由 `RequestGraphCompletion` 与 `ClearGraphCompletionRequest` 说。模块的触发由 `ResetModuleTrigger` 说，operation 占着 worker 由 `HoldModuleOperationWorker` 说——它就挨着 store 原有的 `ReleaseModuleOperationWorker`。
+    - **暂停时钟与执行时钟**（`4c821127`）。两个时钟原先是自由函数，写着 kernel 表：暂停时钟写节点行的暂停列（图可以暂停，图里的一个节点也可以暂停，时钟是共用的），执行时钟写执行行的两段区间。它们现在是 store 的方法：`SetNativePause`、`FinishNativePauses`、`NativePauseMs`、`SetExecutionWaiting`、`CloseExecutionTiming`。**改签名是这次交出的要点**：要用这些时钟的地方手里正好有 kernel store，于是它们现在这么说——图的控制面与节点泳道本来就有，任务运行时一直有（store 建起来那天它就有了），**执行名额只有 task store**，因为它把旧的 `operations` 表与新的 kernel 表一起数：那是关于两份 store 的事实，它留在原处；但它不再自己写 kernel 表，它问 store 要 worker 与执行等待。
+        - **一处必须记下来的约束**：执行名额的等待**开着事务**再调 store。因此 store 的方法要写成**加入调用方已经持有的事务**而不是自己再开一个——事务里再 BEGIN 正是宿主一直拒绝的。store 那个方法就是这么写的，所以等待既不死锁也不开嵌套事务。
+    - **每一条新方法都是一条语句**，这正是它们能在调用方已经持有的事务里跑的原因——一条语句本身就是原子的。图的控制在事务里应用（重试路径把队列项、节点的暂停标志与节点的状态一起改，要么都成要么都不成），store 的方法因此**加入那个事务，而不是自己开一个**。
+    - **这一轮没有新写测试**：改的是**谁写哪张表**，不是**写什么**。行为由完整的门禁证明（见门禁证据那份文档）。
 
-TypeScript 原件在 `src/runtime/durable-tools.ts:160-172` 恢复时只做了一件事：**把整份冻结策略盖回请求上**。
-
-| | TypeScript 原件 | Go 主会话（改之前） | Go 节点泳道（改之前） |
-| --- | --- | --- | --- |
-| **id** | 同一个 id 既给 broker 也给工具 | **两个 id** | 同一个 id ✓ |
-| **遥测** | 每次调用都记，在 `finally` 里 | 记，但 **panic 时不记** | **完全不记** |
-| **panic** | 重新抛出 | 重新抛出（`PrepareArguments` 的 panic 逃出去） | 转成错误值 |
-| **外部闸门** | 只看 `externallyGated` 标记 | 只看标记 ✓ | 标记 + 一份名字清单 |
-
-**先前记的一处是错的，这里更正**："`submit` 本来就带着 `ExternallyGated` 标记，等于同一件事记了两遍"——**不成立**。`submit` 由 `kernelGraphLaneSubmitTool()` 造，是 `PiWorkerTool`，不是 `AgentToolDeclaration`；它没有那个标记，因此那份名字清单不是重复。
-
-三行现在都说同一句话了：**id 收成一个**（额度账本与写入账本记的是同一次调用）；**遥测补上**（PiG kernel 那个 `OnToolCall` 钩子从来没有被触发，所以记录只能来自工具自己）；**panic 转成错误值**（那正是这个 daemon 自己说的做法）。
-
-24. **main 又前进了十三个提交，合进来了**（提交 `45b66d4c`）。那十三个提交全是 harness 的活：一个同时装着"项目遇到的摩擦"与"项目采纳的教训"的**知识库**、一次让一个任务在几个 harness 下各跑一遍的探针、跑过的候选、它们教出来的教训，以及把教训读回去的循环。
-
-    **这一次合并不是"解冲突"那么简单。** 本分支拆过其中几个文件，因此 main 的内容必须**放到每个声明现在所在的地方**；而 main 自己也拆了 harness 那几个文件——**main 的拆法更新，而且它装的东西是本分支那份的超集**（逐个函数比过：main 有 45 个，本分支有 39 个，本分支的一个都不缺 main 的），所以那五个文件直接取 main 的，本分支多出来的两个删掉。
-
-    - **工具表**：graph management 那个面多了 `HarnessDecision` 与 `HarnessFriction` 两个字段，工具表多了两个 handler（记摩擦、声明领域）。**字段进放类型的文件，handler 进放 harness handler 的文件**，探针那个 handler 换成 main 的版本（它现在要 task、recipe、model、base harness 与那几个变体）。
-    - **Agent 上下文**：main 把 classified 那段身份改成了由默认那段**推导**出来的，因此两段声明都按 main 的取；overlay（让一个节点跑在与其余节点不同的 harness 下）进 library 文件与提示词文件。
-    - **图服务与任务运行时**：接口与接线多了摩擦记录器，经验的那次读**现在带着它该回答的那个 scope**。
-    - **工具 schema 表**：保留本分支写明它为何大的标注，取 main 新增的工具声明。
-
-    **这一次合并是查过的，不是看过的**：把 main 自分支分叉以来**新增的每一行**拿到合并后的树里去找，**找不到的行数是零**。第一次合并时这个数是 **174**——冲突只是看得见的那一部分，其余是本分支拆过、而 main 只是编辑过的文件。查出来之后才知道：只看冲突是不够的。
-
-    合并在本分支之上动了 22 个文件。合并跳过了文件大小守卫，理由与前一次相同：守卫量的是暂存的 blob，而一次合并会把 main 自己的文件暂存进来（`src/runtime/agent-context.ts` 47KB，逐字节是 main 的）。
-
-25. **恢复后的回合拿到它被受理时的那套工具**（提交 `9c40debf` 与 `eb60abc7`）。一个能力**声明**这次会话可以看到它的扩展的哪些工具，扩展**注册**它们——两者都在回合开始时从磁盘读。因此**能力声明在受理与恢复之间变了，被恢复的回合能调的工具就变了**。而 ADR 0033 明写禁止"用目录里此刻的配置重发已受理的输入"。
-
-    冻结记录**本来就记着**那些名字，但十五个字段里只读回八个，而**决定工具面的那两个不在其中**：扩展工具的名字根本没冻。
-
-    现在策略**把扩展工具的名字也冻进去**，两条恢复路径都**读回**它们：节点泳道（它的请求原本从"此刻的会话"取允许的名字）与主 Agent 会话（它的请求原本从"此刻的能力操作"取）。
-
-    **证据**：一份真图、一个真的 Pi 扩展。扩展注册两个工具，能力声明其中一个。节点的回合被受理但从未发出，守护进程死掉，能力声明在它停下的时候被改写。**被恢复的回合必须仍然拿到它被受理时的那套工具**。**这个 E2E 在父提交上失败**（被恢复的回合拿到的是能力的新工具，而不是它被受理时的那个），在这个提交上通过。
-
-    随后三个摘要与思考档位也一并还原（提交 `eb60abc7`）：它们今天**被读到却到不了任何决定什么的地方**，但**一份承诺了一件事却只还一部分的记录，是一份说谎的记录**。
+27. **内核表有了一道守卫**（提交 `bd063ba4`）。一句没人检查的话是话，不是规则。`scripts/check-kernel-ownership.mjs` 去找 `backend/internal/graph` 里 store 自己文件之外对 `kernel_` 表的写，并报出文件、行与表名。它**读 SQL 本身**，因此写法不同的写也是写；注释里提到一张表不是写，因此它先去掉注释再看。**守卫也试过它能不能失败**：拿一个有写的文件试，它报出了那一行；拿一个只提到表的注释试，它没有报。
+    - **它暂时不进 `node --run check`，也不进 Pre-commit Hook**：main 与并行的几个分支仍有几十处越界写（main 61 处），而 Hook 与门禁是**这个仓库所有工作树共用的**，现在接进去只会打断它们的提交，不会教会它们什么。检查自己站得住（`node --run check:ownership`），检查操作指南里写清了接进 `check-queue.py` 的条件：**那些分支都取了这次改动之后**。
 
 ## 查出来、尚未处理的问题
 
