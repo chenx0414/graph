@@ -29,4 +29,21 @@
 
 8. **把 main 合了进来**（提交 `ef6a3e39`）。main 在这一轮里继续往前走，harness 那一摊工作落到了 main 上，而它改的正是本分支已经重写过的两个文件。合并因此不是整文件的两版，而是两处小搬迁：节点的 harness overlay（一个节点可以替换自己跑在哪些提示词之下）跟着会话装配搬到 `runtime_kernel_graph_lane_session.go`，主 Agent 的经验上下文跟着 operation 搬到 `runtime_pi_adapter_operation.go`。行为与 main 一字不差，变的只是它们住在哪个文件。这次提交跳过了文件大小守卫，原因是守卫在这里分辨不出来：它量的是暂存的 blob，而一次合并会把 main 自己的文件暂存进来（`core_task_runtime.go` 有 198KB），那些文件 main 上已经有了。在本分支里拆它们等于分叉 main 的工作而不是保留它，所以这一次提交跳过守卫，守卫报出的十个文件全是 main 的、原样未动。
 
-后半程记在另外两份文档里：表的归属在[架构深化的后半程](architecture-deepening-ownership-2026-10-22.md)，二十九次拆分在[拆分战役](architecture-deepening-splits-2026-10-22.md)。
+## 这一轮记在哪里
+
+这一份是入口：**代码的形状**记在上面（第一到第八步）。后面按主题分开记，每一份只讲一件事：
+
+| 文档 | 讲什么 |
+| --- | --- |
+| [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) | 第一轮给表找主人：kernel store 按职责拆开、provider 闸门与 operation broker 不再直接写 kernel 表、`tasks` 表有了 owner、任务闸门不再自己写 SQL、工具闸门与节点泳道都问 store、`questions` 表只有一个写入口（第九到第十六步） |
+| [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) | 把那句主张**查到底**：kernel 表在图服务层也有 38 处越界写，于是图的创建请求、控制面、修订与执行、暂停与执行时钟都归了 store（第二十六到第三十四步） |
+| [v1 的表也有了主人](architecture-deepening-v1-tables-2026-10-22.md) | v1 剩下的散表：节点表、那一轮、instance、operation、对话域的三张、git 那一族、产出那一行、命令回执、能力授权、图布局（第三十五到第三十八步） |
+| [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) | 两条工具表合成同一套规则、main 的十三个 harness 提交合进来、恢复后的回合拿到它被受理时的那套工具（第二十三到第二十五步） |
+| [拆分战役](architecture-deepening-splits-2026-10-22.md) | 三十七次拆分：二十九次按字节预算拆大文件，以及**仓库另一条预算**（500 行）——八处拆分把同时超了行数、而且做的不是一件事的文件拆开 |
+| [门禁证据](architecture-deepening-gate-2026-10-22.md) · [归属那轮的门禁](architecture-deepening-gate-ownership-2026-10-22.md) | 每一次门禁跑了什么、结论是什么；[门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) 记的是那张表背后的方法与教训 |
+| [尚未处理的问题](architecture-deepening-open-2026-10-22.md) | **还开着的**：E2E 门禁横跨两套实现、事务的状态是全局的、在途占用的两个账、系统自模型未接线、三个大文件 |
+| [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md) | 查出来而这一轮处理掉了的：冻结策略只还原了一半、两条工具表本来就一份 |
+| [表归属这一层，还剩什么](architecture-deepening-table-owners-2026-10-22.md) | 归属这一层的判断：kernel store 内部的分散是设计，而 v1 那层的毛病已经没有了；以及**事务的状态是全局的**那件更重的事 |
+| [ADR 0035](../../adr/0035-one-owner-per-table.md) | **一条表一个主人**这条规矩本身，写在决定该在的地方 |
+
+**读法**：想看代码变成了什么形状，读这一份和[后半程](architecture-deepening-ownership-2026-10-22.md)；想知道每一步凭什么算数，读[门禁证据](architecture-deepening-gate-2026-10-22.md)；想知道**还有什么没做**，读[尚未处理的问题](architecture-deepening-open-2026-10-22.md)。
