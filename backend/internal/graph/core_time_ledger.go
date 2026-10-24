@@ -1,30 +1,24 @@
 package graph
 
-import "fmt"
-
-const timeLedgerTerminal = "('succeeded','skipped','retired','failed')"
-
 func OpenPause(kernel *KernelStore, taskID string, now ...int64) {
 	at := ledgerNow(now)
 	kernel.SetNativePause(taskID, true, "", at)
-	g5Exec(kernel.Store.Db, fmt.Sprintf("UPDATE nodes SET pause_since=? WHERE task_id=? AND pause_since IS NULL AND status NOT IN %s", timeLedgerTerminal), at, taskID)
+	kernel.Store.OpenNodePause(taskID, at)
 }
 
 func ClosePause(kernel *KernelStore, taskID string, now ...int64) {
 	at := ledgerNow(now)
 	kernel.SetNativePause(taskID, false, "", at)
-	g5Exec(kernel.Store.Db, `UPDATE nodes SET pause_ms=COALESCE(pause_ms,0)+(?-pause_since), pause_since=NULL
-    WHERE task_id=? AND pause_since IS NOT NULL AND ? >= pause_since`, at, taskID, at)
+	kernel.Store.CloseNodePause(taskID, at)
 }
 
 func OpenUserWait(store *TaskStore, taskID, nodeID string, now ...int64) {
-	g5Exec(store.Db, "UPDATE nodes SET user_wait_since=? WHERE task_id=? AND id=? AND user_wait_since IS NULL", ledgerNow(now), taskID, nodeID)
+	store.OpenNodeUserWait(taskID, nodeID, ledgerNow(now))
 }
 
 func CloseUserWait(store *TaskStore, taskID, nodeID string, now ...int64) {
 	at := ledgerNow(now)
-	g5Exec(store.Db, `UPDATE nodes SET user_wait_ms=COALESCE(user_wait_ms,0)+(?-user_wait_since), user_wait_since=NULL
-    WHERE task_id=? AND id=? AND user_wait_since IS NOT NULL AND ? >= user_wait_since`, at, taskID, nodeID, at)
+	store.CloseNodeUserWait(taskID, nodeID, at)
 }
 
 func CloseUserWaitForOperation(store *TaskStore, operationID string, now ...int64) {
