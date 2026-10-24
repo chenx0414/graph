@@ -1,0 +1,72 @@
+package graph
+
+// The artifacts table is one published artifact: what it is, where it
+// came from, who produced it, what it supersedes, and whether it has been
+// retired.
+//
+// The two places that published an artifact each wrote the whole row out
+// in SQL - thirty-one columns, spelled the same way twice. The row is
+// written once here now, and a caller says which value belongs to which
+// column by name.
+
+// ArtifactRow is one row of the artifacts table.
+type ArtifactRow struct {
+	ArtifactId            string
+	Version               int
+	Scope                 string
+	OwnerId               string
+	TaskId                string
+	ProjectId             any
+	Namespace             string
+	Name                  string
+	LogicalKey            string
+	Digest                string
+	ObjectPath            string
+	Size                  int
+	MediaType             string
+	SchemaKind            any
+	SchemaVersion         any
+	Title                 any
+	Summary               any
+	Tags                  []string
+	ProducerNodeId        any
+	ProducerInstanceId    any
+	ProducerOperationId   any
+	ProducerActivationId  any
+	ProducerOutputVersion any
+	Visibility            string
+	Trust                 string
+	State                 string
+	SupersedesArtifactId  any
+	SupersedesVersion     any
+	Metadata              map[string]any
+	CreatedAt             int64
+	RetiredAt             any
+}
+
+// RecordArtifact writes one artifact row.
+func RecordArtifact(store *TaskStore, row ArtifactRow) {
+	kernelExec(store.Db, `INSERT INTO artifacts(
+        artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,logical_key,digest,object_path,size,
+        media_type,schema_kind,schema_version,title,summary,tags,producer_node_id,producer_instance_id,
+        producer_operation_id,producer_activation_id,producer_output_version,visibility,trust,state,
+        supersedes_artifact_id,supersedes_version,metadata,created_at,retired_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		row.ArtifactId, row.Version, row.Scope, row.OwnerId, row.TaskId, row.ProjectId, row.Namespace, row.Name,
+		row.LogicalKey, row.Digest, row.ObjectPath, row.Size, row.MediaType, row.SchemaKind, row.SchemaVersion,
+		row.Title, row.Summary, CanonicalJSON(row.Tags), row.ProducerNodeId, row.ProducerInstanceId,
+		row.ProducerOperationId, row.ProducerActivationId, row.ProducerOutputVersion, row.Visibility, row.Trust, row.State,
+		row.SupersedesArtifactId, row.SupersedesVersion, CanonicalJSON(row.Metadata), row.CreatedAt, row.RetiredAt)
+}
+
+// RetireArtifact says an artifact version was retired.
+func RetireArtifact(store *TaskStore, artifactID string, version int, retiredAt int64) {
+	kernelExec(store.Db, "UPDATE artifacts SET state='retired',retired_at=? WHERE artifact_id=? AND version=?", retiredAt, artifactID, version)
+}
+
+// LinkArtifact records what an artifact is related to. The link is kept if
+// it is already there.
+func LinkArtifact(store *TaskStore, artifactID string, version int, subjectKind, subjectID, relation string, at int64) {
+	kernelExec(store.Db, `INSERT OR IGNORE INTO artifact_links(id,artifact_id,version,subject_kind,subject_id,relation,created_at)
+        VALUES(?,?,?,?,?,?,?)`, newUUID(), artifactID, version, subjectKind, subjectID, relation, at)
+}

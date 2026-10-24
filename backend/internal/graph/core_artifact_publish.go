@@ -301,19 +301,19 @@ func (w *ArtifactWorkspace) Publish(input PublishArtifactInput) ArtifactRecord {
 			supersedesID = supersedes.ArtifactId
 			supersedesVersion = supersedes.Version
 		}
-		kernelExec(w.store.Db, `INSERT INTO artifacts(
-        artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,logical_key,digest,object_path,size,
-        media_type,schema_kind,schema_version,title,summary,tags,producer_node_id,producer_instance_id,
-        producer_operation_id,producer_activation_id,producer_output_version,visibility,trust,state,
-        supersedes_artifact_id,supersedes_version,metadata,created_at,retired_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			record.ArtifactId, record.Version, string(record.Scope), record.OwnerId, record.TaskId, nil, record.Namespace, record.Name,
-			record.LogicalKey, record.Digest, record.ObjectPath, record.Size, record.MediaType, record.SchemaKind, record.SchemaVersion,
-			record.Title, record.Summary, CanonicalJSON(record.Tags), input.Producer.NodeId, input.Producer.InstanceId,
-			input.Producer.OperationId, input.Producer.ActivationId, outputVersion, record.Visibility, string(record.Trust), string(record.State),
-			supersedesID, supersedesVersion, CanonicalJSON(record.Metadata), record.CreatedAt, nil)
-		kernelExec(w.store.Db, `INSERT OR IGNORE INTO artifact_links(id,artifact_id,version,subject_kind,subject_id,relation,created_at)
-        VALUES(?,?,?,?,?,?,?)`, newUUID(), artifactId, version, "operation", input.Producer.OperationId, "produced_by", createdAt)
+		RecordArtifact(w.store, ArtifactRow{
+			ArtifactId: record.ArtifactId, Version: record.Version, Scope: string(record.Scope), OwnerId: record.OwnerId,
+			TaskId: record.TaskId, ProjectId: nil, Namespace: record.Namespace, Name: record.Name,
+			LogicalKey: record.LogicalKey, Digest: record.Digest, ObjectPath: record.ObjectPath, Size: record.Size,
+			MediaType: record.MediaType, SchemaKind: record.SchemaKind, SchemaVersion: record.SchemaVersion,
+			Title: record.Title, Summary: record.Summary, Tags: record.Tags,
+			ProducerNodeId: input.Producer.NodeId, ProducerInstanceId: input.Producer.InstanceId,
+			ProducerOperationId: input.Producer.OperationId, ProducerActivationId: input.Producer.ActivationId,
+			ProducerOutputVersion: outputVersion, Visibility: record.Visibility, Trust: string(record.Trust), State: string(record.State),
+			SupersedesArtifactId: supersedesID, SupersedesVersion: supersedesVersion,
+			Metadata: record.Metadata, CreatedAt: record.CreatedAt,
+		})
+		LinkArtifact(w.store, artifactId, version, "operation", input.Producer.OperationId, "produced_by", createdAt)
 		w.artifactEvent(input.TaskId, artifactId, version, "artifact.published", map[string]any{
 			"artifactId": artifactId, "version": version, "namespace": namespace, "name": name, "digest": digest, "size": len(data),
 		})

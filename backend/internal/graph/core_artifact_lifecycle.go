@@ -41,7 +41,7 @@ func (w *ArtifactWorkspace) Retire(taskId, artifactId string, version int, reaso
 	}
 	retiredAt := NowMillis()
 	result := w.store.Command(commandScope, requestId, commandPayload, func() any {
-		kernelExec(w.store.Db, "UPDATE artifacts SET state='retired',retired_at=? WHERE artifact_id=? AND version=?", retiredAt, artifactId, version)
+		RetireArtifact(w.store, artifactId, version, retiredAt)
 		w.artifactEvent(targetTaskId, record.ArtifactId, record.Version, "artifact.retired", commandPayload)
 		record.State = "retired"
 		record.RetiredAt = &retiredAt
@@ -106,19 +106,19 @@ func (w *ArtifactWorkspace) Promote(input ArtifactPromoteInput) ArtifactRecord {
 			supersedesVersion = int(kernelInt(latest["version"]))
 			supersedes = &ArtifactSupersedes{ArtifactId: kernelString(latest["artifact_id"]), Version: int(kernelInt(latest["version"]))}
 		}
-		kernelExec(w.store.Db, `INSERT INTO artifacts(
-        artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,logical_key,digest,object_path,size,
-        media_type,schema_kind,schema_version,title,summary,tags,producer_node_id,producer_instance_id,
-        producer_operation_id,producer_activation_id,producer_output_version,visibility,trust,state,
-        supersedes_artifact_id,supersedes_version,metadata,created_at,retired_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			artifactId, version, "project", task.ProjectID, input.TaskId, task.ProjectID, source.Namespace, source.Name,
-			source.LogicalKey, source.Digest, source.ObjectPath, source.Size, source.MediaType, source.SchemaKind,
-			source.SchemaVersion, source.Title, source.Summary, CanonicalJSON(source.Tags), nodeID, instanceID,
-			operationID, activationID, outputVersion, "project", string(source.Trust), "published",
-			supersedesID, supersedesVersion, CanonicalJSON(metadata), createdAt, nil)
-		kernelExec(w.store.Db, `INSERT OR IGNORE INTO artifact_links(id,artifact_id,version,subject_kind,subject_id,relation,created_at)
-        VALUES(?,?,?,?,?,?,?)`, newUUID(), artifactId, version, "artifact", source.ArtifactId+"@"+itoa(source.Version), "promoted_from", createdAt)
+		RecordArtifact(w.store, ArtifactRow{
+			ArtifactId: artifactId, Version: version, Scope: "project", OwnerId: task.ProjectID,
+			TaskId: input.TaskId, ProjectId: task.ProjectID, Namespace: source.Namespace, Name: source.Name,
+			LogicalKey: source.LogicalKey, Digest: source.Digest, ObjectPath: source.ObjectPath, Size: source.Size,
+			MediaType: source.MediaType, SchemaKind: source.SchemaKind, SchemaVersion: source.SchemaVersion,
+			Title: source.Title, Summary: source.Summary, Tags: source.Tags,
+			ProducerNodeId: nodeID, ProducerInstanceId: instanceID, ProducerOperationId: operationID,
+			ProducerActivationId: activationID, ProducerOutputVersion: outputVersion,
+			Visibility: "project", Trust: string(source.Trust), State: "published",
+			SupersedesArtifactId: supersedesID, SupersedesVersion: supersedesVersion,
+			Metadata: metadata, CreatedAt: createdAt,
+		})
+		LinkArtifact(w.store, artifactId, version, "artifact", source.ArtifactId+"@"+itoa(source.Version), "promoted_from", createdAt)
 		w.artifactEvent(input.TaskId, artifactId, version, "artifact.promoted", map[string]any{
 			"artifactId": artifactId, "version": version, "sourceArtifactId": source.ArtifactId, "sourceVersion": source.Version,
 		})
