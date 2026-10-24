@@ -27,8 +27,8 @@ func (runtime *TaskRuntime) Prepare(input TaskRuntimeProjectPrepareInput) any {
 	headBefore := runtime.git.ProjectHead(input.ProjectId)
 	fingerprintBefore := runtime.git.ProjectFingerprint(input.ProjectId)
 	runtime.store.Transaction(func() any {
-		kernelExec(runtime.store.Db, "INSERT INTO git_ops VALUES(?,?,?,?,?,?)", opId, "project:"+input.ProjectId, "prepare", "intent",
-			CanonicalJSON(map[string]any{"payload": payload, "requestId": input.RequestId, "headBefore": headBefore, "fingerprintBefore": fingerprintBefore}), nil)
+		RecordGitOperation(runtime.store, opId, "project:"+input.ProjectId, "prepare", "intent",
+			CanonicalJSON(map[string]any{"payload": payload, "requestId": input.RequestId, "headBefore": headBefore, "fingerprintBefore": fingerprintBefore}))
 		return nil
 	})
 	prep := runtime.git.PrepareProject(input.ProjectId, input.Initialize, input.CreateBaseline)
@@ -42,7 +42,7 @@ func (runtime *TaskRuntime) Prepare(input TaskRuntimeProjectPrepareInput) any {
 func (runtime *TaskRuntime) settlePrepare(opId, requestId string, payload map[string]any, prep *ProjectPreparation, result map[string]any) any {
 	encoded := CanonicalJSON(payload)
 	return runtime.store.Transaction(func() any {
-		kernelExec(runtime.store.Db, "UPDATE git_ops SET state=?, result=? WHERE id=?", "succeeded", CanonicalJSON(result), opId)
+		SettleGitOperation(runtime.store, opId, "succeeded", CanonicalJSON(result))
 		duplicate := kernelRow(runtime.store.Db, "SELECT payload,receipt FROM commands WHERE scope=? AND request_id=?", "projects", requestId)
 		if duplicate != nil {
 			if kernelString(duplicate["payload"]) != encoded {

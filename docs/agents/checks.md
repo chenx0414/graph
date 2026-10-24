@@ -111,6 +111,8 @@ node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime
 
 读不算第二个主人：读不改表的形状，所以 store 之外仍可以有读。
 
+**模块自己的表**（`wake_intents`、`tool_calls`、`git_commits`、`git_ops`、`worktrees` 等）由**那个模块**的一个文件拥有——守卫逐个点名了它们。
+
 **两种文件可以例外，但要在文件头上写明为什么**：
 
 ```

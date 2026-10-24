@@ -304,7 +304,7 @@ func (integration *GitIntegration) PrepareTask(taskId, targetBranch string) {
 	}
 	integration.store.Transaction(func() any {
 		integration.store.SetTaskIntegration(taskId, branch, sha, *targetSha)
-		graphDBExec(integration.store.Db, "INSERT OR REPLACE INTO worktrees VALUES(?,?,?,?,?)", "integration:"+taskId, taskId, "integration", integrationPath, branch)
+		ReplaceIntegrationWorktree(integration.store, taskId, integrationPath, branch)
 		integration.store.Event(taskId, "git.prepared", map[string]any{"branch": branch, "targetBranch": targetBranch, "targetSha": *targetSha})
 		return nil
 	})
@@ -334,5 +334,5 @@ func (integration *GitIntegration) ensureIntegrationWorkspace(taskId string) {
 		Raise("invalid_state", "Task integration commit is unavailable")
 	}
 	EnsureWorktree(*repo, path, *task.IntegrationBranch, *tip)
-	graphDBExec(integration.store.Db, "INSERT INTO worktrees VALUES(?,?,?,?,?)", "integration:"+taskId, taskId, "integration", path, *task.IntegrationBranch)
+	AddIntegrationWorktree(integration.store, taskId, path, *task.IntegrationBranch)
 }

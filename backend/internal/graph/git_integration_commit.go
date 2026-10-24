@@ -128,7 +128,7 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 		return integration.recheckAgainstTarget(taskId, integrationPath, *task.TargetBranch, *targetSha)
 	}
 	opId := graphUUID()
-	graphDBExec(integration.store.Db, "INSERT INTO git_ops VALUES(?,?,?,?,?,?)", opId, taskId, "deliver", "dispatched", CanonicalJSON(map[string]any{"integrationSha": *integrationSha, "targetSha": *targetSha}), nil)
+	RecordGitOperation(integration.store, opId, taskId, "deliver", "dispatched", CanonicalJSON(map[string]any{"integrationSha": *integrationSha, "targetSha": *targetSha}))
 	checkouts := []gitWorktree{}
 	for _, tree := range WorktreeList(*repo) {
 		if tree.Branch == *task.TargetBranch {
@@ -142,14 +142,14 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 				ignore = []string{integration.stateDir}
 			}
 			if !IsClean(target.Path, ignore) {
-				graphDBExec(integration.store.Db, "UPDATE git_ops SET state='blocked',result=? WHERE id=?", CanonicalJSON(map[string]any{"kind": "git_dirty"}), opId)
+				SettleGitOperation(integration.store, opId, "blocked", CanonicalJSON(map[string]any{"kind": "git_dirty"}))
 				return GitDeliverResult{Status: "blocked", Data: map[string]any{"kind": "git_dirty", "reason": "Target worktree is dirty"}}
 			}
 		}
 		for _, target := range checkouts {
 			forwarded := FastForwardCheckout(target.Path, *integrationSha)
 			if !forwarded.Ok {
-				graphDBExec(integration.store.Db, "UPDATE git_ops SET state='failed',result=? WHERE id=?", CanonicalJSON(map[string]any{"stderr": forwarded.Stderr}), opId)
+				SettleGitOperation(integration.store, opId, "failed", CanonicalJSON(map[string]any{"stderr": forwarded.Stderr}))
 				next := *targetSha
 				if moved := RevParse(*repo, *task.TargetBranch); moved != nil {
 					next = *moved
@@ -160,7 +160,7 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 	} else {
 		updated := UpdateRef(*repo, "refs/heads/"+*task.TargetBranch, *integrationSha, *targetSha)
 		if !updated.Ok {
-			graphDBExec(integration.store.Db, "UPDATE git_ops SET state='failed',result=? WHERE id=?", CanonicalJSON(map[string]any{"stderr": updated.Stderr}), opId)
+			SettleGitOperation(integration.store, opId, "failed", CanonicalJSON(map[string]any{"stderr": updated.Stderr}))
 			next := *targetSha
 			if moved := RevParse(*repo, *task.TargetBranch); moved != nil {
 				next = *moved
@@ -170,7 +170,7 @@ func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *str
 	}
 	integration.store.Transaction(func() any {
 		integration.store.SetTaskTargetSha(taskId, *integrationSha)
-		graphDBExec(integration.store.Db, "UPDATE git_ops SET state='succeeded',result=? WHERE id=?", CanonicalJSON(map[string]any{"sha": *integrationSha}), opId)
+		SettleGitOperation(integration.store, opId, "succeeded", CanonicalJSON(map[string]any{"sha": *integrationSha}))
 		return nil
 	})
 	return GitDeliverResult{Status: "merged"}

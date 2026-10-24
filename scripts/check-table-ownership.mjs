@@ -63,6 +63,8 @@ const OWNED = new Map([
   ['tool_call_spools', 'core_store_tool_calls.go'],
   ['agent_context_bindings', 'core_context.go'],
   ['git_commits', 'git_integration_commit.go'],
+  ['git_ops', 'core_git_operations.go'],
+  ['worktrees', 'core_git_operations.go'],
 ]);
 
 /** The kernel tables are owned by the store's own files. */

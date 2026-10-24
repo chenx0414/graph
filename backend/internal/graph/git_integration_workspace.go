@@ -79,7 +79,7 @@ func (integration *GitIntegration) Workspace(taskId string, instanceId *string, 
 		start = *tip
 	}
 	EnsureWorktree(*repo, path, branch, start)
-	graphDBExec(integration.store.Db, "INSERT OR IGNORE INTO worktrees VALUES(?,?,?,?,?)", *instanceId, taskId, nodeId, path, branch)
+	KeepNodeWorktree(integration.store, *instanceId, taskId, nodeId, path, branch)
 	joined := joinSub(path)
 	return &joined
 }

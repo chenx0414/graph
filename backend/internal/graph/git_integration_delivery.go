@@ -34,7 +34,7 @@ func (integration *GitIntegration) Restore(taskId string) *GitDeliverResult {
 	}
 	targetSha := RevParse(*repo, *current.TargetBranch)
 	if targetSha != nil && head != nil && *targetSha == *head {
-		graphDBExec(integration.store.Db, "UPDATE git_ops SET state='succeeded' WHERE task_id=? AND kind='deliver' AND state IN ('intent','dispatched')", taskId)
+		SettleGitDeliveries(integration.store, taskId)
 		integration.store.SetTaskTargetSha(taskId, *head)
 		return &GitDeliverResult{Status: "merged"}
 	}
@@ -75,7 +75,7 @@ func (integration *GitIntegration) ReleaseWorkcopies(taskId string) int {
 		}
 	}
 	Git(*repo, []string{"worktree", "prune"}, nil, nil)
-	graphDBExec(integration.store.Db, "DELETE FROM worktrees WHERE task_id=?", taskId)
+	ReleaseWorktrees(integration.store, taskId)
 	integration.store.Event(taskId, "git.workcopies.released", map[string]any{"registered": len(rows), "removed": removed})
 	return len(rows)
 }
