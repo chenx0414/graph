@@ -107,7 +107,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 					panic(err)
 				}
 				spec.Model = &selected.Id
-				kernelExec(runtime.store.Db, "UPDATE nodes SET spec=? WHERE task_id=? AND id='master'", CanonicalJSON(spec), taskId)
+				runtime.store.SetNodeSpec(taskId, "master", CanonicalJSON(spec))
 				kernelExec(runtime.store.Db, "UPDATE instances SET model=? WHERE id=?", selected.Id, kernelString(master["instance_id"]))
 			}
 			effective := selected
@@ -211,7 +211,7 @@ func (runtime *TaskRuntime) createMasterNode(taskId string) string {
 		Role:              taskRuntimeStringPtr("master"),
 	}
 	instanceId := graphUUID()
-	kernelExec(runtime.store.Db, "INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)", taskId, spec.Id, CanonicalJSON(spec), instanceId)
+	runtime.store.CreateNode(taskId, spec.Id, CanonicalJSON(spec), instanceId)
 	runtime.insertInstance(instanceId, taskId, spec.Id, spec.DefinitionVersion, spec.Model)
 	CreateActivation(runtime.store, taskId, spec.Id, 0)
 	return instanceId

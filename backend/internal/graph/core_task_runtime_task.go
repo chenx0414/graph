@@ -54,7 +54,7 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 				Role:              taskRuntimeStringPtr("master"),
 			}
 			instanceId := graphUUID()
-			kernelExec(runtime.store.Db, "INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)", taskId, spec.Id, CanonicalJSON(spec), instanceId)
+			runtime.store.CreateNode(taskId, spec.Id, CanonicalJSON(spec), instanceId)
 			runtime.insertInstance(instanceId, taskId, spec.Id, spec.DefinitionVersion, spec.Model)
 			CreateActivation(runtime.store, taskId, spec.Id, 0)
 			active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])

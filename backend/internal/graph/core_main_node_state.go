@@ -15,9 +15,7 @@ func CreateActivation(store *TaskStore, taskID, nodeID string, graphVersion int,
 	); err != nil {
 		panic(err)
 	}
-	if _, err := store.Db.Exec("UPDATE nodes SET activation_id=? WHERE task_id=? AND id=?", id, taskID, nodeID); err != nil {
-		panic(err)
-	}
+	store.SetNodeActivation(taskID, nodeID, id)
 	return id
 }
 

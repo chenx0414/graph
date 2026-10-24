@@ -266,7 +266,7 @@ func (conversations *TaskRuntimeConversations) SelectModel(conversationId, model
 		currentLevel := ConversationRowOf(runtime.store, conversationId).ThinkingLevel
 		changed := (spec.Model == nil || *spec.Model != entry.Id) || currentLevel == nil || *currentLevel != string(level)
 		spec.Model = &entry.Id
-		kernelExec(runtime.store.Db, "UPDATE nodes SET spec=? WHERE task_id=? AND id=?", CanonicalJSON(spec), anchor, spec.Id)
+		runtime.store.SetNodeSpec(anchor, spec.Id, CanonicalJSON(spec))
 		kernelExec(runtime.store.Db, "UPDATE instances SET model=? WHERE id=?", entry.Id, kernelString(master["instance_id"]))
 		kernelExec(runtime.store.Db, "UPDATE conversations SET thinking_level=? WHERE id=?", string(level), conversationId)
 		if changed {

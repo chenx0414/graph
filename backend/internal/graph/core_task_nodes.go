@@ -51,3 +51,18 @@ func (s *TaskStore) ResumeSucceededNode(taskID, nodeID string) {
 func (s *TaskStore) SetNodeRunningForActivation(taskID, nodeID, activationID string) {
 	kernelExec(s.DB, "UPDATE nodes SET status='running' WHERE task_id=? AND id=? AND activation_id=?", taskID, nodeID, activationID)
 }
+
+// SetNodeSpec records the spec a node runs with.
+func (s *TaskStore) SetNodeSpec(taskID, nodeID, spec string) {
+	kernelExec(s.DB, "UPDATE nodes SET spec=? WHERE task_id=? AND id=?", spec, taskID, nodeID)
+}
+
+// SetNodeActivation says a node runs the turn of one activation.
+func (s *TaskStore) SetNodeActivation(taskID, nodeID, activationID string) {
+	kernelExec(s.DB, "UPDATE nodes SET activation_id=? WHERE task_id=? AND id=?", activationID, taskID, nodeID)
+}
+
+// CreateNode adds one node to a task.
+func (s *TaskStore) CreateNode(taskID, nodeID, spec, instanceID string) {
+	kernelExec(s.DB, "INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)", taskID, nodeID, spec, instanceID)
+}

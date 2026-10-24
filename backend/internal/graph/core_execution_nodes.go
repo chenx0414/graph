@@ -99,7 +99,7 @@ func (e *Execution) refreshDefinition(node ExecutionNodeRow) ExecutionNodeRow {
 	}
 	spec.DefinitionVersion = &definitionVersion
 	specText := CanonicalJSON(spec)
-	kernelExec(e.store.Db, "UPDATE nodes SET spec=? WHERE task_id=? AND id=?", specText, node.TaskId, node.Id)
+	e.store.SetNodeSpec(node.TaskId, node.Id, specText)
 	if node.InstanceId != nil {
 		kernelExec(e.store.Db, "UPDATE instances SET definition_version=? WHERE id=?", definitionVersion, *node.InstanceId)
 	}
