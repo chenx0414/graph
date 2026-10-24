@@ -49,12 +49,18 @@ type TaskRuntimeTaskStatusInput struct {
 }
 
 // TaskStatus reads the compact status projection of one task.
+//
+// A query that names no task asks about the supervisor's own task. The
+// TypeScript original guards its owner lookup with the same check - it
+// asks the owner table only when a task id was given - and the port had
+// dropped the guard, so a query without a task id dereferenced a nil
+// pointer and the model read a Go runtime message instead of an answer.
 func (supervisor *TaskRuntimeSupervisor) TaskStatus(input TaskRuntimeTaskStatusInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
-	ownerTaskID, owned := runtime.kernel.GraphOwner(*input.TaskId)
 	target := supervisor.taskId
 	if input.TaskId != nil {
+		ownerTaskID, owned := runtime.kernel.GraphOwner(*input.TaskId)
 		if owned && ownerTaskID == supervisor.taskId {
 			target = *input.TaskId
 		} else {
