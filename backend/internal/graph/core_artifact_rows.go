@@ -51,7 +51,7 @@ func RecordArtifact(store *TaskStore, row ArtifactRow) {
         media_type,schema_kind,schema_version,title,summary,tags,producer_node_id,producer_instance_id,
         producer_operation_id,producer_activation_id,producer_output_version,visibility,trust,state,
         supersedes_artifact_id,supersedes_version,metadata,created_at,retired_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		row.ArtifactId, row.Version, row.Scope, row.OwnerId, row.TaskId, row.ProjectId, row.Namespace, row.Name,
 		row.LogicalKey, row.Digest, row.ObjectPath, row.Size, row.MediaType, row.SchemaKind, row.SchemaVersion,
 		row.Title, row.Summary, CanonicalJSON(row.Tags), row.ProducerNodeId, row.ProducerInstanceId,
