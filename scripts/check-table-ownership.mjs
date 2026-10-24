@@ -27,8 +27,14 @@
  * Usage:
  *   node scripts/check-table-ownership.mjs           # the whole package
  *   node scripts/check-table-ownership.mjs <path>...  # only those files
+ *   node scripts/check-table-ownership.mjs --staged  # only what the change adds
+ *
+ * The staged mode is the one that can run in every worktree's commit hook:
+ * it refuses a change that adds a writer for a table that already has one,
+ * and leaves the tables whose owner this branch has not reached yet alone.
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -129,36 +135,85 @@ function goFilesIn(directory) {
     .map((name) => join(directory, name));
 }
 
+/**
+ * The writes the staged change adds, with the file they are in.
+ *
+ * Only what is added is looked at. A table whose owner this branch has not
+ * reached yet is still written from several places in the tree, and a change
+ * that does not touch those places is not what made it so. What the check
+ * refuses is a change that adds a new writer for a table that already has
+ * one.
+ */
+function stagedWrites() {
+  let diff = '';
+  try {
+    diff = execFileSync('git', ['diff', '--cached', '-U0'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  } catch {
+    return [];
+  }
+  const found = [];
+  let file = '';
+  diff.split('\n').forEach((line) => {
+    if (line.startsWith('+++ b/')) {
+      file = line.slice(6);
+      return;
+    }
+    if (!line.startsWith('+') || line.startsWith('+++')) return;
+    const text = line.slice(1);
+    if (!/(?:INSERT|UPDATE|DELETE)/i.test(text)) return;
+    WRITE.lastIndex = 0;
+    let match;
+    while ((match = WRITE.exec(text)) !== null) {
+      const table = match[1];
+      if (!OWNED.has(table) && !table.startsWith('kernel_')) continue;
+      found.push({ file: resolve(REPO_ROOT, file), table, line: text.trim() });
+    }
+  });
+  return found;
+}
+
 function report(offenders) {
   for (const offender of offenders) {
     console.error(
-      `  ${relative(REPO_ROOT, offender.file)}:${offender.line} writes ${offender.table}`,
+      `  ${relative(REPO_ROOT, offender.file)}: writes ${offender.table}`,
     );
   }
 }
 
 function main() {
-  const given = process.argv.slice(2);
-  const files = given.length > 0
-    ? given.map((path) => resolve(REPO_ROOT, path))
-    : goFilesIn(PACKAGE);
+  const args = process.argv.slice(2);
+  const staged = args.includes('--staged');
+  const given = args.filter((arg) => !arg.startsWith('--'));
 
   const offenders = [];
   const tables = new Set();
-  for (const file of files) {
-    if (!file.endsWith('.go')) continue;
-    const source = readFileSync(file, 'utf8');
-    if (source.includes(EXEMPT)) continue;
-    const name = file.slice(file.lastIndexOf('/') + 1);
-    for (const write of writesIn(source)) {
+
+  if (staged) {
+    for (const write of stagedWrites()) {
+      const name = write.file.slice(write.file.lastIndexOf('/') + 1);
       if (ownsIt(name, write.table)) continue;
       tables.add(write.table);
-      offenders.push({ file, line: write.line, table: write.table });
+      offenders.push(write);
+    }
+  } else {
+    const files = given.length > 0
+      ? given.map((path) => resolve(REPO_ROOT, path))
+      : goFilesIn(PACKAGE);
+    for (const file of files) {
+      if (!file.endsWith('.go')) continue;
+      const source = readFileSync(file, 'utf8');
+      if (source.includes(EXEMPT)) continue;
+      const name = file.slice(file.lastIndexOf('/') + 1);
+      for (const write of writesIn(source)) {
+        if (ownsIt(name, write.table)) continue;
+        tables.add(write.table);
+        offenders.push({ file, line: write.line, table: write.table });
+      }
     }
   }
 
   if (offenders.length === 0) {
-    const scope = given.length > 0 ? `${files.length} file(s)` : 'the package';
+    const scope = staged ? 'the staged change' : given.length > 0 ? `${given.length} file(s)` : 'the package';
     console.log(`table ownership: ${scope} writes no owned table outside its owner`);
     return 0;
   }

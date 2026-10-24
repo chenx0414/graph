@@ -123,9 +123,29 @@ node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime
 的操作**——退役一个图连同它的一切，是关于许多张表的一个事实，拆开它会让这次操作对自己在
 做什么说谎。
 
-这个检查**暂时不进** `node --run check`，也不进 Pre-commit Hook：main 与并行的几个分支
-仍有几十处越界写，把检查接进共享的门禁会立刻打断它们的提交。等那些分支都取了这次改动
-（`feature/architecture-deepening`）之后，再把它接进 `check-queue.py` 的步骤里。
+**它有两种看法**：
+
+```sh
+node --run check:ownership                  # 整棵树：谁在写谁的表
+node scripts/check-table-ownership.mjs --staged   # 只看这次改动新增了什么
+```
+
+**`--staged` 才是能进 Pre-commit Hook 的那一种**：它**只拦新增的写者**——一张已经有主人的表，
+这次改动又添了一个写者，就 refused。而**这个分支还没走到的主人**（main 与并行分支上那些
+表仍然从许多地方写），**它一个也不碰**。理由和文件大小守卫一样：**要拦的是**本次改动**新写
+的东西**，不是历史上就有的。
+
+因此 Hook 里接的是 `--staged`：
+
+```sh
+node "$hook_dir/../scripts/check-table-ownership.mjs" --staged
+```
+
+**仓库里没有这个脚本时，Hook 跳过它**——所以不认识「表的主人」这件事的分支不会被它拦住。
+
+**整棵树那一种**（`node --run check:ownership`）**暂时不进** `node --run check`：main 与并行的
+几个分支仍有几十处越界写，把检查接进共享的门禁会立刻打断它们的提交。等那些分支都取了这次
+改动（`feature/architecture-deepening`）之后，再把它接进 `check-queue.py` 的步骤里。
 
 ## Pre-push Hook
 
