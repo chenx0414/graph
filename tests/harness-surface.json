@@ -7,12 +7,12 @@
     "command": "pass"
   },
   "surface": {
-    "src/runtime/agent-context.ts": "7c10c38531cb251d7cecff8a91f0d13e6ec86a123caaa15a7341dcf522fe10d3",
+    "src/runtime/agent-context.ts": "92557162a54a13e685f220da5891116a61772625667953c8cba88c6b87cf943d",
     "src/runtime/agent-context-assembly.ts": "a303ddd84c61bcfb2945c5f8db78d274037e98f8d09ca9ec0ed7cd88138b1f92",
     "src/runtime/agent-tool-definitions.ts": "c312d5e3fe297e417ae5ee34f201ef25619f11f2ab43a8acf401aeb63666bee4",
     "src/runtime/agent-tools.ts": "4f229c2e0bef2eb93185756db5df11960e31159ad97ced461cd263d9edd633f3",
     "src/runtime/pi-native-tools.ts": "91ec82a3d296d059842c3799dfa2b55408f62c6e05883384748f8f2e30ca6b91",
-    "backend/internal/graph/runtime_agent_context.go": "a4a9f708d88ce59294f0630a1ad4fa4001551f18b55f334cc7f8f1394f44f6c6",
+    "backend/internal/graph/runtime_agent_context.go": "eff5c50fe16e39ae4e84db9c91e52a88672ade241f5a4f788640f83e004f5e24",
     "backend/internal/graph/runtime_agent_tool_definitions.go": "fdd14e319bb23fd47328a920f235ebfb9730554eb85691c12cfc7a39591b036a",
     "backend/internal/graph/runtime_agent_tools.go": "5d2410eca004c481f14d639b5dc0bb0393a5a46cce2b3eb8aa14c5c2b3c4d23b",
     "backend/internal/graph/runtime_pi_native_tools.go": "65ce1b0f5b71df3ac9426b964bb8f676eb35ca78e7c0458b613f4cd4e5496219",
@@ -23,5 +23,5 @@
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "bcf3a0089998787b48207ef12796a530bb171aeb5cb63c688cbbc33285e65111"
   },
-  "updatedAt": "2026-10-24T01:34:24.323Z"
+  "updatedAt": "2026-10-24T03:54:22.208Z"
 }

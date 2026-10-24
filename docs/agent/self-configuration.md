@@ -127,6 +127,28 @@ RSI 只改"正在运行的这份代码"，所以：
 对比只给事实，不给判决：选谁由你决定，因为这类任务通常没有标准答案可比。
 判决之后记得用 `record_harness_decision` 沉淀，否则下一个同领域任务仍然从零开始。
 
+### 真实模型评测
+
+改了 harness 之后，除了门禁（`node --run check` 里的 `check:harness`），
+还可以让**真模型**把冻结用例重跑一遍：
+
+```sh
+node --run eval:harness                        # 用 ~/.graph 那套真在跑的面
+node --run eval:harness -- --cases parser,cli  # 只跑其中几个用例
+```
+
+它会冻结你现在的 harness 面（提示、配方、能力），用 config 里的模型把冻结用例跑完，
+判决记进 `~/.graph/harness-eval-verdicts.json`，报告落在 `~/.graph/harness-eval-report.json`。
+账本记着每个用例上次的判决，所以它会直接说**哪个用例回归了**。
+
+报告是证据：读完之后用 `record_harness_decision` 把结论留下来（cue 写清楚"什么情况"，
+lesson 写"这次改动该怎么做"，evidence 写报告里的那句判决），
+下一个探针就能从这条教训起跑。
+
+真模型要凭据（config 里 `secretRef` 指的环境变量得在你的环境里），所以它不在
+`node --run check` 里：门禁那一层用替身模型，判"活儿还能不能干完"；
+这一层用真模型，判"提示还管不管用"。两层的分工是这样。
+
 ### 领域与接续
 
 - `declare_harness_domain {domain}`：告诉宿主**这个项目是做什么的**（parser、billing、code review…）。
