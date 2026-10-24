@@ -290,7 +290,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		panic(recovered)
 	}()
 
-	WaitForKernelProgramExecutionSlot(kernel.Store, id, cancellation)
+	WaitForKernelProgramExecutionSlot(kernel, id, cancellation)
 	var programEnv map[string]string
 	var programReadPaths []string
 	var nodeModulesPath *string

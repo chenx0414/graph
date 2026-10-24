@@ -115,7 +115,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if hasTarget {
 			targetNode = target
 		}
-		SetNativePause(service.kernel.Store, input.GraphId, paused, targetNode, 0)
+		service.kernel.SetNativePause(input.GraphId, paused, targetNode, 0)
 		return graph.State()
 	case "retry", "skip", "cancel":
 		if input.Seq == nil {
@@ -145,7 +145,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 				service.kernel.SettleQueueItem(input.GraphId, int64(seq), input.Action)
 			}
 			service.kernel.UnpauseNodeState(input.GraphId, nodeId)
-			SetNativePause(service.kernel.Store, input.GraphId, false, nodeId, 0)
+			service.kernel.SetNativePause(input.GraphId, false, nodeId, 0)
 			service.kernel.ReleaseNode(input.GraphId, nodeId)
 			service.kernel.Store.CompleteBlockedTask(input.GraphId)
 			service.kernel.Store.Event(input.GraphId, "graph.queue."+input.Action, map[string]any{"seq": seq, "nodeId": nodeId})

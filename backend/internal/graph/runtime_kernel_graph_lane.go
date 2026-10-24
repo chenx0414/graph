@@ -432,7 +432,7 @@ func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, crede
 	}
 	return func(candidate ModelEntry) *piAdapterSlot {
 		return &piAdapterSlot{acquire: func(signal *AbortSignal) (func(), error) {
-			SetNativeExecutionWaiting(options.Kernel.Store, executionId, true)
+			options.Kernel.SetExecutionWaiting(executionId, true)
 			var release func()
 			released := false
 			releaseSlot := func() {
@@ -465,7 +465,7 @@ func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, crede
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					releaseSlot()
-					SetNativeExecutionWaiting(options.Kernel.Store, executionId, false)
+					options.Kernel.SetExecutionWaiting(executionId, false)
 					panic(recovered)
 				}
 			}()
@@ -473,7 +473,7 @@ func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, crede
 				before := request()
 				acquired, err := options.Scheduler.Acquire(before, signal)
 				if err != nil {
-					SetNativeExecutionWaiting(options.Kernel.Store, executionId, false)
+					options.Kernel.SetExecutionWaiting(executionId, false)
 					return nil, err
 				}
 				after := request()
@@ -483,7 +483,7 @@ func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, crede
 				}
 				acquired()
 			}
-			WaitForKernelExecutionSlot(options.Kernel.Store, executionId, signal)
+			WaitForKernelExecutionSlot(options.Kernel, executionId, signal)
 			return releaseSlot, nil
 		}}
 	}

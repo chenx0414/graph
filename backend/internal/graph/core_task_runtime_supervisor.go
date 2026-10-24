@@ -41,7 +41,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 			}
 			runtime.store.SetTaskPaused(target, pausedValue != 0)
 			if paused {
-				OpenPause(runtime.store, target)
+				OpenPause(runtime.kernel, target)
 				active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
                   JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
                   WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
@@ -50,7 +50,7 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 					stoppedMaster = AwaitPauseContinuation(runtime.store, input.RequestId, target, kernelString(active["id"]))
 				}
 			} else {
-				ClosePause(runtime.store, target)
+				ClosePause(runtime.kernel, target)
 				ResumePauseContinuations(runtime.store, target)
 			}
 			eventType := "task.resumed"

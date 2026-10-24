@@ -116,7 +116,7 @@ func (k *KernelStore) SetNodeQueuePaused(taskID, nodeID string, paused bool) {
 		}
 		g5Exec(k.Db, "UPDATE kernel_node_state SET paused=? WHERE task_id=? AND node_id=?", flag, taskID, nodeID)
 		if !paused {
-			SetNativePause(k.Store, taskID, false, nodeID, 0)
+			k.SetNativePause(taskID, false, nodeID, 0)
 		}
 		return nil
 	})

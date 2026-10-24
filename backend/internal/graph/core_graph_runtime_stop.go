@@ -7,7 +7,7 @@ func (runtime *GraphRuntime) Stop() GraphStateRow {
 	if phase == "completed" || phase == "stopped" {
 		return *runtime.State()
 	}
-	FinishNativePauses(runtime.kernel.Store, runtime.graphId, nil)
+	runtime.kernel.FinishNativePauses(runtime.graphId, nil)
 	runtime.kernel.Store.StopTask(runtime.graphId)
 	runtime.kernel.MarkGraphDeliveriesProcessed(runtime.graphId)
 	runtime.kernel.RouteGraphTransitions(runtime.graphId)

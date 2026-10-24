@@ -361,7 +361,7 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Session: sessionView, Capabilities: facts, CapabilityDigest: digest, CapabilityUsage: []any{},
 		Operations: operations, Invocations: invocations, Questions: []any{}, Evidence: []any{},
 		Timing: map[string]any{"totalMs": totalMs, "runMs": totalMeasured("runMs"), "waitingMs": totalMeasured("waitingMs"),
-			"pauseMs": NativePauseMs(kernel.Store, graphID, nodeID), "userWaitMs": nil, "inProgress": inProgress},
+			"pauseMs": kernel.NativePauseMs(graphID, nodeID), "userWaitMs": nil, "inProgress": inProgress},
 		Entries: page["entries"], EntryCount: page["entryCount"], Limit: page["limit"], HasOlder: page["hasOlder"], HasNewer: page["hasNewer"],
 		Phase: kernel.Store.Task(graphID).Phase,
 	}

@@ -89,7 +89,7 @@ func (k *KernelStore) AdmitNode(taskID string, revisionVersion int, nodeID strin
 	}
 	g5Exec(k.Db, "INSERT INTO kernel_nodes(task_id,revision_version,node_id,instance_id,kind,spec,status) VALUES(?,?,?,?,?,?,?)", taskID, revisionVersion, nodeID, input.instance(), kind, CanonicalJSON(node), "idle")
 	if _, paused := g5One(k.Db, "SELECT 1 FROM kernel_nodes WHERE task_id=? AND graph_paused=1", taskID); paused {
-		SetNativePause(k.Store, taskID, true, "", 0)
+		k.SetNativePause(taskID, true, "", 0)
 	}
 }
 
@@ -151,7 +151,7 @@ func (k *KernelStore) SetExecutionState(executionID, state string) {
 func (k *KernelStore) FinishExecution(executionID, state string) {
 	finish := func() {
 		now := NowMillis()
-		CloseNativeExecutionTiming(k.Store, executionID, now)
+		k.CloseExecutionTiming(executionID, now)
 		g5Exec(k.Db, "UPDATE kernel_executions SET state=?, ended_at=? WHERE id=?", state, now, executionID)
 	}
 	if k.Store.IsTransaction() {

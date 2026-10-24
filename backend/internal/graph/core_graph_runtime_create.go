@@ -133,7 +133,7 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) struct
 		}
 		for _, id := range removed {
 			nodeId := id
-			FinishNativePauses(runtime.kernel.Store, runtime.graphId, &nodeId)
+			runtime.kernel.FinishNativePauses(runtime.graphId, &nodeId)
 		}
 		for _, id := range removed {
 			runtime.kernel.RetireNode(runtime.graphId, id)

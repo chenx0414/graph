@@ -21,7 +21,7 @@ func (runtime *GraphRuntime) State() *GraphStateRow {
 func (runtime *GraphRuntime) setPhase(phase GraphPhase) {
 	runtime.kernel.Store.SetTaskPhase(runtime.graphId, string(phase))
 	if phase == "completed" || phase == "stopped" {
-		FinishNativePauses(runtime.kernel.Store, runtime.graphId, nil)
+		runtime.kernel.FinishNativePauses(runtime.graphId, nil)
 		ReleaseTaskSlot(runtime.kernel.Store, runtime.graphId)
 	}
 }

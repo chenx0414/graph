@@ -139,7 +139,7 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 		}
 		runtime.store.SetTaskPaused(task.taskId, pausedValue != 0)
 		if paused {
-			OpenPause(runtime.store, task.taskId)
+			OpenPause(runtime.kernel, task.taskId)
 			active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
               JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
               WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
@@ -148,7 +148,7 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 				stoppedMaster = AwaitPauseContinuation(runtime.store, requestId, task.taskId, kernelString(active["id"]))
 			}
 		} else {
-			ClosePause(runtime.store, task.taskId)
+			ClosePause(runtime.kernel, task.taskId)
 			ResumePauseContinuations(runtime.store, task.taskId)
 		}
 		eventType := "task.resumed"
