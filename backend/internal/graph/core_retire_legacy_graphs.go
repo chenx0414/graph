@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: retiring a graph and everything of it is one fact about many tables
+
 import "strings"
 
 // RetireLegacyGraphs discards DAG records before recovery or model binding.

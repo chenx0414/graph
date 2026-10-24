@@ -83,18 +83,34 @@ node scripts/check-file-tokens.mjs src/core/task-runtime.ts
 这个检查不进 `node --run check`：仓库里已存在历史大文件，而它要拦的是**本次改动**新写大
 文件。`GRAPH_FILE_TOKEN_LIMIT` 可临时改上限（默认 5000）。
 
-## 内核表的归属检查
+## 表的归属检查
 
-`kernel_` 开头的表是图的持久状态，它们归 `KernelStore` 一个主人：形状由 store 知道，其他
-地方只问 store 要答案、要 store 去写。任何在 store 之外写这些表的地方都是第二个主人，
-一列要改就得在两个地方都改。
+有两份持久表，各归一个 store 一个主人：
+
+| 表 | 主人 |
+| --- | --- |
+| `kernel_` 开头的那批 | `KernelStore`（`core_kernel_*.go`） |
+| `tasks`、`questions`、`invocations`、`nodes` | `TaskStore`（`core_task_lifecycle.go`、`core_task_questions.go`、`core_task_invocations.go`、`core_task_nodes.go`） |
+
+形状由 store 知道，其他地方只问 store 要答案、要 store 去写。任何在 store 之外写这些表的
+地方都是第二个主人，一列要改就得在两个地方都改。
 
 ```sh
 node --run check:ownership                  # 整个 backend/internal/graph 包
-node scripts/check-kernel-ownership.mjs backend/internal/graph/core_graph_runtime_stop.go
+node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime_stop.go
 ```
 
 读不算第二个主人：读不改表的形状，所以 store 之外仍可以有读。
+
+**两种文件可以例外，但要在文件头上写明为什么**：
+
+```
+// graph:table-writes-exempt: a migration owns the SQL of the schema it migrates
+```
+
+一是**迁移**——迁移的 SQL 描述的就是形状本身，它属于写下形状的地方。二是**一次跨多张表
+的操作**——退役一个图连同它的一切，是关于许多张表的一个事实，拆开它会让这次操作对自己在
+做什么说谎。
 
 这个检查**暂时不进** `node --run check`，也不进 Pre-commit Hook：main 与并行的几个分支
 仍有几十处越界写，把检查接进共享的门禁会立刻打断它们的提交。等那些分支都取了这次改动

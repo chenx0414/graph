@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: a migration owns the SQL of the schema it migrates
+
 import (
 	"database/sql"
 )
