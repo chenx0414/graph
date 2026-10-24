@@ -44,7 +44,7 @@ func (lifecycle *OperationLifecycle) acceptDurableCompletion(receipt durableComp
 		lifecycle.store.ResolveOperationRecoveryQuestions(operation.Id, map[string]any{"proof": "Original durable input has its completed SDK receipt; unresolved usage remains unknown", "inputRequestId": receipt.InputRequestId})
 		CloseUserWaitForOperation(lifecycle.store, operation.Id)
 		lifecycle.store.SetNodeRunningForActivation(operation.TaskId, operation.NodeId, operation.ActivationId)
-		kernelExec(lifecycle.store.Db, "UPDATE activations SET state='running' WHERE id=?", operation.ActivationId)
+		lifecycle.store.RunActivation(operation.ActivationId)
 		lifecycle.store.Event(operation.TaskId, "operation.durable_resumed", map[string]any{"operationId": operation.Id, "inputRequestId": receipt.InputRequestId})
 		outcome := "completed"
 		if receipt.StopReason == "error" || receipt.StopReason == "aborted" {

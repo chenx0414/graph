@@ -25,8 +25,7 @@ func (l *OperationLifecycle) Admit(input OperationAdmitInput) Operation {
 		if input.AfterIntent != nil {
 			input.AfterIntent(operation)
 		}
-		kernelExec(l.store.Db, "UPDATE activations SET input_versions=?,state='preparing' WHERE id=?",
-			CanonicalJSON(operation.InputVersions), operation.ActivationId)
+		l.store.PrepareActivation(operation.ActivationId, CanonicalJSON(operation.InputVersions))
 		l.store.SetNodePreparing(operation.TaskId, operation.NodeId)
 		l.store.Event(operation.TaskId, "operation.intent", OperationIntentEvent(operation))
 		return operation

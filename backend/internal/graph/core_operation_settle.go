@@ -77,7 +77,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 				kernelExec(l.store.Db, "UPDATE operations SET state='settled',worker_active=0,result=? WHERE id=?",
 					CanonicalJSON(result), operation.Id)
 				l.store.RetryNodeOutput(operation.TaskId, operation.NodeId, CanonicalJSON(result.Output), operation.Id)
-				kernelExec(l.store.Db, "UPDATE activations SET state='pending',round=round+1 WHERE id=?", operation.ActivationId)
+				l.store.RetryActivation(operation.ActivationId)
 				l.store.Event(operation.TaskId, "node.transient_retry", map[string]any{
 					"nodeId":      operation.NodeId,
 					"attempt":     decision.Attempt,
@@ -237,8 +237,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 		}, operationLifecycleStringPtr(operation.Id))
 	}
 	l.store.Event(operation.TaskId, "operation.result", map[string]any{"operationId": operation.Id, "result": result})
-	kernelExec(l.store.Db, "UPDATE activations SET state=(SELECT status FROM nodes WHERE task_id=? AND id=?) WHERE id=?",
-		operation.TaskId, operation.NodeId, operation.ActivationId)
+	l.store.SettleActivation(operation.ActivationId, operation.TaskId, operation.NodeId)
 }
 
 // bindWakes binds ready wakes to the turn that is about to act on them.

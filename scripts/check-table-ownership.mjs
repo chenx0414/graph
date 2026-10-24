@@ -45,6 +45,7 @@ const OWNED = new Map([
   ['questions', 'core_task_questions.go'],
   ['invocations', 'core_task_invocations.go'],
   ['nodes', 'core_task_nodes.go'],
+  ['activations', 'core_task_activations.go'],
 ]);
 
 /** The kernel tables are owned by the store's own files. */

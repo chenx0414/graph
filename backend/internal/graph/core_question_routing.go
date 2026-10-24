@@ -246,7 +246,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 		store.ResolveQuestion(id, input.AutoAnswer.Answer)
 		if input.AutoAnswer.Resume != nil && *input.AutoAnswer.Resume {
 			store.SetNodePending(input.TaskId, input.NodeId)
-			kernelExec(store.Db, "UPDATE activations SET state='pending' WHERE id=(SELECT activation_id FROM nodes WHERE task_id=? AND id=?)", input.TaskId, input.NodeId)
+			store.ResetNodeActivation(input.TaskId, input.NodeId)
 		}
 		store.Event(input.TaskId, "question.auto_approved", map[string]any{
 			"questionId":   id,

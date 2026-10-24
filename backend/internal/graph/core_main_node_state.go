@@ -2,23 +2,6 @@ package graph
 
 import "database/sql"
 
-// CreateActivation keeps the external main's activation identity outside native graphs.
-func CreateActivation(store *TaskStore, taskID, nodeID string, graphVersion int, round ...int) string {
-	which := 1
-	if len(round) > 0 {
-		which = round[0]
-	}
-	id := graphUUID()
-	if _, err := store.Db.Exec(
-		"INSERT INTO activations(id,task_id,node_id,graph_version,round,state,input_versions) VALUES(?,?,?,?,?,'pending','{}')",
-		id, taskID, nodeID, graphVersion, which,
-	); err != nil {
-		panic(err)
-	}
-	store.SetNodeActivation(taskID, nodeID, id)
-	return id
-}
-
 func HasLockedQuestion(store *TaskStore, taskID, nodeID string) bool {
 	var instanceID sql.NullString
 	err := store.Db.QueryRow("SELECT instance_id FROM nodes WHERE task_id=? AND id=?", taskID, nodeID).Scan(&instanceID)

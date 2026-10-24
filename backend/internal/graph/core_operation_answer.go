@@ -9,7 +9,7 @@ func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, opera
 	return l.transaction(func() any {
 		node := l.nodeRow(taskId, nodeId)
 		l.store.SetNodeBlocked(taskId, nodeId)
-		kernelExec(l.store.Db, "UPDATE activations SET state='blocked' WHERE id=?", kernelString(node["activation_id"]))
+		l.store.BlockActivation(kernelString(node["activation_id"]))
 		var autoAnswer *QuestionAutoAnswer
 		if operationId != nil && kind == "permission" {
 			operation := l.Get(*operationId)

@@ -56,7 +56,7 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 			instanceId := graphUUID()
 			runtime.store.CreateNode(taskId, spec.Id, CanonicalJSON(spec), instanceId)
 			runtime.insertInstance(instanceId, taskId, spec.Id, spec.DefinitionVersion, spec.Model)
-			CreateActivation(runtime.store, taskId, spec.Id, 0)
+			runtime.store.CreateActivation(taskId, spec.Id, 0)
 			active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
 			if active == "" {
 				kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)

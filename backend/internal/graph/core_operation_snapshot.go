@@ -169,7 +169,7 @@ func (l *OperationLifecycle) restoreUnsentConversation(row map[string]any) bool 
 	}
 	l.markNotSent(row, operationNotSentOptions{ResetNode: true, EventReason: operationLifecycleStringPtr("Recovered conversation before adapter session/send")})
 	ReleaseMessages(l.store, kernelString(row["id"]))
-	kernelExec(l.store.Db, "UPDATE activations SET state='pending' WHERE id=?", activationId)
+	l.store.ResetActivation(activationId)
 	l.store.Event(taskId, "conversation.turn_requeued", map[string]any{"operationId": kernelString(row["id"]), "reason": "adapter_not_started"})
 	return true
 }

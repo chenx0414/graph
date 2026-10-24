@@ -35,7 +35,7 @@ func (l *OperationLifecycle) Dispatch(operation Operation) {
 		now := NowMillis()
 		kernelExec(l.store.Db, "UPDATE operations SET state='dispatched',worker_active=1,dispatched_at=COALESCE(dispatched_at,?) WHERE id=?", now, operation.Id)
 		l.store.SetNodeRunning(operation.TaskId, operation.NodeId)
-		kernelExec(l.store.Db, "UPDATE activations SET state='running' WHERE id=?", operation.ActivationId)
+		l.store.RunActivation(operation.ActivationId)
 		l.store.Event(operation.TaskId, "operation.dispatched", map[string]any{"operationId": operation.Id})
 		if operation.Context.RsiContinuation != nil {
 			l.store.Event(operation.TaskId, "rsi.continuation_dispatched", map[string]any{

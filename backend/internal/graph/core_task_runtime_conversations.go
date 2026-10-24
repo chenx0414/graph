@@ -213,6 +213,6 @@ func (runtime *TaskRuntime) createMasterNode(taskId string) string {
 	instanceId := graphUUID()
 	runtime.store.CreateNode(taskId, spec.Id, CanonicalJSON(spec), instanceId)
 	runtime.insertInstance(instanceId, taskId, spec.Id, spec.DefinitionVersion, spec.Model)
-	CreateActivation(runtime.store, taskId, spec.Id, 0)
+	runtime.store.CreateActivation(taskId, spec.Id, 0)
 	return instanceId
 }
