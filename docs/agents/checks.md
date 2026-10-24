@@ -20,6 +20,21 @@ GRAPH_UPDATE_EVIDENCE=1 node --run test
 
 Vitest 默认最多运行两个 worker。遇到第一个失败即停止本轮套件，完整成功仍须运行全部测试。桌面启动按真实窗口就绪等待，业务断言和用例总时限保持不变。给命令设置超时时，把排队等待时间也算进去；不要因等待名额而重复启动门禁。安装排队入口时已经启动的检查会先完成。
 
+## harness 行为门禁
+
+`node --run check` 在 `lint` 之后跑 `check:harness`：它把四个冻结用例
+（`parser`、`cli`、`persistence`、`command`）各跑一遍，结论是各用例自己的 verify 脚本，
+外加工具的使用纪律（读 → 精确改 → 读回来核对）。跑用例的是一个只按 harness 行事的替身模型：
+它做每一步之前先看 harness 还给不给这个工具、还告诉不告诉它该怎么用。
+
+约 20 秒。门禁记下被判过的 harness 面（逐文件 sha256）与每个用例的判决，
+所以面变了又变红，报的是**回归**而不是笼统的失败。
+
+- 单独跑：`node --run check:harness`。
+- 判自己 `~/.graph/prompts` 下的那一套（默认只判仓库里的出厂面）：
+  `GRAPH_HARNESS_GATE_SNAPSHOT=/path/to/snapshot node --run check:harness`。
+- 门禁红了先看它指名的那句规则；多数时候是 harness 少了东西，不是用例坏了。
+
 ## 后台运行桌面测试
 
 普通 `node --run check` 和 `app:smoke` 在后台启动桌面窗口，不显示 Dock 图标、托盘、系统通知或错误对话框。隐藏窗口继续渲染，桌面 E2E 仍运行真实 Electron、后端和页面交互。

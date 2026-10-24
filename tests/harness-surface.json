@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "parser": "pass",
+    "cli": "pass",
+    "persistence": "pass",
+    "command": "pass"
+  },
+  "surface": {
+    "src/runtime/agent-context.ts": "00e503715a25da02d1e4f7a9c914e58bd739ba1469c4e42b47a2efc0d3da90f7",
+    "src/runtime/agent-context-assembly.ts": "a303ddd84c61bcfb2945c5f8db78d274037e98f8d09ca9ec0ed7cd88138b1f92",
+    "src/runtime/agent-tool-definitions.ts": "c312d5e3fe297e417ae5ee34f201ef25619f11f2ab43a8acf401aeb63666bee4",
+    "src/runtime/agent-tools.ts": "4f229c2e0bef2eb93185756db5df11960e31159ad97ced461cd263d9edd633f3",
+    "src/runtime/pi-native-tools.ts": "91ec82a3d296d059842c3799dfa2b55408f62c6e05883384748f8f2e30ca6b91",
+    "backend/internal/graph/runtime_agent_context.go": "497f2fce077d30477d6e13c25a0c4319b5cd5796170c8933cef1c2de5008007e",
+    "backend/internal/graph/runtime_agent_tool_definitions.go": "67e17d8e89746cffb97abb4fc02f096c001a13a7acbbbcbd92a48dbe205b06f2",
+    "backend/internal/graph/runtime_agent_tools.go": "5d2410eca004c481f14d639b5dc0bb0393a5a46cce2b3eb8aa14c5c2b3c4d23b",
+    "backend/internal/graph/runtime_pi_native_tools.go": "65ce1b0f5b71df3ac9426b964bb8f676eb35ca78e7c0458b613f4cd4e5496219",
+    "backend/internal/graph/runtime_pig_native_tools.go": "20e95d5752b7008c6aac2efb0c946740ae2bf3e006c08cb558bfdc0274066b51",
+    "scripts/harness-eval-cases.mjs": "31e8dd009090a25ab67ca263b554ecbf4b4af3c3cc8ce58879d083672be4dd1f",
+    "scripts/harness-real-eval.mjs": "ed60e330aafa237a429f39e7dffefb8d06332bb42c7b61aa8ea5ad71334bfe6e",
+    "scripts/harness-behavior-cases.mjs": "68a62f9a1f172e40125279bcc71d300e98f2c322ec47cb9c21aff83e5ad37c0c",
+    "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
+    "scripts/harness-behavior-gate.mjs": "bcf3a0089998787b48207ef12796a530bb171aeb5cb63c688cbbc33285e65111"
+  },
+  "updatedAt": "2026-10-24T01:10:18.800Z"
+}
