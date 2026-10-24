@@ -40,7 +40,7 @@ func (lifecycle *OperationLifecycle) acceptDurableCompletion(receipt durableComp
 			}
 		}
 		usage := sumKnownUsage(calls)
-		kernelExec(lifecycle.store.Db, "UPDATE operations SET state='dispatched',worker_active=1,waiting_slot=0 WHERE id=?", operation.Id)
+		lifecycle.store.MarkOperationDispatched(operation.Id)
 		lifecycle.store.ResolveOperationRecoveryQuestions(operation.Id, map[string]any{"proof": "Original durable input has its completed SDK receipt; unresolved usage remains unknown", "inputRequestId": receipt.InputRequestId})
 		CloseUserWaitForOperation(lifecycle.store, operation.Id)
 		lifecycle.store.SetNodeRunningForActivation(operation.TaskId, operation.NodeId, operation.ActivationId)

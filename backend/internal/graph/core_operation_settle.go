@@ -74,8 +74,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 				Attempt int
 			}{Output: describeFailure(result.Output), Attempt: int(attempt) + 1})
 			if decision.Retry {
-				kernelExec(l.store.Db, "UPDATE operations SET state='settled',worker_active=0,result=? WHERE id=?",
-					CanonicalJSON(result), operation.Id)
+				l.store.MarkOperationSettled(operation.Id, CanonicalJSON(result))
 				l.store.RetryNodeOutput(operation.TaskId, operation.NodeId, CanonicalJSON(result.Output), operation.Id)
 				l.store.RetryActivation(operation.ActivationId)
 				l.store.Event(operation.TaskId, "node.transient_retry", map[string]any{
@@ -94,7 +93,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	unknownUsageAllowed := fullAccess || (missingUsage && UnknownUsageIsNonBlocking(l.store, operationInstanceId(operation)))
 	if missingUsage && !unknownUsageAllowed {
 		RecordConversationOutput(l.store, operation, result)
-		kernelExec(l.store.Db, "UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?", CanonicalJSON(result), operation.Id)
+		l.store.RecordUnknownOperationResult(operation.Id, CanonicalJSON(result))
 		l.store.SetNodeBlocked(operation.TaskId, operation.NodeId)
 		l.store.ResolveOperationRecoveryQuestions(operation.Id, map[string]any{"result": result})
 		CloseUserWaitForOperation(l.store, operation.Id)
@@ -161,9 +160,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	if usage != nil {
 		storedUsage = CanonicalJSON(usage)
 	}
-	kernelExec(l.store.Db, `UPDATE operations
-    SET state='succeeded',worker_active=0,result=?,usage=?,settled_at=COALESCE(settled_at,?)
-    WHERE id=?`, CanonicalJSON(result), storedUsage, NowMillis(), operation.Id)
+	l.store.MarkOperationSucceeded(operation.Id, CanonicalJSON(result), storedUsage, NowMillis())
 	l.bindWakes(operation)
 	ReleaseOperationReservation(l.store, operation.Id)
 	if operation.InstanceId != nil && usage != nil {

@@ -176,14 +176,13 @@ func ReserveOperation(store *TaskStore, operationID string, amount int64) {
 	if !g5SafeInt(amount) || amount < 0 {
 		Raise("invalid_adapter", "A bounded token reservation is required")
 	}
-	changes, _ := g5Exec(store.Db, "UPDATE operations SET reserved=? WHERE id=? AND state='intent' AND reserved=0", amount, operationID)
-	if changes != 1 {
+	if !store.TakeOperationReservation(operationID, amount) {
 		Raise("invalid_operation", "Operation reservation is no longer available")
 	}
 }
 
 func ReleaseOperationReservation(store *TaskStore, operationID string) {
-	g5Exec(store.Db, "UPDATE operations SET reserved=0 WHERE id=?", operationID)
+	store.ClearOperationReservation(operationID)
 }
 
 func CommitUsage(store *TaskStore, instanceID string, total int64) {

@@ -90,7 +90,7 @@ func MarkOperationReplied(store *TaskStore, operationId *string) {
 	if operationId == nil || *operationId == "" {
 		return
 	}
-	kernelExec(store.Db, "UPDATE operations SET replied_at=COALESCE(replied_at,?) WHERE id=?", NowMillis(), *operationId)
+	store.MarkOperationReplied(*operationId, NowMillis())
 }
 
 // RecordConversationOutput persists the durable side of one master turn: its assistant

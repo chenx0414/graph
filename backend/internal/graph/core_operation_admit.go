@@ -9,18 +9,7 @@ func (l *OperationLifecycle) Admit(input OperationAdmitInput) Operation {
 		row := kernelRow(l.store.Db, "SELECT COUNT(*) AS count FROM operations WHERE task_id=? AND node_id=?", input.Node.TaskId, input.Node.Id)
 		attempt := int(kernelInt(row["count"])) + 1
 		operation := input.Prepare(attempt).operation(graphUUID(), l.generation, attempt)
-		kernelExec(l.store.Db, `INSERT INTO operations(
-        id,task_id,node_id,instance_id,generation,spec,state,reserved,activation_id
-      ) VALUES(?,?,?,?,?,?,'intent',?,?)`,
-			operation.Id,
-			operation.TaskId,
-			operation.NodeId,
-			operation.InstanceId,
-			operation.Generation,
-			CanonicalJSON(operation),
-			0,
-			operation.ActivationId,
-		)
+		l.store.RecordOperationIntent(operation.Id, operation.TaskId, operation.NodeId, operation.InstanceId, operation.Generation, CanonicalJSON(operation), 0, operation.ActivationId)
 		ReserveOperation(l.store, operation.Id, input.Reservation)
 		if input.AfterIntent != nil {
 			input.AfterIntent(operation)
@@ -41,9 +30,7 @@ func (l *OperationLifecycle) markNotSent(row map[string]any, options operationNo
 	now := NowMillis()
 	id := kernelString(row["id"])
 	ClearConversationStream(l.store, id)
-	kernelExec(l.store.Db, `UPDATE operations
-      SET state='not_sent',worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
-      WHERE id=?`, now, id)
+	l.store.MarkOperationUnsent(id, "not_sent", now)
 	ReleaseOperationReservation(l.store, id)
 	ReleaseRsiContinuation(l.store, id)
 	ReleaseWakes(l.store, id)

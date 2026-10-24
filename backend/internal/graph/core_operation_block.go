@@ -55,9 +55,7 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			settledState = "interrupted"
 		}
 		ClearConversationStream(l.store, operation.Id)
-		kernelExec(l.store.Db, `UPDATE operations
-        SET state=?,worker_active=0,waiting_slot=0,settled_at=COALESCE(settled_at,?)
-        WHERE id=?`, settledState, NowMillis(), operation.Id)
+		l.store.MarkOperationUnsent(operation.Id, settledState, NowMillis())
 		ReleaseOperationReservation(l.store, operation.Id)
 		if settledState == "interrupted" {
 			if !unknown && total > 0 && operation.InstanceId != nil {
@@ -131,7 +129,7 @@ func (l *OperationLifecycle) MarkUncertain(operation Operation, reason string, q
 		if !quiescent {
 			active = 1
 		}
-		kernelExec(l.store.Db, "UPDATE operations SET state='unknown',worker_active=? WHERE id=?", active, operation.Id)
+		l.store.MarkOperationUnknown(operation.Id, active)
 		l.store.Event(operation.TaskId, "operation.unknown", map[string]any{
 			"operationId": operation.Id,
 			"reason":      reason,

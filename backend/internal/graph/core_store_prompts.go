@@ -32,9 +32,3 @@ func (s *TaskStore) NodeSystemPrompt(taskID, nodeID string) *SystemPromptRecord 
 func (s *TaskStore) ConversationSystemPrompt(anchorTaskID string) *SystemPromptRecord {
 	return s.NodeSystemPrompt(anchorTaskID, "master")
 }
-
-func (s *TaskStore) RecordOperationSystemPrompt(operationID, text string, toolDeclarations any) {
-	if _, err := s.DB.Exec("UPDATE operations SET system_prompt = ?, tool_declarations = ? WHERE id = ? AND system_prompt IS NULL", text, toolDeclarations, operationID); err != nil {
-		panic(err)
-	}
-}

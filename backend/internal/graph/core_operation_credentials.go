@@ -129,7 +129,7 @@ func MarkOperationCredentialWait(store *TaskStore, operationId string, now ...in
 	if len(now) > 0 {
 		at = now[0]
 	}
-	kernelExec(store.Db, "UPDATE operations SET waiting_slot=1,waiting_since=COALESCE(waiting_since,?) WHERE id=?", at, operationId)
+	store.HoldOperationSlot(operationId, at)
 }
 
 // FinishOperationCredentialWait records that the credential slot is free again.
@@ -138,12 +138,10 @@ func FinishOperationCredentialWait(store *TaskStore, operationId string, now ...
 	if len(now) > 0 {
 		at = now[0]
 	}
-	kernelExec(store.Db, `UPDATE operations
-    SET waiting_slot=0,waiting_ms=waiting_ms + MAX(0,?-COALESCE(waiting_since,?)),waiting_since=NULL
-    WHERE id=?`, at, at, operationId)
+	store.CloseOperationSlot(operationId, at)
 }
 
 // ClearOperationCredentialWait drops the credential wait without accounting for it.
 func ClearOperationCredentialWait(store *TaskStore, operationId string) {
-	kernelExec(store.Db, "UPDATE operations SET waiting_slot=0 WHERE id=?", operationId)
+	store.ClearOperationSlot(operationId)
 }

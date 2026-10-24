@@ -94,7 +94,7 @@ func (l *OperationLifecycle) Recover() int {
 			}
 			// Access grants cannot prove that an interrupted effect never happened.
 
-			kernelExec(l.store.Db, "UPDATE operations SET state='unknown',worker_active=0,waiting_slot=0 WHERE id=?", kernelString(row["id"]))
+			l.store.RecoverOperationAsUnknown(kernelString(row["id"]))
 			l.store.Event(kernelString(row["task_id"]), "operation.unknown", map[string]any{
 				"operationId": kernelString(row["id"]),
 				"reason":      "Recovered after restart with no live worker",
@@ -118,7 +118,7 @@ func (l *OperationLifecycle) Recover() int {
 		for _, row := range stranded {
 			l.restoreUnsentConversation(row)
 		}
-		kernelExec(l.store.Db, "UPDATE operations SET worker_active=0 WHERE state='unknown' AND worker_active=1")
+		l.store.ReleaseUnknownOperationWorkers()
 		return generation
 	}).(int)
 }

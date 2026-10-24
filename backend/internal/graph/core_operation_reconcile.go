@@ -33,7 +33,7 @@ func (l *OperationLifecycle) MarkPreparationFailed(operationId, reason string) {
 func (l *OperationLifecycle) Dispatch(operation Operation) {
 	l.transaction(func() any {
 		now := NowMillis()
-		kernelExec(l.store.Db, "UPDATE operations SET state='dispatched',worker_active=1,dispatched_at=COALESCE(dispatched_at,?) WHERE id=?", now, operation.Id)
+		l.store.MarkOperationDispatchedAt(operation.Id, now)
 		l.store.SetNodeRunning(operation.TaskId, operation.NodeId)
 		l.store.RunActivation(operation.ActivationId)
 		l.store.Event(operation.TaskId, "operation.dispatched", map[string]any{"operationId": operation.Id})
@@ -118,7 +118,7 @@ func (l *OperationLifecycle) Reconcile(id string, reconcile func(operation Opera
 			if !evidence.Quiescent {
 				active = 1
 			}
-			kernelExec(l.store.Db, "UPDATE operations SET worker_active=? WHERE id=?", active, id)
+			l.store.SetOperationWorker(id, active)
 		}
 		l.store.Event(operation.TaskId, "operation.reconciled", map[string]any{"operationId": id, "evidence": evidence})
 		return nil
