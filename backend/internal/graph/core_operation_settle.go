@@ -76,8 +76,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 			if decision.Retry {
 				kernelExec(l.store.Db, "UPDATE operations SET state='settled',worker_active=0,result=? WHERE id=?",
 					CanonicalJSON(result), operation.Id)
-				kernelExec(l.store.Db, "UPDATE nodes SET status='pending',output=?,stall_count=stall_count+1,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?",
-					CanonicalJSON(result.Output), operation.Id, operation.TaskId, operation.NodeId)
+				l.store.RetryNodeOutput(operation.TaskId, operation.NodeId, CanonicalJSON(result.Output), operation.Id)
 				kernelExec(l.store.Db, "UPDATE activations SET state='pending',round=round+1 WHERE id=?", operation.ActivationId)
 				l.store.Event(operation.TaskId, "node.transient_retry", map[string]any{
 					"nodeId":      operation.NodeId,
@@ -211,15 +210,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	default:
 		nextStatus = result.Outcome
 	}
-	kernelExec(l.store.Db, `UPDATE nodes
-    SET status=?,output=?,route=NULL,output_version=output_version+1,output_operation=?
-    WHERE task_id=? AND id=?`,
-		nextStatus,
-		CanonicalJSON(result.Output),
-		operation.Id,
-		operation.TaskId,
-		operation.NodeId,
-	)
+	l.store.SettleNodeOutput(operation.TaskId, operation.NodeId, nextStatus, CanonicalJSON(result.Output), operation.Id)
 	if result.Outcome == "failed" {
 		attempt := int64(0)
 		node := kernelRow(l.store.Db, "SELECT stall_count FROM nodes WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)

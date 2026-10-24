@@ -1,5 +1,7 @@
 package graph
 
+import "fmt"
+
 // The nodes table is the v1 node table: one row per node of a task, with
 // the node's spec, the instance it runs in, its activation, its status and
 // its output.
@@ -65,4 +67,19 @@ func (s *TaskStore) SetNodeActivation(taskID, nodeID, activationID string) {
 // CreateNode adds one node to a task.
 func (s *TaskStore) CreateNode(taskID, nodeID, spec, instanceID string) {
 	kernelExec(s.DB, "INSERT INTO nodes(task_id,id,spec,instance_id) VALUES(?,?,?,?)", taskID, nodeID, spec, instanceID)
+}
+
+// RetryNodeOutput records the output of an attempt that will be tried
+// again. The node's stall count goes up, so the retry budget sees it.
+func (s *TaskStore) RetryNodeOutput(taskID, nodeID, output, operationID string) {
+	kernelExec(s.DB, "UPDATE nodes SET status='pending',output=?,stall_count=stall_count+1,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?",
+		output, operationID, taskID, nodeID)
+}
+
+// SettleNodeOutput records the output of a turn that ended, and the state
+// the node is left in. The node's route is cleared, because the output it
+// was waiting for has arrived.
+func (s *TaskStore) SettleNodeOutput(taskID, nodeID, status, output, operationID string) {
+	kernelExec(s.DB, "UPDATE nodes SET status=?,output=?,route=NULL,output_version=output_version+1,output_operation=? WHERE task_id=? AND id=?",
+		status, output, operationID, taskID, nodeID)
 }
