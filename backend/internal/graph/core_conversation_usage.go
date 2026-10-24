@@ -210,8 +210,7 @@ func ReleaseMessages(store *TaskStore, operationId string) {
 	if len(released) == 0 {
 		return
 	}
-	kernelExec(store.Db, "UPDATE messages SET state='pending',operation_id=NULL,updated_at=MAX(?,updated_at+1) WHERE operation_id=? AND state='delivered'",
-		NowMillis(), operationId)
+	store.ReleaseDeliveredMessages(operationId, NowMillis())
 	for _, row := range released {
 		PublishMessageUpdate(store, row.Id)
 	}
