@@ -1,10 +1,11 @@
 # 代码库结构深化的门禁证据（2026-10-22）
 
-配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)——那里记着每一步做了什么。
+配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [v1 的表也有了主人](architecture-deepening-v1-tables-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [归属那轮的门禁](architecture-deepening-gate-ownership-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [归属那轮的门禁](architecture-deepening-gate-ownership-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [归属那轮的门禁](architecture-deepening-gate-ownership-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)——那里记着每一步做了什么。[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)——那里记着每一步做了什么。
 
 ## 门禁证据
 
 `node --run check`（`check:backend` + `typecheck` + `lint` + `test:report` + `check:baseline` + `check:evidence`）在本分支各步之后运行。这台机器上同时有五个会话在跑各自的门禁，负载平均一度到 83，满负载下 `node --run check` 会有大批用例如超时失败——因此每一次失败都逐项与**未改动的 main**在同一台机器、同样负载下对照过：
+
 
 | 提交 | 门禁 | 结论 |
 | --- | --- | --- |
@@ -28,8 +29,6 @@
 | `e7971253`（拆能力文件） | **293 通过、1 跳过、0 失败**（1552 个测试） | 在一份干净 worktree 上跑已提交状态（708 秒），**与未改动的 main 同时跑**（700 秒，同样负载）：main 也是 293 通过、1 跳过、1552 个测试、0 失败，**两边的判定一致**；上一轮那个 harness-prompt 的失败在这一次两边的完整套里都没有再出现 |
 | `293716eb`（再拆五个文件：用量、自改进、提示词库、受控 provider、对话） | **293 通过、1 跳过、0 失败**（1552 个测试）；"Suite matches the baseline (files 294, tests 1556)" | 在一份干净 worktree 上跑最终 head（`293716eb`），604 秒；`check:backend`、`typecheck`、`lint`、`check:baseline`、`check:evidence` 同时全部通过 |
 
-**六次拆分全部是纯搬移**：每一次都用两种方式证明过——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。
-
 | 提交 | 门禁 | 结论 |
 | --- | --- | --- |
 | `e7971253` … `45f43f73`（二十三次拆分） | **293 通过、1 跳过、0 失败**（1552 个测试）；"Suite matches the baseline (files 294, tests 1556)"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑最终 head（`45f43f73`），543 秒；`check:backend`、`typecheck`、`lint`、`check:baseline`、`check:evidence` 同时全部通过。二十九次拆分合起来动了 285 个 Go 文件，因此这一次门禁跑的是整个拆分战役之后的状态 |
@@ -43,7 +42,6 @@
 | `6df12b5c`（main 又合了一次 harness 的活） | **296 通过、1 跳过、0 失败**（1556 个测试） | 在一份干净 worktree 上跑合并后的 head，541 秒。**同样的查法**：main 新增的每一行都拿到合并后的树里去找，找不到的数是零（只剩 baseline 的计数，那由门禁自己重算）。合并之后 **main 是本分支的祖先** |
 | `45b66d4c`（合入 main 的十三个 harness 提交） | **296 通过、1 跳过、0 失败**（1556 个测试）；"Suite baseline increased to files 297, tests 1560"；"Acceptance evidence is unchanged" | 在一份干净 worktree 上跑合并后的 head，547 秒。**合并本身是查过的**：main 自分支分叉以来新增的每一行都拿到合并后的树里去找，**找不到的是零**（第一次合并时是 174 行）。第一次合并后完整套里有一个失败（`tests/e2e/harness-axes.test.ts` 读不到候选跑在哪个 harness 下），那正是漏掉的那处改动 |
 
-
 | `07ef0b92` … `4c821127`（kernel 表的写只有一个主人） | 300 个文件里 **299 通过、1 跳过、1 失败**（1563 个测试）；"Suite baseline increased to files 300, tests 1563"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 502 秒。**唯一失败是 `tests/m0/restricted-process.test.ts`——而它不是环境问题**：main 已经修了它（npm 12 拦截 install script，除非项目按名字允许那一个），分支还没合那次修复，见下面最后一行 |
 | `bd063ba4`（内核表有了一道守卫） | 同上一行 | 守卫**试过自己能不能失败**：拿一个有写的文件试，它报出文件、行与表名；拿一个只提到表的**注释**试，它没有报。它**暂时不进 `node --run check`**，因为 main 与并行的分支仍有几十处越界写，而门禁与 Hook 是所有工作树共用的 |
 | `9d2a7480`（一条状态查询不带 task id 就崩） | 同上一行 | 新增的 `tests/e2e/task-status-without-task-id.test.ts` **在父提交上失败**（模型读到 `runtime error: invalid memory address or nil pointer dereference`），在这个提交上通过。**第一版那份 E2E 驱动的是 TypeScript 守护进程，在 TypeScript 上通过**——把测试指向 Go daemon 之后它才说得上话 |
@@ -51,17 +49,3 @@
 | `b8c7cc1`（合入 main 的两个提交） | 301 个文件里 **299 通过、1 跳过、1 失败**（1564 个测试）；"Suite baseline increased to files 301, tests 1564"；"Acceptance evidence is unchanged" | 完整套 498 秒。**唯一失败换了一个**：`tests/e2e/go-wake-notification.test.ts`（"a confirmed graph wakes main with the graph id"），满负载下的超时，**单独重跑只花 2,552 毫秒并通过**——分支以前也撞见过它。而上一行那条 `restricted-process` 的失败**被 main 的修复带走了**。合并用分支的老办法查过：main 自分叉以来新增的每一行都拿到合并后的树里去找，**找不到的只有 baseline 自己的计数**（门禁重算它）。合并后 **main 是本分支的祖先** |
 
 | `b8c7cc1`（合入 main 的两个提交，**再跑一次**） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged" | 完整套 497 秒，**这一次全绿**。上一轮那个 `go-wake-notification` 的超时因此确认是满负载下的抖动（它单独跑只要 2,552 毫秒），不是本分支的问题 |
-**二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
-| `6161e550` … `20c61fc0`（`nodes` 表也有了主人） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 502 秒，**全绿**。这一轮改的是**谁写哪张表**，不是写什么：18 处节点状态、3 处规格与 activation、2 处产出、4 处时钟都搬进了 task store，`nodes` 表在 store 之外只剩 schema 迁移与那次跨表退役（两处都写明了为什么） |
-
-| `f77e7674`（节点的那一轮（`activations` 表）也有了主人） | 301 个文件里 299 通过、1 跳过、**1 失败**（1564 个测试） | 唯一失败是 `tests/e2e/harness-composition.test.ts`（"a second probe starts from the harness the project already adopted"），满负载下的超时：它在完整套里花了 **120,346 毫秒**却没拿到比较结果，**单独重跑只花 1,010 毫秒并通过**。它讲的是 harness 探针的比较，与本轮改动无关（本轮改的是**谁写哪张表**） |
-**本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
-| `b616bb83`（`instances` 表（节点跑在哪个 runtime 上）也有了主人） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 540 秒，**全绿**。`instances` 原先由 7 个文件各自写着 SQL；额度那几列本来只有账本一个人写（`budget_scopes` 也是），所以这一步消掉的是**身份那一面**的分散：执行、对话、任务运行时四个地方原先各自写着 instance 的 model 与 definition |
-| `f77e7674`（节点的那一轮，**再跑一次**） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 500 秒，**这一次全绿**。上一轮那个 `harness-composition` 的超时因此确认是满负载下的抖动（它单独跑只要 1,010 毫秒），与本轮改动无关 |
-| `64cf797`（合入 main 的「用真模型评判 harness」） | 302 个文件里 **301 通过、1 跳过、0 失败**（1565 个测试）；"Suite baseline increased to files 302, tests 1565"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 **全绿**。合并用分支的老办法查过：main 自分叉以来新增的每一行都拿到合并后的树里去找，**找不到的只有门禁账本自己的计数与哈希**（门禁重算它们）。main 新增了一个测试文件，因此文件数 301→302、测试数 1564→1565 |
-
-| `0b9bad7e` + `c87ad1ea`（`operations` 表（一次 operation）也有了主人；守卫认得两种主人） | 302 个文件里 **301 通过、1 跳过、0 失败**（1565 个测试）；"Suite matches the baseline (files 302, tests 1565)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 **全绿**。`operations` 原先由 **11 个文件**各自写着 SQL，是 v1 里散得最开的一张表；守卫现在逐个点名了**模块自己的表**（`wake_intents`、`tool_calls`、`git_commits` 等），它们本来就只由一个文件写 |
-门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
-| `e3f37853` + `670ab552`（对话域的三张表都有了主人） | 302 个文件里 **301 通过、1 跳过、0 失败**（1565 个测试）；"Suite matches the baseline (files 302, tests 1565)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 **全绿**。`conversations`（3 个文件）、`proposals`（2 个）、`messages`（2 个）一组一起做——**这一组是彼此相关的** |
-
-`tests/e2e/node-budget.test.ts` 断言结算后节点的 `used: 50, reserved: 0`，正是第三条改动的两条路径。

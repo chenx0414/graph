@@ -1,6 +1,6 @@
 # 架构深化查出来、尚未处理的问题（2026-10-22）
 
-配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
+配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [v1 的表也有了主人](architecture-deepening-v1-tables-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [归属那轮的门禁](architecture-deepening-gate-ownership-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [归属那轮的门禁](architecture-deepening-gate-ownership-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [门禁的注记](architecture-deepening-gate-notes-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)[后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
 
 下面每一条都是**这一轮查出来、但刻意没有改**的问题。改动它们要么需要一次产品决定，要么需要一份能证明它的 E2E，而这两样都不是结构整理该顺手做的。
 
@@ -61,6 +61,20 @@ kernel 层的表与 `tasks` 表现在都有 owner 了。`tasks` 的生命周期�
 
 **还有一批表本来就只有一个主人**（`wake_intents`、`rsi_continuations`、`pause_continuations`、`tool_calls`、`tool_call_spools`、`git_commits`、`agent_context_bindings`）——它们不是 store 的表，而是**各自模块自己的表**，一个文件写、一处不散。它们因此**不需要搬家**，但守卫要知道它们的主人是谁。
 
-**因此守卫的规则要再往前一步**：一条表**一个主人**，而主人**可以是一个 store，也可以是一个模块**。守卫要认得这两种。它们与 kernel 表、nodes 表是**同一个形状的问题**——一张表的形状被许多地方知道——因此这是**下一步的候选**，不是一次产品决定。本轮没有做。
+**因此守卫的规则要再往前一步**：一条表**一个主人**，而主人**可以是一个 store，也可以是一个模块**。守卫要认得这两种。**这一轮两条都做到了**：v1 的散表各有主人，模块自己的表（`wake_intents`、`tool_calls`、`git_commits`、`git_ops`、`worktrees`…）守卫也逐个点名。
+
+**v1 全部归位之后，剩下的是 store 内部的那一层**。kernel 表的主人是 `KernelStore`，这一点从来没问题；**问题是 store 自己**——它按职责拆成了二十几个文件，于是**同一张表的形状在几个文件里都知道**：
+
+| 表 | 写在哪几个文件 | 它自己的那个文件写了多少 |
+| --- | --- | --- |
+| `kernel_executions` | 6 个（执行、执行状态、执行时钟、预算、恢复、provider 调用） | 8 / 19 |
+| `kernel_node_state` | 4 个（预算、节点、控制面、恢复） | 7 / 18 |
+| `kernel_nodes` | 7 个（节点、暂停时钟、执行、控制面、预算、恢复、修订） | 6 / 17 |
+| `kernel_queue` | 5 个（队列、控制面、执行、节点、恢复） | 6 / 13 |
+| `kernel_module_operations` | 4 个 | 7 / 11 |
+
+**下一步的候选**：给每张 kernel 表一个**自己的文件**，其余文件通过它来写。**但这一层和 v1 那层不一样，要先想清楚一件事**：store 内部的跨文件写**多半不是「第二个主人」，而是「关于许多张表的一个事实」**——预算同时动 `kernel_nodes` 与 `kernel_node_state`，暂停时钟动 `kernel_nodes`，恢复动好几张。**这与退役一个图、保留期清扫是同一类**，而那两类已经写明了理由。所以这一层要判断的是**哪些跨文件写是「一张表的另一个规则」，哪些是「一个事实」**——**这是一次判断，不是一次搬移**。
+
+**守卫自己也有过一个洞，值得记下来**：它的正则读的是 `INSERT INTO`，而**没有读 `INSERT OR IGNORE INTO` 与 `INSERT OR REPLACE INTO`**。那些冲突子句也是语句的一部分，于是**有一处 store 之外的写一直没被看见**（`kernel_graph_layouts`，写在任务运行时里）。**正则补上之后，它立刻抓到了那条**——**抓住它的正是它被写出来要做的那件事：读 SQL，而不是读名字**。它们与 kernel 表、nodes 表是**同一个形状的问题**——一张表的形状被许多地方知道——因此这是**下一步的候选**，不是一次产品决定。本轮没有做。
 
 **而这句话原本只覆盖了一半——图服务层没有查过**。一查就发现 **12 个文件里 38 处越界写**（`kernel_create_requests`、`kernel_graph_owners`、`kernel_graph_layouts`、`kernel_module_operations`、`kernel_module_inbox`、`kernel_transition_outbox`、`kernel_queue`、`kernel_node_state`、`kernel_nodes`、`kernel_modules`、`kernel_executions`、`kernel_lifecycle`）。现在它们都归 store 了：`backend/internal/graph` 里 **store 之外一处 kernel 写都没有**，而 `node --run check:ownership` 查的就是这件事（守卫与它的启用条件记在[后半程](architecture-deepening-ownership-2026-10-22.md)的第二十七步）。**一句只查了一半就写下来的主张，是愿望，不是主张。**
