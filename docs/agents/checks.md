@@ -113,6 +113,12 @@ node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime
 
 **模块自己的表**（`wake_intents`、`tool_calls`、`git_commits`、`git_ops`、`worktrees` 等）由**那个模块**的一个文件拥有——守卫逐个点名了它们。
 
+**schema 里的每张表都要有主人**。守卫自己读 schema（`core_store_schema_base.go`、`core_store_schema.go`、
+`core_store_migrate.go` 里的 `CREATE TABLE`），所以：
+
+- **一张表有主人，就只有那个主人写它**；
+- **一张表还没有主人，第一次写它就会被拒**——新表要先被点名。
+
 **两种文件可以例外，但要在文件头上写明为什么**：
 
 ```

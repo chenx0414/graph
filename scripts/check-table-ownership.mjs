@@ -78,7 +78,47 @@ const OWNED = new Map([
   ['context_handoffs', 'core_context.go'],
   ['commands', 'core_store_events.go'],
   ['task_grants', 'core_task_grants.go'],
+  // The tables one file has always written by itself.
+  ['artifact_events', 'core_artifact_storage.go'],
+  ['context_resolutions', 'core_context.go'],
+  ['conversation_acceptances', 'core_task_runtime_conversation_confirm.go'],
+  ['conversation_streams', 'core_conversation_activity.go'],
+  ['definitions', 'catalog_catalog.go'],
+  ['events', 'core_store_events.go'],
+  ['models', 'core_task_runtime_open.go'],
+  ['node_capabilities', 'core_node_capabilities.go'],
+  ['node_entries', 'core_node_entries.go'],
+  ['node_sessions', 'core_node_capabilities.go'],
+  ['node_write_captures', 'core_write_ledger.go'],
+  ['presets', 'catalog_catalog.go'],
+  ['project_preparation', 'git_integration_prepare.go'],
 ]);
+
+/**
+ * The tables the schema declares.
+ *
+ * A table that is not in the schema is not the database's business: SQLite
+ * keeps tables of its own, and a statement that names one of those is not
+ * a write this rule has an opinion about.
+ */
+const SCHEMA_FILES = ['core_store_schema_base.go', 'core_store_schema.go', 'core_store_migrate.go'];
+const SCHEMA_TABLE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\s*\(/gi;
+
+function schemaTables() {
+  const tables = new Set();
+  for (const name of SCHEMA_FILES) {
+    let source;
+    try {
+      source = readFileSync(join(PACKAGE, name), 'utf8');
+    } catch {
+      continue;
+    }
+    SCHEMA_TABLE.lastIndex = 0;
+    let match;
+    while ((match = SCHEMA_TABLE.exec(source)) !== null) tables.add(match[1]);
+  }
+  return tables;
+}
 
 /** The kernel tables are owned by the store's own files. */
 const KERNEL_OWNER = /^core_kernel_/;
@@ -123,10 +163,18 @@ function writesIn(source) {
   return found;
 }
 
-/** Whether a file owns the table it writes, or has said why it may. */
-function ownsIt(name, table) {
+/**
+ * Whether a file may write a table.
+ *
+ * A table the schema declares needs a named owner, and only that owner
+ * writes it. A table with no owner yet is the one case this refuses
+ * outright: a new table has to be given one before it is written.
+ */
+function ownsIt(name, table, declared) {
   if (table.startsWith('kernel_')) return KERNEL_OWNER.test(name);
-  return OWNED.get(table) === name;
+  const owner = OWNED.get(table);
+  if (owner === undefined) return !declared.has(table);
+  return owner === name;
 }
 
 function goFilesIn(directory) {
@@ -164,9 +212,7 @@ function stagedWrites() {
     WRITE.lastIndex = 0;
     let match;
     while ((match = WRITE.exec(text)) !== null) {
-      const table = match[1];
-      if (!OWNED.has(table) && !table.startsWith('kernel_')) continue;
-      found.push({ file: resolve(REPO_ROOT, file), table, line: text.trim() });
+      found.push({ file: resolve(REPO_ROOT, file), table: match[1], line: text.trim() });
     }
   });
   return found;
@@ -187,11 +233,12 @@ function main() {
 
   const offenders = [];
   const tables = new Set();
+  const declared = schemaTables();
 
   if (staged) {
     for (const write of stagedWrites()) {
       const name = write.file.slice(write.file.lastIndexOf('/') + 1);
-      if (ownsIt(name, write.table)) continue;
+      if (ownsIt(name, write.table, declared)) continue;
       tables.add(write.table);
       offenders.push(write);
     }
@@ -205,7 +252,7 @@ function main() {
       if (source.includes(EXEMPT)) continue;
       const name = file.slice(file.lastIndexOf('/') + 1);
       for (const write of writesIn(source)) {
-        if (ownsIt(name, write.table)) continue;
+        if (ownsIt(name, write.table, declared)) continue;
         tables.add(write.table);
         offenders.push({ file, line: write.line, table: write.table });
       }
@@ -225,6 +272,7 @@ function main() {
   console.error('');
   console.error(`Tables written outside their owner: ${[...tables].sort().join(', ')}`);
   console.error('Move the write into the owner\'s method and call that.');
+  console.error('A table the schema declares and nobody owns yet needs an owner named in this file.');
   console.error('A migration, or an operation that spans many tables at once, says so at the top:');
   console.error(`  // ${EXEMPT} <reason>`);
   return 1;
