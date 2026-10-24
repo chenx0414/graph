@@ -182,6 +182,12 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		// what this turn may call.
 		request.PiExtensionTools = append([]string{}, record.Policy.PiExtensionTools...)
 		request.AllowedToolNames = append([]string{}, record.Policy.AllowedToolNames...)
+		request.BundleDigest = record.Policy.BundleDigest
+		request.ToolPolicyDigest = record.Policy.ToolPolicyDigest
+		request.RuntimePolicyDigest = record.Policy.RuntimePolicyDigest
+		if record.Policy.ThinkingLevel != nil {
+			request.ThinkingLevel = stringPointer(*record.Policy.ThinkingLevel)
+		}
 		request.CapabilityDescriptor = options.RecoverySnapshot.Descriptor
 		request.ExecutionConfiguration = record.Configuration.ExecutionConfiguration
 		request.CredentialReference = record.Configuration.CredentialReference

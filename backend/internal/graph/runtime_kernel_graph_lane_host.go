@@ -391,11 +391,17 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 				allowedToolNames = append(allowedToolNames, name)
 			}
 		}
+		bundleDigest := session.BundleDigest
+		toolPolicyDigest := session.ToolPolicyDigest
+		runtimePolicyDigest := session.RuntimePolicyDigest
 		if frozen := state.restoring[graphId+"/"+nodeId]; frozen != nil {
 			// The tools it was given are the ones the capability declared
 			// then. A capability that declares a different tool since must
 			// not change what this turn may call.
 			allowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
+			bundleDigest = frozen.Record.Policy.BundleDigest
+			toolPolicyDigest = frozen.Record.Policy.ToolPolicyDigest
+			runtimePolicyDigest = frozen.Record.Policy.RuntimePolicyDigest
 		}
 		submit := kernelGraphLaneSubmitTool()
 		nodeTools = append(nodeTools, ToolDefinition{
@@ -463,9 +469,9 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			WriteRoots:              writeRoots,
 			SystemPrompt:            session.SystemPrompt,
 			AllowedToolNames:        allowedToolNames,
-			BundleDigest:            session.BundleDigest,
-			ToolPolicyDigest:        session.ToolPolicyDigest,
-			RuntimePolicyDigest:     session.RuntimePolicyDigest,
+			BundleDigest:            bundleDigest,
+			ToolPolicyDigest:        toolPolicyDigest,
+			RuntimePolicyDigest:     runtimePolicyDigest,
 			McpAdapterServers:       mcpServers,
 		}
 		host := NewPigNodeHost(PigNodeHostOptions{
