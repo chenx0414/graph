@@ -204,4 +204,7 @@ test('the harness identity records durable harness knowledge and reports it with
   // Finishing a work item must include an unprompted report and a proposal.
   expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/unprompted/);
   expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/propose/);
+  // A harness change is judged by the behavior gate, so the Agent has to know
+  // that a dropped rule shows up there as a regressed case.
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/behavior gate carries the frozen cases/);
 });

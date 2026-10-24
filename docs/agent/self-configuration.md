@@ -115,7 +115,7 @@ RSI 只改"正在运行的这份代码"，所以：
 - `record_harness_friction`：记录**还没解决的摩擦**——卡住的一次、误导的一次、浪费的一趟。
   它和已采纳的教训住在**同一个库**里，是同一条知识的两个阶段：这条是**遇到的摩擦**，那条是**采纳的做法**。
   摩擦只是怀疑，**不会**进后续任务的 prompt；只有已采纳的教训会。
-  同一��� cue 再记一次并给 `status: fixed` 与 `ref`（比如修它的那个 commit），就是把它关掉。
+  同一个 cue 再记一次并给 `status: fixed` 与 `ref`（比如修它的那个 commit），就是把它关掉。
 - `read_harness_experience`：读某领域该知道的全部：它自己的条目 + 普遍适用的那些，
   **一份列表**，每条自带 `axis` 与 `kind`（friction / lesson）说明它属于哪一层；
   不带领域则列出有哪些 scope。
@@ -147,6 +147,30 @@ RSI 只改"正在运行的这份代码"，所以：
 所以：通用轴的价值不是"多记一条笔记"，而是"下一个任务开工前就已经带着它"。
 摩擦与教训同库，是为了让"我遇到过什么"和"我最后怎么做"不再分散在两个地方——
 一份知识，两个阶段，只有第二阶段会进 prompt。
+
+### harness 改动的行为门禁
+
+改了提示、工具或装配，`node --run check` 会自动把四个冻结用例重跑一遍：
+`parser`、`cli`、`persistence`、`command`——每个都有独立的 verify 脚本，只看结果、不看 Agent 说了什么。
+跑用例的是一个**只按 harness 行事**的替身模型：它做每一步之前先看 harness 还给不给这个工具、
+还告诉不告诉它该怎么用；不给就停下来说明原因。
+
+所以门禁红的时候，多半是 harness 少了什么，而不是用例坏了。它会指名说：
+
+```
+the agent said: I cannot continue: the harness no longer says "Use edit for precise changes".
+```
+
+判决记在 `tests/harness-surface.json`：被判过的 harness 面（逐文件 sha256）与每个用例的判决。
+面变了又变红，就是**回归**。
+
+门禁判的是仓库里的出厂面——你自己的 `~/.graph/prompts` 不在仓库里，所以门禁只报告它。
+要判自己那一套，先冻结一份上下文再指给门禁：
+
+```sh
+node scripts/harness-eval-context.mjs ~/.graph /tmp/my-harness-context
+GRAPH_HARNESS_GATE_SNAPSHOT=/tmp/my-harness-context node --run check:harness
+```
 
 ### 读自己的证据
 
