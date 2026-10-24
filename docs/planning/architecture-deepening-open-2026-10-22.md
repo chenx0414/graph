@@ -44,6 +44,24 @@ kernel 层的表与 `tasks` 表现在都有 owner 了。`tasks` 的生命周期�
 
 **到这一步，运行时层与内核层写过的表都有 owner 了**：`tasks`、`questions`、`invocations` 归 task store，`kernel_*` 归 kernel store。剩下的是**读**的归属问题：这些表仍被十来处直接读（harness 的诊断面、预算账本、节点执行器、pi adapter 等），读不写，因此不构成"谁拥有这张表"的争议，但一个列的含义若要改，仍要找许多处。
 
-**再往下还有一层，而它原先也没被查过**。`nodes` 是 v1 的节点表，它**原先由 17 个文件各自写着 SQL**——和 kernel 表一模一样的缺口，就在一层之下。现在它也有主人了（见[一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md)），守卫也管到了它。**但 v1 还有几张表没有主人**：`operations`（21 处写、11 个文件），以及 `messages`、`runtime`、`conversations`、`proposals`、`projects` 这几张。（`activations` 与 `instances` 已经在这一轮有了主人。）而 `budget_scopes` **本来就有一个主人**——额度账本自己写它，别处一处也没有。它们与 kernel 表、nodes 表是**同一个形状的问题**——一张表的形状被许多地方知道——因此这是**下一步的候选**，不是一次产品决定。本轮没有做。
+**再往下还有一层，而它原先也没被查过**。`nodes` 是 v1 的节点表，它**原先由 17 个文件各自写着 SQL**——和 kernel 表一模一样的缺口，就在一层之下。现在它也有主人了（见[一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md)），守卫也管到了它。**v1 的表，一张一张地往下查到了底**。这一轮给了 `nodes`（17 个文件）、`activations`（8 个）、`instances`（7 个）、`operations`（11 个）四个主人——**它们是 v1 里写散得最开的那几张**。`budget_scopes` **本来就有一个主人**：额度账本自己写它，别处一处也没有。
+
+**剩下的是这些**（按写散的程度排）：
+
+| 表 | 写在哪 | 散在几个文件 |
+| --- | --- | --- |
+| `git_ops` | git 集成模块 + 任务运行时 | 3 |
+| `conversations` | 对话运行时 | 3 |
+| `proposals` | 对话确认 + 主管 | 2 |
+| `messages` | 对话失败 + 对话用量 | 2 |
+| `runtime` | operation 快照 + 任务队列 + 对话确认 + 任务运行时 | 4 |
+| `worktrees` | git 集成模块 | 3 |
+| `projects` | 对话 + 派发 + 打开运行时 | 3 |
+| `context_handoffs` | 上下文 + 保留期 + schema | 3 |
+| `artifacts` | 产出生命周期 + 产出发布 | 2 |
+
+**还有一批表本来就只有一个主人**（`wake_intents`、`rsi_continuations`、`pause_continuations`、`tool_calls`、`tool_call_spools`、`git_commits`、`agent_context_bindings`）——它们不是 store 的表，而是**各自模块自己的表**，一个文件写、一处不散。它们因此**不需要搬家**，但守卫要知道它们的主人是谁。
+
+**因此守卫的规则要再往前一步**：一条表**一个主人**，而主人**可以是一个 store，也可以是一个模块**。守卫要认得这两种。它们与 kernel 表、nodes 表是**同一个形状的问题**——一张表的形状被许多地方知道——因此这是**下一步的候选**，不是一次产品决定。本轮没有做。
 
 **而这句话原本只覆盖了一半——图服务层没有查过**。一查就发现 **12 个文件里 38 处越界写**（`kernel_create_requests`、`kernel_graph_owners`、`kernel_graph_layouts`、`kernel_module_operations`、`kernel_module_inbox`、`kernel_transition_outbox`、`kernel_queue`、`kernel_node_state`、`kernel_nodes`、`kernel_modules`、`kernel_executions`、`kernel_lifecycle`）。现在它们都归 store 了：`backend/internal/graph` 里 **store 之外一处 kernel 写都没有**，而 `node --run check:ownership` 查的就是这件事（守卫与它的启用条件记在[后半程](architecture-deepening-ownership-2026-10-22.md)的第二十七步）。**一句只查了一半就写下来的主张，是愿望，不是主张。**

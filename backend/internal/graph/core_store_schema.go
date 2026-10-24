@@ -1,5 +1,7 @@
 package graph
 
+// graph:table-writes-exempt: a migration owns the SQL of the schema it migrates
+
 const schemaV12 = "ALTER TABLE tasks ADD COLUMN decision_digest TEXT; PRAGMA user_version=12;"
 
 const schemaV13 = "\n        ALTER TABLE proposals ADD COLUMN decision_snapshot TEXT;\n        ALTER TABLE conversations ADD COLUMN binding_since_seq INTEGER NOT NULL DEFAULT 0;\n        PRAGMA user_version=13;"

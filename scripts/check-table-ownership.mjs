@@ -41,6 +41,7 @@ const EXEMPT = 'graph:table-writes-exempt:';
 
 /** The tables each store owns, and the file that owns each one. */
 const OWNED = new Map([
+  // The task store owns the v1 tables.
   ['tasks', 'core_task_lifecycle.go'],
   ['questions', 'core_task_questions.go'],
   ['invocations', 'core_task_invocations.go'],
@@ -48,6 +49,17 @@ const OWNED = new Map([
   ['activations', 'core_task_activations.go'],
   ['instances', 'core_task_instances.go'],
   ['operations', 'core_task_operations.go'],
+  // A module may own a table of its own. These were already written by one
+  // file each, so the rule is already true of them - saying so keeps it
+  // true, and names who the owner is.
+  ['budget_scopes', 'core_budget_ledger.go'],
+  ['wake_intents', 'core_wake_ledger.go'],
+  ['rsi_continuations', 'core_rsi_continuation.go'],
+  ['pause_continuations', 'core_pause_continuation.go'],
+  ['tool_calls', 'core_store_tool_calls.go'],
+  ['tool_call_spools', 'core_store_tool_calls.go'],
+  ['agent_context_bindings', 'core_context.go'],
+  ['git_commits', 'git_integration_commit.go'],
 ]);
 
 /** The kernel tables are owned by the store's own files. */
@@ -140,7 +152,7 @@ function main() {
   }
 
   console.error('An owned table has more than one writer.');
-  console.error('The store that owns it is the only one that writes it.');
+  console.error('Its owner - a store, or the module it belongs to - is the only one that writes it.');
   console.error('');
   report(offenders);
   console.error('');
