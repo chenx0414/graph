@@ -25,3 +25,21 @@
 **守卫自己也有过一个洞，值得记下来**：它的正则读的是 `INSERT INTO`，而**没有读 `INSERT OR IGNORE INTO` 与 `INSERT OR REPLACE INTO`**。那些冲突子句也是语句的一部分，于是**有一处 store 之外的写一直没被看见**（`kernel_graph_layouts`，写在任务运行时里）。**正则补上之后，它立刻抓到了那条**——**抓住它的正是它被写出来要做的那件事：读 SQL，而不是读名字**。它们与 kernel 表、nodes 表是**同一个形状的问题**——一张表的形状被许多地方知道——因此这是**下一步的候选**，不是一次产品决定。本轮没有做。
 
 **而这句话原本只覆盖了一半——图服务层没有查过**。一查就发现 **12 个文件里 38 处越界写**（`kernel_create_requests`、`kernel_graph_owners`、`kernel_graph_layouts`、`kernel_module_operations`、`kernel_module_inbox`、`kernel_transition_outbox`、`kernel_queue`、`kernel_node_state`、`kernel_nodes`、`kernel_modules`、`kernel_executions`、`kernel_lifecycle`）。现在它们都归 store 了：`backend/internal/graph` 里 **store 之外一处 kernel 写都没有**，而 `node --run check:ownership` 查的就是这件事（守卫与它的启用条件记在[后半程](architecture-deepening-ownership-2026-10-22.md)的第二十七步）。**一句只查了一半就写下来的主张，是愿望，不是主张。**
+
+## 顺带查出来的一件更重的事：事务的状态是全局的（2026-10-24）
+
+这一轮在查「store 内部的跨文件写是不是也是毛病」的时候，撞见了一件**不属于表**、但更重的事。
+
+`TaskStore` 的连接池是**一个连接**。`BEGIN IMMEDIATE` 之后那条连接回到了池里，于是**任何并发语句都落在那个开着的事务里**。一次探针（用真实 store，探针已删除）把后果坐实了：
+
+```
+while the transaction is open, the other writer's row is visible: 1
+after that transaction rolled back, the other writer's row is still there: 0
+=> the concurrent write was rolled back by a transaction it was never part of
+```
+
+**一次并发写被一个它从未参与的事务回滚了。**
+
+而**十二处**写成了「已经在事务里就内联，否则开一个」——`withStoreTx`、`k.tx`、`ModuleTransaction` 那一族——而 `IsTransaction()` 答的是「**有没有人**在事务里」，代码问的却是「**我**在不在事务里」。**全局的状态，被当成了自己的。**
+
+**这一件是决定，不是整理**：修它要么每个 goroutine 一条连接（那么事务里的每一条语句也得用那条连接，而现在是直接打 `k.Db` 的），要么把**所有**写都串行化到同一把锁后面（那么整个 daemon 的写都排队）。两条都动 `TaskStore` 的接口与面。**这一轮把事实与代价摆出来，没有动。**
