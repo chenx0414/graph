@@ -145,6 +145,16 @@ func (k *KernelStore) NoteNodeRebind(taskID, nodeID string) {
 	})
 }
 
+// SetNodeIdle says a node is waiting for work.
+func (k *KernelStore) SetNodeIdle(taskID, nodeID string) {
+	g5Exec(k.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?", taskID, nodeID)
+}
+
+// RetireNode says a node will not run again.
+func (k *KernelStore) RetireNode(taskID, nodeID string) {
+	g5Exec(k.Db, "UPDATE kernel_nodes SET status='retired' WHERE task_id=? AND node_id=?", taskID, nodeID)
+}
+
 // ModuleInput reads one module input.
 
 // ParkNode parks a node without a reason of its own. The recovery records why

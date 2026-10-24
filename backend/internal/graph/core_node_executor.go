@@ -337,7 +337,7 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			}
 			if !e.hasValidSubmission(executionId) && pausedReport.MatchString(*report.Error) && (e.kernel.Store.Task(e.graphId).Paused != 0 || e.kernel.NodeState(e.graphId, nodeId).Paused) {
 				e.kernel.FinishExecution(executionId, "blocked")
-				graphDBExec(e.kernel.Store.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?", e.graphId, nodeId)
+				e.kernel.SetNodeIdle(e.graphId, nodeId)
 				e.queue.Complete(seq, QueueCompletion{Kind: "blocked", Reason: *report.Error})
 				return NodeOutcomeBlocked
 			}
@@ -379,7 +379,7 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 				resubmitsUsed++
 				e.kernel.NoteExecutionContinuation(executionId, "resubmit", report.Missing)
 				e.kernel.NoteNodeResubmit(e.graphId, nodeId, int(maxSafeInteger))
-				graphDBExec(e.kernel.Store.Db, "UPDATE kernel_executions SET missing_required=1 WHERE id=?", executionId)
+				e.kernel.MarkExecutionMissingRequired(executionId)
 				injection = &TurnInjection{Missing: report.Missing}
 				continue
 			}

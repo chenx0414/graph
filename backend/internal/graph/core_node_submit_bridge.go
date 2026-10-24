@@ -234,7 +234,7 @@ func (b *NodeSubmitBridge) Submit(request SubmitRequest) BridgeReceipt {
 		receipt = b.kernel.Submit(b.ExecutionId, request)
 	}()
 	if !failed {
-		graphDBExec(b.kernel.Store.Db, "UPDATE kernel_executions SET missing_required=0 WHERE id=?", b.ExecutionId)
+		b.kernel.ClearExecutionMissingRequired(b.ExecutionId)
 		id := receipt.SubmissionId
 		return BridgeReceipt{
 			Accepted: true, SubmissionId: &id, Replayed: receipt.Replayed, NoRecipients: receipt.NoRecipients,
@@ -246,7 +246,7 @@ func (b *NodeSubmitBridge) Submit(request SubmitRequest) BridgeReceipt {
 		if err != nil {
 			panic(err)
 		}
-		graphDBExec(b.kernel.Store.Db, "UPDATE kernel_executions SET missing_required=1,pending_gap=? WHERE id=?", string(raw), b.ExecutionId)
+		b.kernel.MarkExecutionPendingGap(b.ExecutionId, string(raw))
 	}
 	return BridgeReceipt{
 		Accepted: false, SubmissionId: nil, Replayed: false, NoRecipients: false,

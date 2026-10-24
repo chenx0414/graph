@@ -58,6 +58,11 @@ func (k *KernelStore) RecordModuleTransition(taskID string, input ModuleTransiti
 	return ModuleTransitionRow{ModuleTransitionInput: input, Id: id, CreatedAt: createdAt}
 }
 
+// ResetModuleTrigger says a module has not been triggered yet.
+func (k *KernelStore) ResetModuleTrigger(taskID, moduleID string) {
+	g5Exec(k.Db, "UPDATE kernel_modules SET triggered=0 WHERE task_id=? AND module_id=?", taskID, moduleID)
+}
+
 // ModuleTransitions lists judgments in creation order.
 func (k *KernelStore) ModuleTransitions(taskID, moduleID string) []ModuleTransitionRow {
 	rows := g5Query(k.Db, "SELECT * FROM kernel_module_transitions WHERE task_id=? AND module_id=? ORDER BY created_at", taskID, moduleID)

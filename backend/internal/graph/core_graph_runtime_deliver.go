@@ -91,7 +91,7 @@ func (runtime *GraphRuntime) Complete() GraphStateRow {
 	if phase == "stopping" || phase == "stopped" {
 		Raise("invalid_graph", "Stopped graph cannot complete")
 	}
-	kernelExec(runtime.kernel.DB, "INSERT INTO kernel_lifecycle(task_id,completion_requested) VALUES(?,1) ON CONFLICT(task_id) DO UPDATE SET completion_requested=1", runtime.graphId)
+	runtime.kernel.RequestGraphCompletion(runtime.graphId)
 	runtime.setPhase("completing")
 	return *runtime.State()
 }
@@ -103,7 +103,7 @@ func (runtime *GraphRuntime) WithdrawComplete() GraphStateRow {
 	if phase == "completed" || phase == "stopping" || phase == "stopped" || !runtime.completionRequested() {
 		Raise("invalid_graph", "Graph "+runtime.graphId+" is not completing")
 	}
-	kernelExec(runtime.kernel.DB, "UPDATE kernel_lifecycle SET completion_requested=0 WHERE task_id=?", runtime.graphId)
+	runtime.kernel.ClearGraphCompletionRequest(runtime.graphId)
 	runtime.setPhase("running")
 	return *runtime.State()
 }

@@ -121,14 +121,14 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) struct
 				if err != nil {
 					panic(err)
 				}
-				kernelExec(runtime.kernel.DB, "UPDATE kernel_nodes SET revision_version=?,spec=? WHERE task_id=? AND node_id=?", revision.Version, string(encoded), runtime.graphId, id)
+				runtime.kernel.ApplyNodeRevision(runtime.graphId, id, revision.Version, string(encoded))
 			}
 		}
 		for id, module := range parsed.Modules {
 			if _, ok := latest.Definition.Modules[id]; !ok {
 				runtime.kernel.AdmitModule(runtime.graphId, revision.Version, id, AdmitModuleInput{ModuleType: module.Type, Trigger: module.Trigger})
 			} else {
-				kernelExec(runtime.kernel.DB, "UPDATE kernel_modules SET revision_version=?,module_type=?,trigger=? WHERE task_id=? AND module_id=?", revision.Version, module.Type, module.Trigger, runtime.graphId, id)
+				runtime.kernel.ApplyModuleRevision(runtime.graphId, id, revision.Version, module.Type, module.Trigger)
 			}
 		}
 		for _, id := range removed {
@@ -136,7 +136,7 @@ func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) struct
 			FinishNativePauses(runtime.kernel.Store, runtime.graphId, &nodeId)
 		}
 		for _, id := range removed {
-			kernelExec(runtime.kernel.DB, "UPDATE kernel_nodes SET status='retired' WHERE task_id=? AND node_id=?", runtime.graphId, id)
+			runtime.kernel.RetireNode(runtime.graphId, id)
 		}
 		runtime.kernel.Store.Event(runtime.graphId, "graph.patched", map[string]any{"revision": revision.Version, "previousRevision": latest.Version, "reason": changes.Reason})
 		return struct{ Revision int }{Revision: revision.Version}

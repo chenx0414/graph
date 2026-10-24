@@ -40,7 +40,7 @@ func (runtime *ModuleRuntime) ConsumeDelivery(moduleId, inputName string, value 
 			} else {
 				judged = runtime.Evaluate(moduleId)
 			}
-			graphDBExec(runtime.kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryId)
+			runtime.kernel.MarkDeliveryProcessed(deliveryId)
 			return judged
 		}).(ModuleEvaluation)
 	}); err != nil {

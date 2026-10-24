@@ -15,7 +15,7 @@ func (runtime *ModuleRuntime) ReopenAfterPending(moduleId string) ModuleEvaluati
 // Reopen clears the latch and keeps the inputs.
 func (runtime *ModuleRuntime) Reopen(moduleId string) ModuleEvaluation {
 	compiled := runtime.compile(moduleId)
-	graphDBExec(runtime.kernel.Db, "UPDATE kernel_modules SET triggered=0 WHERE task_id=? AND module_id=?", runtime.taskId, moduleId)
+	runtime.kernel.ResetModuleTrigger(runtime.taskId, moduleId)
 	_, state := runtime.environment(moduleId, compiled)
 	runtime.kernel.RecordModuleTransition(runtime.taskId, ModuleTransitionInput{
 		ModuleId: moduleId, InputName: "(reopen)", InputValue: nil, StateBefore: state, StateAfter: state,
@@ -68,7 +68,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 		return runtime.kernel.ModuleTransaction(func() any {
 			judged := runtime.acceptControl(moduleId, inputName, value)
 			if deliveryId != "" {
-				graphDBExec(runtime.kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryId)
+				runtime.kernel.MarkDeliveryProcessed(deliveryId)
 			}
 			return *judged
 		}).(ModuleEvaluation)
@@ -108,7 +108,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 				Outputs: map[string]any{}, RuleVersion: implementationVersion, Reason: reason,
 			})
 			if deliveryId != "" {
-				graphDBExec(runtime.kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryId)
+				runtime.kernel.MarkDeliveryProcessed(deliveryId)
 			}
 			return nil
 		})
@@ -162,7 +162,7 @@ func (runtime *ModuleRuntime) deliverEvaluatedUnlocked(moduleId, inputName strin
 			Verdict: verdictPtr, Outputs: result.Outputs, RuleVersion: implementationVersion, Reason: reason,
 		})
 		if deliveryId != "" {
-			graphDBExec(runtime.kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryId)
+			runtime.kernel.MarkDeliveryProcessed(deliveryId)
 		}
 		return row
 	})

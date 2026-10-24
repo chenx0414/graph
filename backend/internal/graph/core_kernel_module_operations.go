@@ -48,6 +48,11 @@ func (k *KernelStore) ReleaseModuleOperationWorker(id string) {
 	g5Exec(k.Db, "UPDATE kernel_module_operations SET worker_active=0 WHERE id=?", id)
 }
 
+// HoldModuleOperationWorker says the operation holds a worker.
+func (k *KernelStore) HoldModuleOperationWorker(id string) {
+	g5Exec(k.Db, "UPDATE kernel_module_operations SET worker_active=1 WHERE id=?", id)
+}
+
 // ModuleOperationPrepared reports whether an operation is still waiting to
 // be sent.
 func (k *KernelStore) ModuleOperationPrepared(id string) bool {
