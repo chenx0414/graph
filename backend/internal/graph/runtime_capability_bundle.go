@@ -1,5 +1,9 @@
 package graph
 
+// The capability bundle: what one Agent recipe is allowed to use.
+//
+// The bundle holds the capability facts, the prompts an operation
+// runs under, and the skills that go with it.
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +19,7 @@ func capabilityBundleDigest(value any) string {
 }
 
 // CapabilityBundleOptions selects one definition's capability closure.
+
 type CapabilityBundleOptions struct {
 	FrozenFacts       []ResolvedCapabilityFact
 	Catalog           *Catalog
@@ -29,12 +34,14 @@ type CapabilityBundleOptions struct {
 }
 
 // CapabilityBootstrap is the immutable Graph prompt pair.
+
 type CapabilityBootstrap struct {
 	Agent string
 	Tool  string
 }
 
 // CapabilityOperationOptions opens one executable operation of a bundle.
+
 type CapabilityOperationOptions struct {
 	Workspace            string
 	ScratchDir           string
@@ -57,6 +64,7 @@ type CapabilityOperationOptions struct {
 }
 
 // CapabilityOperation is the tool surface and digests one turn binds to.
+
 type CapabilityOperation struct {
 	Descriptor               any
 	BundleDigest             string
@@ -84,12 +92,14 @@ type CapabilityOperation struct {
 }
 
 // CapabilityOperationPrompts is the system and tool text for one operation.
+
 type CapabilityOperationPrompts struct {
 	System string
 	Tool   *string
 }
 
 // CapabilityBundleVersion is one resolved definition closure.
+
 type CapabilityBundleVersion struct {
 	DefinitionVersion   string
 	Digest              string
@@ -134,6 +144,7 @@ func capabilityCloneFacts(facts []ResolvedCapabilityFact) []ResolvedCapabilityFa
 }
 
 // OpenCapabilityBundle resolves facts and mirrors bound skills.
+
 func OpenCapabilityBundle(options CapabilityBundleOptions) *CapabilityBundleVersion {
 	facts := options.FrozenFacts
 	if facts == nil {
@@ -208,35 +219,7 @@ func OpenCapabilityBundle(options CapabilityBundleOptions) *CapabilityBundleVers
 
 // capabilityToolAllowed reports whether the surface already carries a tool of
 // that name.
-func capabilityToolAllowed(name string, tools []ToolDefinition) bool {
-	for _, tool := range tools {
-		if tool.Name == name {
-			return true
-		}
-	}
-	return false
-}
 
-func capabilityUnique(values []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, value := range values {
-		if seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
-func capabilitySortedCopy(values []string) []string {
-	out := append([]string{}, values...)
-	sort.Strings(out)
-	return out
-}
-
-// OpenOperation loads capabilities and freezes the digests a turn may use.
 func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperationOptions) CapabilityOperation {
 	var loaded LoadedCapabilities
 	var operation CapabilityOperation
@@ -423,101 +406,6 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	return operation
 }
 
-type capabilityDeclaredTool struct {
-	Name        string
-	Description string
-}
-
-func capabilityDeclaredTools(fact ResolvedCapabilityFact) []capabilityDeclaredTool {
-	record := asMap(fact)
-	raw, _ := record["declaredTools"].([]any)
-	if raw == nil {
-		raw, _ = record["DeclaredTools"].([]any)
-	}
-	out := []capabilityDeclaredTool{}
-	for _, item := range raw {
-		tool, _ := item.(map[string]any)
-		out = append(out, capabilityDeclaredTool{Name: mapString(tool, "name", "Name"), Description: mapString(tool, "description", "Description")})
-	}
-	return out
-}
-
-func capabilityFactKind(fact RuntimeCapabilityLoadFact) string {
-	return mapString(asMap(fact), "kind", "Kind")
-}
-
-func capabilityFactPath(fact RuntimeCapabilityLoadFact) string {
-	return mapString(asMap(fact), "path", "Path")
-}
-
-func capabilityFactName(fact RuntimeCapabilityLoadFact) string {
-	return mapString(asMap(fact), "name", "Name")
-}
-
-func capabilityPastedSkill(skill LoadedSkill) RuntimeCapabilityLoadFact {
-	return capabilityFactFromMap(map[string]any{
-		"id": skill.Name, "version": "local", "kind": "skill", "name": skill.Name, "description": skill.Description,
-		"path": skill.FilePath, "loaded": true, "executable": false, "reason": "原生 skills 注入：模型按需读取 SKILL.md",
-	})
-}
-
-func capabilityWithReason(fact RuntimeCapabilityLoadFact, reason string) RuntimeCapabilityLoadFact {
-	record := asMap(fact)
-	if record == nil {
-		record = map[string]any{}
-	}
-	record["reason"] = reason
-	return capabilityFactFromMap(record)
-}
-
-func capabilityFilterTools(fact RuntimeCapabilityLoadFact, disabled map[string]bool) RuntimeCapabilityLoadFact {
-	record := asMap(fact)
-	if record == nil {
-		return fact
-	}
-	tools, ok := record["tools"].([]any)
-	if !ok {
-		return fact
-	}
-	kept := []any{}
-	for _, tool := range tools {
-		name, _ := tool.(string)
-		if !disabled[name] {
-			kept = append(kept, tool)
-		}
-	}
-	record["tools"] = kept
-	return capabilityFactFromMap(record)
-}
-
-func capabilityFactFromMap(record map[string]any) RuntimeCapabilityLoadFact {
-	raw, err := json.Marshal(record)
-	if err != nil {
-		panic(err)
-	}
-	var fact RuntimeCapabilityLoadFact
-	if err := json.Unmarshal(raw, &fact); err != nil {
-		panic(err)
-	}
-	return fact
-}
-
-func capabilityCopyEnv(env map[string]string) map[string]string {
-	out := map[string]string{}
-	for key, value := range env {
-		out[key] = value
-	}
-	return out
-}
-
-func capabilityAccessDigest(access *ResolvedAccessPolicy) any {
-	if access == nil {
-		return nil
-	}
-	return access.Digest
-}
-
-// CapabilityLoadInput is the loader request for one operation.
 type CapabilityLoadInput struct {
 	FrozenFacts          []ResolvedCapabilityFact
 	Catalog              *Catalog
@@ -536,6 +424,7 @@ type CapabilityLoadInput struct {
 }
 
 // CapabilityPromptsInput builds the identity prompt from the loaded bundle.
+
 type CapabilityPromptsInput struct {
 	DefinitionVersion string
 	Action            string

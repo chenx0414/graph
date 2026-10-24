@@ -1,224 +1,12 @@
 package graph
 
-import (
-	"database/sql"
-	"encoding/json"
-	"math"
-	"strconv"
-	"unicode/utf16"
-)
-
+// The graph's own vocabulary: the shapes that travel between the daemon,
+// the kernel and the model.
+//
+// The helpers that read and write them live in their own files - the JSON
+// values in core_json.go, the database rows in core_db.go - so that this
+// file is the list of what the graph is made of.
 // Json is the TypeScript Json union: nil, bool, float64, string, []any, or map[string]any.
-type Json = any
-
-const maxSafeInteger = 9007199254740991
-
-func isSafeInteger(value any) bool {
-	f, ok := asFloat(value)
-	if !ok || math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
-		return false
-	}
-	return f >= -maxSafeInteger && f <= maxSafeInteger
-}
-
-func isJSInteger(value any) bool {
-	f, ok := asFloat(value)
-	if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
-		return false
-	}
-	return f == math.Trunc(f)
-}
-
-func asFloat(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case json.Number:
-		f, err := v.Float64()
-		return f, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func asInt(value any) int64 {
-	switch v := value.(type) {
-	case int64:
-		return v
-	case int:
-		return int64(v)
-	case int32:
-		return int64(v)
-	case float64:
-		return int64(v)
-	case json.Number:
-		i, err := v.Int64()
-		if err != nil {
-			f, ferr := v.Float64()
-			if ferr != nil {
-				return 0
-			}
-			return int64(f)
-		}
-		return i
-	default:
-		return 0
-	}
-}
-
-func jsonRecord(value any) (map[string]any, bool) {
-	record, ok := value.(map[string]any)
-	return record, ok && record != nil
-}
-
-func jsonClone(value any) any {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		panic(err)
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		panic(err)
-	}
-	return out
-}
-
-func jsonStringify(value any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		panic(err)
-	}
-	return string(raw)
-}
-
-func utf16Len(value string) int {
-	return len(utf16.Encode([]rune(value)))
-}
-
-func utf16Slice(value string, n int) string {
-	units := utf16.Encode([]rune(value))
-	if n > len(units) {
-		n = len(units)
-	}
-	if n < 0 {
-		n = 0
-	}
-	return string(utf16.Decode(units[:n]))
-}
-
-func enUS(n int) string {
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	digits := strconv.Itoa(n)
-	out := make([]byte, 0, len(digits)+len(digits)/3)
-	for i := 0; i < len(digits); i++ {
-		if i > 0 && (len(digits)-i)%3 == 0 {
-			out = append(out, ',')
-		}
-		out = append(out, digits[i])
-	}
-	if negative {
-		return "-" + string(out)
-	}
-	return string(out)
-}
-
-func graphDBRow(db *sql.DB, query string, args ...any) (map[string]any, bool) {
-	rows := graphDBAll(db, query, args...)
-	if len(rows) == 0 {
-		return nil, false
-	}
-	return rows[0], true
-}
-
-func graphDBAll(db *sql.DB, query string, args ...any) []map[string]any {
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		panic(err)
-	}
-	defer rows.Close()
-	cols, err := rows.Columns()
-	if err != nil {
-		panic(err)
-	}
-	out := []map[string]any{}
-	for rows.Next() {
-		dest := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range dest {
-			ptrs[i] = &dest[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			panic(err)
-		}
-		row := make(map[string]any, len(cols))
-		for i, col := range cols {
-			row[col] = normalizeSQL(dest[i])
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
-	return out
-}
-
-func graphDBExec(db *sql.DB, query string, args ...any) int64 {
-	result, err := db.Exec(query, args...)
-	if err != nil {
-		panic(err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		panic(err)
-	}
-	return n
-}
-
-func normalizeSQL(value any) any {
-	switch v := value.(type) {
-	case []byte:
-		return string(v)
-	default:
-		return v
-	}
-}
-
-func graphDBString(row map[string]any, key string) string {
-	switch v := row[key].(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		return ""
-	}
-}
-
-func graphDBStringPtr(row map[string]any, key string) *string {
-	if row[key] == nil {
-		return nil
-	}
-	value := graphDBString(row, key)
-	return &value
-}
-
-func graphDBInt(row map[string]any, key string) int64 {
-	if row == nil {
-		return 0
-	}
-	return asInt(row[key])
-}
 
 type ProjectConfig struct {
 	Id     string   `json:"id"`
@@ -328,6 +116,7 @@ type ResolvedAgentContext struct {
 }
 
 // NodeSpec is the internal record for main. Graph declarations use NodeDefinition.
+
 type NodeSpec struct {
 	Id                string  `json:"id"`
 	Kind              string  `json:"kind"`
@@ -346,6 +135,7 @@ type ProposalScope struct {
 }
 
 // NativeProposal is a declarative graph draft. Main belongs outside its definition.
+
 type NativeProposal struct {
 	RequirementVersion int              `json:"requirementVersion"`
 	Summary            string           `json:"summary"`
@@ -375,6 +165,7 @@ type TaskUpdate struct {
 }
 
 // TaskWatch is the async iterator returned by a task event watch.
+
 type TaskWatch struct {
 	Next func() (TaskUpdate, bool)
 	Stop func()
@@ -513,6 +304,7 @@ type OperationResult struct {
 }
 
 // Answer is one user reply to a parked question.
+
 type Answer struct {
 	Type   string      `json:"type"`
 	Tokens int64       `json:"tokens,omitempty"`
@@ -531,6 +323,7 @@ type Reconciliation struct {
 }
 
 // ActionAdapter is the trusted host adapter. Optional methods are nil when absent.
+
 type ActionAdapter struct {
 	Kind                string
 	ReserveTokens       *int
