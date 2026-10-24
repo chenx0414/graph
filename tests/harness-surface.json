@@ -12,7 +12,7 @@
     "src/runtime/agent-tool-definitions.ts": "c312d5e3fe297e417ae5ee34f201ef25619f11f2ab43a8acf401aeb63666bee4",
     "src/runtime/agent-tools.ts": "4f229c2e0bef2eb93185756db5df11960e31159ad97ced461cd263d9edd633f3",
     "src/runtime/pi-native-tools.ts": "91ec82a3d296d059842c3799dfa2b55408f62c6e05883384748f8f2e30ca6b91",
-    "backend/internal/graph/runtime_agent_context.go": "74545f3b3f71c714cf6ffb0faa6e06ccb8dd3808f86bbc5d4e9a5455a3bce2f2",
+    "backend/internal/graph/runtime_agent_context.go": "c3bb3d93a09bc18518895255ddc69ff272878595279a6f3722e450054312a625",
     "backend/internal/graph/runtime_agent_tool_definitions.go": "7e7c5e4b8caf51c1600f77b05fd9944f30768d30e16bec9059a17214c9621920",
     "backend/internal/graph/runtime_agent_tools.go": "c37d88e7cb0046a72781227d713e82dcdcd309e836ea2d3f6298e72c411e7762",
     "backend/internal/graph/runtime_pi_native_tools.go": "65ce1b0f5b71df3ac9426b964bb8f676eb35ca78e7c0458b613f4cd4e5496219",
@@ -23,5 +23,5 @@
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "bcf3a0089998787b48207ef12796a530bb171aeb5cb63c688cbbc33285e65111"
   },
-  "updatedAt": "2026-10-24T02:59:56.612Z"
+  "updatedAt": "2026-10-24T04:17:33.449Z"
 }

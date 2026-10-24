@@ -58,6 +58,7 @@
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
 | `b616bb83`（`instances` 表（节点跑在哪个 runtime 上）也有了主人） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 540 秒，**全绿**。`instances` 原先由 7 个文件各自写着 SQL；额度那几列本来只有账本一个人写（`budget_scopes` 也是），所以这一步消掉的是**身份那一面**的分散：执行、对话、任务运行时四个地方原先各自写着 instance 的 model 与 definition |
 | `f77e7674`（节点的那一轮，**再跑一次**） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 500 秒，**这一次全绿**。上一轮那个 `harness-composition` 的超时因此确认是满负载下的抖动（它单独跑只要 1,010 毫秒），与本轮改动无关 |
+| `64cf797`（合入 main 的「用真模型评判 harness」） | 302 个文件里 **301 通过、1 跳过、0 失败**（1565 个测试）；"Suite baseline increased to files 302, tests 1565"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 **全绿**。合并用分支的老办法查过：main 自分叉以来新增的每一行都拿到合并后的树里去找，**找不到的只有门禁账本自己的计数与哈希**（门禁重算它们）。main 新增了一个测试文件，因此文件数 301→302、测试数 1564→1565 |
 
 门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
 
