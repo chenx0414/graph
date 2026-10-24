@@ -71,6 +71,18 @@ func (k *KernelStore) RecordCompletionDelivery(taskID, commitSHA string) {
 		taskID, commitSHA, NowMillis())
 }
 
+// MarkDeliveryProcessed says one delivery has been handled, so the module
+// that was waiting for it does not wait any longer.
+func (k *KernelStore) MarkDeliveryProcessed(deliveryID string) {
+	g5Exec(k.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryID)
+}
+
+// MarkGraphDeliveriesProcessed says every delivery of a graph has been
+// handled. A graph that stops will not handle any of them.
+func (k *KernelStore) MarkGraphDeliveriesProcessed(taskID string) {
+	g5Exec(k.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?", taskID)
+}
+
 // DeliveryEdges are the endpoint pairs a task has received work over.
 //
 // Disabling an edge cannot erase the identity of work already received

@@ -15,7 +15,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 	}
 	switch input.Action {
 	case "relayout":
-		kernelExec(service.kernel.Db, "DELETE FROM kernel_graph_layouts WHERE task_id=?", input.GraphId)
+		service.kernel.ResetGraphLayout(input.GraphId)
 		service.kernel.Store.Event(input.GraphId, "graph.layout_reset", map[string]any{})
 		return map[string]any{"state": "layout_reset"}
 	case "cancel_operation":
@@ -44,8 +44,8 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		deliveryId := kernelString(operation["delivery_id"])
 		moduleId := kernelString(operation["module_id"])
 		service.kernel.ModuleTransaction(func() any {
-			kernelExec(service.kernel.Db, "UPDATE kernel_module_operations SET state='cancelled' WHERE id=?", operationId)
-			kernelExec(service.kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryId)
+			service.kernel.CancelModuleOperation(operationId)
+			service.kernel.MarkDeliveryProcessed(deliveryId)
 			service.kernel.SetNodeQueuePaused(input.GraphId, moduleId, false)
 			service.kernel.Store.CompleteBlockedTask(input.GraphId)
 			service.kernel.Store.Event(input.GraphId, "graph.operation.cancelled", map[string]any{
@@ -106,7 +106,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			}
 			service.kernel.SetNodeQueuePaused(input.GraphId, target, paused)
 			if !paused {
-				kernelExec(service.kernel.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status='blocked'", input.GraphId, target)
+				service.kernel.UnblockNode(input.GraphId, target)
 			}
 		} else {
 			service.kernel.Store.SetTaskPaused(input.GraphId, paused)
@@ -139,17 +139,14 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			Raise("invalid_queue", "Submitted work cannot be sent again")
 		}
 		service.kernel.Store.Transaction(func() any {
-			queueState := "done"
-			generation := 0
 			if input.Action == "retry" {
-				queueState = "queued"
-				generation = 1
+				service.kernel.RetryQueueItem(input.GraphId, int64(seq), input.Action)
+			} else {
+				service.kernel.SettleQueueItem(input.GraphId, int64(seq), input.Action)
 			}
-			kernelExec(service.kernel.Db, "UPDATE kernel_queue SET state=?,reason=?,generation=generation+? WHERE task_id=? AND seq=?",
-				queueState, input.Action, generation, input.GraphId, seq)
-			kernelExec(service.kernel.Db, "UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?", input.GraphId, nodeId)
+			service.kernel.UnpauseNodeState(input.GraphId, nodeId)
 			SetNativePause(service.kernel.Store, input.GraphId, false, nodeId, 0)
-			kernelExec(service.kernel.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=? AND status IN ('blocked','failed')", input.GraphId, nodeId)
+			service.kernel.ReleaseNode(input.GraphId, nodeId)
 			service.kernel.Store.CompleteBlockedTask(input.GraphId)
 			service.kernel.Store.Event(input.GraphId, "graph.queue."+input.Action, map[string]any{"seq": seq, "nodeId": nodeId})
 			return nil

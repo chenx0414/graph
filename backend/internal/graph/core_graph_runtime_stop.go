@@ -9,9 +9,9 @@ func (runtime *GraphRuntime) Stop() GraphStateRow {
 	}
 	FinishNativePauses(runtime.kernel.Store, runtime.graphId, nil)
 	runtime.kernel.Store.StopTask(runtime.graphId)
-	kernelExec(runtime.kernel.DB, "UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?", runtime.graphId)
-	kernelExec(runtime.kernel.DB, "UPDATE kernel_transition_outbox SET routed=1 WHERE transition_id IN (SELECT id FROM kernel_module_transitions WHERE task_id=?)", runtime.graphId)
-	kernelExec(runtime.kernel.Store.DB, "UPDATE kernel_queue SET state='done',reason='cancelled by stop' WHERE task_id=? AND state='queued'", runtime.graphId)
+	runtime.kernel.MarkGraphDeliveriesProcessed(runtime.graphId)
+	runtime.kernel.RouteGraphTransitions(runtime.graphId)
+	runtime.kernel.CancelQueuedWork(runtime.graphId, "cancelled by stop")
 	runtime.kernel.Store.Event(runtime.graphId, "graph.stopping", map[string]any{})
 	return *runtime.State()
 }
@@ -25,7 +25,7 @@ func (runtime *GraphRuntime) SettleStop() string {
 	if runtime.State().Phase != "stopping" {
 		Raise("invalid_graph", "Graph "+runtime.graphId+" is not stopping")
 	}
-	kernelExec(runtime.kernel.DB, "UPDATE kernel_queue SET state='done',reason='cancelled by stop' WHERE task_id=? AND state='queued'", runtime.graphId)
+	runtime.kernel.CancelQueuedWork(runtime.graphId, "cancelled by stop")
 	queued := kernelInt(kernelRow(runtime.kernel.DB, "SELECT COUNT(*) AS n FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')", runtime.graphId)["n"])
 	running := kernelInt(kernelRow(runtime.kernel.DB, "SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND state='running'", runtime.graphId)["n"])
 	if queued > 0 || running > 0 {
