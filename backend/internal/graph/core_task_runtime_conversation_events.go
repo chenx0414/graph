@@ -268,7 +268,7 @@ func (conversations *TaskRuntimeConversations) SelectModel(conversationId, model
 		spec.Model = &entry.Id
 		runtime.store.SetNodeSpec(anchor, spec.Id, CanonicalJSON(spec))
 		runtime.store.SetInstanceModel(kernelString(master["instance_id"]), entry.Id)
-		kernelExec(runtime.store.Db, "UPDATE conversations SET thinking_level=? WHERE id=?", string(level), conversationId)
+		runtime.store.SetConversationThinkingLevel(conversationId, string(level))
 		if changed {
 			runtime.store.Event(anchor, "conversation.model_selected", map[string]any{"model": entry.Id, "thinkingLevel": string(level)})
 		}

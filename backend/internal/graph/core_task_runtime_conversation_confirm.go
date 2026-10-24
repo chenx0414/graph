@@ -59,8 +59,7 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 			phase = "running"
 		}
 		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, phase, sequence, conversationId, row["decision_snapshot"])
-		kernelExec(runtime.store.Db, "INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot) VALUES(?,?,?,?,?)",
-			taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
+		runtime.store.RecordProposal(taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
 		MaterializeGraph(runtime.kernel, taskId, ParseGraphDefinition(proposal.Definition), "Confirmed conversation draft")
 		if phase == "running" {
 			kernelExec(runtime.store.Db, "UPDATE runtime SET active_task=?", taskId)
@@ -117,7 +116,7 @@ func (conversations *TaskRuntimeConversations) ArchiveDraft(conversationId strin
 			Raise("not_found", "Proposal v"+itoa(input.ProposalVersion)+" was not found")
 		}
 		if row["archived_at"] == nil {
-			kernelExec(runtime.store.Db, "UPDATE proposals SET archived_at=? WHERE task_id=? AND version=?", NowMillis(), anchor.ID, input.ProposalVersion)
+			runtime.store.ArchiveProposal(anchor.ID, int64(input.ProposalVersion), NowMillis())
 		}
 		return map[string]any{
 			"conversationId":  conversationId,
@@ -144,7 +143,7 @@ func (conversations *TaskRuntimeConversations) RestoreDraft(conversationId strin
 		if row == nil || row["deleted_at"] != nil {
 			Raise("not_found", "Proposal v"+itoa(input.ProposalVersion)+" was not found")
 		}
-		kernelExec(runtime.store.Db, "UPDATE proposals SET archived_at=NULL WHERE task_id=? AND version=?", anchor.ID, input.ProposalVersion)
+		runtime.store.RestoreProposal(anchor.ID, int64(input.ProposalVersion))
 		newer := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS n FROM proposals WHERE task_id=? AND version>? AND deleted_at IS NULL AND archived_at IS NULL", anchor.ID, input.ProposalVersion)["n"])
 		if newer == 0 && kernelInt(row["requirement_version"]) == anchor.RequirementVersion {
 			runtime.store.SetTaskLatestProposal(anchor.ID, input.ProposalVersion)
@@ -175,7 +174,7 @@ func (conversations *TaskRuntimeConversations) DeleteDraft(conversationId string
 			Raise("not_found", "Proposal v"+itoa(input.ProposalVersion)+" was not found")
 		}
 		if row["deleted_at"] == nil {
-			kernelExec(runtime.store.Db, "UPDATE proposals SET deleted_at=? WHERE task_id=? AND version=?", NowMillis(), anchor.ID, input.ProposalVersion)
+			runtime.store.DeleteProposal(anchor.ID, int64(input.ProposalVersion), NowMillis())
 		}
 		return map[string]any{
 			"conversationId":  conversationId,

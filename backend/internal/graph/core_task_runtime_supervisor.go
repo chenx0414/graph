@@ -291,11 +291,9 @@ func (supervisor *TaskRuntimeSupervisor) Propose(input TaskRuntimeProposeInput) 
 			}
 		}
 		if inPlace {
-			kernelExec(runtime.store.Db, "UPDATE proposals SET requirement_version=?,spec=?,decision_snapshot=?,draft_revision=?,draft_digest=? WHERE task_id=? AND version=?",
-				input.ProposalVersion, spec, snapshot, draftRevision, digest, supervisor.taskId, version)
+			runtime.store.UpdateProposalDraft(supervisor.taskId, int64(version), int64(input.ProposalVersion), spec, snapshot, int64(draftRevision), digest)
 		} else {
-			kernelExec(runtime.store.Db, "INSERT INTO proposals(task_id,version,requirement_version,spec,decision_snapshot,draft_revision,draft_digest) VALUES(?,?,?,?,?,?,?)",
-				supervisor.taskId, version, input.ProposalVersion, spec, snapshot, draftRevision, digest)
+			runtime.store.RecordProposalDraft(supervisor.taskId, int64(version), int64(input.ProposalVersion), spec, snapshot, int64(draftRevision), digest)
 		}
 		if task.LatestProposal != int64(version) {
 			runtime.store.SetTaskLatestProposal(supervisor.taskId, version)

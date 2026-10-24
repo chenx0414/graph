@@ -49,6 +49,9 @@ const OWNED = new Map([
   ['activations', 'core_task_activations.go'],
   ['instances', 'core_task_instances.go'],
   ['operations', 'core_task_operations.go'],
+  ['conversations', 'core_task_conversations.go'],
+  ['proposals', 'core_task_proposals.go'],
+  ['messages', 'core_task_messages.go'],
   // A module may own a table of its own. These were already written by one
   // file each, so the rule is already true of them - saying so keeps it
   // true, and names who the owner is.

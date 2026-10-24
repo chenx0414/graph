@@ -79,8 +79,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			title = string([]rune(title)[:120])
 		}
 		runtime.store.CreateConversationTask(taskId, workspaceProjectId, title, "chatting", sequence, conversationId)
-		kernelExec(runtime.store.Db, "INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES(?,?,?,?,?,?,?)",
-			conversationId, projectId, workspaceProjectId, taskId, title, sequence, NowMillis())
+		runtime.store.CreateConversation(conversationId, projectId, workspaceProjectId, taskId, title, sequence, NowMillis())
 		if runtime.master != nil && runtime.masterModel() != nil {
 			runtime.createMasterNode(taskId)
 			requestedModel := ""
@@ -130,7 +129,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			}
 			if effective != nil {
 				level := EffectiveThinkingLevel(effective.ModelEntry, requestedLevel)
-				kernelExec(runtime.store.Db, "UPDATE conversations SET thinking_level=? WHERE id=?", string(level), conversationId)
+				runtime.store.SetConversationThinkingLevel(conversationId, string(level))
 			}
 		}
 		cursor := runtime.store.Event(taskId, "conversation.created", map[string]any{"conversationId": conversationId, "projectId": projectId, "title": title})

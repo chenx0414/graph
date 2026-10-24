@@ -52,7 +52,7 @@ func (conversations *TaskRuntimeConversations) Archive(conversationId, requestId
 	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "archive"}, func() any {
 		now := NowMillis()
 		if conversation.ArchivedAt == nil {
-			kernelExec(runtime.store.Db, "UPDATE conversations SET archived_at=? WHERE id=?", now, conversationId)
+			runtime.store.ArchiveConversation(conversationId, now)
 		}
 		archivedAt := now
 		if conversation.ArchivedAt != nil {
@@ -79,7 +79,7 @@ func (conversations *TaskRuntimeConversations) Unarchive(conversationId, request
 	conversation := ConversationRowOf(runtime.store, conversationId)
 	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "unarchive"}, func() any {
 		if conversation.ArchivedAt != nil {
-			kernelExec(runtime.store.Db, "UPDATE conversations SET archived_at=NULL WHERE id=?", conversationId)
+			runtime.store.RestoreConversation(conversationId)
 		}
 		return map[string]any{
 			"conversationId": conversationId,
@@ -196,7 +196,7 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 		if previous != nil && *previous == projectId {
 			return map[string]any{"conversationId": conversationId, "taskId": conversation.AnchorTaskId, "changed": false, "cursor": nil}
 		}
-		kernelExec(runtime.store.Db, "UPDATE conversations SET project_id=? WHERE id=?", projectId, conversationId)
+		runtime.store.BindConversationProject(conversationId, projectId)
 		runtime.store.SetTaskProject(conversation.AnchorTaskId, projectId)
 		invalidated := false
 		if previous != nil {
@@ -204,7 +204,7 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 			// project makes every existing draft unconfirmable, not just hidden.
 			invalidated = true
 			runtime.store.BumpRequirementVersion(conversation.AnchorTaskId)
-			kernelExec(runtime.store.Db, "UPDATE conversations SET binding_since_seq=COALESCE((SELECT MAX(seq) FROM messages WHERE conversation_id=?),0) WHERE id=?", conversationId, conversationId)
+			runtime.store.RebindConversation(conversationId)
 			AppendMessage(runtime.store, MessageInput{
 				ConversationID: conversationId,
 				Role:           MessageRoleSystem,
