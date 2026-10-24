@@ -391,6 +391,12 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 				allowedToolNames = append(allowedToolNames, name)
 			}
 		}
+		if frozen := state.restoring[graphId+"/"+nodeId]; frozen != nil {
+			// The tools it was given are the ones the capability declared
+			// then. A capability that declares a different tool since must
+			// not change what this turn may call.
+			allowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
+		}
 		submit := kernelGraphLaneSubmitTool()
 		nodeTools = append(nodeTools, ToolDefinition{
 			Name:        submit.Name,

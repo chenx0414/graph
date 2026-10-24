@@ -177,6 +177,11 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		request.ReadRoots = record.Policy.ReadRoots
 		request.WriteRoots = record.Policy.WriteRoots
 		request.ProtectedPaths = record.Policy.ProtectedPaths
+		// The tools it was given are the ones the capability declared then.
+		// A capability that declares a different tool since must not change
+		// what this turn may call.
+		request.PiExtensionTools = append([]string{}, record.Policy.PiExtensionTools...)
+		request.AllowedToolNames = append([]string{}, record.Policy.AllowedToolNames...)
 		request.CapabilityDescriptor = options.RecoverySnapshot.Descriptor
 		request.ExecutionConfiguration = record.Configuration.ExecutionConfiguration
 		request.CredentialReference = record.Configuration.CredentialReference

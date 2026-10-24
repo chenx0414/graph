@@ -296,6 +296,12 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				workerConfig.NodeExecutionConfiguration = asMap(configuration.ExecutionConfiguration)
 				workerConfig.CredentialReference = asMap(configuration.CredentialReference)
 				workerConfig.CapabilityDescriptor = frozen.Descriptor
+				// The tools it was given are the ones the capability declared
+				// then. A capability that declares a different tool since
+				// must not change what this turn may call.
+				workerConfig.PiExtensionTools = append([]string{}, frozen.Record.Policy.PiExtensionTools...)
+				workerConfig.AllowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
+				allowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
 			}
 			return workerConfig
 

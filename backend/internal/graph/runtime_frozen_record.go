@@ -110,6 +110,8 @@ type FrozenExecutionPolicy struct {
 	NativeTools []string `json:"nativeTools"`
 	// AllowedToolNames are the tools it could call.
 	AllowedToolNames []string `json:"allowedToolNames"`
+	// PiExtensionTools are the tools its Pi extensions registered for it.
+	PiExtensionTools []string `json:"piExtensionTools"`
 	// BundleDigest is the capability bundle digest of the execution.
 	BundleDigest string `json:"bundleDigest"`
 	// ToolPolicyDigest is the tool policy digest of the execution.
@@ -182,7 +184,8 @@ func frozenExecutionOfRequest(request AgentSessionRequest, preAdmission []string
 			Workspace: request.Workspace, StateDir: request.StateDir, SkillPaths: request.SkillPaths,
 			SkillFolder: request.SkillFolder, PiExtensionPaths: request.PiExtensionPaths, ReadRoots: request.ReadRoots,
 			WriteRoots: request.WriteRoots, ProtectedPaths: request.ProtectedPaths, FilesystemAccess: request.FilesystemAccess,
-			NativeTools: request.NativeTools, AllowedToolNames: request.AllowedToolNames, BundleDigest: request.BundleDigest,
+			NativeTools: request.NativeTools, AllowedToolNames: request.AllowedToolNames,
+			PiExtensionTools: request.PiExtensionTools, BundleDigest: request.BundleDigest,
 			ToolPolicyDigest: request.ToolPolicyDigest, RuntimePolicyDigest: request.RuntimePolicyDigest, ThinkingLevel: request.ThinkingLevel,
 		},
 		Configuration: FrozenExecutionConfiguration{
