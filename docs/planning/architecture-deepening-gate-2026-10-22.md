@@ -54,6 +54,7 @@
 **二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
 | `6161e550` … `20c61fc0`（`nodes` 表也有了主人） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 502 秒，**全绿**。这一轮改的是**谁写哪张表**，不是写什么：18 处节点状态、3 处规格与 activation、2 处产出、4 处时钟都搬进了 task store，`nodes` 表在 store 之外只剩 schema 迁移与那次跨表退役（两处都写明了为什么） |
 
+| `f77e7674`（节点的那一轮（`activations` 表）也有了主人） | 301 个文件里 299 通过、1 跳过、**1 失败**（1564 个测试） | 唯一失败是 `tests/e2e/harness-composition.test.ts`（"a second probe starts from the harness the project already adopted"），满负载下的超时：它在完整套里花了 **120,346 毫秒**却没拿到比较结果，**单独重跑只花 1,010 毫秒并通过**。它讲的是 harness 探针的比较，与本轮改动无关（本轮改的是**谁写哪张表**） |
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
 
 门禁配置在 2026-10-23 变了：`vitest.config.ts` 现在是 `bail: 1` + `maxWorkers: 2`，并且 `check` 走 `scripts/check-queue.py` 串行化各 worktree。因此一次失败会停掉整轮门禁，本文件的失败对照改用 `--bail=0` 跑完整套，再与未改动的 main 逐项对照。
