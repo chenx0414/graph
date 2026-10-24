@@ -50,6 +50,7 @@
 | `8d670c3c`（文档按主题拆开） | 同上一行 | 门禁**第一次拦下**这两份文档（21,224 与 25,464 字节，超 20,000 的上限）。**拆，不求例外**：未处理的问题与已经处理的问题分成两份，工具表/main 的合入/冻结执行另占一份，七份文档互相链接 |
 | `b8c7cc1`（合入 main 的两个提交） | 301 个文件里 **299 通过、1 跳过、1 失败**（1564 个测试）；"Suite baseline increased to files 301, tests 1564"；"Acceptance evidence is unchanged" | 完整套 498 秒。**唯一失败换了一个**：`tests/e2e/go-wake-notification.test.ts`（"a confirmed graph wakes main with the graph id"），满负载下的超时，**单独重跑只花 2,552 毫秒并通过**——分支以前也撞见过它。而上一行那条 `restricted-process` 的失败**被 main 的修复带走了**。合并用分支的老办法查过：main 自分叉以来新增的每一行都拿到合并后的树里去找，**找不到的只有 baseline 自己的计数**（门禁重算它）。合并后 **main 是本分支的祖先** |
 
+| `b8c7cc1`（合入 main 的两个提交，**再跑一次**） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged" | 完整套 497 秒，**这一次全绿**。上一轮那个 `go-wake-notification` 的超时因此确认是满负载下的抖动（它单独跑只要 2,552 毫秒），不是本分支的问题 |
 **二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
 
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
