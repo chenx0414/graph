@@ -134,11 +134,7 @@ func (runtime *TaskRuntime) GraphLayout(taskId string, revision int) map[string]
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
 	epoch := kernelInt(kernelRow(runtime.kernel.Db, "SELECT COALESCE(MAX(cursor),0) AS epoch FROM events WHERE task_id=? AND type='graph.layout_reset'", taskId)["epoch"])
-	row := kernelRow(runtime.kernel.Db, "SELECT topology,layout FROM kernel_graph_layouts WHERE task_id=? AND revision_version<=? ORDER BY revision_version DESC LIMIT 1", taskId, revision)
-	var snapshot any
-	if row != nil {
-		snapshot = map[string]any{"topology": kernelString(row["topology"]), "layout": parseJSON(kernelString(row["layout"]))}
-	}
+	snapshot := runtime.kernel.GraphLayoutSnapshot(taskId, revision)
 	return map[string]any{"epoch": epoch, "snapshot": snapshot}
 }
 
@@ -150,8 +146,7 @@ func (runtime *TaskRuntime) SaveGraphLayout(taskId string, revision int, topolog
 	if current != epoch {
 		return false
 	}
-	kernelExec(runtime.kernel.Db, "INSERT OR IGNORE INTO kernel_graph_layouts(task_id,revision_version,topology,layout) VALUES(?,?,?,?)",
-		taskId, revision, topology, CanonicalJSON(layout))
+	runtime.kernel.KeepGraphLayout(taskId, revision, topology, CanonicalJSON(layout))
 	return true
 }
 

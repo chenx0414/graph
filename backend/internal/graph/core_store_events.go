@@ -150,11 +150,17 @@ func (s *TaskStore) Command(scope, requestID string, payload any, apply func() a
 			panic(err)
 		}
 		result := apply()
-		if _, err := s.DB.Exec("INSERT INTO commands VALUES(?,?,?,?)", scope, requestID, encoded, CanonicalJSON(result)); err != nil {
-			panic(err)
-		}
+		s.RecordCommand(scope, requestID, encoded, CanonicalJSON(result))
 		return result
 	})
+}
+
+// RecordCommand records the receipt of one command, so a repeated request
+// with the same id gets the same answer.
+func (s *TaskStore) RecordCommand(scope, requestID, encoded, receipt string) {
+	if _, err := s.DB.Exec("INSERT INTO commands VALUES(?,?,?,?)", scope, requestID, encoded, receipt); err != nil {
+		panic(err)
+	}
 }
 
 func eventTaskID(taskID any) any {

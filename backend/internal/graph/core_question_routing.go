@@ -241,7 +241,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 			if !ok || requested != input.AutoAnswer.Answer.Grant {
 				panic(errors.New("Automatic grant must match the requested capability"))
 			}
-			kernelExec(store.Db, "INSERT OR IGNORE INTO task_grants VALUES(?,?)", input.TaskId, input.AutoAnswer.Answer.Grant)
+			store.GrantTaskCapability(input.TaskId, input.AutoAnswer.Answer.Grant)
 		}
 		store.ResolveQuestion(id, input.AutoAnswer.Answer)
 		if input.AutoAnswer.Resume != nil && *input.AutoAnswer.Resume {

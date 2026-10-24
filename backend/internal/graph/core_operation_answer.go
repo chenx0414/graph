@@ -102,7 +102,7 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			if answer.Grant != grant {
 				Raise("invalid_answer", "Grant must match the requested capability")
 			}
-			kernelExec(l.store.Db, "INSERT OR IGNORE INTO task_grants VALUES(?,?)", taskId, answer.Grant)
+			l.store.GrantTaskCapability(taskId, answer.Grant)
 		} else if kind == "system_change" && answer.Type == "respond" {
 			decision := ""
 			if record, ok := jsonRecord(answer.Value); ok {

@@ -55,7 +55,7 @@ func (runtime *TaskRuntime) settlePrepare(opId, requestId string, payload map[st
 			"baselineSha": prep.BaselineSha,
 			"cursor":      runtime.store.Event(nil, "project.prepared", map[string]any{"projectId": payload["projectId"], "state": prep.State, "baselineSha": prep.BaselineSha}),
 		}
-		kernelExec(runtime.store.Db, "INSERT INTO commands VALUES(?,?,?,?)", "projects", requestId, encoded, CanonicalJSON(receipt))
+		runtime.store.RecordCommand("projects", requestId, encoded, CanonicalJSON(receipt))
 		return receipt
 	})
 }

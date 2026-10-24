@@ -7,12 +7,6 @@ package graph
 // these can be called from inside a transaction the caller already holds -
 // which is exactly where the graph's controls are applied.
 
-// ResetGraphLayout forgets the stored layout, so the next read lays the graph
-// out again.
-func (k *KernelStore) ResetGraphLayout(taskID string) {
-	g5Exec(k.Db, "DELETE FROM kernel_graph_layouts WHERE task_id=?", taskID)
-}
-
 // CancelModuleOperation says an operation will not run.
 func (k *KernelStore) CancelModuleOperation(operationID string) {
 	g5Exec(k.Db, "UPDATE kernel_module_operations SET state='cancelled' WHERE id=?", operationID)
