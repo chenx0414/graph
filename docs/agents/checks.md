@@ -35,6 +35,15 @@ Vitest 默认最多运行两个 worker。遇到第一个失败即停止本轮套
   `GRAPH_HARNESS_GATE_SNAPSHOT=/path/to/snapshot node --run check:harness`。
 - 门禁红了先看它指名的那句规则；多数时候是 harness 少了东西，不是用例坏了。
 
+## 真实模型评测
+
+`node --run check` 里的 `check:harness` 用替身模型跑冻结用例：免费、确定，判"活儿还能不能干完"。
+判"提示还管不管用"要真模型，那是 `node --run eval:harness` 的事：它冻结真正在跑的那套
+harness 面（默认 `~/.graph`），用 config 里的模型跑一遍，判决记进
+`~/.graph/harness-eval-verdicts.json`，报告落在 `~/.graph/harness-eval-report.json`。
+
+它按需跑，不进门禁：真模型要凭据、要预算。
+
 ## 后台运行桌面测试
 
 普通 `node --run check` 和 `app:smoke` 在后台启动桌面窗口，不显示 Dock 图标、托盘、系统通知或错误对话框。隐藏窗口继续渲染，桌面 E2E 仍运行真实 Electron、后端和页面交互。

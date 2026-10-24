@@ -7,7 +7,7 @@
     "command": "pass"
   },
   "surface": {
-    "src/runtime/agent-context.ts": "7c10c38531cb251d7cecff8a91f0d13e6ec86a123caaa15a7341dcf522fe10d3",
+    "src/runtime/agent-context.ts": "92557162a54a13e685f220da5891116a61772625667953c8cba88c6b87cf943d",
     "src/runtime/agent-context-assembly.ts": "a303ddd84c61bcfb2945c5f8db78d274037e98f8d09ca9ec0ed7cd88138b1f92",
     "src/runtime/agent-tool-definitions.ts": "c312d5e3fe297e417ae5ee34f201ef25619f11f2ab43a8acf401aeb63666bee4",
     "src/runtime/agent-tools.ts": "4f229c2e0bef2eb93185756db5df11960e31159ad97ced461cd263d9edd633f3",

@@ -41,6 +41,7 @@
     "accept:m7:contract": "node examples/m7-contract.ts",
     "check:evidence": "node scripts/check-evidence.mjs",
     "check:harness": "node scripts/harness-behavior-gate.mjs",
+    "eval:harness": "node scripts/harness-eval-report.mjs",
     "test:report": "python3 scripts/check-queue.py --continue -- node node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=tests/.suite-report.json",
     "check:baseline": "node scripts/check-test-baseline.mjs",
     "check:tokens": "node scripts/check-file-tokens.mjs",

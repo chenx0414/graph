@@ -154,6 +154,12 @@ Harness² 的跑分框架不需要移植，它的**方法**可以拆成三个 Gr
   门禁记下被判过的 harness 面与每个用例的判决，所以"改完 harness"有了行为上的判决，
   而回归会指名道姓地说哪个用例坏了、harness 少了哪句规则。
   `node --run check` 会跑它（`check:harness`，约 20 秒）。
+- **P6：真实模型评测接进闭环（已落地）**。替身模型判不了"提示还管不管用"，那要真模型。
+  `node --run eval:harness` 冻结**真正在跑的那套 harness 面**（默认 `~/.graph`），
+  用 config 里的模型把冻结用例跑完，判决记进 `~/.graph/harness-eval-verdicts.json`
+  （账本记着面与模型，于是下次能说出**哪个用例回归了**），报告落在
+  `~/.graph/harness-eval-report.json`。它不进 `node --run check`——真模型要凭据、要预算，
+  没人跑得起来的门禁不是门禁；它按需跑，结论由 Agent 用 `record_harness_decision` 沉淀。
 
 ## 已补的缺口：Agent 读自己的证据
 

@@ -207,4 +207,7 @@ test('the harness identity records durable harness knowledge and reports it with
   // A harness change is judged by the behavior gate, so the Agent has to know
   // that a dropped rule shows up there as a regressed case.
   expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/behavior gate carries the frozen cases/);
+  // The gate judges with a scripted model; the real evaluation is the other
+  // judgement, and the Agent has to know it exists.
+  expect(DEFAULT_MAIN_RSI_IDENTITY).toMatch(/eval:harness/);
 });
