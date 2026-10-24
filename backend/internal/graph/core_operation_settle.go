@@ -96,7 +96,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	if missingUsage && !unknownUsageAllowed {
 		RecordConversationOutput(l.store, operation, result)
 		kernelExec(l.store.Db, "UPDATE operations SET state='unknown',worker_active=0,result=? WHERE id=?", CanonicalJSON(result), operation.Id)
-		kernelExec(l.store.Db, "UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)
+		l.store.SetNodeBlocked(operation.TaskId, operation.NodeId)
 		l.store.ResolveOperationRecoveryQuestions(operation.Id, map[string]any{"result": result})
 		CloseUserWaitForOperation(l.store, operation.Id)
 		if kernelRow(l.store.Db, "SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'", operation.Id) == nil {

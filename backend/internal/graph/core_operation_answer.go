@@ -8,7 +8,7 @@ import (
 func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, operationId *string) string {
 	return l.transaction(func() any {
 		node := l.nodeRow(taskId, nodeId)
-		kernelExec(l.store.Db, "UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?", taskId, nodeId)
+		l.store.SetNodeBlocked(taskId, nodeId)
 		kernelExec(l.store.Db, "UPDATE activations SET state='blocked' WHERE id=?", kernelString(node["activation_id"]))
 		var autoAnswer *QuestionAutoAnswer
 		if operationId != nil && kind == "permission" {
@@ -186,7 +186,7 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			} else if kind != "system_change" && completed && queued == 0 {
 				next = "succeeded"
 			}
-			kernelExec(l.store.Db, "UPDATE nodes SET status=? WHERE task_id=? AND id=?", next, taskId, nodeId)
+			l.store.SetNodeStatus(taskId, nodeId, next)
 		}
 		return nil
 	})

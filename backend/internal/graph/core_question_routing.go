@@ -198,7 +198,7 @@ func RecoverMaster(store *TaskStore, taskId, reason string) bool {
 			store.ResolveQuestion(kernelString(question["id"]), map[string]any{"type": "retry"})
 		}
 		if reason == "configuration" || (master.Status != "preparing" && master.Status != "running" && master.Status != "blocked") {
-			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", taskId, master.Id)
+			store.SetNodePending(taskId, master.Id)
 		}
 		if reason == "configuration" {
 			store.Event(taskId, "task.master_recovered", map[string]any{"reason": "internal problem parked while the environment was unavailable"})
@@ -245,7 +245,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 		}
 		store.ResolveQuestion(id, input.AutoAnswer.Answer)
 		if input.AutoAnswer.Resume != nil && *input.AutoAnswer.Resume {
-			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", input.TaskId, input.NodeId)
+			store.SetNodePending(input.TaskId, input.NodeId)
 			kernelExec(store.Db, "UPDATE activations SET state='pending' WHERE id=(SELECT activation_id FROM nodes WHERE task_id=? AND id=?)", input.TaskId, input.NodeId)
 		}
 		store.Event(input.TaskId, "question.auto_approved", map[string]any{
@@ -268,7 +268,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 		// The main Agent runs as the conversation master. Its prompt reads the
 		// structured problem list; no user-visible raw error message is inserted.
 		if master.Status != "preparing" && master.Status != "running" {
-			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", anchorTaskId, master.Id)
+			store.SetNodePending(anchorTaskId, master.Id)
 		}
 		// Record the same durable, deduplicated intent every other wake uses, so a
 		// problem that is observed again does not become a second turn. A problem

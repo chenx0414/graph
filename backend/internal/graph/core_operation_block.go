@@ -90,18 +90,18 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			l.store.Event(operation.TaskId, "context.rejected", map[string]any{"nodeId": operation.NodeId, "operationId": operation.Id, "data": data})
 			l.Block(operation.TaskId, operation.NodeId, "context_rejected", data, operationLifecycleStringPtr(operation.Id))
 		case "interrupted":
-			kernelExec(l.store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)
+			l.store.SetNodePending(operation.TaskId, operation.NodeId)
 			RecordConversationInterruption(l.store, operation, refusal.Message)
 		default:
 			if unknown || refusal.Code == "unknown_usage" {
 				existing := kernelRow(l.store.Db, "SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'", operation.Id)
 				if existing != nil {
-					kernelExec(l.store.Db, "UPDATE nodes SET status='blocked' WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)
+					l.store.SetNodeBlocked(operation.TaskId, operation.NodeId)
 				} else {
 					l.Block(operation.TaskId, operation.NodeId, "unknown_usage", map[string]any{"reason": refusal.Message}, nil)
 				}
 			} else {
-				kernelExec(l.store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)
+				l.store.SetNodePending(operation.TaskId, operation.NodeId)
 			}
 		}
 		return true

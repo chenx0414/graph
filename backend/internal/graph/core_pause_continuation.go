@@ -25,7 +25,7 @@ func ResumePauseContinuations(store *TaskStore, taskId string) []map[string]any 
 	rows := kernelRows(store.DB, "SELECT request_id AS requestId,node_id AS nodeId FROM pause_continuations WHERE task_id=? AND state='waiting' ORDER BY rowid", taskId)
 	for _, row := range rows {
 		kernelExec(store.DB, "UPDATE pause_continuations SET state='ready' WHERE request_id=? AND state='waiting'", kernelString(row["requestId"]))
-		kernelExec(store.DB, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=? AND status='succeeded'", taskId, kernelString(row["nodeId"]))
+		store.ResumeSucceededNode(taskId, kernelString(row["nodeId"]))
 		store.Event(taskId, "pause.continuation_ready", map[string]any{"requestId": kernelString(row["requestId"]), "nodeId": kernelString(row["nodeId"])})
 	}
 	return rows

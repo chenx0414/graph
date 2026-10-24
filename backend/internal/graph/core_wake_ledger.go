@@ -65,8 +65,7 @@ func WakeMaster(store *TaskStore, intent WakeIntent) bool {
 		if promoted == 0 {
 			return false
 		}
-		sqliteChanges(store.DB, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=? AND status='succeeded'",
-			anchorTaskID, sqlString(row["master_id"]))
+		store.ResumeSucceededNode(anchorTaskID, sqlString(row["master_id"]))
 		store.Event(anchorTaskID, "wake.ready", map[string]any{
 			"kind": intent.Kind, "dedupeKey": intent.DedupeKey, "taskId": intent.TaskID, "nodeId": sqlString(row["master_id"]),
 		})

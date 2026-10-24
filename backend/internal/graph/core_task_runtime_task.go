@@ -226,7 +226,7 @@ func (task *TaskRuntimeTask) SetBudget(input TaskRuntimeBudgetInput) Receipt {
 			CloseUserWait(runtime.store, task.taskId, input.NodeId)
 			stillOpen := kernelRow(runtime.store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'", task.taskId, input.NodeId)
 			if stillOpen == nil {
-				kernelExec(runtime.store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", task.taskId, input.NodeId)
+				runtime.store.SetNodePending(task.taskId, input.NodeId)
 			}
 		}
 		return map[string]any{
@@ -277,7 +277,7 @@ func (task *TaskRuntimeTask) Say(text string, requestId string) Receipt {
 			if status == "preparing" || status == "running" || HasLockedQuestion(runtime.store, task.taskId, kernelString(row["id"])) {
 				continue
 			}
-			kernelExec(runtime.store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", task.taskId, kernelString(row["id"]))
+			runtime.store.SetNodePending(task.taskId, kernelString(row["id"]))
 		}
 		return map[string]any{
 			"taskId": task.taskId,

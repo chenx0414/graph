@@ -159,7 +159,7 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 				row := kernelRow(runtime.store.Db, "SELECT status FROM nodes WHERE task_id=? AND id='master'", taskId)
 				status := kernelString(row["status"])
 				if status != "preparing" && status != "running" {
-					kernelExec(runtime.store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id='master'", taskId)
+					runtime.store.SetNodePending(taskId, "master")
 				}
 			}
 			if message.Cursor != nil {

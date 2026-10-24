@@ -27,7 +27,7 @@ func (l *OperationLifecycle) Admit(input OperationAdmitInput) Operation {
 		}
 		kernelExec(l.store.Db, "UPDATE activations SET input_versions=?,state='preparing' WHERE id=?",
 			CanonicalJSON(operation.InputVersions), operation.ActivationId)
-		kernelExec(l.store.Db, "UPDATE nodes SET status='preparing' WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId)
+		l.store.SetNodePreparing(operation.TaskId, operation.NodeId)
 		l.store.Event(operation.TaskId, "operation.intent", OperationIntentEvent(operation))
 		return operation
 	}).(Operation)
@@ -49,7 +49,7 @@ func (l *OperationLifecycle) markNotSent(row map[string]any, options operationNo
 	ReleaseRsiContinuation(l.store, id)
 	ReleaseWakes(l.store, id)
 	if options.ResetNode {
-		kernelExec(l.store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", kernelString(row["task_id"]), kernelString(row["node_id"]))
+		l.store.SetNodePending(kernelString(row["task_id"]), kernelString(row["node_id"]))
 	}
 	if options.EventReason != nil {
 		l.store.Event(kernelString(row["task_id"]), "operation.not_sent", map[string]any{"operationId": id, "reason": *options.EventReason})
