@@ -83,6 +83,23 @@ node scripts/check-file-tokens.mjs src/core/task-runtime.ts
 这个检查不进 `node --run check`：仓库里已存在历史大文件，而它要拦的是**本次改动**新写大
 文件。`GRAPH_FILE_TOKEN_LIMIT` 可临时改上限（默认 5000）。
 
+## 内核表的归属检查
+
+`kernel_` 开头的表是图的持久状态，它们归 `KernelStore` 一个主人：形状由 store 知道，其他
+地方只问 store 要答案、要 store 去写。任何在 store 之外写这些表的地方都是第二个主人，
+一列要改就得在两个地方都改。
+
+```sh
+node --run check:ownership                  # 整个 backend/internal/graph 包
+node scripts/check-kernel-ownership.mjs backend/internal/graph/core_graph_runtime_stop.go
+```
+
+读不算第二个主人：读不改表的形状，所以 store 之外仍可以有读。
+
+这个检查**暂时不进** `node --run check`，也不进 Pre-commit Hook：main 与并行的几个分支
+仍有几十处越界写，把检查接进共享的门禁会立刻打断它们的提交。等那些分支都取了这次改动
+（`feature/architecture-deepening`）之后，再把它接进 `check-queue.py` 的步骤里。
+
 ## Pre-push Hook
 
 仓库内提供 `.githooks/pre-push`，推送前执行完整检查。在每个 clone 的长期主检出中启用一次：
