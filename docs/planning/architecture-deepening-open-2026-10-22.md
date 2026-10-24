@@ -1,6 +1,6 @@
 # 架构深化查出来、尚未处理的问题（2026-10-22）
 
-配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
+配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
 
 下面每一条都是**这一轮查出来、但刻意没有改**的问题。改动它们要么需要一次产品决定，要么需要一份能证明它的 E2E，而这两样都不是结构整理该顺手做的。
 
@@ -43,5 +43,7 @@ kernel 层的表与 `tasks` 表现在都有 owner 了。`tasks` 的生命周期�
 剩下的同类已经补上了：`invocations` 与 `questions` 这两张表原先各有多个写入口——闸门这一侧已收进 store，operation 生命周期自己写一次调用的 usage 与 cost，`questions` 表更是由 7 个文件写了 14 遍"回答一个问题"、6 种谓词。现在 <span>core_task_questions.go</span> 是这张表唯一的写入口，七条规则各按"它答什么"命名；`invocations` 那一个写入口也走了 store。store 之外只剩两处 **schema 迁移**（退役时删掉已退役 operation 的 invocations、把问题归属从 user 移到 main Agent 的那次迁移）——迁移的 SQL 应该在迁移里。
 
 **到这一步，运行时层与内核层写过的表都有 owner 了**：`tasks`、`questions`、`invocations` 归 task store，`kernel_*` 归 kernel store。剩下的是**读**的归属问题：这些表仍被十来处直接读（harness 的诊断面、预算账本、节点执行器、pi adapter 等），读不写，因此不构成"谁拥有这张表"的争议，但一个列的含义若要改，仍要找许多处。
+
+**再往下还有一层，而它原先也没被查过**。`nodes` 是 v1 的节点表，它**原先由 17 个文件各自写着 SQL**——和 kernel 表一模一样的缺口，就在一层之下。现在它也有主人了（见[一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md)），守卫也管到了它。**但 v1 还有几张表没有主人**：`operations`（21 处写、11 个文件）、`instances`（14 处、7 个）、`activations`（9 处、8 个），以及 `messages`、`runtime`、`projects` 这几张。它们与 kernel 表、nodes 表是**同一个形状的问题**——一张表的形状被许多地方知道——因此这是**下一步的候选**，不是一次产品决定。本轮没有做。
 
 **而这句话原本只覆盖了一半——图服务层没有查过**。一查就发现 **12 个文件里 38 处越界写**（`kernel_create_requests`、`kernel_graph_owners`、`kernel_graph_layouts`、`kernel_module_operations`、`kernel_module_inbox`、`kernel_transition_outbox`、`kernel_queue`、`kernel_node_state`、`kernel_nodes`、`kernel_modules`、`kernel_executions`、`kernel_lifecycle`）。现在它们都归 store 了：`backend/internal/graph` 里 **store 之外一处 kernel 写都没有**，而 `node --run check:ownership` 查的就是这件事（守卫与它的启用条件记在[后半程](architecture-deepening-ownership-2026-10-22.md)的第二十七步）。**一句只查了一半就写下来的主张，是愿望，不是主张。**

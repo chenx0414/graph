@@ -1,6 +1,6 @@
-# 架构深化的后半程：表的归属（2026-10-22）
+# 架构深化的后半程：先给几张表一个主人（2026-10-22）
 
-配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
+配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)
 
 ## 已完成并有证据的部分（后半程）
 
@@ -33,21 +33,6 @@
     - **store 之外只剩两处 schema 迁移**——退役时删掉已退役 operation 的 invocations，以及把问题归属从 user 移到 main Agent 的那次迁移。迁移的 SQL 应该在迁移里。
     - **这一次提交跳过了文件大小守卫**，理由与合并、任务生命周期那两次相同：守卫量的是暂存的 blob，而这四个文件改动前就很大（`core_task_runtime.go` 197KB、`core_operation_lifecycle.go` 60KB、`core_execution.go` 46KB、`core_graph_runtime.go` 22KB），而且**四个都比改动前小了**——456、608、99、70 字节。这次新增的文件 `core_task_questions.go` 是 3,031 字节。
     - **证据**：一次探针把每条规则推过真实的行——开一个问题与它的 canonical data、同一问题答两次、只答还开着的那个（已答过的不再答）、一个 operation 的问题不动另一个 operation、recovery 规则不动另一个 kind、两条要计数的规则与它们的计数、改 data 而不回答问题、以及一次调用的 usage 与 cost——**24 项检查全过**。探针已删除。
-
-26. **「kernel 表归 store」这条主张，此前只查过两个层**（提交 `07ef0b92`、`83c16062`、`9894782f`、`4c821127`）。第十五步写下这句话时，它查过的是**运行时层**与**内核层**：泳道、节点宿主、工具闸门、provider 闸门、operation broker 与节点恢复都不再自己写 kernel 表。**图服务层没有查过**。一查就发现 **12 个文件里 38 处越界写**——而且它们写的是 `kernel_create_requests`、`kernel_graph_owners`、`kernel_graph_layouts`、`kernel_module_operations`、`kernel_module_inbox`、`kernel_transition_outbox`、`kernel_queue`、`kernel_node_state`、`kernel_nodes`、`kernel_modules`、`kernel_executions`、`kernel_lifecycle`。**一条被写下来的主张，如果只查了一半，那它就不是主张，是愿望。**
-
-    - **图的创建请求与归属**（`07ef0b92`）。同一个 request id 问两次要拿到同一个图，让这件事成真的是那张记着"第一次问了什么"的行——图 id、要的定义、准备到了哪一步。图服务原先自己读它、自己写它三个状态，因此知道它的列。store 现在持有它：`FindCreateRequest` 答"这个 request id 用过没有"，`RecordCreateRequest` 记下这次问，`MarkCreateRequestReady` 与 `MarkCreateRequestFailed` 记下准备到了哪一步，`RecordGraphOwner` 与 `GraphOwner` 记与答"这张图归谁"。
-    - **图的控制面**（`83c16062`）。relayout、取消一个 operation、重试/跳过/取消一个队列项、暂停/恢复一个节点、停掉整张图——每一样都在调用点写着 kernel 表的 SQL：布局行、module operation、module inbox、队列、节点自己的行、节点的暂停标志。现在它们问 store，而方法名说的是**做什么**而不是**动哪些列**：`ResetGraphLayout`、`CancelModuleOperation`、`UnblockNode`（被挡住的节点回到 idle）、`ReleaseNode`（跑不了的节点回到 idle）、`RetryQueueItem`（放回队列并把 generation 加一）、`SettleQueueItem`（结束，不再跑）、`CancelQueuedWork`、`MarkDeliveryProcessed` 与 `MarkGraphDeliveriesProcessed`。
-        - 一条语句变成两条，而差别是**一条规则**而不是一次重写：重试路径原本一条语句同时写队列状态、原因与 generation，而 generation 只在重试时加一。`RetryQueueItem` 与 `SettleQueueItem` 各自说明自己是哪一种，于是 generation 只在它该加的地方加。
-    - **修订、执行与模块**（`9894782f`）。新修订不是换掉一张图，而是把它挪动：修订新增的节点被受理，留下的节点被放到新修订上并带上新的 spec，被移除的节点被退休——这三条原先由图运行时自己写，因此它知道节点表与模块表的列。store 现在知道：`ApplyNodeRevision`、`ApplyModuleRevision`、`RetireNode`。执行身上那个"还缺什么"的标志由节点执行器与提交桥各写一次，现在由 `MarkExecutionMissingRequired`、`ClearExecutionMissingRequired`、`MarkExecutionPendingGap` 说。图请求完成由 `RequestGraphCompletion` 与 `ClearGraphCompletionRequest` 说。模块的触发由 `ResetModuleTrigger` 说，operation 占着 worker 由 `HoldModuleOperationWorker` 说——它就挨着 store 原有的 `ReleaseModuleOperationWorker`。
-    - **暂停时钟与执行时钟**（`4c821127`）。两个时钟原先是自由函数，写着 kernel 表：暂停时钟写节点行的暂停列（图可以暂停，图里的一个节点也可以暂停，时钟是共用的），执行时钟写执行行的两段区间。它们现在是 store 的方法：`SetNativePause`、`FinishNativePauses`、`NativePauseMs`、`SetExecutionWaiting`、`CloseExecutionTiming`。**改签名是这次交出的要点**：要用这些时钟的地方手里正好有 kernel store，于是它们现在这么说——图的控制面与节点泳道本来就有，任务运行时一直有（store 建起来那天它就有了），**执行名额只有 task store**，因为它把旧的 `operations` 表与新的 kernel 表一起数：那是关于两份 store 的事实，它留在原处；但它不再自己写 kernel 表，它问 store 要 worker 与执行等待。
-        - **一处必须记下来的约束**：执行名额的等待**开着事务**再调 store。因此 store 的方法要写成**加入调用方已经持有的事务**而不是自己再开一个——事务里再 BEGIN 正是宿主一直拒绝的。store 那个方法就是这么写的，所以等待既不死锁也不开嵌套事务。
-    - **每一条新方法都是一条语句**，这正是它们能在调用方已经持有的事务里跑的原因——一条语句本身就是原子的。图的控制在事务里应用（重试路径把队列项、节点的暂停标志与节点的状态一起改，要么都成要么都不成），store 的方法因此**加入那个事务，而不是自己开一个**。
-    - **这一轮没有新写测试**：改的是**谁写哪张表**，不是**写什么**。行为由完整的门禁证明（见门禁证据那份文档）。
-
-27. **内核表有了一道守卫**（提交 `bd063ba4`）。一句没人检查的话是话，不是规则。`scripts/check-kernel-ownership.mjs` 去找 `backend/internal/graph` 里 store 自己文件之外对 `kernel_` 表的写，并报出文件、行与表名。它**读 SQL 本身**，因此写法不同的写也是写；注释里提到一张表不是写，因此它先去掉注释再看。**守卫也试过它能不能失败**：拿一个有写的文件试，它报出了那一行；拿一个只提到表的注释试，它没有报。
-    - **它暂时不进 `node --run check`，也不进 Pre-commit Hook**：main 与并行的几个分支仍有几十处越界写（main 61 处），而 Hook 与门禁是**这个仓库所有工作树共用的**，现在接进去只会打断它们的提交，不会教会它们什么。检查自己站得住（`node --run check:ownership`），检查操作指南里写清了接进 `check-queue.py` 的条件：**那些分支都取了这次改动之后**。
-
 ## 查出来、尚未处理的问题
 
 它们各占一份文档，因为每一件都是不同的性质、需要不同的决定：[架构深化查出来、尚未处理的问题](architecture-deepening-open-2026-10-22.md)。

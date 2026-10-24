@@ -1,6 +1,6 @@
 # 代码库结构深化的门禁证据（2026-10-22）
 
-配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md)——那里记着每一步做了什么。
+配套文档：[架构深化计划与证据](architecture-deepening-2026-10-22.md) · [后半程：表的归属](architecture-deepening-ownership-2026-10-22.md) · [一张表一个主人](architecture-deepening-one-owner-per-table-2026-10-22.md) · [工具表、main 的合入与冻结执行](architecture-deepening-tools-2026-10-22.md) · [拆分战役](architecture-deepening-splits-2026-10-22.md) · [门禁证据](architecture-deepening-gate-2026-10-22.md) · [尚未处理的问题](architecture-deepening-open-2026-10-22.md) · [查出来、已经处理的问题](architecture-deepening-closed-2026-10-22.md)——那里记着每一步做了什么。
 
 ## 门禁证据
 
@@ -52,6 +52,7 @@
 
 | `b8c7cc1`（合入 main 的两个提交，**再跑一次**） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged" | 完整套 497 秒，**这一次全绿**。上一轮那个 `go-wake-notification` 的超时因此确认是满负载下的抖动（它单独跑只要 2,552 毫秒），不是本分支的问题 |
 **二十九次拆分没有一次靠推理**：每一次都用两种方式证明过是纯搬移——脚本在写任何文件之前先确认各段接起来与原文件逐字节相同，写完之后再用另一段代码独立地比对一次，两次都报 `identical: True`。**守卫每一次都正常跑过，一次 `--no-verify` 都没用。**
+| `6161e550` … `20c61fc0`（`nodes` 表也有了主人） | 301 个文件里 **300 通过、1 跳过、0 失败**（1564 个测试）；"Suite matches the baseline (files 301, tests 1564)"；"Acceptance evidence is unchanged"；`check:ownership` 通过 | 完整套 502 秒，**全绿**。这一轮改的是**谁写哪张表**，不是写什么：18 处节点状态、3 处规格与 activation、2 处产出、4 处时钟都搬进了 task store，`nodes` 表在 store 之外只剩 schema 迁移与那次跨表退役（两处都写明了为什么） |
 
 **本分支改动过的文件现在都在守卫上限之内**：kernel 层与节点泳道那几个文件最大的一个是 `runtime_kernel_graph_lane_host.go` 的 18,856 字节。这不等于整个包都小——`backend/internal/graph` 里另有 **33 个文件超过 20,000 字节**，它们本分支没有改过，因此也不在本文件的证据范围里。
 
