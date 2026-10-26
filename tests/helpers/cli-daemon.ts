@@ -32,6 +32,13 @@ export async function launchCli(root: string, options: {
     ...options.extraArgs ?? [],
   ];
   process.stdout.write(`[graph] backend ${bin}\n`);
+  // The daemon inherits this process' environment. That is what makes a test
+  // see the flags and keys it set for itself - and also what makes a test
+  // depend on the machine: an ambient GRAPH_SUBSCRIPTION_* key makes a
+  // subscription platform look configured, so a case that asserts "saving
+  // without a key is refused" passes on a clean laptop and fails here
+  // (measured: provider-metadata.part-02). A case that needs an unresolved
+  // credential must pass that variable empty rather than trust the host.
   const child = spawn(bin, args, {
     cwd: root, env: { ...process.env, HOME: root, ...options.env }, stdio: ['ignore', 'pipe', 'pipe'],
   });
