@@ -48,37 +48,46 @@ export async function fixture(plans: ResponsePlan[], finiteBudget = false, pause
     // Delay delivery of a genuine application response at the network boundary.
     // No owner DTO or pause transition is supplied by this transport proxy.
     const proxy = createServer(async (request, response) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(chunk);
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(request.headers)) {
-        if (value !== undefined && !['host', 'connection', 'content-length', 'transfer-encoding'].includes(key)) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+      // Teardown closes the application under an in-flight proxied request, and
+      // an async request handler that rejects has nobody to answer to: node
+      // reports it as an unhandled rejection and the whole gate goes red for a
+      // test that passed. A proxy whose upstream went away destroys the
+      // client socket instead.
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const headers = new Headers();
+        for (const [key, value] of Object.entries(request.headers)) {
+          if (value !== undefined && !['host', 'connection', 'content-length', 'transfer-encoding'].includes(key)) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+        }
+        const upstream = await fetch(`${server.url}${request.url}`, {
+          method: request.method ?? 'GET', headers,
+          ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
+        });
+        if (request.url?.endsWith('/pause')) await pauseResponse;
+        if (request.url?.endsWith('/messages') && request.method === 'POST') await browserOptions.messageResponse;
+        if (request.url?.endsWith('/steer') && request.method === 'POST') await browserOptions.steerResponse;
+        // fetch decodes gzip before exposing body; forward headers for those bytes.
+        const responseHeaders = new Headers(upstream.headers);
+        responseHeaders.delete('content-encoding');
+        responseHeaders.delete('content-length');
+        response.writeHead(upstream.status, Object.fromEntries(responseHeaders));
+        if (upstream.body) {
+          const reader = upstream.body.getReader();
+          try {
+            while (!response.destroyed) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              response.write(chunk.value);
+            }
+          } catch (error) {
+            if (!response.destroyed) response.destroy(error instanceof Error ? error : new Error(String(error)));
+          } finally { reader.releaseLock(); }
+        }
+        response.end();
+      } catch (error) {
+        if (!response.destroyed) response.destroy(error instanceof Error ? error : new Error(String(error)));
       }
-      const upstream = await fetch(`${server.url}${request.url}`, {
-        method: request.method ?? 'GET', headers,
-        ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
-      });
-      if (request.url?.endsWith('/pause')) await pauseResponse;
-      if (request.url?.endsWith('/messages') && request.method === 'POST') await browserOptions.messageResponse;
-      if (request.url?.endsWith('/steer') && request.method === 'POST') await browserOptions.steerResponse;
-      // fetch decodes gzip before exposing body; forward headers for those bytes.
-      const responseHeaders = new Headers(upstream.headers);
-      responseHeaders.delete('content-encoding');
-      responseHeaders.delete('content-length');
-      response.writeHead(upstream.status, Object.fromEntries(responseHeaders));
-      if (upstream.body) {
-        const reader = upstream.body.getReader();
-        try {
-          while (!response.destroyed) {
-            const chunk = await reader.read();
-            if (chunk.done) break;
-            response.write(chunk.value);
-          }
-        } catch (error) {
-          if (!response.destroyed) response.destroy(error instanceof Error ? error : new Error(String(error)));
-        } finally { reader.releaseLock(); }
-      }
-      response.end();
     });
     await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
     browserUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;

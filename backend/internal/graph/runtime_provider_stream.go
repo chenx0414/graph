@@ -43,6 +43,13 @@ func (stream *controlledStream) finishReasonReported() bool {
 // The arguments of a tool call arrive as a stream of text. A call whose text
 // is cut short used to be repaired into an empty object, so the tool ran with
 // no arguments at all and the turn was reported as a success.
+//
+// It is cut short for two different reasons, and they are not the same defect:
+// the transport died, or the answer ran out of output budget. A reader told
+// "the provider cut the arguments" goes looking at the network; a reader told
+// "the reply hit the output token limit" knows the call was too big and shrinks
+// it. The provider already said which one it was in its finish reason, so the
+// failure repeats it instead of guessing.
 func (stream *controlledStream) brokenToolCall() error {
 	for _, call := range stream.toolCalls {
 		text := strings.TrimSpace(call.arguments.String())
@@ -50,6 +57,9 @@ func (stream *controlledStream) brokenToolCall() error {
 			continue
 		}
 		if _, ok := decodeJSONValue(text); !ok {
+			if stream.finishReason == "length" {
+				return fmt.Errorf("The reply hit the output token limit before the arguments of the %s tool call were complete", call.name)
+			}
 			return fmt.Errorf("The provider cut the arguments of the %s tool call", call.name)
 		}
 	}
