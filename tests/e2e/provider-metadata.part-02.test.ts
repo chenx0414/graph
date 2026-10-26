@@ -37,8 +37,14 @@ test('real provider fields reject missing keys and malformed custom configuratio
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } } }));
   const original = await readFile(configPath, 'utf8');
+  // The platform's "already configured" state is derived from the daemon's own
+  // environment: a machine that runs Graph on the opencode-go subscription has
+  // GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY set, so the platform looks
+  // configured, the wizard rightly stops asking for a key, and the very error
+  // this test asserts never appears. The daemon must start without it for the
+  // unresolved case to exist at all; the assertion itself is unchanged.
   const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
-    env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-key' }, extraArgs: ['--dynamic'] });
+    env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: '' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());

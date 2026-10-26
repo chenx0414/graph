@@ -55,6 +55,7 @@ function parseArguments(argv) {
     ledger: DEFAULT_LEDGER,
     report: DEFAULT_REPORT,
     timeoutMs: 180000,
+    freezeTimeoutMs: Number(process.env.GRAPH_EVAL_FREEZE_TIMEOUT_MS ?? 600000),
   };
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
@@ -65,8 +66,9 @@ function parseArguments(argv) {
     if (flag === '--report') { options.report = value; index++; continue; }
     if (flag === '--cases') { options.cases = value.split(',').map(name => name.trim()).filter(Boolean); index++; continue; }
     if (flag === '--timeout') { options.timeoutMs = Number(value); index++; continue; }
+    if (flag === '--freeze-timeout') { options.freezeTimeoutMs = Number(value); index++; continue; }
     if (flag === '--help' || flag === '-h') {
-      process.stdout.write('Usage: node scripts/harness-eval-report.mjs --config <config.json> [--cases parser,cli] [--surface <graph home>] [--ledger <file>] [--report <file>]\n');
+      process.stdout.write('Usage: node scripts/harness-eval-report.mjs --config <config.json> [--cases parser,cli] [--surface <graph home>] [--ledger <file>] [--report <file>] [--timeout <ms per case>] [--freeze-timeout <ms>]\n\nThe freeze timeout is a setting, not a constant: freezing copies and digests the whole harness home (measured 2.5 GB / 143,901 files / 236 s with a full capability library), so a fixed ceiling fails the run before it judges anything.\n');
       process.exit(0);
     }
     throw new Error(`Unknown argument: ${flag}`);
@@ -75,6 +77,7 @@ function parseArguments(argv) {
   if (!options.config) throw new Error('A config is required: it names the model that carries the cases out');
   if (!existsSync(options.config)) throw new Error(`The config does not exist: ${options.config}`);
   if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0) throw new Error('The timeout must be a positive number of milliseconds');
+  if (!Number.isSafeInteger(options.freezeTimeoutMs) || options.freezeTimeoutMs <= 0) throw new Error('The freeze timeout must be a positive number of milliseconds');
   return options;
 }
 
@@ -100,10 +103,19 @@ function surfaceFingerprint(manifest) {
  * Freeze the surface the cases will run under. A frozen context is what makes
  * two runs comparable: the same prompts, the same recipes, the same
  * capabilities.
+ *
+ * The freeze copies and digests the whole harness home, including the local SDK
+ * cache when it is there, so its cost follows the size of what is installed:
+ * measured 2.5 GB / 143,901 files / 236 s on a machine with a full capability
+ * library. A fixed 120 s ceiling therefore turned "run the evaluation" into a
+ * coin flip that failed with no verdict and no ledger entry - measured twice,
+ * both times with nothing written. The ceiling is now a setting with real
+ * headroom; it is still a ceiling, because a freeze that never returns is not
+ * evidence either.
  */
-async function freezeSurface(surface, root) {
+async function freezeSurface(surface, root, timeoutMs) {
   const snapshot = join(root, 'surface');
-  await execute(process.execPath, ['scripts/harness-eval-context.mjs', surface, snapshot], { cwd: repo, timeout: 120000 });
+  await execute(process.execPath, ['scripts/harness-eval-context.mjs', surface, snapshot], { cwd: repo, timeout: timeoutMs });
   const manifest = JSON.parse(await readFile(join(snapshot, 'context.json'), 'utf8'));
   return { snapshot, manifest };
 }
@@ -159,7 +171,7 @@ async function main() {
   const caseIds = options.cases.length ? options.cases : Object.keys(cases);
   const root = await mkdtemp(join(tmpdir(), 'graph-harness-eval-'));
   try {
-    const { snapshot, manifest } = await freezeSurface(options.surface, root);
+    const { snapshot, manifest } = await freezeSurface(options.surface, root, options.freezeTimeoutMs);
     const ledger = await readLedger(options.ledger);
     const previous = ledger.runs?.[0]?.cases ?? {};
     const results = [];

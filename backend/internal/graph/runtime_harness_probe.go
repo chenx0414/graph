@@ -87,6 +87,13 @@ type HarnessProbeResult struct {
 // stops being readable as a contrast.
 const HARNESS_PROBE_MAX_VARIANTS = 6
 
+// HARNESS_PROBE_QUIET_MS is how long a probe tolerates a run where nothing at
+// all happened. Silence is measured in observable work (transcript entries,
+// model calls), not in execution state: a candidate that reads, edits and
+// answers for minutes stays in one execution state the whole time, so state
+// alone calls a working experiment stuck.
+const HARNESS_PROBE_QUIET_MS = 120_000
+
 // HarnessProbe runs one task under several harnesses and contrasts them.
 //
 // The host builds the probe graph itself: the variants differ only in the
@@ -210,14 +217,14 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 			break
 		}
 		// The probe holds the Agent's turn, so it must not wait for a
-		// candidate that is going nowhere. When nothing about the candidates
-		// has changed for a while, the honest answer is what has happened so
-		// far - a candidate that did not finish is a fact too.
+		// candidate that is going nowhere. When no candidate has produced
+		// anything observable for a long while, the honest answer is what has
+		// happened so far - a candidate that did not finish is a fact too.
 		signature := service.harnessProbeProgress(graphId)
 		if signature != progress {
 			progress = signature
 			quietSince = NowMillis()
-		} else if NowMillis()-quietSince >= 30_000 {
+		} else if NowMillis()-quietSince >= HARNESS_PROBE_QUIET_MS {
 			timedOut = true
 			break
 		}
@@ -257,6 +264,13 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 
 // harnessProbeProgress is a short description of what the candidates are doing.
 // It changes while they work and stops changing when they are stuck.
+//
+// The signature has to move on work, not only on state: a candidate inside one
+// long turn keeps its execution in `running` and the queue at zero while it
+// calls tools and gets answers. Reading state alone therefore reports a busy
+// experiment as a stalled one, and the contrast is published from candidates
+// that had not finished (measured: three real candidates abandoned at 30 s with
+// 5-12 tool calls and nothing submitted).
 func (service *graphManagementService) harnessProbeProgress(graphId string) string {
 	parts := []string{}
 	for _, row := range kernelRows(service.kernel.Db, "SELECT node_id,state FROM kernel_executions WHERE task_id=? ORDER BY node_id", graphId) {
@@ -264,6 +278,13 @@ func (service *graphManagementService) harnessProbeProgress(graphId string) stri
 	}
 	queued := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed')", graphId)
 	parts = append(parts, "queued="+itoa(int(kernelInt(queued["count"]))))
+	// Written work: every tool call and every answer a candidate produces lands
+	// here, so this count moves while it works even though its state does not.
+	entries := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM node_entries WHERE task_id=?", graphId)
+	parts = append(parts, "entries="+itoa(int(kernelInt(entries["count"]))))
+	// Model calls, which also cover the turn that is still streaming.
+	calls := kernelRow(service.kernel.Db, "SELECT COUNT(*) AS count FROM kernel_provider_calls WHERE task_id=?", graphId)
+	parts = append(parts, "calls="+itoa(int(kernelInt(calls["count"]))))
 	return strings.Join(parts, ",")
 }
 

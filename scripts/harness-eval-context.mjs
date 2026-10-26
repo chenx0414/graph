@@ -80,6 +80,10 @@ export async function createEvaluationContext(sourceHome,destination){
  const installed=await validatedLibrary(graphHome);
  if(JSON.stringify(recipeFacts(installed))!==JSON.stringify(recipeFacts(library)) || JSON.stringify(capabilityFacts(installed))!==JSON.stringify(capabilityFacts(library)))throw new Error('Copied catalog does not match source');
  const archive=join(output,'context.tar.gz');
+ // The archive is written with the default gzip level. A lower level measured
+ // no faster here (bsdtar archives through libarchive, which ignores the GZIP
+ // variable), so the level is left alone rather than claimed as an
+ // optimisation.
  await tar(['-czf',archive,'--no-xattrs','-C',graphHome,...parts.filter(part=>existsSync(join(graphHome,part)))]);
  await chmod(archive,0o600);
  await validateArchive(archive);
