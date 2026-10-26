@@ -63,6 +63,13 @@ type NodeDefinition struct {
 	Acceptance  []string               `json:"acceptance,omitempty"`
 	Submission  NodeSubmission         `json:"submission"`
 	Deliverable *NodeDeliverable       `json:"deliverable,omitempty"`
+	// Integrate puts this node's committed work into the graph's integration
+	// tip when it settles. A nil value means yes, which is what an
+	// implementation lane wants. An experiment does not: candidates that ran
+	// the same task can produce the same path, and the second one to settle is
+	// then refused by the integration tip for a collision that says nothing
+	// about which candidate did better.
+	Integrate   *bool                  `json:"integrate,omitempty"`
 	Inputs      map[string]ProtocolRef `json:"inputs"`
 	Outputs     map[string]ProtocolRef `json:"outputs"`
 	ExecutionSettings

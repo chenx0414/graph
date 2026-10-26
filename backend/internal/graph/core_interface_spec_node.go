@@ -71,7 +71,7 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 	}
 	allowed := map[string]bool{
 		"recipe": true, "task": true, "instructions": true, "acceptance": true, "inputs": true, "outputs": true,
-		"submission": true, "model": true, "retry": true, "budget": true, "deliverable": true, "workspace": true, "access": true,
+		"submission": true, "model": true, "retry": true, "budget": true, "deliverable": true, "workspace": true, "access": true, "integrate": true,
 		"harness": true,
 	}
 	for key := range node {
@@ -183,6 +183,11 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 	for _, anyOf := range interfaceSpecStrings(submission["requiredAnyOf"]) {
 		if _, ok := outputs[anyOf]; !ok {
 			interfaceSpecInvalid("Node " + id + " requiredAnyOf names undeclared output " + anyOf)
+		}
+	}
+	if integrate, ok := node["integrate"]; ok && integrate != nil {
+		if _, isBool := integrate.(bool); !isBool {
+			interfaceSpecInvalid("Node " + id + " integrate must be true or false")
 		}
 	}
 	if deliverable, ok := node["deliverable"]; ok && deliverable != nil {

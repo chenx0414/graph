@@ -142,6 +142,7 @@ func (service *graphManagementService) HarnessProbe(input HarnessProbeInput) Har
 		node := map[string]any{
 			"recipe":     variantRecipe,
 			"task":       task,
+			"integrate":  false,
 			"inputs":     map[string]any{"in": map[string]any{"protocol": "job"}},
 			"outputs":    map[string]any{"out": map[string]any{"protocol": "done"}},
 			"submission": map[string]any{"required": []any{"out"}},

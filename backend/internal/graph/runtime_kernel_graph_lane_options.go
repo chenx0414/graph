@@ -60,6 +60,13 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				if known && state.options.Catalog.Definition(node.Recipe).Review {
 					return nil
 				}
+				// An experiment's candidates are compared, not delivered. Landing
+				// both would make the second lane collide with the first on any
+				// shared path, and the collision would read as "this harness did
+				// worse" when it only means "this lane settled later".
+				if node.Integrate != nil && !*node.Integrate {
+					return nil
+				}
 				admitted := kernelGraphLaneAdmittedNode(state.options.Kernel, execution.TaskId, execution.NodeId)
 				result := state.options.Git.Integrate(GitIntegrateInput{
 					Id: execution.Id, TaskId: execution.TaskId, NodeId: execution.NodeId,
