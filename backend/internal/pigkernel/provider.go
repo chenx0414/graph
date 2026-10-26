@@ -8,13 +8,15 @@ import (
 	"github.com/MichaelKinsy/PiG/ai"
 )
 
-// The daemon owns the model channel; the kernel owns the execution history.
+// The provider stream the daemon owns.
 //
 // PiG's provider runtime accepts any stream implementation, so the daemon can
-// hand the kernel its own controlled stream: the one that admits the send,
-// spends the credential, records the usage and refuses a request the budget
-// does not allow. The kernel therefore never owns an ungated provider channel,
-// and the Graph admission rules keep their force over every send.
+// hand the kernel its own controlled stream. The kernel therefore never owns
+// an ungated provider channel, and the Graph admission rules keep their force
+// over every send.
+//
+// The daemon/kernel division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 
 // EventStream is the provider answer stream the daemon owns.
 //
@@ -30,13 +32,32 @@ type EventStream interface {
 // StreamFunc sends one transcript to the model and returns its answer stream.
 type StreamFunc func(ctx context.Context, transcript []map[string]any, options map[string]any) (EventStream, error)
 
+// MaxTokensOption is the option one request's own output budget travels under.
+//
+// The kernel knows how much room a request may take: a summary asks for a
+// bounded handoff, a conversation turn asks for the model's own limit. The
+// budget belongs to the request, so it travels with the request.
+const MaxTokensOption = "maxTokens"
+
+// requestOptions are the options one request reaches the daemon with.
+//
+// The kernel's own options for the request come first; the daemon's standing
+// options fill in what the request did not say.
+func requestOptions(bridge ProviderBridge, options ai.StreamOptions) map[string]any {
+	merged := map[string]any{}
+	for key, value := range bridge.Options {
+		merged[key] = value
+	}
+	if options.MaxTokens > 0 {
+		merged[MaxTokensOption] = options.MaxTokens
+	}
+	return merged
+}
+
 // ProviderBridge is the daemon's model channel, seen from the kernel.
 type ProviderBridge struct {
 	// Stream sends the transcript to the model the daemon chose.
 	Stream StreamFunc
-	// Stopped reports whether the turn was stopped before the send. A stopped
-	// turn never reaches the provider.
-	Stopped func() bool
 	// Options are the provider options the daemon's stream expects.
 	Options map[string]any
 }
@@ -51,16 +72,12 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 	stream := func(ctx context.Context, model *ai.Model, request ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
 		output := ai.NewAssistantMessageEventStream()
 		go func() {
-			if bridge.Stopped != nil && bridge.Stopped() {
-				pushFailure(output, model, "Turn stopped at the tool boundary")
-				return
-			}
 			transcript, err := TranscriptMessages(request)
 			if err != nil {
 				pushFailure(output, model, err.Error())
 				return
 			}
-			source, err := bridge.Stream(ctx, transcript, bridge.Options)
+			source, err := bridge.Stream(ctx, transcript, requestOptions(bridge, options))
 			if err != nil {
 				pushFailure(output, model, err.Error())
 				return
@@ -90,6 +107,23 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 		return output, nil
 	}
 	return ai.ProviderAPIMap{api: &ai.ProviderStreams{Stream: stream, StreamSimple: stream}}
+}
+
+// bridgeRequestOptions merges the kernel's own request options into the
+// daemon's options.
+//
+// The kernel asks for a summary with a budget of its own: the summary is
+// written into that budget, and a request that asks for the model's whole
+// output limit instead writes the summary until it is cut off.
+func bridgeRequestOptions(base map[string]any, options ai.StreamOptions) map[string]any {
+	merged := map[string]any{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	if options.MaxTokens > 0 {
+		merged["maxTokens"] = options.MaxTokens
+	}
+	return merged
 }
 
 // TranscriptMessages reads the kernel's transcript as the SDK's own message
@@ -277,8 +311,15 @@ func restoreToolCallArguments(message *ai.AssistantMessage) {
 		if !ok || call.Arguments != nil {
 			continue
 		}
-		call.Arguments = ai.JsonObject{}
+		restoreMissingArguments(&call)
 		message.Content[index] = call
+	}
+}
+
+func restoreMissingArguments(call *ai.ToolCall) {
+	arguments, err := call.ArgumentsJSON()
+	if err == nil && string(arguments) == "{}" {
+		call.Arguments = ai.JsonObject{}
 	}
 }
 
@@ -296,7 +337,7 @@ func toolCall(value any) (ai.ToolCall, error) {
 		return call, fmt.Errorf("pig kernel: the tool call is not readable: %w", err)
 	}
 	if call.Arguments == nil {
-		call.Arguments = ai.JsonObject{}
+		restoreMissingArguments(&call)
 	}
 	return call, nil
 }

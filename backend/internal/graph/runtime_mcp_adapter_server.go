@@ -1,21 +1,14 @@
 package graph
 
 import (
-	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-)
 
-// The MCP servers a Graph definition binds.
-//
-// The declaration side is the Graph's: which servers a session may use and
-// which secrets they get. The connection side is the kernel's: the PiG kernel
-// connects every server itself and offers its tools under its own
-// `mcp__<server>__<tool>` names, so no extension stands between the model and
-// the server.
+	"encoding/json"
+)
 
 // McpAdapterServerRef is one server handed to the kernel.
 type McpAdapterServerRef struct {

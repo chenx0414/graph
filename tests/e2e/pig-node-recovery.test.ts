@@ -1,147 +1,21 @@
 import { DatabaseSync } from 'node:sqlite';
+
 import { createServer, type Server } from 'node:http';
+
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
+
 import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
+
 import { expect, test } from 'vitest';
-import { git } from '../../src/git/git.ts';
+
+import { execFileSync } from 'node:child_process';
+
 import { launchCli } from '../helpers/cli-daemon.ts';
+import { git, type ProviderTool, type ProviderMessage, type ProviderBody, type ProviderRequest, PROPOSAL, type LaneProvider, laneProvider, workerRequests } from "./pig-node-recovery.fixture.ts";
 
-// The graph node lane has to survive a daemon that dies mid-turn, on the PiG
-// kernel.
-//
-// Three facts decide what a dead turn means, and the kernel keeps all three:
-// whether the kernel finished the turn, whether the turn was ever accepted as
-// an input, and whether the turn ever reached the model.
-//
-//   - A turn the kernel finished is an answer the Graph already paid for. The
-//     node settles from it, and the model is not asked again.
-//   - A turn that was accepted but never sent is sent again, with the
-//     configuration it was admitted with, not the configuration the catalog
-//     happens to hold now.
-//   - A turn that was already at the model is neither. The credential was
-//     spent and the side effects may have happened, so the node waits for the
-//     user instead of spending the credential twice.
 
-interface ProviderTool { function?: { name?: string } }
-interface ProviderMessage { role?: string; content?: unknown; tool_calls?: { function?: { name?: string } }[] }
-interface ProviderBody { tools?: ProviderTool[]; messages?: ProviderMessage[] }
-interface ProviderRequest { master: boolean; body: ProviderBody }
-
-const PROPOSAL = {
-  requirementVersion: 1,
-  summary: '节点恢复',
-  acceptance: [{ id: 'works', description: '节点跑完', checkNode: 'check' }],
-  definition: {
-    schemaVersion: 2, name: '节点恢复', protocols: { result: { type: 'object' } },
-    nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Do the work.',
-      inputs: { job: { protocol: 'result' } }, outputs: { done: { protocol: 'result' } }, submission: { required: ['done'] } } },
-    modules: { check: { type: 'operation', trigger: 'each', inputs: { start: { protocol: 'result' } },
-      outputs: { result: { protocol: 'result' } },
-      operation: { action: 'workspace.command', version: 1, command: 'node', args: ['test/check.js'], output: 'result' } } },
-    edges: { first: { from: 'work.done', to: 'check.start', enabled: true } },
-    inputs: {}, outputs: { result: { from: 'check.result', protocol: 'result' } },
-    acceptance: [{ id: 'works', description: '节点跑完', kind: 'check', module: 'check' }],
-  },
-};
-
-interface LaneProvider {
-  requests: ProviderRequest[];
-  baseUrl: string;
-  close: () => Promise<void>;
-}
-
-/**
- * laneProvider answers by role: the master proposes, the master dispatches,
- * the worker submits.
- *
- * The master can also be told to keep its last request open, which holds the
- * credential slot the worker needs. That is how a node turn is caught between
- * the kernel accepting the input and the model receiving it.
- */
-async function laneProvider(options: { hold: 'master' | 'worker' | 'none' }): Promise<LaneProvider> {
-  const requests: ProviderRequest[] = [];
-  let proposed = false;
-  let dispatched = false;
-  let masterTurns = 0;
-  let workerTurns = 0;
-  const server: Server = createServer(async (request, response) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const body: ProviderBody = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) as ProviderBody : {};
-    const names = (body.tools ?? []).map(tool => tool.function?.name);
-    const master = names.includes('propose_graph') || names.includes('graph_send');
-    requests.push({ master, body });
-    const lastUser = [...(body.messages ?? [])].reverse().find(message => message.role === 'user');
-    const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
-    const toolCall = (id: string, name: string, args: unknown) => frame({
-      id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id, type: 'function',
-        function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }],
-    });
-    const stop = frame({ id: 'r', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-      usage: { prompt_tokens: 10, completion_tokens: 5 } });
-    response.writeHead(200, { 'content-type': 'text/event-stream' });
-    if (master) {
-      masterTurns += 1;
-      if (!proposed) {
-        proposed = true;
-        response.write(toolCall('call-propose', 'propose_graph', { proposal: PROPOSAL, requestId: 'propose' }));
-        response.write(stop);
-        response.end('data: [DONE]\n\n');
-        return;
-      }
-      const wake = /Graph ([a-f0-9-]+) is ready and awaits explicit input/.exec(JSON.stringify(lastUser?.content ?? ''));
-      if (wake && !dispatched) {
-        dispatched = true;
-        response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'start-work', type: 'function',
-          function: { name: 'graph_send', arguments: JSON.stringify({ graphId: wake[1], nodeId: 'work', input: 'job', value: { text: 'Run the work' } }) } }] }, finish_reason: null }] }));
-        response.write(stop);
-        response.end('data: [DONE]\n\n');
-        return;
-      }
-      // The master keeps a request open: the credential slot stays taken, so
-      // the node's own send waits for it.
-      if (options.hold === 'master' && masterTurns >= 3) {
-        response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'Still working.' }, finish_reason: null }] }));
-        return;
-      }
-      response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'Dispatched.' }, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 5, completion_tokens: 5 } }));
-      response.end('data: [DONE]\n\n');
-      return;
-    }
-    // The worker submits its output, then answers.
-    const submitted = (body.messages ?? []).some(message => message.tool_calls?.some(call => call.function?.name === 'submit'));
-    if (!submitted) {
-      workerTurns += 1;
-      // The worker keeps its request open: the turn is at the model when the
-      // daemon dies.
-      if (options.hold === 'worker' && workerTurns === 1) {
-        response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'Working on it.' }, finish_reason: null }] }));
-        return;
-      }
-      response.write(toolCall('call-submit', 'submit', { outputs: { done: { enable: true, value: { text: 'Worker finished' } } } }));
-      response.write(stop);
-      response.end('data: [DONE]\n\n');
-      return;
-    }
-    response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'Done.' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 5, completion_tokens: 5 } }));
-    response.end('data: [DONE]\n\n');
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
-  const port = (server.address() as { port: number }).port;
-  return {
-    requests,
-    baseUrl: `http://127.0.0.1:${port}/v1`,
-    close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
-  };
-}
-
-/** workerRequests are the provider requests the graph's worker made. */
-function workerRequests(provider: LaneProvider): ProviderRequest[] {
-  return provider.requests.filter(entry => !entry.master);
-}
 
 test('an interrupted node turn that never reached the model is sent again with the configuration it was admitted with', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-node-resend-'));
@@ -297,6 +171,8 @@ test('an interrupted node turn that never reached the model is sent again with t
   }
 }, 300000);
 
+
+
 test('an interrupted node turn that was already at the model is not sent again', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-node-atmodel-'));
   const project = join(root, 'project');
@@ -415,140 +291,6 @@ test('an interrupted node turn that was already at the model is not sent again',
     expect(nodes.find(node => node.id === 'work')?.status).not.toBe('succeeded');
   } finally {
     await writeFile('/tmp/pig-node-at-model-debug.log', JSON.stringify({
-      requests: provider.requests.map(entry => ({
-        master: entry.master,
-        tools: (entry.body.tools ?? []).map(tool => tool.function?.name),
-      })),
-      state,
-      stderr: daemon?.stderr ?? '',
-    }, null, 2));
-    await daemon?.close();
-    await provider.close();
-    await rm(root, { recursive: true, force: true });
-  }
-}, 300000);
-
-test('an interrupted node turn the kernel already finished settles the node without asking the model again', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-pig-node-finished-'));
-  const project = join(root, 'project');
-  await mkdir(project, { recursive: true });
-  await mkdir(join(root, 'web'), { recursive: true });
-  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
-  await mkdir(join(project, 'test'), { recursive: true });
-  await writeFile(join(project, 'test', 'check.js'), 'console.log("check passed");\n');
-  await writeFile(join(project, 'README.md'), '# Node recovery project\n');
-  git(project, ['init', '-q', '-b', 'main']);
-  git(project, ['config', 'user.email', 'graph@example.invalid']);
-  git(project, ['config', 'user.name', 'Graph Test']);
-  git(project, ['add', '.']);
-  git(project, ['commit', '-q', '-m', 'initial']);
-  const provider = await laneProvider({ hold: 'none' });
-  let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
-  let state = '';
-  const configPath = join(root, 'graph.config.json');
-  const database = join(root, 'state/tasks.sqlite');
-  try {
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      projects: [{ id: 'p', root: project }],
-      credentials: { local: { secretRef: 'GRAPH_NODE_RECOVERY_KEY' } },
-      models: { entries: [{ id: 'local', provider: 'graph-node-recovery', grade: 'high',
-        api: 'openai-completions', baseUrl: provider.baseUrl, contextWindow: 32000, maxTokens: 512,
-        credentialId: 'local' }] },
-    }));
-    const start = () => launchCli(root, { configPath, env: { GRAPH_NODE_RECOVERY_KEY: 'synthetic-only' }, extraArgs: ['--execute', '--kernel', 'pig'] });
-    daemon = await start();
-    const request = async (path: string, method = 'GET', data?: unknown) => {
-      const reply = await daemon!.request(path, { method, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      return { status: reply.status, body: await reply.json().catch(() => ({})) };
-    };
-    // The Graph cannot record the node's completion. The kernel still finishes
-    // the turn: the turn is the kernel's, and only the acknowledgement is the
-    // Graph's.
-    const fault = new DatabaseSync(join(root, 'state/tasks.sqlite'));
-    fault.exec("PRAGMA busy_timeout=5000; CREATE TRIGGER reject_node_completion BEFORE UPDATE OF state ON kernel_executions WHEN NEW.state='completed' BEGIN SELECT RAISE(ABORT, 'E2E storage acknowledgement failure'); END");
-    fault.close();
-    const created = await request('/api/conversations', 'POST', {
-      projectId: 'p', model: 'local', text: 'Make a graph with one worker.', requestId: 'lane-1',
-    });
-    expect(created.status, JSON.stringify(created.body)).toBe(200);
-    const conversationId = (created.body as { conversationId: string }).conversationId;
-
-    let draft: { version?: number; draftRevision?: number; targetBranch?: string } = {};
-    await expect.poll(async () => {
-      const view = await request(`/api/conversations/${conversationId}`);
-      const proposal = (view.body as { proposal?: { version?: number; draftRevision?: number; targetBranch?: string } }).proposal;
-      draft = proposal ?? {};
-      return Boolean(proposal);
-    }, { timeout: 60000, interval: 250 }).toBe(true);
-    await expect.poll(async () => {
-      const view = await request(`/api/conversations/${conversationId}`);
-      return (view.body as { master?: { status?: string } }).master?.status;
-    }, { timeout: 90000, interval: 500 }).toBe('succeeded');
-
-    const confirmed = await request(`/api/conversations/${conversationId}/confirm`, 'POST', {
-      proposalVersion: draft.version ?? 1, draftRevision: draft.draftRevision ?? 1,
-      targetBranch: draft.targetBranch ?? 'main', requestId: 'lane-confirm',
-    });
-    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
-    const taskId = (confirmed.body as { taskId: string }).taskId;
-    expect(taskId).toBeTruthy();
-
-    // The kernel finishes the turn: the worker submitted and answered.
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && workerRequests(provider).length < 2) {
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
-    if (workerRequests(provider).length < 2) {
-      const db = new DatabaseSync(database, { readOnly: true });
-      try {
-        state = JSON.stringify({
-          worker: workerRequests(provider).length,
-          executions: db.prepare("SELECT id,state,attempt FROM kernel_executions").all(),
-          submissions: db.prepare("SELECT conversation_id,request_id,status FROM graph_durable_submissions").all(),
-        }, null, 1);
-      } finally { db.close(); }
-    }
-    expect(workerRequests(provider).length, `the worker never finished its turn:\n${state}`).toBe(2);
-    // The Graph could not record the completion, so the node is still running.
-    await expect.poll(async () => {
-      const task = await request(`/api/tasks/${taskId}`);
-      const nodes = (task.body as { nodes?: { id: string; status: string }[] }).nodes ?? [];
-      return nodes.find(node => node.id === 'work')?.status;
-    }, { timeout: 30000, interval: 250 }).not.toBe('succeeded');
-
-    daemon.child.kill('SIGKILL');
-    await daemon.close();
-    const repair = new DatabaseSync(database);
-    repair.exec('PRAGMA busy_timeout=5000; DROP TRIGGER reject_node_completion');
-    repair.close();
-
-    daemon = await start();
-    const resumed = await request(`/api/tasks/${taskId}/graph/control`, 'POST', { action: 'resume', nodeId: 'work' });
-    expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
-
-    let nodeStatus = '';
-    const settle = Date.now() + 90_000;
-    while (Date.now() < settle) {
-      const task = await request(`/api/tasks/${taskId}`);
-      const nodes = (task.body as { nodes?: { id: string; status: string }[] }).nodes ?? [];
-      nodeStatus = nodes.find(node => node.id === 'work')?.status ?? '';
-      if (nodeStatus === 'succeeded') break;
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    if (nodeStatus !== 'succeeded') {
-      const events = await request(`/api/tasks/${taskId}/events?after=0&limit=400`);
-      const lines = (Array.isArray(events.body) ? events.body : []).slice(-30)
-        .map((event: { cursor?: number; type?: string; data?: unknown }) =>
-          `${event.cursor ?? '?'} ${event.type ?? '?'} ${JSON.stringify(event.data ?? {}).slice(0, 240)}`);
-      expect(nodeStatus, `events:\n${lines.join('\n')}\ndaemon:\n${daemon?.stderr ?? ''}`).toBe('succeeded');
-    }
-    expect(nodeStatus).toBe('succeeded');
-    // The kernel kept the answer it already had. The model was not asked
-    // again.
-    expect(workerRequests(provider)).toHaveLength(2);
-  } finally {
-    await writeFile('/tmp/pig-node-finished-debug.log', JSON.stringify({
       requests: provider.requests.map(entry => ({
         master: entry.master,
         tools: (entry.body.tools ?? []).map(tool => tool.function?.name),

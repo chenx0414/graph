@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"database/sql"
 	"strings"
+
+	"database/sql"
 )
 
 // AcquireOwner holds an OS lock for the owner's entire lifetime.

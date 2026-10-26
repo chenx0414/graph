@@ -1,11 +1,14 @@
 package graph
 
 import (
-	"crypto/rand"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"crypto/rand"
 )
 
 const sessionCookieName = "graph_session"
@@ -27,6 +30,39 @@ func LocalOrigin(origin string) string {
 		return origin
 	}
 	return ""
+}
+
+// SessionTokenPath is where the console session token of one installation lives.
+func SessionTokenPath(stateDir string) string {
+	return filepath.Join(stateDir, "session-token")
+}
+
+// LoadOrCreateSession returns the session token of this installation.
+//
+// The token belongs to the installation, not to the process: a daemon that
+// restarts - on an upgrade, or when the desktop app relaunches it on the same
+// port - has to keep serving the console that is already open. A token that
+// changed with every process would turn every open console into a wall of
+// "unauthorized" answers until the user reloaded the page. The token stays in
+// the state directory, which only the owner can read.
+func LoadOrCreateSession(stateDir string) string {
+	if stateDir == "" {
+		return CreateSession()
+	}
+	path := SessionTokenPath(stateDir)
+	if raw, err := os.ReadFile(path); err == nil {
+		if token := strings.TrimSpace(string(raw)); token != "" {
+			return token
+		}
+	}
+	token := CreateSession()
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return token
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return token
+	}
+	return token
 }
 
 func SetSessionCookie(header http.Header, token string) {

@@ -36,7 +36,6 @@ const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TESTS_DIR = join(REPO_ROOT, 'tests');
 const SKIP_DIRS = new Set(['node_modules', '.git', 'build', 'dist', 'coverage']);
 
-// Files vitest.config.ts collects, and the wider "looks like a test" shape.
 const COLLECTED_EXT = /\.test\.ts$/;
 const TEST_LIKE_EXT = /\.test\.(?:[cm]?[jt]sx?)$/;
 // A test()/it() call site, with or without a modifier (.each, .skip, .only,

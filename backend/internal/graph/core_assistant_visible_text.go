@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"regexp"
 	"strings"
+
+	"regexp"
 )
 
 // Private response dialect markers observed in ordinary provider text.

@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"path/filepath"
 )
 
 // StartupInfo is the boot snapshot the console reads. Source is filled once, at startup.
@@ -42,21 +43,20 @@ type AppRsiService struct {
 
 // AppOptions is the slice of host options CreateApp reads.
 type AppOptions struct {
-	Origin        string
-	WebDir        string
-	Startup       *StartupInfo
-	StartupInfo   func() StartupInfo
-	ConfigStore   any
-	ConfigEnv     map[string]*string
-	ConfigTest    func(modelId string) any
-	AppServices   *AppServices
-	Usage         any
-	SystemContext any
-	AgentContext  any
+	Origin       string
+	WebDir       string
+	Startup      *StartupInfo
+	StartupInfo  func() StartupInfo
+	ConfigStore  *ConfigStore
+	ConfigEnv    map[string]*string
+	ConfigTest   func(modelId string) any
+	AppServices  *AppServices
+	Usage        UsageService
+	AgentContext *AgentContextLibrary
 }
 
-// GraphServerOptions is the daemon open request. The TypeScript host spreads the same
-// object into OpenTaskRuntime; fields this function does not read are still forwarded.
+// GraphServerOptions is the daemon open request. Every field names the type it
+// carries, so the compiler checks the seam between the daemon and the runtime.
 type GraphServerOptions struct {
 	StateDir      string
 	Projects      []ProjectConfig
@@ -66,23 +66,20 @@ type GraphServerOptions struct {
 	Origin        string
 	Startup       *StartupInfo
 	StartupInfo   func() StartupInfo
-	ConfigStore   any
+	ConfigStore   *ConfigStore
 	ConfigEnv     map[string]*string
 	ConfigTest    func(modelId string) any
 	AppServices   *AppServices
-	Usage         any
-	SystemContext any
-	AgentContext  any
-	Models        any
-	Actions       any
-	Master        any
-	Network       any
-	Limits        any
-	Access        any
-	Live          any
-	Program       any
-	Rsi           any
-	Catalog       any
+	Usage         UsageService
+	SystemContext *TaskRuntimeSystemContext
+	AgentContext  *AgentContextLibrary
+	Models        *TaskRuntimeModels
+	Master        *TaskRuntimeMaster
+	Limits        *TaskRuntimeLimits
+	Access        func() AccessPolicy
+	Live          *TaskRuntimeLive
+	Rsi           *RsiService
+	Catalog       *TaskRuntimeCatalog
 	// Codemode offers the kernel's codemode tool to the Agent sessions. It
 	// is off by default.
 	Codemode GraphCodemode
@@ -90,8 +87,7 @@ type GraphServerOptions struct {
 
 // GraphHost is the listening daemon and its drive loop.
 type GraphHost struct {
-	Runtime any
-	App     any
+	Runtime *TaskRuntime
 	Url     string
 
 	mu       sync.Mutex
@@ -99,14 +95,8 @@ type GraphHost struct {
 	stopped  bool
 	closed   bool
 	loopDone chan struct{}
-	runtime  interface {
-		Close()
-	}
-	app interface {
-		Close()
-		CloseAllConnections()
-	}
-	pump func()
+	app      *GraphApp
+	pump     func()
 }
 
 // OpenGraphServer binds 127.0.0.1 and drives the runtime.
@@ -129,7 +119,7 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 	app := CreateApp(runtime, AppOptions{
 		Origin: origin, WebDir: options.WebDir, Startup: options.Startup, StartupInfo: options.StartupInfo,
 		ConfigStore: options.ConfigStore, ConfigEnv: options.ConfigEnv, ConfigTest: options.ConfigTest,
-		AppServices: options.AppServices, Usage: options.Usage, SystemContext: options.SystemContext, AgentContext: agentContext,
+		AppServices: options.AppServices, Usage: options.Usage, AgentContext: agentContext,
 	})
 	requested := 0
 	if options.Port != nil {
@@ -155,8 +145,8 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 		url = "http://127.0.0.1:" + itoaPort(bindPort)
 	}
 	host := &GraphHost{
-		Runtime: runtime, App: app, Url: url, driving: autoDrive, loopDone: make(chan struct{}),
-		runtime: runtime, app: app, pump: func() { runtime.Host.Pump() },
+		Runtime: runtime, Url: url, driving: autoDrive, loopDone: make(chan struct{}),
+		app: app, pump: func() { runtime.Host.Pump() },
 	}
 	go host.drive()
 	return host
@@ -216,12 +206,11 @@ func (h *GraphHost) Close() {
 	<-h.loopDone
 	h.app.CloseAllConnections()
 	h.app.Close()
-	h.runtime.Close()
+	h.Runtime.Close()
 }
 
-func ensureAgentContext(library any) {
-	type ensurer interface{ Ensure() }
-	if library, ok := library.(ensurer); ok {
+func ensureAgentContext(library *AgentContextLibrary) {
+	if library != nil {
 		library.Ensure()
 	}
 }

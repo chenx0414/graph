@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"net"
 	"net/url"
 	"strconv"
 	"time"
+
+	"net"
 )
 
 // PreferredConsolePort is the port for a request that only wants a free one.

@@ -1,0 +1,225 @@
+package graph
+
+import (
+	"path/filepath"
+)
+
+// agentContextLibrary is the prompt library of this runtime, when it has one.
+func (runtime *TaskRuntime) agentContextLibrary() *AgentContextLibrary {
+	return runtime.agentCtx
+}
+
+// graphHome is the root the capability library lives under.
+func (runtime *TaskRuntime) graphHome() string {
+	if runtime.catalogOpt != nil && runtime.catalogOpt.CapabilityRoot != "" {
+		return filepath.Dir(runtime.catalogOpt.CapabilityRoot)
+	}
+	return filepath.Join(taskRuntimeHome(), ".graph")
+}
+
+// fallbackAdapter builds the adapter that serves the built-in agent action.
+func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
+	options := PiAdapterOptions{
+		Store:        runtime.store,
+		InstancesDir: filepath.Join(runtime.stateDir, "instances"),
+		Catalog:      runtime.catalog,
+		Artifacts:    runtime.artifacts,
+		Directory:    runtime.liveEntries,
+		ApiKey:       runtime.apiKey(),
+		ApiKeyFor:    runtime.apiKeyFor,
+		BindingFor:   runtime.liveCredentialFor,
+		Scheduler:    runtime.scheduler,
+		Sediment:     runtime.sedimentSettings,
+		ModelRuntime: runtime.modelRuntime(),
+		Channels:     runtime.piChannels(),
+		TaskSetups:   runtime.taskSetups,
+	}
+	// The PiG kernel keeps the durable conversations in this process, and the
+	// daemon's own tools are the ones the kernel offers.
+	options.Transport = CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
+	options.DaemonNativeTools = true
+	return options
+}
+
+func (runtime *TaskRuntime) fallbackAdapter() *ActionAdapter {
+	adapter := CreatePiAdapter(runtime.mainAdapterOptions())
+	return &adapter
+}
+
+// apiKey is the legacy single key every entry shares when no binding exists.
+func (runtime *TaskRuntime) apiKey() *string {
+	if runtime.models == nil || runtime.models.APIKey == "" {
+		return nil
+	}
+	key := runtime.models.APIKey
+	return &key
+}
+
+// apiKeyFor is the key of one model, when it has its own credential.
+func (runtime *TaskRuntime) apiKeyFor(entry ModelEntry) *string {
+	binding := runtime.liveCredentialFor(entry)
+	if binding == nil || binding.ApiKey == "" {
+		return nil
+	}
+	key := binding.ApiKey
+	return &key
+}
+
+// configuredById indexes the configured entries by model id.
+func (runtime *TaskRuntime) configuredById() map[string]ConfiguredModel {
+	out := map[string]ConfiguredModel{}
+	for _, entry := range runtime.liveConfiguredEntries() {
+		out[entry.Id] = entry
+	}
+	return out
+}
+
+// liveCredentialFor is the credential binding of one model.
+func (runtime *TaskRuntime) liveCredentialFor(entry ModelEntry) *PiAdapterBinding {
+	configured, ok := runtime.configuredById()[entry.Id]
+	if !ok {
+		return nil
+	}
+	var resolved *ResolvedCredential
+	if runtime.live != nil && runtime.live.CredentialFor != nil {
+		resolved = runtime.live.CredentialFor(configured)
+	} else if runtime.models != nil && runtime.models.CredentialFor != nil {
+		resolved = runtime.models.CredentialFor(configured)
+	}
+	if resolved == nil {
+		if runtime.models == nil || runtime.models.APIKey == "" {
+			return nil
+		}
+		return &PiAdapterBinding{ApiKey: runtime.models.APIKey}
+	}
+	binding := &PiAdapterBinding{
+		ApiKey:       resolved.APIKey,
+		CredentialId: resolved.CredentialID,
+		Limit:        resolved.Limit,
+		GroupLimit:   resolved.GroupLimit,
+	}
+	if resolved.SharedGroupID != "" {
+		shared := resolved.SharedGroupID
+		binding.SharedGroupId = &shared
+	}
+	return binding
+}
+
+// modelRuntime is the provider registry of the runtime.
+func (runtime *TaskRuntime) modelRuntime() *ModelRuntime {
+	if runtime.models == nil {
+		return nil
+	}
+	return runtime.models.ModelRuntime
+}
+
+// sedimentSettings reads the post-operation skill review settings live.
+func (runtime *TaskRuntime) sedimentSettings() SedimentSettings {
+	if runtime.live == nil || runtime.live.Config == nil {
+		return SedimentSettingsFrom(nil)
+	}
+	return SedimentSettingsFrom(runtime.live.Config())
+}
+
+// piChannels are the host channels the Agent session may use.
+func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
+	channels := &PiAdapterChannels{
+		Supervisor: func(taskId string) PiAdapterSupervisor {
+			supervisor := runtime.Supervisor(taskId)
+			return PiAdapterSupervisor{
+				Propose: func(proposal NativeProposal, requestId string, newVersion bool) any {
+					return supervisor.Propose(TaskRuntimeProposeInput{
+						ProposalVersion: proposal.RequirementVersion,
+						Summary:         proposal.Summary,
+						Acceptance:      proposal.Acceptance,
+						Decisions:       proposal.Decisions,
+						HasDecisions:    proposal.Decisions != nil,
+						Definition:      proposal.Definition,
+						RequestId:       requestId,
+						NewVersion:      newVersion,
+					})
+				},
+				WithdrawDraft: func(input PiAdapterDraftAction) any {
+					return supervisor.WithdrawDraft(TaskRuntimeWithdrawInput{
+						ProposalVersion: input.ProposalVersion,
+						Reason:          input.Reason,
+						RequestId:       input.RequestId,
+					})
+				},
+				ConfirmDraft: func(input PiAdapterConfirmDraft) any {
+					return supervisor.ConfirmDraft(TaskRuntimeConfirmInput{
+						ProposalVersion: input.ProposalVersion,
+						DraftRevision:   input.DraftRevision,
+						TargetBranch:    input.TargetBranch,
+						RequestId:       input.RequestId,
+						Attestation: &TaskRuntimeAttestation{
+							Actor:       "agent",
+							OnBehalfOf:  "user",
+							Instruction: input.Instruction,
+						},
+					})
+				},
+				ArchiveDraft: func(input PiAdapterDraftAction) any {
+					return supervisor.ArchiveDraft(TaskRuntimeDraftInput{ProposalVersion: input.ProposalVersion, RequestId: input.RequestId})
+				},
+				RestoreDraft: func(input PiAdapterDraftAction) any {
+					return supervisor.RestoreDraft(TaskRuntimeDraftInput{ProposalVersion: input.ProposalVersion, RequestId: input.RequestId})
+				},
+				DeleteDraft: func(input PiAdapterDraftAction) any {
+					return supervisor.DeleteDraft(TaskRuntimeDraftInput{ProposalVersion: input.ProposalVersion, RequestId: input.RequestId})
+				},
+				GraphState:       func() any { return supervisor.GraphState() },
+				TaskStatus:       func(input PiAdapterTaskStatus) any { return supervisor.TaskStatus(TaskRuntimeTaskStatusInput(input)) },
+				ValidateProposal: func(proposal NativeProposal) any { return supervisor.ValidateProposal(proposal) },
+				ListProjects:     func() any { return supervisor.ListProjects() },
+				BindProject:      func(input PiAdapterBindProject) any { return supervisor.BindProject(input.ProjectId, input.RequestId) },
+				ListProblems:     func() any { return supervisor.ListProblems() },
+				ResolveProblem: func(input PiAdapterResolveProblem) any {
+					return supervisor.ResolveProblem(TaskRuntimeResolveInput{
+						QuestionId: input.QuestionId,
+						Action:     input.Action,
+						Response:   input.Response,
+						Proof:      input.Proof,
+						RequestId:  input.RequestId,
+					})
+				},
+				GraphManagement: runtime.graphManagement(taskId),
+			}
+		},
+		Catalog: runtime.catalog,
+		Peers: func(taskId string) PiAdapterPeers {
+			return PiAdapterPeers{Deliver: func(from string, input PiAdapterPeerDelivery) any {
+				nodeInput := NodeMessageInput{Text: input.Text, RequestID: input.RequestId}
+				if input.To == "main" {
+					return SendKernelMainMessage(runtime.kernel, taskId, from, nodeInput)
+				}
+				sender := from
+				return SendKernelNodeMessage(runtime.kernel, taskId, input.To, nodeInput, &sender)
+			}}
+		},
+	}
+	if runtime.agentCtx != nil {
+		channels.AgentContext = runtime.agentCtx
+	}
+	if runtime.catalogOpt != nil {
+		channels.BootstrapPrompts = runtime.catalogOpt.BootstrapPrompts
+		if runtime.catalogOpt.BootstrapToolPrompt != "" {
+			prompt := runtime.catalogOpt.BootstrapToolPrompt
+			channels.BootstrapToolPrompt = &prompt
+		}
+	}
+	if rsi := runtime.piRsiChannel(); rsi != nil {
+		channels.Rsi = rsi
+	}
+	if runtime.systemCtx != nil && runtime.systemCtx.SystemSummary != nil {
+		channels.SystemContext = &PiAdapterSystemContext{SystemSummary: func() map[string]any {
+			summary := runtime.systemCtx.SystemSummary()
+			record, _ := summary.(map[string]any)
+			if record == nil {
+				record = map[string]any{}
+			}
+			return record
+		}}
+	}
+	return channels
+}

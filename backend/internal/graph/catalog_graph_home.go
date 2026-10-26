@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
+
+	"os"
 )
 
 // GraphHome is the user-owned Graph state directory.

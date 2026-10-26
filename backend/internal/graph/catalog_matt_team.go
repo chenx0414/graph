@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"regexp"
 	"strings"
+
+	"regexp"
 )
 
 type MattTeamRole string

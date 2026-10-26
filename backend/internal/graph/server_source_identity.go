@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"os"
 )
 
 // SourceIdentity is which code the running daemon is actually executing.

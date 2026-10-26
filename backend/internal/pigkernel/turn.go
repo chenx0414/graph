@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,10 +17,8 @@ import (
 
 // One agent turn on the PiG kernel.
 //
-// The Graph daemon owns every business fact, credential and admission rule;
-// the kernel owns the execution history. A turn therefore arrives with the
-// model, the tools and the prompt already decided by the daemon, and leaves
-// with the answer and the durable records that produced it.
+// The daemon/kernel division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 
 // ModelSpec is the model a turn runs on, described in the daemon's terms.
 //
@@ -40,13 +39,20 @@ type ModelSpec struct {
 	ThinkingLevel string
 }
 
+// ToolResultRenderer rewrites one tool result before the model reads it.
+//
+// It is the seam where a result too large to carry is written to a file the
+// model can read by offset and limit. A nil renderer leaves the result as the
+// tool produced it.
+type ToolResultRenderer func(name string, args map[string]any, value any) any
+
 // ToolSpec is one tool the model may call during the turn.
 type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
-	// Execute runs the tool. The daemon owns the admission and the side
-	// effects; the kernel only carries the call and its result.
+	// Execute runs the tool. The daemon/kernel division of labour is
+	// documented in docs/architecture.md, section daemon 与内核的分工.
 	Execute func(ctx context.Context, args map[string]any) (string, error)
 	// Result runs the tool and returns the SDK's own tool result. It is the
 	// faithful shape: a tool that returns an image or structured details
@@ -71,11 +77,10 @@ type TurnOptions struct {
 	Instructions string
 	// Prompt is the user input of the turn.
 	Prompt string
-	// Gate admits the model send. It runs before the provider call and fails
-	// the turn when the daemon refuses.
-	Gate func() error
 	// OnEvent receives the kernel's events.
 	OnEvent func(event string)
+	// ToolResults rewrites a tool result before the model reads it.
+	ToolResults ToolResultRenderer
 }
 
 // TurnResult is what one turn produced.
@@ -119,7 +124,7 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	defer func() { _ = kernel.Close() }()
 
 	recorder := &callRecorder{}
-	registrations := toolRegistrations(options.Tools, recorder)
+	registrations := toolRegistrations(options.Tools, recorder, options.ToolResults)
 	// The MCP servers are connected by the kernel itself: the model reaches
 	// their tools directly, without a gateway tool and without an extension.
 	mcpConnections, mcpTools, err := connectMcpServers(ctx, options.McpServers, recorder)
@@ -129,7 +134,11 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	defer closeMcpServers(mcpConnections)
 	registrations = append(registrations, mcpTools...)
 
-	extension := &durable.Extension{Name: "graph-tools", Tools: registrations}
+	// The extension is installed under the name the identity owns, the same
+	// name the resident session path uses. Two derivations of one name would
+	// let the last writer replace the tool bodies the other conversation's
+	// durable selection still points at.
+	extension := &durable.Extension{Name: extensionName(options.Identity), Tools: registrations}
 	if err := registry.Install(extension); err != nil {
 		return TurnResult{}, err
 	}
@@ -148,12 +157,6 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 		return TurnResult{}, err
 	}
 
-	// The host admits the turn before anything is sent.
-	if options.Gate != nil {
-		if err := options.Gate(); err != nil {
-			return TurnResult{}, err
-		}
-	}
 	// The request id deduplicates an admission: the same input must not be
 	// admitted twice, and a second, different input needs its own id.
 	requestId := options.Identity + ":turn:" + newRequestId()
@@ -289,7 +292,7 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 					parts = append(parts, content.Text)
 				}
 			}
-			text = parts[len(parts)-1]
+			text = strings.Join(parts, "")
 		}
 		return nil, nil
 	})
@@ -305,7 +308,7 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 // The tool bodies are the daemon's: the kernel carries the call and the
 // result, and the daemon decides whether the call is allowed and what it
 // does.
-func toolRegistrations(tools []ToolSpec, recorder *callRecorder) []*durable.ToolRegistration {
+func toolRegistrations(tools []ToolSpec, recorder *callRecorder, renderer ToolResultRenderer) []*durable.ToolRegistration {
 	registrations := make([]*durable.ToolRegistration, 0, len(tools))
 	for _, tool := range tools {
 		spec := tool
@@ -315,6 +318,11 @@ func toolRegistrations(tools []ToolSpec, recorder *callRecorder) []*durable.Tool
 				Description: spec.Description,
 				Parameters:  spec.Parameters,
 			},
+			// The renderer is the one authority on how much of a result the
+			// model reads. The kernel's own truncation would cut the result
+			// before the renderer could spill it, and a cut result has no
+			// handle to read the rest from.
+			OutputLimits: toolOutputLimits(renderer),
 			Execute: func(ctx context.Context, args any, _ durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
 				recorder.record(spec.Name)
 				decoded := map[string]any{}
@@ -329,6 +337,9 @@ func toolRegistrations(tools []ToolSpec, recorder *callRecorder) []*durable.Tool
 							IsError: boolPointer(true),
 						}, nil
 					}
+					if renderer != nil {
+						value = renderer(spec.Name, decoded, value)
+					}
 					return toolExecutionResult(value), nil
 				}
 				text, err := spec.Execute(ctx, decoded)
@@ -338,11 +349,29 @@ func toolRegistrations(tools []ToolSpec, recorder *callRecorder) []*durable.Tool
 						IsError: boolPointer(true),
 					}, nil
 				}
-				return durable.ToolExecutionResult{Output: []ai.ToolResultMessageContent{ai.TextContent{Text: text}}}, nil
+				value := any(map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}})
+				if renderer != nil {
+					value = renderer(spec.Name, decoded, value)
+				}
+				return toolExecutionResult(value), nil
 			},
 		})
 	}
 	return registrations
+}
+
+// toolOutputLimits are the limits the kernel puts on a tool result.
+//
+// Without a renderer the kernel's own limits stand: a result too large is cut
+// there, and the cut is final. With a renderer the renderer decides, so the
+// kernel's limits are lifted - a result the renderer spilled is read from the
+// file it wrote, byte for byte.
+func toolOutputLimits(renderer ToolResultRenderer) *durable.ToolOutputLimits {
+	if renderer == nil {
+		return nil
+	}
+	unlimited := int(^uint(0) >> 1)
+	return &durable.ToolOutputLimits{MaxBytes: &unlimited, MaxLines: &unlimited}
 }
 
 // toolExecutionResult reads the SDK's own tool result.

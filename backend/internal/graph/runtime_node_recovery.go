@@ -2,21 +2,10 @@ package graph
 
 import "sync"
 
-// The node's recovery handover.
-//
-// A node's turn may be interrupted by a crash. The recovery restores the
-// configuration the turn was admitted with into the lane, so the node's
-// re-run is the turn it was admitted as, and it marks the turns the kernel
-// finished so the executor may start them again.
-//
-// The kernel is the PiG one and it runs in this process: the restored
-// configuration is what the lane needs, and there is no second process to
-// admit anything.
-
 var nodeRecoveryResolvers = struct {
 	sync.Mutex
-	values map[string]func(map[string]any) (*NodeRecoveryBinding, error)
-}{values: map[string]func(map[string]any) (*NodeRecoveryBinding, error){}}
+	values map[string]func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error)
+}{values: map[string]func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error){}}
 
 // NodeRecoveryBinding is what the lane learned about one restored node.
 type NodeRecoveryBinding struct {
@@ -29,14 +18,14 @@ type NodeRecoveryBinding struct {
 }
 
 // registerNodeRecoveryResolver records how a restored node is handed back.
-func registerNodeRecoveryResolver(database string, resolver func(map[string]any) (*NodeRecoveryBinding, error)) {
+func registerNodeRecoveryResolver(database string, resolver func(*FrozenExecutionRecovery) (*NodeRecoveryBinding, error)) {
 	nodeRecoveryResolvers.Lock()
 	defer nodeRecoveryResolvers.Unlock()
 	nodeRecoveryResolvers.values[database] = resolver
 }
 
 // PrepareNodeRecovery restores one node into the lane.
-func PrepareNodeRecovery(database string, wrapper map[string]any) (*NodeRecoveryBinding, error) {
+func PrepareNodeRecovery(database string, wrapper *FrozenExecutionRecovery) (*NodeRecoveryBinding, error) {
 	nodeRecoveryResolvers.Lock()
 	resolver := nodeRecoveryResolvers.values[database]
 	nodeRecoveryResolvers.Unlock()

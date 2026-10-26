@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"fmt"
 )
 
 var (

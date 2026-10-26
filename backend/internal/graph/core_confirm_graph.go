@@ -2,7 +2,6 @@ package graph
 
 import (
 	"fmt"
-	"sort"
 )
 
 // MaterializedGraph is the v2 graph created from a confirmed draft.
@@ -20,8 +19,8 @@ func MaterializeGraph(kernel *KernelStore, taskID string, definition GraphDefini
 		panic(fmt.Errorf("task %s already has a v2 graph; materialising it again would duplicate its rows", taskID))
 	}
 	revision := kernel.InsertRevision(taskID, ParseGraphDefinition(definition), reason, 1)
-	nodeIDs := mapKeys(revision.Definition.Nodes)
-	moduleIDs := mapKeys(revision.Definition.Modules)
+	nodeIDs := sortedKeys(revision.Definition.Nodes)
+	moduleIDs := sortedKeys(revision.Definition.Modules)
 	for _, nodeID := range nodeIDs {
 		kernel.AdmitNode(taskID, revision.Version, nodeID, AdmitNodeInput{InstanceID: graphUUID()})
 	}
@@ -35,14 +34,4 @@ func MaterializeGraph(kernel *KernelStore, taskID string, definition GraphDefini
 		NodeIDs:    nodeIDs,
 		ModuleIDs:  moduleIDs,
 	}
-}
-
-func mapKeys[V any](values map[string]V) []string {
-	// TODO(port): Go maps have no insertion order. Keys are sorted so admission is stable.
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

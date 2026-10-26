@@ -1,13 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, expect } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
-import { openGraphServer } from '../../src/server/host.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer, type ResponsePlan } from './openai-server.ts';
 
 let webDir: string;
@@ -26,15 +25,23 @@ export async function fixture(plans: ResponsePlan[], finiteBudget = false, pause
   cleanup.push(() => provider.close());
   const suggestion = browserOptions.suggestionPlans ? await openaiServer(browserOptions.suggestionPlans) : undefined;
   if (suggestion) cleanup.push(() => suggestion.close());
-  const options = {
-    stateDir: join(root, 'state'), catalog: { capabilityRoot: join(root, 'capabilities'), recipesPath: join(root, 'recipes.json') }, projects: [{ id: 'alpha', root }], webDir, autoDrive: true,
+  const configPath = join(root, 'config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1, projects: [{ id: 'alpha', root }],
+    credentials: { local: { secretRef: 'GRAPH_COMPOSER_KEY' } },
     ...(finiteBudget ? { limits: { defaultBudgetTokens: 20_000_000 } } : {}),
-    models: { entries: [{ id: 'local', provider: provider.model.provider, grade: 'high' as const, api: 'openai-completions' as const,
-      baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }, ...(suggestion ? [{ id: 'cheap', provider: suggestion.model.provider, grade: 'low' as const, api: 'openai-completions' as const, baseUrl: suggestion.model.baseUrl, contextWindow: 32_000, maxTokens: 256 }] : [])], apiKey: 'scripted-local-key', modelRuntime: provider.runtime },
-    master: { action: 'master', definitionVersion: 'master@1', model: 'local' },
-  };
-  let server = await openGraphServer({ ...options, autoDrive: browserOptions.initiallyDrive !== false });
-  server.runtime.catalog.publishDefinition('master', { recommendedGrade: 'high' }, 'lifecycle-master');
+    models: { entries: [
+      { id: 'local', modelId: 'local', provider: provider.model.provider, grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' },
+      ...(suggestion ? [{ id: 'cheap', modelId: 'cheap', provider: 'graph-suggestion', grade: 'low', api: 'openai-completions',
+        baseUrl: suggestion.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] : []),
+    ] },
+  }));
+  async function launch(drive: boolean) {
+    return launchCli(root, { configPath, graphHome: join(root, 'graph-home'), webDir,
+      env: { GRAPH_COMPOSER_KEY: 'scripted-local-key' }, extraArgs: [drive ? '--execute' : '--view-only'] });
+  }
+  let server = await launch(browserOptions.initiallyDrive !== false);
   cleanup.push(() => server.close());
   let browserUrl = server.url;
   if (pauseResponse || browserOptions.messageResponse || browserOptions.steerResponse) {
@@ -93,30 +100,9 @@ export async function fixture(plans: ResponsePlan[], finiteBudget = false, pause
   async function answered(id: string, count: number) {
     await expect.poll(async () => (await view(id)).messages.filter((message: { role: string }) => message.role === 'assistant').length, { timeout: 30_000 }).toBe(count);
   }
-  return { root, get url() { return browserUrl; }, page, provider, suggestion, post, view, events, open, answered, get runtime() { return server.runtime; }, async restart(restoredBinding?: { targetTaskId: string; sourceTaskId: string }) {
+  return { root, get url() { return browserUrl; }, page, provider, suggestion, post, view, events, open, answered, async restart() {
     await server.close();
-    if (restoredBinding) {
-      // External restore input changes only a current binding. Every instance,
-      // invocation, receipt and row order came from the closed real producer.
-      const snapshot = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
-      try {
-        const binding = snapshot.prepare("SELECT instance_id FROM nodes WHERE task_id=? AND id='master'");
-        const source = binding.get(restoredBinding.sourceTaskId) as { instance_id: string };
-        const target = binding.get(restoredBinding.targetTaskId) as { instance_id: string };
-        expect(source.instance_id).toBeTruthy(); expect(target.instance_id).toBeTruthy();
-        // Two independently produced instances remain uniquely bound. The
-        // external restore input exchanges bindings without touching history.
-        snapshot.exec('BEGIN');
-        try {
-          const update = snapshot.prepare("UPDATE nodes SET instance_id=? WHERE task_id=? AND id='master'");
-          expect(update.run(null, restoredBinding.targetTaskId).changes).toBe(1);
-          expect(update.run(target.instance_id, restoredBinding.sourceTaskId).changes).toBe(1);
-          expect(update.run(source.instance_id, restoredBinding.targetTaskId).changes).toBe(1);
-          snapshot.exec('COMMIT');
-        } catch (error) { snapshot.exec('ROLLBACK'); throw error; }
-      } finally { snapshot.close(); }
-    }
-    server = await openGraphServer(options);
+    server = await launch(true);
     if (!pauseResponse && !browserOptions.messageResponse && !browserOptions.steerResponse) browserUrl = server.url;
     await context.setExtraHTTPHeaders({ origin: browserUrl });
     await page.request.get(browserUrl);

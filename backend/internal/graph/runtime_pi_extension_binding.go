@@ -1,18 +1,10 @@
 package graph
 
 import (
-	"path/filepath"
 	"strings"
-)
 
-// The Pi extensions a request binds, and how a refusal names them.
-//
-// The PiG kernel hosts Pi extensions: PiG's own extension host runs one in a
-// Node process of its own, and the daemon's bridge hands the extension's tools
-// to the model and its hooks to the call. A session that may not host one -
-// because its policy is narrower than the daemon's own reach, or because the
-// extension would not load - is refused by name, not quietly run without the
-// tools the model was promised.
+	"path/filepath"
+)
 
 // piExtensionBindingNames names the Pi extension capabilities one request bound.
 //

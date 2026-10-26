@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"database/sql"
 	"strings"
 	"sync"
+
+	"database/sql"
 )
 
 // ModuleOperationRequest is one host operation a module asked the runner to perform.

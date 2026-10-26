@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"regexp"
 	"unicode"
+
+	"regexp"
 )
 
 // MAX_SLUG_LENGTH is the longest slug kept.
@@ -12,8 +13,6 @@ const MAX_SLUG_LENGTH = 40
 const DEFAULT_SLUG = "task"
 
 var asciiAlnum = regexp.MustCompile(`^[A-Za-z0-9]$`)
-
-// TODO(port): NFC normalization needs golang.org/x/text, which is not an approved dependency. JSON text is left unchanged.
 
 // TaskSlug turns an arbitrary task summary into a branch-safe slug.
 func TaskSlug(request string) string {

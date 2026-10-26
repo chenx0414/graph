@@ -1,15 +1,17 @@
 package graph
 
 import (
-	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"encoding/json"
 )
 
 type AgentCombinationResourceRole string
+
 type AgentCombinationMode string
 
 type AgentCombinationResource struct {

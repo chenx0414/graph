@@ -16,15 +16,17 @@ import (
 //
 // PiG runs a TypeScript extension in a Node process of its own and speaks to
 // it over PiG's extension wire: the extension declares the tools it registers
-// and the hooks it watches, and the host calls them. The daemon keeps the
-// admission - an extension tool reaches the model only when Graph's own
-// policy allows it, and its call passes the same gate every other tool
-// passes.
+// and the hooks it watches, and the host calls them. An extension tool reaches
+// the model only when Graph's own policy allows it, and its call passes the
+// same gate every other tool passes.
 //
 // The extension's process belongs to the extension. The daemon cannot confine
 // it, so a session whose policy is narrower than the daemon's own reach must
 // not host one. That rule is the caller's; the kernel only says what it can
 // do.
+//
+// The daemon/kernel division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 
 // ExtensionHost hosts the Pi extensions one daemon loads.
 //

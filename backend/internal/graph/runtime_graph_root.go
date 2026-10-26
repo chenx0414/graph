@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"bytes"
 
 	"crypto/rand"
 )

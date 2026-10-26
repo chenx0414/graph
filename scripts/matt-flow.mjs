@@ -30,9 +30,8 @@ function fail(message) {
 }
 
 const argv = process.argv.slice(2);
-// Flags whose value must not be mistaken for a positional argument. The original parser took the
-// first non-`--` token as the slug, so `--stage merge` read "merge" as the slug; the merge stage
-// takes no slug at all and made that latent bug visible.
+// Flags whose value must not be mistaken for a positional argument: without this, `--stage merge`
+// reads "merge" as the slug, and the merge stage takes no slug at all.
 const VALUE_FLAGS = new Set(['stage', 'tickets', 'root']);
 const positionals = [];
 for (let index = 0; index < argv.length; index += 1) {
@@ -48,8 +47,7 @@ const readOption = name => {
   const index = argv.indexOf(`--${name}`);
   return index === -1 ? undefined : argv[index + 1];
 };
-const flags = new Set(argv.filter(value => value.startsWith('--') && !argv.some((other, i) => i > 0 && argv[i - 1] === value)));
-const asJson = flags.has('--json') || argv.includes('--json');
+const asJson = argv.includes('--json');
 const stage = readOption('stage') ?? 'implement';
 const ticketsFile = readOption('tickets');
 const root = resolve(readOption('root') ?? process.cwd());
@@ -145,7 +143,6 @@ function checkReview() {
  * 不带 ref 时就看当前工作树（一个已经处于未解决冲突状态的合并）。
  */
 function checkMerge() {
-  // The merge stage takes no slug, so both positionals are refs.
   const ours = positionals[0];
   const theirs = positionals[1];
   const gitTry = (...args) => {
@@ -169,7 +166,6 @@ function checkMerge() {
         return record('merge', false, `ref 解析不到提交：${ref}`);
       }
     }
-    // merge-tree 只算结果、不动工作树；它退出非零恰恰就是找到冲突的时候。
     const probe = gitCapture('merge-tree', '--write-tree', ours, theirs);
     const conflicted = probe.out.trim();
     if (!conflicted) return record('merge', false, `${ours} 与 ${theirs} 无法比较（缺少共同祖先？）`);
@@ -180,7 +176,6 @@ function checkMerge() {
     return record('merge', true, `${files.length || '若干'} 个冲突路径：${[...new Set(files)].slice(0, 10).join(', ') || '(见 merge-tree 输出)'}`);
   }
 
-  // 没有 ref：看当前工作树是不是一个「有冲突的未完成合并」。
   if (gitTry('rev-parse', '-q', '--verify', 'MERGE_HEAD') === undefined) {
     return record('merge', false, '当前没有未完成的合并（缺少 MERGE_HEAD）；要么给两个 ref，要么先开始一次合并');
   }

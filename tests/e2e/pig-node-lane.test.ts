@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vitest';
-import { git } from '../../src/git/git.ts';
+import { execFileSync } from 'node:child_process';
+const git = (cwd: string, args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
 import { launchCli } from '../helpers/cli-daemon.ts';
 
 const run = promisify(execFile);

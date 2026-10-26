@@ -1,10 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
+import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { git } from '../../src/git/git.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
 
 /**
@@ -29,6 +29,20 @@ interface ProviderBody { tools?: ProviderTool[]; messages?: ProviderMessage[] }
 interface ProviderRequest {
   master: boolean;
   body: ProviderBody;
+}
+
+/** Real Git: the fixture project is a repository, so the daemon has a branch to work on. */
+function git(cwd: string, args: string[]) {
+  execFileSync('git', args, {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Graph Test', GIT_AUTHOR_EMAIL: 'graph@example.invalid',
+      GIT_COMMITTER_NAME: 'Graph Test', GIT_COMMITTER_EMAIL: 'graph@example.invalid',
+      GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0',
+    },
+  });
 }
 
 const PROPOSAL = {
@@ -125,7 +139,7 @@ test('a confirmed graph wakes main with the graph id', async () => {
   await mkdir(join(project, 'test'), { recursive: true });
   await writeFile(join(project, 'test', 'check.js'), 'console.log("check passed");\n');
   await writeFile(join(project, 'README.md'), '# Wake project\n');
-  git(project, ['init', '-q', '-b', 'main']);
+  git(project, ['init', '-q', '--template=', '-b', 'main']);
   git(project, ['config', 'user.email', 'graph@example.invalid']);
   git(project, ['config', 'user.name', 'Graph Test']);
   git(project, ['add', '.']);

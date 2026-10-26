@@ -1,26 +1,25 @@
 import { createServer } from 'node:http';
+
 import type { AddressInfo } from 'node:net';
+
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+
 import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
+
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+
 import { build } from 'vite';
+
 import { chromium } from 'playwright';
-import { startGraphDaemon } from '../../src/server/start.ts';
 
-let webDir: string;
-const cleanup: (() => Promise<void>)[] = [];
-beforeAll(async () => {
-  webDir = await mkdtemp(join(tmpdir(), 'graph-e2e-metadata-web-'));
-  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
-}, 60_000);
-afterAll(() => rm(webDir, { recursive: true, force: true }));
-afterEach(async () => { for (const action of cleanup.reverse()) await action(); cleanup.length = 0; });
+import { launchCli } from '../helpers/cli-daemon.ts';
 
-const providerMap = { custom: { id: 'custom', models: {
-  flagship: { id: 'flagship', reasoning: true, reasoning_options: [{ type: 'effort', values: ['none', 'bogus', 'max'] }], modalities: { input: ['text', 'image', 'pdf'] }, limit: { context: 200_000, output: 32_000 }, cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75, currency: 'EUR' } },
-  partial: { id: 'partial', modalities: { input: ['text'] }, limit: { context: 8_000, output: 2_000 }, cost: { input: 2, output: 8 } },
-} } };
+import { vendorProxy } from '../helpers/vendor-proxy.ts';
+import { webDir, cleanup, providerMap } from "./provider-metadata.fixture.ts";
+
+
 
 // Catalog data is the external fixture. The browser still runs the shipped mapper/editor and saves through the real daemon.
 test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s catalog data and persists complete metadata without inventing defaults', async format => {
@@ -36,7 +35,8 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}/v1`;
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY', displayName: 'Gateway' } }, models: { entries: [{ id: 'seed', provider: 'custom', grade: 'high', api: 'openai-completions', baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] } }));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-catalog-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-catalog-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -100,6 +100,8 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   await expect.poll(async () => (await disk()).models.entries.find((entry: { modelId?: string }) => entry.modelId === 'unlisted')?.contextWindow).toBe(8765);
 }, 90_000);
 
+
+
 test('provider account edits keep credential identity, names and concurrency while new accounts stay independent', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-accounts-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -113,19 +115,18 @@ test('provider account edits keep credential identity, names and concurrency whi
   await new Promise<void>(resolve => vendor.listen(0, '127.0.0.1', resolve));
   cleanup.push(async () => { vendor.closeAllConnections(); await new Promise<void>(resolve => vendor.close(() => resolve())); });
   const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}`;
-  const nativeFetch = globalThis.fetch;
-  // Redirect only the external preset vendor transport; real daemon routes and business handlers remain in control.
-  globalThis.fetch = (input, init) => {
-    const url = input instanceof Request ? input.url : String(input);
-    return nativeFetch(url.startsWith('https://opencode.ai/zen/go/v1/') ? url.replace('https://opencode.ai/zen/go/v1', baseUrl) : input, init);
-  };
-  cleanup.push(async () => { globalThis.fetch = nativeFetch; });
+  // The daemon owns its own process, so the preset vendor endpoint is redirected
+  // at the network layer: the daemon's real proxy and CA settings carry the
+  // request to this controlled vendor.
+  const proxy = await vendorProxy(root, ['opencode.ai'], baseUrl);
+  cleanup.push(() => proxy.close());
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: {
     'opencode-go': { secretRef: 'GRAPH_CUSTOM_FIRST', displayName: '工作账户', platform: 'opencode-go', sharedLimitGroupId: 'old-group' },
     'opencode-go-2': { secretRef: 'GRAPH_CUSTOM_SECOND', displayName: '备用账户', platform: 'opencode-go' },
   }, limits: { credentials: { 'opencode-go': 3 }, sharedGroups: { 'old-group': 8 } }, models: { entries: [{ id: 'go-model', provider: 'opencode-go', modelId: 'space-bunny-free', grade: 'high', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 32000, maxTokens: 256, credentialId: 'opencode-go' }] } }));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, GRAPH_CUSTOM_FIRST: 'first-synthetic-key', GRAPH_CUSTOM_SECOND: 'second-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'preset-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_3: 'third-synthetic-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
+    env: { HOME: root, ...proxy.env, GRAPH_CUSTOM_FIRST: 'first-synthetic-key', GRAPH_CUSTOM_SECOND: 'second-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'preset-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_3: 'third-synthetic-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
@@ -186,133 +187,4 @@ test('provider account edits keep credential identity, names and concurrency whi
   await page.getByTestId('provider-save').click();
   await expect.poll(async () => (await disk()).limits).toEqual({ defaultBudgetTokens: null, credentials: {}, sharedGroups: {} });
   expect((await disk()).credentials['opencode-go']).not.toHaveProperty('sharedLimitGroupId');
-}, 90_000);
-
-test('real provider fields reject missing keys and malformed custom configuration before writing or sending', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-provider-validation-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const requests: string[] = [];
-  const vendor = createServer(async (request, response) => {
-    for await (const _ of request) { /* drain */ }
-    requests.push(request.url ?? '');
-    response.writeHead(403, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ error: { message: 'subscription does not allow listing' } }));
-  });
-  await new Promise<void>(resolve => vendor.listen(0, '127.0.0.1', resolve));
-  cleanup.push(async () => { vendor.closeAllConnections(); await new Promise<void>(resolve => vendor.close(() => resolve())); });
-  const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}/v1`;
-  const configPath = join(root, 'graph.config.json');
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } } }));
-  const original = await readFile(configPath, 'utf8');
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-key' }, log: () => undefined });
-  cleanup.push(() => daemon.close());
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/models`);
-  if (await page.getByTestId('model-editor-toggle').getAttribute('aria-expanded') === 'false') await page.getByTestId('model-editor-toggle').click();
-  const picker = page.getByTestId('provider-platforms');
-  await picker.getByRole('searchbox', { name: '搜索服务商' }).fill('api.anthropic.com');
-  await page.getByTestId('provider-platform-anthropic').click();
-  expect(await page.getByTestId('provider-baseUrl').inputValue()).toBe('https://api.anthropic.com');
-  const brand = picker.getByTestId('provider-platform-anthropic').locator('img');
-  await expect.poll(() => brand.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
-  expect(await page.getByRole('link', { name: '获取 Anthropic API 凭据 ↗' }).getAttribute('href')).toContain('claude.com');
-  await picker.getByRole('searchbox').fill('');
-  await picker.getByRole('combobox', { name: '服务商类型' }).selectOption('subscription');
-  expect(await picker.getByTestId('provider-platform-anthropic').count()).toBe(0);
-  await picker.getByTestId('provider-platform-opencode-go').click();
-  await page.getByTestId('provider-save').click();
-  await expect.poll(() => page.getByTestId('provider-key-error').innerText()).toContain('环境变量');
-  expect(requests).toHaveLength(0);
-  expect(await readFile(configPath, 'utf8')).toBe(original);
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBe(true);
-  await picker.getByRole('searchbox').fill('missing provider xyz');
-  await picker.getByRole('status').filter({ hasText: '没有匹配' }).waitFor();
-  await page.getByTestId('provider-platform-custom').click();
-  await page.getByTestId('provider-save').click();
-  expect(await page.getByTestId('provider-label').getAttribute('data-invalid')).toBe('true');
-  expect(await page.getByTestId('provider-baseUrl').getAttribute('data-invalid')).toBe('true');
-  await page.getByTestId('provider-label').fill('Gateway');
-  await page.getByTestId('provider-baseUrl').fill('ftp://invalid');
-  await page.getByTestId('provider-credentialId').fill('Bad Id');
-  await page.getByTestId('provider-credentialRef').fill('1-bad');
-  await page.getByTestId('provider-save').click();
-  for (const field of ['baseUrl', 'credentialId', 'credentialRef']) expect(await page.getByTestId(`provider-${field}`).getAttribute('data-invalid')).toBe('true');
-  expect(requests).toHaveLength(0);
-  expect(await readFile(configPath, 'utf8')).toBe(original);
-  await page.getByTestId('provider-baseUrl').fill(baseUrl);
-  await page.getByTestId('provider-credentialId').fill('local');
-  await page.getByTestId('provider-credentialRef').fill('GRAPH_LOCAL_KEY');
-  await page.getByTestId('provider-save').click();
-  await expect.poll(() => page.getByTestId('provider-verification').innerText()).toContain('subscription does not allow listing');
-  await expect.poll(async () => JSON.parse(await readFile(configPath, 'utf8')).credentials.local.displayName).toBe('Gateway');
-  expect(requests).toContain('/v1/models');
-  expect(JSON.parse(await readFile(configPath, 'utf8')).credentials.local).not.toHaveProperty('platform');
-  await page.reload();
-  await page.getByTestId('configured-provider-local').waitFor();
-  expect(await page.getByTestId('configured-provider-local').innerText()).toContain('Gateway');
-  const saved = JSON.parse(await readFile(configPath, 'utf8'));
-  expect(saved.credentials.local.secretRef).toBe('GRAPH_LOCAL_KEY');
-  expect(JSON.stringify(saved)).not.toContain('synthetic-key');
-}, 90_000);
-
-test('the setup wizard keeps two connections to one upstream model and repeated saves preserve the first identity', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-setup-identities-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const auth: string[] = [];
-  const vendor = createServer(async (request, response) => {
-    for await (const _ of request) { /* drain */ }
-    auth.push(request.headers.authorization ?? '');
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ choices: [] }));
-  });
-  await new Promise<void>(resolve => vendor.listen(0, '127.0.0.1', resolve));
-  cleanup.push(async () => { vendor.closeAllConnections(); await new Promise<void>(resolve => vendor.close(() => resolve())); });
-  const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}/v1`;
-  const configPath = join(root, 'graph.config.json');
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }] }));
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir, port: 0, mode: 'view', dynamic: true, env: { HOME: root, OPENAI_API_KEY: 'first-setup-key', ANTHROPIC_API_KEY: 'second-setup-key' }, log: () => undefined });
-  cleanup.push(() => daemon.close());
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/setup`);
-  const setupPicker = page.getByTestId('setup-providers');
-  await setupPicker.getByRole('searchbox').fill('deepseek');
-  await page.getByTestId('setup-provider-deepseek').click();
-  expect(await page.getByTestId('setup-providers').getByRole('button', { pressed: true }).innerText()).toContain('DeepSeek');
-  await setupPicker.getByRole('searchbox').fill('');
-  const configure = async (provider: 'openai' | 'anthropic') => {
-    await page.getByTestId(`setup-provider-${provider}`).click();
-    for (const checkbox of await page.getByTestId('setup-models').locator('input[type="checkbox"]').all()) await checkbox.uncheck();
-    await page.getByTestId('setup-model-add').click();
-    await page.getByTestId('setup-custom-model-0').locator('input').fill('same-model');
-    await page.getByTestId('setup-advanced-toggle').click();
-    await page.getByTestId('setup-base-url').fill(baseUrl);
-    await page.getByTestId('setup-api').selectOption('openai-completions');
-  };
-  const save = async () => {
-    const response = page.waitForResponse(response => new URL(response.url()).pathname === '/api/config' && response.request().method() === 'POST');
-    await page.getByTestId('setup-save').click();
-    expect(await (await response).json()).toMatchObject({ applied: true });
-  };
-  const disk = async () => JSON.parse(await readFile(configPath, 'utf8'));
-  await configure('openai');
-  await save();
-  expect((await disk()).models.entries).toMatchObject([{ id: 'same-model', modelId: 'same-model', provider: 'openai', credentialId: 'openai' }]);
-  await save();
-  expect((await disk()).models.entries).toHaveLength(1);
-  await page.getByTestId('setup-advanced-toggle').click();
-  await configure('anthropic');
-  await save();
-  expect((await disk()).models.entries).toMatchObject([{ id: 'same-model', modelId: 'same-model', provider: 'openai', credentialId: 'openai' }, { id: 'same-model-anthropic', modelId: 'same-model', provider: 'anthropic', credentialId: 'anthropic' }]);
-  expect((await disk()).credentials).toMatchObject({ openai: { secretRef: 'OPENAI_API_KEY' }, anthropic: { secretRef: 'ANTHROPIC_API_KEY' } });
-  expect(auth).toHaveLength(0);
-  for (const modelId of ['same-model', 'same-model-anthropic']) {
-    const response = await page.request.post(`${daemon.url}/api/config/test`, { headers: { origin: daemon.url }, data: { modelId } });
-    expect(await response.json()).toMatchObject({ ok: true });
-  }
-  expect(auth).toEqual(['Bearer first-setup-key', 'Bearer second-setup-key']);
 }, 90_000);

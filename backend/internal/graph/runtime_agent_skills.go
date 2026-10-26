@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"os"
 )
 
 // LoadedSkill is one skill directory the Agent can see.

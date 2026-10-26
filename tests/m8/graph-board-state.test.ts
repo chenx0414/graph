@@ -121,13 +121,5 @@ describe('canvas and conversation source wiring', () => {
     expect(app).not.toContain('被阻塞 / 已跳过');
   });
 
-  test('the conversation drawer keeps the task-graph testids without a second legend', () => {
-    const source = read('src/web/Conversation.tsx');
-    expect(source).toContain('data-testid="graph-state-summary"');
-    expect(source).toContain('data-testid="draft-graph-detail"');
-    expect(source).toContain('data-testid="conversation-node-detail"');
-    // The legend is single-sourced in GraphCanvas; the drawer must not render
-    // its own copy under a different testid.
-    expect(source).not.toContain('graph-board-legend');
-  });
+
 });

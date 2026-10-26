@@ -58,7 +58,7 @@ func RouteModuleOutputs(kernel *KernelStore, modules *ModuleRuntime, graphID, mo
 				port = delivery.ToEndpoint[dot+1:]
 			}
 			next := modules.Deliver(owner, port, delivery.Value)
-			g5Exec(kernel.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", delivery.Id)
+			kernel.MarkDeliveryProcessed(delivery.Id)
 			landings = append(landings, RouteModuleOutputs(kernel, modules, graphID, owner, next, depth+1, false)...)
 		}
 	}

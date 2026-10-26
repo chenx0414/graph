@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"os"
 )
 
 type SkillUsageEntry struct {

@@ -1,11 +1,12 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"crypto/sha256"
 )
 
 // contextDigestPattern is the exact artifact digest a handoff reference must carry.

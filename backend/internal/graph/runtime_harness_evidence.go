@@ -1,22 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"strings"
-)
 
-// The harness evidence surface is what lets the improver read its own run.
-//
-// The RSI identity tells the Main Agent to watch its own trajectory, its tool
-// errors, the operations that got blocked and how the checks went - but until
-// now nothing let it read any of that. The facts were all persisted: the
-// transcript entries of every node, the open internal problems, the queue
-// reasons of failed nodes, the receipts of applied changes and the usage of
-// every model call. They were simply not reachable from the Agent.
-//
-// This file turns those facts into one bounded digest. It reports facts and
-// never judgements: what happened, what failed, what it cost. The Agent still
-// decides what to do about it.
+	"encoding/json"
+)
 
 // HARNESS_EVIDENCE_MAX_STEPS bounds the trajectory one node contributes.
 const HARNESS_EVIDENCE_MAX_STEPS = 60

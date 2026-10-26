@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,20 +8,10 @@ import (
 	"strconv"
 	"strings"
 
+	"context"
+
 	"github.com/MichaelKinsy/PiG/codemode"
 )
-
-// The codemode tool.
-//
-// The PiG kernel has codemode built in: the model writes JavaScript that
-// calls the host's tools, and the script runs in the kernel's QuickJS sandbox.
-// The daemon owns the host side of that sandbox. The tools a script may call
-// are the session's own tools, and every call passes the same admission gate a
-// direct call passes: the sandbox is a way to write the calls, not a way
-// around them.
-//
-// The tool is on by default. The configuration turns it off when a deployment
-// wants the model to call its tools one by one.
 
 // CodemodeToolName is the name the codemode tool is offered under.
 const CodemodeToolName = "codemode"

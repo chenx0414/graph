@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,6 +13,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"bytes"
 )
 
 // Browser authorization is owned by the host. Neither codes nor keys enter a
@@ -26,6 +27,7 @@ type providerLogin struct {
 	claimed                                 bool
 	mutex                                   sync.Mutex
 }
+
 type providerLogins struct {
 	mutex         sync.Mutex
 	values        map[string]*providerLogin
@@ -46,6 +48,7 @@ func (app *GraphApp) loginService() *providerLogins {
 	}
 	return app.logins
 }
+
 func (service *providerLogins) pending(ref string) bool {
 	if service.services.PendingSecretRequests != nil {
 		for _, request := range service.services.PendingSecretRequests() {
@@ -56,6 +59,7 @@ func (service *providerLogins) pending(ref string) bool {
 	}
 	return false
 }
+
 func (service *providerLogins) view(login *providerLogin) map[string]any {
 	login.mutex.Lock()
 	defer login.mutex.Unlock()
@@ -72,6 +76,7 @@ func (service *providerLogins) view(login *providerLogin) map[string]any {
 	}
 	return view
 }
+
 func (service *providerLogins) get(id string) *providerLogin {
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
@@ -81,6 +86,7 @@ func (service *providerLogins) get(id string) *providerLogin {
 	}
 	return login
 }
+
 func (service *providerLogins) start(provider, ref string) map[string]any {
 	if provider != "openrouter" {
 		Raise("invalid_input", "该服务商尚未启用浏览器授权")
@@ -225,6 +231,7 @@ func (service *providerLogins) start(provider, ref string) map[string]any {
 	}()
 	return service.view(login)
 }
+
 func (service *providerLogins) cancel(login *providerLogin) {
 	login.mutex.Lock()
 	saving := login.state == "saving"
@@ -238,6 +245,7 @@ func (service *providerLogins) cancel(login *providerLogin) {
 	}
 	<-login.done
 }
+
 func (service *providerLogins) disconnect(ref string) map[string]any {
 	if !providerSecretRef.MatchString(ref) {
 		Raise("invalid_input", "凭据引用无效")
@@ -275,6 +283,7 @@ func (service *providerLogins) disconnect(ref string) map[string]any {
 	service.mutex.Unlock()
 	return map[string]any{"disconnected": true, "persistencePending": service.pending(ref)}
 }
+
 func (service *providerLogins) close() {
 	service.mutex.Lock()
 	logins := []*providerLogin{}

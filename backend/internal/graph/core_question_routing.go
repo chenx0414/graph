@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
+
+	"encoding/json"
 )
 
 // QuestionOwner is who may answer a parked question.
@@ -195,10 +196,10 @@ func RecoverMaster(store *TaskStore, taskId, reason string) bool {
 			}
 		}
 		for _, question := range released {
-			kernelExec(store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?", CanonicalJSON(map[string]any{"type": "retry"}), question["id"])
+			store.ResolveQuestion(kernelString(question["id"]), map[string]any{"type": "retry"})
 		}
 		if reason == "configuration" || (master.Status != "preparing" && master.Status != "running" && master.Status != "blocked") {
-			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", taskId, master.Id)
+			store.SetNodePending(taskId, master.Id)
 		}
 		if reason == "configuration" {
 			store.Event(taskId, "task.master_recovered", map[string]any{"reason": "internal problem parked while the environment was unavailable"})
@@ -233,8 +234,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 	// main-owned problem (invisible to the user) and is parked from the
 	// scheduler until an explicit retry or configuration recovery releases it.
 	selfOwned := master != nil && anchorTaskId == input.TaskId && master.Id == input.NodeId
-	kernelExec(store.Db, "INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)",
-		id, input.TaskId, input.NodeId, questionOptionalOperationId(input.OperationId), input.Kind, CanonicalJSON(input.Data), string(owner))
+	store.OpenQuestion(id, input.TaskId, input.NodeId, questionOptionalOperationId(input.OperationId), input.Kind, input.Data, owner)
 
 	if input.AutoAnswer != nil {
 		if input.Kind == "permission" && input.AutoAnswer.Answer.Type == "grant" {
@@ -242,12 +242,12 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 			if !ok || requested != input.AutoAnswer.Answer.Grant {
 				panic(errors.New("Automatic grant must match the requested capability"))
 			}
-			kernelExec(store.Db, "INSERT OR IGNORE INTO task_grants VALUES(?,?)", input.TaskId, input.AutoAnswer.Answer.Grant)
+			store.GrantTaskCapability(input.TaskId, input.AutoAnswer.Answer.Grant)
 		}
-		kernelExec(store.Db, "UPDATE questions SET status='resolved',answer=? WHERE id=?", CanonicalJSON(input.AutoAnswer.Answer), id)
+		store.ResolveQuestion(id, input.AutoAnswer.Answer)
 		if input.AutoAnswer.Resume != nil && *input.AutoAnswer.Resume {
-			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", input.TaskId, input.NodeId)
-			kernelExec(store.Db, "UPDATE activations SET state='pending' WHERE id=(SELECT activation_id FROM nodes WHERE task_id=? AND id=?)", input.TaskId, input.NodeId)
+			store.SetNodePending(input.TaskId, input.NodeId)
+			store.ResetNodeActivation(input.TaskId, input.NodeId)
 		}
 		store.Event(input.TaskId, "question.auto_approved", map[string]any{
 			"questionId":   id,
@@ -269,7 +269,7 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 		// The main Agent runs as the conversation master. Its prompt reads the
 		// structured problem list; no user-visible raw error message is inserted.
 		if master.Status != "preparing" && master.Status != "running" {
-			kernelExec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=?", anchorTaskId, master.Id)
+			store.SetNodePending(anchorTaskId, master.Id)
 		}
 		// Record the same durable, deduplicated intent every other wake uses, so a
 		// problem that is observed again does not become a second turn. A problem
@@ -401,7 +401,7 @@ func ApproveHumanCheck(store *TaskStore, questionId, note string) bool {
 			updated[key] = value
 		}
 		updated["preReview"] = map[string]any{"approved": true, "note": note}
-		kernelExec(store.Db, "UPDATE questions SET data=? WHERE id=?", CanonicalJSON(updated), questionId)
+		store.AmendQuestionData(questionId, updated)
 		store.Event(kernelString(row["task_id"]), "human.prereview_approved", map[string]any{
 			"questionId": questionId,
 			"nodeId":     kernelString(row["node_id"]),

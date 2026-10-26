@@ -24,7 +24,7 @@ func ConfirmRsiContinuation(store *TaskStore, requestID string) {
 	if !eligible {
 		return
 	}
-	g5Exec(store.Db, "UPDATE nodes SET status='pending' WHERE task_id=? AND id=? AND status='succeeded'", row["task_id"], row["node_id"])
+	store.ResumeSucceededNode(g5Str(row["task_id"]), g5Str(row["node_id"]))
 	store.Event(g5Str(row["task_id"]), "rsi.continuation_ready", map[string]any{"requestId": requestID, "nodeId": g5Str(row["node_id"])})
 }
 

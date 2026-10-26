@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"fmt"
 	"strings"
+
+	"fmt"
 )
 
 type BriefingAgentCombination struct {
@@ -42,7 +43,13 @@ type BriefingExtra struct {
 }
 
 // Briefing is the external main briefing: request, acceptance, own messages and available capabilities.
-func Briefing(operation Operation, extra BriefingExtra) string {
+//
+// It returns the briefing and the length of its setup: the tail that describes the
+// environment the task runs in - the bound capabilities, the catalog and the system
+// context. The setup is the same text in every operation of a task, and the session
+// reads it once. A caller that knows the session still carries it may send the
+// briefing without that tail.
+func Briefing(operation Operation, extra BriefingExtra) (string, int) {
 	catalogDefinitions := []string{}
 	catalogCapabilities := []string{}
 	catalogAgentCombinations := []BriefingAgentCombination{}
@@ -122,14 +129,13 @@ func Briefing(operation Operation, extra BriefingExtra) string {
 	} else {
 		lines = append(lines, "")
 	}
+	setup := []string{}
 	if len(extra.Capabilities) > 0 {
 		items := make([]string, 0, len(extra.Capabilities))
 		for _, item := range extra.Capabilities {
 			items = append(items, fmt.Sprintf("- %s@%s", item.Id, item.Version))
 		}
-		lines = append(lines, "Bound capabilities:\n"+strings.Join(items, "\n"))
-	} else {
-		lines = append(lines, "")
+		setup = append(setup, "Bound capabilities:\n"+strings.Join(items, "\n"))
 	}
 	if len(catalogDefinitions) > 0 || len(catalogCapabilities) > 0 || len(catalogAgentCombinations) > 0 {
 		items := []string{}
@@ -142,9 +148,7 @@ func Briefing(operation Operation, extra BriefingExtra) string {
 		for _, item := range catalogAgentCombinations {
 			items = append(items, fmt.Sprintf("- Agent recipe %s (%s, %s, %s): %s", item.Id, item.Name, item.RecommendedGrade, item.Status, item.Description))
 		}
-		lines = append(lines, "Catalog:\n"+strings.Join(items, "\n"))
-	} else {
-		lines = append(lines, "")
+		setup = append(setup, "Catalog:\n"+strings.Join(items, "\n"))
 	}
 	if extra.SystemContext != nil && (extra.SystemContext.Resources || extra.SystemContext.AgentCombinations || extra.SystemContext.SystemSummary) {
 		system := []string{"System context (read-only; query before planning instead of guessing):"}
@@ -157,14 +161,16 @@ func Briefing(operation Operation, extra BriefingExtra) string {
 		if extra.SystemContext.SystemSummary {
 			system = append(system, "- read_system_capabilities: configured subscription plans, configured models, Agent definitions, graph architectures and quota windows (secrets excluded).")
 		}
-		lines = append(lines, strings.Join(system, "\n"))
-	} else {
-		lines = append(lines, "")
+		setup = append(setup, strings.Join(system, "\n"))
 	}
 	if len(operation.Context.Answers) > 0 {
-		lines = append(lines, "Answers: "+jsonStringify(operation.Context.Answers))
-	} else {
-		lines = append(lines, "")
+		setup = append(setup, "Answers: "+jsonStringify(operation.Context.Answers))
+	}
+	keptSetup := []string{}
+	for _, line := range setup {
+		if line != "" {
+			keptSetup = append(keptSetup, line)
+		}
 	}
 	kept := []string{}
 	for _, line := range lines {
@@ -172,5 +178,13 @@ func Briefing(operation Operation, extra BriefingExtra) string {
 			kept = append(kept, line)
 		}
 	}
-	return strings.Join(kept, "\n")
+	kept = append(kept, keptSetup...)
+	// The setup is the tail of the briefing: the length is what a caller needs to
+	// take it off again.
+	setupText := strings.Join(keptSetup, "\n")
+	setupLength := 0
+	if setupText != "" && strings.HasSuffix(strings.Join(kept, "\n"), setupText) {
+		setupLength = len(setupText)
+	}
+	return strings.Join(kept, "\n"), setupLength
 }

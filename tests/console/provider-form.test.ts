@@ -6,7 +6,7 @@
  * sockets, no child processes — real network probing and browser behaviour are
  * covered by the human acceptance check.
  *
- * The field names mirror the daemon contract in src/server/providers.ts:
+ * The field names mirror the daemon contract in backend/internal/graph/server_providers.go:
  * `label` (not `name`) and `credentialRef` (not `secretRef`), plus `requestId`
  * on every probe POST.
  */

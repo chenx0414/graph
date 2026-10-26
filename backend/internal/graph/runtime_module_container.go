@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -9,6 +8,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"context"
 )
 
 // MODULE_IMAGE is the pinned runtime, prepared by the operator. Evaluations never pull an image or use the network.
@@ -216,6 +217,12 @@ func RunModuleContainer(input ModuleContainerInput) ModuleContainerResult {
 		} else {
 			result.Stderr = waitErr.Error()
 		}
+	} else {
+		// A module that answered has an exit code of zero. Leaving the code
+		// empty made every successful evaluation look like an unknown exit,
+		// and the host reported it as a failed module.
+		code := 0
+		result.Code = &code
 	}
 	killMu.Lock()
 	started := killStarted

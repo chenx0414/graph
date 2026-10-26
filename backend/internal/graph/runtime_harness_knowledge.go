@@ -1,18 +1,11 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
-)
 
-// The knowledge side of the harness store: what a project met and what it
-// adopted, and the two ways one is found again.
-//
-// A friction is a suspicion the project has not resolved. A lesson is what the
-// project saw happen and chose to keep. They are the same kind of record at
-// two stages, so they share one store - but only a lesson travels into a
-// prompt, because a guess is not a fact.
+	"encoding/json"
+)
 
 // HARNESS_KIND_FRICTION is the old name for the stage a record is at before
 // it was solved. It is read for the records written under the first shape.
@@ -106,8 +99,6 @@ type HarnessDecisionInput struct {
 	RequestId string
 }
 
-// HarnessDecisionResult is what a recorded decision returns.
-
 type HarnessDecisionResult struct {
 	Domain     string                   `json:"domain"`
 	Axis       string                   `json:"axis"`
@@ -125,9 +116,6 @@ func (service *graphManagementService) HarnessDecision(store *harnessArtifactSto
 	input.Overlay = service.harnessCandidateOverlay(input.GraphId, input.Chosen)
 	return harnessRecordDecision(store, entries, input)
 }
-
-// harnessRecordDecision appends one adopted lesson to a domain's store and
-// promotes it, so the next task of that domain finds it.
 
 func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
 	if store == nil || !store.present || store.publish == nil {

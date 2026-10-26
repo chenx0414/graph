@@ -1,4 +1,3 @@
-// These are private response dialect markers observed in ordinary provider text.
 // Keep one definition for stream recovery and transcript rendering.
 const PRIVATE_TAG = '(?:analysis|review[\\s_]*of[\\s_]*last[\\s_]*turn)';
 const PAIRED = new RegExp(`<(${PRIVATE_TAG})>[\\s\\S]*?<\\/\\1>`, 'gi');

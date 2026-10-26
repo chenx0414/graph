@@ -15,7 +15,6 @@ type QuestionPolicy = {
   escalate?: boolean;
 };
 
-// Ownership, offered actions and answer acceptance share the same policy.
 // Message retries are deliberately narrower than configuration recovery.
 const POLICIES: Readonly<Record<string, QuestionPolicy>> = {
   permission: { owner: 'user', answers: ['grant'] },

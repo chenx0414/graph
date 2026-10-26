@@ -1,12 +1,13 @@
 package graph
 
 import (
-	"crypto/x509"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"crypto/x509"
 )
 
 // ApplicationRoot is the checkout the daemon was loaded from. The CLI sets it

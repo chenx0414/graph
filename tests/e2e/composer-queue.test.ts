@@ -116,7 +116,7 @@ test('queued messages survive a real restart and receipt replay without merging 
   expect(JSON.stringify(f.provider.requests[0])).toContain(`[${firstMessageId}] (v1) FIFO first message`);
   expect(firstAnswer.messages.map((message: { role: string; state: string }) => [message.role, message.state])).toEqual([['user', 'delivered'], ['assistant', 'done']]);
   expect(await (await f.page.request.get(`${f.url}/api/tasks`)).json()).toEqual([]);
-  expect(await f.runtime.host.runReady()).toEqual({ dispatched: 0 });
+  await expect.poll(async () => (await f.view(id)).master?.status).not.toBe('running');
   expect(f.provider.requests).toHaveLength(1);
   await f.post(`/api/conversations/${id}/pause`);
   const replay = crypto.randomUUID();
@@ -140,7 +140,7 @@ test('queued messages survive a real restart and receipt replay without merging 
   // Remove the pause guard first: archive alone must still prevent admission.
   await f.post(`/api/conversations/${id}/resume`);
   expect((await f.view(id)).paused).toBe(false);
-  expect(await f.runtime.host.runReady()).toEqual({ dispatched: 0 });
+  await expect.poll(async () => (await f.view(id)).master?.status).not.toBe('running');
   expect(f.provider.requests).toHaveLength(1);
   expect(await (await f.page.request.get(`${f.url}/api/conversations`)).json()).toEqual([]);
   expect(await (await f.page.request.get(`${f.url}/api/conversations?archived=true`)).json()).toMatchObject([{ id, archivedAt: archiveReceipt.archivedAt }]);
@@ -180,8 +180,12 @@ test('queued messages survive a real restart and receipt replay without merging 
 
 
 test('real main provider prompts preserve attached message anchors and the available Agent recipe description', async () => {
-  const f = await fixture([{ text: 'The supplied notes and recipe were received.' }, { text: 'The revised requirement and acceptance were received.' }]);
-  const identity = join(f.root, 'capabilities', 'agent-md', 'coder-identity');
+  let proposal: unknown;
+  const f = await fixture([{ text: 'The supplied notes and recipe were received.' },
+    { tools: [{ id: 'propose', name: 'propose_graph', arguments: () => JSON.stringify({ proposal, requestId: 'propose-revision' }) }] },
+    { text: 'The revised draft was prepared.' },
+    { text: 'The revised requirement and acceptance were received.' }]);
+  const identity = join(f.root, 'graph-home', 'capabilities', 'agent-md', 'coder-identity');
   await mkdir(identity, { recursive: true });
   await writeFile(join(identity, 'capability.json'), JSON.stringify({ id: 'coder-identity', kind: 'prompt', role: 'agent', version: '1.0.0', name: 'Coder identity' }));
   await writeFile(join(identity, 'agent.md'), 'You are a coder.\n');
@@ -209,18 +213,24 @@ test('real main provider prompts preserve attached message anchors and the avail
   await f.post(`/api/tasks/${view.anchorTaskId}/say`, { text: '先实现 A' });
   await f.post(`/api/tasks/${view.anchorTaskId}/say`, { text: '加入 B' });
   expect((await f.view(created.conversationId)).requirementVersion).toBe(3);
-  await f.runtime.supervisor(view.anchorTaskId).propose({
+  proposal = {
     requirementVersion: 3, summary: '实现 A 与 B', acceptance: [{ id: 'a1', description: '两种行为都成立', checkNode: 'check' }],
     definition: { schemaVersion: 2, name: '实现 A 与 B', protocols: { data: { type: 'object' } }, nodes: {},
       modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } }, operation: { action: 'workspace.command', version: 1, command: 'node', args: ['--version'], output: 'result' } } },
       edges: {}, inputs: {}, outputs: {}, acceptance: [{ id: 'a1', description: '两种行为都成立', kind: 'check', module: 'check' }],
     },
-  }, crypto.randomUUID());
-  const message = await f.post(`/api/conversations/${created.conversationId}/messages`, { text: '做这两件事' });
+  };
+  await f.post(`/api/conversations/${created.conversationId}/messages`, { text: 'Prepare the agreed draft.' });
   await f.post(`/api/conversations/${created.conversationId}/resume`);
   await f.answered(created.conversationId, 2);
-  expect(f.provider.requests).toHaveLength(2);
-  const revised = f.provider.requests[1] as { messages: { role: string; content: string | { type: string; text?: string }[] }[] };
+  await expect.poll(() => send.getAttribute('data-mode')).toBe('send');
+  expect((await f.view(created.conversationId)).proposal.spec.summary).toBe('实现 A 与 B');
+  await f.post(`/api/conversations/${created.conversationId}/pause`);
+  const message = await f.post(`/api/conversations/${created.conversationId}/messages`, { text: '做这两件事' });
+  await f.post(`/api/conversations/${created.conversationId}/resume`);
+  await f.answered(created.conversationId, 3);
+  await expect.poll(() => f.provider.requests.length).toBe(4);
+  const revised = f.provider.requests[3] as { messages: { role: string; content: string | { type: string; text?: string }[] }[] };
   const revisedPrompt = revised.messages.filter(item => item.role === 'user').map(item => typeof item.content === 'string' ? item.content : item.content.filter(part => part.type === 'text').map(part => part.text ?? '').join('')).join('\n');
   expect(revisedPrompt).toContain('Requirement version: 3');
   expect(revisedPrompt).toContain(`User messages:\n- [${message.messageId}] (v3) 做这两件事`);

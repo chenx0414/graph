@@ -1,8 +1,11 @@
 package graph
 
+// graph:table-writes-exempt: a retention sweep is one fact about many tables
+
 import (
-	"database/sql"
 	"fmt"
+
+	"database/sql"
 )
 
 // RetentionOptions is the conservative reclaim window for one task database.
@@ -102,6 +105,17 @@ func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 		panic(err)
 	}
 	return applied
+}
+
+// ApplyRetention deletes the doomed rows of one store.
+//
+// The deletes take the store's transaction lock, so they cannot interleave
+// with another writer's transaction: the reclaim runs inside a daemon that
+// keeps writing.
+func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
+	s.txMu.Lock()
+	defer s.txMu.Unlock()
+	return ApplyRetention(s.DB, options)
 }
 
 func applyRetentionLocked(db *sql.DB, sqlText retentionDoomed) (RetentionApplied, error) {

@@ -37,11 +37,6 @@ const statePath = process.env.GRAPH_HARNESS_GATE_STATE
  * cases have to run again.
  */
 const HARNESS_SURFACE_FILES = [
-  'src/runtime/agent-context.ts',
-  'src/runtime/agent-context-assembly.ts',
-  'src/runtime/agent-tool-definitions.ts',
-  'src/runtime/agent-tools.ts',
-  'src/runtime/pi-native-tools.ts',
   'backend/internal/graph/runtime_agent_context.go',
   'backend/internal/graph/runtime_agent_tool_definitions.go',
   'backend/internal/graph/runtime_agent_tools.go',

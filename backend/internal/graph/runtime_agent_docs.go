@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"path/filepath"
 	"strings"
+
+	"path/filepath"
 )
 
 // GraphDocumentationPaths are the read-only Agent-facing documentation locations.

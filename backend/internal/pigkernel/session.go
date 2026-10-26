@@ -2,8 +2,8 @@ package pigkernel
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/MichaelKinsy/PiG/ai"
@@ -18,11 +18,8 @@ import (
 // identity's view of that kernel: its model, its tools, its instructions and
 // its events.
 //
-// The division of labour is the one the daemon already keeps. The kernel owns
-// the execution history - the transcript, the admissions, the tool calls and
-// their results. The daemon owns the model channel, the tool bodies, the
-// admission gate and the budget. Neither one can spend a credential or call a
-// tool the other did not allow.
+// The division of labour between the daemon and the kernel is documented in
+// docs/architecture.md, section daemon 与内核的分工.
 
 // SessionOptions configure one resident session.
 type SessionOptions struct {
@@ -46,10 +43,25 @@ type SessionOptions struct {
 	// RequestId is the admission identity of the next input. The same id is
 	// the same input, so a retried admission is never sent twice.
 	RequestId string
+	// Compaction are the compaction thresholds the daemon decided for this
+	// model. The kernel derives the summary's own output budget from the
+	// reserve, so thresholds the kernel never heard of are a summary that is
+	// cut short and a conversation that keeps far less than it should.
+	Compaction *CompactionThresholds
 	// OnEvent receives the kernel's events.
 	OnEvent func(event map[string]any)
 	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
+	// ToolResults rewrites a tool result before the model reads it.
+	ToolResults ToolResultRenderer
+}
+
+// CompactionThresholds are the compaction thresholds of one model.
+type CompactionThresholds struct {
+	// ReserveTokens is the room the summary is written in.
+	ReserveTokens int
+	// KeepRecentTokens is the part of the conversation that survives.
+	KeepRecentTokens int
 }
 
 // ToolCallRecord is one executed tool call.
@@ -107,31 +119,36 @@ type Usage struct {
 	Total      int `json:"total"`
 }
 
+type sessionContinuation struct {
+	submission durable.Submission
+	err        error
+}
+
 // Session is one resident session on the kernel.
 type Session struct {
-	kernel      *Kernel
+	kernel       *Kernel
 	conversation harness.Conversation
-	extension   *durable.Extension
-	connections []*mcpConnection
-	recorder    *callRecorder
+	extension    *durable.Extension
+	connections  []*mcpConnection
+	recorder     *callRecorder
 
-	identity    string
-	model       ModelSpec
+	identity     string
+	model        ModelSpec
 	instructions string
-	toolNames   []string
-	loaded      []string
-	requestId   string
+	toolNames    []string
+	loaded       []string
+	requestId    string
 	// OnEvent receives the kernel's events.
 	OnEvent func(event map[string]any)
 	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
 
-	mutex         sync.Mutex
-	closed        bool
-	stopped       bool
+	mutex          sync.Mutex
+	closed         bool
+	stopped        bool
 	acceptingInput bool
-	interrupted   bool
-	continuation  chan struct{}
+	interrupted    bool
+	continuation   chan sessionContinuation
 }
 
 // OpenSession opens one resident session on the kernel.
@@ -144,7 +161,7 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		return nil, err
 	}
 	recorder := &callRecorder{}
-	registrations := toolRegistrations(options.Tools, recorder)
+	registrations := toolRegistrations(options.Tools, recorder, options.ToolResults)
 	connections, mcpTools, err := connectMcpServers(ctx, options.McpServers, recorder)
 	if err != nil {
 		return nil, err
@@ -158,6 +175,13 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 	// The model is the daemon's: the kernel asks the daemon's own stream for
 	// the answer, and the daemon admits the send.
 	providerID := providerName(options.Identity)
+	// The daemon owns the compaction thresholds of the model this session
+	// runs on. The kernel resolves the policy by the model reference the
+	// agent holds, which is the registered provider and the model id.
+	if options.Compaction != nil {
+		RegisterCompactionPolicy(providerID+"/"+options.Model.Id,
+			options.Compaction.ReserveTokens, options.Compaction.KeepRecentTokens)
+	}
 	provider := ai.CreateProvider(ai.CreateProviderOptions{
 		ID: providerID,
 		Auth: ai.ProviderAuth{APIKey: &ai.APIKeyAuth{
@@ -256,9 +280,37 @@ func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, e
 		}
 		submission = submitted
 	}
-	settled, err := submission.Wait(ctx)
-	if err != nil {
-		return SessionTurn{}, err
+	var settled durable.SettledSubmissionRecord
+	for {
+		record, waitErr := submission.Wait(ctx)
+		if waitErr != nil {
+			return SessionTurn{}, waitErr
+		}
+		session.mutex.Lock()
+		next := session.continuation
+		if next == nil {
+			session.acceptingInput = false
+		}
+		session.mutex.Unlock()
+		if next == nil {
+			settled = record
+			break
+		}
+		var resumed sessionContinuation
+		select {
+		case resumed = <-next:
+		case <-ctx.Done():
+			return SessionTurn{}, ctx.Err()
+		}
+		if resumed.err != nil {
+			return SessionTurn{}, resumed.err
+		}
+		session.mutex.Lock()
+		if session.continuation == next {
+			session.continuation = nil
+		}
+		session.mutex.Unlock()
+		submission = resumed.submission
 	}
 	turn := SessionTurn{StopReason: string(settled.Status)}
 	if settled.Answer != nil {
@@ -274,36 +326,22 @@ func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, e
 	}
 	if settled.Status != durable.SubmissionDone {
 		turn.ErrorMessage = fmt.Sprintf("The durable input was not answered: %s", settled.Status)
+		// The reason the turn could not be answered is what the user needs to
+		// see: "unanswered" on its own says that the turn ended without an
+		// answer, not that the provider stopped sending halfway through it.
+		if detail, ok := settled.Detail.(string); ok && strings.TrimSpace(detail) != "" {
+			turn.ErrorMessage += ": " + detail
+		}
+	}
+	session.mutex.Lock()
+	interrupted := session.interrupted
+	session.mutex.Unlock()
+	if interrupted {
+		turn.StopReason = "aborted"
+		turn.ErrorMessage = ""
 	}
 	turn.Inspect = session.Inspect()
 	return turn, nil
-}
-
-// Compact prepares the next operation's prompt.
-func (session *Session) Compact(ctx context.Context, instructions string) error {
-	session.mutex.Lock()
-	if session.closed {
-		session.mutex.Unlock()
-		return fmt.Errorf("pig kernel: the session is closed")
-	}
-	session.mutex.Unlock()
-	var prompt *string
-	if instructions != "" {
-		value := instructions
-		prompt = &value
-	}
-	task, err := session.conversation.Compact(ctx, prompt)
-	if err != nil {
-		return err
-	}
-	result, err := session.kernel.Harness().WaitForTask(ctx, task)
-	if err != nil {
-		return err
-	}
-	if result.State.Outcome != nil && result.State.Outcome.Status != durable.OutcomeCompleted {
-		return fmt.Errorf("pig kernel: the compaction did not complete")
-	}
-	return nil
 }
 
 // Steer injects a message into the running turn.
@@ -328,39 +366,46 @@ func (session *Session) Steer(ctx context.Context, text string) error {
 	return err
 }
 
-// Interrupt aborts the running turn. When text is present it becomes the next
-// prompt in the same session, keeping the interrupted operation alive.
+// Interrupt aborts the running turn. Replacement input stays in this operation.
 func (session *Session) Interrupt(ctx context.Context, text *string) error {
 	session.mutex.Lock()
-	if session.closed {
-		session.mutex.Unlock()
-		return fmt.Errorf("pig kernel: the session is closed")
-	}
-	if !session.acceptingInput {
+	if session.closed || !session.acceptingInput {
 		session.mutex.Unlock()
 		return fmt.Errorf("pig kernel: the session is no longer accepting interruption")
 	}
-	session.interrupted = true
+	if session.continuation != nil {
+		session.mutex.Unlock()
+		return fmt.Errorf("pig kernel: an interruption is already pending")
+	}
+	replacement := text != nil && *text != ""
+	session.interrupted = !replacement
+	var next chan sessionContinuation
+	if replacement {
+		next = make(chan sessionContinuation, 1)
+		session.continuation = next
+	}
 	session.mutex.Unlock()
 	if err := session.conversation.Abort(ctx, &durable.ConversationAbortOptions{}); err != nil {
+		if next != nil {
+			next <- sessionContinuation{err: err}
+		}
 		return err
 	}
-	if text == nil || *text == "" {
+	if !replacement {
 		return nil
 	}
 	requestId := session.admissionId() + ":continuation:" + newRequestId()
-	_, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
-		Type:      durable.SubmissionTypeInput,
-		Content:   ai.UserText(*text),
-		RequestId: &requestId,
+	submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
+		Type: durable.SubmissionTypeInput, Content: ai.UserText(*text), RequestId: &requestId,
 	})
+	next <- sessionContinuation{submission: submitted, err: err}
 	return err
 }
 
 // Stop soft-stops the running turn. The session and its transcript are kept.
 func (session *Session) Stop(ctx context.Context) error {
 	session.mutex.Lock()
-	session.stopped = true
+	session.interrupted = true
 	session.mutex.Unlock()
 	return session.conversation.Abort(ctx, &durable.ConversationAbortOptions{})
 }
@@ -372,14 +417,14 @@ func (session *Session) Inspect() SessionInspect {
 		names = append(names, name)
 	}
 	return SessionInspect{
-		SessionId:       fmt.Sprintf("%d", session.conversation.Id()),
-		SessionFile:     fmt.Sprintf("durable:%d", session.conversation.Id()),
-		Model:           session.model.Id,
-		Messages:        []any{},
-		ActiveTools:     names,
-		RegisteredTools: names,
+		SessionId:        fmt.Sprintf("%d", session.conversation.Id()),
+		SessionFile:      fmt.Sprintf("durable:%d", session.conversation.Id()),
+		Model:            session.model.Id,
+		Messages:         []any{},
+		ActiveTools:      names,
+		RegisteredTools:  names,
 		LoadedExtensions: session.loaded,
-		ToolCalls:       session.recorder.calls(),
+		ToolCalls:        session.recorder.calls(),
 	}
 }
 
@@ -405,13 +450,6 @@ func (session *Session) admissionId() string {
 	return session.identity
 }
 
-// stopped reports whether the turn was stopped before the provider call.
-func (session *Session) stoppedNow() bool {
-	session.mutex.Lock()
-	defer session.mutex.Unlock()
-	return session.stopped
-}
-
 // emit reports one kernel event to the daemon.
 func (session *Session) emit(event harness.AgentEvent) {
 	if session.OnEvent == nil {
@@ -428,91 +466,3 @@ func (session *Session) emit(event harness.AgentEvent) {
 // ends, a tool call starts and ends. The kernel's events carry the same
 // information under its own names, so they are translated here rather than
 // leaking a second vocabulary into the daemon.
-func translateEvent(event harness.AgentEvent) []map[string]any {
-	switch value := event.(type) {
-	case harness.RunStartEvent:
-		return []map[string]any{{"type": "agent_start"}}
-	case harness.RunEndEvent:
-		return []map[string]any{{"type": "agent_end"}}
-	case harness.TurnStartEvent:
-		return []map[string]any{{"type": "turn_start"}}
-	case harness.TurnEndEvent:
-		return []map[string]any{{"type": "turn_end"}}
-	case harness.MessageStartEvent:
-		message := messageMap(value.Message)
-		return []map[string]any{{"type": "message_start", "message": message}}
-	case harness.MessageUpdateEvent:
-		reports := []map[string]any{}
-		for _, change := range value.Changes {
-			if change.Type != "text_delta" {
-				continue
-			}
-			reports = append(reports, map[string]any{
-				"type": "message_update",
-				"assistantMessageEvent": map[string]any{
-					"type": "text_delta", "contentIndex": change.ContentIndex, "delta": change.Delta,
-				},
-			})
-		}
-		return reports
-	case harness.MessageEndEvent:
-		reports := []map[string]any{}
-		for _, message := range value.Entry.Model {
-			report := messageMap(message)
-			reports = append(reports, map[string]any{"type": "message_end", "message": report})
-		}
-		return reports
-	case harness.ToolExecutionStartEvent:
-		args := map[string]any{}
-		if value.Args != nil {
-			for name, item := range value.Args.All() {
-				args[name] = item
-			}
-		}
-		return []map[string]any{{
-			"type": "tool_execution_start", "toolName": value.ToolName, "toolCallId": value.ToolCallId,
-			"args": args,
-		}}
-	case harness.ToolExecutionEndEvent:
-		result := map[string]any{"content": []any{}}
-		failed := true
-		if value.Entry != nil {
-			for _, message := range value.Entry.Model {
-				if outcome, ok := message.(ai.ToolResultMessage); ok {
-					text := toolResultText(outcome)
-					result["content"] = []any{map[string]any{"type": "text", "text": text}}
-					failed = outcome.IsError
-				}
-			}
-		}
-		return []map[string]any{{
-			"type": "tool_execution_end", "toolName": value.ToolName, "toolCallId": value.ToolCallId,
-			"isError": failed, "result": result,
-		}}
-	}
-	return nil
-}
-
-// messageMap reads one transcript message as the daemon's own map.
-func messageMap(message ai.Message) map[string]any {
-	body, err := json.Marshal(message)
-	if err != nil {
-		return map[string]any{}
-	}
-	decoded := map[string]any{}
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return map[string]any{}
-	}
-	return decoded
-}
-
-// toolResultText reads the text of one tool result.
-func toolResultText(message ai.ToolResultMessage) string {
-	text := ""
-	for _, block := range message.Content {
-		if content, ok := block.(ai.TextContent); ok {
-			text += content.Text
-		}
-	}
-	return text
-}

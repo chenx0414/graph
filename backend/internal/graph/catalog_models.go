@@ -1,15 +1,20 @@
 package graph
 
 import (
-	"math"
 	"regexp"
 	"strings"
+
+	"math"
 )
 
 type ModelTier string
+
 type ModelGrade string
+
 type ModelInput string
+
 type ModelApi string
+
 type ModelThinkingLevel string
 
 var MODEL_TIERS = []ModelTier{"small", "medium", "frontier"}

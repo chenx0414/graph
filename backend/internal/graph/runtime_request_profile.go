@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
+
+	"crypto/sha256"
 )
 
 var cacheControlPattern = regexp.MustCompile(`"cache_control"\s*:`)

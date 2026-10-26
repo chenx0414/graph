@@ -2,14 +2,14 @@ package graph
 
 import "regexp"
 
-// A provider may emit its tool-call wire format as ordinary assistant text.
-// Match both observed parameter-opening variants by their complete closing sequence.
-// A fenced example is documentation, not a request to execute a tool.
-
 var unexecutedFence = regexp.MustCompile("(?s)```.*?```|~~~.*?~~~")
+
 var unexecutedDSML = regexp.MustCompile(`(?s)<parameter\s+name="[\w.-]+">.*</｜DSML｜\s+parameter>\s*</｜DSML｜\s+invoke>\s*</｜DSML｜\s+calls>\s*$`)
+
 var unexecutedInvoke = regexp.MustCompile(`(?s)<parameter\s+name="[\w.-]+">.*<parameter\s+name="[\w.-]+">.*</parameter>\s*</invoke>\s*(?:</analysis>)?\s*$`)
+
 var unexecutedParam = regexp.MustCompile(`(?s)<parameter\s+name="[\w.-]+">.*?</parameter>`)
+
 var unexecutedParamStart = regexp.MustCompile(`<parameter\s+name="[\w.-]+">`)
 
 func HasUnexecutedToolCall(text string) bool {

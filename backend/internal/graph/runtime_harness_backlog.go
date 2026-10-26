@@ -1,14 +1,10 @@
 package graph
 
 import (
-	"regexp"
 	"strings"
-)
 
-// The retired backlog artifact. The convention that wrote it is gone, but the
-// friction it holds is the project's own history, so it is read into the same
-// list the store holds. Nothing is written there: the backlog stays the
-// archive it is, and the store is where new knowledge goes.
+	"regexp"
+)
 
 // HARNESS_BACKLOG_ARTIFACT is the artifact the retired convention used.
 const HARNESS_BACKLOG_ARTIFACT = "harness-backlog"

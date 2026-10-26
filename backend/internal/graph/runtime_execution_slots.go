@@ -1,14 +1,13 @@
 package graph
 
 import (
-	"sync"
 	"time"
+
+	"sync"
 )
 
-// TODO(port): AbortSignal is defined once, in this file. Sibling ports should use this type and not redeclare it.
-// Nil is not aborted. AddEventListener does not replay an abort that already happened.
-
 const AGENT_EXECUTION_LIMIT = 10
+
 const PROGRAM_EXECUTION_LIMIT = 4
 
 type AbortSignal struct {
@@ -146,7 +145,8 @@ func WaitForAgentExecutionSlot(store *TaskStore, operationId string, signal *Abo
 }
 
 // WaitForKernelExecutionSlot yields capacity while a resident execution waits for provider credentials.
-func WaitForKernelExecutionSlot(store *TaskStore, executionId string, signal *AbortSignal) {
+func WaitForKernelExecutionSlot(kernel *KernelStore, executionId string, signal *AbortSignal) {
+	store := kernel.Store
 	for {
 		if signal.Aborted() {
 			panic(executionSlotsAborted())
@@ -159,7 +159,7 @@ func WaitForKernelExecutionSlot(store *TaskStore, executionId string, signal *Ab
 			if OccupiedSlots(store, "agent") >= AGENT_EXECUTION_LIMIT {
 				return false
 			}
-			SetNativeExecutionWaiting(store, executionId, false)
+			kernel.SetExecutionWaiting(executionId, false)
 			return true
 		})
 		if admitted == true {
@@ -170,7 +170,8 @@ func WaitForKernelExecutionSlot(store *TaskStore, executionId string, signal *Ab
 }
 
 // WaitForKernelProgramExecutionSlot reserves program capacity before a native operation crosses its send boundary.
-func WaitForKernelProgramExecutionSlot(store *TaskStore, operationId string, signal *AbortSignal) {
+func WaitForKernelProgramExecutionSlot(kernel *KernelStore, operationId string, signal *AbortSignal) {
+	store := kernel.Store
 	for {
 		if signal.Aborted() {
 			panic(executionSlotsAborted())
@@ -187,7 +188,7 @@ func WaitForKernelProgramExecutionSlot(store *TaskStore, operationId string, sig
 			if OccupiedSlots(store, "program") >= PROGRAM_EXECUTION_LIMIT {
 				return false
 			}
-			graphDBExec(store.Db, "UPDATE kernel_module_operations SET worker_active=1 WHERE id=?", operationId)
+			kernel.HoldModuleOperationWorker(operationId)
 			return true
 		})
 		if admitted == true {

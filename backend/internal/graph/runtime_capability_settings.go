@@ -1,11 +1,12 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+
+	"encoding/json"
 )
 
 // FreezeCapabilitySettings retains literal configuration while replacing secret

@@ -1,10 +1,10 @@
 package graph
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sort"
+
+	"database/sql"
 )
 
 // ActiveOperation is the turn actually running on a node.
@@ -21,19 +21,6 @@ func ActiveOperationForNode(store *TaskStore, taskID, nodeID string) *ActiveOper
 		return nil
 	}
 	return &ActiveOperation{Id: g5Str(row["id"])}
-}
-
-// TODO(port): Go maps have no insertion order. portKeys sorts keys. Stored
-// definitions round-trip through CanonicalJSON, whose object keys are sorted;
-// a live object built in insertion order can differ until it is reloaded.
-
-func portKeys[T any](items map[string]T) []string {
-	keys := make([]string, 0, len(items))
-	for key := range items {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func g5Query(db *sql.DB, query string, args ...any) []map[string]any {

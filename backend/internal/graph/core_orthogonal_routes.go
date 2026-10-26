@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"errors"
 	"fmt"
 	"math"
+
+	"errors"
 )
 
 // orthogonalGRID is the grid every connector vertex sits on.

@@ -1,24 +1,15 @@
 package graph
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
-)
 
-// A `workspace.command` operation reads code out of the integration worktree, so it may only be
-// admitted once the delivery's causal commit is really in that tree. An execution being `completed`
-// is not that fact: a source that submitted and then failed to merge has an output but no
-// integration, and a source that is still running has not merged yet.
-//
-// Only this action is gated, and only in the integration copy: agents, ordinary modules, `each`
-// routers, immediate delivery and graphs without Git keep their own timing. Nothing is inferred
-// into the protocol value - the delivery keeps exactly the value its producer emitted, and the
-// operation's own receipt still names the commit it read.
+	"bytes"
+)
 
 // ModuleOperationProgram is the program declaration one operation runs under.
 type ModuleOperationProgram struct {
@@ -137,14 +128,11 @@ func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, 
 	if deployResolve("", graphDBString(integration, "path")) != deployResolve("", workspace) {
 		return
 	}
-	source := kernelRow(kernel.Db, `SELECT s.execution_id AS execution,e.state AS state FROM kernel_deliveries d
-    LEFT JOIN kernel_submissions s ON s.id=d.submission_id LEFT JOIN kernel_executions e ON e.id=s.execution_id
-    WHERE d.id=?`, deliveryID)
-	if source == nil {
+	executionID, sourceState, found := kernel.DeliverySource(deliveryID)
+	if !found {
 		return
 	}
 	// Main-delivered and module-to-module input has no causal producer to wait for.
-	executionID := graphDBStringPtr(source, "execution")
 	if executionID == nil {
 		return
 	}
@@ -163,7 +151,7 @@ func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, 
 	merged := kernelRow(kernel.Db, "SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='integration'", graphID, *executionID)
 	if merged == nil {
 		// A short wait, not a repair: the delivery stays pending and the same one is retried.
-		if graphDBString(source, "state") == "running" {
+		if sourceState == "running" {
 			Raise("paused", "Delivery source "+*executionID+" has not been integrated yet")
 		}
 		Raise("integration_blocked", "Delivery source "+*executionID+" did not reach the integration branch")
@@ -183,15 +171,15 @@ func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, 
 func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationResponse {
 	kernel := options.Kernel
 	operation := options.Operation
-	previous := kernelRow(kernel.Db, "SELECT id,state,result FROM kernel_module_operations WHERE delivery_id=?", options.DeliveryId)
+	previous := kernel.ModuleOperationOfDelivery(options.DeliveryId)
 	if previous != nil {
-		switch graphDBString(previous, "state") {
+		switch previous.State {
 		case "settled":
-			return rsiDecodeModuleOperation(kernel.Content.Decode(graphDBString(previous, "result")))
+			return rsiDecodeModuleOperation(kernel.Content.Decode(previous.Result))
 		case "cancelled":
 			Raise("invalid_operation", "Cancelled operation input cannot be replayed; send a new input explicitly")
 		case "dispatched", "uncertain":
-			Raise("uncertain_operation", "Operation "+graphDBString(previous, "id")+" may have side effects; reconcile or cancel it before retrying")
+			Raise("uncertain_operation", "Operation "+previous.Id+" may have side effects; reconcile or cancel it before retrying")
 		}
 	}
 	if operation == nil {
@@ -202,16 +190,14 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	}
 	id := graphUUID()
 	if previous != nil {
-		id = graphDBString(previous, "id")
+		id = previous.Id
 	}
 	created := NowMillis()
 	kernel.Store.Transaction(func() any {
 		request := kernel.Content.Encode(map[string]any{
 			"operation": operation, "inputs": options.Inputs, "workspace": options.Workspace,
 		})
-		kernelExec(kernel.Db, `INSERT INTO kernel_module_operations(id,task_id,module_id,delivery_id,revision_version,request,state,created_at)
-		VALUES(?,?,?,?,?,?,'prepared',?) ON CONFLICT(delivery_id) DO UPDATE SET request=excluded.request,revision_version=excluded.revision_version,state='prepared',error=NULL,resource_receipt=NULL,record_digest=NULL`,
-			id, options.GraphId, options.ModuleId, options.DeliveryId, options.RevisionVersion, request, created)
+		kernel.PrepareModuleOperation(id, options.GraphId, options.ModuleId, options.DeliveryId, options.RevisionVersion, request, created)
 		return nil
 	})
 
@@ -232,12 +218,11 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		rsiAdmitSource(kernel, options.GraphId, options.DeliveryId, options.Workspace, operation, options.IntegratesSource)
 		commit = RevParse(options.Workspace, "HEAD")
 		cleanBefore = commit != nil && cleanTree()
-		changed := kernelExec(kernel.Db, "UPDATE kernel_module_operations SET state='dispatched',started_at=? WHERE id=? AND state='prepared'", NowMillis(), id)
-		count, err := changed.RowsAffected()
+		dispatched, err := kernel.DispatchModuleOperation(id)
 		if err != nil {
 			panic(err)
 		}
-		if count != 1 {
+		if !dispatched {
 			Raise("invalid_operation", "Operation is no longer dispatchable")
 		}
 	}
@@ -276,7 +261,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		if runner != nil {
 			runner.Close()
 		}
-		kernelExec(kernel.Db, "UPDATE kernel_module_operations SET worker_active=0 WHERE id=?", id)
+		kernel.ReleaseModuleOperationWorker(id)
 	}()
 	defer func() {
 		recovered := recover()
@@ -287,17 +272,16 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		reason := rsiPanicMessage(recovered)
 		unsentPause := false
 		if failure, ok := recovered.(*RuntimeError); ok && failure.Code == "paused" &&
-			kernelRow(kernel.Db, "SELECT 1 FROM kernel_module_operations WHERE id=? AND state='prepared'", id) != nil {
+			kernel.ModuleOperationPrepared(id) {
 			unsentPause = true
 		}
 		if !unsentPause {
-			kernelExec(kernel.Db, "UPDATE kernel_module_operations SET state=CASE WHEN state='dispatched' THEN 'uncertain' ELSE 'failed' END,error=?,ended_at=? WHERE id=? AND state!='settled'",
-				reason, NowMillis(), id)
+			kernel.FailModuleOperation(id, reason, NowMillis())
 		}
 		panic(recovered)
 	}()
 
-	WaitForKernelProgramExecutionSlot(kernel.Store, id, cancellation)
+	WaitForKernelProgramExecutionSlot(kernel, id, cancellation)
 	var programEnv map[string]string
 	var programReadPaths []string
 	var nodeModulesPath *string
@@ -326,7 +310,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		command := ResolveUnsandboxedCommand(operation.Command, operation.Args)
 		nonce := graphUUID()
 		quiescence := ProcessQuiescenceReceipt{Path: filepath.Join(scratchDir, "quiescence-"+nonce+".json"), Nonce: nonce}
-		kernelExec(kernel.Db, "UPDATE kernel_module_operations SET resource_receipt=? WHERE id=?", CanonicalJSON(quiescence), id)
+		kernel.RecordModuleOperationReceipt(id, CanonicalJSON(quiescence))
 		declared := map[string]string{}
 		for key, value := range programEnv {
 			declared[key] = value
@@ -415,8 +399,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		Diagnostics: []string{"workspace.command " + id},
 	}
 	kernel.Store.Transaction(func() any {
-		kernelExec(kernel.Db, "UPDATE kernel_module_operations SET state='settled',result=?,record_digest=?,ended_at=? WHERE id=?",
-			kernel.Content.Encode(evaluated), recordDigest, NowMillis(), id)
+		kernel.SettleModuleOperation(id, kernel.Content.Encode(evaluated), recordDigest, NowMillis())
 		return nil
 	})
 	kernel.Store.Event(options.GraphId, "graph.operation.settled", map[string]any{

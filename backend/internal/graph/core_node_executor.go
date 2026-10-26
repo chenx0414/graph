@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"fmt"
 	"regexp"
+
+	"fmt"
 )
 
 // ExecutorHost is the slice of the resident host this loop turns.
@@ -203,7 +204,12 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 	recovered := e.kernel.Execution(executionId)
 	attempt := recovered.Attempt
 	retriesUsed := recovered.RetriesUsed
-	resubmitsUsed := recovered.ResubmitsUsed
+	// The resubmit allowance is the node's, not this execution's. The node's
+	// durable counter is the one that survives a restart, and the contract
+	// says a reopened database does not refresh the automatic allowance: a
+	// node that used its one resubmit has used it, whichever execution it
+	// used it in.
+	resubmitsUsed := e.kernel.NodeState(e.graphId, nodeId).ResubmitsUsed
 	var injection *TurnInjection
 	if len(recovered.PendingGap) > 0 {
 		injection = &TurnInjection{Missing: recovered.PendingGap}
@@ -314,7 +320,7 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			continue
 		}
 		if metering != nil && (report.Usage == nil || !report.Usage.Accounted) && report.Usage != nil && isSafeInteger(report.Usage.Total) && report.Usage.Total > 0 {
-			e.kernel.CommitNodeUsage(e.graphId, nodeId, e.kernel.BudgetState(e.graphId, nodeId, metering.limit).Used+report.Usage.Total)
+			e.kernel.CommitNodeUsage(e.graphId, nodeId, int64(report.Usage.Total))
 		}
 		if metering != nil && report.Usage == nil {
 			if e.hasValidSubmission(executionId) {
@@ -337,7 +343,7 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			}
 			if !e.hasValidSubmission(executionId) && pausedReport.MatchString(*report.Error) && (e.kernel.Store.Task(e.graphId).Paused != 0 || e.kernel.NodeState(e.graphId, nodeId).Paused) {
 				e.kernel.FinishExecution(executionId, "blocked")
-				graphDBExec(e.kernel.Store.Db, "UPDATE kernel_nodes SET status='idle' WHERE task_id=? AND node_id=?", e.graphId, nodeId)
+				e.kernel.SetNodeIdle(e.graphId, nodeId)
 				e.queue.Complete(seq, QueueCompletion{Kind: "blocked", Reason: *report.Error})
 				return NodeOutcomeBlocked
 			}
@@ -378,8 +384,8 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			if resubmitsUsed < budget.ResubmitsAllowed {
 				resubmitsUsed++
 				e.kernel.NoteExecutionContinuation(executionId, "resubmit", report.Missing)
-				e.kernel.NoteNodeResubmit(e.graphId, nodeId, int(maxSafeInteger))
-				graphDBExec(e.kernel.Store.Db, "UPDATE kernel_executions SET missing_required=1 WHERE id=?", executionId)
+				e.kernel.NoteNodeResubmit(e.graphId, nodeId, budget.ResubmitsAllowed)
+				e.kernel.MarkExecutionMissingRequired(executionId)
 				injection = &TurnInjection{Missing: report.Missing}
 				continue
 			}
@@ -458,6 +464,7 @@ func panicMessage(value any) string {
 }
 
 var tokenBudgetExhausted = regexp.MustCompile(`Token budget exhausted`)
+
 var pausedReport = regexp.MustCompile(`(?i)paused`)
 
 // terminalReport matches the failures a retry cannot fix.

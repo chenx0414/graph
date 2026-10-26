@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { DEFAULT_COMMON_RULES } from '../../src/runtime/agent-context.ts';
+import { defaultCommonRules } from '../helpers/agent-rules.ts';
 import { behaviorCases } from '../../scripts/harness-behavior-cases.mjs';
 import { startBehaviorProvider } from '../../scripts/harness-behavior-model.mjs';
 
@@ -42,6 +42,7 @@ async function surface(root: string, rules: string) {
 test('the real-model evaluation records a verdict per case and names the case that regressed', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-harness-eval-report-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const rules = await defaultCommonRules(root);
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
 
@@ -64,7 +65,7 @@ test('the real-model evaluation records a verdict per case and names the case th
   const report = join(root, 'report.json');
 
   // The harness as it ships: the case is carried out and the verdict kept.
-  const good = await surface(root, DEFAULT_COMMON_RULES);
+  const good = await surface(root, rules);
   const green = await runReport(configPath, good, ledger, report);
   expect(green.code).toBe(0);
   expect(green.output).toContain('parser: pass');
@@ -77,7 +78,7 @@ test('the real-model evaluation records a verdict per case and names the case th
 
   // The harness loses the rule that tells the agent how to make a precise
   // change: the case stops passing, and the runner says it regressed.
-  const broken = await surface(root, DEFAULT_COMMON_RULES.split('\n').filter(rule => !rule.includes('Use edit for precise changes')).join('\n'));
+  const broken = await surface(root, rules.split('\n').filter(rule => !rule.includes('Use edit for precise changes')).join('\n'));
   const red = await runReport(configPath, broken, ledger, report);
   expect(red.code).not.toBe(0);
   expect(red.output).toContain('parser: fail (regressed)');

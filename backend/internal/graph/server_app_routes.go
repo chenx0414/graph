@@ -1,0 +1,141 @@
+package graph
+
+import (
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+)
+
+// registerRoutes registers every route of the console. The paths and methods
+// are the ones RULEBOOK §6 lists.
+func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /{$}", app.serveHome)
+	mux.HandleFunc("GET /api/health", app.serveHealth)
+	mux.HandleFunc("GET /api/startup", app.serveStartup)
+	mux.HandleFunc("GET /api/agent-context", app.serveAgentContext)
+	mux.HandleFunc("PUT /api/agent-context/prompts", app.serveAgentContextPrompt)
+	mux.HandleFunc("PUT /api/agent-context/prompts/default", app.serveAgentContextDefault)
+	mux.HandleFunc("POST /api/agent-context/prompts/default/reset", app.serveAgentContextDefaultReset)
+	mux.HandleFunc("POST /api/agent-context/prompts/reset", app.serveAgentContextPromptReset)
+	mux.HandleFunc("PUT /api/agent-context/tools", app.serveAgentContextTools)
+	if app.options.Usage != nil {
+		mux.HandleFunc("GET /api/usage", app.serveUsage)
+		mux.HandleFunc("POST /api/usage/refresh", app.serveUsageRefresh)
+		mux.HandleFunc("GET /api/usage/credentials", app.serveUsageCredentials)
+	}
+	mux.HandleFunc("GET /api/model-pricing", app.serveModelPricing)
+	mux.HandleFunc("POST /api/providers/login", app.serveProviderLogin)
+	mux.HandleFunc("GET /api/providers/login/{id}", app.serveProviderLoginStatus)
+	mux.HandleFunc("POST /api/providers/login/{id}/cancel", app.serveProviderLoginCancel)
+	mux.HandleFunc("POST /api/providers/disconnect", app.serveProviderDisconnect)
+	mux.HandleFunc("GET "+PROVIDER_ROUTES.List, app.serveProviders)
+	mux.HandleFunc("POST "+PROVIDER_ROUTES.Probe, app.serveProviderProbe)
+	mux.HandleFunc("POST /api/app/secret", app.serveAppSecret)
+	mux.HandleFunc("GET /api/app/secret-requests", app.serveAppSecretRequests)
+	mux.HandleFunc("GET /api/app/rsi/status", app.serveAppRsiStatus)
+	mux.HandleFunc("POST /api/app/rsi/restart-ack", app.serveAppRsiRestartAck)
+	mux.HandleFunc("GET /api/limits", app.serveLimits)
+	mux.HandleFunc("GET /api/tool-stats", app.serveToolStats)
+	mux.HandleFunc("POST /api/tool-stats/clear", app.serveToolStatsClear)
+	mux.HandleFunc("GET /api/skill-stats", app.serveSkillStats)
+	mux.HandleFunc("POST /api/skills/promote", app.serveSkillPromote)
+	// The configuration routes exist whether or not a configuration file was
+	// opened: a daemon without one answers with the reason, not with a 404.
+	mux.HandleFunc("GET /api/config", app.serveConfig)
+	mux.HandleFunc("POST /api/config", app.serveConfigSave)
+	if app.options.AppServices != nil && app.options.AppServices.RefreshPrices != nil {
+		mux.HandleFunc("POST /api/pricing/refresh", app.servePricingRefresh)
+	}
+	if app.options.ConfigTest != nil {
+		mux.HandleFunc("POST /api/config/test", app.serveConfigTest)
+	}
+	mux.HandleFunc("GET /api/settings", app.serveSettings)
+	mux.HandleFunc("GET /api/capabilities/config", app.serveCapabilityConfig)
+	mux.HandleFunc("GET /api/tasks", app.serveTasks)
+	mux.HandleFunc("GET /api/inbox", app.serveInbox)
+	mux.HandleFunc("GET /api/projects/{projectId}/entries", app.serveProjectEntries)
+	mux.HandleFunc("POST /api/projects/{projectId}/prepare", app.serveProjectPrepare)
+	mux.HandleFunc("GET /api/conversations", app.serveConversations)
+	mux.HandleFunc("POST /api/conversations", app.serveConversationCreate)
+	mux.HandleFunc("GET /api/conversations/{conversationId}", app.serveConversation)
+	mux.HandleFunc("GET /api/messages/{messageId}/attachments/{index}", app.serveAttachment)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/history", app.serveConversationHistory)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/artifacts", app.serveConversationArtifacts)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/draft-graph", app.serveDraftGraph)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/proposals/{version}", app.serveProposal)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/messages", app.serveConversationMessage)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/messages/{messageId}/cancel", app.serveConversationMessageCancel)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/model", app.serveConversationModel)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/compact", app.serveConversationCompact)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/archive", app.serveConversationArchive)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/unarchive", app.serveConversationUnarchive)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/bind", app.serveConversationBind)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/confirm", app.serveConversationConfirm)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/drafts/archive", app.serveConversationDraftArchive)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/drafts/restore", app.serveConversationDraftRestore)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/drafts/delete", app.serveConversationDraftDelete)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/pause", app.serveConversationPause)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/resume", app.serveConversationResume)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/steer", app.serveConversationSteer)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/interrupt", app.serveConversationInterrupt)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/events", app.serveConversationEvents)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/events/stream", app.serveConversationStream)
+	mux.HandleFunc("POST /api/tasks", app.serveTaskCreate)
+	mux.HandleFunc("GET /api/tasks/{taskId}", app.serveTask)
+	mux.HandleFunc("POST /api/tasks/{taskId}/say", app.serveTaskSay)
+	mux.HandleFunc("POST /api/tasks/{taskId}/accept", app.serveTaskAccept)
+	mux.HandleFunc("POST /api/tasks/{taskId}/abandon", app.serveTaskAbandon)
+	mux.HandleFunc("POST /api/tasks/{taskId}/pause", app.serveTaskPause)
+	mux.HandleFunc("POST /api/tasks/{taskId}/resume", app.serveTaskResume)
+	mux.HandleFunc("POST /api/tasks/{taskId}/budget", app.serveTaskBudget)
+	mux.HandleFunc("POST /api/tasks/{taskId}/answer", app.serveTaskAnswer)
+	mux.HandleFunc("GET /api/tasks/{taskId}/events", app.serveTaskEvents)
+	mux.HandleFunc("GET /api/tasks/{taskId}/events/stream", app.serveTaskStream)
+	mux.HandleFunc("POST /api/tasks/{taskId}/nodes/{nodeId}/messages", app.serveNodeMessage)
+	mux.HandleFunc("GET /api/tasks/{taskId}/nodes/{nodeId}/run", app.serveNodeRun)
+	mux.HandleFunc("GET /api/tasks/{taskId}/nodes/{nodeId}/prompt", app.serveNodePrompt)
+	mux.HandleFunc("GET /api/tasks/{taskId}/operations", app.serveOperations)
+	mux.HandleFunc("POST /api/tasks/{taskId}/graph/control", app.serveGraphControl)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph/modules/{moduleId}", app.serveGraphModule)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph/modules/{moduleId}/values", app.serveGraphModuleValues)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph/modules/{moduleId}/transitions/{transitionId}", app.serveGraphModuleTransition)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph/edges/{edgeId}", app.serveGraphEdge)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph/edges/{edgeId}/deliveries/{deliveryId}", app.serveGraphEdgeDelivery)
+	mux.HandleFunc("GET /api/tasks/{taskId}/graph", app.serveGraph)
+	mux.HandleFunc("GET /api/tasks/{taskId}/artifacts", app.serveTaskArtifacts)
+	mux.HandleFunc("GET /api/projects/{projectId}/artifacts", app.serveProjectArtifacts)
+	mux.HandleFunc("GET /api/tasks/{taskId}/artifacts/{artifactId}", app.serveArtifact)
+	mux.HandleFunc("GET /api/tasks/{taskId}/artifacts/{artifactId}/{version}/content", app.serveArtifactContent)
+	mux.HandleFunc("POST /api/tasks/{taskId}/artifacts/{artifactId}/{version}/retire", app.serveArtifactRetire)
+	mux.HandleFunc("POST /api/tasks/{taskId}/artifacts/{artifactId}/{version}/promote", app.serveArtifactPromote)
+	mux.HandleFunc("GET /api/catalog", app.serveCatalog)
+	mux.HandleFunc("POST /api/catalog/refresh", app.serveCatalogRefresh)
+	mux.HandleFunc("GET /api/catalog/pi-extension-updates", app.servePiExtensionUpdates)
+	mux.HandleFunc("GET /api/catalog/pi-packages", app.servePiPackages)
+	mux.HandleFunc("POST /api/catalog/pi-extensions/{id}/{version}/update", app.servePiExtensionUpdate)
+	mux.HandleFunc("POST /api/catalog/combinations", app.serveCombinationSave)
+	mux.HandleFunc("POST /api/catalog/combinations/{id}/description", app.serveCombinationDescription)
+	mux.HandleFunc("DELETE /api/catalog/combinations/{id}", app.serveCombinationDelete)
+	mux.HandleFunc("POST /api/catalog/combinations/{id}/compile", app.serveCombinationCompile)
+	mux.HandleFunc("GET /api/catalog/definitions/{definitionId}", app.serveDefinition)
+	if app.options.WebDir != "" {
+		mux.HandleFunc("GET /assets/{path...}", app.serveAssets)
+	}
+}
+
+// serveHome reads the console shell on every request and sets the session
+// cookie. A rebuilt bundle must never sit behind a stale page.
+func (app *GraphApp) serveHome(w http.ResponseWriter, r *http.Request) {
+	SetSessionCookie(w.Header(), app.session)
+	body := appDefaultPage()
+	if app.options.WebDir != "" {
+		raw, err := os.ReadFile(filepath.Join(app.options.WebDir, "index.html"))
+		if err == nil {
+			body = string(raw)
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, body)
+}

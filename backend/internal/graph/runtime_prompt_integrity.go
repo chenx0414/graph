@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"encoding/json"
 )
 
 // PROMPT_SECTIONS are Graph's own three sections plus the working directory the session appends.

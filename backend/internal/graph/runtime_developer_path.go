@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"os"
 	"strings"
+
+	"os"
 )
 
 // DEVELOPER_PATH_DIRECTORIES are locations a developer's shell puts on PATH

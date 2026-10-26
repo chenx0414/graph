@@ -1,13 +1,14 @@
 package graph
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"time"
+
+	"context"
 )
 
 // RetrievalResult is one granted textual fetch.

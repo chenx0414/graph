@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"sync"
+
+	"crypto/sha256"
 )
 
 // SlotRequest is one credential's concurrency ask.

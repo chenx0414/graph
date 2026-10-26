@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"bytes"
 	"encoding/json"
 	"math"
 	"strings"
+
+	"bytes"
 )
 
 // PublishedSubject is an exact published artifact a review cites.

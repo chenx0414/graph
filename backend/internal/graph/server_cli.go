@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"bytes"
 )
 
 // RunCLI is the process the APP spawns (`dist/graphd`). It serves HTTP itself.
@@ -32,6 +33,18 @@ func runCLI(args []string) (code int) {
 		panic(err)
 	}
 	env := osEnviron()
+	// The commands that are not the console: `graphd reclaim` reclaims a state
+	// directory without serving anything, `graphd review-module` turns a review
+	// policy into a command module, and `graphd assemble-team` builds a team
+	// from a running console's capability library.
+	switch {
+	case len(args) > 0 && args[0] == "reclaim":
+		return runReclaim(args[1:], cwd)
+	case len(args) > 0 && args[0] == "review-module":
+		return runReviewModule(args[1:], cwd)
+	case len(args) > 0 && args[0] == "assemble-team":
+		return runAssembleTeam(args[1:], cwd)
+	}
 	opts := parseCLI(args, env, cwd)
 	if opts.help {
 		fmt.Fprintln(os.Stdout, cliUsage)

@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
+
+	"os"
 )
 
 // READ_ONLY_GIT is the git subcommands a work copy may run.
@@ -228,6 +229,9 @@ func (runner *WorkspaceCommandRunner) Run(command string, args []string, signal 
 		panic(err)
 	}
 	environment := map[string]string{}
+	if hostCommands {
+		environment["PATH"] = os.Getenv("PATH")
+	}
 	for key, value := range runner.env {
 		environment[key] = value
 	}

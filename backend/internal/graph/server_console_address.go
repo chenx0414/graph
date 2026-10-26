@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"encoding/json"
 )
 
 // ConsoleAddress is where the console is listening, written for tools that have to find it.

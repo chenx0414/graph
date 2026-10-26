@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"os"
 	"strings"
+
+	"encoding/json"
 )
 
 // RecordedPrompt is one send's own record: the system prompt and tool

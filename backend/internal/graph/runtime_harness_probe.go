@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"fmt"
 )
 
 const (
@@ -31,11 +32,6 @@ const (
 	// HARNESS_MAX_OUTPUT_VALUE bounds one submitted output value.
 	HARNESS_MAX_OUTPUT_VALUE = 2000
 )
-
-// The harness probe compares the candidates of one task and reports what each
-// of them did differently. It reports facts, never a verdict: choosing between
-// candidates stays with the Agent, because this kind of task has no ground
-// truth to appeal to.
 
 // HarnessProbeVariant is one candidate harness of a probe: the same task, a
 // different set of prompt texts.

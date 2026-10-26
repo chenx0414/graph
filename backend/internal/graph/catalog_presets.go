@@ -1,12 +1,13 @@
 package graph
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"encoding/json"
 )
 
 // BootstrapDefinition is one preset definition the bootstrap pack publishes.

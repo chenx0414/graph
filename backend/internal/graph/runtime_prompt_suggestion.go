@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"regexp"
 	"strings"
+
+	"encoding/json"
 )
 
 // PromptSuggestionReply is one composer suggestion, including a refusal.

@@ -1,19 +1,5 @@
 package graph
 
-// Per-model thinking strengths, derived from the vendored models.dev snapshot.
-//
-// Graph stores and sends Pi's own level vocabulary (ModelThinkingLevel); a
-// model may accept only a subset of it and may name those levels differently.
-// Two rules keep the console honest:
-//
-//   - a level the snapshot does not list for this model is denied (null), so no
-//     control ever offers a strength the model cannot take;
-//   - the catalog decides availability, never the configuration: a saved default
-//     the model does not accept is not offered and is clamped instead.
-//
-// Every model is treated as thinking-capable and off is denied, so a strength
-// is always chosen: the console offers real levels only.
-
 // mappedOnly are levels the SDK refuses to invent: it accepts xhigh/max only through an
 // explicit mapping, so a model that does not name them does not offer them.
 var mappedOnly = map[string]bool{"xhigh": true, "max": true}

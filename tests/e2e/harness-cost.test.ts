@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { startGraphDaemon } from '../../src/server/start.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const execute = promisify(execFile);
@@ -70,8 +70,8 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
     await mkdir(join(root,'graph','prompts','rules'),{recursive:true});
     await writeFile(join(root,'graph','prompts','rules','common.md'),ownerRule);
   }
-  const daemon = await startGraphDaemon({ configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'),
-    webDir, port: 0, mode: 'execute', dynamic: true, env: { HOME: root, GRAPH_LOCAL_KEY: 'private-fixture-key' }, log: () => undefined });
+  const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'),
+    webDir, extraArgs: ['--execute'], env: { HOME: root, GRAPH_LOCAL_KEY: 'private-fixture-key' } });
   cleanup.push(() => daemon.close());
   const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
   const headers = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
@@ -128,6 +128,49 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
     expect(task.cacheHitRequestRate).toBe(1);
   }
   expect(report.requestProfiles.samples).toBe(cacheField === 'capacity-retry' ? 4 : 3);
+  // The report prices the whole tree and shows the prefix each request carried.
+  expect(report.summary.costByPurpose.completion.requests).toBe(cacheField === 'capacity-retry' ? 4 : 3);
+  // The same spend counted by source and by billing type: what each source
+  // cost, split by the type that prices it.
+  const cross = report.summary.costByPurposeAndBillingType as Record<string, Record<string, Record<string, number>> | undefined>;
+  if (cacheField === 'unreported') {
+    // No call carried a frozen rate, so no source can be priced.
+    expect(cross.completion).toBeUndefined();
+  } else {
+    const priced = cross.completion!.USD!;
+    expect(priced.input).toBeCloseTo(0.00015, 10);
+    expect(priced.output).toBeCloseTo(0.00012, 10);
+    expect(priced.cacheRead).toBeCloseTo(0.0000225, 10);
+    expect(priced.cacheWrite).toBe(0);
+    // The cross adds up to the whole tree priced by billing type.
+    const crossed = Object.values(priced).reduce((sum: number, value: number) => sum + value, 0);
+    expect(crossed).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
+  }
+  // A request whose usage was never reported carries no evidence of its prefix.
+  const measured = cacheField === 'unreported' ? 0 : 3;
+  expect(report.summary.contextPerRequest.cacheRead.requests).toBe(measured);
+  if (measured) {
+    expect(report.summary.contextPerRequest.cacheRead.mean).toBe(15);
+    expect(report.summary.contextPerRequest.cacheRead.max).toBe(15);
+  } else {
+    expect(report.summary.contextPerRequest.cacheRead.mean).toBeNull();
+  }
+  if (cacheField === 'unreported') {
+    expect(report.summary.scenarioCost).toEqual({});
+    expect(report.summary.scenarioCostByPurpose).toEqual({});
+  } else {
+    expect(report.summary.scenarioCost.USD.total).toBeGreaterThan(0);
+    expect(report.summary.scenarioCost.USD.byBillingType.cacheRead.tokens).toBe(45);
+    // The scenario, source by source: every source of spend, split by the
+    // billing type that prices it.
+    const byPurpose = report.summary.scenarioCostByPurpose as Record<string, { USD: { byBillingType: Record<string, { tokens: number; amount: number }>; total: number } } | undefined>;
+    const completion = byPurpose.completion!.USD!;
+    expect(completion.byBillingType.cacheRead!.tokens).toBe(45);
+    expect(completion.total).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
+    // The sources add up to the tree.
+    const summed = Object.values(byPurpose).reduce((sum: number, entry) => sum + entry!.USD!.total, 0);
+    expect(summed).toBeCloseTo(report.summary.scenarioCost.USD.total, 12);
+  }
   expect(report.tools.find((tool: { tool: string }) => tool.tool === 'bash')).toMatchObject({ calls: 1, errors: 0, taskReach: 1 });
   // One executed bash result is resent on both later provider requests; read is sent once.
   expect(report.requestProfiles.toolResults.find((row:{tool:string})=>row.tool==='bash')).toMatchObject({requestViews:2,resultViews:2});

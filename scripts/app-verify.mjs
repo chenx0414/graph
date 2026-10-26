@@ -19,13 +19,13 @@ import { join, resolve } from 'node:path';
 const MARKERS = [
   ['consoleReloadAction', 'desktop：同一地址重载必须刷新文档'],
   ['showConsole', 'desktop：决定 reload 还是 navigate 的那层'],
-  ['toolCallSpoolPath', 'worker 车道的工具调用落盘'],
-  ['hoistTruncationNotice', '截断结果把提示提到最前'],
-  ['preferredConsolePort', '重载保持控制台端口'],
-  ['writeConsoleAddress', '控制台公布自己的地址'],
+  ['ToolCallSpoolPath', 'worker 车道的工具调用落盘'],
+  ['HoistTruncationNotice', '截断结果把提示提到最前'],
+  ['PreferredConsolePort', '重载保持控制台端口'],
+  ['WriteConsoleAddress', '控制台公布自己的地址'],
 ];
 
-const SCAN_EXTENSIONS = ['.mjs', '.js', '.cjs', '.ts', '.tsx', '.json', '.html', '.css'];
+const SCAN_EXTENSIONS = ['.mjs', '.js', '.cjs', '.ts', '.tsx', '.json', '.html', '.css', '.go'];
 const SKIP_DIRECTORIES = new Set(['node_modules', '.git', 'dist']);
 
 const dist = process.argv[2]

@@ -1,12 +1,11 @@
 package graph
 
 import (
-	"encoding/json"
-	"sort"
 	"sync"
+
+	"encoding/json"
 )
 
-// ResolvedCredential is one model entry's merged secret binding.
 type ResolvedCredential struct {
 	CredentialID  string
 	APIKey        string
@@ -22,7 +21,6 @@ type liveIdentity struct {
 	groupLimit    *int
 }
 
-// LiveConfigState is one complete candidate. A conflict leaves the previous state effective.
 type LiveConfigState struct {
 	Revision              int
 	Config                GraphConfig
@@ -35,13 +33,11 @@ type LiveConfigState struct {
 	Conflict              string
 }
 
-// ApplyResult reports whether a candidate became the effective configuration.
 type ApplyResult struct {
 	Applied bool    `json:"applied"`
 	Reason  *string `json:"reason"`
 }
 
-// LiveConfig is the immutable-snapshot configuration owner for the daemon.
 type LiveConfig struct {
 	mu        sync.Mutex
 	env       map[string]string
@@ -60,7 +56,6 @@ type LiveConfigOptions struct {
 	Revoked []string
 }
 
-// LiveConfigInitial is the configuration the daemon starts from.
 type LiveConfigInitial struct {
 	Config   GraphConfig
 	Revision int
@@ -184,7 +179,6 @@ func (live *LiveConfig) Status() LiveStatus {
 	}
 }
 
-// LiveStatus is the public configuration summary.
 type LiveStatus struct {
 	Configured        bool              `json:"configured"`
 	ModelCount        int               `json:"modelCount"`
@@ -197,80 +191,6 @@ func (live *LiveConfig) ResolvedCredentialIDs() []string {
 	live.mu.Lock()
 	defer live.mu.Unlock()
 	return append([]string{}, live.state.ResolvedCredentialIDs...)
-}
-
-func (live *LiveConfig) Apply(config GraphConfig, revision int) ApplyResult {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	return live.recompute(config, revision)
-}
-
-func (live *LiveConfig) Check(config GraphConfig, revision int) ApplyResult {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	candidate := liveCompute(config, revision, live.env, live.secrets, live.revoked)
-	if candidate.state != nil {
-		return ApplyResult{Applied: true}
-	}
-	return ApplyResult{Applied: false, Reason: liveReason(candidate.reason)}
-}
-
-func (live *LiveConfig) PushSecret(ref string, value *string) ApplyResult {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	previous, hadPrevious := live.secrets[ref]
-	wasRevoked := live.revoked[ref]
-	if value == nil || *value == "" {
-		live.revoked[ref] = true
-		delete(live.secrets, ref)
-	} else {
-		delete(live.revoked, ref)
-		live.secrets[ref] = *value
-	}
-	result := live.recompute(live.state.Config, live.state.Revision)
-	if !result.Applied {
-		if wasRevoked {
-			live.revoked[ref] = true
-		} else {
-			delete(live.revoked, ref)
-		}
-		if !hadPrevious {
-			delete(live.secrets, ref)
-		} else {
-			live.secrets[ref] = previous
-		}
-	}
-	return result
-}
-
-func (live *LiveConfig) Secrets() map[string]string {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	out := map[string]string{}
-	for key, value := range live.secrets {
-		out[key] = value
-	}
-	return out
-}
-
-func (live *LiveConfig) Revoked() []string {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	out := make([]string, 0, len(live.revoked))
-	for ref := range live.revoked {
-		out = append(out, ref)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func (live *LiveConfig) Projects() []ProjectConfig {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	if live.state.Config.Projects == nil {
-		return []ProjectConfig{}
-	}
-	return live.state.Config.Projects
 }
 
 func (live *LiveConfig) Snapshot() LiveConfigState {
@@ -295,245 +215,18 @@ func (live *LiveConfig) Subscribe(listener func()) func() {
 			next = append(next, item)
 		}
 		live.listeners = next
-		live.removeListener(listener)
+		live.removeListener()
 	}
 }
 
-func (live *LiveConfig) removeListener(listener func()) {
-	// func values are not comparable. Keep listeners; a no-op unsubscribe is safer than deleting the wrong one.
-	// TODO(port): Go cannot compare function values, so unsubscribe is a no-op. The daemon never unsubscribes.
-	_ = listener
-}
-
-func (live *LiveConfig) recompute(config GraphConfig, revision int) ApplyResult {
-	candidate := liveCompute(config, revision, live.env, live.secrets, live.revoked)
-	if candidate.state == nil {
-		live.log("Configuration not applied: " + candidate.reason)
-		return ApplyResult{Applied: false, Reason: liveReason(candidate.reason)}
-	}
-	live.state = *candidate.state
-	listeners := append([]func(){}, live.listeners...)
-	live.mu.Unlock()
-	for _, listener := range listeners {
-		listener()
-	}
-	live.mu.Lock()
-	return ApplyResult{Applied: true}
-}
+func (live *LiveConfig) removeListener() {}
 
 type liveMerged struct {
 	secretRef string
 	value     *string
 }
 
-func liveMergeValue(config GraphConfig, env, secrets map[string]string, revoked map[string]bool, credentialID string) *liveMerged {
-	credential, ok := config.Credentials[credentialID]
-	if !ok {
-		return nil
-	}
-	if revoked[credential.SecretRef] {
-		return &liveMerged{secretRef: credential.SecretRef, value: nil}
-	}
-	if pushed, ok := secrets[credential.SecretRef]; ok {
-		return &liveMerged{secretRef: credential.SecretRef, value: &pushed}
-	}
-	if fromEnv, ok := env[credential.SecretRef]; ok {
-		trimmed := trimSpace(fromEnv)
-		if trimmed != "" {
-			return &liveMerged{secretRef: credential.SecretRef, value: &trimmed}
-		}
-	}
-	return &liveMerged{secretRef: credential.SecretRef, value: nil}
-}
-
-func liveCredentialIDs(config GraphConfig) []string {
-	// TODO(port): Go maps have no insertion order. Sorted ids keep the canonical alias stable
-	// because the TypeScript identity also sorts aliases before choosing one.
-	ids := make([]string, 0, len(config.Credentials))
-	for id := range config.Credentials {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func liveGroupConflict(config GraphConfig, env, secrets map[string]string, revoked map[string]bool) string {
-	byValue := map[string][]string{}
-	order := []string{}
-	for _, id := range liveCredentialIDs(config) {
-		resolved := liveMergeValue(config, env, secrets, revoked, id)
-		if resolved == nil || resolved.value == nil {
-			continue
-		}
-		if _, ok := byValue[*resolved.value]; !ok {
-			order = append(order, *resolved.value)
-		}
-		byValue[*resolved.value] = append(byValue[*resolved.value], id)
-	}
-	for _, key := range order {
-		aliases := byValue[key]
-		if len(aliases) < 2 {
-			continue
-		}
-		sorted := append([]string{}, aliases...)
-		sort.Strings(sorted)
-		groups := []string{}
-		seen := map[string]bool{}
-		for _, id := range sorted {
-			group := config.Credentials[id].SharedLimitGroupId
-			if group == "" || seen[group] {
-				continue
-			}
-			seen[group] = true
-			groups = append(groups, group)
-		}
-		if len(groups) > 1 {
-			return "credentials." + sorted[0] + ".sharedLimitGroupId: aliases resolving to one key must share one sharedLimitGroupId (" + joinComma(sorted) + ")"
-		}
-	}
-	return ""
-}
-
 type liveCandidate struct {
 	state  *LiveConfigState
 	reason string
-}
-
-func liveCompute(config GraphConfig, revision int, env, secrets map[string]string, revoked map[string]bool) liveCandidate {
-	if conflict := liveGroupConflict(config, env, secrets, revoked); conflict != "" {
-		return liveCandidate{reason: conflict}
-	}
-	entries := []ConfiguredModel{}
-	if config.Models != nil {
-		entries = config.Models.Entries
-	}
-	bySecret := map[string][]string{}
-	order := []string{}
-	for _, id := range liveCredentialIDs(config) {
-		resolved := liveMergeValue(config, env, secrets, revoked, id)
-		if resolved == nil || resolved.value == nil {
-			continue
-		}
-		if _, ok := bySecret[*resolved.value]; !ok {
-			order = append(order, *resolved.value)
-		}
-		bySecret[*resolved.value] = append(bySecret[*resolved.value], id)
-	}
-	identities := map[string]liveIdentity{}
-	resolvedIDs := []string{}
-	for _, key := range order {
-		aliases := bySecret[key]
-		resolvedIDs = append(resolvedIDs, aliases...)
-		sorted := append([]string{}, aliases...)
-		sort.Strings(sorted)
-		canonical := sorted[0]
-		caps := []int{}
-		for _, id := range sorted {
-			if limit, ok := config.Limits.Credentials[id]; ok {
-				caps = append(caps, limit)
-			}
-		}
-		groups := []string{}
-		seen := map[string]bool{}
-		for _, id := range sorted {
-			group := config.Credentials[id].SharedLimitGroupId
-			if group == "" || seen[group] {
-				continue
-			}
-			seen[group] = true
-			groups = append(groups, group)
-		}
-		identity := liveIdentity{canonical: canonical}
-		if len(caps) > 0 {
-			min := caps[0]
-			for _, cap := range caps[1:] {
-				if cap < min {
-					min = cap
-				}
-			}
-			identity.limit = &min
-		}
-		if len(groups) > 0 {
-			identity.sharedGroupID = groups[0]
-			if limit, ok := config.Limits.SharedGroups[groups[0]]; ok {
-				identity.groupLimit = &limit
-			}
-		}
-		for _, alias := range sorted {
-			identities[alias] = identity
-		}
-	}
-	credentials := map[string]ResolvedCredential{}
-	for _, entry := range entries {
-		resolved := liveMergeValue(config, env, secrets, revoked, entry.CredentialId)
-		if resolved == nil || resolved.value == nil {
-			continue
-		}
-		identity, ok := identities[entry.CredentialId]
-		if !ok {
-			continue
-		}
-		credentials[entry.Id] = ResolvedCredential{
-			CredentialID:  identity.canonical,
-			APIKey:        *resolved.value,
-			Limit:         identity.limit,
-			SharedGroupID: identity.sharedGroupID,
-			GroupLimit:    identity.groupLimit,
-		}
-	}
-	master := ""
-	for _, entry := range entries {
-		if _, ok := credentials[entry.Id]; ok {
-			master = entry.Id
-			break
-		}
-	}
-	aliases := map[string]string{}
-	aliasKeys := make([]string, 0, len(identities))
-	for alias := range identities {
-		aliasKeys = append(aliasKeys, alias)
-	}
-	sort.Strings(aliasKeys)
-	for _, alias := range aliasKeys {
-		identity := identities[alias]
-		if alias != identity.canonical {
-			aliases[alias] = identity.canonical
-		}
-	}
-	return liveCandidate{state: &LiveConfigState{
-		Revision:              revision,
-		Config:                config,
-		Directory:             entries,
-		Credentials:           credentials,
-		ResolvedCredentialIDs: resolvedIDs,
-		MasterModel:           master,
-		Enabled:               len(entries) > 0 && len(credentials) > 0,
-		LimitAliases:          aliases,
-	}}
-}
-
-func liveCopyAliases(in map[string]string) map[string]string {
-	out := map[string]string{}
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func liveReason(reason string) *string {
-	if reason == "" {
-		return nil
-	}
-	return &reason
-}
-
-func trimSpace(value string) string {
-	start, end := 0, len(value)
-	for start < end && (value[start] == ' ' || value[start] == '\t' || value[start] == '\n' || value[start] == '\r') {
-		start++
-	}
-	for end > start && (value[end-1] == ' ' || value[end-1] == '\t' || value[end-1] == '\n' || value[end-1] == '\r') {
-		end--
-	}
-	return value[start:end]
 }

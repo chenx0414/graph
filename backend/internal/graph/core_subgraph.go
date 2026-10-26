@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"encoding/json"
 )
 
 // ExpandInput pins one subgraph template into a parent fragment.

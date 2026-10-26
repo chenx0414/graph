@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,20 +8,12 @@ import (
 	"strings"
 	"sync"
 
+	"time"
+
+	"context"
+
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
-
-// The PiG kernel of a graph node.
-//
-// A node's turn is the same turn the main agent runs: its own identity, its own
-// transcript, its own admission, all in the same durable namespace and on the
-// same kernel. The daemon keeps what it always kept - the model channel, the
-// tool bodies, the admission gate and the budget - and the kernel keeps the
-// execution history.
-//
-// The node opens one session per turn, the way the TypeScript sidecar did: the
-// admission identity of a turn carries the attempt, so a retry is a new
-// admission and an interrupted turn keeps the one it had.
 
 // PigNodeHostOptions configure one node's host on the PiG kernel.
 type PigNodeHostOptions struct {
@@ -137,7 +128,9 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		return pigNodeTurnError(err.Error())
 	}
 	tools = append(tools, extensions...)
-	session, err := openPigSession(context.Background(), host.options.Database, request, host.provider(), tools, host.options.OnEvent, host.options.OnToolCall)
+	session, err := openPigSession(context.Background(), host.options.Database, request,
+		pigProviderBridge(host.options.Stream, host.options.Request.Model, func(map[string]any) map[string]any { return host.providerOptions() }),
+		tools, host.options.OnEvent, host.options.OnToolCall)
 	if err != nil {
 		return pigNodeTurnError(err.Error())
 	}
@@ -214,26 +207,13 @@ func (host *PigNodeHost) Dispose() error {
 	return session.Close()
 }
 
-// provider is the daemon's model channel, seen from the kernel.
-//
-// The kernel asks for the answer; the daemon's own stream produces it. The
-// daemon's stream is the one that admits the send, spends the credential and
-// records the usage, so the kernel never opens a provider channel of its own.
-func (host *PigNodeHost) provider() pigkernel.ProviderBridge {
+// providerOptions are the provider options the node's turn runs with.
+func (host *PigNodeHost) providerOptions() map[string]any {
 	options := map[string]any{}
 	if host.options.StreamOptions != nil {
 		options = host.options.StreamOptions()
 	}
-	return pigkernel.ProviderBridge{
-		Stream: func(_ context.Context, transcript []map[string]any, _ map[string]any) (pigkernel.EventStream, error) {
-			messages := make([]any, 0, len(transcript))
-			for _, message := range transcript {
-				messages = append(messages, message)
-			}
-			context := map[string]any{"messages": messages}
-			return host.options.Stream(host.options.Request.Model, context, options)
-		},
-	}
+	return options
 }
 
 // pigNodeTurnError is the report of a turn that failed.
@@ -289,6 +269,7 @@ func pigNodeToolSpecs(request AgentSessionRequest, gate SendGate, ungated []stri
 					return definition.Execute(graphUUID(), params)
 				}
 				id := graphUUID()
+				started := time.Now()
 				value := gate.Dispatch(id, 0, func() any {
 					defer gate.Settle(id, &TokenUsage{})
 					result, executeErr := definition.Execute(id, params)
@@ -297,9 +278,15 @@ func pigNodeToolSpecs(request AgentSessionRequest, gate SendGate, ungated []stri
 					}
 					return result
 				})
+				// Every tool call this node makes is reported, the way the
+				// main session reports its own and the way the TypeScript
+				// host reports every call: the statistics table is how a
+				// user sees what the agents actually did.
 				if failure, ok := value.(error); ok {
+					recordPigToolCall(request, definition.Name, started, true)
 					return nil, failure
 				}
+				recordPigToolCall(request, definition.Name, started, false)
 				return value, nil
 			},
 		})

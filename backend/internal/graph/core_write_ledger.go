@@ -1,13 +1,14 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"crypto/sha256"
 )
 
 // WRITE_TOOLS are the tools whose effect on one path can be observed.

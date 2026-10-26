@@ -1,9 +1,10 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
+
+	"encoding/json"
 )
 
 // NodeSessionBinding is the resident worker's persisted identity.
@@ -38,7 +39,7 @@ type NodeSession struct {
 
 // NodeSessionOptions assembles one node from its immutable recipe.
 type NodeSessionOptions struct {
-	Frozen             map[string]any
+	Frozen             *FrozenExecutionRecovery
 	RetainCapabilities bool
 	Access             *ResolvedAccessPolicy
 	Bindings           *NodeSessionBindings
@@ -109,7 +110,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 	}
 	action := "work"
 	if options.Frozen != nil {
-		if mapString(asMap(asMap(options.Frozen["snapshot"])["configuration"])["nodeExecutionConfiguration"].(map[string]any), "role") == "reviewer" {
+		if mapString(asMap(options.Frozen.Record.Configuration.ExecutionConfiguration), "role") == "reviewer" {
 			action = "review"
 		}
 	} else if options.Catalog.Definition(recipe).Review {
@@ -122,7 +123,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 		assemblyInput.SkillProjectRoot = options.ProjectRoot
 	}
 	if options.Frozen != nil {
-		descriptor := asMap(options.Frozen["restoredDescriptor"])
+		descriptor := options.Frozen.Descriptor
 		body, _ := json.Marshal(descriptor["facts"])
 		facts := []ResolvedCapabilityFact{}
 		if err := json.Unmarshal(body, &facts); err != nil {
@@ -131,10 +132,9 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 		assemblyInput.FrozenFacts = facts
 	}
 	assembly := OpenAgentContextAssembly(assemblyInput)
-	row, ok := g5One(options.Kernel.Db, "SELECT instance_id FROM kernel_nodes WHERE task_id=? AND node_id=?", options.GraphId, options.NodeId)
 	instanceID := kernelNodeInstanceID(options.GraphId, options.NodeId)
-	if ok {
-		instanceID = g5Str(row["instance_id"])
+	if admitted, found := options.Kernel.NodeInstanceID(options.GraphId, options.NodeId); found {
+		instanceID = admitted
 	}
 	scratchDir := filepath.Join(options.InstancesDir, instanceID, "capability-scratch")
 	gate := kernelPassthroughGate()
@@ -158,11 +158,11 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			tools := AgentToolsInput{
 				Workspace: options.Workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog, Access: options.Access,
 				ReadGraph: func(input GraphSectionQuery) any {
-					execution, found := g5One(options.Kernel.Db, "SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", options.GraphId, options.NodeId)
-					if !found {
+					execution := options.Kernel.RunningExecution(options.GraphId, options.NodeId)
+					if execution == nil {
 						Raise("invalid_execution", "Graph definition reads require an active execution")
 					}
-					definition := options.Kernel.Revision(options.GraphId, int(g5Int(execution["revision_version"]))).Definition
+					definition := options.Kernel.Revision(options.GraphId, execution.RevisionVersion).Definition
 					section := input.Section
 					if section != "nodes" && section != "modules" && section != "edges" && section != "protocols" && section != "acceptance" && section != "inputs" && section != "outputs" {
 						Raise("invalid_query", "Unknown graph definition section")
@@ -222,7 +222,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 					if input.Id == nil && after+len(selected) < len(entries) {
 						next = after + len(selected)
 					}
-					return map[string]any{"graphId": options.GraphId, "revision": g5Int(execution["revision_version"]), "section": section, "total": len(entries), "items": items, "nextAfter": next}
+					return map[string]any{"graphId": options.GraphId, "revision": execution.RevisionVersion, "section": section, "total": len(entries), "items": items, "nextAfter": next}
 				},
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
 					return commands.Run(command, args, signal)
@@ -282,27 +282,27 @@ func kernelSectionEntries(definition GraphDefinition, section string) []kernelSe
 	out := []kernelSectionEntry{}
 	switch section {
 	case "nodes":
-		for _, id := range portKeys(definition.Nodes) {
+		for _, id := range sortedKeys(definition.Nodes) {
 			out = append(out, kernelSectionEntry{id, definition.Nodes[id]})
 		}
 	case "modules":
-		for _, id := range portKeys(definition.Modules) {
+		for _, id := range sortedKeys(definition.Modules) {
 			out = append(out, kernelSectionEntry{id, definition.Modules[id]})
 		}
 	case "edges":
-		for _, id := range portKeys(definition.Edges) {
+		for _, id := range sortedKeys(definition.Edges) {
 			out = append(out, kernelSectionEntry{id, definition.Edges[id]})
 		}
 	case "protocols":
-		for _, id := range portKeys(definition.Protocols) {
+		for _, id := range sortedKeys(definition.Protocols) {
 			out = append(out, kernelSectionEntry{id, definition.Protocols[id]})
 		}
 	case "inputs":
-		for _, id := range portKeys(definition.Inputs) {
+		for _, id := range sortedKeys(definition.Inputs) {
 			out = append(out, kernelSectionEntry{id, definition.Inputs[id]})
 		}
 	case "outputs":
-		for _, id := range portKeys(definition.Outputs) {
+		for _, id := range sortedKeys(definition.Outputs) {
 			out = append(out, kernelSectionEntry{id, definition.Outputs[id]})
 		}
 	}

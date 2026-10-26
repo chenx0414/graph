@@ -4,7 +4,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { git } from '../../src/git/git.ts';
+import { execFileSync } from 'node:child_process';
+const git = (cwd: string, args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
 import { launchCli } from '../helpers/cli-daemon.ts';
 
 // The graph node lane hosts a Pi extension too.

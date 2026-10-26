@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,22 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
 	"sync"
 	"time"
-)
 
-// Run one command as the host would run it: a direct process, no seatbelt.
-//
-// This exists for the one case where the sandbox makes the proof worthless. A confirmed gate that
-// runs a project's own suite has to run the way that suite is run by the project itself; measured
-// 2026-09-30 on task 68543fed, the same copy and the same `node --run check` gave 1480/1480 outside
-// the sandbox and 224 failed / 49 passed inside it, mostly the suite's own timeouts. A gate that
-// fails for reasons unrelated to the work is not evidence of anything.
-//
-// A supervisor starts the command in its own process group and kills it on timeout, cancellation
-// or owner IPC disconnect. The owner bounds the output it keeps. What it does NOT do is decide
-// anything - not whether it was allowed to run (that is `graph.command`'s `sandbox` declaration,
-// honoured only under full access) and not what the command may see (that is `checkEnvironment`).
+	"bufio"
+)
 
 // maxHostOutputBytes is how much of one stream is kept: a check that prints more than this is
 // flooding, not evidencing.
@@ -364,8 +353,8 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 		prepare["quiescence"] = map[string]any{"path": input.Quiescence.Path, "nonce": input.Quiescence.Nonce}
 	}
 	state.send(prepare)
-	waitErr := process.Wait()
 	pumps.Wait()
+	waitErr := process.Wait()
 	if waitErr != nil {
 		var exitError *exec.ExitError
 		if !errors.As(waitErr, &exitError) {
@@ -473,4 +462,11 @@ func hostCommandNumber(value any) bool {
 		return true
 	}
 	return false
+}
+
+func errorText(rec any) string {
+	if err, ok := rec.(error); ok {
+		return err.Error()
+	}
+	return stringifyJSON(rec)
 }

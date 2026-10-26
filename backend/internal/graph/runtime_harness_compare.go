@@ -1,18 +1,12 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+
+	"encoding/json"
 )
-
-// The comparison reads the behavioral facts of the candidates of one task and
-// the contrast between them. It reports facts, never a verdict: choosing
-// between candidates stays with the Agent, because this kind of task has no
-// ground truth to appeal to.
-
-// HarnessCandidateFacts is what one candidate run did.
 
 type HarnessCandidateFacts struct {
 	AnonId       string            `json:"anonId"`
@@ -34,9 +28,6 @@ type HarnessCandidateFacts struct {
 	Messages     int               `json:"messages"`
 	FinalMessage string            `json:"finalMessage,omitempty"`
 }
-
-// HarnessDifference is one behavioral difference between a candidate and the
-// baseline it was compared against.
 
 type HarnessDifference struct {
 	Field     string `json:"field"`
@@ -63,10 +54,6 @@ type HarnessCompareInput struct {
 	BaselineNodeId string
 	Domain         string
 }
-
-// HarnessCompare reads the behavioral facts of the candidates and the contrast
-// between them. It reads only committed facts: an execution's state, what it
-// submitted, which tools it called and what it cost.
 
 func (service *graphManagementService) HarnessCompare(input HarnessCompareInput) HarnessComparison {
 	graphId := strings.TrimSpace(input.GraphId)
@@ -139,6 +126,7 @@ func (service *graphManagementService) HarnessCompare(input HarnessCompareInput)
 	}
 	return comparison
 }
+
 func (service *graphManagementService) harnessCandidateFacts(graphId string, nodeIds []string) []HarnessCandidateFacts {
 	executions := map[string]*HarnessCandidateFacts{}
 	order := []string{}
@@ -263,8 +251,6 @@ func (service *graphManagementService) harnessCandidateFacts(graphId string, nod
 	return out
 }
 
-// harnessToolName reads the tool name of one transcript call entry.
-
 func harnessToolName(text string) string {
 	call := struct {
 		Name string `json:"name"`
@@ -275,17 +261,12 @@ func harnessToolName(text string) string {
 	return call.Name
 }
 
-// harnessBoundText keeps a text short enough to travel in a report.
-
 func harnessBoundText(text string, limit int) string {
 	if len(text) <= limit {
 		return text
 	}
 	return text[:limit] + "..."
 }
-
-// harnessOutputValues is the one-line form of the values a candidate
-// submitted, so two candidates can be compared without reading both.
 
 func harnessOutputValues(facts HarnessCandidateFacts) string {
 	if len(facts.OutputValues) == 0 {
@@ -302,9 +283,6 @@ func harnessOutputValues(facts HarnessCandidateFacts) string {
 	}
 	return strings.Join(parts, " ")
 }
-
-// harnessDifferences reports the fields on which a candidate differs from the
-// baseline. A field that matches is not a difference.
 
 func harnessDifferences(base, candidate HarnessCandidateFacts) []HarnessDifference {
 	differences := []HarnessDifference{}

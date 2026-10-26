@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { DEFAULT_COMMON_RULES } from '../../src/runtime/agent-context.ts';
+import { defaultCommonRules } from '../helpers/agent-rules.ts';
 
 const execute = promisify(execFile);
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -26,6 +26,7 @@ async function runGate(env: Record<string, string>) {
 test('the harness behavior gate judges the frozen cases, and names what a broken harness took away', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-harness-gate-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const rules = await defaultCommonRules(root);
 
   // The gate the way the check pipeline runs it: every frozen case is carried
   // out against the harness the product ships, and the case's own independent
@@ -40,7 +41,7 @@ test('the harness behavior gate judges the frozen cases, and names what a broken
   const state = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as { cases: Record<string, string>; surface: Record<string, string> };
   expect(Object.keys(state.cases)).toEqual(['parser', 'cli', 'persistence', 'command']);
   expect(Object.keys(state.cases).every(caseId => state.cases[caseId] === 'pass')).toBe(true);
-  expect(state.surface['src/runtime/agent-context.ts']).toMatch(/^[0-9a-f]{64}$/);
+  expect(state.surface['backend/internal/graph/runtime_agent_context.go']).toMatch(/^[0-9a-f]{64}$/);
 
   // A harness that no longer says how to make a precise change leaves the
   // agent without a way to act. The gate has to see that and say so.
@@ -50,7 +51,7 @@ test('the harness behavior gate judges the frozen cases, and names what a broken
     version: 1,
     combinations: [{ id: 'main', mode: 'main', name: 'Main', description: 'Handle the requested project work.', recommendedGrade: 'high', review: false, tags: [], resources: [] }],
   }));
-  const doctored = DEFAULT_COMMON_RULES.split('\n').filter((rule) => !rule.includes('Use edit for precise changes')).join('\n');
+  const doctored = rules.split('\n').filter((rule) => !rule.includes('Use edit for precise changes')).join('\n');
   expect(doctored).not.toContain('Use edit for precise changes');
   await writeFile(join(context, 'prompts', 'rules', 'common.md'), `${doctored}\n`);
   const snapshot = join(root, 'snapshot');

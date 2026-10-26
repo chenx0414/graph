@@ -1,18 +1,20 @@
 package graph
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
+
+	"fmt"
 )
 
 // SKILL_TOKEN selects one skill bound to the Agent for this turn.
 var SKILL_TOKEN = regexp.MustCompile(`(?:^|\s)/skill:([A-Za-z0-9._-]+)`)
 
 const SKILL_BODY_LIMIT = 40000
+
 const SKILL_TOTAL_LIMIT = 120000
 
 type BoundSkill struct {

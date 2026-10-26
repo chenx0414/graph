@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"fmt"
 	"math"
+
+	"fmt"
 
 	"golang.org/x/sys/unix"
 )

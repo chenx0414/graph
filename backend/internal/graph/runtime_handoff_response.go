@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"regexp"
 	"strings"
+
+	"regexp"
 )
 
 // ModelEventStream is one model call's events plus its terminal message.
@@ -297,11 +298,10 @@ func GuardHandoffResponses(stream PromptStreamFunc, enabled func() bool, onRecov
 					onRecovery("failed")
 				}
 				events = append(events, handoffCaught(model, options, errString("Model stream ended without a terminal event")))
-			} else if done["type"] == "done" {
-				terminal = asMap(done["message"])
-				// TODO(port): replay through ReplayAssistantStream once frame structs exist.
-				events = append(events, done)
 			} else {
+				if done["type"] == "done" {
+					terminal = asMap(done["message"])
+				}
 				events = append(events, done)
 			}
 			break

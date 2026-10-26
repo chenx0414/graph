@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { build } from 'vite';
 import { chromium } from 'playwright';
-import { startGraphDaemon } from '../../src/server/start.ts';
+import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -28,9 +28,10 @@ test('the wizard connects a platform from a clean start, appends a second one an
   await mkdir(projectRoot, { recursive: true });
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({ version: 1, revision: 0, projects: [{ id: 'p', root: projectRoot }] }, null, 2));
-  const daemon = await startGraphDaemon({
-    configPath, stateDir: join(root, 'state'), webDir, port: 0, mode: 'execute', dynamic: true,
-    env: { OPENAI_API_KEY: 'env-key-one', ANTHROPIC_API_KEY: 'env-key-two' }, log: () => undefined,
+  const daemon = await launchCli(root, {
+    configPath, stateDir: join(root, 'state'), webDir,
+    env: { OPENAI_API_KEY: 'env-key-one', ANTHROPIC_API_KEY: 'env-key-two' },
+    extraArgs: ['--execute', '--dynamic'],
   });
   cleanup.push(() => daemon.close());
 

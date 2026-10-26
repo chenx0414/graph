@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
+
+	"crypto/sha256"
 )
 
 // SettleDeliverableInput settles one v2 node's declared file when its execution completes.

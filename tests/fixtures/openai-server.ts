@@ -23,7 +23,20 @@ export interface ResponsePlan {
   holdOpen?: boolean;
   /** Emit content but never the final usage or terminator, until the connection closes. */
   holdBeforeUsage?: boolean;
+  /** Close the connection before the finish reason and the terminator: the answer never arrived. */
+  cut?: boolean;
+  /** Hold the connection open and send keepalive comments only: the provider never answers. */
+  keepalive?: boolean;
+  /** How often the keepalive comment is sent, in milliseconds. */
+  keepaliveEveryMs?: number;
+  /** Wait this many milliseconds between the chunks of the answer. */
+  pace?: number;
   beforeReply?: () => Promise<void> | void;
+  /**
+   * Answer the way a provider that respects its output budget does: cut the
+   * answer at the request's max_tokens and report that it ran out of room.
+   */
+  truncateToMaxTokens?: boolean;
 }
 /**
  * A scripted provider: one plan per request, in arrival order.
@@ -60,6 +73,14 @@ export async function openaiServer(plans: ResponsePlan[]) {
       return;
     }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (plan.keepalive) {
+      // The provider holds the connection open and says nothing but keepalive
+      // comments. A comment is transport, not an event: the model never
+      // answers, and the answer never starts.
+      const timer = setInterval(() => res.write(': ping\n\n'), plan.keepaliveEveryMs ?? 200);
+      res.on('close', () => clearInterval(timer));
+      return;
+    }
     for (const comment of plan.comments ?? []) res.write(`: ${comment}\n\n`);
     const delta: Record<string, unknown> = { role: 'assistant' };
     if (plan.thinking) delta.reasoning_content = plan.thinking;
@@ -74,8 +95,19 @@ export async function openaiServer(plans: ResponsePlan[]) {
       delta.content = plan.text ?? 'Local response';
     }
     const finishReason = plan.finishReason ?? (plan.tools ? 'tool_calls' : 'stop');
+    // A provider that respects its output budget cuts the answer and says so.
+    let reportedFinish = finishReason;
+    if (plan.truncateToMaxTokens && typeof delta.content === 'string') {
+      const requested = (requests[requests.length - 1] as { max_tokens?: number }).max_tokens;
+      const room = typeof requested === 'number' ? Math.max(0, requested * 4) : Infinity;
+      if (delta.content.length > room) {
+        delta.content = delta.content.slice(0, room);
+        reportedFinish = 'length';
+      }
+    }
     if (plan.chunks) {
       for (const chunk of plan.chunks) {
+        if (plan.pace) await new Promise(resolve => setTimeout(resolve, plan.pace));
         res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { role: 'assistant', content: chunk }, finish_reason: null }] })}\n\n`);
       }
       if (plan.tools) {
@@ -85,7 +117,8 @@ export async function openaiServer(plans: ResponsePlan[]) {
       res.write(`data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     }
     if (plan.holdBeforeUsage) return;
-    res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
+    if (plan.cut) { res.end(); return; }
+    res.write(`data: ${JSON.stringify({ id: 'response', choices: [{ index: 0, delta: {}, finish_reason: reportedFinish }], usage: plan.usage === undefined ? { prompt_tokens: 40, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 15 }, completion_tokens_details: { reasoning_tokens: 3 } } : plan.usage })}\n\n`);
     if (plan.holdOpen) res.write('data: [DONE]\n\n');
     else res.end('data: [DONE]\n\n');
   });

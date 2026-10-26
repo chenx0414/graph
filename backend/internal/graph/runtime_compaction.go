@@ -1,9 +1,14 @@
 package graph
 
 import (
-	"encoding/json"
 	"math"
+	"os"
 	"regexp"
+
+	"strconv"
+	"strings"
+
+	"encoding/json"
 )
 
 // CompactionSettings is the reserve and keep-recent window for one model.
@@ -104,8 +109,30 @@ func ShouldCompactContext(entry struct {
 	if limit < 1 {
 		limit = 1
 	}
+	if ceiling := compactionContextCeiling(); ceiling > 0 && ceiling < limit {
+		limit = ceiling
+	}
 	return *contextTokens > float64(limit)
 }
+
+// COMPACTION_CONTEXT_CEILING caps how far the recorded context may grow before the
+// session is compacted.
+//
+// The provider's window is the limit the session has to respect, and the session
+// compacts just before it would overflow. That keeps every token the conversation
+// ever produced, and it bills the whole of it again on every request of the next
+// cycle: the running production conversations compact at around half a million
+// tokens, and each of the requests in between pays for the whole of that prefix.
+//
+// A ceiling asks for the same compaction with less history behind it. The summary
+// the session continues from is the same size either way, and the tokens the
+// compaction call reads are the same tokens either way, because a session that
+// compacts four times as often summarizes four times as little each time. Only
+// the prefix every request carries shrinks.
+//
+// It is off unless the environment names a ceiling, because how much history a
+// task needs is the task's own business.
+const COMPACTION_CONTEXT_CEILING = "GRAPH_COMPACTION_CONTEXT_CEILING"
 
 // RecordedContextUsage is one settled invocation's usage string.
 type RecordedContextUsage struct {
@@ -157,6 +184,19 @@ func LatestContextTokens(completions []RecordedContextUsage, lastCompaction *Rec
 		}
 	}
 	return completionTokens
+}
+
+// compactionContextCeiling is the ceiling the environment names, or zero when it names none.
+func compactionContextCeiling() int {
+	raw := strings.TrimSpace(os.Getenv(COMPACTION_CONTEXT_CEILING))
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0
+	}
+	return value
 }
 
 func compactionUsage(raw string) (map[string]float64, bool) {

@@ -1,12 +1,13 @@
 package graph
 
 import (
-	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"math"
+
+	"context"
 )
 
 // kernelContentPrefix is deliberately not JSON: a user value can never impersonate a reference.

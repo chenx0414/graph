@@ -4,8 +4,7 @@ import {join} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
-import {startGraphDaemon} from '../src/server/start.ts';
-import {writeConsoleAddress} from '../src/server/console-address.ts';
+import {startGoDaemon,openConsole} from './go-daemon.mjs';
 import {cases} from './harness-eval-cases.mjs';
 import {installEvaluationContext} from './harness-eval-context.mjs';
 const exec=promisify(execFile);
@@ -57,35 +56,42 @@ if(process.env.GRAPH_EVAL_BROWSER_SOURCE){
 const workflowEnabled=process.env.GRAPH_EVAL_CONFIRM_WORKFLOW==='1';
 const workflow=workflowEnabled ? {coderAvailable:false,proposalSeen:false,confirmedTaskId:null,phase:null,awaitingInput:false,taskIds:[]} : undefined;
 let daemon;
+let console_;
 let result;
 let ownerTaskId;
 let cleanupError;
 let cleanupIncomplete=false;
 let toolTelemetry={collected:false,reason:'daemon_unavailable'};
+// A recipe's resources are compared by what they mean, not by the order the
+// daemon and the snapshot happen to serialize them in.
+const resourceFacts=list=>(list??[]).map(item=>({resourceId:item.resourceId,version:item.version??'',role:item.role,required:Boolean(item.required)}))
+ .sort((left,right)=>left.resourceId.localeCompare(right.resourceId));
 try {
- daemon=await startGraphDaemon({configPath,stateDir:join(root,'state'),graphHome,webDir,port:0,mode:'execute',dynamic:true,env:process.env,log:()=>{}});
- await writeConsoleAddress(daemon.stateDir,{url:daemon.url,pid:process.pid,mode:daemon.mode,startedAt:Date.now()});
- if(evaluationContext)for(const expected of evaluationContext.recipes){
-  const actual=daemon.server.runtime.catalog.agentCombinations().find(recipe=>recipe.id===expected.id);
-  if(actual?.status!=='valid' || JSON.stringify(actual.resources)!==JSON.stringify(expected.resources))throw new Error(`Frozen recipe did not load: ${expected.id}`);
+ daemon=await startGoDaemon({root,configPath,stateDir:join(root,'state'),graphHome,webDir,mode:'execute'});
+ console_=await openConsole(daemon.url);
+ if(evaluationContext){
+  const catalog=await console_.json('/api/catalog');
+  for(const expected of evaluationContext.recipes){
+   const actual=catalog.agentCombinations.find(recipe=>recipe.id===expected.id);
+   if(actual?.status!=='valid'||JSON.stringify(resourceFacts(actual.resources))!==JSON.stringify(resourceFacts(expected.resources)))throw new Error(`Frozen recipe did not load: ${expected.id}`);
+  }
  }
  if(workflow){
   if(evaluationContext){
-   workflow.coderDefinition=daemon.server.runtime.catalog.compileAgentCombination('coder').definitionVersion;
-   if(daemon.server.runtime.catalog.agentCombinations().some(recipe=>recipe.id==='reviewer'))workflow.reviewerDefinition=daemon.server.runtime.catalog.compileAgentCombination('reviewer').definitionVersion;
+   workflow.coderDefinition=(await console_.post('/api/catalog/combinations/coder/compile')).definitionVersion;
+   const frozenCatalog=await console_.json('/api/catalog');
+   if(frozenCatalog.agentCombinations.some(recipe=>recipe.id==='reviewer'))workflow.reviewerDefinition=(await console_.post('/api/catalog/combinations/reviewer/compile')).definitionVersion;
   }else{
-  const coderRecipe=await daemon.server.runtime.catalog.saveAgentCombination({id:'coder',name:'Controlled coding worker',description:`Implement the assigned project change and verify its acceptance in its worktree.${workerId ? ` Evaluation worker model: ${worker.id}.` : ''}`,recommendedGrade:worker.grade,review:false,tags:[],resources:[],systemPrompt:'Implement the assigned project change in the provided worktree. Follow the declared acceptance criteria and report evidence through the bound tools.'});
+  const coderRecipe=await console_.post('/api/catalog/combinations',{combination:{id:'coder',name:'Controlled coding worker',description:`Implement the assigned project change and verify its acceptance in its worktree.${workerId ? ` Evaluation worker model: ${worker.id}.` : ''}`,recommendedGrade:worker.grade,review:false,tags:[],resources:[],systemPrompt:'Implement the assigned project change in the provided worktree. Follow the declared acceptance criteria and report evidence through the bound tools.'}});
   workflow.coderDefinition=coderRecipe.definition?.definitionVersion;
   if(reviewer){
-   const reviewRecipe=await daemon.server.runtime.catalog.saveAgentCombination({id:'reviewer',name:'Independent reviewer',description:`Review immutable code artifacts and the exact integration commit. Evaluation reviewer model: ${reviewer.id}.`,recommendedGrade:reviewer.grade,review:true,tags:[],resources:[],systemPrompt:'Review the immutable code artifacts and current integration commit, and publish the independent review through the bound tools.'});
+   const reviewRecipe=await console_.post('/api/catalog/combinations',{combination:{id:'reviewer',name:'Independent reviewer',description:`Review immutable code artifacts and the exact integration commit. Evaluation reviewer model: ${reviewer.id}.`,recommendedGrade:reviewer.grade,review:true,tags:[],resources:[],systemPrompt:'Review the immutable code artifacts and current integration commit, and publish the independent review through the bound tools.'}});
    workflow.reviewerDefinition=reviewRecipe.definition?.definitionVersion;
   }
   }
-  await daemon.server.runtime.projects.prepare({projectId:'p',requestId:'eval-prepare',initialize:true,createBaseline:true});
+  await console_.post('/api/projects/p/prepare',{requestId:'eval-prepare',initialize:true,createBaseline:true});
   workflow.coderAvailable=true;
  }
- const home=await fetch(daemon.url,{headers:{origin:daemon.url}});
- const headers={origin:daemon.url,cookie:home.headers.get('set-cookie')??'','content-type':'application/json'};
  // Model selection is an approved evaluation constraint, not a recipe rewrite.
  // Keep the original business request separate from this user-role setup.
  const executionConstraints=workflow && workerId ? [
@@ -96,34 +102,32 @@ try {
  ].join('\n') : '';
  const initialText=[scenario.prompt,executionConstraints].filter(Boolean).join('\n\n');
  await writeFile(join(root,'execution-setup.json'),JSON.stringify({originalTask:scenario.prompt,executionConstraints,initialText},null,2),{mode:0o600});
- const createdResponse=await fetch(`${daemon.url}/api/conversations`,{method:'POST',headers,body:JSON.stringify({projectId:'p',model:model.id,text:initialText,requestId:'real-parser-eval'})});
- if(!createdResponse.ok)throw new Error(`create: ${createdResponse.status}`);
- const created=await createdResponse.json();
+ const created=await console_.post('/api/conversations',{projectId:'p',model:model.id,text:initialText,requestId:'real-parser-eval'});
  ownerTaskId=created.taskId;
  if(workflow)workflow.taskIds.push(created.taskId);
  const began=Date.now();let completed=false;
  while(Date.now()-began<deadlineMs){
-  const operations=await(await fetch(`${daemon.url}/api/tasks/${created.taskId}/operations?latest=true`,{headers})).json();
-  const masterIdle=operations.length && operations.every(operation=>!operation.workerActive && operation.state!=='dispatched' && operation.state!=='prepared');
+  const operations=await console_.json(`/api/tasks/${created.taskId}/operations?latest=true`);
+  const masterIdle=operations.length && operations.every(operation=>!operation.workerActive && !['dispatched','prepared','not_sent'].includes(operation.state));
   if(workflow){
-   const view=await daemon.server.runtime.conversations.view(created.conversationId);
+   const view=await console_.json(`/api/conversations/${created.conversationId}`);
    if(view.proposal && !view.proposal.stale && masterIdle && !workflow.confirmedTaskId){
     workflow.proposalSeen=true;
     if(workerId){
-     const draft=await daemon.server.runtime.conversations.proposal(created.conversationId,view.proposal.version);
+     const draft=await console_.json(`/api/conversations/${created.conversationId}/proposals/${view.proposal.version}`);
      for(const node of Object.values(draft.spec.definition.nodes)){
       const expected=node.recipe===workflow.coderDefinition ? worker.id : node.recipe===workflow.reviewerDefinition ? reviewer?.id : undefined;
       if(!expected || node.model!==expected || (node.recipe===workflow.coderDefinition && node.workspace?.base!=='worktree'))throw new Error('Draft violates frozen evaluation worker/reviewer configuration');
      }
     }
-    const confirmed=await daemon.server.runtime.conversations.confirm(created.conversationId,{proposalVersion:view.proposal.version,draftRevision:view.proposal.draftRevision,targetBranch:'main',requestId:'eval-confirm'});
+    const confirmed=await console_.post(`/api/conversations/${created.conversationId}/confirm`,{proposalVersion:view.proposal.version,draftRevision:view.proposal.draftRevision,targetBranch:'main',requestId:'eval-confirm'});
     workflow.confirmedTaskId=confirmed.taskId;workflow.taskIds.push(confirmed.taskId);
-    await daemon.server.runtime.conversations.chat(created.conversationId,{text:`已确认 graph ${confirmed.taskId}，继续按验收执行并交付。`,requestId:'eval-continue'});
+    await console_.post(`/api/conversations/${created.conversationId}/messages`,{text:`已确认 graph ${confirmed.taskId}，继续按验收执行并交付。`,requestId:'eval-continue'});
    }
    const graph=view.tasks.find(task=>task.id===workflow.confirmedTaskId);
    workflow.phase=graph?.phase ?? null;
    if(graph?.phase==='completed' && masterIdle){completed=true;break;}
-   if(masterIdle && ((graph?.openQuestions?.length ?? 0)>0 || (view.master?.questions?.length ?? 0)>0)){
+   if(masterIdle && ((graph?.openQuestions?.length ?? 0)>0 || (view.questions?.length ?? 0)>0)){
     workflow.awaitingInput=true;break;
    }
   } else if(masterIdle){completed=operations.every(operation=>operation.state==='succeeded');break;}
@@ -132,14 +136,14 @@ try {
  }
  const timedOut=!completed && Date.now()-began>=deadlineMs;
  if(timedOut){
-  if(workflow?.confirmedTaskId)await daemon.server.runtime.supervisor(created.taskId).graphControl({graphId:workflow.confirmedTaskId,action:'stop'});
-  const paused=await fetch(`${daemon.url}/api/conversations/${created.conversationId}/pause`,{method:'POST',headers,body:JSON.stringify({requestId:'eval-deadline-pause'})});
-  if(!paused.ok)throw new Error(`pause: ${paused.status}`);
+  if(workflow?.confirmedTaskId)await console_.post(`/api/tasks/${workflow.confirmedTaskId}/graph/control`,{action:'stop'});
+  const paused=await console_.request(`/api/conversations/${created.conversationId}/pause`,{method:'POST',body:JSON.stringify({requestId:'eval-deadline-pause'})});
+  if(paused.status!==200)throw new Error(`pause: ${paused.status}`);
   const cancelBegan=Date.now();
   while(true){
-   const interrupted=await fetch(`${daemon.url}/api/conversations/${created.conversationId}/interrupt`,{method:'POST',headers,body:JSON.stringify({requestId:'eval-deadline-interrupt'})});
-   if(interrupted.ok)break;
-   const refusal=await interrupted.json();
+   const interrupted=await console_.request(`/api/conversations/${created.conversationId}/interrupt`,{method:'POST',body:JSON.stringify({requestId:'eval-deadline-interrupt'})});
+   if(interrupted.status===200)break;
+   const refusal=interrupted.body??{};
    if(refusal.code!=='no_active_operation' || Date.now()-cancelBegan>=30000)throw new Error(`interrupt: ${interrupted.status} ${refusal.code}`);
    await new Promise(resolve=>setTimeout(resolve,100));
   }
@@ -156,7 +160,7 @@ try {
    // outer cleanup deadline; equal deadlines race the final unknown write.
    const drainDeadlineMs=process.env.GRAPH_DRAIN_CANCELED_USAGE==='1' ? 35000 : 30000;
    while(pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0 && Date.now()-drainBegan<drainDeadlineMs)await new Promise(resolve=>setTimeout(resolve,100));
-   cleanupIncomplete=pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0;
+   cleanupIncomplete=pending.get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0 || ledger.prepare("SELECT COUNT(*) AS n FROM operations WHERE task_id IN (?,?) AND state='unknown'").get(created.taskId,workflow?.confirmedTaskId ?? created.taskId).n>0;
   } finally {ledger.close();}
  }
  let success=false;let verification='';let verificationEvidence;
@@ -167,26 +171,25 @@ try {
   success=true;verification='verified';
  } catch(error) {
   if(typeof error?.stdout==='string')verificationEvidence=error.stdout.trim() || undefined;
-  verification='behavioral CLI check failed';
+  verification='behavioral CLI check failed: '+String(error?.stderr || error?.message || error).slice(0,4000);
  }
 
  result={variant,caseId,root,model:model.id,completed,timedOut,success,verification,verificationEvidence,workflow,elapsedMs:Date.now()-began,taskId:created.taskId};
 } catch(error){result={variant,caseId,root,model:model.id,taskId:ownerTaskId,workflow,error:error instanceof Error?error.message:String(error)};}
 finally {
  if(workflow?.confirmedTaskId && ownerTaskId && workflow.phase!=='completed'){
-  try {await daemon?.server.runtime.supervisor(ownerTaskId).graphControl({graphId:workflow.confirmedTaskId,action:'stop'});}
-  catch(error){cleanupIncomplete=true;cleanupError=String(error);}
+  try {await console_?.post(`/api/tasks/${workflow.confirmedTaskId}/graph/control`,{action:'stop'});}
+  catch(error){cleanupError=String(error);}
  }
- if(!cleanupIncomplete){
-  // Child processes spool native calls. Fold them through the public runtime
-  // before closing the store; harness-cost intentionally reads only SQLite.
-  if(daemon)try {await daemon.server.runtime.toolCallStats();toolTelemetry={collected:true};}
-  catch(error){toolTelemetry={collected:false,error:String(error)};}
-  await daemon?.close();
- }else toolTelemetry={collected:false,reason:'cleanup_incomplete'};
+ // The daemon owns the state directory and this process only reads it. A
+ // transport that never drains leaves the daemon's ledger unsettled - the
+ // report says so out loud instead of keeping the process alive.
+ if(console_)try {await console_.json('/api/tool-stats');toolTelemetry={collected:true};}
+ catch(error){toolTelemetry={collected:false,error:String(error)};}
+ await daemon?.close();
 }
 // Persist the verifier only after the model process has stopped.
-if(!cleanupIncomplete)await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
+await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
 const report=await exec(process.execPath,[new URL('./harness-cost.mjs', import.meta.url).pathname,join(root,'state','tasks.sqlite')]);
 await writeFile(join(root,'cost-report.json'),report.stdout);
 const cost=JSON.parse(report.stdout);
@@ -194,8 +197,6 @@ const db=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
 const settled=db.prepare('SELECT state,settled_at-dispatched_at AS operationMs FROM operations ORDER BY rowid DESC LIMIT 1').get();
 db.close();
 result={...result,evaluationContext,settled,cleanupIncomplete,toolTelemetry,...(cleanupError ? {cleanupError} : {}),taskSuccess:result.success===true && result.completed===true && settled?.state==='succeeded'};
-console.log(JSON.stringify({...result,accounting:cost.summary,task:cost.tasks[0]},null,2));
-
-// This standalone evaluator owns its process. If a transport never drains, keep
-// its durable unknown ledger and exit rather than closing SQLite under a writer.
-if(cleanupIncomplete)process.exit(2);
+const finalReport={...result,accounting:cost.summary,task:cost.tasks[0]};
+await writeFile(join(root,'evaluation-report.json'),JSON.stringify(finalReport,null,2));
+console.log(JSON.stringify(finalReport,null,2));

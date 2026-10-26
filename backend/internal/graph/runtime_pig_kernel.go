@@ -1,27 +1,21 @@
 package graph
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/MichaelKinsy/PiG/durable/harness"
+
 	"os"
 	"path/filepath"
 	"strings"
 
+	"context"
+
 	"github.com/MichaelKinsy/PiG/durable"
-	"github.com/MichaelKinsy/PiG/durable/harness"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
-
-// The PiG kernel takes over the durable namespace of a Graph database that the
-// TypeScript kernel wrote. The takeover is only safe if both kernels address
-// the same records, so the inspection below reads the real tables through
-// PiG's own storage contract and reports what it found.
-//
-// It is a read-only surface: the harness is opened, the durable schema is
-// brought up to the level PiG ships, and the records are reported. No Graph
-// business fact is read or written through it.
 
 // PigKernelConversation is one durable conversation the kernel found.
 type PigKernelConversation struct {

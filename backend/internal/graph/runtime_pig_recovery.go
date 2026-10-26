@@ -1,40 +1,26 @@
 package graph
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
+	"context"
+
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
-
-// The PiG kernel's crash recovery.
-//
-// The daemon may die while a turn is running. What can be recovered follows
-// from three facts, and the kernel keeps all three:
-//
-//   - A turn the kernel finished is a receipt. The Graph settles the operation
-//     from it, and the model is not asked again.
-//   - A turn that never reached the model is sent again, with the
-//     configuration it was admitted with, not the configuration the catalog
-//     happens to hold now.
-//   - A turn that was already at the model is neither. The credential was
-//     spent and the side effects may have happened, so the operation waits
-//     for the user to reconcile it.
-//
-// The frozen execution ties the three together: it names the Graph
-// execution, the admission it was waiting for and the configuration it was
-// admitted with.
 
 // bootstrapPigRecovery rebinds the Graph to the turns the kernel kept.
 //
 // The recovery runs before the daemon serves anything. A turn that has to be
 // sent again must not wait for a daemon that is not up yet, and an operation
 // that is already settled must not be dispatched a second time.
-func (runtime *TaskRuntime) bootstrapPigRecovery() {
+func (runtime *TaskRuntime) bootstrapPigRecovery(interruptedNodes []string) {
+	pendingNodes := map[string]bool{}
+	for _, id := range interruptedNodes {
+		pendingNodes[id] = true
+	}
 	// The lane owns the restored configuration of a node, so it has to exist
 	// before the recovery restores one.
 	runtime.residentGraphLane()
@@ -43,6 +29,9 @@ func (runtime *TaskRuntime) bootstrapPigRecovery() {
 		panic(fmt.Errorf("pig kernel: the frozen executions are not readable: %w", err))
 	}
 	for _, execution := range executions {
+		if runtime.kernel.Execution(execution.ExecutionId) != nil && !pendingNodes[execution.ExecutionId] {
+			continue
+		}
 		if runtime.recoverPigNodeExecution(execution) {
 			continue
 		}
@@ -81,6 +70,13 @@ func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecut
 		// checkpoint, and a request the model already received is not
 		// requested a second time.
 	default:
+		// A recovery that already failed is not tried again: the same send
+		// would fail the same way after every boot, and the operation would
+		// stay unknown for ever.
+		if reason, failed := pigkernel.RecoveryFailure(execution.Record); failed {
+			runtime.reportPigRecoveryBlocked(operation, reason)
+			return
+		}
 		runtime.reattachPigExecution(operation, execution)
 	}
 }
@@ -95,10 +91,26 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 		ExecutionId:               execution.ExecutionId,
 		Identity:                  execution.Identity,
 		InputRequestId:            execution.InputRequestId,
-		PreAdmissionInvocationIds: durableStrings(execution.Record["preAdmissionInvocationIds"]),
+		PreAdmissionInvocationIds: frozenExecutionOfRecord(execution.Record).PreAdmissionInvocationIds,
 		FinalAssistantText:        receipt.Text,
 		StopReason:                receipt.StopReason,
 	})
+}
+
+// reportPigRecoveryBlocked records that a recovery could not send a turn.
+//
+// The operation stays unknown - the turn may have reached the model - but the
+// reason is durable and the user sees it, so the wait is a decision and not
+// a silence.
+func (runtime *TaskRuntime) reportPigRecoveryBlocked(operation Operation, reason string) {
+	message := "The interrupted turn could not be sent again: " + reason
+	runtime.store.Transaction(func() any {
+		runtime.store.Event(operation.TaskId, "graph.recovery.blocked", map[string]any{
+			"operationId": operation.Id, "nodeId": operation.NodeId, "reason": message,
+		})
+		return nil
+	})
+	reportPigRecoveryFailure(message)
 }
 
 // reattachPigExecution sends the interrupted turn again.
@@ -111,11 +123,15 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 // The turn runs in the background: the daemon must come up even when the
 // model is slow, and the operation is unknown until the turn settles it.
 func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution pigkernel.FrozenExecution) {
-	wrapper := map[string]any{
-		"snapshot":           execution.Record,
-		"restoredPolicy":     asMap(execution.Record["policy"]),
-		"restoredDescriptor": asMap(asMap(execution.Record["configuration"])["descriptor"]),
-	}
+	// The attempt is recorded before it happens: a turn that is attempted and
+	// fails must not be attempted again after the next boot.
+	runtime.store.Transaction(func() any {
+		runtime.store.Event(operation.TaskId, "graph.recovery.attempted", map[string]any{
+			"operationId": operation.Id, "nodeId": operation.NodeId,
+		})
+		return nil
+	})
+	wrapper := frozenExecutionRecovery(frozenExecutionOfRecord(execution.Record), execution.Identity)
 	capture := &pigRecoveryCapture{}
 	options := runtime.mainAdapterOptions()
 	options.Transport = capture
@@ -130,7 +146,9 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 	// The adapter records the admission and returns. The value is on the
 	// capture when Prepare returns, so nothing races a closed channel.
 	if !capture.opened || !capture.prompted {
-		reportPigRecoveryFailure("the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk))
+		reason := "the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk)
+		runtime.markPigRecoveryFailure(execution, reason)
+		reportPigRecoveryFailure(reason)
 		return
 	}
 	go func() {
@@ -138,13 +156,17 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 		transport := CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
 		session, err := transport.Open(capture.request)
 		if err != nil {
-			reportPigRecoveryFailure("the interrupted turn could not be opened: " + err.Error())
+			reason := "the interrupted turn could not be opened: " + err.Error()
+			runtime.markPigRecoveryFailure(execution, reason)
+			reportPigRecoveryFailure(reason)
 			return
 		}
 		defer func() { _ = session.Close() }()
 		turn, err := session.Prompt(capture.prompt, nil)
 		if err != nil {
-			reportPigRecoveryFailure("the interrupted turn could not be sent again: " + err.Error())
+			reason := "the interrupted turn could not be sent again: " + err.Error()
+			runtime.markPigRecoveryFailure(execution, reason)
+			reportPigRecoveryFailure(reason)
 			return
 		}
 		runtime.settlePigTurn(operation, turn)
@@ -214,6 +236,17 @@ func (runtime *TaskRuntime) settlePigTurn(operation Operation, turn AgentSession
 	}, operationSettleOptions{})
 }
 
+// markPigRecoveryFailure records that a recovery could not send a turn.
+//
+// The record is what the next boot reads: a recovery that already failed is
+// not tried again, so the same doomed send does not run after every restart.
+func (runtime *TaskRuntime) markPigRecoveryFailure(execution pigkernel.FrozenExecution, reason string) {
+	func() {
+		defer func() { _ = recover() }()
+		_ = pigkernel.MarkRecoveryAttempt(context.Background(), runtime.store.Path, execution.ConversationId, reason)
+	}()
+}
+
 // pigExecutionCalledProvider reports whether the execution reached the model.
 //
 // The frozen record names the invocations that existed before the execution
@@ -224,7 +257,7 @@ func pigExecutionCalledProvider(store *TaskStore, operation Operation, execution
 	for _, call := range kernelRows(store.Db, "SELECT id FROM invocations WHERE operation_id=?", operation.Id) {
 		seen = append(seen, kernelString(call["id"]))
 	}
-	return pigCallsBeyond(durableStrings(execution.Record["preAdmissionInvocationIds"]), seen)
+	return pigCallsBeyond(frozenExecutionOfRecord(execution.Record).PreAdmissionInvocationIds, seen)
 }
 
 // pigRecoveryCapture records the admission the adapter would open.
@@ -289,81 +322,7 @@ func (session *pigRecoverySession) Close() error { return nil }
 // waiting for. The credential never enters it: the daemon keeps the live
 // binding, and the record only names the headers it may restore.
 func pigFrozenExecution(request AgentSessionRequest, preAdmission []string) map[string]any {
-	model := map[string]any{}
-	if view, ok := request.Model.(piModelView); ok {
-		body, _ := json.Marshal(view)
-		_ = json.Unmarshal(body, &model)
-	} else if record := asMap(request.Model); record != nil {
-		model = record
-	}
-	configuration := map[string]any{}
-	if request.ExecutionConfiguration != nil {
-		body, _ := json.Marshal(request.ExecutionConfiguration)
-		_ = json.Unmarshal(body, &configuration)
-	}
-	credential := map[string]any{}
-	if request.CredentialReference != nil {
-		body, _ := json.Marshal(request.CredentialReference)
-		_ = json.Unmarshal(body, &credential)
-	}
-	// The credential headers never enter the durable record: the daemon owns
-	// the live binding, and the record only names the headers it may restore.
-	names := map[string]bool{}
-	for _, header := range []map[string]any{model, pigNestedMap(configuration, "model")} {
-		for _, name := range pigCredentialHeaders(header) {
-			names[name] = true
-		}
-	}
-	credentials := []string{}
-	for name := range names {
-		credentials = append(credentials, name)
-	}
-	sort.Strings(credentials)
-	policy := map[string]any{
-		"workspace":           request.Workspace,
-		"stateDir":            request.StateDir,
-		"skillPaths":          request.SkillPaths,
-		"skillFolder":         request.SkillFolder,
-		"piExtensionPaths":    request.PiExtensionPaths,
-		"readRoots":           request.ReadRoots,
-		"writeRoots":          request.WriteRoots,
-		"protectedPaths":      request.ProtectedPaths,
-		"filesystemAccess":    request.FilesystemAccess,
-		"nativeTools":         request.NativeTools,
-		"allowedToolNames":    request.AllowedToolNames,
-		"bundleDigest":        request.BundleDigest,
-		"toolPolicyDigest":    request.ToolPolicyDigest,
-		"runtimePolicyDigest": request.RuntimePolicyDigest,
-		"thinkingLevel":       request.ThinkingLevel,
-	}
-	tools := []map[string]any{}
-	for _, tool := range request.Tools {
-		tools = append(tools, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters,
-		})
-	}
-	record := map[string]any{
-		"identity":                  request.Binding.InstanceId,
-		"executionId":               request.ExecutionId,
-		"inputRequestId":            request.InputRequestId,
-		"preAdmissionInvocationIds": preAdmission,
-		"model":                     model,
-		"agent": map[string]any{
-			"model":        model,
-			"instructions": request.SystemPrompt,
-			"cwd":          request.Workspace,
-		},
-		"extensionName": pigkernel.ExtensionName(request.Binding.InstanceId),
-		"tools":         tools,
-		"policy":        policy,
-		"configuration": map[string]any{
-			"executionConfiguration": configuration,
-			"credentialReference":    credential,
-			"headerCredentials":      credentials,
-			"descriptor":             request.CapabilityDescriptor,
-		},
-	}
-	return record
+	return frozenExecutionRecord(frozenExecutionOfRequest(request, preAdmission))
 }
 
 // pigNestedMap reads one nested object of a frozen record.

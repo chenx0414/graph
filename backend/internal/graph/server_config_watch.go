@@ -1,13 +1,14 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
+
+	"crypto/sha256"
 )
 
 // ConfigWatchReport is the watcher's last outcome.

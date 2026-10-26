@@ -1,9 +1,5 @@
 package graph
 
-import (
-	"encoding/json"
-)
-
 // InvocationPurpose is what one provider send is for. Pi compaction and branch summaries are real
 // billed requests and must be attributable separately from normal turns.
 type InvocationPurpose string
@@ -63,14 +59,8 @@ func TaskGate(store *TaskStore, operation TaskGateOperation, model ModelEntry, o
 	gate := &TaskSendGate{store: store, operation: operation, model: model, options: options, purpose: InvocationCompletion}
 	if operation.NodeId != nil {
 		gate.nodeId = operation.NodeId
-	} else {
-		row := kernelRow(store.DB, "SELECT node_id FROM operations WHERE id=?", operation.Id)
-		if row != nil {
-			if value, ok := row["node_id"]; ok && value != nil {
-				nodeId := kernelString(value)
-				gate.nodeId = &nodeId
-			}
-		}
+	} else if nodeId, found := store.OperationNode(operation.Id); found {
+		gate.nodeId = &nodeId
 	}
 	gate.SendGate = SendGate{
 		Dispatch: func(id string, reservation float64, send func() any) any {
@@ -101,7 +91,7 @@ func (gate *TaskSendGate) Check(reservation float64) {
 	}
 	if gate.hasNode() &&
 		!UnknownUsageIsNonBlocking(gate.store, gate.operation.InstanceId) &&
-		kernelRow(gate.store.DB, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND kind='unknown_usage' AND status='open' AND owner='user'", gate.operation.TaskId, *gate.nodeId) != nil {
+		gate.store.OpenUnknownUsageQuestion(gate.operation.TaskId, *gate.nodeId) {
 		Raise("unknown_usage", "Instance paused for unknown usage")
 	}
 	AssertWithinBudget(gate.store, gate.operation.InstanceId, int64(reservation))
@@ -118,15 +108,10 @@ func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() a
 		modelName = gate.model.Id
 	}
 	gate.store.Transaction(func() {
-		if kernelRow(gate.store.DB, "SELECT id FROM invocations WHERE id=?", id) != nil {
+		if gate.store.InvocationExists(id) {
 			Raise("invalid_input", "Invocation already dispatched")
 		}
-		// Freeze the underlying upstream identity, not just the mutable
-		// connection id: review independence reads this history later.
-		if _, err := gate.store.DB.Exec("INSERT INTO invocations(id,operation_id,instance_id,model,purpose) VALUES(?,?,?,?,?)",
-			id, gate.operation.Id, gate.operation.InstanceId, modelName, string(gate.purpose)); err != nil {
-			panic(err)
-		}
+		gate.store.OpenInvocation(id, gate.operation.Id, gate.operation.InstanceId, modelName, string(gate.purpose))
 	})
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -140,8 +125,8 @@ func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() a
 // settle records the usage evidence of one invocation.
 func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 	gate.store.Transaction(func() {
-		row := kernelRow(gate.store.DB, "SELECT usage FROM invocations WHERE id=?", id)
-		if row == nil {
+		settled, found := gate.store.InvocationUsage(id)
+		if !found {
 			Raise("not_found", "Unknown invocation")
 		}
 		var normalized *TokenUsage
@@ -150,9 +135,8 @@ func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 			normalized = &value
 		}
 		source := UsageSourceOf(normalized)
-		if recorded, ok := row["usage"]; ok && recorded != nil {
-			existing, _ := recorded.(string)
-			if existing != CanonicalJSON(normalized) {
+		if settled != nil {
+			if *settled != CanonicalJSON(normalized) {
 				Raise("result_conflict", "Conflicting usage evidence")
 			}
 			return
@@ -170,16 +154,14 @@ func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 		if normalized != nil {
 			recorded = CanonicalJSON(normalized)
 		}
-		if _, err := gate.store.DB.Exec("UPDATE invocations SET usage=?,cost=? WHERE id=?", recorded, CanonicalJSON(cost), id); err != nil {
-			panic(err)
-		}
+		gate.store.RecordInvocationUsage(id, recorded, CanonicalJSON(cost))
 		if !accountable {
 			gate.unknown = true
 			if !gate.options.Optional &&
 				!gate.options.Unrestricted &&
 				gate.hasNode() &&
 				!UnknownUsageIsNonBlocking(gate.store, gate.operation.InstanceId) &&
-				kernelRow(gate.store.DB, "SELECT id FROM questions WHERE operation_id=? AND kind='unknown_usage' AND status='open'", gate.operation.Id) == nil {
+				!gate.store.OpenUnknownUsageQuestionForOperation(gate.operation.Id) {
 				reason := "Agent returned no accountable usage"
 				if source == UsageEstimated {
 					reason = "Agent returned only estimated usage for a finite budget"
@@ -241,44 +223,7 @@ func (gate *TaskSendGate) Total() *TokenUsage {
 	return &total
 }
 
-// InvocationRow is one recorded provider invocation.
-type InvocationRow struct {
-	Id          string      `json:"id"`
-	OperationId string      `json:"operationId"`
-	InstanceId  string      `json:"instanceId"`
-	Model       string      `json:"model"`
-	Usage       *TokenUsage `json:"usage"`
-	UsageSource UsageSource `json:"usageSource"`
-	Cost        any         `json:"cost"`
-}
-
 // InvocationRows are the invocations one task recorded, oldest first.
 func InvocationRows(store *TaskStore, taskId string) []InvocationRow {
-	rows := kernelRows(store.DB, "SELECT i.id,i.operation_id,i.instance_id,i.model,i.usage,i.cost FROM invocations i JOIN operations o ON o.id=i.operation_id WHERE o.task_id=? ORDER BY i.rowid", taskId)
-	out := []InvocationRow{}
-	for _, row := range rows {
-		entry := InvocationRow{
-			Id:          kernelString(row["id"]),
-			OperationId: kernelString(row["operation_id"]),
-			InstanceId:  kernelString(row["instance_id"]),
-			Model:       kernelString(row["model"]),
-		}
-		if recorded, ok := row["usage"].(string); ok && recorded != "" {
-			var usage TokenUsage
-			if err := json.Unmarshal([]byte(recorded), &usage); err != nil {
-				panic(err)
-			}
-			entry.Usage = &usage
-		}
-		entry.UsageSource = UsageSourceOf(entry.Usage)
-		if recorded, ok := row["cost"].(string); ok && recorded != "" {
-			var cost any
-			if err := json.Unmarshal([]byte(recorded), &cost); err != nil {
-				panic(err)
-			}
-			entry.Cost = cost
-		}
-		out = append(out, entry)
-	}
-	return out
+	return store.InvocationRows(taskId)
 }

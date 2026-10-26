@@ -2,9 +2,8 @@ package graph
 
 import "fmt"
 
-// One serial queue per node. Retry counters live in the durable store.
-
 const DEFAULT_RETRIES = 2
+
 const DEFAULT_RESUBMITS = 1
 
 type QueueInput struct {

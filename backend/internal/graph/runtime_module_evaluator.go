@@ -1,12 +1,14 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
+
+	"os"
 )
 
 const MODULE_TIMEOUT_MS = 5000
+
 const MODULE_MAX_BYTES = 1048576
 
 // MISSING_INPUT marks an input that never received a delivery, distinct from false or null.

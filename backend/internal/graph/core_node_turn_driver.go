@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"encoding/json"
 	"strings"
+
+	"encoding/json"
 )
 
 // DriverHost is the part of the resident host a turn needs. Deliberately the

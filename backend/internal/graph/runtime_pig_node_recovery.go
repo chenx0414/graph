@@ -1,30 +1,12 @@
 package graph
 
 import (
-	"context"
 	"fmt"
+
+	"context"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
-
-// The PiG kernel's recovery of a graph node.
-//
-// A node's turn is the same turn the main agent runs: its own identity, its
-// own transcript, its own admission, all on the same kernel. The three facts
-// decide the same way they decide for the main agent.
-//
-//   - A turn the kernel finished is an answer the Graph already paid for. The
-//     node runs again against the same admission, the kernel hands back the
-//     answer it kept, and the model is not asked a second time.
-//   - A turn the kernel accepted but never sent is sent again, with the
-//     configuration it was admitted with - not the configuration the catalog
-//     happens to hold now.
-//   - A turn that was already at the model is neither. The credential was
-//     spent and the side effects may have happened, so the input is not sent
-//     again and the node waits for the user.
-//
-// The recovery restores the frozen configuration into the lane, so the node's
-// re-run is the turn it was admitted as.
 
 const pigNodeStoppedReason = "Runtime interrupted after the model was reached; the credential was spent. Reconcile the unknown usage before the input is sent again."
 
@@ -82,9 +64,8 @@ func (runtime *TaskRuntime) restorePigNode(frozen pigkernel.FrozenExecution) {
 // The model is not asked again.
 func (runtime *TaskRuntime) requeuePigNode(execution *ExecutionRow) {
 	runtime.store.Transaction(func() any {
-		kernelExec(runtime.store.Db, "UPDATE kernel_executions SET state='blocked' WHERE id=? AND state='failed'", execution.Id)
-		kernelExec(runtime.store.Db, "UPDATE kernel_queue SET state='queued',reason='Original kernel receipt retained for settlement' WHERE task_id=? AND node_id=? AND state='failed'",
-			execution.TaskId, execution.NodeId)
+		runtime.kernel.BlockFailedExecution(execution.Id)
+		runtime.kernel.RequeueFailedItem(execution.TaskId, execution.NodeId, "Original kernel receipt retained for settlement")
 		return nil
 	})
 }
@@ -100,10 +81,9 @@ func (runtime *TaskRuntime) requeuePigNode(execution *ExecutionRow) {
 // second time.
 func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
 	runtime.store.Transaction(func() any {
-		kernelExec(runtime.store.Db, "UPDATE kernel_queue SET state='failed',reason=? WHERE task_id=? AND node_id=? AND state IN ('queued','claimed')",
-			pigNodeStoppedReason, execution.TaskId, execution.NodeId)
-		kernelExec(runtime.store.Db, "UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?", execution.TaskId, execution.NodeId)
-		kernelExec(runtime.store.Db, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", execution.TaskId)
+		runtime.kernel.FailQueuedItem(execution.TaskId, execution.NodeId, pigNodeStoppedReason)
+		runtime.kernel.ParkNode(execution.TaskId, execution.NodeId)
+		runtime.store.BlockTaskPhase(execution.TaskId)
 		runtime.store.Event(execution.TaskId, "graph.node.recovery.stopped", map[string]any{
 			"executionId": execution.Id, "nodeId": execution.NodeId, "reason": pigNodeStoppedReason,
 		})
@@ -118,10 +98,10 @@ func (runtime *TaskRuntime) stopPigNode(execution *ExecutionRow) {
 // be sent again.
 func pigNodeCalledProvider(kernel *KernelStore, execution *ExecutionRow, frozen pigkernel.FrozenExecution) bool {
 	seen := []string{}
-	for _, call := range kernelRows(kernel.Db, "SELECT id FROM kernel_provider_calls WHERE execution_id=?", execution.Id) {
-		seen = append(seen, kernelString(call["id"]))
+	for _, call := range kernel.ProviderCallsOfExecution(execution.Id) {
+		seen = append(seen, call.Id)
 	}
-	return pigCallsBeyond(durableStrings(frozen.Record["preAdmissionInvocationIds"]), seen)
+	return pigCallsBeyond(frozenExecutionOfRecord(frozen.Record).PreAdmissionInvocationIds, seen)
 }
 
 // pigNodeRestoredWrapper is the shape the lane reads a restored node from.
@@ -130,26 +110,6 @@ func pigNodeCalledProvider(kernel *KernelStore, execution *ExecutionRow, frozen 
 // executions carry it, and the PiG kernel's frozen records hold the same
 // facts under the kernel's own names. The translation is the whole point: the
 // node's re-run must use the configuration it was admitted with.
-func pigNodeRestoredWrapper(frozen pigkernel.FrozenExecution) map[string]any {
-	record := frozen.Record
-	configuration := asMap(record["configuration"])
-	snapshot := map[string]any{
-		"identity":    frozen.Identity,
-		"executionId": frozen.ExecutionId,
-		"model":       record["model"],
-		"agent":       record["agent"],
-		"configuration": map[string]any{
-			"policy": map[string]any{
-				"binding": map[string]any{"instanceId": frozen.Identity},
-			},
-			"nodeExecutionConfiguration": configuration["executionConfiguration"],
-			"credentialReference":        configuration["credentialReference"],
-			"descriptor":                 configuration["descriptor"],
-		},
-	}
-	return map[string]any{
-		"snapshot":           snapshot,
-		"restoredPolicy":     asMap(record["policy"]),
-		"restoredDescriptor": configuration["descriptor"],
-	}
+func pigNodeRestoredWrapper(frozen pigkernel.FrozenExecution) *FrozenExecutionRecovery {
+	return frozenExecutionRecovery(frozenExecutionOfRecord(frozen.Record), frozen.Identity)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/MichaelKinsy/PiG/chord/delta"
 	"github.com/MichaelKinsy/PiG/durable"
@@ -91,6 +92,67 @@ func FreezeExecution(ctx context.Context, database string, identity string, reco
 		return fmt.Errorf("pig kernel: the frozen execution is not stored: %w", err)
 	}
 	return nil
+}
+
+// MarkRecoveryAttempt records that a recovery tried to send a frozen turn and
+// could not.
+//
+// The marker is what keeps the next boot from trying the same doomed send
+// again. The frozen record is durable, and it is the one thing the recovery
+// reads, so the reason for the failure survives the restart that failed.
+func MarkRecoveryAttempt(ctx context.Context, database string, conversationId int64, reason string) error {
+	resident, err := openResident(ctx, database)
+	if err != nil {
+		return err
+	}
+	if conversationId == 0 {
+		return fmt.Errorf("pig kernel: the conversation of the failed recovery is unknown")
+	}
+	root, err := resident.kernel.Harness().Root(ctx, nil)
+	if err != nil {
+		return err
+	}
+	_, err = root.Commit(ctx, func(tx durable.Tx) (any, error) {
+		conversations, err := conversationIndex(tx, executionsDoc)
+		if err != nil {
+			return nil, err
+		}
+		key := fmt.Sprintf("%d", conversationId)
+		encoded, found := conversations.Lookup(key)
+		if !found {
+			return nil, fmt.Errorf("pig kernel: the frozen execution of %d is gone", conversationId)
+		}
+		text, ok := encoded.(string)
+		if !ok {
+			return nil, fmt.Errorf("pig kernel: the frozen execution of %d is not readable", conversationId)
+		}
+		record := map[string]any{}
+		if err := json.Unmarshal([]byte(text), &record); err != nil {
+			return nil, fmt.Errorf("pig kernel: the frozen execution of %d is not readable: %w", conversationId, err)
+		}
+		record["recoveryAttemptedAt"] = nowMillis()
+		record["recoveryFailure"] = reason
+		updated, err := json.Marshal(record)
+		if err != nil {
+			return nil, fmt.Errorf("pig kernel: the frozen execution is not serializable: %w", err)
+		}
+		return nil, conversations.Set(key, string(updated))
+	})
+	if err != nil {
+		return fmt.Errorf("pig kernel: the recovery attempt is not recorded: %w", err)
+	}
+	return nil
+}
+
+// RecoveryFailure reads the failed recovery attempt a frozen record records.
+//
+// The second answer says whether the record carries a failed attempt at all.
+func RecoveryFailure(record map[string]any) (string, bool) {
+	reason, ok := record["recoveryFailure"].(string)
+	if !ok || strings.TrimSpace(reason) == "" {
+		return "", false
+	}
+	return reason, true
 }
 
 // FrozenExecutions reads every frozen execution of the database.

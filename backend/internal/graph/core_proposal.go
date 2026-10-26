@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"encoding/json"
 	"strings"
+
+	"encoding/json"
 )
 
 // ValidateProposal checks static structure before any node or instance is created.

@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
+
+	"os"
 )
 
 // LinkProjectDependencies links the project's installed toolchain into a work copy.

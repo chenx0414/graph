@@ -7,10 +7,6 @@
 
 export const COMPOSER_DRAFT_PREFIX = 'graph.conversation.composer.';
 
-/* ------------------------------------------------------------------ *
- * ② Per-conversation draft persistence
- * ------------------------------------------------------------------ */
-
 export interface ComposerStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -42,18 +38,10 @@ export function writeComposerDraft(storage: ComposerStorage | null | undefined, 
   }
 }
 
-/* ------------------------------------------------------------------ *
- * ③ Scroll-to-latest decision on entering a conversation
- * ------------------------------------------------------------------ */
-
 /** Jump to the newest message exactly once per entry; never re-yank a reader. */
 export function shouldScrollToLatest(input: { tab: string; hasMessages: boolean; alreadyJumped: boolean }): boolean {
   return input.tab === 'chat' && input.hasMessages && !input.alreadyJumped;
 }
-
-/* ------------------------------------------------------------------ *
- * ④ Primary button state machine
- * ------------------------------------------------------------------ */
 
 export type ComposerPrimaryMode = 'send' | 'pause' | 'resume' | 'pending';
 export type ComposerPrimaryAction =
@@ -83,14 +71,10 @@ export interface ComposerPrimaryInput {
 export function composerPrimaryState(input: ComposerPrimaryInput): { mode: ComposerPrimaryMode; action: ComposerPrimaryAction } {
   if (input.pending) return { mode: 'pending', action: 'none' };
   if (input.paused) {
-    // ② empty composer + empty queue resumes; ③/④ anything to send (typed
-    // content or a waiting queue) sends and auto-continues.
     if (input.hasInput || input.queueLength > 0) return { mode: 'send', action: 'send-and-resume' };
     return { mode: 'resume', action: 'resume' };
   }
   if (input.busy) {
-    // ① While the master outputs the control is pause, unconditionally. Sending
-    // during output is the keyboard/Enter path, not this button.
     return { mode: 'pause', action: 'pause' };
   }
   if (input.hasInput) return { mode: 'send', action: 'send' };
@@ -106,10 +90,6 @@ export function composerPrimaryDisabled(input: {
   if (input.paused || input.busy) return false;
   return !input.hasInput && !input.hasSuggestion;
 }
-
-/* ------------------------------------------------------------------ *
- * ⑤ Queued message list after a cancel
- * ------------------------------------------------------------------ */
 
 export function queuedUserMessages<T extends { role: string; state: string }>(messages: T[]): T[] {
   return messages.filter(message => message.role === 'user' && message.state === 'queued');

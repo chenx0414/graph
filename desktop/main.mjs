@@ -89,8 +89,6 @@ if (!app.requestSingleInstanceLock()) {
           encryptString: input => safeStorage.encryptString(input),
           decryptString: input => safeStorage.decryptString(input),
         };
-        // Read-modify-write: an entry this instance cannot decrypt is still the
-        // user's entry, and rewriting the file from the in-memory map would erase it.
         const stored = saveSecrets(secretsPath, codec, outcome.secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }), {
           raw: loadRawSecretEntries(secretsPath, path => readFileSync(path, 'utf8')),
           touched: [request.ref],
@@ -183,8 +181,6 @@ if (!app.requestSingleInstanceLock()) {
       openWindow(url);
       return;
     }
-    // Same address after a port-reusing reload: loadURL does not install the
-    // new session cookie. Force a document reload so GET / runs.
     if (consoleReloadAction(window.webContents.getURL(), target) === 'reload') {
       window.webContents.reloadIgnoringCache();
       return;

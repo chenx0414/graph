@@ -44,6 +44,12 @@ SSE 传递可恢复的事件与引用，公开结果通过 resultId 主动查询
 
 main 保留自己的会话与 operation 基础设施，位于 graph 外部；它的结束不由 graph 生命周期控制。Agent checkpoint 与执行恢复由 durable 负责；Graph 保留业务命令、未知用量、模块副作用与 Git 收据的核对，不另设 Agent 恢复器。
 
+## daemon 与内核的分工
+
+Go daemon 拥有全部业务事实：凭据、准入规则、预算与用量账本、模型通道、工具体与扩展宿主。内核拥有执行历史：transcript、准入记录、工具调用与结果、durable 会话与文档。分工不可越过：内核向 daemon 要答案，daemon 决定是否放行、花哪把凭据、记哪笔用量，因此内核拿不到一条绕过准入或预算的模型通道；反过来，任何一方都花不掉另一方的凭据，也调用不了另一方未放行的工具。
+
+内核接到一个回合时，模型、工具与提示词已经由 daemon 决定，交回的是答案与产生答案的 durable 记录。工具体与扩展工具走同一道准入闸门：调用先由 daemon 放行，再由 daemon 执行，内核只搬运调用与结果。MCP 沿用同一条边界：daemon 决定会话能用哪些服务器、给哪些密钥，内核拥有连接、工具表与调用本身。
+
 ## 模块隔离与副作用
 
 规则表达式只处理声明的输入、状态和输出，不执行任意字符串代码。once 锁存与输入状态独立；重开只解除锁存，等待下一次输入。不存在隐含清空、容器调度器或独立工具节点。
@@ -81,6 +87,7 @@ ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚�
 - 定义、持久模型与生命周期：[interface-spec.ts](../backend/internal/graph/core_interface_spec.go)、[kernel-store.ts](../backend/internal/graph/core_kernel_store.go)、[graph-runtime.ts](../backend/internal/graph/core_graph_runtime.go)、[graph-service.ts](../backend/internal/graph/core_graph_service.go)。
 - 执行与恢复：[graph-runner.ts](../backend/internal/graph/core_graph_runner.go)、[node-executor.ts](../backend/internal/graph/core_node_executor.go)、[node-turn-driver.ts](../backend/internal/graph/core_node_turn_driver.go)、[kernel-recovery.ts](../backend/internal/graph/core_kernel_recovery.go)。
 - Pi 与能力：[kernel-graph-lane.ts](../backend/internal/graph/runtime_kernel_graph_lane.go)、[kernel-node-host.ts](../backend/internal/graph/runtime_kernel_node_host.go)、[agent-context-assembly.ts](../backend/internal/graph/runtime_agent_context_assembly.go)、[capability-library.ts](../backend/internal/graph/catalog_capability_library.go)。
+- durable 内核：[kernel.go](../backend/internal/pigkernel/kernel.go)、[session.go](../backend/internal/pigkernel/session.go)、[turn.go](../backend/internal/pigkernel/turn.go)。
 - 模块：[module-runtime.ts](../backend/internal/graph/core_module_runtime.go)、[module-router.ts](../backend/internal/graph/core_module_router.go)、[module-evaluator.ts](../backend/internal/graph/runtime_module_evaluator.go)、[kernel-operation-broker.ts](../backend/internal/graph/runtime_kernel_operation_broker.go)。
 - 产物与 Git：[artifact-workspace.ts](../backend/internal/graph/core_artifact_workspace.go)、[graph-acceptance.ts](../backend/internal/graph/core_graph_acceptance.go)、[Git 模块](../backend/internal/graph/git_git.go)。
 - 投影与界面：[kernel-views.ts](../backend/internal/graph/core_kernel_views.go)、[kernel-explain.ts](../backend/internal/graph/core_kernel_explain.go)、[node-run.ts](../backend/internal/graph/core_node_run.go)、[layout.ts](../backend/internal/graph/server_layout.go)、[GraphCanvas.tsx](../src/web/GraphCanvas.tsx)、[AgentNodeChat.tsx](../src/web/AgentNodeChat.tsx)。

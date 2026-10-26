@@ -3,11 +3,26 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, expect } from 'playwright/test';
-import { readConsoleAddress } from '../src/server/console-address.ts';
+
+/**
+ * Where the console is listening. The daemon publishes this file in its state
+ * directory once the socket is bound; nothing else records the port, because the
+ * daemon is started with `--port 0`.
+ */
+async function readConsoleAddress(stateDir) {
+  const raw = await readFile(join(stateDir, 'console.json'), 'utf8').catch(() => null);
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw);
+    return typeof value?.url === 'string' && value.url.startsWith('http') ? { url: value.url } : null;
+  } catch {
+    return null;
+  }
+}
 
 const repo = join(import.meta.dirname, '..');
 const root = await mkdtemp(join(tmpdir(), 'graph-interface-e2e-'));
@@ -57,7 +72,6 @@ try {
   const dialog = page.getByRole('dialog', { name: '创建项目' });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('textbox', { name: '项目名称' })).toBeFocused();
-  // Keyboard stays inside the real modal even after cycling past both ends.
   for (let i = 0; i < 9; i += 1) {
     await page.keyboard.press('Tab');
     assert.equal(await dialog.evaluate(el => el.contains(document.activeElement) || document.activeElement === document.body), true, 'No background control may receive focus; Chromium may focus its browser chrome');

@@ -1,27 +1,16 @@
 package graph
 
 import (
-	"context"
 	"errors"
+
+	"github.com/chenx0414/graph/backend/internal/pigkernel"
+
 	"sync"
 
-	"github.com/MichaelKinsy/PiG/ai"
-	"github.com/chenx0414/graph/backend/internal/pigkernel"
-)
+	"context"
 
-// The Pi extensions the PiG kernel hosts.
-//
-// The kernel runs the extension in a Node process of its own; the daemon
-// keeps the admission. An extension tool reaches the model only when Graph's
-// own tool policy allows it, and its call passes the same gate every other
-// tool passes: the extension owns the body of the tool, not the right to
-// call it.
-//
-// The extension's process belongs to the extension. The daemon cannot confine
-// it - PiG's extension host gives the process the daemon's own reach - so a
-// session whose policy is narrower than that reach cannot host one. Such a
-// session is refused by name, because running an extension that sees more
-// than the session may is worse than not running it.
+	"github.com/MichaelKinsy/PiG/ai"
+)
 
 // pigExtensionHost is the resident host of the daemon's Pi extensions.
 //

@@ -1,23 +1,13 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
-)
 
-// The harness experience store holds what a project has learned about its own
-// harness. A record is one situation - the cue - at one stage. A record with
-// only a cue is a friction: something the project met. A record that also
-// carries a lesson and the evidence for it is an adopted lesson. One record,
-// two stages: a lesson completes the friction it belongs to instead of
-// standing next to it.
-//
-// Only the adopted lessons travel into a prompt. A friction is a suspicion; a
-// lesson is what the project saw happen. Injecting both would put guesses in
-// front of the next task as if they were facts.
+	"encoding/json"
+)
 
 // HarnessExperienceEntry is one piece of harness knowledge: the situation, and
 // what the project knows about it.
@@ -92,35 +82,18 @@ const (
 // domain reads it, which is what makes a general lesson general.
 const HARNESS_GENERAL_SCOPE = "general"
 
-// harnessArtifactStore is the artifact surface the harness tools use. The
-// session's artifact service fills in the producer, so a lesson is written the
-// same way every other artifact is written.
-
 type harnessArtifactStore = agentToolsArtifacts
-
-// harnessExperienceReader reads the lesson set of one domain from the shared
-// artifact workspace.
-//
-// The read is scope-free on purpose. A lesson another task promoted lives in
-// the project scope, and the next task of that domain has to find it - a read
-// that only looked at the current task's own artifacts would find nothing.
 
 type harnessExperienceReader interface {
 	List(query ArtifactQuery) ArtifactPage
 	ReadVerifiedContent(taskId string, artifactId string, version int, maxBytes ...int) []byte
 }
 
-// harnessAnonID names the n-th candidate. A, B, C ... AA, AB: a chooser reads
-// one of these without learning which lane produced it.
-
 type HarnessExperienceInput struct {
 	Domain string
 	// Scope reads one scope only. Empty means the domain's own scope.
 	Scope string
 }
-
-// HarnessExperienceResult is what one read returns. With no domain it names
-// the domains that hold lessons.
 
 type HarnessExperienceResult struct {
 	Domain string `json:"domain,omitempty"`
@@ -219,8 +192,6 @@ func harnessExperienceName(domain string) string {
 	return HARNESS_EXPERIENCE_PREFIX + "-" + harnessSlug(domain)
 }
 
-// harnessSlug reduces a domain name to the slug the artifact store accepts.
-
 func harnessSlug(domain string) string {
 	normalized := strings.ToLower(strings.TrimSpace(domain))
 	out := []rune{}
@@ -243,10 +214,6 @@ func harnessSlug(domain string) string {
 	}
 	return slug
 }
-
-// harnessExperienceEntries reads the lessons of one scope, newest store
-// first. The project scope wins over the task scope: a lesson another task
-// already promoted is the lesson this task must see.
 
 func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope string) []HarnessExperienceEntry {
 	if reader == nil {
@@ -287,8 +254,6 @@ func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope stri
 	return entries
 }
 
-// harnessExperienceScopes lists the scopes that hold lessons.
-
 func harnessExperienceScopes(reader harnessExperienceReader, taskId string) []string {
 	if reader == nil {
 		return []string{}
@@ -312,9 +277,6 @@ func harnessExperienceScopes(reader harnessExperienceReader, taskId string) []st
 	sort.Strings(scopes)
 	return scopes
 }
-
-// harnessPromote promotes one artifact version, turning a refusal into an
-// error instead of a panic: the caller keeps what it already has.
 
 func harnessPromote(store *harnessArtifactStore, published ArtifactRecord, requestId string) (record ArtifactRecord, err error) {
 	defer func() {

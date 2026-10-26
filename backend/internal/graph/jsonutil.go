@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"bytes"
 	"encoding/json"
 	"sort"
 	"strings"
+
+	"bytes"
 )
 
 // CanonicalJSON is src/core/store.ts canonicalJson: objects key-sorted, undefined

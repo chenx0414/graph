@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"reflect"
 	"runtime"
 	"sort"
 	"strings"
+
+	"reflect"
 )
 
 // PI_NATIVE_TOOL_NAMES are Pi's built-in tools. powershell is windows-only.

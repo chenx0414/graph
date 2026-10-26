@@ -92,6 +92,67 @@ node scripts/check-file-tokens.mjs src/core/task-runtime.ts
 这个检查不进 `node --run check`：仓库里已存在历史大文件，而它要拦的是**本次改动**新写大
 文件。`GRAPH_FILE_TOKEN_LIMIT` 可临时改上限（默认 5000）。
 
+## 表的归属检查
+
+有两份持久表，各归一个 store 一个主人：
+
+| 表 | 主人 |
+| --- | --- |
+| `kernel_` 开头的那批 | `KernelStore`（`core_kernel_*.go`） |
+| `tasks`、`questions`、`invocations`、`nodes`、`activations`、`instances`、`operations`、`conversations`、`proposals`、`messages` | `TaskStore`（`core_task_*.go`，每张表一个文件） |
+
+形状由 store 知道，其他地方只问 store 要答案、要 store 去写。任何在 store 之外写这些表的
+地方都是第二个主人，一列要改就得在两个地方都改。
+
+```sh
+node --run check:ownership                  # 整个 backend/internal/graph 包
+node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime_stop.go
+```
+
+读不算第二个主人：读不改表的形状，所以 store 之外仍可以有读。
+
+**模块自己的表**（`wake_intents`、`tool_calls`、`git_commits`、`git_ops`、`worktrees` 等）由**那个模块**的一个文件拥有——守卫逐个点名了它们。
+
+**schema 里的每张表都要有主人**。守卫自己读 schema（`core_store_schema_base.go`、`core_store_schema.go`、
+`core_store_migrate.go` 里的 `CREATE TABLE`），所以：
+
+- **一张表有主人，就只有那个主人写它**；
+- **一张表还没有主人，第一次写它就会被拒**——新表要先被点名。
+
+**两种文件可以例外，但要在文件头上写明为什么**：
+
+```
+// graph:table-writes-exempt: a migration owns the SQL of the schema it migrates
+```
+
+一是**迁移**——迁移的 SQL 描述的就是形状本身，它属于写下形状的地方。二是**一次跨多张表
+的操作**——退役一个图连同它的一切，是关于许多张表的一个事实，拆开它会让这次操作对自己在
+做什么说谎。
+
+**它有两种看法**：
+
+```sh
+node --run check:ownership                  # 整棵树：谁在写谁的表
+node scripts/check-table-ownership.mjs --staged   # 只看这次改动新增了什么
+```
+
+**`--staged` 才是能进 Pre-commit Hook 的那一种**：它**只拦新增的写者**——一张已经有主人的表，
+这次改动又添了一个写者，就 refused。而**这个分支还没走到的主人**（main 与并行分支上那些
+表仍然从许多地方写），**它一个也不碰**。理由和文件大小守卫一样：**要拦的是**本次改动**新写
+的东西**，不是历史上就有的。
+
+因此 Hook 里接的是 `--staged`：
+
+```sh
+node "$hook_dir/../scripts/check-table-ownership.mjs" --staged
+```
+
+**仓库里没有这个脚本时，Hook 跳过它**——所以不认识「表的主人」这件事的分支不会被它拦住。
+
+**整棵树那一种**（`node --run check:ownership`）**暂时不进** `node --run check`：main 与并行的
+几个分支仍有几十处越界写，把检查接进共享的门禁会立刻打断它们的提交。等那些分支都取了这次
+改动（`feature/architecture-deepening`）之后，再把它接进 `check-queue.py` 的步骤里。
+
 ## Pre-push Hook
 
 仓库内提供 `.githooks/pre-push`，推送前执行完整检查。在每个 clone 的长期主检出中启用一次：

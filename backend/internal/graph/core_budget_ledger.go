@@ -51,7 +51,7 @@ func EnsureBudgetScope(store *TaskStore, taskID, instanceID string) string {
 	g5Exec(store.Db, `INSERT INTO budget_scopes(
     id,task_id,root_task_id,owner_instance_id,limit_tokens,unlimited,used_tokens,created_at
   ) VALUES(?,?,?,?,?,?,?,?)`, id, taskID, taskID, g5Str(instance["id"]), limit, boolInt(unlimited), g5Int(instance["used"]), NowMillis())
-	g5Exec(store.Db, "UPDATE instances SET budget_scope_id=? WHERE id=?", id, g5Str(instance["id"]))
+	store.JoinBudgetScope(g5Str(instance["id"]), id)
 	return id
 }
 
@@ -90,7 +90,7 @@ func ShareBudgetScope(store *TaskStore, instanceID, scopeID string) {
 	if scope["limit_tokens"] != nil {
 		limit = g5Int(scope["limit_tokens"])
 	}
-	g5Exec(store.Db, "UPDATE instances SET budget_scope_id=?,budget=?,unlimited=? WHERE id=?", scopeID, limit, g5Int(scope["unlimited"]), instanceID)
+	store.TakeSharedBudget(instanceID, scopeID, limit, int(g5Int(scope["unlimited"])))
 }
 
 func LoadBudgetSnapshot(store *TaskStore, instanceID string) BudgetSnapshot {
@@ -176,14 +176,13 @@ func ReserveOperation(store *TaskStore, operationID string, amount int64) {
 	if !g5SafeInt(amount) || amount < 0 {
 		Raise("invalid_adapter", "A bounded token reservation is required")
 	}
-	changes, _ := g5Exec(store.Db, "UPDATE operations SET reserved=? WHERE id=? AND state='intent' AND reserved=0", amount, operationID)
-	if changes != 1 {
+	if !store.TakeOperationReservation(operationID, amount) {
 		Raise("invalid_operation", "Operation reservation is no longer available")
 	}
 }
 
 func ReleaseOperationReservation(store *TaskStore, operationID string) {
-	g5Exec(store.Db, "UPDATE operations SET reserved=0 WHERE id=?", operationID)
+	store.ClearOperationReservation(operationID)
 }
 
 func CommitUsage(store *TaskStore, instanceID string, total int64) {
@@ -192,7 +191,7 @@ func CommitUsage(store *TaskStore, instanceID string, total int64) {
 	}
 	instance := instanceBudget(store, instanceID)
 	if total > 0 {
-		g5Exec(store.Db, "UPDATE instances SET used=used+? WHERE id=?", total, instanceID)
+		store.AddInstanceUsage(instanceID, total)
 		if instance["budget_scope_id"] != nil {
 			g5Exec(store.Db, "UPDATE budget_scopes SET used_tokens=used_tokens+? WHERE id=?", total, instance["budget_scope_id"])
 		}
@@ -200,18 +199,7 @@ func CommitUsage(store *TaskStore, instanceID string, total int64) {
 }
 
 func ModelsUsed(store *TaskStore, instanceID string) []string {
-	row, ok := g5One(store.Db, "SELECT models_used FROM instances WHERE id=?", instanceID)
-	if !ok {
-		Raise("not_found", "Unknown instance")
-	}
-	var used []string
-	if err := json.Unmarshal([]byte(g5Str(row["models_used"])), &used); err != nil {
-		panic(err)
-	}
-	if used == nil {
-		return []string{}
-	}
-	return used
+	return store.InstanceModelsUsed(instanceID)
 }
 
 func RecordModelUse(store *TaskStore, instanceID, model string) {
@@ -224,11 +212,7 @@ func RecordModelUse(store *TaskStore, instanceID, model string) {
 			return
 		}
 	}
-	encoded, err := json.Marshal(append(used, model))
-	if err != nil {
-		panic(err)
-	}
-	g5Exec(store.Db, "UPDATE instances SET models_used=? WHERE id=?", string(encoded), instanceID)
+	store.SetInstanceModelsUsed(instanceID, append(used, model))
 }
 
 func RecordCurrentModelUse(store *TaskStore, instanceID string) {
@@ -263,10 +247,10 @@ func SetBudget(store *TaskStore, instanceID string, tokens *int64) {
 		budget = *tokens
 		limit = *tokens
 	}
-	g5Exec(store.Db, "UPDATE instances SET budget=?,unlimited=? WHERE id=?", budget, unlimited, instanceID)
+	store.SetInstanceBudget(instanceID, budget, unlimited)
 	if row["budget_scope_id"] != nil {
 		g5Exec(store.Db, "UPDATE budget_scopes SET limit_tokens=?,unlimited=? WHERE id=?", limit, unlimited, row["budget_scope_id"])
-		g5Exec(store.Db, "UPDATE instances SET budget=?,unlimited=? WHERE budget_scope_id=?", budget, unlimited, row["budget_scope_id"])
+		store.SetScopeMemberBudget(g5Str(row["budget_scope_id"]), budget, unlimited)
 	}
 }
 
@@ -281,12 +265,12 @@ func AddBudget(store *TaskStore, instanceID string, tokens int64) {
 	if !g5SafeInt(g5Int(row["budget"]) + tokens) {
 		Raise("invalid_answer", "Budget exceeds the supported range")
 	}
-	g5Exec(store.Db, "UPDATE instances SET budget=budget+? WHERE id=?", tokens, instanceID)
+	store.AddInstanceBudget(instanceID, tokens)
 	if row["budget_scope_id"] != nil {
 		scope, _ := g5One(store.Db, "SELECT limit_tokens,unlimited FROM budget_scopes WHERE id=?", row["budget_scope_id"])
 		if g5Int(scope["unlimited"]) == 0 {
 			g5Exec(store.Db, "UPDATE budget_scopes SET limit_tokens=COALESCE(limit_tokens,0)+? WHERE id=?", tokens, row["budget_scope_id"])
-			g5Exec(store.Db, "UPDATE instances SET budget=COALESCE((SELECT limit_tokens FROM budget_scopes WHERE id=?),0) WHERE budget_scope_id=?", row["budget_scope_id"], row["budget_scope_id"])
+			store.SyncScopeMemberBudget(g5Str(row["budget_scope_id"]))
 		}
 	}
 }

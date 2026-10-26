@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"crypto/sha256"
 )
 
 // ResolvedAccessPolicy is an access policy bound to one host: the policy

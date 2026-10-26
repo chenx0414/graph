@@ -1,19 +1,12 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-)
 
-// The PiG kernel is a kernel, not a shell.
-//
-// The TypeScript SDK assembled the session prompt around Graph's own prompt:
-// the project context files, the skills the session may load and the working
-// directory. PiG takes the instructions as they are - it has no environment of
-// its own - so the daemon assembles them now. The model therefore reads the
-// same prompt on the PiG kernel as it read on the sidecar.
+	"os"
+)
 
 // pigSessionInstructions is the system prompt of one PiG session.
 //

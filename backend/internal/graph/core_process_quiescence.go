@@ -1,8 +1,9 @@
 package graph
 
 import (
-	"bytes"
 	"encoding/json"
+
+	"bytes"
 
 	"golang.org/x/sys/unix"
 )

@@ -1,0 +1,70 @@
+
+.artifact-index .drawer-artifact-open > svg { flex: 0 0 auto; color: var(--muted); }
+.artifact-index .drawer-artifact-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.artifact-index-filters .select { width: 150px; }
+.artifact-index-heading > label { display: flex; align-items: center; flex-direction: row; white-space: nowrap; }
+.artifact-index-heading .select { width: 160px; }
+.sidebar-section[hidden] { display: none; }
+.sidebar-section-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 3px 0; }
+.sidebar-section-toggle svg { transform: rotate(90deg); transition: transform 120ms; }
+.sidebar-section-toggle[aria-expanded="false"] svg { transform: rotate(0); }
+.sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 0; transition: opacity 120ms; }
+.sidebar-label:hover .sidebar-add, .sidebar-label:focus-within .sidebar-add, .sidebar-project summary:hover .sidebar-new-chat, .sidebar-project summary:focus-within .sidebar-new-chat { opacity: 1; }
+@media (hover: none) { .sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 1; } }
+.drawer-all-tasks { display: flex; flex-direction: column; min-width: 0; }
+.drawer-task-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.drawer-task-controls select { min-width: 0; flex: 1 1 130px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
+.drawer-all-tasks .drawer-task-detail { display: flex; flex-direction: column; }
+.drawer-task-detail > .drawer-entry-links { order: -1; }
+.drawer-entry-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.drawer-entry-links > .btn { padding: 16px 10px; background: var(--panel-soft); border: 1px solid var(--border); font-size: 13px; font-weight: 600; justify-content: center; }
+.drawer-entry-links > .btn:hover { background: var(--accent-weak); border-color: var(--accent); }
+.drawer-head h2 { font-size: 17px; }
+.artifact-version-history { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px; background: var(--panel-soft); }
+.artifact-version-history summary { display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 12px 16px; font-size: 13px; }
+.artifact-version-history summary > span { margin-left: auto; color: var(--muted); }
+.artifact-version-list { max-height: 300px; overflow: auto; padding: 0 12px 12px; }
+.artifact-version-list a { display: flex; align-items: center; gap: 16px; padding: 10px; border-radius: 6px; color: var(--text); }
+.artifact-version-list a[data-active="true"], .artifact-version-list a:hover { background: var(--accent-weak); }
+.artifact-version-list small { margin-left: auto; }
+.node-prompt-card { padding: 0; border: 1px solid var(--border); border-radius: 10px; margin: 8px 22px; overflow: auto; max-height: 45vh; flex-shrink: 0; }
+.node-prompt-summary { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; background: var(--panel-soft); list-style: none; }
+.node-prompt-summary > span { display: grid; flex: 1; gap: 2px; }
+.node-prompt-summary strong { font-size: 13px; }
+.node-prompt-summary small { font-size: 11px; }
+.node-prompt-summary::-webkit-details-marker { display: none; }
+.node-prompt-card[open] .node-prompt-summary > svg:last-child { transform: rotate(90deg); }
+.node-prompt-card > .stack { padding: 14px; }
+.task-graph-title { margin: 0; font-size: clamp(20px, 2.1vw, 30px); line-height: 1.3; overflow-wrap: anywhere; white-space: normal; }
+.task-graph-page .graph-wrap { height: clamp(640px, calc(100vh - 210px), 1080px); }
+.graph-wrap { position: relative; }
+.graph-message-edge { cursor: pointer; }
+.graph-edge-inspector { position: absolute; z-index: 10; right: 12px; bottom: 12px; width: min(340px, calc(100% - 24px)); max-height: 45%; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); font-size: 12px; }
+.graph-edge-inspector > button { float: right; border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; }
+.graph-edge-inspector ol { padding-left: 18px; }
+.graph-edge-inspector li { margin-top: 10px; overflow-wrap: anywhere; }
+.graph-edge-inspector time { color: var(--muted); }
+.graph-edge-inspector p { white-space: pre-wrap; }
+.graph-edge-inspector pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.tool-group-images { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px 12px; }
+.tool-group-images a { display: inline-flex; max-width: 100%; }
+.tool-group-images img { display: block; max-width: min(280px, 100%); max-height: 240px; object-fit: contain; border-radius: 8px; }
+.task-graph-page .node-head { font-size: 14px; }
+.task-graph-page .node-card { padding: 10px 13px; }
+.node-prompt-popover { margin: 0; border: 0; max-height: none; overflow: visible; position: relative; background: transparent; }
+.node-prompt-popover .node-prompt-summary { display: inline-flex; width: 30px; height: 30px; padding: 0; justify-content: center; list-style: none; border-radius: 8px; background: transparent; }
+.node-prompt-popover .node-prompt-summary::-webkit-details-marker { display: none; }
+.node-prompt-popover .node-prompt-popover-panel { position: fixed; right: 16px; top: 48px; width: min(580px, calc(100vw - 32px)); max-height: min(74vh, 780px); overflow: auto; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); z-index: 120; }
+.node-prompt-popover-heading { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.node-prompt-popover-heading span { font-size: 11px; color: var(--muted); }
+.node-prompt-popover .stack { padding: 0; }
+.node-prompt-popover[open] .node-prompt-summary > svg:last-child { transform: none; }
+
+/* The one toolbar control remains reachable when the native drawer widens the window. */
+.workspace-bar { position: relative; z-index: 112; }
+.window-drawer-layer { padding-top: 44px; }
+.window-drawer-layer .detail-drawer .drawer-inner { padding-top: 0; }
+.node-chat-composer { flex: 0 0 auto; }
+
+.subgraph-ports { max-height: calc(100% - 32px); box-sizing: border-box; overflow: auto; padding: 20px 16px; font-weight: 400; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.subgraph-ports strong { display: block; margin-top: 8px; }

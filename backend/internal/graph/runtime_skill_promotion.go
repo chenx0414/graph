@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,9 +10,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"crypto/sha256"
 )
 
 var skillNamePattern = regexp.MustCompile(`(?m)^name:\s*(.*)$`)
+
 var skillDescriptionPattern = regexp.MustCompile(`(?m)^description:\s*(.*)$`)
 
 // PromotionResult is a copied skill declaration. Binding stays a user decision.

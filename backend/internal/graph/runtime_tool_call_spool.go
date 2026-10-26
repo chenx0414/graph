@@ -1,27 +1,14 @@
 package graph
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-)
 
-// Worker lanes run in a child process that holds no store, so their tool calls cannot be
-// written by the daemon's own seam. They are spooled to a file inside the state directory
-// the worker was already given, and folded into `tool_calls` on the next read.
-//
-// That directory is the lane's own instance directory: a lane receives its session directory as
-// `stateDir`, so its spool lands at `<stateDir>/instances/<instanceId>/tool-calls/`. The daemon's
-// own root is read as well, because a lane handed the root (a host-run check, a fixture) writes
-// there. Both places are the same convention seen from two ends; reading only the root reported
-// zero calls for every lane while the samples sat on disk.
-//
-// A file, not a new protocol: the worker already writes only inside that directory, and an
-// append cannot block the turn it observes. Losing a sample is acceptable; breaking a tool
-// call is not, so every write here swallows its own failure.
+	"encoding/json"
+)
 
 // TOOL_CALL_SPOOL_DIR is the directory a worker instance spools its calls into.
 const TOOL_CALL_SPOOL_DIR = "tool-calls"

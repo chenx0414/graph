@@ -13,11 +13,12 @@ import (
 
 // The kernel connects MCP servers itself.
 //
-// The Graph decides which servers a session may use and which secrets they
-// get; the kernel owns the connection, the tool list and the call. The model
-// reaches a server's tools under PiG's own naming, `mcp__<server>__<tool>`,
-// so no gateway tool and no extension stand between the model and the
-// server.
+// The model reaches a server's tools under PiG's own naming,
+// `mcp__<server>__<tool>`, so no gateway tool and no extension stand between
+// the model and the server.
+//
+// The daemon/kernel division of labour is documented in docs/architecture.md,
+// section daemon 与内核的分工.
 
 // McpServerSpec is one MCP server the kernel connects.
 type McpServerSpec struct {

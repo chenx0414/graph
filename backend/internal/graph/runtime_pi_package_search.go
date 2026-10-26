@@ -1,13 +1,14 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+
+	"encoding/json"
 )
 
 // PiPackageHit is one official Pi package from the npm keyword channel.

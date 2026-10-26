@@ -1,25 +1,16 @@
 package graph
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"context"
+
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
-
-// The PiG kernel is the Agent kernel of the daemon.
-//
-// The division of labour is the one the daemon already kept. The daemon owns
-// the model channel, the tool bodies, the admission gate, the budget and the
-// credential; the kernel owns the execution history: the transcript, the
-// admissions, the tool calls and their results.
-//
-// The MCP servers are connected by the kernel itself. The model reaches their
-// tools under PiG's own `mcp__<server>__<tool>` names, so no gateway tool and
-// no adapter extension stand between the model and the server.
 
 // The Agent kernel the daemon runs on.
 //
@@ -49,7 +40,16 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		return nil, err
 	}
 	tools = append(tools, extensions...)
-	session, err := openPigSession(context.Background(), transport.store.Path, request, pigProviderBridge(request), tools, request.OnEvent, nil)
+	session, err := openPigSession(context.Background(), transport.store.Path, request, pigProviderBridge(request.Stream, request.Model, func(kernelOptions map[string]any) map[string]any {
+		effective := map[string]any{}
+		for key, value := range pigProviderOptions(request) {
+			effective[key] = value
+		}
+		for key, value := range kernelOptions {
+			effective[key] = value
+		}
+		return effective
+	}), tools, request.OnEvent, nil)
 	if err != nil {
 		// The refusal a session gets when a bound Pi extension cannot be
 		// hosted for it is returned, not raised: the caller turns it into a
@@ -92,9 +92,18 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 // tools, MCP, instructions, and the daemon's model channel. The caller
 // supplies the tools and the channel. The credential stays in that channel.
 func openPigSession(ctx context.Context, database string, request AgentSessionRequest, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
+	tools, provider, err := pigDeferredToolSurface(request, tools, provider)
+	if err != nil {
+		return nil, err
+	}
 	options := pigkernel.SessionOptions{
-		Database:     database,
-		Identity:     request.Binding.InstanceId,
+		Database: database,
+		// The identity names the session's durable conversation and its tool
+		// registration. It is never empty: an empty identity would give every
+		// instance-less session the same conversation and the same registration
+		// name, so the last one to open would replace the tool bodies the
+		// earlier ones still point at.
+		Identity:     pigSessionIdentity(request),
 		Model:        pigModelSpec(request.Model),
 		Provider:     provider,
 		Tools:        tools,
@@ -103,9 +112,19 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 		RequestId:    request.InputRequestId,
 		OnEvent:      onEvent,
 		OnToolCall:   onToolCall,
+		ToolResults:  toolResultRenderer(request.Binding.InstanceId, request.StateDir),
 	}
 	if request.ThinkingLevel != nil {
 		options.ThinkingLevel = *request.ThinkingLevel
+	}
+	if request.Compaction != nil {
+		options.Compaction = &pigkernel.CompactionThresholds{
+			ReserveTokens:    request.Compaction.ReserveTokens,
+			KeepRecentTokens: request.Compaction.KeepRecentTokens,
+		}
+		if ceiling := compactionContextCeiling(); ceiling > 0 && ceiling < options.Compaction.KeepRecentTokens {
+			options.Compaction.KeepRecentTokens = max(1, ceiling/2)
+		}
 	}
 	return pigkernel.OpenSession(ctx, options)
 }
@@ -116,15 +135,24 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 // daemon's stream is the one that admits the send, spends the credential,
 // records the usage and refuses a request the budget does not allow, so the
 // kernel never opens a provider channel of its own.
-func pigProviderBridge(request AgentSessionRequest) pigkernel.ProviderBridge {
+//
+// options decides which provider options the turn runs with. Nil means the
+// kernel's own per-call options; a function means the caller replaces them.
+// The node lane replaces them - it runs the turn with the options it was
+// admitted with.
+func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[string]any) map[string]any) pigkernel.ProviderBridge {
 	return pigkernel.ProviderBridge{
-		Stream: func(_ context.Context, transcript []map[string]any, options map[string]any) (pigkernel.EventStream, error) {
+		Stream: func(_ context.Context, transcript []map[string]any, kernelOptions map[string]any) (pigkernel.EventStream, error) {
 			messages := make([]any, 0, len(transcript))
 			for _, message := range transcript {
 				messages = append(messages, message)
 			}
 			context := map[string]any{"messages": messages}
-			return request.Stream(request.Model, context, options)
+			effective := kernelOptions
+			if options != nil {
+				effective = options(kernelOptions)
+			}
+			return stream(model, context, effective)
 		},
 	}
 }
@@ -142,7 +170,27 @@ func pigToolSpecs(request AgentSessionRequest, codemode CodemodeSettings) []pigk
 			Name:        definition.Name,
 			Description: definition.Description,
 			Parameters:  asMap(definition.Parameters),
-			Result: func(ctx context.Context, args map[string]any) (any, error) {
+			Result: func(ctx context.Context, args map[string]any) (result any, err error) {
+				// A refusal is not a dead turn.
+				//
+				// Preparing the arguments happens outside the tool's own
+				// handler, so its refusal would otherwise escape the tool and
+				// take the turn with it. The node lane turns it into the
+				// tool error the model reads; the main session does the same.
+				defer func() {
+					recovered := recover()
+					if recovered == nil {
+						return
+					}
+					switch failure := recovered.(type) {
+					case *RuntimeError:
+						result, err = nil, failure
+					case error:
+						result, err = nil, failure
+					default:
+						err = errors.New(fmt.Sprint(recovered))
+					}
+				}()
 				prepared := any(args)
 				if definition.PrepareArguments != nil {
 					prepared = definition.PrepareArguments(prepared)
@@ -166,6 +214,18 @@ func pigToolSpecs(request AgentSessionRequest, codemode CodemodeSettings) []pigk
 		specs = append(specs, pigCodemodeSpec(request.Tools, request.Broker, codemode))
 	}
 	return specs
+}
+
+// pigProviderOptions are the provider options one session's channel carries.
+//
+// The thinking level belongs to the session: without it the channel would ask
+// the provider for no effort at all, and the strength the user chose would
+// never leave the process.
+func pigProviderOptions(request AgentSessionRequest) map[string]any {
+	if request.ThinkingLevel == nil || *request.ThinkingLevel == "" {
+		return nil
+	}
+	return map[string]any{"reasoning": *request.ThinkingLevel}
 }
 
 // pigCodemodeSpec is the codemode tool one session may call.

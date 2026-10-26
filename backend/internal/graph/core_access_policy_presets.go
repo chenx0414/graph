@@ -1,15 +1,21 @@
 package graph
 
-// Browser-safe policy definitions shared by configuration and the console.
-
 type AccessMode string
+
 type AccessRead string
+
 type AccessWrite string
+
 type AccessNetwork string
+
 type AccessCommands string
+
 type ExtensionRuntime string
+
 type UnixSocketAccess string
+
 type ProtectedStoreAccess string
+
 type GitMetadataAccess string
 
 type AccessAutoApprove struct {
