@@ -17,7 +17,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -166,7 +166,33 @@ function compare(previous, current) {
   return previous.verdict === 'pass' ? 'regressed' : 'improved';
 }
 
+/**
+ * How long a run's own temporary root may survive it.
+ *
+ * The root is removed in a `finally`, which is the right place - and it does
+ * not run when the process is killed. A killed run (a freeze that exceeded its
+ * ceiling, an interrupted evaluation) therefore leaves the whole harness home
+ * behind: measured 2.5 GB per attempt, seven of them after three attempts,
+ * which filled the disk to 98 % and made an unrelated browser test crash. The
+ * next run sweeps what earlier runs could not.
+ */
+const STALE_ROOT_MS = 6 * 60 * 60 * 1000;
+
+async function sweepStaleRoots() {
+  const base = tmpdir();
+  for (const name of await readdir(base).catch(() => [])) {
+    if (!/^graph-(harness-eval|real-eval)-/.test(name)) continue;
+    const path = join(base, name);
+    try {
+      const info = await stat(path);
+      if (!info.isDirectory() || Date.now() - info.mtimeMs < STALE_ROOT_MS) continue;
+      await rm(path, { recursive: true, force: true });
+    } catch { /* a live run owns it, or it is already gone */ }
+  }
+}
+
 async function main() {
+  await sweepStaleRoots();
   const options = parseArguments(process.argv.slice(2));
   const caseIds = options.cases.length ? options.cases : Object.keys(cases);
   const root = await mkdtemp(join(tmpdir(), 'graph-harness-eval-'));
