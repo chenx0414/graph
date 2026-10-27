@@ -58,6 +58,29 @@ func (app *GraphApp) serveOperations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.Operations(r.PathValue("taskId"), query))
 }
 
+// serveGraphCreate creates a graph from a definition on behalf of a conversation.
+//
+// It is the same door graph_create opens for an Agent, exposed to the console so
+// a caller can start a graph without spending a model turn: an isolated runner
+// that wants the work done by a worker, not planned by the main Agent, needs
+// exactly this. Ownership is not invented here: the graph belongs to the
+// conversation the caller names, as it would if that Agent had created it.
+func (app *GraphApp) serveGraphCreate(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	conversationId := appBodyString(body, "conversationId")
+	if conversationId == "" {
+		RaiseStatus(http.StatusBadRequest, "invalid_input", "The request must name the conversation that owns the graph")
+	}
+	payload := map[string]any{"definition": body["definition"]}
+	if value, ok := body["targetBranch"].(string); ok && value != "" {
+		payload["targetBranch"] = value
+	}
+	if value, ok := body["requestId"].(string); ok && value != "" {
+		payload["requestId"] = value
+	}
+	writeJSON(w, http.StatusOK, app.runtime.CreateGraph(conversationId, payload))
+}
+
 // serveGraphControl applies one graph control action.
 func (app *GraphApp) serveGraphControl(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)

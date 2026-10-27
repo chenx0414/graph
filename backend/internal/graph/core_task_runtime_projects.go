@@ -130,6 +130,26 @@ func (runtime *TaskRuntime) Talent(id string, version *int, allVersions bool) an
 }
 
 // ControlGraph applies one graph control action.
+// CreateGraph creates a graph on behalf of a conversation.
+//
+// The graph's owner is the conversation's own task, which is exactly what
+// happens when the main Agent calls graph_create: a console caller may start a
+// graph without a model turn, and the ownership it records is the same one an
+// Agent-created graph would record. An unknown conversation is refused rather
+// than attached to a guess.
+func (runtime *TaskRuntime) CreateGraph(conversationId string, input map[string]any) any {
+	runtime.ensureOpen()
+	owner := ConversationRowOf(runtime.store, conversationId).AnchorTaskId
+	if strings.TrimSpace(owner) == "" {
+		Raise("invalid_input", "A graph needs the conversation that owns it: "+conversationId)
+	}
+	result := runtime.graphManagement(owner).GraphCreate(input)
+	if runtime.autoWake {
+		runtime.execution.Kick()
+	}
+	return result
+}
+
 func (runtime *TaskRuntime) ControlGraph(taskId string, input GraphControlInput) any {
 	runtime.ensureOpen()
 	payload := map[string]any{"graphId": taskId, "action": input.Action}

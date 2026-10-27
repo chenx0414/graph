@@ -96,6 +96,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks/{taskId}/nodes/{nodeId}/run", app.serveNodeRun)
 	mux.HandleFunc("GET /api/tasks/{taskId}/nodes/{nodeId}/prompt", app.serveNodePrompt)
 	mux.HandleFunc("GET /api/tasks/{taskId}/operations", app.serveOperations)
+	mux.HandleFunc("POST /api/graphs", app.serveGraphCreate)
 	mux.HandleFunc("POST /api/tasks/{taskId}/graph/control", app.serveGraphControl)
 	mux.HandleFunc("GET /api/tasks/{taskId}/graph/modules/{moduleId}", app.serveGraphModule)
 	mux.HandleFunc("GET /api/tasks/{taskId}/graph/modules/{moduleId}/values", app.serveGraphModuleValues)
