@@ -155,6 +155,41 @@ func RecoveryFailure(record map[string]any) (string, bool) {
 	return reason, true
 }
 
+// WaitConversationIdle waits until the durable conversation of one identity
+// has no live turn of its own.
+//
+// A daemon that comes back finds the kernel still running the turn that was in
+// flight when it died. A new message admitted into that conversation would be
+// refused as busy, and opening the session would rewrite the frozen record of
+// the turn that is still running. The message therefore waits for the turn
+// that owns the conversation: the same serial rule the Graph applies to two
+// messages sent to one node. Waiting also resumes the kernel's scheduler, so
+// the recovered turn runs instead of staying parked.
+func WaitConversationIdle(ctx context.Context, database, identity string) error {
+	resident, err := openResident(ctx, database)
+	if err != nil {
+		return err
+	}
+	conversationId, err := conversationIdOf(ctx, resident.kernel, identity)
+	if err != nil {
+		return err
+	}
+	if conversationId == 0 {
+		return nil
+	}
+	conversation, err := resident.kernel.Harness().Conversation(ctx, durable.ConversationId(conversationId))
+	if err != nil {
+		return fmt.Errorf("pig kernel: the conversation %d is not readable: %w", conversationId, err)
+	}
+	if conversation == nil {
+		return nil
+	}
+	if err := conversation.WaitForIdle(ctx); err != nil {
+		return fmt.Errorf("pig kernel: the conversation %d did not become idle: %w", conversationId, err)
+	}
+	return nil
+}
+
 // FrozenExecutions reads every frozen execution of the database.
 //
 // The order is the conversation order, so a recovery walks the conversations

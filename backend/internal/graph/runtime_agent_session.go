@@ -78,6 +78,10 @@ type AgentSessionRequest struct {
 	CredentialReference        any
 	// Binding is the persisted identity of the session.
 	Binding AgentSessionBinding
+	// Recovering opens the session to resume the very turn it recovers.
+	// Such an open must not wait for that turn to become idle: it is the
+	// turn that is being resumed.
+	Recovering bool
 	// OnToolCall is the reporting sink for executed tool calls.
 	OnToolCall func(call PiAdapterToolCall)
 	// Workspace is the work copy the session runs in.

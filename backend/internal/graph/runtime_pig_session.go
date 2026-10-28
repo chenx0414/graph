@@ -59,6 +59,19 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		// silently recovers from.
 		return nil, err
 	}
+	// A message sent while the kernel still runs the turn a restart recovered
+	// belongs behind that turn. Submitting into the busy conversation would be
+	// refused with `Conversation ... is busy`, and freezing this execution
+	// would overwrite the record of the turn that is still running. The open
+	// therefore waits for the conversation to become idle first; the session is
+	// already open here so the recovered turn has the model and tools it needs
+	// to finish.
+	if !request.Recovering {
+		if err := pigkernel.WaitConversationIdle(context.Background(), transport.store.Path, pigSessionIdentity(request)); err != nil {
+			_ = session.Close()
+			return nil, err
+		}
+	}
 	// The execution is frozen before the turn starts. The record is what the
 	// recovery reads when the daemon dies mid-turn: which execution the
 	// kernel was running, the model it was admitted with and the input it was

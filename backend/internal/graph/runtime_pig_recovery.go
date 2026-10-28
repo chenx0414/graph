@@ -154,6 +154,9 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 	go func() {
 		defer catchPigRecoveryFailure("the interrupted turn could not be sent again")
 		transport := CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
+		// This open resumes the very turn it is recovering; waiting for that
+		// turn to become idle would wait for this prompt to run.
+		capture.request.Recovering = true
 		session, err := transport.Open(capture.request)
 		if err != nil {
 			reason := "the interrupted turn could not be opened: " + err.Error()
