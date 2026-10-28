@@ -24,6 +24,11 @@ type PiAdapterChannels struct {
 
 // PiAdapterSupervisor is the Graph management surface one Agent session may drive.
 type PiAdapterSupervisor struct {
+	ControlTask      func(input AgentToolsControlTask) any
+	ResumeWork       func(input WorkResumeInstruction) any
+	DelegateWork     func(input DelegateWorkInput) any
+	ProposeWorkGraph func(input WorkDraftToolInput) any
+	ReadWorkDraft    func(workID string, version int64) any
 	Propose          func(proposal NativeProposal, requestId string, newVersion bool) any
 	WithdrawDraft    func(input PiAdapterDraftAction) any
 	ConfirmDraft     func(input PiAdapterConfirmDraft) any
@@ -75,11 +80,12 @@ type PiAdapterBindProject struct {
 
 // PiAdapterResolveProblem answers one parked problem.
 type PiAdapterResolveProblem struct {
-	QuestionId string
-	Action     string
-	Response   *string
-	Proof      *string
-	RequestId  string
+	QuestionId       string
+	Action           string
+	Response         *string
+	Proof            *string
+	RequestId        string
+	ExpectedRevision *int64
 }
 
 // PiAdapterPeers is the peer delivery surface of one task.

@@ -69,7 +69,11 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		proposalHistory = append(proposalHistory, entry)
 	}
 	anchorQuestions := []map[string]any{}
-	for _, row := range kernelRows(runtime.store.Db, "SELECT id,node_id,operation_id,kind,status,data,answer,owner FROM questions WHERE task_id=? ORDER BY rowid", conversation.AnchorTaskId) {
+	questionRows := kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner FROM questions WHERE task_id=? AND (route_stage IS NULL OR route_stage!='user') ORDER BY rowid", conversation.AnchorTaskId)
+	if conversation.Role == ConversationGlobal {
+		questionRows = append(questionRows, kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner FROM questions WHERE route_stage='user' AND status='open' ORDER BY rowid")...)
+	}
+	for _, row := range questionRows {
 		var data any
 		if err := json.Unmarshal([]byte(kernelString(row["data"])), &data); err != nil {
 			panic(err)
@@ -89,7 +93,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 			"owner":       kernelString(row["owner"]),
 			"data":        data,
 			"answer":      answer,
-			"taskId":      conversation.AnchorTaskId,
+			"taskId":      kernelString(row["task_id"]),
 		})
 	}
 	tasks := []map[string]any{}
@@ -98,7 +102,12 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	taskBudget := int64(0)
 	taskUnlimited := false
 	unknownUsagePending := false
-	for _, row := range kernelRows(runtime.store.Db, "SELECT id,request,phase,paused,target_branch,accepted_proposal,integration_sha,(SELECT MIN(timestamp) FROM events WHERE task_id=tasks.id) AS createdAt FROM tasks WHERE conversation_id=? AND phase!='chatting' ORDER BY created_seq", conversationId) {
+	for _, row := range kernelRows(runtime.store.Db, `SELECT t.id,t.request,t.phase,t.paused,t.target_branch,t.accepted_proposal,t.integration_sha,
+ (SELECT MIN(timestamp) FROM events WHERE task_id=t.id) AS createdAt FROM tasks t
+ LEFT JOIN kernel_graph_owners g ON g.task_id=t.id LEFT JOIN tasks owner ON owner.id=g.owner_task_id
+ WHERE (COALESCE(owner.conversation_id,t.conversation_id)=? OR
+   (t.conversation_id=? AND EXISTS (SELECT 1 FROM conversations source WHERE source.id=? AND source.role='history')))
+ AND t.phase!='chatting' ORDER BY t.created_seq`, conversationId, conversationId, conversationId) {
 		taskId := kernelString(row["id"])
 		openQuestions := []map[string]any{}
 		internalProblems := 0
@@ -317,6 +326,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	}
 	view := map[string]any{
 		"id":                 conversation.Id,
+		"role":               conversation.Role,
 		"title":              conversation.Title,
 		"projectId":          conversation.ProjectId,
 		"projectRoot":        projectRoot,

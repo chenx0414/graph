@@ -22,62 +22,6 @@ import { cleanup, webDir, temp, git, gitProject, consoleServer, type ScriptedSte
 
 
 
-test('the shell groups conversations by project and keeps an unbound recent section', async () => {
-  const root = await temp('sidebar');
-  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
-  await createConversation(server, { text: '未绑定讨论', requestId: 'unbound' });
-  await createConversation(server, { projectId: 'alpha', text: '项目内讨论', requestId: 'bound' });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(server.url);
-  await page.getByTestId('new-conversation-input').waitFor();
-
-  const sidebar = page.getByTestId('conversation-list');
-  await expect.poll(() => sidebar.innerText()).toContain('未绑定讨论');
-  await expect.poll(() => sidebar.innerText()).toContain('项目内讨论');
-  for (const [heading, title] of [['项目', '项目内讨论'], ['最近', '未绑定讨论']] as const) {
-    const toggle = sidebar.getByRole('button', { name: heading, exact: true });
-    await toggle.click();
-    expect(await toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(await sidebar.getByText(title, { exact: true }).isVisible()).toBe(false);
-    await toggle.click();
-    expect(await sidebar.getByText(title, { exact: true }).isVisible()).toBe(true);
-  }
-  await page.getByTestId('new-conversation-input').focus();
-  await page.mouse.move(700, 500);
-  const add = page.getByTestId('new-conversation-recent');
-  // Starting a conversation stays discoverable without hover, including keyboard and touch.
-  await expect.poll(() => add.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
-  await add.focus();
-  expect(await add.evaluate(element => element === document.activeElement)).toBe(true);
-  // The labelled rail keeps explicit names for assistive use.
-  expect(await page.locator('a[href="#/inbox"]').getAttribute('aria-label')).toBe('问题');
-  expect(await page.locator('a[href="#/catalog"]').getAttribute('aria-label')).toBe('资源库');
-  expect(await page.locator('a[href="#/settings"]').getAttribute('aria-label')).toBe('设置');
-  expect(await page.locator('a').filter({ hasText: '概览' }).count()).toBe(0);
-  expect(await page.locator('a').filter({ hasText: '向导' }).count()).toBe(0);
-
-  await page.getByTestId('new-conversation-project-alpha').click();
-  await page.waitForFunction(() => location.hash.includes('project=alpha'));
-  await page.waitForFunction(() => (document.querySelector('[data-testid="new-conversation-project"]') as HTMLSelectElement | null)?.value === 'alpha');
-  expect(await page.getByTestId('new-conversation-project').evaluate((element: HTMLInputElement) => element.value)).toBe('alpha');
-
-  await page.getByTestId('sidebar-toggle').click();
-  await page.waitForFunction(() => document.querySelector('.sidebar')?.getAttribute('data-collapsed') === 'true');
-  expect(await sidebar.isHidden()).toBe(true);
-  await page.getByTestId('sidebar-toggle').click();
-  await sidebar.waitFor({ state: 'visible' });
-
-  // The new-chat page has nothing to detail, so the shell offers no drawer control for it:
-  // the right drawer belongs to the conversation, which carries its own entry.
-  expect(await page.getByTestId('workspace-drawer-toggle').count()).toBe(1);
-  expect(await page.locator('[data-testid="detail-drawer"]').count()).toBe(0);
-});
-
-
-
 test('conversations archive from the sidebar and restore from settings', async () => {
   const root = await temp('archive-ui');
   const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });

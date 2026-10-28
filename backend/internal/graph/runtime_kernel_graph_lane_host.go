@@ -83,6 +83,9 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		if row.ResubmitsUsed > 0 {
 			suffix = fmt.Sprintf(":resubmit:%d", row.ResubmitsUsed)
 		}
+		if answer := kernelRow(state.options.Kernel.Db, "SELECT question_id FROM node_questions WHERE execution_id=? AND state='answered' ORDER BY rowid DESC LIMIT 1", row.Id); answer != nil {
+			suffix += ":question:" + kernelString(answer["question_id"])
+		}
 		return fmt.Sprintf("%s:attempt:%d%s", row.Id, row.Attempt, suffix)
 	}
 	// The node's model channel: the controlled provider stream with the

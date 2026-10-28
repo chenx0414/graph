@@ -72,8 +72,13 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 	}
 	workspace := location.Workspace
 	access := state.nodeAccess(graphId, nodeId, revisionVersion)
+	conversation := SupervisorConversationForTask(state.options.Kernel.Store, graphId)
+	owner := ""
+	if conversation != nil {
+		owner = conversation.AnchorTaskId
+	}
 	configuration := CanonicalJSON(map[string]any{
-		"recipe": recipe, "prompts": prompts, "workspace": workspace, "access": access, "network": state.options.Network,
+		"recipe": recipe, "prompts": prompts, "workspace": workspace, "access": access, "network": state.options.Network, "supervisor": owner,
 	})
 	if hasCached && state.sessionRevisions.Get(key) == configuration {
 		return cached
@@ -105,6 +110,11 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		gate = &tool
 	}
 	bindings := &NodeSessionBindings{}
+	if conversation != nil && conversation.Role == ConversationProject {
+		bindings.AskSupervisor = func(question PiAdapterAskedQuestion) {
+			state.options.Kernel.RecordNodeQuestion(graphId, nodeId, question)
+		}
+	}
 	if retrieval != nil {
 		broker := retrieval
 		bindings.Fetch = func(url string, signal *AbortSignal) RetrievalResult {

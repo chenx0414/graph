@@ -6,7 +6,7 @@
 
 
 
-import { useCallback,useEffect,useState } from 'react';
+import { useCallback,useEffect,useRef,useState } from 'react';
 
 import { api } from './api.ts';
 
@@ -46,6 +46,8 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
   const [error, setError] = useState('');
   const [modelId, setModelId] = useState('');
   const [thinkingLevel, setThinkingLevel] = useState('low');
+  const [modelChosen, setModelChosen] = useState(false);
+  const pendingMessage = useRef<{ payload: string; requestId: string } | null>(null);
   const { data: agentContext } = useAsync(() => api<AgentContextView>('/api/agent-context'), []);
 
   useEffect(() => { setProjectId(initialProjectId); }, [initialProjectId]);
@@ -78,24 +80,46 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
     ));
     setBusy(true);
     setError('');
-    setText('');
+    const payload = JSON.stringify({
+      projectId,
+      text: outgoing.trim(),
+      attachments: attachmentPayload(attachments),
+    });
+    if (pendingMessage.current?.payload !== payload) {
+      pendingMessage.current = { payload, requestId: `message-${crypto.randomUUID()}` };
+    }
     try {
-      const created = await api<{ conversationId: string }>('/api/conversations', {
+      const target = projectId
+        ? `/api/projects/${encodeURIComponent(projectId)}/thread`
+        : '/api/orchestration/global';
+      const thread = await api<{ conversationId: string }>(target, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `open-${crypto.randomUUID()}` }),
+      });
+      if (modelChosen && modelId) {
+        await api(`/api/conversations/${thread.conversationId}/model`, {
+          method: 'POST',
+          body: JSON.stringify({ model: modelId, thinkingLevel, requestId: `model-${crypto.randomUUID()}` }),
+        });
+      }
+      await api(`/api/conversations/${thread.conversationId}/messages`, {
         method: 'POST',
         body: JSON.stringify({
-          ...(projectId ? { projectId } : {}),
-          ...(outgoing.trim() ? { text: outgoing.trim() } : {}),
+          text: outgoing.trim(),
           ...(attachments.length ? { attachments: attachmentPayload(attachments) } : {}),
-          ...(modelId ? { model: modelId } : {}),
-          ...(thinkingLevel ? { thinkingLevel } : {}),
-          requestId: `conv-${crypto.randomUUID()}`,
+          requestId: pendingMessage.current.requestId,
         }),
       });
+      pendingMessage.current = null;
+      setText('');
+      setAttachments([]);
       window.dispatchEvent(new Event('graph:conversations-changed'));
-      location.hash = `#/conversations/${created.conversationId}`;
+      location.hash = `#/conversations/${thread.conversationId}`;
     } catch (reason) {
-      setText(current => current || text);
-      setError(reason instanceof Error ? reason.message : String(reason));
+      const selectionRequired = reason instanceof Error && 'code' in reason && reason.code === 'thread_selection_required';
+      setError(selectionRequired
+        ? '这个项目已有历史对话，需要先选择一个作为项目主管对话。历史对话仍可从侧栏打开。'
+        : reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(false);
     }
@@ -105,7 +129,7 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
       <div className="new-chat-intro">
         <div className="new-chat-mark" aria-hidden="true" />
         <span className="new-chat-eyebrow">从一个目标，开始协作</span>
-        <h1>开始新对话</h1>
+        <h1>与主 Agent 对话</h1>
         <p>描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。</p>
       </div>
       <ChatComposer
@@ -123,6 +147,7 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
         onSlashModelSelect={(model, level) => {
           setModelId(model.id);
           setThinkingLevel(level);
+          setModelChosen(true);
         }}
         onSend={() => void start()}
         sendDisabled={busy || (!text.trim() && !attachments.length)}
@@ -139,7 +164,7 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
             onChange={event => setProjectId(event.target.value)}
             aria-label="对话项目"
           >
-            <option value="">先聊聊，暂不选项目</option>
+            <option value="">全局主 Agent</option>
             {(settings?.projects ?? []).map(project => <option key={project.id} value={project.id}>{project.id}</option>)}
           </select>
         )}
@@ -152,6 +177,7 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
           onSelect={(model, level) => {
             setModelId(model.id);
             setThinkingLevel(level);
+            setModelChosen(true);
           }}
         />
       </div>

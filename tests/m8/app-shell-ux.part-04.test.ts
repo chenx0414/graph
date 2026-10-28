@@ -283,61 +283,6 @@ test('the new-chat composer supports project mentions and attachments before sub
 
 
 
-test('the new-chat composer switches model and thinking before the conversation starts', async () => {
-  const root = await temp('new-chat-model');
-  const server = await consoleServer(root, { models: 2 });
-  const creates: { text?: string; model?: string; thinkingLevel?: string }[] = [];
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.route('**/api/settings', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      projects: [],
-      defaultModel: 'local',
-      models: [
-        { id: 'local', grade: 'high', credentialId: 'local', contextWindow: 32_000, reasoning: true, defaultThinkingLevel: 'low' },
-        { id: 'fast', grade: 'medium', credentialId: 'local', contextWindow: 16_000, reasoning: false },
-      ],
-      definitions: [],
-      capabilities: [],
-    }),
-  }));
-  await page.route('**/api/conversations', async route => {
-    if (route.request().method() !== 'POST') return route.continue();
-    creates.push(JSON.parse(route.request().postData() ?? '{}') as { text?: string; model?: string; thinkingLevel?: string });
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversationId: 'created' }) });
-  });
-
-  await page.goto(`${server.url}/#/`);
-  await page.getByTestId('new-conversation-input').waitFor();
-  const control = page.getByTestId('model-control');
-  await control.waitFor();
-  // The pre-creation composer shows the daemon default and its thinking level,
-  // written in the model's own vocabulary (no translation).
-  await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
-  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 low');
-  await control.click();
-  const fastOption = page.getByTestId('model-option-fast');
-  await fastOption.waitFor();
-  expect(await fastOption.innerText()).not.toContain('可思考');
-  expect(await fastOption.innerText()).not.toContain('标准');
-  await fastOption.click();
-  expect(await page.getByTestId('telemetry-model').innerText()).toContain('fast');
-  await page.keyboard.press('Escape');
-  await page.getByTestId('model-menu').waitFor({ state: 'detached' });
-  await page.getByTestId('new-conversation-input').fill('用选中的模型开始');
-  await page.getByTestId('new-conversation-start').click();
-
-  await expect.poll(() => creates.length).toBe(1);
-  // Thinking is always on: the level carried over from the default model is
-  // clamped into the target model's levels (the lowest real one here).
-  expect(creates[0]).toMatchObject({ text: '用选中的模型开始', model: 'fast', thinkingLevel: 'low' });
-}, 60_000);
-
-
-
 test('settings opens as a second page with its own navigation and return control', async () => {
   const root = await temp('settings-shell');
   const server = await consoleServer(root);

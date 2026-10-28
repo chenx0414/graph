@@ -151,5 +151,10 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	// driveable again; queued conversation messages stay pending until then.
 	// The same scan runs after a hot configuration apply.
 	runtime.RecoverMasters()
+	runtime.markInterruptedGraphPreparations()
+	if runtime.autoWake {
+		go runtime.recoverWorkGraphs()
+		go runtime.recoverTransferredGraphPreparations()
+	}
 	return runtime
 }

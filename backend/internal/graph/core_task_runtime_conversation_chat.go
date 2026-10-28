@@ -12,7 +12,7 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
 	if archived {
 		filter = "IS NOT NULL"
 	}
-	rows := kernelRows(runtime.store.Db, `SELECT c.id,c.title,c.project_id AS projectId,c.anchor_task_id AS anchorTaskId,c.created_at AS createdAt,
+	rows := kernelRows(runtime.store.Db, `SELECT c.id,c.role,c.title,c.project_id AS projectId,c.anchor_task_id AS anchorTaskId,c.created_at AS createdAt,
     c.archived_at AS archivedAt,
     (SELECT MAX(e.timestamp) FROM events e JOIN tasks t ON t.id=e.task_id WHERE t.conversation_id=c.id) AS updatedAt,
     (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user') AS openQuestions,
@@ -30,6 +30,7 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
 		}
 		out = append(out, map[string]any{
 			"id":            kernelString(row["id"]),
+			"role":          kernelString(row["role"]),
 			"title":         kernelString(row["title"]),
 			"projectId":     row["projectId"],
 			"anchorTaskId":  kernelString(row["anchorTaskId"]),
@@ -49,6 +50,9 @@ func (conversations *TaskRuntimeConversations) Archive(conversationId, requestId
 	runtime := conversations.runtime
 	runtime.ensureOpen()
 	conversation := ConversationRowOf(runtime.store, conversationId)
+	if conversation.Role == ConversationGlobal || conversation.Role == ConversationProject {
+		Raise("invalid_input", "A supervisor thread cannot be archived as a conversation")
+	}
 	result := runtime.store.Command("conversation:"+conversationId, requestId, map[string]any{"type": "archive"}, func() any {
 		now := NowMillis()
 		if conversation.ArchivedAt == nil {
@@ -113,6 +117,10 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 	result := runtime.store.Command("conversation:"+conversationId, input.RequestId, map[string]any{
 		"type": "chat", "text": input.Text, "attachments": attachments, "command": input.Command, "source": input.Source,
 	}, func() any {
+		conversation = ConversationRowOf(runtime.store, conversationId)
+		if conversation.Role == ConversationHistory {
+			Raise("invalid_input", "Historical conversations are read-only")
+		}
 		if strings.TrimSpace(input.Text) == "" && len(attachments) == 0 && input.Command == nil {
 			Raise("invalid_input", "A nonempty message, attachment or command is required")
 		}
@@ -188,6 +196,9 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 	runtime := conversations.runtime
 	runtime.ensureOpen()
 	conversation := ConversationRowOf(runtime.store, conversationId)
+	if conversation.Role == ConversationGlobal || conversation.Role == ConversationProject {
+		Raise("invalid_input", "A supervisor thread cannot change its project")
+	}
 	if kernelRow(runtime.store.Db, "SELECT id FROM projects WHERE id=?", projectId) == nil {
 		Raise("invalid_input", "A known project is required")
 	}

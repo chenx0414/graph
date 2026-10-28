@@ -89,8 +89,8 @@ type piAdapterTurnInput struct {
 	Spec                    NodeSpec
 	Conversation            *ConversationRow
 	Workspace               string
-	PermissionRequest       *CapabilityPermissionRequest
-	AskedQuestion           *PiAdapterAskedQuestion
+	PermissionRequest       **CapabilityPermissionRequest
+	AskedQuestion           **PiAdapterAskedQuestion
 	ReloadReceipt           *map[string]any
 	CapabilityOperation     CapabilityOperation
 	ContextAssembly         *AgentContextAssembly

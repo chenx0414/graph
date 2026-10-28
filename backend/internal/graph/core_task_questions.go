@@ -6,6 +6,18 @@ func (s *TaskStore) OpenQuestion(id, taskID, nodeID string, operationID any, kin
 		id, taskID, nodeID, operationID, kind, CanonicalJSON(data), string(owner))
 }
 
+func (s *TaskStore) RouteQuestion(id, stage string) {
+	kernelExec(s.DB, "UPDATE questions SET route_stage=?,route_revision=1 WHERE id=?", stage, id)
+}
+
+func (s *TaskStore) AdvanceQuestionRevision(id, stage string, revision int64) bool {
+	return kernelChanges(s.DB, "UPDATE questions SET route_revision=route_revision+1 WHERE id=? AND route_stage=? AND route_revision=? AND status='open'", id, stage, revision) == 1
+}
+
+func (s *TaskStore) SetQuestionHandler(id, stage string, owner QuestionOwner, data any) {
+	kernelExec(s.DB, "UPDATE questions SET route_stage=?,owner=?,data=?,route_revision=route_revision+1 WHERE id=? AND status='open'", stage, string(owner), CanonicalJSON(data), id)
+}
+
 // ResolveQuestion answers one question, whatever state it is in.
 func (s *TaskStore) ResolveQuestion(questionID string, answer any) {
 	kernelExec(s.DB, "UPDATE questions SET status='resolved',answer=? WHERE id=?", CanonicalJSON(answer), questionID)

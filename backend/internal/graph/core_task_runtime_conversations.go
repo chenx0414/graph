@@ -53,6 +53,9 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		projectId := input.ProjectId
 		workspaceProjectId := ""
 		if projectId != nil {
+			if kernelRow(runtime.store.Db, "SELECT id FROM conversations WHERE project_id=? AND role='project'", *projectId) != nil {
+				Raise("invalid_input", "This project already has a supervisor thread; open that thread instead")
+			}
 			if kernelRow(runtime.store.Db, "SELECT id FROM projects WHERE id=?", *projectId) == nil {
 				Raise("invalid_input", "A known project is required")
 			}

@@ -96,6 +96,12 @@ func (runtime *TaskRuntime) RecoverMasters() int {
 		for _, task := range pending {
 			phase := kernelString(task["phase"])
 			projectId := kernelString(task["project_id"])
+			if phase == "chatting" {
+				conversation := ConversationForTask(runtime.store, kernelString(task["id"]))
+				if conversation != nil && conversation.Role == ConversationHistory {
+					continue
+				}
+			}
 			// A task whose project was removed from the configuration keeps its
 			// history but is not brought back to life. Conversation workspaces
 			// are host-owned and stay addressable.

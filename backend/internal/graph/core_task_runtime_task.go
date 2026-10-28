@@ -247,6 +247,12 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": "answer", "taskId": task.taskId, "questionId": questionId, "answer": answer,
 	}, func() any {
+		if runtime.receiveRoutedUserAnswer(task.taskId, questionId, answer) {
+			return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, "question.answered", map[string]any{"questionId": questionId, "answer": answer})}
+		}
+		if kernelRow(runtime.store.Db, "SELECT id FROM questions WHERE id=? AND task_id=? AND route_stage IN ('project','global') AND status='open'", questionId, task.taskId) != nil {
+			Raise("permission", "This question is being handled by a supervisor")
+		}
 		// A task that could not start has no master node to re-pend: the answer
 		// is about the task itself, and it is settled before the runtime sees
 		// the question.
@@ -254,6 +260,9 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 		runtime.execution.Answer(task.taskId, questionId, answer)
 		return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, "question.answered", map[string]any{"questionId": questionId, "answer": answer})}
 	})
+	if runtime.autoWake {
+		runtime.execution.Kick()
+	}
 	return taskRuntimeReceipt(result)
 }
 

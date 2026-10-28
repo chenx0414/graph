@@ -165,18 +165,29 @@ func (supervisor *TaskRuntimeSupervisor) ListProblems() []map[string]any {
 	for _, id := range tasks {
 		params = append(params, id)
 	}
-	rows := kernelRows(runtime.store.Db, `SELECT q.id,q.task_id,q.node_id,q.kind,q.data,
+	scope := "(q.task_id IN (" + placeholders + ") AND q.route_stage IS NULL)"
+	if conversation.Role == ConversationProject && conversation.AnchorTaskId == supervisor.taskId {
+		scope = "(q.task_id IN (" + placeholders + ") AND (q.route_stage IS NULL OR q.route_stage='project'))"
+	}
+	if conversation.Role == ConversationGlobal && conversation.AnchorTaskId == supervisor.taskId {
+		scope += " OR q.route_stage='global'"
+	}
+	rows := kernelRows(runtime.store.Db, `SELECT q.id,q.task_id,q.node_id,q.kind,q.data,q.route_stage,q.route_revision,
       t.request,t.phase,n.status AS node_status,i.model
     FROM questions q JOIN tasks t ON t.id=q.task_id
     LEFT JOIN nodes n ON n.task_id=q.task_id AND n.id=q.node_id
     LEFT JOIN instances i ON i.id=n.instance_id
-    WHERE q.owner='main' AND q.status='open' AND q.task_id IN (`+placeholders+`)
+    WHERE q.owner='main' AND q.status='open' AND (`+scope+`)
     ORDER BY q.rowid`, params...)
 	out := []map[string]any{}
 	for _, row := range rows {
 		var data any
 		if err := json.Unmarshal([]byte(kernelString(row["data"])), &data); err != nil {
 			panic(err)
+		}
+		actions := ProblemActions(kernelString(row["kind"]))
+		if row["route_stage"] != nil && (kernelString(row["kind"]) == "waiting" || kernelString(row["kind"]) == "recovery") {
+			actions = append(actions, ProblemActionEscalate)
 		}
 		out = append(out, map[string]any{
 			"id":             kernelString(row["id"]),
@@ -189,7 +200,9 @@ func (supervisor *TaskRuntimeSupervisor) ListProblems() []map[string]any {
 			"taskPhase":      kernelString(row["phase"]),
 			"nodeStatus":     row["node_status"],
 			"model":          row["model"],
-			"allowedActions": ProblemActions(kernelString(row["kind"])),
+			"allowedActions": actions,
+			"routeStage":     row["route_stage"],
+			"revision":       kernelInt(row["route_revision"]),
 		})
 	}
 	return out
@@ -197,11 +210,12 @@ func (supervisor *TaskRuntimeSupervisor) ListProblems() []map[string]any {
 
 // TaskRuntimeResolveInput resolves one main-owned problem.
 type TaskRuntimeResolveInput struct {
-	QuestionId string
-	Action     string
-	Response   *string
-	Proof      *string
-	RequestId  string
+	QuestionId       string
+	Action           string
+	Response         *string
+	Proof            *string
+	RequestId        string
+	ExpectedRevision *int64
 }
 
 // ResolveProblem answers one main-owned problem.
@@ -214,24 +228,27 @@ func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolve
 	}
 	tasks := runtime.conversationTaskIds(conversation.Id)
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(tasks)), ",")
-	params := []any{}
+	params := []any{input.QuestionId}
 	for _, id := range tasks {
 		params = append(params, id)
 	}
-	params = append(params, input.QuestionId)
-	for _, id := range tasks {
-		params = append(params, id)
+	scope := "(task_id IN (" + placeholders + ") AND route_stage IS NULL)"
+	if conversation.Role == ConversationProject && conversation.AnchorTaskId == supervisor.taskId {
+		scope = "(task_id IN (" + placeholders + ") AND (route_stage IS NULL OR route_stage='project'))"
+	}
+	if conversation.Role == ConversationGlobal && conversation.AnchorTaskId == supervisor.taskId {
+		scope += " OR route_stage='global'"
 	}
 	receipt := runtime.store.Command("problems:"+supervisor.taskId, input.RequestId, input, func() any {
-		row := kernelRow(runtime.store.Db, `SELECT id,task_id,node_id,kind,data
-          FROM questions WHERE id=? AND owner='main' AND status='open' AND task_id IN (`+placeholders+`)`, params...)
+		row := kernelRow(runtime.store.Db, `SELECT id,task_id,node_id,kind,data,route_stage,route_revision
+          FROM questions WHERE id=? AND owner='main' AND status='open' AND (`+scope+`)`, params...)
 		if row == nil {
 			settledParams := []any{input.QuestionId}
 			for _, id := range tasks {
 				settledParams = append(settledParams, id)
 			}
 			settled := kernelRow(runtime.store.Db, `SELECT id,task_id,answer FROM questions
-          WHERE id=? AND owner='main' AND status='resolved' AND task_id IN (`+placeholders+`)`, settledParams...)
+          WHERE id=? AND owner='main' AND status='resolved' AND (`+scope+`)`, settledParams...)
 			if settled == nil {
 				Raise("not_found", "No open main-Agent problem with that id")
 			}
@@ -244,9 +261,21 @@ func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolve
 				"answer":          settled["answer"],
 			}
 		}
+		if row["route_stage"] != nil {
+			if input.ExpectedRevision == nil || *input.ExpectedRevision != kernelInt(row["route_revision"]) {
+				Raise("stale_question", "The question changed; read it again before resolving it")
+			}
+			returningToProject := kernelString(row["route_stage"]) == "global" && questionParseRecord(kernelString(row["data"]))["requestType"] == "node_decision"
+			if input.Action != "escalate" && !returningToProject && !runtime.store.AdvanceQuestionRevision(input.QuestionId, kernelString(row["route_stage"]), *input.ExpectedRevision) {
+				Raise("stale_question", "The question changed; read it again before resolving it")
+			}
+		}
 		allowed := []string{}
 		for _, action := range ProblemActions(kernelString(row["kind"])) {
 			allowed = append(allowed, string(action))
+		}
+		if row["route_stage"] != nil && (kernelString(row["kind"]) == "waiting" || kernelString(row["kind"]) == "recovery") {
+			allowed = append(allowed, "escalate")
 		}
 		if !containsString(allowed, input.Action) {
 			Raise("invalid_answer", "Problem "+kernelString(row["kind"])+" does not accept "+input.Action)
@@ -259,12 +288,23 @@ func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolve
 			if len([]rune(text)) > 4000 {
 				text = string([]rune(text)[:4000])
 			}
+			if row["route_stage"] != nil {
+				if kernelString(row["route_stage"]) == "project" {
+					runtime.escalateQuestionToGlobal(row, text)
+					return map[string]any{"questionId": input.QuestionId, "taskId": kernelString(row["task_id"]), "action": input.Action, "resolved": false, "routeStage": "global"}
+				}
+				runtime.escalateRoutedQuestion(row, text)
+				return map[string]any{"questionId": input.QuestionId, "taskId": kernelString(row["task_id"]), "action": input.Action, "resolved": false, "routeStage": "user"}
+			}
 			runtime.execution.Escalate(kernelString(row["task_id"]), kernelString(row["id"]), text)
 			return map[string]any{"questionId": kernelString(row["id"]), "taskId": kernelString(row["task_id"]), "action": input.Action, "resolved": true}
 		}
 		answer := Answer{}
 		switch input.Action {
 		case "retry":
+			if kernelString(row["kind"]) == "recovery" && row["route_stage"] != nil && (input.Proof == nil || strings.TrimSpace(*input.Proof) == "") {
+				Raise("invalid_answer", "Explain the inspection that makes retry safe")
+			}
 			answer = Answer{Type: "retry"}
 		case "acknowledge":
 			answer = Answer{Type: "acknowledge"}
@@ -287,7 +327,20 @@ func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolve
 			}
 			answer = Answer{Type: "reconcile_usage", Proof: text}
 		}
+		if kernelString(row["route_stage"]) == "global" && questionParseRecord(kernelString(row["data"]))["requestType"] == "node_decision" {
+			if input.Action != "respond" {
+				Raise("invalid_answer", "A node question requires a response or escalation")
+			}
+			runtime.returnNodeQuestionToProject(row, answer.Value.(string))
+			return map[string]any{"questionId": input.QuestionId, "taskId": kernelString(row["task_id"]), "action": input.Action, "resolved": false, "routeStage": "project"}
+		}
+		if kernelString(row["route_stage"]) == "project" && questionParseRecord(kernelString(row["data"]))["requestType"] == "node_decision" {
+			return runtime.answerProjectNodeQuestion(row, input.Action, answer)
+		}
 		runtime.execution.Answer(kernelString(row["task_id"]), kernelString(row["id"]), answer)
+		if kernelString(row["kind"]) == "recovery" && row["route_stage"] != nil && input.Proof != nil {
+			runtime.store.Event(kernelString(row["task_id"]), "problem.recovery_inspected", map[string]any{"questionId": input.QuestionId, "proof": strings.TrimSpace(*input.Proof)})
+		}
 		runtime.store.Event(kernelString(row["task_id"]), "problem.resolved", map[string]any{
 			"questionId": kernelString(row["id"]),
 			"nodeId":     kernelString(row["node_id"]),
@@ -376,75 +429,4 @@ func (supervisor *TaskRuntimeSupervisor) ReviewHumanCheck(input TaskRuntimeRevie
 		return map[string]any{}
 	}
 	return record
-}
-
-// ListProjects reads the projects of the runtime.
-func (supervisor *TaskRuntimeSupervisor) ListProjects() []map[string]any {
-	return supervisor.runtime.User().Projects()
-}
-
-// BindProject binds the conversation of the supervisor to a project.
-func (supervisor *TaskRuntimeSupervisor) BindProject(projectId, requestId string) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := ConversationForTask(runtime.store, supervisor.taskId)
-	if conversation == nil {
-		Raise("not_found", "This Main Agent is not attached to a conversation")
-	}
-	return runtime.Conversations().Bind(conversation.Id, projectId, requestId)
-}
-
-// ConfirmDraft confirms one draft on behalf of the user.
-func (supervisor *TaskRuntimeSupervisor) ConfirmDraft(input TaskRuntimeConfirmInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	if strings.TrimSpace(input.AttestationInstruction()) == "" {
-		Raise("invalid_input", "An instruction is required: record the words that authorised this confirmation")
-	}
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to confirm")
-	}
-	return runtime.Conversations().Confirm(*conversation, input)
-}
-
-// AttestationInstruction reads the recorded instruction of a confirmation.
-func (input TaskRuntimeConfirmInput) AttestationInstruction() string {
-	if input.Attestation == nil {
-		return ""
-	}
-	return input.Attestation.Instruction
-}
-
-// ArchiveDraft archives one draft of the conversation of the supervisor.
-func (supervisor *TaskRuntimeSupervisor) ArchiveDraft(input TaskRuntimeDraftInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to archive a draft in")
-	}
-	return runtime.Conversations().ArchiveDraft(*conversation, input)
-}
-
-// RestoreDraft restores one draft of the conversation of the supervisor.
-func (supervisor *TaskRuntimeSupervisor) RestoreDraft(input TaskRuntimeDraftInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to restore a draft in")
-	}
-	return runtime.Conversations().RestoreDraft(*conversation, input)
-}
-
-// DeleteDraft deletes one draft of the conversation of the supervisor.
-func (supervisor *TaskRuntimeSupervisor) DeleteDraft(input TaskRuntimeDraftInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to delete a draft from")
-	}
-	return runtime.Conversations().DeleteDraft(*conversation, input)
 }

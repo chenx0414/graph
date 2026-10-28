@@ -13,7 +13,7 @@ import { launchCli } from '../helpers/cli-daemon.ts';
  * repair without minting a second graph.
  *
  * Creating a graph on a branch that does not exist yet is not a lost
- * request: the graph is created, it waits, and the same request id picks up
+ * request: the graph is created, it waits, and an inspected retry prepares
  * that very graph once the branch is there. A request id that is reused for
  * different content is refused instead of quietly creating a second graph.
  *
@@ -148,8 +148,13 @@ test('a real Git preparation failure resumes the same creation request after rep
     const waiting = await request(`/api/tasks/${graphId}`);
     expect((waiting.body as { paused: boolean }).paused).toBe(true);
 
-    // The branch is there now, and the same request picks up that graph.
+    await expect.poll(() => master.results.get('create-repair'), { timeout: 60_000, interval: 250 }).toContain('blocked');
+    // The branch is there now. A checked retry prepares the same graph.
     await run('git', ['branch', 'main'], { cwd: project });
+    const retry = await request(`/api/tasks/${graphId}/graph/control`, {
+      method: 'POST', body: JSON.stringify({ action: 'retry_preparation', proof: 'The missing branch now exists and the failed Git process has exited.' }),
+    });
+    expect(retry.status, JSON.stringify(retry.body)).toBe(200);
     await expect.poll(() => /"replayed"\s*:\s*true/.test(master.results.get('create-repair') ?? ''), { timeout: 60_000, interval: 250 }).toBe(true);
     const repaired = JSON.parse(master.results.get('create-repair')!) as { graphId: string; replayed: boolean };
     expect(repaired).toMatchObject({ graphId, replayed: true });

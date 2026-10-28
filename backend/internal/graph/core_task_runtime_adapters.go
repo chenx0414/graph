@@ -126,7 +126,15 @@ func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 	channels := &PiAdapterChannels{
 		Supervisor: func(taskId string) PiAdapterSupervisor {
 			supervisor := runtime.Supervisor(taskId)
-			return PiAdapterSupervisor{
+			channel := PiAdapterSupervisor{
+				ControlTask: func(input AgentToolsControlTask) any {
+					var tokens *int64
+					if input.Tokens != nil {
+						value := int64(*input.Tokens)
+						tokens = &value
+					}
+					return supervisor.ControlTask(TaskRuntimeControlInput{Action: input.Action, TaskId: input.TaskId, NodeId: input.NodeId, Text: input.Text, Tokens: tokens, Reason: input.Reason, RequestId: input.RequestId, SourceMessageID: input.SourceMessageID, Instruction: input.Instruction})
+				},
 				Propose: func(proposal NativeProposal, requestId string, newVersion bool) any {
 					return supervisor.Propose(TaskRuntimeProposeInput{
 						ProposalVersion: proposal.RequirementVersion,
@@ -176,15 +184,32 @@ func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 				ListProblems:     func() any { return supervisor.ListProblems() },
 				ResolveProblem: func(input PiAdapterResolveProblem) any {
 					return supervisor.ResolveProblem(TaskRuntimeResolveInput{
-						QuestionId: input.QuestionId,
-						Action:     input.Action,
-						Response:   input.Response,
-						Proof:      input.Proof,
-						RequestId:  input.RequestId,
+						QuestionId:       input.QuestionId,
+						Action:           input.Action,
+						Response:         input.Response,
+						Proof:            input.Proof,
+						RequestId:        input.RequestId,
+						ExpectedRevision: input.ExpectedRevision,
 					})
 				},
-				GraphManagement: runtime.graphManagement(taskId),
+				GraphManagement: runtime.graphManagement(taskId, true),
 			}
+			conversation := ConversationForTask(runtime.store, taskId)
+			if conversation != nil && (conversation.Role == ConversationGlobal || conversation.Role == ConversationProject) && conversation.AnchorTaskId == taskId {
+				channel.ResumeWork = func(input WorkResumeInstruction) any {
+					input.CallerTaskID = taskId
+					return runtime.ResumeWorkBySupervisor(input)
+				}
+				channel.ReadWorkDraft = func(workID string, version int64) any { return runtime.ReadWorkDraft(taskId, workID, version) }
+			}
+			if conversation != nil && conversation.Role == ConversationProject && conversation.AnchorTaskId == taskId {
+				channel.ProposeWorkGraph = func(input WorkDraftToolInput) any { return runtime.ProposeWorkGraph(taskId, input) }
+			}
+			if conversation != nil && conversation.Role == ConversationGlobal && conversation.AnchorTaskId == taskId {
+				channel.DelegateWork = func(input DelegateWorkInput) any { return runtime.DelegateFromGlobal(taskId, input) }
+				channel.BindProject = nil
+			}
+			return channel
 		},
 		Catalog: runtime.catalog,
 		Peers: func(taskId string) PiAdapterPeers {

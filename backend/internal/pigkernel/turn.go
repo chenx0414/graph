@@ -337,10 +337,18 @@ func toolRegistrations(tools []ToolSpec, recorder *callRecorder, renderer ToolRe
 							IsError: boolPointer(true),
 						}, nil
 					}
+					terminate := false
+					if result, ok := value.(map[string]any); ok {
+						terminate, _ = result["terminate"].(bool)
+					}
 					if renderer != nil {
 						value = renderer(spec.Name, decoded, value)
 					}
-					return toolExecutionResult(value), nil
+					result := toolExecutionResult(value)
+					if terminate {
+						result.Control = &durable.ToolControl{Terminate: true}
+					}
+					return result, nil
 				}
 				text, err := spec.Execute(ctx, decoded)
 				if err != nil {

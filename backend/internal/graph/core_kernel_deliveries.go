@@ -28,6 +28,7 @@ func (k *KernelStore) DeliverDirect(taskID, endpoint string, value any) DirectDe
 		Raise("invalid_input", *defect)
 	}
 	return k.Store.Transaction(func() any {
+		requireProjectActive(k.Store, k.Store.Task(taskID).ProjectID)
 		id := graphUUID()
 		createdAt := NowMillis()
 		seqRow, _ := g5One(k.Db, "SELECT COALESCE(MAX(seq),0) AS s FROM kernel_deliveries WHERE task_id=?", taskID)

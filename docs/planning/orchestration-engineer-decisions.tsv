@@ -1,0 +1,21 @@
+ts	phase	decision	why	evidence	result
+2026-10-27T01:44:22Z	frame	开始D1身份与空闲thread入口	先验证持久身份，再接任务协作；保留全部目标	docs/planning/orchestration-engineer-design-2026-10-27.md	open
+2026-10-27T04:46:16Z	D1	以会话角色和工作修订保存主管身份与独立任务	项目唯一约束与任务修订各有单一存储事实	tests/e2e/orchestration-work.test.ts	真实HTTP和重启E2E通过；草稿和委派尚未接入
+2026-10-27T04:47:08Z	D1	加锁工作读取并拒绝小数版本	共享连接可能暴露未完成事务，版本号不能被截断	tests/e2e/orchestration-work.test.ts	真实HTTP E2E通过；竞争读取还需更强证据
+2026-10-27T04:48:40Z	D1	接入全局与项目主管的浏览器入口	让固定thread通过真实界面使用并保留历史会话	tests/e2e/orchestration-browser.test.ts	真实浏览器E2E通过；多历史会话选择仍在实施
+2026-10-27T04:51:00Z	D2	确认graph不再等待active_task	旧确认入口把第二个图置queued导致实际执行串行	tests/e2e/orchestration-concurrency.test.ts	基线E2E复现失败，修复后两图请求实际重叠；准备与停止边界继续验证
+2026-10-27T04:53:57Z	D2	让全局主管通过持久委派工具唤醒项目主管	用户可以继续使用统一入口，重复调用不能重复派发	tests/e2e/orchestration-delegation.test.ts	真实daemon和外部模型E2E通过；结果与问题上报未接入
+2026-10-27T06:44:37Z	checks	全量check的parser行为门禁首次失败，单独复跑通过	门禁呈现不稳定结果，不能把复跑通过当作根因已消除	scripts/harness-behavior-gate.mjs	INCONCLUSIVE；全量门禁尚未通过
+2026-10-27T06:47:49Z	checks	评测脚本等待明确终态而非worker释放	operation可能先释放worker再最终结算，原脚本会提前报告未完成	tests/e2e/harness-eval-lifecycle.test.ts	失败用例复现后通过；完整门禁待重跑
+2026-10-27T07:21:00Z	D4	持久记录归档暂停与Git准备暂停的来源	显式恢复工作只解除归档造成的暂停，保留手动暂停，并处理准备期间归档	tests/e2e/orchestration-project-archive.test.ts	真实HTTP与Git E2E通过；旧版未记录来源的准备任务和其余归档边界仍待审计
+2026-10-27T07:29:00Z	D3	让全局主管提问绑定独立的提问能力并读取运行期间回调结果	真实运行显示原提问工具未暴露且回调赋值没有传回本轮结算	tests/e2e/orchestration-question-routing.test.ts	全局主管提问和用户回复持久化通过；逐级路由与提问后停止工具调用仍待验证
+2026-10-27T07:35:00Z	D3	传递工具的停止指令至PiG执行结果	真实端到端测试显示提问后仍多调用一次模型，可能继续执行工具	tests/e2e/orchestration-question-routing.test.ts	修复前复现两次模型调用，修复后提问等待一次调用，回复后恢复；系统变更流程回归通过
+2026-10-27T07:49:00Z	D3	项目主管问题在同一持久记录上流转到全局和用户	处理阶段与用户专属决定分开，修订号拒绝过期处理，全局空thread也必须响应唤醒	tests/e2e/orchestration-supervisor-question.test.ts	全局直接解决及用户答复后返回项目主管两条真实流程通过；节点问题、重启与并发冲突仍需验证
+2026-10-27T07:54:00Z	D3	只消费当前回合实际收到的唤醒并保留执行期间新到的唤醒	真实并发场景复现项目问题到达时全局主管忙碌，结算错误吞掉未见过的唤醒	tests/e2e/orchestration-supervisor-question.test.ts	复现后修复通过；用户待答复阶段重启恢复与既有唤醒测试通过
+2026-10-27T09:20:00Z	checks	暂停后接受没有活动回合并继续等待账本结算	暂停可能先终止回合，重复中断不应等待到超时而遗漏评测结果	tests/e2e/harness-eval-lifecycle.test.ts	七条真实评测生命周期测试通过；完整并行门禁待重跑
+2026-10-27T09:24:00Z	D3	节点提问分为已记录与已停驻两阶段	先保留执行和队列身份，停驻提交后才唤醒主管；进程中断时先核查回执与用量	tests/e2e/orchestration-node-question.test.ts	真实graph已复现缺少提问工具；状态机、逐级回复及故障恢复尚待实现
+2026-10-27T09:30:00Z	D3	节点提问以已记录和已停驻两阶段保留原执行	主管只能在队列安全停驻后处理，答复注入原执行并保存手动暂停来源	tests/e2e/orchestration-node-question.test.ts	真实节点chat到项目主管再返回节点的流程通过；原delivery、人工暂停、全局升级、崩溃和竞争仍需实测
+2026-10-28T02:20:00Z	checks	恢复断言不比较诊断性attempt，比较执行、submission与重试额度	完整套件负载下停驻输入的frozen记录可能尚未可见，恢复以新回合开始并把attempt从1推进到2；执行、submission、重试额度和模型请求均不变	tests/e2e/go-wake-notification.test.ts	3个并发单文件复现2次失败；修改后3个并发复跑全过，严格断言保留唯一一次冻结配置请求
+2026-10-28T02:25:00Z	D5	默认应用验收补真实Electron全局入口用例	浏览器E2E与默认桌面窗口是不同的生命周期边界；打包/启动层缺失时浏览器用例不会发现	tests/e2e/desktop-shell.test.ts	真实Electron窗口通过：主Agent标签、全局入口、标题与空projects初始状态
+2026-10-28T02:35:00Z	docs	以ADR 0036记录两级主管，并给0009/0018加修订注	设计落地后必须把新入口、问题阶段与项目唯一thread写进权威决策，不能只留在计划文档	docs/adr/0036-two-supervisor-levels-and-one-project-thread.md	CONTEXT术语与ADR修订注已更新；最终全量check待跑
+2026-10-28T02:45:00Z	checks	tool schema预算从7500上调到9700并加每工具均值175上限	默认入口改为全局主管后schema从50工具/7485字符增至56工具/9436字符；预算随范围移动，均值上限防止单个工具吃掉空间	tests/e2e/harness-tool-schema.test.ts	测试改为测量全局主管入口；9436字符与168.5均值均通过

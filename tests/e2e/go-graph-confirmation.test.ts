@@ -11,6 +11,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { expect, test } from 'vitest';
 
@@ -151,13 +152,16 @@ test('a confirmed draft becomes a graph that runs, and confirming it twice does 
     expect(edge.deliveries).toMatchObject([{ value: { n: 42 } }]);
 
     // Confirming the same draft again does not wake the master again.
-    const turns = master.turns();
-    await request(`/api/conversations/${conversationId}/confirm`, {
+    const replay = await request(`/api/conversations/${conversationId}/confirm`, {
       method: 'POST',
       body: JSON.stringify({ proposalVersion: receipt.proposalVersion, draftRevision: receipt.draftRevision, targetBranch: 'main', requestId: 'confirm' }),
     });
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    expect(master.turns()).toBe(turns);
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200);
+    expect(replay.body).toMatchObject({ taskId });
+    const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true });
+    const wakes = db.prepare("SELECT COUNT(*) AS count FROM events WHERE type='wake.ready' AND json_extract(data,'$.kind')='graph_ready' AND json_extract(data,'$.dedupeKey')=?").get(`${taskId}:ready`);
+    db.close();
+    expect(wakes).toMatchObject({ count: 1 });
   } finally {
     await daemon?.close(); await master.close(); await node.close();
     await rm(root, { recursive: true, force: true });

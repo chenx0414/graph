@@ -16,7 +16,10 @@ func (k *KernelStore) Enqueue(taskID string, input QueueInsert) QueueRow {
 	if k.Store.IsTransaction() {
 		return k.EnqueueInCurrentTransaction(taskID, input)
 	}
-	return k.Store.Transaction(func() any { return k.EnqueueInCurrentTransaction(taskID, input) }).(QueueRow)
+	return k.Store.Transaction(func() any {
+		requireProjectActive(k.Store, k.Store.Task(taskID).ProjectID)
+		return k.EnqueueInCurrentTransaction(taskID, input)
+	}).(QueueRow)
 }
 
 func (k *KernelStore) historyWindow(query HistoryQuery) (int, int) {

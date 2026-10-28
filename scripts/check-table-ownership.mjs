@@ -49,13 +49,20 @@ const EXEMPT = 'graph:table-writes-exempt:';
 const OWNED = new Map([
   // The task store owns the v1 tables.
   ['tasks', 'core_task_lifecycle.go'],
+  ['project_archive_pauses', 'core_task_lifecycle.go'],
+  ['graph_preparation_pauses', 'core_task_lifecycle.go'],
   ['questions', 'core_task_questions.go'],
+  ['node_questions', 'core_node_questions.go'],
   ['invocations', 'core_task_invocations.go'],
   ['nodes', 'core_task_nodes.go'],
   ['activations', 'core_task_activations.go'],
   ['instances', 'core_task_instances.go'],
   ['operations', 'core_task_operations.go'],
   ['conversations', 'core_task_conversations.go'],
+  ['work_requests', 'core_task_work_requests.go'],
+  ['work_request_revisions', 'core_task_work_requests.go'],
+  ['work_graphs', 'core_task_work_graphs.go'],
+  ['work_drafts', 'core_task_work_drafts.go'],
   ['proposals', 'core_task_proposals.go'],
   ['messages', 'core_task_messages.go'],
   // A module may own a table of its own. These were already written by one

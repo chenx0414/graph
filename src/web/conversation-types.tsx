@@ -128,6 +128,7 @@ export function residentFlag(id: string): 'true' | undefined {
 export type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; owner?: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string };
 
 export type ConversationView = {
+  role?: 'global' | 'project' | 'history' | 'legacy';
   eventCursor?: number;
   continuations?: { operationId: string; resumedOperationId: string | null }[];
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;

@@ -9,45 +9,8 @@ import (
 // agentToolsConversationHandlers are the handlers of the Conversation tools.
 func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
-		"ask_user": func(id string, params map[string]any) any {
-			prompt := strings.TrimSpace(agentToolsStringOrEmpty(params["prompt"]))
-			why := strings.TrimSpace(agentToolsStringOrEmpty(params["why"]))
-			if prompt == "" {
-				panic(errors.New("A question is required"))
-			}
-			if why == "" {
-				panic(errors.New("Say what would change with the answer: a question nobody can act on is not worth the user turn"))
-			}
-			if input.OnAskUser == nil {
-				panic(errors.New("This Agent session cannot ask the user"))
-			}
-			options := []string{}
-			if raw, ok := params["options"].([]any); ok {
-				for _, item := range raw {
-					value := strings.TrimSpace(agentToolsString(item))
-					if value == "" {
-						continue
-					}
-					if len(value) > 300 {
-						value = value[:300]
-					}
-					if !agentToolsContains(options, value) {
-						options = append(options, value)
-					}
-				}
-				if len(options) > 8 {
-					options = options[:8]
-				}
-			}
-			input.OnAskUser(PiAdapterAskedQuestion{
-				Prompt: agentToolsTruncate(prompt, 2_000), Why: agentToolsTruncate(why, 1_000),
-				Options: options, Multiple: params["multiple"] == true,
-			})
-			// The turn stops here on purpose: the answer is the next turn's input.
-			result := agentToolsText(stringifyJSON(map[string]any{"status": "asked", "prompt": prompt}))
-			result["terminate"] = true
-			return result
-		},
+		"ask_user":       func(id string, params map[string]any) any { return agentToolsAsk(input.OnAskUser, params) },
+		"ask_supervisor": func(id string, params map[string]any) any { return agentToolsAsk(input.OnAskSupervisor, params) },
 		"conversation_read": func(id string, params map[string]any) any {
 			if input.Conversations.List == nil {
 				panic(errors.New("This Agent session cannot reach other conversations"))
@@ -134,7 +97,7 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 		"control_task": func(id string, params map[string]any) any {
 			action := strings.TrimSpace(agentToolsStringOrEmpty(params["action"]))
 			if !agentToolsContains(agentToolsControlActions, action) {
-				panic(errors.New("Unsupported control action: use pause, resume, abandon, set_budget or steer"))
+				panic(errors.New("Unsupported control action: use pause, resume, abandon, set_budget, steer or stop_node"))
 			}
 			if input.ControlTask == nil {
 				panic(errors.New("This Agent session cannot control tasks"))
@@ -144,6 +107,8 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 				panic(errors.New("A bounded requestId is required"))
 			}
 			control := AgentToolsControlTask{Action: action, RequestId: requestID}
+			control.SourceMessageID = agentToolsStringOrEmpty(params["sourceMessageId"])
+			control.Instruction = agentToolsStringOrEmpty(params["instruction"])
 			if raw, ok := params["taskId"].(string); ok && strings.TrimSpace(raw) != "" {
 				value := strings.TrimSpace(raw)
 				control.TaskId = &value
@@ -177,4 +142,48 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 			return result
 		},
 	}
+}
+
+func agentToolsAsk(ask func(PiAdapterAskedQuestion), params map[string]any) any {
+	prompt := strings.TrimSpace(agentToolsStringOrEmpty(params["prompt"]))
+	why := strings.TrimSpace(agentToolsStringOrEmpty(params["why"]))
+	if prompt == "" {
+		panic(errors.New("A question is required"))
+	}
+	if why == "" {
+		panic(errors.New("Say what would change with the answer: a question nobody can act on is not worth the user turn"))
+	}
+	if ask == nil {
+		panic(errors.New("This Agent session cannot ask the user"))
+	}
+	requestID := strings.TrimSpace(agentToolsStringOrEmpty(params["requestId"]))
+	if requestID == "" || len(requestID) > 200 {
+		panic(errors.New("A bounded requestId is required"))
+	}
+	options := []string{}
+	if raw, ok := params["options"].([]any); ok {
+		for _, item := range raw {
+			value := strings.TrimSpace(agentToolsString(item))
+			if value == "" {
+				continue
+			}
+			if len(value) > 300 {
+				value = value[:300]
+			}
+			if !agentToolsContains(options, value) {
+				options = append(options, value)
+			}
+		}
+		if len(options) > 8 {
+			options = options[:8]
+		}
+	}
+	ask(PiAdapterAskedQuestion{
+		Prompt: agentToolsTruncate(prompt, 2_000), Why: agentToolsTruncate(why, 1_000),
+		Options: options, Multiple: params["multiple"] == true, RequestID: requestID,
+	})
+	// The turn stops here on purpose: the answer is the next turn's input.
+	result := agentToolsText(stringifyJSON(map[string]any{"status": "asked", "prompt": prompt}))
+	result["terminate"] = true
+	return result
 }

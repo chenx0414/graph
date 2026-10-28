@@ -80,6 +80,12 @@ func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *Tu
 	if turn.Error != nil {
 		return TurnReport{Done: false, Error: turn.Error, Usage: usage}
 	}
+	if turn.Interrupted {
+		return TurnReport{Interrupted: true, Usage: usage}
+	}
+	if driver.options.Kernel.HasRecordedNodeQuestion(executionId) {
+		return TurnReport{QuestionPending: true, Usage: usage}
+	}
 
 	// The node's submit runs against the kernel; a refusal is reported, not swallowed.
 	var gap *TurnInjection
@@ -155,6 +161,11 @@ func (driver *NodeTurnDriver) requiredOutputs(executionId string) []string {
 // promptFor is the prompt for this attempt: an injected gap, a continuation, or
 // the full briefing.
 func (driver *NodeTurnDriver) promptFor(executionId string, attempt int, injection *TurnInjection, input *QueueRow) string {
+	answers := kernelRows(driver.options.Kernel.Db, `SELECT q.id,q.answer FROM node_questions n JOIN questions q ON q.id=n.question_id
+ WHERE n.execution_id=? AND n.state='answered' AND q.status='resolved' ORDER BY n.rowid`, executionId)
+	if len(answers) > 0 && injection == nil {
+		return "The project supervisor answered your question. Continue the same work and submit the required outputs. Recorded answers: " + CanonicalJSON(answers)
+	}
 	if injection != nil && len(injection.Missing) > 0 {
 		parts := []string{
 			"Your previous submission was refused: the required output(s) " + strings.Join(injection.Missing, ", ") + " were not enabled.",
@@ -175,15 +186,6 @@ func (driver *NodeTurnDriver) promptFor(executionId string, attempt int, injecti
 		parts = append(parts, "", driver.options.TurnText(nil))
 	}
 	return strings.Join(parts, "\n")
-}
-
-// nodeTurnOutputShape is the exact output shape a refused submission must use.
-func nodeTurnOutputShape(missing []string) string {
-	parts := make([]string, 0, len(missing))
-	for _, name := range missing {
-		parts = append(parts, `"`+name+`":{"enable":true,"value":<value>}`)
-	}
-	return strings.Join(parts, ",")
 }
 
 // firstTurnPrompt is the full first-turn briefing of one execution.

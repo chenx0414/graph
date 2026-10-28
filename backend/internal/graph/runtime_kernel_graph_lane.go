@@ -207,6 +207,28 @@ func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForCo
 func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	state := newKernelGraphLaneState(options)
 	lane := NewGraphLane(state.laneOptions())
+	lane.options.StopNode = func(graphID, nodeID, executionID string, attempt int) error {
+		execution := state.options.Kernel.RunningExecution(graphID, nodeID)
+		if execution == nil || execution.Id != executionID || execution.Attempt != attempt {
+			return fmt.Errorf("The node execution has changed")
+		}
+		host, ok := state.hosts.Lookup(graphID + "/" + nodeID)
+		if !ok {
+			return fmt.Errorf("The node is not running")
+		}
+		return host.StopActive()
+	}
+	lane.options.Steer = func(graphID, nodeID, executionID, text, requestID string) error {
+		execution := state.options.Kernel.RunningExecution(graphID, nodeID)
+		if execution == nil || execution.Id != executionID {
+			return fmt.Errorf("The node execution has changed")
+		}
+		host, ok := state.hosts.Lookup(graphID + "/" + nodeID)
+		if !ok {
+			return fmt.Errorf("The node is not accepting steering messages")
+		}
+		return host.Steer(text, requestID)
+	}
 	if state.options.TokenBudget != nil && state.options.ReserveTokens != nil {
 		lane.options.TokenBudget = state.options.TokenBudget
 		lane.options.ReserveTokens = state.options.ReserveTokens

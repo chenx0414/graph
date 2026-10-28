@@ -32,7 +32,9 @@ func WakeMaster(store *TaskStore, intent WakeIntent) bool {
 	apply := func() any {
 		row, ok := sqliteOne(store.DB, `SELECT c.id AS conversation_id,c.anchor_task_id,c.archived_at,m.id AS master_id
       FROM tasks t
-      JOIN conversations c ON c.id=t.conversation_id
+      LEFT JOIN kernel_graph_owners g ON g.task_id=t.id
+      LEFT JOIN tasks owner ON owner.id=g.owner_task_id
+      JOIN conversations c ON c.id=COALESCE(owner.conversation_id,t.conversation_id)
       JOIN nodes m ON m.task_id=c.anchor_task_id AND json_extract(m.spec,'$.role')='master'
       JOIN tasks a ON a.id=c.anchor_task_id
       WHERE t.id=?`, intent.TaskID)
@@ -124,6 +126,52 @@ func WakeForWaiting(store *TaskStore, taskID string, data any) bool {
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "waiting", DedupeKey: mapString(asMap(data), "questionId", "QuestionID"), Data: data, HasData: true})
 }
 
+// TransferLegacyGraphWakes moves unconsumed graph notifications to the new supervisor.
+func TransferLegacyGraphWakes(store *TaskStore, oldAnchor, newAnchor, sourceConversation string, messages map[string]string) {
+	rows := kernelRows(store.Db, "SELECT id,kind,dedupe_key,data FROM wake_intents WHERE task_id=? AND state IN ('waiting','ready') ORDER BY id", oldAnchor)
+	for _, row := range rows {
+		var data map[string]any
+		if row["data"] != nil {
+			data = asMap(parseJSON(kernelString(row["data"])))
+		}
+		graphID := mapString(data, "graphId", "taskId")
+		if graphID == "" {
+			if questionID := mapString(data, "questionId"); questionID != "" {
+				question := kernelRow(store.Db, "SELECT task_id FROM questions WHERE id=?", questionID)
+				if question != nil {
+					graphID = kernelString(question["task_id"])
+				}
+			}
+		}
+		if graphID == "" || kernelRow(store.Db, "SELECT id FROM tasks WHERE id=? AND conversation_id=? AND phase!='chatting'", graphID, sourceConversation) == nil {
+			Raise("migration_in_progress", "A pending notification cannot yet be transferred safely")
+		}
+		kernel := NewKernelStore(store)
+		if kernel.LatestRevision(graphID) == nil {
+			Raise("migration_in_progress", "A notification for legacy work needs review before transfer")
+		}
+		owner, hasOwner := kernel.GraphOwner(graphID)
+		if !hasOwner || owner == oldAnchor {
+			kernel.TransferGraphOwner(graphID, newAnchor)
+			store.Event(graphID, "graph.supervisor_transferred", map[string]any{"fromConversationId": sourceConversation, "ownerTaskId": newAnchor})
+		} else if owner != newAnchor {
+			Raise("migration_in_progress", "A pending notification belongs to another supervisor")
+		}
+		dedupe := kernelString(row["dedupe_key"])
+		if kernelString(row["kind"]) == "peer_message" {
+			oldMessage := mapString(data, "messageId")
+			if replacement := messages[oldMessage]; replacement != "" {
+				data["messageId"] = replacement
+				dedupe = replacement
+			} else {
+				Raise("migration_in_progress", "A pending peer notification has no transferable message")
+			}
+		}
+		WakeMaster(store, WakeIntent{TaskID: newAnchor, Kind: WakeKind(kernelString(row["kind"])), DedupeKey: dedupe, Data: data, HasData: row["data"] != nil})
+		kernelExec(store.Db, "UPDATE wake_intents SET state='consumed' WHERE id=? AND state IN ('waiting','ready')", row["id"])
+	}
+}
+
 func sliceLike(v any) bool {
 	if v == nil {
 		return false
@@ -150,9 +198,9 @@ func PendingWakes(store *TaskStore, taskID, nodeID string) []PendingWake {
 	return out
 }
 
-func ConsumeWakes(store *TaskStore, taskID, nodeID, operationID string) int64 {
-	return sqliteChanges(store.DB, "UPDATE wake_intents SET state='consumed',consumed_operation_id=? WHERE task_id=? AND node_id=? AND state='ready'",
-		operationID, taskID, nodeID)
+func ConsumeWake(store *TaskStore, taskID, nodeID, operationID, kind, dedupeKey string) int64 {
+	return sqliteChanges(store.DB, "UPDATE wake_intents SET state='consumed',consumed_operation_id=? WHERE task_id=? AND node_id=? AND kind=? AND dedupe_key=? AND state='ready'",
+		operationID, taskID, nodeID, kind, dedupeKey)
 }
 
 func ReleaseWakes(store *TaskStore, operationID string) int64 {
@@ -170,6 +218,12 @@ func RenderWakes(wakes []PendingWake) string {
 			}
 		}
 		switch wake.Kind {
+		case "node_question":
+			lines = append(lines, "- Node "+jsString(data["nodeId"])+" in graph "+jsString(data["graphId"])+" asked question "+jsString(data["questionId"])+". Use list_problems to inspect it and resolve it if you can.")
+		case "supervisor_question":
+			lines = append(lines, "- A project supervisor needs your help with question "+jsString(data["questionId"])+" at revision "+jsString(data["revision"])+". Use list_problems to inspect it, resolve what you can, and only ask the user if necessary.")
+		case "work_draft_ready":
+			lines = append(lines, "- Project supervisor saved graph draft "+jsString(data["version"])+" for work "+jsString(data["workId"])+" (work revision "+jsString(data["workRevision"])+", draft revision "+jsString(data["draftRevision"])+"). Use read_work_draft to inspect it and report to the user.")
 		case "task_completed":
 			graphID := jsString(coalesce(data["graphId"], wake.DedupeKey))
 			phase := jsString(coalesce(data["phase"], "completed"))

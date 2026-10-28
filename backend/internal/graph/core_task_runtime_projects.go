@@ -152,7 +152,22 @@ func (runtime *TaskRuntime) CreateGraph(conversationId string, input map[string]
 
 func (runtime *TaskRuntime) ControlGraph(taskId string, input GraphControlInput) any {
 	runtime.ensureOpen()
+	if input.Action == "stop_node" || input.Action == "steer_node" {
+		if input.NodeId == nil || strings.TrimSpace(*input.NodeId) == "" || input.RequestID == "" || len(input.RequestID) > 200 {
+			Raise("invalid_input", "A node and bounded requestId are required")
+		}
+		if input.Action == "stop_node" {
+			return runtime.stopGraphNode("user:"+taskId, taskId, strings.TrimSpace(*input.NodeId), input.RequestID)
+		}
+		if strings.TrimSpace(input.Text) == "" {
+			Raise("invalid_input", "A nonempty steering message is required")
+		}
+		return runtime.steerGraphNode("user:"+taskId, taskId, strings.TrimSpace(*input.NodeId), strings.TrimSpace(input.Text), input.RequestID)
+	}
 	payload := map[string]any{"graphId": taskId, "action": input.Action}
+	if input.Proof != "" {
+		payload["proof"] = input.Proof
+	}
 	if input.NodeId != nil {
 		payload["nodeId"] = *input.NodeId
 	}
@@ -161,6 +176,15 @@ func (runtime *TaskRuntime) ControlGraph(taskId string, input GraphControlInput)
 	}
 	if input.Seq != nil {
 		payload["seq"] = *input.Seq
+	}
+	if input.OperationId != nil {
+		payload["operationId"] = *input.OperationId
+	}
+	if input.CallId != nil {
+		payload["callId"] = *input.CallId
+	}
+	if input.Usage != nil {
+		payload["usage"] = map[string]any{"input": input.Usage.Input, "output": input.Usage.Output, "cacheRead": input.Usage.CacheRead, "cacheWrite": input.Usage.CacheWrite}
 	}
 	result := runtime.graphManagement(taskId).GraphControl(payload)
 	if runtime.autoWake {
@@ -332,7 +356,7 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	}
 	assembly := OpenAgentContextAssembly(assemblyInput)
 	features := AgentToolFeatures{
-		Role: "master", Run: true, Fetch: true, Catalog: true, GraphManagement: true,
+		Role: "master", Run: true, AskUser: true, Fetch: true, Catalog: true, GraphManagement: true,
 		Conversations: &AgentConversationFeatures{Read: true, Write: true},
 		Peers:         false,
 		Artifacts:     agentArtifactAccessForPreview(action),
@@ -342,6 +366,22 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 			ConfirmDraft: true, ArchiveDraft: true, RestoreDraft: true, DeleteDraft: true,
 			PendingHumanChecks: true, ReviewHumanCheck: true, ControlTask: true,
 		},
+	}
+	if conversationId != nil && *conversationId != "" {
+		conversation := ConversationRowOf(runtime.store, *conversationId)
+		switch conversation.Role {
+		case ConversationGlobal:
+			features.Supervisor.ResumeWork = true
+			features.Supervisor.DelegateWork = true
+			features.Supervisor.ReadWorkDraft = true
+			features.Supervisor.BindProject = false
+		case ConversationProject:
+			features.Supervisor.ResumeWork = true
+			features.AskUser = false
+			features.AskSupervisor = true
+			features.Supervisor.ProposeWorkGraph = true
+			features.Supervisor.ReadWorkDraft = true
+		}
 	}
 	if runtime.systemCtx != nil {
 		// The preview must say what the next turn really gets. The four system

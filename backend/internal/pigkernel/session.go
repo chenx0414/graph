@@ -346,6 +346,11 @@ func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, e
 
 // Steer injects a message into the running turn.
 func (session *Session) Steer(ctx context.Context, text string) error {
+	return session.SteerWithRequestID(ctx, text, newRequestId())
+}
+
+// SteerWithRequestID preserves the caller's retry identity for this admission.
+func (session *Session) SteerWithRequestID(ctx context.Context, text, id string) error {
 	session.mutex.Lock()
 	accepting := session.acceptingInput
 	closed := session.closed
@@ -356,7 +361,7 @@ func (session *Session) Steer(ctx context.Context, text string) error {
 	if !accepting {
 		return fmt.Errorf("pig kernel: the session is no longer accepting steering messages")
 	}
-	requestId := session.admissionId() + ":continuation:" + newRequestId()
+	requestId := session.admissionId() + ":continuation:" + id
 	_, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
 		Type:      durable.SubmissionTypeInput,
 		Content:   ai.UserText(text),
@@ -368,6 +373,11 @@ func (session *Session) Steer(ctx context.Context, text string) error {
 
 // Interrupt aborts the running turn. Replacement input stays in this operation.
 func (session *Session) Interrupt(ctx context.Context, text *string) error {
+	return session.InterruptWithRequestID(ctx, text, newRequestId())
+}
+
+// InterruptWithRequestID gives a replacement input a stable retry identity.
+func (session *Session) InterruptWithRequestID(ctx context.Context, text *string, id string) error {
 	session.mutex.Lock()
 	if session.closed || !session.acceptingInput {
 		session.mutex.Unlock()
@@ -394,7 +404,7 @@ func (session *Session) Interrupt(ctx context.Context, text *string) error {
 	if !replacement {
 		return nil
 	}
-	requestId := session.admissionId() + ":continuation:" + newRequestId()
+	requestId := session.admissionId() + ":continuation:" + id
 	submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
 		Type: durable.SubmissionTypeInput, Content: ai.UserText(*text), RequestId: &requestId,
 	})

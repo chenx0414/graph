@@ -12,13 +12,15 @@ func (runtime *TaskRuntime) Supervisor(taskId string) *TaskRuntimeSupervisor {
 
 // TaskRuntimeControlInput is one control action of the main Agent.
 type TaskRuntimeControlInput struct {
-	Action    string
-	TaskId    *string
-	NodeId    *string
-	Text      *string
-	Tokens    *int64
-	Reason    *string
-	RequestId string
+	Action          string
+	TaskId          *string
+	NodeId          *string
+	Text            *string
+	Tokens          *int64
+	Reason          *string
+	RequestId       string
+	SourceMessageID string
+	Instruction     string
 }
 
 // ControlTask applies one control action of the main Agent.
@@ -34,12 +36,23 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 	case "pause", "resume":
 		paused := input.Action == "pause"
 		stoppedMaster := false
-		receipt := runtime.store.Command(scope, input.RequestId, map[string]any{"type": input.Action, "taskId": target}, func() any {
+		payload := map[string]any{"type": input.Action, "taskId": target}
+		if input.SourceMessageID != "" || input.Instruction != "" {
+			payload["sourceMessageId"] = input.SourceMessageID
+			payload["instruction"] = input.Instruction
+		}
+		receipt := runtime.store.Command(scope, input.RequestId, payload, func() any {
+			if !paused {
+				requireArchiveResumeInstruction(runtime.store, supervisor.taskId, target, input.SourceMessageID, input.Instruction)
+			}
 			pausedValue := 0
 			if paused {
 				pausedValue = 1
 			}
 			runtime.store.SetTaskPaused(target, pausedValue != 0)
+			if runtime.kernel.LatestRevision(target) != nil {
+				runtime.kernel.SetNativePause(target, paused, "", 0)
+			}
 			if paused {
 				OpenPause(runtime.kernel, target)
 				active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
@@ -145,6 +158,9 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 		if text == "" {
 			Raise("invalid_input", "A nonempty steering message is required")
 		}
+		if runtime.kernel.LatestRevision(target) != nil {
+			return runtime.steerGraphNode(supervisor.taskId, target, nodeId, text, input.RequestId)
+		}
 		active := ActiveOperationForNode(runtime.store, target, nodeId)
 		if active == nil {
 			Raise("steering_unavailable", "Node "+nodeId+" has no running turn to steer")
@@ -159,6 +175,11 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 				"cursor":      runtime.store.Event(target, "operation.steered", map[string]any{"nodeId": nodeId, "operationId": active.Id, "actor": "agent", "text": text}),
 			}
 		})
+	case "stop_node":
+		if input.NodeId == nil || strings.TrimSpace(*input.NodeId) == "" {
+			Raise("invalid_input", "stop_node needs the node to stop")
+		}
+		return runtime.stopGraphNode(supervisor.taskId, target, strings.TrimSpace(*input.NodeId), input.RequestId)
 	}
 	Raise("invalid_input", "Unknown control action "+input.Action)
 	return nil
@@ -174,7 +195,8 @@ func (supervisor *TaskRuntimeSupervisor) controlTarget(requested *string) string
 		return target
 	}
 	conversation := runtime2Conversation(supervisor.runtime, supervisor.taskId)
-	if conversation == nil || runtime2Conversation(supervisor.runtime, target) != conversation {
+	targetConversation := runtime2Conversation(supervisor.runtime, target)
+	if conversation == nil || targetConversation == nil || *targetConversation != *conversation {
 		Raise("invalid_input", "Control reaches only tasks of this conversation")
 	}
 	return target
@@ -182,6 +204,9 @@ func (supervisor *TaskRuntimeSupervisor) controlTarget(requested *string) string
 
 // runtime2Conversation reads the conversation of one task.
 func runtime2Conversation(runtime *TaskRuntime, taskId string) *string {
+	if owner, ok := runtime.kernel.GraphOwner(taskId); ok {
+		return runtime.store.Task(owner).ConversationID
+	}
 	conversation := runtime.store.Task(taskId).ConversationID
 	return conversation
 }

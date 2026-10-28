@@ -92,13 +92,15 @@ type AgentToolsHumanCheck struct {
 
 // AgentToolsControlTask is one task control action of the main Agent.
 type AgentToolsControlTask struct {
-	Action    string
-	TaskId    *string
-	NodeId    *string
-	Text      *string
-	Tokens    *int
-	Reason    *string
-	RequestId string
+	Action          string
+	TaskId          *string
+	NodeId          *string
+	Text            *string
+	Tokens          *int
+	Reason          *string
+	RequestId       string
+	SourceMessageID string
+	Instruction     string
 }
 
 // AgentToolsWriteLedger records the writes one turn makes.
@@ -147,7 +149,8 @@ type AgentToolsInput struct {
 	// ReadGraph reads one slice of the frozen graph definition.
 	ReadGraph func(input GraphSectionQuery) any
 	// OnAskUser hands a question to the session that can durably record it.
-	OnAskUser func(request PiAdapterAskedQuestion)
+	OnAskUser       func(request PiAdapterAskedQuestion)
+	OnAskSupervisor func(request PiAdapterAskedQuestion)
 	// Peers is the same-graph Agent channel. It holds a PiAdapterPeerTools.
 	Peers any
 	// Artifacts is the shared artifact workspace. It holds a PiAdapterArtifactService.
@@ -199,7 +202,7 @@ var agentToolsArtifactTrusts = []string{"unverified", "reviewed", "accepted"}
 var agentToolsCapabilityKinds = []string{"skill", "mcp", "extension", "pi-extension", "prompt"}
 
 // agentToolsControlActions are the task control actions the tool accepts.
-var agentToolsControlActions = []string{"pause", "resume", "abandon", "set_budget", "steer"}
+var agentToolsControlActions = []string{"pause", "resume", "abandon", "set_budget", "steer", "stop_node"}
 
 // agentToolsProblemActions are the problem actions the tool accepts.
 var agentToolsProblemActions = []string{"retry", "acknowledge", "respond", "reconcile_usage", "escalate"}
@@ -259,6 +262,8 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 	}
 
 	features := AgentToolFeatures{
+		AskUser:         input.OnAskUser != nil,
+		AskSupervisor:   input.OnAskSupervisor != nil,
 		GraphManagement: input.GraphManagement.GraphCreate != nil,
 		GraphRead:       input.ReadGraph != nil,
 		WorkspaceCommit: input.CommitWorkspace != nil,
@@ -275,6 +280,10 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 	}
 	if agentToolsSupervisorPresent(input.Supervisor) {
 		features.Supervisor = &AgentSupervisorFeatures{
+			ResumeWork:         input.Supervisor.ResumeWork != nil,
+			DelegateWork:       input.Supervisor.DelegateWork != nil,
+			ProposeWorkGraph:   input.Supervisor.ProposeWorkGraph != nil,
+			ReadWorkDraft:      input.Supervisor.ReadWorkDraft != nil,
 			ValidateProposal:   input.Supervisor.ValidateProposal != nil,
 			GraphState:         input.Supervisor.GraphState != nil,
 			TaskStatus:         input.Supervisor.TaskStatus != nil,

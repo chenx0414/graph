@@ -38,3 +38,8 @@ func (s *TaskStore) CancelQueuedMessage(messageID string, at int64) bool {
 	changes := kernelChanges(s.Db, "UPDATE messages SET state='cancelled',updated_at=MAX(?,updated_at+1) WHERE id=? AND state='queued'", at, messageID)
 	return changes > 0
 }
+
+// RetireTransferredMessage keeps the original as history after its handoff.
+func (s *TaskStore) RetireTransferredMessage(messageID string, at int64) {
+	kernelExec(s.DB, "UPDATE messages SET state='cancelled',updated_at=MAX(?,updated_at+1) WHERE id=? AND state IN ('pending','queued')", at, messageID)
+}

@@ -3,7 +3,7 @@ package graph
 // graphManagement binds the graph control surface to one owner task. The
 // TypeScript supervisor spread graphManagement() into itself, so the graph
 // tools of the main Agent read the same surface.
-func (runtime *TaskRuntime) graphManagement(taskId string) AgentToolsGraphManagement {
+func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentToolsGraphManagement {
 	service := NewGraphManagement(runtime.kernel, taskId, func(graphId string, branch string) {
 		if runtime.git != nil {
 			runtime.git.PrepareTask(graphId, branch)
@@ -56,6 +56,12 @@ func (runtime *TaskRuntime) graphManagement(taskId string) AgentToolsGraphManage
 			request := GraphControlInput{
 				GraphId: agentToolsString(input["graphId"]),
 				Action:  agentToolsString(input["action"]),
+			}
+			request.Proof, _ = input["proof"].(string)
+			if len(agent) > 0 && agent[0] {
+				request.AgentTaskID = taskId
+				request.SourceMessageID, _ = input["sourceMessageId"].(string)
+				request.Instruction, _ = input["instruction"].(string)
 			}
 			if nodeID, ok := input["nodeId"].(string); ok {
 				request.NodeId = &nodeID

@@ -41,6 +41,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const pendingSend = useRef<{ text: string; requestId: string } | null>(null);
+  const pendingControl = useRef<{ action: 'steer_node' | 'stop_node'; text: string; requestId: string } | null>(null);
   const [data, setData] = useState<NodeRun | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(Boolean(taskId));
@@ -163,13 +164,33 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setSending(false); }
   }
+  async function controlNode(action: 'steer_node' | 'stop_node') {
+    if (!taskId || sending || !busy || (action === 'steer_node' && !text.trim())) return;
+    const message = action === 'steer_node' ? text.trim() : '';
+    const previous = pendingControl.current;
+    const command = previous?.action === action && previous.text === message ? previous : { action, text: message, requestId: crypto.randomUUID() };
+    pendingControl.current = command;
+    setSending(true); setError('');
+    try {
+      await api(`/api/tasks/${taskId}/graph/control`, { method: 'POST', body: JSON.stringify({ ...command, nodeId }) });
+      if (action === 'steer_node') setText('');
+      pendingControl.current = null;
+      refresh(); transcriptFollow.scrollToLatest('auto');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setSending(false); }
+  }
   const composer = <div className="conversation-composer-wrap node-chat-composer">
     {error && <ErrorBox message={error} />}
     <ChatComposer value={text} onChange={setText} attachments={attachments} onAttachmentsChange={setAttachments}
       allowAttachments={false} projectId={null} placeholder={busy ? `向 ${agentName} 发送补充说明…` : `向 ${agentName} 发送返工要求…`}
       onSend={() => void send()} sendDisabled={sending || !taskId || data?.node.kind !== 'agent' || !text.trim()}
       inputTestId="node-chat-input" sendTestId="node-chat-send" history={entries.filter(entry => entry.role === 'user' && entry.kind === 'chat').map(entry => entry.text)} />
-    <div className="composer-footer"><span className="muted">{busy ? 'Enter 发送到当前节点 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span></div>
+    <div className="composer-footer"><span className="muted">{busy ? 'Enter 排队发送 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span>
+      {busy && data?.node.kind === 'agent' && <span className="row">
+        <Button size="sm" disabled={sending || !text.trim()} onClick={() => void controlNode('steer_node')}>立即引导</Button>
+        <Button size="sm" disabled={sending} onClick={() => void controlNode('stop_node')}>停止节点</Button>
+      </span>}
+    </div>
   </div>;
   const onScroll = () => {
     transcriptFollow.onScroll();

@@ -30,6 +30,7 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		if conversation.ProjectId == nil {
 			Raise("invalid_input", "Bind a project before confirming a draft")
 		}
+		requireProjectActive(runtime.store, *conversation.ProjectId)
 		if strings.TrimSpace(input.TargetBranch) == "" {
 			Raise("invalid_input", "A target branch is required")
 		}
@@ -53,17 +54,9 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 		ValidateProposal(proposal)
 		taskId := graphUUID()
 		sequence := kernelInt(kernelRow(runtime.store.Db, "SELECT COUNT(*) AS count FROM tasks")["count"]) + 1
-		active := kernelString(kernelRow(runtime.store.Db, "SELECT active_task FROM runtime")["active_task"])
-		phase := "queued"
-		if active == "" {
-			phase = "running"
-		}
-		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, phase, sequence, conversationId, row["decision_snapshot"])
+		runtime.store.CreateConfirmedTask(taskId, *conversation.ProjectId, proposal.Summary, kernelInt(row["requirement_version"]), input.TargetBranch, "running", sequence, conversationId, row["decision_snapshot"])
 		runtime.store.RecordProposal(taskId, 1, kernelInt(row["requirement_version"]), kernelString(row["spec"]), row["decision_snapshot"])
 		MaterializeGraph(runtime.kernel, taskId, ParseGraphDefinition(proposal.Definition), "Confirmed conversation draft")
-		if phase == "running" {
-			runtime.store.SetRuntimeActiveTask(taskId)
-		}
 		runtime.store.BumpRequirementVersion(anchor.ID)
 		kernelExec(runtime.store.Db, "INSERT INTO conversation_acceptances(conversation_id,proposal_version,task_id,target_branch,accepted_at,draft_revision) VALUES(?,?,?,?,?,?)",
 			conversationId, input.ProposalVersion, taskId, input.TargetBranch, NowMillis(), kernelInt(row["draft_revision"]))
@@ -91,6 +84,9 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 	taskId, _ := record["taskId"].(string)
 	if taskId != "" {
 		runtime.git.PrepareTask(taskId, input.TargetBranch)
+		if runtime.autoWake {
+			runtime.execution.Kick()
+		}
 		if NewKernelStore(runtime.store).LatestRevision(taskId) != nil {
 			WakeMaster(runtime.store, WakeIntent{TaskID: taskId, Kind: "graph_ready", DedupeKey: taskId + ":ready", Data: map[string]any{"graphId": taskId}, HasData: true})
 		}

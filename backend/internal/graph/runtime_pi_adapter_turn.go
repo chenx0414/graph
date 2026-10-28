@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// piAdapterRunTurn opens the session, sends the prompt and settles the operation.
+// piAdapterRunTurn opens, sends and settles one operation.
 func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport, input piAdapterRunInput, turn piAdapterTurnInput) OperationResult {
 	operation := input.Operation
 	entry := input.Entry
@@ -308,8 +308,8 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	userImages := PromptImagesFromAttachments(attachments)
 	// A bound skill is knowledge the model cannot call, and a `disable-model-invocation`
 	// skill is not in the system prompt at all: the only way its body reaches a turn is
-	// the user selecting it. Only this turn's own messages are read for the token - a
-	// briefing keeps an earlier turn as standing context and would re-inject it forever.
+	// the user selecting it. Only this turn's messages are read; a briefing would
+	// re-inject forever.
 	turnTexts := []string{}
 	for _, message := range operation.Context.Messages {
 		if strings.TrimSpace(message.Text) != "" {
@@ -375,19 +375,22 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			Usage:   turn.Gate.Total(),
 		}
 	}
-	// An explicit question from the agent ends the turn: the answer is the next
-	// turn's input, so waiting costs no further model requests.
-	if turn.AskedQuestion != nil {
-		question := *turn.AskedQuestion
+	// An explicit question ends the turn; its answer is the next input.
+	if turn.AskedQuestion != nil && *turn.AskedQuestion != nil {
+		question := **turn.AskedQuestion
+		requestType := "user_decision"
+		if question.ToSupervisor {
+			requestType = "supervisor_decision"
+		}
 		return OperationResult{
 			Outcome:  "waiting",
 			Output:   map[string]any{"question": question},
-			Question: &OperationQuestion{Prompt: question.Prompt, Data: map[string]any{"requestType": "user_decision", "prompt": question.Prompt, "why": question.Why, "options": question.Options, "multiple": question.Multiple}},
+			Question: &OperationQuestion{Prompt: question.Prompt, Data: map[string]any{"requestType": requestType, "prompt": question.Prompt, "why": question.Why, "options": question.Options, "multiple": question.Multiple}},
 			Usage:    turn.Gate.Total(),
 		}
 	}
-	if turn.PermissionRequest != nil {
-		request := *turn.PermissionRequest
+	if turn.PermissionRequest != nil && *turn.PermissionRequest != nil {
+		request := **turn.PermissionRequest
 		return OperationResult{
 			Outcome: "waiting",
 			Output: map[string]any{"permission": map[string]any{

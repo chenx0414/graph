@@ -80,7 +80,11 @@ func (runtime *TaskRuntime) conversationTaskIds(conversationId string) []string 
 		seen[id] = true
 		ids = append(ids, id)
 	}
-	for _, row := range kernelRows(runtime.store.Db, "SELECT id FROM tasks WHERE conversation_id=?", conversationId) {
+	for _, row := range kernelRows(runtime.store.Db, `SELECT t.id FROM tasks t
+ LEFT JOIN kernel_graph_owners g ON g.task_id=t.id
+ LEFT JOIN tasks owner ON owner.id=g.owner_task_id
+ WHERE COALESCE(owner.conversation_id,t.conversation_id)=? OR
+   (t.conversation_id=? AND EXISTS (SELECT 1 FROM conversations source WHERE source.id=? AND source.role='history'))`, conversationId, conversationId, conversationId) {
 		id := kernelString(row["id"])
 		if id == "" || seen[id] {
 			continue

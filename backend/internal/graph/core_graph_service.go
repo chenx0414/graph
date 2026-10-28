@@ -51,14 +51,20 @@ type GraphInspectInput struct {
 
 // GraphControlInput drives a graph's execution controls.
 type GraphControlInput struct {
-	GraphId     string
-	Action      string
-	NodeId      *string
-	ModuleId    *string
-	Seq         *int
-	OperationId *string
-	CallId      *string
-	Usage       *TokenUsage
+	GraphId         string
+	Action          string
+	NodeId          *string
+	ModuleId        *string
+	Seq             *int
+	OperationId     *string
+	CallId          *string
+	Usage           *TokenUsage
+	AgentTaskID     string
+	SourceMessageID string
+	Instruction     string
+	RequestID       string
+	Text            string
+	Proof           string
 }
 
 // GraphSendInput delivers a public input or a chat message.
@@ -119,6 +125,14 @@ func (service *graphManagementService) runtime(graphId string) *GraphRuntime {
 	targetConversation := ""
 	if target.ConversationID != nil {
 		targetConversation = *target.ConversationID
+	}
+	if bindingOwner != "" {
+		currentOwner := service.kernel.Store.Task(bindingOwner)
+		if currentOwner.ConversationID != nil {
+			targetConversation = *currentOwner.ConversationID
+		} else {
+			targetConversation = ""
+		}
 	}
 	if graphId != service.ownerTaskId && bindingOwner != service.ownerTaskId &&
 		(ownerConversation == "" || targetConversation != ownerConversation) {

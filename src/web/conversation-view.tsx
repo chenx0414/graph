@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { ConversationDrawerView } from "./conversation-drawer-view.tsx";
+import { WorkDrafts } from './WorkDrafts.tsx';
 
 import { WindowDrawer } from './WindowDrawer.tsx';
 
@@ -120,6 +121,7 @@ return (
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
+          <WorkDrafts role={view.role} conversationId={id} projectId={view.projectId} projects={settings?.projects ?? []} cursor={view.cursor} />
 
           <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />
           </div>

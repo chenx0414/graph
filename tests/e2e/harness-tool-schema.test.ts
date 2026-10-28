@@ -76,9 +76,17 @@ test('the tool schema the provider receives is short enough to read, and keeps t
         credentialId: 'local' }] },
     }));
     daemon = await launchCli(root, { configPath, env: { GRAPH_TOOL_SCHEMA_KEY: 'synthetic-tool-schema-key' }, extraArgs: ['--execute'] });
-    const reply = await daemon.request('/api/conversations', {
+    // The product entry is the global supervisor, not a legacy conversation:
+    // its schema is the one every user's first turn carries.
+    const opened = await daemon.request('/api/orchestration/global', {
+      method: 'POST', body: JSON.stringify({ requestId: 'schema-global' }),
+    });
+    const openedBody = await opened.text();
+    expect(opened.status, openedBody).toBe(200);
+    const { conversationId } = JSON.parse(openedBody) as { conversationId: string };
+    const reply = await daemon.request(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ projectId: 'p', model: 'local', text: 'What can you do?', requestId: 'schema-1' }),
+      body: JSON.stringify({ text: 'What can you do?', requestId: 'schema-1' }),
     });
     expect(reply.status, await reply.text()).toBe(200);
 
@@ -89,9 +97,16 @@ test('the tool schema the provider receives is short enough to read, and keeps t
     // The prose the provider reads on every request of every session.
     const prose = descriptionChars(tools);
     const schema = tools.reduce((total, tool) => total + JSON.stringify(tool.input_schema ?? {}).length, 0);
+    // The cap ratchets with the product entry. When the default entry became
+    // the global supervisor, the schema grew from 7,485 characters over 50
+    // tools to 9,436 over 56: the supervisor gained ask_user, control_task and
+    // the work tools. The cap moved with that scope; the per-tool average
+    // keeps one verbose tool from eating the room.
     expect(prose, `the tool schema spends ${prose} characters on descriptions and ${schema} on parameters:\n`
       + tools.map(tool => `${tool.name}: ${(tool.description ?? '').length}`).join('\n'))
-      .toBeLessThanOrEqual(7500);
+      .toBeLessThanOrEqual(9700);
+    expect(prose / tools.length, `the ${tools.length} tool descriptions average ${Math.round(prose / tools.length)} characters`)
+      .toBeLessThanOrEqual(175);
     // The schema is not mostly prose: the descriptions are no longer the
     // bigger half of what the provider reads.
     expect(prose, `the descriptions are ${prose} characters and the parameters ${schema}: the schema is mostly prose`)

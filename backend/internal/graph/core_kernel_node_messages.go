@@ -79,11 +79,11 @@ func SendKernelMainMessage(kernel *KernelStore, graphID, from string, input Node
 		if phase == "stopping" || phase == "stopped" {
 			Raise("stopping", "Graph "+graphID+" is stopping; chat is closed")
 		}
-		task := kernel.Store.Task(graphID)
-		conversationID := mapString(asMap(task), "conversation_id", "conversationId", "ConversationID", "ConversationId")
-		if conversationID == "" {
+		conversation := SupervisorConversationForTask(kernel.Store, graphID)
+		if conversation == nil {
 			Raise("invalid_input", "Graph has no owning conversation")
 		}
+		conversationID := conversation.Id
 		message := AppendMessage(kernel.Store, MessageInput{
 			ConversationID: conversationID,
 			Role:           "user",

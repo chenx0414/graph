@@ -7,6 +7,8 @@ type GraphLaneOptions struct {
 	Kernel          *KernelStore
 	SettleWorkspace func(executionId string)
 	Close           func()
+	Steer           func(graphId, nodeId, executionId, text, requestId string) error
+	StopNode        func(graphId, nodeId, executionId string, attempt int) error
 	Operation       func(graphId string, request ModuleOperationRequest) ModuleOperationResponse
 	CloseGraph      func(graphId string)
 	Finalize        func(graphId string)
@@ -50,6 +52,8 @@ func (lane *GraphLane) Runnable() []RunnableGraph {
 		return nil
 	}
 	kernel := lane.options.Kernel
+	kernel.Store.txMu.Lock()
+	defer kernel.Store.txMu.Unlock()
 	db := kernel.Store.Db
 	rows := graphDBAll(db, `SELECT q.task_id FROM kernel_queue q LEFT JOIN kernel_node_state s ON s.task_id=q.task_id AND s.node_id=q.node_id
         WHERE q.state='queued' AND COALESCE(s.paused,0)=0 AND NOT EXISTS(SELECT 1 FROM kernel_nodes n WHERE n.task_id=q.task_id AND n.node_id=q.node_id AND n.status='blocked')
@@ -62,11 +66,14 @@ func (lane *GraphLane) Runnable() []RunnableGraph {
 	graphs := []RunnableGraph{}
 	for _, row := range rows {
 		taskId := graphDBString(row, "task_id")
-		task, ok := graphDBRow(db, "SELECT phase, paused FROM tasks WHERE id=?", taskId)
-		if !ok || graphDBInt(task, "paused") != 0 {
+		task, ok := graphDBRow(db, "SELECT phase, paused, project_id, target_branch, integration_branch FROM tasks WHERE id=?", taskId)
+		if !ok || graphDBInt(task, "paused") != 0 || projectArchived(kernel.Store, graphDBString(task, "project_id")) {
 			continue
 		}
 		phase := graphDBString(task, "phase")
+		if task["target_branch"] != nil && task["integration_branch"] == nil && phase != "stopping" {
+			continue
+		}
 		if phase != "running" && phase != "idle" && phase != "blocked" && phase != "completing" && phase != "stopping" {
 			continue
 		}

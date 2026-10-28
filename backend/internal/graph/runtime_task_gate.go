@@ -83,6 +83,10 @@ func (gate *TaskSendGate) Check(reservation float64) {
 	if !jsSafeInteger(reservation) || reservation < 0 {
 		Raise("invalid_input", "A token reservation is required")
 	}
+	task := gate.store.Task(gate.operation.TaskId)
+	if task.Phase != "chatting" && projectArchived(gate.store, task.ProjectID) {
+		Raise("paused", "Project is archived")
+	}
 	if gate.options.Unrestricted {
 		return
 	}

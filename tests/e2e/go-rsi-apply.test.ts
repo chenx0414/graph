@@ -271,8 +271,12 @@ test('a self-improvement call that asks for a reload leaves a real reload reques
   });
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
-  await expect.poll(() => f.provider.observed.has('activate'), { timeout: 90_000, interval: 250 }).toBe(true);
-  expect(f.provider.observed.get('activate')).toContain('"restartRequired":true');
+  const { conversationId } = started.body as { conversationId: string };
+  await expect.poll(async () => {
+    const view = await f.request(`/api/conversations/${conversationId}`);
+    const messages = (view.body as { messages?: { kind: string; data?: { restartRequired?: boolean; activation?: { state?: string } } }[] }).messages ?? [];
+    return messages.some(message => message.kind === 'rsi' && message.data?.restartRequired === true && message.data.activation?.state === 'pending_reload');
+  }, { timeout: 90_000, interval: 250 }).toBe(true);
 
   // The reload request names the commit that has to run.
   await expect.poll(async () => {

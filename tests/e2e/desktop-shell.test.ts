@@ -90,6 +90,16 @@ test('the real desktop drawer reserves display space, restores content bounds an
   }
 }, 90000);
 
+test('the default desktop window serves the global supervisor entry', async () => {
+  const { page } = await shell();
+  await page.getByTestId('new-conversation-input').waitFor({ timeout: 30000 });
+  await expect.poll(() => page.getByTestId('conversation-list').innerText(), { timeout: 30000 }).toContain('主 Agent');
+  expect(await page.getByTestId('open-global-agent').count()).toBe(1);
+  expect(await page.getByRole('heading', { name: '与主 Agent 对话', exact: true }).count()).toBe(1);
+  const settings = await page.evaluate(async () => (await fetch('/api/settings')).json());
+  expect(settings).toMatchObject({ projects: [] });
+}, 90000);
+
 test.skipIf(process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1')('a maximized native desktop uses a drawer overlay without changing its bounds', async () => {
   const { app, page } = await shell();
   const bounds = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());

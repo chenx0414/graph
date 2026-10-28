@@ -28,6 +28,17 @@ func (s *TaskStore) BlockTask(taskID string) {
 
 // SetTaskPaused pauses or resumes a task.
 func (s *TaskStore) SetTaskPaused(taskID string, paused bool) {
+	if paused {
+		kernelExec(s.Db, "DELETE FROM project_archive_pauses WHERE task_id=?", taskID)
+	} else if kernelRow(s.Db, `SELECT t.id FROM tasks t
+ LEFT JOIN work_graphs g ON g.graph_id=t.id LEFT JOIN work_requests w ON w.id=g.work_id
+ LEFT JOIN projects project ON project.id=t.project_id
+ WHERE t.id=? AND t.phase!='chatting' AND (project.archived_at IS NOT NULL OR w.execution_paused=1)`, taskID) != nil {
+		Raise("paused", "Restore the project and resume its work before resuming this graph")
+	} else {
+		kernelExec(s.Db, "DELETE FROM project_archive_pauses WHERE task_id=?", taskID)
+	}
+	kernelExec(s.Db, "DELETE FROM graph_preparation_pauses WHERE task_id=?", taskID)
 	flag := 0
 	if paused {
 		flag = 1
@@ -133,4 +144,41 @@ func (s *TaskStore) CreateConversationTask(id, projectID, request, phase string,
 func (s *TaskStore) CreateConfirmedTask(id, projectID, request string, requirementVersion int64, targetBranch any, phase string, createdSeq int64, conversationID any, decisionDigest any) {
 	kernelExec(s.DB, "INSERT INTO tasks(id,project_id,request,requirement_version,latest_proposal,accepted_proposal,target_branch,phase,created_seq,graph_version,conversation_id,decision_digest) VALUES(?,?,?,?,1,1,?,?,?,1,?,?)",
 		id, projectID, request, requirementVersion, targetBranch, phase, createdSeq, conversationID, decisionDigest)
+}
+
+func (s *TaskStore) PauseProjectTasks(projectID string) {
+	kernelExec(s.Db, `INSERT OR IGNORE INTO project_archive_pauses(task_id)
+ SELECT id FROM tasks WHERE project_id=? AND (paused=0 OR EXISTS(SELECT 1 FROM graph_preparation_pauses p WHERE p.task_id=tasks.id))
+ AND phase NOT IN ('chatting','completed','stopping','stopped','abandoned')`, projectID)
+	kernelExec(s.Db, "UPDATE tasks SET paused=1 WHERE project_id=? AND phase NOT IN ('chatting','completed','stopped','abandoned')", projectID)
+}
+
+func (s *TaskStore) ArchivePausedWorkGraphs(workID string) []string {
+	ids := []string{}
+	for _, row := range kernelRows(s.Db, `SELECT t.id FROM project_archive_pauses p JOIN tasks t ON t.id=p.task_id
+ JOIN work_graphs g ON g.graph_id=t.id WHERE g.work_id=? AND g.state='ready'
+ AND t.phase NOT IN ('completed','stopping','stopped','abandoned','blocked')`, workID) {
+		ids = append(ids, kernelString(row["id"]))
+	}
+	return ids
+}
+
+func (s *TaskStore) ClearArchivePause(taskID string) {
+	kernelExec(s.Db, "DELETE FROM project_archive_pauses WHERE task_id=?", taskID)
+}
+
+func (s *TaskStore) StartGraphPreparation(taskID string) {
+	kernelExec(s.Db, "INSERT INTO graph_preparation_pauses(task_id) VALUES(?)", taskID)
+	s.PauseTask(taskID)
+}
+
+func (s *TaskStore) FinishGraphPreparation(taskID string, mayResume bool) bool {
+	preparing := kernelRow(s.Db, "SELECT task_id FROM graph_preparation_pauses WHERE task_id=?", taskID) != nil
+	kernelExec(s.Db, "DELETE FROM graph_preparation_pauses WHERE task_id=?", taskID)
+	if preparing && mayResume {
+		s.ClearArchivePause(taskID)
+		s.ResumeTask(taskID)
+		return true
+	}
+	return false
 }

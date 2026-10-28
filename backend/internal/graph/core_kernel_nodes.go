@@ -87,6 +87,10 @@ func (k *KernelStore) BlockNode(taskID, nodeID, reason string) {
 	k.blockedWake(taskID, nodeID, reason)
 }
 
+func (k *KernelStore) ParkNodeForQuestion(taskID, nodeID string) {
+	g5Exec(k.Db, "UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?", taskID, nodeID)
+}
+
 // RequestBudget opens one user budget question for a finite execution.
 func (k *KernelStore) ensureNodeState(taskID, nodeID string) {
 	g5Exec(k.Db, "INSERT OR IGNORE INTO kernel_node_state(task_id,node_id) VALUES(?,?)", taskID, nodeID)
@@ -117,17 +121,21 @@ func (k *KernelStore) NoteNodeResubmit(taskID, nodeID string, allowed int) {
 // SetNodeQueuePaused pauses or resumes one node's queue.
 func (k *KernelStore) SetNodeQueuePaused(taskID, nodeID string, paused bool) {
 	k.ModuleTransaction(func() any {
-		k.ensureNodeState(taskID, nodeID)
-		flag := 0
-		if paused {
-			flag = 1
-		}
-		g5Exec(k.Db, "UPDATE kernel_node_state SET paused=? WHERE task_id=? AND node_id=?", flag, taskID, nodeID)
-		if !paused {
-			k.SetNativePause(taskID, false, nodeID, 0)
-		}
+		k.SetNodeQueuePausedInCurrentTransaction(taskID, nodeID, paused)
 		return nil
 	})
+}
+
+func (k *KernelStore) SetNodeQueuePausedInCurrentTransaction(taskID, nodeID string, paused bool) {
+	k.ensureNodeState(taskID, nodeID)
+	flag := 0
+	if paused {
+		flag = 1
+	}
+	g5Exec(k.Db, "UPDATE kernel_node_state SET paused=? WHERE task_id=? AND node_id=?", flag, taskID, nodeID)
+	if !paused {
+		k.SetNativePause(taskID, false, nodeID, 0)
+	}
 }
 
 // ConfigureNodeRetries overrides the graph default for one node.

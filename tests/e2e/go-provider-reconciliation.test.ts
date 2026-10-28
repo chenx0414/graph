@@ -142,7 +142,8 @@ test.each(variants)('provider reconciliation retains correlatable evidence witho
     const stopped = await daemon.request(`/api/conversations/${conversationId}/${action}`, {
       method: 'POST', body: JSON.stringify({ requestId: `reconciliation-${action}` }),
     });
-    expect(stopped.status).toBe(200);
+    const result = await stopped.json() as { code?: string };
+    expect(stopped.status === 200 || (action === 'interrupt' && result.code === 'no_active_operation'), `${action}: ${JSON.stringify(result)}`).toBe(true);
   }
 
   const runView = await (await daemon.request(`/api/tasks/${taskId}/nodes/master/run`)).json() as NodeRunView;

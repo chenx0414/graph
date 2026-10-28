@@ -7,6 +7,11 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 	if input.RequestId != nil {
 		requestId = *input.RequestId
 	}
+	unlock := lockWorkGraph("graph-create:"+service.ownerTaskId, requestId)
+	defer unlock()
+	if conversation := ConversationForTask(service.kernel.Store, service.ownerTaskId); conversation != nil && conversation.Role == ConversationHistory {
+		Raise("permission", "Historical conversations cannot create graph work")
+	}
 	var targetBranchValue any
 	if input.TargetBranch != nil {
 		targetBranchValue = *input.TargetBranch
@@ -31,13 +36,17 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 		created = GraphCreateResult{GraphId: graphId, Definition: latest.Definition, Revision: latest.Version}
 	} else {
 		created = service.kernel.Store.Transaction(func() any {
+			if conversation := ConversationForTask(service.kernel.Store, service.ownerTaskId); conversation != nil && conversation.Role == ConversationHistory {
+				Raise("permission", "Historical conversations cannot create graph work")
+			}
+			requireProjectActive(service.kernel.Store, parent.ProjectID)
 			var conversationId any
 			if parent.ConversationID != nil {
 				conversationId = *parent.ConversationID
 			}
 			service.kernel.Store.CreateSubgraphTask(graphId, parent.ProjectID, conversationId, definition.Name, NowMillis(), targetBranchValue)
 			if hasTargetBranch {
-				service.kernel.Store.PauseTask(graphId)
+				service.kernel.Store.StartGraphPreparation(graphId)
 			}
 			createState := "ready"
 			if hasTargetBranch {
@@ -58,40 +67,9 @@ func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 		}).(GraphCreateResult)
 	}
 	if hasTargetBranch && (previous == nil || previous.State != "ready") {
-		reason := ""
-		failed := false
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					failed = true
-					reason = graphServiceErrorMessage(recovered)
-				}
-			}()
-			if service.prepare == nil {
-				Raise("invalid_input", "Git preparation is unavailable")
-			}
-			service.prepare(graphId, *input.TargetBranch)
-			service.kernel.Store.Transaction(func() any {
-				service.kernel.MarkCreateRequestReady(service.ownerTaskId, requestId)
-				service.kernel.Store.ResumeTask(graphId)
-				return nil
-			})
-		}()
-		if failed {
-			service.kernel.Store.Transaction(func() any {
-				service.kernel.MarkCreateRequestFailed(service.ownerTaskId, requestId, reason)
-				service.kernel.Store.BlockTask(graphId)
-				service.kernel.Store.Event(graphId, "graph.preparation.failed", map[string]any{"reason": reason, "requestId": requestId})
-				return nil
-			})
-			return GraphCreateBlocked{
-				GraphId:    created.GraphId,
-				Definition: created.Definition,
-				Revision:   created.Revision,
-				RequestId:  requestId,
-				State:      "blocked",
-				Reason:     reason,
-			}
+		reason := service.prepareGraph(graphId, service.ownerTaskId, requestId, *input.TargetBranch, parent.ProjectID, false)
+		if reason != "" {
+			return GraphCreateBlocked{GraphId: created.GraphId, Definition: created.Definition, Revision: created.Revision, RequestId: requestId, State: "blocked", Reason: reason}
 		}
 	}
 	return GraphCreateResult{

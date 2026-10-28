@@ -171,7 +171,7 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 	if err != nil {
 		return pigNodeTurnError(err.Error())
 	}
-	report := TurnReport{Done: true}
+	report := TurnReport{Done: true, Interrupted: turn.StopReason == "aborted"}
 	if turn.ErrorMessage != "" {
 		return pigNodeTurnError(turn.ErrorMessage)
 	}
@@ -181,6 +181,28 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		}
 	}
 	return report
+}
+
+// Steer interrupts the current model response and continues the same execution.
+func (host *PigNodeHost) Steer(text, requestID string) error {
+	host.mutex.Lock()
+	session := host.current
+	host.mutex.Unlock()
+	if session == nil {
+		return errors.New("The node is not accepting steering messages")
+	}
+	return session.InterruptWithRequestID(context.Background(), &text, requestID)
+}
+
+// Stop ends the running turn. The node keeps its transcript.
+func (host *PigNodeHost) StopActive() error {
+	host.mutex.Lock()
+	session := host.current
+	host.mutex.Unlock()
+	if session == nil {
+		return errors.New("The node session is not yet available")
+	}
+	return session.Stop(context.Background())
 }
 
 // Stop ends the running turn. The node keeps its transcript.

@@ -85,7 +85,28 @@ func (app *GraphApp) serveGraphCreate(w http.ResponseWriter, r *http.Request) {
 func (app *GraphApp) serveGraphControl(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
 	input := GraphControlInput{
-		Action: appBodyString(body, "action"),
+		Action: appBodyString(body, "action"), RequestID: appBodyString(body, "requestId"), Text: appBodyString(body, "text"), Proof: appBodyString(body, "proof"),
+	}
+	if value, ok := body["operationId"].(string); ok {
+		input.OperationId = &value
+	}
+	if value, ok := body["callId"].(string); ok {
+		input.CallId = &value
+	}
+	if value, ok := body["usage"].(map[string]any); ok {
+		keys := []string{"input", "output", "cacheRead", "cacheWrite"}
+		values := make([]int, len(keys))
+		for index, key := range keys {
+			if !isSafeInteger(value[key]) {
+				Raise("invalid_input", "usage requires non-negative integer token counts")
+			}
+			number, valid := appBodyInt(value, key)
+			if !valid || number < 0 {
+				Raise("invalid_input", "usage requires non-negative integer token counts")
+			}
+			values[index] = number
+		}
+		input.Usage = &TokenUsage{Input: int64(values[0]), Output: int64(values[1]), CacheRead: int64(values[2]), CacheWrite: int64(values[3])}
 	}
 	if value, ok := body["nodeId"].(string); ok {
 		input.NodeId = &value

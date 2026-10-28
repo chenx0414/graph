@@ -280,7 +280,8 @@ func taskRuntimeConversationTarget(store *TaskStore, supervisorTaskId string, re
 		return supervisorTaskId
 	}
 	self := kernelRow(store.Db, "SELECT conversation_id FROM tasks WHERE id=?", supervisorTaskId)
-	target := kernelRow(store.Db, "SELECT conversation_id FROM tasks WHERE id=?", *requested)
+	target := kernelRow(store.Db, `SELECT COALESCE(owner.conversation_id,t.conversation_id) AS conversation_id FROM tasks t
+ LEFT JOIN kernel_graph_owners g ON g.task_id=t.id LEFT JOIN tasks owner ON owner.id=g.owner_task_id WHERE t.id=?`, *requested)
 	if target == nil || self == nil || self["conversation_id"] == nil ||
 		kernelString(target["conversation_id"]) != kernelString(self["conversation_id"]) {
 		Raise("invalid_input", what+" may only target a task of this conversation")

@@ -46,6 +46,7 @@ func (runtime *GraphRuntime) Deliver(nodeId, input string, value any) QueueRow {
 
 // DeliverEndpoint refuses delivery once completion or stop has begun.
 func (runtime *GraphRuntime) DeliverEndpoint(endpoint string, value any) DirectDelivery {
+	requireProjectActive(runtime.kernel.Store, runtime.kernel.Store.Task(runtime.graphId).ProjectID)
 	phase := GraphPhase("running")
 	if state := runtime.State(); state != nil {
 		phase = state.Phase
@@ -61,6 +62,7 @@ func (runtime *GraphRuntime) DeliverEndpoint(endpoint string, value any) DirectD
 
 // Chat queues a message. External chat closes during completion unless internal is set.
 func (runtime *GraphRuntime) Chat(nodeId, text string, internal bool) QueueRow {
+	requireProjectActive(runtime.kernel.Store, runtime.kernel.Store.Task(runtime.graphId).ProjectID)
 	phase := GraphPhase("running")
 	if state := runtime.State(); state != nil {
 		phase = state.Phase

@@ -64,6 +64,7 @@ type NodeSessionOptions struct {
 type NodeSessionBindings struct {
 	Peers           any
 	Artifacts       any
+	AskSupervisor   func(PiAdapterAskedQuestion)
 	CommitWorkspace func(paths []string, message string) any
 	Fetch           func(url string, signal *AbortSignal) RetrievalResult
 }
@@ -232,6 +233,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			nativeToolInput = &built
 			if options.Bindings != nil {
 				tools.Peers = options.Bindings.Peers
+				tools.OnAskSupervisor = options.Bindings.AskSupervisor
 				tools.Artifacts = options.Bindings.Artifacts
 				tools.CommitWorkspace = options.Bindings.CommitWorkspace
 				tools.Fetch = options.Bindings.Fetch

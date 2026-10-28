@@ -31,6 +31,11 @@ func (k *KernelStore) MarkCreateRequestReady(ownerTaskID, requestID string) {
 	kernelExec(k.Db, "UPDATE kernel_create_requests SET state='ready',error=NULL WHERE owner_task_id=? AND request_id=?", ownerTaskID, requestID)
 }
 
+// MarkCreateRequestPreparing records a retry before starting external preparation.
+func (k *KernelStore) MarkCreateRequestPreparing(ownerTaskID, requestID string) {
+	kernelExec(k.Db, "UPDATE kernel_create_requests SET state='preparing' WHERE owner_task_id=? AND request_id=? AND state='failed'", ownerTaskID, requestID)
+}
+
 // MarkCreateRequestFailed says the preparation failed, and why.
 func (k *KernelStore) MarkCreateRequestFailed(ownerTaskID, requestID, reason string) {
 	kernelExec(k.Db, "UPDATE kernel_create_requests SET state='failed',error=? WHERE owner_task_id=? AND request_id=?", reason, ownerTaskID, requestID)
@@ -39,6 +44,12 @@ func (k *KernelStore) MarkCreateRequestFailed(ownerTaskID, requestID, reason str
 // RecordGraphOwner says which task owns a graph.
 func (k *KernelStore) RecordGraphOwner(graphID, ownerTaskID string) {
 	kernelExec(k.Db, "INSERT INTO kernel_graph_owners(task_id,owner_task_id) VALUES(?,?)", graphID, ownerTaskID)
+}
+
+// TransferGraphOwner changes the active supervisor without changing the graph's source task.
+func (k *KernelStore) TransferGraphOwner(graphID, ownerTaskID string) {
+	kernelExec(k.Db, `INSERT INTO kernel_graph_owners(task_id,owner_task_id) VALUES(?,?)
+ ON CONFLICT(task_id) DO UPDATE SET owner_task_id=excluded.owner_task_id`, graphID, ownerTaskID)
 }
 
 // GraphOwner is the task that owns a graph, when it has an owner.

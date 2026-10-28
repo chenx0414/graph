@@ -108,7 +108,7 @@ try {
  const began=Date.now();let completed=false;
  while(Date.now()-began<deadlineMs){
   const operations=await console_.json(`/api/tasks/${created.taskId}/operations?latest=true`);
-  const masterIdle=operations.length && operations.every(operation=>!operation.workerActive && !['dispatched','prepared','not_sent'].includes(operation.state));
+  const masterIdle=operations.length && operations.every(operation=>!operation.workerActive && ['succeeded','failed','interrupted','cancelled'].includes(operation.state));
   if(workflow){
    const view=await console_.json(`/api/conversations/${created.conversationId}`);
    if(view.proposal && !view.proposal.stale && masterIdle && !workflow.confirmedTaskId){
@@ -139,14 +139,8 @@ try {
   if(workflow?.confirmedTaskId)await console_.post(`/api/tasks/${workflow.confirmedTaskId}/graph/control`,{action:'stop'});
   const paused=await console_.request(`/api/conversations/${created.conversationId}/pause`,{method:'POST',body:JSON.stringify({requestId:'eval-deadline-pause'})});
   if(paused.status!==200)throw new Error(`pause: ${paused.status}`);
-  const cancelBegan=Date.now();
-  while(true){
-   const interrupted=await console_.request(`/api/conversations/${created.conversationId}/interrupt`,{method:'POST',body:JSON.stringify({requestId:'eval-deadline-interrupt'})});
-   if(interrupted.status===200)break;
-   const refusal=interrupted.body??{};
-   if(refusal.code!=='no_active_operation' || Date.now()-cancelBegan>=30000)throw new Error(`interrupt: ${interrupted.status} ${refusal.code}`);
-   await new Promise(resolve=>setTimeout(resolve,100));
-  }
+  const interrupted=await console_.request(`/api/conversations/${created.conversationId}/interrupt`,{method:'POST',body:JSON.stringify({requestId:'eval-deadline-interrupt'})});
+  if(interrupted.status!==200 && interrupted.body?.code!=='no_active_operation')throw new Error(`interrupt: ${interrupted.status} ${interrupted.body?.code}`);
   // An interrupted SDK turn can finish before its transport usage observer.
   // cost is written for every settled invocation, including unknown usage.
   // Startup can be active before it creates its first invocation.

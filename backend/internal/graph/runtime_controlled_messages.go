@@ -150,6 +150,7 @@ func (stream *controlledStream) run() {
 	}
 	if transport.StatusCode < 200 || transport.StatusCode >= 300 {
 		transport.Body.Close()
+		stream.broker.Settle(stream.invocation, nil)
 		stream.fail(fmt.Errorf("Provider answered HTTP %d", transport.StatusCode))
 		return
 	}

@@ -246,10 +246,19 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			}
 			// The tool surface records the agent's own question here; the capability
 			// layer above knows nothing about it.
-			tools.OnAskUser = func(request PiAdapterAskedQuestion) {
-				if askedQuestion == nil {
-					copied := request
-					askedQuestion = &copied
+			if conversation == nil || conversation.Role != ConversationProject {
+				tools.OnAskUser = func(request PiAdapterAskedQuestion) {
+					if askedQuestion == nil {
+						copied := request
+						askedQuestion = &copied
+					}
+				}
+			} else if role == "master" && conversation.AnchorTaskId == operation.TaskId {
+				tools.OnAskSupervisor = func(request PiAdapterAskedQuestion) {
+					if askedQuestion == nil {
+						request.ToSupervisor = true
+						askedQuestion = &request
+					}
 				}
 			}
 			if retrieval != nil {
@@ -293,6 +302,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			if channels != nil {
 				supervisor := channels.Supervisor(operation.TaskId)
 				tools.Supervisor = supervisor
+				tools.ControlTask = supervisor.ControlTask
 				// The TypeScript supervisor carries the graph control surface, so
 				// the graph tools read it from the same place.
 				tools.GraphManagement = supervisor.GraphManagement
@@ -392,6 +402,14 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	})
 	toolPolicyDigest := capabilityOperation.ToolPolicyDigest
 	composedPrompt := contextAssembly.ForOperation(capabilityOperation).Composed.Text
+	if conversation != nil && role == "master" {
+		switch conversation.Role {
+		case ConversationGlobal:
+			composedPrompt += "\n\nYou are the global supervisor. You coordinate all projects and do not bind this conversation to one project. Clarify the user's project, goal, and acceptance before calling delegate_work. When notified that a project draft is ready, use read_work_draft to review it and tell the user what is ready. Explain issues yourself first; ask the user only when you cannot resolve them."
+		case ConversationProject:
+			composedPrompt += "\n\nYou are the long-lived project supervisor. Manage work delegated by the global supervisor and coordinate this project's graphs. Use propose_work_graph with the work ID and revision to create a task-specific graph draft. Preserve the work ID when reporting results or requesting clarification."
+		}
+	}
 	agentContext := operation.Context.AgentContext
 	// Record what was actually loaded for this operation so the node
 	// projection cannot later guess from catalog status.
@@ -411,7 +429,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	onEvent := func(event map[string]any) { live.handle(event) }
 	return piAdapterRunTurn(options, transport, input, piAdapterTurnInput{
 		Gate: gate, ObservedGate: observedGate, Spec: spec, Conversation: conversation, Workspace: workspace,
-		PermissionRequest: permissionRequest, AskedQuestion: askedQuestion, ReloadReceipt: &reloadReceipt,
+		PermissionRequest: &permissionRequest, AskedQuestion: &askedQuestion, ReloadReceipt: &reloadReceipt,
 		CapabilityOperation: capabilityOperation, ContextAssembly: contextAssembly, Commands: commands,
 		Tools: tools, ThinkingLevel: thinkingLevel, ModelPolicyDigest: modelPolicyDigest,
 		ToolPolicyDigest: toolPolicyDigest, ComposedPrompt: composedPrompt, AgentContext: agentContext,

@@ -2,6 +2,8 @@
 
 状态：2026-09-14 已实施并本地验证，等待独立验收（分支 `feat/master-agent-entry`，基线 `main@688dd1f`）。方案见 [主 Agent 入口改造草案](../planning/master-agent-entry-plan-2026-09-14.md)，代码差距见 [差距核对](../planning/master-agent-entry-gap-2026-09-14.md)，结果见 [实施与验收报告](../planning/master-agent-entry-report-2026-09-14.md)，独立验收反例的修复见 [第一轮返工报告](../planning/master-agent-entry-rework-report-2026-09-14.md) 与 [第二轮返工报告](../planning/master-agent-entry-rework2-report-2026-09-14.md)。
 
+2026-10-28 修订：[ADR 0036](0036-two-supervisor-levels-and-one-project-thread.md) 收窄了本 ADR 的入口模型。每个会话仍有 anchor 任务与主管，但会话增加 `global`/`project`/`history` 角色，全局主管唯一、每个项目只有一个长期 thread；用户不再按项目新建多个主管会话。
+
 ## 背景
 
 产品要求用户像与 Pi 聊天一样持续与主管交流：可以不先创建功能任务、可以先说模糊目标、可以调查与讨论、可以在确认提案后继续问进展与调整。已验收的执行内核（操作/实例/activation、逐调用门、预算、未知用量、暂停、证据绑定）必须原样生效，不能为聊天另建一条绕过账本的路径。

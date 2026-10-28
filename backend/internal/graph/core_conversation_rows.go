@@ -13,6 +13,7 @@ func ConversationRowOf(store *TaskStore, conversationId string) ConversationRow 
 	}
 	return ConversationRow{
 		Id:                 kernelString(row["id"]),
+		Role:               ConversationRole(kernelString(row["role"])),
 		ProjectId:          conversationNullableString(row["project_id"]),
 		WorkspaceProjectId: kernelString(row["workspace_project_id"]),
 		AnchorTaskId:       kernelString(row["anchor_task_id"]),
@@ -33,6 +34,7 @@ func ConversationForTask(store *TaskStore, taskId string) *ConversationRow {
 	}
 	return &ConversationRow{
 		Id:                 kernelString(row["id"]),
+		Role:               ConversationRole(kernelString(row["role"])),
 		ProjectId:          conversationNullableString(row["project_id"]),
 		WorkspaceProjectId: kernelString(row["workspace_project_id"]),
 		AnchorTaskId:       kernelString(row["anchor_task_id"]),
@@ -43,6 +45,15 @@ func ConversationForTask(store *TaskStore, taskId string) *ConversationRow {
 		ThinkingLevel:      conversationNullableString(row["thinking_level"]),
 		BindingSinceSeq:    kernelInt(row["binding_since_seq"]),
 	}
+}
+
+// SupervisorConversationForTask follows the current owner while retaining the source conversation on the task.
+func SupervisorConversationForTask(store *TaskStore, taskID string) *ConversationRow {
+	anchor, ok := questionConversationAnchor(store, taskID)
+	if !ok {
+		return nil
+	}
+	return ConversationForTask(store, anchor)
 }
 
 // PublicMessage is the client projection of one message row. The ledger keeps the full

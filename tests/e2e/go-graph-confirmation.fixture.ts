@@ -32,7 +32,7 @@ export interface MasterCall {
   before?: () => Promise<void>;
 }
 
-export async function masterProvider(plan: () => MasterCall[]) {
+export async function masterProvider(plan: (body: ChatBody) => MasterCall[]) {
   const results = new Map<string, string>();
   const failures: string[] = [];
   let turns = 0;
@@ -55,7 +55,7 @@ export async function masterProvider(plan: () => MasterCall[]) {
       return;
     }
     turns += 1;
-    const next = plan().find(call => !spoken.has(call.id));
+    const next = plan(body).find(call => !spoken.has(call.id));
     if (!next) {
       response.write(frame({ id: 'r', choices: [{ index: 0, delta: { role: 'assistant', content: 'The graph is as expected.' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 5, completion_tokens: 5 } }));

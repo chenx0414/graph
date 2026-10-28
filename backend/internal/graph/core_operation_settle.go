@@ -201,6 +201,8 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 		nextStatus = "pending"
 	case conversation != nil && result.Outcome == "completed" && queuedAfter > 0:
 		nextStatus = "pending"
+	case conversation != nil && result.Outcome == "completed" && len(PendingWakes(l.store, operation.TaskId, operation.NodeId)) > 0:
+		nextStatus = "pending"
 	case result.Outcome == "completed":
 		nextStatus = "succeeded"
 	case result.Outcome == "continue":
@@ -240,16 +242,19 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 
 // bindWakes binds ready wakes to the turn that is about to act on them.
 func (l *OperationLifecycle) bindWakes(operation Operation) {
-	ready := PendingWakes(l.store, operation.TaskId, operation.NodeId)
-	if len(ready) == 0 {
+	if len(operation.Context.Wakes) == 0 {
 		return
 	}
-	ConsumeWakes(l.store, operation.TaskId, operation.NodeId, operation.Id)
 	kinds := []string{}
 	dedupeKeys := []string{}
-	for _, wake := range ready {
-		kinds = append(kinds, string(wake.Kind))
-		dedupeKeys = append(dedupeKeys, wake.DedupeKey)
+	for _, wake := range operation.Context.Wakes {
+		if ConsumeWake(l.store, operation.TaskId, operation.NodeId, operation.Id, wake.Kind, wake.DedupeKey) != 0 {
+			kinds = append(kinds, wake.Kind)
+			dedupeKeys = append(dedupeKeys, wake.DedupeKey)
+		}
+	}
+	if len(kinds) == 0 {
+		return
 	}
 	l.store.Event(operation.TaskId, "wake.delivered", map[string]any{
 		"operationId": operation.Id,

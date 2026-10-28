@@ -31,8 +31,10 @@ type PiAdapterActivityRecord struct {
 
 // PiAdapterAskedQuestion is the agent's own question to the user.
 type PiAdapterAskedQuestion struct {
-	Prompt   string   `json:"prompt"`
-	Why      string   `json:"why"`
-	Options  []string `json:"options"`
-	Multiple bool     `json:"multiple"`
+	Prompt       string   `json:"prompt"`
+	Why          string   `json:"why"`
+	Options      []string `json:"options"`
+	Multiple     bool     `json:"multiple"`
+	ToSupervisor bool     `json:"-"`
+	RequestID    string   `json:"-"`
 }

@@ -50,7 +50,7 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
     const report = JSON.parse(stdout);
     artifactRoot = report.root;
     expect(provider.requests.length, JSON.stringify(report)).toBeGreaterThan(0);
-    expect(report).toMatchObject({ completed: !timedOut, success: !timedOut && !fixedCount, timedOut });
+    expect(report, JSON.stringify(report)).toMatchObject({ completed: !timedOut, success: !timedOut && !fixedCount, timedOut });
     // A transport that never answers leaves the Go daemon's ledger unsettled: the
     // operation settles as an unknown outcome and the call stays unknown, because
     // settling a transport that never drained belongs with the PiG kernel

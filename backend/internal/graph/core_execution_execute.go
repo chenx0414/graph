@@ -20,7 +20,7 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	}
 	if e.store.Task(node.TaskId).Phase == "chatting" {
 		conversation := ConversationForTask(e.store, node.TaskId)
-		if conversation == nil || conversation.ArchivedAt != nil {
+		if conversation == nil || conversation.ArchivedAt != nil || conversation.Role == ConversationHistory {
 			graphDatabaseMu.Unlock()
 			return false
 		}

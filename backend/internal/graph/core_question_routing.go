@@ -168,52 +168,6 @@ func IsMasterParked(store *TaskStore, taskId, nodeId string) bool {
 	return kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main' LIMIT 1", taskId, nodeId) != nil
 }
 
-// RecoverMaster releases a master for an explicit message or configuration
-// change. Startup does not call this: simply reopening the runtime must leave
-// problems parked. It reports whether a parked problem was resolved. Writes
-// join an existing command/recovery transaction, or open one when called on
-// its own.
-func RecoverMaster(store *TaskStore, taskId, reason string) bool {
-	apply := func() any {
-		master := questionMasterNode(store, taskId)
-		if master == nil {
-			return false
-		}
-		parked := kernelRows(store.Db, "SELECT id,kind FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main'", taskId, master.Id)
-		if reason == "configuration" {
-			if len(parked) == 0 || kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND status='open' AND owner='user' LIMIT 1", taskId) != nil {
-				return false
-			}
-		}
-		released := []map[string]any{}
-		if reason == "configuration" {
-			released = parked
-		} else {
-			for _, question := range parked {
-				if questionPolicy(kernelString(question["kind"])).RetryOnMessage {
-					released = append(released, question)
-				}
-			}
-		}
-		for _, question := range released {
-			store.ResolveQuestion(kernelString(question["id"]), map[string]any{"type": "retry"})
-		}
-		if reason == "configuration" || (master.Status != "preparing" && master.Status != "running" && master.Status != "blocked") {
-			store.SetNodePending(taskId, master.Id)
-		}
-		if reason == "configuration" {
-			store.Event(taskId, "task.master_recovered", map[string]any{"reason": "internal problem parked while the environment was unavailable"})
-		}
-		return len(released) > 0
-	}
-	if store.IsTransaction() {
-		released, _ := apply().(bool)
-		return released
-	}
-	released, _ := store.Transaction(apply).(bool)
-	return released
-}
-
 // InsertQuestion inserts one durable question and routes it to the correct
 // owner. Main-owned questions wake the conversation master; user-owned
 // questions open the human wait ledger and become visible in the inbox.
@@ -235,6 +189,31 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 	// scheduler until an explicit retry or configuration recovery releases it.
 	selfOwned := master != nil && anchorTaskId == input.TaskId && master.Id == input.NodeId
 	store.OpenQuestion(id, input.TaskId, input.NodeId, questionOptionalOperationId(input.OperationId), input.Kind, input.Data, owner)
+	routeGlobal := false
+	if input.Kind == "waiting" && questionRecord(input.Data)["requestType"] == "supervisor_decision" {
+		conversation := ConversationForTask(store, input.TaskId)
+		if conversation == nil || conversation.Role != ConversationProject || conversation.AnchorTaskId != input.TaskId || !selfOwned {
+			Raise("permission", "Only a project supervisor can ask the global supervisor")
+		}
+		global := kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE role='global' AND archived_at IS NULL")
+		if global == nil {
+			Raise("invalid_state", "The global supervisor is unavailable")
+		}
+		store.RouteQuestion(id, "global")
+		routeGlobal = true
+		WakeMaster(store, WakeIntent{TaskID: kernelString(global["anchor_task_id"]), Kind: "supervisor_question", DedupeKey: id,
+			Data: map[string]any{"questionId": id, "revision": 1, "projectId": conversation.ProjectId}, HasData: true})
+	}
+	if input.Kind == "recovery" && selfOwned {
+		conversation := ConversationForTask(store, input.TaskId)
+		global := kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE role='global' AND archived_at IS NULL")
+		if conversation != nil && conversation.Role == ConversationProject && global != nil {
+			store.RouteQuestion(id, "global")
+			routeGlobal = true
+			WakeMaster(store, WakeIntent{TaskID: kernelString(global["anchor_task_id"]), Kind: "supervisor_question", DedupeKey: id,
+				Data: map[string]any{"questionId": id, "revision": 1, "projectId": conversation.ProjectId}, HasData: true})
+		}
+	}
 
 	if input.AutoAnswer != nil {
 		if input.Kind == "permission" && input.AutoAnswer.Answer.Type == "grant" {
@@ -257,6 +236,8 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 			"answer":       input.AutoAnswer.Answer,
 			"policyDigest": input.AutoAnswer.PolicyDigest,
 		})
+	} else if routeGlobal {
+		store.Event(input.TaskId, "problem.routed_global", map[string]any{"questionId": id, "revision": 1})
 	} else if owner == QuestionOwnerMain && hasConversation && master != nil {
 		routing := map[string]any{
 			"questionId": id,
@@ -360,7 +341,8 @@ func HumanCheckPreReview(store *TaskStore, questionId string) map[string]any {
 func PendingHumanChecks(store *TaskStore, conversationId string) []map[string]any {
 	rows := kernelRows(store.Db, `SELECT q.id,q.task_id,q.node_id,q.data FROM questions q
     JOIN tasks t ON t.id=q.task_id
-    WHERE t.conversation_id=? AND q.kind='human_check' AND q.status='open' ORDER BY q.rowid`, conversationId)
+    LEFT JOIN kernel_graph_owners g ON g.task_id=t.id LEFT JOIN tasks owner ON owner.id=g.owner_task_id
+    WHERE COALESCE(owner.conversation_id,t.conversation_id)=? AND q.kind='human_check' AND q.status='open' ORDER BY q.rowid`, conversationId)
 	checks := []map[string]any{}
 	for _, row := range rows {
 		if questionPreApproved(questionParseRecord(kernelString(row["data"]))) {
@@ -431,7 +413,9 @@ func questionMasterNode(store *TaskStore, taskId string) *questionMaster {
 // row directly so the routing file does not depend on that translation's
 // row type.
 func questionConversationAnchor(store *TaskStore, taskId string) (string, bool) {
-	row := kernelRow(store.Db, "SELECT c.anchor_task_id FROM conversations c JOIN tasks t ON t.conversation_id=c.id WHERE t.id=?", taskId)
+	row := kernelRow(store.Db, `SELECT c.anchor_task_id FROM tasks t
+ LEFT JOIN kernel_graph_owners g ON g.task_id=t.id LEFT JOIN tasks owner ON owner.id=g.owner_task_id
+ JOIN conversations c ON c.id=COALESCE(owner.conversation_id,t.conversation_id) WHERE t.id=?`, taskId)
 	if row == nil {
 		return "", false
 	}

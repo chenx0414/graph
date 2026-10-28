@@ -53,6 +53,9 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					}
 					used, paused := kernel.NodeUsage(graphId, nodeId)
 					task := kernel.Store.Task(graphId)
+					if projectArchived(kernel.Store, task.ProjectID) {
+						Raise("paused", "Project is archived")
+					}
 					if paused || task.Paused != 0 || phaseClosed(task.Phase) {
 						Raise("paused", "Provider send is paused")
 					}

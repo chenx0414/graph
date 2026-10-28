@@ -1,17 +1,27 @@
 package graph
 
+type ConversationRole string
+
+const (
+	ConversationGlobal  ConversationRole = "global"
+	ConversationProject ConversationRole = "project"
+	ConversationHistory ConversationRole = "history"
+	ConversationLegacy  ConversationRole = "legacy"
+)
+
 // ConversationRow is one conversations table row.
 type ConversationRow struct {
-	Id                 string  `json:"id"`
-	ProjectId          *string `json:"project_id"`
-	WorkspaceProjectId string  `json:"workspace_project_id"`
-	AnchorTaskId       string  `json:"anchor_task_id"`
-	Title              string  `json:"title"`
-	CreatedSeq         int64   `json:"created_seq"`
-	CreatedAt          int64   `json:"created_at"`
-	ArchivedAt         *int64  `json:"archived_at"`
-	ThinkingLevel      *string `json:"thinking_level"`
-	BindingSinceSeq    int64   `json:"binding_since_seq"`
+	Role               ConversationRole `json:"role"`
+	Id                 string           `json:"id"`
+	ProjectId          *string          `json:"project_id"`
+	WorkspaceProjectId string           `json:"workspace_project_id"`
+	AnchorTaskId       string           `json:"anchor_task_id"`
+	Title              string           `json:"title"`
+	CreatedSeq         int64            `json:"created_seq"`
+	CreatedAt          int64            `json:"created_at"`
+	ArchivedAt         *int64           `json:"archived_at"`
+	ThinkingLevel      *string          `json:"thinking_level"`
+	BindingSinceSeq    int64            `json:"binding_since_seq"`
 }
 
 // ConversationMessage is one durable transcript row.

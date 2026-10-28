@@ -16,6 +16,8 @@ type AgentToolFeatures struct {
 	Role            string
 	ReadOnly        bool
 	Run             bool
+	AskUser         bool
+	AskSupervisor   bool
 	Fetch           bool
 	Catalog         bool
 	Artifacts       *AgentArtifactAccess
@@ -35,6 +37,10 @@ type AgentArtifactAccess struct {
 
 // AgentSupervisorFeatures are the conversation controls offered to main.
 type AgentSupervisorFeatures struct {
+	ResumeWork         bool
+	DelegateWork       bool
+	ProposeWorkGraph   bool
+	ReadWorkDraft      bool
 	ValidateProposal   bool
 	GraphState         bool
 	TaskStatus         bool

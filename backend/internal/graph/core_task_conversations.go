@@ -1,5 +1,9 @@
 package graph
 
+func (s *TaskStore) AssignConversationRole(conversationID string, role ConversationRole) {
+	kernelExec(s.DB, "UPDATE conversations SET role=? WHERE id=?", string(role), conversationID)
+}
+
 // CreateConversation opens one conversation.
 func (s *TaskStore) CreateConversation(id string, projectID *string, workspaceProjectID, anchorTaskID, title string, sequence, createdAt int64) {
 	kernelExec(s.DB, "INSERT INTO conversations(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at) VALUES(?,?,?,?,?,?,?)",

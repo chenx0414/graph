@@ -9,6 +9,15 @@ import (
 // agentToolsSupervisorHandlers are the handlers of the Supervisor tools.
 func agentToolsSupervisorHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
+		"delegate_work": func(id string, params map[string]any) any {
+			acceptance := []string{}
+			if values, ok := params["acceptance"].([]any); ok {
+				for _, value := range values {
+					acceptance = append(acceptance, agentToolsString(value))
+				}
+			}
+			return agentToolsText(stringifyJSON(input.Supervisor.DelegateWork(DelegateWorkInput{ProjectID: agentToolsString(params["projectId"]), SourceMessageID: agentToolsStringOrEmpty(params["sourceMessageId"]), Brief: agentToolsString(params["brief"]), Acceptance: acceptance, RequestID: agentToolsString(params["requestId"])})))
+		},
 		"validate_proposal": func(id string, params map[string]any) any {
 			// The master asks whether a proposal would be accepted. A refusal
 			// is the answer to that question, not a failed tool call: the
@@ -109,6 +118,10 @@ func agentToolsSupervisorHandlers(input AgentToolsInput, root string, readRoots 
 				QuestionId: strings.TrimSpace(agentToolsString(params["questionId"])),
 				Action:     action,
 				RequestId:  strings.TrimSpace(agentToolsString(params["requestId"])),
+			}
+			if revision, ok := agentToolsNumber(params["expectedRevision"]); ok && revision > 0 && float64(int64(revision)) == revision {
+				value := int64(revision)
+				resolve.ExpectedRevision = &value
 			}
 			if response, ok := params["response"].(string); ok {
 				value := strings.TrimSpace(response)

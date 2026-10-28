@@ -61,12 +61,25 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 			kernel.SetNodeQueuePaused(taskId, nodeId, true)
 			kernelExec(kernel.Db, "UPDATE kernel_nodes SET status='blocked' WHERE task_id=? AND node_id=?", taskId, nodeId)
 			kernel.Store.BlockTaskPhase(taskId)
+			if !submitted && kernel.HasRecordedNodeQuestion(kernelString(row["id"])) {
+				kernel.PublishRecordedNodeQuestion(kernelString(row["id"]), "The runtime was interrupted after this question was recorded. Inspect the execution and reconcile pending provider calls before answering.")
+			} else {
+				WakeForBlockedNode(kernel.Store, taskId, BlockedNodeWake{NodeID: nodeId, Reason: reason, IncidentID: kernelString(row["id"]), HasIncident: true})
+			}
 			kernel.Store.Event(taskId, "graph.execution.interrupted", map[string]any{
 				"executionId": kernelString(row["id"]),
 				"nodeId":      nodeId,
 				"submitted":   submitted,
 				"reason":      reason,
 			})
+		}
+		// Earlier interruptions may have left a recorded question on an already
+		// blocked execution. Its original queued input is still the continuation.
+		for _, row := range kernelRows(kernel.Db, `SELECT n.execution_id FROM node_questions n
+ JOIN kernel_executions e ON e.id=n.execution_id
+ JOIN kernel_queue q ON q.task_id=n.task_id AND q.node_id=n.node_id AND q.seq=n.queue_seq
+ WHERE n.state='recorded' AND e.state='blocked' AND e.submission_id IS NULL AND q.state='queued'`) {
+			kernel.PublishRecordedNodeQuestion(kernelString(row["execution_id"]), "The execution was interrupted after this question was recorded. Inspect the execution and reconcile pending provider calls before answering.")
 		}
 		return nil
 	})

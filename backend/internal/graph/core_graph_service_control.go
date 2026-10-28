@@ -8,7 +8,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		phase = state.Phase
 	}
 	switch input.Action {
-	case "pause", "resume", "reopen", "retry", "skip", "cancel":
+	case "pause", "resume", "reopen", "retry", "skip", "cancel", "retry_preparation":
 		if phase == "completed" || phase == "stopping" || phase == "stopped" {
 			Raise("invalid_graph", "Ended graph cannot change its execution controls")
 		}
@@ -61,6 +61,8 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			Raise("invalid_input", "reconcile_usage requires callId and usage")
 		}
 		return ReconcileKernelUsage(service.kernel, input.GraphId, *input.CallId, *input.Usage)
+	case "retry_preparation":
+		return service.retryGraphPreparation(input.GraphId, input.Proof)
 	case "complete":
 		return graph.Complete()
 	case "withdraw_complete":
@@ -104,18 +106,31 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			if !known {
 				Raise("invalid_input", "Pause/resume requires a target in the current graph definition")
 			}
-			service.kernel.SetNodeQueuePaused(input.GraphId, target, paused)
-			if !paused {
-				service.kernel.UnblockNode(input.GraphId, target)
+			service.kernel.Store.Transaction(func() any {
+				if !paused {
+					requireProjectActive(service.kernel.Store, service.kernel.Store.Task(input.GraphId).ProjectID)
+					if input.AgentTaskID != "" {
+						requireArchiveResumeInstruction(service.kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
+					}
+				}
+				service.kernel.SetQuestionManualPause(input.GraphId, target, paused)
+				service.kernel.SetNodeQueuePausedInCurrentTransaction(input.GraphId, target, paused)
+				if !paused {
+					service.kernel.UnblockNode(input.GraphId, target)
+				}
+				service.kernel.SetNativePause(input.GraphId, paused, target, 0)
+				return nil
+			})
+			return graph.State()
+		}
+		service.kernel.Store.Transaction(func() any {
+			if !paused && input.AgentTaskID != "" {
+				requireArchiveResumeInstruction(service.kernel.Store, input.AgentTaskID, input.GraphId, input.SourceMessageID, input.Instruction)
 			}
-		} else {
 			service.kernel.Store.SetTaskPaused(input.GraphId, paused)
-		}
-		targetNode := ""
-		if hasTarget {
-			targetNode = target
-		}
-		service.kernel.SetNativePause(input.GraphId, paused, targetNode, 0)
+			service.kernel.SetNativePause(input.GraphId, paused, "", 0)
+			return nil
+		})
 		return graph.State()
 	case "retry", "skip", "cancel":
 		if input.Seq == nil {
@@ -139,6 +154,13 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			Raise("invalid_queue", "Submitted work cannot be sent again")
 		}
 		service.kernel.Store.Transaction(func() any {
+			requireProjectActive(service.kernel.Store, service.kernel.Store.Task(input.GraphId).ProjectID)
+			if input.Action == "retry" && service.kernel.HasPendingProviderCall(input.GraphId, nodeId) {
+				Raise("unknown_usage", "Reconcile the node's pending provider calls before retrying")
+			}
+			if kernelRow(service.kernel.Db, "SELECT id FROM node_questions WHERE task_id=? AND node_id=? AND queue_seq=? AND state IN ('recorded','parked')", input.GraphId, nodeId, seq) != nil {
+				Raise("invalid_queue", "The node question must be resolved before changing its queue item")
+			}
 			if input.Action == "retry" {
 				service.kernel.RetryQueueItem(input.GraphId, int64(seq), input.Action)
 			} else {

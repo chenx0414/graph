@@ -281,7 +281,19 @@ test('an interrupted node turn that was already at the model is not sent again',
     expect(item?.state, `the recovery did not stop the turn:\n${state}`).toBe('failed');
     expect(item?.reason ?? '').toMatch(/reconcile/i);
 
-    // The user may resume the node. The input is still not sent again.
+    // Unknown usage must be reconciled before the node may be resumed.
+    const premature = await request(`/api/tasks/${taskId}/graph/control`, 'POST', { action: 'resume', nodeId: 'work' });
+    expect(premature.status).not.toBe(200);
+    const pendingDB = new DatabaseSync(database, { readOnly: true });
+    const calls = pendingDB.prepare("SELECT id FROM kernel_provider_calls WHERE task_id=? AND node_id='work' AND state='unknown'").all(taskId);
+    pendingDB.close();
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      if (typeof call.id !== 'string') throw new Error('Missing pending provider call id');
+      const reconciled = await request(`/api/tasks/${taskId}/graph/control`, 'POST', { action: 'reconcile_usage', callId: call.id, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+      expect(reconciled.status, JSON.stringify(reconciled.body)).toBe(200);
+    }
+    // Resuming does not resend the interrupted input.
     const resumed = await request(`/api/tasks/${taskId}/graph/control`, 'POST', { action: 'resume', nodeId: 'work' });
     expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
     await new Promise(resolve => setTimeout(resolve, 3000));

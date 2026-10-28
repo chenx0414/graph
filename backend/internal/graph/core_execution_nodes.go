@@ -130,7 +130,7 @@ func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 	task := e.store.Task(taskId)
 	if task.Phase == "chatting" {
 		conversation := ConversationForTask(e.store, taskId)
-		if conversation == nil || conversation.ArchivedAt != nil {
+		if conversation == nil || conversation.ArchivedAt != nil || conversation.Role == ConversationHistory {
 			return nil
 		}
 		// A conversation that has no message yet is still being created: the
@@ -139,7 +139,8 @@ func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 		// before the message it has to answer existed. The Go host runs the
 		// creation and the dispatch on separate goroutines, so a master whose
 		// conversation still has no message waits for one.
-		if kernelInt(kernelRow(e.store.Db, "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?", conversation.Id)["count"]) == 0 {
+		if kernelInt(kernelRow(e.store.Db, "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?", conversation.Id)["count"]) == 0 &&
+			kernelRow(e.store.Db, "SELECT id FROM wake_intents WHERE task_id=? AND state='ready' LIMIT 1", taskId) == nil {
 			return nil
 		}
 		rows := kernelRows(e.store.Db, `SELECT * FROM nodes n
