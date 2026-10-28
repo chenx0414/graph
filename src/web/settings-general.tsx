@@ -21,6 +21,7 @@ import type { ProjectRow } from "./settings-config.tsx";
 export function ProjectGitCard() {
   const [projects, setProjects] = useState<ProjectRow[] | null>(null);
   const [busy, setBusy] = useState('');
+  const [archiving, setArchiving] = useState('');
   const load = useCallback(async () => {
     const data = await api<{ projects: ProjectRow[] }>('/api/settings');
     setProjects(data.projects.filter(project => !project.id.startsWith('conversation:')));
@@ -41,30 +42,67 @@ export function ProjectGitCard() {
       await load().catch(() => undefined);
     }
   };
+  // Archiving pauses the project's unfinished work and refuses new delegations.
+  // Restoring only lifts the archive: the work it paused stays paused until the
+  // user asks for it by name.
+  const setArchived = async (project: ProjectRow, action: 'archive' | 'restore') => {
+    if (archiving) return;
+    setArchiving(project.id);
+    try {
+      await api(`/api/projects/${encodeURIComponent(project.id)}/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `${action}-${project.id}-${crypto.randomUUID()}` }),
+      });
+      toast(action === 'archive'
+        ? '项目已归档：未完成的工作已暂停，新的委派会被拒绝。'
+        : '项目已恢复；归档时暂停的工作仍保持暂停，需要你明确要求继续。', 'success');
+      window.dispatchEvent(new Event('graph:settings-changed'));
+    } catch (reason) {
+      toast(`${action === 'archive' ? '归档' : '恢复'}失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
+    } finally {
+      setArchiving('');
+      await load().catch(() => undefined);
+    }
+  };
   const label = (state: string | undefined) => state === 'ready' ? '已准备' : state === 'detected' ? '待处理' : state === 'failed' ? '失败' : '未准备';
-  return (
-    <Card title="项目与本地基线" icon="box" subtitle="正式派发前必须准备好 Git 与本地基线；普通目录由宿主初始化并建立本地版本记录">
-      {projects === null && <Spinner />}
-      {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
-      {projects?.map(project => {
-        const prep = project.preparation;
-        const dirty = prep?.detail?.dirty ?? 0;
-        return (
-          <div className="list-item" key={project.id} data-testid={`git-project-${project.id}`}>
-            <div className="row grow" style={{ alignItems: 'center' }}>
-              <Pill tone={prep?.state === 'ready' ? 'success' : prep?.state === 'failed' ? 'danger' : prep?.state === 'detected' ? 'warn' : 'neutral'}>{label(prep?.state)}</Pill>
-              <span className="grow">{project.id} <span className="muted">{project.root}</span></span>
-              {prep?.projectSubdir && <span className="muted">子目录 {prep.projectSubdir}</span>}
-              {prep?.baselineSha && <code className="faint">{prep.baselineSha.slice(0, 10)}</code>}
-            </div>
-            {prep?.state === 'detected' && <span className="muted">{dirty ? `${dirty} 项未提交修改；创建基线将把这些改动纳入本地快照` : prep.detail?.reason === 'not_a_repository' ? '尚未初始化 Git' : '需要准备'}</span>}
-            {prep?.state === 'failed' && <span className="muted">{prep.detail?.reason ?? '准备失败'}</span>}
+  const row = (project: ProjectRow, archived: boolean) => {
+    const prep = project.preparation;
+    const dirty = prep?.detail?.dirty ?? 0;
+    return (
+      <div className="list-item" key={project.id} data-testid={`git-project-${project.id}`} data-archived={archived}>
+        <div className="row grow" style={{ alignItems: 'center' }}>
+          {archived
+            ? <Pill tone="neutral">已归档</Pill>
+            : <Pill tone={prep?.state === 'ready' ? 'success' : prep?.state === 'failed' ? 'danger' : prep?.state === 'detected' ? 'warn' : 'neutral'}>{label(prep?.state)}</Pill>}
+          <span className="grow">{project.id} <span className="muted">{project.root}</span></span>
+          {!archived && prep?.projectSubdir && <span className="muted">子目录 {prep.projectSubdir}</span>}
+          {!archived && prep?.baselineSha && <code className="faint">{prep.baselineSha.slice(0, 10)}</code>}
+        </div>
+        {!archived && prep?.state === 'detected' && <span className="muted">{dirty ? `${dirty} 项未提交修改；创建基线将把这些改动纳入本地快照` : prep.detail?.reason === 'not_a_repository' ? '尚未初始化 Git' : '需要准备'}</span>}
+        {!archived && prep?.state === 'failed' && <span className="muted">{prep.detail?.reason ?? '准备失败'}</span>}
+        {archived && <span className="muted">{project.archivedAt ? `归档于 ${new Date(project.archivedAt).toLocaleString()}；` : ''}不再接受新的委派</span>}
+        <div className="row" style={{ gap: 8 }}>
+          {!archived && (
             <Button size="sm" data-testid={`git-prepare-${project.id}`} disabled={busy === project.id} onClick={() => void prepare(project, prep?.state === 'detected' && dirty > 0)}>
               {prep?.state === 'detected' && dirty > 0 ? '创建本地基线提交' : '准备 Git'}
             </Button>
-          </div>
-        );
-      })}
+          )}
+          {archived
+            ? <Button size="sm" icon="refresh" data-testid={`project-restore-${project.id}`} disabled={archiving === project.id} onClick={() => void setArchived(project, 'restore')}>{archiving === project.id ? '恢复中…' : '恢复项目'}</Button>
+            : <Button size="sm" variant="danger" data-testid={`project-archive-${project.id}`} disabled={archiving === project.id} onClick={() => void setArchived(project, 'archive')}>{archiving === project.id ? '归档中…' : '归档项目'}</Button>}
+        </div>
+      </div>
+    );
+  };
+  const active = (projects ?? []).filter(project => project.archivedAt == null);
+  const archived = (projects ?? []).filter(project => project.archivedAt != null);
+  return (
+    <Card title="项目与本地基线" icon="box" subtitle="正式派发前必须准备好 Git 与本地基线；归档的项目不再接受新的委派，恢复后也不会自动继续归档时暂停的工作">
+      {projects === null && <Spinner />}
+      {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
+      {active.map(project => row(project, false))}
+      {archived.length > 0 && <div className="sidebar-label" data-testid="archived-projects-label">已归档项目（{archived.length}）</div>}
+      {archived.map(project => row(project, true))}
     </Card>
   );
 }

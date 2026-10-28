@@ -44,6 +44,11 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   const [openingProject, setOpeningProject] = useState('');
   const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
   const global = ordered.find(conversation => 'role' in conversation && conversation.role === 'global');
+  // An archived project is put away: its rows leave the project list, and the
+  // settings page is where it comes back from.
+  const projectRows = settings?.projects ?? [];
+  const activeProjects = projectRows.filter(project => project.archivedAt == null);
+  const archivedProjects = projectRows.filter(project => project.archivedAt != null);
   const unbound = ordered.filter(conversation => !conversation.projectId && !('role' in conversation && conversation.role === 'global'));
   function isSupervisor(conversation: ConversationSummary) {
     return 'role' in conversation && (conversation.role === 'global' || conversation.role === 'project');
@@ -96,7 +101,7 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
           </button>
         </div>
         <div className="sidebar-section" hidden={!sections.projects}>
-          {(settings?.projects ?? []).map(project => {
+          {activeProjects.map(project => {
             const items = ordered.filter(conversation => conversation.projectId === project.id);
             return (
               <details
@@ -139,7 +144,12 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
               </details>
             );
           })}
-          {!settings?.projects.length && <div className="sidebar-empty">添加项目，让 Agent 了解你的代码。<button type="button" className="sidebar-empty-action" onClick={() => setCreateProject(true)}>添加项目<Icon name="plus" size={13} /></button></div>}
+          {archivedProjects.length > 0 && (
+            <a className="sidebar-empty" href="#/settings" data-testid="archived-projects-hint">
+              已归档 {archivedProjects.length} 个项目 · 在设置中恢复
+            </a>
+          )}
+          {!projectRows.length && <div className="sidebar-empty">添加项目，让 Agent 了解你的代码。<button type="button" className="sidebar-empty-action" onClick={() => setCreateProject(true)}>添加项目<Icon name="plus" size={13} /></button></div>}
         </div>
         <div className="sidebar-label"><button type="button" className="sidebar-section-toggle" aria-expanded={sections.recent} onClick={() => setSections(value => ({ ...value, recent: !value.recent }))}><Icon name="chevron" size={12} /><span>最近</span></button>
 

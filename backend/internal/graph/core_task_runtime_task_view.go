@@ -411,6 +411,7 @@ func (user *TaskRuntimeUser) Projects() []map[string]any {
 			"root":        root,
 			"grants":      taskRuntimeGrants(project.Grants),
 			"branch":      nil,
+			"archivedAt":  projectArchivedAt(runtime.store, project.Id),
 			"preparation": runtime.git.Preparation(project.Id),
 		}
 		if branch := CheckedOutBranch(root); branch != nil {

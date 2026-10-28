@@ -138,4 +138,4 @@ export function mergeSubscriptionCredentials(config: RawConfig, detected: Record
 
 export type Preparation = { state: string; repoRoot: string | null; projectSubdir: string | null; baselineSha: string | null; detail: { dirty?: number; reason?: string } | null };
 
-export type ProjectRow = { id: string; root: string; preparation: Preparation | null };
+export type ProjectRow = { id: string; root: string; archivedAt?: number | null; preparation: Preparation | null };
