@@ -9,7 +9,7 @@
   "surface": {
     "backend/internal/graph/runtime_agent_context.go": "c47a77afcdb893c35ac6ae6c87673a5f881df78372c5c1f50715b38472b51e4c",
     "backend/internal/graph/runtime_agent_tool_definitions.go": "356e8b59c95da240542bac05814d733e17daea1045e312c928cc0041af91dcc5",
-    "backend/internal/graph/runtime_agent_tools.go": "da32b514bc415c2c984f42cb566c8beaf886f8a8843115d79a78500befdcc589",
+    "backend/internal/graph/runtime_agent_tools.go": "d6088306a82d1e41dd9a5294581dbfe40701cd2860fe2c1fce5147fbbb1503b4",
     "backend/internal/graph/runtime_pi_native_tools.go": "fcefd7b410364862ab5f9b131a904dfb56f852ed7d8ce696ad0e1e37268b9173",
     "backend/internal/graph/runtime_pig_native_tools.go": "dbca13cbb89f8cefb3bde6cae545f1426b32d4a6acd40dede54328408f5a4d24",
     "scripts/harness-eval-cases.mjs": "31e8dd009090a25ab67ca263b554ecbf4b4af3c3cc8ce58879d083672be4dd1f",
@@ -18,5 +18,5 @@
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "26ef1e08d7fe6fe5359a8264d1763f71a774731b26ffaf13405db3db418b7462"
   },
-  "updatedAt": "2026-10-28T01:29:15.094Z"
+  "updatedAt": "2026-10-28T07:32:09.914Z"
 }
