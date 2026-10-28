@@ -19,6 +19,9 @@ import (
 type PigNodeHostOptions struct {
 	// Database is the formal Graph database the durable records live in.
 	Database string
+	// Store is the daemon's store, so a node's extension calls reach the same
+	// tool telemetry every other tool writes to.
+	Store *TaskStore
 	// Request is the node's own session request. Everything the kernel runs -
 	// the model, the tools, the prompt and the identity - is the daemon's.
 	Request AgentSessionRequest
@@ -118,7 +121,11 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		request.InputRequestId = host.options.RequestId()
 	}
 	tools := pigNodeToolSpecs(request, host.options.Gate, host.options.Ungated)
-	extensions, err := pigExtensionSpecs(context.Background(), request, host.options.Gate)
+	extensions, err := pigExtensionSpecs(context.Background(), request, host.options.Gate, func(tool string, ms float64, isError bool) {
+		if host.options.Store != nil {
+			host.options.Store.RecordToolCall(ToolCallInput{InstanceID: request.Binding.InstanceId, Tool: tool, Ms: ms, IsError: isError})
+		}
+	})
 	if err != nil {
 		// The refusal names the extension: a node that cannot host one has to
 		// say which one, so the user knows what to unbind.

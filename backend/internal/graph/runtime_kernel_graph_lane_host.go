@@ -382,6 +382,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		}
 		host := NewPigNodeHost(PigNodeHostOptions{
 			Database: state.options.Kernel.Store.Path,
+			Store:    state.options.Kernel.Store,
 			Request:  nodeRequest,
 			Gate:     nativeGate,
 			// The `submit` is the host's own tool: the host executes it

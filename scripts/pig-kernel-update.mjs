@@ -149,6 +149,11 @@ function parseArguments(argv) {
   return options;
 }
 
+/** A network this host cannot use is not a version drift the updater can judge. */
+function unreachable(message) {
+  return /tls:|x509|dial tcp|no such host|i\/o timeout|connection refused|network is unreachable|server misbehaving/i.test(String(message));
+}
+
 function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.mode === 'help') {
@@ -157,13 +162,23 @@ function main() {
   }
   if (options.root) useRoot(options.root);
   if (!existsSync(goModPath)) fail(`no Go module at ${goModPath}`);
-  let current;
-  let latest;
-  try {
-    current = pinnedVersion();
-    latest = latestVersion();
-  } catch (error) {
-    fail(error.message);
+  const current = pinnedVersion();
+  // Pinning one exact version needs no network; reporting, checking and
+  // `--set latest` all need the published list.
+  const needsLatest = options.mode !== 'set' || options.version === 'latest';
+  let latest = null;
+  if (needsLatest) {
+    try {
+      latest = latestVersion();
+    } catch (error) {
+      // A module proxy we cannot reach is not a drift signal: the tree may be
+      // current and the answer is simply unavailable. Report the skip instead
+      // of failing a tree this host cannot judge, and keep --set strict
+      // because it has to fetch the version it pins.
+      if (options.mode === 'set' || !unreachable(error.message)) fail(error.message);
+      process.stdout.write(`pinned:  ${current ?? '(not pinned)'}\nlatest:  (unavailable)\nmodule:  ${MODULE}\nskipped: the module proxy is unreachable\nreason:  ${error.message}\n`);
+      return;
+    }
   }
   if (options.mode === 'report') {
     process.stdout.write(`pinned:  ${current ?? '(not pinned)'}\nlatest:  ${latest}\nmodule:  ${MODULE}\n`);

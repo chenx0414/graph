@@ -49,7 +49,7 @@ func (runtime *TaskRuntime) ArchiveProject(projectID, requestID string) ProjectL
 			for _, row := range kernelRows(runtime.store.Db, `SELECT id FROM tasks WHERE project_id=? AND phase NOT IN ('chatting','completed','stopping','stopped','abandoned')`, projectID) {
 				runtime.kernel.SetNativePause(kernelString(row["id"]), true, "", 0)
 			}
-			runtime.store.Event(nil, "project.archived", map[string]any{"projectId": projectID})
+			runtime.store.Event(nil, "project.archived", map[string]any{"projectId": projectID, "requestId": requestID})
 		}
 		return runtime.projectLifecycleInTransaction(projectID)
 	})
@@ -64,7 +64,7 @@ func (runtime *TaskRuntime) RestoreProject(projectID, requestID string) ProjectL
 		before := runtime.projectLifecycleInTransaction(projectID)
 		if before.Archived {
 			runtime.store.RestoreProject(projectID)
-			runtime.store.Event(nil, "project.restored", map[string]any{"projectId": projectID})
+			runtime.store.Event(nil, "project.restored", map[string]any{"projectId": projectID, "requestId": requestID})
 		}
 		return runtime.projectLifecycleInTransaction(projectID)
 	})

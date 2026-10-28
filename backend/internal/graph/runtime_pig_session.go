@@ -35,7 +35,9 @@ type pigAgentTransport struct {
 // Open opens one session on the PiG kernel.
 func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSession, error) {
 	tools := pigToolSpecs(request, transport.codemode)
-	extensions, err := pigExtensionSpecs(context.Background(), request, request.Broker)
+	extensions, err := pigExtensionSpecs(context.Background(), request, request.Broker, func(tool string, ms float64, isError bool) {
+		transport.store.RecordToolCall(ToolCallInput{InstanceID: request.Binding.InstanceId, Tool: tool, Ms: ms, IsError: isError})
+	})
 	if err != nil {
 		return nil, err
 	}

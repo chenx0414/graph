@@ -28,8 +28,12 @@ test('the backend pins a published PiG kernel and the updater reports that pin',
   expect(report.code).toBe(0);
   const pinned = /pinned:\s+(v\d+\.\d+\.\d+)/.exec(report.stdout)?.[1];
   const latest = /latest:\s+(v\d+\.\d+\.\d+)/.exec(report.stdout)?.[1];
+  // The network is the one thing this gate cannot prove. A host whose module
+  // proxy is unreachable cannot judge drift, and the updater says so instead
+  // of failing a tree it never saw the published list for.
+  const offline = /skipped: the module proxy is unreachable/.test(report.stdout);
   expect(pinned).toBeTruthy();
-  expect(latest).toBeTruthy();
+  if (!offline) expect(latest).toBeTruthy();
   expect(report.stdout).toContain(MODULE);
 
   // The pin in go.mod must be the version the Go build actually resolves, or
@@ -41,12 +45,17 @@ test('the backend pins a published PiG kernel and the updater reports that pin',
   // tells the truth about whether the tree is behind the published kernel.
   const check = await updater(['--check']);
   expect(check.stdout).toContain(`pinned:  ${pinned}`);
-  expect(check.stdout).toContain(`latest:  ${latest}`);
-  if (pinned === latest) {
+  if (offline) {
     expect(check.code).toBe(0);
+    expect(check.stdout).toContain('skipped: the module proxy is unreachable');
   } else {
-    expect(check.code).toBe(1);
-    expect(check.stderr).toContain('behind the published');
+    expect(check.stdout).toContain(`latest:  ${latest}`);
+    if (pinned === latest) {
+      expect(check.code).toBe(0);
+    } else {
+      expect(check.code).toBe(1);
+      expect(check.stderr).toContain('behind the published');
+    }
   }
 }, 300_000);
 

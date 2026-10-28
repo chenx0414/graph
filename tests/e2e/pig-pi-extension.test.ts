@@ -147,6 +147,10 @@ test('a bound Pi extension runs its own tool on the PiG kernel', async () => {
     expect(declared.map(tool => tool.function?.name)).toContain('proof_tool');
     // The call reached the extension: it ran, and it wrote its own file.
     expect(existsSync(join(capabilityDirectory, 'tool-ran.txt'))).toBe(true);
+    // An extension tool call is telemetry like any other: without this row a
+    // later "who called agent_browser" has no answer.
+    const stats = await (await daemon.request('/api/tool-stats')).text();
+    expect(stats).toContain('proof_tool');
     // The extension's own answer is what the model read.
     expect(JSON.stringify(provider.requests[1])).toContain('extension-proof');
     const answers = (await view()).messages?.filter(message => message.role === 'assistant') ?? [];

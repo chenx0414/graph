@@ -10,6 +10,8 @@ import (
 	"context"
 
 	"github.com/MichaelKinsy/PiG/ai"
+
+	"time"
 )
 
 // pigExtensionHost is the resident host of the daemon's Pi extensions.
@@ -33,7 +35,7 @@ func ClosePigExtensions() {
 // session may see, and the session's own policy says which of them the model
 // may call. A tool the capability did not declare is not the session's tool
 // at all.
-func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker SendGate) ([]pigkernel.ToolSpec, error) {
+func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker SendGate, record func(tool string, ms float64, isError bool)) ([]pigkernel.ToolSpec, error) {
 	specs := []pigkernel.ToolSpec{}
 	if len(request.PiExtensionPaths) == 0 {
 		return specs, nil
@@ -61,7 +63,7 @@ func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker 
 			if len(allowed) > 0 && !allowed[tool.Name] {
 				continue
 			}
-			specs = append(specs, pigExtensionToolSpec(loaded, tool, broker))
+			specs = append(specs, pigExtensionToolSpec(loaded, tool, broker, record))
 		}
 	}
 	return specs, nil
@@ -72,7 +74,7 @@ func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker 
 // The call goes through the same gate as every other tool: the gate admits
 // the call, the extension's own hook may still refuse it, and the extension
 // runs the body in its own process.
-func pigExtensionToolSpec(loaded *pigkernel.LoadedExtension, tool pigkernel.ExtensionTool, broker SendGate) pigkernel.ToolSpec {
+func pigExtensionToolSpec(loaded *pigkernel.LoadedExtension, tool pigkernel.ExtensionTool, broker SendGate, record func(tool string, ms float64, isError bool)) pigkernel.ToolSpec {
 	return pigkernel.ToolSpec{
 		Name:        tool.Name,
 		Description: tool.Description,
@@ -90,8 +92,15 @@ func pigExtensionToolSpec(loaded *pigkernel.LoadedExtension, tool pigkernel.Exte
 				},
 			}
 			gated := piWorkerGatedTool(definition, broker)
+			started := time.Now()
 			value := gated(graphUUID(), args, ctx)
-			if failure, ok := value.(error); ok {
+			failure, failed := value.(error)
+			// An extension tool is telemetry like any other tool: without this row
+			// nobody can say afterwards which Agent called agent_browser.
+			if record != nil {
+				record(tool.Name, float64(time.Since(started).Milliseconds()), failed)
+			}
+			if failed {
 				return nil, failure
 			}
 			return value, nil
