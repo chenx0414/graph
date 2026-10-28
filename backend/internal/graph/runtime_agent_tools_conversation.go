@@ -10,7 +10,9 @@ import (
 func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"ask_user":       func(id string, params map[string]any) any { return agentToolsAsk(input.OnAskUser, params) },
-		"ask_supervisor": func(id string, params map[string]any) any { return agentToolsAsk(input.OnAskSupervisor, params) },
+		"ask_supervisor": func(id string, params map[string]any) any {
+			return agentToolsSupervisor(input.OnAskSupervisor, input.OnNotifySupervisor, params)
+		},
 		"conversation_read": func(id string, params map[string]any) any {
 			if input.Conversations.List == nil {
 				panic(errors.New("This Agent session cannot reach other conversations"))

@@ -260,6 +260,13 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 						askedQuestion = &request
 					}
 				}
+				// A notice is the non-blocking half of the same channel: the project
+				// supervisor says what happened and its own turn keeps running.
+				tools.OnNotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
+					return RecordSupervisorNotice(options.Store, operation.TaskId, SupervisorNotice{
+						Text: notice.Text, Milestone: notice.Milestone, Evidence: notice.Evidence, RequestID: notice.RequestID,
+					})
+				}
 			}
 			if retrieval != nil {
 				tools.Fetch = func(url string, signal *AbortSignal) RetrievalResult {
@@ -405,9 +412,9 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	if conversation != nil && role == "master" {
 		switch conversation.Role {
 		case ConversationGlobal:
-			composedPrompt += "\n\nYou are the global supervisor. You coordinate all projects and do not bind this conversation to one project. Clarify the user's project, goal, and acceptance before calling delegate_work. When notified that a project draft is ready, use read_work_draft to review it and tell the user what is ready. Explain issues yourself first; ask the user only when you cannot resolve them."
+			composedPrompt += "\n\nYou are the global supervisor. You coordinate all projects and do not bind this conversation to one project. This application's own repository is your workspace, not a project: its harness, console, backend and prompt changes are yours to make and verify yourself - apply_rsi_change for the commit, then a real assertion in the console after the reload. Every other project is reached through delegate_work. Clarify the user's project, goal, and acceptance before delegating. When notified that a project draft is ready, or woken by a project supervisor's notice, use read_work_draft to review it and tell the user what is ready. Explain issues yourself first; ask the user only when you cannot resolve them."
 		case ConversationProject:
-			composedPrompt += "\n\nYou are the long-lived project supervisor. Manage work delegated by the global supervisor and coordinate this project's graphs. Use propose_work_graph with the work ID and revision to create a task-specific graph draft. Preserve the work ID when reporting results or requesting clarification."
+			composedPrompt += "\n\nYou are the long-lived project supervisor. Manage work delegated by the global supervisor and coordinate this project's graphs. Use propose_work_graph with the work ID and revision to create a task-specific graph draft. Preserve the work ID when reporting results or requesting clarification. Report milestones to the global supervisor with ask_supervisor kind=notice - a draft is ready, the work completed, it failed or it is blocked - and say where the evidence lives (plan, report, screenshot path); use kind=question only when you need a decision."
 		}
 	}
 	agentContext := operation.Context.AgentContext

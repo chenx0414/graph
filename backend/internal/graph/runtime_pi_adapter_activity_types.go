@@ -38,3 +38,12 @@ type PiAdapterAskedQuestion struct {
 	ToSupervisor bool     `json:"-"`
 	RequestID    string   `json:"-"`
 }
+
+// PiAdapterSupervisorNotice is the notice half of the supervisor channel: a
+// project supervisor reports what happened and keeps working.
+type PiAdapterSupervisorNotice struct {
+	Text      string
+	Milestone string
+	Evidence  string
+	RequestID string
+}

@@ -151,6 +151,8 @@ type AgentToolsInput struct {
 	// OnAskUser hands a question to the session that can durably record it.
 	OnAskUser       func(request PiAdapterAskedQuestion)
 	OnAskSupervisor func(request PiAdapterAskedQuestion)
+	// OnNotifySupervisor delivers a notice that does not wait for an answer.
+	OnNotifySupervisor func(notice PiAdapterSupervisorNotice) any
 	// Peers is the same-graph Agent channel. It holds a PiAdapterPeerTools.
 	Peers any
 	// Artifacts is the shared artifact workspace. It holds a PiAdapterArtifactService.
@@ -263,7 +265,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 
 	features := AgentToolFeatures{
 		AskUser:         input.OnAskUser != nil,
-		AskSupervisor:   input.OnAskSupervisor != nil,
+		AskSupervisor:   input.OnAskSupervisor != nil || input.OnNotifySupervisor != nil,
 		GraphManagement: input.GraphManagement.GraphCreate != nil,
 		GraphRead:       input.ReadGraph != nil,
 		WorkspaceCommit: input.CommitWorkspace != nil,
