@@ -66,35 +66,6 @@ test('the Main Agent recipe is visible with fixed system capabilities and an edi
 
 
 
-test('the inbox keeps resolved questions in history', async () => {
-  const root = await temp('inbox-history');
-  const server = await consoleServer(root);
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.route('**/api/inbox', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      history: [{
-        id: 'question-1', taskId: 'task-1', nodeId: 'work', kind: 'permission', status: 'resolved',
-        data: { prompt: '允许读取项目目录' }, answer: { type: 'grant' },
-        request: '检查项目结构', projectId: 'alpha', conversationId: 'conversation-1',
-      }],
-    }),
-  }));
-  await page.goto(`${server.url}/#/inbox`);
-  await page.getByTestId('inbox-history').waitFor();
-  expect(await page.getByTestId('inbox-empty').isVisible()).toBe(true);
-  const history = await page.getByTestId('inbox-history').innerText();
-  expect(history).toContain('检查项目结构');
-  expect(history).toContain('允许读取项目目录');
-  expect(history).toContain('处理结果');
-});
-
-
-
 test('the composer inserts project file mentions and carries text attachments into the message ledger', async () => {
   const root = await temp('composer-context');
   await mkdir(join(root, 'src'), { recursive: true });

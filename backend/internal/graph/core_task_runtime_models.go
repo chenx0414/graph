@@ -70,49 +70,6 @@ func (runtime *TaskRuntime) ModelsInUse() []string {
 	return out
 }
 
-// InboxHistory reads the resolved questions across the conversation anchors.
-func (runtime *TaskRuntime) InboxHistory(limit int) []map[string]any {
-	runtime.ensureOpen()
-	cap := limit
-	if cap <= 0 {
-		cap = 100
-	}
-	if cap > 500 {
-		cap = 500
-	}
-	out := []map[string]any{}
-	for _, row := range kernelRows(runtime.store.Db, `SELECT q.id,q.task_id AS taskId,q.node_id AS nodeId,q.kind,q.status,q.data,q.answer,q.owner,
-    t.request,t.project_id AS projectId,t.conversation_id AS conversationId
-    FROM questions q JOIN tasks t ON t.id=q.task_id
-    WHERE q.status='resolved' AND q.owner='user'
-    ORDER BY q.rowid DESC LIMIT ?`, cap) {
-		var data any
-		if err := json.Unmarshal([]byte(kernelString(row["data"])), &data); err != nil {
-			panic(err)
-		}
-		var answer any
-		if row["answer"] != nil {
-			if err := json.Unmarshal([]byte(kernelString(row["answer"])), &answer); err != nil {
-				panic(err)
-			}
-		}
-		out = append(out, map[string]any{
-			"id":             kernelString(row["id"]),
-			"taskId":         kernelString(row["taskId"]),
-			"nodeId":         kernelString(row["nodeId"]),
-			"kind":           kernelString(row["kind"]),
-			"status":         kernelString(row["status"]),
-			"owner":          kernelString(row["owner"]),
-			"data":           data,
-			"answer":         answer,
-			"request":        kernelString(row["request"]),
-			"projectId":      kernelString(row["projectId"]),
-			"conversationId": row["conversationId"],
-		})
-	}
-	return out
-}
-
 // GraphMessages reads the peer messages of one task.
 func (runtime *TaskRuntime) GraphMessages(taskId string) []map[string]any {
 	runtime.ensureOpen()

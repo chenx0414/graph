@@ -114,6 +114,13 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		bindings.AskSupervisor = func(question PiAdapterAskedQuestion) {
 			state.options.Kernel.RecordNodeQuestion(graphId, nodeId, question)
 		}
+		// A notice reaches the global supervisor's thread directly; it is not a
+		// node question and nothing in this graph waits for it.
+		bindings.NotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
+			return RecordSupervisorNotice(state.options.Kernel.Store, graphId, SupervisorNotice{
+				Text: notice.Text, Milestone: notice.Milestone, Evidence: notice.Evidence, RequestID: notice.RequestID,
+			})
+		}
 	}
 	if retrieval != nil {
 		broker := retrieval

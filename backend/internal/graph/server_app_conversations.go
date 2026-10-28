@@ -13,15 +13,6 @@ func (app *GraphApp) serveTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.User().List())
 }
 
-// serveInbox is the operator inbox.
-func (app *GraphApp) serveInbox(w http.ResponseWriter, r *http.Request) {
-	limit := 0
-	if value, ok := appQueryInt(r, "limit"); ok {
-		limit = value
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"history": app.runtime.InboxHistory(limit)})
-}
-
 // serveProjectEntries is the entry list of one project.
 func (app *GraphApp) serveProjectEntries(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")

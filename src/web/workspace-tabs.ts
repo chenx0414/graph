@@ -96,7 +96,6 @@ export function tabForPath(path: string): TabDescriptor | null {
   // `/tasks/<id>` and `/tasks/<id>/graph` are the same window now; the graph address is canonical.
   const graph = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname);
   if (graph) return { kind: 'graph', key: graph[1]!, title: '任务图', hash: `#/tasks/${graph[1]!}/graph` };
-  if (pathname === '/inbox') return page('inbox', '问题', '#/inbox');
   if (pathname === '/artifacts') return page('artifacts', '共享产物', `#${path}`);
   if (pathname === '/usage') return page('usage', '用量', '#/usage');
   if (pathname === '/tools') return page('tools', '工具', '#/tools');

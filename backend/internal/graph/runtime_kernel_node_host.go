@@ -65,6 +65,9 @@ type NodeSessionBindings struct {
 	Peers           any
 	Artifacts       any
 	AskSupervisor   func(PiAdapterAskedQuestion)
+	// NotifySupervisor lets a graph node report a milestone to the global
+	// supervisor without waiting for an answer.
+	NotifySupervisor func(notice PiAdapterSupervisorNotice) any
 	CommitWorkspace func(paths []string, message string) any
 	Fetch           func(url string, signal *AbortSignal) RetrievalResult
 }
@@ -234,6 +237,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			if options.Bindings != nil {
 				tools.Peers = options.Bindings.Peers
 				tools.OnAskSupervisor = options.Bindings.AskSupervisor
+				tools.OnNotifySupervisor = options.Bindings.NotifySupervisor
 				tools.Artifacts = options.Bindings.Artifacts
 				tools.CommitWorkspace = options.Bindings.CommitWorkspace
 				tools.Fetch = options.Bindings.Fetch

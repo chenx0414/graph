@@ -91,7 +91,6 @@ test('the browser returns to the same global and project supervisors while retai
   await projectEntry.focus();
   expect(await projectEntry.evaluate(element => element === document.activeElement)).toBe(true);
   expect(await projectEntry.getAttribute('aria-label')).toContain('主管');
-  expect(await page.locator('a[href="#/inbox"]').getAttribute('aria-label')).toBe('问题');
   expect(await page.locator('a[href="#/catalog"]').getAttribute('aria-label')).toBe('资源库');
   expect(await page.locator('a[href="#/settings"]').getAttribute('aria-label')).toBe('设置');
   expect(await page.locator('a').filter({ hasText: '概览' }).count()).toBe(0);

@@ -36,7 +36,7 @@ import { Spinner } from './ui.tsx';
 
 
 
-import { Inbox,NewConversation } from "./app-new-conversation.tsx";
+import { NewConversation } from "./app-new-conversation.tsx";
 import type { Settings_,Startup,TaskSummary } from "./app-state.tsx";
 import { CapabilityResourceLibrary,ModelsPage,ToolStatsPage,UsagePage } from "./app-state.tsx";
 
@@ -59,7 +59,6 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
     <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`}>
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
-            {pathname === '/inbox' && <Inbox tasks={tasks} onAnswered={() => void refreshTasks().catch(() => undefined)} />}
             {catalogMatch && <Suspense fallback={<Spinner />}><CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} /></Suspense>}
             {pathname === '/usage' && <Suspense fallback={<Spinner />}><UsagePage /></Suspense>}
             {pathname === '/tools' && <Suspense fallback={<Spinner />}><ToolStatsPage /></Suspense>}

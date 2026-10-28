@@ -186,7 +186,6 @@ export function App() {
   }, [path]);
 
   const pathname = path.split('?')[0];
-  const questionTotal = openQuestionTotal(tasks);
   // Tabs are named from the data the shell already polls: a conversation by its own title, a
   // task by its request. Until that arrives the tab keeps the generic name it opened with.
   const shownTabs = withTitles(tabs, tab => {
@@ -285,10 +284,6 @@ export function App() {
             aria-label={sidebarCollapsed ? '导航：展开左侧抽屉' : '导航：收起左侧抽屉'}>
             <Icon name="panel-left" size={17} /><span className="rail-label">导航</span>
           </button>
-          <a className="rail-button" href="#/inbox" data-testid="rail-inbox" title="问题" aria-label="问题" data-active={pathname === '/inbox'}>
-            <Icon name="inbox" size={17} /><span className="rail-label">问题</span>
-            {questionTotal > 0 && <span className="rail-badge" data-testid="rail-inbox-badge">{questionTotal}</span>}
-          </a>
           <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
             <Icon name="catalog" size={17} /><span className="rail-label">资源库</span>
           </a>

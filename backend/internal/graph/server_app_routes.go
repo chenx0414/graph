@@ -53,7 +53,6 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings", app.serveSettings)
 	mux.HandleFunc("GET /api/capabilities/config", app.serveCapabilityConfig)
 	mux.HandleFunc("GET /api/tasks", app.serveTasks)
-	mux.HandleFunc("GET /api/inbox", app.serveInbox)
 	mux.HandleFunc("GET /api/projects/{projectId}/entries", app.serveProjectEntries)
 	mux.HandleFunc("GET /api/projects/{projectId}/lifecycle", app.serveProjectLifecycle)
 	mux.HandleFunc("POST /api/projects/{projectId}/archive", app.serveProjectArchive)
