@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/MichaelKinsy/PiG/coding/extension"
 	"github.com/MichaelKinsy/PiG/coding/extension/host/subprocess"
@@ -37,6 +39,11 @@ type ExtensionHost struct {
 	host   *subprocess.Host
 	mutex  sync.Mutex
 	loaded map[string]*LoadedExtension
+	// catalog is the tool list the host reports when an extension reads
+	// pi.getAllTools(). Load publishes it after the extension is ready, so the
+	// answer never waits on the lock Load holds while the extension process
+	// starts.
+	catalog atomic.Pointer[[]subprocess.ToolInfo]
 }
 
 // LoadedExtension is one loaded Pi extension.
@@ -49,8 +56,29 @@ type LoadedExtension struct {
 }
 
 // NewExtensionHost returns a host that loads extensions for cwd.
+//
+// PiG answers an extension's host calls through a UI bridge, and a host with no
+// bridge answers every one of them with an error. A Graph session is headless,
+// but an extension still reads the session catalog while it works: agent_browser
+// calls pi.getAllTools() and pi.getCommands() before it picks the directory it
+// launches in, and with no bridge that read failed and the tool never ran. The
+// bridge answers the catalog reads and leaves the rendering calls to PiG's
+// headless defaults.
 func NewExtensionHost(cwd string) *ExtensionHost {
-	return &ExtensionHost{host: subprocess.NewHost(cwd), loaded: map[string]*LoadedExtension{}}
+	host := &ExtensionHost{host: subprocess.NewHost(cwd), loaded: map[string]*LoadedExtension{}}
+	bridge := subprocess.NewUIBridge(nil)
+	// The host holds the extensions' own tools, not the session's built-in ones:
+	// Graph's tool policy belongs to the session, and one host serves every
+	// session of the daemon.
+	bridge.SetHostAction("getAllTools", func() []subprocess.ToolInfo {
+		if catalog := host.catalog.Load(); catalog != nil {
+			return *catalog
+		}
+		return nil
+	})
+	bridge.SetHostAction("getCommands", func() []subprocess.CommandInfo { return nil })
+	host.host.SetUIBridge(bridge)
+	return host
 }
 
 // Load loads the Pi extension at path, once per host.
@@ -79,7 +107,28 @@ func (h *ExtensionHost) Load(ctx context.Context, path string) (*LoadedExtension
 	}
 	entry := &LoadedExtension{Name: name, Path: absolute, extension: loaded}
 	h.loaded[absolute] = entry
+	h.publishCatalog()
 	return entry, nil
+}
+
+// publishCatalog republishes the tools the host holds for pi.getAllTools().
+//
+// The caller holds the lock; a reader takes the published slice through the
+// atomic pointer, so an extension that asks while another one loads is answered
+// instead of waiting.
+func (h *ExtensionHost) publishCatalog() {
+	catalog := []subprocess.ToolInfo{}
+	for _, loaded := range h.loaded {
+		for _, tool := range loaded.Tools() {
+			encoded, err := json.Marshal(tool.Parameters)
+			if err != nil {
+				continue
+			}
+			catalog = append(catalog, subprocess.ToolInfo{Name: tool.Name, Description: tool.Description, Parameters: encoded})
+		}
+	}
+	sort.Slice(catalog, func(left, right int) bool { return catalog[left].Name < catalog[right].Name })
+	h.catalog.Store(&catalog)
 }
 
 // Close stops every extension process the host started.
