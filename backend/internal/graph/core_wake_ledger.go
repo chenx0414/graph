@@ -126,52 +126,6 @@ func WakeForWaiting(store *TaskStore, taskID string, data any) bool {
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "waiting", DedupeKey: mapString(asMap(data), "questionId", "QuestionID"), Data: data, HasData: true})
 }
 
-// TransferLegacyGraphWakes moves unconsumed graph notifications to the new supervisor.
-func TransferLegacyGraphWakes(store *TaskStore, oldAnchor, newAnchor, sourceConversation string, messages map[string]string) {
-	rows := kernelRows(store.Db, "SELECT id,kind,dedupe_key,data FROM wake_intents WHERE task_id=? AND state IN ('waiting','ready') ORDER BY id", oldAnchor)
-	for _, row := range rows {
-		var data map[string]any
-		if row["data"] != nil {
-			data = asMap(parseJSON(kernelString(row["data"])))
-		}
-		graphID := mapString(data, "graphId", "taskId")
-		if graphID == "" {
-			if questionID := mapString(data, "questionId"); questionID != "" {
-				question := kernelRow(store.Db, "SELECT task_id FROM questions WHERE id=?", questionID)
-				if question != nil {
-					graphID = kernelString(question["task_id"])
-				}
-			}
-		}
-		if graphID == "" || kernelRow(store.Db, "SELECT id FROM tasks WHERE id=? AND conversation_id=? AND phase!='chatting'", graphID, sourceConversation) == nil {
-			Raise("migration_in_progress", "A pending notification cannot yet be transferred safely")
-		}
-		kernel := NewKernelStore(store)
-		if kernel.LatestRevision(graphID) == nil {
-			Raise("migration_in_progress", "A notification for legacy work needs review before transfer")
-		}
-		owner, hasOwner := kernel.GraphOwner(graphID)
-		if !hasOwner || owner == oldAnchor {
-			kernel.TransferGraphOwner(graphID, newAnchor)
-			store.Event(graphID, "graph.supervisor_transferred", map[string]any{"fromConversationId": sourceConversation, "ownerTaskId": newAnchor})
-		} else if owner != newAnchor {
-			Raise("migration_in_progress", "A pending notification belongs to another supervisor")
-		}
-		dedupe := kernelString(row["dedupe_key"])
-		if kernelString(row["kind"]) == "peer_message" {
-			oldMessage := mapString(data, "messageId")
-			if replacement := messages[oldMessage]; replacement != "" {
-				data["messageId"] = replacement
-				dedupe = replacement
-			} else {
-				Raise("migration_in_progress", "A pending peer notification has no transferable message")
-			}
-		}
-		WakeMaster(store, WakeIntent{TaskID: newAnchor, Kind: WakeKind(kernelString(row["kind"])), DedupeKey: dedupe, Data: data, HasData: row["data"] != nil})
-		kernelExec(store.Db, "UPDATE wake_intents SET state='consumed' WHERE id=? AND state IN ('waiting','ready')", row["id"])
-	}
-}
-
 func sliceLike(v any) bool {
 	if v == nil {
 		return false

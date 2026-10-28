@@ -72,8 +72,6 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/orchestration/work/{workId}/drafts/{version}/{action}", app.serveWorkDraftAction)
 	mux.HandleFunc("POST /api/orchestration/global", app.serveGlobalThread)
 	mux.HandleFunc("POST /api/projects/{projectId}/thread", app.serveProjectThread)
-	mux.HandleFunc("POST /api/projects/{projectId}/thread/select", app.serveProjectThreadSelection)
-	mux.HandleFunc("GET /api/projects/{projectId}/thread/preview", app.serveProjectThreadPreview)
 	mux.HandleFunc("GET /api/conversations", app.serveConversations)
 	mux.HandleFunc("POST /api/conversations", app.serveConversationCreate)
 	mux.HandleFunc("GET /api/conversations/{conversationId}", app.serveConversation)

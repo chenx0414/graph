@@ -11,9 +11,9 @@
 - [x] D2。持久委派、统一建图、多graph并发。证据：`orchestration-delegation`、`orchestration-concurrency`、`orchestration-work-confirm`、`orchestration-agent-drafts`。
 - [x] D3。两级主管问题路由与结果返回。证据：`orchestration-question-routing`、`orchestration-supervisor-question`、`orchestration-node-escalation`、`orchestration-node-question`、`orchestration-resume-provenance`。
 - [x] D4。执行控制、归档准入、解除归档保持暂停。证据：`orchestration-node-steer`、`orchestration-project-archive`。
-- [x] D5。历史迁移、界面、真实应用验收。证据：`orchestration-identity`（迁移）、`orchestration-preparing-migration`、`orchestration-browser`（迁移预览与固定 thread）、`desktop-shell` 的全局入口用例（真实 Electron 默认窗口）。
+- [x] D5。项目创建即生成主管、历史会话只读、界面与真实应用验收。证据：`orchestration-identity`（新主管不提升历史会话）、`orchestration-browser`（固定 thread）、`desktop-shell` 的全局入口用例（真实 Electron 默认窗口）。
 - [ ] 本轮后续。招募、记忆、graph eval、SF、X发布准备；autoresearchclaw暂缓。
-- [x] Verify。全量check与逐项需求审计。2026-10-28 最终 `node --run check` 通过：204 个测试文件、715 通过、2 跳过（717 个），316 秒；suite baseline 从 187/663 增至 204/717；harness 行为门禁通过；验收证据未变。
+- [x] Verify。全量check与逐项需求审计。2026-10-28 产品修正后的最终 `node --run check` 通过：203 个测试文件、700 通过、2 跳过（702 个），302 秒；suite baseline 从 204/717 降至 203/702（删除选择式迁移用例，`GRAPH_UPDATE_BASELINE=1` 有意降低）；harness 行为门禁通过；验收证据未变。
 
 ## 方法
 
@@ -36,6 +36,8 @@
 项目主管可对正在运行的 graph 节点发出即时引导：中断当前模型响应并在同一执行中继续，重复请求沿用原执行与回执。也可停止指定节点并暂停其队列；端到端验证另一并行节点继续运行、重复停止不会产生第二条请求，停止后强制重启不会自动重新执行。停止信号未送达时保留暂停并允许重试。引导和停止动作执行过程中的进程中断、以及未知调用核查后的恢复仍需独立验证。
 
 用户可以在节点对话中直接即时引导或停止节点；浏览器端到端测试验证了两种操作。对正在调用模型的节点强制终止进程后，真实 HTTP 测试验证了未知用量会阻止恢复和重试、核对可幂等且本身不解除暂停；明确重试后保留原记录并以新执行继续。
+
+> 2026-10-28 产品修正：选择式迁移已删除。下面这段记录的是被取代的实现，不再是当前行为。
 
 D5 的迁移范围完成：未完成 graph 现可在选择主管时事务性转交，保留原始会话来源；真实迁移测试验证了负责人、历史、未消费的节点失败通知、重启后的管理列表，以及节点后续向新主管提问并继续。待处理的节点消息及对应通知也可转交，原消息保留在历史中，测试覆盖了投递和重启后的去重。未暂停且未归档的旧会话中待处理的普通消息会按顺序作为历史交接转交，保留来源和附件，不被视作新用户授权；真实重启测试验证了进入主管上下文，暂停会话则仍阻止切换。准备中和失败的建图也能转交：同一进程中的准备按 graph 串行接续；重启后结果不确定时先要求核查 Git 进程与工作副本，记录理由后才重试，保留原 graph 和创建请求。非 graph 的旧工作及无法归属的通知不在 D5 范围：它们仍阻止切换，作为显式安全边界而不是静默转交或删除。
 
@@ -63,6 +65,17 @@ D5 的迁移范围完成：未完成 graph 现可在选择主管时事务性转�
 
 真实 HTTP 竞态测试覆盖建图与主管切换同时发生：已接受的 graph 归新主管，切换后的历史会话建图被拒绝；相同请求 ID 不同内容仍被拒绝。
 
+## 2026-10-28 产品修正：项目创建即生成主管
+
+用户确认不需要在项目的历史会话中选择一个作为主管；项目创建时就应有一个主管。
+
+- `OpenProjectThread` 不再提升唯一的旧会话，也不在多会话时要求选择；没有 project thread 时直接创建。
+- `CreateProjectDialog` 保存配置后立即创建项目主管，项目在侧栏出现时已有自己的 thread。
+- 删除 `/api/projects/{id}/thread/select`、`/thread/preview`、迁移预览对话框与转交实现。
+- 已有历史会话保留 `legacy` 读取，不再被提升，也不会自动转交未完成工作。
+- 新 E2E：`orchestration-identity` 的 “a project gets a new supervisor instead of choosing a legacy conversation”；`tests/m8/app-shell-ux.test.ts` 的项目创建用例断言 `role=project` 立即存在。
+- 选择式迁移与 preparing-migration 用例按产品修正退休。
+
 ## 2026-10-28 接手与收尾
 
 Codex 会话在完整检查运行到一半时结束。接手后按会话记录、设计、决策表与工作区实际状态恢复，不重跑已完成的单元。
@@ -77,5 +90,5 @@ Codex 会话在完整检查运行到一半时结束。接手后按会话记录�
 
 - 本轮 orange 后续目标未实施：招募 agent、全局入口记忆、跨 graph eval、持久化 Software Factory、X 发布准备；autoresearchclaw 按指示暂缓。
 - 真实模型尚未走完整三级交互。现有 E2E 用受控外部模型服务替代远端供应商，规则允许；这不证明模型能自行正确协调，只证明协调路径与持久化成立。
-- 非 graph 旧工作与无法归属的通知仍阻止项目主管切换，未提供“结束旧工作”的产品入口。
+- 历史 `legacy` 会话的未完成工作不自动转交到新主管，仍留在原会话中。
 - 分发打包（`node --run app:build`）未运行；默认应用验收跑的是真实 Electron 应用线，不是 dmg 安装包。

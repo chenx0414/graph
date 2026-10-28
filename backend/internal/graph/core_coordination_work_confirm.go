@@ -91,7 +91,7 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 		}
 		owner := kernelRow(runtime.store.Db, "SELECT anchor_task_id FROM conversations WHERE role='project' AND project_id=? AND archived_at IS NULL", *work.ProjectID)
 		if owner == nil {
-			Raise("thread_selection_required", "Open the project supervisor before confirming work")
+			Raise("invalid_input", "The project supervisor must be opened before confirming work")
 		}
 		proposal := draft.Proposal
 		if proposal["definition"] == nil {

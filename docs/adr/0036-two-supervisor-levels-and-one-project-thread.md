@@ -4,7 +4,7 @@
 
 ## 状态
 
-已接受。实现证据见 [Orchestration Engineer 实施记录](../planning/orchestration-engineer-implementation-2026-10-27.md)；2026-10-28 完整 `node --run check` 通过（204 个文件、717 个用例）。
+已接受。实现证据见 [Orchestration Engineer 实施记录](../planning/orchestration-engineer-implementation-2026-10-27.md)；2026-10-28 完整 `node --run check` 通过。
 
 ## 背景
 
@@ -35,7 +35,7 @@ CREATE UNIQUE INDEX one_project_thread ON conversations(project_id) WHERE role='
 
 ### 2. 全局入口与项目入口分开
 
-全局主管使用新的独立会话，不拿一个旧的无项目会话冒充用户的全局记忆。项目入口返回该项目唯一的 thread；项目有多个旧会话时，必须先选择一个作为长期 thread，其余转为 `history`，保留原 transcript、预算与来源，不拼接历史。
+全局主管使用新的独立会话，不拿一个旧的无项目会话冒充用户的全局记忆。项目主管在项目创建时生成，项目入口返回该项目唯一的 thread。项目已有的历史会话保留 `legacy` 读取，不会被提升为项目主管，也不需要用户先选择其中一个。
 
 ### 3. 工作请求是长期 thread 内的独立单位
 
@@ -65,7 +65,7 @@ CREATE UNIQUE INDEX one_project_thread ON conversations(project_id) WHERE role='
 
 继续使用 PiG 的三分判据：完成回执用于结算，不重复问模型；未发送输入按冻结配置恢复；已发出而结果未知的调用先由主管核查，无法确定再由全局主管问用户。归档与暂停优先于可恢复性。
 
-旧会话迁移先预览再应用，保留原 session 预算、工作副本与任务来源；未完成 graph、待处理消息、通知与准备中的建图请求转交给新主管，原 graph ID 与 request ID 不复用。无法安全归属的非 graph 旧工作继续阻止切换，作为显式安全边界，而不是静默转交。
+项目主管在项目创建时生成，不从历史会话中选择，也不自动转交旧会话的未完成工作。历史会话保留原 transcript、预算与来源供读取；旧 graph、消息与通知不迁移到新主管。
 
 ## 后果
 
@@ -73,7 +73,7 @@ CREATE UNIQUE INDEX one_project_thread ON conversations(project_id) WHERE role='
 - ADR 0018 的 `owner` 保留，新增阶段与升级路径；只表达一层的旧查询需要改为从项目与阶段推导当前 handler。
 - 用户侧默认打开全局入口；项目打开固定 thread；节点仍可直接对话。
 - 归档不释放唯一约束，因此解除归档后不会产生第二个项目 thread。
-- 旧项目已有多个会话时，迁移必须由用户选择长期 thread；不能自动拼接或删除历史。
+- 旧项目已有多个会话时，不提升其中任何一个；新主管创建后，历史会话仍按原内容读取。
 
 ## 证据
 

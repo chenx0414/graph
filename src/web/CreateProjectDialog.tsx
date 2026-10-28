@@ -78,6 +78,13 @@ export function CreateProjectDialog({ onClose, onCreated }: { onClose: () => voi
         body: JSON.stringify({ expectedRevision: current.revision, document }),
       });
       if (saved.applied === false) throw new Error(saved.reason ?? '配置未生效');
+      // A project owns one supervisor from the moment it is created. If the
+      // thread call fails, the project still exists and opening it creates the
+      // thread on demand.
+      await api(`/api/projects/${encodeURIComponent(id)}/thread`, {
+        method: 'POST',
+        body: JSON.stringify({ requestId: `project-thread-${crypto.randomUUID()}` }),
+      }).catch(() => undefined);
       onCreated();
       onClose();
     } catch (reason) {

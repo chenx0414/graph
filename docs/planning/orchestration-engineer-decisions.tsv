@@ -19,3 +19,4 @@ ts	phase	decision	why	evidence	result
 2026-10-28T02:25:00Z	D5	默认应用验收补真实Electron全局入口用例	浏览器E2E与默认桌面窗口是不同的生命周期边界；打包/启动层缺失时浏览器用例不会发现	tests/e2e/desktop-shell.test.ts	真实Electron窗口通过：主Agent标签、全局入口、标题与空projects初始状态
 2026-10-28T02:35:00Z	docs	以ADR 0036记录两级主管，并给0009/0018加修订注	设计落地后必须把新入口、问题阶段与项目唯一thread写进权威决策，不能只留在计划文档	docs/adr/0036-two-supervisor-levels-and-one-project-thread.md	CONTEXT术语与ADR修订注已更新；最终全量check待跑
 2026-10-28T02:45:00Z	checks	tool schema预算从7500上调到9700并加每工具均值175上限	默认入口改为全局主管后schema从50工具/7485字符增至56工具/9436字符；预算随范围移动，均值上限防止单个工具吃掉空间	tests/e2e/harness-tool-schema.test.ts	测试改为测量全局主管入口；9436字符与168.5均值均通过
+2026-10-28T03:20:00Z	D5	项目创建即生成主管，删除历史会话选择与转交	用户确认项目不应在创建后再从历史会话中选择主管；主管应随项目出生	backend/internal/graph/core_coordination.go; src/web/CreateProjectDialog.tsx	tests/e2e/orchestration-identity.test.ts / tests/m8/app-shell-ux.test.ts 通过；选择式迁移代码与用例已删除

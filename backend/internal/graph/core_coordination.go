@@ -49,17 +49,6 @@ func (runtime *TaskRuntime) ensureSupervisorThread(projectID *string, requestID 
 			if kernelRow(runtime.store.Db, "SELECT id FROM projects WHERE id=?", *projectID) == nil {
 				Raise("invalid_input", "A known project is required")
 			}
-			legacy := kernelRows(runtime.store.Db, "SELECT id,archived_at FROM conversations WHERE project_id=? AND role='legacy' ORDER BY created_seq", *projectID)
-			if len(legacy) > 1 || (len(legacy) == 1 && legacy[0]["archived_at"] != nil) {
-				Raise("thread_selection_required", "Select the existing project thread before opening its supervisor")
-			}
-			if len(legacy) == 1 {
-				id := kernelString(legacy[0]["id"])
-				runtime.store.AssignConversationRole(id, ConversationProject)
-				row := ConversationRowOf(runtime.store, id)
-				runtime.store.Event(row.AnchorTaskId, "conversation.supervisor_selected", map[string]any{"conversationId": id, "projectId": *projectID})
-				return supervisorThreadOf(row)
-			}
 		}
 		id, taskID := graphUUID(), graphUUID()
 		workspace := "conversation:" + id

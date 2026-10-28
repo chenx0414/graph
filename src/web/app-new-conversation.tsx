@@ -116,10 +116,7 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
       window.dispatchEvent(new Event('graph:conversations-changed'));
       location.hash = `#/conversations/${thread.conversationId}`;
     } catch (reason) {
-      const selectionRequired = reason instanceof Error && 'code' in reason && reason.code === 'thread_selection_required';
-      setError(selectionRequired
-        ? '这个项目已有历史对话，需要先选择一个作为项目主管对话。历史对话仍可从侧栏打开。'
-        : reason instanceof Error ? reason.message : String(reason));
+      setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(false);
     }

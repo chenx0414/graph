@@ -16,7 +16,6 @@ import { api } from './api.ts';
 
 
 import { CreateProjectDialog } from './CreateProjectDialog.tsx';
-import { ProjectThreadMigrationDialog } from './ProjectThreadMigrationDialog.tsx';
 
 
 
@@ -43,7 +42,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   const [createProject, setCreateProject] = useState(false);
   const [archiving, setArchiving] = useState('');
   const [openingProject, setOpeningProject] = useState('');
-  const [migration, setMigration] = useState<{ projectId: string; conversationId: string } | null>(null);
   const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
   const global = ordered.find(conversation => 'role' in conversation && conversation.role === 'global');
   const unbound = ordered.filter(conversation => !conversation.projectId && !('role' in conversation && conversation.role === 'global'));
@@ -60,30 +58,7 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
       window.dispatchEvent(new Event('graph:conversations-changed'));
       location.hash = `#/conversations/${thread.conversationId}`;
     } catch (reason) {
-      const selectionRequired = reason instanceof Error && 'code' in reason && reason.code === 'thread_selection_required';
-      if (selectionRequired) setProjectOpen(current => ({ ...current, [projectId]: true }));
-      toast(selectionRequired
-        ? '请在项目的历史对话中选择一个作为项目主管对话。'
-        : reason instanceof Error ? reason.message : String(reason), 'danger');
-    } finally {
-      setOpeningProject('');
-    }
-  }
-  async function selectProjectThread(projectId: string, conversationId: string) {
-    if (openingProject) return;
-    setOpeningProject(projectId);
-    try {
-      const thread = await api<{ conversationId: string }>(`/api/projects/${encodeURIComponent(projectId)}/thread/select`, {
-        method: 'POST',
-        body: JSON.stringify({ conversationId, requestId: `select-${crypto.randomUUID()}` }),
-      });
-      window.dispatchEvent(new Event('graph:conversations-changed'));
-      location.hash = `#/conversations/${thread.conversationId}`;
-    } catch (reason) {
-      const migrationInProgress = reason instanceof Error && 'code' in reason && reason.code === 'migration_in_progress';
-      toast(migrationInProgress
-        ? '其他历史对话仍有未完成的工作或对话，请先处理后再选择项目主管。'
-        : reason instanceof Error ? reason.message : String(reason), 'danger');
+      toast(reason instanceof Error ? reason.message : String(reason), 'danger');
     } finally {
       setOpeningProject('');
     }
@@ -123,7 +98,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
         <div className="sidebar-section" hidden={!sections.projects}>
           {(settings?.projects ?? []).map(project => {
             const items = ordered.filter(conversation => conversation.projectId === project.id);
-            const hasSupervisor = items.some(isSupervisor);
             return (
               <details
                 className="sidebar-project"
@@ -151,27 +125,14 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
                 </summary>
                 <div className="sidebar-conversations">
                   {items.map(conversation => (
-                    <div key={conversation.id}>
-                      <SidebarConversation
-                        conversation={conversation}
-                        active={path === `/conversations/${conversation.id}`}
-                        archiving={archiving === conversation.id}
-                        onArchive={() => void archiveConversation(conversation)}
-                        canArchive={!isSupervisor(conversation)}
-                      />
-                      {!hasSupervisor && 'role' in conversation && conversation.role === 'legacy' && (
-                        <button
-                          type="button"
-                          className="sidebar-empty-action"
-                          data-testid={`select-project-thread-${conversation.id}`}
-                          disabled={Boolean(openingProject)}
-                          onClick={() => setMigration({ projectId: project.id, conversationId: conversation.id })}
-                          aria-label={`将 ${conversation.title} 设为项目主管`}
-                        >
-                          设为项目主管
-                        </button>
-                      )}
-                    </div>
+                    <SidebarConversation
+                      key={conversation.id}
+                      conversation={conversation}
+                      active={path === `/conversations/${conversation.id}`}
+                      archiving={archiving === conversation.id}
+                      onArchive={() => void archiveConversation(conversation)}
+                      canArchive={!isSupervisor(conversation)}
+                    />
                   ))}
                   {!items.length && <span className="sidebar-empty">暂无对话</span>}
                 </div>
@@ -205,7 +166,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
           onCreated={onSettingsChanged}
         />
       )}
-      {migration && <ProjectThreadMigrationDialog projectId={migration.projectId} conversationId={migration.conversationId} onClose={() => setMigration(null)} onConfirm={() => { setMigration(null); void selectProjectThread(migration.projectId, migration.conversationId); }} />}
     </>
   );
 }
