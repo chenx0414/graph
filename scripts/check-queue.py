@@ -20,13 +20,31 @@ def process_start(pid):
     return result.stdout.strip()
 
 
+def ps_row(pid):
+    """One ps row, or None when this environment does not let us ask.
+
+    A restricted agent sandbox refuses to spawn ps at all (PermissionError), and
+    that refusal used to break the whole gate: the run died before the first
+    check. Not being able to look is not evidence of an ancestor, so say so and
+    let the file lock below keep the runs serialized anyway.
+    """
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "ppid=", "-o", "args="],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError as error:
+        sys.stderr.write(f"check-queue: cannot inspect processes ({error}); assuming no queue ancestor\n")
+        return None
+    return result.stdout.strip().split(None, 2)
+
+
 def has_queue_ancestor():
     pid = os.getppid()
     while pid > 1:
-        row = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "ppid=", "-o", "args="],
-            capture_output=True, text=True, check=False,
-        ).stdout.strip().split(None, 2)
+        row = ps_row(pid)
+        if row is None:
+            return False
         if len(row) < 3:
             return False
         if Path(row[2].split()[0]).name == "check-queue.py":
