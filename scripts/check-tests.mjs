@@ -11,6 +11,47 @@ const reportPath = join(root, 'tests/.suite-report.json');
 // Kept beside the report and ignored by git: a review ledger of quarantined
 // files that travels with the checkout but never rides along in a commit.
 const historyPath = join(root, 'tests/.quarantine-history.json');
+
+/**
+ * Can this machine launch the browser the m8 layer needs?
+ *
+ * The layer drives a real Chromium, so an environment without window services
+ * fails every one of its files with "Process failed to launch!". That is an
+ * unavailable environment, not a regression, and a gate that calls it a
+ * regression teaches people to ignore the gate. The probe is the same call the
+ * tests make, so a skip is based on the real capability and not on a guess
+ * about which machine we are on.
+ */
+function browserLaunches() {
+  const probe = spawnSync(process.execPath, [
+    '-e', `
+      const { chromium } = require('playwright');
+      chromium.launch({ headless: true })
+        .then(async browser => { await browser.close(); process.stdout.write('ok'); })
+        .catch(error => { process.stdout.write(String(error).split('\\n')[0]); process.exitCode = 1; });
+    `,
+  ], { cwd: root, encoding: 'utf8', timeout: 120_000 });
+  return probe.status === 0 ? undefined : (probe.stdout || probe.stderr || 'launch failed').trim();
+}
+
+const requested = process.argv.slice(2);
+const requestedExcludes = requested.filter(argument => argument.startsWith('--exclude'));
+const browserLayerExcluded = requestedExcludes.some(argument => argument.includes('tests/m8'));
+const forced = process.env.GRAPH_BROWSER_LAYER;
+let excludeBrowserLayer = browserLayerExcluded;
+if (!browserLayerExcluded && forced !== 'require') {
+  if (forced === 'skip') {
+    excludeBrowserLayer = true;
+    console.log('check:tests: browser layer skipped by GRAPH_BROWSER_LAYER=skip');
+  } else {
+    const reason = browserLaunches();
+    if (reason) {
+      excludeBrowserLayer = true;
+      console.log(`check:tests: browser layer skipped - this environment cannot launch Chromium (${reason})`);
+      console.log('check:tests: tests/m8 still runs where window services exist (the host gate), or set GRAPH_BROWSER_LAYER=require to demand it');
+    }
+  }
+}
 const run = spawnSync(process.execPath, [
   'node_modules/vitest/vitest.mjs', 'run',
   // bail=1 would stop the suite at the first failure, which makes a quarantined
@@ -19,7 +60,8 @@ const run = spawnSync(process.execPath, [
   '--bail=0',
   // The caller decides the tier (check:affected forwards an --exclude); the
   // quarantine decision stays here so both tiers excuse the same files.
-  ...process.argv.slice(2),
+  ...requested,
+  ...(excludeBrowserLayer && !browserLayerExcluded ? ['--exclude', '**/tests/m8/**'] : []),
   '--reporter=default', '--reporter=json', '--outputFile=tests/.suite-report.json',
 ], { stdio: 'inherit', cwd: root });
 
@@ -46,6 +88,7 @@ if (quarantined.size) {
   for (const [file, reason] of quarantined) console.log(`  - ${file}${excused.includes(file) ? '  [FAILED this run]' : ''} — ${reason}`);
 }
 if (stale.length) console.log(`check:tests: stale quarantine entry/entries, no such test ran: ${stale.join(', ')}`);
+if (excludeBrowserLayer) console.log('check:tests: this run did not include tests/m8, so the browser layer is unverified here');
 if (excused.length) console.log(`check:tests: ${excused.length} quarantined failure(s), reported and not blocking: ${excused.join(', ')}`);
 if (blocking.length) {
   console.error(`\ncheck:tests: ${blocking.length} failure(s) outside the quarantine:`);
