@@ -2,6 +2,15 @@ package graph
 
 import "database/sql"
 
+// nodeRole reads a node's declared role without loading its whole spec.
+func nodeRole(store *TaskStore, taskID, nodeID string) string {
+	row := kernelRow(store.Db, "SELECT json_extract(spec,'$.role') AS role FROM nodes WHERE task_id=? AND id=?", taskID, nodeID)
+	if row == nil {
+		return ""
+	}
+	return kernelString(row["role"])
+}
+
 func HasLockedQuestion(store *TaskStore, taskID, nodeID string) bool {
 	var instanceID sql.NullString
 	err := store.Db.QueryRow("SELECT instance_id FROM nodes WHERE task_id=? AND id=?", taskID, nodeID).Scan(&instanceID)
