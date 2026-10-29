@@ -8,16 +8,8 @@ import (
 func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, operationId *string) string {
 	return l.transaction(func() any {
 		node := l.nodeRow(taskId, nodeId)
-		// The Agent that must answer a supervisor's own question is the same
-		// node: dispatch only ever lists a *pending* master (readyNodesFor),
-		// so blocking it here would leave nobody able to answer the question
-		// that blocked it. Such a node stays pending and a wake brings it back
-		// to read the question and resolve it.
-		supervisorOwns := questionPolicy(kind).Owner == QuestionOwnerMain && nodeRole(l.store, taskId, nodeId) == "master"
-		if !supervisorOwns {
-			l.store.SetNodeBlocked(taskId, nodeId)
-			l.store.BlockActivation(kernelString(node["activation_id"]))
-		}
+		l.store.SetNodeBlocked(taskId, nodeId)
+		l.store.BlockActivation(kernelString(node["activation_id"]))
 		var autoAnswer *QuestionAutoAnswer
 		if operationId != nil && kind == "permission" {
 			operation := l.Get(*operationId)
