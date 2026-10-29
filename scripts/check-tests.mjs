@@ -72,8 +72,15 @@ history.runs = [...(history.runs ?? []), snapshot].slice(-30);
 writeFileSync(historyPath, `${JSON.stringify(history, null, 2)}\n`);
 const GREEN_RUNS = 3;
 for (const [file] of quarantined) {
-  const recent = history.runs.slice(-GREEN_RUNS).map(item => item.files.find(entry => entry.path === file)?.status);
-  if (recent.length === GREEN_RUNS && recent.every(status => status === 'passed')) {
-    console.log(`check:tests: ${file} passed the last ${GREEN_RUNS} runs — take it out of tests/quarantine.json`);
+  // Count the whole streak, not just the last three runs, and speak only when
+  // the streak first becomes worth acting on. A hint on every single run for
+  // the rest of the quarantine's life is noise people learn to scroll past.
+  let streak = 0;
+  for (const item of [...history.runs].reverse()) {
+    if (item.files.find(entry => entry.path === file)?.status !== 'passed') break;
+    streak += 1;
+  }
+  if (streak === GREEN_RUNS || streak >= GREEN_RUNS * 3) {
+    console.log(`check:tests: ${file} passed the last ${streak} runs — take it out of tests/quarantine.json`);
   }
 }
