@@ -16,7 +16,7 @@
     "scripts/harness-real-eval.mjs": "b4c0133fd2d9416e0d8c9e9edd6db6d3dcdd3fed5804d163ec497d9e73d87a95",
     "scripts/harness-behavior-cases.mjs": "68a62f9a1f172e40125279bcc71d300e98f2c322ec47cb9c21aff83e5ad37c0c",
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
-    "scripts/harness-behavior-gate.mjs": "26ef1e08d7fe6fe5359a8264d1763f71a774731b26ffaf13405db3db418b7462"
+    "scripts/harness-behavior-gate.mjs": "2289f03b6607184356e0e7efd83ba143e390f2cef846b4cceee94b538ada61f0"
   },
-  "updatedAt": "2026-10-29T07:46:39.321Z"
+  "updatedAt": "2026-10-29T09:00:17.097Z"
 }
