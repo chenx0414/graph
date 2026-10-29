@@ -61,6 +61,22 @@ function MessageMeta({ createdAt, elapsedMs }: { createdAt?: number | undefined;
 }
 
 function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { message: ConversationMessage; userAuthor?: string; copyable?: string; markdown?: boolean }) {
+  // A command turn is an action the user asked the Agent to perform, not words
+  // the user typed: it renders as one system action line with its time instead
+  // of a user bubble that reads as if the person had said "压缩当前会话上下文".
+  const command = message.data && typeof (message.data as Record<string, unknown>).command === 'string'
+    ? String((message.data as Record<string, unknown>).command)
+    : undefined;
+  if (message.role === 'user' && command) {
+    return (
+      <div className="message-row" data-role="system-action" data-command={command} data-state={message.state} data-testid="message-command">
+        <Icon name="refresh" size={12} />
+        <span>{command === 'compact' ? '已压缩上下文' : command}</span>
+        {message.state === 'pending' && <span className="message-state">执行中</span>}
+        <MessageMeta createdAt={message.createdAt} />
+      </div>
+    );
+  }
   if (message.role === 'user') {
     const attachments = messageAttachments(message);
     // A peer Agent's message arrived like a prompt; label it with its sender rather than "我" so the

@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": "tests/e2e/go-wake-notification.test.ts",
+      "reason": "restart timing under load; the same code passes and fails on different runs (measured 2026-10-29, review after the next full run)"
+    },
+    {
+      "path": "tests/e2e/go-command-output.test.ts",
+      "reason": "worker_active read mid-restart; passes standalone twice (measured 2026-10-29, review after the next full run)"
+    }
+  ]
+}

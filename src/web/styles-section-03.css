@@ -407,6 +407,8 @@
 .message-stack { max-width: min(76%, 680px); min-width: 0; }
 .message-row[data-role="user"] .message-stack { max-width: min(72%, 620px); }
 .message-author { margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.message-row[data-role="system-action"] { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 10px 0; color: var(--muted); font-size: 12px; }
+.message-row[data-role="system-action"] .message-state { font-size: 11px; opacity: 0.8; }
 .message-row[data-role="user"] .message-author { text-align: right; }
 .message-content {
   border-radius: 16px;

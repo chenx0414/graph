@@ -43,6 +43,7 @@
     "check:harness": "node scripts/harness-behavior-gate.mjs",
     "eval:harness": "node scripts/harness-eval-report.mjs",
     "test:report": "python3 scripts/check-queue.py --continue -- node node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=tests/.suite-report.json",
+    "check:tests": "node scripts/check-tests.mjs",
     "check:baseline": "node scripts/check-test-baseline.mjs",
     "check:tokens": "node scripts/check-file-tokens.mjs",
     "check:ownership": "node scripts/check-table-ownership.mjs",

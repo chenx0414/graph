@@ -109,7 +109,7 @@ def main():
     if command[:1] == ["--"]:
         command = command[1:]
     if not command:
-        steps = ("check:backend", "typecheck", "lint", "check:harness", "test:report", "check:baseline", "check:evidence")
+        steps = ("check:backend", "typecheck", "lint", "check:harness", "check:tests", "check:baseline", "check:evidence")
         command = ["/bin/sh", "-c", " && ".join(f"node --run {step}" for step in steps)]
     with protect_worktree(common):
         return run_queued(common, command, continuation)
