@@ -55,6 +55,13 @@ type RsiValidationResult struct {
 	Command string `json:"command"`
 	Status  string `json:"status"`
 	Output  string `json:"output"`
+	// Environment marks a failure the environment explains - a dropped download,
+	// a proxy the machine cannot reach, a socket that never opened - rather than
+	// a broken change. The verdict still fails, because a gate that passed
+	// nowhere is not evidence; the flag is what lets the caller tell the user
+	// which of the two happened, and keeps a later automatic follow-up from
+	// chasing an outage as if it were a regression.
+	Environment bool `json:"environment,omitempty"`
 }
 
 // RsiReceiptActivation is the activation state a receipt carries.

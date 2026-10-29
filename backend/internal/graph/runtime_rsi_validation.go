@@ -166,6 +166,28 @@ func rsiChangedSince(root, base string) []string {
 	return paths
 }
 
+// rsiRunCheckWithEnvironmentRetry runs one gate command, and retries it once
+// when the failure is one the environment explains.
+//
+// A dropped download, a proxy the machine cannot reach, a rate limit: none of
+// them say anything about the change under test, and the first retry is what
+// turns a bad minute into a pass. A second failure is reported as a failure
+// with the environment flag set, so nobody reads an outage as a regression.
+func rsiRunCheckWithEnvironmentRetry(root string, command RsiCommand, timeoutMs int) RsiValidationResult {
+	first := rsiRunCommand(root, command, timeoutMs)
+	if first.Status != "failed" || !IsEnvironmentFailure(first.Output) {
+		return first
+	}
+	label := command.Command + " " + strings.Join(command.Args, " ")
+	retry := rsiRunCommand(root, command, timeoutMs)
+	if retry.Status == "passed" {
+		return RsiValidationResult{Command: retry.Command, Status: retry.Status,
+			Output: label + " 第一次因环境/网络故障失败，已自动重跑一次并成功（与改动无关）。\n" + retry.Output}
+	}
+	return RsiValidationResult{Command: retry.Command, Status: retry.Status, Environment: true,
+		Output: label + " 连续两次失败，其中至少一次是环境/网络问题，而不是改动本身。\n--- 第一次 ---\n" + first.Output + "\n--- 第二次 ---\n" + retry.Output}
+}
+
 // rsiDefaultValidate runs the project's own gate.
 //
 // Custom checks give a fast inner loop while iterating. The full gate runs
@@ -173,7 +195,7 @@ func rsiChangedSince(root, base string) []string {
 func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 	results := []RsiValidationResult{}
 	for _, check := range input.Checks {
-		result := rsiRunCommand(input.Root, check, RSI_CHECK_TIMEOUT_MS)
+		result := rsiRunCheckWithEnvironmentRetry(input.Root, check, RSI_CHECK_TIMEOUT_MS)
 		results = append(results, result)
 		if result.Status == "failed" {
 			return results
@@ -182,7 +204,7 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 	if len(input.Checks) > 0 && !input.Activate {
 		return results
 	}
-	check := rsiRunCommand(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "check"}}, RSI_CHECK_TIMEOUT_MS)
+	check := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "check"}}, RSI_CHECK_TIMEOUT_MS)
 	results = append(results, check)
 	if check.Status == "failed" || !input.Activate {
 		return results
@@ -190,23 +212,8 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 	if !input.NeedsBuild {
 		return results
 	}
-	appBuild := RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}
-	build := rsiRunCommand(input.Root, appBuild, RSI_BUILD_TIMEOUT_MS)
-	if build.Status == "passed" || !IsEnvironmentFailure(build.Output) {
-		results = append(results, build)
-		return results
-	}
-	// Only the packaging step is re-run here: `check` already passed and its verdict cannot change
-	// because a download was interrupted. One retry, because a flake is what this fixes; a real
-	// outage still fails, and the message says which of the two happened.
-	retry := rsiRunCommand(input.Root, appBuild, RSI_BUILD_TIMEOUT_MS)
-	if retry.Status == "passed" {
-		results = append(results, RsiValidationResult{Command: retry.Command, Status: retry.Status,
-			Output: "app:build 第一次因网络/下载中断失败，已自动重跑一次并成功（与改动无关）。\n" + retry.Output})
-	} else {
-		results = append(results, RsiValidationResult{Command: retry.Command, Status: retry.Status,
-			Output: "app:build 连续两次失败，其中至少一次是网络/下载问题，而不是改动本身。\n--- 第一次 ---\n" + build.Output + "\n--- 第二次 ---\n" + retry.Output})
-	}
+	build := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}, RSI_BUILD_TIMEOUT_MS)
+	results = append(results, build)
 	return results
 }
 
