@@ -35,6 +35,11 @@ func RetryDecision(input struct {
 	if strings.TrimSpace(input.Output) == "" {
 		return RetryDecisionRecord{Retry: false, Attempt: attempt, Reason: "节点失败但没有输出，无法判断是否为环境问题，交 main 诊断。", Exhausted: false}
 	}
+	if IsDisconnectBeforeReply(input.Output) {
+		// The transport already retried the dropped connection to its bound. A
+		// turn retry would send the whole request again on top of that.
+		return RetryDecisionRecord{Retry: false, Attempt: attempt, Exhausted: false, Reason: "连接在收到任何回复前中断；传输层已有限次重试，交 main 处理。"}
+	}
 	if IsCapacityFailure(input.Output) {
 		// The transport already gave the provider the pause it asked for. A turn
 		// retry would send the whole request again and multiply the same budget.

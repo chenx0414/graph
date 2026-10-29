@@ -131,11 +131,24 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 			} else {
 				broker.Settle(id, nil)
 			}
-			if !notSent || attempt >= maxAttempts {
+			if attempt >= maxAttempts {
 				return nil, failure
 			}
-			delay(500 * attempt)
-			continue
+			if notSent {
+				delay(500 * attempt)
+				continue
+			}
+			// The response never started: not one byte the provider wrote reached
+			// this process, so no tool can have run and the turn may be sent
+			// again. The failed attempt's usage stays unknown - the provider may
+			// still have billed the request - and the retry dials a fresh
+			// connection instead of reusing the one that just died.
+			if controlledDisconnectedBeforeReply(controlledTransportErrorCodes(failure)) {
+				request.Close = true
+				delay(1000 * attempt)
+				continue
+			}
+			return nil, failure
 		}
 		// The headers are the first thing the provider said about the request:
 		// a status is not token evidence, and a correlation id may come back
@@ -177,6 +190,25 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 		}
 		return response, nil
 	}
+}
+
+// controlledReplayableDisconnects are the transport failures that end a request
+// before its response starts. They are replayable because no reply was read, so
+// no tool could have run; the cost of a possibly billed request is the price of
+// not failing the turn on a dropped connection.
+var controlledReplayableDisconnects = map[string]bool{
+	"EOF": true, "UNEXPECTED_EOF": true, "ECONNRESET": true, "ECONNABORTED": true, "EPIPE": true,
+}
+
+// controlledDisconnectedBeforeReply reports whether one attempt failed without
+// any response byte arriving.
+func controlledDisconnectedBeforeReply(codes []string) bool {
+	for _, code := range codes {
+		if controlledReplayableDisconnects[code] {
+			return true
+		}
+	}
+	return false
 }
 
 // controlledCapacityPause is how long a capacity answer asks the next attempt to wait.

@@ -14,7 +14,9 @@ import { launchCli } from '../helpers/cli-daemon.ts';
  * provider billed it. The ledger must keep that gap: the evidence of the
  * attempt stays correlatable - the same id on the wire, in the invocation
  * ledger and in the transport observations - and the usage stays unknown
- * instead of becoming zero.
+ * instead of becoming zero. A connection that dies before any reply byte is
+ * sent again on a fresh connection, to a bound: no reply arrived, so no tool
+ * can have run, while every failed attempt keeps its unknown usage.
  *
  * Only the external provider is replaced. The proof is the real daemon and a
  * real endpoint that records every request it was sent.
@@ -194,13 +196,16 @@ test.each(variants)('provider reconciliation retains correlatable evidence witho
     expect(invocation.usageSource).toBe('authoritative');
     expect((invocation.cost as { amount?: number }).amount).toBeGreaterThan(0);
   } else if (variant === 'lost-before-headers') {
-    // Nothing came back and nothing proves the request was not billed, so the
-    // attempt is not repeated and no usage is invented.
-    expect(provider.received).toHaveLength(1);
-    const invocation = invocations.find(candidate => candidate.id === provider.received[0]!.id)!;
-    expect(invocation.usage).toBeNull();
-    expect(invocation.usageSource).toBe('unknown');
-    expect(claimsNoCost(invocation.cost), JSON.stringify(invocation.cost)).toBe(true);
+    // Nothing came back before the socket died, so the turn is retried to the
+    // bound; every attempt that died keeps its unknown usage and is never
+    // priced, and none of them invents an answer.
+    expect(provider.received).toHaveLength(3);
+    for (const request of provider.received) {
+      const invocation = invocations.find(candidate => candidate.id === request.id)!;
+      expect(invocation.usage).toBeNull();
+      expect(invocation.usageSource).toBe('unknown');
+      expect(claimsNoCost(invocation.cost), JSON.stringify(invocation.cost)).toBe(true);
+    }
   } else {
     // A capacity answer is retried, and every attempt is kept: each one is
     // unknown in usage and unpriced, so the ledger never claims a number the
