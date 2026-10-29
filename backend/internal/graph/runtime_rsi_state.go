@@ -439,6 +439,12 @@ func (service *RsiService) AckRestart(id string, store *TaskStore) RsiAckRestart
 	}
 	confirmed := RsiLastActivation{Id: id, Commit: current.Commit, ConfirmedAt: NowMillis(), Generation: generation}
 	confirmedGeneration := int64(confirmed.Generation)
+	touched := []string{}
+	for _, row := range kernelRows(store.Db, "SELECT DISTINCT conversation_id FROM messages WHERE kind='rsi' AND json_extract(data,'$.id')=?", id) {
+		if value := graphDBString(row, "conversation_id"); value != "" {
+			touched = append(touched, value)
+		}
+	}
 	store.Transaction(func() any {
 		messages := kernelRows(store.Db, "SELECT id,conversation_id,text,data FROM messages WHERE kind='rsi' AND json_extract(data,'$.id')=?", id)
 		for _, message := range messages {
@@ -471,6 +477,8 @@ func (service *RsiService) AckRestart(id string, store *TaskStore) RsiAckRestart
 		panic(err)
 	}
 	_ = os.Remove(service.rsiRestartPath())
+	// The change is live; now prove the rest of the suite, off this path.
+	service.rsiStartAsyncFull(store, id, rsiStringValue(current.Commit), touched)
 	return RsiAckRestart{Cleared: true, PendingRestart: nil}
 }
 
