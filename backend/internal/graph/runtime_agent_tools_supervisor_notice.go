@@ -26,12 +26,18 @@ func agentToolsSupervisor(ask func(PiAdapterAskedQuestion), notify func(notice P
 	if requestID == "" || len(requestID) > 200 {
 		panic(errors.New("A bounded requestId is required"))
 	}
+	version := 0
+	if value, ok := agentToolsNumber(params["artifactVersion"]); ok && value > 0 {
+		version = int(value)
+	}
 	delivered := notify(PiAdapterSupervisorNotice{
-		Text:      agentToolsTruncate(text, 2_000),
-		Milestone: agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["milestone"])), 200),
-		WorkID:    agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["workId"])), 200),
-		Evidence:  agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["evidence"])), 1_000),
-		RequestID: requestID,
+		Text:            agentToolsTruncate(text, 2_000),
+		Milestone:       agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["milestone"])), 200),
+		WorkID:          agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["workId"])), 200),
+		Evidence:        agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["evidence"])), 1_000),
+		ArtifactID:      agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["artifactId"])), 200),
+		ArtifactVersion: version,
+		RequestID:       requestID,
 	})
 	// No terminate: the sender keeps working after telling its supervisor.
 	return agentToolsText(stringifyJSON(delivered))

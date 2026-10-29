@@ -1,6 +1,9 @@
 package graph
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // SupervisorNotice is what a project supervisor tells the global supervisor
 // without asking anything back.
@@ -15,9 +18,41 @@ type SupervisorNotice struct {
 	// WorkID is the work the milestone belongs to. With it the notice is
 	// delivered once per work and milestone, however many tool calls say it
 	// again; without it the request id is the only identity there is.
-	WorkID    string
-	Evidence  string
-	RequestID string
+	WorkID   string
+	Evidence string
+	// EvidenceExcerpt is the artifact body the sender read on the receiver's
+	// behalf. The receiver cannot open the sender's task workspace, so a bare
+	// pointer is not evidence: it is a claim that cannot be checked.
+	EvidenceExcerpt string
+	ArtifactID      string
+	ArtifactVersion int
+	RequestID       string
+}
+
+// noticeEvidenceExcerpt reads the named artifact in the sender's own scope and
+// returns a bounded excerpt for the delivery.
+//
+// A missing artifact must not swallow the notice: the receiver still has to hear
+// that the milestone happened, and it has to know the evidence did not come
+// with it. So a failed read returns an empty excerpt and the notifier says so.
+func noticeEvidenceExcerpt(artifactId string, version int, read func(id string, version int, maxBytes int) ArtifactRead) (excerpt string) {
+	if strings.TrimSpace(artifactId) == "" {
+		return ""
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			excerpt = ""
+		}
+	}()
+	result := read(artifactId, version, 1_500)
+	if result.Text == nil {
+		return ""
+	}
+	text := strings.TrimSpace(*result.Text)
+	if result.Truncated {
+		text += fmt.Sprintf("\n…（已截到 %d 字节，完整内容见 artifact %s）", result.Bytes, artifactId)
+	}
+	return text
 }
 
 // RecordSupervisorNotice delivers one notice into the global conversation and
@@ -71,6 +106,17 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 		body += "\n里程碑: " + milestone + "\n内容: " + text
 		if evidence != "" {
 			body += "\n证据: " + evidence
+		}
+		if notice.ArtifactID != "" {
+			if strings.TrimSpace(notice.EvidenceExcerpt) == "" {
+				body += "\n证据附件: " + notice.ArtifactID + " 未附加——发送方没能读出它，请向项目侧要求可读的摘要或路径。"
+			} else {
+				body += "\n证据附件: " + notice.ArtifactID
+				if notice.ArtifactVersion > 0 {
+					body += "@" + itoa(notice.ArtifactVersion)
+				}
+				body += "\n" + strings.TrimSpace(notice.EvidenceExcerpt)
+			}
 		}
 		body += "\n这条通知不需要回答；需要验收时先读工作草案与验收证据，再决定下一步。"
 		message := AppendMessage(store, MessageInput{

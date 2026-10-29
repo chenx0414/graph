@@ -46,5 +46,11 @@ type PiAdapterSupervisorNotice struct {
 	Milestone string
 	WorkID    string
 	Evidence  string
-	RequestID string
+	// ArtifactID names evidence the receiver cannot reach on its own: the global
+	// supervisor has no project, so a project's task-scoped artifact is invisible
+	// to it. The sender reads it and the delivery carries the bytes.
+	ArtifactID      string
+	ArtifactVersion int
+	EvidenceExcerpt string
+	RequestID       string
 }
