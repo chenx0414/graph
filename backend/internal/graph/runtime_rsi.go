@@ -12,6 +12,11 @@ const RSI_MAX_REPORT_DIFF = 40_000
 
 const RSI_CHECK_TIMEOUT_MS = 15 * 60 * 1000
 
+// RSI_ASYNC_FULL_TIMEOUT_MS bounds the slow confirmation that runs after a
+// reload. It is generous because the point of running it in the background is
+// that nobody is waiting on it.
+const RSI_ASYNC_FULL_TIMEOUT_MS = 60 * 60 * 1000
+
 const RSI_BUILD_TIMEOUT_MS = 20 * 60 * 1000
 
 // RsiCommand is one check command. The runtime only runs node.
@@ -271,4 +276,7 @@ type RsiService struct {
 	runningCommit *string
 	mu            sync.Mutex
 	changing      bool
+	// asyncFull remembers which activations already started their background
+	// confirmation, so a repeated acknowledgement does not run the suite twice.
+	asyncFull sync.Map
 }
