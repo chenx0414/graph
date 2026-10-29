@@ -52,6 +52,11 @@ for (const path of changed.slice(0, 20)) console.log(`  - ${path}`);
 if (changed.length > 20) console.log(`  … ${changed.length - 20} more`);
 console.log(`check:affected: tier ${wide ? 'wide (everything)' : web ? 'web + core' : 'core only'}${forced ? ' (forced full)' : ''}`);
 
+if (process.env.GRAPH_CHECK_PLAN_ONLY === '1') {
+  // Operators and the agent read the decision without paying for the run.
+  console.log('check:affected: plan only, no test was run');
+  process.exit(0);
+}
 const args = ['node_modules/vitest/vitest.mjs', 'run', '--bail=0'];
 if (!wide) {
   // The browser tier is the slow one and only a web change can move it.
