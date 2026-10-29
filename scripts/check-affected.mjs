@@ -57,12 +57,13 @@ if (process.env.GRAPH_CHECK_PLAN_ONLY === '1') {
   console.log('check:affected: plan only, no test was run');
   process.exit(0);
 }
-const args = ['node_modules/vitest/vitest.mjs', 'run', '--bail=0'];
+const args = ['scripts/check-tests.mjs'];
 if (!wide) {
-  // The browser tier is the slow one and only a web change can move it.
-  args.push('--exclude', '**/tests/m8/**');
+  // The browser tier is the slow one and only a web change can move it. The
+  // quarantine decision lives in check:tests, so both tiers excuse the same
+  // files instead of one of them blocking on a quarantined flake.
+  args.push('--exclude=**/tests/m8/**');
 }
-for (const file of wide || web ? [] : []) args.push(file);
 const run = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
 if (run.status !== 0) {
   console.error('check:affected: the affected tier failed; the full suite is the async confirmation, not a substitute');

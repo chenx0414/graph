@@ -14,6 +14,9 @@ const run = spawnSync(process.execPath, [
   // failure look like a shrunk suite to the baseline check and hides whatever
   // else would have failed. The gate decides from a complete report.
   '--bail=0',
+  // The caller decides the tier (check:affected forwards an --exclude); the
+  // quarantine decision stays here so both tiers excuse the same files.
+  ...process.argv.slice(2),
   '--reporter=default', '--reporter=json', '--outputFile=tests/.suite-report.json',
 ], { stdio: 'inherit', cwd: root });
 

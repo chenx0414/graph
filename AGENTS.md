@@ -10,3 +10,9 @@
 - Keep every source file at or below 500 LOC. Tests, docs and CSS are exempt. Markdown is documentation, not source. Split a source file before completion if your change takes it over the limit.
 
 - worktree 不遗留：在 worktree（含 subagent 的 .claude/worktrees/agent-*）里做的任务，完成时必须删除该 worktree 及其分支。它专用的 cargo target 目录一并删掉。删除前二选一：合并进 main；或不合并时先把未提交改动提交到该分支，打 archive/<worktree 名> tag 存档，再 git worktree remove + git branch -D。编排 subagent 的会话负责收尾它派生的 worktree。确需保留的（待用户裁决、有冲突待解）在最终回复里点名路径与原因，不得默默留下。
+
+## 门禁分层
+
+`node --run check` 是**激活门禁**（快层）：静态检查加 `check:affected`，后者按改动区域选层——纯后端改动不跑浏览器层 `tests/m8`，`src/web`/`src/core`/`desktop` 改动才跑它，改 `scripts`/`tests`/`presets`/`docs`/`package.json`/vitest 配置则跑全套。用 `GRAPH_CHECK_PLAN_ONLY=1 node --run check:affected` 可以只读“这次会跑哪一层、因为哪些文件”。
+
+`node --run check:full` 是**全量确认**（慢层，约 4–5 分钟）：包含 `check:tests` 与 `check:baseline`。激活重载之后必须跑一次并把结果写进汇报；失败不当场阻塞重载，但要开一条后续任务把回归收尾。`tests/quarantine.json` 里的时序敏感用例每次仍会跑并逐条打印，只是不阻塞门禁；`GRAPH_STRICT_SUITE=1` 时恢复严格，隔离项连续全绿后就把它移出名单。
