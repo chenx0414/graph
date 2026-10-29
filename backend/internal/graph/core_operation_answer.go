@@ -44,12 +44,9 @@ func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, opera
 			input.AutoAnswer = autoAnswer
 		}
 		question := InsertQuestion(l.store, input)
-		if supervisorOwns {
-			WakeMaster(l.store, WakeIntent{
-				TaskID: taskId, Kind: "supervisor_question", DedupeKey: question.Id,
-				Data: map[string]any{"questionId": question.Id}, HasData: true,
-			})
-		}
+		// The node was left dispatchable on purpose, but it is not woken here:
+		// the queued message or wake that brought it back is what runs it, and a
+		// turn nobody asked for would spend a model call per failure.
 		return question.Id
 	}).(string)
 }
