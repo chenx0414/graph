@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"encoding/json"
@@ -26,6 +28,20 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 		delay = func(milliseconds int) { time.Sleep(time.Duration(milliseconds) * time.Millisecond) }
 	}
 	for attempt := 1; ; attempt++ {
+		// A request body is a stream: the first attempt drains it, so every later attempt needs a
+		// fresh one. Without this the retry never leaves the process - the transport refuses a
+		// ContentLength that no longer matches the empty body - and a capacity answer becomes a
+		// failed turn although the provider asked for a later attempt.
+		if attempt > 1 {
+			if request.GetBody == nil {
+				return nil, errors.New("the request body cannot be replayed")
+			}
+			body, err := request.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			request.Body = body
+		}
 		id := graphUUID()
 		requestSha256 := controlledRequestSha256(request)
 		// Correlation diagnostics never change a send or its usage evidence: a
@@ -135,13 +151,18 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 		// of failing the Agent turn. Other 5xx answers stay hard failures - they can be a provider bug
 		// that the unknown-usage path must see. Settling zero usage matters too: an unknown settlement
 		// would turn a provider hiccup into a blocking usage question for the user.
+		//
+		// The retry waits for the pause the provider asked for. A rate limit is not a failed send: a
+		// half-second retry turns one capacity answer into a burst of full-size requests that all land
+		// in the same window, and the turn fails although waiting would have succeeded.
 		if (response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable) && attempt < maxAttempts {
 			release()
 			broker.Settle(id, nil)
+			pause := controlledCapacityPause(response.Header.Get("Retry-After"), attempt)
 			if response.Body != nil {
 				_ = response.Body.Close()
 			}
-			delay(500 * attempt)
+			delay(pause)
 			continue
 		}
 		if options.OnResponse != nil {
@@ -156,6 +177,52 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 		}
 		return response, nil
 	}
+}
+
+// controlledCapacityPause is how long a capacity answer asks the next attempt to wait.
+//
+// Retry-After is the provider's own statement and wins when it is readable. Without one the backoff
+// grows on its own (10s, 20s, then the cap) so the next attempt leaves the window that refused the
+// first one. The bounds matter both ways: a malformed or absent hint still pauses, and an absurd one
+// cannot hold the turn for minutes.
+func controlledCapacityPause(header string, attempt int) int {
+	if pause, ok := controlledRetryAfter(header); ok {
+		return pause
+	}
+	pause := 10_000
+	for retry := 1; retry < attempt && pause < 30_000; retry++ {
+		pause *= 2
+	}
+	if pause > 30_000 {
+		pause = 30_000
+	}
+	return pause
+}
+
+// controlledRetryAfter reads the seconds or HTTP date of a Retry-After header.
+func controlledRetryAfter(header string) (int, bool) {
+	value := strings.TrimSpace(header)
+	if value == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		return controlledCapacityBound(seconds * 1000), true
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		return controlledCapacityBound(int(time.Until(at).Milliseconds())), true
+	}
+	return 0, false
+}
+
+// controlledCapacityBound keeps one pause between no wait and one minute.
+func controlledCapacityBound(milliseconds int) int {
+	if milliseconds < 0 {
+		return 0
+	}
+	if milliseconds > 60_000 {
+		return 60_000
+	}
+	return milliseconds
 }
 
 // ControlledRequestToolDeclarations reads the tool declarations one request body carries.

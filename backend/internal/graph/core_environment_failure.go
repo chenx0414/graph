@@ -18,6 +18,17 @@ import (
 // harness's own automatic retry never ran.
 var ENVIRONMENT_FAILURE = regexp.MustCompile(`(?i)aborted pending request|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|getaddrinfo|socket hang up|SSL_ERROR|ERR_SOCKET|Client network socket disconnected|TLS connection|Connection error|at capacity due to high demand|temporarily unavailable|socket disconnected|529|rate limit|no such host|connection refused|connection reset by peer|broken pipe|i/o timeout|unexpected EOF|Provider answered HTTP (429|5[0-9][0-9])`)
 
+// CAPACITY_FAILURE matches a provider that answered "not now" before doing any
+// work. The transport already retried it with the pause the provider asked for,
+// so the node-level transient retry must not repeat the whole turn on top of
+// that: multiplying a capacity budget by the retry count is how one rate limit
+// turns into a burst.
+var CAPACITY_FAILURE = regexp.MustCompile(`(?i)Provider answered HTTP (429|503)`)
+
+func IsCapacityFailure(output string) bool {
+	return len(strings.TrimSpace(output)) > 0 && CAPACITY_FAILURE.MatchString(output)
+}
+
 func IsEnvironmentFailure(output string) bool {
 	return len(strings.TrimSpace(output)) > 0 && ENVIRONMENT_FAILURE.MatchString(output)
 }

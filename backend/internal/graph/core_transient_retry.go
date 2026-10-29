@@ -35,6 +35,11 @@ func RetryDecision(input struct {
 	if strings.TrimSpace(input.Output) == "" {
 		return RetryDecisionRecord{Retry: false, Attempt: attempt, Reason: "节点失败但没有输出，无法判断是否为环境问题，交 main 诊断。", Exhausted: false}
 	}
+	if IsCapacityFailure(input.Output) {
+		// The transport already gave the provider the pause it asked for. A turn
+		// retry would send the whole request again and multiply the same budget.
+		return RetryDecisionRecord{Retry: false, Attempt: attempt, Exhausted: false, Reason: "provider 已按容量限制的暂停重试过；再重跑整轮只会倍增请求，交 main 处理。"}
+	}
 	if !IsEnvironmentFailure(input.Output) {
 		return RetryDecisionRecord{Retry: false, Attempt: attempt, Reason: "这是对代码/结果的判断，不是环境问题；重试不会有不同结论，交 main 处理。", Exhausted: false}
 	}
