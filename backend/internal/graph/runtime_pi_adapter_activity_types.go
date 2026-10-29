@@ -52,5 +52,8 @@ type PiAdapterSupervisorNotice struct {
 	ArtifactID      string
 	ArtifactVersion int
 	EvidenceExcerpt string
+	// EvidenceFailure is why the excerpt is missing; the receiver reads a reason
+	// instead of an unexplained empty attachment.
+	EvidenceFailure string
 	RequestID       string
 }

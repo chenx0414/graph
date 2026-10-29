@@ -266,15 +266,20 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				// A notice is the non-blocking half of the same channel: the project
 				// supervisor says what happened and its own turn keeps running.
 				tools.OnNotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
-					notice.EvidenceExcerpt = noticeEvidenceExcerpt(notice.ArtifactID, notice.ArtifactVersion, func(id string, version int, maxBytes int) ArtifactRead {
+					notice.EvidenceExcerpt, notice.EvidenceFailure = noticeEvidenceExcerpt(notice.ArtifactID, notice.ArtifactVersion, func(id string, version int, maxBytes int) ArtifactRead {
 						if artifactService == nil {
 							Raise("invalid_state", "This session has no artifact workspace")
+						}
+						// No version means newest: Get answers latest only for a nil
+						// version, and Read insists on a real number.
+						if version <= 0 {
+							version = artifactService.Get(id, nil).Version
 						}
 						return artifactService.Read(id, version, maxBytes)
 					})
 					return RecordSupervisorNotice(options.Store, operation.TaskId, SupervisorNotice{
 						Text: notice.Text, Milestone: notice.Milestone, WorkID: notice.WorkID, Evidence: notice.Evidence, RequestID: notice.RequestID,
-						EvidenceExcerpt: notice.EvidenceExcerpt, ArtifactID: notice.ArtifactID, ArtifactVersion: notice.ArtifactVersion,
+						EvidenceExcerpt: notice.EvidenceExcerpt, ArtifactID: notice.ArtifactID, ArtifactVersion: notice.ArtifactVersion, EvidenceFailure: notice.EvidenceFailure,
 					})
 				}
 			}

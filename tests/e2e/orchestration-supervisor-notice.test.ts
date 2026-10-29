@@ -18,6 +18,7 @@ function field(value: unknown, key: string): string {
 // A project supervisor reports a milestone with ask_supervisor kind=notice. The
 // notice must reach the global conversation and wake its master, while the
 // project's own turn keeps running: no question opens, nothing waits.
+const marker = 'NOTICE-EVIDENCE-7f2c';
 test('a project supervisor notice reaches the global supervisor without blocking the sender', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-supervisor-notice-'));
   const results = new Map<string, unknown>();
@@ -38,9 +39,19 @@ test('a project supervisor notice reaches the global supervisor without blocking
       if (names.includes('ask_user') && transcript.includes('来自项目主管的通知')) globalSawNotice += 1;
       const spoken = new Set(messages.flatMap(message => Array.isArray(message.tool_calls) ? message.tool_calls.map(call => record(call).id) : []));
       let call: { id: string; name: string; args: object } | undefined;
-      if (isProjectTurn && !spoken.has('notice-1')) {
+      // The project publishes its evidence first, then names it in the notice.
+      // The global supervisor has no project, so it can never open that task's
+      // workspace; whatever it reads must have travelled inside the notice.
+      const published = results.has('publish-1') ? record(JSON.parse(String(results.get('publish-1')))) : undefined;
+      if (isProjectTurn && !spoken.has('publish-1')) {
+        call = { id: 'publish-1', name: 'artifact_publish', args: {
+          namespace: 'plans', name: 'notice-evidence', title: 'Archive UI plan', summary: 'the draft plan',
+          content: `# Archive UI\n\n${marker} the settings page groups archived projects.\n`, requestId: 'publish-1',
+        } };
+      } else if (isProjectTurn && published && !spoken.has('notice-1')) {
         call = { id: 'notice-1', name: 'ask_supervisor', args: {
-          kind: 'notice', prompt: '归档界面草稿已就绪，请审阅。', milestone: 'draft_ready', evidence: 'plans/project-archive-ui.md', requestId: 'notice-1',
+          kind: 'notice', prompt: '归档界面草稿已就绪，请审阅。', milestone: 'draft_ready', evidence: 'plans/notice-evidence',
+          artifactId: field(published, 'artifactId'), requestId: 'notice-1',
         } };
       }
       const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
@@ -95,6 +106,12 @@ test('a project supervisor notice reaches the global supervisor without blocking
       const messages = Array.isArray(view.messages) ? view.messages : [];
       return messages.some(message => String(record(message).text ?? '').includes('来自项目主管的通知'));
     }, { timeout: 20_000 }).toBe(true);
+    // The evidence travelled with it: the artifact's own text is in the notice.
+    const globalView = await request(`/api/conversations/${global}`);
+    const noticeText = (Array.isArray(globalView.messages) ? globalView.messages : [])
+      .map(message => String(record(message).text ?? '')).find(text => text.includes('来自项目主管的通知')) ?? '';
+    expect(noticeText).toContain(marker);
+    expect(noticeText).toContain('证据附件');
     await expect.poll(() => globalSawNotice, { timeout: 20_000 }).toBeGreaterThan(0);
   } finally {
     await daemon?.close();

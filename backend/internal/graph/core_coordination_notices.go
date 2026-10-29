@@ -26,6 +26,9 @@ type SupervisorNotice struct {
 	EvidenceExcerpt string
 	ArtifactID      string
 	ArtifactVersion int
+	// EvidenceFailure says why the excerpt is missing, so a receiver reads a
+	// reason instead of guessing at an empty attachment.
+	EvidenceFailure string
 	RequestID       string
 }
 
@@ -33,26 +36,28 @@ type SupervisorNotice struct {
 // returns a bounded excerpt for the delivery.
 //
 // A missing artifact must not swallow the notice: the receiver still has to hear
-// that the milestone happened, and it has to know the evidence did not come
-// with it. So a failed read returns an empty excerpt and the notifier says so.
-func noticeEvidenceExcerpt(artifactId string, version int, read func(id string, version int, maxBytes int) ArtifactRead) (excerpt string) {
+// that the milestone happened, and it has to know why the evidence did not come
+// with it. So a failed read returns the reason, and the notifier says it.
+func noticeEvidenceExcerpt(artifactId string, version int, read func(id string, version int, maxBytes int) ArtifactRead) (excerpt string, failure string) {
 	if strings.TrimSpace(artifactId) == "" {
-		return ""
+		return "", ""
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			excerpt = ""
+			_, code, message, _ := PublicError(recovered)
+			failure = code + ": " + message
 		}
 	}()
 	result := read(artifactId, version, 1_500)
 	if result.Text == nil {
-		return ""
+		return "", "the artifact holds no text"
 	}
 	text := strings.TrimSpace(*result.Text)
 	if result.Truncated {
 		text += fmt.Sprintf("\n…（已截到 %d 字节，完整内容见 artifact %s）", result.Bytes, artifactId)
 	}
-	return text
+	return text, ""
 }
 
 // RecordSupervisorNotice delivers one notice into the global conversation and
@@ -109,7 +114,11 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 		}
 		if notice.ArtifactID != "" {
 			if strings.TrimSpace(notice.EvidenceExcerpt) == "" {
-				body += "\n证据附件: " + notice.ArtifactID + " 未附加——发送方没能读出它，请向项目侧要求可读的摘要或路径。"
+				reason := strings.TrimSpace(notice.EvidenceFailure)
+				if reason == "" {
+					reason = "发送方没能读出它"
+				}
+				body += "\n证据附件: " + notice.ArtifactID + " 未附加——" + reason + "。请向项目侧要求可读的摘要或路径。"
 			} else {
 				body += "\n证据附件: " + notice.ArtifactID
 				if notice.ArtifactVersion > 0 {

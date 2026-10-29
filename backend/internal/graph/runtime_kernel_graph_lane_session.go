@@ -117,15 +117,20 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		// A notice reaches the global supervisor's thread directly; it is not a
 		// node question and nothing in this graph waits for it.
 		bindings.NotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
-			notice.EvidenceExcerpt = noticeEvidenceExcerpt(notice.ArtifactID, notice.ArtifactVersion, func(id string, version int, maxBytes int) ArtifactRead {
+			notice.EvidenceExcerpt, notice.EvidenceFailure = noticeEvidenceExcerpt(notice.ArtifactID, notice.ArtifactVersion, func(id string, version int, maxBytes int) ArtifactRead {
 				if state.options.Artifacts == nil {
 					Raise("invalid_state", "This session has no artifact workspace")
+				}
+				// A notice that names no version means the newest one; Get answers
+				// latest only for a nil version, and Read insists on a real number.
+				if version <= 0 {
+					version = state.options.Artifacts.Get(graphId, id, nil, "").Version
 				}
 				return state.options.Artifacts.Read(graphId, id, version, maxBytes, "")
 			})
 			return RecordSupervisorNotice(state.options.Kernel.Store, graphId, SupervisorNotice{
 				Text: notice.Text, Milestone: notice.Milestone, WorkID: notice.WorkID, Evidence: notice.Evidence, RequestID: notice.RequestID,
-				EvidenceExcerpt: notice.EvidenceExcerpt, ArtifactID: notice.ArtifactID, ArtifactVersion: notice.ArtifactVersion,
+				EvidenceExcerpt: notice.EvidenceExcerpt, ArtifactID: notice.ArtifactID, ArtifactVersion: notice.ArtifactVersion, EvidenceFailure: notice.EvidenceFailure,
 			})
 		}
 	}
