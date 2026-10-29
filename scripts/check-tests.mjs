@@ -10,6 +10,10 @@ const root = process.cwd();
 const reportPath = join(root, 'tests/.suite-report.json');
 const run = spawnSync(process.execPath, [
   'node_modules/vitest/vitest.mjs', 'run',
+  // bail=1 would stop the suite at the first failure, which makes a quarantined
+  // failure look like a shrunk suite to the baseline check and hides whatever
+  // else would have failed. The gate decides from a complete report.
+  '--bail=0',
   '--reporter=default', '--reporter=json', '--outputFile=tests/.suite-report.json',
 ], { stdio: 'inherit', cwd: root });
 
