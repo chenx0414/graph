@@ -30,6 +30,11 @@ const repo = resolve(fileURLToPath(import.meta.url), '../..');
 const statePath = process.env.GRAPH_HARNESS_GATE_STATE
   ? resolve(process.env.GRAPH_HARNESS_GATE_STATE)
   : join(repo, 'tests/harness-surface.json');
+// The record is written only when someone asks for it. The gate runs inside
+// every gate run, and a check that rewrites a tracked file makes the working
+// tree dirty as a side effect of checking it - which the RSI guard rightly
+// refuses. Recording stays a deliberate act: refresh the file, commit it.
+const records = process.env.GRAPH_HARNESS_GATE_RECORD === '1' || Boolean(process.env.GRAPH_HARNESS_GATE_STATE);
 
 /**
  * The files that make up the harness the product ships. A change in any of
@@ -213,8 +218,13 @@ async function main() {
   const unchanged = JSON.stringify(state.cases ?? {}) === JSON.stringify(verdicts)
     && JSON.stringify(state.surface ?? {}) === JSON.stringify(surface);
   if (!unchanged) {
-    await writeFile(statePath, `${JSON.stringify({ schemaVersion: 1, cases: verdicts, surface, updatedAt: new Date().toISOString() }, null, 2)}\n`);
-    process.stdout.write('recorded the judged harness surface and the case verdicts\n');
+    if (!records) {
+      process.stdout.write('the judged state moved, and was not recorded (a check must not rewrite a tracked file)\n');
+      process.stdout.write('record it deliberately: GRAPH_HARNESS_GATE_RECORD=1 node --run check:harness\n');
+    } else {
+      await writeFile(statePath, `${JSON.stringify({ schemaVersion: 1, cases: verdicts, surface, updatedAt: new Date().toISOString() }, null, 2)}\n`);
+      process.stdout.write('recorded the judged harness surface and the case verdicts\n');
+    }
   } else {
     process.stdout.write('the harness surface and every case are unchanged\n');
   }

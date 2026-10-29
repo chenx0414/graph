@@ -190,6 +190,12 @@ the agent said: I cannot continue: the harness no longer says "Use edit for prec
 判决记在 `tests/harness-surface.json`：被判过的 harness 面（逐文件 sha256）与每个用例的判决。
 面变了又变红，就是**回归**。
 
+这份记录**不会在检查时被自动重写**：门禁每次都会跑，而一个检查顺手改动被跟踪的文件，会让“检查”本身弄脏工作区——RSI 提交会因为工作区不干净而拒收，人就卡在这里。所以记录是一件刻意的事：面变了就自己刷一次，然后当普通提交入库。
+
+```sh
+GRAPH_HARNESS_GATE_RECORD=1 node --run check:harness
+```
+
 门禁判的是仓库里的出厂面——你自己的 `~/.graph/prompts` 不在仓库里，所以门禁只报告它。
 要判自己那一套，先冻结一份上下文再指给门禁：
 
