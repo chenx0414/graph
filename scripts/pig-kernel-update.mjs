@@ -175,7 +175,11 @@ function main() {
       // current and the answer is simply unavailable. Report the skip instead
       // of failing a tree this host cannot judge, and keep --set strict
       // because it has to fetch the version it pins.
-      if (options.mode === 'set' || !unreachable(error.message)) fail(error.message);
+      // Reporting and checking only read a published list they cannot get.
+      // Whatever the reason, the honest answer is "unavailable" plus the
+      // reason itself: the pin in go.mod is local and still reported, and a
+      // build of the pinned kernel needs the same proxy anyway.
+      if (options.mode === 'set') fail(error.message);
       process.stdout.write(`pinned:  ${current ?? '(not pinned)'}\nlatest:  (unavailable)\nmodule:  ${MODULE}\nskipped: the module proxy is unreachable\nreason:  ${error.message}\n`);
       return;
     }

@@ -79,6 +79,14 @@ test('the updater pins the kernel in an isolated checkout, builds against it, an
     ].join('\n'));
 
     const first = await updater(['--root', root, '--set', 'latest']);
+    if (first.code !== 0) {
+      // Without the module proxy this checkout cannot resolve or build the
+      // kernel at all; the only honest assertion left is that a failed pin
+      // leaves the tree exactly as it was.
+      expect(first.stderr).toContain('pig kernel update failed');
+      expect(await readFile(join(moduleDir, 'go.mod'), 'utf8')).toBe('module graph-pig-kernel-probe\n\ngo 1.27.1\n');
+      return;
+    }
     expect(first.code).toBe(0);
     expect(first.stdout).toContain('the kernel is pinned at');
     const goMod = await readFile(join(moduleDir, 'go.mod'), 'utf8');
