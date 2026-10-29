@@ -36,22 +36,43 @@ function browserLaunches() {
 
 const requested = process.argv.slice(2);
 const requestedExcludes = requested.filter(argument => argument.startsWith('--exclude'));
-const browserLayerExcluded = requestedExcludes.some(argument => argument.includes('tests/m8'));
 const forced = process.env.GRAPH_BROWSER_LAYER;
-let excludeBrowserLayer = browserLayerExcluded;
-if (!browserLayerExcluded && forced !== 'require') {
+
+/**
+ * Layers of the suite that need a capability the machine may not have.
+ *
+ * A layer is a named capability plus the files that need it, and it is skipped
+ * only when the probe proves the capability is unavailable. The alternative is
+ * what this gate used to do: call every one of those files a regression because
+ * a browser could not start, until nobody trusted the red.
+ */
+const layers = JSON.parse(readFileSync(join(root, 'tests/env-layers.json'), 'utf8')).layers;
+const probes = { chromium: browserLaunches };
+const skippedLayers = [];
+const layerExcludes = [];
+for (const layer of layers) {
+  const covered = layer.files.every(glob => requestedExcludes.some(argument => argument.includes(glob.replace('**', ''))));
+  if (covered) continue;
   if (forced === 'skip') {
-    excludeBrowserLayer = true;
-    console.log('check:tests: browser layer skipped by GRAPH_BROWSER_LAYER=skip');
-  } else {
-    const reason = browserLaunches();
-    if (reason) {
-      excludeBrowserLayer = true;
-      console.log(`check:tests: browser layer skipped - this environment cannot launch Chromium (${reason})`);
-      console.log('check:tests: tests/m8 still runs where window services exist (the host gate), or set GRAPH_BROWSER_LAYER=require to demand it');
-    }
+    skippedLayers.push({ ...layer, reason: 'GRAPH_BROWSER_LAYER=skip' });
+    layerExcludes.push(...layer.files);
+    continue;
+  }
+  if (forced === 'require') continue;
+  const probe = probes[layer.probe];
+  const reason = probe ? probe() : `no probe named ${layer.probe}`;
+  if (reason) {
+    skippedLayers.push({ ...layer, reason });
+    layerExcludes.push(...layer.files);
   }
 }
+for (const layer of skippedLayers) {
+  console.log(`check:tests: layer "${layer.capability}" skipped (${layer.files.length} entr(ies)) - ${layer.reason}`);
+}
+if (skippedLayers.length) {
+  console.log('check:tests: skipped layers are unverified here; the host gate runs them where the capability exists, or set GRAPH_BROWSER_LAYER=require to demand them');
+}
+
 const run = spawnSync(process.execPath, [
   'node_modules/vitest/vitest.mjs', 'run',
   // bail=1 would stop the suite at the first failure, which makes a quarantined
@@ -61,7 +82,7 @@ const run = spawnSync(process.execPath, [
   // The caller decides the tier (check:affected forwards an --exclude); the
   // quarantine decision stays here so both tiers excuse the same files.
   ...requested,
-  ...(excludeBrowserLayer && !browserLayerExcluded ? ['--exclude', '**/tests/m8/**'] : []),
+  ...layerExcludes.flatMap(glob => ['--exclude', glob]),
   '--reporter=default', '--reporter=json', '--outputFile=tests/.suite-report.json',
 ], { stdio: 'inherit', cwd: root });
 
@@ -88,7 +109,7 @@ if (quarantined.size) {
   for (const [file, reason] of quarantined) console.log(`  - ${file}${excused.includes(file) ? '  [FAILED this run]' : ''} — ${reason}`);
 }
 if (stale.length) console.log(`check:tests: stale quarantine entry/entries, no such test ran: ${stale.join(', ')}`);
-if (excludeBrowserLayer) console.log('check:tests: this run did not include tests/m8, so the browser layer is unverified here');
+if (skippedLayers.length) console.log(`check:tests: verified ${layers.length - skippedLayers.length}/${layers.length} environment layer(s) in this run`);
 if (excused.length) console.log(`check:tests: ${excused.length} quarantined failure(s), reported and not blocking: ${excused.join(', ')}`);
 if (blocking.length) {
   console.error(`\ncheck:tests: ${blocking.length} failure(s) outside the quarantine:`);
