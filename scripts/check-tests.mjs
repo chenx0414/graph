@@ -72,6 +72,13 @@ for (const layer of skippedLayers) {
 if (skippedLayers.length) {
   console.log('check:tests: skipped layers are unverified here; the host gate runs them where the capability exists, or set GRAPH_BROWSER_LAYER=require to demand them');
 }
+// The baseline check counts what ran, so it has to know what was deliberately
+// left out; otherwise a skipped layer reads as deleted tests. Written on every
+// run, including an empty one, so a stale file cannot hide a real shrink.
+writeFileSync(
+  join(root, 'tests/.suite-layers.json'),
+  `${JSON.stringify({ layers: skippedLayers.map(layer => ({ capability: layer.capability, reason: layer.reason, files: layer.files })) }, null, 2)}\n`,
+);
 
 const run = spawnSync(process.execPath, [
   'node_modules/vitest/vitest.mjs', 'run',

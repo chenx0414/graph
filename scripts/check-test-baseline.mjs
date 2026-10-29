@@ -23,6 +23,10 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const BASELINE_PATH = resolve(here, '../tests/suite-baseline.json');
 const REPORT_PATH = resolve(here, '../tests/.suite-report.json');
+// The layers the run deliberately left out, written by scripts/check-tests.mjs.
+// A skipped layer is not a deleted suite: counting it as one makes the guard
+// cry wolf, and a guard that cries wolf gets ignored.
+const LAYERS_PATH = resolve(here, '../tests/.suite-layers.json');
 
 /**
  * Compare the current run against the baseline.
@@ -82,6 +86,12 @@ function readRunReport(path = REPORT_PATH) {
 }
 
 function main() {
+  const skipped = existsSync(LAYERS_PATH) ? (JSON.parse(readFileSync(LAYERS_PATH, 'utf8')).layers ?? []) : [];
+  if (skipped.length) {
+    for (const layer of skipped) console.log(`Suite baseline not compared: layer "${layer.capability}" was skipped in this environment - ${layer.reason}`);
+    console.log('The counts below are a partial run, so this is not evidence of a shrink. The host gate compares them where the capability exists.');
+    return;
+  }
   const current = readRunReport();
   const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : null;
   const result = compareBaseline(baseline, current, process.env.GRAPH_UPDATE_BASELINE === '1');
