@@ -118,7 +118,7 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		// node question and nothing in this graph waits for it.
 		bindings.NotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
 			return RecordSupervisorNotice(state.options.Kernel.Store, graphId, SupervisorNotice{
-				Text: notice.Text, Milestone: notice.Milestone, Evidence: notice.Evidence, RequestID: notice.RequestID,
+				Text: notice.Text, Milestone: notice.Milestone, WorkID: notice.WorkID, Evidence: notice.Evidence, RequestID: notice.RequestID,
 			})
 		}
 	}

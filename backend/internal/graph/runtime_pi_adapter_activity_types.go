@@ -44,6 +44,7 @@ type PiAdapterAskedQuestion struct {
 type PiAdapterSupervisorNotice struct {
 	Text      string
 	Milestone string
+	WorkID    string
 	Evidence  string
 	RequestID string
 }

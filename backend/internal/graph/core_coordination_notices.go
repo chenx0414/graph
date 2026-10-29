@@ -12,6 +12,10 @@ import "strings"
 type SupervisorNotice struct {
 	Text      string
 	Milestone string
+	// WorkID is the work the milestone belongs to. With it the notice is
+	// delivered once per work and milestone, however many tool calls say it
+	// again; without it the request id is the only identity there is.
+	WorkID    string
 	Evidence  string
 	RequestID string
 }
@@ -49,23 +53,35 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 		milestone = "update"
 	}
 	evidence := strings.TrimSpace(notice.Evidence)
-	return store.Command("supervisor:notice:"+taskID, requestID, map[string]any{
-		"text": text, "milestone": milestone, "evidence": evidence, "projectId": projectID,
+	workID := strings.TrimSpace(notice.WorkID)
+	// One delivery per work and milestone: the scope key of the command is what
+	// makes a repeated notice a no-op instead of a second message and a second
+	// wake. Without a work id the call's own request id is the identity.
+	delivery := "notice:" + requestID
+	if workID != "" {
+		delivery = workID + ":" + milestone
+	}
+	return store.Command("supervisor:notice:"+taskID, delivery, map[string]any{
+		"text": text, "milestone": milestone, "workId": workID, "evidence": evidence, "projectId": projectID,
 	}, func() any {
-		body := "[来自项目主管的通知]\n项目: " + projectID + "\n里程碑: " + milestone + "\n内容: " + text
+		body := "[来自项目主管的通知]\n项目: " + projectID
+		if workID != "" {
+			body += "\n工作: " + workID
+		}
+		body += "\n里程碑: " + milestone + "\n内容: " + text
 		if evidence != "" {
 			body += "\n证据: " + evidence
 		}
 		body += "\n这条通知不需要回答；需要验收时先读工作草案与验收证据，再决定下一步。"
 		message := AppendMessage(store, MessageInput{
 			ConversationID: globalID, Role: MessageRoleUser, Kind: "chat", Text: body, State: MessageStatePending,
-			Data: map[string]any{"source": map[string]any{"kind": "agent", "conversationId": caller.Id, "taskId": taskID}, "milestone": milestone},
+			Data: map[string]any{"source": map[string]any{"kind": "agent", "conversationId": caller.Id, "taskId": taskID}, "milestone": milestone, "workId": workID},
 		})
 		WakeMaster(store, WakeIntent{
-			TaskID: anchor, Kind: "supervisor_notice", DedupeKey: taskID + ":" + milestone + ":" + requestID,
-			Data: map[string]any{"conversationId": caller.Id, "taskId": taskID, "milestone": milestone}, HasData: true,
+			TaskID: anchor, Kind: "supervisor_notice", DedupeKey: taskID + ":" + delivery,
+			Data: map[string]any{"conversationId": caller.Id, "taskId": taskID, "milestone": milestone, "workId": workID}, HasData: true,
 		})
-		store.Event(taskID, "supervisor.notice", map[string]any{"conversationId": globalID, "messageId": message.Id, "milestone": milestone})
-		return map[string]any{"delivered": true, "conversationId": globalID, "messageId": message.Id, "milestone": milestone}
+		store.Event(taskID, "supervisor.notice", map[string]any{"conversationId": globalID, "messageId": message.Id, "milestone": milestone, "workId": workID})
+		return map[string]any{"delivered": true, "conversationId": globalID, "messageId": message.Id, "milestone": milestone, "workId": workID}
 	})
 }

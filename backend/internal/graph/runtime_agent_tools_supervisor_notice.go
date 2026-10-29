@@ -29,6 +29,7 @@ func agentToolsSupervisor(ask func(PiAdapterAskedQuestion), notify func(notice P
 	delivered := notify(PiAdapterSupervisorNotice{
 		Text:      agentToolsTruncate(text, 2_000),
 		Milestone: agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["milestone"])), 200),
+		WorkID:    agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["workId"])), 200),
 		Evidence:  agentToolsTruncate(strings.TrimSpace(agentToolsStringOrEmpty(params["evidence"])), 1_000),
 		RequestID: requestID,
 	})

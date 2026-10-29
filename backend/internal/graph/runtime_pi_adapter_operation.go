@@ -264,7 +264,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				// supervisor says what happened and its own turn keeps running.
 				tools.OnNotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
 					return RecordSupervisorNotice(options.Store, operation.TaskId, SupervisorNotice{
-						Text: notice.Text, Milestone: notice.Milestone, Evidence: notice.Evidence, RequestID: notice.RequestID,
+						Text: notice.Text, Milestone: notice.Milestone, WorkID: notice.WorkID, Evidence: notice.Evidence, RequestID: notice.RequestID,
 					})
 				}
 			}
