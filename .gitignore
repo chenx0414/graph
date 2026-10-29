@@ -66,3 +66,4 @@ hb-backlog-*.md
 
 # Ephemeral vitest json report for the suite-baseline guard (HB-255)
 tests/.suite-report.json
+tests/.quarantine-history.json

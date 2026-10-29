@@ -3,11 +3,14 @@
 // not quarantined, and every quarantined failure is printed with its reason. A
 // silent skip would be indistinguishable from a pass, so nothing here is silent.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
 const reportPath = join(root, 'tests/.suite-report.json');
+// Kept beside the report and ignored by git: a review ledger of quarantined
+// files that travels with the checkout but never rides along in a commit.
+const historyPath = join(root, 'tests/.quarantine-history.json');
 const run = spawnSync(process.execPath, [
   'node_modules/vitest/vitest.mjs', 'run',
   // bail=1 would stop the suite at the first failure, which makes a quarantined
@@ -54,3 +57,23 @@ if (process.env.GRAPH_STRICT_SUITE === '1' && failed.length) {
   process.exit(1);
 }
 console.log(`check:tests: ${report.numPassedTests}/${report.numTotalTests} tests passed${excused.length ? `, ${excused.length} quarantined failure(s)` : ''}`);
+
+// The quarantine is a loan, not a home: a file that keeps passing gets named
+// here, so the list only shrinks on purpose instead of growing forever.
+const history = (() => { try { return JSON.parse(readFileSync(historyPath, 'utf8')); } catch { return { runs: [] }; } })();
+const snapshot = {
+  at: new Date().toISOString(),
+  files: [...quarantined.keys()].map(file => ({
+    path: file,
+    status: failed.includes(file) ? 'failed' : ran.has(file) ? 'passed' : 'missing',
+  })),
+};
+history.runs = [...(history.runs ?? []), snapshot].slice(-30);
+writeFileSync(historyPath, `${JSON.stringify(history, null, 2)}\n`);
+const GREEN_RUNS = 3;
+for (const [file] of quarantined) {
+  const recent = history.runs.slice(-GREEN_RUNS).map(item => item.files.find(entry => entry.path === file)?.status);
+  if (recent.length === GREEN_RUNS && recent.every(status => status === 'passed')) {
+    console.log(`check:tests: ${file} passed the last ${GREEN_RUNS} runs — take it out of tests/quarantine.json`);
+  }
+}
