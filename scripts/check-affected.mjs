@@ -15,7 +15,11 @@ const root = process.cwd();
 const git = args => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
 
 function resolveBase() {
-  for (const candidate of [process.env.GRAPH_CHECK_BASE, 'origin/main', 'main', 'HEAD~1']) {
+  // The gate runs before the commit, so the pending change is the working tree:
+  // HEAD is the base that measures exactly what this change touches. A BRANCH
+  // base (GRAPH_CHECK_BASE=origin/main) answers a different question - what this
+  // whole branch changed - and on a long-lived branch that is always wide.
+  for (const candidate of [process.env.GRAPH_CHECK_BASE, 'HEAD', 'origin/main', 'main', 'HEAD~1']) {
     if (!candidate) continue;
     if (git(['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`]).status !== 0) continue;
     const mergeBase = git(['merge-base', 'HEAD', candidate]);
