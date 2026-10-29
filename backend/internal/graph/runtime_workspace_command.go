@@ -208,8 +208,20 @@ func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, rea
 	}
 }
 
-// Run executes one command inside the verified sandbox.
+// Run executes one command inside the verified sandbox, with the runner's own
+// limit.
 func (runner *WorkspaceCommandRunner) Run(command string, args []string, signal *AbortSignal) CommandResult {
+	return runner.run(command, args, signal, 0)
+}
+
+// RunWithTimeout executes one command with a per-call limit. A non-positive
+// timeoutMs keeps the runner's own limit, so a caller that does not care leaves
+// the daemon-wide policy in charge.
+func (runner *WorkspaceCommandRunner) RunWithTimeout(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
+	return runner.run(command, args, signal, timeoutMs)
+}
+
+func (runner *WorkspaceCommandRunner) run(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
 	hostCommands := runner.access != nil && runner.access.Commands == "host"
 	var resolved ResolvedCommand
 	if hostCommands {
@@ -238,12 +250,16 @@ func (runner *WorkspaceCommandRunner) Run(command string, args []string, signal 
 	for key, value := range resolved.Env {
 		environment[key] = value
 	}
+	limit := runner.timeoutMs
+	if timeoutMs > 0 {
+		limit = timeoutMs
+	}
 	cmd := RestrictedCommand{
 		Broker: runner.gate, Cwd: runner.workspace, ScratchDir: scratch,
 		Executable: resolved.Executable, Args: resolved.Args,
 		ReadPaths:  append([]string{runner.workspace, filepath.Dir(resolved.Executable)}, append(resolved.ReadPaths, runner.readPaths...)...),
 		WritePaths: []string{runner.workspace, scratch},
-		TimeoutMs:  runner.timeoutMs,
+		TimeoutMs:  limit,
 		Signal:     signal,
 	}
 	if hostCommands {

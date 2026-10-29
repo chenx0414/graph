@@ -5,6 +5,8 @@ import (
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 
+	"os"
+	"path/filepath"
 	"sync"
 
 	"context"
@@ -20,8 +22,23 @@ import (
 // so one host serves every session of the daemon, and an extension is loaded
 // once no matter how many sessions bind it.
 var pigExtensionHost = sync.OnceValue(func() *pigkernel.ExtensionHost {
-	return pigkernel.NewExtensionHost("")
+	// An extension resolves a relative path against its own process cwd, and the
+	// host passes that cwd straight to the child (`cmd.Dir`). Empty handed, the
+	// child inherited the daemon's cwd - `/` when the app is launched from
+	// Finder - so a relative screenshot or artifact path failed with "Permission
+	// denied" and the whole verification was reported as broken. Give the child a
+	// real writable directory instead.
+	return pigkernel.NewExtensionHost(pigExtensionScratchDir())
 })
+
+// pigExtensionScratchDir is the directory an extension process works in.
+func pigExtensionScratchDir() string {
+	dir := filepath.Join(GraphHome(), "tmp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return GraphHome()
+	}
+	return dir
+}
 
 // ClosePigExtensions stops the extension processes the daemon started.
 func ClosePigExtensions() {

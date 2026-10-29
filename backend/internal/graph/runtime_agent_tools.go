@@ -142,6 +142,10 @@ type AgentToolsInput struct {
 	ReadOnly bool
 	// Run executes one allowed command in the work copy.
 	Run func(command string, args []string, signal *AbortSignal) CommandResult
+	// RunWithTimeout is Run with a per-call limit, for a tool whose schema
+	// exposes the limit to the model. A non-positive timeoutMs keeps the
+	// runner's own limit.
+	RunWithTimeout func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult
 	// CommitWorkspace commits the named paths of the work copy.
 	CommitWorkspace func(paths []string, message string) any
 	// Fetch reads one granted HTTP document.
@@ -271,7 +275,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		WorkspaceCommit: input.CommitWorkspace != nil,
 		Role:            input.Role,
 		ReadOnly:        input.ReadOnly,
-		Run:             input.Run != nil,
+		Run:             input.Run != nil || input.RunWithTimeout != nil,
 		Fetch:           input.Fetch != nil,
 		Catalog:         input.Catalog != nil,
 		Harness:         input.GraphManagement.HarnessCompare != nil,

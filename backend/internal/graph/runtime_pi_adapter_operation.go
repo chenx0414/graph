@@ -238,6 +238,9 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
 					return commands.Run(command, args, signal)
 				},
+				RunWithTimeout: func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
+					return commands.RunWithTimeout(command, args, signal, timeoutMs)
+				},
 			}
 			built := tools
 			nativeToolInput = &built

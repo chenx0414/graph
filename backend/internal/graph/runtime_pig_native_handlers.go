@@ -337,6 +337,10 @@ func pigNativePattern(pattern string) string {
 	return string(out)
 }
 
+// maxBashTimeoutMs caps what one bash call may ask for, so a stuck command
+// cannot hold a session slot for an unbounded time.
+const maxBashTimeoutMs = 1_800_000
+
 func pigBashTool(input AgentToolsInput) ToolDefinition {
 	return ToolDefinition{
 		Name:        "bash",
@@ -346,7 +350,7 @@ func pigBashTool(input AgentToolsInput) ToolDefinition {
 			"type": "object",
 			"properties": map[string]any{
 				"command": map[string]any{"type": "string", "description": "The command to run."},
-				"timeout": map[string]any{"type": "number", "description": "How long the command may run, in milliseconds."},
+				"timeout": map[string]any{"type": "number", "description": "How long the command may run, in milliseconds. Defaults to 120000 and is capped at 1800000."},
 			},
 			"required": []any{"command"},
 		},
@@ -356,10 +360,25 @@ func pigBashTool(input AgentToolsInput) ToolDefinition {
 			if command == "" {
 				return nil, errors.New("bash needs a command")
 			}
-			if input.Run == nil {
+			if input.Run == nil && input.RunWithTimeout == nil {
 				return nil, errors.New("This Agent may not run commands")
 			}
-			result := input.Run("sh", []string{"-c", command}, nil)
+			// The schema promises a per-call limit, so honour it. Accepting the
+			// parameter and dropping it made a long command look like a crash: the
+			// runner's own 120s cap killed it and the tool reported SIGKILL.
+			timeoutMs := pigNativeNumber(arguments["timeout"])
+			if timeoutMs < 0 {
+				timeoutMs = 0
+			}
+			if timeoutMs > maxBashTimeoutMs {
+				timeoutMs = maxBashTimeoutMs
+			}
+			var result CommandResult
+			if timeoutMs > 0 && input.RunWithTimeout != nil {
+				result = input.RunWithTimeout("sh", []string{"-c", command}, nil, timeoutMs)
+			} else {
+				result = input.Run("sh", []string{"-c", command}, nil)
+			}
 			answer := agentToolsText(agentToolsCommandOutput(result))
 			answer["details"] = map[string]any{"shellOutput": result.Stdout + result.Stderr, "exitCode": result.Code}
 			return answer, nil
