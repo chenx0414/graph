@@ -143,21 +143,24 @@ func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 			kernelRow(e.store.Db, "SELECT id FROM wake_intents WHERE task_id=? AND state='ready' LIMIT 1", taskId) == nil {
 			return nil
 		}
-		// A blocked master is normally not dispatched. The exception is the
-		// supervisor that owns the question blocking it: only that same node can
-		// answer it, so without this it waits forever. It is listed only while no
-		// operation of the task is in flight - a recovered turn still owns the
-		// conversation, and a new turn on top of it would break that ownership.
+		// A blocked master is normally not dispatched. The exception is a
+		// supervisor that owns the question blocking it *and* has a queued message
+		// waiting behind that question: nothing else can ever answer it, and the
+		// user's work would wait for ever. Without such a queued message the
+		// block stands - a retry nobody asked for would spend model calls the
+		// failure did not earn. No operation of the task may be in flight either:
+		// a recovered turn still owns the conversation.
+		busy := kernelRow(e.store.Db, "SELECT id FROM operations WHERE task_id=? AND state IN ('dispatched','unknown') LIMIT 1", taskId) != nil
+		stranded := kernelRow(e.store.Db, "SELECT id FROM messages WHERE conversation_id=? AND state IN ('pending','queued') LIMIT 1", conversation.Id) != nil
 		rows := kernelRows(e.store.Db, `SELECT * FROM nodes n
         WHERE n.task_id=? AND json_extract(n.spec,'$.role')='master'
         AND (n.status='pending' OR (n.status='blocked' AND EXISTS(
           SELECT 1 FROM questions q WHERE q.task_id=n.task_id AND q.node_id=n.id AND q.status='open' AND q.owner='main')))
         ORDER BY n.rowid`, taskId)
-		busy := kernelRow(e.store.Db, "SELECT id FROM operations WHERE task_id=? AND state IN ('dispatched','unknown') LIMIT 1", taskId) != nil
 		out := []ExecutionNodeRow{}
 		for _, row := range rows {
 			node := executionNodeRowOf(row)
-			if busy && kernelString(row["status"]) == "blocked" {
+			if (busy || !stranded) && kernelString(row["status"]) == "blocked" {
 				continue
 			}
 			if IsMasterParked(e.store, taskId, node.Id) {
