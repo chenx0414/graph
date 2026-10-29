@@ -16,3 +16,5 @@
 `node --run check` 是**激活门禁**（快层）：静态检查加 `check:affected`，后者按改动区域选层——纯后端改动不跑浏览器层 `tests/m8`，`src/web`/`src/core`/`desktop` 改动才跑它，改 `scripts`/`tests`/`presets`/`docs`/`package.json`/vitest 配置则跑全套。用 `GRAPH_CHECK_PLAN_ONLY=1 node --run check:affected` 可以只读“这次会跑哪一层、因为哪些文件”。
 
 `node --run check:full` 是**全量确认**（慢层，约 4–5 分钟）：包含 `check:tests` 与 `check:baseline`。激活重载之后必须跑一次并把结果写进汇报；失败不当场阻塞重载，但要开一条后续任务把回归收尾。`tests/quarantine.json` 里的时序敏感用例每次仍会跑并逐条打印，只是不阻塞门禁；`GRAPH_STRICT_SUITE=1` 时恢复严格，隔离项连续全绿后就把它移出名单。
+
+这一次全量要走**宿主检查通道**（`apply_rsi_change` 带 `changes: []` 和 `check:full`），不要在自己的 bash 里跑：Agent 的受限执行器没有窗口服务，浏览器层 `tests/m8` 会报 `Process failed to launch!`。实测同一次里 38 个文件 / 123 条用例因这个原因变红，而非浏览器层的用例照旧全绿——所以本机跑出来的全量不能当回归判定，只能在报告里如实标注为环境受限。
