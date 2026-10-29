@@ -175,7 +175,7 @@ func rsiChangedSince(root, base string) []string {
 // with the environment flag set, so nobody reads an outage as a regression.
 func rsiRunCheckWithEnvironmentRetry(root string, command RsiCommand, timeoutMs int) RsiValidationResult {
 	first := rsiRunCommand(root, command, timeoutMs)
-	if first.Status != "failed" || !IsEnvironmentFailure(first.Output) {
+	if first.Status != "failed" || !rsiEnvironmentFailureAtTheEnd(first.Output) {
 		return first
 	}
 	label := command.Command + " " + strings.Join(command.Args, " ")
@@ -186,6 +186,23 @@ func rsiRunCheckWithEnvironmentRetry(root string, command RsiCommand, timeoutMs 
 	}
 	return RsiValidationResult{Command: retry.Command, Status: retry.Status, Environment: true,
 		Output: label + " 连续两次失败，其中至少一次是环境/网络问题，而不是改动本身。\n--- 第一次 ---\n" + first.Output + "\n--- 第二次 ---\n" + retry.Output}
+}
+
+// rsiEnvironmentFailureAtTheEnd asks the classifier about the part of the output
+// that says why the command failed: the tail.
+//
+// A suite log is megabytes, and some of its tests deliberately print network
+// words - "the module proxy is unreachable" is a test asserting that very
+// message. Matching anywhere in that log meant any such test turned every
+// environment retry on, and the whole gate ran twice for nothing. The failure
+// summary is at the end, so the tail is where an environment fault can be read.
+func rsiEnvironmentFailureAtTheEnd(output string) bool {
+	const tailLength = 4_000
+	tail := output
+	if len(tail) > tailLength {
+		tail = tail[len(tail)-tailLength:]
+	}
+	return IsEnvironmentFailure(tail)
 }
 
 // rsiDefaultValidate runs the project's own gate.

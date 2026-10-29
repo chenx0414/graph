@@ -151,7 +151,7 @@ for (const [file] of quarantined) {
     if (item.files.find(entry => entry.path === file)?.status !== 'passed') break;
     streak += 1;
   }
-  if (streak === GREEN_RUNS || streak >= GREEN_RUNS * 3) {
+  if (streak === GREEN_RUNS || streak === GREEN_RUNS * 3) {
     console.log(`check:tests: ${file} passed the last ${streak} runs — take it out of tests/quarantine.json`);
   }
 }
