@@ -32,7 +32,7 @@ func (k *KernelStore) MarkNodeQuestionAnswered(questionID string) {
 
 func (k *KernelStore) SetQuestionManualPause(taskID, nodeID string, paused bool) {
 	if !paused && k.HasPendingProviderCall(taskID, nodeID) {
-		Raise("unknown_usage", "Reconcile the node's pending provider calls before resuming")
+		Raise("unknown_usage", "Reconcile the node's pending provider calls before resuming"+k.pendingProviderCallDetail(taskID, nodeID))
 	}
 	if !paused && kernelRow(k.Db, "SELECT id FROM node_questions WHERE task_id=? AND node_id=? AND state IN ('recorded','parked')", taskID, nodeID) != nil {
 		Raise("paused", "The node is waiting for its supervisor's answer")
@@ -49,7 +49,7 @@ func (k *KernelStore) AnswerNodeQuestion(questionID string, answer Answer) {
 	}
 	taskID, nodeID := kernelString(row["task_id"]), kernelString(row["node_id"])
 	if k.HasPendingProviderCall(taskID, nodeID) {
-		Raise("unknown_usage", "Reconcile the node's pending provider calls before answering its question")
+		Raise("unknown_usage", "Reconcile the node's pending provider calls before answering its question"+k.pendingProviderCallDetail(taskID, nodeID))
 	}
 	k.Store.ResolveQuestion(questionID, answer)
 	k.MarkNodeQuestionAnswered(questionID)

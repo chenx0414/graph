@@ -2,6 +2,7 @@ package graph
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 func (k *KernelStore) ProviderCalls(taskID string, nodeID ...string) []KernelProviderCall {
@@ -111,6 +112,27 @@ func (k *KernelStore) ReconcileProviderCall(id string, usage any, cost any) {
 func (k *KernelStore) HasPendingProviderCall(taskID, nodeID string) bool {
 	_, ok := g5One(k.Db, "SELECT 1 FROM kernel_provider_calls WHERE task_id=? AND node_id=? AND state IN ('inflight','unknown') LIMIT 1", taskID, nodeID)
 	return ok
+}
+
+// pendingProviderCallDetail names the calls that block a resume: which one, in
+// which state, from which execution, and how long it has been open.
+//
+// The refusal is correct - usage nobody can account for must be reconciled - but
+// "pending provider calls" alone left a race impossible to diagnose: the same
+// test failed with it twice and passed five times standalone, and there was no
+// way to tell an inflight row left by a dead turn from an unknown row that was
+// never settled. The detail makes the next occurrence self-explaining.
+func (k *KernelStore) pendingProviderCallDetail(taskID, nodeID string) string {
+	calls := k.PendingProviderCalls(taskID, nodeID)
+	if len(calls) == 0 {
+		return ""
+	}
+	now := NowMillis()
+	parts := make([]string, 0, len(calls))
+	for _, call := range calls {
+		parts = append(parts, call.Id+" state="+call.State+" execution="+call.ExecutionId+" purpose="+call.Purpose+" openForMs="+itoa(int(now-call.CreatedAt)))
+	}
+	return " (" + itoa(len(calls)) + ": " + strings.Join(parts, "; ") + ")"
 }
 
 // HasUnknownProviderCall reports whether a node has usage nobody can account for.
