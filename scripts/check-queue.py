@@ -69,12 +69,12 @@ def wait_for_legacy_checks(common):
         time.sleep(2)
 
 
-def run(command, lock):
+def run(command, lock=None):
     environment = os.environ.copy()
     environment.setdefault("GOMAXPROCS", "2")
     child = subprocess.Popen(
         command, env=environment, start_new_session=True,
-        pass_fds=(lock.fileno(),),
+        pass_fds=(() if lock is None else (lock.fileno(),)),
     )
 
     def cancel(signum, _frame):
@@ -127,8 +127,19 @@ def main():
     if command[:1] == ["--"]:
         command = command[1:]
     if not command:
-        steps = ("check:backend", "typecheck", "lint", "check:harness", "check:affected", "check:evidence")
-        command = ["/bin/sh", "-c", " && ".join(f"node --run {step}" for step in steps)]
+        # The fast gate has two halves, and only one of them needs the machine-wide
+        # slot. Static checks write inside this worktree alone, so two sessions can
+        # run them at the same time; the affected tests share daemons and scratch
+        # directories, so they still queue. Serializing the static half made every
+        # activation wait for whoever else was checking, for no shared resource.
+        static = ("check:backend", "typecheck", "lint", "check:harness")
+        tests = ("check:affected", "check:evidence")
+        with protect_worktree(common):
+            for step in static:
+                code = run(["node", "--run", step])
+                if code:
+                    return code
+            return run_queued(common, ["/bin/sh", "-c", " && ".join(f"node --run {step}" for step in tests)], False)
     with protect_worktree(common):
         return run_queued(common, command, continuation)
 
