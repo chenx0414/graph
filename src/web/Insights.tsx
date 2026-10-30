@@ -52,6 +52,12 @@ function formatCost(micros: number): string {
   return `$${amount.toFixed(4)}`;
 }
 
+/** The role a tool call ran under; the same tool can appear once per role. */
+function roleLabel(role: string | null): string {
+  if (!role || role === 'master') return '主 Agent';
+  return role;
+}
+
 function percent(part: number, whole: number): string {
   if (whole <= 0) return '0%';
   const value = (part / whole) * 100;
@@ -90,7 +96,7 @@ function ShareBars({ rows, testid }: { rows: { key: string; label: string; value
   return (
     <ul className="insights-bars" data-testid={testid}>
       {rows.map(row => (
-        <li key={row.key} className="insights-bar-row" data-testid={`insights-bar-${row.key}`}>
+        <li key={row.key} className="insights-bar-row" data-testid={`insights-bar-${row.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`}>
           <span className="insights-bar-label" title={row.label}>{row.label}</span>
           <span className="insights-bar-track">
             <span className="insights-bar-fill" style={{ width: `${peak > 0 ? (row.value / peak) * 100 : 0}%` }} />
@@ -289,8 +295,8 @@ export function InsightsPage({ settings, conversations }: { settings: Settings_ 
                   <ShareBars
                     testid="insights-tool-bars"
                     rows={topTools.map(row => ({
-                      key: row.tool,
-                      label: row.tool,
+                      key: `${row.tool}/${row.role ?? ''}`,
+                      label: `${row.tool} · ${roleLabel(row.role)}`,
                       value: row.calls,
                       hint: `${row.calls.toLocaleString()} 次 · ${formatDuration(row.totalMs)}`,
                     }))}
@@ -300,7 +306,7 @@ export function InsightsPage({ settings, conversations }: { settings: Settings_ 
                       <tr><th>工具</th><th>角色</th><th>次数</th><th>失败</th><th>平均耗时</th><th>中位数</th><th>最大</th></tr>
                     </thead>
                     <tbody>
-                      {toolRows.map(row => (
+                      {topTools.map(row => (
                         <tr key={`${row.tool}/${row.role ?? ''}`} data-testid={`insights-tool-row-${row.tool}`}>
                           <td><code>{row.tool}</code></td>
                           <td>{row.role ?? '—'}</td>
@@ -313,6 +319,9 @@ export function InsightsPage({ settings, conversations }: { settings: Settings_ 
                       ))}
                     </tbody>
                   </table>
+                  {toolRows.length > topTools.length && (
+                    <p className="card-sub">只列调用最多的 {topTools.length} 项（共 {toolRows.length} 项），完整明细在下方的「工具与技能明细」里。</p>
+                  )}
                 </>
               )}
           </Card>
