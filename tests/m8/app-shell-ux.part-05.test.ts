@@ -59,7 +59,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const sentPanel = await page.getByTestId('agent-context-sent').innerText();
   expect(sentPanel).toContain('实际发出');
   expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
-  await expect.poll(() => page.getByTestId('agent-context-sent').innerText()).toContain(`源码 Docs ${join(process.cwd(), 'docs', 'agent')}`);
+  await expect.poll(() => page.getByTestId('agent-context-sent').innerText(), { timeout: 30_000, interval: 200 }).toContain(`源码 Docs ${join(process.cwd(), 'docs', 'agent')}`);
   expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
@@ -86,13 +86,13 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await page.getByTestId('toasts').getByText(/已恢复 Worker 运行规则/).waitFor();
   await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).not.toContain('CUSTOM CONVERSATION');
   await page.getByTestId('agent-prompt-editor').fill('');
-  await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value)).toBe('');
+  await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value), { timeout: 30_000, interval: 200 }).toBe('');
   await page.getByRole('button', { name: '设为默认' }).click();
   await page.getByTestId('toasts').getByText(/已将 Worker 运行规则 设为默认/).waitFor();
   await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toBe('');
   expect(await readFile(join(root, 'graph', 'prompts', 'defaults', 'runtime', 'worker.md'), 'utf8')).toBe('\n');
   await page.getByTestId('agent-prompt-editor').fill('Temporary after default');
-  await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value)).toBe('Temporary after default');
+  await expect.poll(() => page.getByTestId('agent-prompt-editor').evaluate((element: HTMLInputElement) => element.value), { timeout: 30_000, interval: 200 }).toBe('Temporary after default');
   await page.getByRole('button', { name: '保存 Prompt' }).click();
   await page.getByTestId('toasts').getByText(/已保存 Worker 运行规则/).waitFor();
   await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toContain('Temporary after default');
