@@ -1,10 +1,6 @@
 {
   "files": [
     {
-      "path": "tests/e2e/go-wake-notification.test.ts",
-      "reason": "restart timing under load: retries_used reads 1 where the resumed execution kept 0. Re-added 2026-10-29 23:1x after failing on the very first run that removed it, having passed the previous 17 - which is the whole point of the ledger: a long green streak is not proof that a timing assertion is stable"
-    },
-    {
       "path": "tests/e2e/go-node-queue.part-02.test.ts",
       "reason": "resume races the failed turn's usage record: the daemon sometimes answers resume with unknown_usage (400) right after a turn failed for a missing output. The refusal now names the blocking call (id, state, execution, openForMs) - added in 184883f1 - so the next occurrence is evidence instead of a guess; remove this entry once one failure has named its call"
     }
