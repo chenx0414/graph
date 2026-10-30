@@ -136,7 +136,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
         {overview ? (
           <section className="stack node-overview" data-testid="node-overview" style={{ gap: 8 }}>
             <div className="row" style={{ flexWrap: 'wrap' }}>
-              <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
+              <Pill tone="accent">{overview.node.kind}</Pill>
               <span className="muted mono" data-testid="node-identity">{overview.node.id}</span>
               <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
                 {NODE_LABEL[overview.node.status] ?? overview.node.status}
@@ -144,6 +144,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
               {overview.node.definitionVersion && <span className="muted">{overview.node.definitionVersion}</span>}
               {overview.instance?.model && <span className="muted mono">{overview.instance.model}</span>}
             </div>
+            {overview.node.action && <p className="node-action" data-testid="node-action">{overview.node.action}</p>}
             {overview.environment && <div className="stack" data-testid="node-environment">
               <span>工作目录：<span className="mono">{overview.environment.workspace}</span></span>
               <span className="muted">实际权限：{overview.environment.access.mode === 'full' ? '完全访问' : '受限访问'} · 读取 {overview.environment.access.filesystem.read} · 写入 {overview.environment.access.filesystem.write} · 网络 {overview.environment.access.network} · 配置 v{overview.environment.revision}</span>
