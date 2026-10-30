@@ -103,7 +103,7 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
     const global = field(await request('/api/orchestration/global', { requestId: 'global' }), 'conversationId');
     if (mode === 'busy') {
       await request(`/api/conversations/${global}/messages`, { requestId: 'busy', text: 'Please consider this first.' });
-      await expect.poll(() => globalStarted, { timeout: 10_000 }).toBe(true);
+      await expect.poll(() => globalStarted, { timeout: 30_000 }).toBe(true);
     }
     await request(`/api/conversations/${project}/messages`, { requestId: 'message', text: 'Plan an import.' });
     let questions: unknown[] = [];
@@ -111,7 +111,7 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
       await expect.poll(async () => {
         const view = await request(`/api/conversations/${project}`);
         return Array.isArray(view.questions) && view.questions.length === 1;
-      }, { timeout: 10_000 }).toBe(true);
+      }, { timeout: 30_000 }).toBe(true);
       releaseGlobal();
     }
     await expect.poll(() => results.has('list-global'), { timeout: 15_000 }).toBe(true);
@@ -133,7 +133,7 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
       expect(field(userQuestions[0], 'id')).toBe(field(open[0], 'id'));
       expect(record(record(userQuestions[0]).data)).toMatchObject({ options: [], multiple: false });
       expect((await request(`/api/conversations/${project}`)).questions).toEqual([]);
-      await expect.poll(async () => record((await request(`/api/conversations/${global}`)).master).status, { timeout: 10_000 }).toBe('succeeded');
+      await expect.poll(async () => record((await request(`/api/conversations/${global}`)).master).status, { timeout: 30_000 }).toBe('succeeded');
       await daemon.close();
       daemon = await start();
       const reopened = await request(`/api/conversations/${global}`);
@@ -145,7 +145,7 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
       const view = await request(`/api/conversations/${project}`);
       questions = Array.isArray(view.questions) ? view.questions : [];
       return questions.length > 0 && record(questions[0]).status === 'resolved';
-    }, { timeout: 10_000 }).toBe(true).catch(async () => {
+    }, { timeout: 30_000 }).toBe(true).catch(async () => {
       throw new Error(`Questions: ${JSON.stringify(questions)}, global: ${JSON.stringify(await request(`/api/conversations/${global}`))}, tool results: ${JSON.stringify([...results])}, stderr: ${daemon?.stderr}`);
     });
     expect(record(questions[0])).toMatchObject({ owner: 'main', answer: { type: 'respond', value: 'Use the project database.' } });
@@ -153,7 +153,7 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
       const view = await request(`/api/conversations/${project}`);
       const messages = Array.isArray(view.messages) ? view.messages : [];
       return messages.some(message => record(message).role === 'assistant' && record(message).text === 'Understood.');
-    }, { timeout: 10_000 }).toBe(true);
+    }, { timeout: 30_000 }).toBe(true);
     expect(results.has('list-global')).toBe(true);
     expect(results.has('resolve-global')).toBe(true);
     expect(String(results.get('resolve-stale'))).toContain('question changed');

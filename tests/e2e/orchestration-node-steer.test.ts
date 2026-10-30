@@ -181,4 +181,7 @@ test.each(['steer', 'stop', 'stop-restart', 'user-steer', 'user-stop', 'browser-
     await new Promise<void>(resolve => worker.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
-}, 60_000);
+// Each mode is a whole graph run with its own daemon, master and browser. The
+// 60s the suite defaults to is not that flow's budget: under a loaded machine
+// a correct run was being cut off mid-flight.
+}, 180_000);

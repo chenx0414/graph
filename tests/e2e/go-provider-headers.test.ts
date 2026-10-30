@@ -277,11 +277,17 @@ test('tasks created while dispatch was disabled are recovered on the next execut
   const execute = await launchCli(root, { configPath: executeConfig, env: { GRAPH_RECOVERY_KEY: 'recovery-key' }, extraArgs: ['--execute'] });
   cleanup.push(() => execute.close());
   await expect.poll(() => provider.headers.length, { timeout: 60_000, interval: 250 }).toBeGreaterThan(0);
-  const recovered = await execute.request(`/api/tasks/${taskId}`);
-  const nodes = (await recovered.json() as { nodes?: { id: string; status: string }[] }).nodes ?? [];
-  expect(nodes.map(node => node.id)).toContain('master');
+  // A request that reached the provider is not a turn that finished: the node
+  // settles after the answer comes back. Poll the recorded status rather than
+  // reading it once, the moment the first header arrives.
+  const nodeStatus = async () => {
+    const view = await execute.request(`/api/tasks/${taskId}`);
+    const nodes = (await view.json() as { nodes?: { id: string; status: string }[] }).nodes ?? [];
+    expect(nodes.map(node => node.id)).toContain('master');
+    return nodes.find(node => node.id === 'master')?.status;
+  };
+  await expect.poll(nodeStatus, { timeout: 60_000, interval: 250 }).toBe('succeeded');
   expect(provider.authorizations[0]).toBe('Bearer recovery-key');
-  expect(nodes.find(node => node.id === 'master')?.status).toBe('succeeded');
 
   // The recovery is a fact in the record, not an invisible repair - and the
   // record names what the task was waiting for. The view-only daemon had no
