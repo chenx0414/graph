@@ -181,12 +181,16 @@ test('a conversation that no model can be called is refused with the reason, and
   const confirmed = await bridge({ ref: 'GRAPH_LOCAL_KEY', value: 'key-local-again', persisted: true });
   expect(confirmed.body.applied, JSON.stringify(confirmed.body)).toBe(true);
 
-  // The kept message runs now, and the master really answers it.
+  // The kept message runs now, and the master really answers it. The wait is
+  // generous on purpose: this assertion fires only after the key is stored and
+  // the kept turn is re-admitted, and on a busy machine that round trip can
+  // take a while. The fact is deterministic; a 60s budget was the part that
+  // was not, and it failed once under eight workers.
   await expect.poll(async () => {
     const view = await request(`/api/conversations/${conversationId}`);
     const list = (view.body as { messages?: ConversationMessage[] }).messages ?? [];
     return list.some(message => message.role === 'assistant' && message.text === 'Answered.');
-  }, { timeout: 60_000, interval: 250 }).toBe(true);
+  }, { timeout: 150_000, interval: 250 }).toBe(true);
   const answered = await request(`/api/conversations/${conversationId}`);
   const final = (answered.body as { messages?: ConversationMessage[] }).messages ?? [];
   expect(final.find(message => message.role === 'user')?.state).toBe('delivered');
