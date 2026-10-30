@@ -155,11 +155,14 @@
 .markdown-input .md-strike { text-decoration: line-through; }
 .markdown-input .md-link { color: #356bad; text-decoration: underline; }
 .markdown-input .md-quote { color: var(--muted); border-left: 2px solid var(--border-strong); padding-left: 8px; }
-.window-drawer-layer { position: fixed; inset: 0 0 0 auto; width: min(var(--window-drawer-width,440px),100vw); z-index: 110; pointer-events: none; transform: translateX(100%); visibility:hidden; transition: transform 220ms ease, visibility 220ms; }
-.window-drawer-layer[data-open="true"] { transform:none; pointer-events:auto; visibility:visible; }
-.window-drawer-layer .detail-drawer, .window-drawer-layer .detail-drawer[data-open="true"], .window-drawer-layer .detail-drawer[data-page="graph"][data-open="true"] { position:static; width:100%; height:100%; flex:none; background:var(--surface,#fff); box-shadow:-10px 0 40px #18203012; }
+/* The right drawer is a column of the page, not a layer over it: it takes its
+ * width from the content beside it, so the toolbar stays inside the content
+ * column and the window never grows to make room. */
+.window-drawer-layer { flex: 0 0 auto; width: 0; min-width: 0; height: 100%; overflow: hidden; visibility: hidden; background: var(--panel, #fff); border-left: 0; transition: width 160ms ease-out; }
+.window-drawer-layer[data-open="true"] { width: min(440px, 46vw); border-left: 1px solid var(--border); visibility: visible; }
+.window-drawer-layer[data-wide="true"][data-open="true"] { width: min(760px, 62vw); }
+.window-drawer-layer .detail-drawer, .window-drawer-layer .detail-drawer[data-open="true"], .window-drawer-layer .detail-drawer[data-page="graph"][data-open="true"] { position:static; width:100%; height:100%; flex:none; background:var(--panel,#fff); box-shadow:none; }
 .window-drawer-layer .detail-drawer .drawer-inner, .window-drawer-layer .detail-drawer[data-page="graph"] .drawer-inner { width:100%; min-width:0; padding-top:24px; }
-html[data-drawer-expanded="true"] .app-shell { width:var(--drawer-base-width); max-width:100vw; margin-right:var(--window-drawer-width,440px); }
 .architecture-board { display:grid; grid-template-columns:180px minmax(0,1fr); min-height:510px; gap:20px; }
 .architecture-picker { display:flex; flex-direction:column; gap:5px; }
 .architecture-picker button { display:flex; gap:12px; align-items:center; text-align:left; padding:12px; border:0; border-radius:9px; background:transparent; color:var(--muted); cursor:pointer; }
