@@ -128,6 +128,45 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
     ? '未记录'
     : value < 1_000 ? `${Math.round(value)}ms` : `${(value / 1_000).toFixed(1)}s`;
 
+  const contextControl = (
+      <details className="node-prompt-card node-prompt-popover" data-testid="node-context">
+        <summary className="node-prompt-summary" title="节点上下文" aria-label="节点上下文"><Icon name="overview" size={16} /></summary>
+        <div className="node-prompt-popover-panel">
+        <div className="node-prompt-popover-heading"><strong>节点上下文</strong><span>身份、环境与运行数据</span></div>
+        {overview ? (
+          <section className="stack node-overview" data-testid="node-overview" style={{ gap: 8 }}>
+            <div className="row" style={{ flexWrap: 'wrap' }}>
+              <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
+              <span className="muted mono" data-testid="node-identity">{overview.node.id}</span>
+              <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
+                {NODE_LABEL[overview.node.status] ?? overview.node.status}
+              </Pill>
+              {overview.node.definitionVersion && <span className="muted">{overview.node.definitionVersion}</span>}
+              {overview.instance?.model && <span className="muted mono">{overview.instance.model}</span>}
+            </div>
+            {overview.environment && <div className="stack" data-testid="node-environment">
+              <span>工作目录：<span className="mono">{overview.environment.workspace}</span></span>
+              <span className="muted">实际权限：{overview.environment.access.mode === 'full' ? '完全访问' : '受限访问'} · 读取 {overview.environment.access.filesystem.read} · 写入 {overview.environment.access.filesystem.write} · 网络 {overview.environment.access.network} · 配置 v{overview.environment.revision}</span>
+            </div>}
+            <div className="stat-grid">
+              <Stat label="运行" value={duration(overview.timing?.runMs ?? null)} hint="执行时段之和（不含名额等待）" />
+              <Stat label="等待名额" value={duration(overview.timing?.waitingMs ?? null)} hint="凭据与执行名额等待之和" />
+              <Stat label="工具调用" value={overview.toolCallCount === undefined ? '未记录' : overview.toolCallCount.toLocaleString('en-US')} hint="累计实际调用次数（含失败调用）" />
+              <Stat label="总历时" value={duration(overview.timing?.totalMs ?? null)} hint="已结算执行的历时之和" />
+              <Stat
+                label="用量"
+                value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
+                hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算尚无记录' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
+              />
+              <Stat label="用户授权" value={overview.instance?.authorizedBudget ? overview.instance.authorizedBudget.unlimited ? '不限' : overview.instance.authorizedBudget.budget.toLocaleString('en-US') : '继承默认'} hint="下次执行重新校验" />
+              <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
+            </div>
+          </section>
+        ) : <span className="muted">{loading ? '正在读取…' : '没有这个节点的运行记录。'}</span>}
+        </div>
+      </details>
+  );
+
   const promptControl = (
       <details className="node-prompt-card node-prompt-popover" data-testid="node-prompt">
         <summary className="icon-button node-prompt-summary" title="System prompt" aria-label="System prompt"><Icon name="spark" size={16} /></summary>
@@ -181,41 +220,9 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
   return (
     <div className="conversation-page window-fill" data-testid="node-chat-tab">
       {/* The tab bar owns the title; the prompt lives in its top-right control. */}
-      {document.getElementById('conversation-toolbar') && createPortal(promptControl, document.getElementById('conversation-toolbar')!)}
+      {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content">{contextControl}{promptControl}</div>, document.getElementById('conversation-toolbar')!)}
       <div className="conversation-body" data-view="node">
         <div className="conversation-main">
-      {overview && (
-        <section className="conversation-alert node-overview" data-testid="node-overview">
-          <div className="row" style={{ flexWrap: 'wrap' }}>
-            <Pill tone="accent">{`${overview.node.kind} · ${overview.node.action}`}</Pill>
-            <span className="muted mono" data-testid="node-identity">{overview.node.id}</span>
-            <Pill tone={overview.node.status === 'succeeded' ? 'success' : overview.node.status === 'failed' ? 'danger' : overview.node.status === 'running' ? 'accent' : 'neutral'}>
-              {NODE_LABEL[overview.node.status] ?? overview.node.status}
-            </Pill>
-            {overview.node.definitionVersion && <span className="muted">{overview.node.definitionVersion}</span>}
-            {overview.instance?.model && <span className="muted mono">{overview.instance.model}</span>}
-          </div>
-          {overview.environment && <div className="stack" style={{ marginTop: 8 }} data-testid="node-environment">
-            <span>工作目录：<span className="mono">{overview.environment.workspace}</span></span>
-            <span className="muted">实际权限：{overview.environment.access.mode === 'full' ? '完全访问' : '受限访问'} · 读取 {overview.environment.access.filesystem.read} · 写入 {overview.environment.access.filesystem.write} · 网络 {overview.environment.access.network} · 配置 v{overview.environment.revision}</span>
-          </div>}
-          <div className="stat-grid" style={{ marginTop: 10 }}>
-            <Stat label="运行" value={duration(overview.timing?.runMs ?? null)} hint="执行时段之和（不含名额等待）" />
-            <Stat label="等待名额" value={duration(overview.timing?.waitingMs ?? null)} hint="凭据与执行名额等待之和" />
-            <Stat label="工具调用" value={overview.toolCallCount === undefined ? '未记录' : overview.toolCallCount.toLocaleString('en-US')} hint="累计实际调用次数（含失败调用）" />
-            <Stat label="总历时" value={duration(overview.timing?.totalMs ?? null)} hint="已结算执行的历时之和" />
-            <Stat
-              label="用量"
-              value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
-              hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算尚无记录' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
-            />
-            <Stat label="用户授权" value={overview.instance?.authorizedBudget ? overview.instance.authorizedBudget.unlimited ? '不限' : overview.instance.authorizedBudget.budget.toLocaleString('en-US') : '继承默认'} hint="下次执行重新校验" />
-            <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
-          </div>
-        </section>
-      )}
-
-
       <AgentNodeChat taskId={taskId} nodeId={nodeId} agentName={named ?? nodeId} onRunUpdate={updateRun} page />
         </div>
       </div>
