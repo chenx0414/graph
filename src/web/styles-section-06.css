@@ -494,7 +494,7 @@
   border-left: 1px solid var(--border-strong);
   background: var(--panel);
   box-shadow: var(--shadow-lg);
-  animation: drawer-in 0.18s ease both;
+  animation: fade-in 160ms ease-out both;
 }
 .resource-detail-head {
   flex: 0 0 auto;

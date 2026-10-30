@@ -306,7 +306,7 @@
   border-radius: 14px;
   background: #fff;
   box-shadow: var(--shadow-lg);
-  animation: drawer-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fade-in 160ms ease-out both;
 }
 .agent-chat-header {
   flex: 0 0 auto;
