@@ -82,7 +82,7 @@ func controlledOpenAIToolMessages(calls []controlledFlowCall, results map[string
 		if result, ok := results[call.ID]; ok {
 			out = append(out, map[string]any{
 				"role": "tool", "tool_call_id": call.ID,
-				"content": ControlledTextFromContent(result["content"]),
+				"content": controlledOpenAIContent(result["content"]),
 			})
 			continue
 		}
@@ -155,7 +155,7 @@ func controlledAnthropicAssistant(message map[string]any, results map[string]map
 		if result, ok := results[call.ID]; ok {
 			results2 = append(results2, map[string]any{
 				"type": "tool_result", "tool_use_id": call.ID,
-				"content": ControlledTextFromContent(result["content"]),
+				"content": controlledAnthropicContent(result["content"]),
 			})
 			continue
 		}

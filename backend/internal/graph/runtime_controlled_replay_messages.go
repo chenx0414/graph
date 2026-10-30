@@ -36,7 +36,7 @@ func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 			out = append(out, assistant)
 			out = append(out, toolMessages...)
 		default:
-			out = append(out, map[string]any{"role": "user", "content": ControlledTextFromContent(message["content"])})
+			out = append(out, map[string]any{"role": "user", "content": controlledOpenAIContent(message["content"])})
 		}
 	}
 	return out
@@ -137,7 +137,7 @@ func controlledAnthropicMessages(messages []any) []any {
 		case "system", "developer":
 			continue
 		default:
-			out = append(out, map[string]any{"role": "user", "content": ControlledTextFromContent(message["content"])})
+			out = append(out, map[string]any{"role": "user", "content": controlledAnthropicContent(message["content"])})
 		}
 	}
 	return out
