@@ -45,12 +45,18 @@ test('the backend pins a published PiG kernel and the updater reports that pin',
   // tells the truth about whether the tree is behind the published kernel.
   const check = await updater(['--check']);
   expect(check.stdout).toContain(`pinned:  ${pinned}`);
-  if (offline) {
+  // Each invocation judges its own environment. The module proxy can answer the
+  // report and drop the next call, and a conclusion carried over would make the
+  // check's own answer meaningless: an offline report followed by an online
+  // check that reports real drift became a failure no tree could produce.
+  const checkOffline = /skipped: the module proxy is unreachable/.test(check.stdout);
+  if (checkOffline) {
     expect(check.code).toBe(0);
     expect(check.stdout).toContain('skipped: the module proxy is unreachable');
   } else {
-    expect(check.stdout).toContain(`latest:  ${latest}`);
-    if (pinned === latest) {
+    const published = /latest:\s+(v\d+\.\d+\.\d+)/.exec(check.stdout)?.[1];
+    expect(published).toBeTruthy();
+    if (pinned === published) {
       expect(check.code).toBe(0);
     } else {
       expect(check.code).toBe(1);
