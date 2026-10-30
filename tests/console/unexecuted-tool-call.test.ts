@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { hasUnexecutedToolCall, withoutUnexecutedToolCall } from '../../src/runtime/unexecuted-tool-call.ts';
+import { hasUnexecutedToolCall, withoutUnexecutedToolCall } from '../../src/web/unexecuted-tool-call.ts';
 
 const first = `There it is. Let me check the earlier path.\n\n<parameter name="bash">\n<｜DSML｜ parameter name="command" string="true">grep -n unknown_usage src/core/operation-lifecycle.ts</｜DSML｜ parameter>\n<｜DSML｜ parameter name="timeout" string="false">300</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>`;
 const second = `I found the test fixture problem. Let me inspect it.\n\n<parameter name="bash">\n<｜DSML｜ parameter name="command" string="true">grep -n reservation tests/console/operation-lifecycle.test.ts</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>`;

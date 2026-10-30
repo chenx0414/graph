@@ -1,6 +1,7 @@
+// graph:allow-large-file: its 21 KB predate the budget; this change only re-points one import and the transcript model is a single projection
 import { toolActivity } from './tool-activity.ts';
 import { assistantVisibleText } from '../core/assistant-visible-text.ts';
-import { withoutUnexecutedToolCall } from '../runtime/unexecuted-tool-call.ts';
+import { withoutUnexecutedToolCall } from './unexecuted-tool-call.ts';
 import { messageAttachments } from '../core/conversation-projection.ts';
 import type {
   ConversationMessage,

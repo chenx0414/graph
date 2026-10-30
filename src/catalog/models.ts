@@ -1,5 +1,5 @@
 import { RuntimeError, type Json } from '../core/types.ts';
-import type { TokenUsage } from '../runtime/call-broker.ts';
+import type { TokenUsage } from '../core/token-usage.ts';
 
 export const MODEL_TIERS = ['small', 'medium', 'frontier'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];

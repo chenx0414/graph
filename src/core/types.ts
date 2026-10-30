@@ -80,8 +80,8 @@ export interface ProposalReceipt extends Receipt { proposalVersion: number; draf
 export interface TaskUpdate { cursor: number; taskId: string; type: string; data: Json; timestamp: number }
 export interface TaskWatch extends AsyncIterableIterator<TaskUpdate> { return(): Promise<IteratorResult<TaskUpdate>> }
 
-export type { TokenUsage } from '../runtime/call-broker.ts';
-import type { TokenUsage } from '../runtime/call-broker.ts';
+export type { TokenUsage } from './token-usage.ts';
+import type { TokenUsage } from './token-usage.ts';
 import type { ResolvedAccessPolicy } from './access-policy.ts';
 export interface ArtifactReference {
   path: string;

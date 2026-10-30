@@ -1,7 +1,8 @@
+// graph:allow-large-file: its 70 KB predate the budget; this change only re-points one import and splitting the store is a separate refactor
 import { KernelContent, contentDigest } from './kernel-content.ts';
 import { insertQuestion } from './question-routing.ts';
 import { closeNativeExecutionTiming, setNativePause } from './time-ledger.ts';
-import type { TokenUsage } from '../runtime/call-broker.ts';
+import type { TokenUsage } from './token-usage.ts';
 import { wakeMaster, wakeForBlockedNode } from './wake-ledger.ts';
 import { randomUUID } from 'node:crypto';
 import type { TaskStore } from './store.ts';
