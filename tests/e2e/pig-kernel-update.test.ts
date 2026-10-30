@@ -105,7 +105,10 @@ test('the updater pins the kernel in an isolated checkout, builds against it, an
 
     // A version that cannot be resolved must not leave the checkout half
     // updated: the pin, the sums and the build all stay as they were.
-    const before = { goMod, goSum };
+    const before = {
+      goMod: await readFile(join(moduleDir, 'go.mod'), 'utf8'),
+      goSum: await readFile(join(moduleDir, 'go.sum'), 'utf8'),
+    };
     const broken = await updater(['--root', root, '--set', 'v9.9.9-does-not-exist']);
     expect(broken.code).toBe(1);
     expect(broken.stderr).toContain('is not a published version');
@@ -127,6 +130,14 @@ test('the updater pins the kernel in an isolated checkout, builds against it, an
     expect(again.code).toBe(0);
     expect(again.stdout).toContain('already pinned');
     expect(await readFile(join(moduleDir, 'go.mod'), 'utf8')).toBe(before.goMod);
+
+    // Re-pinning a module that is already pinned keeps the module path. The
+    // first version of this script wrote the indent and the version alone, and
+    // only `go mod tidy` noticed the line it produced was not a requirement.
+    const repin = await updater(['--root', root, '--set', 'v0.5.1', '--allow-downgrade']);
+    expect(repin.code, repin.stderr).toBe(0);
+    const repinned = await readFile(join(moduleDir, 'go.mod'), 'utf8');
+    expect(repinned).toContain(`${MODULE} v0.5.1`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

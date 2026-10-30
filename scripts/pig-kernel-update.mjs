@@ -116,7 +116,10 @@ function writePin(version) {
   const text = readFileSync(goModPath, 'utf8');
   const pattern = pinPattern();
   if (pattern.test(text)) {
-    writeFileSync(goModPath, text.replace(pattern, `$1${version}`));
+    // The capture is the line prefix, not the module path: writing the prefix
+    // and the version alone leaves `\tv0.5.3` behind, and only `go mod tidy`
+    // notices that the line it produced is not a requirement.
+    writeFileSync(goModPath, text.replace(pattern, `$1${MODULE} ${version}`));
     return;
   }
   // The module is not pinned yet: add it as its own require line, which is the
