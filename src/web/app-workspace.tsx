@@ -39,6 +39,7 @@ import { Spinner } from './ui.tsx';
 import { NewConversation } from "./app-new-conversation.tsx";
 import type { Settings_,Startup,TaskSummary } from "./app-state.tsx";
 import { CapabilityResourceLibrary,ModelsPage,ToolStatsPage,UsagePage } from "./app-state.tsx";
+import { ErrorBoundary } from "./ErrorBoundary.tsx";
 
 export function WorkspacePage({ path, active, settings, startup, tasks, conversations, reloadConversations, refreshTasks, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
   path: string; active: boolean; settings: Settings_ | null; startup: Startup | null; tasks: TaskSummary[]; conversations: ConversationSummary[];
@@ -57,6 +58,7 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
   const conversationFirst = pathname === '/' || Boolean(conversationMatch || draftGraphMatch || nodeMatch || contextMatch);
   return <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
     <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`}>
+            <ErrorBoundary resetKey={path}>
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
             {catalogMatch && <Suspense fallback={<Spinner />}><CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} /></Suspense>}
@@ -105,6 +107,7 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
               />
             )}
             {taskMatch && <GraphPanel id={taskMatch[1]!} />}
+            </ErrorBoundary>
     </div>
   </div>;
 }

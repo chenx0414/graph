@@ -53,11 +53,15 @@ function formatWhen(at: number): string {
 export interface SkillUsageSnapshot {
   generatedAt: number;
   retentionDays: number;
-  skills: { id: string; path: string; source: 'project' | 'agent' | 'library'; reads: number; lastReadAt: number | null; neverRead: boolean }[];
-  summary: { skills: number; neverRead: number };
+  // The server reports the scan itself under `report`: the counts and the rows
+  // travel together, and the client reads them from where they actually are.
+  report: {
+    skills: { id: string; path: string; source: 'project' | 'agent' | 'library'; reads: number; lastReadAt: number | null; neverRead: boolean }[];
+    summary: { skills: number; neverRead: number };
+  };
 }
 
-function skillSourceLabel(source: SkillUsageSnapshot['skills'][number]['source']): string {
+function skillSourceLabel(source: SkillUsageSnapshot['report']['skills'][number]['source']): string {
   if (source === 'project') return '项目';
   if (source === 'agent') return 'Agent 目录';
   return '能力库';
@@ -176,14 +180,14 @@ export function ToolStatsPage() {
             保留最近 {skills.retentionDays} 天。
           </p>
           <div className="stat-grid" data-testid="skill-usage-summary">
-            <Stat label="可见技能" value={skills.summary.skills} hint="项目 / Agent 目录 / 能力库" />
+            <Stat label="可见技能" value={skills.report.summary.skills} hint="项目 / Agent 目录 / 能力库" />
             <Stat
               label="从未被读"
-              value={skills.summary.neverRead}
-              tone={skills.summary.neverRead ? 'warn' : 'success'}
+              value={skills.report.summary.neverRead}
+              tone={skills.report.summary.neverRead ? 'warn' : 'success'}
             />
           </div>
-          {skills.skills.length === 0 ? (
+          {skills.report.skills.length === 0 ? (
             <p className="card-sub">还没有发现技能：项目 .agents/skills、该 Agent 的技能目录与能力库都为空。</p>
           ) : (
             <table className="tool-table" data-testid="skill-usage-table">
@@ -191,7 +195,7 @@ export function ToolStatsPage() {
                 <tr><th>技能</th><th>来源</th><th>被读次数</th><th>最近一次</th></tr>
               </thead>
               <tbody>
-                {skills.skills.map(skill => (
+                {skills.report.skills.map(skill => (
                   <tr data-testid={`skill-usage-row-${skill.id}`} key={skill.id}>
                     <td><code>{skill.id}</code></td>
                     <td>{skillSourceLabel(skill.source)}</td>
