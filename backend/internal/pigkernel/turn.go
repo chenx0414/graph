@@ -112,6 +112,9 @@ var identitiesDoc = durable.DefineDoc[map[string]any](durable.DocDefinition[map[
 		Kind:    "graph.identities",
 		Version: 1,
 		Initial: func() map[string]any { return map[string]any{"conversations": map[string]any{}} },
+		// Every change is stored as a complete base, for the same reason the
+		// frozen executions are: one small map, read whole on the next turn.
+		CheckpointWhen: func(map[string]any, []durable.Op, durable.CheckpointInfo) bool { return true },
 	},
 	DocumentSemantics: durable.DocumentSemantics{Scope: durable.ScopeSession},
 })

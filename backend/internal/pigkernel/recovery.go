@@ -52,6 +52,10 @@ var executionsDoc = durable.DefineDoc[map[string]any](durable.DocDefinition[map[
 		Kind:    "graph.frozen-executions",
 		Version: 1,
 		Initial: func() map[string]any { return map[string]any{"conversations": map[string]any{}} },
+		// Every change is stored as a complete base. The document is a small map
+		// that a recovery reads after a crash, so replaying it from deltas buys
+		// nothing and a base is the cheapest thing to read.
+		CheckpointWhen: func(map[string]any, []durable.Op, durable.CheckpointInfo) bool { return true },
 	},
 	DocumentSemantics: durable.DocumentSemantics{Scope: durable.ScopeSession},
 })

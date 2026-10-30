@@ -3,7 +3,7 @@ module github.com/chenx0414/graph/backend
 go 1.27.1
 
 require (
-	github.com/MichaelKinsy/PiG v0.5.1
+	github.com/MichaelKinsy/PiG v0.5.3
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.53.0
 )
@@ -11,7 +11,7 @@ require (
 require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
-	github.com/MichaelKinsy/PiG/extensions/sdk v0.5.1 // indirect
+	github.com/MichaelKinsy/PiG/extensions/sdk v0.5.3 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.47.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
@@ -34,6 +34,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
