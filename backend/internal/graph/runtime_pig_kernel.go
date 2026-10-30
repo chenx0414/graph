@@ -146,6 +146,7 @@ func RunPigKernelTurn(config GraphConfig, options PigKernelTurnOptions) (pigkern
 		ContextWindow: entry.ContextWindow,
 		MaxTokens:     entry.MaxTokens,
 		Reasoning:     entry.Reasoning == nil || *entry.Reasoning,
+		Input:         modelInputNames(entry.Input),
 	}
 	if spec.Id == "" {
 		spec.Id = entry.Id

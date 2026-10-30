@@ -381,3 +381,14 @@ func combineKnownUsage(base *TokenUsage, extra *TokenUsage) *TokenUsage {
 		UsageSource: &[]string{string(source)}[0],
 	}
 }
+
+// modelInputNames are the modalities of one catalog entry, as the kernel spells
+// them. The kernel declares what the catalog reports and nothing else: an empty
+// answer leaves the session on text.
+func modelInputNames(inputs []ModelInput) []string {
+	names := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		names = append(names, string(input))
+	}
+	return names
+}

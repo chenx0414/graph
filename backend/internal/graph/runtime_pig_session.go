@@ -303,6 +303,7 @@ func pigModelSpec(model any) pigkernel.ModelSpec {
 		spec.ContextWindow = view.ContextWindow
 		spec.MaxTokens = view.MaxTokens
 		spec.Reasoning = view.Reasoning
+		spec.Input = modelInputNames(view.Input)
 		return spec
 	}
 	// A restored session carries the frozen model as a record, not as a view.

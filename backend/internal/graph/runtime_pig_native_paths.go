@@ -15,17 +15,22 @@ type pigNativePaths struct {
 }
 
 func (paths *pigNativePaths) readText(requested string) string {
+	return string(paths.readBytes(requested))
+}
+
+// readBytes reads one file, refusing anything the read policy does not mount.
+func (paths *pigNativePaths) readBytes(requested string) []byte {
 	if filepath.IsAbs(requested) {
 		if paths.hostRead {
-			return ReadHost(requested, paths.options)
+			return ReadHostBytes(requested, paths.options)
 		}
 		mount := agentToolsMount(append([]string{paths.root}, paths.readRoots...), requested)
 		if mount == "" {
 			panic(errors.New("Path is outside the workspace"))
 		}
-		return ReadBounded(mount, requested)
+		return ReadBoundedBytes(mount, requested)
 	}
-	return ReadBounded(paths.root, requested)
+	return ReadBoundedBytes(paths.root, requested)
 }
 
 func (paths *pigNativePaths) writeText(requested, content string) {

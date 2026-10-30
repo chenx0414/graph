@@ -11,6 +11,12 @@ import (
 	"errors"
 )
 
+// pigNativeImageLimit is the largest image one read hands the model.
+//
+// The transcript carries the bytes: an oversized picture costs the whole
+// context and buys nothing the model can use.
+const pigNativeImageLimit = 8 << 20
+
 // pigReadTool is the SDK's read tool.
 func pigReadTool(paths *pigNativePaths) ToolDefinition {
 	return ToolDefinition{
@@ -31,6 +37,16 @@ func pigReadTool(paths *pigNativePaths) ToolDefinition {
 			requested := agentToolsString(arguments["path"])
 			if requested == "" {
 				return nil, errors.New("read needs a path")
+			}
+			// An image reaches the model as an image, not as its bytes: the
+			// daemon's session declares the modalities its model accepts, and a
+			// picture read as text is 50KB of noise in the transcript.
+			if mimeType := agentToolsImageMimeType(requested); mimeType != "" {
+				body := paths.readBytes(requested)
+				if len(body) > pigNativeImageLimit {
+					return nil, fmt.Errorf("the image is %d bytes; the limit is %d", len(body), pigNativeImageLimit)
+				}
+				return agentToolsImage(body, mimeType), nil
 			}
 			text := paths.readText(requested)
 			offset := pigNativeNumber(arguments["offset"])

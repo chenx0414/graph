@@ -36,6 +36,9 @@ type ModelSpec struct {
 	ContextWindow int
 	MaxTokens     int
 	Reasoning     bool
+	// Input are the input modalities the model accepts. Empty means text:
+	// the kernel declares what the daemon knows, never more.
+	Input         []string
 	ThinkingLevel string
 }
 
@@ -408,6 +411,31 @@ func toolExecutionResult(value any) durable.ToolExecutionResult {
 	return result
 }
 
+// pigModelInputs maps the daemon's modalities onto PiG's. An empty list is
+// text: the kernel never claims a modality the daemon did not report.
+func pigModelInputs(values []string) []ai.ModelInputModality {
+	inputs := []ai.ModelInputModality{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "text":
+			if !seen["text"] {
+				inputs = append(inputs, ai.ModelInputModality("text"))
+				seen["text"] = true
+			}
+		case "image":
+			if !seen["image"] {
+				inputs = append(inputs, ai.ModelInputModality("image"))
+				seen["image"] = true
+			}
+		}
+	}
+	if len(inputs) == 0 {
+		return []ai.ModelInputModality{"text"}
+	}
+	return inputs
+}
+
 // buildModels registers the turn's model with PiG's model runtime.
 //
 // The provider is the Graph provider: the base URL, the key and the headers
@@ -420,7 +448,7 @@ func buildModels(spec ModelSpec) (durable.Models, *ai.Model) {
 	model := &ai.Model{
 		ID:          spec.Id,
 		DisplayName: spec.Name,
-		Input:       []ai.ModelInputModality{"text"},
+		Input:       pigModelInputs(spec.Input),
 		Capabilities: ai.ModelCapabilities{
 			ContextWindow:   spec.ContextWindow,
 			MaxOutputTokens: spec.MaxTokens,
