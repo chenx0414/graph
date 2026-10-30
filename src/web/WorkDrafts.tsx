@@ -120,18 +120,23 @@ export function WorkDrafts({ role, conversationId, projectId, projects, cursor }
   }
 
   if (role !== 'global' && role !== 'project') return null;
-  if (!items.length && !error && !loading) return null;
+  // A work with no draft has nothing to confirm. The panel used to stand under
+  // every conversation as an empty "工作草稿 / 刷新" strip; it refreshes itself
+  // on every event and after every action, so the button was its only content.
+  if (!items.some(item => item.drafts.length > 0)) {
+    return error
+      ? <section className="thread-card" data-testid="work-drafts" aria-label="工作草稿"><p role="alert">{error}</p></section>
+      : null;
+  }
   return (
     <section className="thread-card" data-testid="work-drafts" aria-label="工作草稿">
       <div className="thread-card-title">工作草稿</div>
-      <Button size="sm" onClick={() => void refresh()} disabled={loading}>刷新</Button>
-      {loading && <span className="muted">正在读取工作草稿…</span>}
       {error && <p role="alert">{error}</p>}
       {items.map(({ work, drafts, graphs }) => drafts.map(draft => {
         const key = `${work.id}:${draft.version}:${draft.workRevision}:${draft.draftRevision}`;
         const graph = graphs.find(item => item.version === draft.version && item.workRevision === draft.workRevision && item.draftRevision === draft.draftRevision);
         const stale = draft.stale || draft.workRevision !== work.revision;
-        const disabled = stale || work.executionPaused || Boolean(busy) || graph?.state === 'ready' || graph?.state === 'preparing';
+        const disabled = stale || work.executionPaused || loading || Boolean(busy) || graph?.state === 'ready' || graph?.state === 'preparing';
         const branch = graph ? graph.targetBranch ?? '' : branches[key] ?? defaultTargetBranch(projects, work.projectId) ?? '';
         return (
           <article className="card" key={key} data-testid={`work-draft-${work.id}-${draft.version}`}>
