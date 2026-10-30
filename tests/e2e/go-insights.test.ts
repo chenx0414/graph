@@ -29,6 +29,10 @@ afterAll(() => rm(webDir, { recursive: true, force: true }));
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
 /** A model call exactly as the runtime records one: usage buckets plus cost. */
+/** Now, minus an offset: a row dated 1970 is a row the tool table prunes on read. */
+const NOW = Date.now();
+const ago = (ms: number) => NOW - ms;
+
 function providerCall(id: string, taskId: string, model: string, usage: Record<string, number>, cost: number, ms: number) {
   return {
     id, taskId, model, ms,
@@ -55,17 +59,17 @@ async function seed(stateDir: string) {
   `);
   const insertCall = db.prepare(`INSERT INTO kernel_provider_calls
     (id, task_id, node_id, execution_id, reserved, state, usage, created_at, settled_at, model, purpose, cost)
-    VALUES (?, ?, 'master', 'exec', 1, 'settled', ?, 1000, ?, ?, 'completion', ?)`);
+    VALUES (?, ?, 'master', 'exec', 1, 'settled', ?, ?, ?, ?, 'completion', ?)`);
   for (const call of CALLS) {
-    insertCall.run(call.id, call.taskId, call.usage, 1000 + call.ms, call.modelJson, call.cost);
+    insertCall.run(call.id, call.taskId, call.usage, ago(call.ms + 1_000), ago(1_000), call.modelJson, call.cost);
   }
   const insertTool = db.prepare(`INSERT INTO tool_calls(instance_id, task_id, node_id, role, tool, ms, is_error, created_at)
-    VALUES ('i', ?, 'master', 'master', ?, ?, ?, 1000)`);
-  insertTool.run('task-a', 'bash', 100, 0);
-  insertTool.run('task-a', 'bash', 300, 1);
-  insertTool.run('task-a', 'read', 50, 0);
-  insertTool.run('task-b', 'edit', 400, 0);
-  insertTool.run(null, 'template-call', 900, 0);
+    VALUES ('i', ?, 'master', 'master', ?, ?, ?, ?)`);
+  insertTool.run('task-a', 'bash', 100, 0, ago(5_000));
+  insertTool.run('task-a', 'bash', 300, 1, ago(4_000));
+  insertTool.run('task-a', 'read', 50, 0, ago(3_000));
+  insertTool.run('task-b', 'edit', 400, 0, ago(2_000));
+  insertTool.run(null, 'template-call', 900, 0, ago(1_000));
   db.close();
 }
 
@@ -121,6 +125,14 @@ test('narrows to one project or one conversation', async () => {
   expect(conversation.overview).toMatchObject({ steps: 1, toolCalls: 1 });
   expect(conversation.models.map((row: { model: string }) => row.model)).toEqual(['sonnet']);
 
+  // The merged page's folds still fetch the two older endpoints, so a clean
+  // installation has to answer both of them - otherwise the detail is a fold
+  // that opens onto an error card.
+  for (const path of ['/api/tool-stats', '/api/skill-stats']) {
+    const response = await daemon.request(path);
+    expect({ path, status: response.status }).toEqual({ path, status: 200 });
+  }
+
   // A scope that names nothing is an error, not a silent whole-installation number.
   const refused = await daemon.request('/api/insights?scope=project');
   expect(refused.status).toBeGreaterThanOrEqual(400);
@@ -153,6 +165,17 @@ test('renders the record, and the old two pages now open it', async () => {
   // The tool table carries the same rows the endpoint returned.
   expect(await text(tab, 'insights-tool-row-bash')).toContain('2');
   expect(await text(tab, 'insights-model-flash')).toContain('2');
+
+  // The two long sections are folds, and closed has to mean not mounted: the
+  // subscription and skill queries only run when someone asks for them.
+  for (const id of ['quota', 'detail']) {
+    expect(await tab.getByTestId(`insights-fold-${id}`).getAttribute('data-open')).toBe('false');
+    expect(await tab.getByTestId(`insights-fold-${id}-body`).count()).toBe(0);
+  }
+  await tab.getByTestId('insights-fold-detail-toggle').click();
+  await expect.poll(async () => (await tab.getByTestId('insights-fold-detail-body').count())).toBe(1);
+  // Opening it reveals the tool detail the page used to be.
+  await expect.poll(async () => (await tab.getByTestId('tool-stats-row-bash').count())).toBeGreaterThan(0);
 
   // `/tools` is the merged page now: the address still works and lands on 洞察.
   await tab.goto(`${daemon.url}/#/tools`);

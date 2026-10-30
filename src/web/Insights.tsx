@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api.ts';
-import { Button, Card, Spinner, Stat } from './ui.tsx';
+import { Button, Card, Icon, Spinner, Stat } from './ui.tsx';
 import { ToolStatsPage } from './ToolStats.tsx';
 import { UsagePage } from './Usage.tsx';
 import type { ConversationSummary } from './conversation-types.tsx';
@@ -105,6 +105,27 @@ function ShareBars({ rows, testid }: { rows: { key: string; label: string; value
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A section that stays closed until asked for.
+ *
+ * Closed has to mean *not rendered*, not merely hidden: the sections below fetch
+ * their own data, and a page that quietly queries the subscription API and the
+ * skill scan every time it opens is slower and noisier than the page it replaced.
+ */
+function Fold({ id, title, hint, children }: { id: string; title: string; hint?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="insights-fold" data-open={open} data-testid={`insights-fold-${id}`}>
+      <button type="button" className="insights-fold-head" aria-expanded={open}
+        data-testid={`insights-fold-${id}-toggle`} onClick={() => setOpen(value => !value)}>
+        <span className="insights-fold-chevron" data-open={open}><Icon name="chevron" size={14} /></span>
+        <span className="insights-fold-title">{title}</span>
+        {hint && <span className="insights-fold-hint">{hint}</span>}
+      </button>
+      {open && <div className="insights-fold-body" data-testid={`insights-fold-${id}-body`}>{children}</div>}
+    </section>
   );
 }
 
@@ -326,15 +347,13 @@ export function InsightsPage({ settings, conversations }: { settings: Settings_ 
               )}
           </Card>
 
-          <section className="insights-section" data-testid="insights-quota">
-            <h3 className="insights-section-title">订阅额度</h3>
+          <Fold id="quota" title="订阅额度" hint="订阅计划、剩余额度与重置时间">
             <UsagePage />
-          </section>
+          </Fold>
 
-          <section className="insights-section" data-testid="insights-tool-detail">
-            <h3 className="insights-section-title">工具与技能明细</h3>
+          <Fold id="detail" title="工具与技能明细" hint={`${toolRows.length} 项工具 · 按技能目录匹配`}>
             <ToolStatsPage />
-          </section>
+          </Fold>
         </>
       )}
     </section>
