@@ -138,21 +138,15 @@ small { color: var(--muted); }
 }
 .banner.info { background: var(--info-weak); }
 
-.page { animation: fade-up 0.28s ease both; }
-.stagger > * { animation: fade-up 0.3s ease both; }
-.stagger > *:nth-child(1) { animation-delay: 0.02s; }
-.stagger > *:nth-child(2) { animation-delay: 0.06s; }
-.stagger > *:nth-child(3) { animation-delay: 0.1s; }
-.stagger > *:nth-child(4) { animation-delay: 0.14s; }
-.stagger > *:nth-child(5) { animation-delay: 0.18s; }
-.stagger > *:nth-child(6) { animation-delay: 0.22s; }
+.page { animation: fade-in 160ms ease-out both; }
+.stagger > * { animation: fade-in 160ms ease-out both; }
 
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes drawer-in {
-  from { opacity: 0; transform: translateX(12px); }
   to { opacity: 1; transform: none; }
 }
 @keyframes slide-in {
@@ -161,10 +155,6 @@ small { color: var(--muted); }
 }
 @keyframes pop-in {
   from { opacity: 0; transform: translateY(10px) scale(0.98); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes conversation-enter {
-  from { opacity: 0; transform: translateY(5px); }
   to { opacity: 1; transform: none; }
 }
 @keyframes stream-fade {

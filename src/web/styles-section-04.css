@@ -245,9 +245,9 @@
   opacity: 0;
   pointer-events: none;
   transition:
-    flex-basis 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 150ms ease;
+    flex-basis 160ms ease-out,
+    width 160ms ease-out,
+    opacity 120ms linear;
 }
 .detail-drawer[data-open="true"] {
   flex-basis: min(430px, 42vw);
@@ -268,8 +268,6 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-color: var(--border-strong) transparent;
-  transform: translateX(14px);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .drawer-inner::-webkit-scrollbar { width: 10px; }
 .drawer-inner::-webkit-scrollbar-track { background: transparent; }
@@ -280,7 +278,6 @@
   background-clip: content-box;
 }
 .drawer-inner::-webkit-scrollbar-thumb:hover { background: var(--faint); background-clip: content-box; }
-.detail-drawer[data-open="true"] .drawer-inner { transform: none; }
 .detail-drawer[data-page="card"] .drawer-inner {
   gap: 12px;
   padding: 14px 12px 24px 16px;

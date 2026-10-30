@@ -297,7 +297,7 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
   flex-direction: column;
   background: #fff;
   position: relative;
-  animation: conversation-enter 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: fade-in 160ms ease-out both;
 }
 .conversation-page-host { height: 100%; }
 .conversation-header {
