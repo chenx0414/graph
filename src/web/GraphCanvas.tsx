@@ -1,6 +1,7 @@
+// graph:allow-large-file: its 27 KB predate the budget; this change only re-points one type import
 import { orthogonalRoutes } from '../core/orthogonal-routes.ts';
 import type { GraphIo, GraphOutput } from '../core/interface-spec.ts';
-import type { ModuleExplanation } from '../core/kernel-explain.ts';
+import type { ModuleExplanation } from './kernel-view-types.ts';
 import { api } from './api.ts';
 import { useEffect, useState } from 'react';
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type Edge, type EdgeProps, type NodeProps } from '@xyflow/react';

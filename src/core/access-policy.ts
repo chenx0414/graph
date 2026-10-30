@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { canonicalJson } from './store.ts';
+import { canonicalJson } from './canonical-json.ts';
 import { RuntimeError } from './types.ts';
 
 import { standardAccessPolicy, fullAccessPolicy, type AccessPolicy } from './access-policy-presets.ts';

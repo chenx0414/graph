@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom';
 import { api } from './api.ts';
 import { AgentNodeChat } from './AgentNodeChat.tsx';
 import { NODE_LABEL } from './labels.ts';
-import type { NodeConfigurations } from '../core/node-prompt.ts';
+import type { NodeConfigurations } from './kernel-view-types.ts';
 import { RecordedPromptPanel } from './PromptPanel.tsx';
 import { Button, Icon, Pill, Spinner, Stat, toast } from './ui.tsx';
 

@@ -1,10 +1,12 @@
+// graph:allow-large-file: its 41 KB predate the budget; this change only re-points one import and the workspace is being retired with the TS store
 import { execFile } from 'node:child_process';
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { canonicalJson, type TaskStore } from './store.ts';
+import { canonicalJson } from './canonical-json.ts';
+import type { TaskStore } from './store.ts';
 import { RuntimeError, type Json } from './types.ts';
 
 const runGit = promisify(execFile);
