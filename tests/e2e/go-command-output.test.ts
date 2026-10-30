@@ -182,8 +182,20 @@ test('a public graph command keeps every byte beyond its inline view and reuses 
   expect(message.status).toBe(200);
   await expect.poll(() => master.results.get('operations-again'), { timeout: 120_000, interval: 500 }).toContain('"passed"');
   // The operation is the same operation: it was not run a second time.
-  const again = JSON.parse(master.results.get('operations-again')!) as { state: string; result?: { outputs: { result: OperationOutput } } }[];
-  expect(again).toEqual(operations);
+  //
+  // Compare the one operation under test, and only the facts that outlive a
+  // restart: its identity, its settled state and the artifact it produced. The
+  // list also carries the conversation's own running operation - the read that
+  // asked for it - so comparing whole rows made this assertion depend on when
+  // the read landed rather than on the behaviour under test.
+  type OperationRow = { id: string; state: string; result?: { outputs: { result: OperationOutput } } };
+  const again = JSON.parse(master.results.get('operations-again')!) as OperationRow[];
+  const commandOf = (rows: OperationRow[]) =>
+    rows.find(row => row.result?.outputs.result.outputFiles.stdout?.path === output.outputFiles.stdout.path);
+  const settled = commandOf(again);
+  expect(settled, 'the settled command operation is still there after the restart').toBeTruthy();
+  expect(settled!.id).toBe(commandOf(operations as OperationRow[])?.id);
+  expect(settled!.state).toBe('settled');
   expect(again[0]!.result!.outputs.result.outputFiles.stdout.path).toBe(output.outputFiles.stdout.path);
   const restoredBytes = await readFile(output.outputFiles.stdout.path);
   expect(restoredBytes.length).toBe(stdout.length);
