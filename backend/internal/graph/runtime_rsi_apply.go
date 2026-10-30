@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -203,6 +204,16 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		switch change.Action {
 		case "write":
 			value := *change.Content
+			// A whole-file write carries no evidence of what it removed. The one
+			// mistake it invites - pasting a placeholder instead of the file - reads
+			// as a successful change to every check that does not open the content,
+			// so a write that guts a large file is refused and the caller is pointed
+			// at the form that names what it deletes.
+			if existing != nil {
+				if refusal := rsiWriteShrinkRefusal(path, *existing, value); refusal != "" {
+					Raise("rsi_edit_conflict", refusal)
+				}
+			}
 			if _, seen := final[path]; !seen {
 				finalOrder = append(finalOrder, path)
 			}
@@ -416,4 +427,27 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	applied.Report = rsiSuccessReport(input, applied, described.Note)
 	service.rsiRecord(context, applied)
 	return applied
+}
+
+// rsiWriteShrinkRefusal refuses a write that would replace a large file with a
+// stub.
+//
+// The rule is deliberately blunt: a file of rsiWriteShrinkLines lines or more
+// may not be written down to less than a tenth of itself in one write. Anything
+// smaller is ordinary editing; anything larger is either a rewrite that deserves
+// to be spelled out as edits, or the accident this guard exists for.
+const rsiWriteShrinkLines = 200
+
+func rsiWriteShrinkRefusal(path, before, after string) string {
+	oldLines := strings.Count(before, "\n") + 1
+	if oldLines < rsiWriteShrinkLines {
+		return ""
+	}
+	newLines := strings.Count(after, "\n") + 1
+	if newLines*10 >= oldLines {
+		return ""
+	}
+	return fmt.Sprintf(
+		"RSI write to %s would replace %d lines with %d: a whole-file write carries no evidence of what it removed. "+
+			"Use replace with edits that name what goes, or split the deletion into several such edits.", path, oldLines, newLines)
 }

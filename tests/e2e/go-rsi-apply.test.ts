@@ -101,6 +101,9 @@ async function fixture(stepsFor: (initialCommit: string) => ToolCall[][]) {
   await writeFile(join(checkout, 'replace.txt'), 'original\n');
   await writeFile(join(checkout, 'delete.txt'), 'remove me\n');
   await writeFile(join(checkout, 'mirror.txt'), 'revision content\n');
+  // A large file the guard protects: a whole-file write that guts it is the
+  // mistake the guard exists for.
+  await writeFile(join(checkout, 'big.txt'), Array.from({ length: 300 }, (_, index) => `line ${index + 1}`).join('\n') + '\n');
   git(['init', '-q', '-b', 'main']);
   git(['config', 'user.name', 'Fixture']);
   git(['config', 'user.email', 'fixture@local']);
@@ -185,6 +188,33 @@ function activationScript(): ToolCall[][] {
     }),
   }]];
 }
+
+test('a whole-file write that would gut a large file is refused and nothing is written', async () => {
+  const f = await fixture(() => [[{
+    id: 'gut',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      changes: [{ path: 'big.txt', action: 'write', content: 'stub\n' }],
+      checks: [check],
+    }),
+  }]]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-gut' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  // The refusal names the file and both sizes, so the caller can see what it was
+  // about to do. The exact counts are the file's business, not the test's.
+  await expect.poll(() => [...f.provider.observed.values()].join('\n'), { timeout: 90_000, interval: 250 })
+    .toMatch(/RSI write to big\.txt would replace \d+ lines with \d+/);
+  // The file is untouched and no commit was made for it.
+  const lines = (await readFile(join(f.checkout, 'big.txt'), 'utf8')).split('\n').filter(Boolean);
+  expect(lines).toHaveLength(300);
+  expect(f.git(['log', '--oneline']).split('\n')).toHaveLength(1);
+}, 120_000);
 
 test('a wrong self-improvement call is explained and changes nothing', async () => {
   const f = await fixture(() => [malformed.map(entry => ({
