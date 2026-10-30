@@ -138,12 +138,12 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 				delay(500 * attempt)
 				continue
 			}
-			// The response never started: not one byte the provider wrote reached
-			// this process, so no tool can have run and the turn may be sent
-			// again. The failed attempt's usage stays unknown - the provider may
-			// still have billed the request - and the retry dials a fresh
-			// connection instead of reusing the one that just died.
-			if controlledDisconnectedBeforeReply(controlledTransportErrorCodes(failure)) {
+			// The response never started: no reply byte was read, so no tool can
+			// have run and the turn may be sent again. The failed attempt's usage
+			// stays unknown - the provider may still have billed the request -
+			// and the retry dials a fresh connection instead of reusing the one
+			// that just died.
+			if controlledReplayableFailure(failure) {
 				request.Close = true
 				delay(1000 * attempt)
 				continue
@@ -192,23 +192,24 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 	}
 }
 
-// controlledReplayableDisconnects are the transport failures that end a request
-// before its response starts. They are replayable because no reply was read, so
-// no tool could have run; the cost of a possibly billed request is the price of
-// not failing the turn on a dropped connection.
-var controlledReplayableDisconnects = map[string]bool{
-	"EOF": true, "UNEXPECTED_EOF": true, "ECONNRESET": true, "ECONNABORTED": true, "EPIPE": true,
-}
-
-// controlledDisconnectedBeforeReply reports whether one attempt failed without
-// any response byte arriving.
-func controlledDisconnectedBeforeReply(codes []string) bool {
-	for _, code := range codes {
-		if controlledReplayableDisconnects[code] {
-			return true
+// controlledReplayableFailure reports whether one attempt failed before any
+// response byte arrived, without the caller asking it to stop.
+//
+// A dropped socket, a reset and a corrupted TLS record all qualify: nothing was
+// read, so no tool can have run, and the same send may be tried on a fresh
+// connection. A cancellation or a certificate the proxy cannot satisfy does
+// not: the retry would repeat the same refusal or ignore the caller.
+func controlledReplayableFailure(err error) bool {
+	for _, code := range controlledTransportErrorCodes(err) {
+		if code == "CANCELED" || code == "DEADLINE_EXCEEDED" {
+			return false
 		}
 	}
-	return false
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "x509") || strings.Contains(message, "certificate") {
+		return false
+	}
+	return true
 }
 
 // controlledCapacityPause is how long a capacity answer asks the next attempt to wait.

@@ -33,7 +33,7 @@ func IsCapacityFailure(output string) bool {
 // that ended before the provider started answering. The bare word is matched
 // after the transport's `: ` so an ordinary "unexpected EOF" in a tool or a
 // script error is not read as a network failure.
-var DISCONNECT_BEFORE_REPLY = regexp.MustCompile(`(?i):\s*(EOF|unexpected EOF|connection reset by peer|broken pipe)\b`)
+var DISCONNECT_BEFORE_REPLY = regexp.MustCompile(`(?i):\s*(EOF|unexpected EOF|connection reset by peer|broken pipe)\b|\btls: (bad record MAC|record overflow|handshake failure|unexpected message|bad certificate|unknown certificate)`)
 
 func IsDisconnectBeforeReply(output string) bool {
 	return len(strings.TrimSpace(output)) > 0 && DISCONNECT_BEFORE_REPLY.MatchString(output)

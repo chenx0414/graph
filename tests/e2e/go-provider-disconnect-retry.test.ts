@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -75,4 +76,65 @@ test('a connection that dies before any reply is retried on a fresh connection',
   }, { timeout: 10_000, interval: 100 }).toEqual(['unknown', 'authoritative']);
   const run = await (await daemon.request(`/api/tasks/${taskId}/nodes/master/run`)).json() as NodeRunView;
   expect(run.invocations?.[0]?.usage).toBeNull();
+}, 60_000);
+
+interface TaskEvent { type: string; data: { data?: { retryVerdict?: string } } }
+
+test('a TLS stream that dies before any reply is retried, then named as an environment failure', async () => {
+  let connections = 0;
+  const server = createTcpServer(socket => {
+    connections++;
+    socket.once('data', () => {
+      // A real fatal TLS alert (handshake_failure, 40): the client gets
+      // "remote error: tls: handshake failure" with no HTTP response at all.
+      socket.end(Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28]));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  cleanup.push(async () => { await new Promise<void>(resolve => server.close(() => resolve())); });
+  const baseUrl = `https://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-tls-drop-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'project'), { recursive: true });
+  await mkdir(join(root, 'web'), { recursive: true });
+  await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: join(root, 'project') }],
+    credentials: { local: { secretRef: 'GRAPH_TLS_DROP_KEY' } },
+    models: { entries: [{ id: 'main', provider: 'graph-main', grade: 'high', api: 'openai-completions',
+      baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] },
+  }));
+  const daemon = await launchCli(root, {
+    configPath,
+    env: { GRAPH_TLS_DROP_KEY: 'synthetic-only', NO_PROXY: '127.0.0.1,localhost' },
+    extraArgs: ['--execute'],
+  });
+  cleanup.push(() => daemon.close());
+
+  const created = await daemon.request('/api/conversations', {
+    method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Survive the TLS record corruption.', requestId: 'tls-drop' }),
+  });
+  const body = await created.text();
+  expect(created.status, body).toBe(200);
+  const { taskId } = JSON.parse(body) as { taskId: string };
+
+  // The turn ends, and what the user reads names the real failure.
+  await expect.poll(async () => {
+    const events = await (await daemon.request(`/api/tasks/${taskId}/events?after=0&limit=500`)).json() as TaskEvent[];
+    return events.some(event => event.type === 'message.created'
+      && JSON.stringify(event.data).includes('tls: handshake failure'));
+  }, { timeout: 30_000, interval: 100 }).toBe(true);
+
+  // The connection was tried again before the turn failed: a pre-response
+  // failure is replayed, not accepted on its first occurrence.
+  expect(connections).toBeGreaterThan(1);
+
+  // It was recognised as the environment, not as a judgement about the code:
+  // the transport had already spent the retry budget, so no turn retry runs.
+  const events = await (await daemon.request(`/api/tasks/${taskId}/events?after=0&limit=500`)).json() as TaskEvent[];
+  const verdict = events.find(event => event.type === 'question.opened')?.data.data?.retryVerdict ?? '';
+  expect(verdict).toContain('传输层已有限次重试');
 }, 60_000);
