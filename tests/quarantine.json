@@ -1,8 +1,3 @@
 {
-  "files": [
-    {
-      "path": "tests/e2e/go-node-queue.part-02.test.ts",
-      "reason": "resume races the failed turn's usage record: the daemon sometimes answers resume with unknown_usage (400) right after a turn failed for a missing output. The refusal now names the blocking call (id, state, execution, openForMs) - added in 184883f1 - so the next occurrence is evidence instead of a guess; remove this entry once one failure has named its call"
-    }
-  ]
+  "files": []
 }

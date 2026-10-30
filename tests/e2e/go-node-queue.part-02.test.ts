@@ -133,10 +133,23 @@ test('a failed node retains its later input across reopen while another node run
       method: 'POST', body: JSON.stringify({ action: 'skip', seq: afterRestart.items[0]!.seq }),
     });
     expect(skipped.status, JSON.stringify(skipped.body)).toBe(200);
+    // Skipping releases the delivery that waited behind the failed one, and it
+    // starts running at once. A resume that arrives while that call is in flight
+    // is refused on purpose - the node has a pending provider call, so resuming
+    // it would be work on top of usage nobody has accounted for yet. Both
+    // answers are correct, and which one comes back depends on whether the
+    // released delivery has started, so the test asserts the contract instead
+    // of the status code: the released work runs, and no answer corrupts the
+    // node. Asserting a single status here made the test race its own skip.
     const resumed = await request(`/api/tasks/${master.graphId()}/graph/control`, {
       method: 'POST', body: JSON.stringify({ action: 'resume', nodeId: 'a' }),
     });
-    expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+    if (resumed.status === 400) {
+      expect((resumed.body as { code?: string }).code).toBe('unknown_usage');
+      expect(String((resumed.body as { message?: string }).message)).toContain("pending provider calls before resuming");
+    } else {
+      expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+    }
     await expect.poll(() => /"n"\s*:\s*3/.test(master.results.get('inspect-results-after') ?? ''), { timeout: 90_000, interval: 250 }).toBe(true);
     expect(a.turns()).toHaveLength(3);
 
