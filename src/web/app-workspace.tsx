@@ -12,7 +12,7 @@ type WorkspaceTabKind
 } from './workspace-tabs.ts';
 
 
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 
 
 import { AgentContextPage } from './AgentContext.tsx';
@@ -38,8 +38,15 @@ import { Spinner } from './ui.tsx';
 
 import { NewConversation } from "./app-new-conversation.tsx";
 import type { Settings_,Startup,TaskSummary } from "./app-state.tsx";
-import { CapabilityResourceLibrary,ModelsPage,ToolStatsPage,UsagePage } from "./app-state.tsx";
+import { CapabilityResourceLibrary,InsightsPage,ModelsPage } from "./app-state.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
+
+/** An old address that still has to land somewhere. The tab the user asked for
+ * is replaced rather than stacked, so history does not grow a hop per visit. */
+function Redirect({ to }: { to: string }) {
+  useEffect(() => { window.location.replace(to); }, [to]);
+  return <Spinner label="正在打开洞察…" />;
+}
 
 export function WorkspacePage({ path, active, settings, startup, tasks, conversations, reloadConversations, refreshTasks, detailOpen, setDetailOpen, retitleWorkspaceTab }: {
   path: string; active: boolean; settings: Settings_ | null; startup: Startup | null; tasks: TaskSummary[]; conversations: ConversationSummary[];
@@ -62,8 +69,8 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
             {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
             {catalogMatch && <Suspense fallback={<Spinner />}><CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} /></Suspense>}
-            {pathname === '/usage' && <Suspense fallback={<Spinner />}><UsagePage /></Suspense>}
-            {pathname === '/tools' && <Suspense fallback={<Spinner />}><ToolStatsPage /></Suspense>}
+            {pathname === '/insights' && <Suspense fallback={<Spinner />}><InsightsPage settings={settings} conversations={conversations} /></Suspense>}
+            {(pathname === '/usage' || pathname === '/tools') && <Redirect to="#/insights" />}
             {pathname === '/models' && <Suspense fallback={<Spinner />}><ModelsPage /></Suspense>}
             {draftGraphMatch && (
               <DraftGraphTab

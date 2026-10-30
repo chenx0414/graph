@@ -2,6 +2,7 @@ package graph
 
 import (
 	"database/sql"
+	"strings"
 )
 
 // ToolCallStat is one tool/role aggregate. Role is JSON null when the call had no role.
@@ -22,17 +23,30 @@ func (s *TaskStore) ToolCallStats(keepDays ...int) []ToolCallStat {
 		days = keepDays[0]
 	}
 	s.PruneToolCalls(days)
+	return s.ToolCallStatsFor("", nil)
+}
+
+// ToolCallStatsFor is the same aggregate narrowed to one scope.
+//
+// The insights page folds the tool side of a project or a conversation, and it
+// has to see exactly the rows that scope recorded - not the installation total
+// with a filter applied afterwards in Go.
+func (s *TaskStore) ToolCallStatsFor(filter string, args []any) []ToolCallStat {
+	predicate := ""
+	if filter = strings.TrimSpace(filter); filter != "" {
+		predicate = " WHERE " + filter
+	}
 	rows, err := s.DB.Query(`WITH ranked AS (
          SELECT tool, role, ms, is_error, created_at,
            row_number() OVER (PARTITION BY tool, role ORDER BY ms, id) AS ordinal,
            count(*) OVER (PARTITION BY tool, role) AS sample_count
-         FROM tool_calls
+         FROM tool_calls`+predicate+`
        )
        SELECT tool, role, count(*) AS calls, sum(is_error) AS errors,
          sum(ms) AS total_ms,
          avg(CASE WHEN ordinal IN ((sample_count + 1) / 2, (sample_count + 2) / 2) THEN ms END) AS median_ms,
          max(ms) AS max_ms, max(created_at) AS last_at
-       FROM ranked GROUP BY tool, role ORDER BY calls DESC, tool`)
+       FROM ranked GROUP BY tool, role ORDER BY calls DESC, tool`, args...)
 	if err != nil {
 		panic(err)
 	}

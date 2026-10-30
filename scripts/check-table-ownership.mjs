@@ -243,9 +243,16 @@ function main() {
   const declared = schemaTables();
 
   if (staged) {
+    // The staged pass reads the same files the whole-package pass does, and a
+    // file that declares why it writes a table directly has already said sorry:
+    // honouring the marker here is what keeps the two passes from disagreeing
+    // about the same tree.
+    const exempt = new Set();
     for (const write of stagedWrites()) {
+      if (exempt.has(write.file)) continue;
       const name = write.file.slice(write.file.lastIndexOf('/') + 1);
       if (ownsIt(name, write.table, declared)) continue;
+      if (readFileSync(write.file, 'utf8').includes(EXEMPT)) { exempt.add(write.file); continue; }
       tables.add(write.table);
       offenders.push(write);
     }

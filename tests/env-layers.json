@@ -12,6 +12,7 @@
         "tests/e2e/conversation-graph-drawer.test.ts",
         "tests/e2e/desktop-shell.test.ts",
         "tests/e2e/go-project-branches-ui.test.ts",
+        "tests/e2e/go-insights.test.ts",
         "tests/e2e/orchestration-browser.test.ts",
         "tests/e2e/orchestration-node-steer.test.ts",
         "tests/e2e/orchestration-work-ui.test.ts",

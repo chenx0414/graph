@@ -67,3 +67,10 @@ func (runtime *TaskRuntime) ClearToolCalls() map[string]any {
 type TaskRuntimeConversations struct {
 	runtime *TaskRuntime
 }
+
+// Insights folds the billed record for the 洞察 page.
+func (runtime *TaskRuntime) Insights(scope InsightsScope) InsightsSummary {
+	runtime.ensureOpen()
+	IngestToolCallSpools(runtime.store, runtime.stateDir)
+	return runtime.store.Insights(scope)
+}

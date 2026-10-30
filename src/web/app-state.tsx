@@ -56,9 +56,7 @@ export const Settings = lazy(() => import('./Settings.tsx').then(module => ({ de
 
 export const ModelsPage = lazy(() => import('./Settings.tsx').then(module => ({ default: module.ModelsPage })));
 
-export const UsagePage = lazy(() => import('./Usage.tsx').then(module => ({ default: module.UsagePage })));
-
-export const ToolStatsPage = lazy(() => import('./ToolStats.tsx').then(module => ({ default: module.ToolStatsPage })));
+export const InsightsPage = lazy(() => import('./Insights.tsx').then(module => ({ default: module.InsightsPage })));
 
 export const CapabilityResourceLibrary = lazy(() => import('./ResourceLibrary.tsx').then(module => ({ default: module.ResourceLibrary })));
 
@@ -287,11 +285,9 @@ export function App() {
           <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
             <Icon name="catalog" size={17} /><span className="rail-label">资源库</span>
           </a>
-          <a className="rail-button" href="#/usage" data-testid="rail-usage" title="用量" aria-label="用量" data-active={pathname === '/usage'}>
-            <Icon name="usage" size={17} /><span className="rail-label">用量</span>
-          </a>
-          <a className="rail-button" href="#/tools" data-testid="rail-tools" title="工具" aria-label="工具" data-active={pathname === '/tools'}>
-            <Icon name="tool" size={17} /><span className="rail-label">工具</span>
+          <a className="rail-button" href="#/insights" data-testid="rail-insights" title="洞察" aria-label="洞察"
+            data-active={pathname === '/insights' || pathname === '/usage' || pathname === '/tools'}>
+            <Icon name="usage" size={17} /><span className="rail-label">洞察</span>
           </a>
           <a className="rail-button" href="#/models" data-testid="rail-models" title="模型" aria-label="模型" data-active={pathname === '/models'}>
             <Icon name="bolt" size={17} /><span className="rail-label">模型</span>

@@ -97,8 +97,8 @@ export function tabForPath(path: string): TabDescriptor | null {
   const graph = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname);
   if (graph) return { kind: 'graph', key: graph[1]!, title: '任务图', hash: `#/tasks/${graph[1]!}/graph` };
   if (pathname === '/artifacts') return page('artifacts', '共享产物', `#${path}`);
-  if (pathname === '/usage') return page('usage', '用量', '#/usage');
-  if (pathname === '/tools') return page('tools', '工具', '#/tools');
+  // 洞察 is where 用量 and 工具 went: one page for the record, so one window.
+  if (pathname === '/insights' || pathname === '/usage' || pathname === '/tools') return page('insights', '洞察', '#/insights');
   if (pathname === '/models') return page('models', '模型', '#/models');
   if (/^\/catalog(?:\/[^/]+)?$/.test(pathname)) return page('catalog', '资源库', `#${pathname}`);
   return null;
