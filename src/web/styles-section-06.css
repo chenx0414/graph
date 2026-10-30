@@ -107,10 +107,14 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 4px;
   margin-top: 7px;
 }
-.composer-note { color: var(--faint); font-size: 11px; }
+/* The composer is as wide as the column, and the column narrows when the drawer
+ * opens: the note keeps one line and the row wraps instead of squeezing it. */
+.composer-note { color: var(--faint); font-size: 11px; white-space: nowrap; }
 .composer-telemetry {
   display: flex;
   align-items: center;
