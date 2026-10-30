@@ -55,7 +55,7 @@ import { residentFlag } from "./conversation-types.tsx";
 export function ConversationPanelView({ sending, steering, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, snapshot, loadingOlder, transcriptRows, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
 return (
     <section className="conversation-page" data-testid="conversation">
-      {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content">
+      {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content" data-drawer={drawerOpen}>
         <div className="conversation-heading">
           <h1 data-testid="conversation-title">{view.title}</h1>
           <div className="conversation-meta" title={`已计量 ${formatTokens(view.usage.used)} tokens · ${costText(view.cost)}`}>

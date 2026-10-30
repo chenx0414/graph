@@ -201,7 +201,11 @@
 
 /* A workspace switch is immediate; live message and status animations remain local. */
 .main .page, .main .stagger > *, .main .conversation-page { animation: none; }
-.conversation-toolbar-content { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* The toolbar lives in the window chrome, so it has to make room for the drawer
+ * by itself: without this the drawer button stays at the window's right edge and
+ * ends up over the drawer instead of over the conversation it belongs to. */
+.conversation-toolbar-content { display: flex; align-items: center; gap: 8px; min-width: 0; transition: padding-right 160ms ease-out; }
+.conversation-toolbar-content[data-drawer="true"] { padding-right: min(440px, 46vw); }
 .conversation-toolbar-content .conversation-heading { display: none; }
 .conversation-toolbar-content .conversation-actions { gap: 0; }
 .conversation-toolbar-content .drawer-entry { padding: 5px 8px; }
