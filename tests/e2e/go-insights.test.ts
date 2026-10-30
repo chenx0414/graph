@@ -73,6 +73,19 @@ async function seed(stateDir: string) {
   db.close();
 }
 
+/** A daemon whose record is empty: what a fresh installation shows. */
+async function openEmpty() {
+  const root = await mkdtemp(join(tmpdir(), 'graph-insights-empty-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  await symlink(webDir, join(root, 'web'));
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }] }));
+  await mkdir(join(root, 'graph-home', 'capabilities'), { recursive: true });
+  const daemon = await launchCli(root, { configPath });
+  cleanup.push(() => daemon.close());
+  return daemon;
+}
+
 async function open() {
   const root = await mkdtemp(join(tmpdir(), 'graph-insights-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -151,6 +164,27 @@ async function text(tab: Page, testid: string): Promise<string> {
   await expect.poll(async () => (await tab.getByTestId(testid).count())).toBeGreaterThan(0);
   return (await tab.getByTestId(testid).innerText()).replace(/\s+/g, ' ').trim();
 }
+
+test('a fresh installation reads as zeros, not as gaps', async () => {
+  const daemon = await openEmpty();
+  const summary = await insights(daemon);
+  expect(summary.overview).toMatchObject({ turns: 0, steps: 0, toolCalls: 0, toolErrors: 0, costMicros: 0 });
+  expect(summary.tokens).toMatchObject({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cacheHitRate: 0 });
+  expect(summary.timing).toMatchObject({ modelMs: 0, modelCalls: 0, toolMs: 0, toolCalls: 0 });
+  expect(summary.models).toEqual([]);
+  expect(summary.tools).toEqual([]);
+});
+
+test('a fresh installation renders empty cards rather than dividing by zero', async () => {
+  const daemon = await openEmpty();
+  const tab = await page(daemon, '#/insights');
+  // Nothing to divide by: the empty cards say so in words, and no cell reads NaN.
+  expect(await text(tab, 'insights-overview')).toContain('模型调用 0');
+  expect(await text(tab, 'insights-cache')).toContain('缓存命中 0.0%');
+  expect(await text(tab, 'insights-models')).toContain('这个范围里还没有模型调用');
+  expect(await text(tab, 'insights-tools')).toContain('这个范围里还没有工具调用');
+  expect(await tab.evaluate(() => document.body.innerText.includes('NaN'))).toBe(false);
+}, 120_000);
 
 test('renders the record, and the old two pages now open it', async () => {
   const daemon = await open();

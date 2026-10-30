@@ -121,6 +121,16 @@ test('a provider that keeps sending events is not cut off by the idle bound', as
       const messages = (reply.body as { messages?: { role?: string; kind?: string; text?: string }[] }).messages ?? [];
       return messages.some(message => message.role === 'assistant' && (message.text ?? '').includes('takes a while'));
     }, { timeout: 60000, interval: 250 }).toBe(true);
+    // The answer landing and the turn settling are two writes, so a reader can
+    // see the text before the status flips. What the bound promises is that the
+    // turn is not cut off - so wait for it to settle instead of demanding one
+    // snapshot where both writes already happened.
+    await expect.poll(async () => {
+      const reply = await request(`/api/conversations/${conversationId}`);
+      view = reply.body;
+      return (reply.body as { master?: { status?: string } }).master?.status ?? '';
+    }, { timeout: 60000, interval: 250 })
+      .toBe('succeeded');
     const status = (view as { master?: { status?: string } }).master?.status ?? '';
     expect(status, `the answer arrived but the turn was reported as ${status}\nstderr: ${daemon?.stderr ?? ''}`).toBe('succeeded');
   } finally {
