@@ -87,6 +87,14 @@ test('the browser returns to the same global and project supervisors while retai
     await toggle.click();
     expect(await toggle.getAttribute('aria-expanded')).toBe('true');
   }
+  // The main Agent entry is one row, not a heading plus a conversation row.
+  const globalEntry = page.getByTestId('open-global-agent');
+  expect(await globalEntry.evaluate(el => el.tagName)).toBe('BUTTON');
+  expect(await page.getByTestId('conversation-list').getByRole('link', { name: 'Main', exact: true }).count()).toBe(0);
+  expect(await page.getByTestId('conversation-list').getByRole('button', { name: '主 Agent', exact: true }).count()).toBe(0);
+  expect(await page.getByTestId('conversation-list').locator('.sidebar-label', { hasText: '主 Agent' }).count()).toBe(0);
+  await page.getByTestId('open-global-agent').click();
+  await expect.poll(() => page.url()).toContain('#/conversations/');
   const projectEntry = page.getByTestId('open-project-p');
   await projectEntry.focus();
   expect(await projectEntry.evaluate(element => element === document.activeElement)).toBe(true);
@@ -131,7 +139,7 @@ test('the browser returns to the same global and project supervisors while retai
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText(), { timeout: 30_000 }).toContain('Project supervisor reply.');
   expect(await page.getByTestId(`archive-conversation-${projectID}`).count()).toBe(0);
 
-  await page.getByTestId('conversation-list').getByRole('link', { name: 'Main', exact: true }).click();
+  await page.getByTestId('open-global-agent').click();
   await expect.poll(() => page.url()).toBe(globalURL);
   await page.getByTestId('open-project-p').click();
   await expect.poll(() => page.url()).toBe(projectURL);

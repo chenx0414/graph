@@ -41,6 +41,7 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   const [createProject, setCreateProject] = useState(false);
   const [archiving, setArchiving] = useState('');
   const [openingProject, setOpeningProject] = useState('');
+  const [openingGlobal, setOpeningGlobal] = useState(false);
   const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
   const global = ordered.find(conversation => 'role' in conversation && conversation.role === 'global');
   // An archived project is put away: its rows leave the project list, and the
@@ -53,6 +54,25 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   const unbound = ordered.filter(conversation => !('role' in conversation && (conversation.role === 'global' || conversation.role === 'project')));
   function isSupervisor(conversation: ConversationSummary) {
     return 'role' in conversation && (conversation.role === 'global' || conversation.role === 'project');
+  }
+  async function openGlobalThread() {
+    if (openingGlobal) return;
+    if (global) {
+      location.hash = `#/conversations/${global.id}`;
+      return;
+    }
+    setOpeningGlobal(true);
+    try {
+      const thread = await api<{ conversationId: string }>('/api/orchestration/global', {
+        method: 'POST', body: JSON.stringify({ requestId: `open-global-${crypto.randomUUID()}` }),
+      });
+      window.dispatchEvent(new Event('graph:conversations-changed'));
+      location.hash = `#/conversations/${thread.conversationId}`;
+    } catch (reason) {
+      toast(reason instanceof Error ? reason.message : String(reason), 'danger');
+    } finally {
+      setOpeningGlobal(false);
+    }
   }
   async function openProjectThread(projectId: string, knownConversationId?: string) {
     if (openingProject) return;
@@ -93,11 +113,25 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   return (
     <>
       <div className="sidebar-scroll" data-testid="conversation-list">
-        <div className="sidebar-label">主 Agent</div>
         <div className="sidebar-section">
-          {global ? <SidebarConversation conversation={global} active={path === `/conversations/${global.id}`} archiving={false} onArchive={() => {}} canArchive={false} /> : (
-            <a className="sidebar-conversation" href="#/" data-testid="open-global-agent"><Icon name="message" size={14} /><span>与主 Agent 对话</span></a>
-          )}
+          {/* One main Agent, one conversation: the entry is the row itself, with no
+              heading above it and no second row to pick from. */}
+          <button
+            type="button"
+            className="sidebar-project-row"
+            data-testid="open-global-agent"
+            data-active={global && path === `/conversations/${global.id}` ? 'true' : undefined}
+            aria-current={global && path === `/conversations/${global.id}` ? 'page' : undefined}
+            aria-label="打开主 Agent 的对话"
+            title={global?.title ?? '主 Agent'}
+            disabled={Boolean(openingGlobal)}
+            onClick={() => void openGlobalThread()}
+          >
+            <Icon name="message" size={14} />
+            <span className="sidebar-project-name">主 Agent</span>
+            {Boolean(global?.openQuestions) && <span className="sidebar-conversation-badge">{global?.openQuestions}</span>}
+            {openingGlobal && <span className="sidebar-empty">打开中…</span>}
+          </button>
         </div>
         <div className="sidebar-label">
           <button type="button" className="sidebar-section-toggle" aria-expanded={sections.projects} onClick={() => setSections(value => ({ ...value, projects: !value.projects }))}><Icon name="chevron" size={12} /><span>项目</span></button>
