@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { RuntimeError, type Json } from '../core/types.ts';
+import { RuntimeError, type Json } from '../../src/core/types.ts';
 import type { CapabilityRecord, DefinitionSpec } from './capability-library.ts';
 import { selectCapabilityRecord } from './capability-select.ts';
-import { MODEL_GRADES, type ModelGrade } from './models.ts';
+import { MODEL_GRADES, type ModelGrade } from '../../src/catalog/models.ts';
 
 export type AgentCombinationResourceRole = 'identity' | 'tool' | 'skill' | 'mcp' | 'pi-extension' | 'extension';
 export type AgentCombinationMode = 'main' | 'subagent';

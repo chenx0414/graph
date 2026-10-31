@@ -1,8 +1,9 @@
+// graph:allow-large-file: 21 KB predate the budget; this change only moves the file out of src/, splitting it is a separate refactor
 import { existsSync } from 'node:fs';
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
-import { normalizeDomainPattern } from '../core/domains.ts';
-import { RuntimeError, type Json } from '../core/types.ts';
+import { normalizeDomainPattern } from './domains.ts';
+import { RuntimeError, type Json } from '../../src/core/types.ts';
 import type { CapabilityKind, CapabilityOrigin, CapabilityRecord } from './capability-library.ts';
 
 export interface CapabilityManifest {

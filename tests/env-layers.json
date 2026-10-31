@@ -5,20 +5,21 @@
       "capability": "window-services",
       "probe": "chromium",
       "files": [
-        "tests/m8/**",
         "tests/console/setup-wizard.test.ts",
         "tests/e2e/composer-interaction.test.ts",
         "tests/e2e/composer-queue.test.ts",
+        "tests/e2e/console-layout.test.ts",
         "tests/e2e/conversation-graph-drawer.test.ts",
         "tests/e2e/desktop-shell.test.ts",
-        "tests/e2e/go-project-branches-ui.test.ts",
         "tests/e2e/go-insights.test.ts",
+        "tests/e2e/go-project-branches-ui.test.ts",
         "tests/e2e/orchestration-browser.test.ts",
         "tests/e2e/orchestration-node-steer.test.ts",
         "tests/e2e/orchestration-work-ui.test.ts",
         "tests/e2e/provider-metadata.part-02.test.ts",
         "tests/e2e/provider-metadata.test.ts",
-        "tests/e2e/resource-library.test.ts"
+        "tests/e2e/resource-library.test.ts",
+        "tests/m8/**"
       ]
     }
   ]

@@ -5,7 +5,7 @@ import {createReadStream,constants,existsSync} from 'node:fs';
 import {mkdir,readdir,lstat,readlink,symlink,copyFile,chmod,readFile,writeFile,realpath,rm} from 'node:fs/promises';
 import {join,resolve,relative,dirname,isAbsolute,basename,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {CapabilityLibrary} from '../src/catalog/capability-library.ts';
+import {CapabilityLibrary} from './lib/capability-library.ts';
 
 const execute=promisify(execFile);
 async function tar(args){return execute('tar',args,{env:{...process.env,COPYFILE_DISABLE:'1'},maxBuffer:64*1024*1024});}

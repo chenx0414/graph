@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { RuntimeError, type Json } from '../core/types.ts';
+import { RuntimeError, type Json } from '../../src/core/types.ts';
 import {
   compileAgentCombinationDefinition,
   parseAgentCombinations,
@@ -16,7 +16,7 @@ import { homedir } from 'node:os';
 import { CONFIG_DIR_NAME, getAgentDir } from '@earendil-works/pi-coding-agent';
 import { parseCapabilityManifest, scanAgentSkills, scanCapabilities, scanNativeSkills, type CapabilityManifest } from './file-capabilities.ts';
 import { selectCapabilityRecord } from './capability-select.ts';
-import { modelGradeMatches, type ModelGrade } from './models.ts';
+import { modelGradeMatches, type ModelGrade } from '../../src/catalog/models.ts';
 
 export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
 
