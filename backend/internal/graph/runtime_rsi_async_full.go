@@ -2,6 +2,7 @@ package graph
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -28,10 +29,18 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 	stateDir := service.stateDir
 	go func() {
 		defer service.asyncFull.Delete(key)
-		result := rsiRunCommand(root, RsiCommand{Command: "node", Args: []string{"--run", "check:full"}}, RSI_ASYNC_FULL_TIMEOUT_MS)
+		// The confirmation runs against the commit, not against whatever the
+		// checkout happens to contain right now. The supervisor keeps working in
+		// the same clone - switching branches, merging, pushing - and a suite that
+		// reads a tree changing under it reports a regression nobody introduced
+		// (measured: a moved file looked like a missing module).
+		runRoot, cleanup := rsiSnapshotRoot(root, commit)
+		defer cleanup()
+		result := rsiRunCommand(runRoot, RsiCommand{Command: "node", Args: []string{"--run", "check:full"}}, RSI_ASYNC_FULL_TIMEOUT_MS)
 		logPath := filepath.Join(stateDir, "rsi", "reports", "async-full-"+activationID+".log")
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err == nil {
-			_ = os.WriteFile(logPath, []byte(result.Output), 0o600)
+			header := "ran in " + runRoot + "\n"
+			_ = os.WriteFile(logPath, []byte(header+result.Output), 0o600)
 		}
 		if result.Status == "passed" {
 			return
@@ -82,4 +91,34 @@ func rsiAsyncFullSummary(output string) string {
 		return "摘要: 日志里没有可归纳的行，请读完整日志。"
 	}
 	return "摘要:\n" + strings.Join(kept, "\n")
+}
+
+// rsiSnapshotRoot checks out one commit into a throwaway worktree and points it
+// at the real dependencies, so the slow confirmation reads an immutable tree.
+//
+// A worktree without node_modules cannot run the suite, so the module directory
+// is linked rather than copied; anything that stops the snapshot from being made
+// falls back to the working checkout, and the log says which one ran.
+func rsiSnapshotRoot(root, commit string) (string, func()) {
+	noop := func() {}
+	if strings.TrimSpace(commit) == "" {
+		return root, noop
+	}
+	dir, err := os.MkdirTemp("", "graph-async-full-")
+	if err != nil {
+		return root, noop
+	}
+	if _, err := exec.Command("git", "-C", root, "worktree", "add", "--detach", dir, commit).CombinedOutput(); err != nil {
+		_ = os.RemoveAll(dir)
+		return root, noop
+	}
+	if err := os.Symlink(filepath.Join(root, "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
+		_ = exec.Command("git", "-C", root, "worktree", "remove", "--force", dir).Run()
+		_ = os.RemoveAll(dir)
+		return root, noop
+	}
+	return dir, func() {
+		_ = exec.Command("git", "-C", root, "worktree", "remove", "--force", dir).Run()
+		_ = os.RemoveAll(dir)
+	}
 }
