@@ -161,6 +161,10 @@ test('the main Agent is given the compact rules, and none of the removed workflo
     expect(prompt).toContain('<rules>\\n- Use bash for file operations like ls, rg, find');
     // The rule that binds the main Agent.
     expect(prompt).toContain('R14 When one node stays blocked for three rounds');
+    // The shape rule lives in the rules channel, which every turn receives - not
+    // in a tool description, which has a byte budget and cannot carry it.
+    expect(prompt).toContain('R15 Before you propose a graph, choose its shape');
+    expect(prompt).toContain('shapeNotes in the propose receipt names the nodes');
     // The workflow prompt that was removed is really gone.
     expect(prompt).not.toContain('<workflow>');
     // And so is the old draft shape.

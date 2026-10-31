@@ -404,6 +404,9 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	})
 	answer := map[string]any{
 		"root": libraryView.Root, "prompts": libraryView.Prompts,
+		// A shipped rule that the effective library no longer carries is a rule
+		// nobody is bound by, and nothing else in the product would say so.
+		"ruleSeedGaps":      library.RuleSeedGaps(),
 		"disabledTools":     assembly.DisabledTools,
 		"docsRoot":          preview.DocsRoot,
 		"definitionVersion": definitionVersion, "latestDefinitionVersion": latestDefinitionVersion,
