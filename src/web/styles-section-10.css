@@ -8,9 +8,9 @@
 .sidebar-section-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 3px 0; }
 .sidebar-section-toggle svg { transform: rotate(90deg); transition: transform 120ms; }
 .sidebar-section-toggle[aria-expanded="false"] svg { transform: rotate(0); }
-.sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 0; transition: opacity 120ms; }
-.sidebar-label:hover .sidebar-add, .sidebar-label:focus-within .sidebar-add, .sidebar-project summary:hover .sidebar-new-chat, .sidebar-project summary:focus-within .sidebar-new-chat { opacity: 1; }
-@media (hover: none) { .sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 1; } }
+.sidebar-label .sidebar-add { opacity: 0; transition: opacity 120ms; }
+.sidebar-label:hover .sidebar-add, .sidebar-label:focus-within .sidebar-add { opacity: 1; }
+@media (hover: none) { .sidebar-label .sidebar-add { opacity: 1; } }
 .drawer-all-tasks { display: flex; flex-direction: column; min-width: 0; }
 .drawer-task-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
 .drawer-task-controls select { min-width: 0; flex: 1 1 130px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }

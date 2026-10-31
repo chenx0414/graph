@@ -222,7 +222,7 @@ test('the project picker adds a local project to the sidebar', async () => {
   const createButton = page.getByTestId('project-create');
   await createButton.click();
   await page.getByTestId('create-project-dialog').waitFor({ state: 'detached' });
-  await page.getByTestId('new-conversation-project-picked').waitFor();
+  await page.getByTestId('open-project-picked').waitFor();
   const conversations = await (await daemon.request('/api/conversations')).json() as { role?: string; projectId?: string }[];
   expect(conversations).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'project', projectId: 'picked' })]));
 }, 30_000);

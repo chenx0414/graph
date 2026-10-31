@@ -52,7 +52,7 @@ p { text-wrap: pretty; }
 .sidebar-empty { padding: 6px 10px; font-size: .75rem; line-height: 1.6; }
 .sidebar-empty-action { display: flex; align-items: center; gap: 6px; padding: 6px 0; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
 .sidebar-section-toggle { min-height: 28px; }
-.sidebar-label .sidebar-add, .sidebar-project .sidebar-new-chat { opacity: 1; }
+.sidebar-label .sidebar-add { opacity: 1; }
 .sidebar[data-collapsed="true"] { gap: 12px; }
 .sidebar[data-collapsed="true"] .sidebar-heading,
 .sidebar[data-collapsed="true"] .rail-label,

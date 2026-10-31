@@ -38,7 +38,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   onSettingsChanged: () => void;
 }) {
   const [sections, setSections] = useState({ projects: true, recent: true });
-  const [projectOpen, setProjectOpen] = useState<Record<string, boolean>>({});
   const [createProject, setCreateProject] = useState(false);
   const [archiving, setArchiving] = useState('');
   const [openingProject, setOpeningProject] = useState('');
@@ -49,12 +48,18 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   const projectRows = settings?.projects ?? [];
   const activeProjects = projectRows.filter(project => project.archivedAt == null);
   const archivedProjects = projectRows.filter(project => project.archivedAt != null);
-  const unbound = ordered.filter(conversation => !conversation.projectId && !('role' in conversation && conversation.role === 'global'));
+  // The project rows no longer list their conversations, so every conversation that is
+  // not a supervisor thread stays reachable from the recent list instead.
+  const unbound = ordered.filter(conversation => !('role' in conversation && (conversation.role === 'global' || conversation.role === 'project')));
   function isSupervisor(conversation: ConversationSummary) {
     return 'role' in conversation && (conversation.role === 'global' || conversation.role === 'project');
   }
-  async function openProjectThread(projectId: string) {
+  async function openProjectThread(projectId: string, knownConversationId?: string) {
     if (openingProject) return;
+    if (knownConversationId) {
+      location.hash = `#/conversations/${knownConversationId}`;
+      return;
+    }
     setOpeningProject(projectId);
     try {
       const thread = await api<{ conversationId: string }>(`/api/projects/${encodeURIComponent(projectId)}/thread`, {
@@ -102,46 +107,27 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
         </div>
         <div className="sidebar-section" hidden={!sections.projects}>
           {activeProjects.map(project => {
-            const items = ordered.filter(conversation => conversation.projectId === project.id);
+            // One project means one supervisor Agent, so the row itself is the
+            // way in: no second button to find and no list to open first.
+            const supervisor = ordered.find(conversation => conversation.projectId === project.id && 'role' in conversation && conversation.role === 'project');
+            const active = Boolean(supervisor && path === `/conversations/${supervisor.id}`);
             return (
-              <details
-                className="sidebar-project"
-                open={projectOpen[project.id] ?? true}
+              <button
+                type="button"
                 key={project.id}
-                onToggle={event => {
-                  const open = event.currentTarget.open;
-                  setProjectOpen(current => current[project.id] === open ? current : { ...current, [project.id]: open });
-                }}
+                className="sidebar-project-row"
+                data-testid={`open-project-${project.id}`}
+                data-active={active ? 'true' : undefined}
+                aria-current={active ? 'page' : undefined}
+                aria-label={`打开 ${project.id} 的主管`}
+                title={project.root}
+                disabled={Boolean(openingProject)}
+                onClick={() => void openProjectThread(project.id, supervisor?.id)}
               >
-                <summary>
-                  <Icon name="chevron" size={13} className="sidebar-chevron" />
-                  <span className="sidebar-project-name" title={project.root}>{project.id}</span>
-                  <button
-                    type="button"
-                    className="sidebar-new-chat"
-                    data-testid={`new-conversation-project-${project.id}`}
-                    title={`打开 ${project.id} 的主管`}
-                    aria-label={`打开 ${project.id} 的主管`}
-                    disabled={Boolean(openingProject)}
-                    onClick={event => { event.preventDefault(); event.stopPropagation(); void openProjectThread(project.id); }}
-                  >
-                    <Icon name="message" size={15} />
-                  </button>
-                </summary>
-                <div className="sidebar-conversations">
-                  {items.map(conversation => (
-                    <SidebarConversation
-                      key={conversation.id}
-                      conversation={conversation}
-                      active={path === `/conversations/${conversation.id}`}
-                      archiving={archiving === conversation.id}
-                      onArchive={() => void archiveConversation(conversation)}
-                      canArchive={!isSupervisor(conversation)}
-                    />
-                  ))}
-                  {!items.length && <span className="sidebar-empty">暂无对话</span>}
-                </div>
-              </details>
+                <Icon name="folder" size={14} />
+                <span className="sidebar-project-name">{project.id}</span>
+                {openingProject === project.id && <span className="sidebar-empty">打开中…</span>}
+              </button>
             );
           })}
           {archivedProjects.length > 0 && (

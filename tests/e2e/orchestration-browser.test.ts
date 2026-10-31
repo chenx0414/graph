@@ -87,10 +87,16 @@ test('the browser returns to the same global and project supervisors while retai
     await toggle.click();
     expect(await toggle.getAttribute('aria-expanded')).toBe('true');
   }
-  const projectEntry = page.getByTestId('new-conversation-project-p');
+  const projectEntry = page.getByTestId('open-project-p');
   await projectEntry.focus();
   expect(await projectEntry.evaluate(element => element === document.activeElement)).toBe(true);
   expect(await projectEntry.getAttribute('aria-label')).toContain('主管');
+  // A project owns exactly one supervisor Agent, so the row is the whole control:
+  // no second button beside it and no list to unfold before the conversation opens.
+  expect(await page.getByTestId('new-conversation-project-p').count()).toBe(0);
+  expect(await page.locator('details.sidebar-project').count()).toBe(0);
+  expect(await page.getByTestId('open-project-p').locator('svg').count()).toBe(1);
+  expect(await page.getByTestId('open-project-p').getByRole('button').count()).toBe(0);
   expect(await page.locator('a[href="#/catalog"]').getAttribute('aria-label')).toBe('资源库');
   expect(await page.locator('a[href="#/settings"]').getAttribute('aria-label')).toBe('设置');
   expect(await page.locator('a').filter({ hasText: '概览' }).count()).toBe(0);
@@ -102,7 +108,7 @@ test('the browser returns to the same global and project supervisors while retai
   expect(await page.getByTestId(`archive-conversation-${priorID}`).count()).toBe(1);
   expect(await page.getByTestId(`archive-conversation-${globalID}`).count()).toBe(0);
 
-  await page.getByTestId('new-conversation-project-p').click();
+  await page.getByTestId('open-project-p').click();
   await expect.poll(() => page.url(), { timeout: 30_000 }).not.toBe(globalURL);
   const projectURL = page.url();
   expect(projectURL).toContain('#/conversations/');
@@ -115,7 +121,7 @@ test('the browser returns to the same global and project supervisors while retai
 
   await page.getByTestId('conversation-list').getByRole('link', { name: 'Main', exact: true }).click();
   await expect.poll(() => page.url()).toBe(globalURL);
-  await page.getByTestId('new-conversation-project-p').click();
+  await page.getByTestId('open-project-p').click();
   await expect.poll(() => page.url()).toBe(projectURL);
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText()).toContain('Review this project');
 }, 180_000);
