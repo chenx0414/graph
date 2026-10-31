@@ -12,7 +12,10 @@ import { chromium } from 'playwright';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const build = join(root, 'build');
 
-const appIcon = `<img style="width:1024px;height:1024px" src="data:image/png;base64,${(await readFile(join(root, 'src/web/assets/graph-icon.png'))).toString('base64')}" />`;
+// macOS icon grid: 824px of artwork inside the 1024px canvas, 185px corner
+// radius, transparent margin. The source asset already rounds its own corners at
+// the same ratio, so the clip below reproduces exactly what ships.
+const appIcon = `<div style="width:824px;height:824px;margin:100px;border-radius:185px;overflow:hidden"><img style="width:824px;height:824px;display:block" src="data:image/png;base64,${(await readFile(join(root, 'src/web/assets/graph-icon.png'))).toString('base64')}" /></div>`;
 
 const tray = (size) => `
 <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 22 22">
