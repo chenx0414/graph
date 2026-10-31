@@ -83,6 +83,8 @@ p { text-wrap: pretty; }
 .chat-composer:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
 .chat-composer .cm-focused { outline: none; }
 .composer-note { color: var(--muted); }
+.conversation-intro { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 16px; }
+.conversation-intro .new-chat-intro p { color: var(--muted); }
 .starter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: min(720px, 100%); margin-top: 28px; }
 .starter-card {
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px;

@@ -31,7 +31,8 @@ import { QuestionReply } from './Questions.tsx';
 import { ErrorBox,useAsync } from './shared.tsx';
 
 
-import { Card,Empty,Icon,Pill,Spinner,type IconName } from './ui.tsx';
+import { Card,Empty,Icon,Pill,Spinner } from './ui.tsx';
+import { ChatIntro,OnboardingSteps,StarterCards } from './chat-intro.tsx';
 
 
 
@@ -123,12 +124,7 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
   }
   return (
     <section className="new-chat-page" data-testid="conversations">
-      <div className="new-chat-intro">
-        <div className="new-chat-mark" aria-hidden="true" />
-        <span className="new-chat-eyebrow">从一个目标，开始协作</span>
-        <h1>与主 Agent 对话</h1>
-        <p>描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。</p>
-      </div>
+      <ChatIntro title="与主 Agent 对话" body="描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。" />
       <ChatComposer
         className="new-chat-composer"
         value={text}
@@ -179,22 +175,15 @@ export function NewConversation({ settings, initialProjectId }: { settings: Sett
         />
       </div>
       {error && <ErrorBox message={error} />}
-      <div className="starter-grid" aria-label="试试这些任务">
-        {([
-          { icon: 'search', title: '了解项目', hint: '梳理结构，找到改进方向', prompt: '帮我梳理这个项目的结构与主要流程，找出值得优先改进的地方。' },
-          { icon: 'bolt', title: '解决问题', hint: '描述现象，一起定位原因', prompt: '我遇到了一个问题，请先帮我分析原因，并告诉我需要补充哪些信息：' },
-          { icon: 'graph', title: '开发功能', hint: '从想法到可执行的方案', prompt: '我想给这个项目添加一项功能，请先帮我明确需求和验收条件，再制定方案：' },
-        ] satisfies { icon: IconName; title: string; hint: string; prompt: string }[]).map(item => <button type="button" className="starter-card" key={item.title} disabled={busy} onClick={() => {
+      <StarterCards
+        disabled={busy}
+        onPick={prompt => {
           if (text.trim()) return;
-          setText(item.prompt);
+          setText(prompt);
           document.querySelector<HTMLElement>('[data-testid="new-conversation-input"]')?.focus();
-        }} aria-disabled={Boolean(text.trim())}>
-          <Icon name={item.icon} size={18} /><strong>{item.title}</strong><span>{item.hint}</span>
-        </button>)}
-      </div>
-      <ol className="onboarding-steps" aria-label="协作流程">
-        <li><span>1</span>描述目标</li><li><span>2</span>确认方案草稿</li><li><span>3</span>在任务图中跟进</li>
-      </ol>
+        }}
+      />
+      <OnboardingSteps />
     </section>
   );
 }

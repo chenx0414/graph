@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { ConversationDrawerView } from "./conversation-drawer-view.tsx";
 import { WorkDrafts } from './WorkDrafts.tsx';
+import { ChatIntro,OnboardingSteps,StarterCards } from './chat-intro.tsx';
 
 import { WindowDrawer } from './WindowDrawer.tsx';
 
@@ -120,6 +121,24 @@ return (
           >
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
+          {/* An empty conversation used to be a blank page. It now shows the same
+              guidance the new-conversation page does, pointed at this Agent. */}
+          {snapshot.messages.length === 0 && !busy && (
+            <div className="conversation-intro" data-testid="conversation-intro">
+              <ChatIntro
+                {...(view.role === 'project' ? { eyebrow: '这个项目还没有对话' } : {})}
+                title={view.role === 'project' ? `与 ${view.projectId ?? '项目'} 的主管对话` : '与主 Agent 对话'}
+                body={view.role === 'project'
+                  ? '先说说你想在这个项目里达成什么，项目主管会梳理现状、提出方案并协调执行。'
+                  : '描述你想解决的问题，主 Agent 会帮你理清思路、制定方案并协调执行。'}
+              />
+              <StarterCards onPick={prompt => {
+                setText(prompt);
+                document.querySelector<HTMLElement>('[data-testid="chat-input"]')?.focus();
+              }} />
+              <OnboardingSteps />
+            </div>
+          )}
           {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
           <WorkDrafts role={view.role} conversationId={id} projectId={view.projectId} projects={settings?.projects ?? []} cursor={view.cursor} />
 

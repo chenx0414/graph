@@ -114,6 +114,14 @@ test('the browser returns to the same global and project supervisors while retai
   expect(projectURL).toContain('#/conversations/');
   const projectID = projectURL.split('/').at(-1);
   if (!projectID) throw new Error('Project conversation ID missing from URL');
+  // A project with no conversation yet used to open onto a blank page: it now shows
+  // the same guidance the new-conversation page does, aimed at that project's Agent.
+  await page.getByTestId('conversation-intro').waitFor();
+  await expect.poll(() => page.getByTestId('conversation-intro').innerText()).toContain('与 p 的主管对话');
+  await expect.poll(() => page.getByTestId('conversation-intro').innerText()).toContain('这个项目还没有对话');
+  expect(await page.getByTestId('conversation-intro').locator('.starter-card').count()).toBe(3);
+  await page.getByTestId('conversation-intro').locator('.starter-card').first().click();
+  await expect.poll(() => page.getByTestId('chat-input').locator('visible=true').innerText()).toContain('梳理这个项目的结构');
   await page.getByTestId('chat-input').locator('visible=true').fill('Review this project');
   await page.getByTestId('chat-send').locator('visible=true').click();
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText(), { timeout: 30_000 }).toContain('Project supervisor reply.');
@@ -124,4 +132,6 @@ test('the browser returns to the same global and project supervisors while retai
   await page.getByTestId('open-project-p').click();
   await expect.poll(() => page.url()).toBe(projectURL);
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText()).toContain('Review this project');
+  // Once the conversation has a message the guidance is gone.
+  expect(await page.getByTestId('conversation-intro').count()).toBe(0);
 }, 180_000);
