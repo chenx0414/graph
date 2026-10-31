@@ -6,7 +6,7 @@
  * its own tab.
  */
 import { useEffect, useRef, useState } from 'react';
-import type { ArtifactRecord } from '../core/artifact-workspace.ts';
+import type { ArtifactRecord } from './kernel-view-types.ts';
 import { api } from './api.ts';
 import { ArtifactList } from './ArtifactViews.tsx';
 import { Button, Icon } from './ui.tsx';

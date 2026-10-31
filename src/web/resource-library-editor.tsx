@@ -10,9 +10,9 @@ import { api } from './api.ts';
 import { Button,Icon } from './ui.tsx';
 
 
-import type { CapabilityRecord,SavedAgentCombination } from '../catalog/catalog.ts';
+import type { CapabilityRecord,SavedAgentCombination } from './catalog-view-types.ts';
 
-import type { AgentCombination,AgentCombinationView } from '../catalog/agent-combinations.ts';
+import type { AgentCombination,AgentCombinationView } from './catalog-view-types.ts';
 
 import './setup.ts';
 

@@ -55,3 +55,46 @@ export interface ModuleExplanation {
   inputs: InputExplanation[];
   transitions: TransitionExplanation[];
 }
+
+/** One published artifact, as the console lists and renders it. */
+export type ArtifactScope = 'task' | 'project';
+export type ArtifactTrust = 'unverified' | 'reviewed' | 'accepted';
+export type ArtifactState = 'published' | 'retired';
+
+export interface ArtifactProducer {
+  nodeId: string;
+  instanceId: string;
+  operationId: string;
+  activationId: string;
+  outputVersion?: number;
+}
+
+export interface ArtifactRecord {
+  artifactId: string;
+  version: number;
+  scope: ArtifactScope;
+  ownerId: string;
+  taskId: string;
+  projectId: string | null;
+  namespace: string;
+  name: string;
+  logicalKey: string;
+  digest: string;
+  objectPath: string;
+  size: number;
+  mediaType: string;
+  schemaKind: string | null;
+  schemaVersion: number | null;
+  title: string | null;
+  summary: string | null;
+  tags: string[];
+  producer: ArtifactProducer | null;
+  visibility: string;
+  trust: ArtifactTrust;
+  state: ArtifactState;
+  supersedes: { artifactId: string; version: number } | null;
+  metadata: Record<string, unknown>;
+  uri: string;
+  createdAt: number;
+  retiredAt: number | null;
+}

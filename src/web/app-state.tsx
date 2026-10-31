@@ -45,9 +45,9 @@ import { openQuestionTotal } from './insights.ts';
 
 import { Icon,Spinner,Toaster } from './ui.tsx';
 
-import type { CapabilityRecord } from '../catalog/catalog.ts';
+import type { CapabilityRecord } from './catalog-view-types.ts';
 
-import type { AgentCombinationView } from '../catalog/agent-combinations.ts';
+import type { AgentCombinationView } from './catalog-view-types.ts';
 
 import { Sidebar } from "./app-sidebar.tsx";
 import { WorkspacePage } from "./app-workspace.tsx";

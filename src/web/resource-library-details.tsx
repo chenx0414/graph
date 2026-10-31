@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { Button,Empty,Pill,toast } from './ui.tsx';
 
 
-import type { CapabilityRecord } from '../catalog/catalog.ts';
+import type { CapabilityRecord } from './catalog-view-types.ts';
 
 
 import './setup.ts';

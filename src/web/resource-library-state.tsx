@@ -15,10 +15,10 @@ import { toast } from './ui.tsx';
 import { GRAPH_ARCHITECTURES } from '../catalog/architecture-catalog.ts';
 
 
-import type { CapabilityRecord } from '../catalog/catalog.ts';
+import type { CapabilityRecord } from './catalog-view-types.ts';
 
 
-import type { AgentCombinationView } from '../catalog/agent-combinations.ts';
+import type { AgentCombinationView } from './catalog-view-types.ts';
 
 
 import './setup.ts';

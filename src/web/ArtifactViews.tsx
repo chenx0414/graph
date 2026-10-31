@@ -8,7 +8,7 @@
  * which no single task owns and which therefore has to stand on its own.
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import type { ArtifactRecord } from '../core/artifact-workspace.ts';
+import type { ArtifactRecord } from './kernel-view-types.ts';
 import { api } from './api.ts';
 import { groupArtifactsByTask } from './conversation-drawer.ts';
 import { ErrorBox } from './shared.tsx';
