@@ -226,3 +226,55 @@ test('the main Agent can ask whether a proposal would be accepted, and its draft
     await rm(root, { recursive: true, force: true });
   }
 }, 240_000);
+
+test('a draft that spends nodes without explaining them comes back with shape notes', async () => {
+  const { root, project, configPath } = await fixture();
+  // Two nodes that do the same job, one of them wired to nothing, and a summary
+  // that never mentions either: every note the shape audit can raise, in one draft.
+  const wasteful = {
+    ...plan,
+    summary: 'Case-insensitive title search',
+    decisions: ['两个实现者并行改同一个函数'],
+    definition: {
+      ...plan.definition,
+      nodes: {
+        'work-a': plan.definition.nodes.work,
+        'work-b': plan.definition.nodes.work,
+      },
+      edges: { checked: { from: 'work-a.done', to: 'check.start', enabled: true } },
+      inputs: { job: { to: 'work-a.job', protocol: 'result' } },
+      outputs: { result: { from: 'check.result', protocol: 'result' } },
+    },
+  };
+  const master = await scriptedProvider(() => [
+    { id: 'v-wasteful', name: 'validate_proposal', args: { proposal: wasteful } },
+    { id: 'p-wasteful', name: 'propose_graph', args: { proposal: wasteful, requestId: 'plan-wasteful' } },
+  ]);
+  await writeConfig(configPath, project, master.baseUrl);
+  const daemon = await launchCli(root, { configPath, env: { GRAPH_LOCAL_KEY: 'local-synthetic' }, extraArgs: ['--execute'] });
+  try {
+    const started = await daemon.request('/api/conversations', {
+      method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Make a wasteful graph.', requestId: 'master-shape-notes' }),
+    });
+    expect(started.status).toBe(200);
+    await expect.poll(() => master.results.has('p-wasteful'), { timeout: 180_000, interval: 250 }).toBeTruthy();
+
+    const validation = JSON.parse(master.results.get('v-wasteful')!) as { valid: boolean; shapeNotes?: string[] };
+    expect(validation.valid).toBe(true);
+    const notes = (validation.shapeNotes ?? []).join('\n');
+    // A node nobody explained.
+    expect(notes).toContain('work-b 在 summary/decisions 里没有被提到');
+    // Two nodes that are the same job.
+    expect(notes).toContain('work-a、work-b 用同一个 recipe 与同样的 task');
+    // A node wired to nothing.
+    expect(notes).toContain('work-b 没有连到任何输入、输出或边');
+
+    // The receipt carries the same notes, so nobody has to know to ask twice.
+    const receipt = JSON.parse(master.results.get('p-wasteful')!) as { shapeNotes?: string[] };
+    expect((receipt.shapeNotes ?? []).join('\n')).toContain('work-b 在 summary/decisions 里没有被提到');
+  } finally {
+    await daemon.close();
+    await master.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 240_000);

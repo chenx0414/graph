@@ -338,6 +338,11 @@ func (supervisor *TaskRuntimeSupervisor) Propose(input TaskRuntimeProposeInput) 
 	if record == nil {
 		return map[string]any{}
 	}
+	// The notes travel with the receipt so the author reads them without asking
+	// for a second opinion they did not know existed.
+	if notes := ProposalShapeNotes(proposal); len(notes) > 0 {
+		record["shapeNotes"] = notes
+	}
 	return record
 }
 
@@ -411,5 +416,9 @@ func (supervisor *TaskRuntimeSupervisor) ValidateProposal(proposal NativeProposa
 		Raise("stale_requirement", "Proposal uses an old requirement version")
 	}
 	ValidateProposal(proposal)
-	return map[string]any{"valid": true, "requirementVersion": task.RequirementVersion}
+	answer := map[string]any{"valid": true, "requirementVersion": task.RequirementVersion}
+	if notes := ProposalShapeNotes(proposal); len(notes) > 0 {
+		answer["shapeNotes"] = notes
+	}
+	return answer
 }
