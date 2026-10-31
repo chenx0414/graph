@@ -122,6 +122,10 @@ test('the browser returns to the same global and project supervisors while retai
   expect(await page.getByTestId('conversation-intro').locator('.starter-card').count()).toBe(3);
   await page.getByTestId('conversation-intro').locator('.starter-card').first().click();
   await expect.poll(() => page.getByTestId('chat-input').locator('visible=true').innerText()).toContain('梳理这个项目的结构');
+  // The guidance has to fit the transcript area: when it overflows, the thread pins to
+  // the bottom and cuts its own top off (measured once at 483px inside 390px).
+  expect(await page.getByTestId('message-list').locator('visible=true').evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  expect(await page.getByTestId('message-list').locator('visible=true').evaluate(el => Math.round(el.scrollTop))).toBe(0);
   await page.getByTestId('chat-input').locator('visible=true').fill('Review this project');
   await page.getByTestId('chat-send').locator('visible=true').click();
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText(), { timeout: 30_000 }).toContain('Project supervisor reply.');
