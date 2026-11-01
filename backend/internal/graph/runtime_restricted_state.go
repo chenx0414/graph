@@ -38,8 +38,11 @@ func (state *restrictedProcessState) killTree() {
 	}
 	pid := state.process.Process.Pid
 	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		execDebugTimeline("kill(-%d) failed err=%v; killing the direct child only", pid, err)
 		_ = state.process.Process.Kill()
+		return
 	}
+	execDebugTimeline("kill(-%d) sent", pid)
 }
 
 // readChannel reads the worker's newline-delimited protocol channel.

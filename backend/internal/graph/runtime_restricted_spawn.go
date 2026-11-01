@@ -56,6 +56,7 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		_ = ipcFile.Close()
 	}
 	pid := process.Process.Pid
+	execDebugTimeline("launched pid=%d timeoutMs=%d", pid, command.TimeoutMs)
 	// The host writes the child's request on stdin, and the host may steer the
 	// same stream afterwards. One lock keeps those writes from interleaving.
 	var stdinMutex sync.Mutex
@@ -109,6 +110,7 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 	if command.TimeoutMs > 0 {
 		timer = time.AfterFunc(time.Duration(command.TimeoutMs)*time.Millisecond, func() {
 			state.timedOut = true
+			execDebugTimeline("timer fired pid=%d", pid)
 			state.killTree()
 		})
 	}
@@ -135,7 +137,10 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		}
 	}()
 	waitErr := process.Wait()
+	execDebugTimeline("wait returned err=%v", waitErr)
+	execDebugTimeline("pumps waiting")
 	pumps.Wait()
+	execDebugTimeline("pumps drained")
 	if timer != nil {
 		timer.Stop()
 	}
