@@ -136,20 +136,9 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": taskRuntimePauseType(paused), "taskId": task.taskId,
 	}, func() any {
-		pausedValue := 0
+		runtime.store.SetTaskPaused(task.taskId, paused)
 		if paused {
-			pausedValue = 1
-		}
-		runtime.store.SetTaskPaused(task.taskId, pausedValue != 0)
-		if paused {
-			OpenPause(runtime.kernel, task.taskId)
-			active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
-              JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
-              WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
-                AND o.state='dispatched' AND o.worker_active=1 ORDER BY o.rowid DESC LIMIT 1`, task.taskId)
-			if active != nil {
-				stoppedMaster = AwaitPauseContinuation(runtime.store, requestId, task.taskId, kernelString(active["id"]))
-			}
+			stoppedMaster = pauseMasterTurn(runtime, task.taskId, requestId)
 		} else {
 			ClosePause(runtime.kernel, task.taskId)
 			ResumePauseContinuations(runtime.store, task.taskId)
@@ -161,6 +150,22 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 		return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, eventType, map[string]any{})}
 	})
 	return taskRuntimeReceipt(result), stoppedMaster
+}
+
+// pauseMasterTurn parks the task and stops the master turn that is running for
+// it, if any. It is the one implementation of "stop this task for now": the
+// pause endpoint and the problem card's stop action both end up here, so a
+// person gets the same recoverable stop whichever door they came through.
+func pauseMasterTurn(runtime *TaskRuntime, taskId, requestId string) bool {
+	OpenPause(runtime.kernel, taskId)
+	active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
+      JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
+      WHERE o.task_id=? AND json_extract(n.spec,'$.role')='master'
+        AND o.state='dispatched' AND o.worker_active=1 ORDER BY o.rowid DESC LIMIT 1`, taskId)
+	if active == nil {
+		return false
+	}
+	return AwaitPauseContinuation(runtime.store, requestId, taskId, kernelString(active["id"]))
 }
 
 func taskRuntimePauseType(paused bool) string {
@@ -247,6 +252,15 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 	result := runtime.store.Command("user", requestId, map[string]any{
 		"type": "answer", "taskId": task.taskId, "questionId": questionId, "answer": answer,
 	}, func() any {
+		if answer.Type == "pause" {
+			// Stop the task for now, then close the question that asked: the same
+			// pause the task menu performs, so resuming still works.
+			runtime.store.SetTaskPaused(task.taskId, true)
+			pauseMasterTurn(runtime, task.taskId, requestId)
+			runtime.store.Event(task.taskId, "task.pause_requested", map[string]any{"questionId": questionId})
+			runtime.execution.Answer(task.taskId, questionId, answer)
+			return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, "question.answered", map[string]any{"questionId": questionId, "answer": answer})}
+		}
 		if runtime.receiveRoutedUserAnswer(task.taskId, questionId, answer) {
 			return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, "question.answered", map[string]any{"questionId": questionId, "answer": answer})}
 		}

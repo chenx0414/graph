@@ -189,3 +189,73 @@ test('answering retry on an escalated problem also runs that turn again', async 
     await rm(root, { recursive: true, force: true });
   }
 }, 300_000);
+
+test('a problem card can also keep waiting and stop the task, recoverably', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-problem-actions-'));
+  await mkdir(join(root, 'web'), { recursive: true });
+  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const provider = flakyProvider();
+  const baseUrl = await provider.baseUrl;
+  let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
+  try {
+    const configPath = join(root, 'graph.config.json');
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      projects: [],
+      credentials: { local: { secretRef: 'GRAPH_RETRY_KEY' } }, limits: { credentials: { local: 1 } },
+      models: { entries: [{ id: 'local', provider: 'graph-retry', grade: 'high',
+        api: 'openai-completions', baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'local' }] },
+    }));
+    daemon = await launchCli(root, { configPath, env: { GRAPH_RETRY_KEY: 'synthetic-retry-key' }, extraArgs: ['--execute'] });
+    async function request(path: string, method = 'GET', data?: unknown) {
+      const response = await daemon!.request(path, { method, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+      return { status: response.status, body: await response.json().catch(() => ({})) };
+    }
+    const dbPath = join(root, 'state/tasks.sqlite');
+    const readDb = <T>(read: (db: DatabaseSync) => T): T => {
+      const db = new DatabaseSync(dbPath, { readOnly: true, timeout: 5000 });
+      try { return read(db); } finally { db.close(); }
+    };
+    const created = await request('/api/conversations', 'POST', { model: 'local', text: '第三件会被拒绝的事：ACTIONS_903', requestId: 'problem-actions' });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const conversationId = (created.body as { conversationId: string }).conversationId;
+    const problem = async () => readDb(db => db.prepare(
+      "SELECT id,kind,asked_at FROM questions WHERE status='open' ORDER BY rowid LIMIT 1",
+    ).get() as { id: string; kind: string; asked_at: number } | undefined);
+    await expect.poll(async () => (await problem())?.kind, { timeout: 90_000, interval: 250 }).toBe('execution_failed');
+    const failure = await problem();
+    const anchor = ((await request(`/api/conversations/${conversationId}`)).body as { anchorTaskId: string }).anchorTaskId;
+    const before = provider.requests.length;
+
+    // Keep waiting: the problem stays open, the clock starts over, and nothing
+    // runs behind the person's back.
+    const waited = await request(`/api/tasks/${anchor}/answer`, 'POST', {
+      questionId: failure!.id, answer: { type: 'wait' }, requestId: 'answer-wait',
+    });
+    expect(waited.status, JSON.stringify(waited.body)).toBe(200);
+    const afterWait = await problem();
+    expect(afterWait?.id, 'keep-waiting closed the question').toBe(failure!.id);
+    expect(afterWait!.asked_at, 'keep-waiting did not restart the wait').toBeGreaterThan(failure!.asked_at);
+    expect(provider.requests.length, 'keep-waiting ran a turn').toBe(before);
+
+    // Stop the task: the question closes, the task is paused, and the pause is
+    // the recoverable one - resuming works.
+    const paused = await request(`/api/tasks/${anchor}/answer`, 'POST', {
+      questionId: failure!.id, answer: { type: 'pause' }, requestId: 'answer-pause',
+    });
+    expect(paused.status, JSON.stringify(paused.body)).toBe(200);
+    const resolved = readDb(db => db.prepare('SELECT status,answer FROM questions WHERE id=?').get(failure!.id) as { status: string; answer: string });
+    expect(resolved.status).toBe('resolved');
+    expect(JSON.parse(resolved.answer).type).toBe('pause');
+    const pausedFlag = async () => (((await request(`/api/tasks/${anchor}`)).body as { paused?: boolean }).paused ?? false);
+    await expect.poll(pausedFlag, { timeout: 30_000, interval: 200 }).toBe(true);
+
+    const resumed = await request(`/api/tasks/${anchor}/resume`, 'POST', { requestId: 'resume-after-pause' });
+    expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+    await expect.poll(pausedFlag, { timeout: 30_000, interval: 200 }).toBe(false);
+  } finally {
+    await daemon?.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 180_000);

@@ -53,6 +53,13 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 		kind := kernelString(question["kind"])
 		nodeId := kernelString(question["node_id"])
 		AssertQuestionAnswer(kind, answer)
+		// "wait" is not a decision: the problem stays open, the clock starts
+		// over, and nothing runs. Taking the decision away from the person would
+		// be worse than the nagging it replaces.
+		if answer.Type == "wait" {
+			l.rearmQuestion(taskId, questionId)
+			return nil
+		}
 		if kind == "budget" && answer.Type == "add_budget" {
 			if answer.Tokens <= 0 {
 				Raise("invalid_answer", "A positive token increment is required")
@@ -202,6 +209,21 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 		}
 		return nil
 	})
+}
+
+// rearmQuestion restarts the wait on a problem the person asked to leave open.
+//
+// The card stops shouting for another deadline and keeps the decision, which is
+// the difference between "wait" and dismissing it: the question is still open,
+// still the person's, and the harness still knows it waited.
+func (l *OperationLifecycle) rearmQuestion(taskId, questionId string) {
+	now := NowMillis()
+	kernelExec(l.store.Db, `UPDATE questions SET asked_at=?,
+	  data=json_set(COALESCE(data,'{}'),
+	    '$.waitedTimes', COALESCE(json_extract(data,'$.waitedTimes'),0)+1,
+	    '$.keptWaitingAt', ?)
+	  WHERE id=? AND task_id=? AND status='open'`, now, now, questionId, taskId)
+	l.store.Event(taskId, "problem.kept_waiting", map[string]any{"questionId": questionId})
 }
 
 // releaseFailedTurnMessages puts the messages of a failed master turn back on

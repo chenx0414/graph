@@ -61,6 +61,11 @@ type QuestionInsertResult struct {
 }
 
 // questionPolicies is the ownership table of every known question kind.
+//
+// A problem the harness hands to a person offers three real answers, not one:
+// retry (run that turn again), wait (keep the problem open and start the clock
+// over) and pause (stop the task for now - pausing is recoverable, abandoning is
+// a different action this card does not offer).
 var questionPolicies = map[string]QuestionPolicy{
 	"permission":           {Owner: QuestionOwnerUser, Answers: []string{"grant"}},
 	"budget":               {Owner: QuestionOwnerUser, Answers: []string{"add_budget"}},
@@ -70,19 +75,19 @@ var questionPolicies = map[string]QuestionPolicy{
 	"unknown_usage":        {Owner: QuestionOwnerMain, Answers: []string{"usage", "reconcile_usage"}},
 	"waiting":              {Owner: QuestionOwnerMain, Answers: []string{"respond"}},
 	"adapter_error":        {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
-	"execution_failed":     {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true, Escalate: true},
+	"execution_failed":     {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, RetryOnMessage: true, Escalate: true},
 	"model_unavailable":    {Owner: QuestionOwnerMain, Answers: []string{"retry"}},
 	"git_conflict":         {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
-	"context_rejected":     {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true, Escalate: true},
+	"context_rejected":     {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, RetryOnMessage: true, Escalate: true},
 	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
-	"result_noncompliant":  {Owner: QuestionOwnerMain, Answers: []string{"retry"}, Escalate: true},
+	"result_noncompliant":  {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, Escalate: true},
 	"git_dirty":            {Owner: QuestionOwnerMain, Answers: []string{"acknowledge"}},
 	// A node stuck for three rounds or returned for rework may need a decision
 	// only the user can make. Escalating hands the decision over with the main
 	// Agent's own explanation attached instead of looping on a retry that
 	// cannot change the outcome.
-	"rework":  {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry"}, Escalate: true},
-	"stalled": {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry"}, Escalate: true},
+	"rework":  {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
+	"stalled": {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
 }
 
 // questionMaster is the master node of one task.

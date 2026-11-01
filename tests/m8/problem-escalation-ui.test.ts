@@ -71,7 +71,13 @@ test('an escalated problem shows up on a readable card', async () => {
   // and the only action on the card says what it really does: re-running that
   // turn costs a model call and may repeat the tool calls it already made.
   expect(text).toContain('无人处理');
+  // Three real answers, each saying what it does: retry runs that turn again,
+  // keeping the wait changes nothing but the clock, and stopping is the
+  // recoverable stop (resume brings the task back).
   expect(text).toContain('重试这一轮');
+  expect(text).toContain('继续等');
+  expect(text).toContain('停止任务');
   expect(text).toContain('再花一次模型调用');
+  expect(text).toContain('停止任务可以恢复');
   expect(text).not.toContain('回“停”');
 }, 300_000);

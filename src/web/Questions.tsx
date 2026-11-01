@@ -102,7 +102,11 @@ export function QuestionReply({ taskId, question, onDone }: {
       </div>
       {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
-      {MASTER_RETRY_KINDS.includes(question.kind) && <div className="question-reply-why" data-testid={`question-retry-hint-${question.id}`}>重试会重新跑这一轮：再花一次模型调用，并可能重复上一轮已经执行的工具调用。</div>}
+      {MASTER_RETRY_KINDS.includes(question.kind) && <>
+        <div className="question-reply-why" data-testid={`question-retry-hint-${question.id}`}>重试会重新跑这一轮：再花一次模型调用，并可能重复上一轮已经执行的工具调用。</div>
+        <div className="question-reply-why" data-testid={`question-wait-hint-${question.id}`}>继续等会把等待重新计时，问题仍留在你手上，不会替你跑任何东西。</div>
+        <div className="question-reply-why" data-testid={`question-pause-hint-${question.id}`}>停止任务可以恢复：它只停这一轮与队列，之后发新消息或恢复任务就能继续。</div>
+      </>}
       <details style={{ maxWidth: '100%', margin: '4px 0' }}>
         <summary className="muted" style={{ cursor: 'pointer' }}>查看技术详情</summary>
         <pre data-testid={`question-data-${question.id}`} style={{ maxWidth: '100%', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
@@ -145,6 +149,8 @@ export function QuestionReply({ taskId, question, onDone }: {
           <Button size="sm" onClick={() => void submit({ type: 'respond', value })}>答复</Button>
         </> : MASTER_RETRY_KINDS.includes(question.kind) ? <>
           <Button size="sm" variant="primary" icon="refresh" onClick={() => void submit({ type: 'retry' })}>重试这一轮</Button>
+          <Button size="sm" icon="clock" onClick={() => void submit({ type: 'wait' })}>继续等</Button>
+          <Button size="sm" variant="danger" icon="pause" onClick={() => void submit({ type: 'pause' })}>停止任务</Button>
         </> : question.kind === 'human_check' ? <>
           <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'acknowledge' })}>确认通过</Button>
           <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'reject', ...(value.trim() ? { reason: value.trim() } : {}) })}>驳回并返工</Button>
