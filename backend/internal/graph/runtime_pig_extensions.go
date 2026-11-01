@@ -16,20 +16,56 @@ import (
 	"time"
 )
 
-// pigExtensionHost is the resident host of the daemon's Pi extensions.
+// pigExtensionHostState is the resident host of the daemon's Pi extensions.
 //
 // The Node process of an extension is expensive to start and worth keeping,
 // so one host serves every session of the daemon, and an extension is loaded
 // once no matter how many sessions bind it.
-var pigExtensionHost = sync.OnceValue(func() *pigkernel.ExtensionHost {
-	// An extension resolves a relative path against its own process cwd, and the
-	// host passes that cwd straight to the child (`cmd.Dir`). Empty handed, the
-	// child inherited the daemon's cwd - `/` when the app is launched from
-	// Finder - so a relative screenshot or artifact path failed with "Permission
-	// denied" and the whole verification was reported as broken. Give the child a
-	// real writable directory instead.
-	return pigkernel.NewExtensionHost(pigExtensionScratchDir())
-})
+//
+// It is replaceable on purpose. Measured 2026-11-01: an extension reads its own
+// configuration when the host starts, so a server installed while the daemon was
+// running stayed invisible - not only in the running session, but in every new
+// conversation too, and a capability refresh did not help either. Only a new
+// host reads the configuration again, so "reload" means "start a new host", not
+// "restart the app".
+var pigExtensionHostState struct {
+	mu   sync.Mutex
+	host *pigkernel.ExtensionHost
+}
+
+// withPigExtensionHost runs one extension load against the current host, and
+// holds the lock so a reload cannot close the host from under it.
+func withPigExtensionHost(run func(host *pigkernel.ExtensionHost) error) error {
+	state := &pigExtensionHostState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.host == nil {
+		// An extension resolves a relative path against its own process cwd, and
+		// the host passes that cwd straight to the child (`cmd.Dir`). Empty
+		// handed, the child inherited the daemon's cwd - `/` when the app is
+		// launched from Finder - so a relative screenshot or artifact path failed
+		// with "Permission denied" and the whole verification was reported as
+		// broken. Give the child a real writable directory instead.
+		state.host = pigkernel.NewExtensionHost(pigExtensionScratchDir())
+	}
+	return run(state.host)
+}
+
+// ReloadPigExtensionHost closes the daemon's extension host, so the next session
+// starts a new one and every extension reads its configuration again. It reports
+// whether a host was actually running.
+func ReloadPigExtensionHost() bool {
+	state := &pigExtensionHostState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	host := state.host
+	state.host = nil
+	if host == nil {
+		return false
+	}
+	host.Close()
+	return true
+}
 
 // pigExtensionScratchDir is the directory an extension process works in.
 func pigExtensionScratchDir() string {
@@ -41,8 +77,18 @@ func pigExtensionScratchDir() string {
 }
 
 // ClosePigExtensions stops the extension processes the daemon started.
+//
+// It never starts a host only to close it: a daemon that never loaded an
+// extension has nothing to stop.
 func ClosePigExtensions() {
-	pigExtensionHost().Close()
+	state := &pigExtensionHostState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	host := state.host
+	state.host = nil
+	if host != nil {
+		host.Close()
+	}
 }
 
 // pigExtensionSpecs returns the tools the session's Pi extensions register.
@@ -69,19 +115,28 @@ func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker 
 		allowed[name] = true
 	}
 	for _, path := range request.PiExtensionPaths {
-		loaded, err := pigExtensionHost().Load(ctx, path)
+		extensionPath := path
+		var extensionSpecs []pigkernel.ToolSpec
+		err := withPigExtensionHost(func(host *pigkernel.ExtensionHost) error {
+			loaded, err := host.Load(ctx, extensionPath)
+			if err != nil {
+				return err
+			}
+			for _, tool := range loaded.Tools() {
+				if !declared[tool.Name] {
+					continue
+				}
+				if len(allowed) > 0 && !allowed[tool.Name] {
+					continue
+				}
+				extensionSpecs = append(extensionSpecs, pigExtensionToolSpec(loaded, tool, broker, record))
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, piExtensionRefusal{reason: err.Error()}
 		}
-		for _, tool := range loaded.Tools() {
-			if !declared[tool.Name] {
-				continue
-			}
-			if len(allowed) > 0 && !allowed[tool.Name] {
-				continue
-			}
-			specs = append(specs, pigExtensionToolSpec(loaded, tool, broker, record))
-		}
+		specs = append(specs, extensionSpecs...)
 	}
 	return specs, nil
 }

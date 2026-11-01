@@ -25,6 +25,14 @@ func (app *GraphApp) serveCatalogRefresh(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, app.runtime.Catalog().Refresh())
 }
 
+// serveExtensionsReload replaces the daemon's Pi extension host, so the next
+// session reads every extension's configuration again (a server installed while
+// the app was running needs this).
+func (app *GraphApp) serveExtensionsReload(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	writeJSON(w, http.StatusOK, app.runtime.ReloadExtensions(appBodyString(body, "requestId")))
+}
+
 // servePiExtensionUpdates lists the Pi extensions with a newer version.
 func (app *GraphApp) servePiExtensionUpdates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.PiExtensionUpdates())

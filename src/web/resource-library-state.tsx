@@ -144,6 +144,19 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
       toast(cause instanceof Error ? cause.message : String(cause), 'danger');
     }
   };
+  // A capability installed while the app is running is invisible until a new
+  // extension host reads its configuration: this is the action that replaces
+  // the host without restarting the app.
+  const reloadExtensions = () => {
+    void api<{ reloaded: boolean }>('/api/extensions/reload', {
+      method: 'POST',
+      body: JSON.stringify({ requestId: `extensions-reload-${Date.now()}` }),
+    }).then(result => {
+      toast(result.reloaded
+        ? '已重载扩展：下一次会话会重新读取扩展配置'
+        : '扩展宿主当前未运行；下一次会话创建时会读取最新配置', 'success');
+    }).catch(cause => toast(cause instanceof Error ? cause.message : String(cause), 'danger'));
+  };
   const refresh = () => {
     void api('/api/catalog/refresh', { method: 'POST' }).then(() => {
       window.dispatchEvent(new Event('graph:settings-changed'));
@@ -175,5 +188,5 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
     const result = await bridge.openResource(kind);
     if (!result.opened) toast(`打开目录失败：${result.message ?? '系统未返回原因'}`, 'danger');
   }
-  return { fallback: null, openResource, sections, active, countFor, setEditing, refresh, settings, agentCombinations, resourceQuery, setResourceQuery, filteredAgents, visibleAgents, openResolvedCapability, remove, libraryFilter, setLibraryFilter, autoUpdate, saveAutoUpdate, filtered, toggleBrowse, browseOpen, browseQuery, setBrowseQuery, loadBrowse, browseBusy, browseError, browseHits, split, showConfigured, configuredVisible, setSelected, showUnconfigured, unconfiguredVisible, configFor, shownCount, setResourceLimits, selected, updates, updateOne, editing, capabilities, Event };
+  return { fallback: null, openResource, sections, active, countFor, setEditing, refresh, settings, agentCombinations, resourceQuery, setResourceQuery, filteredAgents, visibleAgents, openResolvedCapability, remove, libraryFilter, setLibraryFilter, autoUpdate, saveAutoUpdate, filtered, toggleBrowse, browseOpen, browseQuery, setBrowseQuery, loadBrowse, browseBusy, browseError, browseHits, split, showConfigured, configuredVisible, setSelected, showUnconfigured, unconfiguredVisible, configFor, shownCount, setResourceLimits, selected, updates, updateOne, editing, capabilities, reloadExtensions, Event };
 }

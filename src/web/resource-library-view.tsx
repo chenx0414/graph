@@ -31,7 +31,7 @@ import { capabilityConfigGuidance,capabilityGroups,LIBRARY_FILTERS,MAIN_AGENT_SY
 import { useResourceLibraryState } from "./resource-library-state.tsx";
 import './resource-library.css';
 
-export function ResourceLibraryView({ openResource, sections, active, countFor, setEditing, refresh, settings, agentCombinations, resourceQuery, setResourceQuery, filteredAgents, visibleAgents, openResolvedCapability, remove, libraryFilter, setLibraryFilter, autoUpdate, saveAutoUpdate, filtered, toggleBrowse, browseOpen, browseQuery, setBrowseQuery, loadBrowse, browseBusy, browseError, browseHits, split, showConfigured, configuredVisible, setSelected, showUnconfigured, unconfiguredVisible, configFor, shownCount, setResourceLimits, selected, updates, updateOne, editing, capabilities, Event }: Extract<ReturnType<typeof useResourceLibraryState>, { fallback: null }>) {
+export function ResourceLibraryView({ openResource, sections, active, countFor, setEditing, refresh, settings, agentCombinations, resourceQuery, setResourceQuery, filteredAgents, visibleAgents, openResolvedCapability, remove, libraryFilter, setLibraryFilter, autoUpdate, saveAutoUpdate, filtered, toggleBrowse, browseOpen, browseQuery, setBrowseQuery, loadBrowse, browseBusy, browseError, browseHits, split, showConfigured, configuredVisible, setSelected, showUnconfigured, unconfiguredVisible, configFor, shownCount, setResourceLimits, selected, updates, updateOne, editing, capabilities, reloadExtensions, Event }: Extract<ReturnType<typeof useResourceLibraryState>, { fallback: null }>) {
 return (
     <div className="stagger resource-library" data-testid="catalog">
       <div className="resource-layout">
@@ -47,6 +47,7 @@ return (
             actions={(
               <div className="row" style={{ gap: 4 }}>
                 {active.id === 'agents' && <button type="button" className="icon-button" onClick={() => setEditing(null)} title="新建 Agent 配方" aria-label="新建 Agent 配方"><Icon name="plus" size={16} /></button>}
+                {(active.id === 'mcp' || active.id === 'pi-extensions') && <button type="button" className="btn btn-sm" data-testid="resource-reload-extensions" onClick={reloadExtensions} title="重载扩展宿主：装好的扩展或 MCP 服务器从下一次会话起生效">重载扩展</button>}
                 <button type="button" className="icon-button" onClick={refresh} title="重新扫描能力目录" aria-label="重新扫描能力目录"><Icon name="refresh" size={16} /></button>
                 {active.id !== 'agents' && active.id !== 'architectures' && active.id !== 'config' && <button type="button" className="icon-button" data-testid={`resource-open-${active.id}`} onClick={() => void openResource(active.id as 'skills' | 'mcp' | 'pi-extensions' | 'agent-md' | 'prompts')} title="在访达中打开目录" aria-label="在访达中打开目录"><Icon name="folder" size={16} /></button>}
               </div>
