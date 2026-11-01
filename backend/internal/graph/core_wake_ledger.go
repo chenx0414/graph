@@ -100,6 +100,16 @@ func WakeForBlockedNode(store *TaskStore, taskID string, block BlockedNodeWake) 
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "node_blocked", DedupeKey: dedupe, Data: data, HasData: true})
 }
 
+// WakeForNodeSettled tells the supervisor that a node's turn landed and its
+// output is committed. The scheduler dispatches the node's input, but the next
+// step after that node (a review, a follow-up turn, a decision) is main's job:
+// without this fact a graph whose worker succeeded simply stops moving while
+// every view still calls it "in progress".
+func WakeForNodeSettled(store *TaskStore, taskID, nodeID, status, operationID string) bool {
+	data := map[string]any{"graphId": taskID, "nodeId": nodeID, "status": status, "operationId": operationID}
+	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "node_settled", DedupeKey: taskID + ":" + nodeID + ":" + operationID, Data: data, HasData: true})
+}
+
 func WakeForHumanCheck(store *TaskStore, taskID string, data any) bool {
 	m := asMap(data)
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "human_check", DedupeKey: mapString(m, "questionId", "QuestionID"), Data: data, HasData: true})
@@ -200,6 +210,8 @@ func RenderWakes(wakes []PendingWake) string {
 			lines = append(lines, "- Agent "+jsString(data["nodeId"])+" in graph "+jsString(data["graphId"])+" sent you a message. Read the pending conversation message and reply if needed.")
 		case "task_stopped":
 			lines = append(lines, "- Graph "+jsString(data["graphId"])+" stopped; its remaining work was cancelled.")
+		case "node_settled":
+			lines = append(lines, "- Node "+jsString(data["nodeId"])+" in graph "+jsString(data["graphId"])+" settled ("+jsString(coalesce(data["status"], "succeeded"))+") and its output is committed. Nobody else will start what comes next: read graph_inspect results for the exact value and start it yourself, or say why nothing should follow.")
 		case "node_blocked":
 			node := jsString(coalesce(data["nodeId"], wake.DedupeKey))
 			where := ""

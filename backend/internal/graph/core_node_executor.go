@@ -400,6 +400,14 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			}
 			e.kernel.FinishExecution(executionId, "completed")
 			e.kernel.CompleteNode(e.graphId, nodeId)
+			// A delivered job that landed is a fact main has to see: main starts what
+			// comes after the node, and nothing else wakes it for a success. A chat
+			// turn is a conversation, not a step, so it does not wake main on its own.
+			// The status is read back because a stopped node is cancelled by
+			// CompleteNode and must not be reported as a success.
+			if item.Kind != "chat" && e.kernel.NodeStatus(e.graphId, nodeId) == "succeeded" {
+				WakeForNodeSettled(e.kernel.Store, e.graphId, nodeId, "succeeded", executionId)
+			}
 			e.queue.Complete(seq, QueueCompletion{Kind: "submitted"})
 			releaseHold()
 			return NodeOutcomeDone
