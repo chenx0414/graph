@@ -6,6 +6,10 @@ import { Button, Pill, toast } from './ui.tsx';
 
 function questionPrompt(kind: string, data: Record<string, unknown>) {
   const text = (key: string) => typeof data[key] === 'string' && String(data[key]).trim() ? String(data[key]).trim() : undefined;
+  // A problem the harness handed over after nobody acted on it: say that first,
+  // so the card reads as "this waited for you", not as a fresh incident.
+  const escalated = text('escalationPrompt');
+  if (escalated) return escalated;
   // The agent's own question: what it asks, and what its answer changes.
   if (kind === 'waiting' && data.requestType === 'user_decision') {
     const prompt = text('prompt');

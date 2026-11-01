@@ -16,11 +16,13 @@ import "fmt"
 const ProblemUnattendedMs = 30 * 60 * 1000
 
 // problemEscalationPrompt is what the person reads when a problem reaches them
-// without anybody having acted on it. It says what happened and how long it
-// waited, and it says who decides - it does not promise what the harness will do.
+// without anybody having acted on it. It states the wait and who decides, and it
+// promises no action: measured 2026-11-01, the retry button on a failed *master*
+// turn answers 200 without re-running the turn, so telling the person "retry
+// re-runs it" would be a promise the product does not keep.
 func problemEscalationPrompt(kind string, minutes int64) string {
 	return fmt.Sprintf(
-		"这个「%s」问题已经等了 %d 分钟，没有人处理。重试会花掉模型调用，所以这一步由你决定：回“重试”就重试这一轮；回“等”表示先放着；回“停”表示这个任务不要了。",
+		"这个问题（%s）已经等了 %d 分钟，没有人处理。它需要有人决定怎么继续：先看详情，再选下一步。",
 		kind, minutes)
 }
 
@@ -58,12 +60,16 @@ func (runtime *TaskRuntime) SweepUnattendedProblems(now int64) int {
 			case "global":
 				runtime.escalateRoutedQuestion(row, prompt)
 			default:
-				escalatedTo := NewOperationLifecycle(runtime.store, OperationLifecycleHooks{}).Escalate(taskID, questionID, prompt)
+				// Re-owning, not replacing: the question keeps its kind, its label and
+				// the answers it already accepts. A new waiting question would have
+				// thrown those away and left the person with a free-text box.
+				kernelExec(runtime.store.Db, `UPDATE questions SET owner='user', route_stage=NULL,
+ data=json_set(data,'$.escalatedAt',?,'$.escalatedFrom',?,'$.escalatedWaitedMs',?,'$.escalationPrompt',?)
+ WHERE id=? AND status='open' AND data IS NOT NULL`, now, kind, waited, prompt, questionID)
 				runtime.store.Event(taskID, "problem.escalated.unattended", map[string]any{
-					"questionId":  questionID,
-					"escalatedTo": escalatedTo,
-					"kind":        kind,
-					"waitedMs":    waited,
+					"questionId": questionID,
+					"kind":       kind,
+					"waitedMs":   waited,
 				})
 			}
 			escalated++

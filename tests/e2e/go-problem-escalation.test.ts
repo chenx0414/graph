@@ -18,8 +18,12 @@ import { launchCli } from '../helpers/cli-daemon.ts';
  * This case drives the real daemon: the Agent's own turn fails in a way that is
  * not an environment problem (so nothing retries it), the failure is parked on
  * the very Agent that cannot act on it, and after the deadline the harness hands
- * the decision to the person. The test then proves the harness's own retry never
- * fired: handing the problem over is not a retry.
+ * the decision to the person. Handing the problem over is not a retry: the
+ * harness's own retry never fires, and the person still has to answer.
+ *
+ * The card promises no action it cannot keep: measured 2026-11-01, answering
+ * "retry" on a failed *master* turn is recorded (200) but does not re-run that
+ * turn, so the escalation text only states the wait and who decides.
  */
 
 interface ProviderTool { function?: { name?: string } }
@@ -98,11 +102,11 @@ test('a problem nobody acted on reaches the person, and nothing is retried', asy
     const escalated = async () => {
       const view = await request(`/api/conversations/${conversationId}`);
       const questions = ((view.body as { questions?: { id: string; kind: string; owner?: string; data?: Record<string, unknown> }[] }).questions) ?? [];
-      return questions.find(question => question.kind === 'waiting' && question.data?.escalatedFrom === 'execution_failed');
+      return questions.find(question => question.id === failure!.id);
     };
     let reached = false;
     try {
-      await expect.poll(async () => Boolean(await escalated()), { timeout: 120_000, interval: 500 }).toBe(true);
+      await expect.poll(async () => (await escalated())?.owner, { timeout: 120_000, interval: 500 }).toBe('user');
       reached = true;
     } catch { reached = false; }
     if (!reached) {
@@ -113,17 +117,23 @@ test('a problem nobody acted on reaches the person, and nothing is retried', asy
       expect(reached, `questions: ${JSON.stringify(questions)}\nevents:\n${lines.join('\n')}\ndaemon:\n${daemon?.stderr ?? ''}`).toBe(true);
     }
 
-    // The decision is the person's, and the harness's own retry never fired:
-    // handing the problem over is not a retry.
+    // The question keeps its own kind, so the card keeps its own label (执行失败)
+    // and the actions it already accepts, instead of becoming a free-text box.
     const question = await escalated();
-    expect(question?.data?.requestType).toBe('noncompliance_decision');
-    expect(String(question?.data?.prompt ?? '')).toMatch(/已经等了 \d+ 分钟/);
-    expect(question?.owner ?? 'user').toBe('user');
-    const events = await request(`/api/conversations/${conversationId}/events?after=0&limit=300`);
-    expect(JSON.stringify(events.body)).not.toContain('node.transient_retry');
-    const original = readDb(db => db.prepare('SELECT status,answer FROM questions WHERE id=?').get(failure!.id) as { status: string; answer: string });
-    expect(original.status).toBe('resolved');
-    expect(JSON.parse(original.answer).type).toBe('escalated');
+    expect(question?.kind).toBe('execution_failed');
+    expect(question?.data?.escalatedFrom).toBe('execution_failed');
+    expect(String(question?.data?.escalationPrompt ?? '')).toMatch(/已经等了 \d+ 分钟/);
+
+    // Answering is still the only way out, and it is recorded against the
+    // question the person was actually shown.
+    const anchor = ((await request(`/api/conversations/${conversationId}`)).body as { anchorTaskId: string }).anchorTaskId;
+    const answered = await request(`/api/tasks/${anchor}/answer`, 'POST', {
+      questionId: failure!.id, answer: { type: 'retry' }, requestId: 'escalation-retry',
+    });
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+    const resolved = readDb(db => db.prepare('SELECT status,answer FROM questions WHERE id=?').get(failure!.id) as { status: string; answer: string });
+    expect(resolved.status).toBe('resolved');
+    expect(JSON.parse(resolved.answer).type).toBe('retry');
   } finally {
     await daemon?.close();
     await provider.close();
