@@ -75,10 +75,11 @@ test('a provider that closes the stream before the answer is complete fails the 
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
   const marker = join(project, 'cut-marker.txt');
   // The provider writes the tool call and then closes the connection: the answer
-  // never arrived, so the turn never happened.
-  const provider = await openaiServer([
-    { tools: [{ id: 'cut-call', name: 'bash', arguments: JSON.stringify({ command: `printf cut > ${marker}` }) }], cut: true },
-  ]);
+  // never arrived, so the turn never happened. Every attempt is cut: the
+  // environment failure is retried like any other transport failure, and a cut
+  // that repeats is still a failed turn - never a turn that ran the tool.
+  const cut = { tools: [{ id: 'cut-call', name: 'bash', arguments: JSON.stringify({ command: `printf cut > ${marker}` }) }], cut: true };
+  const provider = await openaiServer([cut, cut, cut]);
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   const configPath = join(root, 'graph.config.json');
   try {

@@ -27,8 +27,9 @@ test('a supervisor that owns an execution failure stays dispatchable and answers
     calls += 1;
     const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    if (calls === 1) {
-      // The provider cut the arguments: the tool call never becomes a call.
+    if (calls <= 3) {
+      // The provider cut the arguments on every attempt: the tool call never
+      // becomes a call, and the environment retry is exhausted.
       response.write(frame({ id: 'reply', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'cut-1', type: 'function', function: { name: 'ask_supervisor', arguments: '{"prompt":"进度",' } }] }, finish_reason: null }] }));
       response.write(frame({ id: 'reply', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
     } else {
