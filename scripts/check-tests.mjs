@@ -111,6 +111,69 @@ const excused = failed.filter(file => quarantined.has(file));
 const blocking = failed.filter(file => !quarantined.has(file));
 const stale = [...quarantined.keys()].filter(file => !ran.has(file));
 
+/** The failing test names and their first line of failure, for a report someone can act on. */
+function firstFailures(result) {
+  return (result.assertionResults ?? [])
+    .filter(item => item.status === 'failed')
+    .map(item => ({
+      name: String(item.fullName ?? item.name ?? '?').replace(/\s+/g, ' ').trim(),
+      message: String((item.failureMessages ?? []).join(' ')).replace(/\s+/g, ' ').trim(),
+    }));
+}
+
+/**
+ * What kind of failure this file had, so a reader does not have to guess.
+ *
+ * "timing" and "environment" are the two classes that are not about the code
+ * under test, and telling them apart from an assertion is the difference
+ * between re-running and reading a diff.
+ */
+function failureKind(result) {
+  // The first line only: a stack trace names files and settings, and matching
+  // on it calls every assertion a timeout because the runner's own paths are in it.
+  const text = firstFailures(result).map(item => item.message.split(' at /')[0]).join(' ');
+  if (/timed out|timeout|did not succeed in time|ETIMEDOUT/i.test(text)) return 'timing';
+  if (/sandbox_apply|Operation not permitted|EPERM|EACCES|ENOTFOUND|ECONNREFUSED|Process failed to launch|Cannot find module/i.test(text)) return 'environment';
+  return 'assertion';
+}
+
+/**
+ * A file that failed once is re-run alone, once, before it blocks anything.
+ *
+ * Under six workers the machine is busy enough that a test asserting a real
+ * fact can miss its own budget: measured 2026-10-31, two runs of one commit
+ * failed in different files and each passed when re-run alone. A gate that
+ * cannot tell "busy machine" from "broken code" turns every red into a
+ * re-run experiment, which is exactly the minute it costs.
+ *
+ * The first failure is always printed with its kind and its first line, the
+ * retry is named when it happens, and a regression fails both attempts and
+ * still blocks.
+ */
+function retryOnce(files) {
+  const retryReport = join(root, 'tests/.suite-retry-report.json');
+  spawnSync(process.execPath, [
+    'node_modules/vitest/vitest.mjs', 'run', ...files,
+    // Same layer excludes as the first run: a layer that was skipped is not a
+    // failure to retry.
+    ...layerExcludes.flatMap(glob => ['--exclude', glob]),
+    // bail=1 would stop the retry at the first failure and leave the rest
+    // unrun, which would read as "they passed".
+    '--bail=0',
+    '--reporter=default', '--reporter=json', `--outputFile=${retryReport}`,
+  ], { stdio: 'inherit', cwd: root });
+  try {
+    const second = JSON.parse(readFileSync(retryReport, 'utf8'));
+    return {
+      stillFailing: second.testResults.filter(result => result.status === 'failed').map(result => relative(result.name)),
+      recovered: files.filter(file => !second.testResults.some(result => relative(result.name) === file && result.status === 'failed')),
+      results: second.testResults,
+    };
+  } catch {
+    return { stillFailing: files, recovered: [], results: [] };
+  }
+}
+
 if (quarantined.size) {
   console.log(`\ncheck:tests: ${quarantined.size} quarantined file(s) still run, and do not block the gate:`);
   for (const [file, reason] of quarantined) console.log(`  - ${file}${excused.includes(file) ? '  [FAILED this run]' : ''} — ${reason}`);
@@ -118,16 +181,39 @@ if (quarantined.size) {
 if (stale.length) console.log(`check:tests: stale quarantine entry/entries, no such test ran: ${stale.join(', ')}`);
 if (skippedLayers.length) console.log(`check:tests: verified ${layers.length - skippedLayers.length}/${layers.length} environment layer(s) in this run`);
 if (excused.length) console.log(`check:tests: ${excused.length} quarantined failure(s), reported and not blocking: ${excused.join(', ')}`);
+let retriedFiles = [];
 if (blocking.length) {
+  const details = report.testResults.filter(result => blocking.includes(relative(result.name)));
   console.error(`\ncheck:tests: ${blocking.length} failure(s) outside the quarantine:`);
-  for (const file of blocking) console.error(`  - ${file}`);
-  process.exit(1);
+  for (const result of details) {
+    console.error(`  - ${relative(result.name)} [${failureKind(result)}]`);
+    for (const item of firstFailures(result).slice(0, 3)) {
+      console.error(`      × ${item.name.slice(0, 160)} — ${item.message.slice(0, 240)}`);
+    }
+  }
+  console.error('check:tests: re-running those file(s) alone once, to tell a busy machine from broken code');
+  const retry = retryOnce(blocking);
+  if (retry.recovered.length) {
+    retriedFiles = retry.recovered;
+    console.log(`check:tests: ${retry.recovered.length} file(s) failed once and passed on a re-run: ${retry.recovered.join(', ')}`);
+  }
+  if (retry.stillFailing.length) {
+    console.error(`\ncheck:tests: ${retry.stillFailing.length} file(s) failed twice, so the gate stops here:`);
+    for (const file of retry.stillFailing) console.error(`  - ${file}`);
+    const second = retry.results.find(result => retry.stillFailing.includes(relative(result.name)));
+    if (second) {
+      for (const item of firstFailures(second).slice(0, 3)) {
+        console.error(`      × [${failureKind(second)}] ${item.name.slice(0, 160)} — ${item.message.slice(0, 240)}`);
+      }
+    }
+    process.exit(1);
+  }
 }
 if (process.env.GRAPH_STRICT_SUITE === '1' && failed.length) {
   console.error('check:tests: strict mode fails on any failure, quarantined ones included');
   process.exit(1);
 }
-console.log(`check:tests: ${report.numPassedTests}/${report.numTotalTests} tests passed${excused.length ? `, ${excused.length} quarantined failure(s)` : ''}`);
+console.log(`check:tests: ${report.numPassedTests}/${report.numTotalTests} tests passed${excused.length ? `, ${excused.length} quarantined failure(s)` : ''}${retriedFiles.length ? `; ${retriedFiles.length} file(s) recovered on a re-run: ${retriedFiles.join(', ')}` : ''}`);
 
 // The quarantine is a loan, not a home: a file that keeps passing gets named
 // here, so the list only shrinks on purpose instead of growing forever.
