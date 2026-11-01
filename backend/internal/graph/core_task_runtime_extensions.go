@@ -61,7 +61,7 @@ func (runtime *TaskRuntime) ReloadExtensions(requestId string, deferred bool) ma
 	runtime.ensureOpen()
 	return runtime.store.Command("extensions:reload", requestId, map[string]any{"type": "reload-extensions", "deferred": deferred}, func() any {
 		if inFlight := kernelRow(runtime.store.Db, `SELECT id FROM operations
-        WHERE state IN ('dispatched','unknown') LIMIT 1`); inFlight != nil {
+        WHERE state='dispatched' LIMIT 1`); inFlight != nil {
 			if !deferred {
 				Raise("invalid_state", "A turn is still running; reload the extension host after it settles")
 			}
@@ -80,8 +80,13 @@ func (runtime *TaskRuntime) ApplyDeferredExtensionReload() {
 	if !hasPendingExtensionReload() {
 		return
 	}
+	// Only a dispatched turn is using the extension host right now. An
+	// operation whose outcome was never settled ("unknown") is not running: its
+	// session died with the daemon. Measured 2026-11-01: nine such rows from the
+	// previous days made the guard refuse for ever, because the queue waited for
+	// an idle moment that could never arrive.
 	busy := func() bool {
-		return kernelRow(runtime.store.Db, `SELECT id FROM operations WHERE state IN ('dispatched','unknown') LIMIT 1`) != nil
+		return kernelRow(runtime.store.Db, `SELECT id FROM operations WHERE state='dispatched' LIMIT 1`) != nil
 	}
 	if busy() {
 		return

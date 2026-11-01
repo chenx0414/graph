@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { createServer, type Server } from 'node:http';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -62,6 +63,7 @@ test('reloading the extension host reports what it did and refuses mid-turn', as
         api: 'openai-completions', baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'local' }] },
     }));
     daemon = await launchCli(root, { configPath, env: { GRAPH_EXT_RELOAD_KEY: 'synthetic-ext-key' }, extraArgs: ['--execute'] });
+    const dbPath = join(root, 'state/tasks.sqlite');
     const request = async (path: string, method = 'GET', data?: unknown) => {
       const response = await daemon!.request(path, { method, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       return { status: response.status, body: await response.json().catch(() => ({})) };
@@ -104,6 +106,20 @@ test('reloading the extension host reports what it did and refuses mid-turn', as
     const accepted = await request('/api/extensions/reload', 'POST', { requestId: 'reload-settled' });
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
     expect(accepted.body).toMatchObject({ reloaded: false, deferred: false });
+
+    // An operation whose outcome was never settled is not a running turn: its
+    // session died with the daemon. Treating it as busy left the queue waiting
+    // for an idle moment that could never arrive (measured 2026-11-01: nine such
+    // rows from earlier days blocked every reload).
+    const anchor = ((await request(`/api/conversations/${conversationId}`)).body as { anchorTaskId: string }).anchorTaskId;
+    const stale = new DatabaseSync(dbPath);
+    stale.exec('PRAGMA busy_timeout=5000');
+    stale.prepare(`INSERT INTO operations(id,task_id,node_id,generation,spec,state,reserved,activation_id)
+      VALUES(?,?,?,1,'{}','unknown',0,'dead-activation')`).run('stale-unknown-operation', anchor, 'master');
+    stale.close();
+    const afterStale = await request('/api/extensions/reload', 'POST', { requestId: 'reload-with-stale' });
+    expect(afterStale.status, JSON.stringify(afterStale.body)).toBe(200);
+    expect(afterStale.body).toMatchObject({ deferred: false });
   } finally {
     await daemon?.close();
     await provider.close();
