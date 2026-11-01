@@ -8,6 +8,7 @@
         "tests/console/setup-wizard.test.ts",
         "tests/e2e/composer-interaction.test.ts",
         "tests/e2e/composer-queue.test.ts",
+        "tests/e2e/console-fresh-shell.test.ts",
         "tests/e2e/console-layout.test.ts",
         "tests/e2e/conversation-graph-drawer.test.ts",
         "tests/e2e/desktop-shell.test.ts",

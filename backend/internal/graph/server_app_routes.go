@@ -143,6 +143,13 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 
 // serveHome reads the console shell on every request and sets the session
 // cookie. A rebuilt bundle must never sit behind a stale page.
+//
+// The document is the only thing that names the bundle, so a client that keeps
+// it keeps loading the old bundle. Measured: without this header the response
+// carried no cache directive at all, which leaves the client free to reuse the
+// previous index.html and reads as "my change did not ship". Both branches
+// below (the real console and the fallback page) hand out that document, so
+// the header is set before either one writes.
 func (app *GraphApp) serveHome(w http.ResponseWriter, r *http.Request) {
 	SetSessionCookie(w.Header(), app.session)
 	body := appDefaultPage()
@@ -152,6 +159,7 @@ func (app *GraphApp) serveHome(w http.ResponseWriter, r *http.Request) {
 			body = string(raw)
 		}
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, body)
