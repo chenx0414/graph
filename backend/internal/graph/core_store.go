@@ -6,7 +6,7 @@ import (
 )
 
 // SCHEMA_VERSION is the newest tasks.sqlite this process writes.
-const SCHEMA_VERSION = 51
+const SCHEMA_VERSION = 52
 
 // SchemaVersion is the same constant. Call sites used both spellings.
 const SchemaVersion = SCHEMA_VERSION

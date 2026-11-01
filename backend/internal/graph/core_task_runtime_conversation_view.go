@@ -69,9 +69,10 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		proposalHistory = append(proposalHistory, entry)
 	}
 	anchorQuestions := []map[string]any{}
-	questionRows := kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner FROM questions WHERE task_id=? AND (route_stage IS NULL OR route_stage!='user') ORDER BY rowid", conversation.AnchorTaskId)
+	questionNow := NowMillis()
+	questionRows := kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner,asked_at FROM questions WHERE task_id=? AND (route_stage IS NULL OR route_stage!='user') ORDER BY rowid", conversation.AnchorTaskId)
 	if conversation.Role == ConversationGlobal {
-		questionRows = append(questionRows, kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner FROM questions WHERE route_stage='user' AND status='open' ORDER BY rowid")...)
+		questionRows = append(questionRows, kernelRows(runtime.store.Db, "SELECT id,task_id,node_id,operation_id,kind,status,data,answer,owner,asked_at FROM questions WHERE route_stage='user' AND status='open' ORDER BY rowid")...)
 	}
 	for _, row := range questionRows {
 		var data any
@@ -84,7 +85,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 				panic(err)
 			}
 		}
-		anchorQuestions = append(anchorQuestions, map[string]any{
+		anchorQuestions = append(anchorQuestions, AddQuestionWaitFacts(map[string]any{
 			"id":          kernelString(row["id"]),
 			"nodeId":      kernelString(row["node_id"]),
 			"operationId": row["operation_id"],
@@ -94,7 +95,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 			"data":        data,
 			"answer":      answer,
 			"taskId":      kernelString(row["task_id"]),
-		})
+		}, row["asked_at"], questionNow))
 	}
 	tasks := []map[string]any{}
 	taskCosts := []CostSummary{}
@@ -111,7 +112,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		taskId := kernelString(row["id"])
 		openQuestions := []map[string]any{}
 		internalProblems := 0
-		for _, question := range kernelRows(runtime.store.Db, "SELECT id,node_id,kind,status,data,owner FROM questions WHERE task_id=? ORDER BY rowid", taskId) {
+		for _, question := range kernelRows(runtime.store.Db, "SELECT id,node_id,kind,status,data,owner,asked_at FROM questions WHERE task_id=? ORDER BY rowid", taskId) {
 			if kernelString(question["status"]) != "open" {
 				continue
 			}
@@ -129,12 +130,12 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 			if err := json.Unmarshal([]byte(kernelString(question["data"])), &data); err != nil {
 				panic(err)
 			}
-			openQuestions = append(openQuestions, map[string]any{
+			openQuestions = append(openQuestions, AddQuestionWaitFacts(map[string]any{
 				"id":     kernelString(question["id"]),
 				"nodeId": kernelString(question["node_id"]),
 				"kind":   kernelString(question["kind"]),
 				"data":   data,
-			})
+			}, question["asked_at"], questionNow))
 		}
 		nodes := []any{}
 		if runtime.kernel.LatestRevision(taskId) == nil {

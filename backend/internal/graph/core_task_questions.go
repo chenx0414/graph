@@ -2,8 +2,8 @@ package graph
 
 // OpenQuestion asks the question a task is waiting on.
 func (s *TaskStore) OpenQuestion(id, taskID, nodeID string, operationID any, kind string, data any, owner QuestionOwner) {
-	kernelExec(s.DB, "INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner) VALUES(?,?,?,?,?,?,?)",
-		id, taskID, nodeID, operationID, kind, CanonicalJSON(data), string(owner))
+	kernelExec(s.DB, "INSERT INTO questions(id,task_id,node_id,operation_id,kind,data,owner,asked_at) VALUES(?,?,?,?,?,?,?,?)",
+		id, taskID, nodeID, operationID, kind, CanonicalJSON(data), string(owner), NowMillis())
 }
 
 func (s *TaskStore) RouteQuestion(id, stage string) {

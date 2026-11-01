@@ -171,6 +171,9 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 51 {
 		execMigration(db, schemaV51)
 	}
+	if version < 52 {
+		execMigration(db, schemaV52)
+	}
 }
 
 func sqliteColumns(db *sql.DB, table string) map[string]bool {

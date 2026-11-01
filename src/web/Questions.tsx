@@ -28,10 +28,31 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
   return text('prompt') ?? text('reason') ?? text('message') ?? '这项操作需要你确认。';
 }
 
+const MINUTE = 60_000;
+
+/**
+ * How long the user has been sitting on this question, in words.
+ *
+ * An unanswered question used to look exactly like work in progress: the card
+ * said what was asked and nothing else. The wait is the one fact that tells
+ * the person "this is still on you, and for how long" - and past the published
+ * deadline it stops being a note and becomes a warning.
+ */
+function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean }) {
+  if (typeof question.waitedMs !== 'number') return null;
+  const minutes = Math.floor(question.waitedMs / MINUTE);
+  const waited = minutes < 1 ? '不到 1 分钟' : `${minutes} 分钟`;
+  if (question.overdue) {
+    const limit = Math.round((question.overdueAfterMs ?? 0) / MINUTE);
+    return limit > 0 ? `已等待 ${waited}（超过 ${limit} 分钟仍未回答）` : `已等待 ${waited}（仍未回答）`;
+  }
+  return `已等待 ${waited}`;
+}
+
 /** One open question answered through the authenticated task command path. */
 export function QuestionReply({ taskId, question, onDone }: {
   taskId: string;
-  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown> };
+  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean };
   onDone: () => void;
 }) {
   const [tokens, setTokens] = useState('100000');
@@ -43,6 +64,7 @@ export function QuestionReply({ taskId, question, onDone }: {
   const [usageMode, setUsageMode] = useState<'usage' | 'reconcile'>('usage');
   const [error, setError] = useState('');
   const decision = question.kind === 'waiting' && question.data.requestType === 'user_decision';
+  const waitText = questionWaitText(question);
   const options = decision && Array.isArray(question.data.options)
     ? question.data.options.filter((option): option is string => typeof option === 'string' && Boolean(option.trim()))
     : [];
@@ -66,6 +88,7 @@ export function QuestionReply({ taskId, question, onDone }: {
         {!decision && <code className="faint">{question.kind}</code>}
         <div className="question-reply-prompt"><Markdown text={decision ? String(question.data.prompt ?? '主 Agent 需要你的一个决定。') : questionPrompt(question.kind, question.data)} /></div>
       </div>
+      {waitText && <div className={`question-wait${question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
       <details style={{ maxWidth: '100%', margin: '4px 0' }}>
         <summary className="muted" style={{ cursor: 'pointer' }}>查看技术详情</summary>

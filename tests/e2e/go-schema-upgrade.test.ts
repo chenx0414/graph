@@ -245,6 +245,8 @@ test('v41 drafts and confirmation provenance survive migration and reopen', asyn
       DROP TABLE project_archive_pauses;
       ALTER TABLE questions DROP COLUMN route_stage;
       ALTER TABLE questions DROP COLUMN route_revision;
+      -- asked_at arrives with schema 52: a v41 database does not have it yet.
+      ALTER TABLE questions DROP COLUMN asked_at;
       DROP TABLE work_graphs;
       ALTER TABLE projects DROP COLUMN archived_at;
       DROP TABLE work_drafts;
