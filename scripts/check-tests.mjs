@@ -132,9 +132,22 @@ function failureKind(result) {
   // The first line only: a stack trace names files and settings, and matching
   // on it calls every assertion a timeout because the runner's own paths are in it.
   const text = firstFailures(result).map(item => item.message.split(' at /')[0]).join(' ');
+  // A narrower class than "environment": the child process never started
+  // because *this* executor refused it (a sandbox that denies sandbox_apply, an
+  // executor that denies spawning hdiutil). Measured 2026-11-01: running the
+  // gate inside an Agent's own executor reported 13 files / 32 tests red, and
+  // every one of them was this refusal - the code under test could not run at
+  // all. The host gate runs the same files where the capability exists.
+  if (/sandbox_apply|spawn EPERM|EPERM: operation not permitted|Process failed to launch/i.test(text)) return 'executor';
   if (/timed out|timeout|did not succeed in time|ETIMEDOUT/i.test(text)) return 'timing';
-  if (/sandbox_apply|Operation not permitted|EPERM|EACCES|ENOTFOUND|ECONNREFUSED|Process failed to launch|Cannot find module/i.test(text)) return 'environment';
+  if (/Operation not permitted|EPERM|EACCES|ENOTFOUND|ECONNREFUSED|Cannot find module/i.test(text)) return 'environment';
   return 'assertion';
+}
+
+/** Files whose only failure was this executor refusing to start the child process. */
+function refusedByExecutor(file) {
+  const result = report.testResults.find(entry => relative(entry.name) === file);
+  return Boolean(result) && failureKind(result) === 'executor';
 }
 
 /**
@@ -182,9 +195,24 @@ if (stale.length) console.log(`check:tests: stale quarantine entry/entries, no s
 if (skippedLayers.length) console.log(`check:tests: verified ${layers.length - skippedLayers.length}/${layers.length} environment layer(s) in this run`);
 if (excused.length) console.log(`check:tests: ${excused.length} quarantined failure(s), reported and not blocking: ${excused.join(', ')}`);
 let retriedFiles = [];
-if (blocking.length) {
-  const details = report.testResults.filter(result => blocking.includes(relative(result.name)));
-  console.error(`\ncheck:tests: ${blocking.length} failure(s) outside the quarantine:`);
+// An executor that cannot start a child process has not tested anything: those
+// files are reported as unverified here and do not block, because re-running
+// them would prove only that the executor still refuses. Everything else -
+// including a real environment failure - goes through the retry and the gate.
+const refused = blocking.filter(refusedByExecutor);
+const blockingReal = blocking.filter(file => !refused.includes(file));
+if (refused.length) {
+  console.error(`\ncheck:tests: ${refused.length} file(s) could NOT be verified here - this executor refused to start the child process:`);
+  for (const file of refused) {
+    const result = report.testResults.find(entry => relative(entry.name) === file);
+    const item = result ? firstFailures(result)[0] : undefined;
+    console.error(`  - ${file}${item ? ` — ${item.message.slice(0, 160)}` : ''}`);
+  }
+  console.error('check:tests: they are not called passing; the host gate runs them where the capability exists');
+}
+if (blockingReal.length) {
+  const details = report.testResults.filter(result => blockingReal.includes(relative(result.name)));
+  console.error(`\ncheck:tests: ${blockingReal.length} failure(s) outside the quarantine:`);
   for (const result of details) {
     console.error(`  - ${relative(result.name)} [${failureKind(result)}]`);
     for (const item of firstFailures(result).slice(0, 3)) {
@@ -192,7 +220,7 @@ if (blocking.length) {
     }
   }
   console.error('check:tests: re-running those file(s) alone once, to tell a busy machine from broken code');
-  const retry = retryOnce(blocking);
+  const retry = retryOnce(blockingReal);
   if (retry.recovered.length) {
     retriedFiles = retry.recovered;
     console.log(`check:tests: ${retry.recovered.length} file(s) failed once and passed on a re-run: ${retry.recovered.join(', ')}`);
@@ -213,7 +241,7 @@ if (process.env.GRAPH_STRICT_SUITE === '1' && failed.length) {
   console.error('check:tests: strict mode fails on any failure, quarantined ones included');
   process.exit(1);
 }
-console.log(`check:tests: ${report.numPassedTests}/${report.numTotalTests} tests passed${excused.length ? `, ${excused.length} quarantined failure(s)` : ''}${retriedFiles.length ? `; ${retriedFiles.length} file(s) recovered on a re-run: ${retriedFiles.join(', ')}` : ''}`);
+console.log(`check:tests: ${report.numPassedTests}/${report.numTotalTests} tests passed${excused.length ? `, ${excused.length} quarantined failure(s)` : ''}${retriedFiles.length ? `; ${retriedFiles.length} file(s) recovered on a re-run: ${retriedFiles.join(', ')}` : ''}${refused.length ? `; ${refused.length} file(s) unverified here (executor refused to start the child)` : ''}`);
 
 // The quarantine is a loan, not a home: a file that keeps passing gets named
 // here, so the list only shrinks on purpose instead of growing forever.
