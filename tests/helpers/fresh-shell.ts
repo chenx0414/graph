@@ -13,7 +13,7 @@ import { launchCli } from './cli-daemon.ts';
  * The bundle here is only there to be recognisable: its marker text is the
  * build stamp a person would look for in the DOM.
  */
-export function shellHtml(bundle: string) {
+function shellHtml(bundle: string) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>shell</title>
 <script type="module" src="/assets/${bundle}"></script></head>
@@ -21,7 +21,7 @@ export function shellHtml(bundle: string) {
 `;
 }
 
-export function bundleJs(stamp: string) {
+function bundleJs(stamp: string) {
   return `const marker = document.createElement('div');
 marker.setAttribute('data-testid', 'bundle-marker');
 marker.textContent = '${stamp}';

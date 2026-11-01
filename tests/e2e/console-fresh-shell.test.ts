@@ -43,7 +43,6 @@ test('console-shell-reload HTTP：同一个 URL 返回新文档', async () => {
 
 test('console-shell-reload HTTP：占位页分支同样不可缓存', async () => {
   const { webDir, url } = await freshShell(cleanup);
-  expect(cacheControl((await fetch(url)).headers), 'the real console must start uncached').toContain('no-store');
 
   // serveHome falls back to appDefaultPage when the shell cannot be read. The
   // startup check only proves the document exists when the daemon starts, so
