@@ -148,13 +148,13 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
   // extension host reads its configuration: this is the action that replaces
   // the host without restarting the app.
   const reloadExtensions = () => {
-    void api<{ reloaded: boolean }>('/api/extensions/reload', {
+    void api<{ reloaded: boolean; deferred: boolean }>('/api/extensions/reload', {
       method: 'POST',
-      body: JSON.stringify({ requestId: `extensions-reload-${Date.now()}` }),
+      body: JSON.stringify({ requestId: `extensions-reload-${Date.now()}`, deferred: true }),
     }).then(result => {
-      toast(result.reloaded
-        ? '已重载扩展：下一次会话会重新读取扩展配置'
-        : '扩展宿主当前未运行；下一次会话创建时会读取最新配置', 'success');
+      if (result.deferred) toast('当前有回合在跑：已在空闲后自动重载，下一次会话生效', 'info');
+      else if (result.reloaded) toast('已重载扩展：下一次会话会重新读取扩展配置', 'success');
+      else toast('扩展宿主当前未运行；下一次会话创建时会读取最新配置', 'success');
     }).catch(cause => toast(cause instanceof Error ? cause.message : String(cause), 'danger'));
   };
   const refresh = () => {

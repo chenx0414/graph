@@ -177,6 +177,13 @@ func (h *GraphHost) drive() {
 				h.Runtime.SweepUnattendedProblems(now)
 			}()
 		}
+		// A reload asked for during a turn waits for the first idle moment:
+		// closing the host while an extension is being called would kill work
+		// the person already paid for.
+		func() {
+			defer func() { _ = recover() }()
+			h.Runtime.ApplyDeferredExtensionReload()
+		}()
 		if driving {
 			func() {
 				defer func() { _ = recover() }()

@@ -129,6 +129,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/catalog", app.serveCatalog)
 	mux.HandleFunc("POST /api/catalog/refresh", app.serveCatalogRefresh)
 	mux.HandleFunc("POST /api/extensions/reload", app.serveExtensionsReload)
+	mux.HandleFunc("GET /api/extensions/status", app.serveExtensionsStatus)
 	mux.HandleFunc("GET /api/catalog/pi-extension-updates", app.servePiExtensionUpdates)
 	mux.HandleFunc("GET /api/catalog/pi-packages", app.servePiPackages)
 	mux.HandleFunc("POST /api/catalog/pi-extensions/{id}/{version}/update", app.servePiExtensionUpdate)

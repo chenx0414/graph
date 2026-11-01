@@ -30,7 +30,13 @@ func (app *GraphApp) serveCatalogRefresh(w http.ResponseWriter, r *http.Request)
 // the app was running needs this).
 func (app *GraphApp) serveExtensionsReload(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
-	writeJSON(w, http.StatusOK, app.runtime.ReloadExtensions(appBodyString(body, "requestId")))
+	deferred, _ := body["deferred"].(bool)
+	writeJSON(w, http.StatusOK, app.runtime.ReloadExtensions(appBodyString(body, "requestId"), deferred))
+}
+
+// serveExtensionsStatus says whether a reload is queued for an idle moment.
+func (app *GraphApp) serveExtensionsStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, app.runtime.ExtensionReloadStatus())
 }
 
 // servePiExtensionUpdates lists the Pi extensions with a newer version.

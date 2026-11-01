@@ -70,7 +70,8 @@ test('reloading the extension host reports what it did and refuses mid-turn', as
     // Nothing has started an extension host in this daemon yet.
     const idle = await request('/api/extensions/reload', 'POST', { requestId: 'reload-idle' });
     expect(idle.status, JSON.stringify(idle.body)).toBe(200);
-    expect(idle.body).toMatchObject({ reloaded: false });
+    expect(idle.body).toMatchObject({ reloaded: false, deferred: false });
+    const beforeDeferred = ((await request('/api/extensions/status')).body as { applied: number }).applied;
 
     // Hold a turn open, then try to reload the host underneath it.
     const created = await request('/api/conversations', 'POST', { model: 'local', text: '第一轮：HOLD_ONE', requestId: 'ext-conversation' });
@@ -81,6 +82,14 @@ test('reloading the extension host reports what it did and refuses mid-turn', as
     expect(refused.status, JSON.stringify(refused.body)).toBe(400);
     expect((refused.body as { code?: string }).code).toBe('invalid_state');
 
+    // A deferred request is accepted mid-turn and applied once the daemon is
+    // idle: refusing would make the action unusable in the moment it matters.
+    const queued = await request('/api/extensions/reload', 'POST', { requestId: 'reload-deferred', deferred: true });
+    expect(queued.status, JSON.stringify(queued.body)).toBe(200);
+    expect(queued.body).toMatchObject({ reloaded: false, deferred: true });
+    await expect.poll(async () => (await request('/api/extensions/status')).body, { timeout: 10_000, interval: 100 })
+      .toMatchObject({ pending: true });
+
     // The same call is accepted once the turn settles.
     provider.release();
     const conversationId = (created.body as { conversationId: string }).conversationId;
@@ -89,9 +98,12 @@ test('reloading the extension host reports what it did and refuses mid-turn', as
       const messages = ((view.body as { messages?: { role?: string }[] }).messages) ?? [];
       return messages.filter(message => message.role === 'assistant').length;
     }, { timeout: 60_000, interval: 250 }).toBe(1);
+    // The queued reload ran on its own once the turn settled, and was counted.
+    await expect.poll(async () => (await request('/api/extensions/status')).body, { timeout: 30_000, interval: 200 })
+      .toMatchObject({ pending: false, applied: beforeDeferred + 1 });
     const accepted = await request('/api/extensions/reload', 'POST', { requestId: 'reload-settled' });
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
-    expect(accepted.body).toMatchObject({ reloaded: false });
+    expect(accepted.body).toMatchObject({ reloaded: false, deferred: false });
   } finally {
     await daemon?.close();
     await provider.close();
