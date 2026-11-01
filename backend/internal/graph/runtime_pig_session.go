@@ -332,6 +332,15 @@ type pigAgentSession struct {
 
 // Prompt sends one prompt and returns the turn it produced.
 func (session *pigAgentSession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
+	// A context that no longer fits the model window cannot be compacted, so it
+	// is replaced before the send. The agent keeps working; what it was told is
+	// said by the handoff and the durable transcript stays in history.
+	budget := pigSessionContextBudget(session.request)
+	if reset, estimated, err := session.session.ResetIfOversized(context.Background(), budget, ""); err != nil {
+		return AgentSessionTurn{}, err
+	} else if reset {
+		session.emitContextReset(estimated, budget)
+	}
 	turn, err := session.session.Prompt(context.Background(), text)
 	if err != nil {
 		return AgentSessionTurn{}, err
@@ -354,6 +363,34 @@ func (session *pigAgentSession) Prompt(text string, images []ImageContent) (Agen
 		}
 	}
 	return result, nil
+}
+
+// pigSessionContextBudget is the model window minus what the request adds
+// beside the transcript: the system prompt and the tool declarations.
+func pigSessionContextBudget(request AgentSessionRequest) int {
+	window := pigModelSpec(request.Model).ContextWindow
+	if window <= 0 {
+		return 0
+	}
+	tools, _ := json.Marshal(request.Tools)
+	overhead := len(request.SystemPrompt)/4 + len(tools)/4
+	if overhead < 4096 {
+		overhead = 4096
+	}
+	budget := window - overhead
+	if budget < 1 {
+		return 1
+	}
+	return budget
+}
+
+// emitContextReset reports the replacement as a session event, so the turn's
+// timeline says why the agent no longer has the earlier context.
+func (session *pigAgentSession) emitContextReset(estimated, budget int) {
+	if session.request.OnEvent == nil {
+		return
+	}
+	session.request.OnEvent(map[string]any{"type": "context_reset", "estimatedTokens": estimated, "contextWindow": budget})
 }
 
 // Compact prepares the next operation's prompt.

@@ -2,6 +2,7 @@ package pigkernel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -418,6 +419,41 @@ func (session *Session) Stop(ctx context.Context) error {
 	session.interrupted = true
 	session.mutex.Unlock()
 	return session.conversation.Abort(ctx, &durable.ConversationAbortOptions{})
+}
+
+// ResetIfOversized starts a new context when the current one can no longer be
+// sent to the model.
+//
+// A context larger than the window cannot be compacted: the summarizer would
+// have to read the same oversized prefix. The only way to keep the agent usable
+// is a new context, with a handoff that says what happened; the durable
+// transcript stays in history. The estimate is the marshalled model context at
+// four bytes per token, which overestimates rather than underestimates.
+func (session *Session) ResetIfOversized(ctx context.Context, budget int, handoff string) (bool, int, error) {
+	if budget <= 0 {
+		return false, 0, nil
+	}
+	view, err := session.conversation.Context(ctx, nil)
+	if err != nil {
+		return false, 0, err
+	}
+	encoded, err := json.Marshal(view.Messages)
+	if err != nil {
+		return false, 0, err
+	}
+	estimated := len(encoded) / 4
+	if estimated <= budget {
+		return false, estimated, nil
+	}
+	text := strings.TrimSpace(handoff)
+	if text == "" {
+		text = "The previous conversation was discarded because it no longer fit the model's context window. " +
+			"The durable transcript is still in history; continue from the user's latest message."
+	}
+	if err := session.conversation.Reset(ctx, &text); err != nil {
+		return false, estimated, err
+	}
+	return true, estimated, nil
 }
 
 // Inspect is the session's own view of itself.

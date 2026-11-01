@@ -103,6 +103,14 @@ func (live *piAdapterLiveTurn) livePart(contentIndex int) *piAdapterPart {
 func (live *piAdapterLiveTurn) handle(event map[string]any) {
 	kind, _ := event["type"].(string)
 	switch kind {
+	case "context_reset":
+		// The session replaced a context that could not fit the model window.
+		// The turn continues; the transcript says why the agent lost it.
+		live.store.Event(live.operation.TaskId, "session.context_reset", map[string]any{
+			"operationId": live.operation.Id, "nodeId": live.operation.NodeId,
+			"estimatedTokens": event["estimatedTokens"], "contextWindow": event["contextWindow"],
+		})
+		return
 	case "message_start":
 		live.entrySeq++
 		live.currentEntryId = fmt.Sprintf("entry-%d", live.entrySeq)
