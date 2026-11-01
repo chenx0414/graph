@@ -1,9 +1,7 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { chromium } from 'playwright';
-import { launchCli } from '../helpers/cli-daemon.ts';
+import { cacheControl, freshShell, rebuild } from '../helpers/fresh-shell.ts';
 
 /**
  * A rebuilt console must reach the browser at the same address.
@@ -12,59 +10,19 @@ import { launchCli } from '../helpers/cli-daemon.ts';
  * never asked for it": the shell document (index.html) names the bundle, so a
  * client that keeps the old document keeps loading the old bundle, and a person
  * reloading the console sees the previous build. That is indistinguishable from
- * a change that did not ship, which is why the fix and this proof are one case:
- * a real graphd, a real web directory that gets rewritten underneath it, and a
- * real HTTP request to the same URL.
+ * a change that did not ship.
+ *
+ * This file is the half that any machine can run: a real graphd, a real web
+ * directory rewritten underneath it, and real HTTP requests to the same URL.
+ * The browser half lives in console-fresh-shell-browser.test.ts and needs
+ * window services, so that one is registered in tests/env-layers.json.
  */
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
-/** The smallest console shell that still has the property under test: it names its bundle. */
-function shellHtml(bundle: string) {
-  return `<!doctype html>
-<html><head><meta charset="utf-8"><title>shell</title>
-<script type="module" src="/assets/${bundle}"></script></head>
-<body><div id="root"></div></body></html>
-`;
-}
-
-/** The bundle is only there to be recognisable: its marker text is the build stamp. */
-function bundleJs(stamp: string) {
-  return `const marker = document.createElement('div');
-marker.setAttribute('data-testid', 'bundle-marker');
-marker.textContent = '${stamp}';
-document.body.appendChild(marker);
-`;
-}
-
-async function shell() {
-  const root = await mkdtemp(join(tmpdir(), 'graph-fresh-shell-'));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const webDir = join(root, 'web');
-  await mkdir(join(webDir, 'assets'), { recursive: true });
-  await mkdir(join(root, 'graph-home', 'capabilities'), { recursive: true });
-  await writeFile(join(webDir, 'index.html'), shellHtml('bundle-a.js'));
-  await writeFile(join(webDir, 'assets', 'bundle-a.js'), bundleJs('a'));
-  const configPath = join(root, 'graph.config.json');
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }] }));
-  const daemon = await launchCli(root, { configPath, webDir });
-  cleanup.push(() => daemon.close());
-  return { webDir, daemon, url: `${daemon.url}/` };
-}
-
-/** A rebuild: a new bundle appears and the shell document starts pointing at it. */
-async function rebuild(webDir: string) {
-  await writeFile(join(webDir, 'assets', 'bundle-b.js'), bundleJs('b'));
-  await writeFile(join(webDir, 'index.html'), shellHtml('bundle-b.js'));
-}
-
-function cacheControl(headers: Headers) {
-  return headers.get('cache-control') ?? '';
-}
-
 test('console-shell-reload HTTP：同一个 URL 返回新文档', async () => {
-  const { webDir, url } = await shell();
+  const { webDir, url } = await freshShell(cleanup);
 
   const before = await fetch(url);
   expect(before.status).toBe(200);
@@ -83,28 +41,20 @@ test('console-shell-reload HTTP：同一个 URL 返回新文档', async () => {
   expect(body).not.toContain('bundle-a.js');
 });
 
-test('console-shell-reload browser：同一个 URL 重载显示新包', async () => {
-  const { webDir, url } = await shell();
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
+test('console-shell-reload HTTP：占位页分支同样不可缓存', async () => {
+  const { webDir, url } = await freshShell(cleanup);
+  expect(cacheControl((await fetch(url)).headers), 'the real console must start uncached').toContain('no-store');
 
-  await page.goto(url);
-  const marker = page.locator('[data-testid="bundle-marker"]');
-  expect(await marker.textContent()).toBe('a');
+  // serveHome falls back to appDefaultPage when the shell cannot be read. The
+  // startup check only proves the document exists when the daemon starts, so
+  // the fallback is reachable at runtime - measured here, not assumed: the
+  // first version of this test claimed the opposite and never covered it.
+  await rm(join(webDir, 'index.html'));
 
-  await rebuild(webDir);
-
-  // The document request of the reload is what has to be fresh; its response
-  // header is the machine-readable half of the same fact the DOM shows.
-  const [document] = await Promise.all([
-    page.waitForResponse(response => response.request().resourceType() === 'document'),
-    page.reload(),
-  ]);
-  expect(document.headers()['cache-control'] ?? '', 'the reloaded document must not be stored').toContain('no-store');
-  // A read that lands while the new document is still replacing the old one
-  // loses its execution context; that is the reload in progress, not a verdict.
-  await expect.poll(async () => marker.textContent({ timeout: 1_000 }).catch(() => null)).toBe('b');
-  // Still the same address: no query string, no new tab, no cache-busting.
-  expect(page.url()).toBe(url);
+  const fallback = await fetch(url);
+  expect(fallback.status).toBe(200);
+  expect(cacheControl(fallback.headers), 'the fallback page is served from the same handler').toContain('no-store');
+  const body = await fallback.text();
+  expect(body).toContain('id="root"');
+  expect(body).not.toContain('/assets/');
 });
