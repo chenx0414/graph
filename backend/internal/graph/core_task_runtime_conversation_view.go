@@ -200,8 +200,8 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		status := kernelString(row["phase"])
 		if kernelInt(row["paused"]) != 0 {
 			status = "paused"
-		} else if len(openQuestions) > 0 {
-			status = "blocked"
+		} else {
+			status = StatusForQuestions(openQuestions, status)
 		}
 		tasks = append(tasks, map[string]any{
 			"id":                      taskId,

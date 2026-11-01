@@ -49,7 +49,7 @@ export type ConversationNode = { id: string; kind: string; role: string | null; 
 export type ConversationTask = {
   id: string; request: string; phase: string; status: string; paused: boolean; targetBranch: string | null; createdAt: number;
   acceptedProposalVersion: number | null; integrationSha: string | null;
-  openQuestions: { id: string; nodeId: string; kind: string; data: Record<string, unknown>; askedAt?: number | null; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean }[];
+  openQuestions: { id: string; nodeId: string; kind: string; data: Record<string, unknown>; askedAt?: number | null; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean }[];
   nodes: ConversationNode[];
   cost: { unknown?: boolean; amount?: number };
   evidence: { acceptanceId: string; valid: boolean }[];
@@ -128,7 +128,7 @@ export function residentFlag(id: string): 'true' | undefined {
 export type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; owner?: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string;
   // How long this question has waited for the person who has to answer it.
   // overdueAfterMs is the published deadline; nothing answers the question for you.
-  askedAt?: number | null; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean };
+  askedAt?: number | null; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean };
 
 export type ConversationView = {
   role?: 'global' | 'project' | 'history' | 'legacy';

@@ -1,6 +1,8 @@
 export const TASK_LABEL: Record<string, string> = {
   discussing: '讨论中', chatting: '对话中', running: '执行中', queued: '排队中', paused: '已暂停', pausing: '暂停中',
   blocked: '等待处理', completed: '已完成', failed: '失败', skipped: '已跳过', executing: '执行中', abandoned: '已终止',
+  // Waiting for a person past the suspend deadline: not a runtime problem, and not progress.
+  awaiting_user: '等你回答',
 };
 
 export const NODE_LABEL: Record<string, string> = {

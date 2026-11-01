@@ -61,4 +61,16 @@ test('an unanswered question shows how long it has waited', async () => {
   expect(await wait.getAttribute('data-overdue')).toBe('true');
   expect(await wait.innerText()).toContain('已等待 20 分钟');
   expect(await wait.innerText()).toContain('超过 15 分钟仍未回答');
+
+  // Past the suspend deadline the card says the conversation is no longer in
+  // progress: it is waiting for a person. The question stays answerable.
+  const suspendedDb = new DatabaseSync(join(root, 'state/tasks.sqlite'));
+  suspendedDb.exec('PRAGMA busy_timeout=5000');
+  suspendedDb.prepare('UPDATE questions SET asked_at=? WHERE id=?').run(Date.now() - 60 * 60 * 1000, question!.id);
+  suspendedDb.close();
+  await page.reload();
+  const suspended = page.getByTestId(`question-waiting-${question!.id}`);
+  await suspended.waitFor({ timeout: 60_000 });
+  await expect.poll(async () => suspended.getAttribute('data-suspended'), { timeout: 30_000 }).toBe('true');
+  expect(await suspended.innerText()).toContain('已挂起');
 });

@@ -224,7 +224,7 @@ export function Inbox({ tasks, onAnswered }: { tasks: TaskSummary[]; onAnswered:
       {pending.map(task => (
         <Card key={task.id} testid={`inbox-${task.id}`} icon="inbox" tone="warn"
           title={<a href={`#/tasks/${task.id}/graph`}>{task.request.slice(0, 70)}</a>}
-          subtitle={`${task.projectId} · ${task.openQuestions} 个待处理问题`}>
+          subtitle={`${task.projectId} · ${task.openQuestions} 个等你回答`}>
           <ul className="list">{(views[task.id]?.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user').map(question => (
             <QuestionReply key={question.id} taskId={task.id} question={question} onDone={() => { void load(); void reloadHistory(); onAnswered(); }} />
           ))}</ul>

@@ -64,6 +64,7 @@ function questionProvider() {
 interface WaitedQuestion {
   id: string; kind: string; status: string;
   askedAt?: number | null; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean;
+  suspendedAfterMs?: number; suspended?: boolean;
 }
 
 test('an open question reports how long it has waited and when it is overdue', async () => {
@@ -118,6 +119,34 @@ test('an open question reports how long it has waited and when it is overdue', a
     expect(overdue?.status).toBe('open');
     expect(overdue?.waitedMs ?? 0).toBeGreaterThanOrEqual(20 * 60 * 1000);
     expect(overdue?.overdue).toBe(true);
+
+    // Past the suspend deadline the conversation stops reporting a blocking
+    // problem and starts reporting the truth: it is waiting for a person.
+    // Nothing answers the question - the status is the only thing that changes.
+    const suspendedDb = new DatabaseSync(join(root, 'state/tasks.sqlite'));
+    suspendedDb.exec('PRAGMA busy_timeout=5000');
+    suspendedDb.prepare('UPDATE questions SET asked_at=? WHERE id=?').run(Date.now() - 60 * 60 * 1000, asked!.id);
+    suspendedDb.close();
+
+    const listStatus = async (conversation: string) => {
+      const list = await request('/api/conversations');
+      const rows = (Array.isArray(list.body) ? list.body : []) as { id: string; status: string }[];
+      return rows.find(row => row.id === conversation)?.status;
+    };
+    await expect.poll(async () => listStatus(conversationId), { timeout: 20000, interval: 250 }).toBe('awaiting_user');
+    const stillOpen = await openQuestion();
+    expect(stillOpen?.status).toBe('open');
+    expect(stillOpen?.suspended).toBe(true);
+
+    // A person answering is still the only thing that ends the wait, and the
+    // conversation leaves the suspended status without any other help.
+    const view = (await request(`/api/conversations/${conversationId}`)).body as { anchorTaskId: string };
+    const answered = await request(`/api/tasks/${view.anchorTaskId}/answer`, 'POST', {
+      questionId: asked!.id, answer: { type: 'respond', value: '先做提问期限' }, requestId: 'answer-question-wait',
+    });
+    expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+    await expect.poll(async () => listStatus(conversationId), { timeout: 30000, interval: 250 }).not.toBe('awaiting_user');
+    await expect.poll(async () => Boolean(await openQuestion()), { timeout: 30000, interval: 250 }).toBe(false);
   } finally {
     await daemon?.close();
     await provider.close();

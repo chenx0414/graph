@@ -38,10 +38,16 @@ const MINUTE = 60_000;
  * the person "this is still on you, and for how long" - and past the published
  * deadline it stops being a note and becomes a warning.
  */
-function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean }) {
+function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean }) {
   if (typeof question.waitedMs !== 'number') return null;
   const minutes = Math.floor(question.waitedMs / MINUTE);
   const waited = minutes < 1 ? '不到 1 分钟' : `${minutes} 分钟`;
+  if (question.suspended) {
+    const limit = Math.round((question.suspendedAfterMs ?? 0) / MINUTE);
+    return limit > 0
+      ? `已等待 ${waited}（已挂起：超过 ${limit} 分钟无人回答，不再算进行中）`
+      : `已等待 ${waited}（已挂起）`;
+  }
   if (question.overdue) {
     const limit = Math.round((question.overdueAfterMs ?? 0) / MINUTE);
     return limit > 0 ? `已等待 ${waited}（超过 ${limit} 分钟仍未回答）` : `已等待 ${waited}（仍未回答）`;
@@ -52,7 +58,7 @@ function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?:
 /** One open question answered through the authenticated task command path. */
 export function QuestionReply({ taskId, question, onDone }: {
   taskId: string;
-  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean };
+  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean };
   onDone: () => void;
 }) {
   const [tokens, setTokens] = useState('100000');
@@ -88,7 +94,7 @@ export function QuestionReply({ taskId, question, onDone }: {
         {!decision && <code className="faint">{question.kind}</code>}
         <div className="question-reply-prompt"><Markdown text={decision ? String(question.data.prompt ?? '主 Agent 需要你的一个决定。') : questionPrompt(question.kind, question.data)} /></div>
       </div>
-      {waitText && <div className={`question-wait${question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'}>{waitText}</div>}
+      {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
       <details style={{ maxWidth: '100%', margin: '4px 0' }}>
         <summary className="muted" style={{ cursor: 'pointer' }}>查看技术详情</summary>

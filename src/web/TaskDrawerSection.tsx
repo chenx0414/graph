@@ -13,6 +13,7 @@ export interface DrawerTask {
 const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'info'> = {
   discussing: 'info', running: 'accent', queued: 'neutral', paused: 'warn', pausing: 'warn',
   blocked: 'warn', completed: 'success', failed: 'danger', skipped: 'neutral', abandoned: 'danger',
+  awaiting_user: 'warn',
 };
 
 /** One task navigation surface for the conversation and every other workspace tab. */

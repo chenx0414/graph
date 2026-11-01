@@ -16,13 +16,16 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
     c.archived_at AS archivedAt,
     (SELECT MAX(e.timestamp) FROM events e JOIN tasks t ON t.id=e.task_id WHERE t.conversation_id=c.id) AS updatedAt,
     (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user') AS openQuestions,
+    (SELECT COUNT(*) FROM questions q JOIN tasks t ON t.id=q.task_id WHERE t.conversation_id=c.id AND q.status='open' AND q.owner='user' AND q.asked_at IS NOT NULL AND q.asked_at<=?) AS suspendedQuestions,
     (SELECT COUNT(*) FROM tasks t WHERE t.conversation_id=c.id AND t.phase!='chatting') AS taskCount
     FROM conversations c WHERE c.archived_at `+filter+`
-    ORDER BY c.created_seq`)
+    ORDER BY c.created_seq`, NowMillis()-QuestionSuspendedMs)
 	out := []map[string]any{}
 	for _, row := range rows {
 		status := "chatting"
 		switch {
+		case kernelInt(row["suspendedQuestions"]) > 0:
+			status = QuestionWaitStatus
 		case kernelInt(row["openQuestions"]) > 0:
 			status = "blocked"
 		case kernelInt(row["taskCount"]) > 0:
@@ -37,9 +40,10 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
 			"createdAt":     kernelInt(row["createdAt"]),
 			"archivedAt":    row["archivedAt"],
 			"updatedAt":     row["updatedAt"],
-			"openQuestions": kernelInt(row["openQuestions"]),
-			"taskCount":     kernelInt(row["taskCount"]),
-			"status":        status,
+			"openQuestions":      kernelInt(row["openQuestions"]),
+			"suspendedQuestions": kernelInt(row["suspendedQuestions"]),
+			"taskCount":          kernelInt(row["taskCount"]),
+			"status":             status,
 		})
 	}
 	return out

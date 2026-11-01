@@ -382,6 +382,8 @@
 /* The wait is the only thing that separates "still on you" from "in progress". */
 .question-wait { align-self: flex-start; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-size: 11.5px; line-height: 1.6; }
 .question-wait.overdue { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, #fff); color: var(--danger); font-weight: 600; }
+/* Suspended is not louder than overdue: it is the product saying "this is not progress". */
+.question-wait.suspended { border-color: var(--border); background: var(--panel-soft); color: var(--muted); font-weight: 600; }
 .question-answer-options { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .question-option-list { display: grid; gap: 7px; }
 .question-option { display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; }

@@ -128,7 +128,7 @@ export function ConversationGraphBoard({
             <strong>任务状态</strong>
             <span>
               {state.taskCount} 个任务 · {state.evidenceCount} 条有效证据 · {formatTokens(state.used)} tokens · 预算 {state.unlimited || state.budget === null ? '不限' : formatTokens(state.budget)}
-              {state.openQuestions > 0 ? ` · ${state.openQuestions} 个待处理问题` : ''}
+              {state.openQuestions > 0 ? ` · ${state.openQuestions} 个等你回答` : ''}
             </span>
           </div>
         </aside>
