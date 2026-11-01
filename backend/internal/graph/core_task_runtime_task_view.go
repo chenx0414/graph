@@ -369,14 +369,17 @@ func (user *TaskRuntimeUser) List() []map[string]any {
     t.conversation_id AS conversationId,
     (SELECT MIN(timestamp) FROM events WHERE task_id=t.id) AS createdAt,
     (SELECT MAX(timestamp) FROM events WHERE task_id=t.id) AS updatedAt,
-    (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user') AS openQuestions
-    FROM tasks t WHERE t.phase!='chatting' ORDER BY t.created_seq`)
+    (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user') AS openQuestions,
+    (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user' AND asked_at IS NOT NULL AND asked_at<=?) AS suspendedQuestions
+    FROM tasks t WHERE t.phase!='chatting' ORDER BY t.created_seq`, NowMillis()-QuestionSuspendedMs)
 	out := []map[string]any{}
 	for _, row := range rows {
 		status := kernelString(row["phase"])
 		switch {
 		case kernelInt(row["paused"]) != 0:
 			status = "paused"
+		case kernelInt(row["suspendedQuestions"]) > 0:
+			status = QuestionWaitStatus
 		case kernelInt(row["openQuestions"]) > 0:
 			status = "blocked"
 		}
@@ -391,6 +394,7 @@ func (user *TaskRuntimeUser) List() []map[string]any {
 			"createdAt":               row["createdAt"],
 			"updatedAt":               row["updatedAt"],
 			"openQuestions":           kernelInt(row["openQuestions"]),
+			"suspendedQuestions":      kernelInt(row["suspendedQuestions"]),
 		})
 	}
 	return out
