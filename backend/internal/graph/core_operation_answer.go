@@ -201,9 +201,10 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 	})
 }
 
-// Escalate hands a main-owned problem to the user with the main Agent's explanation.
-func (l *OperationLifecycle) Escalate(taskId, questionId, prompt string) {
-	l.transaction(func() any {
+// Escalate hands a main-owned problem to the user with the main Agent's explanation,
+// and says which question now carries the decision.
+func (l *OperationLifecycle) Escalate(taskId, questionId, prompt string) string {
+	return l.transaction(func() any {
 		row := kernelRow(l.store.Db, `SELECT node_id,kind,data FROM questions
         WHERE id=? AND task_id=? AND status='open'`, questionId, taskId)
 		if row == nil {
@@ -239,6 +240,6 @@ func (l *OperationLifecycle) Escalate(taskId, questionId, prompt string) {
 			"kind":        kernelString(row["kind"]),
 			"escalatedTo": escalated.Id,
 		})
-		return nil
-	})
+		return escalated.Id
+	}).(string)
 }

@@ -229,7 +229,7 @@ func (e *Execution) Answer(taskId, questionId string, answer Answer) {
 // Escalate hands a main-owned problem to the user with an explanation.
 func (e *Execution) Escalate(taskId, questionId, prompt string) {
 	graphDatabaseMu.Lock()
-	e.lifecycle.Escalate(taskId, questionId, prompt)
+	_ = e.lifecycle.Escalate(taskId, questionId, prompt)
 	graphDatabaseMu.Unlock()
 	if e.autoWake {
 		e.Kick()

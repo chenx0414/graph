@@ -85,6 +85,10 @@ type GraphServerOptions struct {
 	Codemode GraphCodemode
 }
 
+// How often the harness looks for problems nobody acted on. The sweep is one
+// indexed read, but it does not need to ride every drive tick.
+const problemSweepMs = 60 * 1000
+
 // GraphHost is the listening daemon and its drive loop.
 type GraphHost struct {
 	Runtime *TaskRuntime
@@ -97,6 +101,8 @@ type GraphHost struct {
 	loopDone chan struct{}
 	app      *GraphApp
 	pump     func()
+	// lastProblemSweep is only touched by the drive loop.
+	lastProblemSweep int64
 }
 
 // OpenGraphServer binds 127.0.0.1 and drives the runtime.
@@ -161,6 +167,15 @@ func (h *GraphHost) drive() {
 		h.mu.Unlock()
 		if stopped {
 			return
+		}
+		// A problem nobody acted on still belongs to someone. Handing it over is
+		// not a retry: it only makes the decision visible (see SweepUnattendedProblems).
+		if now := NowMillis(); now-h.lastProblemSweep >= problemSweepMs {
+			h.lastProblemSweep = now
+			func() {
+				defer func() { _ = recover() }()
+				h.Runtime.SweepUnattendedProblems(now)
+			}()
 		}
 		if driving {
 			func() {
