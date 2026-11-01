@@ -32,6 +32,8 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
   return text('prompt') ?? text('reason') ?? text('message') ?? '这项操作需要你确认。';
 }
 
+const MASTER_RETRY_KINDS = ['adapter_error', 'execution_failed', 'model_unavailable', 'git_conflict', 'context_rejected'];
+
 const MINUTE = 60_000;
 
 /**
@@ -100,6 +102,7 @@ export function QuestionReply({ taskId, question, onDone }: {
       </div>
       {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
+      {MASTER_RETRY_KINDS.includes(question.kind) && <div className="question-reply-why" data-testid={`question-retry-hint-${question.id}`}>重试会重新跑这一轮：再花一次模型调用，并可能重复上一轮已经执行的工具调用。</div>}
       <details style={{ maxWidth: '100%', margin: '4px 0' }}>
         <summary className="muted" style={{ cursor: 'pointer' }}>查看技术详情</summary>
         <pre data-testid={`question-data-${question.id}`} style={{ maxWidth: '100%', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
@@ -140,6 +143,8 @@ export function QuestionReply({ taskId, question, onDone }: {
         </> : question.kind === 'rework' || question.kind === 'stalled' ? <>
           <Button size="sm" icon="refresh" onClick={() => void submit({ type: 'retry' })}>重试</Button>
           <Button size="sm" onClick={() => void submit({ type: 'respond', value })}>答复</Button>
+        </> : MASTER_RETRY_KINDS.includes(question.kind) ? <>
+          <Button size="sm" variant="primary" icon="refresh" onClick={() => void submit({ type: 'retry' })}>重试这一轮</Button>
         </> : question.kind === 'human_check' ? <>
           <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'acknowledge' })}>确认通过</Button>
           <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'reject', ...(value.trim() ? { reason: value.trim() } : {}) })}>驳回并返工</Button>

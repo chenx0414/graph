@@ -62,5 +62,9 @@ export function elapsedLabel(ms: number) {
 export function describeQuestion(kind: string, data?: Record<string, unknown>) {
   // A master question asks for a decision, not for an external condition to clear.
   if (kind === 'waiting' && data?.requestType === 'user_decision') return '等待你的决定';
-  return QUESTION_LABEL[kind] ?? kind;
+  const label = QUESTION_LABEL[kind] ?? kind;
+  // A problem the harness handed over after nobody acted on it is not a fresh
+  // failure: the card has to say why it is in front of the person now.
+  if (typeof data?.escalatedAt === 'number') return `${label} · 无人处理`;
+  return label;
 }

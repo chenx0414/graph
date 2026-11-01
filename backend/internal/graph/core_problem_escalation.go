@@ -16,10 +16,11 @@ import "fmt"
 const ProblemUnattendedMs = 30 * 60 * 1000
 
 // problemEscalationPrompt is what the person reads when a problem reaches them
-// without anybody having acted on it. It states the wait and who decides, and it
-// promises no action: measured 2026-11-01, the retry button on a failed *master*
-// turn answers 200 without re-running the turn, so telling the person "retry
-// re-runs it" would be a promise the product does not keep.
+// without anybody having acted on it. It states the wait and who decides. The
+// action itself is the card's, not this text's: a retry re-runs the failed turn
+// (measured 2026-11-01, answering retry still did not re-run it; that is fixed)
+// and costs another model call, which is why the card says so next to the button
+// instead of pretending the retry is free.
 func problemEscalationPrompt(kind string, minutes int64) string {
 	return fmt.Sprintf(
 		"这个问题（%s）已经等了 %d 分钟，没有人处理。它需要有人决定怎么继续：先看详情，再选下一步。",

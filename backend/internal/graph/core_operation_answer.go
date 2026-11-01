@@ -140,6 +140,9 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 		if kind == "human_check" && answer.Type == "acknowledge" {
 			l.store.Event(taskId, "human.accepted", map[string]any{"questionId": questionId, "nodeId": nodeId})
 		}
+		if answer.Type == "retry" {
+			l.releaseFailedTurnMessages(question)
+		}
 		l.store.ResolveQuestion(questionId, answer)
 		CloseUserWait(l.store, taskId, nodeId)
 		WakeForAnswer(l.store, taskId, map[string]any{
@@ -198,6 +201,44 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			l.store.SetNodeStatus(taskId, nodeId, next)
 		}
 		return nil
+	})
+}
+
+// releaseFailedTurnMessages puts the messages of a failed master turn back on
+// the queue, so answering retry answers the same request again.
+//
+// Measured 2026-11-01: the retry answer only flipped the node back to pending,
+// and the turn that then ran carried no user message at all - the person's
+// click started something, just not the turn that failed. Re-pending the
+// messages is deliberate: a retry re-runs that request, which is why the card
+// says it spends another model call and may repeat that turn's tool calls.
+func (l *OperationLifecycle) releaseFailedTurnMessages(question map[string]any) {
+	operationId := kernelString(question["operation_id"])
+	if operationId == "" || questionPolicy(kernelString(question["kind"])).Owner != QuestionOwnerMain {
+		return
+	}
+	// Only the turn that is still the latest one can be re-run: an older
+	// failure has already been superseded by a later turn, and re-pending its
+	// messages would replay a request the conversation has moved past.
+	latest := kernelRow(l.store.Db, "SELECT id FROM operations WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1",
+		kernelString(question["task_id"]), kernelString(question["node_id"]))
+	if latest == nil || kernelString(latest["id"]) != operationId {
+		return
+	}
+	released := []string{}
+	for _, row := range MessagesForOperation(l.store, operationId) {
+		if row.Role == string(MessageRoleUser) && row.State == string(MessageStateDelivered) {
+			released = append(released, row.Id)
+		}
+	}
+	if len(released) == 0 {
+		return
+	}
+	ReleaseMessages(l.store, operationId)
+	l.store.Event(kernelString(question["task_id"]), "conversation.turn_retried", map[string]any{
+		"operationId": operationId,
+		"questionId":  kernelString(question["id"]),
+		"messages":    released,
 	})
 }
 

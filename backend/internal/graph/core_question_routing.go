@@ -164,8 +164,20 @@ func QuestionSummary(kind string, data any) string {
 
 // IsMasterParked reports whether a pending master is parked. Callers must not
 // infer readiness from status alone.
+//
+// Parking follows the question kind, not its current owner: handing a problem
+// to the person is not a decision, so an escalated failure still parks the turn
+// it came from. Measured 2026-11-01: the unattended sweep re-owned a failed
+// master turn's question to the person, the master stopped looking parked, took
+// a turn with nothing to answer, and its own failure then parked the retry the
+// person had just asked for.
 func IsMasterParked(store *TaskStore, taskId, nodeId string) bool {
-	return kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open' AND owner='main' LIMIT 1", taskId, nodeId) != nil
+	for _, row := range kernelRows(store.Db, "SELECT kind FROM questions WHERE task_id=? AND node_id=? AND status='open'", taskId, nodeId) {
+		if questionPolicy(kernelString(row["kind"])).Owner == QuestionOwnerMain {
+			return true
+		}
+	}
+	return false
 }
 
 // InsertQuestion inserts one durable question and routes it to the correct

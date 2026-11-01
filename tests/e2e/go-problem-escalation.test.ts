@@ -21,9 +21,11 @@ import { launchCli } from '../helpers/cli-daemon.ts';
  * the decision to the person. Handing the problem over is not a retry: the
  * harness's own retry never fires, and the person still has to answer.
  *
- * The card promises no action it cannot keep: measured 2026-11-01, answering
- * "retry" on a failed *master* turn is recorded (200) but does not re-run that
- * turn, so the escalation text only states the wait and who decides.
+ * The card promises only what the product does: measured 2026-11-01, answering
+ * "retry" on a failed *master* turn was recorded (200) without re-running that
+ * turn; that is fixed (go-question-retry-reruns.test.ts is the other half), so
+ * the escalation text still states only the wait and who decides - the retry
+ * and its cost are the card's own action and copy.
  */
 
 interface ProviderTool { function?: { name?: string } }

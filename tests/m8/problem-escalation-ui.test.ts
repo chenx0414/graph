@@ -67,5 +67,11 @@ test('an escalated problem shows up on a readable card', async () => {
   // invent a "stop" action the product does not have.
   expect(text).toContain('已经等了');
   expect(text).toContain('执行失败');
+  // The label separates "a failure nobody acted on" from "a fresh incident",
+  // and the only action on the card says what it really does: re-running that
+  // turn costs a model call and may repeat the tool calls it already made.
+  expect(text).toContain('无人处理');
+  expect(text).toContain('重试这一轮');
+  expect(text).toContain('再花一次模型调用');
   expect(text).not.toContain('回“停”');
 }, 300_000);
