@@ -42,6 +42,8 @@ async function provider(source: Promise<string>) {
   const results = new Map<string, unknown>();
   const offers = new Set<string>();
   let projectAssignment = '';
+  let projectSystem = '';
+  let projectTools: { name: string; description: string }[] = [];
   const server = createServer(async (request, response) => {
     try {
       const chunks: Buffer[] = [];
@@ -49,6 +51,12 @@ async function provider(source: Promise<string>) {
       const body = object(JSON.parse(Buffer.concat(chunks).toString()));
       const messages = Array.isArray(body.messages) ? body.messages.map(object) : [];
       const offered = Array.isArray(body.tools) ? body.tools.map(object) : [];
+      const described = offered.map(tool => object(tool.function))
+        .filter(fn => typeof fn.name === 'string')
+        .map(fn => ({ name: String(fn.name), description: typeof fn.description === 'string' ? fn.description : '' }));
+      const systemText = messages.filter(message => message.role === 'system' || message.role === 'developer')
+        .map(message => typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? ''))
+        .join('\n');
       for (const tool of offered) {
         const fn = object(tool.function);
         if (typeof fn.name === 'string') offers.add(fn.name);
@@ -66,6 +74,7 @@ async function provider(source: Promise<string>) {
       const userText = typeof lastUser?.content === 'string' ? lastUser.content : JSON.stringify(lastUser?.content ?? '');
       const isProject = userText.includes('AGENT_DRAFT_PROJECT_381');
       const isGlobal = !isProject && userText.includes('AGENT_DRAFT_GLOBAL_381');
+      if (isProject) { projectSystem = systemText; projectTools = described; }
       let call: { id: string; name: string; args: object } | undefined;
       const readyWork = /Project supervisor saved graph draft (\d+) for work ([a-f0-9-]+)/i.exec(userText);
       if (readyWork && !spoken.has('global-read')) {
@@ -110,6 +119,8 @@ async function provider(source: Promise<string>) {
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`, results, offers,
     assignment: () => projectAssignment,
+    system: () => projectSystem,
+    tools: () => projectTools,
     async close() { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
   };
 }
@@ -160,6 +171,14 @@ test('the project supervisor creates a work-scoped graph draft from a global del
   expect(model.offers.has('propose_work_graph')).toBe(true);
   expect(model.assignment()).toContain(workID);
   expect(model.assignment()).toMatch(/工作修订:\s*1/);
+  const projectContext = `${model.system()}\n${model.assignment()}`;
+  expect(projectContext, 'the project supervisor prompt no longer asks for the graph shape')
+    .toMatch(/decide the shape before the nodes/i);
+  expect(projectContext).toMatch(/docs\/agent\/graph-v2\.md/);
+  const workDraftTool = model.tools().find(tool => tool.name === 'propose_work_graph');
+  expect(workDraftTool, 'the project supervisor is not offered propose_work_graph').toBeTruthy();
+  expect(workDraftTool?.description, 'the work-graph drafting tool does not point at the shape document')
+    .toMatch(/graph-v2\.md/);
   const draftReceipt = result(model.results.get('project-draft'));
   expect(draftReceipt).toMatchObject({ workId: workID, version: 1, workRevision: 1, proposal: { summary: 'Search proposal' } });
 
