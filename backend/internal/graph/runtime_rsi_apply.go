@@ -126,9 +126,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			adopted = append(adopted, path)
 		}
 	}
-	if len(blocked) > 0 {
-		Raise("rsi_dirty", RsiDirtyMessage(*root, blocked))
-	}
 
 	createdBranch := false
 	if originalBranch == nil || branch != *originalBranch {
@@ -137,6 +134,24 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			Raise("rsi_git", rsiFirstText(switched.Stderr, "Failed to create "+branch))
 		}
 		createdBranch = true
+	}
+
+	// Paths this change does not own are somebody else's uncommitted work: they
+	// must not decide whether it lands, and they must never end up inside it. See
+	// runtime_rsi_isolated.go for the tree the change is built in instead.
+	claimedPaths := append(append([]string{}, uniquePaths...), ownedOrder...)
+	work := *root
+	isolated := false
+	isolatedCleanup := func() {}
+	if len(blocked) > 0 {
+		snapshot, ok, cleanup := rsiIsolatedWorktree(*root, claimedPaths)
+		if !ok {
+			// Fail closed: without an isolated tree the checks would measure work the
+			// commit cannot contain, which is the reason this guard exists.
+			Raise("rsi_dirty", RsiDirtyMessage(*root, blocked))
+		}
+		work, isolated, isolatedCleanup = snapshot, true, cleanup
+		defer isolatedCleanup()
 	}
 
 	snapshotOrder := []string{}
@@ -151,7 +166,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 		for _, path := range snapshotOrder {
 			content := snapshots[path]
-			absolute := filepath.Join(*root, path)
+			absolute := filepath.Join(work, path)
 			if content == nil {
 				_ = os.Remove(absolute)
 				continue
@@ -198,8 +213,8 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	}()
 
 	for changeIndex, change := range input.Changes {
-		path, _ := rsiInside(*root, change.Path)
-		absolute := filepath.Join(*root, path)
+		path, _ := rsiInside(work, change.Path)
+		absolute := filepath.Join(work, path)
 		existing, known := snapshots[path]
 		if !known {
 			content, err := os.ReadFile(absolute)
@@ -253,46 +268,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			}
 			final[path] = nil
 		default:
-			if existing == nil {
-				Raise("not_found", "Cannot replace missing RSI file "+path)
-			}
-			content := *existing
-			if change.FromPath != nil {
-				content = rsiChangeContent(*root, change, changeIndex)
-				if refusal := rsiWriteShrinkRefusal(path, *existing, content); refusal != "" {
-					Raise("rsi_edit_conflict", refusal)
-				}
-			} else {
-				// A batch rolls back as a whole, so every anchor that does not match is
-				// named in one answer: the caller has to be able to correct the whole
-				// batch in one resend instead of discovering the mismatches one call at a
-				// time.
-				failures := []string{}
-				for index, edit := range change.Edits {
-					matches := strings.Count(content, edit.OldText)
-					if matches != 1 {
-						failures = append(failures, rsiEditMismatch(index, len(change.Edits), matches, edit.OldText))
-						continue
-					}
-					content = strings.Replace(content, edit.OldText, edit.NewText, 1)
-				}
-				if len(failures) > 0 {
-					// Which state the anchor was matched against is the part the caller cannot see: a failed
-					// attempt keeps its files uncommitted, so the committed text is already gone from the
-					// worktree and "found 0" on its own reads like a typo instead of a stale anchor.
-					hint := ""
-					if owned[path] {
-						hint = "；该文件当前是上一轮未提交（检查失败保留）的内容：oldText 要按它现在的样子匹配，或改用 action \"write\" 直接给全文"
-					}
-					if len(failures) == 1 {
-						Raise("rsi_edit_conflict", "RSI replacement in "+path+" must match exactly once, "+failures[0]+hint)
-					}
-					Raise("rsi_edit_conflict", "RSI replacement in "+path+" has "+itoa(len(failures))+" of "+
-						itoa(len(change.Edits))+" edits that do not match exactly once, so nothing was written: "+
-						strings.Join(failures, "; ")+hint)
-				}
-			}
-			value := content
+			value := rsiReplacedContent(*root, change, changeIndex, path, existing, owned[path])
 			if _, seen := final[path]; !seen {
 				finalOrder = append(finalOrder, path)
 			}
@@ -302,7 +278,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 
 	for _, path := range finalOrder {
 		content := final[path]
-		absolute := filepath.Join(*root, path)
+		absolute := filepath.Join(work, path)
 		if content == nil {
 			_ = os.Remove(absolute)
 			continue
@@ -320,13 +296,13 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	// running window serves with this checkout's own build.
 	var changedPaths []string
 	if service.runningCommit != nil {
-		changedPaths = rsiChangedSince(*root, *service.runningCommit)
+		changedPaths = rsiChangedSince(work, *service.runningCommit)
 	}
 	relevant := append([]string{}, uniquePaths...)
 	relevant = append(relevant, ownedOrder...)
 	relevant = append(relevant, changedPaths...)
 	needsBuild := changedPaths == nil || rsiBuildRelevant(relevant)
-	raw := service.validate(RsiValidateInput{Root: *root, Checks: checks, Activate: activate, NeedsBuild: needsBuild})
+	raw := service.validate(RsiValidateInput{Root: work, Checks: checks, Activate: activate, NeedsBuild: needsBuild})
 	outputPath := service.rsiWriteReportFile(id, raw)
 	validation := []RsiValidationResult{}
 	for _, item := range raw {
@@ -346,7 +322,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		// already untouched.
 		for _, path := range snapshotOrder {
 			content := snapshots[path]
-			absolute := filepath.Join(*root, path)
+			absolute := filepath.Join(work, path)
 			if content == nil {
 				_ = os.Remove(absolute)
 				continue
@@ -379,6 +355,12 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			}
 		}
 		sort.Strings(pendingFiles)
+		if isolated {
+			// The gate measured the isolated tree, so that is the tree the next attempt
+			// has to iterate on. Only this change's own paths move; the foreign files in
+			// the shared checkout stay exactly as they are.
+			rsiCopyPaths(work, *root, pendingFiles)
+		}
 		_ = service.rsiWriteWorking(branch, pendingFiles)
 		failure := RsiReceipt{
 			Id: id, Status: "checks_failed", Title: title, Root: root, Branch: &branch, Commit: nil,
@@ -395,7 +377,13 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	// Paths this attempt wrote are expected to be dirty; anything else was verified by the checks
 	// but would stay out of the commit, so the green run must not become a commit.
 	unverified := []string{}
-	for _, path := range rsiDirtyPaths(*root) {
+	for _, path := range rsiDirtyPaths(work) {
+		// The isolated tree links the real checkout's dependencies, and a checkout
+		// whose ignore rules do not cover them would read that link as work nobody
+		// declared. It is the one entry in that tree HEAD does not own.
+		if isolated && (path == "node_modules" || strings.HasPrefix(path, "node_modules/")) {
+			continue
+		}
 		if !owned[path] && !seen[path] {
 			unverified = append(unverified, path)
 		}
@@ -417,7 +405,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	}
 	sort.Strings(commitPaths)
 	tracked := map[string]bool{}
-	for _, path := range strings.Split(Git(*root, append([]string{"ls-files", "--"}, commitPaths...), nil, nil).Stdout, "\n") {
+	for _, path := range strings.Split(Git(work, append([]string{"ls-files", "--"}, commitPaths...), nil, nil).Stdout, "\n") {
 		if path != "" {
 			tracked[path] = true
 		}
@@ -428,26 +416,29 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			stagePaths = append(stagePaths, path)
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(*root, path)); err == nil {
+		if _, err := os.Stat(filepath.Join(work, path)); err == nil {
 			stagePaths = append(stagePaths, path)
 		}
 	}
-	commit := RevParse(*root, "HEAD")
+	commit := RevParse(work, "HEAD")
 	committedNow := false
 	if len(stagePaths) > 0 {
-		staged := Git(*root, append([]string{"add", "-A", "--"}, stagePaths...), nil, nil)
+		staged := Git(work, append([]string{"add", "-A", "--"}, stagePaths...), nil, nil)
 		if staged.Code != 0 {
 			Raise("rsi_git", rsiFirstText(staged.Stderr, "Failed to stage RSI changes"))
 		}
-		committed := Git(*root, append([]string{"commit", "--no-verify", "-m", "rsi: " + title, "--"}, stagePaths...), nil, nil)
+		committed := Git(work, append([]string{"commit", "--no-verify", "-m", "rsi: " + title, "--"}, stagePaths...), nil, nil)
 		if committed.Code != 0 {
 			Raise("rsi_git", rsiFirstText(committed.Stderr, "Failed to commit RSI changes"))
 		}
-		commit = RevParse(*root, "HEAD")
+		commit = RevParse(work, "HEAD")
 		if commit == nil {
 			Raise("rsi_git", "RSI commit did not produce a HEAD")
 		}
 		committedNow = true
+	}
+	if isolated && committedNow && commit != nil {
+		rsiLandIsolatedCommit(*root, work, *commit, claimedPaths)
 	}
 	_ = os.Remove(service.rsiWorkingPath())
 
@@ -545,3 +536,4 @@ func rsiWriteShrinkRefusal(path, before, after string) string {
 		"RSI write to %s would replace %d lines with %d: a whole-file write carries no evidence of what it removed. "+
 			"Use replace with edits that name what goes, or split the deletion into several such edits.", path, oldLines, newLines)
 }
+

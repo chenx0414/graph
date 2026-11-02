@@ -1,3 +1,4 @@
+<!-- graph:allow-large-file: 它的 22 KB 早于预算；本次只替换「未提交改动」那一段，拆分是单独的编辑工作 -->
 # Graph Self Configuration
 
 ## 目标
@@ -86,7 +87,7 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 调用形状是固定的（写错会白跑一个来回，报错会点名缺哪个字段）：`title`、`problem`、`changes`、`checks` 都是**顶层**字段；`changes[]` 的每个条目必须带 `path`（仓储相对路径）与 `action`（`write` / `replace` / `delete`），`write` 配 `content` 或 `fromPath`、`replace` 配 `edits` 或 `fromPath`；`checks` 里每项是 `{ command, args }`，也放顶层，不要塞进单个 change 里。SDK 的校验**一次列全部问题**（每行一条，并回显收到的参数），所以两处错误会同时出现，不必改一条试一次。改动里的多个 `edits` 也一样：所有匹配不上的锚点（`found 0` / `found 2`）在同一条报错里列出，改一次就能重发，而不是一次只发现一个。嵌套写错的那种会另行点名（`changes[0] is one file change… "checks" belongs at the top level of the call - it is nested one level too deep.`），因为 schema 只能描述结果、说不出原因。
 
-**手工改过的文件不能搭这趟车，但你自己刚写的可以**：`apply_rsi_change` 拒绝运行于有未提交改动的 checkout（`Uncommitted changes outside this RSI change`），这条规则保护的是「检查跑在整个工作树上，它证明不了别人未提交的东西」。所以不属于这次改动的未提交文件照旧阻塞：先用 `git restore --staged --worktree -- <path>`（未跟踪的用 `rm`）恢复，再把同样的编辑作为 `changes[]` 传进去。**这次改动自己要写的路径**不受它影响：你用自己的工具把文件落盘、跑通，再用 `{path, action: "write", fromPath: "<同一个文件>"}` 命名它，提交的就是磁盘上的那些字节，收据会在「其中提交前已在工作区」里点名，不会悄悄带进来别的东西。
+**别人未提交的改动不会挡住你的提交，也不会被吞进去**：共用 checkout 里另有一路未提交的文件时，`apply_rsi_change` 在 HEAD 上开一个只带本次声明路径的临时 worktree，把改动写进去、在那里跑检查、在那里提交；随后只把当前分支移到那个提交（并刷新索引），**其余文件一个字节都不动、依旧未提交**。所以检查证明的仍然是提交里的东西，而你不必为别人的工作等它先提交。这条路径不可用时（比如未能在 HEAD 上建 worktree）才回落成拒绝，消息依旧是 `Uncommitted changes outside this RSI change`。**这次改动自己要写的路径**：你用自己的工具把文件落盘、跑通，再用 `{path, action: "write", fromPath: "<同一个文件>"}` 命名它，提交的就是磁盘上的那些字节，收据会在「其中提交前已在工作区」里点名。
 
 检查必须能证明它声称的东西：`node --run check` 同时跑 typecheck 与全部测试，是「快检」的下限。只拿单文件 vitest 当检查会漏掉类型错误（实际漏过两次：一次 TDZ、一次忘了提拔 `SCHEMA_VERSION`），所以快检至少写成 `node --run typecheck && node node_modules/vitest/vitest.mjs run <files>`，或者直接用 `node --run check`。
 

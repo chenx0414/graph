@@ -364,3 +364,47 @@ func RsiDirtyMessage(root string, blocked []string) string {
 		"or revert them with `git -C " + root + " restore --staged --worktree -- " + paths + "`. " +
 		"Files left behind by an earlier failed RSI attempt on this branch are committed instead of reported."
 }
+
+// rsiReplacedContent is the new text of one `replace` change: the file's current
+// text with every anchor edited, or the whole file when a fromPath supplies it.
+//
+// A batch rolls back as a whole, so every anchor that does not match is named in
+// one answer: the caller corrects the whole batch in one resend instead of
+// discovering the mismatches one call at a time. `owned` says the file currently
+// holds a failed attempt's uncommitted content, which is why a stale anchor is
+// explained instead of reading like a typo.
+func rsiReplacedContent(root string, change RsiFileChange, index int, path string, existing *string, owned bool) string {
+	if existing == nil {
+		Raise("not_found", "Cannot replace missing RSI file "+path)
+	}
+	content := *existing
+	if change.FromPath != nil {
+		content = rsiChangeContent(root, change, index)
+		if refusal := rsiWriteShrinkRefusal(path, *existing, content); refusal != "" {
+			Raise("rsi_edit_conflict", refusal)
+		}
+		return content
+	}
+	failures := []string{}
+	for editIndex, edit := range change.Edits {
+		matches := strings.Count(content, edit.OldText)
+		if matches != 1 {
+			failures = append(failures, rsiEditMismatch(editIndex, len(change.Edits), matches, edit.OldText))
+			continue
+		}
+		content = strings.Replace(content, edit.OldText, edit.NewText, 1)
+	}
+	if len(failures) > 0 {
+		hint := ""
+		if owned {
+			hint = "；该文件当前是上一轮未提交（检查失败保留）的内容：oldText 要按它现在的样子匹配，或改用 action \"write\" 直接给全文"
+		}
+		if len(failures) == 1 {
+			Raise("rsi_edit_conflict", "RSI replacement in "+path+" must match exactly once, "+failures[0]+hint)
+		}
+		Raise("rsi_edit_conflict", "RSI replacement in "+path+" has "+itoa(len(failures))+" of "+
+			itoa(len(change.Edits))+" edits that do not match exactly once, so nothing was written: "+
+			strings.Join(failures, "; ")+hint)
+	}
+	return content
+}

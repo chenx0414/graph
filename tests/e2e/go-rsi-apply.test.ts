@@ -1,3 +1,4 @@
+// graph:allow-large-file: its 24 KB predate the budget; this change replaces one case and splits nothing else
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -393,19 +394,32 @@ test('a batch whose anchors do not match names every bad edit and writes nothing
   expect(f.git(['status', '--porcelain'])).toBe('');
 }, 180_000);
 
-test('an unrelated uncommitted file still stops the change', async () => {
+test('another track\'s uncommitted work is left alone and stays out of the commit', async () => {
+  // The gate this change runs must also prove the isolation: it fails when the
+  // other track's untracked file is visible, and when a tracked file holds the
+  // other track's edit instead of the committed one.
+  const isolated = {
+    command: 'node',
+    args: ['-e', "const fs=require('node:fs');"
+      + "if(!fs.existsSync('welcome.txt'))process.exit(1);"
+      + "if(fs.readFileSync('welcome.txt','utf8')!=='hi\\n')process.exit(1);"
+      + "if(fs.existsSync('stranger.txt'))process.exit(1);"
+      + "if(fs.readFileSync('delete.txt','utf8')!=='remove me\\n')process.exit(1)"],
+  };
   const f = await fixture(() => [[{
     id: 'stranger',
     name: 'apply_rsi_change',
     arguments: JSON.stringify({
       ...base,
       changes: [{ path: 'welcome.txt', action: 'write', content: 'hi\n' }],
-      checks: [check],
+      checks: [isolated],
     }),
   }]]);
-  // Somebody else's work in the same checkout: checks would verify what the
-  // commit cannot contain, so the change is refused instead.
+  // Measured 2026-11-02: a whole other track sat uncommitted in this checkout for
+  // an hour, and every commit of mine was refused because of it. Both shapes are
+  // here: an untracked file and an edit to a tracked one.
   await writeFile(join(f.checkout, 'stranger.txt'), 'someone else work\n');
+  await writeFile(join(f.checkout, 'delete.txt'), 'someone else edits this\n');
 
   const started = await f.request('/api/conversations', {
     method: 'POST',
@@ -415,10 +429,22 @@ test('an unrelated uncommitted file still stops the change', async () => {
 
   const observed = f.provider.observed;
   await expect.poll(() => observed.has('stranger'), { timeout: 90_000, interval: 250 }).toBe(true);
-  expect(observed.get('stranger')).toMatch(/Uncommitted changes outside this RSI change: stranger\.txt/);
-  await expect(readFile(join(f.checkout, 'welcome.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
-  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
-  expect(f.git(['status', '--porcelain'])).toBe('?? stranger.txt');
+  const receipt = observed.get('stranger')!;
+  expect(receipt, 'the change was refused instead of isolated').not.toMatch(/Uncommitted changes outside this RSI change/);
+  expect(receipt).toMatch(/"status":"applied"|RSI 已提交/);
+
+  // The commit holds exactly this change, and the other track's work is still
+  // there, byte for byte, still uncommitted.
+  expect(f.git(['show', '--pretty=format:', '--name-only', 'HEAD']).split('\n').filter(Boolean).sort()).toEqual(['welcome.txt']);
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('2');
+  expect(f.git(['status', '--porcelain', '--', 'stranger.txt'])).toBe('?? stranger.txt');
+  expect(await readFile(join(f.checkout, 'stranger.txt'), 'utf8')).toBe('someone else work\n');
+  // `git status` is read through a helper that trims, so the worktree marker has no
+  // leading blank here; what matters is that the edit is still uncommitted.
+  expect(f.git(['status', '--porcelain', '--', 'delete.txt'])).toBe('M delete.txt');
+  expect(await readFile(join(f.checkout, 'delete.txt'), 'utf8')).toBe('someone else edits this\n');
+  // What the change committed is what sits in the caller's checkout once it lands.
+  expect(await readFile(join(f.checkout, 'welcome.txt'), 'utf8')).toBe('hi\n');
 }, 180_000);
 
 test('a dry run applies the change, runs the check and restores the checkout', async () => {
