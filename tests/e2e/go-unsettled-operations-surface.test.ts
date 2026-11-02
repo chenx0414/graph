@@ -91,6 +91,20 @@ test('an operation whose outcome never settled reaches main once', async () => {
     // The next pass must not report the same operation again.
     await new Promise(resolve => setTimeout(resolve, 65_000));
     expect((await surfaced()).length, 'the same operation was reported twice').toBe(1);
+
+    // "Acknowledge" closes the problem without pretending anything ran: the
+    // operation stays unknown, no new operation appears, and no message is
+    // re-queued for a turn nobody asked for.
+    const before = readDb(db => Number((db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=?').get(anchor) as { count: number }).count));
+    const acknowledged = await request(`/api/tasks/${anchor}/answer`, 'POST', {
+      questionId: question!.id, answer: { type: 'acknowledge' }, requestId: 'acknowledge-unsettled',
+    });
+    expect(acknowledged.status, JSON.stringify(acknowledged.body)).toBe(200);
+    const after = await surfaced();
+    expect(after[0]?.status).toBe('resolved');
+    expect(after[0]?.data, 'acknowledging rewrote the record').toContain('unsettled-probe-operation');
+    expect(readDb(db => (db.prepare("SELECT state FROM operations WHERE id='unsettled-probe-operation'").get() as { state: string }).state)).toBe('unknown');
+    expect(readDb(db => Number((db.prepare('SELECT COUNT(*) AS count FROM operations WHERE task_id=?').get(anchor) as { count: number }).count))).toBe(before);
   } finally {
     await daemon?.close();
     await provider.close();

@@ -207,6 +207,13 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			}
 			l.store.SetNodeStatus(taskId, nodeId, next)
 		}
+		// "acknowledge" on a problem whose outcome was never settled says "stop
+		// asking me": the operation stays unknown (the fact is kept, not erased),
+		// and the node stays parked so closing the problem cannot start a turn
+		// nobody asked for. A new message or an explicit retry releases it.
+		if kind == "recovery" && answer.Type == "acknowledge" {
+			l.store.SetNodeBlocked(taskId, nodeId)
+		}
 		return nil
 	})
 }

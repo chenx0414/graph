@@ -79,7 +79,7 @@ var questionPolicies = map[string]QuestionPolicy{
 	"model_unavailable":    {Owner: QuestionOwnerMain, Answers: []string{"retry"}},
 	"git_conflict":         {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
 	"context_rejected":     {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, RetryOnMessage: true, Escalate: true},
-	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
+	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry", "acknowledge"}, RetryOnMessage: true},
 	"result_noncompliant":  {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, Escalate: true},
 	"git_dirty":            {Owner: QuestionOwnerMain, Answers: []string{"acknowledge"}},
 	// A node stuck for three rounds or returned for rework may need a decision
