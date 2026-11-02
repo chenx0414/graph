@@ -125,6 +125,12 @@ test('a problem nobody acted on reaches the person, and nothing is retried', asy
     expect(question?.kind).toBe('execution_failed');
     expect(question?.data?.escalatedFrom).toBe('execution_failed');
     expect(String(question?.data?.escalationPrompt ?? '')).toMatch(/已经等了 \d+ 分钟/);
+    // Measured 2026-11-01: re-owning the failed turn's question made the master
+    // stop looking parked, so it took a turn with nothing to answer and the same
+    // user message reached the provider a second time. Parking follows the kind
+    // now; the parked turn still fails, so nothing may call the provider while
+    // the question waits for a person.
+    expect(provider.requests.length, 'the parked master called the provider again').toBe(1);
 
     // Answering is still the only way out, and it is recorded against the
     // question the person was actually shown.
