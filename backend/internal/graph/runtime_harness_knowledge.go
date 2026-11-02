@@ -1,11 +1,30 @@
 package graph
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"encoding/json"
 )
+
+// harnessRecordingId names one recording intent.
+//
+// The id used to be built from the millisecond the record was created, so two
+// records written by one assistant message - the kernel runs a tool batch in
+// parallel - shared it whenever they landed in the same millisecond, and the
+// second was refused with "requestId was already used with different content":
+// a lost write dressed as a conflict. The id now names what is being recorded,
+// so the same intent replays and a different one always gets its own id.
+func harnessRecordingId(prefix string, parts ...string) string {
+	digest := sha256.New()
+	for _, part := range parts {
+		digest.Write([]byte(part))
+		digest.Write([]byte{0})
+	}
+	return prefix + "-" + hex.EncodeToString(digest.Sum(nil)[:8])
+}
 
 // HARNESS_KIND_FRICTION is the old name for the stage a record is at before
 // it was solved. It is read for the records written under the first shape.
@@ -197,7 +216,7 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	content := string(body)
 	requestId := strings.TrimSpace(input.RequestId)
 	if requestId == "" {
-		requestId = "harness-decision-" + harnessSlug(domain) + "-" + itoa(int(entry.CreatedAt))
+		requestId = harnessRecordingId("harness-decision", scope, entry.Chosen, entry.Cue, entry.Lesson, entry.Evidence, entry.Harness)
 	}
 	published := store.publish(PublishArtifactInput{
 		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
@@ -356,7 +375,7 @@ func harnessRecordFriction(store *harnessArtifactStore, entries []HarnessExperie
 	content := string(body)
 	requestId := strings.TrimSpace(input.RequestId)
 	if requestId == "" {
-		requestId = "harness-friction-" + harnessSlug(scope) + "-" + itoa(int(entry.CreatedAt))
+		requestId = harnessRecordingId("harness-friction", scope, entry.Cue, entry.Status, entry.Ref, entry.Note)
 	}
 	published := store.publish(PublishArtifactInput{
 		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
