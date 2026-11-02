@@ -160,16 +160,16 @@ test('a lesson claimed on the general axis reaches every domain, while a domain 
   expect(runtimes.sort()).toEqual(['DOMAIN_VARIANT_RULE', 'GENERAL_VARIANT_RULE']);
 
   // Both decisions are recorded, each in the scope its axis names.
-  const generalDecision = JSON.parse(resultOf('decide-general') || '{}') as { axis: string; scope: string; entries: { axis: string; chosen: string }[] };
+  const generalDecision = JSON.parse(resultOf('decide-general') || '{}') as { axis: string; scope: string; entry?: { axis: string; chosen: string } };
   expect(generalDecision.axis).toBe('general');
   expect(generalDecision.scope).toBe('general');
   // The anonymous letter only means something inside the comparison it came
   // from: the record names the candidate, so a later reader still understands it.
-  expect(generalDecision.entries[0]!.chosen).toBe('general-way');
-  const specificDecision = JSON.parse(resultOf('decide-specific') || '{}') as { axis: string; scope: string; entries: { axis: string; chosen: string }[] };
+  expect(generalDecision.entry?.chosen).toBe('general-way');
+  const specificDecision = JSON.parse(resultOf('decide-specific') || '{}') as { axis: string; scope: string; entry?: { axis: string; chosen: string } };
   expect(specificDecision.axis).toBe('specific');
   expect(specificDecision.scope).toBe('parser');
-  expect(specificDecision.entries[0]!.chosen).toBe('domain-way');
+  expect(specificDecision.entry?.chosen).toBe('domain-way');
 
   // The domain finds both: its own lesson and the general one.
   const parser = JSON.parse(resultOf('read-parser') || '{}') as { entries: { axis: string; lesson: string }[] };

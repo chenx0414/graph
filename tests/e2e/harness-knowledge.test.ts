@@ -74,7 +74,12 @@ test('friction and adopted lessons live in one store, and only the adopted ones 
           } }];
           break;
         case 3:
-          calls = [{ id: 'read', name: 'read_harness_experience', args: { domain: 'parser' } }];
+          calls = [
+            { id: 'read', name: 'read_harness_experience', args: { domain: 'parser' } },
+            // One state at a time, bounded: the caller says what it is looking for
+            // instead of paying for the whole history on every read.
+            { id: 'read-open', name: 'read_harness_experience', args: { domain: 'parser', status: 'open', limit: 1 } },
+          ];
           break;
       }
       step++;
@@ -132,6 +137,21 @@ test('friction and adopted lessons live in one store, and only the adopted ones 
   expect(lesson!.lesson).toContain('Trim the trailing empty line');
   expect(lessons).toHaveLength(2);
   expect(lessons.some(entry => entry.lesson.includes('Read the header row'))).toBe(true);
+
+  // A write answers with the record it wrote, not with the whole scope: echoing
+  // every entry cost about 15 KB per call (measured 2026-11-02), which made
+  // "record a friction" more expensive than the friction itself.
+  const frictionReceipt = JSON.parse(results.get('friction') || '{}') as { entry?: { cue: string; status: string }; entries?: unknown; total?: number };
+  expect(frictionReceipt.entry?.cue).toBe('A file that is not there.');
+  expect(frictionReceipt.entry?.status).toBe('open');
+  expect(frictionReceipt.entries, 'the write still echoes the whole scope').toBeUndefined();
+  expect(frictionReceipt.total).toBeGreaterThanOrEqual(1);
+
+  // A read narrows by state and bounds itself, and says whether it left records out.
+  const openOnly = JSON.parse(results.get('read-open') || '{}') as { entries: { status: string }[]; total: number; truncated: boolean };
+  expect(openOnly.entries).toHaveLength(1);
+  expect(openOnly.entries[0]!.status).toBe('open');
+  expect(openOnly.truncated).toBe(openOnly.total > 1);
 
   // The next task of the project starts with the adopted lesson - and not with
   // the friction, which is a suspicion and not a lesson.

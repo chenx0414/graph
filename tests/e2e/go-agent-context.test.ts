@@ -167,3 +167,24 @@ test('the documentation pointer can be compacted without losing the paths', asyn
   // The paths are still there - a shorter pointer is not a lost pointer.
   expect(compactInstructions).toContain('docs/agent/README.md');
 }, 240_000);
+
+test('a conversation whose workspace is gone answers what is missing instead of a server error', async () => {
+  const f = await fixture({ matchSearch: false, classifyFriction: false, compactDocs: false, ownerRules: false });
+  const created = await f.daemon.request('/api/conversations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'Read your instructions.', requestId: 'agent-context-gone' }),
+  });
+  expect(created.status).toBe(200);
+  const { conversationId } = await created.json() as { conversationId: string };
+
+  // Measured 2026-11-02: a conversation from a /private/tmp project kept its row
+  // after the directory was cleaned up, and its context preview answered 500 -
+  // the console could only show it as a failed request.
+  await rm(join(f.root, 'project'), { recursive: true, force: true });
+  const preview = await f.daemon.request(`/api/agent-context?conversationId=${conversationId}`);
+  expect(preview.status).toBe(400);
+  const body = await preview.json() as { code?: string; message?: string };
+  expect(body.code).toBe('workspace_missing');
+  expect(body.message).toContain('no longer exists');
+}, 120_000);

@@ -34,8 +34,10 @@ func harnessToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 			{"domain", tbString(map[string]any{"description": "The name of the kind of work this project does."})},
 			{"requestId", tbOptional(tbString(nil))},
 		}, []string{"domain"}), Available: main && features.Harness},
-		{Name: "read_harness_experience", Label: "Read harness experience", Description: "Read recorded harness friction and decisions. Filter and page results before inspecting a specific record.", Parameters: tbObject([]tbField{
+		{Name: "read_harness_experience", Label: "Read harness experience", Description: "Read recorded harness friction and decisions. Narrow it with status and limit, and check truncated before assuming you have seen everything.", Parameters: tbObject([]tbField{
 			{"domain", tbOptional(tbString(map[string]any{"description": "Domain to read. Omit it to list the domains that hold lessons."}))},
+			{"status", tbOptional(tbString(map[string]any{"description": "Only records in this state: open, adopted, fixed or rejected."}))},
+			{"limit", tbOptional(tbNumber())},
 		}, nil), Available: main && features.Harness},
 		{Name: "read_harness_evidence", Label: "Read harness evidence", Description: "Read evidence for a harness change or candidate. Use evidence to distinguish an observed failure from a hypothesis.", Parameters: tbObject([]tbField{
 			{"graphId", tbOptional(tbString(map[string]any{"description": "Graph to read. Omit it to read this conversation's own run."}))},

@@ -112,7 +112,14 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 					RequestId: requestId,
 				})
 			})
-			return agentToolsText(stringifyJSON(result))
+			// The record it wrote, not the whole scope: echoing every entry cost about
+			// 15 KB per call (measured 2026-11-02), which made "record a lesson" more
+			// expensive than the lesson itself.
+			return agentToolsText(stringifyJSON(map[string]any{
+				"domain": result.Domain, "axis": result.Axis, "scope": result.Scope, "chosen": result.Chosen,
+				"artifactId": result.ArtifactId, "version": result.Version, "total": len(result.Entries),
+				"entry": harnessWrittenEntry(result.Entries, strings.TrimSpace(agentToolsString(params["cue"]))),
+			}))
 		},
 		"read_harness_experience": func(id string, params map[string]any) any {
 			domain := ""
@@ -120,9 +127,15 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 				domain = strings.TrimSpace(value)
 			}
 			if input.GraphManagement.HarnessExperience == nil {
-				return agentToolsText(stringifyJSON(HarnessExperienceResult{}))
+				return agentToolsText(stringifyJSON(HarnessExperienceView{Entries: []HarnessExperienceEntry{}}))
 			}
-			return agentToolsText(stringifyJSON(input.GraphManagement.HarnessExperience(map[string]any{"domain": domain})))
+			status := strings.TrimSpace(agentToolsStringOrEmpty(params["status"]))
+			limit := 0
+			if value, ok := agentToolsNumber(params["limit"]); ok {
+				limit = int(value)
+			}
+			read, _ := input.GraphManagement.HarnessExperience(map[string]any{"domain": domain}).(HarnessExperienceResult)
+			return agentToolsText(stringifyJSON(harnessExperiencePage(read, status, limit)))
 		},
 		"read_harness_evidence": func(id string, params map[string]any) any {
 			if input.GraphManagement.HarnessEvidence == nil {
@@ -195,7 +208,11 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 					RequestId: requestId,
 				})
 			})
-			return agentToolsText(stringifyJSON(result))
+			return agentToolsText(stringifyJSON(map[string]any{
+				"domain": result.Domain, "axis": result.Axis, "status": result.Status,
+				"artifactId": result.ArtifactId, "version": result.Version, "total": len(result.Entries),
+				"entry": harnessWrittenEntry(result.Entries, strings.TrimSpace(agentToolsStringOrEmpty(params["cue"]))),
+			}))
 		},
 		"declare_harness_domain": func(id string, params map[string]any) any {
 			if !artifacts.present || artifacts.publish == nil {

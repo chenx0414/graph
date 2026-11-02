@@ -167,10 +167,10 @@ test('one run reads its own evidence, probes two harnesses, keeps the lesson, an
   expect(probe.comparison.candidates[0]!.outputValues.out).not.toEqual(probe.comparison.candidates[1]!.outputValues.out);
 
   // 3. The decision was kept, on the general axis.
-  const decision = JSON.parse(await waitFor('decide') || '{}') as { axis: string; scope: string; entries: { lesson: string }[] };
+  const decision = JSON.parse(await waitFor('decide') || '{}') as { axis: string; scope: string; entry?: { lesson: string } };
   expect(decision.axis).toBe('general');
   expect(decision.scope).toBe('general');
-  expect(decision.entries[0]!.lesson).toContain('Read the file list before reading a file.');
+  expect(decision.entry?.lesson).toContain('Read the file list before reading a file.');
 
   // 4. The next task of the project starts with that lesson.
   const second = await daemon.request('/api/conversations', {

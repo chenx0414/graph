@@ -142,10 +142,14 @@ test('a second probe starts from the harness the project already adopted', async
   while (!results.get('probe-two') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
 
   // The adopted lesson keeps the harness it was adopted from.
-  const decision = JSON.parse(results.get('adopt') || '{}') as { entries: { chosen: string; overlay: Record<string, string> }[] };
-  expect(decision.entries[0]!.chosen).toBe('alpha');
-  expect(decision.entries[0]!.overlay['rules/worker.md']).toBe('X_TEXT');
-  expect(decision.entries[0]!.overlay['tools/worker.md']).toBe('X_TOOLS');
+  // The write answers with the record it wrote: the lesson keeps the harness it
+  // was adopted from, and the reply no longer echoes the whole scope.
+  const decision = JSON.parse(results.get('adopt') || '{}') as { entry?: { chosen: string; overlay: Record<string, string> }; entries?: unknown };
+  expect(decision.entry, 'the write does not name the record it wrote').toBeTruthy();
+  expect(decision.entry!.chosen).toBe('alpha');
+  expect(decision.entry!.overlay['rules/worker.md']).toBe('X_TEXT');
+  expect(decision.entry!.overlay['tools/worker.md']).toBe('X_TOOLS');
+  expect(decision.entries, 'the write still echoes the whole scope').toBeUndefined();
 
   // The second round starts from that harness and layers the new change on top.
   const second = JSON.parse(results.get('probe-two') || '{}') as {

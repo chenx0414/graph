@@ -45,7 +45,21 @@ func (app *GraphApp) serveLayoutRoutes(w http.ResponseWriter, r *http.Request) {
 			Raise("invalid_input", "Missing layout endpoint for "+edge.ID)
 		}
 	}
-	routes := OrthogonalRoutes(request.Edges, request.Positions, request.NodeIDs)
+	// The router walks its own grid and panics when a connector cannot be routed.
+	// That is a fact about the geometry the caller sent, not a broken daemon:
+	// measured 2026-11-02, two boxes 200px apart answered 500 while the same
+	// boxes 192px apart answered 200, because 200 is not a multiple of the 16px
+	// layout grid.
+	routes := map[string][]LayoutPoint{}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				Raise("invalid_input", "These boxes cannot be routed: every x, y, width and height must sit on the "+
+					itoa(layoutGRID)+"px layout grid, and no connector may cross a box")
+			}
+		}()
+		routes = OrthogonalRoutes(request.Edges, request.Positions, request.NodeIDs)
+	}()
 	if routes == nil {
 		routes = map[string][]LayoutPoint{}
 	}

@@ -81,6 +81,22 @@ test('a real task answers its graph view with the graph, not a server error', as
     expect(points?.length).toBeGreaterThan(1);
     expect(points?.[0]).toEqual({ x: 80, y: 64 });
     expect(points?.[points.length - 1]).toEqual({ x: 80, y: 192 });
+
+    // A box that does not sit on the layout grid cannot be routed, and that is a
+    // fact about the caller's geometry: measured 2026-11-02, the same two boxes
+    // 8px lower answered 500, which the console could only report as a broken
+    // request. It names the constraint instead.
+    const offGrid = await request('/api/layout/routes', 'POST', {
+      edges: [{ id: 'link', source: 'a', target: 'b' }],
+      positions: {
+        a: { x: 0, y: 0, width: 160, height: 64 },
+        b: { x: 0, y: 200, width: 160, height: 64 },
+      },
+      nodeIds: ['a', 'b'],
+    });
+    expect(offGrid.status, JSON.stringify(offGrid.body)).toBe(400);
+    expect((offGrid.body as { code?: string }).code).toBe('invalid_input');
+    expect(JSON.stringify(offGrid.body)).toContain('16px layout grid');
   } finally {
     await daemon?.close();
     await main.close();

@@ -134,6 +134,66 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 	return result
 }
 
+// HarnessExperienceView is what one read answers: the records that matched,
+// bounded, and how many there were.
+type HarnessExperienceView struct {
+	Domain      string                   `json:"domain,omitempty"`
+	Scopes      []string                 `json:"scopes,omitempty"`
+	Entries     []HarnessExperienceEntry `json:"entries"`
+	Total       int                      `json:"total"`
+	Truncated   bool                     `json:"truncated"`
+}
+
+// HARNESS_EXPERIENCE_READ_MAX bounds one read when the caller names no limit.
+const HARNESS_EXPERIENCE_READ_MAX = 12
+
+// harnessExperiencePage narrows one read.
+//
+// Measured 2026-11-02: the read answered with the whole scope - about 46 KB in
+// this project - because the call could not say what it was looking for. A
+// caller that wants "what is still open" now says so, and pays for that list
+// instead of the whole history.
+func harnessExperiencePage(result HarnessExperienceResult, status string, limit int) HarnessExperienceView {
+	status = strings.TrimSpace(status)
+	if limit <= 0 || limit > 200 {
+		limit = HARNESS_EXPERIENCE_READ_MAX
+	}
+	matched := []HarnessExperienceEntry{}
+	for _, entry := range result.Entries {
+		if status != "" && !strings.EqualFold(entry.Status, status) {
+			continue
+		}
+		matched = append(matched, entry)
+	}
+	// The slice is the newest one, because a caller that just recorded something
+	// has to be able to read it back without asking for the whole history. The
+	// order inside the slice stays oldest first, which is how it reads.
+	kept := matched
+	if len(matched) > limit {
+		kept = matched[len(matched)-limit:]
+	}
+	return HarnessExperienceView{
+		Domain: result.Domain, Scopes: result.Scopes,
+		Entries: kept, Total: len(matched), Truncated: len(matched) > len(kept),
+	}
+}
+
+// harnessWrittenEntry is the record a write just produced: the one with this
+// cue, or the newest record when the caller named no cue.
+func harnessWrittenEntry(entries []HarnessExperienceEntry, cue string) *HarnessExperienceEntry {
+	if cue != "" {
+		for index := range entries {
+			if entries[index].Cue == cue {
+				return &entries[index]
+			}
+		}
+	}
+	if len(entries) > 0 {
+		return &entries[len(entries)-1]
+	}
+	return nil
+}
+
 // HARNESS_EXPERIENCE_PROMPT_MAX bounds how many lessons travel in a prompt.
 const HARNESS_EXPERIENCE_PROMPT_MAX = 5
 

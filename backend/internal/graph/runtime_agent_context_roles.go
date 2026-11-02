@@ -12,7 +12,11 @@ func OpenAgentContextAssembly(input AgentContextAssemblyOptions) *AgentContextAs
 	if input.Workspace != "" {
 		resolved, err := filepath.EvalSymlinks(input.Workspace)
 		if err != nil {
-			panic(err)
+			// A workspace directory that no longer exists is a fact about the
+			// data, not a broken daemon: measured 2026-11-02, a conversation from
+			// a /private/tmp project kept answering 500 for its context preview,
+			// which the console reported as a failed request.
+			Raise("workspace_missing", "The conversation workspace no longer exists: "+input.Workspace)
 		}
 		workspace = resolved
 	}
