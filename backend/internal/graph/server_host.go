@@ -89,6 +89,10 @@ type GraphServerOptions struct {
 // indexed read, but it does not need to ride every drive tick.
 const problemSweepMs = 60 * 1000
 
+// unsettledSweepMs is how often an operation whose outcome was never settled is
+// handed to the main Agent.
+const unsettledSweepMs = 60 * 1000
+
 // GraphHost is the listening daemon and its drive loop.
 type GraphHost struct {
 	Runtime *TaskRuntime
@@ -103,6 +107,8 @@ type GraphHost struct {
 	pump     func()
 	// lastProblemSweep is only touched by the drive loop.
 	lastProblemSweep int64
+	// lastUnsettledSweep is only touched by the drive loop.
+	lastUnsettledSweep int64
 }
 
 // OpenGraphServer binds 127.0.0.1 and drives the runtime.
@@ -184,6 +190,15 @@ func (h *GraphHost) drive() {
 			defer func() { _ = recover() }()
 			h.Runtime.ApplyDeferredExtensionReload()
 		}()
+		// An operation whose outcome was never settled is invisible otherwise: no
+		// result, no usage, no question. Hand it to main a few at a time.
+		if now := NowMillis(); now-h.lastUnsettledSweep >= unsettledSweepMs {
+			h.lastUnsettledSweep = now
+			func() {
+				defer func() { _ = recover() }()
+				h.Runtime.SweepUnsettledOperations(now)
+			}()
+		}
 		if driving {
 			func() {
 				defer func() { _ = recover() }()
