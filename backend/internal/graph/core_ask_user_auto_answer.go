@@ -50,8 +50,7 @@ func (runtime *TaskRuntime) SweepAutoAnswerQuestions(now int64) int {
 			if name == "" {
 				name = "列表第一项"
 			}
-			kernelExec(runtime.store.Db, `UPDATE questions SET data=json_set(COALESCE(data,'{}'),'$.autoAnsweredAt',?)
-          WHERE id=?`, now, questionId)
+			runtime.store.MarkQuestionAutoAnswered(questionId, now)
 			if conversation := ConversationForTask(runtime.store, taskId); conversation != nil {
 				AppendMessage(runtime.store, MessageInput{
 					ConversationID: conversation.Id,

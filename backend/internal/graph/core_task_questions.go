@@ -56,3 +56,37 @@ func (s *TaskStore) ResolveNodeBudgetQuestions(taskID, nodeID string, answer any
 func (s *TaskStore) AmendQuestionData(questionID string, data any) {
 	kernelExec(s.DB, "UPDATE questions SET data=? WHERE id=?", CanonicalJSON(data), questionID)
 }
+
+// MarkQuestionAutoAnswered records that the harness answered for the person.
+//
+// It is the only trace of a decision nobody made: the answer says what was
+// chosen, this says the choice was not theirs, so the card can say so.
+func (s *TaskStore) MarkQuestionAutoAnswered(questionID string, at int64) {
+	kernelExec(s.DB, `UPDATE questions SET data=json_set(COALESCE(data,'{}'),'$.autoAnsweredAt',?)
+          WHERE id=?`, at, questionID)
+}
+
+// RearmQuestion restarts the wait on a question the person asked to leave open.
+//
+// The card stops shouting for another deadline and keeps the decision: the
+// question is still open, still theirs, and the harness still knows it waited.
+func (s *TaskStore) RearmQuestion(taskID, questionID string) {
+	now := NowMillis()
+	kernelExec(s.DB, `UPDATE questions SET asked_at=?,
+	  data=json_set(COALESCE(data,'{}'),
+	    '$.waitedTimes', COALESCE(json_extract(data,'$.waitedTimes'),0)+1,
+	    '$.keptWaitingAt', ?)
+	  WHERE id=? AND task_id=? AND status='open'`, now, now, questionID, taskID)
+}
+
+// EscalateQuestionOwnership hands an open question to the person, with the
+// reason it reached them.
+//
+// Re-owning, not replacing: the question keeps its kind, its label and the
+// answers it already accepts. A new waiting question would throw those away
+// and leave the person with a free-text box.
+func (s *TaskStore) EscalateQuestionOwnership(questionID string, escalatedAt int64, from string, waitedMs int64, prompt string) {
+	kernelExec(s.DB, `UPDATE questions SET owner='user', route_stage=NULL,
+ data=json_set(data,'$.escalatedAt',?,'$.escalatedFrom',?,'$.escalatedWaitedMs',?,'$.escalationPrompt',?)
+ WHERE id=? AND status='open' AND data IS NOT NULL`, escalatedAt, from, waitedMs, prompt, questionID)
+}

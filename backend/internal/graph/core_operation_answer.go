@@ -224,12 +224,7 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 // the difference between "wait" and dismissing it: the question is still open,
 // still the person's, and the harness still knows it waited.
 func (l *OperationLifecycle) rearmQuestion(taskId, questionId string) {
-	now := NowMillis()
-	kernelExec(l.store.Db, `UPDATE questions SET asked_at=?,
-	  data=json_set(COALESCE(data,'{}'),
-	    '$.waitedTimes', COALESCE(json_extract(data,'$.waitedTimes'),0)+1,
-	    '$.keptWaitingAt', ?)
-	  WHERE id=? AND task_id=? AND status='open'`, now, now, questionId, taskId)
+	l.store.RearmQuestion(taskId, questionId)
 	l.store.Event(taskId, "problem.kept_waiting", map[string]any{"questionId": questionId})
 }
 

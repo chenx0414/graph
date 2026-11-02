@@ -132,7 +132,7 @@ def main():
         # run them at the same time; the affected tests share daemons and scratch
         # directories, so they still queue. Serializing the static half made every
         # activation wait for whoever else was checking, for no shared resource.
-        static = ("check:backend", "typecheck", "lint", "check:harness")
+        static = ("check:backend", "typecheck", "lint", "check:ownership", "check:harness")
         tests = ("check:affected", "check:evidence")
         with protect_worktree(common):
             for step in static:

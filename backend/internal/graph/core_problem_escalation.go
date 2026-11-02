@@ -64,9 +64,7 @@ func (runtime *TaskRuntime) SweepUnattendedProblems(now int64) int {
 				// Re-owning, not replacing: the question keeps its kind, its label and
 				// the answers it already accepts. A new waiting question would have
 				// thrown those away and left the person with a free-text box.
-				kernelExec(runtime.store.Db, `UPDATE questions SET owner='user', route_stage=NULL,
- data=json_set(data,'$.escalatedAt',?,'$.escalatedFrom',?,'$.escalatedWaitedMs',?,'$.escalationPrompt',?)
- WHERE id=? AND status='open' AND data IS NOT NULL`, now, kind, waited, prompt, questionID)
+				runtime.store.EscalateQuestionOwnership(questionID, now, kind, waited, prompt)
 				runtime.store.Event(taskID, "problem.escalated.unattended", map[string]any{
 					"questionId": questionID,
 					"kind":       kind,
