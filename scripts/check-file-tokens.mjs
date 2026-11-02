@@ -18,11 +18,12 @@
  *
  * Usage:
  *   node scripts/check-file-tokens.mjs            # check the staged files
+ *   node scripts/check-file-tokens.mjs --changed  # check what the working tree changed
  *   node scripts/check-file-tokens.mjs <path>...  # check those files (working tree)
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -223,7 +224,7 @@ function blobHead(sha) {
 function fileRecords(paths) {
   const records = [];
   for (const path of paths) {
-    const absolute = resolve(process.cwd(), path);
+    const absolute = resolve(REPO_ROOT, path);
     const stats = statSync(absolute);
     if (!stats.isFile()) continue;
     records.push({
@@ -233,6 +234,25 @@ function fileRecords(paths) {
     });
   }
   return records;
+}
+
+/**
+ * The paths an uncommitted change touches: what the next commit would contain.
+ *
+ * The gate runs on a working tree, not on an index, and the self-improvement
+ * path commits with the hooks skipped - so "staged" is empty exactly when the
+ * budget most needs measuring. This is the same set the RSI guard calls dirty:
+ * tracked files that differ from HEAD, plus the files nobody has added yet.
+ */
+function changedPaths() {
+  const read = (args) => execFileSync('git', args, {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  }).split('\0').filter(Boolean);
+  const tracked = read(['diff', '--name-only', '-z', 'HEAD']);
+  const untracked = read(['ls-files', '--others', '--exclude-standard', '-z']);
+  return [...new Set([...tracked, ...untracked])];
 }
 
 function stagedRecords() {
@@ -290,7 +310,7 @@ function formatBytes(bytes) {
 }
 
 function report(violations, skipped, limit) {
-  console.error(`pre-commit: ${violations.length} file(s) exceed the ${limit.toLocaleString('en-US')}-token file budget (bytes / ${BYTES_PER_TOKEN}).\n`);
+  console.error(`${violations.length} file(s) exceed the ${limit.toLocaleString('en-US')}-token file budget (bytes / ${BYTES_PER_TOKEN}).\n`);
   for (const record of violations) {
     const tokens = Math.ceil(record.bytes / BYTES_PER_TOKEN);
     console.error(`  ${record.path}`);
@@ -303,7 +323,7 @@ function report(violations, skipped, limit) {
   console.error('     topic instead of by length.');
   console.error('  2. Keep the interface of the file you shrink stable, so callers do not');
   console.error('     change. Move the code out first, rewrite it afterwards.');
-  console.error('  3. Fix the imports on both sides, stage the new files, commit again.');
+  console.error('  3. Fix the imports on both sides, then commit again.');
   console.error('');
   console.error('  Check the split with:  node --run check:tokens');
   console.error('');
@@ -326,7 +346,11 @@ function report(violations, skipped, limit) {
 function main() {
   const limit = tokenLimit();
   const explicit = process.argv.slice(2);
-  const records = explicit.length ? fileRecords(explicit) : stagedRecords();
+  const changed = explicit.includes('--changed');
+  const paths = explicit.filter(argument => argument !== '--changed');
+  const records = changed
+    ? fileRecords(changedPaths().filter(path => existsSync(resolve(REPO_ROOT, path))))
+    : paths.length ? fileRecords(paths) : stagedRecords();
   const { violations, skipped } = check(records, limit);
 
   if (violations.length) {
@@ -334,8 +358,9 @@ function main() {
     process.exit(1);
   }
 
+  const scope = changed ? 'changed' : paths.length ? 'named' : 'staged';
   console.log(
-    `pre-commit: ${records.length} staged file(s) within the ${limit.toLocaleString('en-US')}-token budget` +
+    `file budget: ${records.length} ${scope} file(s) within the ${limit.toLocaleString('en-US')}-token budget` +
       `${skipped.length ? `, ${skipped.length} skipped as not agent-authored` : ''}.`,
   );
 }
