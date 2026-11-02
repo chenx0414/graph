@@ -103,7 +103,7 @@ type RsiReceipt struct {
 	// Adopted are paths this change writes that were already uncommitted in the
 	// checkout before it ran (the Agent's own draft, verified and then committed).
 	Adopted []string `json:"adopted,omitempty"`
-	Report       string   `json:"report"`
+	Report  string   `json:"report"`
 	// OutputPath is the full check output for this attempt, written outside the receipt the
 	// conversation stores.
 	OutputPath *string `json:"outputPath,omitempty"`
@@ -224,9 +224,12 @@ type RsiStatus struct {
 	Sync           *RsiSyncState      `json:"sync"`
 	PendingRestart *RsiPendingRestart `json:"pendingRestart"`
 	// LastActivation is the last confirmed reload.
-	LastActivation   *RsiLastActivation `json:"lastActivation"`
-	ActiveOperations int                `json:"activeOperations"`
-	Operations       []RsiOperation     `json:"operations"`
+	LastActivation *RsiLastActivation `json:"lastActivation"`
+	// InterruptedAttempt answers what a call that never returned did: it is only
+	// present while the file it wrote before starting is still there.
+	InterruptedAttempt *RsiInterruptedAttempt `json:"interruptedAttempt"`
+	ActiveOperations   int                    `json:"activeOperations"`
+	Operations         []RsiOperation         `json:"operations"`
 	// OperationsKnown is false when the operation ledger could not be read, so a reload must wait.
 	OperationsKnown bool `json:"operationsKnown"`
 	CanRestart      bool `json:"canRestart"`

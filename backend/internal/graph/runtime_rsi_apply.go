@@ -127,6 +127,11 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 	}
 
+	// Recorded before anything else, so a call that never returns can still be
+	// answered afterwards; every normal exit clears it.
+	service.rsiBeginAttempt(id, title, *root, branch, *originalHead, uniquePaths)
+	defer service.rsiClearAttempt()
+
 	createdBranch := false
 	if originalBranch == nil || branch != *originalBranch {
 		switched := Git(*root, []string{"switch", "-c", branch}, nil, nil)
@@ -536,4 +541,3 @@ func rsiWriteShrinkRefusal(path, before, after string) string {
 		"RSI write to %s would replace %d lines with %d: a whole-file write carries no evidence of what it removed. "+
 			"Use replace with edits that name what goes, or split the deletion into several such edits.", path, oldLines, newLines)
 }
-

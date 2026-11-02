@@ -203,6 +203,9 @@ func (service *RsiService) Status(compare bool) RsiStatus {
 		PendingRestart:  service.rsiReadRestart(),
 		LastActivation:  service.rsiReadActivation(),
 	}
+	if attempt := service.rsiReadAttempt(); attempt != nil {
+		status.InterruptedAttempt = service.rsiDeriveAttempt(*attempt)
+	}
 	if service.Available && service.Root != nil {
 		status.Available = true
 		status.Root = service.Root
