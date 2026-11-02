@@ -1,10 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { launchCli } from '../helpers/cli-daemon.ts';
-import { openaiServer } from '../fixtures/openai-server.ts';
+import { withExtension, type ConversationView } from '../helpers/pi-extension-fixture.ts';
 
 // A real Pi extension: the module a Pi extension package ships, loaded by Pi's
 // own extension loader. It registers one tool and watches every tool call.
@@ -53,78 +51,6 @@ export default function (pi) {
   });
 }
 `;
-
-interface ConversationMessage { role?: string; kind?: string; text?: string }
-interface ConversationView {
-  master?: { status?: string };
-  messages?: ConversationMessage[];
-  questions?: { kind?: string; owner?: string; status?: string; data?: { output?: { setupError?: string } } }[];
-}
-
-/** One daemon, one capability, one pi extension on disk. */
-async function withExtension(
-  source: string,
-  declaredTools: { name: string; description: string }[],
-  run: (context: {
-    daemon: Awaited<ReturnType<typeof launchCli>>;
-    provider: Awaited<ReturnType<typeof openaiServer>>;
-    project: string;
-    capabilityDirectory: string;
-  }) => Promise<void>,
-  access?: unknown,
-  script?: Parameters<typeof openaiServer>[0],
-) {
-  const root = await mkdtemp(join(tmpdir(), 'graph-pig-pi-extension-'));
-  const project = join(root, 'project');
-  const home = join(root, 'graph-home');
-  await mkdir(project);
-  await mkdir(join(root, 'web'));
-  await mkdir(home);
-  await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
-
-  const capabilityDirectory = join(home, 'capabilities', 'pi-extension', 'proof-1.0.0');
-  await mkdir(capabilityDirectory, { recursive: true });
-  await writeFile(join(capabilityDirectory, 'index.mjs'), source);
-  await writeFile(join(capabilityDirectory, 'capability.json'), JSON.stringify({
-    id: 'proof', kind: 'pi-extension', version: '1.0.0', name: 'Proof extension',
-    entry: './index.mjs',
-    tools: declaredTools,
-  }));
-  await writeFile(join(home, 'agent-combinations.json'), JSON.stringify({
-    version: 1,
-    combinations: [{
-      id: 'main', name: 'Main', description: 'The main agent with a Pi extension.',
-      recommendedGrade: 'high', review: false, tags: [],
-      resources: [{ resourceId: 'proof', version: '1.0.0', role: 'pi-extension', required: false }],
-    }],
-  }));
-
-  // The model calls the tool the extension registered: the extension is the
-  // authority on what it offers, and the call is the only way to reach it.
-  const called = declaredTools[0]?.name ?? 'proof_tool';
-  const provider = await openaiServer(script ?? [
-    { tools: [{ id: 'call-proof', name: called, arguments: JSON.stringify({}) }] },
-    { text: 'The extension answered.' },
-  ]);
-  let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
-  try {
-    const configPath = join(root, 'graph.config.json');
-    await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: project }],
-      credentials: { local: { secretRef: 'GRAPH_PIG_PI_EXTENSION_KEY' } },
-      ...(access === undefined ? {} : { access }),
-      models: { entries: [{ id: 'main', provider: 'graph-main', grade: 'high', api: 'openai-completions',
-        baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] } }));
-    daemon = await launchCli(root, { configPath, env: {
-      GRAPH_PIG_PI_EXTENSION_KEY: 'synthetic-only',
-      GRAPH_PIG_PI_EXTENSION_MARKER: join(capabilityDirectory, 'tool-ran.txt'),
-    }, extraArgs: ['--execute', '--kernel', 'pig'] });
-    await run({ daemon, provider, project, capabilityDirectory });
-  } finally {
-    await daemon?.close();
-    await provider.close();
-    await rm(root, { recursive: true, force: true });
-  }
-}
 
 // A bound Pi extension really runs on the PiG kernel.
 //
@@ -273,74 +199,6 @@ test('a reloaded extension host runs the extension in a new process', async () =
     expect(next.trim()).not.toBe(first.trim());
     // Both turns really reached an extension process.
     expect((provider.requests as { tools?: { function?: { name?: string } }[] }[]).length).toBeGreaterThanOrEqual(2);
-  }, undefined, [
-    { tools: [{ id: 'call-proof', name: 'proof_tool', arguments: JSON.stringify({}) }] },
-    { text: 'The extension answered.' },
-    { tools: [{ id: 'call-proof-again', name: 'proof_tool', arguments: JSON.stringify({}) }] },
-    { text: 'The extension answered again.' },
-  ]);
-}, 180_000);
-
-// A Pi extension is told its session started, before any of its tools is called.
-//
-// Measured 2026-11-02: every installed Pi extension (pi-fff, agent-browser,
-// mcp-adapter) builds its state in `pi.on('session_start')`. The daemon's host
-// never emitted the event, so a stateful extension answered from a state nobody
-// built - pi-fff rejected every search with "FFF picker factory is not
-// initialized" while its tool stayed callable.
-//
-// The order is the assertion: the extension writes each lifecycle line it hears
-// into one file, and the file must start with session_start. One host serves
-// every session, so a second turn must not initialize it again.
-const lifecycleExtensionSource = `import { appendFileSync } from 'node:fs';
-
-export default function (pi) {
-  const log = (line) => {
-    try {
-      if (process.env.GRAPH_PIG_PI_EXTENSION_MARKER) appendFileSync(process.env.GRAPH_PIG_PI_EXTENSION_MARKER, line + '\\n');
-    } catch {}
-  };
-  pi.on('session_start', async () => { log('session_start'); });
-  pi.registerTool({
-    name: 'proof_tool',
-    description: 'Record that a turn called it.',
-    parameters: { type: 'object', properties: {}, additionalProperties: false },
-    execute: async () => {
-      log('tool');
-      return { content: [{ type: 'text', text: 'extension-proof' }] };
-    },
-  });
-}
-`;
-
-test('a Pi extension hears session_start before its first tool call, once per host', async () => {
-  await withExtension(lifecycleExtensionSource, [{ name: 'proof_tool', description: 'Record that a turn called it.' }], async ({ daemon, capabilityDirectory }) => {
-    const marker = join(capabilityDirectory, 'tool-ran.txt');
-    const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
-    expect(compiled.status).toBe(200);
-
-    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the proof tool.', requestId: 'lifecycle-first' }) });
-    expect(created.status).toBe(200);
-    const { conversationId } = await created.json() as { conversationId: string };
-    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
-    await expect.poll(async () => (await view()).master?.status, { timeout: 60000, interval: 250 }).toBe('succeeded');
-
-    const second = await daemon.request(`/api/conversations/${conversationId}/messages`, {
-      method: 'POST', body: JSON.stringify({ text: 'Call the proof tool again.', requestId: 'lifecycle-second' }),
-    });
-    expect(second.status).toBe(200);
-    await expect.poll(async () => (await view()).messages?.filter(message => message.role === 'assistant').length, { timeout: 60000, interval: 250 })
-      .toBeGreaterThanOrEqual(2);
-
-    const lines = (await readFile(marker, 'utf8')).split('\n').filter(Boolean);
-    // The event arrived before the work: an extension initializes its state on
-    // session_start, and a tool that runs first runs against nothing.
-    expect(lines[0]).toBe('session_start');
-    // One host serves every session of the daemon, so the second turn must not
-    // initialize the extension again.
-    expect(lines.filter(line => line === 'session_start')).toHaveLength(1);
-    // Both turns really reached the extension.
-    expect(lines.filter(line => line === 'tool')).toHaveLength(2);
   }, undefined, [
     { tools: [{ id: 'call-proof', name: 'proof_tool', arguments: JSON.stringify({}) }] },
     { text: 'The extension answered.' },

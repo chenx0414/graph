@@ -135,6 +135,12 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 		return pigNodeTurnError(err.Error())
 	}
 	tools = append(tools, extensions...)
+	// The same per-turn event the master turn sends: a node that bound an
+	// extension tells it what this turn is about before the tools run. A failure
+	// is dropped here rather than failing the node: the extension's own tool
+	// calls will report it, and this binding has no task id to file an event
+	// under.
+	_ = pigExtensionTurnStarted(request.Workspace, text)
 	session, err := openPigSession(context.Background(), host.options.Database, request,
 		pigProviderBridge(host.options.Stream, host.options.Request.Model, func(map[string]any) map[string]any { return host.providerOptions() }),
 		tools, host.options.OnEvent, host.options.OnToolCall)

@@ -185,13 +185,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	(*input.ActiveInstances)[operation.Id] = session
 	input.ActiveMu.Unlock()
 	inspected := session.Inspect()
-	if len(inspected.ExtensionErrors) > 0 {
-		details := []string{}
-		for _, item := range inspected.ExtensionErrors {
-			details = append(details, fmt.Sprintf("%s: %v", item.Path, item.Error))
-		}
-		Raise("capability_unavailable", "A bound Pi extension failed to load: "+strings.Join(details, "; "))
-	}
+	raisePiExtensionLoadErrors(inspected.ExtensionErrors)
 	if turn.PersistEntries {
 		RecordNodeSession(store, instanceId, inspected.SessionId, inspected.SessionFile)
 		if turn.AgentContext != nil {
@@ -331,6 +325,8 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			})
 		}()
 	}
+	// A Pi extension hears each turn start before it runs.
+	pigExtensionTurnStart(store, operation.TaskId, operation.Id, operation.NodeId, request.Workspace, skillInjection.Text)
 	result, err := session.Prompt(skillInjection.Text, userImages)
 	if err == nil && setupSent {
 		// The provider answered, so the session carries the setup.

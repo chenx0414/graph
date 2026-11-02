@@ -2,11 +2,13 @@ package graph
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"context"
@@ -16,54 +18,174 @@ import (
 	"time"
 )
 
-// pigExtensionHostState is the resident host of the daemon's Pi extensions.
+// pigExtensionHosts are the resident hosts of the daemon's Pi extensions, one
+// per workspace.
 //
-// The Node process of an extension is expensive to start and worth keeping,
-// so one host serves every session of the daemon, and an extension is loaded
-// once no matter how many sessions bind it.
+// The Node process of an extension is expensive to start and worth keeping, so
+// an extension is loaded once per workspace no matter how many sessions bind it.
 //
-// It is replaceable on purpose. Measured 2026-11-01: an extension reads its own
-// configuration when the host starts, so a server installed while the daemon was
-// running stayed invisible - not only in the running session, but in every new
+// One host per workspace, not one per daemon, because the host's cwd *is* the
+// extension's cwd: a search, a write or a spawned browser resolves a relative
+// path against it. A single host handed every session the same scratch
+// directory, so an extension that searches its cwd searched `~/.graph/tmp` and
+// never found the project - measured 2026-11-02, right after the same host
+// learned to emit session_start and pi-fff started answering (it returned a
+// patch file from the scratch dir instead of the repository).
+//
+// They are replaceable on purpose. Measured 2026-11-01: an extension reads its
+// own configuration when the host starts, so a server installed while the daemon
+// was running stayed invisible - not only in the running session, but in every new
 // conversation too, and a capability refresh did not help either. Only a new
-// host reads the configuration again, so "reload" means "start a new host", not
+// host reads the configuration again, so "reload" means "start new hosts", not
 // "restart the app".
-var pigExtensionHostState struct {
-	mu   sync.Mutex
-	host *pigkernel.ExtensionHost
+var pigExtensionHostState = &pigExtensionHosts{}
+
+type pigExtensionHosts struct {
+	// lifecycle is held shared while one load runs and exclusively while the
+	// hosts are replaced, so a reload cannot close a host under a load.
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	hosts     map[string]*pigkernel.ExtensionHost
 }
 
-// withPigExtensionHost runs one extension load against the current host, and
-// holds the lock so a reload cannot close the host from under it.
-func withPigExtensionHost(run func(host *pigkernel.ExtensionHost) error) error {
-	state := &pigExtensionHostState
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.host == nil {
-		// An extension resolves a relative path against its own process cwd, and
-		// the host passes that cwd straight to the child (`cmd.Dir`). Empty
-		// handed, the child inherited the daemon's cwd - `/` when the app is
-		// launched from Finder - so a relative screenshot or artifact path failed
-		// with "Permission denied" and the whole verification was reported as
-		// broken. Give the child a real writable directory instead.
-		state.host = pigkernel.NewExtensionHost(pigExtensionScratchDir())
+// acquire returns the host serving one workspace and the release of the read
+// lock that keeps it alive for the load.
+func (hosts *pigExtensionHosts) acquire(workspace string) (*pigkernel.ExtensionHost, func()) {
+	hosts.lifecycle.RLock()
+	cwd := pigExtensionHostCwd(workspace)
+	hosts.mu.Lock()
+	if hosts.hosts == nil {
+		hosts.hosts = map[string]*pigkernel.ExtensionHost{}
 	}
-	return run(state.host)
+	host := hosts.hosts[cwd]
+	if host == nil {
+		host = pigkernel.NewExtensionHost(cwd)
+		hosts.hosts[cwd] = host
+	}
+	hosts.mu.Unlock()
+	return host, hosts.lifecycle.RUnlock
+}
+
+// take removes every host, so the caller can close them outside the locks.
+func (hosts *pigExtensionHosts) take() []*pigkernel.ExtensionHost {
+	hosts.lifecycle.Lock()
+	defer hosts.lifecycle.Unlock()
+	hosts.mu.Lock()
+	taken := hosts.hosts
+	hosts.hosts = nil
+	hosts.mu.Unlock()
+	closed := make([]*pigkernel.ExtensionHost, 0, len(taken))
+	for _, host := range taken {
+		closed = append(closed, host)
+	}
+	return closed
+}
+
+// withPigExtensionHost runs one extension load against the host of its
+// workspace, and holds the read lock so a reload cannot close it underneath.
+func withPigExtensionHost(workspace string, run func(host *pigkernel.ExtensionHost) error) error {
+	host, release := pigExtensionHostState.acquire(workspace)
+	defer release()
+	return run(host)
+}
+
+// withExisting reaches the host of one workspace without creating one.
+//
+// Emitting an event must never be the reason an extension process starts: a
+// node that binds no extension has no host, and a session that never bound one
+// has nothing to tell it.
+func (hosts *pigExtensionHosts) withExisting(workspace string, run func(host *pigkernel.ExtensionHost)) bool {
+	hosts.lifecycle.RLock()
+	defer hosts.lifecycle.RUnlock()
+	hosts.mu.Lock()
+	host := hosts.hosts[pigExtensionHostCwd(workspace)]
+	hosts.mu.Unlock()
+	if host == nil {
+		return false
+	}
+	run(host)
+	return true
+}
+
+// pigExtensionTurnStarted tells the extensions of one workspace that a turn is
+// about to run, with the prompt it answers.
+//
+// before_agent_start is where a Pi extension injects context, narrows the tool
+// list or prepares per-turn state. It is the per-turn half of the contract whose
+// session half is session_start; a host that sends only the first leaves an
+// extension initialized but never told what the turn is about.
+func pigExtensionTurnStarted(workspace, prompt string) []error {
+	failures := []error{}
+	pigExtensionHostState.withExisting(workspace, func(host *pigkernel.ExtensionHost) {
+		failures = host.EmitBeforeAgentStart(prompt)
+	})
+	return failures
+}
+
+// pigExtensionTurnStart emits before_agent_start for one turn and files a
+// failure as an event instead of failing the turn.
+//
+// An extension that cannot prepare a turn is the extension's problem: its tools
+// will say so when they run, and a turn that never asked the model anything
+// would be the worse answer.
+func pigExtensionTurnStart(store *TaskStore, taskId, operationId, nodeId, workspace, prompt string) {
+	failures := pigExtensionTurnStarted(workspace, prompt)
+	if len(failures) == 0 || store == nil {
+		return
+	}
+	messages := []string{}
+	for _, failure := range failures {
+		messages = append(messages, failure.Error())
+	}
+	func() {
+		defer func() { _ = recover() }()
+		store.Event(taskId, "pi.extension.before_agent_start_failed", map[string]any{
+			"operationId": operationId, "nodeId": nodeId, "message": strings.Join(messages, "; "),
+		})
+	}()
+}
+
+// raisePiExtensionLoadErrors refuses a session whose bound extension did not
+// load, naming the extension that failed.
+func raisePiExtensionLoadErrors(errors []AgentSessionExtensionError) {
+	if len(errors) == 0 {
+		return
+	}
+	details := []string{}
+	for _, item := range errors {
+		details = append(details, fmt.Sprintf("%s: %v", item.Path, item.Error))
+	}
+	Raise("capability_unavailable", "A bound Pi extension failed to load: "+strings.Join(details, "; "))
+}
+
+// pigExtensionHostCwd is the directory an extension process works in.
+//
+// An extension resolves a relative path against its own process cwd, and the
+// host passes that cwd straight to the child (`cmd.Dir`). Empty handed, the
+// child inherited the daemon's cwd - `/` when the app is launched from Finder -
+// so a relative screenshot or artifact path failed with "Permission denied" and
+// the whole verification was reported as broken. The session's own work copy is
+// the answer whenever there is one; the scratch directory is the fallback.
+func pigExtensionHostCwd(workspace string) string {
+	if trimmed := strings.TrimSpace(workspace); trimmed != "" {
+		if info, err := os.Stat(trimmed); err == nil && info.IsDir() {
+			return filepath.Clean(trimmed)
+		}
+	}
+	return pigExtensionScratchDir()
 }
 
 // ReloadPigExtensionHost closes the daemon's extension host, so the next session
 // starts a new one and every extension reads its configuration again. It reports
 // whether a host was actually running.
 func ReloadPigExtensionHost() bool {
-	state := &pigExtensionHostState
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	host := state.host
-	state.host = nil
-	if host == nil {
+	hosts := pigExtensionHostState.take()
+	if len(hosts) == 0 {
 		return false
 	}
-	host.Close()
+	for _, host := range hosts {
+		host.Close()
+	}
 	return true
 }
 
@@ -81,12 +203,7 @@ func pigExtensionScratchDir() string {
 // It never starts a host only to close it: a daemon that never loaded an
 // extension has nothing to stop.
 func ClosePigExtensions() {
-	state := &pigExtensionHostState
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	host := state.host
-	state.host = nil
-	if host != nil {
+	for _, host := range pigExtensionHostState.take() {
 		host.Close()
 	}
 }
@@ -117,7 +234,7 @@ func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker 
 	for _, path := range request.PiExtensionPaths {
 		extensionPath := path
 		var extensionSpecs []pigkernel.ToolSpec
-		err := withPigExtensionHost(func(host *pigkernel.ExtensionHost) error {
+		err := withPigExtensionHost(request.Workspace, func(host *pigkernel.ExtensionHost) error {
 			loaded, err := host.Load(ctx, extensionPath)
 			if err != nil {
 				return err
