@@ -350,13 +350,18 @@ func DescribeActivation(input RsiActivationInput) RsiActivation {
 }
 
 // RsiDirtyMessage says why a dirty path outside the requested change stops an RSI write, and what to do
-// about it. An Agent that edited the checkout by hand gets this instead of a
-// commit, so the message has to name the supported route: RSI edits must be
-// written by the tool, which is the only path that can attribute them to a
-// verified commit.
+// about it.
+//
+// It is the fail-closed answer, not the normal one: an isolated worktree is built
+// whenever the checkout carries paths this change does not own
+// (runtime_rsi_isolated.go), and this message appears only when that tree could
+// not be made. Then the checks would measure work the commit cannot contain, so
+// the message names both routes that keep the attribution honest: write the edits
+// through the tool, or commit the foreign work first.
 func RsiDirtyMessage(root string, blocked []string) string {
 	paths := strings.Join(blocked, " ")
-	return "Uncommitted changes outside this RSI change: " + strings.Join(blocked, ", ") + ". " +
+	return "Uncommitted changes outside this RSI change, and the change could not be built in an isolated worktree: " +
+		strings.Join(blocked, ", ") + ". " +
 		"Checks run against the working tree, so they would verify changes that the commit does not contain. " +
 		"If you edited these files by hand, revert them and pass the same edits as changes to apply_rsi_change: " +
 		"RSI edits must be written by the tool, and a hand-committed tree cannot be attributed to a verified RSI commit. " +
