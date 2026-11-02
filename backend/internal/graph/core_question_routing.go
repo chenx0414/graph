@@ -79,7 +79,13 @@ var questionPolicies = map[string]QuestionPolicy{
 	"model_unavailable":    {Owner: QuestionOwnerMain, Answers: []string{"retry"}},
 	"git_conflict":         {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
 	"context_rejected":     {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, RetryOnMessage: true, Escalate: true},
-	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry", "acknowledge"}, RetryOnMessage: true},
+	// A recovery problem is the only signal a turn whose outcome was never proven
+	// has, and no other reader can answer it: its task's master is parked, the
+	// global main never sees another task's problems, and closing the operation
+	// waits for the decision. Ten of them waited nine hours (2026-11-02) with
+	// nobody asked, so it takes the same escalation path as a failed turn and
+	// reaches the person with both of its own actions.
+	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry", "acknowledge"}, RetryOnMessage: true, Escalate: true},
 	"result_noncompliant":  {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, Escalate: true},
 	"git_dirty":            {Owner: QuestionOwnerMain, Answers: []string{"acknowledge"}},
 	// A node stuck for three rounds or returned for rework may need a decision

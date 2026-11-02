@@ -102,7 +102,7 @@ export function QuestionReply({ taskId, question, onDone }: {
       </div>
       {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
-      {question.kind === 'recovery' && <div className="question-reply-why" data-testid={`question-recovery-hint-${question.id}`}>这一轮的结果没有落定：「重跑」会再花一次模型调用并可能重复副作用；「当作已放弃」只关闭这条问题，不重跑。</div>}
+      {question.kind === 'recovery' && <div className="question-reply-why" data-testid={`question-recovery-hint-${question.id}`}>这一轮的结果没有落定：「重跑」会再花一次模型调用并可能重复副作用；「当作已放弃」会把这一轮记为已放弃（不重跑），之后不再占用这个任务。</div>}
       {MASTER_RETRY_KINDS.includes(question.kind) && <>
         <div className="question-reply-why" data-testid={`question-retry-hint-${question.id}`}>重试会重新跑这一轮：再花一次模型调用，并可能重复上一轮已经执行的工具调用。</div>
         <div className="question-reply-why" data-testid={`question-wait-hint-${question.id}`}>继续等会把等待重新计时，问题仍留在你手上，不会替你跑任何东西。</div>

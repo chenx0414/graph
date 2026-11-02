@@ -200,13 +200,22 @@ test('an operation is closed only after its problem was answered', async () => {
 
     // An open problem is still somebody's decision: that operation stays parked.
     expect(operation('open-problem-operation').state, 'an operation was closed while its problem was still open').toBe('unknown');
+    // ...and nobody acted on it, so it reaches the person instead of sitting on the
+    // Agent that cannot answer it: a recovery problem owned by main has no other
+    // reader, and the operation can only close after a decision.
+    const openProblem = () => readDb(db => db.prepare("SELECT owner,status,data FROM questions WHERE id='open-problem-question'").get() as { owner: string; status: string; data: string });
+    await expect.poll(() => openProblem().owner, { timeout: 120_000, interval: 500 }).toBe('user');
+    expect(openProblem().status).toBe('open');
+    expect(openProblem().data).toContain('escalatedAt');
+    expect(openProblem().data).toContain('escalationPrompt');
+    expect(operation('open-problem-operation').state, 'escalating closed the operation').toBe('unknown');
     // An operation nobody was told about is raised instead of closed.
     expect(operation('unraised-operation').state).toBe('unknown');
     await expect.poll(() => problems('unraised-operation').length, { timeout: 120_000, interval: 500 }).toBe(1);
     expect(problems('unraised-operation')[0]!.status).toBe('open');
     expect(operation('unraised-operation').state, 'raising the problem closed the operation').toBe('unknown');
 
-    // Answering the open problem closes the loop for its operation too.
+    // Answering the escalated problem closes the loop for its operation too.
     const answered = await request(`/api/tasks/${anchor}/answer`, 'POST', {
       questionId: 'open-problem-question', answer: { type: 'acknowledge' }, requestId: 'acknowledge-open-problem',
     });
