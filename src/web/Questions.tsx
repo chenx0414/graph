@@ -44,10 +44,17 @@ const MINUTE = 60_000;
  * the person "this is still on you, and for how long" - and past the published
  * deadline it stops being a note and becomes a warning.
  */
-function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean }) {
+function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean; autoAnswerChoice?: string; autoAnswerRemainingMs?: number | null }) {
   if (typeof question.waitedMs !== 'number') return null;
   const minutes = Math.floor(question.waitedMs / MINUTE);
   const waited = minutes < 1 ? '不到 1 分钟' : `${minutes} 分钟`;
+  // A question the harness answers itself says so, and names the choice: the
+  // generic deadlines below describe a wait that never happens for it.
+  if (typeof question.autoAnswerChoice === 'string') {
+    const left = Math.max(0, Math.ceil((question.autoAnswerRemainingMs ?? 0) / MINUTE));
+    const soon = left < 1 ? '不到 1 分钟内' : `${left} 分钟内`;
+    return `已等待 ${waited}（${soon}没有你的回答，我会按「${question.autoAnswerChoice}」继续；你现在选会优先）`;
+  }
   if (question.suspended) {
     const limit = Math.round((question.suspendedAfterMs ?? 0) / MINUTE);
     return limit > 0
@@ -64,7 +71,7 @@ function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?:
 /** One open question answered through the authenticated task command path. */
 export function QuestionReply({ taskId, question, onDone }: {
   taskId: string;
-  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean };
+  question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean; autoAnswerChoice?: string; autoAnswerRemainingMs?: number | null };
   onDone: () => void;
 }) {
   const [tokens, setTokens] = useState('100000');
@@ -100,7 +107,7 @@ export function QuestionReply({ taskId, question, onDone }: {
         {!decision && <code className="faint">{question.kind}</code>}
         <div className="question-reply-prompt"><Markdown text={decision ? String(question.data.prompt ?? '主 Agent 需要你的一个决定。') : questionPrompt(question.kind, question.data)} /></div>
       </div>
-      {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'}>{waitText}</div>}
+      {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'} data-auto-answer={typeof question.autoAnswerChoice === 'string' ? question.autoAnswerChoice : undefined}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
       {question.kind === 'recovery' && <div className="question-reply-why" data-testid={`question-recovery-hint-${question.id}`}>这一轮的结果没有落定：「重跑」会再花一次模型调用并可能重复副作用；「当作已放弃」会把这一轮记为已放弃（不重跑），之后不再占用这个任务。</div>}
       {MASTER_RETRY_KINDS.includes(question.kind) && <>

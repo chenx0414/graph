@@ -45,8 +45,34 @@ func QuestionWaitFacts(askedAt, now int64) map[string]any {
 }
 
 // AddQuestionWaitFacts puts the wait on a question payload the console reads.
+//
+// A question the harness will answer itself carries the deadline that actually
+// applies to it, not the generic ones: measured 2026-11-02, a decision question
+// whose card said "超过 45 分钟无人回答，不再算进行中" was answered by the
+// harness after five minutes, so the card promised a state the product could
+// never reach and never mentioned the choice being made in the person's name.
 func AddQuestionWaitFacts(payload map[string]any, askedAt any, now int64) map[string]any {
-	for key, value := range QuestionWaitFacts(kernelInt(askedAt), now) {
+	asked := kernelInt(askedAt)
+	facts := QuestionWaitFacts(asked, now)
+	record, _ := payload["data"].(map[string]any)
+	if choice, ok := questionAutoAnswerChoice(record); ok {
+		// Overdue and suspended describe a question that nothing answers. This one
+		// is answered, so those two thresholds are unreachable and say nothing.
+		facts["overdue"], facts["suspended"] = false, false
+		facts["autoAnswerAfterMs"] = AskUserAutoAnswerMs
+		facts["autoAnswerChoice"] = choice
+		if asked > 0 {
+			at := asked + int64(AskUserAutoAnswerMs)
+			remaining := at - now
+			if remaining < 0 {
+				remaining = 0
+			}
+			facts["autoAnswerAt"], facts["autoAnswerRemainingMs"] = at, remaining
+		} else {
+			facts["autoAnswerAt"], facts["autoAnswerRemainingMs"] = nil, nil
+		}
+	}
+	for key, value := range facts {
 		payload[key] = value
 	}
 	return payload

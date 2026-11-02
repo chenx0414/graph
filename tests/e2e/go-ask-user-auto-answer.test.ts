@@ -86,6 +86,21 @@ test('an unanswered ask_user takes the recommended option once, and says so', as
     await expect.poll(async () => (await asked())?.id, { timeout: 90_000, interval: 250 }).toBeTruthy();
     const question = (await asked())!;
 
+    // The card carries the deadline that actually applies to it, and names the
+    // choice. Measured 2026-11-02: it used to carry only the generic 15/45 minute
+    // thresholds - states the harness itself made unreachable - and said nothing
+    // about the answer it was about to give in the person's name.
+    const view = await request(`/api/conversations/${conversationId}`);
+    const shown = ((view.body as { questions?: { id: string; autoAnswerChoice?: string; autoAnswerAfterMs?: number; autoAnswerRemainingMs?: number; overdue?: boolean; suspended?: boolean }[] }).questions ?? [])
+      .find(item => item.id === question.id);
+    expect(shown, 'the conversation view does not carry the question').toBeTruthy();
+    expect(shown!.autoAnswerChoice).toBe('Postgres（推荐）');
+    expect(shown!.autoAnswerAfterMs).toBe(5 * 60 * 1000);
+    expect(shown!.autoAnswerRemainingMs).toBeGreaterThan(0);
+    expect(shown!.autoAnswerRemainingMs).toBeLessThanOrEqual(5 * 60 * 1000);
+    expect(shown!.overdue, 'a question the harness answers itself can never be overdue').toBe(false);
+    expect(shown!.suspended, 'a question the harness answers itself can never be suspended').toBe(false);
+
     // The question waited longer than the deadline; nothing has answered it yet.
     const write = new DatabaseSync(dbPath);
     write.exec('PRAGMA busy_timeout=5000');

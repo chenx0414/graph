@@ -25,10 +25,15 @@ import { launchCli } from '../helpers/cli-daemon.ts';
 interface ProviderTool { function?: { name?: string } }
 interface ProviderBody { tools?: ProviderTool[]; messages?: { role?: string; content?: unknown }[] }
 
+// Several choices at once: the harness has no single recommendation to take, so
+// this question keeps the plain wait and the published deadlines. A question with
+// one answer would be answered by the harness after five minutes instead, and
+// could never reach the states asserted here.
 const QUESTION = {
-  prompt: '这一轮先做哪一件？',
-  why: '两件都会改动唤醒链路，先做哪件决定我接下来改哪个文件。',
+  prompt: '这一轮先做哪几件？',
+  why: '两件都会改动唤醒链路，先做哪些决定我接下来改哪个文件。',
   options: ['先做提问期限', '先做节点落定后的重试'],
+  multiple: true,
   requestId: 'ask-wait-1',
 };
 

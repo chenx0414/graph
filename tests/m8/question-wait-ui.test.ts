@@ -28,9 +28,16 @@ test('an unanswered question shows how long it has waited', async () => {
   const provider = await scriptedProvider(body => {
     const answered = (body.messages ?? []).some(message => message.role === 'tool' && message.tool_call_id === 'call-ask');
     if (answered) return [];
+    // The second conversation asks the same question with a recommendation, which
+    // is the shape the harness answers by itself. The first one asks for several
+    // choices at once - no single recommendation to take - so its card keeps the
+    // plain wait and the published deadlines.
+    const recommended = JSON.stringify(body.messages ?? []).includes('带推荐项');
     return [{
       id: 'call-ask', name: 'ask_user',
-      args: { prompt: '这一轮先做哪一件？', why: '先做哪件决定我接下来改哪个文件。', options: ['先做提问期限', '先做重试'], requestId: 'ask-ui' },
+      args: recommended
+        ? { prompt: '这一轮先做哪一件？', why: '先做哪件决定我接下来改哪个文件。', options: ['先做提问期限', '先做重试'], recommended: '先做提问期限', requestId: 'ask-ui-recommended' }
+        : { prompt: '这一轮先做哪几件？', why: '先做哪件决定我接下来改哪个文件。', options: ['先做提问期限', '先做重试'], multiple: true, requestId: 'ask-ui' },
     }];
   });
   cleanup.push(() => provider.close());
@@ -73,4 +80,26 @@ test('an unanswered question shows how long it has waited', async () => {
   await suspended.waitFor({ timeout: 60_000 });
   await expect.poll(async () => suspended.getAttribute('data-suspended'), { timeout: 30_000 }).toBe('true');
   expect(await suspended.innerText()).toContain('已挂起');
+
+  // A question the harness answers by itself promises its own deadline instead:
+  // the 15/45 minute lines describe a wait that never happens for it, and the
+  // person must be told which choice will be made in their name.
+  const recommended = await createConversation(server, { projectId: 'alpha', text: '问我一个带推荐项的问题。', requestId: 'question-auto-answer-ui' });
+  const recommendedQuestions = async () => {
+    const response = await server.request(`/api/conversations/${recommended.conversationId}`);
+    const view = await response.json() as { questions?: (SeenQuestion & { autoAnswerChoice?: string })[] };
+    return (view.questions ?? []).filter(question => question.status === 'open' && question.kind === 'waiting');
+  };
+  await expect.poll(async () => (await recommendedQuestions()).length, { timeout: 90_000, interval: 250 }).toBe(1);
+  const autoQuestion = (await recommendedQuestions())[0]!;
+  expect(autoQuestion.autoAnswerChoice, 'the card does not carry the choice it will take').toBe('先做提问期限');
+  await page.goto(`${server.url}/#/conversations/${recommended.conversationId}`);
+  const autoWait = page.getByTestId(`question-waiting-${autoQuestion.id}`);
+  await autoWait.waitFor({ timeout: 60_000 });
+  expect(await autoWait.getAttribute('data-auto-answer')).toBe('先做提问期限');
+  expect(await autoWait.getAttribute('data-overdue')).toBe('false');
+  expect(await autoWait.getAttribute('data-suspended')).toBe('false');
+  const autoText = await autoWait.innerText();
+  expect(autoText).toContain('我会按「先做提问期限」继续');
+  expect(autoText).not.toContain('不再算进行中');
 });

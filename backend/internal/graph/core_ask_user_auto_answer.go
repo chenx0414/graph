@@ -11,6 +11,29 @@ import "fmt"
 // needs a human for something can leave the recommendation out.
 const AskUserAutoAnswerMs = 5 * 60 * 1000
 
+// questionAutoAnswerChoice is the option the harness would take for this
+// question, and whether it would take one at all.
+//
+// One rule for the sweep that answers and for the card that says what will
+// happen: a decision question with options is answered with its recommendation,
+// or with the first option when the asker named none. A question with no options
+// has nothing to take, and `multiple` has no single recommendation - both stay
+// with the person.
+func questionAutoAnswerChoice(record map[string]any) (string, bool) {
+	if mapString(record, "requestType") != "user_decision" || record["multiple"] == true {
+		return "", false
+	}
+	options := questionOptions(record["options"])
+	if len(options) == 0 {
+		return "", false
+	}
+	choice := mapString(record, "recommended")
+	if !containsString(options, choice) {
+		choice = options[0]
+	}
+	return choice, true
+}
+
 // SweepAutoAnswerQuestions answers the ask_user questions nobody came back to.
 //
 // Only agent questions with options take part: a permission grant, a budget or a
@@ -32,16 +55,12 @@ func (runtime *TaskRuntime) SweepAutoAnswerQuestions(now int64) int {
 		questionId := kernelString(row["id"])
 		taskId := kernelString(row["task_id"])
 		record := questionParseRecord(kernelString(row["data"]))
-		if mapString(record, "requestType") != "user_decision" || record["autoAnsweredAt"] != nil || record["multiple"] == true {
+		if record["autoAnsweredAt"] != nil {
 			continue
 		}
-		options := questionOptions(record["options"])
-		if len(options) == 0 {
+		choice, ok := questionAutoAnswerChoice(record)
+		if !ok {
 			continue
-		}
-		choice := mapString(record, "recommended")
-		if !containsString(options, choice) {
-			choice = options[0]
 		}
 		func() {
 			defer func() { _ = recover() }()
