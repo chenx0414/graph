@@ -19,7 +19,6 @@ cancelQueuedMessage,
 composerPrimaryState,
 readComposerDraft,
 shouldScrollToLatest,
-visibleTranscriptMessages,
 writeComposerDraft
 } from './composer-state.ts';
 
@@ -29,7 +28,6 @@ import { usePreferences,visibleSuggestion } from './preferences.ts';
 
 import {
 applyConversationEvent,
-conversationProjectionSnapshot,
 createConversationProjection,
 observeConversationHistory,
 observeConversationView,
@@ -55,7 +53,7 @@ import { ErrorBox,useAsync,useEventStream,useTargetBranch } from './shared.tsx';
 
 import { Spinner,toast } from './ui.tsx';
 
-import { buildTranscriptRows } from './transcript-model.ts';
+import { supervisorTranscript } from './supervisor-transcript.ts';
 
 import type { ConversationView,DraftGraph,ProposalDetail,Settings } from "./conversation-types.tsx";
 import { composerStorage,sentUserPrompts } from "./conversation-types.tsx";
@@ -200,26 +198,21 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   useEffect(() => {
     if (view) setProjection(current => observeConversationView(current, view));
   }, [view]);
-  const snapshot = useMemo(() => conversationProjectionSnapshot(projection, { busy: Boolean(busy) }), [projection, busy]);
+  const transcript = useMemo(() => supervisorTranscript(projection, {
+    busy: Boolean(busy),
+    continuations: view?.continuations ?? [],
+  }), [projection, busy, view?.continuations]);
   useLayoutEffect(() => {
     const anchor = historyAnchor.current;
     const thread = transcriptFollow.threadRef.current;
     if (!anchor || !thread) return;
     thread.scrollTop = anchor.top + thread.scrollHeight - anchor.height;
     historyAnchor.current = null;
-  }, [snapshot.messages]);
-  const displayMessages = useMemo(() => visibleTranscriptMessages(snapshot.messages), [snapshot.messages]);
-  const composerHistory = useMemo(() => sentUserPrompts(displayMessages), [displayMessages]);
-  const transcriptRows = useMemo(() => buildTranscriptRows({
-    messages: displayMessages,
-    continuations: view?.continuations ?? [],
-    liveTools: snapshot.liveTools,
-    streaming: snapshot.streaming,
-    busy: Boolean(busy),
-  }), [displayMessages, view?.continuations, snapshot.liveTools, snapshot.streaming, busy]);
+  }, [transcript.messages]);
+  const composerHistory = useMemo(() => sentUserPrompts(transcript.messages), [transcript.messages]);
   useEffect(() => {
-    if (snapshot.streamNeedsResync) reload();
-  }, [reload, snapshot.streamNeedsResync]);
+    if (transcript.streamNeedsResync) reload();
+  }, [reload, transcript.streamNeedsResync]);
   // Entering a conversation (or reopening the window) starts at the newest
   // message once the transcript window has rendered. Leaving and re-entering
   // the chat tab re-arms the jump without yanking a reader on new arrivals.
@@ -227,14 +220,14 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   useEffect(() => {
     const jump = shouldScrollToLatest({
       tab: 'chat',
-      hasMessages: snapshot.messages.length > 0,
+      hasMessages: transcript.messages.length > 0,
       alreadyJumped: enteredScrollRef.current,
     });
     if (!jump) return;
     enteredScrollRef.current = true;
     const frame = requestAnimationFrame(() => transcriptFollow.scrollToLatest('auto'));
     return () => cancelAnimationFrame(frame);
-  }, [snapshot.messages.length, transcriptFollow.scrollToLatest]);
+  }, [transcript.messages.length, transcriptFollow.scrollToLatest]);
   if (loading && !view) return { fallback: <div role="status" className="conversation-loading"><Spinner label="正在加载会话…" /></div> };
   if (error && !view) return { fallback: <ErrorBox message={error} onRetry={reload} /> };
   if (!view) return { fallback: <div role="status" className="conversation-loading"><Spinner label="正在加载会话…" /></div> };
@@ -245,11 +238,11 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const paused = pausedOverride ?? view.paused;
   const queuedMessages = dismissedQueue.reduce(
     (list, messageId) => cancelQueuedMessage(list, messageId),
-    snapshot.queuedMessages,
+    transcript.queuedMessages,
   );
   // Candidate prompts are an opt-in preference; when off, the composer never
   // shows (nor sends) a suggested next prompt.
-  const promptSuggestion = visibleSuggestion(preferences, snapshot.promptSuggestion);
+  const promptSuggestion = visibleSuggestion(preferences, transcript.promptSuggestion);
   const hasComposerInput = Boolean(text.trim() || attachments.length);
   const primaryState = composerPrimaryState({
     busy: Boolean(busy),
@@ -265,7 +258,7 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
   async function loadOlder() {
     if (olderPending.current) return;
-    const request = snapshot.historyRequest;
+    const request = transcript.historyRequest;
     if (!request) return;
     olderPending.current = true;
     setLoadingOlder(true);
@@ -349,5 +342,5 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   // The initialization panels (empty task list, project binding) are declared by
   // the policy module; the view only renders what the policy places in the drawer.
   const deferredInitPanelIds = drawerInitPanelIds();
-  return { fallback: null, sending, steering, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, snapshot, loadingOlder, transcriptRows, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
+  return { fallback: null, sending, steering, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
 }

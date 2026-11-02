@@ -50,7 +50,7 @@ export type TranscriptRow =
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
-  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean }
+  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
 
@@ -149,11 +149,13 @@ function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptToo
 
 function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
   if (!tools.length) return;
+  const active = tools.some(tool => !tool.done);
   rows.push({
     kind: 'tools',
     id: `tools:${tools[0]!.id}`,
     tools,
-    active: tools.some(tool => !tool.done),
+    active,
+    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools),
   });
 }
 

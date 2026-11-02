@@ -62,11 +62,25 @@ test('a real task answers its graph view with the graph, not a server error', as
     for (const _ of [1, 2]) {
       const view = await request(`/api/tasks/${graphId}/graph`);
       expect(view.status, JSON.stringify(view.body)).toBe(200);
-      const graph = view.body as { nodes: unknown[]; layout: { positions: unknown } };
+      const graph = view.body as { nodes: { id: string; label: string; visualKind: string }[]; layout: { positions: Record<string, { x: number; y: number; width: number; height: number }> } };
       expect(Array.isArray(graph.nodes)).toBe(true);
+      expect(graph.nodes.find(node => node.id === 'work')).toMatchObject({ label: 'work agent', visualKind: 'agent' });
       expect(graph.layout).toBeTruthy();
       expect(graph.layout.positions).toBeTruthy();
     }
+    const routed = await request('/api/layout/routes', 'POST', {
+      edges: [{ id: 'link', source: 'a', target: 'b' }],
+      positions: {
+        a: { x: 0, y: 0, width: 160, height: 64 },
+        b: { x: 0, y: 192, width: 160, height: 64 },
+      },
+      nodeIds: ['a', 'b'],
+    });
+    expect(routed.status, JSON.stringify(routed.body)).toBe(200);
+    const points = (routed.body as { routes: { link?: { x: number; y: number }[] } }).routes.link;
+    expect(points?.length).toBeGreaterThan(1);
+    expect(points?.[0]).toEqual({ x: 80, y: 64 });
+    expect(points?.[points.length - 1]).toEqual({ x: 80, y: 192 });
   } finally {
     await daemon?.close();
     await main.close();

@@ -1,3 +1,4 @@
+// graph:allow-large-file: its 21 KB predate the budget; this change drops a summary computed here in favour of the one the transcript model already carries
 import { toolActivity } from './tool-activity.ts';
 import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { OrbState } from 'thinking-orbs';
@@ -9,11 +10,7 @@ import { attachmentImageSource } from './attachments.ts';
 import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
-import {
-  activeToolStatus,
-  toolGroupSummary,
-  type TranscriptRow,
-} from './transcript-model.ts';
+import { type TranscriptRow } from './transcript-model.ts';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
@@ -145,7 +142,6 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
   // Tool calls stay folded away by default, running or finished; the button opens
   // one group when its detail is needed.
   const open = manualOpen ?? false;
-  const summary = row.active ? activeToolStatus(row.tools) : toolGroupSummary(row.tools);
   const activeTool = [...row.tools].reverse().find(tool => !tool.done);
   const kind = activeTool ? toolActivity(activeTool.name, activeTool.summary).kind : 'other';
   const orbState: OrbState = kind === 'search' || kind === 'browse' ? 'searching'
@@ -170,7 +166,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
           {row.active ? <ActivityOrb key={activeTool?.id ?? row.id} state={orbState} /> : <Icon name={row.tools.some(tool => tool.error) ? 'alert' : 'check'} size={13} />}
         </span>
         <span className="tool-group-copy">
-          <strong>{summary}</strong>
+          <strong>{row.summary}</strong>
           <span>{row.active ? '进行中' : `${row.tools.length} 项活动`}</span>
         </span>
         <Icon name="chevron" size={14} className="tool-group-chevron" />

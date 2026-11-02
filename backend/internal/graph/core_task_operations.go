@@ -60,6 +60,21 @@ func (s *TaskStore) MarkOperationSettled(operationID, result string) {
 	kernelExec(s.DB, "UPDATE operations SET state='settled',worker_active=0,result=? WHERE id=?", result, operationID)
 }
 
+// AbandonOperation closes an operation whose outcome was never proven, after the
+// problem that reported it was answered.
+//
+// The result, the usage and the dispatch time stay on the row: what ends is the
+// hold, not the fact. Only an operation that already gave its worker back can be
+// closed this way, and only while it is still "unknown", so a turn that comes
+// back to life is never overwritten by a sweep. It reports whether this call is
+// the one that closed the row.
+func (s *TaskStore) AbandonOperation(operationID string, at int64) bool {
+	changes, _ := g5Exec(s.DB, `UPDATE operations
+ SET state='abandoned',worker_active=0,waiting_slot=0,reserved=0,settled_at=COALESCE(settled_at,?)
+ WHERE id=? AND state='unknown' AND worker_active=0`, at, operationID)
+	return changes == 1
+}
+
 // MarkOperationSucceeded says the operation succeeded, with what it
 // produced and what it used.
 func (s *TaskStore) MarkOperationSucceeded(operationID, result string, usage any, at int64) {

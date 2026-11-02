@@ -208,9 +208,12 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			l.store.SetNodeStatus(taskId, nodeId, next)
 		}
 		// "acknowledge" on a problem whose outcome was never settled says "stop
-		// asking me": the operation stays unknown (the fact is kept, not erased),
-		// and the node stays parked so closing the problem cannot start a turn
-		// nobody asked for. A new message or an explicit retry releases it.
+		// asking me": the record is kept (the fact is not erased) and the node stays
+		// parked so closing the problem cannot start a turn nobody asked for. A new
+		// message or an explicit retry releases it. The operation itself is closed by
+		// AbandonClosedUnsettledOperations on the next pass: an answered problem whose
+		// operation stayed "unknown" for ever made the task look busy (measured
+		// 2026-11-02: 98 such rows, the oldest 45 days old).
 		if kind == "recovery" && answer.Type == "acknowledge" {
 			l.store.SetNodeBlocked(taskId, nodeId)
 		}

@@ -53,7 +53,7 @@ import { Icon } from './ui.tsx';
 import { useConversationPanelState } from "./conversation-state.tsx";
 import { residentFlag } from "./conversation-types.tsx";
 
-export function ConversationPanelView({ sending, steering, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, snapshot, loadingOlder, transcriptRows, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
+export function ConversationPanelView({ sending, steering, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
 return (
     <section className="conversation-page" data-testid="conversation">
       {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content" data-drawer={drawerOpen}>
@@ -120,10 +120,10 @@ return (
             onTouchStart={transcriptFollow.onTouchStart}
           >
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
-          {snapshot.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
+          {transcript.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {/* An empty conversation used to be a blank page. It now shows the same
               guidance the new-conversation page does, pointed at this Agent. */}
-          {snapshot.messages.length === 0 && !busy && (
+          {transcript.messages.length === 0 && !busy && (
             <div className="conversation-intro" data-testid="conversation-intro">
               <ChatIntro
                 {...(view.role === 'project' ? { eyebrow: '这个项目还没有对话' } : {})}
@@ -139,7 +139,7 @@ return (
               <OnboardingSteps />
             </div>
           )}
-          {transcriptRows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
+          {transcript.rows.map(row => <TranscriptRowView key={row.id} row={row} markdown={markdownEnabled(preferences)} />)}
           <WorkDrafts role={view.role} conversationId={id} projectId={view.projectId} projects={settings?.projects ?? []} cursor={view.cursor} />
 
           <div className="conversation-runway" style={{ height: transcriptFollow.runway }} aria-hidden="true" />

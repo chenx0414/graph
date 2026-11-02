@@ -92,6 +92,15 @@ type appGraphNode struct {
 	Inputs            map[string]ProtocolRef `json:"inputs"`
 	Outputs           map[string]ProtocolRef `json:"outputs"`
 	Agent             any                    `json:"agent"`
+	Label             string                 `json:"label"`
+	VisualKind        string                 `json:"visualKind"`
+}
+
+// appGraphNodePicture is the label and visual kind the layout module already uses
+// to size the box. The canvas draws these fields and does not recompute them.
+func appGraphNodePicture(id, kind, action string) (string, string) {
+	node := GraphNodeLike{Id: id, Kind: kind, Action: action}
+	return GraphNodeLabel(node), string(GraphNodeVisualKind(node))
 }
 
 // appGraphContainer is one subgraph instance of the graph structure view.
@@ -154,11 +163,12 @@ func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native 
 	nodes := []appGraphNode{}
 	for _, id := range appSortedKeys(definition.Nodes) {
 		node := definition.Nodes[id]
+		label, visualKind := appGraphNodePicture(id, "agent", node.Task)
 		entry := appGraphNode{
 			ID: id, Kind: "agent", Action: node.Task, Container: containerFor(id),
 			Status: "draft", BoundDefinition: node.Recipe, DefinitionVersion: node.Recipe,
 			Inputs: node.Inputs, Outputs: node.Outputs,
-			Agent: app.appGraphAgentDetail(node.Recipe),
+			Agent: app.appGraphAgentDetail(node.Recipe), Label: label, VisualKind: visualKind,
 		}
 		if native != nil {
 			entry.Status = "idle"
@@ -185,9 +195,11 @@ func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native 
 		case module.Trigger == "once":
 			action = "join"
 		}
+		label, visualKind := appGraphNodePicture(id, "module", action)
 		entry := appGraphNode{
 			ID: id, Kind: "module", Action: action, Container: containerFor(id),
 			Status: "draft", Inputs: module.Inputs, Outputs: module.Outputs,
+			Label: label, VisualKind: visualKind,
 		}
 		if native != nil {
 			entry.Status = "idle"

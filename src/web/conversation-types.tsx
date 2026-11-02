@@ -87,6 +87,7 @@ export type GraphAgentDetail = {
 export type DraftGraph = {
   nodes: {
     id: string; kind: string; status: string; container?: string;
+    label: string; visualKind: string;
     action?: string; definitionVersion?: string; model?: string;
     agent?: GraphAgentDetail | null;
     inputs?: Record<string, ProtocolRef>;

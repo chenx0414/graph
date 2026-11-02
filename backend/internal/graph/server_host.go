@@ -197,12 +197,18 @@ func (h *GraphHost) drive() {
 			h.Runtime.ApplyDeferredExtensionReload()
 		}()
 		// An operation whose outcome was never settled is invisible otherwise: no
-		// result, no usage, no question. Hand it to main a few at a time.
+		// result, no usage, no question. Hand it to main a few at a time, and close
+		// the ones whose problem is already answered - an answered problem that left
+		// its operation "unknown" for ever kept the task looking busy.
 		if now := NowMillis(); now-h.lastUnsettledSweep >= unsettledSweepMs {
 			h.lastUnsettledSweep = now
 			func() {
 				defer func() { _ = recover() }()
 				h.Runtime.SweepUnsettledOperations(now)
+			}()
+			func() {
+				defer func() { _ = recover() }()
+				h.Runtime.AbandonClosedUnsettledOperations(now)
 			}()
 		}
 		// An ask_user nobody came back to takes the asker's recommended option.

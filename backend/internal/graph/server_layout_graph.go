@@ -136,7 +136,7 @@ func LayoutGraph(input LayoutInput, previous *LayoutPrevious) GraphLayout {
 	for index, node := range input.Nodes {
 		ids[index] = node.ID
 	}
-	routed := layoutOrthogonalRoutes(input.Edges, positions, ids)
+	routed := OrthogonalRoutes(input.Edges, positions, ids)
 	outEdges := make([]LayoutRoutedEdge, len(input.Edges))
 	for index, edge := range input.Edges {
 		outEdges[index] = LayoutRoutedEdge{ID: edge.ID, Source: edge.Source, Target: edge.Target, Points: routed[edge.ID]}

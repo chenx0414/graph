@@ -84,6 +84,59 @@ func (runtime *TaskRuntime) SweepUnsettledOperations(now int64) int {
 	return raised
 }
 
+// abandonedOperationSweepLimit bounds one pass, so a backlog of stuck turns
+// becomes a few closes at a time instead of one long transaction.
+const abandonedOperationSweepLimit = 50
+
+// AbandonClosedUnsettledOperations closes the operations whose problem is over.
+//
+// A recovery problem says "this turn's outcome was never proven". Answering it -
+// retry, or "treat it as abandoned" - used to close the question and leave the
+// operation "unknown" for ever. Measured 2026-11-02: 98 operations were parked
+// that way, the oldest 45 days old, with nothing left that could ever close
+// them. "unknown" is also one of the two states that make a task look busy:
+// core_execution_nodes.go refuses to dispatch a master that has a message queued
+// behind a problem while any operation of its task is "dispatched" or
+// "unknown". A conversation whose turn died days ago could therefore never
+// answer again.
+//
+// The order is the promise: surface first, close only after the decision. An
+// operation whose problem is still open stays parked - the decision is still
+// somebody's - and one that was never surfaced is not closed here at all: the
+// sweep above raises it instead. Closing keeps the record (result, usage,
+// dispatch time) and only ends the hold, because the outcome really is unproven.
+func (runtime *TaskRuntime) AbandonClosedUnsettledOperations(now int64) int {
+	runtime.ensureOpen()
+	rows := kernelRows(runtime.store.Db, `SELECT o.id,o.task_id,o.dispatched_at FROM operations o
+      WHERE o.state='unknown' AND o.settled_at IS NULL AND o.worker_active=0
+        AND EXISTS (SELECT 1 FROM questions q
+          WHERE COALESCE(q.operation_id,json_extract(q.data,'$.operationId'))=o.id AND q.status!='open')
+        AND NOT EXISTS (SELECT 1 FROM questions q
+          WHERE COALESCE(q.operation_id,json_extract(q.data,'$.operationId'))=o.id AND q.status='open')
+      ORDER BY o.dispatched_at LIMIT ?`, abandonedOperationSweepLimit)
+	abandoned := 0
+	for _, row := range rows {
+		id, taskId := kernelString(row["id"]), kernelString(row["task_id"])
+		waited := now - kernelInt(row["dispatched_at"])
+		if waited < 0 {
+			waited = 0
+		}
+		func() {
+			defer func() { _ = recover() }()
+			if !runtime.store.AbandonOperation(id, now) {
+				return
+			}
+			runtime.store.Event(taskId, "operation.abandoned", map[string]any{
+				"operationId": id,
+				"waitedMs":    waited,
+				"reason":      "the problem reported for it is answered; the outcome stays unproven",
+			})
+			abandoned++
+		}()
+	}
+	return abandoned
+}
+
 // unsettledWaitText says how long ago in words a person reads without arithmetic.
 func unsettledWaitText(ms int64) string {
 	minutes := ms / 60000

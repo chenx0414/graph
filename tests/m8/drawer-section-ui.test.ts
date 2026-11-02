@@ -13,7 +13,6 @@ import { build } from 'vite';
 import { chromium } from 'playwright';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
-import { parseGraphDefinition } from '../../src/core/interface-spec.ts';
 import type { NativeProposal } from '../../src/core/types.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -54,13 +53,14 @@ async function gitProject(dir: string) {
 
 function workerCheckProposal(summary: string, requirementVersion = 1): NativeProposal {
   return { requirementVersion, summary, acceptance: [{ id: 'ok', description: '检查通过', checkNode: 'check' }],
-    definition: parseGraphDefinition({ schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
+    definition: { schemaVersion: 2, name: summary, protocols: { data: { type: 'object' } },
       nodes: { work: { recipe: 'coder@1', model: 'local', task: 'Implement the requested work', inputs: { job: { protocol: 'data' } },
         outputs: { result: { protocol: 'data' } }, submission: { required: ['result'] } } },
       modules: { check: { type: 'operation', trigger: 'each', inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
         operation: { action: 'workspace.command', version: 1, command: 'node', args: ['check.js'], output: 'result' } } },
       edges: { checkWork: { from: 'work.result', to: 'check.job', enabled: true } },
-      acceptance: [{ id: 'ok', description: '检查通过', kind: 'check', module: 'check' }] }),
+      inputs: {}, outputs: {},
+      acceptance: [{ id: 'ok', description: '检查通过', kind: 'check', module: 'check' }] },
   };
 }
 

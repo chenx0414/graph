@@ -1,11 +1,10 @@
 // graph:allow-large-file: its 27 KB predate the budget; this change only re-points one type import
-import { orthogonalRoutes } from '../core/orthogonal-routes.ts';
 import type { GraphIo, GraphOutput } from '../core/interface-spec.ts';
 import type { ModuleExplanation } from './kernel-view-types.ts';
 import { api } from './api.ts';
 import { useEffect, useState } from 'react';
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, Controls, Handle, MarkerType, MiniMap, Position, type Edge, type EdgeProps, type NodeProps } from '@xyflow/react';
-import { graphNodeLabel, graphNodeVisualKind, type GraphNodeVisualKind } from '../core/graph-presentation.ts';
+import { useFoldedRoutes } from './folded-routes.ts';
 import {
   BOARD_STATE_META,
   NODE_TONE_COLOR,
@@ -29,6 +28,7 @@ type GraphPayload = {
   messages?: { id: string; source: string; target: string; text: string; createdAt: number }[];
   nodes: {
     id: string; kind: string; action?: string; status: string; container?: string; selectedModel?: string; instanceId?: string | null;
+    label: string; visualKind: string;
   }[];
   containers: { id: string; parent?: string; template?: string; version?: number; inputs?: Record<string, GraphIo>; outputs?: Record<string, GraphOutput> }[];
   layout: {
@@ -40,7 +40,7 @@ type GraphPayload = {
 type NodeData = {
   id: string;
   label: string;
-  nodeType: GraphNodeVisualKind;
+  nodeType: string;
   tone: NodeTone;
   status: string;
   boardState: BoardNodeState;
@@ -48,7 +48,7 @@ type NodeData = {
   unknown: boolean;
 };
 
-const NODE_TYPE_LABEL: Record<GraphNodeVisualKind, string> = {
+const NODE_TYPE_LABEL: Record<string, string> = {
   agent: 'A',
   tool: 'T',
   human: 'H',
@@ -321,10 +321,9 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
     ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => {
       const position = graph.layout.positions[node.id] ?? { x: 0, y: 0, width: 192, height: 48 };
       const tone = nodeTone(node.status);
-      const nodeType = graphNodeVisualKind(node);
       return {
-        id: node.id, ariaLabel: `${graphNodeLabel(node)}，${boardStateLabel(node.status)}，按 Enter 打开`, ariaRole: 'button', type: 'graphNode', position: relativePosition(node.id, position),
-        data: { id: node.id, label: graphNodeLabel(node), nodeType, tone, status: node.status, boardState: boardNodeState(node.status), unknown: !boardStateKnown(node.status) } satisfies NodeData,
+        id: node.id, ariaLabel: `${node.label}，${boardStateLabel(node.status)}，按 Enter 打开`, ariaRole: 'button', type: 'graphNode', position: relativePosition(node.id, position),
+        data: { id: node.id, label: node.label, nodeType: node.visualKind, tone, status: node.status, boardState: boardNodeState(node.status), unknown: !boardStateKnown(node.status) } satisfies NodeData,
         // Layout already knows the size; providing it keeps event-driven
         // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
@@ -346,10 +345,15 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
     const source = representative(edge.source), target = representative(edge.target);
     return { ...edge, source, target, folded: source !== edge.source || target !== edge.target };
   }).filter(edge => edge.source !== edge.target || (!edge.folded && Boolean(edge.points?.length)));
-  const foldedRoutes = projectedEdges.some(edge => edge.folded) ? orthogonalRoutes(projectedEdges, graph.layout.positions, [
-    ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => node.id),
-    ...graph.containers.filter(group => collapsed[group.id] && (!group.parent || !hiddenContainers.has(group.parent))).map(group => group.id),
-  ]) : null;
+  const foldedEdges = projectedEdges.filter(edge => edge.folded);
+  const foldedRoutes = useFoldedRoutes(foldedEdges.length ? {
+    edges: foldedEdges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target })),
+    positions: graph.layout.positions,
+    nodeIds: [
+      ...graph.nodes.filter(node => !hidden.has(node.id)).map(node => node.id),
+      ...graph.containers.filter(group => collapsed[group.id] && (!group.parent || !hiddenContainers.has(group.parent))).map(group => group.id),
+    ],
+  } : null);
   const publicEndpoint = (owner: string, endpoint: string, direction: 'input' | 'output') => {
     const group = containerById.get(owner);
     if (!group || !collapsed[owner]) return endpoint;
