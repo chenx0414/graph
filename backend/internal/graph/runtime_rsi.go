@@ -38,6 +38,10 @@ type RsiFileChange struct {
 	Content *string       `json:"content,omitempty"`
 	Edits   []RsiFileEdit `json:"edits,omitempty"`
 	From    *string       `json:"from,omitempty"`
+	// FromPath takes the new content from a file already in the checkout, so a
+	// file the Agent wrote and ran itself is committed byte for byte instead of
+	// being retyped into the call.
+	FromPath *string `json:"fromPath,omitempty"`
 }
 
 // RsiChangeInput is one self-improvement request.
@@ -93,6 +97,9 @@ type RsiReceipt struct {
 	PendingFiles []string `json:"pendingFiles,omitempty"`
 	Error        *string  `json:"error,omitempty"`
 	Diff         *string  `json:"diff,omitempty"`
+	// Adopted are paths this change writes that were already uncommitted in the
+	// checkout before it ran (the Agent's own draft, verified and then committed).
+	Adopted []string `json:"adopted,omitempty"`
 	Report       string   `json:"report"`
 	// OutputPath is the full check output for this attempt, written outside the receipt the
 	// conversation stores.

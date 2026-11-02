@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -68,6 +69,32 @@ func rsiChangePathText(body map[string]any, index int) string {
 	return path
 }
 
+// rsiFromPath reads the optional workspace source of a change's new content.
+//
+// The Agent writes and runs a keeper file with its own tools; naming it here is
+// what lets that verified file be committed byte for byte instead of being
+// retyped into the call (a 110-line test pasted once is a 4k-token call).
+func rsiFromPath(value any, index int) (string, bool) {
+	if value == nil {
+		return "", false
+	}
+	text, ok := value.(string)
+	if !ok {
+		Raise("invalid_input", fmt.Sprintf("changes[%d].fromPath must be a string", index))
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		Raise("invalid_input", fmt.Sprintf("changes[%d].fromPath must name a file already written in the checkout", index))
+	}
+	if utf8.RuneCountInString(text) > 1000 {
+		Raise("invalid_input", fmt.Sprintf("changes[%d].fromPath must be at most 1000 characters", index))
+	}
+	if filepath.IsAbs(text) || rsiHasGitComponent(text) {
+		Raise("invalid_input", fmt.Sprintf("changes[%d].fromPath must stay inside the Graph source root and must not target .git", index))
+	}
+	return text, true
+}
+
 // rsiNormalizeChange reads one file change.
 func rsiNormalizeChange(value any, index int) RsiFileChange {
 	body := rsiPlainObject(value)
@@ -75,10 +102,26 @@ func rsiNormalizeChange(value any, index int) RsiFileChange {
 		Raise("invalid_input", fmt.Sprintf("changes[%d] must be an object", index))
 	}
 	path := rsiChangePathText(body, index)
-	switch rsiText(body["action"]) {
+	action := rsiText(body["action"])
+	fromPath, hasFromPath := rsiFromPath(body["fromPath"], index)
+	if hasFromPath && (action == "copy" || action == "delete") {
+		Raise("invalid_input", fmt.Sprintf("changes[%d].fromPath is only for write or replace: %q carries no content", index, action))
+	}
+	switch action {
 	case "write":
-		content, ok := body["content"].(string)
+		rawContent, present := body["content"]
+		if hasFromPath && present && rawContent != nil {
+			Raise("invalid_input", fmt.Sprintf("changes[%d] has both content and fromPath: give the new text once - inline content, or fromPath naming a file already written", index))
+		}
+		if hasFromPath {
+			return RsiFileChange{Path: path, Action: "write", FromPath: &fromPath}
+		}
+		content, ok := rawContent.(string)
 		if !ok {
+			if !present || rawContent == nil {
+				Raise("invalid_input", fmt.Sprintf(
+					"changes[%d].content or changes[%d].fromPath is required: a write needs the new text, inline or from a file already written", index, index))
+			}
 			Raise("invalid_input", fmt.Sprintf("changes[%d].content must be a string", index))
 		}
 		return RsiFileChange{Path: path, Action: "write", Content: &content}
@@ -94,11 +137,17 @@ func rsiNormalizeChange(value any, index int) RsiFileChange {
 	case "delete":
 		return RsiFileChange{Path: path, Action: "delete"}
 	}
-	if rsiText(body["action"]) != "replace" {
+	if action != "replace" {
 		Raise("invalid_input", fmt.Sprintf("changes[%d] must be write, replace, copy or delete", index))
 	}
-	rawEdits, ok := rsiAsArrayOf(body["edits"])
-	if !ok || len(rawEdits) == 0 {
+	rawEdits, hasEdits := rsiAsArrayOf(body["edits"])
+	if hasFromPath && hasEdits {
+		Raise("invalid_input", fmt.Sprintf("changes[%d] has both edits and fromPath: a replace is either the edits that change it or a whole file read from fromPath", index))
+	}
+	if hasFromPath {
+		return RsiFileChange{Path: path, Action: "replace", FromPath: &fromPath}
+	}
+	if !hasEdits || len(rawEdits) == 0 {
 		Raise("invalid_input", fmt.Sprintf("changes[%d] must be write, replace, copy or delete", index))
 	}
 	edits := []RsiFileEdit{}

@@ -88,7 +88,7 @@ func RsiChangeShapeHint(args any) string {
 		return ""
 	}
 	topLevel := []string{"title", "problem", "evidence", "diagnosis", "impact", "risk", "checks", "activate", "force"}
-	changeKeys := []string{"path", "action", "content", "edits", "from"}
+	changeKeys := []string{"path", "action", "content", "edits", "from", "fromPath"}
 	for index, change := range rsiAsArray(top["changes"]) {
 		if rsiIsArray(change) {
 			return "changes[" + itoa(index) + "] is an array: changes[] holds one object per file - flatten it."
@@ -113,7 +113,7 @@ func RsiChangeShapeHint(args any) string {
 		// properties path" - no index, no shape, so the same call comes back. Name it here instead.
 		if _, ok := entry["path"].(string); !ok {
 			return "changes[" + itoa(index) + "] is missing \"path\": every change needs one path per file. Write it as " +
-				"{path, action: \"write\", content} | {path, action: \"replace\", edits: [{oldText, newText}]}" +
+				"{path, action: \"write\", content or fromPath} | {path, action: \"replace\", edits: [{oldText, newText}] or fromPath}" +
 				" | {path, action: \"copy\", from: \"<revision>\"} | {path, action: \"delete\"}."
 		}
 		// A mirror names a revision instead of retyping content. Shape mistakes in that one field are

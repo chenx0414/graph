@@ -106,10 +106,24 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	// Checks run against the whole working tree, so a green run only proves the commit when the
 	// commit contains everything that was dirty while they ran. Anything else is refused up front
 	// instead of being silently left out of the commit that gets reported as verified.
+	// A path this change writes is not "outside" it, even when the Agent's own
+	// tools already put it on disk: the change overwrites it before the checks run
+	// and the commit holds exactly the content that was checked. Anything else
+	// that is dirty still blocks - the checks would verify work the commit cannot
+	// contain.
+	claimed := map[string]bool{}
+	for _, path := range append(append([]string{}, ownedOrder...), uniquePaths...) {
+		claimed[path] = true
+	}
 	blocked := []string{}
+	adopted := []string{}
 	for _, path := range rsiDirtyPaths(*root) {
-		if !owned[path] {
+		if !claimed[path] {
 			blocked = append(blocked, path)
+			continue
+		}
+		if !owned[path] {
+			adopted = append(adopted, path)
 		}
 	}
 	if len(blocked) > 0 {
@@ -183,7 +197,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		receipt = failure
 	}()
 
-	for _, change := range input.Changes {
+	for changeIndex, change := range input.Changes {
 		path, _ := rsiInside(*root, change.Path)
 		absolute := filepath.Join(*root, path)
 		existing, known := snapshots[path]
@@ -203,7 +217,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 		switch change.Action {
 		case "write":
-			value := *change.Content
+			value := rsiChangeContent(*root, change, changeIndex)
 			// A whole-file write carries no evidence of what it removed. The one
 			// mistake it invites - pasting a placeholder instead of the file - reads
 			// as a successful change to every check that does not open the content,
@@ -243,16 +257,26 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 				Raise("not_found", "Cannot replace missing RSI file "+path)
 			}
 			content := *existing
-			for index, edit := range change.Edits {
-				matches := strings.Count(content, edit.OldText)
-				if matches != 1 {
-					// A batch rolls back as a whole, so name the edit that failed: the
-					// caller has to know which oldText to correct without guessing.
-					head := strings.TrimSpace(strings.Split(edit.OldText, "\n")[0])
-					runes := []rune(head)
-					if len(runes) > 90 {
-						head = string(runes[:90])
+			if change.FromPath != nil {
+				content = rsiChangeContent(*root, change, changeIndex)
+				if refusal := rsiWriteShrinkRefusal(path, *existing, content); refusal != "" {
+					Raise("rsi_edit_conflict", refusal)
+				}
+			} else {
+				// A batch rolls back as a whole, so every anchor that does not match is
+				// named in one answer: the caller has to be able to correct the whole
+				// batch in one resend instead of discovering the mismatches one call at a
+				// time.
+				failures := []string{}
+				for index, edit := range change.Edits {
+					matches := strings.Count(content, edit.OldText)
+					if matches != 1 {
+						failures = append(failures, rsiEditMismatch(index, len(change.Edits), matches, edit.OldText))
+						continue
 					}
+					content = strings.Replace(content, edit.OldText, edit.NewText, 1)
+				}
+				if len(failures) > 0 {
 					// Which state the anchor was matched against is the part the caller cannot see: a failed
 					// attempt keeps its files uncommitted, so the committed text is already gone from the
 					// worktree and "found 0" on its own reads like a typo instead of a stale anchor.
@@ -260,10 +284,13 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 					if owned[path] {
 						hint = "；该文件当前是上一轮未提交（检查失败保留）的内容：oldText 要按它现在的样子匹配，或改用 action \"write\" 直接给全文"
 					}
-					Raise("rsi_edit_conflict", "RSI replacement in "+path+" must match exactly once, found "+itoa(matches)+
-						" (edit "+itoa(index+1)+" of "+itoa(len(change.Edits))+", first line: "+head+")"+hint)
+					if len(failures) == 1 {
+						Raise("rsi_edit_conflict", "RSI replacement in "+path+" must match exactly once, "+failures[0]+hint)
+					}
+					Raise("rsi_edit_conflict", "RSI replacement in "+path+" has "+itoa(len(failures))+" of "+
+						itoa(len(change.Edits))+" edits that do not match exactly once, so nothing was written: "+
+						strings.Join(failures, "; ")+hint)
 				}
-				content = strings.Replace(content, edit.OldText, edit.NewText, 1)
 			}
 			value := content
 			if _, seen := final[path]; !seen {
@@ -416,7 +443,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		Id: id, Status: "applied", Title: title, Root: root, Branch: &branch, Commit: commit,
 		Files: stagePaths, Validation: validation, RestartRequired: restartRequired,
 		Activation: &RsiReceiptActivation{State: described.State},
-		OutputPath: &outputPath,
+		OutputPath: &outputPath, Adopted: adopted,
 	}
 	if input.Force {
 		applied.Force = true
@@ -427,6 +454,45 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	applied.Report = rsiSuccessReport(input, applied, described.Note)
 	service.rsiRecord(context, applied)
 	return applied
+}
+
+// rsiChangeContent is the new text of one change: given inline, or read from a
+// file the Agent already wrote in the checkout.
+//
+// The second form exists because the most expensive call this tool served was a
+// file pasted back in: the Agent writes a keeper test with its own tools, runs
+// it, and then had to repeat every line inside `changes[]`. Naming the file
+// commits exactly the bytes that were verified.
+func rsiChangeContent(root string, change RsiFileChange, index int) string {
+	if change.FromPath == nil {
+		if change.Content == nil {
+			Raise("invalid_input", "changes["+itoa(index)+"] has no content: give content or fromPath")
+		}
+		return *change.Content
+	}
+	source, ok := rsiInside(root, *change.FromPath)
+	if !ok {
+		Raise("invalid_input", "changes["+itoa(index)+"].fromPath must stay inside the Graph source root")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, source))
+	if err != nil {
+		if os.IsNotExist(err) {
+			Raise("not_found", "changes["+itoa(index)+"].fromPath "+source+
+				" does not exist in the checkout: write the file first, then name it here instead of pasting its text")
+		}
+		Raise("rsi_edit_conflict", "changes["+itoa(index)+"].fromPath "+source+" could not be read: "+err.Error())
+	}
+	return string(raw)
+}
+
+// rsiEditMismatch names one anchor that does not match exactly once.
+func rsiEditMismatch(index, total, matches int, oldText string) string {
+	head := strings.TrimSpace(strings.Split(oldText, "\n")[0])
+	runes := []rune(head)
+	if len(runes) > 90 {
+		head = string(runes[:90])
+	}
+	return "found " + itoa(matches) + " (edit " + itoa(index+1) + " of " + itoa(total) + ", first line: " + head + ")"
 }
 
 // rsiWriteShrinkRefusal refuses a write that would replace a large file with a

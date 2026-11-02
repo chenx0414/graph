@@ -79,14 +79,14 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。RSI 不限于修 bug：只要它能给出理由，修缺陷、重构、新增功能、改进命令或文档都可以改。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求、仍在运行的 operation 及其身份（task/node/request/archived），再用 `apply_rsi_change` 提交一次结构化改动：
 
-- 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `delete`），拒绝 `.git` 与路径逃逸，要求目标文件没有未提交改动；
+- 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `copy` / `delete`）；`write` 的正文可以内联，也可以用 `fromPath` 取自 checkout 里你已经写好、跑过的那个文件（不再重贴一遍）。`.git` 与路径逃逸被拒绝；不属于这次改动的未提交文件仍然阻塞（见下）；
 - 运行检查（自定义 `node` 检查、`node --run check`，`activate` 时再加 `node --run app:build`）；
 - 提交到专用 `rsi/*` 分支；
 - `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在 operation 停稳后重启 daemon 让改动生效；`force` 为真时跳过等待、立即重载，可能中断在途 operation。
 
-调用形状是固定的（写错会白跑一个来回，报错会点名缺哪个字段）：`title`、`problem`、`changes`、`checks` 都是**顶层**字段；`changes[]` 的每个条目必须带 `path`（仓储相对路径）与 `action`（`write` / `replace` / `delete`），`write` 配 `content`、`replace` 配 `edits`；`checks` 里每项是 `{ command, args }`，也放顶层，不要塞进单个 change 里。SDK 的校验**一次列全部问题**（每行一条，并回显收到的参数），所以两处错误会同时出现，不必改一条试一次。嵌套写错的那种会另行点名（`changes[0] is one file change… "checks" belongs at the top level of the call - it is nested one level too deep.`），因为 schema 只能描述结果、说不出原因。
+调用形状是固定的（写错会白跑一个来回，报错会点名缺哪个字段）：`title`、`problem`、`changes`、`checks` 都是**顶层**字段；`changes[]` 的每个条目必须带 `path`（仓储相对路径）与 `action`（`write` / `replace` / `delete`），`write` 配 `content` 或 `fromPath`、`replace` 配 `edits` 或 `fromPath`；`checks` 里每项是 `{ command, args }`，也放顶层，不要塞进单个 change 里。SDK 的校验**一次列全部问题**（每行一条，并回显收到的参数），所以两处错误会同时出现，不必改一条试一次。改动里的多个 `edits` 也一样：所有匹配不上的锚点（`found 0` / `found 2`）在同一条报错里列出，改一次就能重发，而不是一次只发现一个。嵌套写错的那种会另行点名（`changes[0] is one file change… "checks" belongs at the top level of the call - it is nested one level too deep.`），因为 schema 只能描述结果、说不出原因。
 
-**手工改过的文件不能搭这趟车**：`apply_rsi_change` 拒绝运行于有未提交改动的 checkout（`Uncommitted changes outside this RSI change`），这是对的——检查跑在整个工作树上，它证明不了别人未提交的东西。先用 `git restore --staged --worktree -- <path>`（未跟踪的用 `rm`）恢复，再把同样的编辑作为 `changes[]` 传进去；否则那次改动要么被回滚、要么会把它的文件一并提交。
+**手工改过的文件不能搭这趟车，但你自己刚写的可以**：`apply_rsi_change` 拒绝运行于有未提交改动的 checkout（`Uncommitted changes outside this RSI change`），这条规则保护的是「检查跑在整个工作树上，它证明不了别人未提交的东西」。所以不属于这次改动的未提交文件照旧阻塞：先用 `git restore --staged --worktree -- <path>`（未跟踪的用 `rm`）恢复，再把同样的编辑作为 `changes[]` 传进去。**这次改动自己要写的路径**不受它影响：你用自己的工具把文件落盘、跑通，再用 `{path, action: "write", fromPath: "<同一个文件>"}` 命名它，提交的就是磁盘上的那些字节，收据会在「其中提交前已在工作区」里点名，不会悄悄带进来别的东西。
 
 检查必须能证明它声称的东西：`node --run check` 同时跑 typecheck 与全部测试，是「快检」的下限。只拿单文件 vitest 当检查会漏掉类型错误（实际漏过两次：一次 TDZ、一次忘了提拔 `SCHEMA_VERSION`），所以快检至少写成 `node --run typecheck && node node_modules/vitest/vitest.mjs run <files>`，或者直接用 `node --run check`。
 

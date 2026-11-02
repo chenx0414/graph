@@ -318,3 +318,105 @@ test('a self-improvement call that asks for a reload leaves a real reload reques
     }
   }, { timeout: 60_000, interval: 250 }).toMatchObject({ commit: expect.any(String), branch: expect.stringContaining('rsi/') });
 }, 240_000);
+
+test('a file already written in the workspace is committed without retyping it', async () => {
+  const f = await fixture(() => [[{
+    id: 'adopt',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      changes: [
+        { path: 'replace.txt', action: 'replace', edits: [{ oldText: 'original', newText: 'corrected' }] },
+        // The Agent wrote and ran this file itself; it is untracked in the
+        // checkout, and retyping it into the call is the cost this shape removes.
+        { path: 'keeper.txt', action: 'write', fromPath: 'keeper.txt' },
+      ],
+      checks: [check],
+    }),
+  }]]);
+  await writeFile(join(f.checkout, 'keeper.txt'), 'keeper content\n');
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-adopt' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('adopt'), { timeout: 90_000, interval: 250 }).toBe(true);
+  expect(observed.get('adopt')).toContain('"status":"applied"');
+  // The committed bytes are the bytes that were on disk, now tracked.
+  expect(await readFile(join(f.checkout, 'keeper.txt'), 'utf8')).toBe('keeper content\n');
+  expect(f.git(['ls-files', 'keeper.txt'])).toBe('keeper.txt');
+  expect(f.git(['log', '--format=%s', '-1'])).toBe('rsi: Correct native RSI call');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+}, 180_000);
+
+test('a batch whose anchors do not match names every bad edit and writes nothing', async () => {
+  const f = await fixture(() => [[{
+    id: 'several',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      changes: [{
+        path: 'replace.txt',
+        action: 'replace',
+        edits: [
+          // "i" occurs twice in "original\n": one edit matches many.
+          { oldText: 'i', newText: 'I' },
+          { oldText: 'original', newText: 'corrected' },
+          // Nothing in the file contains this: one edit matches none.
+          { oldText: 'zzz', newText: 'x' },
+        ],
+      }],
+      checks: [check],
+    }),
+  }]]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-several' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('several'), { timeout: 90_000, interval: 250 }).toBe(true);
+  const message = observed.get('several') ?? '';
+  // One resend has to be enough: both wrong anchors are named, not just the first.
+  expect(message).toMatch(/edit 1 of 3/);
+  expect(message).toMatch(/found 2/);
+  expect(message).toMatch(/edit 3 of 3/);
+  expect(message).toMatch(/found 0/);
+  // Nothing was written and no commit was made.
+  expect(await readFile(join(f.checkout, 'replace.txt'), 'utf8')).toBe('original\n');
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+}, 180_000);
+
+test('an unrelated uncommitted file still stops the change', async () => {
+  const f = await fixture(() => [[{
+    id: 'stranger',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      changes: [{ path: 'welcome.txt', action: 'write', content: 'hi\n' }],
+      checks: [check],
+    }),
+  }]]);
+  // Somebody else's work in the same checkout: checks would verify what the
+  // commit cannot contain, so the change is refused instead.
+  await writeFile(join(f.checkout, 'stranger.txt'), 'someone else work\n');
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-stranger' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('stranger'), { timeout: 90_000, interval: 250 }).toBe(true);
+  expect(observed.get('stranger')).toMatch(/Uncommitted changes outside this RSI change: stranger\.txt/);
+  await expect(readFile(join(f.checkout, 'welcome.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
+  expect(f.git(['status', '--porcelain'])).toBe('?? stranger.txt');
+}, 180_000);

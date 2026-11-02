@@ -129,6 +129,9 @@ func rsiSuccessReport(input RsiChangeInput, receipt RsiReceipt, activationNote s
 		"- 文件："+strings.Join(receipt.Files, ", "),
 		"- 验证：",
 	)
+	if len(receipt.Adopted) > 0 {
+		lines = append(lines, "- 其中提交前已在工作区（内容以磁盘上的为准）："+strings.Join(receipt.Adopted, ", "))
+	}
 	for _, item := range receipt.Validation {
 		lines = append(lines, "  - "+item.Command+": "+item.Status)
 	}

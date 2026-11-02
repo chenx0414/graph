@@ -19,7 +19,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	rsiArguments := PrepareToolArguments("apply_rsi_change")
 	apply := AgentToolDeclaration{
 		Name: "apply_rsi_change", Label: "Apply self-improvement change",
-		Description: "Change Graph files, check and commit to rsi/*. Each file needs a relative path and write, replace, \"copy\" or delete; copy mirrors a revision. Failed checks leave edits uncommitted; changes:[] retries checks. Activation runs full check and app:build, ends this operation and schedules reload. Wait while reload is pending; ask before force interrupts running work.",
+		Description: "Change Graph files, check and commit to rsi/*. Each change is a relative path plus write, replace, \"copy\", delete, or fromPath (a file already written); copy mirrors a revision. Failed checks keep edits; changes:[] retries. Activation runs the full gate, ends this operation and schedules reload. Wait while a reload is pending; ask before force interrupts work.",
 		Parameters: tbObject([]tbField{
 			{"title", tbString(nil)}, {"problem", tbString(nil)},
 			{"evidence", tbOptional(tbString(nil))}, {"diagnosis", tbOptional(tbString(nil))},
@@ -29,6 +29,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 				{"action", tbString(nil)},
 				{"content", tbOptional(tbString(nil))},
 				{"from", tbOptional(tbString(map[string]any{"description": "Revision to copy the file from, for action \"copy\" (for example the commit of the branch you are mirroring)."}))},
+				{"fromPath", tbOptional(tbString(map[string]any{"description": "Take the new text from this file already in the checkout (the keeper you wrote and ran) instead of inlining content."}))},
 				{"edits", tbOptional(tbArray(tbObject([]tbField{{"oldText", tbString(nil)}, {"newText", tbString(nil)}}, []string{"oldText", "newText"})))},
 			}, []string{"path", "action"})))},
 			{"checks", tbOptional(tbArray(tbObject([]tbField{{"command", tbString(nil)}, {"args", tbArray(tbString(nil))}}, []string{"command", "args"})))},
