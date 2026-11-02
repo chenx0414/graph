@@ -39,6 +39,13 @@ type ExtensionHost struct {
 	host   *subprocess.Host
 	mutex  sync.Mutex
 	loaded map[string]*LoadedExtension
+	// sessionStarted remembers which extensions already heard session_start in
+	// this host. A host serves every session of the daemon, and an extension
+	// that a second conversation loads again must not be re-initialized: Pi's
+	// contract is one session_start per session, and an extension that tears
+	// its state down on shutdown while refusing to rebuild it twice (pi-fff)
+	// ends up serving a process nobody can use.
+	sessionStarted map[string]bool
 	// catalog is the tool list the host reports when an extension reads
 	// pi.getAllTools(). Load publishes it after the extension is ready, so the
 	// answer never waits on the lock Load holds while the extension process
@@ -65,7 +72,7 @@ type LoadedExtension struct {
 // bridge answers the catalog reads and leaves the rendering calls to PiG's
 // headless defaults.
 func NewExtensionHost(cwd string) *ExtensionHost {
-	host := &ExtensionHost{host: subprocess.NewHost(cwd), loaded: map[string]*LoadedExtension{}}
+	host := &ExtensionHost{host: subprocess.NewHost(cwd), loaded: map[string]*LoadedExtension{}, sessionStarted: map[string]bool{}}
 	bridge := subprocess.NewUIBridge(nil)
 	// The host holds the extensions' own tools, not the session's built-in ones:
 	// Graph's tool policy belongs to the session, and one host serves every
@@ -136,6 +143,7 @@ func (h *ExtensionHost) Close() {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	h.loaded = map[string]*LoadedExtension{}
+	h.sessionStarted = map[string]bool{}
 	h.host.Shutdown("the daemon is closing")
 }
 
@@ -150,6 +158,96 @@ func extensionHostName(path string) string {
 		directory = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	return directory
+}
+
+// EmitSessionStart tells every extension that has not heard it yet that the
+// session it serves has begun.
+//
+// Pi extensions are stateful participants in a session: they build their index,
+// their browser or their configuration on session_start and release it on
+// session_shutdown. A host that never emits it leaves every one of them half
+// initialized - the tool still exists (its schema is declared eagerly), it just
+// answers from a state nobody built. Measured 2026-11-02: pi-fff answered every
+// search with "FFF picker factory is not initialized", and agent-browser and
+// mcp-adapter subscribe to the same two events.
+//
+// An extension that fails its own setup is reported, not fatal: its tools will
+// fail on use, which is the truth about that extension rather than a reason to
+// refuse the turn.
+func (h *ExtensionHost) EmitSessionStart(reason string) []error {
+	type pending struct {
+		path  string
+		entry *LoadedExtension
+	}
+	h.mutex.Lock()
+	waiting := []pending{}
+	for path, entry := range h.loaded {
+		if h.sessionStarted[path] {
+			continue
+		}
+		waiting = append(waiting, pending{path: path, entry: entry})
+	}
+	h.mutex.Unlock()
+	failures := []error{}
+	for _, item := range waiting {
+		event := extension.SessionStartEvent{Type: "session_start", Reason: reason}
+		if err := item.entry.emit("session_start", event); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		h.mutex.Lock()
+		h.sessionStarted[item.path] = true
+		h.mutex.Unlock()
+	}
+	return failures
+}
+
+// EmitBeforeAgentStart tells every extension one turn is about to start.
+//
+// The event carries the prompt the turn answers, which is what an extension
+// reads to inject context, filter tools or prepare a per-turn state.
+func (h *ExtensionHost) EmitBeforeAgentStart(prompt string) []error {
+	event := extension.BeforeAgentStartEvent{Type: "before_agent_start", Prompt: prompt}
+	return h.emitEverywhere("before_agent_start", event)
+}
+
+// emitEverywhere delivers one event to every loaded extension.
+func (h *ExtensionHost) emitEverywhere(event string, payload any) []error {
+	h.mutex.Lock()
+	loaded := make([]*LoadedExtension, 0, len(h.loaded))
+	for _, entry := range h.loaded {
+		loaded = append(loaded, entry)
+	}
+	h.mutex.Unlock()
+	sort.Slice(loaded, func(left, right int) bool { return loaded[left].Name < loaded[right].Name })
+	failures := []error{}
+	for _, entry := range loaded {
+		if err := entry.emit(event, payload); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return failures
+}
+
+// emit delivers one event to the handlers this extension subscribed to.
+//
+// The handlers the subprocess host hands back are proxies: invoking one sends
+// the event over the same wire a tool call travels, so the extension's own
+// pi.on(...) callback runs in its own process.
+func (entry *LoadedExtension) emit(event string, payload any) error {
+	if entry == nil || entry.extension == nil {
+		return nil
+	}
+	failures := []string{}
+	for _, handler := range entry.extension.EventHandlers(event) {
+		if _, err := handler(payload, context.Background()); err != nil {
+			failures = append(failures, err.Error())
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s: the %s handler failed: %s", entry.Name, event, strings.Join(failures, "; "))
 }
 
 // ExtensionTool is one tool an extension registered.

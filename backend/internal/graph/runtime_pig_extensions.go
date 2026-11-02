@@ -122,6 +122,20 @@ func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker 
 			if err != nil {
 				return err
 			}
+			// A Pi extension builds its state on session_start, and the host
+			// serves every session of the daemon: the event is emitted once per
+			// extension per host, right after the load that made it available and
+			// before any of its tools is called. Without it a stateful extension
+			// answers from a state nobody built - measured 2026-11-02: pi-fff
+			// rejected every search with "FFF picker factory is not initialized".
+			for _, failure := range host.EmitSessionStart("startup") {
+				if request.OnEvent != nil {
+					request.OnEvent(map[string]any{
+						"type":    "pi_extension_setup_failed",
+						"message": failure.Error(),
+					})
+				}
+			}
 			for _, tool := range loaded.Tools() {
 				if !declared[tool.Name] {
 					continue

@@ -280,3 +280,71 @@ test('a reloaded extension host runs the extension in a new process', async () =
     { text: 'The extension answered again.' },
   ]);
 }, 180_000);
+
+// A Pi extension is told its session started, before any of its tools is called.
+//
+// Measured 2026-11-02: every installed Pi extension (pi-fff, agent-browser,
+// mcp-adapter) builds its state in `pi.on('session_start')`. The daemon's host
+// never emitted the event, so a stateful extension answered from a state nobody
+// built - pi-fff rejected every search with "FFF picker factory is not
+// initialized" while its tool stayed callable.
+//
+// The order is the assertion: the extension writes each lifecycle line it hears
+// into one file, and the file must start with session_start. One host serves
+// every session, so a second turn must not initialize it again.
+const lifecycleExtensionSource = `import { appendFileSync } from 'node:fs';
+
+export default function (pi) {
+  const log = (line) => {
+    try {
+      if (process.env.GRAPH_PIG_PI_EXTENSION_MARKER) appendFileSync(process.env.GRAPH_PIG_PI_EXTENSION_MARKER, line + '\\n');
+    } catch {}
+  };
+  pi.on('session_start', async () => { log('session_start'); });
+  pi.registerTool({
+    name: 'proof_tool',
+    description: 'Record that a turn called it.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    execute: async () => {
+      log('tool');
+      return { content: [{ type: 'text', text: 'extension-proof' }] };
+    },
+  });
+}
+`;
+
+test('a Pi extension hears session_start before its first tool call, once per host', async () => {
+  await withExtension(lifecycleExtensionSource, [{ name: 'proof_tool', description: 'Record that a turn called it.' }], async ({ daemon, capabilityDirectory }) => {
+    const marker = join(capabilityDirectory, 'tool-ran.txt');
+    const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
+    expect(compiled.status).toBe(200);
+
+    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the proof tool.', requestId: 'lifecycle-first' }) });
+    expect(created.status).toBe(200);
+    const { conversationId } = await created.json() as { conversationId: string };
+    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
+    await expect.poll(async () => (await view()).master?.status, { timeout: 60000, interval: 250 }).toBe('succeeded');
+
+    const second = await daemon.request(`/api/conversations/${conversationId}/messages`, {
+      method: 'POST', body: JSON.stringify({ text: 'Call the proof tool again.', requestId: 'lifecycle-second' }),
+    });
+    expect(second.status).toBe(200);
+    await expect.poll(async () => (await view()).messages?.filter(message => message.role === 'assistant').length, { timeout: 60000, interval: 250 })
+      .toBeGreaterThanOrEqual(2);
+
+    const lines = (await readFile(marker, 'utf8')).split('\n').filter(Boolean);
+    // The event arrived before the work: an extension initializes its state on
+    // session_start, and a tool that runs first runs against nothing.
+    expect(lines[0]).toBe('session_start');
+    // One host serves every session of the daemon, so the second turn must not
+    // initialize the extension again.
+    expect(lines.filter(line => line === 'session_start')).toHaveLength(1);
+    // Both turns really reached the extension.
+    expect(lines.filter(line => line === 'tool')).toHaveLength(2);
+  }, undefined, [
+    { tools: [{ id: 'call-proof', name: 'proof_tool', arguments: JSON.stringify({}) }] },
+    { text: 'The extension answered.' },
+    { tools: [{ id: 'call-proof-again', name: 'proof_tool', arguments: JSON.stringify({}) }] },
+    { text: 'The extension answered again.' },
+  ]);
+}, 180_000);
