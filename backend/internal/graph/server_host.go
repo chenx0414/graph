@@ -93,6 +93,10 @@ const problemSweepMs = 60 * 1000
 // handed to the main Agent.
 const unsettledSweepMs = 60 * 1000
 
+// autoAnswerSweepMs is how often an unanswered ask_user question is checked
+// against its deadline.
+const autoAnswerSweepMs = 60 * 1000
+
 // GraphHost is the listening daemon and its drive loop.
 type GraphHost struct {
 	Runtime *TaskRuntime
@@ -109,6 +113,8 @@ type GraphHost struct {
 	lastProblemSweep int64
 	// lastUnsettledSweep is only touched by the drive loop.
 	lastUnsettledSweep int64
+	// lastAutoAnswerSweep is only touched by the drive loop.
+	lastAutoAnswerSweep int64
 }
 
 // OpenGraphServer binds 127.0.0.1 and drives the runtime.
@@ -197,6 +203,14 @@ func (h *GraphHost) drive() {
 			func() {
 				defer func() { _ = recover() }()
 				h.Runtime.SweepUnsettledOperations(now)
+			}()
+		}
+		// An ask_user nobody came back to takes the asker's recommended option.
+		if now := NowMillis(); now-h.lastAutoAnswerSweep >= autoAnswerSweepMs {
+			h.lastAutoAnswerSweep = now
+			func() {
+				defer func() { _ = recover() }()
+				h.Runtime.SweepAutoAnswerQuestions(now)
 			}()
 		}
 		if driving {

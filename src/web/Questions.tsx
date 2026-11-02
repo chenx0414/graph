@@ -122,8 +122,10 @@ export function QuestionReply({ taskId, question, onDone }: {
                 if (!multiple) setValue('');
               }} />
               <Markdown text={option} />
+              {String(question.data.recommended ?? '') === option && <span className="faint" data-testid={`question-recommended-${question.id}`}>（推荐：5 分钟后自动选它）</span>}
             </label>)}
           </div>}
+          <div className="question-reply-why" data-testid={`question-auto-answer-hint-${question.id}`}>5 分钟不回答，会按推荐选项继续一次；之后你仍可以接着说别的。</div>
           <textarea className="input question-custom-answer" data-testid="waiting-value" value={value} onChange={event => {
             setValue(event.target.value);
             if (!multiple) setChoices([]);

@@ -34,6 +34,7 @@ type PiAdapterAskedQuestion struct {
 	Prompt       string   `json:"prompt"`
 	Why          string   `json:"why"`
 	Options      []string `json:"options"`
+	Recommended  string   `json:"recommended"`
 	Multiple     bool     `json:"multiple"`
 	ToSupervisor bool     `json:"-"`
 	RequestID    string   `json:"-"`

@@ -180,9 +180,16 @@ func agentToolsAsk(ask func(PiAdapterAskedQuestion), params map[string]any) any 
 			options = options[:8]
 		}
 	}
+	// The option a person would have picked if they were here. It is explicit
+	// rather than "the first one": a question that times out answers as the
+	// asker intended, not as the list happened to be ordered.
+	recommended := strings.TrimSpace(agentToolsStringOrEmpty(params["recommended"]))
+	if recommended != "" && !agentToolsContains(options, recommended) {
+		panic(errors.New("A recommended option must be one of the options"))
+	}
 	ask(PiAdapterAskedQuestion{
 		Prompt: agentToolsTruncate(prompt, 2_000), Why: agentToolsTruncate(why, 1_000),
-		Options: options, Multiple: params["multiple"] == true, RequestID: requestID,
+		Options: options, Recommended: recommended, Multiple: params["multiple"] == true, RequestID: requestID,
 	})
 	// The turn stops here on purpose: the answer is the next turn's input.
 	result := agentToolsText(stringifyJSON(map[string]any{"status": "asked", "prompt": prompt}))

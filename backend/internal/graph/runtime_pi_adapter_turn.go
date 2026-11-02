@@ -385,7 +385,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		return OperationResult{
 			Outcome:  "waiting",
 			Output:   map[string]any{"question": question},
-			Question: &OperationQuestion{Prompt: question.Prompt, Data: map[string]any{"requestType": requestType, "prompt": question.Prompt, "why": question.Why, "options": question.Options, "multiple": question.Multiple}},
+			Question: &OperationQuestion{Prompt: question.Prompt, Data: map[string]any{"requestType": requestType, "prompt": question.Prompt, "why": question.Why, "options": question.Options, "recommended": question.Recommended, "multiple": question.Multiple}},
 			Usage:    turn.Gate.Total(),
 		}
 	}
