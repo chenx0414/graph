@@ -34,6 +34,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 			}, []string{"path", "action"})))},
 			{"checks", tbOptional(tbArray(tbObject([]tbField{{"command", tbString(nil)}, {"args", tbArray(tbString(nil))}}, []string{"command", "args"})))},
 			{"activate", tbOptional(tbBool())}, {"force", tbOptional(tbBool())},
+			{"dryRun", tbOptional(map[string]any{"type": "boolean", "description": "Apply the changes and run the checks, then restore the working tree: nothing is committed, nothing reloads."})},
 		}, []string{"title", "problem"}),
 		Available: main && features.Rsi != nil && features.Rsi.Apply, ExternallyGated: false,
 	}

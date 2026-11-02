@@ -339,6 +339,34 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			break
 		}
 	}
+	if input.DryRun {
+		// A rehearsal leaves nothing behind: the files go back to the snapshots the
+		// moment the verdict is in, and a branch created just for it goes away.
+		// Nothing is staged yet - staging runs after this point - so the index is
+		// already untouched.
+		for _, path := range snapshotOrder {
+			content := snapshots[path]
+			absolute := filepath.Join(*root, path)
+			if content == nil {
+				_ = os.Remove(absolute)
+				continue
+			}
+			_ = os.MkdirAll(filepath.Dir(absolute), 0o700)
+			_ = os.WriteFile(absolute, []byte(*content), 0o644)
+		}
+		if createdBranch && originalBranch != nil && len(owned) == 0 {
+			Git(*root, []string{"switch", *originalBranch}, nil, nil)
+			Git(*root, []string{"branch", "-D", branch}, nil, nil)
+		}
+		rehearsal := RsiReceipt{
+			Id: id, Status: "dry_run", Title: title, Root: root, Commit: nil,
+			Files: uniquePaths, Validation: validation, RestartRequired: false,
+			OutputPath: &outputPath,
+		}
+		rehearsal.Report = rsiDryRunReport(input, rehearsal, failed)
+		service.rsiRecord(context, rehearsal)
+		return rehearsal
+	}
 	if failed {
 		// Keep the working tree so the Agent can iterate; a flaky or genuinely
 		// failing check must not discard the change.

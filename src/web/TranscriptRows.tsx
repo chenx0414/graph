@@ -253,9 +253,11 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const { rsi } = row;
   const [expanded, setExpanded] = useState<boolean | null>(null);
   const open = expanded ?? false;
+  const dryRunFailed = rsi.status === 'dry_run' && rsi.validation.some(item => item.status === 'failed');
   const statusLabel = rsi.status === 'applied' ? (rsi.activation === 'active' ? '已生效' : rsi.activation === 'pending_reload' ? '等待重载' : '已提交')
     : rsi.status === 'checks_failed' ? '检查未通过'
-      : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
+      : rsi.status === 'dry_run' ? (dryRunFailed ? '演练未通过' : '演练通过')
+        : rsi.status === 'rolled_back' ? '已回滚' : '不可用';
   const files = rsi.files.length ? rsi.files : rsi.pendingFiles;
   return (
     <section className="rsi-report" data-testid="rsi-report" data-status={rsi.status}>
@@ -294,6 +296,9 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
       {rsi.error && <p className="rsi-report-error">{rsi.error}</p>}
       {rsi.status === 'checks_failed' && (
         <p className="rsi-report-pending">改动已保留在工作区、尚未提交，也不会触发重载。继续修复后再次调用即可。</p>
+      )}
+      {rsi.status === 'dry_run' && (
+        <p className="rsi-report-pending">演练：改动写进工作区跑过检查后已恢复；没有提交，也不会重载。</p>
       )}
       {rsi.restartRequired && (
         <p className="rsi-report-restart">

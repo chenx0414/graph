@@ -55,6 +55,9 @@ type RsiChangeInput struct {
 	Changes   []RsiFileChange `json:"changes"`
 	Checks    []RsiCommand    `json:"checks,omitempty"`
 	Activate  *bool           `json:"activate,omitempty"`
+	// DryRun applies the changes and runs the checks, then restores the working
+	// tree: the verdict is delivered, the change is not.
+	DryRun bool `json:"dryRun,omitempty"`
 	// Force reloads even while other operations are still running; it may interrupt them.
 	Force bool `json:"force,omitempty"`
 }

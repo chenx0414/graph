@@ -21,7 +21,7 @@ export type TranscriptTool = {
 
 export type TranscriptRsi = {
   id: string;
-  status: 'applied' | 'checks_failed' | 'rolled_back' | 'unavailable';
+  status: 'applied' | 'checks_failed' | 'rolled_back' | 'unavailable' | 'dry_run';
   title: string;
   problem: string;
   branch: string | null;
@@ -90,7 +90,7 @@ function stringArray(value: unknown): string[] {
 function durableRsi(message: ConversationMessage): TranscriptRsi {
   const data = (message.data ?? {}) as Record<string, unknown>;
   const status = data.status === 'applied' || data.status === 'checks_failed'
-    || data.status === 'rolled_back' || data.status === 'unavailable'
+    || data.status === 'rolled_back' || data.status === 'unavailable' || data.status === 'dry_run'
     ? data.status
     : 'unavailable';
   const validation = Array.isArray(data.validation)

@@ -256,6 +256,13 @@ func RsiChangeInputOf(value any) RsiChangeInput {
 		}
 	}
 	normalized.Activate = &activate
+	if flag, ok := body["dryRun"].(bool); ok && flag {
+		normalized.DryRun = true
+		// A rehearsal delivers nothing, so it cannot activate either: the default
+		// activate=true must not turn a dry run into a live reload.
+		disabled := false
+		normalized.Activate = &disabled
+	}
 	if flag, ok := body["force"].(bool); ok && flag {
 		normalized.Force = true
 	}

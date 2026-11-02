@@ -87,7 +87,7 @@ func RsiChangeShapeHint(args any) string {
 	if top == nil {
 		return ""
 	}
-	topLevel := []string{"title", "problem", "evidence", "diagnosis", "impact", "risk", "checks", "activate", "force"}
+	topLevel := []string{"title", "problem", "evidence", "diagnosis", "impact", "risk", "checks", "activate", "force", "dryRun"}
 	changeKeys := []string{"path", "action", "content", "edits", "from", "fromPath"}
 	for index, change := range rsiAsArray(top["changes"]) {
 		if rsiIsArray(change) {

@@ -81,6 +81,41 @@ func rsiChecksFailedReport(input RsiChangeInput, receipt RsiReceipt) string {
 	return strings.Join(lines, "\n")
 }
 
+// rsiDryRunReport is the report of a rehearsal: the verdict, without the delivery.
+func rsiDryRunReport(input RsiChangeInput, receipt RsiReceipt, failed bool) string {
+	lines := []string{
+		"### RSI 演练：" + input.Title,
+		"",
+		"- 问题：" + input.Problem,
+	}
+	if input.Evidence != nil && *input.Evidence != "" {
+		lines = append(lines, "- 证据："+*input.Evidence)
+	}
+	if input.Diagnosis != nil && *input.Diagnosis != "" {
+		lines = append(lines, "- 诊断："+*input.Diagnosis)
+	}
+	if input.Impact != nil && *input.Impact != "" {
+		lines = append(lines, "- 影响："+*input.Impact)
+	}
+	if input.Risk != nil && *input.Risk != "" {
+		lines = append(lines, "- 风险："+*input.Risk)
+	}
+	lines = append(lines, "- 文件："+strings.Join(receipt.Files, ", "), "- 验证：")
+	for _, item := range receipt.Validation {
+		lines = append(lines, "  - "+item.Command+": "+item.Status)
+	}
+	if receipt.OutputPath != nil && *receipt.OutputPath != "" {
+		lines = append(lines, "- 完整日志："+*receipt.OutputPath)
+	}
+	lines = append(lines, FailureDigest(receipt.Validation)...)
+	if failed {
+		lines = append(lines, "- 结论：有检查未通过。这是演练：改动已从工作区恢复，没有留下任何东西，也没有提交。")
+	} else {
+		lines = append(lines, "- 结论：检查全部通过。这是演练：改动已从工作区恢复，没有提交，也不会重载。需要真正交付时去掉 dryRun 再来一次。")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // rsiUnavailableReport is the report of a change that could not run at all.
 func rsiUnavailableReport(input RsiChangeInput, root *string, reason string) string {
 	target := "未找到"

@@ -420,3 +420,74 @@ test('an unrelated uncommitted file still stops the change', async () => {
   expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
   expect(f.git(['status', '--porcelain'])).toBe('?? stranger.txt');
 }, 180_000);
+
+test('a dry run applies the change, runs the check and restores the checkout', async () => {
+  const f = await fixture(() => [[{
+    id: 'dry',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      dryRun: true,
+      changes: [
+        { path: 'replace.txt', action: 'replace', edits: [{ oldText: 'original', newText: 'corrected' }] },
+        { path: 'draft.txt', action: 'write', content: 'draft\n' },
+      ],
+      checks: [check],
+    }),
+  }]]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-dry' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('dry'), { timeout: 90_000, interval: 250 }).toBe(true);
+  const receipt = observed.get('dry') ?? '';
+  // The verdict is the point of the exercise: the check really ran on the
+  // changed file, and the receipt says so.
+  expect(receipt).toContain('"status":"dry_run"');
+  expect(receipt).toContain('"status":"passed"');
+  // Nothing is left behind: no committed change, no branch, no dirty file.
+  expect(await readFile(join(f.checkout, 'replace.txt'), 'utf8')).toBe('original\n');
+  await expect(readFile(join(f.checkout, 'draft.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+  expect(f.git(['branch', '--list', 'rsi/*'])).toBe('');
+  expect(f.git(['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
+}, 180_000);
+
+test('a dry run that fails the gate still restores the checkout and never reloads', async () => {
+  const f = await fixture(() => [[{
+    id: 'dry-fail',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      // activate is not named: its default is true, and a dry run must not act on it.
+      dryRun: true,
+      changes: [{ path: 'replace.txt', action: 'write', content: 'unrelated\n' }],
+      checks: [check],
+    }),
+  }]]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-dry-fail' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('dry-fail'), { timeout: 90_000, interval: 250 }).toBe(true);
+  const receipt = observed.get('dry-fail') ?? '';
+  expect(receipt).toContain('"status":"dry_run"');
+  expect(receipt).toContain('"status":"failed"');
+  expect(receipt).toContain('"restartRequired":false');
+  // The failure teaches, it does not linger: the file is back and nothing waits
+  // for a reload.
+  expect(await readFile(join(f.checkout, 'replace.txt'), 'utf8')).toBe('original\n');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+  expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('1');
+  expect(f.git(['branch', '--list', 'rsi/*'])).toBe('');
+  await expect(readFile(join(f.root, 'state', 'rsi', 'restart.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+}, 180_000);
