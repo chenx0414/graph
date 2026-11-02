@@ -72,6 +72,7 @@ async function withExtension(
     capabilityDirectory: string;
   }) => Promise<void>,
   access?: unknown,
+  script?: Parameters<typeof openaiServer>[0],
 ) {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-pi-extension-'));
   const project = join(root, 'project');
@@ -101,7 +102,7 @@ async function withExtension(
   // The model calls the tool the extension registered: the extension is the
   // authority on what it offers, and the call is the only way to reach it.
   const called = declaredTools[0]?.name ?? 'proof_tool';
-  const provider = await openaiServer([
+  const provider = await openaiServer(script ?? [
     { tools: [{ id: 'call-proof', name: called, arguments: JSON.stringify({}) }] },
     { text: 'The extension answered.' },
   ]);
@@ -214,3 +215,68 @@ test('a session with a narrow policy refuses the bound Pi extension by name', as
     expect(question?.data?.output?.setupError).toContain('narrower than the daemon');
   }, { mode: 'standard' });
 }, 120000);
+
+// A closed extension host leaves no process behind.
+//
+// Measured 2026-11-02: an extension keeps module state for as long as its
+// process lives, so a process inherited by the next host arrives "already
+// initialized" and never initializes again. pi-fff is the visible case - its
+// search is built on session start and torn down on shutdown, and after that
+// teardown every call answers "FFF picker factory is not initialized" while the
+// tool itself keeps working. Closing a host has to mean the process is gone.
+const pidExtensionSource = `import { writeFileSync } from 'node:fs';
+
+export default function (pi) {
+  pi.registerTool({
+    name: 'proof_tool',
+    description: 'Record the pid of the extension process that answered.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    execute: async () => {
+      if (process.env.GRAPH_PIG_PI_EXTENSION_MARKER) {
+        writeFileSync(process.env.GRAPH_PIG_PI_EXTENSION_MARKER, String(process.pid));
+      }
+      return { content: [{ type: 'text', text: 'extension-proof' }] };
+    },
+  });
+}
+`;
+
+test('a reloaded extension host runs the extension in a new process', async () => {
+  await withExtension(pidExtensionSource, [{ name: 'proof_tool', description: 'Record the pid of the extension process that answered.' }], async ({ daemon, provider, capabilityDirectory }) => {
+    const marker = join(capabilityDirectory, 'tool-ran.txt');
+    const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
+    expect(compiled.status).toBe(200);
+
+    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the proof tool.', requestId: 'pid-first' }) });
+    expect(created.status).toBe(200);
+    const { conversationId } = await created.json() as { conversationId: string };
+    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
+    await expect.poll(async () => (await view()).master?.status, { timeout: 60000, interval: 250 }).toBe('succeeded');
+    const first = await readFile(marker, 'utf8');
+    expect(first.trim()).toMatch(/^\d+$/);
+
+    // The turn is settled, so the host can be replaced the way the console does.
+    const reloaded = await daemon.request('/api/extensions/reload', { method: 'POST', body: JSON.stringify({ requestId: 'pid-reload' }) });
+    expect(reloaded.status).toBe(200);
+
+    const second = await daemon.request(`/api/conversations/${conversationId}/messages`, {
+      method: 'POST', body: JSON.stringify({ text: 'Call the proof tool again.', requestId: 'pid-second' }),
+    });
+    expect(second.status).toBe(200);
+    await expect.poll(async () => (await view()).messages?.filter(message => message.role === 'assistant').length, { timeout: 60000, interval: 250 })
+      .toBeGreaterThanOrEqual(2);
+
+    const next = await readFile(marker, 'utf8');
+    expect(next.trim()).toMatch(/^\d+$/);
+    // The second host must not adopt the process the first one used: that
+    // process carries the state the closed host was supposed to drop.
+    expect(next.trim()).not.toBe(first.trim());
+    // Both turns really reached an extension process.
+    expect((provider.requests as { tools?: { function?: { name?: string } }[] }[]).length).toBeGreaterThanOrEqual(2);
+  }, undefined, [
+    { tools: [{ id: 'call-proof', name: 'proof_tool', arguments: JSON.stringify({}) }] },
+    { text: 'The extension answered.' },
+    { tools: [{ id: 'call-proof-again', name: 'proof_tool', arguments: JSON.stringify({}) }] },
+    { text: 'The extension answered again.' },
+  ]);
+}, 180_000);
