@@ -239,3 +239,109 @@ test('once the project declares its domain, the lessons of that domain reach the
   expect(later).toContain('Lessons earlier runs of this project learned');
   expect(later).toContain('Read the header row before mapping the columns.');
 }, 300_000);
+
+test('two friction records in one turn both land, and neither is lost to the other', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-harness-friction-batch-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+
+  const results = new Map<string, string>();
+  let step = 0;
+  const main = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as ProviderBody;
+    const isMain = body.tools?.some(tool => tool.function.name === 'record_harness_friction') ?? false;
+    let calls: { id: string; name: string; args: unknown }[] = [];
+    if (isMain) {
+      for (const message of body.messages) {
+        if (message.role === 'tool' && message.tool_call_id) {
+          results.set(message.tool_call_id, typeof message.content === 'string' ? message.content : JSON.stringify(message.content));
+        }
+      }
+      switch (step) {
+        case 0:
+          // Two records in ONE assistant message: the kernel runs a batch in
+          // parallel, so both read the same store and one of them used to lose
+          // its write to the other.
+          calls = [
+            { id: 'first', name: 'record_harness_friction', args: {
+              domain: 'parser', cue: 'A heading with no body.', why: 'The turn that read it had nothing to work from.',
+            } },
+            { id: 'second', name: 'record_harness_friction', args: {
+              domain: 'parser', cue: 'A table with no header.', why: 'The columns had to be guessed.',
+            } },
+            // The lessons go to a different scope than the friction, and the
+            // same race applies to them: two decisions in one message share one
+            // head just as two records do.
+            { id: 'lesson-one', name: 'record_harness_decision', args: {
+              domain: 'parser', axis: 'general', chosen: 'A',
+              cue: 'A document with a stray blank line.', lesson: 'Drop the trailing blank line before parsing.',
+              evidence: 'The candidate that trimmed it parsed the document.',
+            } },
+            { id: 'lesson-two', name: 'record_harness_decision', args: {
+              domain: 'parser', axis: 'general', chosen: 'B',
+              cue: 'A document with a folded header.', lesson: 'Unfold the header before mapping columns.',
+              evidence: 'The candidate that unfolded it mapped the columns.',
+            } },
+          ];
+          break;
+        case 1:
+          calls = [{ id: 'read', name: 'read_harness_experience', args: { domain: 'parser' } }];
+          break;
+      }
+      step++;
+    }
+    if (calls.length) {
+      sse(response, { role: 'assistant', tool_calls: calls.map((call, index) => ({ index, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })) }, 'tool_calls');
+      return;
+    }
+    sse(response, { role: 'assistant', content: isMain ? 'Friction recorded.' : 'No suggestion' }, 'stop');
+  });
+  await new Promise<void>(resolve => main.listen(0, '127.0.0.1', resolve));
+  cleanup.push(async () => { main.closeAllConnections(); await new Promise<void>(resolve => main.close(() => resolve())); });
+  const mainUrl = `http://127.0.0.1:${(main.address() as AddressInfo).port}/v1`;
+
+  const webDir = join(root, 'web');
+  await mkdir(webDir);
+  await writeFile(join(webDir, 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    access: fullAccessPolicy(),
+    credentials: { local: { secretRef: 'GRAPH_BATCH_KEY' } },
+    models: { entries: [
+      { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },
+    ] },
+  }));
+  const daemon = await launchCli(root, { configPath, extraArgs: ['--execute'], env: { GRAPH_BATCH_KEY: 'harness-friction-batch-key' } });
+  cleanup.push(() => daemon.close());
+
+  const started = await daemon.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'Record the two things we met', requestId: 'harness-friction-batch' }),
+  });
+  expect(started.status).toBe(200);
+
+  const deadline = Date.now() + 120000;
+  while (!results.get('read') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
+
+  // Neither write may be reported as an error: a lost update is not a detail
+  // the Agent can recover from, because the record it tried to make is gone.
+  for (const id of ['first', 'second', 'lesson-one', 'lesson-two']) {
+    const value = results.get(id) ?? '';
+    expect(value, id).not.toContain('artifact_conflict');
+    expect(value, id).not.toMatch(/Tool failed/i);
+    expect(value, id).toContain('createdAt');
+  }
+
+  const read = JSON.parse(results.get('read') || '{}') as { entries: { cue: string; status: string; lesson?: string }[] };
+  const cues = read.entries.filter(entry => entry.status === 'open').map(entry => entry.cue);
+  expect(cues.some(cue => cue.includes('heading with no body'))).toBe(true);
+  expect(cues.some(cue => cue.includes('table with no header'))).toBe(true);
+  const lessons = read.entries.filter(entry => entry.status === 'adopted').map(entry => entry.lesson ?? '');
+  expect(lessons.some(lesson => lesson.includes('trailing blank line'))).toBe(true);
+  expect(lessons.some(lesson => lesson.includes('Unfold the header'))).toBe(true);
+}, 300_000);

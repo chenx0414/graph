@@ -6,6 +6,42 @@ import (
 	"errors"
 )
 
+// harnessRecordRetries bounds how often one read-merge-publish step re-reads
+// after another writer moved the artifact it publishes to.
+//
+// The agent runs a batch of tool calls in parallel, so two records in one
+// assistant message read the same head and the second publish loses the race:
+// "Artifact head changed: expected version 2, found 3". The refusal is right -
+// the step really is working from a stale read - so the answer is to read the
+// current head again and merge onto it, not to retry the same write.
+const harnessRecordRetries = 5
+
+// harnessRetryConflict runs one read-merge-publish step and repeats it after an
+// artifact conflict. Any other failure is passed through untouched.
+func harnessRetryConflict(run func()) {
+	for attempt := 1; ; attempt++ {
+		conflict := false
+		func() {
+			defer func() {
+				recovered := recover()
+				if recovered == nil {
+					return
+				}
+				problem, ok := recovered.(*RuntimeError)
+				if ok && problem.Code == "artifact_conflict" && attempt < harnessRecordRetries {
+					conflict = true
+					return
+				}
+				panic(recovered)
+			}()
+			run()
+		}()
+		if !conflict {
+			return
+		}
+	}
+}
+
 // agentToolsHarnessHandlers are the handlers of the Harness tools.
 func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
@@ -50,26 +86,31 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 			domain := strings.TrimSpace(agentToolsString(params["domain"]))
 			axis := harnessAxis(agentToolsStringOrEmpty(params["axis"]))
 			// The lessons already adopted in the scope this lesson lands in
-			// are the ones it joins, so they are read before it is written.
-			entries := []HarnessExperienceEntry{}
-			if input.GraphManagement.HarnessExperience != nil {
-				existing, ok := input.GraphManagement.HarnessExperience(map[string]any{
-					"scope": harnessExperienceScope(domain, axis),
-				}).(HarnessExperienceResult)
-				if ok {
-					entries = existing.Entries
+			// are the ones it joins, so they are read before it is written - and
+			// read again when another writer in the same batch moved the head
+			// between the read and the publish.
+			result := HarnessDecisionResult{}
+			harnessRetryConflict(func() {
+				entries := []HarnessExperienceEntry{}
+				if input.GraphManagement.HarnessExperience != nil {
+					existing, ok := input.GraphManagement.HarnessExperience(map[string]any{
+						"scope": harnessExperienceScope(domain, axis),
+					}).(HarnessExperienceResult)
+					if ok {
+						entries = existing.Entries
+					}
 				}
-			}
-			result := input.GraphManagement.HarnessDecision(&artifacts, entries, HarnessDecisionInput{
-				GraphId:   strings.TrimSpace(agentToolsStringOrEmpty(params["graphId"])),
-				Domain:    domain,
-				Axis:      axis,
-				Chosen:    strings.TrimSpace(agentToolsString(params["chosen"])),
-				Cue:       strings.TrimSpace(agentToolsString(params["cue"])),
-				Lesson:    strings.TrimSpace(agentToolsString(params["lesson"])),
-				Evidence:  strings.TrimSpace(agentToolsString(params["evidence"])),
-				Harness:   harness,
-				RequestId: requestId,
+				result = input.GraphManagement.HarnessDecision(&artifacts, entries, HarnessDecisionInput{
+					GraphId:   strings.TrimSpace(agentToolsStringOrEmpty(params["graphId"])),
+					Domain:    domain,
+					Axis:      axis,
+					Chosen:    strings.TrimSpace(agentToolsString(params["chosen"])),
+					Cue:       strings.TrimSpace(agentToolsString(params["cue"])),
+					Lesson:    strings.TrimSpace(agentToolsString(params["lesson"])),
+					Evidence:  strings.TrimSpace(agentToolsString(params["evidence"])),
+					Harness:   harness,
+					RequestId: requestId,
+				})
 			})
 			return agentToolsText(stringifyJSON(result))
 		},
@@ -135,21 +176,24 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 			domain := strings.TrimSpace(agentToolsStringOrEmpty(params["domain"]))
 			axis := harnessAxis(agentToolsStringOrEmpty(params["axis"]))
 			scope := harnessExperienceScope(domain, axis)
-			entries := []HarnessExperienceEntry{}
-			if input.GraphManagement.HarnessExperience != nil {
-				existing, ok := input.GraphManagement.HarnessExperience(map[string]any{"scope": scope}).(HarnessExperienceResult)
-				if ok {
-					entries = existing.Entries
+			result := HarnessFrictionResult{}
+			harnessRetryConflict(func() {
+				entries := []HarnessExperienceEntry{}
+				if input.GraphManagement.HarnessExperience != nil {
+					existing, ok := input.GraphManagement.HarnessExperience(map[string]any{"scope": scope}).(HarnessExperienceResult)
+					if ok {
+						entries = existing.Entries
+					}
 				}
-			}
-			result := input.GraphManagement.HarnessFriction(&artifacts, entries, HarnessFrictionInput{
-				Domain:    domain,
-				Axis:      axis,
-				Cue:       strings.TrimSpace(agentToolsStringOrEmpty(params["cue"])),
-				Why:       strings.TrimSpace(agentToolsStringOrEmpty(params["why"])),
-				Status:    strings.TrimSpace(agentToolsStringOrEmpty(params["status"])),
-				Ref:       ref,
-				RequestId: requestId,
+				result = input.GraphManagement.HarnessFriction(&artifacts, entries, HarnessFrictionInput{
+					Domain:    domain,
+					Axis:      axis,
+					Cue:       strings.TrimSpace(agentToolsStringOrEmpty(params["cue"])),
+					Why:       strings.TrimSpace(agentToolsStringOrEmpty(params["why"])),
+					Status:    strings.TrimSpace(agentToolsStringOrEmpty(params["status"])),
+					Ref:       ref,
+					RequestId: requestId,
+				})
 			})
 			return agentToolsText(stringifyJSON(result))
 		},
