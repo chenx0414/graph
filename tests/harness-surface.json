@@ -7,7 +7,7 @@
     "command": "pass"
   },
   "surface": {
-    "backend/internal/graph/runtime_agent_context.go": "c47a77afcdb893c35ac6ae6c87673a5f881df78372c5c1f50715b38472b51e4c",
+    "backend/internal/graph/runtime_agent_context.go": "713c60040cdd738a2c6649727ec8a177f75b352d31b53d1ea65792b822ce651a",
     "backend/internal/graph/runtime_agent_tool_definitions.go": "356e8b59c95da240542bac05814d733e17daea1045e312c928cc0041af91dcc5",
     "backend/internal/graph/runtime_agent_tools.go": "9c558f97b945a609ef5d166caaf4354996edc360f8e0085d177a4f0cb4df7a3b",
     "backend/internal/graph/runtime_pi_native_tools.go": "fcefd7b410364862ab5f9b131a904dfb56f852ed7d8ce696ad0e1e37268b9173",
@@ -18,5 +18,5 @@
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "2289f03b6607184356e0e7efd83ba143e390f2cef846b4cceee94b538ada61f0"
   },
-  "updatedAt": "2026-10-29T09:00:17.097Z"
+  "updatedAt": "2026-11-02T06:45:01.464Z"
 }
