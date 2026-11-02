@@ -129,6 +129,12 @@ test('the tool schema the provider receives is short enough to read, and keeps t
     const propose = descriptionOf(tools, 'propose_graph');
     expect(propose, 'the graph proposal no longer points at the document with the format')
       .toMatch(/graph-v2\.md/i);
+    // A call that never returned leaves its attempt on disk; the model only finds
+    // that answer if the tool says so. The status field alone is not discoverable
+    // after the turn that would have read it is already gone.
+    const inspect = descriptionOf(tools, 'inspect_rsi_status');
+    expect(inspect, 'the status tool no longer says an interrupted apply is answered there')
+      .toMatch(/interrupt/i);
   } finally {
     await daemon?.close();
     await provider.close();
