@@ -170,4 +170,7 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
     await new Promise<void>(resolve => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
-}, 60_000);
+  // Several daemon round trips in a row (create, ask, escalate, answer, list):
+  // 60s was measured on an idle machine and ran out under six workers while the
+  // assertions were still moving. The budget reflects the chain, not a target.
+}, 180_000);

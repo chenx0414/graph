@@ -17,7 +17,13 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     // Gives every test one spelling for the temp directory, whatever TMPDIR the runner was started with.
     setupFiles: ['tests/setup.ts'],
-    testTimeout: 15_000,
+    // A test's own budget must not be shorter than the poll window it is
+    // allowed to use: tests/setup.ts gives every expect.poll 30s, so a 15s
+    // testTimeout could kill a poll that was legitimately still waiting - the
+    // red then says "the machine was busy", not "the fact never arrived".
+    // Measured 2026-11-01: under six workers two runs of one commit failed in
+    // different files, each passing alone.
+    testTimeout: 30_000,
     hookTimeout: 30_000,
   },
 });
