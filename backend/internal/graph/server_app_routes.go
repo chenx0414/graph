@@ -127,6 +127,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{taskId}/artifacts/{artifactId}/{version}/retire", app.serveArtifactRetire)
 	mux.HandleFunc("POST /api/tasks/{taskId}/artifacts/{artifactId}/{version}/promote", app.serveArtifactPromote)
 	mux.HandleFunc("GET /api/catalog", app.serveCatalog)
+	mux.HandleFunc("GET /api/build", app.serveBuild)
 	mux.HandleFunc("POST /api/catalog/refresh", app.serveCatalogRefresh)
 	mux.HandleFunc("POST /api/extensions/reload", app.serveExtensionsReload)
 	mux.HandleFunc("GET /api/extensions/status", app.serveExtensionsStatus)

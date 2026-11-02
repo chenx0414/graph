@@ -40,6 +40,7 @@ import { TASK_LABEL,describeQuestion } from './labels.ts';
 
 
 import { useAsync } from './shared.tsx';
+import { StaleBuildBanner } from './build-freshness.tsx';
 
 import { openQuestionTotal } from './insights.ts';
 
@@ -260,6 +261,7 @@ export function App() {
   if (settingsPage) {
     return (
       <div className="settings-app-root">
+        <StaleBuildBanner />
         <Suspense fallback={<Spinner />}><Settings openGuide={pathname === '/setup'} /></Suspense>
         <Toaster />
       </div>
@@ -268,6 +270,7 @@ export function App() {
 
   return (
     <div className="app-shell">
+      <StaleBuildBanner />
       <button type="button" className="skip-link" onClick={() => document.getElementById('workspace-main')?.focus()}>跳到主内容</button>
       <aside className="sidebar" data-collapsed={sidebarCollapsed}>
         <div className="sidebar-heading">
