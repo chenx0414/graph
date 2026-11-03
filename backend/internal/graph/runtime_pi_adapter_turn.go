@@ -16,10 +16,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	if operation.InstanceId != nil {
 		instanceId = *operation.InstanceId
 	}
-	// Context size comes from the last billed completion for this
-	// instance, so Graph can compact before the window is exceeded
-	// instead of waiting for a provider overflow.
-	lastContextTokens := piAdapterLastContextTokens(store, operation.TaskId, instanceId)
 	// The skills the session may read must match the block Graph renders: the bound
 	// snapshots plus the SDK's own global and project folders.
 	skillReadPaths := piAdapterUnique(append(append([]string{}, turn.CapabilityOperation.SkillPaths...),
@@ -222,12 +218,11 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			break
 		}
 	}
-	// Graph triggers compaction itself so the bounded instructions below
-	// apply. Pi's own threshold/overflow compaction stays enabled as a
-	// backstop for a context Graph mis-estimated.
-	autoCompact := !compactRequested && shouldCompactContextForEntry(entry, lastContextTokens)
+	// The kernel's own threshold compaction decides when a context is
+	// summarized; this block is the manual request and the bounded handoff
+	// instructions that go with it.
 	compacted := false
-	if compactRequested || autoCompact {
+	if compactRequested {
 		compactionErr := session.Compact(COMPACTION_INSTRUCTIONS)
 		if compactionErr == nil {
 			// The compaction replaced the context that held the task setup.

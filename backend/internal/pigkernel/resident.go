@@ -72,8 +72,12 @@ func openResident(ctx context.Context, database string) (*resident, error) {
 // in force for that session's next compaction - and for no other one.
 func residentSettings() *harness.HarnessSettings {
 	retry := harness.RetryPolicyPatch{Enabled: boolPointer(false)}
+	// The kernel's own threshold compaction is on: the daemon owns the
+	// thresholds and the kernel applies them to the request it is about to
+	// send, so a turn that grows past 70% of the window is summarized before
+	// the provider ever sees an oversized request.
 	compaction := harness.CompactionPolicyPatch{
-		Enabled:          boolPointer(false),
+		Enabled:          boolPointer(true),
 		ReserveTokens:    intPointer(4096),
 		KeepRecentTokens: intPointer(1024),
 		BackgroundTokens: intPointer(0),

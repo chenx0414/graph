@@ -2,7 +2,6 @@ package pigkernel
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -150,6 +149,9 @@ type Session struct {
 	acceptingInput bool
 	interrupted    bool
 	continuation   chan sessionContinuation
+	// compactions are the compaction tasks whose end Compact reports itself,
+	// so the event stream does not report the same compaction twice.
+	compactions map[durable.TaskId]bool
 }
 
 // OpenSession opens one resident session on the kernel.
@@ -168,6 +170,13 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		return nil, err
 	}
 	registrations = append(registrations, mcpTools...)
+	// The durable transcript is the session's own memory: it outlives compaction
+	// and a reset, and the model reads it on demand instead of trusting the
+	// daemon to keep everything that matters.
+	history := &historyTool{}
+	if !toolRegistered(options.Tools, historyToolName) {
+		registrations = append(registrations, toolRegistrations([]ToolSpec{history.spec()}, recorder, options.ToolResults)...)
+	}
 	extension := &durable.Extension{Name: extensionName(options.Identity), Tools: registrations}
 	if err := resident.registry.Install(extension); err != nil {
 		closeMcpServers(connections)
@@ -218,6 +227,7 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		toolNames: names, loaded: []string{extension.Name}, requestId: options.RequestId,
 		OnEvent: options.OnEvent, OnToolCall: options.OnToolCall,
 	}
+	history.session = session
 	return session, nil
 }
 
@@ -421,41 +431,6 @@ func (session *Session) Stop(ctx context.Context) error {
 	return session.conversation.Abort(ctx, &durable.ConversationAbortOptions{})
 }
 
-// ResetIfOversized starts a new context when the current one can no longer be
-// sent to the model.
-//
-// A context larger than the window cannot be compacted: the summarizer would
-// have to read the same oversized prefix. The only way to keep the agent usable
-// is a new context, with a handoff that says what happened; the durable
-// transcript stays in history. The estimate is the marshalled model context at
-// four bytes per token, which overestimates rather than underestimates.
-func (session *Session) ResetIfOversized(ctx context.Context, budget int, handoff string) (bool, int, error) {
-	if budget <= 0 {
-		return false, 0, nil
-	}
-	view, err := session.conversation.Context(ctx, nil)
-	if err != nil {
-		return false, 0, err
-	}
-	encoded, err := json.Marshal(view.Messages)
-	if err != nil {
-		return false, 0, err
-	}
-	estimated := len(encoded) / 4
-	if estimated <= budget {
-		return false, estimated, nil
-	}
-	text := strings.TrimSpace(handoff)
-	if text == "" {
-		text = "The previous conversation was discarded because it no longer fit the model's context window. " +
-			"The durable transcript is still in history; continue from the user's latest message."
-	}
-	if err := session.conversation.Reset(ctx, &text); err != nil {
-		return false, estimated, err
-	}
-	return true, estimated, nil
-}
-
 // Inspect is the session's own view of itself.
 func (session *Session) Inspect() SessionInspect {
 	names := []string{}
@@ -499,6 +474,15 @@ func (session *Session) admissionId() string {
 // emit reports one kernel event to the daemon.
 func (session *Session) emit(event harness.AgentEvent) {
 	if session.OnEvent == nil {
+		return
+	}
+	// A compaction the kernel started by itself (the threshold compaction) is
+	// reported here. The daemon's own Compact reports its compaction, and the
+	// same task must not be announced twice.
+	if end, ok := event.(harness.CompactionEndEvent); ok {
+		if !session.compactionReported(end.TaskId) {
+			session.reportThresholdCompaction(end)
+		}
 		return
 	}
 	for _, report := range translateEvent(event) {

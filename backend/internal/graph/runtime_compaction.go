@@ -1,14 +1,10 @@
 package graph
 
 import (
-	"math"
 	"os"
 	"regexp"
-
 	"strconv"
 	"strings"
-
-	"encoding/json"
 )
 
 // CompactionSettings is the reserve and keep-recent window for one model.
@@ -19,8 +15,12 @@ type CompactionSettings struct {
 }
 
 // CompactionSettingsFor derives thresholds from the model that will receive the request.
-// A window only a few hundred tokens wide still gets a usable reserve: the fixed
-// 1024-token floor is capped at half the window so the trigger point never goes negative.
+//
+// The reserve is the room kept free for the summary and the answer: compaction
+// starts at 70% of the window, so the summarizer still reads a context that
+// fits. The remaining 30% also leaves room for the next few tool results before
+// the compaction lands. The summary's own output budget is derived from the
+// reserve by the kernel (four fifths of it, capped by the model's limit).
 func CompactionSettingsFor(entry struct {
 	ContextWindow int
 	MaxTokens     int
@@ -29,24 +29,18 @@ func CompactionSettingsFor(entry struct {
 	if contextWindow < 1 {
 		contextWindow = 1
 	}
-	maxTokens := entry.MaxTokens
-	if maxTokens < 1 {
-		maxTokens = 1
+	reserve := contextWindow * 30 / 100
+	if reserve < 1024 {
+		reserve = 1024
 	}
+	// A window only a few hundred tokens wide still gets a usable reserve: the
+	// floor is capped at half the window so the trigger point never goes negative.
 	half := contextWindow / 2
-	if half < 256 {
-		half = 256
+	if half < 1 {
+		half = 1
 	}
-	floor := maxTokens
-	if floor < 1024 {
-		floor = 1024
-	}
-	reserve := floor
-	if half < reserve {
+	if reserve > half {
 		reserve = half
-	}
-	if reserve > 16384 {
-		reserve = 16384
 	}
 	quarter := contextWindow / 4
 	if quarter < 1024 {
@@ -92,27 +86,9 @@ func IsSummaryLeakRetry(output any) bool {
 	return code == "session_summary_leak"
 }
 
-// ShouldCompactContext is true once the recorded context no longer fits beside the reserve.
-func ShouldCompactContext(entry struct {
-	ContextWindow int
-	MaxTokens     int
-}, contextTokens *float64) bool {
-	if contextTokens == nil || math.IsNaN(*contextTokens) || math.IsInf(*contextTokens, 0) {
-		return false
-	}
-	settings := CompactionSettingsFor(entry)
-	window := entry.ContextWindow
-	if window < 1 {
-		window = 1
-	}
-	limit := window - settings.ReserveTokens
-	if limit < 1 {
-		limit = 1
-	}
-	if ceiling := compactionContextCeiling(); ceiling > 0 && ceiling < limit {
-		limit = ceiling
-	}
-	return *contextTokens > float64(limit)
+// IsCompactionNoop reports Pi's no-op compaction outcomes. Neither is an execution failure.
+func IsCompactionNoop(message string) bool {
+	return compactionNoop.MatchString(message)
 }
 
 // COMPACTION_CONTEXT_CEILING caps how far the recorded context may grow before the
@@ -134,58 +110,6 @@ func ShouldCompactContext(entry struct {
 // task needs is the task's own business.
 const COMPACTION_CONTEXT_CEILING = "GRAPH_COMPACTION_CONTEXT_CEILING"
 
-// RecordedContextUsage is one settled invocation's usage string.
-type RecordedContextUsage struct {
-	Usage     string
-	SettledAt float64
-	Sequence  *float64
-}
-
-// RecordedCompaction is a successful compaction event.
-type RecordedCompaction struct {
-	Timestamp float64
-	Data      string
-}
-
-// LatestContextTokens resolves the context size the next turn will send.
-// Zero-usage placeholders are ignored. A newer compaction estimate wins.
-func LatestContextTokens(completions []RecordedContextUsage, lastCompaction *RecordedCompaction) *float64 {
-	var completion *RecordedContextUsage
-	for i := range completions {
-		parsed, ok := compactionUsage(completions[i].Usage)
-		if ok && compactionTokenSum(parsed) > 0 {
-			completion = &completions[i]
-			break
-		}
-	}
-	var completionTokens *float64
-	if completion != nil {
-		parsed, _ := compactionUsage(completion.Usage)
-		sum := compactionTokenSum(parsed)
-		completionTokens = &sum
-	}
-	if lastCompaction != nil {
-		var data struct {
-			TokensAfter        *float64 `json:"tokensAfter"`
-			CompletionSequence *float64 `json:"completionSequence"`
-		}
-		if err := json.Unmarshal([]byte(lastCompaction.Data), &data); err == nil {
-			summaryIsNewer := completion == nil
-			if completion != nil {
-				if data.CompletionSequence != nil && completion.Sequence != nil {
-					summaryIsNewer = *completion.Sequence <= *data.CompletionSequence
-				} else {
-					summaryIsNewer = lastCompaction.Timestamp >= completion.SettledAt
-				}
-			}
-			if summaryIsNewer && data.TokensAfter != nil && !math.IsNaN(*data.TokensAfter) && !math.IsInf(*data.TokensAfter, 0) {
-				return data.TokensAfter
-			}
-		}
-	}
-	return completionTokens
-}
-
 // compactionContextCeiling is the ceiling the environment names, or zero when it names none.
 func compactionContextCeiling() int {
 	raw := strings.TrimSpace(os.Getenv(COMPACTION_CONTEXT_CEILING))
@@ -197,27 +121,4 @@ func compactionContextCeiling() int {
 		return 0
 	}
 	return value
-}
-
-func compactionUsage(raw string) (map[string]float64, bool) {
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, false
-	}
-	out := map[string]float64{}
-	for _, key := range []string{"input", "output", "cacheRead", "cacheWrite"} {
-		if number, ok := asFloat(parsed[key]); ok {
-			out[key] = number
-		}
-	}
-	return out, true
-}
-
-func compactionTokenSum(parsed map[string]float64) float64 {
-	return parsed["input"] + parsed["output"] + parsed["cacheRead"] + parsed["cacheWrite"]
-}
-
-// IsCompactionNoop reports Pi's no-op compaction outcomes. Neither is an execution failure.
-func IsCompactionNoop(message string) bool {
-	return compactionNoop.MatchString(message)
 }

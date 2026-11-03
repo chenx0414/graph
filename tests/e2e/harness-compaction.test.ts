@@ -33,7 +33,7 @@ test('the compaction the daemon asked for is written in the room it reserved', a
   await mkdir(join(root, 'web'), { recursive: true });
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
   // The window is small enough that the daemon reserves a small room for the
-  // summary: 1024 tokens of reserve, and the kernel writes the summary into
+  // summary: 30% of 4000 tokens is 1200, and the kernel writes the summary into
   // four fifths of it.
   const provider = await openaiServer([
     { text: 'The work is done. ' + 'context '.repeat(400) },
@@ -76,13 +76,13 @@ test('the compaction the daemon asked for is written in the room it reserved', a
 
     // The summary was asked for in the room the daemon reserved, not in the
     // model's whole output limit: a summary written into the model's limit
-    // is written until it is cut off. The daemon reserves 2000 tokens of a
-    // 4000-token window, and the kernel writes the summary into four fifths
-    // of the reserve.
+    // is written until it is cut off. The daemon reserves 1200 tokens of a
+    // 4000-token window (compaction starts at 70%), and the kernel writes the
+    // summary into four fifths of the reserve.
     const summary = (provider.requests as ProviderRequest[]).find(entry =>
       JSON.stringify(entry.messages ?? []).includes(SUMMARY_REQUEST));
     expect(summary, `no summary request:\n${JSON.stringify(provider.requests).slice(0, 1500)}`).toBeTruthy();
-    expect(summary!.max_tokens, 'the summary was asked for with the model output limit').toBe(1600);
+    expect(summary!.max_tokens, 'the summary was asked for with the model output limit').toBe(960);
 
     // The compaction is reported as a compaction: the daemon keeps the record
     // of a context that really was compacted.

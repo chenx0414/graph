@@ -7,6 +7,7 @@ import (
 
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable"
+	"github.com/MichaelKinsy/PiG/durable/harness"
 )
 
 // The compaction of one session.
@@ -20,6 +21,14 @@ import (
 
 // Compact prepares the next operation's prompt.
 func (session *Session) Compact(ctx context.Context, instructions string) error {
+	return session.CompactWithReason(ctx, instructions, "manual")
+}
+
+// CompactWithReason prepares the next operation's prompt and reports why.
+//
+// A compaction the daemon asks for is manual; one the threshold asks for is
+// threshold. The daemon records the reason, so the two never look alike.
+func (session *Session) CompactWithReason(ctx context.Context, instructions string, reason string) error {
 	session.mutex.Lock()
 	if session.closed {
 		session.mutex.Unlock()
@@ -35,11 +44,14 @@ func (session *Session) Compact(ctx context.Context, instructions string) error 
 	if err != nil {
 		return err
 	}
+	// This compaction is reported by Compact itself, so the event stream must
+	// not report it a second time when the same task also appears there.
+	session.markCompactionReported(task)
 	result, err := session.kernel.Harness().WaitForTask(ctx, task)
 	if err != nil {
 		return err
 	}
-	session.reportCompaction(ctx, result)
+	session.reportCompaction(ctx, result, reason)
 	if result.State.Outcome != nil && result.State.Outcome.Status != durable.OutcomeCompleted {
 		return fmt.Errorf("pig kernel: the compaction did not complete")
 	}
@@ -60,11 +72,14 @@ func (session *Session) Compact(ctx context.Context, instructions string) error 
 // as the entry that carries the compacted context forward. Without this the
 // daemon's compaction handling never runs, and a compaction that failed is
 // invisible.
-func (session *Session) reportCompaction(ctx context.Context, result durable.SettledTask[durable.JsonValue]) {
+func (session *Session) reportCompaction(ctx context.Context, result durable.SettledTask[durable.JsonValue], reason string) {
 	if session.OnEvent == nil {
 		return
 	}
-	report := map[string]any{"type": "compaction_end", "reason": "manual"}
+	if reason == "" {
+		reason = "manual"
+	}
+	report := map[string]any{"type": "compaction_end", "reason": reason}
 	outcome := result.State.Outcome
 	if outcome != nil && outcome.Status == durable.OutcomeCompleted {
 		if summary := session.compactionSummary(ctx); summary != "" {
@@ -139,4 +154,96 @@ func compactionCarriesSummary(result *any) bool {
 		}
 	}
 	return false
+}
+
+// markCompactionReported records a compaction whose end Compact reports.
+func (session *Session) markCompactionReported(task durable.TaskId) {
+	session.mutex.Lock()
+	if session.compactions == nil {
+		session.compactions = map[durable.TaskId]bool{}
+	}
+	session.compactions[task] = true
+	session.mutex.Unlock()
+}
+
+// compactionReported reports whether Compact already reported this task.
+func (session *Session) compactionReported(task durable.TaskId) bool {
+	session.mutex.Lock()
+	reported := session.compactions[task]
+	session.mutex.Unlock()
+	return reported
+}
+
+// PrepareContext makes the next request fit the model window.
+//
+// Below compactAt the context is left alone. Above compactAt the kernel
+// compacts: the summary replaces the older part of the context before the
+// request is sent, so the provider never reads a request that is about to
+// overflow. Above budget the context no longer fits even for the summarizer,
+// so it is replaced with a pointer to the durable transcript: nothing is lost,
+// and the next turn retrieves what it needs with history_search.
+//
+// The estimate anchors on the last provider-billed usage and estimates only
+// the messages after it, the same way the kernel's threshold compaction does.
+// JSON bytes were not a token count: escaped HTML and tool results inflated the
+// old estimate by 30-170% and reset sessions that still fit.
+func (session *Session) PrepareContext(ctx context.Context, budget int, compactAt int, pending string, instructions string, handoff string) (reset bool, compacted bool, estimated int, err error) {
+	if budget <= 0 {
+		return false, false, 0, nil
+	}
+	view, err := session.conversation.Context(ctx, nil)
+	if err != nil {
+		return false, false, 0, err
+	}
+	estimated = estimateContextTokens(view.Messages) + int(estimateTextTokens(pending))
+	if estimated > budget {
+		text := strings.TrimSpace(handoff)
+		if text == "" {
+			text = fmt.Sprintf("The previous conversation was replaced because it no longer fit the model's context window. "+
+				"Its full transcript is durable as conversation %d; use the %s tool to read what you need (search by keyword, "+
+				"or read one entry by id), then continue from the user's latest message.", session.conversation.Id(), historyToolName)
+		}
+		if err := session.conversation.Reset(ctx, &text); err != nil {
+			return false, false, estimated, err
+		}
+		return true, false, estimated, nil
+	}
+	if compactAt <= 0 || estimated <= compactAt {
+		return false, false, estimated, nil
+	}
+	if err := session.CompactWithReason(ctx, instructions, "threshold"); err != nil {
+		// A compaction that cannot run (nothing to compact, or a summarizer
+		// failure) must not kill the turn: the context still fits the window,
+		// the request proceeds, and the failure is already on the event stream.
+		return false, false, estimated, nil
+	}
+	return false, true, estimated, nil
+}
+
+// reportThresholdCompaction tells the daemon how the kernel's own compaction
+// ended, with the summary it wrote. Pi's threshold compaction is not routed
+// through Compact, so without this the daemon sees a compaction start and no
+// compaction end: the summary is invisible and a failure cannot be told apart
+// from a success.
+func (session *Session) reportThresholdCompaction(event harness.CompactionEndEvent) {
+	report := map[string]any{"type": "compaction_end", "reason": string(event.Reason)}
+	if event.Error != nil {
+		report["aborted"] = true
+		report["errorMessage"] = *event.Error
+		session.OnEvent(report)
+		return
+	}
+	summary := session.compactionSummary(context.Background())
+	if summary == "" {
+		report["aborted"] = true
+		report["errorMessage"] = "Nothing to compact (session too small)"
+		session.OnEvent(report)
+		return
+	}
+	result := map[string]any{"summary": summary}
+	if view, err := session.conversation.Context(context.Background(), nil); err == nil {
+		result["estimatedTokensAfter"] = estimateContextTokens(view.Messages)
+	}
+	report["result"] = result
+	session.OnEvent(report)
 }

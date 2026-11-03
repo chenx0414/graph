@@ -67,34 +67,6 @@ func piAdapterCompletionSequence(store *TaskStore, instanceId string) int64 {
 	return graphDBInt(row, "sequence")
 }
 
-// piAdapterLastContextTokens resolves the context size the next turn will send.
-func piAdapterLastContextTokens(store *TaskStore, taskId string, instanceId string) *float64 {
-	rows := graphDBAll(store.Db, `SELECT i.rowid AS sequence, i.usage, COALESCE(o.settled_at, o.dispatched_at, 0) AS settled_at
-       FROM invocations i
-       JOIN operations o ON o.id = i.operation_id
-       WHERE i.instance_id = ? AND i.purpose = 'completion' AND i.usage IS NOT NULL
-       ORDER BY i.rowid DESC LIMIT 20`, instanceId)
-	completions := []RecordedContextUsage{}
-	for _, row := range rows {
-		sequence := asFloatValue(row["sequence"])
-		usage, _ := row["usage"].(string)
-		settled := asFloatValue(row["settled_at"])
-		completions = append(completions, RecordedContextUsage{Usage: usage, SettledAt: settled, Sequence: &sequence})
-	}
-	var compaction *RecordedCompaction
-	last, ok := graphDBRow(store.Db, `SELECT e.timestamp, e.data
-       FROM events e
-       JOIN operations o ON o.id = json_extract(e.data, '$.operationId')
-       WHERE e.task_id = ? AND e.type = 'session.compacted' AND o.instance_id = ?
-       ORDER BY e.cursor DESC LIMIT 1`, taskId, instanceId)
-	if ok {
-		timestamp := asFloatValue(last["timestamp"])
-		data, _ := last["data"].(string)
-		compaction = &RecordedCompaction{Timestamp: timestamp, Data: data}
-	}
-	return LatestContextTokens(completions, compaction)
-}
-
 // compactionSettingsForEntry derives the compaction thresholds of one model.
 func piAdapterCompactionSettings(entry ModelEntry) *CompactionSettings {
 	settings := CompactionSettingsFor(struct {
@@ -102,14 +74,6 @@ func piAdapterCompactionSettings(entry ModelEntry) *CompactionSettings {
 		MaxTokens     int
 	}{ContextWindow: entry.ContextWindow, MaxTokens: entry.MaxTokens})
 	return &settings
-}
-
-// shouldCompactContextForEntry reports whether the context is already too large to send.
-func shouldCompactContextForEntry(entry ModelEntry, contextTokens *float64) bool {
-	return ShouldCompactContext(struct {
-		ContextWindow int
-		MaxTokens     int
-	}{ContextWindow: entry.ContextWindow, MaxTokens: entry.MaxTokens}, contextTokens)
 }
 
 // piAdapterGenerateSuggestion asks one fresh model call for a composer line.

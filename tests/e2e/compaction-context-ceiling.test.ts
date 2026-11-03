@@ -125,7 +125,7 @@ test('the summary is asked for the room the handoff needs, and it fits', async (
     version: 1, projects: [{ id: 'p', root: project }],
     credentials: { local: { secretRef: 'GRAPH_CEILING_TEST_KEY' } },
     models: { entries: [{ id: 'main', modelId: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
-      baseUrl: provider.model.baseUrl, contextWindow: 512_000, maxTokens: 8_192, credentialId: 'local' }] },
+      baseUrl: provider.model.baseUrl, contextWindow: 512_000, maxTokens: 200_000, credentialId: 'local' }] },
   }));
   const daemon = await launchCli(root, {
     env: { GRAPH_CEILING_TEST_KEY: 'synthetic-only', GRAPH_COMPACTION_CONTEXT_CEILING: '20' },
@@ -157,7 +157,7 @@ test('the summary is asked for the room the handoff needs, and it fits', async (
     const summary = provider.requests.find(request => JSON.stringify(request).includes(SUMMARY_REQUEST)) as { max_tokens?: number } | undefined;
     expect(summary).toBeDefined();
     expect(summary!.max_tokens).toBeGreaterThanOrEqual(1500);
-    expect(summary!.max_tokens).toBeLessThan(8_192);
+    expect(summary!.max_tokens).toBeLessThan(200_000);
 
     // And the handoff fit, so the compaction replaced the history instead of
     // leaving the session with the context it was trying to shrink.

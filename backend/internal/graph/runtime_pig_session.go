@@ -332,11 +332,14 @@ type pigAgentSession struct {
 
 // Prompt sends one prompt and returns the turn it produced.
 func (session *pigAgentSession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
-	// A context that no longer fits the model window cannot be compacted, so it
-	// is replaced before the send. The agent keeps working; what it was told is
-	// said by the handoff and the durable transcript stays in history.
+	// The kernel owns the two boundaries of a request: at 70% of the window it
+	// compacts the context into a summary, and only a context that no longer
+	// fits at all is replaced - with a pointer to the durable transcript the
+	// next turn can search. The ceiling, when the daemon names one, moves the
+	// compaction earlier without moving the reset.
 	budget := pigSessionContextBudget(session.request)
-	if reset, estimated, err := session.session.ResetIfOversized(context.Background(), budget, ""); err != nil {
+	compactAt := pigSessionCompactionTrigger(session.request)
+	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, "", ""); err != nil {
 		return AgentSessionTurn{}, err
 	} else if reset {
 		session.emitContextReset(estimated, budget)
@@ -363,6 +366,23 @@ func (session *pigAgentSession) Prompt(text string, images []ImageContent) (Agen
 		}
 	}
 	return result, nil
+}
+
+// pigSessionCompactionTrigger is the token count at which a compaction starts:
+// 70% of the window, or the ceiling when the daemon named a smaller one.
+func pigSessionCompactionTrigger(request AgentSessionRequest) int {
+	window := pigModelSpec(request.Model).ContextWindow
+	if window <= 0 {
+		return 0
+	}
+	trigger := window * 70 / 100
+	if ceiling := compactionContextCeiling(); ceiling > 0 && ceiling < trigger {
+		trigger = ceiling
+	}
+	if trigger < 1 {
+		return 1
+	}
+	return trigger
 }
 
 // pigSessionContextBudget is the model window minus what the request adds

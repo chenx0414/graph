@@ -62,7 +62,7 @@
 - 模型的 `maxTokens`：摘要预算永远不会超过它，配置过小会让长会话的摘要永远放不下；
 - 会话是否已经超过窗口（UI 的“上下文”指标）。超过后每一轮都会失败，直到一次压缩成功。
 
-Graph 会在每次回合开始前，按上一次已计量的上下文判断是否需要压缩，并用 `COMPACTION_INSTRUCTIONS` 主动调用一次压缩：这套指令要求摘要控制在约 1500 tokens、允许丢弃已解决的细节，从而避免 Pi 默认“保留全部历史”的更新提示让摘要逐次膨胀直到超出输出上限。Pi 自己的阈值/溢出压缩仍作为兜底保留。压缩事件记录已覆盖的 completion 调用序号，下一轮按调用顺序选择压缩后估算或更新的模型用量，不按整轮结束时间判断。`Already compacted` / `Nothing to compact (session too small)` 是无需操作的成功结果，记录为 `session.compaction_skipped`，不会停驻主管。真正的手动压缩失败仍作为普通执行失败上报。排队的原任务与已确认重载后的续跑不因压缩命令丢失。
+上下文有两个边界，都由内核在发送前执行。超过窗口的 70%（或 `GRAPH_COMPACTION_CEILING` 指定的更小值）时先压缩：摘要替换较早的上下文，最近的窗口原样保留；超过窗口本身时不再发送，改为重置成一条指针——完整 transcript 仍在 durable 会话里，下一轮用 `history_search` 工具按需检索（无参数列出最近条目，`query` 按关键词返回片段，`entryId` 读全文）。重置是 `session.context_reset` 事件，不丢历史。估算以上一次 provider 实报的 usage 为锚点，只估它之后的新消息，并加上待发送的输入；不再用 JSON 字节数——转义后的 HTML 与工具结果会把估算放大 30–170%，在真实用量只有 60–76% 时就错误地重置会话。`/compact` 仍是手动路径，使用 `COMPACTION_INSTRUCTIONS` 的有界交接指令；Pi 自己的阈值/溢出压缩作为兜底保留。压缩事件记录已覆盖的 completion 调用序号，下一轮按调用顺序选择压缩后估算或更新的模型用量，不按整轮结束时间判断。`Already compacted` / `Nothing to compact (session too small)` 是无需操作的成功结果，记录为 `session.compaction_skipped`，不会停驻主管。真正的手动压缩失败仍作为普通执行失败上报。排队的原任务与已确认重载后的续跑不因压缩命令丢失。
 
 ## 模型不可用
 

@@ -6,24 +6,22 @@ import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
 // A context that can no longer fit the model's window cannot be compacted: the
-// summarizer would have to read the same oversized prefix. The turn must not
-// be sent into a provider that can only answer "Input too long", and the agent
-// must not be dead for good. The session starts a new context with a handoff
-// before the send; the durable transcript stays in history.
-//
-// The proof is the real daemon: the first turn writes an answer larger than a
-// deliberately small window, the second turn is sent a context without that
-// answer, and the answer to the second turn still arrives.
+// summarizer would have to read the same oversized prefix. The session starts a
+// new context with a handoff before the send; the durable transcript stays in
+// history, and the handoff names both the conversation and the tool that reads
+// it. The next turn proves the pointer works: the model searches the transcript
+// for the answer the reset removed from its context and gets it back.
 
 const cleanup: (() => Promise<void> | void)[] = [];
 test.afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
 interface ConversationView { messages: { role: string; text?: string }[] }
 
-test('an oversized context is replaced with a handoff instead of being sent to the provider', async () => {
-  const longAnswer = `LONG-ANSWER-MARKER ${'context filler '.repeat(8_000)}`;
+test('an oversized context is replaced with a pointer to the searchable transcript', async () => {
+  const longAnswer = `LONG-ANSWER-MARKER ${'context filler '.repeat(12_000)}`;
   const provider = await openaiServer([
-    { text: longAnswer, usage: { prompt_tokens: 40, completion_tokens: 10 } },
+    { text: longAnswer, usage: { prompt_tokens: 40, completion_tokens: 56_000 } },
+    { tools: [{ id: 'search-history', name: 'history_search', arguments: JSON.stringify({ query: 'LONG-ANSWER-MARKER' }) }] },
     { text: 'After the reset.', usage: { prompt_tokens: 40, completion_tokens: 10 } },
   ]);
   cleanup.push(() => provider.close());
@@ -62,12 +60,18 @@ test('an oversized context is replaced with a handoff instead of being sent to t
   await expect.poll(async () => (await view()).messages.some(message => (message.text ?? '').includes('After the reset.')),
     { timeout: 30_000, interval: 100 }).toBe(true);
 
-  // The second request carried the handoff, not the oversized answer.
-  expect(provider.requests).toHaveLength(2);
+  // The second request carried the handoff, not the oversized answer, and the
+  // handoff says where the transcript is and how to read it.
+  expect(provider.requests).toHaveLength(3);
   const sent = JSON.stringify(provider.requests[1]);
   expect(sent).not.toContain('LONG-ANSWER-MARKER');
   expect(sent).toContain("no longer fit the model's context window");
-  expect(sent).toContain('Continue after the reset.');
+  expect(sent).toContain('history_search');
+  expect(sent).toMatch(/conversation \d+/);
+
+  // The pointer works: the model searched the durable transcript and is sent
+  // back the answer the reset removed from its context.
+  expect(JSON.stringify(provider.requests[2])).toContain('LONG-ANSWER-MARKER');
 
   // The history the user can scroll back to is untouched.
   expect((await view()).messages.some(message => (message.text ?? '').includes('LONG-ANSWER-MARKER'))).toBe(true);

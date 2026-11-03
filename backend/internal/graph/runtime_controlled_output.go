@@ -116,6 +116,11 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 	if usage == nil {
 		usage = &TokenUsage{UsageSource: stringPointer(string(UsageUnknown))}
 	}
+	// The transcript keeps the usage the provider billed. The kernel's own
+	// context estimate anchors on the last measured message; without this
+	// every session looked like it had never been billed, so its threshold
+	// compaction measured a context that never grew and never compacted.
+	stream.message.Usage = assistantUsageOf(usage)
 	stream.settle(usage)
 	if failure == nil && !terminated && !stream.finishReasonReported() {
 		failure = errors.New("The provider closed the stream before the answer was complete")
@@ -135,6 +140,17 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 	stream.events = append(stream.events, map[string]any{
 		"type": "done", "reason": reason, "message": asMap(stream.message),
 	})
+}
+
+// assistantUsageOf is the usage one settled send carries into the transcript.
+func assistantUsageOf(usage *TokenUsage) AssistantUsage {
+	if usage == nil {
+		return AssistantUsage{}
+	}
+	return AssistantUsage{
+		Input: usage.Input, Output: usage.Output, CacheRead: usage.CacheRead, CacheWrite: usage.CacheWrite,
+		TotalTokens: usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite,
+	}
 }
 
 // estimateUsage estimates the usage one response used when the provider reported none.
