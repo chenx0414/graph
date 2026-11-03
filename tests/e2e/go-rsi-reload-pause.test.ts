@@ -147,9 +147,27 @@ test('an activation interrupts and records the live work, and the next daemon re
   await daemon.close();
   daemon = await start();
   cleanup.push(() => daemon.close());
-  await expect.poll(async () => access(resumePath).then(() => true).catch(() => false), { timeout: 60_000, interval: 250 }).toBe(false);
-  const after = await request(`/api/conversations/${victimConversation}`);
-  expect(after.body.paused, 'the reload-paused conversation was not resumed').toBe(false);
+  // Until the desktop acknowledges the reload, dispatch stays closed and the
+  // paused work stays paused on purpose.
+  await expect(access(resumePath)).resolves.toBeUndefined();
+  expect((await request(`/api/conversations/${victimConversation}`)).body.paused,
+    'the reload-paused conversation must wait for the ack').toBe(true);
+
+  // The desktop acknowledges the reload once the new daemon runs the commit:
+  // that ack is also when dispatch opens again (a pending restart blocks every
+  // turn), and therefore when the paused work is continued.
+  const restart = JSON.parse(await readFile(restartPath, 'utf8')) as { id: string };
+  const appToken = (await readFile(join(root, 'state', 'app-token'), 'utf8')).trim();
+  const ack = await daemon.request('/api/app/rsi/restart-ack', {
+    method: 'POST',
+    headers: { 'x-graph-app-token': appToken },
+    body: JSON.stringify({ id: restart.id }),
+  });
+  expect(ack.status, await ack.clone().text()).toBe(200);
+
+  await expect.poll(async () => access(resumePath).then(() => true).catch(() => false), { timeout: 30_000, interval: 200 }).toBe(false);
+  expect((await request(`/api/conversations/${victimConversation}`)).body.paused,
+    'the reload-paused conversation was not resumed by the ack').toBe(false);
   const stillPaused = await request(`/api/conversations/${pausedConversation}`);
   expect(stillPaused.body.paused, 'a person paused this one; the reload must not resume it').toBe(true);
 }, 300_000);

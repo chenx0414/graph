@@ -480,6 +480,10 @@ func (service *RsiService) AckRestart(id string, store *TaskStore) RsiAckRestart
 		panic(err)
 	}
 	_ = os.Remove(service.rsiRestartPath())
+	// The reload is confirmed and dispatch is open again: continue what this
+	// reload paused. Doing it at boot was wrong - a pending restart blocks every
+	// dispatch until the ack, so the continuation would be appended and never run.
+	rsiConsumeResume(service, store, nil)
 	// The change is live; now prove the rest of the suite, off this path.
 	service.rsiStartAsyncFull(store, id, rsiStringValue(current.Commit), touched)
 	return RsiAckRestart{Cleared: true, PendingRestart: nil}

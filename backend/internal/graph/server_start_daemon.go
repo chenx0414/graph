@@ -409,10 +409,11 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	// continues it. Wiring happens here because both halves need the runtime.
 	if rsi != nil && server.Runtime != nil {
 		rsi.reload = &RsiReloadHooks{
-			Pause:  func(store *TaskStore, excludeTaskID string) []string { return server.Runtime.PauseForReload(store, excludeTaskID) },
+			Pause: func(store *TaskStore, excludeTaskID string) []string {
+				return server.Runtime.PauseForReload(store, excludeTaskID)
+			},
 			Resume: func(store *TaskStore, ids []string) []string { return server.Runtime.ResumeAfterReload(store, ids) },
 		}
-		rsiConsumeResume(rsi, server.Runtime.store, log)
 	}
 	// The catalog is ready once the runtime is open: the bootstrap pack
 	// publishes its definitions, and the built-in recipes follow when the
