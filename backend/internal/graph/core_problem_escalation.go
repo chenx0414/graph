@@ -29,11 +29,16 @@ func problemEscalationPrompt(kind string, minutes int64) string {
 
 // SweepUnattendedProblems hands every main-owned problem that outlived
 // ProblemUnattendedMs to the next actor: a routed question moves one stage up
-// (project → global → user), and an unrouted one goes straight to the person.
-// It never retries anything, and one unreadable row does not stop the sweep.
+// (project → global → user). An unrouted problem in a project conversation is
+// the project supervisor's own failure, so it goes to the global supervisor
+// first - the person asked for these to land in the global main's interface,
+// and only what the global main cannot resolve (or leaves unattended) reaches
+// the person. Problems of a conversation that has no global supervisor above
+// it go straight to the person, as before. It never retries anything, and one
+// unreadable row does not stop the sweep.
 func (runtime *TaskRuntime) SweepUnattendedProblems(now int64) int {
 	runtime.ensureOpen()
-	rows := kernelRows(runtime.store.Db, `SELECT id,task_id,node_id,kind,route_stage,asked_at FROM questions
+	rows := kernelRows(runtime.store.Db, `SELECT id,task_id,node_id,kind,data,route_stage,asked_at FROM questions
  WHERE status='open' AND owner='main' AND asked_at IS NOT NULL AND asked_at<=?
  ORDER BY rowid`, now-int64(ProblemUnattendedMs))
 	escalated := 0
@@ -61,6 +66,17 @@ func (runtime *TaskRuntime) SweepUnattendedProblems(now int64) int {
 			case "global":
 				runtime.escalateRoutedQuestion(row, prompt)
 			default:
+				// A problem on a project conversation is the project supervisor's
+				// own failure, parked on the one Agent that cannot answer it. The
+				// global supervisor can retry it, answer it, or escalate it; the
+				// person is the second stage, not the first.
+				if conversation := ConversationForTask(runtime.store, taskID); conversation != nil &&
+					conversation.Role == ConversationProject && conversation.AnchorTaskId == taskID {
+					if kernelRow(runtime.store.Db, "SELECT anchor_task_id FROM conversations WHERE role='global' AND archived_at IS NULL") != nil {
+						runtime.escalateQuestionToGlobal(row, prompt)
+						break
+					}
+				}
 				// Re-owning, not replacing: the question keeps its kind, its label and
 				// the answers it already accepts. A new waiting question would have
 				// thrown those away and left the person with a free-text box.
