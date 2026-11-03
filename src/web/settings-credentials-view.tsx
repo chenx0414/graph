@@ -60,7 +60,7 @@ return <section id="settings-credentials" className="settings-section" data-test
             </div>
           )}
 
-          {selected?.oauthProvider === 'openrouter' && <ProviderLogin key={active.credentialRef} credentialRef={active.credentialRef} configured={resolved} onChange={configured => {
+          {selected?.oauthProvider && <ProviderLogin key={`${selected.oauthProvider}:${active.credentialRef}`} providerId={selected.oauthProvider} credentialRef={active.credentialRef} configured={resolved} onChange={configured => {
             setKeyResolved(current => ({ ...current, [active.credentialId]: configured }));
             onCredentialStored(active.credentialId, configured);
             setPlatforms(current => current.map(platform => platform.id === platformId ? { ...platform, credentialConfigured: configured } : platform));

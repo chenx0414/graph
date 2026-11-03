@@ -27,7 +27,7 @@ interface Choice {
   baseUrl: string;
   credentialKind?: 'api-key' | 'subscription';
   credentialConfigured?: boolean;
-  oauthProvider?: 'openrouter';
+  oauthProvider?: 'openrouter' | 'xai';
 }
 
 export function ProviderPicker({ choices, value, onChange, testIdPrefix, testId, disabled = false }: {
@@ -56,7 +56,7 @@ export function ProviderPicker({ choices, value, onChange, testIdPrefix, testId,
     <div className="provider-choice-grid" role="group" aria-label="选择服务商">
       {matches.map(item => <button type="button" key={item.id} className="provider-choice" aria-pressed={value === item.id} data-testid={`${testIdPrefix}${item.id}`} disabled={disabled} onClick={() => onChange(item.id)}>
         <ProviderIcon id={item.id} />
-        <span className="provider-choice-copy"><strong>{item.label}</strong><span>{item.oauthProvider ? '浏览器授权或密钥' : item.credentialKind === 'subscription' ? '订阅访问令牌' : 'API key'}</span></span>
+        <span className="provider-choice-copy"><strong>{item.label}</strong><span>{item.oauthProvider ? '账号登录或密钥' : item.credentialKind === 'subscription' ? '订阅访问令牌' : 'API key'}</span></span>
         {item.credentialConfigured && <span className="provider-ready">已配置</span>}
         {value === item.id && <span className="provider-selected" aria-label="已选择">✓</span>}
       </button>)}

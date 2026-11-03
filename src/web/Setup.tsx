@@ -204,7 +204,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
         {preset.docsUrl && <p className="provider-help"><a href={preset.docsUrl} target="_blank" rel="noreferrer">获取 {preset.label} API 凭据 ↗</a></p>}
         {template.notes.length > 0 && <p className="muted">{template.notes.join('；')}</p>}
 
-        {preset.oauthProvider === 'openrouter' && <ProviderLogin key={secretRef} credentialRef={secretRef} configured={loginConfigured} onChange={setLoginConfigured} />}
+        {preset.oauthProvider && <ProviderLogin key={`${preset.oauthProvider}:${secretRef}`} providerId={preset.oauthProvider} credentialRef={secretRef} configured={loginConfigured} onChange={setLoginConfigured} />}
         <h3 className="section-title">{preset.credentialKind === 'subscription' ? '订阅访问令牌' : 'API key'}</h3>
         {bridge
           ? <Field label="API 密钥" hint="只写入系统钥匙串；不进入配置文件、日志或页面状态">

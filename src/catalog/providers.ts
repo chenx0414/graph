@@ -137,7 +137,9 @@ export function templateModelEntry(template: ProviderTemplate, model: ProviderTe
 }
 
 /** Shared directory for setup, the settings workbench and the HTTP catalog.
- * A subscription token is deliberately not advertised as an OAuth login. */
+ * `oauthProvider` marks the platforms whose account login the host implements
+ * (OpenRouter PKCE, xAI device code); a plain subscription token stays a
+ * pasted credential. */
 export interface ProviderPreset {
   id: string;
   label: string;
@@ -145,7 +147,7 @@ export interface ProviderPreset {
   baseUrl: string;
   credentialRef: string;
   credentialKind: 'api-key' | 'subscription';
-  oauthProvider?: 'openrouter';
+  oauthProvider?: 'openrouter' | 'xai';
   modelsListSupported: boolean;
   docsUrl?: string;
   headers?: Record<string, string>;
@@ -155,7 +157,7 @@ export interface ProviderPreset {
 const SUBSCRIPTION_PRESETS: ProviderPreset[] = [
   { id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', credentialKind: 'subscription', modelsListSupported: true, headers: { 'x-opencode-session': 'graph-console' }, docsUrl: 'https://opencode.ai/docs/zen', notes: ['订阅凭据；所有请求自动附带 x-opencode-session。'] },
   { id: 'command-goat', label: 'Command Goat', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', credentialRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；请从自己的服务商账户获取凭据。'] },
-  { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；使用 xAI 的 OpenAI 兼容端点。'] },
+  { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', oauthProvider: 'xai', modelsListSupported: true, notes: ['订阅访问令牌；可点「使用 xAI 账号登录」走设备码授权，也可以直接粘贴访问令牌。', '设备码登录会写访问令牌与一个 `<credentialRef>_REFRESH` 伴随条目，访问令牌到期前自动刷新。'] },
   { id: 'chatgpt', label: 'ChatGPT', api: 'openai-completions', baseUrl: 'https://chatgpt.com/backend-api/codex', credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；Responses 协议适配尚未完成，登录或配置凭据不代表模型可调用，请先验证连接。'] },
 ];
 

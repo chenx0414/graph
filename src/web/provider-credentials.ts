@@ -43,7 +43,7 @@ export interface PlatformPreset {
   /** Environment variable / keychain entry name; config stores only this. */
   credentialRef: string;
   credentialKind: CredentialKind;
-  oauthProvider?: 'openrouter';
+  oauthProvider?: 'openrouter' | 'xai';
   /** True when the vendor is known to expose `<baseUrl>/models`. Display-only:
    * a probe always attempts `/models` and lets the vendor's response decide. */
   modelsListSupported: boolean;
@@ -227,7 +227,7 @@ export function normalizePlatforms(payload: unknown): PlatformPreset[] {
       baseUrl: typeof entry.baseUrl === 'string' ? entry.baseUrl.trim() : '',
       credentialRef,
       credentialKind: entry.credentialKind === 'subscription' ? 'subscription' : 'api-key',
-      ...(entry.oauthProvider === 'openrouter' ? { oauthProvider: 'openrouter' as const } : {}),
+      ...(entry.oauthProvider === 'xai' || entry.oauthProvider === 'openrouter' ? { oauthProvider: entry.oauthProvider } : {}),
       modelsListSupported: entry.modelsListSupported !== false,
       ...(entry.custom === true || id === CUSTOM_PLATFORM_ID ? { custom: true } : {}),
       ...(typeof entry.credentialConfigured === 'boolean' ? { credentialConfigured: entry.credentialConfigured } : {}),

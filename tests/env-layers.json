@@ -20,6 +20,7 @@
         "tests/e2e/provider-metadata.part-02.test.ts",
         "tests/e2e/provider-metadata.test.ts",
         "tests/e2e/resource-library.test.ts",
+        "tests/e2e/xai-oauth.test.ts",
         "tests/m8/**"
       ]
     }

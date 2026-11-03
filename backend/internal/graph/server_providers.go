@@ -85,10 +85,13 @@ var PLATFORM_PRESETS = []PlatformPresetRecord{
 		Notes: []string{"订阅凭据；优先从 <baseUrl>/models 探测可用模型。"},
 	},
 	{
-		ID: "grok", Label: "Grok", API: ModelApiOpenAICompletions,
+		ID: "grok", Label: "Grok", OAuthProvider: "xai", API: ModelApiOpenAICompletions,
 		BaseURL: "https://api.x.ai/v1", CredentialRef: "GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN",
 		CredentialKind: ProviderCredentialKindSubscription, ModelsListSupported: true,
-		Notes: []string{"订阅访问令牌；使用 xAI 的 OpenAI 兼容端点。"},
+		Notes: []string{
+			"订阅访问令牌；可点「使用 xAI 账号登录」走设备码授权，也可以直接粘贴访问令牌。",
+			"设备码登录会写访问令牌与一个 `<credentialRef>_REFRESH` 伴随条目，访问令牌到期前自动刷新。",
+		},
 	},
 	{
 		ID: "chatgpt", Label: "ChatGPT", API: ModelApiOpenAICompletions,

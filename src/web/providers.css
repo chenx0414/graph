@@ -19,3 +19,8 @@
 .provider-current { margin: 10px 0 0; font-size: 12px; }
 .provider-help { display: flex; gap: 10px; align-items: center; margin: 12px 0; }
 @media (max-width: 520px) { .provider-choice-grid { grid-template-columns: 1fr; } .provider-picker-tools { flex-wrap: wrap; } }
+
+/* Device-code login: the user has to read and type this code, so it is the one
+   value on the page that is deliberately large. */
+.provider-login-code { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12.5px; }
+.provider-login-code code { padding: 2px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); font-size: 17px; letter-spacing: 2px; }

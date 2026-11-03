@@ -23,6 +23,12 @@ func CreateApp(runtime *TaskRuntime, options AppOptions) *GraphApp {
 	mux := http.NewServeMux()
 	app.registerRoutes(mux)
 	app.handler = app.guard(mux)
+	// A device-code login outlives the daemon that started it: the refresh loop
+	// has to be armed at startup, not only after someone opens the settings
+	// page, or the one-hour access token would expire silently.
+	if options.AppServices != nil && options.AppServices.PushSecret != nil {
+		app.loginService()
+	}
 	return app
 }
 
