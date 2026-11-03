@@ -194,6 +194,11 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	// standing goal; a goal that reaches its budget stops being injected.
 	if conversation != nil && usage != nil {
 		AccountGoalUsage(l.store, conversation.Id, total, NowMillis())
+		// A goal is the work: when a turn ends cleanly and the goal still has
+		// room, the next turn starts from it instead of waiting for a person.
+		if result.Outcome == "completed" && total > 0 {
+			ContinueGoal(l.store, conversation.Id, NowMillis())
+		}
 	}
 	RecordConversationOutput(l.store, operation, result)
 	queuedAfter := 0

@@ -127,22 +127,23 @@ test('a goal reaches the model, counts real usage and stops at its budget', asyn
   // Setting the goal is the instruction to work on it: a turn starts without
   // anyone repeating the objective, and it spends the goal it just set.
   expect(set.body.started, JSON.stringify(set.body)).toBe(true);
-  await expect.poll(replies, { timeout: 30_000, interval: 250 }).toBe(2);
-  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', usedTokens: 50, budgetTokens: 100 });
+  // The goal runs itself: the start turn spends fifty of a hundred, then the
+  // goal starts its own next turn, which spends the rest.
+  await expect.poll(replies, { timeout: 30_000, interval: 250 }).toBe(3);
+  const spent = (await request(`/api/conversations/${conversationId}/goal`)).body.goal as Record<string, any>;
+  expect(spent).toMatchObject({ status: 'budget_limited', usedTokens: 100, budgetTokens: 100 });
   // The standing goal is part of what the model was told, not just a row - and
-  // the turn was told to begin instead of waiting for a second message.
+  // the first turn was told to begin, the second to keep going.
   expect(JSON.stringify(provider.requests[1])).toContain('Standing goal');
   expect(JSON.stringify(provider.requests[1])).toContain('交付 CSV 导出');
   expect(JSON.stringify(provider.requests[1])).toContain('开始执行这个目标');
-
-  await turn('第二轮', 'goal-turn-2', 3);
-  const spent = (await request(`/api/conversations/${conversationId}/goal`)).body.goal as Record<string, any>;
-  expect(spent).toMatchObject({ status: 'budget_limited', usedTokens: 100, budgetTokens: 100 });
+  expect(JSON.stringify(provider.requests[2])).toContain('继续推进目标');
   const visible = (await messages()).filter(message => message.kind === 'goal');
   expect(visible.some(message => message.text?.includes('预算已用完')), JSON.stringify(visible)).toBe(true);
+
   // The budget stops the goal, not the conversation: the next turn still runs,
   // but it no longer carries the goal and it no longer spends the goal budget.
-  await turn('第四轮', 'goal-turn-4', 4);
+  await turn('下一轮', 'goal-turn-2', 4);
   expect(JSON.stringify(provider.requests[3])).not.toContain('Standing goal');
   expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'budget_limited', usedTokens: 100 });
 
@@ -188,7 +189,7 @@ test('a goal set as the first message starts the work', async () => {
     return { status: response.status, body: await response.json().catch(() => ({})) as Record<string, any> };
   };
 
-  const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '/goal 先修好导出 +2000', requestId: 'goal-first-turn' });
+  const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '/goal 先修好导出 +50', requestId: 'goal-first-turn' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   expect(created.body).toMatchObject({ command: 'goal', action: 'set', started: true, title: '先修好导出' });
   const conversationId = String(created.body.conversationId);
@@ -205,11 +206,11 @@ test('a goal set as the first message starts the work', async () => {
   const transcript = await messages();
   expect(transcript.some(message => message.role === 'user' && message.text?.includes('开始执行这个目标')), JSON.stringify(transcript)).toBe(true);
   expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('先修好导出')), JSON.stringify(transcript)).toBe(true);
-  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', usedTokens: 50, budgetTokens: 2000 });
+  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'budget_limited', usedTokens: 50, budgetTokens: 50 });
 
   // A command that only changes the goal does not start another turn.
-  const paused = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal pause', requestId: 'goal-first-pause' });
-  expect(paused.body.goal.status).toBe('paused');
+  const finished = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal done 导出修好了', requestId: 'goal-first-done' });
+  expect(finished.body.goal).toMatchObject({ status: 'completed', checkNote: '导出修好了' });
   await new Promise(resolve => setTimeout(resolve, 1200));
   expect(provider.requests).toHaveLength(1);
   expect(await replies()).toBe(1);

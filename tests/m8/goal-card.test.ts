@@ -36,8 +36,11 @@ test('the goal card shows the objective and runs pause, resume, budget, completi
   // A scripted provider keeps the console in its normal state and answers the
   // turn a freshly set goal starts, so the card shows a settled spend instead
   // of an unanswered thread.
+  // A turn that reports no usage spends nothing the goal can account, so the
+  // goal stays active instead of continuing: this case is about the card's
+  // actions, not about how far a goal runs.
   const provider = await openaiServer([
-    { text: '开始做导出', usage: { prompt_tokens: 40, completion_tokens: 10 } },
+    { text: '开始做导出', usage: { prompt_tokens: 0, completion_tokens: 0 } },
   ]);
   cleanup.push(() => provider.close());
   await writeFile(configPath, JSON.stringify({
@@ -69,9 +72,7 @@ test('the goal card shows the objective and runs pause, resume, budget, completi
 
   expect(await page.getByTestId('goal-objective').innerText()).toBe('让导出支持 CSV');
   expect(await page.getByTestId('goal-status').innerText()).toBe('进行中');
-  // Setting the goal started a turn; its spend lands on the card on the next
-  // refresh, so the assertion waits for the settled number.
-  await expect.poll(() => page.getByTestId('goal-usage').innerText(), { timeout: 15_000 }).toContain('已用 50 / 500 tokens');
+  expect(await page.getByTestId('goal-usage').innerText()).toContain('已用 0 / 500 tokens');
 
   await page.getByTestId('goal-pause').click();
   await expect.poll(() => page.getByTestId('goal-status').innerText(), { timeout: 10_000 }).toBe('已暂停');

@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -194,6 +195,15 @@ func goalStartInstruction(goal *ConversationGoal) string {
 // goalLine is the one visible line a /goal command leaves in the conversation.
 func goalLine(action string, goal *ConversationGoal) string {
 	switch action {
+	case "set":
+		// The card is the live view of the goal; this line is the receipt of
+		// the command. Repeating status and spend here left a line that
+		// contradicted the card the moment the goal was paused or extended.
+		line := "目标已设定：" + goal.Objective
+		if goal.BudgetTokens > 0 {
+			return line + "（预算 " + strconv.FormatInt(goal.BudgetTokens, 10) + " tokens，用完就停）"
+		}
+		return line + "（未设预算：最多自动连续推进 " + strconv.Itoa(goalAutoTurnLimit) + " 轮）"
 	case "clear":
 		return "目标已清除。"
 	case "done":
@@ -270,6 +280,87 @@ func AccountGoalUsage(store *TaskStore, conversationID string, total int64, now 
 			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "budget_limited"},
 		})
 	}
+}
+
+// goalAutoTurnLimit bounds a goal that has no budget. A budget is what stops a
+// goal that keeps working: without one the loop has no brake, so such a goal
+// advances this many turns in a row and then pauses for a person to confirm.
+const goalAutoTurnLimit = 4
+
+// goalContinueText is the instruction one automatic continuation starts from.
+func goalContinueText(goal *ConversationGoal) string {
+	return "继续推进目标：" + goal.Objective +
+		"\n\n这是自动续跑：上一轮结束后目标仍在进行中。接着做，不必向我确认；目标真正完成时用一句话说明结果。"
+}
+
+// ContinueGoal turns a settled turn into the next one while the goal still has
+// room to work: a goal is the work, so it does not stop just because one turn
+// ended. It reports whether it queued a continuation.
+//
+// The brakes are deliberate. A goal with a budget stops when the budget is
+// spent; a goal without one advances goalAutoTurnLimit turns and then pauses,
+// because nothing else would ever stop it. A turn that asked the person a
+// question, a message already waiting, and an outcome that is not a clean
+// completion all stop it too - each of those means the next thing to happen
+// belongs to the person, not to the goal.
+func ContinueGoal(store *TaskStore, conversationID string, now int64) bool {
+	goal := store.Goal(conversationID)
+	if goal == nil || goal.Status != GoalActive {
+		return false
+	}
+	if len(PendingMessages(store, conversationID, 1)) > 0 {
+		return false
+	}
+	conversation := ConversationRowOf(store, conversationID)
+	if kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND status='open' LIMIT 1", conversation.AnchorTaskId) != nil {
+		return false
+	}
+	if goal.BudgetTokens > 0 {
+		if goal.UsedTokens >= goal.BudgetTokens {
+			return false
+		}
+	} else if goalContinueStreak(store, conversationID) >= goalAutoTurnLimit {
+		goal.Status = GoalPaused
+		store.PutGoal(*goal, now)
+		AppendMessage(store, MessageInput{
+			ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
+			Text: "目标已自动连续推进 " + strconv.Itoa(goalAutoTurnLimit) + " 轮，先暂停等你确认。用 /goal resume 继续，或用 /goal +N 给预算让目标一直跑到预算用完。",
+			State: MessageStateDone,
+			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "auto_paused"},
+		})
+		return false
+	}
+	AppendMessage(store, MessageInput{
+		ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat",
+		Text: goalContinueText(goal), State: MessageStatePending,
+		Data: map[string]any{"source": map[string]any{"kind": "goal_continue", "objective": goal.Objective}},
+	})
+	return true
+}
+
+// goalContinueStreak counts the automatic continuations since the last message
+// a person wrote, so the limit applies to one unbroken run rather than to the
+// goal for ever.
+func goalContinueStreak(store *TaskStore, conversationID string) int {
+	rows := kernelRows(store.Db, "SELECT data FROM messages WHERE conversation_id=? AND role='user' ORDER BY seq DESC LIMIT 64", conversationID)
+	count := 0
+	for _, row := range rows {
+		kind := ""
+		if data := kernelString(row["data"]); data != "" {
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(data), &parsed); err == nil {
+				if source, ok := parsed["source"].(map[string]any); ok {
+					kind, _ = source["kind"].(string)
+				}
+			}
+		}
+		if kind == "goal_continue" {
+			count++
+			continue
+		}
+		break
+	}
+	return count
 }
 
 // AppendGoalLine writes the single visible line one /goal action leaves in the
