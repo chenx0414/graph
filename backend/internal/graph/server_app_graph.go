@@ -114,10 +114,27 @@ func (app *GraphApp) serveGraphControl(w http.ResponseWriter, r *http.Request) {
 	if value, ok := body["moduleId"].(string); ok {
 		input.ModuleId = &value
 	}
+	input.Limitations = graphAcceptanceLimitationsOfPayload(body)
 	if value, ok := appBodyInt(body, "seq"); ok {
 		input.Seq = &value
 	}
 	writeJSON(w, http.StatusOK, app.runtime.ControlGraph(r.PathValue("taskId"), input))
+}
+
+// serveGraphAcceptanceWaive records the user's own waiver of one acceptance item.
+//
+// This is the only door that speaks as the user, and the actor is set here, not
+// read from the body: an Agent that could send "actor":"user" through graph_control
+// could sign an acceptance the user never made.
+func (app *GraphApp) serveGraphAcceptanceWaive(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	input := GraphAcceptanceWaiveInput{
+		AcceptanceId: appBodyString(body, "acceptanceId"),
+		Reason:       appBodyString(body, "reason"),
+		Evidence:     appBodyString(body, "evidence"),
+		RequestId:    appBodyString(body, "requestId"),
+	}
+	writeJSON(w, http.StatusOK, app.runtime.WaiveAcceptance(r.PathValue("taskId"), input))
 }
 
 // serveGraphModule explains one module of a graph.

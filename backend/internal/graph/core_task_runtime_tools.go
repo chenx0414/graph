@@ -4,11 +4,7 @@ package graph
 // TypeScript supervisor spread graphManagement() into itself, so the graph
 // tools of the main Agent read the same surface.
 func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentToolsGraphManagement {
-	service := NewGraphManagement(runtime.kernel, taskId, func(graphId string, branch string) {
-		if runtime.git != nil {
-			runtime.git.PrepareTask(graphId, branch)
-		}
-	}, runtime.artifacts)
+	service := runtime.graphService(taskId)
 	return AgentToolsGraphManagement{
 		GraphCreate: func(input map[string]any) any {
 			request := GraphCreateInput{Definition: input["definition"]}
@@ -58,6 +54,9 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 				Action:  agentToolsString(input["action"]),
 			}
 			request.Proof, _ = input["proof"].(string)
+			// A retried control action names its request so the kernel can recognise
+			// the replay instead of doing the same thing twice.
+			request.RequestID, _ = input["requestId"].(string)
 			if len(agent) > 0 && agent[0] {
 				request.AgentTaskID = taskId
 				request.SourceMessageID, _ = input["sourceMessageId"].(string)
@@ -79,6 +78,10 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 			if callID, ok := input["callId"].(string); ok {
 				request.CallId = &callID
 			}
+			// What complete_with_limitations closes on. The actor is not read from
+			// the payload: this door speaks as the Agent, so the service refuses a
+			// human acceptance item here whatever the arguments claim.
+			request.Limitations = graphAcceptanceLimitationsOfPayload(input)
 			if usage, ok := input["usage"].(map[string]any); ok {
 				parsed := &TokenUsage{}
 				if value, ok := agentToolsNumber(usage["input"]); ok {
@@ -146,6 +149,17 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 		HarnessFriction: service.HarnessFriction,
 		HarnessDecision: service.HarnessDecision,
 	}
+}
+
+// graphService binds the management surface to one owner task. The Agent tools
+// and the user-only doors share it: they differ in who they say is acting, not in
+// what a graph control does.
+func (runtime *TaskRuntime) graphService(taskId string) GraphManagement {
+	return NewGraphManagement(runtime.kernel, taskId, func(graphId string, branch string) {
+		if runtime.git != nil {
+			runtime.git.PrepareTask(graphId, branch)
+		}
+	}, runtime.artifacts)
 }
 
 // graphManagementPatchChange reads the changes object of a graph patch.

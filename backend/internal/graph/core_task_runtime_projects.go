@@ -186,7 +186,31 @@ func (runtime *TaskRuntime) ControlGraph(taskId string, input GraphControlInput)
 	if input.Usage != nil {
 		payload["usage"] = map[string]any{"input": input.Usage.Input, "output": input.Usage.Output, "cacheRead": input.Usage.CacheRead, "cacheWrite": input.Usage.CacheWrite}
 	}
+	if len(input.Limitations) > 0 {
+		payload["limitations"] = input.Limitations
+	}
+	if input.RequestID != "" {
+		// The console door names its request too, so a retried control action
+		// replays its receipt instead of doing the same thing twice.
+		payload["requestId"] = input.RequestID
+	}
 	result := runtime.graphManagement(taskId).GraphControl(payload)
+	if runtime.autoWake {
+		runtime.execution.Kick()
+	}
+	return result
+}
+
+// WaiveAcceptance records the user's own waiver of one acceptance item.
+//
+// It is not a graph control action: graph_control runs as the Agent, and the
+// service refuses a human acceptance item for any actor that is not the user. The
+// record it appends is the same append-only ledger an Agent's limitation goes
+// into, so one read shows every decision a closure rests on.
+func (runtime *TaskRuntime) WaiveAcceptance(taskId string, input GraphAcceptanceWaiveInput) any {
+	runtime.ensureOpen()
+	input.GraphId = taskId
+	result := runtime.graphService(taskId).WaiveAcceptance(input)
 	if runtime.autoWake {
 		runtime.execution.Kick()
 	}

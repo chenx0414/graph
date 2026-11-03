@@ -69,19 +69,11 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 		return "completing"
 	}
 	acceptance := GraphAcceptance(runtime.kernel, runtime.graphId, runtime.artifacts)
-	delivery := kernelRow(runtime.kernel.DB, "SELECT commit_sha FROM kernel_completion_delivery WHERE task_id=?", runtime.graphId)
 	task = runtime.kernel.Store.Task(runtime.graphId)
-	deliveryMatches := true
-	hasIntegrationBranch := task.IntegrationBranch != nil && *task.IntegrationBranch != ""
-	deliveryCommit := (*string)(nil)
-	if delivery != nil && delivery["commit_sha"] != nil {
-		text := kernelString(delivery["commit_sha"])
-		deliveryCommit = &text
-	}
-	if hasIntegrationBranch && (!graphAcceptanceShaEqual(task.TargetSha, acceptance.Commit) || delivery == nil || !graphAcceptanceShaEqual(deliveryCommit, acceptance.Commit)) {
-		deliveryMatches = false
-	}
-	if !acceptance.Ready || !deliveryMatches {
+	// A waived item is not evidence: acceptance.Ready counts only passed items,
+	// so a graph with recorded limitations still reaches this hard gate and stays
+	// blocked until someone uses complete_with_limitations explicitly.
+	if !acceptance.Ready || !graphAcceptanceDeliveryMatches(task, acceptance) {
 		runtime.kernel.ModuleTransaction(func() any {
 			readyHuman := true
 			for _, item := range acceptance.Items {

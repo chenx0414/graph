@@ -67,6 +67,11 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		return graph.Complete()
 	case "withdraw_complete":
 		return graph.WithdrawComplete()
+	case "complete_with_limitations":
+		// A separate action on purpose: complete keeps its hard gate. This one
+		// closes a blocked graph on decisions recorded in
+		// kernel_acceptance_limitations, and it is the only place that does.
+		return service.completeWithLimitations(input.GraphId, input)
 	case "stop":
 		return graph.Stop()
 	case "reopen":

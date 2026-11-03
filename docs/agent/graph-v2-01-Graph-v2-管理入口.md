@@ -52,7 +52,7 @@ node_run 的 toolCallCount 是节点所有执行累计的实际工具启动次�
 
 局部修改使用 `changes:{reason,patch,retire?}`，与 definition 二选一。例如 `patch:{nodes:{work:{task:"处理新增边界"}},edges:{review:{enabled:false}}}`。对象字段递归合并，数组整体替换，null 删除字段；未指定内容保留。结果仍按同一正式 graph 定义整体验证，不增加第二套 graph 格式。删除节点仍要显式 retire 并先处理待办工作；有连接时同时在 patch 中删除对应边。
 
-`graph_inspect({graphId,query,id?,after?,limit?,deliveryId?})` 支持 summary（默认）、revision、nodes、results、edge、edge_delivery、module、module_values、module_transition、operations、provider_calls、queue、executions。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
+`graph_inspect({graphId,query,id?,after?,limit?,deliveryId?})` 支持 summary（默认）、revision、nodes、results、edge、edge_delivery、module、module_values、module_transition、operations、provider_calls、queue、executions、acceptance、limitations。limitations 是这张图已记录的全部收口限制（按记录顺序，含 acceptanceId、理由、证据、actor、commit、版本与 requestId），与 acceptance 里各项的 waived/limitation 字段是同一批记录。edge/module 查询要求对应对象的 id。results 是公开输出收到的业务结果；运行失败与完成通知单独记录。
 
 edge 历史按新到旧分页，默认20条，limit范围1–200；返回nextBefore，下一页将它作为after传入。图概览每条边只带最新1条摘要。超过4096 bytes的value返回valueTruncated=true、valueBytes与短预览，value=null表示尚未加载；latestTruncated同样区分最新值未加载与真实null。精确读取使用 `graph_inspect({graphId,query:"edge_delivery",id:"边ID",deliveryId:"投递ID"})`，只返回属于该graph和该边的一条完整记录。来源execution、接收处理状态、版本、时间与具名端点保留；接收状态会随处理变化，不是不可变投递value的一部分。
 
@@ -69,8 +69,11 @@ module 判断历史按发生顺序分页，默认20条，上限200；下一页�
 - cancel_operation：指定 operationId，取消 uncertain/failed 操作的原输入；不撤销已产生的副作用，也不生成成功结果。dispatched 操作必须先停止。取消可以重放；恢复后如需重做，由 main 显式重新投递。
 - reopen：指定 moduleId，等待已经开始的模块判断结束后清除一次汇合的触发锁存，保留输入，等待下一次投递再判断。
 - complete：关闭外部新输入，等待内部工作清空后完成；空闲不等于完成。
+- complete_with_limitations：只对 blocked 图生效，显式收口。必须给 limits 数组（每项 acceptanceId、reason、evidence），且未满足的验收项要全部被覆盖（漏项会点名）；failed、stale、kind=human（除非用户本人）和 Git 交付不匹配都拒绝，拒绝路径不写任何记录。同 requestId 重放返回同一份收口结果，不重复记录。它不改 complete 的硬门禁，也不改 ready 的含义。
 - withdraw_complete：撤销完成请求，恢复外部输入。
 - stop：关闭派发并取消待处理工作，等待运行中的工作收尾。
+
+用户本人的豁免走 HTTP `POST /api/tasks/{taskId}/graph/acceptance/waive`（acceptanceId、reason、evidence、requestId），记录 actor=user；Agent 的 graph_control 无法签名用户验收，service 按 actor 拒绝，读取请求体里的 actor 无效。
 
 一次有效 submit 可以包含多个具名输出；未出现的输出等价于 enable:false。整次输出校验通过后才广播。业务“不通过”应发送 enable:true 和 passed:false；禁用连接是独立的 graph 管理操作。
 

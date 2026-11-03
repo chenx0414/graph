@@ -7,13 +7,19 @@ import (
 )
 
 // AcceptanceStatus is one criterion's evidence.
+//
+// Status "waived" is not evidence: somebody decided this item may stay unmet,
+// and the limitation says who, why, and on which commit. Ready still counts only
+// passed items, so a waived item never makes a graph ready on its own.
 type AcceptanceStatus struct {
-	Id          string            `json:"id"`
-	Description string            `json:"description"`
-	Kind        string            `json:"kind"`
-	Status      string            `json:"status"`
-	Reason      string            `json:"reason"`
-	Source      *AcceptanceSource `json:"source,omitempty"`
+	Id          string                `json:"id"`
+	Description string                `json:"description"`
+	Kind        string                `json:"kind"`
+	Status      string                `json:"status"`
+	Reason      string                `json:"reason"`
+	Source      *AcceptanceSource     `json:"source,omitempty"`
+	Waived      bool                  `json:"waived"`
+	Limitation  *AcceptanceLimitation `json:"limitation,omitempty"`
 }
 
 // AcceptanceSource names the row or artifact that decided a criterion.
@@ -24,13 +30,19 @@ type AcceptanceSource struct {
 }
 
 // GraphAcceptanceReport is the final acceptance of one graph.
+//
+// Ready keeps its one meaning: every item passed, nothing is pending, nothing is
+// paused. Limitations and Closable answer a different question - which decisions
+// let this graph close anyway - and neither of them makes Ready true.
 type GraphAcceptanceReport struct {
-	Ready    bool                    `json:"ready"`
-	Drained  bool                    `json:"drained"`
-	Commit   *string                 `json:"commit"`
-	Items    []AcceptanceStatus      `json:"items"`
-	Human    []AcceptanceCriterion   `json:"human"`
-	Delivery GraphAcceptanceDelivery `json:"delivery"`
+	Ready       bool                      `json:"ready"`
+	Drained     bool                      `json:"drained"`
+	Commit      *string                   `json:"commit"`
+	Items       []AcceptanceStatus        `json:"items"`
+	Human       []AcceptanceCriterion     `json:"human"`
+	Delivery    GraphAcceptanceDelivery   `json:"delivery"`
+	Limitations []AcceptanceLimitationRow `json:"limitations"`
+	Closable    bool                      `json:"closable"`
 }
 
 // GraphAcceptanceDelivery is the Git receipt, when one is required.
@@ -318,6 +330,26 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 		}
 		items = append(items, result)
 	}
+	// A recorded limitation replaces "no evidence" with "decided": the item is
+	// waived for the commit the record names, and Ready stays false because
+	// nothing about it passed.
+	records := kernel.AcceptanceLimitations(graphID)
+	waived := graphAcceptanceWaivedItems(records, commit)
+	for index := range items {
+		if items[index].Status == "passed" {
+			continue
+		}
+		record, ok := waived[items[index].Id]
+		if !ok {
+			continue
+		}
+		items[index].Status = "waived"
+		items[index].Waived = true
+		items[index].Limitation = &AcceptanceLimitation{
+			Reason: record.Reason, Evidence: record.Evidence, Actor: record.Actor,
+			Commit: record.Commit, CreatedAt: record.CreatedAt,
+		}
+	}
 	_, pending := g5One(kernel.Db, `SELECT 1 WHERE
     EXISTS(SELECT 1 FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed','failed')) OR
     EXISTS(SELECT 1 FROM kernel_executions WHERE task_id=? AND state='running') OR
@@ -350,8 +382,11 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 		text := g5Str(receipt["commit_sha"])
 		delivered = &text
 	}
-	return GraphAcceptanceReport{
+	report := GraphAcceptanceReport{
 		Ready: !pending && task.Paused == 0 && passed, Drained: !pending, Commit: commit, Items: items, Human: human,
-		Delivery: GraphAcceptanceDelivery{Required: hasIntegrationBranch, Commit: delivered},
+		Delivery:    GraphAcceptanceDelivery{Required: hasIntegrationBranch, Commit: delivered},
+		Limitations: records,
 	}
+	report.Closable = graphAcceptanceClosable(task, report)
+	return report
 }
