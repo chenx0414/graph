@@ -110,17 +110,6 @@ test('a goal reaches the model, counts real usage and stops at its budget', asyn
     const response = await daemon.request(path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
     return { status: response.status, body: await response.json().catch(() => ({})) as Record<string, any> };
   };
-  // A conversation whose first message is a command must not spend a turn:
-  // the master's initial activation has nothing to answer, so it is settled
-  // before the scheduler can start it.
-  const commandOnly = await request('/api/conversations', { model: 'main', text: '/goal 只有目标的会话 +40', requestId: 'goal-command-first' });
-  expect(commandOnly.status, JSON.stringify(commandOnly.body)).toBe(200);
-  expect(commandOnly.body).toMatchObject({ command: 'goal', action: 'set' });
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  const commandMessages = ((await request(`/api/conversations/${commandOnly.body.conversationId}`)).body.messages ?? []) as { role?: string; kind?: string }[];
-  expect(commandMessages.some(message => message.role === 'assistant'), JSON.stringify(commandMessages)).toBe(false);
-  expect(provider.requests).toHaveLength(0);
-
   const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '开始工作', requestId: 'goal-start' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
@@ -135,15 +124,18 @@ test('a goal reaches the model, counts real usage and stops at its budget', asyn
   await expect.poll(replies, { timeout: 30_000, interval: 250 }).toBe(1);
   const set = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal 交付 CSV 导出 +100', requestId: 'goal-set' });
   expect(set.body.goal).toMatchObject({ objective: '交付 CSV 导出', status: 'active', usedTokens: 0, budgetTokens: 100 });
-
-  await turn('第二轮', 'goal-turn-2', 2);
-  const afterOne = (await request(`/api/conversations/${conversationId}/goal`)).body.goal as Record<string, any>;
-  expect(afterOne).toMatchObject({ status: 'active', usedTokens: 50, budgetTokens: 100 });
-  // The standing goal is part of what the model was told, not just a row.
+  // Setting the goal is the instruction to work on it: a turn starts without
+  // anyone repeating the objective, and it spends the goal it just set.
+  expect(set.body.started, JSON.stringify(set.body)).toBe(true);
+  await expect.poll(replies, { timeout: 30_000, interval: 250 }).toBe(2);
+  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', usedTokens: 50, budgetTokens: 100 });
+  // The standing goal is part of what the model was told, not just a row - and
+  // the turn was told to begin instead of waiting for a second message.
   expect(JSON.stringify(provider.requests[1])).toContain('Standing goal');
   expect(JSON.stringify(provider.requests[1])).toContain('交付 CSV 导出');
+  expect(JSON.stringify(provider.requests[1])).toContain('开始执行这个目标');
 
-  await turn('第三轮', 'goal-turn-3', 3);
+  await turn('第二轮', 'goal-turn-2', 3);
   const spent = (await request(`/api/conversations/${conversationId}/goal`)).body.goal as Record<string, any>;
   expect(spent).toMatchObject({ status: 'budget_limited', usedTokens: 100, budgetTokens: 100 });
   const visible = (await messages()).filter(message => message.kind === 'goal');
@@ -158,4 +150,67 @@ test('a goal reaches the model, counts real usage and stops at its budget', asyn
   expect(extended.body.goal).toMatchObject({ status: 'active', usedTokens: 100, budgetTokens: 200 });
   const done = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal done 已交付', requestId: 'goal-done' });
   expect(done.body.goal).toMatchObject({ status: 'completed', checkNote: '已交付' });
+}, 120_000);
+
+/**
+ * A goal typed as the first message of a new conversation is still an
+ * instruction to work: the conversation starts on it instead of sitting there
+ * until the person speaks again. Only the command that states an objective
+ * starts a turn; the ones that change an existing goal do not.
+ */
+test('a goal set as the first message starts the work', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-goal-first-turn-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  await mkdir(join(root, 'web'), { recursive: true });
+  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  const provider = await openaiServer([
+    { text: '开始了', usage: { prompt_tokens: 40, completion_tokens: 10 } },
+  ]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    access: { mode: 'full' },
+    models: { entries: [
+      { id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+        baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' },
+    ] },
+    credentials: { local: { secretRef: 'GRAPH_GOAL_FIRST_KEY' } },
+    limits: { defaultBudgetTokens: 3_000_000 },
+  }, null, 2));
+  const daemon = await launchCli(root, { configPath, env: { GRAPH_GOAL_FIRST_KEY: 'synthetic-only' }, extraArgs: ['--execute'] });
+  cleanup.push(() => daemon.close());
+  const request = async (path: string, body?: object) => {
+    const response = await daemon.request(path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json().catch(() => ({})) as Record<string, any> };
+  };
+
+  const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '/goal 先修好导出 +2000', requestId: 'goal-first-turn' });
+  expect(created.status, JSON.stringify(created.body)).toBe(200);
+  expect(created.body).toMatchObject({ command: 'goal', action: 'set', started: true, title: '先修好导出' });
+  const conversationId = String(created.body.conversationId);
+  const messages = async () => ((await request(`/api/conversations/${conversationId}`)).body.messages ?? []) as { role?: string; kind?: string; text?: string }[];
+  const replies = async () => (await messages()).filter(message => message.role === 'assistant').length;
+
+  await expect.poll(replies, { timeout: 30_000, interval: 250 }).toBe(1);
+  expect(provider.requests).toHaveLength(1);
+  const prompt = JSON.stringify(provider.requests[0]);
+  expect(prompt).toContain('Standing goal');
+  expect(prompt).toContain('先修好导出');
+  // The turn starts from a visible instruction, not from nothing: the model is
+  // told to begin, and the transcript says why it did.
+  const transcript = await messages();
+  expect(transcript.some(message => message.role === 'user' && message.text?.includes('开始执行这个目标')), JSON.stringify(transcript)).toBe(true);
+  expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('先修好导出')), JSON.stringify(transcript)).toBe(true);
+  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', usedTokens: 50, budgetTokens: 2000 });
+
+  // A command that only changes the goal does not start another turn.
+  const paused = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal pause', requestId: 'goal-first-pause' });
+  expect(paused.body.goal.status).toBe('paused');
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  expect(provider.requests).toHaveLength(1);
+  expect(await replies()).toBe(1);
 }, 120_000);

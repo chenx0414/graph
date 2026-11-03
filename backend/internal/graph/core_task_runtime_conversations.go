@@ -225,10 +225,19 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 	goalCommand.RequestID = input.RequestId
 	applied := runtime.Conversations().Goal(conversationId, goalCommand)
 	line := AppendGoalLine(runtime.store, conversationId, goalCommand.Action, applied)
+	// The first message may be the objective itself: then the goal starts the
+	// conversation instead of leaving it waiting for a second message.
+	startGoalTurn(runtime.Conversations(), conversationId, goalCommand.Action, applied, input.RequestId)
 	record["command"] = "goal"
 	record["action"] = goalCommand.Action
 	record["goal"] = applied["goal"]
 	record["messageId"] = line.Id
+	if started := applied["started"]; started != nil {
+		record["started"] = started
+	}
+	if startedMessageId := applied["startedMessageId"]; startedMessageId != nil {
+		record["startedMessageId"] = startedMessageId
+	}
 	if line.Cursor != nil {
 		record["cursor"] = *line.Cursor
 	}

@@ -180,6 +180,17 @@ func ParseGoalCommand(text string) (GoalInput, bool) {
 	return GoalInput{Action: "set", Objective: rest, BudgetTokens: budget}, true
 }
 
+// goalStartInstruction is the message a freshly set goal starts its first turn
+// from. A goal is an instruction to work, not a note on the thread: without a
+// turn the person sets an objective and nothing happens until they speak again
+// (measured 2026-11-03: a goal set in the console produced no turn at all). The
+// text is short and explicit so the model begins instead of asking whether it
+// should.
+func goalStartInstruction(goal *ConversationGoal) string {
+	return "开始执行这个目标：" + goal.Objective +
+		"\n\n不必先向我确认，直接开始推进；需要我裁决时再问。完成后用一句话说明结果。"
+}
+
 // goalLine is the one visible line a /goal command leaves in the conversation.
 func goalLine(action string, goal *ConversationGoal) string {
 	switch action {

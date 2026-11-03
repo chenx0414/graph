@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { chromium } from 'playwright';
 import { build } from 'vite';
 import { launchCli } from '../helpers/cli-daemon.ts';
+import { openaiServer } from '../fixtures/openai-server.ts';
 
 /**
  * The goal is a property of the conversation, so the console has to show it as
@@ -32,14 +33,18 @@ test('the goal card shows the objective and runs pause, resume, budget, completi
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
   const configPath = join(root, 'graph.config.json');
-  // A configured model keeps the console in its normal state (the workspace
-  // banner for an unconfigured one would float above the slash palette). The
-  // endpoint is never called: this case only drives /goal.
+  // A scripted provider keeps the console in its normal state and answers the
+  // turn a freshly set goal starts, so the card shows a settled spend instead
+  // of an unanswered thread.
+  const provider = await openaiServer([
+    { text: '开始做导出', usage: { prompt_tokens: 40, completion_tokens: 10 } },
+  ]);
+  cleanup.push(() => provider.close());
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
     models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
-      baseUrl: 'http://127.0.0.1:1/v1', contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] },
+      baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] },
     credentials: { local: { secretRef: 'GRAPH_GOAL_CARD_KEY' } },
   }));
   const daemon = await launchCli(root, { configPath, webDir, env: { GRAPH_GOAL_CARD_KEY: 'synthetic-only' }, extraArgs: ['--execute'] });
@@ -64,7 +69,9 @@ test('the goal card shows the objective and runs pause, resume, budget, completi
 
   expect(await page.getByTestId('goal-objective').innerText()).toBe('让导出支持 CSV');
   expect(await page.getByTestId('goal-status').innerText()).toBe('进行中');
-  expect(await page.getByTestId('goal-usage').innerText()).toContain('已用 0 / 500 tokens');
+  // Setting the goal started a turn; its spend lands on the card on the next
+  // refresh, so the assertion waits for the settled number.
+  await expect.poll(() => page.getByTestId('goal-usage').innerText(), { timeout: 15_000 }).toContain('已用 50 / 500 tokens');
 
   await page.getByTestId('goal-pause').click();
   await expect.poll(() => page.getByTestId('goal-status').innerText(), { timeout: 10_000 }).toBe('已暂停');

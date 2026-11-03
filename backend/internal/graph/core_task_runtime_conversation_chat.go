@@ -123,6 +123,7 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 		command.RequestID = input.RequestId
 		result := runtime.Conversations().Goal(conversationId, command)
 		AppendGoalLine(runtime.store, conversationId, command.Action, result)
+		startGoalTurn(conversations, conversationId, command.Action, result, input.RequestId)
 		return result
 	}
 	attachments := CleanAttachments(input.Attachments)
@@ -191,6 +192,44 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 		return map[string]any{}
 	}
 	return record
+}
+
+// startGoalTurn turns a goal the person just set into the turn that works on
+// it. Only `set` starts work: pause, resume, extend, done, clear and show act
+// on an existing goal, and starting a turn for those would spend model calls
+// nobody asked for. The turn is an ordinary message, so it queues behind a
+// running turn and is answered in order.
+func startGoalTurn(conversations *TaskRuntimeConversations, conversationId, action string, result map[string]any, requestId string) {
+	if action != "set" {
+		return
+	}
+	runtime := conversations.runtime
+	if runtime.master == nil || runtime.masterModel() == nil || runtime.masterDefinitionVersion() == nil {
+		// No model is configured: the goal is still recorded, and the console
+		// says why nothing can start. A message that can never be answered would
+		// only look like a lost turn.
+		return
+	}
+	var goal *ConversationGoal
+	switch value := result["goal"].(type) {
+	case *ConversationGoal:
+		goal = value
+	case ConversationGoal:
+		copied := value
+		goal = &copied
+	}
+	if goal == nil {
+		return
+	}
+	started := conversations.Chat(conversationId, TaskRuntimeChatInput{
+		Text:      goalStartInstruction(goal),
+		RequestId: requestId + "#goal-start",
+		Source:    map[string]any{"kind": "goal_start", "objective": goal.Objective},
+	})
+	result["started"] = true
+	if messageId, ok := started["messageId"]; ok && messageId != nil {
+		result["startedMessageId"] = messageId
+	}
 }
 
 // Compact asks the master to compact the conversation context.
