@@ -95,6 +95,8 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/conversations/{conversationId}/resume", app.serveConversationResume)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/steer", app.serveConversationSteer)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/interrupt", app.serveConversationInterrupt)
+	mux.HandleFunc("GET /api/conversations/{conversationId}/goal", app.serveConversationGoal)
+	mux.HandleFunc("POST /api/conversations/{conversationId}/goal", app.serveConversationGoalAction)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/events", app.serveConversationEvents)
 	mux.HandleFunc("GET /api/conversations/{conversationId}/events/stream", app.serveConversationStream)
 	mux.HandleFunc("POST /api/tasks", app.serveTaskCreate)

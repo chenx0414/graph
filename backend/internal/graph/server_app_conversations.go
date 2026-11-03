@@ -450,3 +450,19 @@ func (app *GraphApp) serveConversationStream(w http.ResponseWriter, r *http.Requ
 	after := appEventCursor(r)
 	app.appWriteEventStream(w, r, app.runtime.Conversations().Watch(conversationID, after))
 }
+
+// serveConversationGoal reads the persistent goal of one conversation.
+func (app *GraphApp) serveConversationGoal(w http.ResponseWriter, r *http.Request) {
+	conversationID := r.PathValue("conversationId")
+	writeJSON(w, http.StatusOK, map[string]any{"conversationId": conversationID, "goal": app.runtime.store.Goal(conversationID)})
+}
+
+// serveConversationGoalAction applies one /goal action.
+func (app *GraphApp) serveConversationGoalAction(w http.ResponseWriter, r *http.Request) {
+	body := appJSONBody(w, r)
+	input := GoalInput{Action: appBodyString(body, "action"), Objective: appBodyString(body, "objective"), RequestID: appBodyString(body, "requestId")}
+	if value, ok := body["budgetTokens"].(float64); ok && value >= 0 {
+		input.BudgetTokens = int64(value)
+	}
+	writeJSON(w, http.StatusOK, app.runtime.Conversations().Goal(r.PathValue("conversationId"), input))
+}
