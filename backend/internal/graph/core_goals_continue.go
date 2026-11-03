@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
 	"strings"
 )
 
@@ -62,26 +61,46 @@ func ContinueGoal(store *TaskStore, conversationID string, now int64, carry stri
 	if kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND status='open' LIMIT 1", conversation.AnchorTaskId) != nil {
 		return false
 	}
-	// Only a goal stored before budgets were retired can still carry one. Such
-	// a row stops here instead of spending past a number its author set.
-	if goal.BudgetTokens > 0 && goal.UsedTokens >= goal.BudgetTokens {
-		goal.Status = GoalPaused
-		store.PutGoal(*goal, now)
-		AppendMessage(store, MessageInput{
-			ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
-			Text: "目标沿用了历史数据里的预算（已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " / 预算 " + strconv.FormatInt(goal.BudgetTokens, 10) +
-				" tokens），已暂停。用 /goal resume 继续：目标现在没有上限。",
-			State: MessageStateDone,
-			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "budget_limited"},
-		})
-		return false
-	}
+	// Every round starts at a marker, so "the same blocker for three rounds in a
+	// row" can be read off the round boundaries instead of counted from reports.
+	RecordGoalRound(store, conversationID, "continue")
 	AppendMessage(store, MessageInput{
 		ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat",
 		Text: goalContinueText(goal, carry), State: MessageStatePending,
 		Data: map[string]any{"source": map[string]any{"kind": "goal_continue", "objective": goal.Objective}},
 	})
 	return true
+}
+
+// RecordGoalRound marks the start of one working round of the goal and returns
+// its number. A blocked report belongs to the round it happened in: a round
+// that did not report the same blocker breaks the run, no matter how many
+// reports were written earlier.
+func RecordGoalRound(store *TaskStore, conversationID, reason string) int {
+	round := goalLastRound(store, conversationID) + 1
+	store.Event(goalTaskID(store, conversationID), "goal.round", map[string]any{
+		"conversationId": conversationID, "round": round, "reason": reason,
+	})
+	return round
+}
+
+// goalLastRound is the number of the newest round of this conversation, or 0
+// before the goal started its first turn.
+func goalLastRound(store *TaskStore, conversationID string) int {
+	rows := kernelRows(store.Db, "SELECT data FROM events WHERE task_id=? AND type='goal.round' ORDER BY cursor DESC LIMIT 8", goalTaskID(store, conversationID))
+	for _, row := range rows {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(kernelString(row["data"])), &parsed); err != nil {
+			continue
+		}
+		if kernelString(parsed["conversationId"]) != conversationID {
+			continue
+		}
+		if value, ok := parsed["round"].(float64); ok {
+			return int(value)
+		}
+	}
+	return 0
 }
 
 // MarkGoalUsageLimited stops an active goal when the provider refused this turn
@@ -129,10 +148,42 @@ func RecordGoalBlocked(store *TaskStore, conversationID, note string, now int64)
 	}
 	fingerprint := goalFingerprint(note)
 	taskID := goalTaskID(store, conversationID)
+	round := goalLastRound(store, conversationID)
 	store.Event(taskID, "goal.blocked", map[string]any{
-		"conversationId": conversationID, "fingerprint": fingerprint, "note": utf16Slice(note, goalNoteMax),
+		"conversationId": conversationID, "fingerprint": fingerprint, "note": utf16Slice(note, goalNoteMax), "round": round,
 	})
-	return goalEventRepeats(store, taskID, conversationID, "goal.blocked", fingerprint), fingerprint
+	return goalBlockedRounds(store, taskID, conversationID, fingerprint, round), fingerprint
+}
+
+// goalBlockedRounds counts how many consecutive rounds, ending with newest,
+// reported this same blocker. A round with no report of it ends the run: three
+// reports spread over four rounds is not three rounds of being stuck.
+func goalBlockedRounds(store *TaskStore, taskID, conversationID, fingerprint string, newest int) int {
+	if newest <= 0 {
+		return 0
+	}
+	reported := map[int]bool{}
+	rows := kernelRows(store.Db, "SELECT data FROM events WHERE task_id=? AND type='goal.blocked' ORDER BY cursor DESC LIMIT 64", taskID)
+	for _, row := range rows {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(kernelString(row["data"])), &parsed); err != nil {
+			continue
+		}
+		if kernelString(parsed["conversationId"]) != conversationID || kernelString(parsed["fingerprint"]) != fingerprint {
+			continue
+		}
+		if value, ok := parsed["round"].(float64); ok && int(value) > 0 {
+			reported[int(value)] = true
+		}
+	}
+	repeats := 0
+	for round := newest; round > 0; round-- {
+		if !reported[round] {
+			break
+		}
+		repeats++
+	}
+	return repeats
 }
 
 // goalEventRepeats counts how many times in a row the newest tail of one event

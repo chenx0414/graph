@@ -223,6 +223,9 @@ func startGoalTurn(conversations *TaskRuntimeConversations, conversationId, acti
 	if goal == nil {
 		return
 	}
+	// The round marker comes first: the turn is about to start, and a blocker it
+	// reports belongs to this round.
+	RecordGoalRound(runtime.store, conversationId, action)
 	started := conversations.Chat(conversationId, TaskRuntimeChatInput{
 		Text:      goalStartInstruction(goal),
 		RequestId: requestId + "#goal-start",

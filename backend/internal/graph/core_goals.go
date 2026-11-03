@@ -40,8 +40,8 @@ type ConversationGoal struct {
 	ConversationID string `json:"conversationId"`
 	Objective      string `json:"objective"`
 	Status         string `json:"status"`
-	// BudgetTokens is the spent-limit of a goal stored before budgets were
-	// retired. It is read for historical rows only and never set any more.
+	// BudgetTokens is the field a goal used to carry a spent-limit in. Budgets
+	// are retired: it reads 0 and is written 0, whatever the column still says.
 	BudgetTokens int64  `json:"budgetTokens"`
 	UsedTokens   int64  `json:"usedTokens"`
 	CheckNote    string `json:"checkNote,omitempty"`
@@ -54,7 +54,10 @@ type ConversationGoal struct {
 // A row written while budgets existed can still say budget_limited. Reading it
 // as paused is what makes `/goal resume` the one way back: reaching a number no
 // longer stops a goal, and an old row that says it did is the same situation as
-// a person pausing.
+// a person pausing. The stored budget is not read at all - not by the console,
+// not by the continuation check, not by resume - so a historical number cannot
+// brake anything the day after it was written and then cleared on the next
+// write.
 func (s *TaskStore) Goal(conversationID string) *ConversationGoal {
 	row := kernelRow(s.Db, `SELECT conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at
 		FROM conversation_goals WHERE conversation_id=?`, conversationID)
@@ -67,7 +70,7 @@ func (s *TaskStore) Goal(conversationID string) *ConversationGoal {
 	}
 	return &ConversationGoal{
 		ConversationID: kernelString(row["conversation_id"]), Objective: kernelString(row["objective"]),
-		Status: status, BudgetTokens: kernelInt(row["budget_tokens"]),
+		Status: status, BudgetTokens: 0,
 		UsedTokens: kernelInt(row["used_tokens"]), CheckNote: kernelString(row["check_note"]),
 		CreatedAt: kernelInt(row["created_at"]), UpdatedAt: kernelInt(row["updated_at"]),
 	}
@@ -148,6 +151,10 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 				Raise("invalid_state", "Only a paused or usage-limited goal can be resumed")
 			}
 			goal.Status = GoalActive
+			// Resume is the one moment a historical row is rewritten anyway:
+			// clear the retired number instead of carrying it into the turn it
+			// just started.
+			goal.BudgetTokens = 0
 		case "done":
 			if goal.Status == GoalCompleted {
 				Raise("invalid_state", "This goal is already completed")
@@ -219,7 +226,7 @@ func goalStartInstruction(goal *ConversationGoal) string {
 
 // goalToolInstruction is the same closing rule on every turn a goal starts: the
 // model, not a turn counter, is what ends a goal.
-const goalToolInstruction = "\n目标真正完成并已验证时，用 goal 工具（action=complete）收口，并在 note 里报告最终已用 tokens；同一个阻碍连续三轮没解决时用 action=blocked 停下来等我。"
+const goalToolInstruction = "\n目标真正完成并已验证时，用 goal 工具（action=complete）提交独立验收，并在 note 里报告最终已用 tokens——acceptance 通过才算完成；连续三轮都报告同一个阻碍时用 action=blocked 停下来等我。"
 
 // goalLine is the one visible line a /goal command leaves in the conversation.
 func goalLine(action string, goal *ConversationGoal, budgetIgnored bool) string {
@@ -263,7 +270,7 @@ func goalPromptSection(goal *ConversationGoal) string {
 	}
 	funds := "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens，未设上限"
 	return "\n\n# Standing goal\nThis conversation has one standing objective the user set outside the chat. Keep it in view for this turn and prefer work that advances it:\n「" + goal.Objective + "」\n" + funds +
-		"\nWhen the objective is genuinely done and verified, call the goal tool with action \"complete\" and report the final used tokens in note. Do not claim completion before the work is verified. If the same blocker has stood for three consecutive turns, call it with action \"blocked\"."
+		"\nWhen the objective is genuinely done and verified, call the goal tool with action \"complete\" and report the final used tokens in note: it requests an independent acceptance check, and only a pass completes the goal. Do not claim completion before the work is verified. If the same blocker has stood in each of the last three rounds, call it with action \"blocked\"."
 }
 
 // AppendGoalLine writes the single visible line one /goal action leaves in the

@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -48,12 +49,13 @@ async function goalConversation(plans: ResponsePlan[], credential: string) {
   };
   const messages = async (conversationId: string) => ((await request(`/api/conversations/${conversationId}`)).body.messages ?? []) as { role?: string; kind?: string; text?: string }[];
   const replies = async (conversationId: string) => (await messages(conversationId)).filter(message => message.role === 'assistant').length;
+  const goalOf = async (conversationId: string) => ((await request(`/api/conversations/${conversationId}/goal`)).body.goal ?? null) as Record<string, any> | null;
   const start = async (text: string, requestId: string) => {
     const created = await request('/api/conversations', { projectId: 'p', model: 'main', text, requestId });
     expect(created.status, JSON.stringify(created.body)).toBe(200);
     return String(created.body.conversationId);
   };
-  return { request, messages, replies, start, provider };
+  return { root, request, messages, replies, start, provider, goalOf };
 }
 
 test('a goal without a budget starts its next turn by itself, with no turn cap', async () => {
@@ -98,4 +100,52 @@ test('resuming a paused goal starts the next turn immediately', async () => {
   expect(provider.requests.length).toBe(2);
   const transcript = await messages(conversationId);
   expect(transcript.filter(message => message.role === 'user' && message.text?.includes('开始执行这个目标')).length).toBe(2);
+}, 180_000);
+
+/**
+ * A goal stored while budgets existed is the same situation as a person
+ * pausing: it reads as paused, and resume is the one way back. What it must not
+ * do is come back with its old ceiling and stop again on the next turn.
+ */
+test('a historical budget-limited row resumes and never re-pauses on the old number', async () => {
+  const { root, request, messages, replies, start, provider, goalOf } = await goalConversation([
+    { text: '开始做', usage: { prompt_tokens: 0, completion_tokens: 0 } },
+    { text: '接着做', usage: { prompt_tokens: 40, completion_tokens: 10 } },
+    { text: '再推一轮', usage: { prompt_tokens: 0, completion_tokens: 0 } },
+  ], 'GRAPH_GOAL_LEGACY_KEY');
+  const conversationId = await start('/goal 交付 CSV 导出', 'goal-legacy');
+  await expect.poll(() => replies(conversationId), { timeout: 60_000, interval: 250 }).toBe(1);
+
+  // The row as an older runtime wrote it: a spent budget and the status that
+  // said the number had run out.
+  const db = new DatabaseSync(join(root, 'state/tasks.sqlite'));
+  db.exec('PRAGMA busy_timeout=5000');
+  db.prepare('UPDATE conversation_goals SET status=?, budget_tokens=?, used_tokens=? WHERE conversation_id=?')
+    .run('budget_limited', 5000, 6000, conversationId);
+  db.close();
+
+  // Reading it is the D1 normalisation: paused, and the number is not part of
+  // what the goal is any more.
+  await expect.poll(() => goalOf(conversationId), { timeout: 30_000, interval: 250 }).toMatchObject({ status: 'paused', budgetTokens: 0, usedTokens: 6000 });
+
+  const resumed = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal resume', requestId: 'goal-legacy-resume' });
+  expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+  expect(resumed.body.goal).toMatchObject({ status: 'active', budgetTokens: 0, usedTokens: 6000 });
+  expect(resumed.body.started, JSON.stringify(resumed.body)).toBe(true);
+
+  // Resume rewrites the retired column instead of carrying it forward.
+  const after = new DatabaseSync(join(root, 'state/tasks.sqlite'));
+  after.exec('PRAGMA busy_timeout=5000');
+  const row = after.prepare('SELECT status,budget_tokens FROM conversation_goals WHERE conversation_id=?').get(conversationId) as { status: string; budget_tokens: number };
+  after.close();
+  expect(row).toMatchObject({ status: 'active', budget_tokens: 0 });
+
+  // A full round runs on top of a goal that already spent more than the old
+  // ceiling, and it keeps going: nothing re-pauses on that number.
+  await expect.poll(() => replies(conversationId), { timeout: 60_000, interval: 250 }).toBe(3);
+  await expect.poll(() => goalOf(conversationId), { timeout: 30_000, interval: 250 }).toMatchObject({ status: 'active', usedTokens: 6050, budgetTokens: 0 });
+  const transcript = await messages(conversationId);
+  expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('历史数据里的预算')), JSON.stringify(transcript)).toBe(false);
+  expect(transcript.some(message => message.role === 'user' && message.text?.startsWith('继续推进目标')), JSON.stringify(transcript)).toBe(true);
+  expect(provider.requests.length).toBe(3);
 }, 180_000);

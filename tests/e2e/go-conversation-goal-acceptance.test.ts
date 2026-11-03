@@ -99,7 +99,7 @@ test('a rejected acceptance does not complete the goal and the reasons reach the
 }, 180_000);
 
 test('only an acceptance pass completes the goal, and the final report carries the verdict', async () => {
-  const { messages, goal, start } = await goalConversation([
+  const { messages, goal, start, provider } = await goalConversation([
     claimTurn('第一轮'),
     { text: '导出已上线，跑了测试', usage: { prompt_tokens: 40, completion_tokens: 10 } },
     { text: 'VERDICT: pass\n- [pass] 导出可用: 实跑导出测试通过\n- [pass] 文件到位: 工作区里能看到导出实现', usage: { prompt_tokens: 40, completion_tokens: 10 } },
@@ -113,6 +113,12 @@ test('only an acceptance pass completes the goal, and the final report carries t
   expect(current).toMatchObject({ usedTokens: 150 });
   expect(String(current?.checkNote)).toContain('验收通过');
   expect(String(current?.checkNote)).toContain('导出可用');
+
+  // The tool the model read says what complete does: it asks for an
+  // independent acceptance check, it does not finish the goal.
+  const toolText = JSON.stringify((provider.requests[0] as { tools?: unknown }).tools ?? []);
+  expect(toolText, toolText.slice(0, 400)).toContain('independent acceptance check');
+  expect(toolText).not.toContain('it ends the goal');
 
   const transcript = await messages(conversationId);
   const report = transcript.filter(message => message.kind === 'goal' && message.text?.includes('验收结论：通过'));

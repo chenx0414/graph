@@ -6,12 +6,12 @@ import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 /**
- * blocked is evidence, not an opinion.
+ * blocked is evidence, and it is counted per round.
  *
- * The first time something stands in the way the model keeps working: the goal
- * only stops once the SAME blocker has stood for three consecutive turns. The
- * proof is the real daemon, a scripted provider that reports the identical
- * blocker each turn, and the transcript a person would read.
+ * The first time something stands in the way the model keeps working. The goal
+ * stops only once the same blocker has been reported in each of the last three
+ * rounds - so a round that does not report it breaks the run, and three reports
+ * spread over four rounds are not three rounds of being stuck.
  */
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -19,7 +19,7 @@ afterEach(async () => { for (const close of cleanup.reverse()) await close(); cl
 
 const BLOCKER = '拿不到生产环境的 API key，导出接口无法联调';
 
-/** One turn: report the same blocker, then answer. */
+/** One turn that reports the same blocker, then answers. */
 function blockedTurn(turn: number): ResponsePlan[] {
   return [
     {
@@ -30,14 +30,26 @@ function blockedTurn(turn: number): ResponsePlan[] {
   ];
 }
 
-test('the same blocker pauses the goal only after three consecutive turns', async () => {
+/** One turn that reports nothing: it breaks the run of identical blockers. */
+function clearTurn(turn: number): ResponsePlan[] {
+  return [{ text: `第 ${turn} 轮没有报告阻碍`, usage: { prompt_tokens: 40, completion_tokens: 10 } }];
+}
+
+test('the same blocker pauses the goal only after three consecutive rounds of it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-goal-blocked-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
   await mkdir(join(root, 'web'), { recursive: true });
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
-  const provider = await openaiServer([...blockedTurn(1), ...blockedTurn(2), ...blockedTurn(3)]);
+  const provider = await openaiServer([
+    ...blockedTurn(1),
+    ...blockedTurn(2),
+    ...clearTurn(3),
+    ...blockedTurn(4),
+    ...blockedTurn(5),
+    ...blockedTurn(6),
+  ]);
   cleanup.push(() => provider.close());
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
@@ -64,19 +76,22 @@ test('the same blocker pauses the goal only after three consecutive turns', asyn
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
 
-  await expect.poll(() => goal(conversationId), { timeout: 90_000, interval: 250 }).toMatchObject({ status: 'paused' });
+  await expect.poll(() => goal(conversationId), { timeout: 120_000, interval: 250 }).toMatchObject({ status: 'paused' });
   const transcript = await messages(conversationId);
-  // The first two reports did not stop it: the goal kept working, and the
-  // transcript says why each time.
-  expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('第 1 轮')), JSON.stringify(transcript)).toBe(true);
-  expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('第 2 轮')), JSON.stringify(transcript)).toBe(true);
-  // The third identical blocker is what paused it, with the blocker named.
-  const stopped = transcript.filter(message => message.kind === 'goal' && message.text?.includes('卡住 3 轮'));
-  expect(stopped.length, JSON.stringify(transcript)).toBe(1);
+  const goalLines = transcript.filter(message => message.kind === 'goal');
+
+  // The report that followed the quiet round started the count over: two lines
+  // say "第 1 轮", the report in round 1 and the report in round 4.
+  expect(goalLines.filter(message => message.text?.includes('第 1 轮')).length, JSON.stringify(goalLines.map(message => message.text))).toBe(2);
+  expect(goalLines.some(message => message.text?.includes('第 2 轮'))).toBe(true);
+  // Round 3 reported nothing, so rounds 2 and 4 never formed a run of three.
+  const stopped = goalLines.filter(message => message.text?.includes('卡住 3 轮'));
+  expect(stopped.length, JSON.stringify(goalLines.map(message => message.text))).toBe(1);
   expect(stopped[0]?.text).toContain('导出接口无法联调');
   expect((await goal(conversationId))?.checkNote ?? '').not.toContain('验收通过');
 
-  // Three turns, two requests each: nothing kept running after the pause.
-  expect(provider.requests.length).toBe(6);
-  expect(transcript.filter(message => message.role === 'assistant').length).toBe(3);
-}, 180_000);
+  // Six rounds: the five that report the blocker ask twice (the tool call, then
+  // the answer) and the quiet round asks once. Nothing ran after the pause.
+  expect(provider.requests.length).toBe(11);
+  expect(transcript.filter(message => message.role === 'assistant').length).toBe(6);
+}, 240_000);
