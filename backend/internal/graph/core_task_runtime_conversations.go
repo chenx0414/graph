@@ -99,6 +99,16 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		runtime.store.CreateConversation(conversationId, projectId, workspaceProjectId, taskId, title, sequence, NowMillis())
 		if runtime.master != nil && runtime.masterModel() != nil {
 			runtime.createMasterNode(taskId)
+			if goalFirst {
+				// Creating a master node opens a pending activation, which the
+				// scheduler reads as "a turn to run". A command-only conversation
+				// has no message for that turn to answer, so the activation is
+				// settled before it starts; the first real message re-opens it
+				// through RecoverMaster, the same path every later message uses.
+				activation := kernelRow(runtime.store.Db, "SELECT activation_id FROM nodes WHERE task_id=? AND id='master'", taskId)
+				runtime.store.SetNodeStatus(taskId, "master", "succeeded")
+				runtime.store.SettleActivation(kernelString(activation["activation_id"]), taskId, "master")
+			}
 			requestedModel := ""
 			if input.Model != nil {
 				requestedModel = strings.TrimSpace(*input.Model)

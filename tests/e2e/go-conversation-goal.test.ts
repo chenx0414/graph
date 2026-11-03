@@ -110,6 +110,17 @@ test('a goal reaches the model, counts real usage and stops at its budget', asyn
     const response = await daemon.request(path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
     return { status: response.status, body: await response.json().catch(() => ({})) as Record<string, any> };
   };
+  // A conversation whose first message is a command must not spend a turn:
+  // the master's initial activation has nothing to answer, so it is settled
+  // before the scheduler can start it.
+  const commandOnly = await request('/api/conversations', { model: 'main', text: '/goal 只有目标的会话 +40', requestId: 'goal-command-first' });
+  expect(commandOnly.status, JSON.stringify(commandOnly.body)).toBe(200);
+  expect(commandOnly.body).toMatchObject({ command: 'goal', action: 'set' });
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  const commandMessages = ((await request(`/api/conversations/${commandOnly.body.conversationId}`)).body.messages ?? []) as { role?: string; kind?: string }[];
+  expect(commandMessages.some(message => message.role === 'assistant'), JSON.stringify(commandMessages)).toBe(false);
+  expect(provider.requests).toHaveLength(0);
+
   const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '开始工作', requestId: 'goal-start' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
