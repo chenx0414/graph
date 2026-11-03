@@ -1,0 +1,13 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement[39m
+
+[graph] 后端已构建：/Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement/dist/graphd
+[graph] backend /Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement/dist/graphd
+ [32m✓[39m tests/e2e/acceptance-limitation-replay.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 2639[2mms[22m[39m
+   [33m[2m✓[22m[39m an empty closure on a completed graph reports that it wrote nothing, and a recorded request still replays[33m 2639[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m   Start at [22m 21:53:25
+[2m   Duration [22m 2.77s[2m (tests 98%, transform 1%, import 1%)[22m
+

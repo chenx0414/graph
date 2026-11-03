@@ -47,9 +47,16 @@ type GraphAcceptanceWaiveInput struct {
 // the graph is in now, every limitation the closure rests on, and the acceptance
 // report read back after the write.
 type GraphAcceptanceClosure struct {
-	GraphId     string                    `json:"graphId"`
-	Phase       string                    `json:"phase"`
-	Replayed    bool                      `json:"replayed"`
+	GraphId string `json:"graphId"`
+	Phase   string `json:"phase"`
+	// Replayed is true only when this request was recognised as an earlier one by
+	// a row it wrote. A closure with nothing left to limit writes no row, so a
+	// repeat of it has nothing to be recognised by and is not a replay.
+	Replayed bool `json:"replayed"`
+	// Records is how many limitation rows this request wrote. Zero is the honest
+	// answer for a closure over a graph that had nothing left to limit: it says
+	// "nothing to record" instead of claiming a decision nobody made.
+	Records     int                       `json:"records"`
 	Limitations []AcceptanceLimitationRow `json:"limitations"`
 	Acceptance  GraphAcceptanceReport     `json:"acceptance"`
 }
@@ -138,11 +145,13 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		phase = string(state.Phase)
 	}
 	if phase != "blocked" {
-		// A closure that records nothing has no row to recognise its replay by,
-		// and the graph being closed already is the same answer the first call
-		// gave: answering with that closure is a replay, not a second decision.
+		// A closure that records nothing has no row to recognise its replay by, so
+		// a repeat cannot be told apart from the first call. It is not a replay and
+		// must not claim to be one: the graph is already completed, this request
+		// wrote no record, and the receipt says exactly that (records: 0, replayed:
+		// false) instead of reporting a decision it never made.
 		if plan.complete && len(plan.limitations) == 0 && phase == "completed" {
-			return graphAcceptanceClosureResult(service, plan.graphId, true)
+			return graphAcceptanceClosureResult(service, plan.graphId, false, 0)
 		}
 		Raise("invalid_graph", "Graph "+plan.graphId+" is "+phase+"; only a blocked graph closes with recorded limitations")
 	}
@@ -272,7 +281,7 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		}
 		return nil
 	})
-	return graphAcceptanceClosureResult(service, plan.graphId, false)
+	return graphAcceptanceClosureResult(service, plan.graphId, false, len(plan.limitations))
 }
 
 // graphAcceptanceClosureReplay answers a request that already recorded its
@@ -287,17 +296,17 @@ func graphAcceptanceClosureReplay(service *graphManagementService, plan acceptan
 	if len(service.kernel.AcceptanceLimitationsOfRequest(plan.graphId, request)) == 0 {
 		return nil, false
 	}
-	return graphAcceptanceClosureResult(service, plan.graphId, true), true
+	return graphAcceptanceClosureResult(service, plan.graphId, true, 0), true
 }
 
 // graphAcceptanceClosureResult reads the closure back the way a caller sees it.
-func graphAcceptanceClosureResult(service *graphManagementService, graphId string, replayed bool) GraphAcceptanceClosure {
+func graphAcceptanceClosureResult(service *graphManagementService, graphId string, replayed bool, records int) GraphAcceptanceClosure {
 	phase := "unknown"
 	if state := service.runtime(graphId).State(); state != nil {
 		phase = string(state.Phase)
 	}
 	return GraphAcceptanceClosure{
-		GraphId: graphId, Phase: phase, Replayed: replayed,
+		GraphId: graphId, Phase: phase, Replayed: replayed, Records: records,
 		Limitations: service.kernel.AcceptanceLimitations(graphId),
 		Acceptance:  GraphAcceptance(service.kernel, graphId, service.artifacts),
 	}

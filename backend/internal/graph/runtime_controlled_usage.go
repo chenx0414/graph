@@ -33,8 +33,11 @@ func stringPointerValue(value *string) string {
 
 // ControlledProviderUsage parses the usage one provider reported.
 func ControlledProviderUsage(value any, api ModelApi) *TokenUsage {
-	if api == "anthropic-messages" {
+	switch api {
+	case "anthropic-messages":
 		return controlledAnthropicUsage(value)
+	case "openai-responses":
+		return controlledResponsesUsage(value)
 	}
 	return controlledOpenAIUsage(value)
 }
@@ -162,6 +165,11 @@ func (evidence *controlledUsageEvidence) result(api ModelApi) *TokenUsage {
 	if api == "anthropic-messages" && (!evidence.complete || !evidence.terminal) {
 		return nil
 	}
+	// A Responses answer reports its usage in its last event only: a stream that
+	// stopped before it has no usage to report, not a zero one.
+	if api == "openai-responses" && !evidence.terminal {
+		return nil
+	}
 	return evidence.usage
 }
 
@@ -197,6 +205,16 @@ func (evidence *controlledUsageEvidence) feed(line string, api ModelApi) bool {
 				evidence.complete = evidence.usage != nil
 			}
 		case "message_stop":
+			evidence.terminal = true
+			return true
+		}
+	} else if api == "openai-responses" {
+		switch rsiText(event["type"]) {
+		case "response.completed":
+			evidence.usage = controlledResponsesUsage(asMap(asMap(event["response"])["usage"]))
+			evidence.terminal = true
+			return true
+		case "response.failed", "response.incomplete", "error":
 			evidence.terminal = true
 			return true
 		}

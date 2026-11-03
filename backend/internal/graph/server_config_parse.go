@@ -12,8 +12,8 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 		configInvalid(path + ".grade must be one of " + configJoinGrades(MODEL_GRADES))
 	}
 	api := configAsString(entry["api"], path+".api")
-	if api != "openai-completions" && api != "anthropic-messages" {
-		configInvalid(path + ".api must be \"openai-completions\" or \"anthropic-messages\"")
+	if api != "openai-completions" && api != "anthropic-messages" && api != "openai-responses" {
+		configInvalid(path + ".api must be \"openai-completions\", \"openai-responses\" or \"anthropic-messages\"")
 	}
 	credentialID := configAsString(entry["credentialId"], path+".credentialId")
 	if _, ok := credentials[credentialID]; !ok {

@@ -104,7 +104,7 @@ func ValidateProviderDraft(input any) ProviderDraftValidation {
 		hasAPI = true
 	}
 	if !hasAPI || (api != string(ModelApiOpenAICompletions) && api != string(ModelApiAnthropicMessages)) {
-		errors = append(errors, ProviderDraftError{Field: "api", Message: "兼容格式必须是 openai-completions 或 anthropic-messages"})
+		errors = append(errors, ProviderDraftError{Field: "api", Message: "兼容格式必须是 openai-completions、openai-responses 或 anthropic-messages"})
 	}
 
 	rawLabel := ""

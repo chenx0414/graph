@@ -150,7 +150,13 @@ func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, 
 	}
 	merged := kernelRow(kernel.Db, "SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='integration'", graphID, *executionID)
 	if merged == nil {
-		// A short wait, not a repair: the delivery stays pending and the same one is retried.
+		// A short wait, not a repair: the delivery stays pending and the same one is
+		// retried. It cannot block here instead: this operation runs under the
+		// graph's Git lock (Git.Exclusive), and the source execution's own
+		// integration needs that same lock (SettleWorkspace). Waiting for the
+		// commit while holding the lock would wait for a commit that cannot be
+		// made, so the operation gives the attempt back and the delivery is
+		// retried after the source integrated.
 		if sourceState == "running" {
 			Raise("paused", "Delivery source "+*executionID+" has not been integrated yet")
 		}
@@ -228,6 +234,16 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	}
 
 	scratchDir := filepath.Join(options.ScratchRoot, "module-operations", id)
+	if previous != nil && previous.State == "prepared" {
+		// An operation that stayed prepared never crossed its send boundary, so
+		// the attempt before it ran nothing and left nothing behind but its own
+		// scratch directory. It is retried as the same operation, and the stream
+		// files are opened exclusively - one attempt must not overwrite another
+		// attempt's evidence - so that directory is cleared, not inherited.
+		if err := os.RemoveAll(scratchDir); err != nil {
+			panic(err)
+		}
+	}
 	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 		panic(err)
 	}

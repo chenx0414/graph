@@ -212,6 +212,8 @@ func (stream *controlledStream) handleEvent(event map[string]any) {
 	switch stream.api {
 	case "anthropic-messages":
 		stream.handleAnthropicEvent(event)
+	case "openai-responses":
+		stream.handleResponsesEvent(event)
 	default:
 		stream.handleOpenAIEvent(event)
 	}

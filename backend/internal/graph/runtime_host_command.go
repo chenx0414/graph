@@ -214,7 +214,14 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 	// The parent's copy of the inherited descriptor is closed: a parent that
 	// keeps the child's end open never sees the channel reach its end.
 	_ = channelFile.Close()
-	var admissionError error
+	// A refusal raised at the send boundary is a typed value (Raise panics with a
+	// *RuntimeError that carries its code), and it crosses a goroutine boundary
+	// here: the reader thread cannot re-panic, so the value is carried as it was
+	// raised and re-panicked below. Flattening it into an error lost the code, and
+	// a caller that refuses by code - the module broker waiting for an unintegrated
+	// source, the graph runner deciding between a wait and a failure - then read a
+	// wait as a hard failure.
+	var admissionFailure any
 	var resultCode *int
 	var resultError string
 	hasResult := false
@@ -234,8 +241,8 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 		if outputError != nil {
 			panic(outputError)
 		}
-		if admissionError != nil {
-			panic(admissionError)
+		if admissionFailure != nil {
+			panic(admissionFailure)
 		}
 		reason := ""
 		if state.timedOut && input.TimeoutMs != nil {
@@ -283,14 +290,14 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 							func() {
 								defer func() {
 									if recovered := recover(); recovered != nil {
-										admissionError = errors.New(errorText(recovered))
+										admissionFailure = recovered
 										state.killTree()
 									}
 								}()
 								input.BeforeStart()
 							}()
 						}
-						if admissionError == nil {
+						if admissionFailure == nil {
 							state.send(map[string]any{"kind": "start"})
 						}
 					case "result":
@@ -462,11 +469,4 @@ func hostCommandNumber(value any) bool {
 		return true
 	}
 	return false
-}
-
-func errorText(rec any) string {
-	if err, ok := rec.(error); ok {
-		return err.Error()
-	}
-	return stringifyJSON(rec)
 }

@@ -69,7 +69,7 @@ module 判断历史按发生顺序分页，默认20条，上限200；下一页�
 - cancel_operation：指定 operationId，取消 uncertain/failed 操作的原输入；不撤销已产生的副作用，也不生成成功结果。dispatched 操作必须先停止。取消可以重放；恢复后如需重做，由 main 显式重新投递。
 - reopen：指定 moduleId，等待已经开始的模块判断结束后清除一次汇合的触发锁存，保留输入，等待下一次投递再判断。
 - complete：关闭外部新输入，等待内部工作清空后完成；空闲不等于完成。
-- complete_with_limitations：只对 blocked 图生效，显式收口。必须给 limitations 数组（每项 acceptanceId、reason、evidence），且未满足的验收项要全部被覆盖（漏项会点名）；唯一例外是没有任何未满足项（全部 passed 或已被用户豁免）时列表可以为空，此时记录只有用户先前的豁免；failed、stale、kind=human（除非用户本人）和 Git 交付不匹配都拒绝，拒绝路径不写任何记录。同 requestId 重放返回同一份收口结果，不重复记录。它不改 complete 的硬门禁，也不改 ready 的含义。
+- complete_with_limitations：只对 blocked 图生效，显式收口。必须给 limitations 数组（每项 acceptanceId、reason、evidence），且未满足的验收项要全部被覆盖（漏项会点名）；唯一例外是没有任何未满足项（全部 passed 或已被用户豁免）时列表可以为空，此时记录只有用户先前的豁免；failed、stale、kind=human（除非用户本人）和 Git 交付不匹配都拒绝，拒绝路径不写任何记录。同 requestId 重放返回同一份收口结果，不重复记录；回执里 `replayed` 只在命中已写记录时为 true，`records` 是这次真正写入的限制条数——空 limitations 的收口不写记录，所以对已完成图再发一次只回 `records:0, replayed:false`（「无可写项」），不冒充重放。它不改 complete 的硬门禁，也不改 ready 的含义。
 - withdraw_complete：撤销完成请求，恢复外部输入。
 - stop：关闭派发并取消待处理工作，等待运行中的工作收尾。
 

@@ -260,6 +260,26 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		if tools := controlledAnthropicTools(transcript); len(tools) > 0 {
 			body["tools"] = controlledAnthropicCachedTools(tools)
 		}
+	case "openai-responses":
+		endpoint += "/responses"
+		body["model"] = modelID
+		body["stream"] = true
+		// The transcript travels every turn: the provider keeps nothing, so no
+		// stored response id can go missing between two requests.
+		body["store"] = false
+		if instructions := controlledSystemPrompt(stream.context); instructions != "" {
+			body["instructions"] = instructions
+		}
+		body["input"] = controlledResponsesInput(transcript)
+		if tokens := ControlledMaxTokens(record, stream.options); tokens > 0 {
+			body["max_output_tokens"] = tokens
+		}
+		if tools := controlledResponsesTools(transcript); len(tools) > 0 {
+			body["tools"] = tools
+		}
+		if reasoning := controlledResponsesReasoning(record, stream.options); reasoning != nil {
+			body["reasoning"] = reasoning
+		}
 	default:
 		endpoint += "/chat/completions"
 		body["model"] = modelID

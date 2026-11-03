@@ -1,0 +1,14 @@
+[graph] 后端已是最新：/Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement/dist/graphd
+[graph] backend /Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement/dist/graphd
+ [32m✓[39m tests/e2e/module-delivery-integration-race.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 1515[2mms[22m[39m
+   [33m[2m✓[22m[39m a module handed a node output before that node integrated waits and still produces its result[33m 1514[2mms[22m[39m
+ [32m✓[39m tests/e2e/acceptance-limitation-replay.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 1512[2mms[22m[39m
+   [33m[2m✓[22m[39m an empty closure on a completed graph reports that it wrote nothing, and a recorded request still replays[33m 1511[2mms[22m[39m
+ [32m✓[39m tests/e2e/provider-independent-reviews.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 162889[2mms[22m[39m
+   [33m[2m✓[22m[39m Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider[33m 162888[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 23:04:04
+[2m   Duration [22m 163.06s[2m (tests 100%)[22m
+

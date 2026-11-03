@@ -30,11 +30,23 @@ func daemonTestConnection(live *LiveConfig, modelID string) map[string]any {
 	}
 	started := NowMillis()
 	anthropic := entry.Api == "anthropic-messages"
+	responses := entry.Api == "openai-responses"
 	path := "/chat/completions"
 	if anthropic {
 		path = "/messages"
 	}
+	if responses {
+		path = "/responses"
+	}
 	body := map[string]any{"model": entry.Id, "messages": []any{map[string]any{"role": "user", "content": "ping"}}, "max_tokens": 1, "stream": false}
+	if responses {
+		// The Responses transport has no chat messages: the turn is an input item
+		// and its text is an input_text part.
+		body = map[string]any{
+			"model": entry.Id, "stream": false, "store": false, "max_output_tokens": 16,
+			"input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "ping"}}}},
+		}
+	}
 	if entry.ModelId != "" {
 		body["model"] = entry.ModelId
 	}
@@ -42,7 +54,13 @@ func daemonTestConnection(live *LiveConfig, modelID string) map[string]any {
 	if err != nil {
 		panic(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	timeout := 5 * time.Second
+	if responses {
+		// A reasoning model on a subscription endpoint takes longer than a
+		// chat-completions ping; the probe is still bounded.
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(entry.BaseUrl, "/")+path, strings.NewReader(string(payload)))
 	if err != nil {
