@@ -37,6 +37,8 @@ skills-lock.json
 !.agents/matt-skills-LICENSE
 !.agents/pstack-skills-lock.json
 !.agents/pstack-LICENSE
+!.agents/agent-desktop-skills-lock.json
+!.agents/agent-desktop-LICENSE
 
 # App packaging staging
 .stage/

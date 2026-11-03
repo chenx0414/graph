@@ -1,0 +1,32 @@
+{
+  "repository": "https://github.com/vercel-labs/agent-desktop",
+  "version": "1.1.0",
+  "protocol": "2.6",
+  "license": "Apache-2.0",
+  "license_file": ".agents/agent-desktop-LICENSE",
+  "retrieved_with": [
+    "agent-desktop version",
+    "agent-desktop skills get desktop",
+    "agent-desktop skills get platform"
+  ],
+  "retrieved_on": "2026-11-03",
+  "note": "sha256 is the digest of the upstream markdown body that this file vendors verbatim; upstream_sha256 is the digest of the whole data.content the CLI returned.",
+  "files": [
+    {
+      "path": ".agents/skills/agent-desktop/SKILL.md",
+      "source": "skills get desktop",
+      "upstream_sha256": "ac02fcd45fa931b87fe02316641261716d1df5135d54ec7f9d305705cbf6972a",
+      "upstream_bytes": 6997,
+      "sha256": "812a71abed3745ba59a3e6a142ed821bff983f7f0efd326dfccef2c385e18cf7",
+      "bytes": 6125
+    },
+    {
+      "path": ".agents/skills/agent-desktop/references/platform-macos.md",
+      "source": "skills get platform",
+      "upstream_sha256": "23ce4342439ed1216597506e2d4d5c714aa1a796860ca11210a85aa2f033c355",
+      "upstream_bytes": 7767,
+      "sha256": "e409cc40536d8c71cc08ed178da97d1d1cb66301ea080b575710fa68679a3862",
+      "bytes": 7096
+    }
+  ]
+}

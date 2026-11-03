@@ -1,6 +1,7 @@
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
@@ -184,7 +185,10 @@ finally {
 }
 // Persist the verifier only after the model process has stopped.
 await writeFile(join(root,'case.json'),JSON.stringify({caseId,...scenario},null,2));
-const report=await exec(process.execPath,[new URL('./harness-cost.mjs', import.meta.url).pathname,join(root,'state','tasks.sqlite')]);
+// fileURLToPath, not URL.pathname: a checkout under a directory with a space in
+// its name resolves to a `%20` path that no file has, and the harness gate then
+// fails on the machine rather than on the harness.
+const report=await exec(process.execPath,[fileURLToPath(new URL('./harness-cost.mjs', import.meta.url)),join(root,'state','tasks.sqlite')]);
 await writeFile(join(root,'cost-report.json'),report.stdout);
 const cost=JSON.parse(report.stdout);
 const db=new DatabaseSync(join(root,'state','tasks.sqlite'),{readOnly:true});
