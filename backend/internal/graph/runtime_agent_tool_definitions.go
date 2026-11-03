@@ -118,6 +118,65 @@ func PrepareToolArguments(name string) func(args any) any {
 	}
 }
 
+// PrepareFreeFormArguments returns the seam that reads the free-form parameters
+// of one tool the way a model actually sends them.
+//
+// A free-form parameter is declared with an empty schema (tbAny), which is
+// exactly the shape a model tends to encode by hand: "value": "{\"a\":1}"
+// instead of the object. Typed parameters are left untouched, so a string field
+// that happens to contain braces is never reinterpreted.
+func PrepareFreeFormArguments(parameters any) func(args any) any {
+	fields := freeFormParameterNames(parameters)
+	if len(fields) == 0 {
+		return nil
+	}
+	return func(args any) any {
+		input, ok := args.(map[string]any)
+		if !ok {
+			return args
+		}
+		for name := range fields {
+			value, present := input[name]
+			if !present {
+				continue
+			}
+			input[name] = graphSendValue(value)
+		}
+		return input
+	}
+}
+
+// freeFormParameterNames lists the top-level properties whose schema constrains
+// nothing: no type, no union, no enum, no reference.
+func freeFormParameterNames(parameters any) map[string]bool {
+	schema, ok := parameters.(map[string]any)
+	if !ok {
+		return nil
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	names := map[string]bool{}
+	for name, raw := range properties {
+		property, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		free := true
+		for _, key := range []string{"type", "anyOf", "oneOf", "allOf", "enum", "const", "$ref", "items"} {
+			if _, constrained := property[key]; constrained {
+				free = false
+				break
+			}
+		}
+		if free {
+			names[name] = true
+		}
+	}
+	return names
+}
+
 // AgentArtifactAccessFor is the namespace grant for one role and action.
 func AgentArtifactAccessFor(input struct {
 	Role   string

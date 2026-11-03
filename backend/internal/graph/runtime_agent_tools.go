@@ -334,6 +334,16 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			Parameters: declaration.Parameters, PrepareArguments: declaration.PrepareArguments,
 			ExternallyGated: declaration.ExternallyGated,
 		}
+		// A free-form parameter (an empty schema: tbAny) is the one shape a model
+		// keeps encoding by hand. Measured 2026-11-04: graph_send value and
+		// graph_create definition both arrived as JSON strings while every typed
+		// parameter arrived as the object it was, so the graph refused them with
+		// "must be object, received a string". Decoding every encoded object or
+		// array on a free-form parameter is done here once, for every tool, so a
+		// typed parameter is never reinterpreted.
+		if tool.PrepareArguments == nil {
+			tool.PrepareArguments = PrepareFreeFormArguments(declaration.Parameters)
+		}
 		if handler, ok := handlers[declaration.Name]; ok {
 			tool.Execute = func(id string, raw any) (result any, err error) {
 				// The TypeScript handler throws; the host turns that refusal into

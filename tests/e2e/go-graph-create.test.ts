@@ -109,7 +109,9 @@ test('a real Git preparation failure resumes the same creation request after rep
   }
 
   const master = await masterProvider((graphId) => [
-    { id: 'create-once', name: 'graph_create', args: { requestId: 'create-once', targetBranch: 'main', definition: DEFINITION } },
+    // The definition arrives the way a model often writes a free-form parameter:
+    // as an encoded JSON string. It must be read as the object it encodes.
+    { id: 'create-once', name: 'graph_create', args: { requestId: 'create-once', targetBranch: 'main', definition: JSON.stringify(DEFINITION) } },
     { id: 'create-repair', name: 'graph_create', args: { requestId: 'create-once', targetBranch: 'main', definition: DEFINITION },
       until: results => /"replayed"\s*:\s*true/.test(results.get('create-repair') ?? '') },
     { id: 'create-conflict', name: 'graph_create', args: { requestId: 'create-once', targetBranch: 'main', definition: OTHER_DEFINITION } },
