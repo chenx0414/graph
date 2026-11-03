@@ -19,6 +19,7 @@ const (
 	GoalCompleted    = "completed"
 	goalCommand      = "/goal"
 	goalObjectiveMax = 4000
+	goalNoteMax      = 500
 )
 
 // ConversationGoal is the stored objective of one conversation.
@@ -70,9 +71,10 @@ func (s *TaskStore) DeleteGoal(conversationID string) {
 
 // GoalInput is one `/goal` action.
 type GoalInput struct {
-	Action       string // set, show, pause, resume, clear
+	Action       string // set, show, pause, resume, clear, done, extend
 	Objective    string
 	BudgetTokens int64
+	CheckNote    string
 	RequestID    string
 }
 
@@ -105,7 +107,7 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 			ConversationID: conversationID, Objective: objective, Status: GoalActive,
 			BudgetTokens: input.BudgetTokens,
 		}, now)
-	case "pause", "resume", "clear":
+	case "pause", "resume", "clear", "done", "extend":
 		goal := runtime.store.Goal(conversationID)
 		if goal == nil {
 			Raise("invalid_state", "This conversation has no goal to "+action)
@@ -121,6 +123,20 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 				Raise("invalid_state", "Only a paused or budget-limited goal can be resumed")
 			}
 			goal.Status = GoalActive
+		case "done":
+			if goal.Status == GoalCompleted {
+				Raise("invalid_state", "This goal is already completed")
+			}
+			goal.Status = GoalCompleted
+			goal.CheckNote = utf16Slice(strings.TrimSpace(input.CheckNote), goalNoteMax)
+		case "extend":
+			if input.BudgetTokens <= 0 {
+				Raise("invalid_input", "Extending a goal needs a positive token amount")
+			}
+			goal.BudgetTokens += input.BudgetTokens
+			if goal.Status == GoalBudgetLimit {
+				goal.Status = GoalActive
+			}
 		case "clear":
 			runtime.store.DeleteGoal(conversationID)
 			result["cleared"] = true
@@ -147,12 +163,19 @@ func ParseGoalCommand(text string) (GoalInput, bool) {
 	case "pause", "resume", "clear":
 		return GoalInput{Action: rest}, true
 	}
+	if rest == "done" || strings.HasPrefix(rest, "done ") || strings.HasPrefix(rest, "done\n") {
+		return GoalInput{Action: "done", CheckNote: strings.TrimSpace(strings.TrimPrefix(rest, "done"))}, true
+	}
 	budget := int64(0)
 	if fields := strings.Fields(rest); len(fields) > 0 && strings.HasPrefix(fields[len(fields)-1], "+") {
 		if value, err := strconv.ParseInt(fields[len(fields)-1][1:], 10, 64); err == nil && value >= 0 {
 			budget = value
 			rest = strings.TrimSpace(strings.TrimSuffix(rest, fields[len(fields)-1]))
 		}
+	}
+	// `/goal +N` extends the goal it already has instead of replacing it.
+	if rest == "" && budget > 0 {
+		return GoalInput{Action: "extend", BudgetTokens: budget}, true
 	}
 	return GoalInput{Action: "set", Objective: rest, BudgetTokens: budget}, true
 }
@@ -162,6 +185,14 @@ func goalLine(action string, goal *ConversationGoal) string {
 	switch action {
 	case "clear":
 		return "目标已清除。"
+	case "done":
+		line := "目标已完成：" + goal.Objective
+		if goal.CheckNote != "" {
+			line += "（" + goal.CheckNote + "）"
+		}
+		return line
+	case "extend":
+		return "目标预算已延长到 " + strconv.FormatInt(goal.BudgetTokens, 10) + " tokens，目标恢复进行中：" + goal.Objective
 	case "pause":
 		return "目标已暂停：" + goal.Objective
 	case "resume":
@@ -175,4 +206,51 @@ func goalLine(action string, goal *ConversationGoal) string {
 		line += " / 预算 " + strconv.FormatInt(goal.BudgetTokens, 10)
 	}
 	return line + "）"
+}
+
+// goalPromptSection is the standing objective as the model sees it. It is
+// appended to a master turn's prompt only while the goal is active, so a
+// paused, budget-limited or completed goal changes nothing the model reads.
+func goalPromptSection(goal *ConversationGoal) string {
+	if goal == nil || goal.Status != GoalActive {
+		return ""
+	}
+	funds := "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens，未设预算"
+	if goal.BudgetTokens > 0 {
+		remaining := goal.BudgetTokens - goal.UsedTokens
+		if remaining < 0 {
+			remaining = 0
+		}
+		funds = "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " / 预算 " + strconv.FormatInt(goal.BudgetTokens, 10) +
+			" tokens，剩余 " + strconv.FormatInt(remaining, 10)
+	}
+	return "\n\n# Standing goal\nThis conversation has one standing objective the user set outside the chat. Keep it in view for this turn and prefer work that advances it:\n「" + goal.Objective + "」\n" + funds +
+		"\nWhen the objective is genuinely done and verified, say so plainly so the user can run /goal done. Do not claim completion before the work is verified."
+}
+
+// AccountGoalUsage adds one settled master turn to the conversation's goal and
+// closes the goal once its budget is spent. The transition is visible: the
+// console shows the same line a /goal command leaves.
+func AccountGoalUsage(store *TaskStore, conversationID string, total int64, now int64) {
+	if total <= 0 {
+		return
+	}
+	goal := store.Goal(conversationID)
+	if goal == nil || goal.Status != GoalActive {
+		return
+	}
+	goal.UsedTokens += total
+	if goal.BudgetTokens > 0 && goal.UsedTokens >= goal.BudgetTokens {
+		goal.Status = GoalBudgetLimit
+	}
+	updated := store.PutGoal(*goal, now)
+	if updated.Status == GoalBudgetLimit {
+		AppendMessage(store, MessageInput{
+			ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
+			Text: "目标预算已用完（已用 " + strconv.FormatInt(updated.UsedTokens, 10) + " / 预算 " + strconv.FormatInt(updated.BudgetTokens, 10) +
+				" tokens），目标已停止推进。用 /goal +N 追加预算，或 /goal clear 清除目标。",
+			State: MessageStateDone,
+			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "budget_limited"},
+		})
+	}
 }

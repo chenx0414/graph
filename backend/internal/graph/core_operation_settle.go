@@ -190,6 +190,11 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	if nodeSpec.Role == nil || *nodeSpec.Role != "master" || operation.Kind != "agent" {
 		conversation = nil
 	}
+	// The same usage that funds the instance also spends the conversation's
+	// standing goal; a goal that reaches its budget stops being injected.
+	if conversation != nil && usage != nil {
+		AccountGoalUsage(l.store, conversation.Id, total, NowMillis())
+	}
 	RecordConversationOutput(l.store, operation, result)
 	queuedAfter := 0
 	if conversation != nil {

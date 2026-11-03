@@ -16,6 +16,14 @@ Agent 节点处理具体任务，拥有独立会话、串行队列、工作位�
 4. Agent 发布产物并通过 submit 发送具名输出；main 读取公开结果，检查执行与模块记录并处理失败。
 5. 满足验收后提出 complete，等待工作排空。代码交付还需精确 commit 检查、独立审查与确认后的 Git 集成。
 
+## 会话目标（/goal）
+
+`/goal <目标>` 把一个持续目标写进会话，而不是发成一条要模型解释的消息；`/goal <目标> +5000` 同时设 token 预算。`/goal` 查看当前目标，`/goal +N` 追加预算，`/goal pause` / `resume` 暂停或恢复，`/goal done [备注]` 标为完成，`/goal clear` 清除。每条命令在会话里留一行可见记录（`kind=goal`）。
+
+只有 `active` 目标会进入 master 那一轮的 prompt（"Standing goal" 段）；暂停、预算用完或已完成的目标不进入。每轮结算的 usage 计入目标的 `usedTokens`；达到预算即转 `budget_limited` 并留一条可见提示，目标不再注入，但会话本身仍可继续（预算停的是目标，不是对话）。HTTP 面为 `GET/POST /api/conversations/{conversationId}/goal`。
+
+尚未实现：控制台里的目标卡片/斜杠命令提示，以及目标自动续跑（目标不会自己发起下一轮），这两项仍要手动发消息推进。
+
 ## 查看当前事实
 
 通过 read_system_capabilities/inspect_graph_system 查看实际配置与应用位置；通过 graph_inspect、node_run、节点窗口及 list_problems 查看正式运行记录。system prompt、有效工具和实际环境对用户可见。旧报告只说明当时的运行，不能证明当前状态。
