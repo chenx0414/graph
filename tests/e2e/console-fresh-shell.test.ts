@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { cacheControl, freshShell, rebuild } from '../helpers/fresh-shell.ts';
@@ -39,6 +39,28 @@ test('console-shell-reload HTTP：同一个 URL 返回新文档', async () => {
   const body = await after.text();
   expect(body).toContain('/assets/bundle-b.js');
   expect(body).not.toContain('bundle-a.js');
+});
+
+test('console-shell-reload HTTP：内容哈希的资源可以永久缓存，普通名字必须回源', async () => {
+  const { webDir, url } = await freshShell(cleanup);
+
+  // The shell names the bundle, so the name is the identity of those bytes:
+  // a rebuilt console publishes new names (vite emits index-<hash>.js) and the
+  // old ones can never change meaning. Re-fetching them on every reload is the
+  // cost this header removes, and the shell's no-store is what keeps the names
+  // fresh.
+  await writeFile(join(webDir, 'assets', 'index-CdM9mI3F.js'), 'const n = 1;\n');
+  const hashed = await fetch(`${url}assets/index-CdM9mI3F.js`);
+  expect(hashed.status).toBe(200);
+  expect(cacheControl(hashed.headers), 'a content-hashed asset may be cached forever')
+    .toContain('immutable');
+
+  // A name without a hash keeps its identity while its bytes may change, so it
+  // must not be cached as if it were immutable.
+  const plain = await fetch(`${url}assets/bundle-a.js`);
+  expect(plain.status).toBe(200);
+  expect(cacheControl(plain.headers), 'an unhashed asset must revalidate').toContain('no-cache');
+  expect(cacheControl(plain.headers)).not.toContain('immutable');
 });
 
 test('console-shell-reload HTTP：占位页分支同样不可缓存', async () => {

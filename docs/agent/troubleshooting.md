@@ -43,7 +43,7 @@
 
 检查：
 
-- `inspect_rsi_status` 的 `available`、`root` 与 `reason`：打包应用运行的是 `Graph.app/Contents/Resources/app` 里的副本，不是 Git 仓库，所以默认不可用；把 `GRAPH_RSI_ROOT` 指向一个 checkout（含 `backend/internal/graph/server_cli.go` 与构建好的 `dist/web/index.html`）后，启动器会改从该 checkout 运行 daemon；控制台页面（`index.html`）与 `assets/*` 都是每个请求从磁盘读，所以替换 `dist/web` 后刷新窗口即可生效，不需要重启 daemon。
+- `inspect_rsi_status` 的 `available`、`root` 与 `reason`：打包应用运行的是 `Graph.app/Contents/Resources/app` 里的副本，不是 Git 仓库，所以默认不可用；把 `GRAPH_RSI_ROOT` 指向一个 checkout（含 `backend/internal/graph/server_cli.go` 与构建好的 `dist/web/index.html`）后，启动器会改从该 checkout 运行 daemon；控制台页面（`index.html`）与 `assets/*` 都是每个请求从磁盘读，所以替换 `dist/web` 后刷新窗口即可生效，不需要重启 daemon。 freshness 契约分两半：`index.html` 带 `Cache-Control: no-store`（文档是唯一指名 bundle 的地方）；`/assets/*` 里**内容哈希**的名字（`index-CdM9mI3F.js` 这种）带 `public, max-age=31536000, immutable`，没有哈希的名字带 `no-cache`。 真机验证「新包生效」要比对页面里 `<script type="module">` 的 `src` 与服务器**当前** `index.html` 里的那个名字（`curl -s <url>/ | grep script`），而不是看界面像不像新的；浏览器侧用 `agent-browser reload`（或换一个 URL/加 `?cb=<commit>`）。实测 2026-11-03（agent-browser 0.6.17，本机 Chromium）：`open` 同一个 URL 会重新导航、`reload` 的 navigation type 是 `reload`，两者都能拿到当前文档；改动前 assets 完全没有缓存指令，每次重载都把整包重新拉一遍。
 - `pendingRestart` 与 `canRestart`：有在途 operation 时普通请求不会重载；`pendingRestart.force` 为真时会跳过该条件；
 - `apply_rsi_change` 返回的 `status`：`checks_failed` 表示检查未通过但改动仍保留在工作区（继续修复或传 `changes: []` 重跑检查），`rolled_back` 表示意外错误并已恢复文件，`unavailable` 表示没有可用 checkout；
 - 桌面进程是否在轮询 `/api/app/rsi/status`，以及 `/api/app/rsi/restart-ack` 是否成功；
