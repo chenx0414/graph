@@ -27,6 +27,8 @@ type AgentToolFeatures struct {
 	Harness         bool
 	Conversations   *AgentConversationFeatures
 	Peers           bool
+	// Goal reports on the standing goal of the session's own conversation.
+	Goal bool
 }
 
 // AgentArtifactAccess is the artifact namespaces one role may use.

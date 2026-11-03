@@ -1,5 +1,6 @@
 /* The standing goal of a conversation. It sits above the thread and is the one
-   place the objective, its budget and its controls are visible together. */
+   place the objective, its spend and its controls are visible together. There is
+   no budget: no ceiling, no progress bar. */
 .goal-card {
   display: flex;
   flex-direction: column;
@@ -16,8 +17,5 @@
 .goal-card-usage { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .goal-card-objective { margin: 0; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .goal-card[data-status="completed"] .goal-card-objective { color: var(--muted); text-decoration: line-through; }
-.goal-card-meter { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.goal-card-meter span { display: block; height: 100%; background: var(--accent); }
-.goal-card[data-status="budget_limited"] .goal-card-meter span { background: var(--danger); }
 .goal-card-actions { flex-wrap: wrap; gap: 8px; }
 .goal-card-extend { display: inline-flex; align-items: center; gap: 6px; }

@@ -194,13 +194,15 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 	return record
 }
 
-// startGoalTurn turns a goal the person just set into the turn that works on
-// it. Only `set` starts work: pause, resume, extend, done, clear and show act
-// on an existing goal, and starting a turn for those would spend model calls
-// nobody asked for. The turn is an ordinary message, so it queues behind a
-// running turn and is answered in order.
+// startGoalTurn turns a goal the person just set or resumed into the turn that
+// works on it. `set` and `resume` both start work: resuming a paused or
+// usage-limited goal says "go on", and a goal that comes back to life without a
+// turn sits there until the person speaks again. Pause, extend, done, clear and
+// show act on an existing goal, and starting a turn for those would spend model
+// calls nobody asked for. The turn is an ordinary message, so it queues behind
+// a running turn and is answered in order.
 func startGoalTurn(conversations *TaskRuntimeConversations, conversationId, action string, result map[string]any, requestId string) {
-	if action != "set" {
+	if action != "set" && action != "resume" {
 		return
 	}
 	runtime := conversations.runtime

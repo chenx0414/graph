@@ -6,12 +6,14 @@ import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 /**
- * A goal is the work, so one finished turn does not end it.
+ * A goal is the work, so one finished turn does not end it - and there is no
+ * turn cap that ends it either.
  *
- * These cases drive the real daemon and a scripted provider: the goal starts
- * its own next turn while it still has room, the budget is what stops a goal
- * that has one, and a goal without a budget advances a bounded number of turns
- * and then pauses for a person - because nothing else would stop it.
+ * These cases drive the real daemon and a scripted provider: the goal starts its
+ * own next turn while it is still active, it stops when a turn spends nothing
+ * (nothing to account means nothing to continue from), and resuming a paused
+ * goal starts the next turn immediately instead of waiting for the person to
+ * speak again.
  */
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -51,45 +53,49 @@ async function goalConversation(plans: ResponsePlan[], credential: string) {
     expect(created.status, JSON.stringify(created.body)).toBe(200);
     return String(created.body.conversationId);
   };
-  return { request, messages, replies, start };
+  return { request, messages, replies, start, provider };
 }
 
-test('a goal with budget left starts its next turn by itself', async () => {
-  const { request, messages, replies, start } = await goalConversation([
-    { text: '第一轮', usage: { prompt_tokens: 40, completion_tokens: 10 } },
-    { text: '第二轮', usage: { prompt_tokens: 40, completion_tokens: 10 } },
-    { text: '第三轮', usage: { prompt_tokens: 40, completion_tokens: 10 } },
-  ], 'GRAPH_GOAL_AUTO_KEY');
-  const conversationId = await start('/goal 连续推进 +150', 'goal-continue');
-
-  // Three turns of fifty tokens spend the budget exactly: the first from the
-  // command, the next two from the goal itself.
-  await expect.poll(() => replies(conversationId), { timeout: 60_000, interval: 250 }).toBe(3);
-  const transcript = await messages(conversationId);
-  expect(transcript.some(message => message.role === 'user' && message.text?.startsWith('继续推进目标')), JSON.stringify(transcript)).toBe(true);
-
-  // The budget is the brake: the goal is stopped and nothing else starts.
-  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'budget_limited', usedTokens: 150, budgetTokens: 150 });
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  expect(await replies(conversationId)).toBe(3);
-}, 120_000);
-
-test('a goal without a budget advances a few turns and then pauses for a person', async () => {
-  const { request, messages, replies, start } = await goalConversation([
+test('a goal without a budget starts its next turn by itself, with no turn cap', async () => {
+  const { request, messages, replies, start, provider } = await goalConversation([
     { text: '第一步', usage: { prompt_tokens: 40, completion_tokens: 10 } },
     { text: '第二步', usage: { prompt_tokens: 40, completion_tokens: 10 } },
     { text: '第三步', usage: { prompt_tokens: 40, completion_tokens: 10 } },
     { text: '第四步', usage: { prompt_tokens: 40, completion_tokens: 10 } },
-    { text: '第五步', usage: { prompt_tokens: 40, completion_tokens: 10 } },
-  ], 'GRAPH_GOAL_CAP_KEY');
-  const conversationId = await start('/goal 无预算连续推进', 'goal-cap');
+    { text: '第五步没有用量', usage: { prompt_tokens: 0, completion_tokens: 0 } },
+  ], 'GRAPH_GOAL_AUTO_KEY');
+  const conversationId = await start('/goal 连续推进', 'goal-continue');
 
-  // One turn from the command plus four automatic continuations, then the pause
-  // that keeps an unbudgeted goal from spending for ever.
+  // Five turns: the goal keeps starting its own. The last one spends nothing,
+  // so the chain ends there - not because a number of turns ran out.
   await expect.poll(() => replies(conversationId), { timeout: 90_000, interval: 250 }).toBe(5);
-  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'paused', budgetTokens: 0, usedTokens: 250 });
+  expect(provider.requests.length).toBe(5);
   const transcript = await messages(conversationId);
-  expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('已自动连续推进 4 轮')), JSON.stringify(transcript)).toBe(true);
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  expect(await replies(conversationId)).toBe(5);
+  expect(transcript.filter(message => message.role === 'user' && message.text?.startsWith('继续推进目标')).length, JSON.stringify(transcript)).toBeGreaterThanOrEqual(3);
+  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', budgetTokens: 0, usedTokens: 200 });
+  // Nothing paused it for the person: a goal is not capped at a few turns.
+  expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('自动连续推进'))).toBe(false);
+}, 180_000);
+
+test('resuming a paused goal starts the next turn immediately', async () => {
+  const { request, messages, replies, start, provider } = await goalConversation([
+    { text: '开始做', usage: { prompt_tokens: 0, completion_tokens: 0 } },
+    { text: '接着做', usage: { prompt_tokens: 0, completion_tokens: 0 } },
+  ], 'GRAPH_GOAL_RESUME_KEY');
+  const conversationId = await start('/goal 恢复后继续', 'goal-resume');
+
+  await expect.poll(() => replies(conversationId), { timeout: 60_000, interval: 250 }).toBe(1);
+  const paused = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal pause', requestId: 'goal-resume-pause' });
+  expect(paused.body.goal.status).toBe('paused');
+  expect(provider.requests.length).toBe(1);
+
+  // Resume means "go on": the goal becomes active and its turn starts now,
+  // exactly like a freshly set goal.
+  const resumed = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal resume', requestId: 'goal-resume-go' });
+  expect(resumed.body.goal.status).toBe('active');
+  expect(resumed.body.started, JSON.stringify(resumed.body)).toBe(true);
+  await expect.poll(() => replies(conversationId), { timeout: 60_000, interval: 250 }).toBe(2);
+  expect(provider.requests.length).toBe(2);
+  const transcript = await messages(conversationId);
+  expect(transcript.filter(message => message.role === 'user' && message.text?.includes('开始执行这个目标')).length).toBe(2);
 }, 180_000);

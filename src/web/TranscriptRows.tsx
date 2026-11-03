@@ -74,6 +74,23 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
       </div>
     );
   }
+  // The goal's own instructions arrive as user-role messages because the turn
+  // chain needs a prompt, but the person never typed them: they render as a
+  // system line instead of a bubble that reads as if the user said it.
+  const sourceKind = message.data && typeof (message.data as Record<string, unknown>).source === 'object' && (message.data as Record<string, unknown>).source
+    ? String(((message.data as Record<string, unknown>).source as Record<string, unknown>).kind ?? '')
+    : '';
+  if (message.role === 'user' && (sourceKind === 'goal_start' || sourceKind === 'goal_continue' || sourceKind === 'goal_acceptance')) {
+    const label = sourceKind === 'goal_start' ? '目标已下达' : sourceKind === 'goal_continue' ? '目标自动续跑' : '目标独立验收';
+    return (
+      <div className="message-row" data-role="system-action" data-source={sourceKind} data-state={message.state} data-testid="message-goal-instruction">
+        <Icon name="spark" size={12} />
+        <span>{label}</span>
+        {message.state === 'pending' && <span className="message-state">执行中</span>}
+        <MessageMeta createdAt={message.createdAt} />
+      </div>
+    );
+  }
   if (message.role === 'user') {
     const attachments = messageAttachments(message);
     // A peer Agent's message arrived like a prompt; label it with its sender rather than "我" so the
