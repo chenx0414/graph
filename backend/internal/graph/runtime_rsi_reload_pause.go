@@ -20,7 +20,7 @@ import (
 
 // RsiService fields used here are set by the daemon once the runtime exists.
 type RsiReloadHooks struct {
-	Pause  func(store *TaskStore) []string
+	Pause  func(store *TaskStore, excludeTaskID string) []string
 	Resume func(store *TaskStore, ids []string) []string
 }
 
@@ -30,11 +30,11 @@ func (service *RsiService) rsiResumePath() string {
 
 // rsiPauseForReload interrupts and pauses everything still running, then
 // remembers what it paused. It returns the task ids, or nil when nothing ran.
-func rsiPauseForReload(service *RsiService, store *TaskStore) []string {
+func rsiPauseForReload(service *RsiService, store *TaskStore, excludeTaskID string) []string {
 	if service == nil || store == nil || service.reload == nil || service.reload.Pause == nil {
 		return nil
 	}
-	ids := service.reload.Pause(store)
+	ids := service.reload.Pause(store, excludeTaskID)
 	if len(ids) == 0 {
 		return nil
 	}

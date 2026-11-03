@@ -409,7 +409,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	// continues it. Wiring happens here because both halves need the runtime.
 	if rsi != nil && server.Runtime != nil {
 		rsi.reload = &RsiReloadHooks{
-			Pause:  func(store *TaskStore) []string { return server.Runtime.PauseForReload(store) },
+			Pause:  func(store *TaskStore, excludeTaskID string) []string { return server.Runtime.PauseForReload(store, excludeTaskID) },
 			Resume: func(store *TaskStore, ids []string) []string { return server.Runtime.ResumeAfterReload(store, ids) },
 		}
 		rsiConsumeResume(rsi, server.Runtime.store, log)

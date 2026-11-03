@@ -456,7 +456,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		// Stop what is running before the daemon is replaced: a reload must not
 		// queue behind somebody else's long tool call. The tasks this pauses are
 		// written down and resumed by the next daemon.
-		_ = rsiPauseForReload(service, context.Store)
+		_ = rsiPauseForReload(service, context.Store, context.TaskId)
 		generation := rsiRuntimeGeneration(context.Store)
 		if err := service.rsiWriteRestart(id, *root, branch, commit, NowMillis(), int(generation), input.Force); err != nil {
 			panic(err)

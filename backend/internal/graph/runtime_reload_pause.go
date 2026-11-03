@@ -1,12 +1,14 @@
 package graph
 
+import "time"
+
 // A reload pauses the work it would otherwise wait for, and the next daemon
 // continues it. See runtime_rsi_reload_pause.go for why the list is a file.
 
 // PauseForReload interrupts every live turn and pauses its task, returning the
 // task ids. Only dispatched operations count: a task that is idle is none of
 // this reload's business, and one a person paused never appears here.
-func (runtime *TaskRuntime) PauseForReload(store *TaskStore) []string {
+func (runtime *TaskRuntime) PauseForReload(store *TaskStore, excludeTaskID string) []string {
 	if runtime == nil || store == nil {
 		return nil
 	}
@@ -15,17 +17,29 @@ func (runtime *TaskRuntime) PauseForReload(store *TaskStore) []string {
 	for _, row := range kernelRows(store.Db, `
 		SELECT DISTINCT o.task_id AS task_id
 		FROM operations o JOIN tasks t ON t.id=o.task_id
-		WHERE o.state='dispatched' AND o.worker_active=1 ORDER BY o.rowid`) {
+		WHERE o.state='dispatched' AND o.worker_active=1 AND COALESCE(t.paused,0)=0 ORDER BY o.rowid`) {
 		taskID := kernelString(row["task_id"])
-		if taskID == "" || seen[taskID] {
+		if taskID == "" || taskID == excludeTaskID || seen[taskID] {
 			continue
 		}
 		seen[taskID] = true
-		for _, operation := range kernelRows(store.Db,
-			`SELECT id FROM operations WHERE task_id=? AND state='dispatched' AND worker_active=1 ORDER BY rowid`, taskID) {
-			runtime.execution.Interrupt(kernelString(operation["id"]), nil)
+		interrupts := kernelRows(store.Db,
+			`SELECT id FROM operations WHERE task_id=? AND state='dispatched' AND worker_active=1 ORDER BY rowid`, taskID)
+		// Signal, do not wait: an interrupt that blocks on a hung model call would
+		// recreate the wait this exists to remove. The request is sent and the
+		// reload proceeds; the operation settles (or is reconciled) afterwards.
+		signalled := make(chan struct{})
+		go func(taskID string, operations []map[string]any) {
+			defer close(signalled)
+			for _, operation := range operations {
+				runtime.execution.Interrupt(kernelString(operation["id"]), nil)
+			}
+			runtime.execution.StopActiveMasterTurns(taskID)
+		}(taskID, interrupts)
+		select {
+		case <-signalled:
+		case <-time.After(2 * time.Second):
 		}
-		runtime.execution.StopActiveMasterTurns(taskID)
 		store.SetTaskPaused(taskID, true)
 		ids = append(ids, taskID)
 	}
