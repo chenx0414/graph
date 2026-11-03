@@ -319,7 +319,7 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 		if master["budget"] != nil {
 			budget = kernelInt(master["budget"])
 		}
-		lines = append(lines, fmt.Sprintf("Master: %s, model %s, used %d/%d tokens",
+		lines = append(lines, fmt.Sprintf("Master: %s, model %s, used %d/%d tokens (input+output+cache read; cache reads dominate repeated context)",
 			kernelString(master["status"]), model, used, budget))
 	}
 	mainProblems := kernelRows(store.Db, `SELECT q.id,q.task_id,q.node_id,q.kind,q.data
