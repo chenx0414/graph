@@ -56,13 +56,13 @@ export function WorkDrafts({ role, conversationId, projectId, projects, cursor }
   const projectIDs = role === 'global' ? projects.map(project => project.id).sort().join('\u0000') : projectId ?? '';
 
   const refresh = useCallback(async () => {
-    if (role !== 'global' && role !== 'project') return;
+    if (role !== 'project') return;
     const current = ++sequence.current;
     setLoading(true);
     try {
       const ids = projectIDs ? projectIDs.split('\u0000') : [];
       const pages = await Promise.all(ids.map(id => api<{ items: Work[] }>(`/api/orchestration/work?projectId=${encodeURIComponent(id)}`)));
-      const work = pages.flatMap(page => page.items).filter(item => role === 'project' || item.conversationId === conversationId);
+      const work = pages.flatMap(page => page.items).filter(item => item.conversationId === conversationId);
       const next = await Promise.all(work.map(async item => {
         const [drafts, graphs] = await Promise.all([
           api<{ items: WorkDraft[] }>(`/api/orchestration/work/${encodeURIComponent(item.id)}/drafts`),
@@ -119,7 +119,11 @@ export function WorkDrafts({ role, conversationId, projectId, projects, cursor }
     }
   }
 
-  if (role !== 'global' && role !== 'project') return null;
+  // A delegated draft is the global supervisor's decision, not the person's:
+  // it is read and confirmed with confirm_work_draft, so a confirm card here
+  // would only ask the user to repeat the choice they already delegated. A
+  // project conversation keeps the card for the drafts it wrote itself.
+  if (role !== 'project') return null;
   // A work with no draft has nothing to confirm. The panel used to stand under
   // every conversation as an empty "工作草稿 / 刷新" strip; it refreshes itself
   // on every event and after every action, so the button was its only content.
