@@ -1,3 +1,4 @@
+// graph:allow-large-file: the composer is a pre-existing 31KB component (input, mentions, slash palette, attachments, telemetry); splitting it is its own refactor and this change is a small viewport fix.
 import { MarkdownInput } from './MarkdownInput.tsx';
 import { usePreferences } from './preferences.ts';
 import { attachmentImageSource } from './attachments.ts';
@@ -289,8 +290,15 @@ export function ChatComposer({
       const rect = composerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const gap = 12;
-      const above = Math.max(0, rect.top - gap);
-      const below = Math.max(0, window.innerHeight - rect.bottom - gap);
+      // The palette is clipped by the conversation body, not by the window: on a
+      // short window the space above the composer inside the body is smaller
+      // than the viewport suggests, and a taller palette would put its first
+      // entries behind the header where nothing can be clicked.
+      const clip = composerRef.current?.closest('.conversation-body')?.getBoundingClientRect();
+      const topLimit = clip ? clip.top : 0;
+      const bottomLimit = clip ? clip.bottom : window.innerHeight;
+      const above = Math.max(0, rect.top - topLimit - gap);
+      const below = Math.max(0, bottomLimit - rect.bottom - gap);
       const placement = below > above ? 'down' : 'up';
       setSlashLayout({
         placement,

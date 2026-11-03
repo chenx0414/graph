@@ -139,7 +139,17 @@ export function slashEntries(input: {
       action: { type: 'thinking' as const, level: option.level as ThinkingLevel },
     }));
   }
-  const system: SlashEntry[] = [];
+  // The goal command is offered through the same "insert a slash token" path a
+  // tool uses: the composer already knows how to place `/name ` at the cursor,
+  // and the target is never treated as a mention (it is not in the tool list).
+  const system: SlashEntry[] = [{
+    id: 'system:goal',
+    label: '设定目标',
+    description: '给这个会话写一个持续目标（/goal <目标> [+预算]）',
+    group: '系统',
+    icon: 'spark',
+    action: { type: 'tool', target: { id: 'goal', kind: 'tool', label: '设定目标', description: '持续目标' } },
+  }];
   if (input.models.length) {
     const currentModel = input.models.find(model => model.id === input.telemetry?.model);
     system.push({

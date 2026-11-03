@@ -460,7 +460,10 @@ func (app *GraphApp) serveConversationGoal(w http.ResponseWriter, r *http.Reques
 // serveConversationGoalAction applies one /goal action.
 func (app *GraphApp) serveConversationGoalAction(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
-	input := GoalInput{Action: appBodyString(body, "action"), Objective: appBodyString(body, "objective"), RequestID: appBodyString(body, "requestId")}
+	input := GoalInput{
+		Action: appBodyString(body, "action"), Objective: appBodyString(body, "objective"),
+		CheckNote: appBodyString(body, "checkNote"), RequestID: appBodyString(body, "requestId"),
+	}
 	if value, ok := body["budgetTokens"].(float64); ok && value >= 0 {
 		input.BudgetTokens = int64(value)
 	}

@@ -13,6 +13,7 @@ import { WindowDrawer } from './WindowDrawer.tsx';
 
 
 import { ChatComposer } from './ChatComposer.tsx';
+import { GoalCard } from './GoalCard.tsx';
 
 import { attachmentImageSource } from './attachments.ts';
 
@@ -100,6 +101,11 @@ return (
           </div>
         </section>
       )}
+
+      {/* The goal is a property of the thread, so it sits above the messages
+          instead of inside them: the same place a person expects the objective
+          to stay while the transcript scrolls. */}
+      <GoalCard conversationId={id} />
 
       {/* The chat column is the conversation: its artifacts live in the drawer, and a single
           artifact opens as its own tab. */}
