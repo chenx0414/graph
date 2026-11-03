@@ -103,7 +103,7 @@ func ValidateProviderDraft(input any) ProviderDraftValidation {
 		api = string(preset.API)
 		hasAPI = true
 	}
-	if !hasAPI || (api != string(ModelApiOpenAICompletions) && api != string(ModelApiAnthropicMessages)) {
+	if !hasAPI || (api != string(ModelApiOpenAICompletions) && api != string(ModelApiOpenAIResponses) && api != string(ModelApiAnthropicMessages)) {
 		errors = append(errors, ProviderDraftError{Field: "api", Message: "兼容格式必须是 openai-completions、openai-responses 或 anthropic-messages"})
 	}
 

@@ -166,7 +166,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `opencode-go` | OpenCode Go | openai-completions | `https://opencode.ai/zen/go/v1` | `GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY` | 订阅 | 是 |
 | `command-goat` | Command Goat | openai-completions | `https://api.commandcode.ai/provider/v1` | `GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY` | 订阅 | 是 |
 | `grok` | Grok | openai-completions | `https://api.x.ai/v1` | `GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN` | 订阅 / xAI 设备码登录 | 是 |
-| `chatgpt` | ChatGPT | openai-completions | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | 是 |
+| `chatgpt` | ChatGPT | openai-responses | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | 是 |
 | `openai` | OpenAI | openai-completions | `https://api.openai.com/v1` | `OPENAI_API_KEY` | API KEY | 是 |
 | `anthropic` | Anthropic | anthropic-messages | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | API KEY | 是 |
 | `gemini` | Google Gemini | openai-completions | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | API KEY | 是 |
@@ -184,7 +184,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 - `custom`：用户自填「厂商名 + Base URL + 兼容格式 + API KEY」；端点不支持列模型时手动添加模型 id。
 - 环境变量别名（配置 `secretRef` 之外的兜底名，代码内已声明）：`OPENCODE_GO_API_KEY` / `OPENCODE_ZEN_API_KEY` / `OPENCODE_API_KEY`；OpenCode 的本地配置 `~/.config/opencode/opencode.json` 也会被识别。
 
-**注意**：`chatgpt` 后端按 Responses 形状返回，而 preset 按 Chat Completions 契约注册与探测 —— 正式调用前用 `/api/config/test` 实测，不要假定一定可用。
+**注意**：`chatgpt` 的 Codex 后端只认 Responses 契约，所以 preset、目录与运行时都把它注册为 `openai-responses`（探针与设置页的草稿校验同样按该传输发请求）；用 chat-completions 打过去会 404/400。主选万一在传输层断开，可配 `fallbackModelId` 让另一个模型接管（见 [模型回退](model-fallback.md)）。
 
 ---
 

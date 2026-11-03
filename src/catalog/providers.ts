@@ -158,7 +158,7 @@ const SUBSCRIPTION_PRESETS: ProviderPreset[] = [
   { id: 'opencode-go', label: 'OpenCode Go', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', credentialRef: 'GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY', credentialKind: 'subscription', modelsListSupported: true, headers: { 'x-opencode-session': 'graph-console' }, docsUrl: 'https://opencode.ai/docs/zen', notes: ['订阅凭据；所有请求自动附带 x-opencode-session。'] },
   { id: 'command-goat', label: 'Command Goat', api: 'openai-completions', baseUrl: 'https://api.commandcode.ai/provider/v1', credentialRef: 'GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；请从自己的服务商账户获取凭据。'] },
   { id: 'grok', label: 'Grok', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN', credentialKind: 'subscription', oauthProvider: 'xai', modelsListSupported: true, notes: ['订阅访问令牌；可点「使用 xAI 账号登录」走设备码授权，也可以直接粘贴访问令牌。', '设备码登录会写访问令牌与一个 `<credentialRef>_REFRESH` 伴随条目，访问令牌到期前自动刷新。'] },
-  { id: 'chatgpt', label: 'ChatGPT', api: 'openai-completions', baseUrl: 'https://chatgpt.com/backend-api/codex', credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；Responses 协议适配尚未完成，登录或配置凭据不代表模型可调用，请先验证连接。'] },
+  { id: 'chatgpt', label: 'ChatGPT', api: 'openai-responses', baseUrl: 'https://chatgpt.com/backend-api/codex', credentialRef: 'GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN', credentialKind: 'subscription', modelsListSupported: true, notes: ['订阅访问令牌；Codex 后端只认 Responses 契约（input 项目、扁平工具、response.* 事件），所以该平台按 openai-responses 配置；文本、工具调用与用量都已按此传输实测。'] },
 ];
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
