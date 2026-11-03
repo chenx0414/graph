@@ -279,6 +279,8 @@ type ValidationCommandPlan struct {
 
 // RsiService is the recursive self-improvement service for one checkout.
 type RsiService struct {
+	// reload pauses and resumes the work a daemon replacement would otherwise wait for.
+	reload *RsiReloadHooks
 	// Root is the source checkout, when one was configured.
 	Root *string
 	// Available is true when the root is a usable Graph Git checkout right now.
