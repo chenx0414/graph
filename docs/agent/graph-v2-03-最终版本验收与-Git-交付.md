@@ -22,6 +22,8 @@ human 在其他证据齐备后形成用户验收问题，绑定 acceptanceId 和
 
 query:"acceptance" 返回各验收项的实际状态、原因和来源，以及持久 Git 交付 commit；ready 表示证据与待处理工作已满足，Git 交付仍是独立步骤。complete 先请求完成，再由宿主检查证据并交付相同的干净 commit。目标工作树脏、集成版本偏移或 Git 竞争均保留 blocked 和完成意图，main 检查时间线后可以处理问题并再次 complete；需要新增输入时先 withdraw_complete。图不会因节点均成功而隐式完成。
 
+证据永远不会有的项，可以用 `graph_control` 的 `complete_with_limitations` 显式收口：每条限制写明 acceptanceId、理由与证据所在，记进只增不改的 `kernel_acceptance_limitations`（含 actor、commit、revision、requestId、时间），`query:"acceptance"` 里该项显示 waived 并带 limitation，`query:"limitations"` 读到同一批记录，`graph.completed` 事件与完成唤醒的数据里也各带一份。这不会放宽判定：ready 仍只数 passed，所以带限制收口的图 ready=false；failed（检查跑过且失败、审查不通过）、stale（绑旧 commit）、kind=human，以及 Git 交付与当前集成 commit 不匹配，都无法被豁免，拒绝时一条记录都不写。human 项只能由用户本人经 HTTP `POST /api/tasks/{taskId}/graph/acceptance/waive` 豁免（记录 actor=user），Agent 的 graph_control 即使声明自己是用户也会被 service 拒绝。用户豁免同时了结该项对应的 open human_check 问题（答案 type=waived，带理由、证据、commit），该项因此不再出现在 acceptance 的 human 列表里，之后的结算也不会再问一遍。收口允许空的 limitations 列表，但只在没有任何未满足项时（全部 passed 或已被用户豁免）——那是「只剩用户决定」的图唯一剩下的收口路；只要还有未满足项，空列表会被拒并点名它们。限制按 commit 生效：集成 commit 变了，旧限制不再覆盖新版本，该项回到未满足。acceptance 里的 closable 只回答一个问题：现在这些未满足项是否都能由 Agent 记录限制后收口（不需要用户参与、没有 failed/stale、交付匹配）；它与 ready 是两件事。
+
 节点也可声明 deliverable: {path,namespace,name,schema}。例如审查文件使用 schema: "graph.review@1"；执行结束后自动发布，缺失或空文件使执行失败。相同内容且相同 schema 复用已发布版本；schema 改变即使字节相同也产生新版本，旧版本保持不变。初始任务说明包含交付路径和 schema，运行中修改在下一次执行生效。
 
 确认带有正式 definition 的草稿，只建立节点、模块和连接，不推断入口、不向 root 或循环图的首节点发送空对象。Git 准备完成后，系统以 graph_ready 通知 main；main 查看声明并通过 graph_send 发送首个合法输入。重复确认重放原 receipt，不产生第二次通知。没有工作时保持空闲，不能据此推断图已完成。
