@@ -50,6 +50,29 @@ export const FAILING_DEFINITION = {
   acceptance: [{ id: 'fails', description: 'The host check passes', kind: 'check', module: 'failing' }],
 };
 
+/**
+ * Everything in this graph is proved except the human acceptance, so closing it
+ * is only ever the user's decision.
+ */
+export const ACCEPTED_DEFINITION = {
+  schemaVersion: 2,
+  name: 'Only the user was left',
+  protocols: { data: { type: 'object' } },
+  nodes: {},
+  modules: {
+    check: {
+      type: 'operation', trigger: 'each',
+      inputs: { job: { protocol: 'data' } }, outputs: { result: { protocol: 'data' } },
+      operation: { action: 'workspace.command', version: 1, command: 'node', sandbox: false, output: 'result', args: ['test/pass.js'] },
+    },
+  },
+  edges: {}, inputs: {}, outputs: {},
+  acceptance: [
+    { id: 'check', description: 'The host check passed', kind: 'check', module: 'check' },
+    { id: 'human', description: 'The user accepts the delivered result', kind: 'human' },
+  ],
+};
+
 interface ToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 interface ChatMessage { role?: string; content?: unknown; tool_call_id?: string; tool_calls?: ToolCall[] }
 interface ChatBody { tools?: { function?: { name?: string } }[]; messages?: ChatMessage[] }
@@ -144,14 +167,29 @@ export function answeredGraphId(master: { results: Map<string, string> }, callId
   return found;
 }
 
+/** One human acceptance question as it really stands in the database. */
+export interface HumanCheckRow { id: string; status: string; answer: string | null }
+
+/** The human acceptance questions of one criterion, oldest first. */
+export function humanChecks(root: string, graphId: string, acceptanceId: string): HumanCheckRow[] {
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true });
+  try {
+    return db.prepare(`SELECT id,status,answer FROM questions WHERE task_id=? AND kind='human_check'
+      AND json_extract(data,'$.acceptanceId')=? ORDER BY rowid`).all(graphId, acceptanceId) as unknown as HumanCheckRow[];
+  } finally {
+    db.close();
+  }
+}
+
 export interface AcceptanceItem {
   id: string; kind: string; status: string; reason: string; waived?: boolean;
   limitation?: { reason: string; evidence: string; commit: string | null; createdAt: number; actor: string };
 }
 
 export interface AcceptanceReport {
-  ready: boolean; closable: boolean; commit: string | null;
+  ready: boolean; closable: boolean; drained: boolean; commit: string | null;
   items: AcceptanceItem[];
+  human: { id: string }[];
   limitations: LimitationRecord[];
 }
 

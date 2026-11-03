@@ -77,7 +77,12 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 		runtime.kernel.ModuleTransaction(func() any {
 			readyHuman := true
 			for _, item := range acceptance.Items {
-				if item.Status != "passed" && item.Kind != "human" {
+				// A waived item is settled for this commit: it is not a debt, and it
+				// does not ask the user anything again.
+				if item.Status == "passed" || item.Status == "waived" {
+					continue
+				}
+				if item.Kind != "human" {
 					readyHuman = false
 				}
 			}

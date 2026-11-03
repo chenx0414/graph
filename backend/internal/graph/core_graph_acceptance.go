@@ -350,6 +350,18 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 			Commit: record.Commit, CreatedAt: record.CreatedAt,
 		}
 	}
+	// A waived criterion is no longer waiting for the user: it is decided. Leaving
+	// it in the human list would ask the same question again on the next settle.
+	if len(waived) > 0 {
+		waiting := make([]AcceptanceCriterion, 0, len(human))
+		for _, criterion := range human {
+			if _, decided := waived[criterion.Id]; decided {
+				continue
+			}
+			waiting = append(waiting, criterion)
+		}
+		human = waiting
+	}
 	_, pending := g5One(kernel.Db, `SELECT 1 WHERE
     EXISTS(SELECT 1 FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed','failed')) OR
     EXISTS(SELECT 1 FROM kernel_executions WHERE task_id=? AND state='running') OR

@@ -138,10 +138,13 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		phase = string(state.Phase)
 	}
 	if phase != "blocked" {
+		// A closure that records nothing has no row to recognise its replay by,
+		// and the graph being closed already is the same answer the first call
+		// gave: answering with that closure is a replay, not a second decision.
+		if plan.complete && len(plan.limitations) == 0 && phase == "completed" {
+			return graphAcceptanceClosureResult(service, plan.graphId, true)
+		}
 		Raise("invalid_graph", "Graph "+plan.graphId+" is "+phase+"; only a blocked graph closes with recorded limitations")
-	}
-	if len(plan.limitations) == 0 {
-		Raise("invalid_input", "complete_with_limitations requires at least one limitation {acceptanceId,reason,evidence}")
 	}
 	for _, limitation := range plan.limitations {
 		if strings.TrimSpace(limitation.AcceptanceId) == "" {
@@ -155,22 +158,38 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		}
 	}
 	report := GraphAcceptance(service.kernel, plan.graphId, service.artifacts)
+	unmet := []string{}
+	for _, item := range report.Items {
+		if item.Status == "passed" || item.Status == "waived" {
+			continue
+		}
+		unmet = append(unmet, item.Id)
+	}
 	covered := map[string]bool{}
 	for _, limitation := range plan.limitations {
 		covered[limitation.AcceptanceId] = true
+	}
+	if len(plan.limitations) == 0 {
+		// An empty list is a closure with nothing left to limit: every item passed
+		// or was waived by the user. It is the one door left to a graph whose only
+		// debt was an acceptance only the user could decide, and refusing it would
+		// report closable=true with no door at all.
+		if !plan.complete {
+			Raise("invalid_input", "A waiver must name the acceptance item it covers")
+		}
+		if len(unmet) > 0 {
+			Raise("invalid_input", "complete_with_limitations requires one limitation {acceptanceId,reason,evidence} for each unmet item: "+strings.Join(unmet, ", "))
+		}
 	}
 	// Coverage is the closure's rule, not one waiver's: a user waiving the one
 	// item they are deciding about does not thereby decide about the others.
 	if plan.complete {
 		uncovered := []string{}
-		for _, item := range report.Items {
-			if item.Status == "passed" || item.Status == "waived" {
+		for _, id := range unmet {
+			if covered[id] {
 				continue
 			}
-			if covered[item.Id] {
-				continue
-			}
-			uncovered = append(uncovered, item.Id)
+			uncovered = append(uncovered, id)
 		}
 		if len(uncovered) > 0 {
 			Raise("invalid_graph", "These acceptance items are unmet and no limitation covers them: "+strings.Join(uncovered, ", "))
@@ -217,6 +236,25 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 			})
 		}
 		records := service.kernel.RecordAcceptanceLimitations(plan.graphId, entries)
+		// The decision answers the question the item was still asking: an open
+		// human check of a waived item would keep the graph blocked on a question
+		// nobody is going to answer, and would ask it again on the next settle.
+		for _, limitation := range plan.limitations {
+			answered := service.kernel.Store.ResolveOpenHumanChecks(plan.graphId, limitation.AcceptanceId, map[string]any{
+				"type": "waived", "actor": plan.actor, "reason": strings.TrimSpace(limitation.Reason),
+				"evidence": strings.TrimSpace(limitation.Evidence), "commitSha": commit,
+			})
+			if len(answered) == 0 {
+				continue
+			}
+			var commitValue any
+			if commit != nil {
+				commitValue = *commit
+			}
+			service.kernel.Store.Event(plan.graphId, "graph.acceptance.waived", map[string]any{
+				"acceptanceId": limitation.AcceptanceId, "questionIds": answered, "actor": plan.actor, "commit": commitValue,
+			})
+		}
 		if plan.complete {
 			graph.setPhase("completed")
 			var sha any

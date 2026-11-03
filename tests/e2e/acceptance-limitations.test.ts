@@ -106,6 +106,12 @@ test('a blocked graph closes with recorded limitations, refuses everything it ma
       },
       { id: 'phase-after-refusal', name: 'graph_inspect', args: { graphId: graphIdOf(master.results.get('create-closable')), query: 'summary' } },
       {
+        // Nothing is left to limit only when nothing is unmet: this graph still
+        // owes two items, so a closure that records nothing names them instead.
+        id: 'reject-empty-closure', name: 'graph_control',
+        args: { graphId: graphIdOf(master.results.get('create-closable')), action: 'complete_with_limitations', requestId: 'empty-closure', limitations: [] },
+      },
+      {
         // The Agent may not sign for the user, whatever it says in the payload.
         id: 'reject-human-agent', name: 'graph_control',
         args: {
@@ -207,6 +213,12 @@ test('a blocked graph closes with recorded limitations, refuses everything it ma
     expect(rowsAfterRefusal).toEqual([[]]);
     // A refusal leaves the graph where it was.
     expect((JSON.parse(master.results.get('phase-after-refusal')!) as { phase: string }).phase).toBe('blocked');
+
+    // A closure with no limitation is refused while items are still owed, and it
+    // names them: the empty door is only for a graph with nothing left to limit.
+    const emptyClosure = master.results.get('reject-empty-closure')!;
+    expect(emptyClosure).toContain('unrun');
+    expect(emptyClosure).toContain('human');
 
     // The Agent may not sign the user's acceptance, even by claiming to be them.
     const signedByAgent = master.results.get('reject-human-agent')!;
