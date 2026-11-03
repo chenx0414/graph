@@ -40,11 +40,15 @@ test('a user reviews independent work drafts and confirms a graph in the browser
     return value;
   }
   const global = text(await post('/api/orchestration/global', { requestId: 'global' }), 'conversationId');
-  await post('/api/projects/p/thread', { requestId: 'project' });
+  const projectConversation = text(await post('/api/projects/p/thread', { requestId: 'project' }), 'conversationId');
+  // This case is the user's own project work: they started it in the project
+  // conversation, so the confirm card is still theirs. A work delegated from the
+  // global supervisor is confirmed by that supervisor instead and draws no card
+  // (tests/m8/work-drafts-panel.test.ts holds that side).
   async function createDraft(label: string) {
-    const message = text(await post(`/api/conversations/${global}/messages`, { requestId: `message-${label}`, text: `Plan ${label}` }), 'messageId');
+    const message = text(await post(`/api/conversations/${projectConversation}/messages`, { requestId: `message-${label}`, text: `Plan ${label}` }), 'messageId');
     const work = text(await post('/api/orchestration/work', {
-      requestId: `work-${label}`, conversationId: global, projectId: 'p', sourceMessageId: message,
+      requestId: `work-${label}`, conversationId: projectConversation, projectId: 'p', sourceMessageId: message,
       brief: `Build ${label}`, acceptance: [`${label} works`],
     }), 'id');
     await post(`/api/orchestration/work/${work}/drafts`, {
@@ -57,7 +61,7 @@ test('a user reviews independent work drafts and confirms a graph in the browser
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/conversations/${global}`);
+  await page.goto(`${daemon.url}/#/conversations/${projectConversation}`);
   const firstCard = page.getByTestId(`work-draft-${first}-1`);
   const secondCard = page.getByTestId(`work-draft-${second}-1`);
   await expect.poll(() => firstCard.count(), { timeout: 30_000 }).toBe(1);
