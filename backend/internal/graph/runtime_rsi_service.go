@@ -29,6 +29,10 @@ func NewRsiService(options RsiServiceOptions) *RsiService {
 		}
 	}
 	if service.Available {
+		// Opening the checkout is the moment the leftovers of an interrupted
+		// background confirmation can be recognised as debris: nothing else ever
+		// looks at them again.
+		rsiPruneStaleSnapshots(*service.Root)
 		service.runningCommit = RevParse(*service.Root, "HEAD")
 	}
 	return service

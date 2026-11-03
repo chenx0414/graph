@@ -101,3 +101,58 @@ test('the goal card shows the objective and runs pause, resume, budget, completi
   await page.getByTestId('goal-clear').click();
   await expect.poll(() => page.getByTestId('goal-card').count(), { timeout: 10_000 }).toBe(0);
 }, 120_000);
+
+test('the goal card shows 预算用完 once a turn spends the budget, and a top-up revives it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-m8-goal-budget-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const provider = await openaiServer([
+    { text: '导出做好了', usage: { prompt_tokens: 40, completion_tokens: 10 } },
+  ]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] },
+    credentials: { local: { secretRef: 'GRAPH_GOAL_BUDGET_KEY' } },
+  }));
+  const daemon = await launchCli(root, { configPath, webDir, env: { GRAPH_GOAL_BUDGET_KEY: 'synthetic-only' }, extraArgs: ['--execute'] });
+  cleanup.push(() => daemon.close());
+  const home = await fetch(daemon.url, { headers: { origin: daemon.url } });
+  const session = { origin: daemon.url, cookie: home.headers.get('set-cookie') ?? '', 'content-type': 'application/json' };
+
+  // The turn the goal starts spends exactly the budget, so the goal stops
+  // there: the card has to say so instead of claiming it is still running.
+  const created = await fetch(`${daemon.url}/api/conversations`, {
+    method: 'POST', headers: session, body: JSON.stringify({ text: '/goal 把导出做成 CSV +50', requestId: 'goal-budget' }),
+  });
+  const createdBody = await created.json() as Record<string, any>;
+  expect(created.status, JSON.stringify(createdBody)).toBe(200);
+  const conversationId = String(createdBody.conversationId);
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${daemon.url}/#/conversations/${conversationId}`);
+  const card = page.getByTestId('goal-card');
+  await card.waitFor();
+
+  await expect.poll(() => page.getByTestId('goal-status').innerText(), { timeout: 20_000 }).toBe('预算用完');
+  expect(await page.getByTestId('goal-usage').innerText()).toContain('已用 50 / 50 tokens');
+  expect(await card.getAttribute('data-status')).toBe('budget_limited');
+  // The conversation says why the goal stopped, so the card is not the only
+  // place the cutoff is visible.
+  await expect.poll(() => page.getByText('目标预算已用完').count(), { timeout: 10_000 }).toBeGreaterThan(0);
+  await page.screenshot({ path: '/tmp/graph-goal-budget.png', fullPage: true });
+
+  // A top-up is the way back, and the same card becomes active again.
+  await page.getByTestId('goal-extend-amount').fill('1000');
+  await page.getByTestId('goal-extend').click();
+  await expect.poll(() => page.getByTestId('goal-status').innerText(), { timeout: 10_000 }).toBe('进行中');
+  await expect.poll(() => page.getByTestId('goal-usage').innerText(), { timeout: 10_000 }).toContain('1.1k');
+  await page.getByTestId('goal-clear').click();
+  await expect.poll(() => page.getByTestId('goal-card').count(), { timeout: 10_000 }).toBe(0);
+}, 120_000);

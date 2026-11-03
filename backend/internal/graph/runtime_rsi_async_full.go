@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // rsiStartAsyncFull runs the slow confirmation after a reload.
@@ -91,6 +92,49 @@ func rsiAsyncFullSummary(output string) string {
 		return "摘要: 日志里没有可归纳的行，请读完整日志。"
 	}
 	return "摘要:\n" + strings.Join(kept, "\n")
+}
+
+// rsiSnapshotMaxAge is how old a leftover snapshot must be before it counts as
+// the debris of an interrupted run rather than a checkout some process is
+// using right now.
+const rsiSnapshotMaxAge = 2 * time.Hour
+
+// rsiPruneStaleSnapshots removes the snapshots a killed background
+// confirmation left behind.
+//
+// The run removes its worktree in a defer, so a run ended by the next reload
+// leaves a registered worktree and a whole checkout on disk that nothing looks
+// at again (measured 2026-11-03: one from the day before was still registered).
+// The age guard is what keeps a run in flight safe: a snapshot minutes old may
+// still be read by the process that made it.
+func rsiPruneStaleSnapshots(root string) int {
+	output, err := exec.Command("git", "-C", root, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, line := range strings.Split(string(output), "\n") {
+		if !strings.HasPrefix(line, "worktree ") {
+			continue
+		}
+		path := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		if !strings.HasPrefix(filepath.Base(path), "graph-async-full-") {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < rsiSnapshotMaxAge {
+			continue
+		}
+		if err := exec.Command("git", "-C", root, "worktree", "remove", "--force", path).Run(); err != nil {
+			// The directory may already be gone, which leaves only the
+			// registration behind; drop it and let prune forget the entry.
+			_ = os.RemoveAll(path)
+		}
+		removed++
+	}
+	if removed > 0 {
+		_ = exec.Command("git", "-C", root, "worktree", "prune").Run()
+	}
+	return removed
 }
 
 // rsiSnapshotRoot checks out one commit into a throwaway worktree and points it
