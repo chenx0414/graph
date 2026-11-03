@@ -59,3 +59,55 @@ func desktopToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 		},
 	}
 }
+
+// desktopAccessibilityCommands are the commands that resolve their target from
+// the accessibility tree. For them the permission question comes first.
+//
+// "I cannot see the screen" and "I cannot tell which element you meant" are
+// different problems with different fixes, and the CLI answers the second when
+// only the first is true: a missing grant surfaces as a target it could not
+// identify. The tool asks the permission question itself, so a user who never
+// granted Accessibility is told exactly that instead of being sent to look for
+// an ambiguous cell. Only a command whose permission is readable as granted may
+// answer with a target error.
+//
+// Commands that never read the tree are absent on purpose: version, status,
+// permissions, skills, session, wait, clipboard-*, screenshot, list-*, help and
+// batch. `batch` reports each entry's own code, so its inner commands keep their
+// own answer.
+var desktopAccessibilityCommands = map[string]bool{
+	"snapshot": true, "find": true, "get": true, "is": true,
+	"click": true, "double-click": true, "triple-click": true, "right-click": true,
+	"type": true, "set-value": true, "clear": true, "focus": true,
+	"select": true, "toggle": true, "check": true, "uncheck": true,
+	"expand": true, "collapse": true, "scroll": true, "scroll-to": true,
+	"press": true, "key-down": true, "key-up": true, "hover": true, "drag": true,
+	"focus-window": true, "resize-window": true, "move-window": true,
+	"minimize": true, "maximize": true, "restore": true,
+}
+
+// desktopPermissionRefusal is the envelope the tool answers with instead of
+// running a command whose target it could not see.
+//
+// It is the CLI's own envelope shape so the model reads it the same way as any
+// other refusal, and it says where it came from (`details.source`) because the
+// words are the tool's, not the CLI's. It carries no payload, so it is safe to
+// hand over verbatim.
+func desktopPermissionRefusal(command, state, version string) map[string]any {
+	envelope := map[string]any{
+		"ok": false, "command": command,
+		"error": map[string]any{
+			"code":    "PERM_DENIED",
+			"message": "Accessibility permission is not granted (" + state + "), so " + command + " has no target it could resolve",
+			"suggestion": "Run agent-desktop permissions --guide from the app that launches agent-desktop " +
+				"(Graph.app, Terminal, iTerm or Codex) and switch on Accessibility. After a reinstall, upgrade or " +
+				"move of that install, run it again: the grant belongs to the binary path and its cdhash.",
+			"details":     map[string]any{"source": "graph-desktop-tool", "accessibility": state, "checked": "agent-desktop permissions"},
+			"disposition": map[string]any{"delivery": "not_delivered", "retry": "safe"},
+		},
+	}
+	if version != "" {
+		envelope["version"] = version
+	}
+	return envelope
+}

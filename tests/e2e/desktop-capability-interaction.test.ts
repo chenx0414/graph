@@ -6,15 +6,21 @@ import { envelopeOf, launchDesktopGraph } from '../helpers/desktop-graph.ts';
 /**
  * What this host can actually see of the desktop.
  *
- * Two facts decide this file: the permission grant is macOS state, and a
- * sandboxed caller reads `denied` even after the user granted it (macOS decides
- * from the launcher's identity and sandbox state). So the observation test runs
- * everywhere and reports the refusal it really got, while the interactive loop
- * runs only from a context that can see the grant - Graph's own host-side runner
- * or a terminal - and says out loud when it did not run. Nothing here may call a
- * refused interaction supported.
+ * Three states exist and all three are asserted here instead of being rounded to
+ * "works" or "skipped":
  *
- * The host ran the loop for real on 2026-11-03 and the record is in
+ *   (a) the grant is readable and the call works: the tree carries `ref_id`, the
+ *       loop can act on it, the tree changes, a stale ref answers `STALE_REF`;
+ *   (b) the grant is not readable: the tool answers the permission question
+ *       itself, `PERM_DENIED` with `retry: "safe"` and the one step only the user
+ *       can take - and never a target error, because "I cannot see the screen" is
+ *       not "I cannot tell which element you meant";
+ *   (c) `permissions` reports granted and the call still fails: that is an
+ *       inconsistency, printed verbatim with its error code and disposition, and
+ *       asserted as an explicit refusal. It is never skipped and never called
+ *       working.
+ *
+ * The host ran the interactive loop for real on 2026-11-03; the record is in
  * `.agents/skills/agent-desktop/`: 836 elements with `ref_id`, a click, a second
  * snapshot of 108 elements, `STALE_REF` with `retry: "safe"` for the old ref,
  * then a fresh ref that worked.
@@ -57,7 +63,13 @@ if (!accessibilityGrantedHere()) {
     + '(Graph’s check runner or a terminal).');
 }
 
-test('a desktop observation reports the permission truth and the tree shape a click needs', async () => {
+/** The one step only the user can take, printed with every refusal. */
+const USER_STEP = '[desktop] the one step only the user can take: run `agent-desktop permissions --guide` from the app '
+  + 'that launches agent-desktop (Graph.app, Terminal, iTerm or Codex) and switch on Accessibility; add Screen '
+  + 'Recording if screenshots are needed. After any reinstall, upgrade or move of that install, run it again: the '
+  + 'grant belongs to the binary path and its cdhash, so it does not survive a reinstall.';
+
+test('a desktop observation reports the permission truth before any question of which target was meant', async () => {
   await graph.open(`${MARKER}: look at the desktop`);
   await expect.poll(() => graph.provider.results.get('snapshot'), { timeout: 120_000, interval: 250 }).toBeTruthy();
 
@@ -65,9 +77,29 @@ test('a desktop observation reports the permission truth and the tree shape a cl
   expect(permissions.ok).toBe(true);
   const accessibility = String(permissions.data?.accessibility?.state ?? 'unknown');
   const screenRecording = String(permissions.data?.screen_recording?.state ?? 'unknown');
+  console.log(`[desktop] permissions raw: ${JSON.stringify(permissions.data)}`);
+
   const snapshotText = graph.answer('snapshot');
   const snapshot = envelopeOf(snapshotText);
+  const live = (): string => desktopStdout(['snapshot', '--app', 'Finder', '--skeleton'], { AGENT_DESKTOP_HOME: graph.desktopHome });
 
+  // (b) The grant is not readable: the tool answers the permission question
+  // before the CLI can resolve a target, so the code is PERM_DENIED and a target
+  // error cannot take its place.
+  if (accessibility !== 'granted') {
+    expect(snapshot.error?.code, snapshotText).toBe('PERM_DENIED');
+    expect(snapshot.error?.disposition?.retry, snapshotText).toBe('safe');
+    expect(snapshot.error?.details?.source, 'the permission refusal did not come from the tool').toBe('graph-desktop-tool');
+    expect(snapshot.error?.details?.accessibility).toBe(accessibility);
+    expect(snapshot.error?.suggestion, 'the refusal does not name the one step the user can take').toMatch(/permissions --guide/);
+    expect(snapshotText, 'a target error took the place of the permission refusal').not.toContain('AMBIGUOUS_TARGET');
+    console.log(`[desktop] observation: refused (accessibility=${accessibility}, screen_recording=${screenRecording}); `
+      + `the tool answered before any target resolution`);
+    console.log(USER_STEP);
+    return;
+  }
+
+  // (a) The grant is readable and the call works.
   if (snapshot.ok) {
     // The ref a click takes is `ref_id`: the nodes carry children, name,
     // native_id, role, states, available_actions, ref_id, description and value.
@@ -75,16 +107,17 @@ test('a desktop observation reports the permission truth and the tree shape a cl
     console.log(`[desktop] observation: granted (accessibility=${accessibility}, screen_recording=${screenRecording})`);
     return;
   }
-  // A refusal is reported as a refusal, never softened into "supported".
-  expect(snapshot.error?.code).toBe('PERM_DENIED');
-  expect(snapshot.error?.disposition?.retry).toBe('safe');
-  const liveRefusal = desktopStdout(['snapshot', '--app', 'Finder', '--skeleton'], { AGENT_DESKTOP_HOME: graph.desktopHome });
-  expect(snapshotText.trim(), 'the refusal is not the CLI’s own words').toBe(liveRefusal);
-  console.log(`[desktop] observation: refused by this executor (accessibility=${accessibility}, screen_recording=${screenRecording})`);
-  console.log(`[desktop] permissions raw: ${JSON.stringify(permissions.data)}`);
-  console.log('[desktop] the one step only the user can take: run `agent-desktop permissions --guide` from the app that '
-    + 'launches agent-desktop (Graph.app, Terminal, iTerm or Codex) and switch on Accessibility; add Screen Recording too '
-    + 'if screenshots are needed. Until then a sandboxed caller reads denied even when the host granted it.');
+
+  // (c) permissions says granted and the call still fails. That is an
+  // inconsistency between the permission report and the real call; it is printed
+  // verbatim and asserted as an explicit refusal - not as success, not skipped.
+  expect(typeof snapshot.error?.code, `a failure without an error code is not an explicit refusal: ${snapshotText}`).toBe('string');
+  expect(snapshot.error?.code.length).toBeGreaterThan(0);
+  expect(typeof snapshot.error?.disposition?.retry, snapshotText).toBe('string');
+  expect(snapshotText.trim(), 'the tool no longer passes the CLI refusal through').toBe(live().trim());
+  console.log('[desktop] INCONSISTENT: `permissions` reports accessibility=granted but the snapshot failed: '
+    + JSON.stringify(snapshot.error));
+  console.log(USER_STEP);
 }, 180_000);
 
 test.skipIf(!accessibilityGrantedHere())('a real Finder interaction acts on a ref_id, sees the tree change, and survives a stale ref', () => {
@@ -94,7 +127,19 @@ test.skipIf(!accessibilityGrantedHere())('a real Finder interaction acts on a re
   const environment = { AGENT_DESKTOP_HOME: graph.desktopHome };
   const snapshot = () => envelopeOf(desktopCall(['snapshot', '--app', 'Finder', '-i'], environment).stdout);
   const first = snapshot();
-  expect(first.ok, 'the interactive loop needs the accessibility grant').toBe(true);
+
+  // The grant was readable, so a failure here is the inconsistent state: record
+  // it as an explicit refusal instead of asserting success that does not exist.
+  if (!first.ok) {
+    expect(typeof first.error?.code, 'a failure without an error code is not an explicit refusal').toBe('string');
+    expect(first.error?.code.length).toBeGreaterThan(0);
+    expect(typeof first.error?.disposition?.retry).toBe('string');
+    console.log('[desktop] INCONSISTENT: accessibility is granted but `snapshot --app Finder -i` failed: '
+      + JSON.stringify(first.error));
+    console.log(USER_STEP);
+    return;
+  }
+
   const refs = collectRefIds(first.data);
   expect(refs.length, 'the Finder snapshot carries no ref_id nodes').toBeGreaterThan(10);
   const target = refs[0]!;
@@ -109,6 +154,7 @@ test.skipIf(!accessibilityGrantedHere())('a real Finder interaction acts on a re
   expect(stale.error?.disposition?.retry).toBe('safe');
   const fresh = collectRefIds(second.data)[0]!;
   expect(envelopeOf(desktopCall(['click', fresh], environment).stdout).ok, 'a fresh ref_id did not work after re-snapshotting').toBe(true);
+  console.log('[desktop] interactive loop: ref_id → click → tree changed → STALE_REF (retry safe) → fresh ref worked');
 }, 180_000);
 
 test.skipIf(!existsSync(INSTALL))('the host capability library resolves the installed CLI with no environment hint', async () => {

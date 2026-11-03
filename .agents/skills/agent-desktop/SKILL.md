@@ -65,6 +65,13 @@ guess them.
 
 ## Permissions, and the one thing that is not a permanent state
 
+- **The permission question comes before the target question.** Without
+  Accessibility a tree command (`snapshot`, `find`, `get`, `click`, `type`, …)
+  answers `PERM_DENIED` with `error.details.source = "graph-desktop-tool"` and
+  `disposition.retry = "safe"`, instead of the CLI's target-shaped error: "I
+  cannot see the screen" and "I cannot tell which element you meant" send the
+  user to two different fixes. A target error is only possible once the grant is
+  readable as granted.
 - **Only a host context reads permissions truthfully.** Run
   `agent-desktop permissions` from Graph's own host process or the user's
   terminal. A sandboxed caller - the Agent's own shell, a test executor - reports

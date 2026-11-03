@@ -64,6 +64,16 @@ the cdhash and invalidates the grant. After any install change, run
 `agent-desktop permissions` and read the answer instead of assuming the
 capability still works.
 
+The tool asks that question before it asks which target was meant: for the
+commands that read the accessibility tree (`snapshot`, `find`, `get`, `is`,
+`click`, `type`, `focus-window`, …) a missing grant answers `PERM_DENIED` with
+`error.details.source = "graph-desktop-tool"` and `disposition.retry = "safe"` -
+never a target error, because "I cannot see the screen" and "I cannot tell which
+element you meant" have different fixes. Only a grant that is readable as granted
+lets a target error through, and when `permissions` says granted while a call
+still fails, that refusal is passed through untouched and reported as the
+inconsistency it is.
+
 Read that answer from a host context only. A sandboxed caller — the Agent's own
 shell, a test executor — reports `denied` even after the grant, and that reading
 is a false negative rather than evidence about the host.

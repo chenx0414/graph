@@ -205,6 +205,11 @@ func agentToolsDesktopResult(desktop *AgentToolsDesktop, params map[string]any) 
 			args = append(args, value)
 		}
 	}
+	// The permission question is answered before the target question: a command
+	// that reads the accessibility tree has no target to name without the grant.
+	if refusal := desktopPermissionProblem(desktop, command); refusal != nil {
+		return agentToolsText(stringifyJSON(refusal))
+	}
 	argv := append([]string{command}, args...)
 	if agentToolsTruthy(params["headed"]) {
 		argv = append(argv, "--headed")
@@ -262,6 +267,37 @@ func agentToolsDesktopResult(desktop *AgentToolsDesktop, params map[string]any) 
 		"reason":  "the payload is " + payload,
 		"include": `pass include:"output" to read the envelope`,
 	}))
+}
+
+// desktopPermissionProblem is the refusal to answer before the command runs, or
+// nil when the command does not need the accessibility tree or the grant is there.
+//
+// A probe that cannot be read is not a denial: the command runs and the CLI's own
+// answer stands, rather than the tool inventing a cause it did not observe.
+func desktopPermissionProblem(desktop *AgentToolsDesktop, command string) map[string]any {
+	if !desktopAccessibilityCommands[command] {
+		return nil
+	}
+	probe := desktop.Run([]string{"permissions"})
+	state, version := desktopAccessibilityState(probe.Stdout)
+	if state == "" || state == "granted" {
+		return nil
+	}
+	return desktopPermissionRefusal(command, state, version)
+}
+
+// desktopAccessibilityState reads the accessibility state and the protocol
+// version out of one `permissions` envelope.
+func desktopAccessibilityState(stdout string) (string, string) {
+	var record map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimRight(stdout, "\n")), &record); err != nil {
+		return "", ""
+	}
+	version, _ := record["version"].(string)
+	data, _ := record["data"].(map[string]any)
+	accessibility, _ := data["accessibility"].(map[string]any)
+	state, _ := accessibility["state"].(string)
+	return strings.TrimSpace(state), version
 }
 
 // agentToolsDesktopWantsOutput reports an explicit request for the payload.
