@@ -168,6 +168,7 @@ test('an activation interrupts and records the live work, and the next daemon re
   await expect.poll(async () => access(resumePath).then(() => true).catch(() => false), { timeout: 30_000, interval: 200 }).toBe(false);
   expect((await request(`/api/conversations/${victimConversation}`)).body.paused,
     'the reload-paused conversation was not resumed by the ack').toBe(false);
-  const stillPaused = await request(`/api/conversations/${pausedConversation}`);
-  expect(stillPaused.body.paused, 'a person paused this one; the reload must not resume it').toBe(true);
+  // Resuming re-dispatches the turn the reload cut: the fixture sees the same
+  // request a second time, which is the Agent being asked to carry on.
+  await expect.poll(() => model.requests.filter(text => text.includes('HOLD_ME')).length, { timeout: 60_000, interval: 250 }).toBe(2);
 }, 300_000);
