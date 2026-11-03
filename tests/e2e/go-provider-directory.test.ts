@@ -117,7 +117,10 @@ test('the provider directory shows what may be configured, and shows no secret',
       id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
       baseUrl: 'http://127.0.0.1:1/v1', contextWindow: 32000, maxTokens: 256, credentialId: 'local',
     }] },
-  }), { GRAPH_LOCAL_KEY: SECRET, GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY: SECRET });
+    // The host may have a real Grok or OpenCode Go login in its environment;
+    // this case asserts what an unconfigured platform looks like, so the
+    // ambient keys are cleared instead of trusted.
+  }), { GRAPH_LOCAL_KEY: SECRET, GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY: SECRET, GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN: '', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: '' });
 
   const directory = await api.request('/api/providers');
   expect(directory.status, JSON.stringify(directory.body)).toBe(200);

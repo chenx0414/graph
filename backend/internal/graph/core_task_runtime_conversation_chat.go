@@ -122,19 +122,7 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 	if command, ok := ParseGoalCommand(input.Text); ok {
 		command.RequestID = input.RequestId
 		result := runtime.Conversations().Goal(conversationId, command)
-		var goal *ConversationGoal
-		switch value := result["goal"].(type) {
-		case *ConversationGoal:
-			goal = value
-		case ConversationGoal:
-			copied := value
-			goal = &copied
-		}
-		AppendMessage(runtime.store, MessageInput{
-			ConversationID: conversationId, Role: MessageRoleSystem, Kind: "goal",
-			Text: goalLine(command.Action, goal), State: MessageStateDone,
-			Data: map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": command.Action},
-		})
+		AppendGoalLine(runtime.store, conversationId, command.Action, result)
 		return result
 	}
 	attachments := CleanAttachments(input.Attachments)

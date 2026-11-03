@@ -58,6 +58,15 @@ test('a conversation keeps one goal through set, show, pause, resume and clear',
   expect(cleared.body.cleared, JSON.stringify(cleared.body)).toBe(true);
   expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toBeNull();
 
+  // The very first message of a new conversation is a command too: it must not
+  // be sent to the model, and the conversation is titled by the objective.
+  const first = await request('/api/conversations', { text: '/goal 首个消息就是目标 +40', requestId: 'goal-first' });
+  expect(first.status, JSON.stringify(first.body)).toBe(200);
+  expect(first.body).toMatchObject({ command: 'goal', action: 'set', title: '首个消息就是目标' });
+  expect(first.body.goal).toMatchObject({ objective: '首个消息就是目标', status: 'active', budgetTokens: 40 });
+  const firstView = await request(`/api/conversations/${first.body.conversationId}`);
+  expect((firstView.body.messages ?? []).some((message: { kind?: string; text?: string }) => message.kind === 'goal' && message.text?.includes('首个消息就是目标'))).toBe(true);
+
   // A bare /goal only shows; a plain message is not a command.
   expect((await request(`/api/conversations/${conversationId}/messages`, { text: '/goal', requestId: 'goal-show' })).body.goal).toBeNull();
   expect((await request(`/api/conversations/${conversationId}/messages`, { text: 'hello again', requestId: 'plain' })).body.command).toBeUndefined();

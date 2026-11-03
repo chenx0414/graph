@@ -98,7 +98,15 @@ export async function configFile(dir: string, baseUrl: string, extra: Record<str
 }
 
 export async function start(dir: string, path: string) {
-  const daemon = await launchCli(dir, { configPath: path, stateDir: join(dir, 'state'), webDir, env: { HOME: dir, GRAPH_SYNTH_KEY: SECRET } });
+  // The console under test declares one local credential. Ambient subscription
+  // logins from the host would add platforms to the vendor picker and make the
+  // case depend on the machine, so they are cleared.
+  const daemon = await launchCli(dir, { configPath: path, stateDir: join(dir, 'state'), webDir, env: {
+    HOME: dir, GRAPH_SYNTH_KEY: SECRET,
+    GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: '', GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN: '',
+    GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN: '', GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY: '',
+    GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY: '',
+  } });
   cleanup.push(() => daemon.close());
   return daemon;
 }

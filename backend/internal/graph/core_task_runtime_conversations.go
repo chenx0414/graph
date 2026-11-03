@@ -34,6 +34,18 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			panic(err)
 		}
 	}
+	// A `/goal …` line typed as the first message of a new conversation is a
+	// command, not a message the model has to interpret. It is applied after
+	// the create transaction commits, because the goal store writes through
+	// its own statements.
+	firstText := ""
+	if input.Text != nil {
+		firstText = strings.TrimSpace(*input.Text)
+	}
+	goalCommand, goalFirst := ParseGoalCommand(firstText)
+	if len(attachments) > 0 {
+		goalFirst = false
+	}
 	result := runtime.store.Command("conversations", input.RequestId, map[string]any{
 		"type":          "create",
 		"projectId":     input.ProjectId,
@@ -75,6 +87,8 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		title := "新对话"
 		if input.Title != nil && strings.TrimSpace(*input.Title) != "" {
 			title = strings.TrimSpace(*input.Title)
+		} else if goalFirst {
+			title = goalCommand.Objective
 		} else if text != "" {
 			title = text
 		}
@@ -137,6 +151,17 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		}
 		cursor := runtime.store.Event(taskId, "conversation.created", map[string]any{"conversationId": conversationId, "projectId": projectId, "title": title})
 		var messageId any
+		if goalFirst {
+			// No user chat message is admitted: the goal line is written after
+			// the command returns, so the turn never starts for a command.
+			return map[string]any{
+				"conversationId": conversationId,
+				"taskId":         taskId,
+				"title":          title,
+				"messageId":      nil,
+				"cursor":         cursor,
+			}
+		}
 		if text != "" || len(attachments) > 0 {
 			data := any(nil)
 			if len(attachments) > 0 {
@@ -183,6 +208,19 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 	record, _ := jsonRecord(result)
 	if record == nil {
 		return map[string]any{}
+	}
+	if !goalFirst {
+		return record
+	}
+	goalCommand.RequestID = input.RequestId
+	applied := runtime.Conversations().Goal(conversationId, goalCommand)
+	line := AppendGoalLine(runtime.store, conversationId, goalCommand.Action, applied)
+	record["command"] = "goal"
+	record["action"] = goalCommand.Action
+	record["goal"] = applied["goal"]
+	record["messageId"] = line.Id
+	if line.Cursor != nil {
+		record["cursor"] = *line.Cursor
 	}
 	return record
 }

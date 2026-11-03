@@ -192,7 +192,13 @@ func goalLine(action string, goal *ConversationGoal) string {
 		}
 		return line
 	case "extend":
-		return "目标预算已延长到 " + strconv.FormatInt(goal.BudgetTokens, 10) + " tokens，目标恢复进行中：" + goal.Objective
+		line := "目标预算已延长到 " + strconv.FormatInt(goal.BudgetTokens, 10) + " tokens"
+		if goal.Status == GoalBudgetLimit {
+			line += "，目标恢复进行中：" + goal.Objective
+		} else if goal.Status != GoalActive {
+			line += "（目标当前是 " + goal.Status + "，用 /goal <目标> 重新开始）"
+		}
+		return line
 	case "pause":
 		return "目标已暂停：" + goal.Objective
 	case "resume":
@@ -253,4 +259,23 @@ func AccountGoalUsage(store *TaskStore, conversationID string, total int64, now 
 			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "budget_limited"},
 		})
 	}
+}
+
+// AppendGoalLine writes the single visible line one /goal action leaves in the
+// conversation. Both the message endpoint and the first message of a new
+// conversation go through it, so the two paths cannot drift.
+func AppendGoalLine(store *TaskStore, conversationID, action string, result map[string]any) AppendedMessage {
+	var goal *ConversationGoal
+	switch value := result["goal"].(type) {
+	case *ConversationGoal:
+		goal = value
+	case ConversationGoal:
+		copied := value
+		goal = &copied
+	}
+	return AppendMessage(store, MessageInput{
+		ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
+		Text: goalLine(action, goal), State: MessageStateDone,
+		Data: map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": action},
+	})
 }
