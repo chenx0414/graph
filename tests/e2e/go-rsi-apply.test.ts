@@ -447,6 +447,38 @@ test('another track\'s uncommitted work is left alone and stays out of the commi
   expect(await readFile(join(f.checkout, 'welcome.txt'), 'utf8')).toBe('hi\n');
 }, 180_000);
 
+test('a path written in Chinese is committed like any other', async () => {
+  // Measured 2026-11-03: `git diff --name-only` C-quotes a non-ASCII path by
+  // default ("docs/\347\256\241..."), the ownership check compared that quoted
+  // form with the path the change declared, and the change's own file read as
+  // somebody else's uncommitted work. Every documentation file whose name is
+  // Chinese was uncommittable through apply_rsi_change.
+  const f = await fixture(() => [[{
+    id: 'cjk',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      ...base,
+      changes: [{ path: '说明.md', action: 'write', content: '# 说明\n' }],
+      checks: [{ command: 'node', args: ['-e', "if(!require('node:fs').existsSync('说明.md'))process.exit(1)"] }],
+    }),
+  }]]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-cjk' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+
+  const observed = f.provider.observed;
+  await expect.poll(() => observed.has('cjk'), { timeout: 90_000, interval: 250 }).toBe(true);
+  const receipt = observed.get('cjk')!;
+  expect(receipt, 'a non-ASCII path is not somebody else\'s work').not.toMatch(/Uncommitted changes outside this RSI change/);
+  expect(receipt).toContain('"status":"applied"');
+  expect(f.git(['-c', 'core.quotepath=false', 'show', '--pretty=format:', '--name-only', 'HEAD']).split('\n').filter(Boolean)).toEqual(['说明.md']);
+  expect(await readFile(join(f.checkout, '说明.md'), 'utf8')).toBe('# 说明\n');
+  expect(f.git(['status', '--porcelain'])).toBe('');
+}, 180_000);
+
 test('a dry run applies the change, runs the check and restores the checkout', async () => {
   const f = await fixture(() => [[{
     id: 'dry',

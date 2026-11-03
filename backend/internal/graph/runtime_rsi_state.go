@@ -47,12 +47,16 @@ func (service *RsiService) rsiWorkingPath() string {
 
 // rsiDirtyPaths lists the uncommitted paths in the checkout. Checks run against the working tree, so a
 // path here that the commit would not contain makes a green run prove the wrong thing.
+//
+// Measured 2026-11-03: git C-quotes a non-ASCII name by default ("说明.md" came
+// back as "\350\257\264\346\230\216.md"), so the quoted form never equalled the
+// path a change declared and the change's own file read as somebody else's
+// uncommitted work - every documentation path written in Chinese was
+// uncommittable. `-z` hands back the bytes of each path instead of a rendering.
 func rsiDirtyPaths(root string) []string {
 	seen := map[string]bool{}
-	for _, args := range [][]string{{"diff", "--name-only", "HEAD"}, {"ls-files", "--others", "--exclude-standard"}} {
-		result := Git(root, args, nil, nil)
-		for _, line := range strings.Split(result.Stdout, "\n") {
-			path := strings.TrimSpace(line)
+	for _, args := range [][]string{{"diff", "--name-only", "-z", "HEAD"}, {"ls-files", "--others", "--exclude-standard", "-z"}} {
+		for _, path := range strings.Split(GitRaw(root, args, nil, nil).Stdout, "\x00") {
 			if path != "" {
 				seen[path] = true
 			}

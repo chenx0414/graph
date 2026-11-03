@@ -73,21 +73,17 @@ func CheckedOutBranch(repo string) *string {
 }
 
 // IsClean is true when every porcelain line sits under an ignored prefix.
+//
+// The status is read with `-z` for the same reason rsiDirtyPaths does: the
+// default output C-quotes a non-ASCII path, and a quoted path never matches the
+// prefix it belongs to.
 func IsClean(cwd string, ignore []string) bool {
 	prefixes := []string{}
 	for _, item := range ignore {
 		prefixes = append(prefixes, gitReal(item))
 	}
-	for _, line := range strings.Split(Git(cwd, []string{"status", "--porcelain", "-u"}, nil, nil).Stdout, "\n") {
-		if line == "" {
-			continue
-		}
-		shown := line
-		if len(shown) > 3 {
-			shown = shown[3:]
-		}
-		shown = strings.Trim(shown, "\"")
-		file := gitReal(filepath.Join(cwd, shown))
+	for _, record := range parseStatus(GitRaw(cwd, []string{"status", "--porcelain=v1", "-z", "-u"}, nil, nil).Stdout) {
+		file := gitReal(filepath.Join(cwd, record.Path))
 		matched := false
 		for _, prefix := range prefixes {
 			if file == prefix || strings.HasPrefix(file, prefix+"/") {
