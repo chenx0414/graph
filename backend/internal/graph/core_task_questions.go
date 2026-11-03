@@ -51,6 +51,25 @@ func (s *TaskStore) ResolveNodeBudgetQuestions(taskID, nodeID string, answer any
 	return kernelChanges(s.DB, "UPDATE questions SET status='resolved',answer=? WHERE task_id=? AND node_id=? AND kind='budget' AND status='open'", CanonicalJSON(answer), taskID, nodeID)
 }
 
+// ResolveOpenHumanChecks answers the open human acceptance questions of one
+// criterion, and says which ones it answered.
+//
+// A user who waived the item has answered the question they were asked. Leaving
+// it open keeps the graph blocked on a question nobody is going to answer, and
+// keeps asking the person for a decision they already made.
+func (s *TaskStore) ResolveOpenHumanChecks(taskID, acceptanceID string, answer any) []string {
+	rows := kernelRows(s.DB, `SELECT id FROM questions WHERE task_id=? AND kind='human_check' AND status='open'
+    AND json_extract(data,'$.acceptanceId')=? ORDER BY rowid`, taskID, acceptanceID)
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		id := kernelString(row["id"])
+		if kernelChanges(s.DB, "UPDATE questions SET status='resolved',answer=? WHERE id=? AND status='open'", CanonicalJSON(answer), id) == 1 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // AmendQuestionData replaces the data of one question, which is how a
 // question that is still open learns something new.
 func (s *TaskStore) AmendQuestionData(questionID string, data any) {

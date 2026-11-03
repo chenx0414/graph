@@ -15,6 +15,8 @@ export interface ResponsePlan {
   finishReason?: 'stop' | 'length' | 'tool_calls';
   usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number }; completion_tokens_details?: { reasoning_tokens: number } } | null;
   status?: number;
+  /** Headers of a non-200 answer, so a case can say what a provider asked for (Retry-After). */
+  headers?: Record<string, string>;
   error?: string;
   /** Vendor error code; defaults to context overflow for existing compaction fixtures. */
   errorCode?: string;
@@ -68,7 +70,7 @@ export async function openaiServer(plans: ResponsePlan[]) {
     const plan = plans.shift() ?? { text: 'Unexpected extra request' };
     await plan.beforeReply?.();
     if (plan.status) {
-      res.writeHead(plan.status, { 'content-type': 'application/json', ...(plan.redirect ? { location: plan.redirect } : {}) });
+      res.writeHead(plan.status, { 'content-type': 'application/json', ...(plan.headers ?? {}), ...(plan.redirect ? { location: plan.redirect } : {}) });
       res.end(JSON.stringify({ error: { message: plan.error ?? 'Service unavailable', type: 'invalid_request_error', code: plan.errorCode ?? 'context_length_exceeded' }, usage: plan.usage }));
       return;
     }

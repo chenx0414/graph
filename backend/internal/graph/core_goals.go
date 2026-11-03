@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -9,15 +8,28 @@ import (
 // A goal is a persistent objective one conversation keeps working toward.
 //
 // Measured 2026-11-03 (Codex /goal): the objective lives outside the chat as
-// one row per thread with a status, a token budget and a completion note, so a
-// turn can end while the work continues and the budget can stop it. The same
-// separation applies here: a `/goal` line is a command, not a message the model
-// has to interpret.
+// one row per thread with a status and a completion note, so a turn can end
+// while the work continues. The same separation applies here: a `/goal` line is
+// a command, not a message the model has to interpret.
+//
+// A goal has no budget. What stops it is the model saying the objective is done
+// or genuinely blocked, the provider refusing the turn for capacity reasons, or
+// the person pausing, clearing or replacing the objective. A numeric cap on how
+// many turns a goal may run is exactly what this file does not contain: the
+// brake is the model's own report, not a count.
 const (
 	GoalActive       = "active"
 	GoalPaused       = "paused"
+	GoalUsageLimited = "usage_limited"
+	// GoalVerifying means the working model says the objective is done and an
+	// independent acceptance turn is judging that claim. It is neither done nor
+	// abandoned: the next verdict decides.
+	GoalVerifying = "verifying"
+	GoalCompleted = "completed"
+	// GoalBudgetLimit is the status a goal used to reach when its budget ran
+	// out. Budgets are retired: nothing writes it any more, and a stored row
+	// that still carries it is read back as GoalPaused.
 	GoalBudgetLimit  = "budget_limited"
-	GoalCompleted    = "completed"
 	goalCommand      = "/goal"
 	goalObjectiveMax = 4000
 	goalNoteMax      = 500
@@ -28,23 +40,37 @@ type ConversationGoal struct {
 	ConversationID string `json:"conversationId"`
 	Objective      string `json:"objective"`
 	Status         string `json:"status"`
-	BudgetTokens   int64  `json:"budgetTokens"`
-	UsedTokens     int64  `json:"usedTokens"`
-	CheckNote      string `json:"checkNote,omitempty"`
-	CreatedAt      int64  `json:"createdAt"`
-	UpdatedAt      int64  `json:"updatedAt"`
+	// BudgetTokens is the field a goal used to carry a spent-limit in. Budgets
+	// are retired: it reads 0 and is written 0, whatever the column still says.
+	BudgetTokens int64  `json:"budgetTokens"`
+	UsedTokens   int64  `json:"usedTokens"`
+	CheckNote    string `json:"checkNote,omitempty"`
+	CreatedAt    int64  `json:"createdAt"`
+	UpdatedAt    int64  `json:"updatedAt"`
 }
 
 // Goal reads the goal of one conversation, or nil when it has none.
+//
+// A row written while budgets existed can still say budget_limited. Reading it
+// as paused is what makes `/goal resume` the one way back: reaching a number no
+// longer stops a goal, and an old row that says it did is the same situation as
+// a person pausing. The stored budget is not read at all - not by the console,
+// not by the continuation check, not by resume - so a historical number cannot
+// brake anything the day after it was written and then cleared on the next
+// write.
 func (s *TaskStore) Goal(conversationID string) *ConversationGoal {
 	row := kernelRow(s.Db, `SELECT conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at
 		FROM conversation_goals WHERE conversation_id=?`, conversationID)
 	if row == nil {
 		return nil
 	}
+	status := kernelString(row["status"])
+	if status == GoalBudgetLimit {
+		status = GoalPaused
+	}
 	return &ConversationGoal{
 		ConversationID: kernelString(row["conversation_id"]), Objective: kernelString(row["objective"]),
-		Status: kernelString(row["status"]), BudgetTokens: kernelInt(row["budget_tokens"]),
+		Status: status, BudgetTokens: 0,
 		UsedTokens: kernelInt(row["used_tokens"]), CheckNote: kernelString(row["check_note"]),
 		CreatedAt: kernelInt(row["created_at"]), UpdatedAt: kernelInt(row["updated_at"]),
 	}
@@ -101,12 +127,13 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 		if objective == "" || len(objective) > goalObjectiveMax {
 			Raise("invalid_input", "The goal objective must be 1 to 4000 bytes")
 		}
-		if input.BudgetTokens < 0 {
-			Raise("invalid_input", "The goal budget must not be negative")
+		// A number a person still types is not an error and not silence: the
+		// objective is set as usual and the goal has no ceiling.
+		if input.BudgetTokens > 0 {
+			result["budgetIgnored"] = true
 		}
 		result["goal"] = runtime.store.PutGoal(ConversationGoal{
 			ConversationID: conversationID, Objective: objective, Status: GoalActive,
-			BudgetTokens: input.BudgetTokens,
 		}, now)
 	case "pause", "resume", "clear", "done", "extend":
 		goal := runtime.store.Goal(conversationID)
@@ -120,10 +147,14 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 			}
 			goal.Status = GoalPaused
 		case "resume":
-			if goal.Status != GoalPaused && goal.Status != GoalBudgetLimit {
-				Raise("invalid_state", "Only a paused or budget-limited goal can be resumed")
+			if goal.Status != GoalPaused && goal.Status != GoalUsageLimited && goal.Status != GoalVerifying {
+				Raise("invalid_state", "Only a paused or usage-limited goal can be resumed")
 			}
 			goal.Status = GoalActive
+			// Resume is the one moment a historical row is rewritten anyway:
+			// clear the retired number instead of carrying it into the turn it
+			// just started.
+			goal.BudgetTokens = 0
 		case "done":
 			if goal.Status == GoalCompleted {
 				Raise("invalid_state", "This goal is already completed")
@@ -131,13 +162,13 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 			goal.Status = GoalCompleted
 			goal.CheckNote = utf16Slice(strings.TrimSpace(input.CheckNote), goalNoteMax)
 		case "extend":
+			// `/goal +N` used to buy more turns. There is nothing to buy now,
+			// so the command says so and changes nothing.
 			if input.BudgetTokens <= 0 {
 				Raise("invalid_input", "Extending a goal needs a positive token amount")
 			}
-			goal.BudgetTokens += input.BudgetTokens
-			if goal.Status == GoalBudgetLimit {
-				goal.Status = GoalActive
-			}
+			result["budgetIgnored"] = true
+			return result
 		case "clear":
 			runtime.store.DeleteGoal(conversationID)
 			result["cleared"] = true
@@ -174,7 +205,8 @@ func ParseGoalCommand(text string) (GoalInput, bool) {
 			rest = strings.TrimSpace(strings.TrimSuffix(rest, fields[len(fields)-1]))
 		}
 	}
-	// `/goal +N` extends the goal it already has instead of replacing it.
+	// `/goal +N` on its own used to extend the goal it has. It still parses as
+	// its own action so the person gets an answer instead of an error.
 	if rest == "" && budget > 0 {
 		return GoalInput{Action: "extend", BudgetTokens: budget}, true
 	}
@@ -189,21 +221,24 @@ func ParseGoalCommand(text string) (GoalInput, bool) {
 // should.
 func goalStartInstruction(goal *ConversationGoal) string {
 	return "开始执行这个目标：" + goal.Objective +
-		"\n\n不必先向我确认，直接开始推进；需要我裁决时再问。完成后用一句话说明结果。"
+		"\n\n不必先向我确认，直接开始推进；需要我裁决时再问。" + goalToolInstruction
 }
 
+// goalToolInstruction is the same closing rule on every turn a goal starts: the
+// model, not a turn counter, is what ends a goal.
+const goalToolInstruction = "\n目标真正完成并已验证时，用 goal 工具（action=complete）提交独立验收，并在 note 里报告最终已用 tokens——acceptance 通过才算完成；连续三轮都报告同一个阻碍时用 action=blocked 停下来等我。"
+
 // goalLine is the one visible line a /goal command leaves in the conversation.
-func goalLine(action string, goal *ConversationGoal) string {
+func goalLine(action string, goal *ConversationGoal, budgetIgnored bool) string {
 	switch action {
 	case "set":
 		// The card is the live view of the goal; this line is the receipt of
-		// the command. Repeating status and spend here left a line that
-		// contradicted the card the moment the goal was paused or extended.
-		line := "目标已设定：" + goal.Objective
-		if goal.BudgetTokens > 0 {
-			return line + "（预算 " + strconv.FormatInt(goal.BudgetTokens, 10) + " tokens，用完就停）"
+		// the command.
+		line := "目标已设定：" + goal.Objective + "（无预算上限：目标会一直推进到完成、被阻碍或你暂停）"
+		if budgetIgnored {
+			line = "目标已设定：" + goal.Objective + "（已忽略 +N：目标无预算上限，会一直推进到完成、被阻碍或你暂停）"
 		}
-		return line + "（未设预算：最多自动连续推进 " + strconv.Itoa(goalAutoTurnLimit) + " 轮）"
+		return line
 	case "clear":
 		return "目标已清除。"
 	case "done":
@@ -213,13 +248,7 @@ func goalLine(action string, goal *ConversationGoal) string {
 		}
 		return line
 	case "extend":
-		line := "目标预算已延长到 " + strconv.FormatInt(goal.BudgetTokens, 10) + " tokens"
-		if goal.Status == GoalBudgetLimit {
-			line += "，目标恢复进行中：" + goal.Objective
-		} else if goal.Status != GoalActive {
-			line += "（目标当前是 " + goal.Status + "，用 /goal <目标> 重新开始）"
-		}
-		return line
+		return "目标现在没有上限：不需要追加预算，它会一直推进到完成、被阻碍，或你 /goal pause。"
 	case "pause":
 		return "目标已暂停：" + goal.Objective
 	case "resume":
@@ -228,139 +257,20 @@ func goalLine(action string, goal *ConversationGoal) string {
 	if goal == nil {
 		return "当前没有目标。用 /goal <目标> 设置。"
 	}
-	line := "当前目标：「" + goal.Objective + "」（" + goal.Status + "，已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens"
-	if goal.BudgetTokens > 0 {
-		line += " / 预算 " + strconv.FormatInt(goal.BudgetTokens, 10)
-	}
+	line := "当前目标：「" + goal.Objective + "」（" + goal.Status + "，已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens，未设上限"
 	return line + "）"
 }
 
 // goalPromptSection is the standing objective as the model sees it. It is
 // appended to a master turn's prompt only while the goal is active, so a
-// paused, budget-limited or completed goal changes nothing the model reads.
+// paused, usage-limited or completed goal changes nothing the model reads.
 func goalPromptSection(goal *ConversationGoal) string {
 	if goal == nil || goal.Status != GoalActive {
 		return ""
 	}
-	funds := "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens，未设预算"
-	if goal.BudgetTokens > 0 {
-		remaining := goal.BudgetTokens - goal.UsedTokens
-		if remaining < 0 {
-			remaining = 0
-		}
-		funds = "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " / 预算 " + strconv.FormatInt(goal.BudgetTokens, 10) +
-			" tokens，剩余 " + strconv.FormatInt(remaining, 10)
-	}
+	funds := "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens，未设上限"
 	return "\n\n# Standing goal\nThis conversation has one standing objective the user set outside the chat. Keep it in view for this turn and prefer work that advances it:\n「" + goal.Objective + "」\n" + funds +
-		"\nWhen the objective is genuinely done and verified, say so plainly so the user can run /goal done. Do not claim completion before the work is verified."
-}
-
-// AccountGoalUsage adds one settled master turn to the conversation's goal and
-// closes the goal once its budget is spent. The transition is visible: the
-// console shows the same line a /goal command leaves.
-func AccountGoalUsage(store *TaskStore, conversationID string, total int64, now int64) {
-	if total <= 0 {
-		return
-	}
-	goal := store.Goal(conversationID)
-	if goal == nil || goal.Status != GoalActive {
-		return
-	}
-	goal.UsedTokens += total
-	if goal.BudgetTokens > 0 && goal.UsedTokens >= goal.BudgetTokens {
-		goal.Status = GoalBudgetLimit
-	}
-	updated := store.PutGoal(*goal, now)
-	if updated.Status == GoalBudgetLimit {
-		AppendMessage(store, MessageInput{
-			ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
-			Text: "目标预算已用完（已用 " + strconv.FormatInt(updated.UsedTokens, 10) + " / 预算 " + strconv.FormatInt(updated.BudgetTokens, 10) +
-				" tokens），目标已停止推进。用 /goal +N 追加预算，或 /goal clear 清除目标。",
-			State: MessageStateDone,
-			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "budget_limited"},
-		})
-	}
-}
-
-// goalAutoTurnLimit bounds a goal that has no budget. A budget is what stops a
-// goal that keeps working: without one the loop has no brake, so such a goal
-// advances this many turns in a row and then pauses for a person to confirm.
-const goalAutoTurnLimit = 4
-
-// goalContinueText is the instruction one automatic continuation starts from.
-func goalContinueText(goal *ConversationGoal) string {
-	return "继续推进目标：" + goal.Objective +
-		"\n\n这是自动续跑：上一轮结束后目标仍在进行中。接着做，不必向我确认；目标真正完成时用一句话说明结果。"
-}
-
-// ContinueGoal turns a settled turn into the next one while the goal still has
-// room to work: a goal is the work, so it does not stop just because one turn
-// ended. It reports whether it queued a continuation.
-//
-// The brakes are deliberate. A goal with a budget stops when the budget is
-// spent; a goal without one advances goalAutoTurnLimit turns and then pauses,
-// because nothing else would ever stop it. A turn that asked the person a
-// question, a message already waiting, and an outcome that is not a clean
-// completion all stop it too - each of those means the next thing to happen
-// belongs to the person, not to the goal.
-func ContinueGoal(store *TaskStore, conversationID string, now int64) bool {
-	goal := store.Goal(conversationID)
-	if goal == nil || goal.Status != GoalActive {
-		return false
-	}
-	if len(PendingMessages(store, conversationID, 1)) > 0 {
-		return false
-	}
-	conversation := ConversationRowOf(store, conversationID)
-	if kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND status='open' LIMIT 1", conversation.AnchorTaskId) != nil {
-		return false
-	}
-	if goal.BudgetTokens > 0 {
-		if goal.UsedTokens >= goal.BudgetTokens {
-			return false
-		}
-	} else if goalContinueStreak(store, conversationID) >= goalAutoTurnLimit {
-		goal.Status = GoalPaused
-		store.PutGoal(*goal, now)
-		AppendMessage(store, MessageInput{
-			ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
-			Text: "目标已自动连续推进 " + strconv.Itoa(goalAutoTurnLimit) + " 轮，先暂停等你确认。用 /goal resume 继续，或用 /goal +N 给预算让目标一直跑到预算用完。",
-			State: MessageStateDone,
-			Data:  map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": "auto_paused"},
-		})
-		return false
-	}
-	AppendMessage(store, MessageInput{
-		ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat",
-		Text: goalContinueText(goal), State: MessageStatePending,
-		Data: map[string]any{"source": map[string]any{"kind": "goal_continue", "objective": goal.Objective}},
-	})
-	return true
-}
-
-// goalContinueStreak counts the automatic continuations since the last message
-// a person wrote, so the limit applies to one unbroken run rather than to the
-// goal for ever.
-func goalContinueStreak(store *TaskStore, conversationID string) int {
-	rows := kernelRows(store.Db, "SELECT data FROM messages WHERE conversation_id=? AND role='user' ORDER BY seq DESC LIMIT 64", conversationID)
-	count := 0
-	for _, row := range rows {
-		kind := ""
-		if data := kernelString(row["data"]); data != "" {
-			var parsed map[string]any
-			if err := json.Unmarshal([]byte(data), &parsed); err == nil {
-				if source, ok := parsed["source"].(map[string]any); ok {
-					kind, _ = source["kind"].(string)
-				}
-			}
-		}
-		if kind == "goal_continue" {
-			count++
-			continue
-		}
-		break
-	}
-	return count
+		"\nWhen the objective is genuinely done and verified, call the goal tool with action \"complete\" and report the final used tokens in note: it requests an independent acceptance check, and only a pass completes the goal. Do not claim completion before the work is verified. If the same blocker has stood in each of the last three rounds, call it with action \"blocked\"."
 }
 
 // AppendGoalLine writes the single visible line one /goal action leaves in the
@@ -375,9 +285,10 @@ func AppendGoalLine(store *TaskStore, conversationID, action string, result map[
 		copied := value
 		goal = &copied
 	}
+	ignored, _ := result["budgetIgnored"].(bool)
 	return AppendMessage(store, MessageInput{
 		ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
-		Text: goalLine(action, goal), State: MessageStateDone,
+		Text: goalLine(action, goal, ignored), State: MessageStateDone,
 		Data: map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": action},
 	})
 }

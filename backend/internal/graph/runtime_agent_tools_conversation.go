@@ -9,7 +9,7 @@ import (
 // agentToolsConversationHandlers are the handlers of the Conversation tools.
 func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
-		"ask_user":       func(id string, params map[string]any) any { return agentToolsAsk(input.OnAskUser, params) },
+		"ask_user": func(id string, params map[string]any) any { return agentToolsAsk(input.OnAskUser, params) },
 		"ask_supervisor": func(id string, params map[string]any) any {
 			return agentToolsSupervisor(input.OnAskSupervisor, input.OnNotifySupervisor, params)
 		},
@@ -69,6 +69,17 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 				return agentToolsText(stringifyJSON(input.Conversations.Resume(conversationID, requestID)))
 			}
 			panic(errors.New("Unsupported write action: use send, steer, pause or resume"))
+		},
+		"goal": func(id string, params map[string]any) any {
+			if input.Goal == nil {
+				panic(errors.New("This conversation has no goal to act on"))
+			}
+			receipt := input.Goal(AgentToolsGoal{
+				Action:    strings.TrimSpace(agentToolsStringOrEmpty(params["action"])),
+				Note:      agentToolsStringOrEmpty(params["note"]),
+				RequestID: strings.TrimSpace(agentToolsStringOrEmpty(params["requestId"])),
+			})
+			return agentToolsText(stringifyJSON(receipt))
 		},
 		"list_peers": func(id string, params map[string]any) any {
 			if peers == nil {

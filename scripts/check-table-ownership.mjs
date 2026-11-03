@@ -99,6 +99,9 @@ const OWNED = new Map([
   ['node_write_captures', 'core_write_ledger.go'],
   ['presets', 'catalog_catalog.go'],
   ['project_preparation', 'git_integration_prepare.go'],
+  // The limitation ledger is one module's own table, named here so the file that
+  // knows what a row means is the only file that writes one.
+  ['kernel_acceptance_limitations', 'core_kernel_acceptance_limitations.go'],
 ]);
 
 /**
@@ -178,6 +181,10 @@ function writesIn(source) {
  * outright: a new table has to be given one before it is written.
  */
 function ownsIt(name, table, declared) {
+  // A kernel table that names its own owner is held to that file; the prefix rule
+  // stays the default for every other kernel table.
+  const named = OWNED.get(table);
+  if (named !== undefined) return named === name;
   if (table.startsWith('kernel_')) return KERNEL_OWNER.test(name);
   const owner = OWNED.get(table);
   if (owner === undefined) return !declared.has(table);

@@ -6,8 +6,7 @@ import './goal-card.css';
 interface Goal {
   conversationId: string;
   objective: string;
-  status: 'active' | 'paused' | 'budget_limited' | 'completed';
-  budgetTokens: number;
+  status: 'active' | 'paused' | 'usage_limited' | 'verifying' | 'completed';
   usedTokens: number;
   checkNote?: string;
 }
@@ -15,7 +14,8 @@ interface Goal {
 const STATUS: Record<Goal['status'], { label: string; tone: 'success' | 'warn' | 'danger' | 'neutral' | 'accent' }> = {
   active: { label: '进行中', tone: 'success' },
   paused: { label: '已暂停', tone: 'warn' },
-  budget_limited: { label: '预算用完', tone: 'danger' },
+  usage_limited: { label: '额度用尽', tone: 'warn' },
+  verifying: { label: '验收中', tone: 'accent' },
   completed: { label: '已完成', tone: 'neutral' },
 };
 
@@ -25,13 +25,14 @@ function compact(value: number) {
 
 /** The standing goal of one conversation, as the person manages it: what the
  * thread is working toward, what it has spent, and the actions /goal offers as
- * commands. A conversation without a goal renders nothing. */
+ * commands. There is no budget: a goal runs until it is done, blocked or
+ * paused, so the card shows spend without a ceiling or a progress bar. A
+ * conversation without a goal renders nothing. */
 export function GoalCard({ conversationId }: { conversationId: string }) {
   const [goal, setGoal] = useState<Goal | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [amount, setAmount] = useState('10000');
   const [note, setNote] = useState('');
   const [closing, setClosing] = useState(false);
   const alive = useRef(true);
@@ -50,8 +51,9 @@ export function GoalCard({ conversationId }: { conversationId: string }) {
   useEffect(() => {
     alive.current = true;
     void load();
-    // The goal also changes while a turn is running (usage and the budget
-    // cutoff happen in the daemon), so the card refreshes on its own.
+    // The goal also changes while a turn is running (usage, completion and a
+    // provider capacity stop happen in the daemon), so the card refreshes on
+    // its own.
     const timer = setInterval(() => { void load(); }, 4000);
     return () => { alive.current = false; clearInterval(timer); };
   }, [load]);
@@ -74,26 +76,18 @@ export function GoalCard({ conversationId }: { conversationId: string }) {
 
   if (loading || !goal) return null;
   const status = STATUS[goal.status] ?? STATUS.active;
-  const spent = goal.budgetTokens > 0 ? Math.min(100, Math.round((goal.usedTokens / goal.budgetTokens) * 100)) : 0;
   return <section className="goal-card" data-testid="goal-card" data-status={goal.status}>
     <div className="goal-card-head">
       <Icon name="spark" size={15} />
       <strong>会话目标</strong>
       <Pill tone={status.tone} testid="goal-status">{status.label}</Pill>
-      <span className="goal-card-usage" data-testid="goal-usage">
-        已用 {compact(goal.usedTokens)} / {goal.budgetTokens > 0 ? compact(goal.budgetTokens) : '未设预算'} tokens
-      </span>
+      <span className="goal-card-usage" data-testid="goal-usage">已用 {compact(goal.usedTokens)} tokens</span>
     </div>
     <p className="goal-card-objective" data-testid="goal-objective">{goal.objective}</p>
-    {goal.budgetTokens > 0 && <div className="goal-card-meter" aria-hidden="true"><span style={{ width: `${spent}%` }} data-testid="goal-meter" /></div>}
     {goal.checkNote && <p className="muted" data-testid="goal-note">完成备注：{goal.checkNote}</p>}
     <div className="row goal-card-actions">
       {goal.status === 'active' && <Button size="sm" icon="pause" data-testid="goal-pause" disabled={busy} onClick={() => void act('pause')}>暂停目标</Button>}
-      {(goal.status === 'paused' || goal.status === 'budget_limited') && <Button size="sm" icon="play" data-testid="goal-resume" disabled={busy} onClick={() => void act('resume')}>恢复目标</Button>}
-      <span className="goal-card-extend">
-        <input className="input" style={{ width: 96 }} type="number" min={1} step={1000} value={amount} data-testid="goal-extend-amount" onChange={event => setAmount(event.target.value)} />
-        <Button size="sm" icon="plus" data-testid="goal-extend" disabled={busy} onClick={() => void act('extend', { budgetTokens: Number(amount) })}>追加预算</Button>
-      </span>
+      {(goal.status === 'paused' || goal.status === 'usage_limited') && <Button size="sm" icon="play" data-testid="goal-resume" disabled={busy} onClick={() => void act('resume')}>恢复目标</Button>}
       {goal.status !== 'completed' && (!closing
         ? <Button size="sm" icon="check" data-testid="goal-done" disabled={busy} onClick={() => setClosing(true)}>标记完成</Button>
         : <span className="goal-card-extend">

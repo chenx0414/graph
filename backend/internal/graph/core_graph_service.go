@@ -7,6 +7,10 @@ type GraphManagement interface {
 	GraphPatch(input GraphPatchInput) any
 	GraphInspect(input GraphInspectInput) any
 	GraphControl(input GraphControlInput) any
+	// WaiveAcceptance records the user's own waiver of one acceptance item.
+	// It is a separate door from GraphControl on purpose: the actor that signs
+	// for the user is the door, never a payload.
+	WaiveAcceptance(input GraphAcceptanceWaiveInput) any
 	GraphSend(input GraphSendInput) any
 	// HarnessFriction records friction the project met but has not solved.
 	HarnessFriction(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
@@ -65,6 +69,8 @@ type GraphControlInput struct {
 	RequestID       string
 	Text            string
 	Proof           string
+	// Limitations is what complete_with_limitations closes a blocked graph on.
+	Limitations []GraphAcceptanceLimitation
 }
 
 // GraphSendInput delivers a public input or a chat message.

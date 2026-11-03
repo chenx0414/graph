@@ -26,6 +26,8 @@ func (service *graphManagementService) GraphInspect(input GraphInspectInput) any
 		return service.kernel.ExecutionHistory(input.GraphId, historyQuery)
 	case "acceptance":
 		return GraphAcceptance(service.kernel, input.GraphId, service.artifacts)
+	case "limitations":
+		return service.kernel.AcceptanceLimitations(input.GraphId)
 	case "provider_calls":
 		if input.Id != nil && *input.Id != "" {
 			return service.kernel.ProviderCalls(input.GraphId, *input.Id)

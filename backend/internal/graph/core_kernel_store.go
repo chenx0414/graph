@@ -218,6 +218,10 @@ CREATE TABLE IF NOT EXISTS kernel_lifecycle(
   task_id TEXT PRIMARY KEY REFERENCES tasks(id), completion_requested INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS kernel_completion_delivery(
   task_id TEXT PRIMARY KEY REFERENCES tasks(id), commit_sha TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS kernel_acceptance_limitations(
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id),
+  acceptance_id TEXT NOT NULL, reason TEXT NOT NULL, evidence TEXT NOT NULL, actor TEXT NOT NULL,
+  commit_sha TEXT, revision_version INTEGER NOT NULL, request_id TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS kernel_graph_results(
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), output_name TEXT NOT NULL,
   source_id TEXT NOT NULL, value TEXT NOT NULL, protocol TEXT NOT NULL, revision_version INTEGER NOT NULL,
@@ -242,7 +246,10 @@ CREATE INDEX IF NOT EXISTS kernel_deliveries_execution ON kernel_deliveries(subm
 CREATE INDEX IF NOT EXISTS kernel_deliveries_to ON kernel_deliveries(task_id,to_endpoint);
 CREATE INDEX IF NOT EXISTS kernel_queue_node ON kernel_queue(task_id,node_id,state);
 CREATE INDEX IF NOT EXISTS kernel_executions_node ON kernel_executions(task_id,node_id);
-CREATE INDEX IF NOT EXISTS kernel_transitions_module ON kernel_module_transitions(task_id,module_id)
+CREATE INDEX IF NOT EXISTS kernel_transitions_module ON kernel_module_transitions(task_id,module_id);
+-- One request records one limitation per acceptance item, so a replayed request
+-- cannot append the same decision twice.
+CREATE UNIQUE INDEX IF NOT EXISTS kernel_acceptance_limitations_request ON kernel_acceptance_limitations(task_id,request_id,acceptance_id) WHERE request_id IS NOT NULL
 `
 
 // settleNodeAfterStop parks a node of a task that is stopping.

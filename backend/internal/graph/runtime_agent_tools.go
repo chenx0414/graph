@@ -179,6 +179,8 @@ type AgentToolsInput struct {
 	ReviewHumanCheck func(input AgentToolsHumanCheck) any
 	// ControlTask controls a task of this conversation.
 	ControlTask func(input AgentToolsControlTask) any
+	// Goal applies one model-reported goal action to this conversation's goal.
+	Goal func(input AgentToolsGoal) any
 	// WriteLedger records the writes one turn makes.
 	WriteLedger *AgentToolsWriteLedger
 }
@@ -279,6 +281,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		Fetch:           input.Fetch != nil,
 		Catalog:         input.Catalog != nil,
 		Harness:         input.GraphManagement.HarnessCompare != nil,
+		Goal:            input.Goal != nil,
 	}
 	if artifacts.present {
 		access := artifacts.access

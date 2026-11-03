@@ -467,5 +467,11 @@ func (app *GraphApp) serveConversationGoalAction(w http.ResponseWriter, r *http.
 	if value, ok := body["budgetTokens"].(float64); ok && value >= 0 {
 		input.BudgetTokens = int64(value)
 	}
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().Goal(r.PathValue("conversationId"), input))
+	conversationID := r.PathValue("conversationId")
+	applied := app.runtime.Conversations().Goal(conversationID, input)
+	// The card's resume button says the same thing the command says: the goal
+	// goes on, so the turn that works on it starts now instead of waiting for
+	// the person to speak again.
+	startGoalTurn(app.runtime.Conversations(), conversationID, input.Action, applied, input.RequestID)
+	writeJSON(w, http.StatusOK, applied)
 }

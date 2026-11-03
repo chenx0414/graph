@@ -100,13 +100,15 @@ test('the tool schema the provider receives is short enough to read, and keeps t
     // The cap ratchets with the product entry. When the default entry became
     // the global supervisor, the schema grew from 7,485 characters over 50
     // tools to 9,436 over 56: the supervisor gained ask_user, control_task and
-    // the work tools. The cap moved with that scope; the per-tool average
+    // the work tools. It grew again with the standing goal (independent
+    // acceptance), the closure-with-limitations action, and history_search:
+    // 10,400 over 54. The cap moved with that scope; the per-tool average
     // keeps one verbose tool from eating the room.
     expect(prose, `the tool schema spends ${prose} characters on descriptions and ${schema} on parameters:\n`
       + tools.map(tool => `${tool.name}: ${(tool.description ?? '').length}`).join('\n'))
-      .toBeLessThanOrEqual(9700);
+      .toBeLessThanOrEqual(10400);
     expect(prose / tools.length, `the ${tools.length} tool descriptions average ${Math.round(prose / tools.length)} characters`)
-      .toBeLessThanOrEqual(175);
+      .toBeLessThanOrEqual(200);
     // The schema is not mostly prose: the descriptions are no longer the
     // bigger half of what the provider reads.
     expect(prose, `the descriptions are ${prose} characters and the parameters ${schema}: the schema is mostly prose`)
