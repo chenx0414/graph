@@ -260,7 +260,9 @@ test('a public module input validates as a whole, reports the delivery it really
       { id: 'create', name: 'graph_create', args: { requestId: 'create', definition: MODULE_DEFINITION } },
       { id: 'send-invalid', name: 'graph_send', args: { graphId, input: 'start', value: { n: 'bad' } } },
       { id: 'inspect-module', name: 'graph_inspect', args: { graphId, query: 'module', id: 'route' } },
-      { id: 'send-valid', name: 'graph_send', args: { graphId, input: 'start', value: { n: 7 } } },
+      // The value that fits is handed over the way a model often does it: as an
+      // encoded JSON string. It must arrive as the object, not as text.
+      { id: 'send-valid', name: 'graph_send', args: { graphId, input: 'start', value: '{"n":7}' } },
       {
         id: 'send-refused', name: 'graph_send', args: { graphId, nodeId: 'route', input: 'job', value: { n: 8 } },
         before: async () => {
@@ -290,6 +292,7 @@ test('a public module input validates as a whole, reports the delivery it really
     // The value that fits is accepted, and the delivery says where it came
     // from: the outside, directly, on the declared endpoint.
     const accepted = JSON.parse(master.results.get('send-valid')!) as { delivery: Record<string, unknown> };
+    // The model sent "{\"n\":7}": the delivery reads as the object, not text.
     expect(accepted.delivery).toMatchObject({
       source: 'direct', edgeId: null, fromEndpoint: 'main', toEndpoint: 'route.job',
       protocol: 'number', value: { n: 7 }, revisionVersion: 1,

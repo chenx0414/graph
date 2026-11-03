@@ -109,7 +109,7 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 				request.Input = &name
 			}
 			if value, ok := input["value"]; ok {
-				request.Value = value
+				request.Value = graphSendValue(value)
 			}
 			if text, ok := input["text"].(string); ok {
 				request.Text = &text
