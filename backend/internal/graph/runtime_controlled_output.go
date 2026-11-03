@@ -20,9 +20,27 @@ func (stream *controlledStream) fail(err error) {
 		StopReason: "error", ErrorMessage: stringPointer(err.Error()), Timestamp: NowMillis(),
 	}
 	stream.message = message
-	stream.events = append(stream.events, map[string]any{
-		"type": "error", "reason": "error", "error": asMap(message),
-	})
+	event := map[string]any{"type": "error", "reason": "error", "error": asMap(message)}
+	if stream.transport {
+		event["transport"] = true
+	}
+	stream.events = append(stream.events, event)
+}
+
+// failTransport records a failure the provider boundary caused before any answer
+// byte arrived.
+//
+// Nothing was answered, so the attempt is settled as producing no usage instead
+// of leaving an unknown call that would refuse the next send - and the failure
+// is marked as one a configured fallback model may take over. A send that
+// already delivered part of an answer is not a transport failure: its usage
+// stays unknown and its failure stands, because a half-written answer is
+// evidence somebody has to look at, not a reason to ask elsewhere.
+func (stream *controlledStream) failTransport(err error) {
+	if stream.message == nil || len(stream.message.Content) == 0 {
+		stream.transport = true
+	}
+	stream.fail(err)
 }
 
 // providerOf reads the provider one model names.
@@ -129,7 +147,10 @@ func (stream *controlledStream) readEvents(response *http.Response) {
 		failure = stream.brokenToolCall()
 	}
 	if failure != nil {
-		stream.fail(failure)
+		// A timeout or a stream the provider cut is a boundary failure when no
+		// answer byte arrived; failTransport decides that and leaves a partial
+		// answer's failure standing as it is.
+		stream.failTransport(failure)
 		return
 	}
 	reason := stream.finishReason

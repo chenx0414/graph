@@ -94,6 +94,10 @@ type ModelEntry struct {
 	Headers              map[string]string  `json:"headers,omitempty"`
 	CredentialId         string             `json:"credentialId,omitempty"`
 	ModelId              string             `json:"modelId,omitempty"`
+	// FallbackModelId names the model this one falls back to when a send fails
+	// at the provider boundary (connection error, timeout, non-2xx, a stream
+	// that ended before its answer). It is one hop: a fallback names no fallback.
+	FallbackModelId string `json:"fallbackModelId,omitempty"`
 }
 
 type ModelEntryView struct {

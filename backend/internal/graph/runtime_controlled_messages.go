@@ -38,6 +38,10 @@ type controlledStream struct {
 	settled        bool
 	invocation     string
 	finishReason   string
+	// transport is set when the send failed at the provider boundary before any
+	// answer byte arrived: such a failure may be taken over by the model's
+	// configured fallback, and it is settled as producing no usage.
+	transport bool
 	// cancelRequest ends the provider request. It is called when the provider
 	// stops answering: the connection is still open then, and everything that
 	// reads the rest of it would wait for the provider to stop talking.
@@ -102,6 +106,9 @@ func (stream *controlledStream) run() {
 	transport, err := ControlledGatedProviderFetch(stream.broker, request, GatedProviderFetchOptions{
 		Reservation:     reservation,
 		RequestIDHeader: controlledRequestIDHeader(stream.candidate),
+		// A send with a fallback may be taken over: an attempt that produced no
+		// answer must not leave an unknown call behind that refuses the fallback.
+		ReclaimUnanswered: stream.usageOptions.HasFallback,
 		OnTransport:     stream.usageOptions.OnTransport,
 		FetchImpl: func(request *http.Request) (*http.Response, error) {
 			if stream.resolveKey != nil {
@@ -145,13 +152,20 @@ func (stream *controlledStream) run() {
 		},
 	})
 	if err != nil {
-		stream.fail(err)
+		stream.failTransport(err)
 		return
 	}
 	if transport.StatusCode < 200 || transport.StatusCode >= 300 {
 		transport.Body.Close()
-		stream.broker.Settle(stream.invocation, nil)
-		stream.fail(fmt.Errorf("Provider answered HTTP %d", transport.StatusCode))
+		if stream.usageOptions.HasFallback {
+			// Nothing was answered, so the call produced no usage - and the
+			// fallback's own send must not be refused as a send after an unknown
+			// one. Without a fallback the attempt keeps its unknown usage.
+			stream.settle(&controlledZeroUsage)
+		} else {
+			stream.broker.Settle(stream.invocation, nil)
+		}
+		stream.failTransport(fmt.Errorf("Provider answered HTTP %d", transport.StatusCode))
 		return
 	}
 	stream.readEvents(transport)

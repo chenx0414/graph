@@ -1,5 +1,5 @@
 {
-  "//": "The two independent provider entries, exactly as they are meant to be merged into models.entries of the application's graph.config.json. `credentials.grok` (secretRef GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN, platform grok) and `credentials.chatgpt` (secretRef GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN) must exist; both only ever carry a secretRef, never a key. Grok answers the chat-completions contract on the xAI endpoint; ChatGPT's Codex backend answers the Responses contract only, which is why that entry names openai-responses.",
+  "//": "The two independent provider entries, exactly as they are meant to be merged into models.entries of the application's graph.config.json. `credentials.grok` (secretRef GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN, platform grok) and `credentials.chatgpt` (secretRef GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN) must exist; both only ever carry a secretRef, never a key. Grok answers the chat-completions contract on the xAI endpoint; ChatGPT's Codex backend answers the Responses contract only, which is why that entry names openai-responses. The ChatGPT entry names Grok as its transport fallback (`fallbackModelId`): when the Codex backend breaks the connection before answering (EOF / timeout / non-2xx), the same review turn continues on Grok, and the graph records `graph.provider.fallback` with the primary model, the failure verbatim, the fallback model and `sameModel:false`. A model that answered badly is never re-asked elsewhere.",
   "models": {
     "entries": [
       {
@@ -12,7 +12,9 @@
         "contextWindow": 131072,
         "maxTokens": 8192,
         "credentialId": "grok",
-        "input": ["text"],
+        "input": [
+          "text"
+        ],
         "reasoning": true
       },
       {
@@ -25,8 +27,11 @@
         "contextWindow": 400000,
         "maxTokens": 8192,
         "credentialId": "chatgpt",
-        "input": ["text"],
-        "reasoning": true
+        "input": [
+          "text"
+        ],
+        "reasoning": true,
+        "fallbackModelId": "grok:grok-4.5"
       }
     ]
   }

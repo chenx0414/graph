@@ -6,19 +6,29 @@ import { expect, test } from 'vitest';
 
 import { launchCli } from '../helpers/cli-daemon.ts';
 import {
-  DATA, type ProviderCall, chatgptCredential, grokAccessToken, implementerProvider, independentEntries,
-  rows, scriptedProvider,
+  DATA, type ProviderCall, chatgptCredential, closingEndpoint, grokAccessToken, implementerProvider,
+  independentEntries, rows, scriptedProvider,
 } from './provider-independent-reviews.fixture.ts';
 
 /**
- * Two independent providers, each running for real.
+ * Two independent providers, each running for real - and a review that survives
+ * its preferred provider breaking the connection.
  *
- * Grok and ChatGPT are configured as their own model entries, they answer a
- * completion each through the daemon's own provider path, and the graph's
- * review node runs on one of them while the implementer runs on another model.
- * The report therefore names two different model ids, and the provider call
- * records - the same rows the kernel charges - are the evidence that the review
- * really came from the independent provider.
+ * Grok and ChatGPT are configured as their own model entries and each answers a
+ * completion through the daemon's own provider path. The graph's review node
+ * prefers ChatGPT and names Grok as its transport fallback, so when the Codex
+ * endpoint breaks the connection before answering, the same review turn
+ * continues on Grok: the report still reaches the graph, the two model ids are
+ * still different, and the failure is kept verbatim in the graph's own record
+ * (`graph.provider.fallback` with primaryModel, error, fallbackModel,
+ * sameModel) instead of being swallowed.
+ *
+ * The transport failure is made deterministic: the entry the graph uses keeps
+ * the delivered id, provider, api and modelId but points at a controlled
+ * endpoint that closes the connection, so this proves the fallback on every run
+ * rather than only when the real backend happens to break. The delivered entry's
+ * real Codex endpoint answers a real completion in the probe above, which is
+ * what proves the ChatGPT transport itself.
  */
 test('Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-independent-'));
@@ -54,6 +64,9 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
   const graphs: string[] = [];
   const graphIdOf = () => graphs[0] ?? '';
   const implementer = await implementerProvider();
+  // The primary the review node uses: the delivered ChatGPT entry, with its
+  // baseUrl pointing at an endpoint that closes the connection (EOF).
+  const closing = await closingEndpoint();
   /**
    * The reviewer's own execution, read from the kernel's own rows: it is done
    * when the execution it ran under stopped running, whether or not the model
@@ -109,10 +122,15 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
           baseUrl: master.baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'local' },
         { id: 'implementer', provider: 'graph-node-sender', modelId: 'implementer-model', grade: 'medium', api: 'openai-completions',
           baseUrl: implementer.baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'local' },
-        // The delivered independent entries, unchanged: Grok on the xAI
-        // endpoint (chat-completions) and ChatGPT on its Codex endpoint
-        // (Responses).
-        entries.grok, entries.chatgpt,
+        // Grok on the xAI endpoint (chat-completions): the review's fallback.
+        entries.grok,
+        // The delivered ChatGPT entry, with only its baseUrl moved to a
+        // controlled endpoint that closes the connection, so the transport
+        // failure the fallback answers happens on every run.
+        { ...entries.chatgpt, baseUrl: closing.baseUrl },
+        // The same delivered settings on the real Codex endpoint: the entry the
+        // probe below proves a real completion with.
+        { ...entries.chatgpt, id: 'chatgpt-live:gpt-6.1-sol', provider: 'chatgpt-live', fallbackModelId: undefined },
       ] },
     }));
     daemon = await launchCli(root, {
@@ -132,7 +150,7 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
     });
     // Each entry really completes: a conversation turn the provider answers.
     const replies: Record<string, string> = {};
-    const probes: [string, string][] = [['grok:grok-4.5', 'grok-ok'], ['chatgpt:gpt-6.1-sol', 'chatgpt-ok']];
+    const probes: [string, string][] = [['grok:grok-4.5', 'grok-ok'], ['chatgpt-live:gpt-6.1-sol', 'chatgpt-ok']];
     for (const [model, marker] of probes) {
       const created = await request('/api/conversations', {
         method: 'POST',
@@ -174,31 +192,63 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
     expect(master.failures, JSON.stringify(master.failures)).toEqual([]);
 
     const calls = JSON.parse(master.results.get('calls')!) as ProviderCall[];
-    const byNode = new Map(calls.map(call => [call.nodeId, call]));
-    // Two different model ids: the implementer's and the reviewer's.
-    const implementerCall = byNode.get('implement')!;
-    const reviewerCall = byNode.get('review')!;
-    expect(implementerCall.model.id).toBe('implementer');
-    expect(reviewerCall.model.id).toBe('chatgpt:gpt-6.1-sol');
-    expect(reviewerCall.model.id).not.toBe(implementerCall.model.id);
-    // The reviewer's call is the review recipe, and it settled against the
-    // provider: the independence is the kernel's own record, not a claim.
-    expect(reviewerCall.model.recipe).toMatchObject({ definition: 'reviewer@1', review: true });
-    expect(implementerCall.model.recipe).toMatchObject({ review: false });
-    expect(reviewerCall.state).toBe('settled');
-    expect(reviewerCall.model.api).toBe('openai-responses');
+    const byNode = new Map<string, ProviderCall>();
+    for (const call of calls) byNode.set(`${call.nodeId}:${call.model.id}`, call);
 
-    // The reviewer really ran (it read the work and answered) and its report
-    // reached the graph's own output.
-    const reviewCalls = calls.filter(call => call.nodeId === 'review');
-    expect(reviewCalls.every(call => call.model.id === 'chatgpt:gpt-6.1-sol')).toBe(true);
-    expect(reviewCalls.some(call => call.state === 'settled')).toBe(true);
+    // The implementer ran on its own model, and the review ran on another one:
+    // the two ids the report has to name are different.
+    const implementerCall = byNode.get('implement:implementer')!;
+    expect(implementerCall.model.recipe).toMatchObject({ review: false });
+    // A review turn may send more than once (it can look at the work before it
+    // reports). Every send that was answered was answered by the fallback: no
+    // call of the review turn carries ChatGPT's tokens.
+    const answered = calls.filter(call => call.nodeId === 'review' && call.state === 'settled'
+      && (call.usage?.input ?? 0) + (call.usage?.output ?? 0) > 0);
+    expect(answered.length).toBeGreaterThan(0);
+    expect(answered.every(call => call.model.id === 'grok:grok-4.5')).toBe(true);
+    expect(answered.every(call => call.model.id !== implementerCall.model.id)).toBe(true);
+    // The answering calls are the review recipe, settled against the provider:
+    // the independence is the kernel's own record, not a claim.
+    expect(answered.every(call => call.model.recipe?.definition === 'reviewer@1' && call.model.recipe.review)).toBe(true);
+
+    // The preferred model was tried first and produced nothing: its attempts are
+    // in the same turn's calls, and none of them is the answer.
+    const attempts = calls.filter(call => call.nodeId === 'review' && call.model.id === 'chatgpt:gpt-6.1-sol');
+    expect(attempts.length).toBeGreaterThan(0);
+    expect(attempts.every(call => call.model.api === 'openai-responses')).toBe(true);
+    expect(attempts.every(call => call.state !== 'settled' || (call.usage?.input ?? 0) + (call.usage?.output ?? 0) === 0)).toBe(true);
+
+    // The fallback is recorded on the graph with all four facts, and the failure
+    // is the provider's own text, byte for byte.
+    const events = await request(`/api/tasks/${graphIdOf()}/events`);
+    const fallbacks = (events.body as { type: string; data?: Record<string, unknown> }[])
+      .filter(event => event.type === 'graph.provider.fallback');
+    expect(fallbacks.length).toBeGreaterThan(0);
+    for (const event of fallbacks) {
+      expect(event.data).toMatchObject({
+        nodeId: 'review', primaryModel: 'chatgpt:gpt-6.1-sol', fallbackModel: 'grok:grok-4.5', sameModel: false,
+      });
+      expect(String(event.data!.error)).toContain(`${closing.baseUrl}/responses`);
+      expect(String(event.data!.error)).toContain('EOF');
+    }
+    // The endpoint really was asked, at the Responses path.
+    expect(closing.hits.some(hit => hit.endsWith('/backend-api/codex/responses'))).toBe(true);
+
+    // One review turn: the fallback continued it instead of starting over.
+    const reviewExecutions = rows<{ state: string }>(root,
+      "SELECT state FROM kernel_executions WHERE task_id=? AND node_id='review'", graphIdOf());
+    expect(reviewExecutions).toHaveLength(1);
+    expect(reviewExecutions[0]!.state).not.toBe('running');
+    expect(reviewExecutions[0]!.state).toBe('completed');
+
+    // The report reached the graph's own output, so the review really finished.
     const results = JSON.parse(master.results.get('results')!) as { output_name: string; value: unknown }[];
     expect(results.map(row => row.output_name)).toContain('report');
     // The implementer's own turn really happened: it wrote and submitted.
     expect(implementer.turns.length).toBeGreaterThanOrEqual(2);
+
   } finally {
-    await daemon?.close(); await master.close(); await implementer.close();
+    await daemon?.close(); await master.close(); await implementer.close(); await closing.close();
     await rm(root, { recursive: true, force: true });
   }
 }, 700_000);

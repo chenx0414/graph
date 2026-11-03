@@ -125,6 +125,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `modelId` | 否 | 上游真实模型 id（与配置 id 不同时） |
 | `cost` / `pricing` | 否 | 费用与价格表（影响预算与用量展示） |
 | `headers` | 否 | 该模型额外请求头 |
+| `fallbackModelId` | 否 | 传输层失败时接管这次发送的另一个模型 id（必须存在、不能是自己、只能一跳），见 [模型回退](model-fallback.md) |
 
 `openai-responses` 是 OpenAI Responses 传输：请求体是 `instructions` 加类型化的 `input` 项目（消息、`function_call`、`function_call_output`），工具声明是扁平的（`{type:"function",name,description,parameters}`），应答是 `response.*` 事件的 SSE，用量随最后一个 `response.completed` 事件到达。ChatGPT 的 Codex 后端（`https://chatgpt.com/backend-api/codex`）只认这一种契约，用 chat-completions 打过去会 404/400，所以 `chatgpt` 平台按 `openai-responses` 注册；该传输下的文本、工具调用与用量都已在真实补全里跑通。
 

@@ -182,5 +182,32 @@ export function rows<T>(root: string, query: string, ...params: (string | number
 
 export interface ProviderCall {
   id: string; nodeId: string; state: string;
+  usage?: { input?: number; output?: number } | null;
   model: { id: string; provider: string; api: string; recipe?: { definition: string; review: boolean } };
+}
+
+/**
+ * An endpoint that accepts the request and closes the connection without an
+ * answer, at the path a Responses send uses: the client sees the provider break
+ * the connection (EOF). It lets a test make that failure happen every run
+ * instead of only when a real backend happens to break.
+ */
+export async function closingEndpoint() {
+  const hits: string[] = [];
+  const server: Server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    hits.push(`${request.method ?? 'POST'} ${request.url ?? '/'}`);
+    // No status line, no headers: the connection dies the way a broken endpoint
+    // does, and the client reports EOF.
+    response.destroy();
+    request.socket.destroy();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    hits,
+    baseUrl: `http://127.0.0.1:${port}/backend-api/codex`,
+    close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); },
+  };
 }

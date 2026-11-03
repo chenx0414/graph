@@ -84,7 +84,9 @@ review 配方从声明连接与已受理投递追溯上游实现节点，排除�
 
 ## 节点模型与重试配置
 
-节点可声明 `model:"configured-connection-id"` 以及 `retry:{automatic:2,resubmit:1}`。model 指配置连接 ID；审查排除仍生效，不可用或被排除的连接会从其余已配置候选选择替代。缺少候选时暂停节点。retry 的两个值各为非负整数，0 关闭对应自动动作；省略字段使用已确认的 2 次异常重试、1 次缺项补交默认值。
+节点可声明 `model:"configured-connection-id"` 以及 `retry:{automatic:2,resubmit:1}`。model 指配置连接 ID；审查排除仍生效，不可用或被排除的连接会从其余已配置候选选择替代。缺少候选时暂停节点。
+
+发送时的传输层回退是另一件事：如果这个连接在 `models.entries[]` 里配了 `fallbackModelId`，而这次发送在主选上因**传输层/协议层边界**失败（连接错误或 EOF、超时、非 2xx、流没走完就断，且一个字都没答出来），同一次发送会由回退模型接着答完——这一轮不重开、节点执行不加一次，`provider_calls` 记的是真正回答的模型（失败的尝试单独一行、用量为 0）。每次回退在图上记一条 `graph.provider.fallback` 事件，带 `primaryModel`、`error`（失败原文，一字不改）、`fallbackModel`、`sameModel`（两个 id 是否同一模型，真的换了模型是 `false`）。模型答了但内容不合格、工具调用写坏、审查不通过都**不**触发回退：那是这一轮的回答。两边都失败时这一轮明确失败，错误消息同时带两段原文。配置与守卫见 `models-and-providers.md`。retry 的两个值各为非负整数，0 关闭对应自动动作；省略字段使用已确认的 2 次异常重试、1 次缺项补交默认值。
 
 使用局部 patch 修改这些字段，从下一次新执行生效。已开始但中断的执行继续按其保存的 revision 恢复；不会因重启采用新任务、模型声明或重试上限。main 显式 retry 队列项会产生新执行，仍保留累计用量，已成功 submit 的原输入不能 retry。
 
