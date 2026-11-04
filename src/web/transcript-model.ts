@@ -455,6 +455,7 @@ export function toolGroupSummary(input: TranscriptTool[]) {
     other: 0,
     skill: 0,
     mcp: 0,
+    desktop: 0,
     failed: 0,
   };
   for (const tool of input) {
@@ -466,6 +467,7 @@ export function toolGroupSummary(input: TranscriptTool[]) {
     else if (kind === 'browse') counts.browse += 1;
     else if (kind === 'skill') counts.skill += 1;
     else if (kind === 'mcp') counts.mcp += 1;
+    else if (kind === 'desktop') counts.desktop += 1;
     else counts.other += 1;
     if (tool.error) counts.failed += 1;
   }
@@ -477,6 +479,7 @@ export function toolGroupSummary(input: TranscriptTool[]) {
   if (counts.browse) parts.push(`访问 ${counts.browse} 个页面`);
   if (counts.skill) parts.push(`读取 ${counts.skill} 个 Skill`);
   if (counts.mcp) parts.push(`MCP 调用 ${counts.mcp} 次`);
+  if (counts.desktop) parts.push(`桌面 ${counts.desktop} 项`);
   if (counts.other) parts.push(`调用 ${counts.other} 个工具`);
   if (counts.failed) parts.push(`${counts.failed} 项失败`);
   return parts.join(' · ') || `${input.length} 个工具`;

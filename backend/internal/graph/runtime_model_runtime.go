@@ -332,6 +332,40 @@ func summarizeToolCall(name string, args any) string {
 		}
 		return strings.Join(kept, " ")
 	}
+	// serverCommand is `服务:命令` for one MCP call, with whichever half exists.
+	serverCommand := func(server, command string) string {
+		switch {
+		case server == "":
+			return command
+		case command == "":
+			return server
+		default:
+			return server + ": " + command
+		}
+	}
+	// desktopSummaryArgs is the part of a desktop call's arguments the summary
+	// may keep. `--app` names the target application; every other argument can
+	// be text the user typed or content read off the screen.
+	desktopSummaryArgs := func(command string, raw any) string {
+		switch command {
+		case "type", "clipboard-set", "batch":
+			return ""
+		}
+		list, ok := raw.([]any)
+		if !ok {
+			return ""
+		}
+		for index, item := range list {
+			value := fmt.Sprintf("%v", item)
+			if strings.HasPrefix(value, "--app=") {
+				return value
+			}
+			if value == "--app" && index+1 < len(list) {
+				return "--app " + fmt.Sprintf("%v", list[index+1])
+			}
+		}
+		return ""
+	}
 	summary := name
 	switch {
 	case name == "bash":
@@ -360,6 +394,25 @@ func summarizeToolCall(name string, args any) string {
 			}
 		}
 		summary = join(values...)
+	case name == "mcp":
+		// The MCP gateway is ONE tool: its arguments name the server tool it
+		// reaches, and the row is only useful when it says which one. The call's
+		// own arguments (a path, a query, a token) are payload, not identity, so
+		// they stay out of the summary.
+		summary = first(serverCommand(target("server"), first(target("tool"), target("action"))), name)
+	case strings.HasPrefix(name, "mcp__"):
+		// The kernel's native channel names a server tool as
+		// `mcp__<server>__<tool>`, so the same `服务:命令` reads off the name.
+		// Anything that does not split cleanly keeps the name it arrived with.
+		if server, tool, split := strings.Cut(strings.TrimPrefix(name, "mcp__"), "__"); split && server != "" && tool != "" {
+			summary = serverCommand(server, tool)
+		}
+	case name == "desktop":
+		// The computer-use tool is ONE tool with `command` plus `args`; the row
+		// names the subcommand. Typed text, clipboard writes and the contents of
+		// a batch are user content and are not echoed; `--app` names the target
+		// the row needs to say what the call was about.
+		summary = first(join(target("command"), desktopSummaryArgs(target("command"), body["args"])), name)
 	case name == "fetch":
 		summary = first(target("url"), name)
 	case name == "propose_graph" || name == "confirm_draft":

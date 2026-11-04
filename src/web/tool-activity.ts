@@ -1,8 +1,27 @@
+/** The one-line summary the host recorded, without the tool-name prefix the
+ * transcript prepends when it stores a call (`bash: rg needle`). The console
+ * never reads the call's arguments: what it shows is the host's own record. */
+function recordedSummary(name: string, summary: string) {
+  const text = summary.trim();
+  const prefix = `${name}:`;
+  return text.startsWith(prefix) ? text.slice(prefix.length).trim() : text;
+}
+
 /** Labels describe the observed call; shell commands keep their real executor. */
 export function toolActivity(name: string, summary = '') {
-  if (/^mcp(?::|__|_|$)/i.test(name)) return { kind: 'mcp', label: 'MCP 调用', name };
+  const recorded = recordedSummary(name, summary);
+  if (/^mcp(?::|__|_|$)/i.test(name)) {
+    // The host records an MCP call as `服务:命令`; the row repeats it instead of
+    // the bare gateway name.
+    return { kind: 'mcp', label: 'MCP 调用', name: recorded && recorded !== name ? recorded : name };
+  }
+  if (name === 'desktop') {
+    // Computer use has its own label, and the recorded subcommand follows it:
+    // "桌面 · snapshot --app Finder".
+    return { kind: 'desktop', label: '桌面', name: recorded && recorded !== name ? `· ${recorded}` : name };
+  }
   const shell = name === 'bash' || name === 'run_command';
-  const command = summary.replace(/^(?:bash|run_command):\s*/, '').trim();
+  const command = recorded;
   // Deliberately avoid interpreting compound shell programs as one tool.
   const simple = !/[;&|`\n]|\$\(/.test(command);
   const executable = simple ? /^(?:\/[^\s]+\/)?([\w.-]+)(?:\s|$)/.exec(command)?.[1] : undefined;
