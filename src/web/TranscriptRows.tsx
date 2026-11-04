@@ -480,7 +480,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
       ? <AssistantResponse row={row} author={assistantAuthor} copyable={copyText(row)} markdown={markdown} />
       : <AssistantResponse row={row} copyable={copyText(row)} markdown={markdown} />;
   }
-  if (row.kind === 'tools') return <ToolActivityGroup row={row} defaultOpen={defaultOpen} />;
+  if (row.kind === 'tools') return <ToolActivityGroup row={row} defaultOpen={defaultOpen || row.open === true} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;

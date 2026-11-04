@@ -50,7 +50,7 @@ export type TranscriptRow =
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
-  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string }
+  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string; /** A row the reader must see without clicking: a running turn's live work. */ open?: boolean }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
 
@@ -147,7 +147,7 @@ function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptToo
   };
 }
 
-function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
+function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[], open = false) {
   if (!tools.length) return;
   const active = tools.some(tool => !tool.done);
   rows.push({
@@ -156,6 +156,7 @@ function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
     tools,
     active,
     summary: active ? activeToolStatus(tools) : toolGroupSummary(tools),
+    ...(open ? { open: true } : {}),
   });
 }
 
@@ -195,11 +196,11 @@ function activityItem(message: ConversationMessage): TranscriptActivityItem {
 /** The rows of one turn's activity in the order it happened: a narration bubble,
  * then the tool calls that followed it, and so on. A contiguous run of tool calls
  * is one group, exactly as it renders while the turn is still running. */
-function activityRows(operationId: string, items: TranscriptActivityItem[]): TranscriptRow[] {
+function activityRows(operationId: string, items: TranscriptActivityItem[], open = false): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   let tools: TranscriptTool[] = [];
   const flush = () => {
-    pushToolGroup(rows, tools);
+    pushToolGroup(rows, tools, open);
     tools = [];
   };
   for (const item of items) {
@@ -312,8 +313,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       return;
     }
     // A running turn is not wrapped: its narration bubbles and tool groups sit
-    // directly in the transcript.
-    rows.push(...activityRows(key, ordered));
+    // directly in the transcript, open, so the reader watches the work instead
+    // of a folded summary of it (2026-11-04 feedback). Once the turn is answered
+    // the same rows fold into the turn block above.
+    rows.push(...activityRows(key, ordered, true));
   };
 
   const flushActivity = () => {

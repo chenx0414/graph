@@ -11,7 +11,11 @@ export function nodeMessages(entries: Entry[], operations: { id: string; state: 
   });
   const last = new Map<string, Entry>();
   for (const entry of entries) if (entry.operationId && entry.role === 'assistant') last.set(entry.operationId, entry);
-  const active = new Set(operations.filter(operation => operation.workerActive || ['prepared', 'dispatched', 'running'].includes(operation.state)).map(operation => operation.id));
+  // A turn is in flight only while the run is. A settled run must not keep its
+  // last turn in live dress: live rows stay unfolded, wrapped turns fold.
+  const active = busy
+    ? new Set(operations.filter(operation => operation.workerActive || ['prepared', 'dispatched', 'running'].includes(operation.state)).map(operation => operation.id))
+    : new Set<string>();
   const newest = entries.at(-1)?.operationId;
   return entries.map(entry => {
     const operationId = entry.operationId ?? `legacy:${entry.id}`;
