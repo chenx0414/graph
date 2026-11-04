@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createServer, type Server } from 'node:http';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'vite';
@@ -19,20 +20,15 @@ import { openaiServer } from '../fixtures/openai-server.ts';
  * own end. Three causes, pinned down here:
  *
  *   1. `pigkernel.Session.Interrupt` committed the kernel abort and then waited
- *      for the conversation to go idle. A turn only leaves the kernel after its
+ *      for the conversation to go idle; a turn only leaves the kernel after its
  *      running tool returned, so the request could not answer before that tool
- *      finished (`PauseForReload` already states the opposite contract where it
- *      calls the same method: "Signal, do not wait").
- *   2. Nothing killed the child. The kernel can only mark the tool task aborted;
+ *      (`PauseForReload` states the opposite contract at the same call site).
+ *   2. Nothing killed the child: the kernel can only mark the tool task aborted,
  *      the process belongs to the daemon's command runner, and the `bash` tool
- *      handed that runner a nil abort signal, so the interrupt could not reach
- *      the process group at all.
- *   3. Because the tool never returned, the turn never ended and the operation
- *      never settled: `dispatched` and `worker_active=1` were the durable state
- *      of an interrupt that had already been accepted.
- *
- * Every flow runs against a real daemon, a real scripted provider (the one
- * external service a test may replace) and the real console that daemon serves.
+ *      handed that runner a nil abort signal.
+ *   3. Because the tool never returned the turn never ended, so the operation
+ *      never settled: `dispatched` + `worker_active=1` were the durable state of
+ *      an accepted interrupt.
  */
 
 const INTERRUPT_BUDGET_MS = 1_000;
@@ -54,8 +50,7 @@ async function projectFixture(root: string): Promise<{ root: string; project: st
 
 /** The pid the command recorded, or 0 before it started. */
 async function recordedPid(pidFile: string): Promise<number> {
-  const text = await readFile(pidFile, 'utf8').catch(() => '');
-  const pid = Number.parseInt(text.trim(), 10);
+  const pid = Number.parseInt((await readFile(pidFile, 'utf8').catch(() => '')).trim(), 10);
   return Number.isFinite(pid) ? pid : 0;
 }
 
@@ -70,7 +65,6 @@ function processExists(pid: number): boolean {
   }
 }
 
-/** The size a file had reached. */
 async function fileBytes(path: string): Promise<number> {
   return (await stat(path).catch(() => ({ size: 0 }))).size;
 }
@@ -91,6 +85,7 @@ interface OperationRow {
   worker_active: number;
 }
 
+/** The newest master operation of one task. */
 function masterOperation(database: string, taskId: string): OperationRow | undefined {
   return query<OperationRow>(
     database,
@@ -110,10 +105,19 @@ interface ConversationView {
   messages?: { role?: string; kind?: string; state?: string }[];
 }
 
+function pendingTools(view: ConversationView) {
+  return (view.messages ?? []).filter(message => message.role === 'tool' && message.state === 'pending');
+}
+
 /** Starts the daemon a test drives, with one scripted provider as its model. */
 async function startDaemon(root: string, fixture: { project: string }, baseUrl: string, requestId: string) {
-  await mkdir(join(root, 'web'), { recursive: true });
-  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
+  // A test that built the real console keeps it; the stub is only for daemons
+  // no browser opens.
+  const index = join(root, 'web', 'index.html');
+  if (!existsSync(index)) {
+    await mkdir(join(root, 'web'), { recursive: true });
+    await writeFile(index, '<!doctype html><div id="root">Graph</div>');
+  }
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
     version: 1,
@@ -135,7 +139,8 @@ async function startDaemon(root: string, fixture: { project: string }, baseUrl: 
 }
 
 /** Sends the console's own interrupt request against a real daemon. */
-async function interrupt(daemon: { url: string }, conversationId: string, cookie: string) {
+async function interrupt(daemon: { url: string }, conversationId: string) {
+  const cookie = (await fetch(daemon.url)).headers.get('set-cookie') ?? '';
   const startedAt = Date.now();
   let reply: Response;
   try {
@@ -151,18 +156,10 @@ async function interrupt(daemon: { url: string }, conversationId: string, cookie
   return { elapsed: Date.now() - startedAt, reply };
 }
 
-/** The cookie the daemon's browser session uses. */
-async function sessionCookie(url: string): Promise<string> {
-  return (await fetch(url)).headers.get('set-cookie') ?? '';
-}
-
 /**
- * Why this host cannot run a sandboxed command, or null when it can.
- *
- * The daemon runs every tool command inside a macOS seatbelt profile, and a
- * profile cannot be applied from inside another one. A test process that is
- * itself sandboxed (an Agent session, for one) therefore has no way to reach
- * the real behaviour; the host gate runs the same test outside that sandbox.
+ * Why this host cannot run a sandboxed command, or null when it can. The daemon
+ * wraps every tool command in a macOS seatbelt and a seatbelt cannot be nested,
+ * so a sandboxed test process (an Agent session) cannot reach that behaviour.
  */
 function sandboxBlocker(): string | null {
   if (process.platform !== 'darwin') return `tool commands need the macOS seatbelt, and this host is ${process.platform}`;
@@ -177,7 +174,7 @@ const SANDBOX_BLOCKER = sandboxBlocker();
 /** A server that accepts the request and never answers it. */
 async function neverAnsweringServer(): Promise<{ url: string; close: () => Promise<void> }> {
   const server: Server = createServer(() => {
-    // The response is held open on purpose: the fetch tool stays in flight.
+    // Held open on purpose: the fetch tool stays in flight.
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -195,8 +192,7 @@ test('an interrupt answers at once while a tool call is still in flight and sett
   const root = await mkdtemp(join(tmpdir(), 'graph-interrupt-inflight-'));
   const fixture = await projectFixture(root);
   // A fetch of a server that never answers keeps a real tool call in flight
-  // inside the daemon without a child process, so this half proves the stall
-  // the user hit on any host.
+  // without a child process, so this half proves the stall on any host.
   const slow = await neverAnsweringServer();
   const provider = await openaiServer([
     { tools: [{ id: 'call-1', name: 'fetch', arguments: JSON.stringify({ url: slow.url }) }] },
@@ -209,14 +205,13 @@ test('an interrupt answers at once while a tool call is still in flight and sett
     // dispatched, the state the report describes.
     await expect.poll(async () => {
       const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
-      return (view.messages ?? []).some(message => message.role === 'tool' && message.state === 'pending');
-    }, { timeout: 60_000, interval: 100 }).toBe(true);
+      return pendingTools(view).length;
+    }, { timeout: 60_000, interval: 100 }).toBe(1);
     await expect.poll(() => masterOperation(database, taskId)?.state, { timeout: 30_000, interval: 100 }).toBe('dispatched');
-    const interrupted = masterOperation(database, taskId);
-    const operationId = interrupted?.id ?? '';
+    const operationId = masterOperation(database, taskId)?.id ?? '';
     expect(operationId, 'the dispatched master operation has no id').not.toBe('');
 
-    const { elapsed, reply } = await interrupt(daemon, conversationId, await sessionCookie(daemon.url));
+    const { elapsed, reply } = await interrupt(daemon, conversationId);
     const body = await reply.json().catch(() => ({}));
     expect(reply.status, JSON.stringify(body)).toBe(200);
     expect(body.state, 'the daemon did not accept the interrupt').toBe('interrupted');
@@ -224,15 +219,15 @@ test('an interrupt answers at once while a tool call is still in flight and sett
 
     // The interrupted turn reaches a terminal state of its own.
     await expect.poll(() => operationById(database, operationId)?.state, { timeout: 30_000, interval: 100 }).toBe('interrupted');
-    expect(operationById(database, operationId)?.worker_active, 'the interrupted operation still holds a worker').toBe(0);
-    const pending = (view: ConversationView) => (view.messages ?? []).filter(message => message.role === 'tool' && message.state === 'pending');
+    const settled = operationById(database, operationId);
+    expect(settled?.worker_active, 'the interrupted operation still holds a worker').toBe(0);
     await expect.poll(async () => {
       const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
       const running = view.master?.status === 'running' || view.master?.status === 'preparing';
-      return `${running ? 'busy' : 'rest'}/${pending(view).length}`;
+      return `${running ? 'busy' : 'rest'}/${pendingTools(view).length}`;
     }, { timeout: 30_000, interval: 100 }).toBe('rest/0');
     const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
-    expect(pending(view).length, `a tool message is still pending: ${JSON.stringify(pending(view))}`).toBe(0);
+    console.log(`[interrupt-cancel] in flight: ${elapsed}ms; ${settled?.state} worker_active=${settled?.worker_active}; master ${view.master?.status}; pending tools ${pendingTools(view).length}`);
   } finally {
     await slow.close().catch(() => undefined);
     await daemon.close().catch(() => undefined);
@@ -270,7 +265,7 @@ test('an interrupt kills the running command and no output arrives after it', as
     const operationId = masterOperation(database, taskId)?.id ?? '';
     expect(operationId, 'the dispatched master operation has no id').not.toBe('');
 
-    const { elapsed, reply } = await interrupt(daemon, conversationId, await sessionCookie(daemon.url));
+    const { elapsed, reply } = await interrupt(daemon, conversationId);
     const body = await reply.json().catch(() => ({}));
     expect(reply.status, JSON.stringify(body)).toBe(200);
     expect(elapsed, `the interrupt request took ${elapsed}ms; it must answer without waiting for the command`).toBeLessThan(INTERRUPT_BUDGET_MS);
@@ -284,13 +279,14 @@ test('an interrupt kills the running command and no output arrives after it', as
     expect(await fileBytes(heartbeat), 'the command kept writing after the interrupt').toBe(stoppedAt);
     // The operation reached a terminal state instead of staying dispatched.
     await expect.poll(() => operationById(database, operationId)?.state, { timeout: 30_000, interval: 100 }).toBe('interrupted');
-    expect(operationById(database, operationId)?.worker_active, 'the interrupted operation still holds a worker').toBe(0);
+    const settled = operationById(database, operationId);
+    expect(settled?.worker_active, 'the interrupted operation still holds a worker').toBe(0);
     const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
-    const pending = (view.messages ?? []).filter(message => message.role === 'tool' && message.state === 'pending');
-    expect(pending.length, `a tool message is still pending: ${JSON.stringify(pending)}`).toBe(0);
+    expect(pendingTools(view).length, `a tool message is still pending: ${JSON.stringify(pendingTools(view))}`).toBe(0);
     // The interrupt did not start another tool call.
     const toolMessages = query<{ n: number }>(database, "SELECT COUNT(*) AS n FROM messages WHERE conversation_id=? AND role='tool'", conversationId);
     expect(toolMessages[0]?.n, 'the interrupt started another tool call').toBe(1);
+    console.log(`[interrupt-cancel] command: ${elapsed}ms; pid ${pid} gone; heartbeat frozen at ${stoppedAt}B; ${settled?.state} worker_active=${settled?.worker_active}; tool messages ${toolMessages[0]?.n}`);
   } finally {
     await daemon.close().catch(() => undefined);
     await provider.close().catch(() => undefined);
@@ -324,19 +320,19 @@ test('the console says 打断中 first and 已打断 when the turn is gone', asy
     }
     const page = await browser.newPage();
     await page.goto(`${daemon.url}/#/conversations/${conversationId}`);
-    const status = page.getByTestId('master-status');
-    await status.waitFor({ timeout: 60_000 });
-    await expect.poll(() => status.textContent(), { timeout: 60_000, interval: 100 }).toContain('正在处理');
+    // The composer footer is the part of the conversation page a browser always
+    // lays out, and it is where the reader is after Escape.
+    await page.locator('.conversation-composer-wrap').waitFor({ timeout: 60_000 });
     const operationId = masterOperation(database, taskId)?.id ?? '';
     expect(operationId, 'the console is over no running operation').not.toBe('');
-    // Every label the toolbar shows, in the order it shows them, so the
-    // sequence is read from the DOM instead of sampled.
+    // Every label the toolbar showed, in order: the sequence is read from the
+    // DOM instead of sampled.
     await page.evaluate(() => {
-      const holder = window as unknown as { __masterStatus: string[] };
-      holder.__masterStatus = [];
+      const holder = window as unknown as { __interruptStatus: string[] };
+      holder.__interruptStatus = [];
       const record = () => {
-        const text = document.querySelector('[data-testid="master-status"]')?.textContent?.trim() ?? '';
-        if (text && holder.__masterStatus[holder.__masterStatus.length - 1] !== text) holder.__masterStatus.push(text);
+        const text = document.querySelector('[data-testid="interrupt-status"]')?.textContent?.trim() ?? '';
+        if (text && holder.__interruptStatus[holder.__interruptStatus.length - 1] !== text) holder.__interruptStatus.push(text);
       };
       record();
       new MutationObserver(record).observe(document.body, { subtree: true, childList: true, characterData: true });
@@ -344,10 +340,13 @@ test('the console says 打断中 first and 已打断 when the turn is gone', asy
 
     await page.keyboard.press('Escape');
 
-    await expect.poll(async () => page.evaluate(() => (window as unknown as { __masterStatus: string[] }).__masterStatus.join('|')), {
+    const labels = page.getByTestId('interrupt-status');
+    await expect.poll(async () => page.evaluate(() => (window as unknown as { __interruptStatus: string[] }).__interruptStatus.join('|')), {
       timeout: 30_000, interval: 100,
     }).toContain('已打断');
-    const seen = await page.evaluate(() => (window as unknown as { __masterStatus: string[] }).__masterStatus as string[]);
+    // The reader has to be able to see it, not merely own a hidden node.
+    expect(await labels.isVisible(), 'the interrupt label is not on screen').toBe(true);
+    const seen = await page.evaluate(() => (window as unknown as { __interruptStatus: string[] }).__interruptStatus as string[]);
     const interrupting = seen.findIndex(label => label.includes('打断中'));
     const interrupted = seen.findIndex(label => label.includes('已打断'));
     expect(interrupting, `the console never said 打断中: ${JSON.stringify(seen)}`).toBeGreaterThanOrEqual(0);
@@ -355,8 +354,8 @@ test('the console says 打断中 first and 已打断 when the turn is gone', asy
     // The label was not a spinner: the turn the reader interrupted is over.
     await expect.poll(() => operationById(database, operationId)?.state, { timeout: 30_000, interval: 100 }).toBe('interrupted');
     const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
-    const pending = (view.messages ?? []).filter(message => message.role === 'tool' && message.state === 'pending');
-    expect(pending.length, `a tool message is still pending: ${JSON.stringify(pending)}`).toBe(0);
+    expect(pendingTools(view).length, `a tool message is still pending: ${JSON.stringify(pendingTools(view))}`).toBe(0);
+    console.log(`[interrupt-cancel] console: ${JSON.stringify(seen)}; ${operationById(database, operationId)?.state}; pending tools ${pendingTools(view).length}`);
   } finally {
     await browser?.close().catch(() => undefined);
     await slow.close().catch(() => undefined);

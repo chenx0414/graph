@@ -63,15 +63,7 @@ return (
           <div className="conversation-meta" title={`已计量 ${formatTokens(view.usage.used)} tokens · ${costText(view.cost)}`}>
             {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span> : <span data-testid="conversation-project">未绑定项目</span>}
             <span>·</span>
-            <span data-testid="master-status" className="master-work-status" data-interrupt={interruptStatus ?? undefined}>{
-              // An interrupt is the reader's own action, so it outranks the turn
-              // status: 打断中 while the turn winds down, 已打断 once it is gone.
-              interruptStatus === '打断中'
-                ? <><span className="spinner" aria-hidden="true" />打断中…</>
-                : interruptStatus === '已打断'
-                  ? '已打断'
-                  : <>{busy && !paused && <span className="spinner" aria-hidden="true" />}{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</>
-            }</span>
+            <span data-testid="master-status" className="master-work-status">{busy && !paused && <span className="spinner" aria-hidden="true" />}{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
             <span>·</span>
             <span data-testid="conversation-connection">{connected ? '已连接' : '重连中…'}</span>
 
@@ -253,6 +245,12 @@ return (
               })}
             />}
             {masterQuestions.length === 0 && taskQuestions.length === 0 && <div className="composer-footer">
+              {/* The interrupt the reader asked for, where the reader is after
+                  pressing Escape: 打断中 while the turn winds down, 已打断 once
+                  it is gone. Nothing at all when they never asked for one. */}
+              {interruptStatus && <span className="composer-note" data-testid="interrupt-status" data-phase={interruptStatus === '已打断' ? 'interrupted' : 'interrupting'}>
+                {interruptStatus === '已打断' ? '已打断。' : '打断中…'}
+              </span>}
               <span className="composer-note">
                 {busy
                   ? <span data-testid="queued-hint">{queuedMessages.length ? `${queuedMessages.length} 条消息等待处理` : '可继续输入'}</span>
