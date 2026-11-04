@@ -282,7 +282,9 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   }
 
   // Durable activity is buffered per turn, so a finished turn becomes one
-  // collapsible block and a running one keeps its individual rows.
+  // block with its own toggle and a running one keeps its individual rows.
+  // History opens expanded: the reader asked to see earlier turns, not a
+  // folded summary of them (2006 feedback, 2026-11-04).
   let activityKey: string | null = null;
   let activityItems: TranscriptActivityItem[] = [];
   const activityToolIndex = new Map<string, number>();
@@ -291,12 +293,13 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     if (!items.length) return;
     const ordered = sortByOrdinal(items);
     if (key && answered.has(key)) {
-      // Keep steering messages visible in place, but fold every stretch of
-      // activity around them once the operation is complete.
+      // Keep steering messages visible in place, and keep every stretch of
+      // activity around them visible too once the operation is complete; the
+      // block still folds on demand through its own toggle.
       let folded: TranscriptActivityItem[] = [];
       const flushFolded = () => {
         if (!folded.length) return;
-        rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: true });
+        rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: false });
         folded = [];
       };
       for (const item of ordered) {

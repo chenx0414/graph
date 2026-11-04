@@ -28,6 +28,17 @@ test('agent markdown renders and tool activity appears before the final answer',
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  // The composer footer maps the saved thinking level onto the model's own ladder.
+  // Keep that ladder in the fixture, so the assertion reads the contract instead of
+  // whichever models this machine happens to have configured.
+  await page.route('**/api/settings', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      projects: [],
+      models: [{ id: 'local', grade: 'local', reasoning: true, thinkingOptions: [{ level: 'off', label: '关' }, { level: 'minimal', label: '轻' }] }],
+    }),
+  }));
   await page.route('**/api/conversations/synthetic', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -78,17 +89,22 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  // A finished turn folds its thinking and tool calls behind one muted line, so the
-  // answer is what the reader sees.
+  // History opens expanded: a finished turn keeps its thinking and tool rows in
+  // place instead of folding them behind one muted line.
   const folded = page.getByTestId('collapsed-turn');
   await folded.waitFor();
-  expect(await folded.getAttribute('data-open')).toBe('false');
-  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
+  expect(await folded.getAttribute('data-open')).toBe('true');
+  expect(await page.getByTestId('tool-activity-group').count()).toBe(1);
+  // The block still folds on demand, so a long history stays readable.
+  await folded.locator('.collapsed-turn-toggle').click();
+  await expect.poll(() => folded.getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
   await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
-  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 off');
+  // The footer prints the model's own label for the level, so the contract is the
+  // level attribute, not one translated word.
+  expect(await page.getByTestId('telemetry-thinking').getAttribute('data-level')).toBe('off');
 });
 
 
