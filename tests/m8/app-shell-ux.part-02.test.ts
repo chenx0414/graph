@@ -13,8 +13,9 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 
 import { build } from 'vite';
+import { launchBrowser } from '../helpers/host-browser.ts';
 
-import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
 
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { cleanup, webDir, temp, git, gitProject, consoleServer, type ScriptedStep, type ScriptedToolCall, type ScriptedMessage, type ScriptedBody, scriptedProvider, libraryPrompt, libraryDisabledTools, workerProposal, createConversation, conversationView, type Daemon, type ConversationView, taskView, catalogView } from "./app-shell-ux.fixture.ts";
@@ -25,7 +26,7 @@ test('agent markdown renders and tool activity appears before the final answer',
   const root = await temp('markdown');
   const server = await consoleServer(root);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   // The composer footer maps the saved thinking level onto the model's own ladder.
@@ -105,11 +106,11 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBe(0);
   expect(await group.locator('.tool-activity-list li').count()).toBeGreaterThan(0);
   // One click brings the detail back with real height, so it is folded, not lost.
-  // The height is polled, not read on the click frame: the open animation outlives
-  // the attribute flip, and reading too early is the same false red as reading too late.
   await group.locator('.tool-group-toggle').click();
   await expect.poll(() => group.getAttribute('data-open')).toBe('true');
-  await expect.poll(() => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+  // The attribute flips at once but the body animates open, so the height is
+  // polled to its settled value instead of read on the frame after the click.
+  await expect.poll(async () => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
   // The block still folds on demand, so a long history stays readable.
   await folded.locator('.collapsed-turn-toggle').click();
   await expect.poll(() => folded.getAttribute('data-open')).toBe('false');
@@ -141,7 +142,7 @@ test('live tool activity groups and streamed markdown follow the transcript tail
     createdAt: index + 1,
     updatedAt: index + 1,
   }));
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.route('**/api/conversations/streaming', route => route.fulfill({
@@ -235,7 +236,7 @@ test('a coarse streamed delta is revealed progressively instead of landing as on
   const root = await temp('coarse-stream');
   const server = await consoleServer(root);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.route('**/api/conversations/coarse-stream', route => route.fulfill({
@@ -320,7 +321,7 @@ test('interrupted retry streams are removed before the durable final answer', as
   const root = await temp('retry-stream');
   const server = await consoleServer(root);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   const view = {

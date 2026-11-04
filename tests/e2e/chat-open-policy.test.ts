@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'vite';
-import { chromium, type Browser } from 'playwright';
+import type { Browser } from 'playwright';
 import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
+import { launchBrowser } from '../helpers/host-browser.ts';
 import { run } from './go-graph-confirmation.fixture.ts';
 
 /**
@@ -67,7 +68,7 @@ test('every chat window folds the tool work inside an open turn, live and settle
     db.exec('COMMIT');
     db.close();
 
-    browser = await chromium.launch({ headless: true });
+    browser = (await launchBrowser()).browser;
     const page = await browser.newPage();
     await page.goto(`${daemon.url}/#/tasks/${taskId}/nodes/master`);
     await expect.poll(() => page.getByTestId('node-chat-input').isVisible(), { timeout: 30_000 }).toBe(true);
@@ -100,7 +101,9 @@ test('every chat window folds the tool work inside an open turn, live and settle
       const group = groups.nth(index);
       await group.locator('.tool-group-toggle').click();
       await expect.poll(() => group.getAttribute('data-open')).toBe('true');
-      const opened = await expect.poll(() => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+      // The attribute flips at once but the body animates open, so the height is
+      // polled to its settled value instead of read on the frame after the click.
+      await expect.poll(async () => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
       await group.locator('.tool-group-toggle').click();
       await expect.poll(() => group.getAttribute('data-open')).toBe('false');
       await expect.poll(() => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBe(0);

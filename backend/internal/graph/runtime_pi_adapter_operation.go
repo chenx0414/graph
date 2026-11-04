@@ -76,21 +76,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	if spec.Role != nil {
 		role = *spec.Role
 	}
-	systemDomains := []string{}
-	if role == "master" {
-		systemDomains = []string{"github.com", "raw.githubusercontent.com", "api.github.com"}
-	}
-	retrievalDomains := []string{}
-	if options.Network != nil {
-		retrievalDomains = append(retrievalDomains, options.Network.RetrievalDomains...)
-	}
-	retrievalDomains = append(retrievalDomains, systemDomains...)
-	retrievalDomains = piAdapterUnique(retrievalDomains)
-	unrestrictedRetrieval := input.AccessPolicy != nil && input.AccessPolicy.Network == "unrestricted"
-	var retrieval *RetrievalBroker
-	if len(retrievalDomains) > 0 || unrestrictedRetrieval {
-		retrieval = CreateRetrievalBroker(retrievalDomains, observedGate, unrestrictedRetrieval, 0, 0)
-	}
+	retrieval := piAdapterRetrievalReach(options.Network, input.AccessPolicy, role, observedGate)
 	artifactService := piAdapterArtifactService(options, input, spec, workspace, role)
 
 	var capabilityOperation CapabilityOperation
@@ -238,10 +224,10 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				// The host's own computer-use CLI: declared only where it exists.
 				Desktop: OpenDesktopTools(desktopCapabilityRoot(options.Catalog)),
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
-					return commands.Run(command, args, signal)
+					return piAdapterRunToolCommand(commands, input.InterruptSignal, command, args, signal, 0)
 				},
 				RunWithTimeout: func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
-					return commands.RunWithTimeout(command, args, signal, timeoutMs)
+					return piAdapterRunToolCommand(commands, input.InterruptSignal, command, args, signal, timeoutMs)
 				},
 			}
 			built := tools
@@ -287,7 +273,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			}
 			if retrieval != nil {
 				tools.Fetch = func(url string, signal *AbortSignal) RetrievalResult {
-					return retrieval.Fetch(url, signal)
+					return piAdapterFetchDocument(retrieval, input.InterruptSignal, url, signal)
 				}
 			}
 			if artifactService != nil {
