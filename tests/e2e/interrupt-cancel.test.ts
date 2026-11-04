@@ -6,7 +6,8 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'vite';
-import { chromium, type Browser } from 'playwright';
+import { launchBrowser } from '../helpers/host-browser.ts';
+import type { Browser } from 'playwright';
 import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
@@ -309,10 +310,9 @@ test('the console says 打断中 first and 已打断 when the turn is gone', asy
   let browser: Browser | undefined;
   try {
     try {
-      browser = await chromium.launch({ headless: true });
+      browser = (await launchBrowser()).browser;
     } catch (reason) {
-      // The window service decides whether a browser can run here; without it
-      // this half is unverified rather than silently passing.
+      // Without a browser this half is unverified, never silently passing.
       const detail = String(reason).split('\n')[0];
       console.log(`[interrupt-cancel] cannot launch a browser here: ${detail}`);
       skip(`the console is unverified here: chromium cannot launch: ${detail}`);
