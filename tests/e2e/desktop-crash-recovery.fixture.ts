@@ -13,7 +13,7 @@
  */
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { cp, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
@@ -36,24 +36,12 @@ export const RUNNING_APP_PIDS = [3329, 3331];
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * True when this process runs inside a seatbelt sandbox.
- *
- * Same probe `tests/helpers/host-browser.ts` uses: `sandbox-exec` refuses to
- * apply a nested profile, which is exactly the restriction that stops Electron
- * from starting. Measured 2026-11-04 in this node: nested profile →
- * `sandbox_apply: Operation not permitted` (exit 71), `/bin/ps` denied, and any
- * Electron started here dies inside IOKit in ~100ms. The graph's check module
- * declares `sandbox: false`, so the host runs it as an ordinary process and this
- * probe is false there.
+ * The same seatbelt probe the browser helper uses - one mechanism, not two.
+ * `tests/helpers/host-browser.ts` (commit e710b928) and this suite must agree on
+ * "is this process sandboxed", or one of them would start Electron in a context
+ * where the other refuses to.
  */
-export async function isSandboxed(): Promise<boolean> {
-  try {
-    await run('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { timeout: 10_000 });
-    return false;
-  } catch {
-    return true;
-  }
-}
+export { isSandboxed } from '../helpers/host-browser.ts';
 
 export const readJsonSync = (path: string): unknown => {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return undefined; }
@@ -220,7 +208,14 @@ export interface KeeperHandle {
 }
 
 /**
- * The keeper is the app's parent, which is the whole point: it survives the kill.
+ * The keeper is the app's parent, which is the whole point: it survives the kill
+ * and it is what turns a death into "code 0" or "signal 9".
+ *
+ * It is spawned by whoever runs this suite, which must therefore be a host-session
+ * process (see `assertNotSandboxed`): a sandboxed runner cannot start Electron and
+ * cannot signal it. Starting the keeper itself through LaunchServices was measured
+ * this round and rejected - Electron starts, prints its DevTools endpoint, and our
+ * app never reaches `whenReady`; see the doc's implementation notes.
  *
  * `--max-restarts=0` is deliberate. This test bounds Electron launches itself;
  * letting the keeper add its own retries would turn one attempt into four

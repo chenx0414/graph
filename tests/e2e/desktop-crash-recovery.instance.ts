@@ -209,10 +209,24 @@ export async function startIsolatedInstance(input: {
   let firstRun: StartedInstance['firstRun'] | undefined;
   let released = false;
 
+  // Stopping an attempt has to leave nothing behind: a hung app keeps the
+  // single-instance lock of its userData, and the next attempt would then quit on
+  // that lock before it ever serves (measured this round: three attempts, the
+  // last two lost to the first one's leaked app).
   const stopKeeper = async () => {
-    if (!keeper || keeper.process.exitCode !== null) return;
-    keeper.process.kill('SIGTERM');
-    await new Promise<void>(resolve => { keeper!.process.once('exit', () => resolve()); setTimeout(resolve, 5_000); });
+    const child = keeper?.process;
+    if (child && child.exitCode === null) {
+      const exited = new Promise<void>(resolve => { child.once('exit', () => resolve()); });
+      child.kill('SIGTERM');
+      await Promise.race([exited, sleep(5_000)]);
+      if (child.exitCode === null) child.kill('SIGKILL');
+    }
+    const leaked = Number((readJsonSync(input.paths.markerPath) as { pid?: number } | undefined)?.pid);
+    if (Number.isInteger(leaked) && leaked > 0 && alive(leaked)) {
+      try { process.kill(leaked, 'SIGTERM'); } catch { /* already gone */ }
+      for (let attempt = 0; attempt < 50 && alive(leaked); attempt += 1) await sleep(100);
+      if (alive(leaked)) { try { process.kill(leaked, 'SIGKILL'); } catch { /* already gone */ } }
+    }
   };
   const release = () => {
     if (released) return;
@@ -237,7 +251,7 @@ export async function startIsolatedInstance(input: {
           if (input.user.record?.pid && record.pid === input.user.record.pid) return undefined;
           const response = await fetch(`${record.url}/api/health`).catch(() => undefined);
           return response?.ok ? record as StartedInstance['daemon'] : undefined;
-        }, `attempt ${attempt}: the isolated daemon to publish its address`, 25_000, () => (keeper!.process.exitCode != null
+        }, `attempt ${attempt}: the isolated daemon to publish its address`, 90_000, () => (keeper!.process.exitCode != null
           ? `the keeper exited ${keeper!.process.exitCode} before the app served anything\n${keeper!.log().slice(-3000)}`
           : undefined));
         firstRun = await waitFor(() => readJsonSync(input.paths.markerPath) as { pid?: number; bootedAt?: number } | undefined,

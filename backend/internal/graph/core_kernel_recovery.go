@@ -83,5 +83,8 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 		}
 		return nil
 	})
+	// A graph the previous process left stalled never reached blocked by itself,
+	// and every closure that records limitations is refused until it does.
+	kernel.Store.ParkStalledTasks()
 	return interrupted
 }

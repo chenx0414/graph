@@ -102,7 +102,11 @@ func (q *NodeQueue) Claim(nodeId string) *QueueRow {
 	if next == nil {
 		return nil
 	}
-	return q.kernel.ClaimQueued(q.taskId, next.Seq)
+	claimed := q.kernel.ClaimQueued(q.taskId, next.Seq)
+	// Work that can run again un-parks a graph parked by ParkStalledTask: the
+	// phase says what the graph is doing, not what it once was.
+	q.kernel.Store.StartTaskPhase(q.taskId, "running", "blocked")
+	return claimed
 }
 
 // Complete settles a successful submit, or marks a failure and pauses the node's queue.
@@ -114,13 +118,18 @@ func (q *NodeQueue) Complete(seq int64, outcome QueueCompletion) {
 	switch outcome.Kind {
 	case "submitted":
 		q.kernel.FinishQueued(q.taskId, seq, "done")
+		// The turn that just ended may have been the last work the graph had, and a
+		// node that failed earlier is still waiting to be seen: park it here too.
+		q.kernel.Store.ParkStalledTask(q.taskId)
 		return
 	case "blocked":
 		q.kernel.BlockQueued(q.taskId, seq)
+		q.kernel.Store.ParkStalledTask(q.taskId)
 		return
 	}
 	q.kernel.FinishQueued(q.taskId, seq, "failed")
 	q.kernel.SetNodeQueuePaused(q.taskId, graphDBString(nodeRow, "node_id"), true)
+	q.kernel.Store.ParkStalledTask(q.taskId)
 }
 
 func (q *NodeQueue) Paused(nodeId string) bool {

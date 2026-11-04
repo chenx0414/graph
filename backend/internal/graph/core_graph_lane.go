@@ -159,11 +159,32 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 			lane.options.CloseGraph(graphId)
 		}
 	} else if !intent && result.Drained {
-		lane.options.Kernel.Store.StartTaskPhase(graphId, "idle", "running")
+		// A check that ran and failed leaves no failed row behind: the operation
+		// settled and its verdict is the value it produced. Only the acceptance
+		// knows the graph cannot close on its own, so it is what parks the graph.
+		if lane.options.Artifacts != nil && acceptanceFailed(graphId, lane) {
+			lane.options.Kernel.Store.BlockTaskPhase(graphId)
+			lane.options.Kernel.Store.Event(graphId, "graph.stalled", map[string]any{"reason": "An acceptance check failed; the graph cannot close on its own"})
+		} else {
+			lane.options.Kernel.Store.SettleDrainedPhase(graphId)
+		}
 	}
 	return result
 }
 
 func (lane *GraphLane) db() *sql.DB {
 	return lane.options.Kernel.Store.Db
+}
+
+// acceptanceFailed reports whether an acceptance check really ran and failed.
+// A missing item is a graph still on its way; a failed one is a graph that
+// cannot close without somebody deciding what to do about it.
+func acceptanceFailed(graphId string, lane *GraphLane) bool {
+	report := GraphAcceptance(lane.options.Kernel, graphId, lane.options.Artifacts(graphId))
+	for _, item := range report.Items {
+		if item.Status == "failed" {
+			return true
+		}
+	}
+	return false
 }

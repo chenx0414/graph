@@ -56,6 +56,83 @@ func (s *TaskStore) AbandonTask(taskID string) {
 	kernelExec(s.DB, "UPDATE tasks SET phase='abandoned' WHERE id=?", taskID)
 }
 
+// ParkStalledTask parks a graph that nothing can move any more.
+//
+// Measured 2026-11-04: two graphs whose nodes had all settled (blocked, failed
+// or succeeded) stayed "running" forever, because only a crash recovery or a
+// stop ever wrote the blocked phase. With no work left and no way to reach
+// blocked, the one door out of such a graph - a closure that records
+// limitations - refused every attempt with "only a blocked graph closes with
+// recorded limitations", so the graph could never be closed at all.
+func (s *TaskStore) ParkStalledTask(taskID string) bool {
+	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_queue'"); !ok {
+		return false
+	}
+	if kernelRow(s.DB, `SELECT id FROM tasks WHERE id=? AND phase IN ('running','idle')`, taskID) == nil {
+		return false
+	}
+	// Nothing may still be able to move: a queued or claimed turn, a running
+	// execution, or an operation that was prepared and not settled yet.
+	if kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed') LIMIT 1`, taskID) != nil {
+		return false
+	}
+	if kernelRow(s.DB, `SELECT 1 FROM kernel_executions WHERE task_id=? AND state='running' LIMIT 1`, taskID) != nil {
+		return false
+	}
+	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_module_operations'"); ok {
+		if kernelRow(s.DB, `SELECT 1 FROM kernel_module_operations WHERE task_id=? AND state IN ('prepared','dispatched') LIMIT 1`, taskID) != nil {
+			return false
+		}
+	}
+	// Something really stopped the graph: a node that blocked or failed, an
+	// operation that failed, a queue item that failed, or an open question. A
+	// graph whose work all succeeded is idle, not blocked.
+	stopped := kernelRow(s.DB, `SELECT 1 FROM kernel_nodes WHERE task_id=? AND status IN ('blocked','failed') LIMIT 1`, taskID) != nil ||
+		kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state='failed' LIMIT 1`, taskID) != nil ||
+		kernelRow(s.DB, `SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1`, taskID) != nil
+	if !stopped {
+		if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_module_operations'"); ok {
+			stopped = kernelRow(s.DB, `SELECT 1 FROM kernel_module_operations WHERE task_id=? AND state IN ('failed','uncertain') LIMIT 1`, taskID) != nil
+		}
+	}
+	if !stopped {
+		return false
+	}
+	s.BlockTaskPhase(taskID)
+	s.Event(taskID, "graph.stalled", map[string]any{"reason": "No work is left and a node is blocked or failed"})
+	return true
+}
+
+// ParkStalledTasks parks every running graph that cannot move.
+func (s *TaskStore) ParkStalledTasks() []string {
+	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_queue'"); !ok {
+		return nil
+	}
+	parked := []string{}
+	for _, row := range kernelRows(s.DB, `SELECT id FROM tasks WHERE phase IN ('running','idle') ORDER BY rowid`) {
+		taskID := kernelString(row["id"])
+		if s.ParkStalledTask(taskID) {
+			parked = append(parked, taskID)
+		}
+	}
+	return parked
+}
+
+// SettleDrainedPhase names what a graph is waiting for once its lane drained.
+//
+// Measured 2026-11-04 on graph 50fa0860: a lane that drained with a failed node
+// wrote "idle", and a graph that is not blocked can never close with recorded
+// limitations, so the graph sat there with nothing left to run and no way out.
+// Idle means the graph is empty; blocked means the graph is waiting for a
+// person or a decision, and that is the difference the closure reads.
+func (s *TaskStore) SettleDrainedPhase(taskID string) string {
+	if s.ParkStalledTask(taskID) {
+		return "blocked"
+	}
+	s.StartTaskPhase(taskID, "idle", "running")
+	return "idle"
+}
+
 // BlockTaskPhase parks a task that is not already closing.
 func (s *TaskStore) BlockTaskPhase(taskID string) {
 	kernelExec(s.DB, "UPDATE tasks SET phase='blocked' WHERE id=? AND phase NOT IN ('stopping','stopped','completed')", taskID)
