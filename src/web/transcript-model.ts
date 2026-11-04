@@ -3,11 +3,31 @@ import { toolActivity } from './tool-activity.ts';
 import { assistantVisibleText } from '../core/assistant-visible-text.ts';
 import { withoutUnexecutedToolCall } from './unexecuted-tool-call.ts';
 import { messageAttachments } from '../core/conversation-projection.ts';
+import { durableRsi, type TranscriptRsi } from './transcript-rsi.ts';
 import type {
   ConversationMessage,
   LiveText,
   LiveTool,
 } from '../core/conversation-projection.ts';
+
+export type { TranscriptRsi } from './transcript-rsi.ts';
+
+/** The one fold policy for every chat window: the main conversation, a project
+ * supervisor conversation and a node conversation all render through these rows,
+ * so the default a reader meets is decided here and nowhere else.
+ *
+ * A turn is what the reader scans, so a turn block opens: the shape of the work
+ * (how many steps, which tools, how long) is visible without a click. The tool
+ * detail inside a turn stays folded — a running turn included — because an open
+ * live turn is a wall of tool rows that pushes the answer off screen (reversed
+ * 2026-11-04: the previous policy opened live work and every history group, and
+ * a node conversation settled or running looked the same at both ends). */
+export const transcriptFoldPolicy = {
+  /** A turn block renders expanded, settled or in flight. */
+  turnExpanded: true,
+  /** The tool groups inside a turn start folded; opening one is the reader's click. */
+  toolGroupExpanded: false,
+} as const;
 
 export type TranscriptTool = {
   id: string;
@@ -17,24 +37,6 @@ export type TranscriptTool = {
   done: boolean;
   error: boolean;
   attachments?: ReturnType<typeof messageAttachments>;
-};
-
-export type TranscriptRsi = {
-  id: string;
-  status: 'applied' | 'checks_failed' | 'rolled_back' | 'unavailable' | 'dry_run';
-  title: string;
-  problem: string;
-  branch: string | null;
-  commit: string | null;
-  files: string[];
-  validation: { command: string; status: string }[];
-  restartRequired: boolean;
-  activation: 'saved' | 'pending_reload' | 'active' | null;
-  force: boolean;
-  pendingFiles: string[];
-  error?: string;
-  diff?: string;
-  report: string;
 };
 
 /** One ordered step of a finished turn: the narration the Agent wrote between
@@ -50,7 +52,7 @@ export type TranscriptRow =
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
-  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string; /** A row the reader must see without clicking: a running turn's live work. */ open?: boolean }
+  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'thinking'; id: 'thinking' };
 
@@ -83,47 +85,6 @@ function durableTool(message: ConversationMessage): TranscriptTool {
   };
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function durableRsi(message: ConversationMessage): TranscriptRsi {
-  const data = (message.data ?? {}) as Record<string, unknown>;
-  const status = data.status === 'applied' || data.status === 'checks_failed'
-    || data.status === 'rolled_back' || data.status === 'unavailable' || data.status === 'dry_run'
-    ? data.status
-    : 'unavailable';
-  const validation = Array.isArray(data.validation)
-    ? (data.validation as unknown[]).flatMap(item => {
-        if (!item || typeof item !== 'object') return [];
-        const record = item as Record<string, unknown>;
-        return typeof record.command === 'string' && typeof record.status === 'string'
-          ? [{ command: record.command, status: record.status }]
-          : [];
-      })
-    : [];
-  return {
-    id: message.id,
-    status,
-    title: typeof data.title === 'string' && data.title ? data.title : '自我改进',
-    problem: typeof data.problem === 'string' ? data.problem : '',
-    branch: typeof data.branch === 'string' ? data.branch : null,
-    commit: typeof data.commit === 'string' ? data.commit : null,
-    files: stringArray(data.files),
-    validation,
-    restartRequired: data.restartRequired === true,
-    activation: data.activation && typeof data.activation === 'object' && !Array.isArray(data.activation)
-      && ['saved', 'pending_reload', 'active'].includes(String((data.activation as Record<string, unknown>).state))
-      ? (data.activation as Record<string, unknown>).state as 'saved' | 'pending_reload' | 'active'
-      : status === 'applied' ? (data.restartRequired === true ? 'pending_reload' : 'saved') : null,
-    force: data.force === true,
-    pendingFiles: stringArray(data.pendingFiles),
-    ...(typeof data.error === 'string' ? { error: data.error } : {}),
-    ...(typeof data.diff === 'string' ? { diff: data.diff } : {}),
-    report: message.text,
-  };
-}
-
 function liveTool(tool: LiveTool): TranscriptTool {
   return {
     id: tool.toolCallId,
@@ -147,7 +108,7 @@ function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptToo
   };
 }
 
-function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[], open = false) {
+function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
   if (!tools.length) return;
   const active = tools.some(tool => !tool.done);
   rows.push({
@@ -156,7 +117,6 @@ function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[], open = fa
     tools,
     active,
     summary: active ? activeToolStatus(tools) : toolGroupSummary(tools),
-    ...(open ? { open: true } : {}),
   });
 }
 
@@ -196,11 +156,11 @@ function activityItem(message: ConversationMessage): TranscriptActivityItem {
 /** The rows of one turn's activity in the order it happened: a narration bubble,
  * then the tool calls that followed it, and so on. A contiguous run of tool calls
  * is one group, exactly as it renders while the turn is still running. */
-function activityRows(operationId: string, items: TranscriptActivityItem[], open = false): TranscriptRow[] {
+function activityRows(operationId: string, items: TranscriptActivityItem[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   let tools: TranscriptTool[] = [];
   const flush = () => {
-    pushToolGroup(rows, tools, open);
+    pushToolGroup(rows, tools);
     tools = [];
   };
   for (const item of items) {
@@ -300,7 +260,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       let folded: TranscriptActivityItem[] = [];
       const flushFolded = () => {
         if (!folded.length) return;
-        rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: false });
+        rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: !transcriptFoldPolicy.turnExpanded });
         folded = [];
       };
       for (const item of ordered) {
@@ -313,10 +273,9 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       return;
     }
     // A running turn is not wrapped: its narration bubbles and tool groups sit
-    // directly in the transcript, open, so the reader watches the work instead
-    // of a folded summary of it (2026-11-04 feedback). Once the turn is answered
-    // the same rows fold into the turn block above.
-    rows.push(...activityRows(key, ordered, true));
+    // directly in the transcript while it runs, under the same policy — the
+    // groups stay folded, the reader opens the one whose detail they want.
+    rows.push(...activityRows(key, ordered));
   };
 
   const flushActivity = () => {

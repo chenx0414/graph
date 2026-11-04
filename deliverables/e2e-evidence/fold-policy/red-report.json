@@ -1,0 +1,171 @@
+{
+  "label": "red",
+  "bundle": {
+    "asset": "assets/index-BTGxgBFp.js",
+    "path": "/tmp/head-web/assets/index-BTGxgBFp.js",
+    "builtAt": "2026-11-04T09:36:48.870Z",
+    "bytes": 941210
+  },
+  "measuredAt": "2026-11-04T09:37:17.656Z",
+  "windows": [
+    {
+      "key": "main",
+      "name": "主对话",
+      "url": "http://127.0.0.1:55510/#/conversations/50e8153b-db4b-481b-b76a-ff0ba457fb12",
+      "counts": {
+        "groups": 2,
+        "turns": 1
+      },
+      "groups": [
+        {
+          "open": "true",
+          "height": 68,
+          "label": "读取 1 项 · 运行 1 条命令",
+          "laidOut": 121.421875
+        },
+        {
+          "open": "true",
+          "height": 38,
+          "label": "正在运行 bash: npm run coverage",
+          "laidOut": 91.421875
+        }
+      ],
+      "turns": [
+        {
+          "open": "true",
+          "label": "上方 2 步思考与工具调用读取 1 项 · 运行 1 条命令"
+        }
+      ],
+      "opened": {
+        "open": "true",
+        "height": 68,
+        "label": "读取 1 项 · 运行 1 条命令",
+        "laidOut": 121.421875
+      },
+      "folded": {
+        "open": "false",
+        "height": 0,
+        "label": "读取 1 项 · 运行 1 条命令",
+        "laidOut": 53.421875
+      },
+      "problems": [
+        "group 0 (\"读取 1 项 · 运行 1 条命令\") renders data-open=true, expected false",
+        "group 0 (\"读取 1 项 · 运行 1 条命令\") reserves 68px of detail while folded, expected 0",
+        "group 1 (\"正在运行 bash: npm run coverage\") renders data-open=true, expected false",
+        "group 1 (\"正在运行 bash: npm run coverage\") reserves 38px of detail while folded, expected 0"
+      ],
+      "shots": [
+        "/Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/red-main.png",
+        "/Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/red-main-opened.png"
+      ]
+    },
+    {
+      "key": "supervisor",
+      "name": "主管对话",
+      "url": "http://127.0.0.1:55510/#/conversations/d723d506-72f3-4f7d-a396-9e58a6ebbf6f",
+      "counts": {
+        "groups": 2,
+        "turns": 1
+      },
+      "groups": [
+        {
+          "open": "true",
+          "height": 68,
+          "label": "读取 1 项 · 运行 1 条命令",
+          "laidOut": 121.421875
+        },
+        {
+          "open": "true",
+          "height": 38,
+          "label": "正在运行 bash: npm run coverage",
+          "laidOut": 91.421875
+        }
+      ],
+      "turns": [
+        {
+          "open": "true",
+          "label": "上方 2 步思考与工具调用读取 1 项 · 运行 1 条命令"
+        }
+      ],
+      "opened": {
+        "open": "true",
+        "height": 68,
+        "label": "读取 1 项 · 运行 1 条命令",
+        "laidOut": 121.421875
+      },
+      "folded": {
+        "open": "false",
+        "height": 0,
+        "label": "读取 1 项 · 运行 1 条命令",
+        "laidOut": 53.421875
+      },
+      "problems": [
+        "group 0 (\"读取 1 项 · 运行 1 条命令\") renders data-open=true, expected false",
+        "group 0 (\"读取 1 项 · 运行 1 条命令\") reserves 68px of detail while folded, expected 0",
+        "group 1 (\"正在运行 bash: npm run coverage\") renders data-open=true, expected false",
+        "group 1 (\"正在运行 bash: npm run coverage\") reserves 38px of detail while folded, expected 0"
+      ],
+      "shots": [
+        "/Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/red-supervisor.png",
+        "/Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/red-supervisor-opened.png"
+      ]
+    },
+    {
+      "key": "node",
+      "name": "节点对话",
+      "url": "http://127.0.0.1:55510/#/tasks/db66fcb2-9738-40f0-ba80-e906464496a0/nodes/master",
+      "counts": {
+        "groups": 2,
+        "turns": 1
+      },
+      "groups": [
+        {
+          "open": "true",
+          "height": 38,
+          "label": "运行 1 条命令",
+          "laidOut": 91.421875
+        },
+        {
+          "open": "true",
+          "height": 38,
+          "label": "读取 1 项",
+          "laidOut": 91.421875
+        }
+      ],
+      "turns": [
+        {
+          "open": "true",
+          "label": "上方 1 步思考与工具调用运行 1 条命令1 项活动运行 r"
+        }
+      ],
+      "opened": {
+        "open": "true",
+        "height": 38,
+        "label": "运行 1 条命令",
+        "laidOut": 91.421875
+      },
+      "folded": {
+        "open": "false",
+        "height": 0,
+        "label": "运行 1 条命令",
+        "laidOut": 53.421875
+      },
+      "problems": [
+        "group 0 (\"运行 1 条命令\") renders data-open=true, expected false",
+        "group 0 (\"运行 1 条命令\") reserves 38px of detail while folded, expected 0",
+        "group 1 (\"读取 1 项\") renders data-open=true, expected false",
+        "group 1 (\"读取 1 项\") reserves 38px of detail while folded, expected 0"
+      ],
+      "shots": [
+        "/Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/red-node.png",
+        "/Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/red-node-opened.png"
+      ]
+    }
+  ],
+  "ok": false,
+  "browser": {
+    "version": "152.0.7977.78",
+    "cdp": "http://127.0.0.1:9333",
+    "executable": null
+  }
+}
