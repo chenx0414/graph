@@ -141,6 +141,12 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	// recovers on its own: the kernel's own receipts settle the turns it
 	// finished, and the turns it never sent are sent again.
 	runtime.bootstrapPigRecovery(interruptedNodes)
+	// A restart that cut through a tool leaves work the kernel will not run
+	// again; it must not hold the conversation, or no later turn can start.
+	runtime.abortStalledMasterTurns()
+	// A message queued behind that work is still the user's request: release
+	// the questions it would have released and let the master run it.
+	runtime.dispatchQueuedMasterMessages()
 	// The state the last run left behind is reclaimed before this one
 	// starts: a daemon that only reclaimed while it was running would let the
 	// state of every run before it grow for ever.

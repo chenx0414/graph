@@ -159,6 +159,72 @@ func RecoveryFailure(record map[string]any) (string, bool) {
 	return reason, true
 }
 
+// AbortStalledConversation ends live work the kernel cannot resume safely.
+//
+// A tool task interrupted while it was executing keeps a checkpoint that says
+// the call may have run. Restarting the caller cannot replay it (the argument
+// is unsafe), so the task stays pending for ever and the generation waiting on
+// it keeps the conversation busy: every later turn waits for an idle that the
+// dead task will never produce. Aborting the conversation settles that work as
+// interrupted and makes the session usable again. The turn's Graph operation
+// stays unknown; the user's next message is a new turn, as it is for any other
+// interrupted execution.
+func AbortStalledConversation(ctx context.Context, database, identity string) (bool, error) {
+	resident, err := openResident(ctx, database)
+	if err != nil {
+		return false, err
+	}
+	conversationId, err := conversationIdOf(ctx, resident.kernel, identity)
+	if err != nil || conversationId == 0 {
+		return false, err
+	}
+	inspection, err := resident.kernel.Harness().Inspect(ctx)
+	if err != nil {
+		return false, err
+	}
+	stalled := false
+	for _, task := range inspection.Tasks {
+		if int64(task.Record.ConversationId) != conversationId || task.Record.Kind != "pi.tool" {
+			continue
+		}
+		if stalledCheckpointPhase(task.Record.State.Checkpoint) == "execute" {
+			stalled = true
+			break
+		}
+	}
+	if !stalled {
+		return false, nil
+	}
+	conversation, err := resident.kernel.Harness().Conversation(ctx, durable.ConversationId(conversationId))
+	if err != nil {
+		return false, err
+	}
+	if conversation == nil {
+		return false, nil
+	}
+	if err := conversation.Abort(ctx, nil); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// stalledCheckpointPhase reads the phase a tool checkpoint was in.
+func stalledCheckpointPhase(checkpoint any) string {
+	if checkpoint == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(checkpoint)
+	if err != nil {
+		return ""
+	}
+	var parsed map[string]any
+	if json.Unmarshal(encoded, &parsed) != nil {
+		return ""
+	}
+	phase, _ := parsed["phase"].(string)
+	return phase
+}
+
 // WaitConversationIdle waits until the durable conversation of one identity
 // has no live turn of its own.
 //

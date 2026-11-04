@@ -39,6 +39,66 @@ func (runtime *TaskRuntime) bootstrapPigRecovery(interruptedNodes []string) {
 	}
 }
 
+// abortStalledMasterTurns ends kernel work that a restart left unable to run.
+//
+// A master turn interrupted while a tool was executing cannot be replayed: the
+// kernel keeps the tool pending because its side effects are unknown, and the
+// generation waiting on it holds the conversation busy for ever. Aborting that
+// conversation lets the pending messages dispatch again; the interrupted
+// operation keeps its recovery question.
+func (runtime *TaskRuntime) abortStalledMasterTurns() int {
+	rows := kernelRows(runtime.store.Db, `SELECT n.task_id, n.instance_id FROM nodes n
+        JOIN conversations c ON c.anchor_task_id = n.task_id
+        WHERE n.id='master' AND c.archived_at IS NULL`)
+	aborted := 0
+	for _, row := range rows {
+		instance := kernelString(row["instance_id"])
+		if instance == "" {
+			continue
+		}
+		did, err := pigkernel.AbortStalledConversation(context.Background(), runtime.store.Path, instance)
+		if err != nil {
+			reportPigRecoveryFailure("the stalled turn could not be aborted: " + err.Error())
+			continue
+		}
+		if !did {
+			continue
+		}
+		aborted++
+		runtime.store.Event(kernelString(row["task_id"]), "graph.recovery.stalled_turn_aborted", map[string]any{
+			"reason": "a tool interrupted mid-execution cannot be replayed; the conversation was aborted so later turns can run",
+		})
+	}
+	if aborted > 0 && runtime.autoWake {
+		runtime.execution.Kick()
+	}
+	return aborted
+}
+
+// dispatchQueuedMasterMessages starts the messages a restart left queued.
+//
+// A message sent while the master was working waits in the conversation queue.
+// The command that queued it also ran the wake that would have dispatched it;
+// a restart between those two leaves the message pending with nobody to start
+// it. The message itself is the user's decision to retry, so the recovery
+// questions it would have released are released here, and the execution is
+// told there is work.
+func (runtime *TaskRuntime) dispatchQueuedMasterMessages() int {
+	rows := kernelRows(runtime.store.Db, `SELECT DISTINCT c.anchor_task_id FROM conversations c
+        JOIN messages m ON m.conversation_id = c.id
+        WHERE c.archived_at IS NULL AND m.role='user' AND m.state IN ('pending','queued')`)
+	released := 0
+	for _, row := range rows {
+		if RecoverMaster(runtime.store, kernelString(row["anchor_task_id"]), "message") {
+			released++
+		}
+	}
+	if len(rows) > 0 && runtime.autoWake {
+		runtime.execution.Kick()
+	}
+	return released
+}
+
 // recoverPigExecution rebinds one frozen execution to its Graph operation.
 func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecution) {
 	if execution.ExecutionId == "" || execution.Identity == "" || execution.InputRequestId == "" {
