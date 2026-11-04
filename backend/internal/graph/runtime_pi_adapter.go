@@ -71,6 +71,27 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 	// in the order of the turn it interrupts.
 	turnOrdinals := map[string]func() int{}
 	turnOrdinalsMu := sync.Mutex{}
+	// The interrupt signal of each running operation. The kernel can only mark
+	// the tool task aborted; the process belongs to the daemon's own command
+	// runner, so the daemon is the only one that can kill it. A tool call runs
+	// with this signal, and an interruption fires it.
+	interruptSignals := map[string]*AbortSignal{}
+	interruptSignalsMu := sync.Mutex{}
+	signalFor := func(operationId string) *AbortSignal {
+		interruptSignalsMu.Lock()
+		defer interruptSignalsMu.Unlock()
+		signal := interruptSignals[operationId]
+		if signal == nil {
+			signal = NewAbortSignal()
+			interruptSignals[operationId] = signal
+		}
+		return signal
+	}
+	dropSignal := func(operationId string) {
+		interruptSignalsMu.Lock()
+		delete(interruptSignals, operationId)
+		interruptSignalsMu.Unlock()
+	}
 	systemChangeApplications := map[string]*piAdapterPending{}
 	systemChangeApplicationsMu := sync.Mutex{}
 
@@ -113,11 +134,22 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		if active == nil {
 			Raise("no_active_operation", "The master Agent is no longer accepting interruption")
 		}
+		interrupting := text == nil || *text == ""
+		interruptSignalsMu.Lock()
+		signal := interruptSignals[operation.Id]
+		interruptSignalsMu.Unlock()
 		if err := active.Interrupt(text); err != nil {
 			if strings.Contains(err.Error(), "no longer accepting") || strings.Contains(err.Error(), "session is closed") {
 				Raise("no_active_operation", "The master Agent is no longer accepting interruption")
 			}
 			panic(err)
+		}
+		// The abort request is issued before the process is killed: the kernel
+		// stops advancing an abort-marked turn, so a killed tool's result cannot
+		// become one more model request and one more tool call. Steering
+		// (replacement text) keeps the turn, and its running command with it.
+		if interrupting {
+			signal.Abort()
 		}
 		if text == nil || *text == "" {
 			return map[string]any{}
@@ -343,7 +375,10 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		}
 		fullAccess := IsFullAccess(accessPolicy)
 		return func() OperationResult {
+			interruptSignal := signalFor(operation.Id)
+			defer dropSignal(operation.Id)
 			return piAdapterRunOperation(options, transport, piAdapterRunInput{
+				InterruptSignal:   interruptSignal,
 				Operation:         operation,
 				Entry:             *entry,
 				ModelNow:          modelNow,

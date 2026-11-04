@@ -406,14 +406,34 @@ func (session *Session) InterruptWithRequestID(ctx context.Context, text *string
 		session.continuation = next
 	}
 	session.mutex.Unlock()
+	// A plain interruption is a signal, not a join. The kernel commits the abort
+	// mark and then waits for the conversation to go idle again, and a turn only
+	// leaves the kernel after the tool it was running has returned; waiting here
+	// handed the caller the whole remaining runtime of that tool. Measured
+	// 2026-11-04: a `sleep 300` under an interrupted turn held the interrupt
+	// request open for its full length. The request answers at once and the turn
+	// winds down behind it - which is the contract PauseForReload already states
+	// where it calls this ("Signal, do not wait").
+	//
+	// A replacement input is different: the caller's next turn is the
+	// continuation submission, so it is awaited below.
+	if !replacement {
+		// The abort outlives the caller: a request that has already answered must
+		// not cancel the abort it asked for.
+		abortContext := context.Background()
+		if ctx != nil {
+			abortContext = context.WithoutCancel(ctx)
+		}
+		go func() {
+			_ = session.conversation.Abort(abortContext, &durable.ConversationAbortOptions{})
+		}()
+		return nil
+	}
 	if err := session.conversation.Abort(ctx, &durable.ConversationAbortOptions{}); err != nil {
 		if next != nil {
 			next <- sessionContinuation{err: err}
 		}
 		return err
-	}
-	if !replacement {
-		return nil
 	}
 	requestId := session.admissionId() + ":continuation:" + id
 	submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
