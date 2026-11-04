@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'vite';
-import { chromium, type Browser } from 'playwright';
 import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
+import { launchBrowser, type LaunchedBrowser } from '../helpers/host-browser.ts';
 import { run } from './go-graph-confirmation.fixture.ts';
 
 /**
@@ -20,7 +20,7 @@ import { run } from './go-graph-confirmation.fixture.ts';
 test('a subagent chat opens the whole run without a load-older click', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-node-history-'));
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
-  let browser: Browser | undefined;
+  let launched: LaunchedBrowser | undefined;
   try {
     const project = join(root, 'project');
     await mkdir(project);
@@ -55,15 +55,18 @@ test('a subagent chat opens the whole run without a load-older click', async () 
     db.exec('COMMIT');
     db.close();
 
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    // The launcher, not this test, decides how a browser may start here: inside
+    // Graph's command sandbox every Chromium build segfaults on launch, so the
+    // helper starts it in the host session and drives it over CDP.
+    launched = await launchBrowser();
+    const page = await launched.browser.newPage();
     await page.goto(`${daemon.url}/#/tasks/${taskId}/nodes/master`);
     await expect.poll(() => page.getByTestId('node-chat-input').isVisible(), { timeout: 30_000 }).toBe(true);
     // No click: the oldest record has to arrive on its own.
     await expect.poll(() => page.getByText('最早的一条记录').count(), { timeout: 60_000 }).toBeGreaterThan(0);
     expect(await page.getByTestId('node-load-older').count()).toBe(0);
   } finally {
-    await browser?.close().catch(() => undefined);
+    await launched?.close().catch(() => undefined);
     await daemon?.close().catch(() => undefined);
     await rm(root, { recursive: true, force: true }).catch(() => undefined);
   }
