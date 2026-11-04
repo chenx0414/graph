@@ -10,7 +10,7 @@ import { attachmentImageSource } from './attachments.ts';
 import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
-import { type TranscriptRow } from './transcript-model.ts';
+import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
@@ -154,13 +154,11 @@ function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refres
   return 'file';
 }
 
-function ToolActivityGroup({ row, defaultOpen = false }: { row: Extract<TranscriptRow, { kind: 'tools' }>; defaultOpen?: boolean }) {
+function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  // A live group stays folded until its detail is asked for, while a group inside an
-  // expanded turn of the history opens with it: measured 2026-11-04, the turn block was
-  // open but every tool group under it still rendered grid-template-rows: 0px, so the
-  // reader saw two summary lines and no detail.
-  const open = manualOpen ?? defaultOpen;
+  // The default is the transcript's one policy, not this component's choice: a
+  // group starts folded whether it is settled, in flight, or inside an open turn.
+  const open = manualOpen ?? transcriptFoldPolicy.toolGroupExpanded;
   const activeTool = [...row.tools].reverse().find(tool => !tool.done);
   const kind = activeTool ? toolActivity(activeTool.name, activeTool.summary).kind : 'other';
   const orbState: OrbState = kind === 'search' || kind === 'browse' ? 'searching'
@@ -234,7 +232,9 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
  */
 function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const open = manualOpen ?? (!row.collapsed || row.rows.some(child => child.kind === 'tools' && child.tools.some(tool => tool.attachments?.length)));
+  // The turn block is the unit that opens; the groups inside it keep the policy
+  // they have everywhere else, so opening a turn never opens its tool detail.
+  const open = manualOpen ?? (transcriptFoldPolicy.turnExpanded || !row.collapsed);
   return (
     <div className="collapsed-turn" data-testid="collapsed-turn" data-open={open}>
       <button
@@ -249,7 +249,7 @@ function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, {
       </button>
       {open && (
         <div className="collapsed-turn-body">
-          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} defaultOpen />)}
+          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} />)}
         </div>
       )}
     </div>
@@ -462,13 +462,11 @@ function ThinkingStatus() {
   );
 }
 
-export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown = true, defaultOpen = false }: {
+export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown = true }: {
   row: TranscriptRow;
   assistantAuthor?: string;
   userAuthor?: string;
   markdown?: boolean;
-  /** Rows rendered inside a history turn that is already open. */
-  defaultOpen?: boolean;
 }) {
   if (row.kind === 'message') {
     return userAuthor
@@ -480,7 +478,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
       ? <AssistantResponse row={row} author={assistantAuthor} copyable={copyText(row)} markdown={markdown} />
       : <AssistantResponse row={row} copyable={copyText(row)} markdown={markdown} />;
   }
-  if (row.kind === 'tools') return <ToolActivityGroup row={row} defaultOpen={defaultOpen || row.open === true} />;
+  if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;

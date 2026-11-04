@@ -1,0 +1,35 @@
+# fold policy after this change: turn blocks open, tool groups folded (live turn included)
+# bundle: built by node --run build:web in this worktree, measured from dist/web
+# run: GRAPH_FOLD_CDP=http://127.0.0.1:9333 node scripts/measure-fold-policy.mjs --label green
+
+bundle: assets/index-BA0r_4o9.js (941123 bytes, built 2026-11-04T09:36:37.540Z)
+web dir: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/dist/web
+daemon: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/dist/graphd
+  http://127.0.0.1:64462
+seeded: main a8cf3dfd-cd85-4be8-8b51-24790c50e86c, supervisor b8915cbc-b9b5-4004-b7e9-17b91d980a8c, node master of 67d87d2e-fb15-476b-9884-887ca91540b1
+browser: http://127.0.0.1:9333 (host-launched, 152.0.7977.78)
+
+主对话: ok
+  tool groups first paint: false / 0px / row 53px, false / 0px / row 53px
+  turn blocks first paint: true (1 group inside)
+  clicks: #0 -> true/64px -> false/0px; #1 -> true/37px -> false/0px
+  shot: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-main.png
+  shot: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-main-opened.png
+
+主管对话: ok
+  tool groups first paint: false / 0px / row 53px, false / 0px / row 53px
+  turn blocks first paint: true (1 group inside)
+  clicks: #0 -> true/64px -> false/0px; #1 -> true/37px -> false/0px
+  shot: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-supervisor.png
+  shot: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-supervisor-opened.png
+
+节点对话: ok
+  tool groups first paint: false / 0px / row 53px, false / 0px / row 53px
+  turn blocks first paint: true (1 group inside)
+  clicks: #0 -> true/36px -> false/0px; #1 -> true/37px -> false/0px
+  shot: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-node.png
+  shot: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-node-opened.png
+
+report: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/deliverables/e2e-evidence/fold-policy/green-report.json
+PASS 3 windows: 6 tool groups folded, every turn block open
+exit=0

@@ -9,16 +9,24 @@ import { launchCli } from '../helpers/cli-daemon.ts';
 import { run } from './go-graph-confirmation.fixture.ts';
 
 /**
- * One transcript policy for every chat window: what the reader must see is open.
+ * One transcript policy for every chat window: the turn opens, the tool work
+ * inside it does not.
  *
- * Measured 2026-11-04 in the console: a running turn rendered its tool groups
- * folded (the reader watched a summary instead of the work), and a settled node
- * run could keep its last turn in live dress — loose rows that never folded into
- * the turn above. This drives the real node chat against a real daemon with one
- * settled turn and one in-flight turn and measures the rendered DOM, not the
- * attributes alone: a group that claims to be open must have a body with height.
+ * Measured 2026-11-04, twice, in opposite directions: first a settled node run
+ * could keep its last turn in live dress (loose rows that never folded into the
+ * turn above), then the live work itself was opened on the theory that the
+ * reader wants to watch it — which made a running turn a wall of tool rows with
+ * the answer pushed below it, and made the same conversation look different at
+ * the two ends of a run. The policy that survived is the one this test pins: a
+ * turn block opens, every tool group inside it starts folded — the in-flight
+ * turn included — and one click is what opens the detail.
+ *
+ * This drives the real node chat against a real daemon with one settled turn and
+ * one in-flight turn and measures the rendered DOM, not the attributes alone: a
+ * group that claims to be folded must reserve no height for its detail, and the
+ * click that opens it must produce height.
  */
-test('every chat window opens the tool work it renders, live and settled', async () => {
+test('every chat window folds the tool work inside an open turn, live and settled', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-open-policy-'));
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   let browser: Browser | undefined;
@@ -69,14 +77,33 @@ test('every chat window opens the tool work it renders, live and settled', async
     const turn = page.locator('[data-testid="collapsed-turn"]').first();
     expect(await turn.getAttribute('data-open')).toBe('true');
 
-    // Both tool groups render open, and each one has a body with real height.
+    // Both tool groups render folded, and a folded group reserves no height for its
+    // detail: the settled one inside the open turn, and the in-flight one.
     const groups = page.locator('[data-testid="tool-activity-group"]');
     await expect.poll(() => groups.count(), { timeout: 30_000 }).toBe(2);
     for (let index = 0; index < 2; index += 1) {
       const group = groups.nth(index);
-      expect(await group.getAttribute('data-open')).toBe('true');
-      const height = await group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height);
-      expect(height).toBeGreaterThan(0);
+      // Offscreen history rows are laid out lazily, so a row is scrolled in before
+      // its geometry is read: 0px must mean folded, never "never laid out".
+      await group.scrollIntoViewIfNeeded();
+      expect(await group.getAttribute('data-open')).toBe('false');
+      const closed = await group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height);
+      expect(closed).toBe(0);
+      // Folded is not empty: the rows are there, behind the toggle.
+      expect(await group.locator('.tool-activity-list li').count()).toBeGreaterThan(0);
+    }
+
+    // Folded is the default, not a permanent state: one click opens the group and
+    // produces height, a second click folds it back. The in-flight group is opened
+    // too, so a running turn's work is exactly one click away, like settled work.
+    for (let index = 0; index < 2; index += 1) {
+      const group = groups.nth(index);
+      await group.locator('.tool-group-toggle').click();
+      await expect.poll(() => group.getAttribute('data-open')).toBe('true');
+      const opened = await expect.poll(() => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+      await group.locator('.tool-group-toggle').click();
+      await expect.poll(() => group.getAttribute('data-open')).toBe('false');
+      await expect.poll(() => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBe(0);
     }
 
     // The settled turn's work belongs to the turn block; the in-flight turn keeps
