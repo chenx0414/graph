@@ -37,6 +37,10 @@ type piAdapterRunInput struct {
 	TurnOrdinalsMu    *sync.Mutex
 	SystemChanges     *map[string]*piAdapterPending
 	SystemChangesMu   *sync.Mutex
+	// InterruptSignal fires when this operation is interrupted. A tool hands it
+	// to the command runner so the process dies with the turn instead of running
+	// to its own end.
+	InterruptSignal *AbortSignal
 }
 
 // stringValue reads an optional string.
