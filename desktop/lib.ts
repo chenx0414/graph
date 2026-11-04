@@ -79,14 +79,17 @@ export interface TrayMenuItem {
   label: string;
   enabled?: boolean;
   separator?: boolean;
-  action?: 'open' | 'quit';
+  action?: 'open' | 'quit' | 'open-crash';
 }
 
-/** Menu definition for the macOS status item; actions stay in main. */
-export function trayMenuItems(openTotal: number): TrayMenuItem[] {
+/** Menu definition for the macOS status item; actions stay in main. `crashLabel`
+ * is the line the crash helpers built for the last abnormal exit: the menu is
+ * where a user who never reads logs finds out the app died and why. */
+export function trayMenuItems(openTotal: number, crashLabel?: string | null): TrayMenuItem[] {
   return [
     { label: '打开控制台', action: 'open' },
     { label: openTotal > 0 ? `待处理问题 ${openTotal}` : '没有待处理问题', enabled: false },
+    ...(crashLabel ? [{ label: crashLabel, action: 'open-crash' as const }] : []),
     { label: '', separator: true },
     { label: '退出 Graph', action: 'quit' },
   ];
