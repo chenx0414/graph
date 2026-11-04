@@ -129,9 +129,13 @@ func BuildModelsRequest(target ProbeTarget) HttpRequestSpec {
 // model work.
 func BuildVerifyRequest(target ProbeTarget, modelID string) HttpRequestSpec {
 	anthropic := target.API == ModelApiAnthropicMessages
+	responses := target.API == ModelApiOpenAIResponses
 	path := "chat/completions"
 	if anthropic {
 		path = "messages"
+	}
+	if responses {
+		path = "responses"
 	}
 	headers := map[string]string{"content-type": "application/json", "accept": "application/json"}
 	for name, value := range AuthHeaders(target) {
@@ -144,7 +148,16 @@ func BuildVerifyRequest(target ProbeTarget, modelID string) HttpRequestSpec {
 		"model": modelID, "max_tokens": 1,
 		"messages": []any{map[string]any{"role": "user", "content": "ping"}},
 	}
-	if !anthropic {
+	if responses {
+		// The Responses transport has no chat messages: the turn is an input item
+		// and its text is an input_text part. A draft that declares this transport
+		// must be probed with it, or the probe rejects a correct draft.
+		payload = map[string]any{
+			"model": modelID, "stream": false, "store": false, "max_output_tokens": 16,
+			"input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "ping"}}}},
+		}
+	}
+	if !anthropic && !responses {
 		payload["stream"] = false
 	}
 	raw, err := json.Marshal(payload)

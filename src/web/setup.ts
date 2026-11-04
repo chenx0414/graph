@@ -18,7 +18,7 @@ declare global {
 export interface TemplateSetupModel { id: string; grade: ModelGrade; contextWindow: number; maxTokens: number }
 export interface TemplateSetupInput {
   providerId: string;
-  api: 'openai-completions' | 'anthropic-messages';
+  api: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
   baseUrl: string;
   credentialId: string;
   secretRef: string;

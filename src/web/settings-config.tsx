@@ -24,7 +24,7 @@ type SnapshotMetadata
 export type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type RawModel = {
-  id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'anthropic-messages'; baseUrl: string;
+  id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'openai-responses' | 'anthropic-messages'; baseUrl: string;
   contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
   /** Per-model strengths the server adds to the view; stripped before saving. */
   tier?: ModelTier;

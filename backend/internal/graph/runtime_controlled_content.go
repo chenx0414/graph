@@ -126,7 +126,7 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 			})
 			code := controlledTransportCode(failure)
 			notSent := code != "" && controlledRetryableTransportCodes[code]
-			if notSent {
+			if notSent || options.ReclaimUnanswered {
 				broker.Settle(id, &controlledZeroUsage)
 			} else {
 				broker.Settle(id, nil)

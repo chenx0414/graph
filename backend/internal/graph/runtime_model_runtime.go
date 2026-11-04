@@ -188,6 +188,8 @@ func providerEndpoint(baseURL string, api ModelApi) string {
 	switch string(api) {
 	case "anthropic-messages":
 		return trimmed + "/messages"
+	case "openai-responses":
+		return trimmed + "/responses"
 	default:
 		return trimmed + "/chat/completions"
 	}
@@ -238,6 +240,23 @@ func providerRequestBody(api ModelApi, request ProviderRequest) ([]byte, error) 
 			payload["system"] = *request.System
 		}
 		payload["stream"] = request.Stream
+		return json.Marshal(payload)
+	}
+	if string(api) == "openai-responses" {
+		// The Responses transport takes its prompt as instructions and its turns
+		// as input items, not as chat messages.
+		payload := map[string]any{
+			"model":    request.Model,
+			"input":    request.Messages,
+			"stream":   request.Stream,
+			"store":    false,
+		}
+		if request.System != nil {
+			payload["instructions"] = *request.System
+		}
+		for key, value := range request.Options {
+			payload[key] = value
+		}
 		return json.Marshal(payload)
 	}
 	payload := map[string]any{

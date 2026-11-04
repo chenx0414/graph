@@ -30,6 +30,7 @@ export const PROVIDER_ROUTES = {
 
 export const PROVIDER_COMPATIBILITIES: readonly { id: ModelApi; label: string }[] = [
   { id: 'openai-completions', label: 'OpenAI Chat Completions' },
+  { id: 'openai-responses', label: 'OpenAI Responses' },
   { id: 'anthropic-messages', label: 'Anthropic Messages' },
 ];
 
@@ -168,7 +169,7 @@ export function validateProviderDraft(draft: ProviderDraft, options: ValidatePro
     if (!draft.label.trim()) errors.label = '自定义厂商必须填写厂商名';
     if (!draft.baseUrl.trim()) errors.baseUrl = '自定义厂商必须填写 Base URL';
     else if (!validHttpUrl(draft.baseUrl.trim())) errors.baseUrl = 'Base URL 必须是 http(s) 绝对地址';
-    if (!COMPATIBILITIES.has(draft.api)) errors.api = '兼容格式必须是 openai-completions 或 anthropic-messages';
+    if (!COMPATIBILITIES.has(draft.api)) errors.api = '兼容格式必须是 openai-completions、openai-responses 或 anthropic-messages';
   }
   if (!draft.credentialId.trim()) errors.credentialId = '需要凭据 id';
   else if (!CREDENTIAL_ID.test(draft.credentialId)) errors.credentialId = '凭据 id 需以小写字母或数字开头，仅含小写字母、数字、- 和 _';
@@ -223,7 +224,7 @@ export function normalizePlatforms(payload: unknown): PlatformPreset[] {
     platforms.push({
       id,
       label: typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : id,
-      api: entry.api === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions',
+      api: entry.api === 'anthropic-messages' ? 'anthropic-messages' : entry.api === 'openai-responses' ? 'openai-responses' : 'openai-completions',
       baseUrl: typeof entry.baseUrl === 'string' ? entry.baseUrl.trim() : '',
       credentialRef,
       credentialKind: entry.credentialKind === 'subscription' ? 'subscription' : 'api-key',

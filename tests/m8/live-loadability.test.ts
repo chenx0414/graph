@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 /**
@@ -30,7 +31,9 @@ import { describe, expect, test } from 'vitest';
  * implemented, however green its unit tests are.
  */
 
-const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
+// fileURLToPath, not URL.pathname: pathname is percent-encoded, and a checkout under a
+// directory with a space in its name resolves to a `%20` path that no file has.
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

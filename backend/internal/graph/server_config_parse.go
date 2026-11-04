@@ -12,8 +12,8 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 		configInvalid(path + ".grade must be one of " + configJoinGrades(MODEL_GRADES))
 	}
 	api := configAsString(entry["api"], path+".api")
-	if api != "openai-completions" && api != "anthropic-messages" {
-		configInvalid(path + ".api must be \"openai-completions\" or \"anthropic-messages\"")
+	if api != "openai-completions" && api != "anthropic-messages" && api != "openai-responses" {
+		configInvalid(path + ".api must be \"openai-completions\", \"openai-responses\" or \"anthropic-messages\"")
 	}
 	credentialID := configAsString(entry["credentialId"], path+".credentialId")
 	if _, ok := credentials[credentialID]; !ok {
@@ -36,6 +36,13 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 	}
 	if _, ok := entry["defaultThinkingLevel"]; ok {
 		model.DefaultThinkingLevel = configThinkingLevel(entry["defaultThinkingLevel"], path+".defaultThinkingLevel")
+	}
+	if _, ok := entry["fallbackModelId"]; ok {
+		fallback := configAsString(entry["fallbackModelId"], path+".fallbackModelId")
+		if fallback == "" {
+			configInvalid(path + ".fallbackModelId must name a model id")
+		}
+		model.FallbackModelId = fallback
 	}
 	modelID := ""
 	if _, ok := entry["modelId"]; ok {
@@ -176,6 +183,25 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 			}
 			if existing.baseURL != entry.BaseURL {
 				configInvalid("models.entries[" + itoa(index) + "].baseUrl: provider \"" + entry.Provider + "\" must use one baseUrl across its models")
+			}
+		}
+		// A fallback is one hop to a model that exists: a chain would make the
+		// same review silently walk an unknown number of providers, and a
+		// fallback to itself would pretend to have switched.
+		for index, entry := range entries {
+			if entry.FallbackModelId == "" {
+				continue
+			}
+			if entry.FallbackModelId == entry.Id {
+				configInvalid("models.entries[" + itoa(index) + "].fallbackModelId must name another model, not itself")
+			}
+			if !seen[entry.FallbackModelId] {
+				configInvalid("models.entries[" + itoa(index) + "].fallbackModelId references unknown model \"" + entry.FallbackModelId + "\"")
+			}
+			for _, other := range entries {
+				if other.Id == entry.FallbackModelId && other.FallbackModelId != "" {
+					configInvalid("models.entries[" + itoa(index) + "].fallbackModelId: \"" + other.Id + "\" has its own fallback; a fallback is one hop")
+				}
 			}
 		}
 		preferences := map[string][]string{}

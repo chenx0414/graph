@@ -21,6 +21,11 @@ const (
 // ModelApiOpenAICompletions is the OpenAI-compatible chat transport.
 const ModelApiOpenAICompletions ModelApi = "openai-completions"
 
+// ModelApiOpenAIResponses is the OpenAI Responses transport: typed input items,
+// flat tool declarations and `response.*` events. ChatGPT's Codex backend
+// answers in this shape only.
+const ModelApiOpenAIResponses ModelApi = "openai-responses"
+
 // ModelApiAnthropicMessages is the Anthropic Messages transport.
 const ModelApiAnthropicMessages ModelApi = "anthropic-messages"
 
@@ -94,10 +99,10 @@ var PLATFORM_PRESETS = []PlatformPresetRecord{
 		},
 	},
 	{
-		ID: "chatgpt", Label: "ChatGPT", API: ModelApiOpenAICompletions,
+		ID: "chatgpt", Label: "ChatGPT", API: ModelApiOpenAIResponses,
 		BaseURL: "https://chatgpt.com/backend-api/codex", CredentialRef: "GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN",
 		CredentialKind: ProviderCredentialKindSubscription, ModelsListSupported: true,
-		Notes: []string{"ChatGPT/Codex 订阅访问令牌；后端以 Responses 形状返回，本轮按 Chat Completions 契约注册与探测，正式调用需在人工验收中确认。"},
+		Notes: []string{"ChatGPT/Codex 订阅访问令牌；后端只按 Responses 形状（input 项目、扁平工具、response.* 事件）应答，所以该平台注册为 openai-responses，真实补全与工具调用均已按此传输实测。"},
 	},
 }
 

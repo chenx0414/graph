@@ -10,6 +10,11 @@ type PiAdapterStreamOptions struct {
 	OnSend func(sent PiAdapterSentRequest)
 	// OnTransport observes what the provider attempt looked like from the outside.
 	OnTransport func(observation ProviderTransportObservation)
+	// HasFallback says a fallback model may take this send over. An attempt that
+	// came back with no answer at all is then settled as producing no usage, so
+	// the fallback's own send is not refused as a send after an unknown one.
+	// Without a fallback the attempt stays unknown, because nothing takes it over.
+	HasFallback bool
 }
 
 // PiAdapterSentRequest is what the transport is about to send.

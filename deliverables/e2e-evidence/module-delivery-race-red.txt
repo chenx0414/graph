@@ -1,0 +1,39 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement[39m
+
+[graph] 后端已是最新：/Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement/dist/graphd
+[graph] backend /Users/macmini/Library/Application Support/Graph/state/worktrees/race-and-independent-models-d557f0d5/implement/dist/graphd
+ [31m❯[39m tests/e2e/module-delivery-integration-race.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 907[2mms[22m[39m
+[31m   [31m×[31m a module handed a node output before that node integrated waits and still produces its result[39m[33m 905[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/e2e/module-delivery-integration-race.test.ts[2m > [22ma module handed a node output before that node integrated waits and still produces its result
+[31m[1mAssertionError[22m: ["the module failed instead of waiting for the source: [{\"id\":\"cd8f0df3-298f-466a-8dc3-59ee1c04cc98\",\"delivery_id\":\"3a2488b7-85c3-444a-ae2a-c61456b7c7f2\",\"state\":\"failed\",\"error\":\"Delivery source exec-750a3b2c-00fa-4877-84f9-b634d95ad996-worker-1 has not been integrated yet\"}]","the module failed instead of waiting for the source: [{\"id\":\"cd8f0df3-298f-466a-8dc3-59ee1c04cc98\",\"delivery_id\":\"3a2488b7-85c3-444a-ae2a-c61456b7c7f2\",\"state\":\"failed\",\"error\":\"Delivery source exec-750a3b2c-00fa-4877-84f9-b634d95ad996-worker-1 has not been integrated yet\"}]","the module failed instead of waiting for the source: [{\"id\":\"cd8f0df3-298f-466a-8dc3-59ee1c04cc98\",\"delivery_id\":\"3a2488b7-85c3-444a-ae2a-c61456b7c7f2\",\"state\":\"failed\",\"error\":\"Delivery source exec-750a3b2c-00fa-4877-84f9-b634d95ad996-worker-1 has not been integrated yet\"}]"]: expected [ …(3) ] to deeply equal [][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [][39m
+[31m+ [[39m
+[31m+   "the module failed instead of waiting for the source: [{\"id\":\"cd8f0df3-298f-466a-8dc3-59ee1c04cc98\",\"delivery_id\":\"3a2488b7-85c3-444a-ae2a-c61456b7c7f2\",\"state\":\"failed\",\"error\":\"Delivery source exec-750a3b2c-00fa-4877-84f9-b634d95ad996-worker-1 has not been integrated yet\"}]",[39m
+[31m+   "the module failed instead of waiting for the source: [{\"id\":\"cd8f0df3-298f-466a-8dc3-59ee1c04cc98\",\"delivery_id\":\"3a2488b7-85c3-444a-ae2a-c61456b7c7f2\",\"state\":\"failed\",\"error\":\"Delivery source exec-750a3b2c-00fa-4877-84f9-b634d95ad996-worker-1 has not been integrated yet\"}]",[39m
+[31m+   "the module failed instead of waiting for the source: [{\"id\":\"cd8f0df3-298f-466a-8dc3-59ee1c04cc98\",\"delivery_id\":\"3a2488b7-85c3-444a-ae2a-c61456b7c7f2\",\"state\":\"failed\",\"error\":\"Delivery source exec-750a3b2c-00fa-4877-84f9-b634d95ad996-worker-1 has not been integrated yet\"}]",[39m
+[31m+ ][39m
+
+[36m [2m❯[22m tests/e2e/module-delivery-integration-race.test.ts:[2m319:62[22m[39m
+    [90m317|[39m     // rules out; a graph that never settles is a failure, not a slow …
+    [90m318|[39m     await expect.poll(() => master.results.has('summary') || master.fa…
+    [90m319|[39m     expect(master.failures, JSON.stringify(master.failures)).toEqual([…
+    [90m   |[39m                                                              [31m^[39m
+    [90m320|[39m
+    [90m321|[39m     // Inside the window the module was asked for the value the source…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m   Start at [22m 21:51:17
+[2m   Duration [22m 1.04s[2m (tests 95%, transform 2%, import 2%)[22m
+

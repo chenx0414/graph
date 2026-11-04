@@ -88,6 +88,12 @@ node --run app:build               # 打包：dist/app/mac-arm64/Graph.app 与 G
 
 桌面功能包含向导、可视化、打包和界面重塑：控制台采用设计系统与明暗主题，可产出本机 `.app`/`.dmg`，托盘常驻；对外分发所需的签名与公证待 Apple Developer ID（A6 提供操作手册）。
 
+## 计算机使用能力（agent-desktop）
+
+Agent 通过一个 `desktop` 工具操作本机 GUI，背后是 [agent-desktop](https://github.com/vercel-labs/agent-desktop) CLI（1.1.0，协议 2.6，Apache-2.0）：`command` + `args`，返回 CLI 自己的 JSON 信封。默认 headless；只有显式 `headed: true` 才会抢焦点、动物理光标。成功输出默认只回一张回执（`bytes`/`sha256`），要读内容必须显式 `include: "output"`；宿主不自动重试，是否重复只由读到 `disposition.retry` 的调用方决定。
+
+装在哪里、怎么授权、真机验证过什么、重装后为什么要重新确认：见 [能力说明](.agents/skills/agent-desktop/README.md)。**授权不是永久状态**——TCC 按路径 + cdhash 认定 adhoc 二进制，重装、升级或换安装路径都会改变 cdhash 使授权失效；动过安装之后要重新跑一次 `agent-desktop permissions` 看答案，而不是假设它还有效。
+
 ## 运行验证
 
 ```sh

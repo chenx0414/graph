@@ -39,4 +39,9 @@ type GatedProviderFetchOptions struct {
 	OnTransport func(observation ProviderTransportObservation)
 	// RequestIDHeader names the correlation header the provider may forward.
 	RequestIDHeader string
+	// ReclaimUnanswered settles an attempt that came back with no response at all
+	// as producing no usage. The caller sets it when a configured fallback takes
+	// the send over: the failed attempt cannot keep an unknown call that would
+	// refuse the very next send.
+	ReclaimUnanswered bool
 }

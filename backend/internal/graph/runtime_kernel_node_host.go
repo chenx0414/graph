@@ -161,6 +161,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			}
 			tools := AgentToolsInput{
 				Workspace: options.Workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog, Access: options.Access,
+				Desktop: OpenDesktopTools(desktopCapabilityRoot(options.Catalog)),
 				ReadGraph: func(input GraphSectionQuery) any {
 					execution := options.Kernel.RunningExecution(options.GraphId, options.NodeId)
 					if execution == nil {

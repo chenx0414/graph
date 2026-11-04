@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.ts';
 import { PROVIDER_TEMPLATES, PROVIDER_PRESETS, providerTemplate, type ProviderTemplate } from '../catalog/providers.ts';
 import { buildTemplateConfigDocument, type TemplateSetupModel } from './setup.ts';
+import type { ModelApi } from '../catalog/models.ts';
 import { Button, Card, Field, Pill, toast } from './ui.tsx';
 
 const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -25,7 +26,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
   const [key, setKey] = useState('');
   const [advanced, setAdvanced] = useState(false);
   const [baseUrl, setBaseUrl] = useState(PROVIDER_TEMPLATES[0]!.baseUrl);
-  const [apiType, setApiType] = useState<'openai-completions' | 'anthropic-messages'>(PROVIDER_TEMPLATES[0]!.api);
+  const [apiType, setApiType] = useState<ModelApi>(PROVIDER_TEMPLATES[0]!.api);
   const [projectId, setProjectId] = useState('');
   const [projectRoot, setProjectRoot] = useState('');
   const [revision, setRevision] = useState<number | null>(null);
@@ -255,6 +256,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
               <Field label="传输" hint="只有经验证的传输可以派发">
                 <select className="select" data-testid="setup-api" value={apiType} onChange={event => setApiType(event.target.value as typeof apiType)}>
                   <option value="openai-completions">OpenAI Chat Completions</option>
+                  <option value="openai-responses">OpenAI Responses</option>
                   <option value="anthropic-messages">Anthropic Messages</option>
                 </select>
               </Field>

@@ -8,15 +8,15 @@
   },
   "surface": {
     "backend/internal/graph/runtime_agent_context.go": "713c60040cdd738a2c6649727ec8a177f75b352d31b53d1ea65792b822ce651a",
-    "backend/internal/graph/runtime_agent_tool_definitions.go": "356e8b59c95da240542bac05814d733e17daea1045e312c928cc0041af91dcc5",
-    "backend/internal/graph/runtime_agent_tools.go": "9c558f97b945a609ef5d166caaf4354996edc360f8e0085d177a4f0cb4df7a3b",
+    "backend/internal/graph/runtime_agent_tool_definitions.go": "4d9eb76ef4e271fac50cad3b0e59c997e9e47ae720e4f3d9267a9328c1fa7d7d",
+    "backend/internal/graph/runtime_agent_tools.go": "80918383390eb8ac19c1d4d1b619336da55a4695042c4d2e60b5fd848ebe8a7e",
     "backend/internal/graph/runtime_pi_native_tools.go": "fcefd7b410364862ab5f9b131a904dfb56f852ed7d8ce696ad0e1e37268b9173",
     "backend/internal/graph/runtime_pig_native_tools.go": "dbca13cbb89f8cefb3bde6cae545f1426b32d4a6acd40dede54328408f5a4d24",
     "scripts/harness-eval-cases.mjs": "31e8dd009090a25ab67ca263b554ecbf4b4af3c3cc8ce58879d083672be4dd1f",
-    "scripts/harness-real-eval.mjs": "b4c0133fd2d9416e0d8c9e9edd6db6d3dcdd3fed5804d163ec497d9e73d87a95",
+    "scripts/harness-real-eval.mjs": "5a08b0f2dcf78f598a9fb87ac64e6d9ce6a0d2f6229b0a2f7cbc48a7216fa2be",
     "scripts/harness-behavior-cases.mjs": "68a62f9a1f172e40125279bcc71d300e98f2c322ec47cb9c21aff83e5ad37c0c",
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "2289f03b6607184356e0e7efd83ba143e390f2cef846b4cceee94b538ada61f0"
   },
-  "updatedAt": "2026-11-02T06:45:01.464Z"
+  "updatedAt": "2026-11-03T15:19:45.694Z"
 }

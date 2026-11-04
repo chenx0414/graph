@@ -42,7 +42,7 @@ func ControlledTextFromContent(value any) string {
 }
 
 // ControlledOpenAIStream is the controlled lower-level adapter, verified for the OpenAI
-// chat-completions and Anthropic messages streams.
+// chat-completions, OpenAI Responses and Anthropic messages streams.
 //
 // The provider HTTP API is the boundary: the Pi SDK is not linked here, so the request is built
 // and the event stream is parsed by this adapter.
@@ -51,7 +51,7 @@ func ControlledTextFromContent(value any) string {
 // resolved against it, never against the provider-shaped model the SDK carries: that one names
 // the provider model, so a lookup by it would miss the configured entry and its credential.
 func ControlledOpenAIStream(broker SendGate, candidate ModelEntry, resolveKey func(candidate ModelEntry) string, slot func(candidate ModelEntry) *piAdapterSlot, api ModelApi, usageOptions PiAdapterStreamOptions) PromptStreamFunc {
-	if api != "openai-completions" && api != "anthropic-messages" {
+	if api != "openai-completions" && api != "anthropic-messages" && api != "openai-responses" {
 		panic(errors.New("Unverified model transport"))
 	}
 	return func(model any, context map[string]any, options map[string]any) (ModelEventStream, error) {

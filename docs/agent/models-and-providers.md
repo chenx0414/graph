@@ -114,7 +114,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `id` | 是 | 本配置内的唯一标识（Graph 侧身份） |
 | `provider` | 是 | 厂商/平台名（用于展示与分组） |
 | `grade` | 是 | `small` / `medium` / `frontier`；历史 `low` / `high` / `highest` 仍可用 |
-| `api` | 是 | `openai-completions` 或 `anthropic-messages` |
+| `api` | 是 | `openai-completions`、`openai-responses` 或 `anthropic-messages` |
 | `baseUrl` | 是 | 端点基址 |
 | `contextWindow` | 是 | 正整数 |
 | `maxTokens` | 是 | 正整数 |
@@ -125,6 +125,9 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `modelId` | 否 | 上游真实模型 id（与配置 id 不同时） |
 | `cost` / `pricing` | 否 | 费用与价格表（影响预算与用量展示） |
 | `headers` | 否 | 该模型额外请求头 |
+| `fallbackModelId` | 否 | 传输层失败时接管这次发送的另一个模型 id（必须存在、不能是自己、只能一跳），见 [模型回退](model-fallback.md) |
+
+`openai-responses` 是 OpenAI Responses 传输：请求体是 `instructions` 加类型化的 `input` 项目（消息、`function_call`、`function_call_output`），工具声明是扁平的（`{type:"function",name,description,parameters}`），应答是 `response.*` 事件的 SSE，用量随最后一个 `response.completed` 事件到达。ChatGPT 的 Codex 后端（`https://chatgpt.com/backend-api/codex`）只认这一种契约，用 chat-completions 打过去会 404/400，所以 `chatgpt` 平台按 `openai-responses` 注册；该传输下的文本、工具调用与用量都已在真实补全里跑通。
 
 `models.preferences`：按 grade 给出模型优先顺序（`Partial<Record<grade, string[]>>`）。
 `limits`：`credentials.<id>` 逐凭据 token 上限、`sharedGroups`、`defaultBudgetTokens`（`null` = 不限）。
@@ -163,7 +166,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `opencode-go` | OpenCode Go | openai-completions | `https://opencode.ai/zen/go/v1` | `GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY` | 订阅 | 是 |
 | `command-goat` | Command Goat | openai-completions | `https://api.commandcode.ai/provider/v1` | `GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY` | 订阅 | 是 |
 | `grok` | Grok | openai-completions | `https://api.x.ai/v1` | `GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN` | 订阅 / xAI 设备码登录 | 是 |
-| `chatgpt` | ChatGPT | openai-completions | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | 是 |
+| `chatgpt` | ChatGPT | openai-responses | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | 是 |
 | `openai` | OpenAI | openai-completions | `https://api.openai.com/v1` | `OPENAI_API_KEY` | API KEY | 是 |
 | `anthropic` | Anthropic | anthropic-messages | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | API KEY | 是 |
 | `gemini` | Google Gemini | openai-completions | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | API KEY | 是 |
@@ -181,7 +184,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 - `custom`：用户自填「厂商名 + Base URL + 兼容格式 + API KEY」；端点不支持列模型时手动添加模型 id。
 - 环境变量别名（配置 `secretRef` 之外的兜底名，代码内已声明）：`OPENCODE_GO_API_KEY` / `OPENCODE_ZEN_API_KEY` / `OPENCODE_API_KEY`；OpenCode 的本地配置 `~/.config/opencode/opencode.json` 也会被识别。
 
-**注意**：`chatgpt` 后端按 Responses 形状返回，而 preset 按 Chat Completions 契约注册与探测 —— 正式调用前用 `/api/config/test` 实测，不要假定一定可用。
+**注意**：`chatgpt` 的 Codex 后端只认 Responses 契约，所以 preset、目录与运行时都把它注册为 `openai-responses`（探针与设置页的草稿校验同样按该传输发请求）；用 chat-completions 打过去会 404/400。主选万一在传输层断开，可配 `fallbackModelId` 让另一个模型接管（见 [模型回退](model-fallback.md)）。
 
 ---
 

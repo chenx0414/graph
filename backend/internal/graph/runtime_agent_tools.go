@@ -181,6 +181,8 @@ type AgentToolsInput struct {
 	ControlTask func(input AgentToolsControlTask) any
 	// Goal applies one model-reported goal action to this conversation's goal.
 	Goal func(input AgentToolsGoal) any
+	// Desktop is the host's agent-desktop CLI, nil when the host has none.
+	Desktop *AgentToolsDesktop
 	// WriteLedger records the writes one turn makes.
 	WriteLedger *AgentToolsWriteLedger
 }
@@ -263,6 +265,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		agentToolsSystemHandlers(input, root, readRoots, hostRead, hostWrite, pathOptions, artifacts, peers),
 		agentToolsHarnessHandlers(input, root, readRoots, hostRead, hostWrite, pathOptions, artifacts, peers),
 		agentToolsConversationHandlers(input, root, readRoots, hostRead, hostWrite, pathOptions, artifacts, peers),
+		agentToolsDesktopHandlers(input),
 	} {
 		for name, handler := range group {
 			handlers[name] = handler
@@ -282,6 +285,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		Catalog:         input.Catalog != nil,
 		Harness:         input.GraphManagement.HarnessCompare != nil,
 		Goal:            input.Goal != nil,
+		Desktop:         input.Desktop != nil && input.Desktop.Bin != "",
 	}
 	if artifacts.present {
 		access := artifacts.access

@@ -29,6 +29,8 @@ type AgentToolFeatures struct {
 	Peers           bool
 	// Goal reports on the standing goal of the session's own conversation.
 	Goal bool
+	// Desktop is the computer-use capability: this host has agent-desktop.
+	Desktop bool
 }
 
 // AgentArtifactAccess is the artifact namespaces one role may use.
@@ -216,6 +218,7 @@ func agentToolDeclarations(features AgentToolFeatures) []AgentToolDeclaration {
 	declarations = append(declarations, artifactToolDeclarations(set)...)
 	declarations = append(declarations, sessionToolDeclarations(set)...)
 	declarations = append(declarations, harnessToolDeclarations(set)...)
+	declarations = append(declarations, desktopToolDeclarations(set)...)
 	return declarations
 }
 

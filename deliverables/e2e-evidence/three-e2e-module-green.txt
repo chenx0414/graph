@@ -1,0 +1,10 @@
+ [32m✓[39m tests/e2e/module-delivery-integration-race.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 1453[2mms[22m[39m
+   [33m[2m✓[22m[39m a module handed a node output before that node integrated waits and still produces its result[33m 1452[2mms[22m[39m
+ [32m✓[39m tests/e2e/provider-independent-reviews.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 31014[2mms[22m[39m
+   [33m[2m✓[22m[39m Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider[33m 31013[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 03:42:07
+[2m   Duration [22m 31.18s[2m (tests 99%)[22m
+

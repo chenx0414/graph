@@ -235,6 +235,8 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			tools := AgentToolsInput{
 				Workspace: workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog,
 				Access: input.AccessPolicy,
+				// The host's own computer-use CLI: declared only where it exists.
+				Desktop: OpenDesktopTools(desktopCapabilityRoot(options.Catalog)),
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
 					return commands.Run(command, args, signal)
 				},

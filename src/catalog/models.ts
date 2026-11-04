@@ -21,7 +21,7 @@ export const MODEL_GRADE_ORDER: readonly ModelGrade[] = ['low', 'small', 'medium
 export const MODEL_INPUTS = ['text', 'image'] as const;
 export type ModelInput = (typeof MODEL_INPUTS)[number];
 /** Transports Graph has actually verified against a provider contract. */
-export type ModelApi = 'openai-completions' | 'anthropic-messages';
+export type ModelApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
 export const MODEL_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ModelThinkingLevel = (typeof MODEL_THINKING_LEVELS)[number];
 /** One thinking strength a model accepts. `level` is Pi's own vocabulary (the
