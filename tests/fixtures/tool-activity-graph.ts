@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
-import type { Browser, Page } from 'playwright';
+import type { Page } from 'playwright';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { desktopBinary } from '../helpers/agent-desktop.ts';
 import { openaiServer, type ResponsePlan } from './openai-server.ts';
@@ -188,5 +188,3 @@ export async function openConsole(page: Page, url: string, conversationId: strin
     await expect.poll(() => group.getAttribute('data-open')).toBe('true');
   }
 }
-
-export type { Browser };
