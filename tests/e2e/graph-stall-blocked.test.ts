@@ -63,6 +63,24 @@ test('a graph with no work left and a failed node reaches blocked by itself, and
       db.close();
     }
   };
+  // Work handed to a paused target can never run - a queue item on a paused node
+  // is never claimed, and a delivery to a paused module waits in
+  // kernel_module_inbox - and that is the shape graph 50fa0860 was stuck in:
+  // four "queued" rows on three paused nodes. That is not live work.
+  const pendingWorkForPaused = (graphId: string) => {
+    const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true });
+    try {
+      const queued = db.prepare(`SELECT COUNT(*) AS n FROM kernel_queue q
+        JOIN kernel_node_state s ON s.task_id=q.task_id AND s.node_id=q.node_id
+        WHERE q.task_id=? AND q.state='queued' AND s.paused=1`).get(graphId) as { n: number };
+      const inbox = db.prepare(`SELECT COUNT(*) AS n FROM kernel_module_inbox i
+        JOIN kernel_node_state s ON s.task_id=i.task_id AND s.node_id=i.module_id
+        WHERE i.task_id=? AND i.processed=0 AND s.paused=1`).get(graphId) as { n: number };
+      return queued.n + inbox.n;
+    } finally {
+      db.close();
+    }
+  };
   const phaseOf = async (graphId: string) => (await request(`/api/tasks/${graphId}`)).body as { phase?: string };
   // The facts behind a phase, read straight from the daemon's database: a
   // failure that only says "still idle" hides which row the graph is waiting on.
@@ -136,13 +154,49 @@ test('a graph with no work left and a failed node reaches blocked by itself, and
           await waitPhase(id, 'blocked');
         },
       },
+      {
+        // A paused target keeps what is sent to it waiting forever. That is not
+        // live work: the graph must keep saying blocked, not fall back to
+        // running just because somebody sent it something.
+        id: 'pause-node', name: 'graph_control',
+        args: { graphId: graphIdOf(master.results.get('create-stalled')), action: 'pause', moduleId: 'failing', requestId: 'stall-pause' },
+      },
+      {
+        id: 'send-while-paused', name: 'graph_send',
+        args: { graphId: graphIdOf(master.results.get('create-stalled')), nodeId: 'failing', input: 'job', value: { marker: 'while-paused' } },
+      },
+      {
+        id: 'still-blocked', name: 'graph_inspect',
+        args: { graphId: graphIdOf(master.results.get('create-stalled')), query: 'summary' },
+        before: async () => {
+          const id = answeredGraphId(master, 'create-stalled');
+          await expect.poll(() => pendingWorkForPaused(id), { timeout: 30_000, interval: 200 }).toBe(1);
+          await waitPhase(id, 'blocked');
+          // It really did not run: the send is waiting, not done.
+          expect(operationCount(id)).toBe(2);
+        },
+      },
+      {
+        // And the waiting delivery was real work: resuming the module runs it.
+        id: 'resume-node', name: 'graph_control',
+        args: { graphId: graphIdOf(master.results.get('create-stalled')), action: 'resume', moduleId: 'failing', requestId: 'stall-resume' },
+      },
+      {
+        id: 'parked-again', name: 'graph_inspect',
+        args: { graphId: graphIdOf(master.results.get('create-stalled')), query: 'summary' },
+        before: async () => {
+          const id = answeredGraphId(master, 'create-stalled');
+          await expect.poll(() => settledOperationCount(id), { timeout: 60_000, interval: 250 }).toBe(3);
+          await waitPhase(id, 'blocked');
+        },
+      },
     ];
 
     const started = await request('/api/conversations', {
       method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Run the check and stop touching the graph.', requestId: 'stall-begin' }),
     });
     expect(started.status, JSON.stringify(started.body)).toBe(200);
-    await waitForStep(master, 'reparked-summary', 90_000);
+    await waitForStep(master, 'parked-again', 120_000);
 
     const graphId = answeredGraphId(master, 'create-stalled');
 
@@ -154,11 +208,20 @@ test('a graph with no work left and a failed node reaches blocked by itself, and
 
     // Work that arrives later really runs again: the graph was not frozen into
     // a phase it can never leave.
-    expect(operationCount(graphId)).toBe(2);
+    expect(operationCount(graphId)).toBe(3);
 
     // That work failed too, so the graph parks again instead of staying loose.
     const reparked = JSON.parse(master.results.get('reparked-summary')!) as { phase: string };
     expect(reparked.phase).toBe('blocked');
+
+    // Work sent to a paused target is not live work: it waited, the graph stayed
+    // blocked, and resuming the module ran it for real.
+    const stillBlocked = JSON.parse(master.results.get('still-blocked')!) as { phase: string };
+    expect(stillBlocked.phase).toBe('blocked');
+    expect(operationCount(graphId)).toBe(3);
+    expect(pendingWorkForPaused(graphId)).toBe(0);
+    const parkedAgain = JSON.parse(master.results.get('parked-again')!) as { phase: string };
+    expect(parkedAgain.phase).toBe('blocked');
 
     const rows = await request(`/api/tasks/${graphId}`);
     expect((rows.body as { phase?: string }).phase).toBe('blocked');

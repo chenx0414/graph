@@ -30,7 +30,7 @@ import {
  * real Codex endpoint answers a real completion in the probe above, which is
  * what proves the ChatGPT transport itself.
  */
-test('Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider', async t => {
+test('Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-independent-'));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
@@ -174,16 +174,7 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
         // slower one later: the reason is the reason the daemon recorded.
         const failure = messages.find(message => message.kind === 'error');
         if (failure || status === 'failed' || status === 'blocked') {
-          const detail = `${failure?.text ?? status} ${JSON.stringify(view).slice(0, 2000)}`;
-          // A credential the provider rejects is this host's problem, not the
-          // code's: the suite must not turn red - and block every commit - until
-          // somebody signs in again. Any other provider failure still fails here.
-          if (/HTTP 40[13]/.test(detail)) {
-            console.log(`[provider-independent-reviews] skipped: ${model} answered the credential with 40x; sign in again to run this proof. ${detail.slice(0, 300)}`);
-            t.skip();
-            return;
-          }
-          throw new Error(`the ${model} turn failed instead of answering: ${detail}`);
+          throw new Error(`the ${model} turn failed instead of answering: ${failure?.text ?? status} ${JSON.stringify(view).slice(0, 2000)}`);
         }
         await new Promise(resolve => setTimeout(resolve, 500));
       }

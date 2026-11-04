@@ -71,13 +71,34 @@ func (s *TaskStore) ParkStalledTask(taskID string) bool {
 	if kernelRow(s.DB, `SELECT id FROM tasks WHERE id=? AND phase IN ('running','idle')`, taskID) == nil {
 		return false
 	}
-	// Nothing may still be able to move: a queued or claimed turn, a running
-	// execution, or an operation that was prepared and not settled yet.
-	if kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state IN ('queued','claimed') LIMIT 1`, taskID) != nil {
+	// Nothing may still be able to move: a claimed turn, a queued one that could
+	// be claimed, a running execution, or an operation prepared and not settled.
+	//
+	// Measured 2026-11-04 on graph 50fa0860: four queue items sat "queued" on
+	// nodes whose queue was paused (line1, line2, line3, every one paused=1), and
+	// Claim refuses a paused node before it ever looks at the queue. Counting
+	// those as live work kept that graph running forever with nothing to run.
+	if kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state='claimed' LIMIT 1`, taskID) != nil {
+		return false
+	}
+	queued := `SELECT 1 FROM kernel_queue WHERE task_id=? AND state='queued' LIMIT 1`
+	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_node_state'"); ok {
+		queued = `SELECT 1 FROM kernel_queue q WHERE q.task_id=? AND q.state='queued' AND COALESCE((SELECT paused FROM kernel_node_state st WHERE st.task_id=q.task_id AND st.node_id=q.node_id), 0)=0 LIMIT 1`
+	}
+	if kernelRow(s.DB, queued, taskID) != nil {
 		return false
 	}
 	if kernelRow(s.DB, `SELECT 1 FROM kernel_executions WHERE task_id=? AND state='running' LIMIT 1`, taskID) != nil {
 		return false
+	}
+	// A delivery handed to a module that is not paused is work that will run.
+	// One waiting on a paused module cannot, and must not keep the graph running
+	// (measured 2026-11-04: a delivery to a paused module is accepted and sits in
+	// kernel_module_inbox with processed=0 until the module is resumed).
+	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_module_inbox'"); ok {
+		if kernelRow(s.DB, `SELECT 1 FROM kernel_module_inbox i WHERE i.task_id=? AND i.processed=0 AND COALESCE((SELECT paused FROM kernel_node_state st WHERE st.task_id=i.task_id AND st.node_id=i.module_id), 0)=0 LIMIT 1`, taskID) != nil {
+			return false
+		}
 	}
 	if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_module_operations'"); ok {
 		if kernelRow(s.DB, `SELECT 1 FROM kernel_module_operations WHERE task_id=? AND state IN ('prepared','dispatched') LIMIT 1`, taskID) != nil {
@@ -85,14 +106,19 @@ func (s *TaskStore) ParkStalledTask(taskID string) bool {
 		}
 	}
 	// Something really stopped the graph: a node that blocked or failed, an
-	// operation that failed, a queue item that failed, or an open question. A
-	// graph whose work all succeeded is idle, not blocked.
+	// operation that failed, a queue item that failed or was left queued on a
+	// paused node, or an open question. A graph whose work all succeeded is idle.
 	stopped := kernelRow(s.DB, `SELECT 1 FROM kernel_nodes WHERE task_id=? AND status IN ('blocked','failed') LIMIT 1`, taskID) != nil ||
-		kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state='failed' LIMIT 1`, taskID) != nil ||
+		kernelRow(s.DB, `SELECT 1 FROM kernel_queue WHERE task_id=? AND state IN ('failed','queued') LIMIT 1`, taskID) != nil ||
 		kernelRow(s.DB, `SELECT 1 FROM questions WHERE task_id=? AND status='open' LIMIT 1`, taskID) != nil
 	if !stopped {
 		if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_module_operations'"); ok {
 			stopped = kernelRow(s.DB, `SELECT 1 FROM kernel_module_operations WHERE task_id=? AND state IN ('failed','uncertain') LIMIT 1`, taskID) != nil
+		}
+	}
+	if !stopped {
+		if _, ok := g5One(s.DB, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_module_inbox'"); ok {
+			stopped = kernelRow(s.DB, `SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND processed=0 LIMIT 1`, taskID) != nil
 		}
 	}
 	if !stopped {
