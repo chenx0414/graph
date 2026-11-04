@@ -154,11 +154,13 @@ function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refres
   return 'file';
 }
 
-function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
+function ToolActivityGroup({ row, defaultOpen = false }: { row: Extract<TranscriptRow, { kind: 'tools' }>; defaultOpen?: boolean }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  // Tool calls stay folded away by default, running or finished; the button opens
-  // one group when its detail is needed.
-  const open = manualOpen ?? false;
+  // A live group stays folded until its detail is asked for, while a group inside an
+  // expanded turn of the history opens with it: measured 2026-11-04, the turn block was
+  // open but every tool group under it still rendered grid-template-rows: 0px, so the
+  // reader saw two summary lines and no detail.
+  const open = manualOpen ?? defaultOpen;
   const activeTool = [...row.tools].reverse().find(tool => !tool.done);
   const kind = activeTool ? toolActivity(activeTool.name, activeTool.summary).kind : 'other';
   const orbState: OrbState = kind === 'search' || kind === 'browse' ? 'searching'
@@ -247,7 +249,7 @@ function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, {
       </button>
       {open && (
         <div className="collapsed-turn-body">
-          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} />)}
+          {row.rows.map(child => <TranscriptRowView key={child.id} row={child} markdown={markdown} defaultOpen />)}
         </div>
       )}
     </div>
@@ -460,11 +462,13 @@ function ThinkingStatus() {
   );
 }
 
-export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown = true }: {
+export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown = true, defaultOpen = false }: {
   row: TranscriptRow;
   assistantAuthor?: string;
   userAuthor?: string;
   markdown?: boolean;
+  /** Rows rendered inside a history turn that is already open. */
+  defaultOpen?: boolean;
 }) {
   if (row.kind === 'message') {
     return userAuthor
@@ -476,7 +480,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
       ? <AssistantResponse row={row} author={assistantAuthor} copyable={copyText(row)} markdown={markdown} />
       : <AssistantResponse row={row} copyable={copyText(row)} markdown={markdown} />;
   }
-  if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
+  if (row.kind === 'tools') return <ToolActivityGroup row={row} defaultOpen={defaultOpen} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiReport row={row} />;

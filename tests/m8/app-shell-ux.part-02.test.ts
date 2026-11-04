@@ -95,6 +95,12 @@ test('agent markdown renders and tool activity appears before the final answer',
   await folded.waitFor();
   expect(await folded.getAttribute('data-open')).toBe('true');
   expect(await page.getByTestId('tool-activity-group').count()).toBe(1);
+  // The turn being open is not enough: the tool group inside it carries the detail,
+  // and it measured grid-template-rows: 0px while the turn was already open.
+  const group = page.getByTestId('tool-activity-group').first();
+  expect(await group.getAttribute('data-open')).toBe('true');
+  expect(await group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+  expect(await group.locator('.tool-activity-list li').count()).toBeGreaterThan(0);
   // The block still folds on demand, so a long history stays readable.
   await folded.locator('.collapsed-turn-toggle').click();
   await expect.poll(() => folded.getAttribute('data-open')).toBe('false');
