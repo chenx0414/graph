@@ -104,28 +104,15 @@ node scripts/measure-fold-policy.mjs --executable /path/to/chromium --label gree
    标签页里出现第二份。脚本只用 `:visible` 的那份。
 3. 折叠是 CSS 过渡，属性先翻、高度后到。脚本按「读到达标值」轮询，而不是读完就断言。
 
-## 两处旧断言：都按新方向改（不是退役）
+## 需要别人接手的两处旧断言（不属本节点文件清单）
 
-方向反转后被挡路的两条既有断言，逐条选了 (A) 按新方向改，都同时断言 `data-open` 与
-内容高度，也都保留了原来那条「细节仍然存在、可点开」的意图，没有删掉任何与之无关的断言：
+方向反了以后，两条既有用例断言的是旧方向，合并前必须退休或按新方向重写，否则门禁会因它们变红：
 
-- `tests/e2e/chat-open-policy.test.ts`（733d1b48 自带）：用例名改为
-  「every chat window folds the tool work inside an open turn, live and settled」。
-  档位没变——仍是真实守护进程 + 真实节点对话 + 一条已结束轮 + 一条进行中轮；断言变为
-  两个工具组 `data-open=false`、`.tool-group-content` 高度为 0、组内 `.tool-activity-list li`
-  仍在（折叠不是空壳），然后两组各自点开有高度、再点回 0；轮块仍断言 `data-open=true`，
-  「已结束轮的工具组属于轮块、进行中轮的行仍是松的」这条也原样保留。
-  为什么改而不是退役：它守的东西仍然成立且重要——「三处窗口同一个策略」与「轮块的
-  细节一个点击可达」——而它是套件里唯一一条对节点对话做浏览器级断言的用例。
-- `tests/m8/app-shell-ux.part-02.test.ts`（2a507e9a 新增）：那条断言的来历是
-  「轮块开着、轮内工具组却量到 grid-template-rows: 0px」——当时缺的是 `defaultOpen`
-  透传，细节根本打不开。现在轮内折叠是**决定过的**行为，所以断言改为：组 `data-open=false`、
-  内容高度 0、`.tool-activity-list li` 仍在，点一次后 `data-open=true` 且高度 > 0。
-  原先要防的事（细节打不开）继续被防着：折叠必须可逆。同一个用例里轮块展开、轮块收起、
-  消息与 telemetry 的断言一条没动。
+- `tests/e2e/chat-open-policy.test.ts:77`（733d1b48 新增）断言每个
+  `[data-testid="tool-activity-group"]` 的 `data-open` 为 `true`、`.tool-group-content`
+  高度 > 0；`:70` 断言轮块打开（这条仍然成立）。
+- `tests/m8/app-shell-ux.part-02.test.ts:101`（2a507e9a 新增）断言打开着的轮块里那个工具组
+  `data-open` 为 `true` 且高度 > 0；`:96` 的轮块断言仍然成立。
 
-边界（必须说清）：这两条都是浏览器层用例，本机沙箱里 `chromium.launch()` 直接 SIGSEGV
-（`tests/e2e/chat-open-policy.test.ts:70:30` 处失败，还没走到任何断言），所以它们**在本机没有跑绿**。
-它们断言的同一组事实由本目录的测量证明，且更严：三处窗口 × 已结束/进行中两轮 × 每个组
-点开再收起，另外多一条「轮块里恰有 1 个组、进行中轮的组是松的」的归属断言。
-`node --run typecheck` 覆盖 `tests/**/*.ts`，改完通过。
+本目录的测量覆盖了它们想守的同一件事（首屏收起、点开有高度、轮块展开），断言级别更高：
+三处窗口 + 进行中的一轮。

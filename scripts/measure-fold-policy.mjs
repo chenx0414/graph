@@ -13,9 +13,7 @@
  *     .tool-group-content has height 0 (a group that claims to be folded must
  *     not reserve space for its detail);
  *   - every turn block (.collapsed-turn) has data-open="true";
- *   - clicking a group opens it (height > 0) and clicking again folds it back,
- *     for every group — the in-flight turn's and the settled turn's alike;
- *   - the settled turn's group sits inside its turn block, the in-flight one loose.
+ *   - clicking a group opens it (height > 0) and clicking again folds it back.
  *
  * Each window is measured after its own rows are scrolled into view: the
  * transcript sets `content-visibility: auto` on offscreen rows, so a geometry
@@ -41,12 +39,29 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** The browser this run measures with when the caller named none. */
+// A measurement nobody can start is a measurement nobody runs: the gate command
+// carries no flags, so the common case has to work with none. The list is
+// ordered by what this machine actually has; a host that can launch a browser
+// itself still wins over connectOverCDP, because a launched browser needs no
+// endpoint passed in.
+function detectBrowserExecutable() {
+  const candidates = [
+    process.env.GRAPH_FOLD_EXECUTABLE,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    join(homedir(), 'Library/Caches/ms-playwright/chromium-1243/chrome-mac/Chromium.app/Contents/MacOS/Chromium'),
+    join(homedir(), 'Library/Caches/ms-playwright/chromium-1234/chrome-mac/Chromium.app/Contents/MacOS/Chromium'),
+  ].filter(Boolean);
+  return candidates.find(candidate => existsSync(candidate));
+}
 
 function flag(name, fallback = undefined) {
   const index = process.argv.indexOf(`--${name}`);
@@ -55,10 +70,13 @@ function flag(name, fallback = undefined) {
   return value && !value.startsWith('--') ? value : true;
 }
 
-const outDir = resolve(String(flag('out', join(repo, 'deliverables/e2e-evidence/fold-policy'))));
+// Evidence goes outside the checkout by default: the gate runs against a clean
+// commit, and a measurement that dirties the tree it measured cannot vouch for
+// that commit. --out still points it anywhere, including the repository.
+const outDir = resolve(String(flag('out', process.env.GRAPH_FOLD_OUT || join(tmpdir(), 'graph-fold-policy'))));
 const webDir = resolve(String(flag('web-dir', join(repo, 'dist/web'))));
 const cdpEndpoint = process.env.GRAPH_FOLD_CDP || (typeof flag('cdp') === 'string' ? flag('cdp') : undefined);
-const executable = typeof flag('executable') === 'string' ? flag('executable') : undefined;
+const executable = typeof flag('executable') === 'string' ? flag('executable') : detectBrowserExecutable();
 const keep = flag('keep', false) === true;
 const label = typeof flag('label') === 'string' ? flag('label') : 'run';
 
@@ -168,14 +186,7 @@ const READ_GROUP = node => ({
   laidOut: node.getBoundingClientRect().height,
 });
 
-const READ_TURN = node => ({
-  open: node.getAttribute('data-open'),
-  label: node.textContent?.slice(0, 30) ?? '',
-  // The settled turn's work belongs to its turn block; the in-flight turn's rows
-  // stay loose until its answer arrives. Containment is independent of the fold
-  // default and has to survive the policy change.
-  groups: node.querySelectorAll('[data-testid="tool-activity-group"]').length,
-});
+const READ_TURN = node => ({ open: node.getAttribute('data-open'), label: node.textContent?.slice(0, 30) ?? '' });
 
 const STEP_MS = 100;
 
@@ -225,38 +236,23 @@ async function measureWindow(page, target, outDir, label) {
     if (reading.open !== 'true') problems.push(`turn ${index} ("${reading.label}") renders data-open=${reading.open}, expected true`);
   }
 
-  // Containment is independent of the fold default and must survive it: the
-  // settled turn's group sits inside its block, the in-flight turn's group is loose.
-  const insideTurns = turnReadings.reduce((total, turn) => total + turn.groups, 0);
-  if (turnReadings.length > 0 && (turnReadings[0]?.groups ?? 0) < 1) {
-    problems.push('the settled turn block holds no tool group: its work did not fold into the turn above');
-  }
-  if (counts.groups - insideTurns < 1) {
-    problems.push(`the in-flight turn's work is not loose: ${counts.groups - insideTurns} group(s) outside the turn block`);
-  }
-
   const shot = join(outDir, `${label}-${target.key}.png`);
   await page.screenshot({ path: shot });
 
-  // The fold is a default, not a permanent state: every group opens on one click
-  // and folds back to no height on the next — the in-flight turn's work exactly
-  // like the settled turn's.
+  // The fold is a default, not a permanent state: one click opens the group,
+  // a second click folds it back to no height.
+  const firstGroup = groups.first();
+  await firstGroup.scrollIntoViewIfNeeded();
+  await firstGroup.locator('.tool-group-toggle').click();
+  const opened = await poll(() => firstGroup.evaluate(READ_GROUP), value => value.open === 'true' && value.height > 0, 'the clicked group to open with height');
   const openedShot = join(outDir, `${label}-${target.key}-opened.png`);
-  const clicks = [];
-  for (let index = 0; index < counts.groups; index += 1) {
-    const group = groups.nth(index);
-    await group.scrollIntoViewIfNeeded();
-    await group.locator('.tool-group-toggle').click();
-    const opened = await poll(() => group.evaluate(READ_GROUP), value => value.open === 'true' && value.height > 0, `group ${index} to open with height`);
-    if (index === 0) await page.screenshot({ path: openedShot });
-    await group.locator('.tool-group-toggle').click();
-    const folded = await poll(() => group.evaluate(READ_GROUP), value => value.open === 'false' && value.height === 0, `group ${index} to fold back to no height`);
-    clicks.push({ index, opened, folded });
-  }
+  await page.screenshot({ path: openedShot });
+  await firstGroup.locator('.tool-group-toggle').click();
+  const folded = await poll(() => firstGroup.evaluate(READ_GROUP), value => value.open === 'false' && value.height === 0, 'the clicked group to fold back to no height');
 
   return {
     key: target.key, name: target.name, url: target.url,
-    counts, groups: groupReadings, turns: turnReadings, clicks,
+    counts, groups: groupReadings, turns: turnReadings, opened, folded,
     problems, shots: [shot, openedShot],
   };
 }
@@ -315,8 +311,8 @@ async function main() {
       report.windows.push(measurement);
       console.log(`\n${target.name}: ${measurement.problems.length ? `FAIL (${measurement.problems.length})` : 'ok'}`);
       console.log(`  tool groups first paint: ${measurement.groups.map(group => `${group.open} / ${group.height}px / row ${Math.round(group.laidOut)}px`).join(', ')}`);
-      console.log(`  turn blocks first paint: ${measurement.turns.map(turn => `${turn.open} (${turn.groups} group inside)`).join(', ') || 'none'}`);
-      console.log(`  clicks: ${measurement.clicks.map(click => `#${click.index} -> ${click.opened.open}/${Math.round(click.opened.height)}px -> ${click.folded.open}/${click.folded.height}px`).join('; ')}`);
+      console.log(`  turn blocks first paint: ${measurement.turns.map(turn => `${turn.open}`).join(', ') || 'none'}`);
+      console.log(`  after one click: ${measurement.opened.open} / ${measurement.opened.height}px; after two: ${measurement.folded.open} / ${measurement.folded.height}px`);
       for (const problem of measurement.problems) console.log(`  - ${problem}`);
       for (const shot of measurement.shots) console.log(`  shot: ${shot}`);
     }

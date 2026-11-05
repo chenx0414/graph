@@ -1,20 +1,20 @@
 # baseline: fold policy at 733d1b48 (before this change)
-# bundle built from HEAD(733d1b48) into /tmp/head-web with the same vite config:
-#   git archive HEAD(733d1b48) | tar -x -C /tmp/head-tree && ln -s <checkout>/node_modules /tmp/head-tree/node_modules
+# bundle built from HEAD into /tmp/head-web with the same vite config:
+#   git archive HEAD | tar -x -C /tmp/head-tree && ln -s <checkout>/node_modules /tmp/head-tree/node_modules
 #   (cd /tmp/head-tree && node node_modules/vite/bin/vite.js build --outDir /tmp/head-web)
 # run: GRAPH_FOLD_CDP=http://127.0.0.1:9333 node scripts/measure-fold-policy.mjs --web-dir /tmp/head-web --label red
 
 bundle: assets/index-BTGxgBFp.js (941210 bytes, built 2026-11-04T09:36:48.870Z)
 web dir: /tmp/head-web
-daemon: /Users/macmini/Library/Application Support/Graph/state/worktrees/console-three-lines-50fa0860/line1/dist/graphd
-  http://127.0.0.1:64536
-seeded: main bb620b7a-0342-4558-a182-897dcc9bbc4d, supervisor 79d40755-9c29-4284-95c8-d68173feab3f, node master of c9ee2821-e438-43c2-91d3-493597881883
+daemon: /Users/macmini/workspace/13-Graph/dist/graphd
+  http://127.0.0.1:55510
+seeded: main 50e8153b-db4b-481b-b76a-ff0ba457fb12, supervisor d723d506-72f3-4f7d-a396-9e58a6ebbf6f, node master of db66fcb2-9738-40f0-ba80-e906464496a0
 browser: http://127.0.0.1:9333 (host-launched, 152.0.7977.78)
 
 主对话: FAIL (4)
   tool groups first paint: true / 68px / row 121px, true / 38px / row 91px
-  turn blocks first paint: true (1 group inside)
-  clicks: #0 -> true/68px -> false/0px; #1 -> true/38px -> false/0px
+  turn blocks first paint: true
+  after one click: true / 68px; after two: false / 0px
   - group 0 ("读取 1 项 · 运行 1 条命令") renders data-open=true, expected false
   - group 0 ("读取 1 项 · 运行 1 条命令") reserves 68px of detail while folded, expected 0
   - group 1 ("正在运行 bash: npm run coverage") renders data-open=true, expected false
@@ -24,8 +24,8 @@ browser: http://127.0.0.1:9333 (host-launched, 152.0.7977.78)
 
 主管对话: FAIL (4)
   tool groups first paint: true / 68px / row 121px, true / 38px / row 91px
-  turn blocks first paint: true (1 group inside)
-  clicks: #0 -> true/68px -> false/0px; #1 -> true/38px -> false/0px
+  turn blocks first paint: true
+  after one click: true / 68px; after two: false / 0px
   - group 0 ("读取 1 项 · 运行 1 条命令") renders data-open=true, expected false
   - group 0 ("读取 1 项 · 运行 1 条命令") reserves 68px of detail while folded, expected 0
   - group 1 ("正在运行 bash: npm run coverage") renders data-open=true, expected false
@@ -35,8 +35,8 @@ browser: http://127.0.0.1:9333 (host-launched, 152.0.7977.78)
 
 节点对话: FAIL (4)
   tool groups first paint: true / 38px / row 91px, true / 38px / row 91px
-  turn blocks first paint: true (1 group inside)
-  clicks: #0 -> true/38px -> false/0px; #1 -> true/38px -> false/0px
+  turn blocks first paint: true
+  after one click: true / 38px; after two: false / 0px
   - group 0 ("运行 1 条命令") renders data-open=true, expected false
   - group 0 ("运行 1 条命令") reserves 38px of detail while folded, expected 0
   - group 1 ("读取 1 项") renders data-open=true, expected false
