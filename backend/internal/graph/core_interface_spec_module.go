@@ -7,6 +7,25 @@ import (
 	"encoding/json"
 )
 
+// moduleOperationDefaultTimeoutMs is the budget an operation gets when its definition declares none.
+//
+// The number has a source rather than a feeling: this repository's own gate
+// (`node --run check`) takes 5-12 minutes (AGENTS.md) and one passing run settled
+// after 315554ms (operation 3a14c833, graph 42d23f2a), so the previous 120s
+// default killed working checks in public. Fifteen minutes is that measurement
+// with room for a loaded machine, and short enough that a hung command becomes a
+// result inside one graph turn; a definition that needs less says so.
+const moduleOperationDefaultTimeoutMs = 15 * 60_000
+
+// moduleOperationMaxTimeoutMs is the largest budget a definition may declare.
+//
+// A budget is a promise that the operation ends one way or another, and it does
+// not exceed what this host already publishes elsewhere: the `bash` tool caps a
+// command at the same 1800000ms. The definition that produced two fifty-minute
+// kills (timeoutMs 3000000 in graph 42d23f2a) was inside the old 24h bound, and
+// neither kill ever judged the check - a bound nobody can explain is not a bound.
+const moduleOperationMaxTimeoutMs = 1_800_000
+
 func interfaceSpecStrings(value any) []string {
 	items, _ := value.([]any)
 	out := []string{}
@@ -40,8 +59,9 @@ func interfaceSpecValidateModule(definition map[string]any, id string, module ma
 		}
 		if timeout, ok := operation["timeoutMs"]; ok && timeout != nil {
 			number := asFloatMust(timeout)
-			if !isSafeInteger(timeout) || number < 1 || number > 86400000 {
-				interfaceSpecInvalid("Module " + id + " has invalid operation timeout")
+			if !isSafeInteger(timeout) || number < 1 || number > moduleOperationMaxTimeoutMs {
+				interfaceSpecInvalid("Module " + id + " has invalid operation timeout: timeoutMs must be between 1 and " +
+					itoa(moduleOperationMaxTimeoutMs) + "ms (the default is " + itoa(moduleOperationDefaultTimeoutMs) + "ms)")
 			}
 		}
 		if sandbox, ok := operation["sandbox"]; ok && sandbox != nil {
