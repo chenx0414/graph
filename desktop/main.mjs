@@ -1,3 +1,4 @@
+// graph:allow-large-file: the Electron entry point owns the window, the daemon lifecycle, the tray, notifications and the keychain bridge in one process; splitting it is a real refactor that needs an Electron-capable host to re-verify, and this host cannot launch Electron at all.
 import { drawerWindowBounds } from './drawer-window.ts';
 import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
 import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runtime-files.mjs';
@@ -6,7 +7,7 @@ import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runt
  * Secrets pass through the daemon environment and stay out of config files.
  */
 import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell, screen } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -56,6 +57,10 @@ if (!app.requestSingleInstanceLock()) {
   let lastCrash = run.lastCrash;
   let secrets = {};
   let secretsPath = null;
+  // Where the in-memory copy came from, so a daemon restart does not decrypt the
+  // whole store again and a real change on disk still reloads it.
+  let secretsReadFrom = null;
+  let secretsReadStamp = 0;
   let notificationState = { primed: false, questions: {}, status: {} };
   let taskPoll = null;
   let secretPoll = null;
@@ -123,10 +128,23 @@ if (!app.requestSingleInstanceLock()) {
     paths: currentPaths,
     bin: paths => findPackagedDaemon(paths.sourceRoot, devRoot),
     secrets: () => secrets,
-    // Loading the keychain and seeding the config happens on every (re)start,
-    // before the daemon is spawned, exactly as it did when this loop lived here.
+    // The keychain is read once per app process, not once per daemon start.
+    //
+    // Measured 2026-11-05: every self-improvement restarted the daemon, and this
+    // hook decrypted every stored secret again - which is what macOS answers with
+    // 「找不到用于储存 Graph Key 的钥匙串」 whenever the grant no longer matches the
+    // app's signature. A restart changes nothing about the keychain, so a second
+    // read can only cost the reader a dialog; the file's mtime is what says the
+    // store moved, and a write from this process updates the map directly.
     prepare: paths => {
-      secrets = secretsFromKeychain(paths);
+      const stamp = (() => {
+        try { return statSync(paths.secretsPath).mtimeMs; } catch { return 0; }
+      })();
+      if (secretsReadFrom !== paths.secretsPath || stamp !== secretsReadStamp) {
+        secrets = secretsFromKeychain(paths);
+        secretsReadFrom = paths.secretsPath;
+        secretsReadStamp = stamp;
+      }
       secretsPath = paths.secretsPath;
       return ensureConfigFile(paths.configPath, existsSync, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
     },
