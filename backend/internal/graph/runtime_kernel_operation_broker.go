@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,21 +52,39 @@ type moduleOperationRecord struct {
 	CleanAfter     bool                             `json:"cleanAfter"`
 	VerifiedCommit *string                          `json:"verifiedCommit"`
 	Sandboxed      bool                             `json:"sandboxed"`
-	ElapsedMs      int64                            `json:"elapsedMs"`
+	// Verdict is what this attempt concluded: a command that ran and exited
+	// judged its work; one that never produced an exit code did not.
+	Verdict string `json:"verdict"`
+	// NoVerdictReason says why there is no verdict, so "unknown" is actionable.
+	NoVerdictReason string `json:"noVerdictReason,omitempty"`
+	// TimedOut says this attempt's own budget killed it.
+	TimedOut bool `json:"timedOut"`
+	// TimeoutMs is the budget that really applied, not the one in the definition.
+	TimeoutMs int `json:"timeoutMs"`
+	// WaitMs is the time spent queued for a program slot: it is reported, and it
+	// is not part of the budget.
+	WaitMs int64 `json:"waitMs"`
+	// ElapsedMs is the attempt's own time, counted from the moment it held a slot.
+	ElapsedMs int64 `json:"elapsedMs"`
 }
 
 // moduleOperationOutput is the value the operation publishes under its output name.
 type moduleOperationOutput struct {
-	Passed         bool                             `json:"passed"`
-	Code           *int                             `json:"code"`
-	Commit         *string                          `json:"commit"`
-	VerifiedCommit *string                          `json:"verifiedCommit"`
-	Record         string                           `json:"record"`
-	OperationId    string                           `json:"operationId"`
-	OutputFiles    map[string]HostCommandOutputFile `json:"outputFiles,omitempty"`
-	Stdout         string                           `json:"stdout"`
-	Stderr         string                           `json:"stderr"`
-	ElapsedMs      int64                            `json:"elapsedMs"`
+	Passed          bool                             `json:"passed"`
+	Code            *int                             `json:"code"`
+	Commit          *string                          `json:"commit"`
+	VerifiedCommit  *string                          `json:"verifiedCommit"`
+	Record          string                           `json:"record"`
+	OperationId     string                           `json:"operationId"`
+	OutputFiles     map[string]HostCommandOutputFile `json:"outputFiles,omitempty"`
+	Stdout          string                           `json:"stdout"`
+	Stderr          string                           `json:"stderr"`
+	Verdict         string                           `json:"verdict"`
+	NoVerdictReason string                           `json:"noVerdictReason,omitempty"`
+	TimedOut        bool                             `json:"timedOut"`
+	TimeoutMs       int                              `json:"timeoutMs"`
+	WaitMs          int64                            `json:"waitMs"`
+	ElapsedMs       int64                            `json:"elapsedMs"`
 }
 
 // moduleOperationEvaluated is the settled result of one operation, as it is stored.
@@ -112,63 +131,42 @@ func rsiModuleTail(value string, limit int) string {
 	return string(runes[len(runes)-limit:])
 }
 
-// rsiAdmitSource refuses a workspace.command that would read code the integration tree does not hold.
-func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, operation *ModuleOperation, integratesSource func(string) bool) {
-	if operation == nil || operation.Action != "workspace.command" {
-		return
+// moduleOperationAttemptDir reserves a directory for one attempt of one operation.
+//
+// The ordinal is the number of attempts already recorded there - the evidence of
+// the attempts before it - so the name is a count and not a random suffix, and
+// nothing an earlier attempt left is deleted to make room for this one. `Mkdir`
+// is what makes it exclusive: two attempts cannot be handed the same directory.
+func moduleOperationAttemptDir(root, operationId string) string {
+	base := filepath.Join(root, "module-operations", operationId)
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		panic(err)
 	}
-	task := kernel.Store.Task(graphID)
-	if task.IntegrationBranch == nil || *task.IntegrationBranch == "" {
-		return
-	}
-	integration := kernelRow(kernel.Db, "SELECT path FROM worktrees WHERE instance_id=?", "integration:"+graphID)
-	if integration == nil {
-		return
-	}
-	if deployResolve("", graphDBString(integration, "path")) != deployResolve("", workspace) {
-		return
-	}
-	executionID, sourceState, found := kernel.DeliverySource(deliveryID)
-	if !found {
-		return
-	}
-	// Main-delivered and module-to-module input has no causal producer to wait for.
-	if executionID == nil {
-		return
-	}
-	// Whether this source owes the integration branch a commit is a production fact (its frozen recipe,
-	// its admitted work location), not the absence of a commit row - a node may submit first and be
-	// committed automatically at settle. The host answers it; a commit row cannot.
-	integrates := false
-	if integratesSource != nil {
-		integrates = integratesSource(*executionID)
-	} else {
-		integrates = kernelRow(kernel.Db, "SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='instance'", graphID, *executionID) != nil
-	}
-	if !integrates {
-		return
-	}
-	merged := kernelRow(kernel.Db, "SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='integration'", graphID, *executionID)
-	if merged == nil {
-		// A short wait, not a repair: the delivery stays pending and the same one is
-		// retried. It cannot block here instead: this operation runs under the
-		// graph's Git lock (Git.Exclusive), and the source execution's own
-		// integration needs that same lock (SettleWorkspace). Waiting for the
-		// commit while holding the lock would wait for a commit that cannot be
-		// made, so the operation gives the attempt back and the delivery is
-		// retried after the source integrated.
-		if sourceState == "running" {
-			Raise("paused", "Delivery source "+*executionID+" has not been integrated yet")
+	for attempt := 1; ; attempt++ {
+		directory := filepath.Join(base, "attempt-"+itoa(attempt))
+		err := os.Mkdir(directory, 0o700)
+		if err == nil {
+			return directory
 		}
-		Raise("integration_blocked", "Delivery source "+*executionID+" did not reach the integration branch")
-	}
-	produced := kernelRow(kernel.Db, "SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='instance'", graphID, *executionID)
-	if produced != nil {
-		sha := graphDBString(produced, "sha")
-		if Git(workspace, []string{"merge-base", "--is-ancestor", sha, "HEAD"}, nil, nil).Code != 0 {
-			Raise("integration_blocked", "Delivery source "+*executionID+" produced "+sha+", which the integration worktree does not contain")
+		if !errors.Is(err, os.ErrExist) {
+			panic(err)
 		}
 	}
+}
+
+// moduleOperationVerdict is what one attempt concluded.
+//
+// Only a command that ran and produced an exit code judged its work: a killed or
+// interrupted one has no verdict, and its reason says so instead of turning into
+// a failure the module has to repair.
+func moduleOperationVerdict(code *int) (string, string) {
+	if code == nil {
+		return "unknown", "no_exit_code"
+	}
+	if *code == 0 {
+		return "passed", ""
+	}
+	return "failed", ""
 }
 
 // ExecuteModuleOperation runs one module operation and returns what it published.
@@ -233,20 +231,16 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		}
 	}
 
-	scratchDir := filepath.Join(options.ScratchRoot, "module-operations", id)
-	if previous != nil && previous.State == "prepared" {
-		// An operation that stayed prepared never crossed its send boundary, so
-		// the attempt before it ran nothing and left nothing behind but its own
-		// scratch directory. It is retried as the same operation, and the stream
-		// files are opened exclusively - one attempt must not overwrite another
-		// attempt's evidence - so that directory is cleared, not inherited.
-		if err := os.RemoveAll(scratchDir); err != nil {
-			panic(err)
-		}
-	}
-	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
-		panic(err)
-	}
+	// Each attempt gets a directory of its own.
+	//
+	// A delivery that gave its attempt back is dispatched again under the same
+	// operation id, so the attempts of one operation share that id; they do not
+	// share the run they belong to. Each one opens exclusive stream files before
+	// it crosses its send boundary, may be killed by its own budget, and leaves a
+	// record, and none of that belongs to the attempt after it (measured: task
+	// 288f801c failed its delivery for good with
+	// `open <state>/module-operations/<id>/stdout.log: file exists`).
+	scratchDir := moduleOperationAttemptDir(options.ScratchRoot, id)
 	cancellation := NewAbortSignal()
 	abort := func() { cancellation.Abort() }
 	var abortListener *abortListener
@@ -297,7 +291,12 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		panic(recovered)
 	}()
 
+	// The slot wait is a queue, and a queue is not the command's time: it is
+	// measured here and published, so the budget cannot quietly absorb it.
+	queued := NowMillis()
 	WaitForKernelProgramExecutionSlot(kernel, id, cancellation)
+	started := NowMillis()
+	waitMs := started - queued
 	var programEnv map[string]string
 	var programReadPaths []string
 	var nodeModulesPath *string
@@ -317,7 +316,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 			readPaths = append(readPaths, resolved)
 		}
 	}
-	timeoutMs := 120_000
+	timeoutMs := moduleOperationDefaultTimeoutMs
 	if operation.TimeoutMs != nil {
 		timeoutMs = *operation.TimeoutMs
 	}
@@ -367,7 +366,13 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 			Settle: func(string, *TokenUsage) {},
 		}, readPaths, environment, true, options.Access, true, timeoutMs)
 		command := runner.Run(operation.Command, operation.Args, cancellation)
-		result = HostCommandResult{Code: command.Code, Stdout: command.Stdout, Stderr: command.Stderr}
+		result = HostCommandResult{
+			Code: command.Code, Stdout: command.Stdout, Stderr: command.Stderr,
+			// The spawner writes this branch's streams into the attempt's own
+			// directory; the two branches publish their logs the same way.
+			OutputFiles: hostCommandOutputStreams(scratchDir),
+			TimedOut:    strings.Contains(command.Stderr, hostCommandTimeoutMarker(timeoutMs)),
+		}
 	}
 	if cancellation.Aborted() {
 		Raise("uncertain_operation", "Operation interrupted after dispatch; inspect its side effects before continuing")
@@ -378,12 +383,14 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	if result.Code != nil && *result.Code == 0 && commit != nil && commitAfter != nil && *commit == *commitAfter && cleanBefore && cleanAfter {
 		verifiedCommit = commit
 	}
+	verdict, noVerdictReason := moduleOperationVerdict(result.Code)
 	record := moduleOperationRecord{
 		OperationId: id, Command: operation.Command, Args: operation.Args,
 		Code: result.Code, Stdout: result.Stdout, Stderr: result.Stderr, OutputFiles: result.OutputFiles,
 		Commit: commit, CommitAfter: commitAfter, CleanBefore: cleanBefore, CleanAfter: cleanAfter,
 		VerifiedCommit: verifiedCommit, Sandboxed: operation.Sandbox == nil || *operation.Sandbox,
-		ElapsedMs: NowMillis() - created,
+		Verdict: verdict, NoVerdictReason: noVerdictReason, TimedOut: result.TimedOut,
+		TimeoutMs: timeoutMs, WaitMs: waitMs, ElapsedMs: NowMillis() - started,
 	}
 	recordPath := filepath.Join(scratchDir, "result.json")
 	buffer := &bytes.Buffer{}
@@ -404,7 +411,8 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		Commit: commit, VerifiedCommit: verifiedCommit, Record: recordPath, OperationId: id,
 		OutputFiles: result.OutputFiles,
 		Stdout:      rsiModuleTail(result.Stdout, 32_768), Stderr: rsiModuleTail(result.Stderr, 32_768),
-		ElapsedMs: record.ElapsedMs,
+		Verdict: verdict, NoVerdictReason: noVerdictReason, TimedOut: result.TimedOut,
+		TimeoutMs: timeoutMs, WaitMs: waitMs, ElapsedMs: record.ElapsedMs,
 	}
 	evaluated := moduleOperationEvaluated{
 		Ok: true, State: options.State,
@@ -420,6 +428,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	})
 	kernel.Store.Event(options.GraphId, "graph.operation.settled", map[string]any{
 		"moduleId": options.ModuleId, "operationId": id, "passed": output.Passed,
+		"verdict": verdict, "timedOut": result.TimedOut,
 		"commit": commit, "verifiedCommit": verifiedCommit, "record": recordPath,
 	})
 	return ModuleOperationResponse{
