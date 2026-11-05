@@ -1,5 +1,6 @@
 // graph:allow-large-file: its 21 KB predate the budget; this change only re-points one import and the transcript model is a single projection
 import { toolActivity } from './tool-activity.ts';
+import { toolGroupSummary } from './tool-activity.ts';
 import { assistantVisibleText } from '../core/assistant-visible-text.ts';
 import { withoutUnexecutedToolCall } from './unexecuted-tool-call.ts';
 import { messageAttachments } from '../core/conversation-projection.ts';
@@ -445,45 +446,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   return rows;
 }
 
-export function toolGroupSummary(input: TranscriptTool[]) {
-  const counts = {
-    read: 0,
-    run: 0,
-    edit: 0,
-    search: 0,
-    browse: 0,
-    other: 0,
-    skill: 0,
-    mcp: 0,
-    desktop: 0,
-    failed: 0,
-  };
-  for (const tool of input) {
-    const kind = toolActivity(tool.name, tool.summary).kind;
-    if (kind === 'read' || kind === 'list') counts.read += 1;
-    else if (kind === 'run') counts.run += 1;
-    else if (kind === 'search') counts.search += 1;
-    else if (kind === 'edit') counts.edit += 1;
-    else if (kind === 'browse') counts.browse += 1;
-    else if (kind === 'skill') counts.skill += 1;
-    else if (kind === 'mcp') counts.mcp += 1;
-    else if (kind === 'desktop') counts.desktop += 1;
-    else counts.other += 1;
-    if (tool.error) counts.failed += 1;
-  }
-  const parts: string[] = [];
-  if (counts.read) parts.push(`读取 ${counts.read} 项`);
-  if (counts.run) parts.push(`运行 ${counts.run} 条命令`);
-  if (counts.edit) parts.push(`编辑 ${counts.edit} 个文件`);
-  if (counts.search) parts.push(`搜索 ${counts.search} 次`);
-  if (counts.browse) parts.push(`访问 ${counts.browse} 个页面`);
-  if (counts.skill) parts.push(`读取 ${counts.skill} 个 Skill`);
-  if (counts.mcp) parts.push(`MCP 调用 ${counts.mcp} 次`);
-  if (counts.desktop) parts.push(`桌面 ${counts.desktop} 项`);
-  if (counts.other) parts.push(`调用 ${counts.other} 个工具`);
-  if (counts.failed) parts.push(`${counts.failed} 项失败`);
-  return parts.join(' · ') || `${input.length} 个工具`;
-}
+export { toolGroupSummary } from './tool-activity.ts';
 
 export function toolActionLabel(name: string) {
   if (name === 'read' || name === 'list_dir') return '读取';
