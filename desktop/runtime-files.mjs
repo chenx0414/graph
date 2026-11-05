@@ -1,4 +1,5 @@
-import { app, safeStorage } from 'electron';
+import { app } from 'electron';
+import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { absolutePaths, appRootFilePath, loadSecrets, resolveAppPaths, resolveSourceRoot } from './lib.ts';
@@ -22,12 +23,16 @@ export function findPackagedDaemon(sourceRoot, devRoot) {
   throw new Error('dist/graphd is missing. Build backend/cmd/graphd into dist/graphd.');
 }
 
+/** The secrets this app has stored, opened with the key file beside them.
+ *
+ * The name survived the move: the store used to live behind the login keychain,
+ * and every touch of that keychain raised a macOS dialog the reader could not get
+ * rid of (measured 2026-11-05). A value sealed by the keychain in an earlier
+ * version now fails to open and reads as an unconfigured provider - the entry is
+ * left in the file, untouched, and the keychain is never opened again.
+ */
 export function secretsFromKeychain(paths) {
-  const codec = {
-    isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-    encryptString: value => safeStorage.encryptString(value),
-    decryptString: value => safeStorage.decryptString(value),
-  };
+  const codec = fileSecretsCodec(secretsKeyPath(paths.secretsPath));
   return loadSecrets(paths.secretsPath, codec, path => readFileSync(path, 'utf8'));
 }
 

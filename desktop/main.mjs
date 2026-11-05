@@ -2,11 +2,12 @@
 import { drawerWindowBounds } from './drawer-window.ts';
 import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
 import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runtime-files.mjs';
+import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
 /**
  * Owns desktop windows, the Go daemon and the keychain bridge.
  * Secrets pass through the daemon environment and stay out of config files.
  */
-import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell, screen } from 'electron';
+import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell, screen } from 'electron';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,12 +101,7 @@ if (!app.requestSingleInstanceLock()) {
       for (const request of Array.isArray(body.requests) ? body.requests : []) {
         const outcome = applySecretRequest(secrets, request?.ref, request?.value ?? null);
         if (!outcome.ok) continue;
-        const codec = {
-          isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-          encryptString: input => safeStorage.encryptString(input),
-          decryptString: input => safeStorage.decryptString(input),
-        };
-        const stored = saveSecrets(secretsPath, codec, outcome.secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }), {
+        const stored = saveSecrets(secretsPath, fileSecretsCodec(secretsKeyPath(secretsPath)), outcome.secrets, (path, data) => writeFileSync(path, data, { mode: 0o600 }), {
           raw: loadRawSecretEntries(secretsPath, path => readFileSync(path, 'utf8')),
           touched: [request.ref],
         });
@@ -258,11 +254,7 @@ if (!app.requestSingleInstanceLock()) {
       const request = applySecretRequest(secrets, ref, value);
       if (!request.ok) return { stored: false, applied: false, message: request.message };
       if (!secretsPath) return { stored: false, applied: false, message: 'no secrets path' };
-      const codec = {
-        isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-        encryptString: input => safeStorage.encryptString(input),
-        decryptString: input => safeStorage.decryptString(input),
-      };
+      const codec = fileSecretsCodec(secretsKeyPath(secretsPath));
       secrets = request.secrets;
       // Keep a revocation in the encrypted map too (it removes the entry), and
       // make the daemon state authoritative for the "revoked" gate.
