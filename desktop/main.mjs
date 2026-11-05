@@ -13,6 +13,10 @@ import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
  * 2026-11-05, after three receipts reported a desktop fix as live while
  * /Applications kept a bundle from 2026-10-20 and the reader restarted an app
  * that never carried a line of it.
+ *
+ * Two traps sit between the copy and a launch that works: the sign has to be
+ * deep (electron-builder leaves the nested frameworks unsealed) and the copy has
+ * to keep the framework symlinks (ditto, not a recursive copy).
  */
 import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell, screen } from 'electron';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
