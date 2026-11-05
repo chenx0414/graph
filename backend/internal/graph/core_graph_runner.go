@@ -341,6 +341,15 @@ const unjudgedEvent = "graph.operation.unjudged"
 // Only a refusal of the module's own definition is a failure of the module, and
 // that keeps graph.module.failed: there the module really did judge its input
 // and found it unfit.
+//
+// A waiting attempt keeps the state its broker gave it, and for "paused" that is
+// prepared: the broker refuses to fail an unsent pause (see its unsentPause),
+// because the attempt has not crossed its send boundary and the same one is made
+// again. Nothing here may reclassify it. Two end-to-end cases read that state in
+// the window between the delivery and the source's integration - the module race
+// case and the scratch-isolation case - and both say prepared, so a change that
+// writes unknown for a paused attempt breaks the contract they assert rather
+// than the other way round.
 func (runner *GraphRunner) recordRefusedDelivery(moduleId, deliveryId string, recovered any) {
 	kernel := runner.options.Kernel
 	reason, brake, isDefect := noVerdictNoExitCode, true, false
