@@ -175,7 +175,30 @@ func ResolveUnsandboxedCommand(command string, args []string) ResolvedCommand {
 	if command == "node" {
 		return ResolveNodeCommand(args, "", "", false)
 	}
-	return pathCommand(command, args)
+	return pipefailShell(pathCommand(command, args))
+}
+
+// pipefailShell makes a shell command report a failing stage of its pipeline.
+//
+// `sh -c 'a | tail'` answers with tail's status, which is 0 however badly a
+// failed: a check whose command ends in `| tail -60` reported passed while its
+// own output said FAIL (measured 2026-11-05 on a graph acceptance item that had
+// never been measured at all). bash's pipefail is the smallest change that
+// makes the exit status mean what the check author meant, and the shell the
+// command already asked for is the only thing swapped.
+func pipefailShell(command ResolvedCommand) ResolvedCommand {
+	base := filepath.Base(command.Executable)
+	if base != "sh" && base != "bash" {
+		return command
+	}
+	for _, arg := range command.Args {
+		if arg != "-c" {
+			continue
+		}
+		args := append([]string{"-o", "pipefail"}, command.Args...)
+		return ResolvedCommand{Executable: "/bin/bash", Args: args, Env: command.Env}
+	}
+	return command
 }
 
 // WorkspaceCommandRunner runs one restricted command through the send gate.

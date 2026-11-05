@@ -293,11 +293,14 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 		environment[listenGuardEnv] = "1"
 		environment["NODE_OPTIONS"] = strings.Join(options, " ")
 	}
+	// bash with pipefail, for the same reason the unsandboxed path uses it: a
+	// command that ends in `| tail` must still report the failing stage, or a
+	// check records passed while its own output says FAIL.
 	launched := "/usr/bin/sandbox-exec"
-	launchedArgs := []string{"-p", boundedProfile, "/bin/sh", "-c", launch}
+	launchedArgs := []string{"-p", boundedProfile, "/bin/bash", "-o", "pipefail", "-c", launch}
 	if command.Unsandboxed {
-		launched = "/bin/sh"
-		launchedArgs = []string{"-c", launch}
+		launched = "/bin/bash"
+		launchedArgs = []string{"-o", "pipefail", "-c", launch}
 	}
 	invocationId := newUUID()
 	result := CommandResult{}
