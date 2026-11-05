@@ -459,6 +459,14 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	if isolated && committedNow && commit != nil {
 		rsiLandIsolatedCommit(*root, work, *commit, claimedPaths)
 	}
+	// The page the window loads is served from THIS checkout, so a console change
+	// proved in an isolated worktree has not reached the reader until this tree's
+	// dist/web is rebuilt. Measured 2026-11-05: after two console commits the served
+	// bundle was still the one built at 11:15, and a live check read the old code
+	// (69 「读取完整记录」 stubs) while the change itself was correct.
+	if isolated && committedNow && needsWebBuild {
+		_ = rsiRunCheckWithEnvironmentRetry(*root, RsiCommand{Command: "node", Args: []string{"--run", "build:web"}}, RSI_BUILD_TIMEOUT_MS)
+	}
 	_ = os.Remove(service.rsiWorkingPath())
 
 	// Activation exists to put a new commit into the running daemon. When this call committed
