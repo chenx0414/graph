@@ -4,8 +4,15 @@ import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
 import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runtime-files.mjs';
 import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
 /**
- * Owns desktop windows, the Go daemon and the keychain bridge.
+ * Owns desktop windows, the Go daemon and the secret store.
  * Secrets pass through the daemon environment and stay out of config files.
+ *
+ * A change in this file reaches the reader only when the package they launch
+ * contains it: `app:build` produces dist/app/mac-arm64/Graph.app and
+ * scripts/install-desktop-app.mjs is what puts it in /Applications. Measured
+ * 2026-11-05, after three receipts reported a desktop fix as live while
+ * /Applications kept a bundle from 2026-10-20 and the reader restarted an app
+ * that never carried a line of it.
  */
 import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell, screen } from 'electron';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
