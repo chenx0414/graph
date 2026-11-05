@@ -209,13 +209,20 @@ test('an operation queued behind a full program budget runs its own command to t
     // wait the same operation recorded, so a queue counted into elapsedMs would
     // make them equal. None of this compares a duration against a wall-clock
     // threshold - the machine may be as slow as it likes.
-    expect(output.waitMs, 'the operation never recorded the time it spent queued').toBeGreaterThan(0);
+    const queued = output.waitMs;
+    const budget = output.timeoutMs;
+    // The record has to carry both numbers before they can be read as a fact
+    // about each other: a missing wait would make the comparison below pass
+    // for the wrong reason.
+    expect(typeof queued === 'number', 'the operation never recorded the time it spent queued').toBe(true);
+    expect(typeof budget === 'number', 'the operation never recorded the budget it was held to').toBe(true);
+    expect(queued as number).toBeGreaterThan(0);
     expect(output.elapsedMs, `elapsedMs=${output.elapsedMs} counts the queue, not the command`)
-      .toBeLessThan(output.waitMs);
+      .toBeLessThan(queued as number);
     // The budget it declared bounds its own time: a command held past the
     // budget would have been killed, which timedOut already says it was not.
-    expect(output.elapsedMs, `elapsedMs=${output.elapsedMs} is outside the declared budget ${output.timeoutMs}`)
-      .toBeLessThan(output.timeoutMs);
+    expect(output.elapsedMs, `elapsedMs=${output.elapsedMs} is outside the declared budget ${budget}`)
+      .toBeLessThan(budget as number);
     // The budget it declared is the budget it was held to.
     expect(output.timeoutMs).toBe(1200);
 
