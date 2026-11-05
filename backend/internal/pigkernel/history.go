@@ -140,14 +140,16 @@ type historyTool struct {
 func (tool *historyTool) spec() ToolSpec {
 	return ToolSpec{
 		Name: historyToolName,
-		Description: "Search this conversation's durable transcript (compaction and reset keep it). " +
-			"No arguments lists recent entries; query finds text; entryId reads one entry.",
+		Description: "Search this conversation's whole durable transcript (compaction and reset keep it). " +
+			"No arguments lists recent entries; query finds text anywhere in the conversation, however far back; " +
+			"entryId reads one entry; before continues further back from an id a previous search returned.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query":   map[string]any{"type": "string", "description": "Keyword or phrase to find, case-insensitive."},
 				"entryId": map[string]any{"type": "integer", "description": "Read one entry in full by its id."},
 				"limit":   map[string]any{"type": "integer", "description": "Maximum entries to return; default 5, at most 20."},
+				"before":  map[string]any{"type": "integer", "description": "Only entries older than this id, to continue a walk further back."},
 			},
 		},
 		Execute: func(ctx context.Context, args map[string]any) (string, error) {
@@ -160,12 +162,17 @@ func (tool *historyTool) spec() ToolSpec {
 }
 
 // searchHistory reads the durable transcript of this conversation.
+//
+// It walks the whole transcript, newest first, one page at a time. It used to
+// read the newest 2000 entries and stop: compaction promises that nothing is
+// lost because this tool can reach the transcript, and a keyword from before
+// that window answered "no entry matches" (measured 2026-11-05 on a 16,041
+// entry conversation - 87% of it was unreachable). The walk is bounded so one
+// search cannot page forever; when the bound is what stopped it, the answer
+// says so and hands back the cursor to continue from.
 func (session *Session) searchHistory(ctx context.Context, args map[string]any) (string, error) {
-	const scanLimit = 2000
-	page, err := session.conversation.Entries(ctx, durable.EntryQuery{ConversationId: session.conversation.Id()}, scanLimit, nil)
-	if err != nil {
-		return "", fmt.Errorf("pig kernel: read the transcript: %w", err)
-	}
+	const pageLimit = 2000
+	const scanBudget = 40000
 	query := strings.TrimSpace(valueString(args["query"]))
 	entryId := valueInt64(args["entryId"])
 	limit := int(valueInt64(args["limit"]))
@@ -175,45 +182,75 @@ func (session *Session) searchHistory(ctx context.Context, args map[string]any) 
 	if limit > 20 {
 		limit = 20
 	}
-	if entryId > 0 {
-		for _, entry := range page.Items {
-			if int64(entry.Id) != entryId {
-				continue
-			}
-			role, text := entryText(entry)
-			return fmt.Sprintf("entry #%d %s (%s)\n\n%s", entry.Id, entry.Kind, role, truncateRunes(text, 20000)), nil
-		}
-		return fmt.Sprintf("entry #%d is not among the last %d entries; search by keyword instead", entryId, scanLimit), nil
+	before := valueInt64(args["before"])
+	base := durable.EntryQuery{ConversationId: session.conversation.Id()}
+	if before > 0 {
+		bound := durable.EntryId(before)
+		base.MaxEntryId = &bound
 	}
 	matches := []string{}
 	scanned := 0
-	for _, entry := range page.Items {
-		role, text := entryText(entry)
-		if strings.TrimSpace(text) == "" {
-			continue
+	oldest := 0
+	var cursor durable.Cursor
+	budgetHit := false
+	for {
+		page, err := session.conversation.Entries(ctx, base, pageLimit, cursor)
+		if err != nil {
+			return "", fmt.Errorf("pig kernel: read the transcript: %w", err)
 		}
-		scanned++
-		if query != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(query)) {
-			continue
+		for _, entry := range page.Items {
+			scanned++
+			oldest = int(entry.Id)
+			role, text := entryText(entry)
+			if entryId > 0 {
+				if int64(entry.Id) == entryId {
+					return fmt.Sprintf("entry #%d %s (%s)\n\n%s", entry.Id, entry.Kind, role, truncateRunes(text, 20000)), nil
+				}
+				continue
+			}
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			if query != "" && !strings.Contains(strings.ToLower(text), strings.ToLower(query)) {
+				continue
+			}
+			excerpt := truncateRunes(text, 300)
+			if query != "" {
+				excerpt = excerptAround(text, query, 300)
+			}
+			matches = append(matches, fmt.Sprintf("#%d %s (%s): %s", entry.Id, entry.Kind, role, excerpt))
+			if len(matches) >= limit {
+				break
+			}
 		}
-		excerpt := truncateRunes(text, 300)
-		if query != "" {
-			excerpt = excerptAround(text, query, 300)
-		}
-		matches = append(matches, fmt.Sprintf("#%d %s (%s): %s", entry.Id, entry.Kind, role, excerpt))
-		if len(matches) >= limit {
+		if len(matches) >= limit || entryId > 0 || page.Next == nil {
 			break
 		}
+		if scanned >= scanBudget {
+			budgetHit = true
+			break
+		}
+		cursor = *page.Next
+	}
+	if entryId > 0 {
+		return fmt.Sprintf("entry #%d is not in this conversation (searched back %d entries); search by keyword instead", entryId, scanned), nil
 	}
 	if len(matches) == 0 {
 		if query == "" {
-			return fmt.Sprintf("conversation %d has no readable entries in the last %d", session.conversation.Id(), scanLimit), nil
+			return fmt.Sprintf("conversation %d has no readable entries", session.conversation.Id()), nil
 		}
-		return fmt.Sprintf("no entry in the last %d entries of conversation %d matches %q", scanLimit, session.conversation.Id(), query), nil
+		reply := fmt.Sprintf("no entry in the %d entries searched of conversation %d matches %q", scanned, session.conversation.Id(), query)
+		if budgetHit {
+			reply += fmt.Sprintf("; the walk stopped at its %d-entry bound, so older entries were not examined - continue with before=%d", scanBudget, oldest)
+		}
+		return reply, nil
 	}
-	header := fmt.Sprintf("conversation %d, %d of the last %d entries", session.conversation.Id(), scanned, scanLimit)
+	header := fmt.Sprintf("conversation %d, searched back %d entries", session.conversation.Id(), scanned)
 	if query != "" {
 		header += fmt.Sprintf(", query %q", query)
+	}
+	if budgetHit {
+		header += fmt.Sprintf(" (stopped at the %d-entry bound; continue with before=%d)", scanBudget, oldest)
 	}
 	return header + "\n\n" + truncateRunes(strings.Join(matches, "\n"), 16000), nil
 }
