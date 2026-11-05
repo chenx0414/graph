@@ -32,7 +32,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
 		}
 		state := kernelString(operation["state"])
-		if state != "uncertain" && state != "failed" && state != "cancelled" {
+		if state != "uncertain" && state != "failed" && state != "unknown" && state != "cancelled" {
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
 		}
 		if kernelInt(operation["worker_active"]) != 0 {
@@ -46,6 +46,15 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		service.kernel.ModuleTransaction(func() any {
 			service.kernel.CancelModuleOperation(operationId)
 			service.kernel.MarkDeliveryProcessed(deliveryId)
+			// A cancel ends the attempt, it does not judge the work: the delivery
+			// was consumed without a verdict and says so, so nothing downstream
+			// reads "processed" as "somebody decided".
+			service.kernel.Store.Event(input.GraphId, unjudgedEvent, map[string]any{
+				"operationId": operationId,
+				"deliveryId":  deliveryId,
+				"moduleId":    moduleId,
+				"reasonCode":  "cancelled_without_verdict",
+			})
 			service.kernel.SetNodeQueuePaused(input.GraphId, moduleId, false)
 			service.kernel.Store.CompleteBlockedTask(input.GraphId)
 			service.kernel.Store.Event(input.GraphId, "graph.operation.cancelled", map[string]any{
