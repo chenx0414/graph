@@ -500,7 +500,7 @@ func pigSessionIdentity(request AgentSessionRequest) string {
 	// that must not inherit the transcript needs an identity of its own. A review
 	// shares one identity across rounds on purpose: it remembers its own earlier
 	// verdicts, and none of the work that produced them.
-	if request.FreshSession {
+	if request.IsolatedContext {
 		return identity + ":review"
 	}
 	return identity

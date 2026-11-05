@@ -134,6 +134,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	for _, message := range operation.Context.Messages {
 		if message.FreshSession {
 			request.FreshSession = true
+			request.IsolatedContext = true
 			break
 		}
 	}

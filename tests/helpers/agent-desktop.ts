@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /**
@@ -23,6 +24,12 @@ export function desktopBinary(): string {
   if (process.env.GRAPH_DESKTOP_BIN) candidates.push(process.env.GRAPH_DESKTOP_BIN);
   candidates.push(join(process.cwd(), 'node_modules', '.bin', 'agent-desktop'));
   candidates.push('/tmp/adesk/node_modules/.bin/agent-desktop');
+  // The capability library is where the app itself installs the program, and the
+  // macOS grant is bound to that path - measured 2026-11-05, when this helper
+  // reported "not installed" on a machine whose desktop tool worked.
+  for (const home of [process.env.GRAPH_APP_USER_DATA, join(homedir(), 'Library', 'Application Support', 'Graph')]) {
+    if (home) candidates.push(join(home, 'capabilities', 'agent-desktop', 'node_modules', '.bin', 'agent-desktop'));
+  }
   for (const directory of (process.env.PATH ?? '').split(':')) {
     if (directory) candidates.push(join(directory, 'agent-desktop'));
   }

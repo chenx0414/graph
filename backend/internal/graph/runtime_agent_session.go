@@ -155,6 +155,10 @@ type AgentSessionRequest struct {
 	AllowWorkspaceChange bool
 	// FreshSession starts a new session instead of reopening the manifest.
 	FreshSession bool
+	// IsolatedContext asks for a kernel identity of its own, so the turn reads a
+	// context without the transcript that produced the work. Only a caller that
+	// means "judge this without seeing how it was made" sets it.
+	IsolatedContext bool
 	// ForkFrom creates a new session file from an immutable source leaf.
 	ForkFrom *PiWorkerForkFrom
 	// ReadOnly turns off the tools that change business files.
