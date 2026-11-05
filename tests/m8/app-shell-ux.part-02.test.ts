@@ -90,12 +90,15 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  // History opens expanded: a finished turn keeps its thinking and tool rows in
-  // place instead of folding them behind one muted line.
+  // The answer folded the turn: its thinking and tool rows sit behind one muted
+  // line, and the line is one click away from the rows it counts.
   const folded = page.getByTestId('collapsed-turn');
   await folded.waitFor();
-  expect(await folded.getAttribute('data-open')).toBe('true');
-  expect(await page.getByTestId('tool-activity-group').count()).toBe(1);
+  expect(await folded.getAttribute('data-open')).toBe('false');
+  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
+  await folded.locator('.collapsed-turn-toggle').click();
+  await expect.poll(() => folded.getAttribute('data-open')).toBe('true');
+  await expect.poll(() => page.getByTestId('tool-activity-group').count()).toBe(1);
   // The turn being open does not open the group inside it: that detail is folded by
   // policy (2026-11-04 twice: a group that reserved height while folded was as wrong
   // as a group whose detail could not be reached at all). Folded means no height,
