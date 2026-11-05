@@ -33,11 +33,18 @@ func piAdapterArtifactService(options PiAdapterOptions, input piAdapterRunInput,
 			query.TaskId = operation.TaskId
 			return options.Artifacts.List(query)
 		},
+		// Neither the artifact id nor its version names a scope, and List above
+		// returns this task's own artifacts together with the project knowledge of
+		// its project. Reading with the scope pinned to "task" therefore answered
+		// "Artifact not found" for a project-scope artifact List had just shown.
+		// The scope is left open here and decided per record: assertScope refuses
+		// an artifact of another task or another project, so the boundary is still
+		// this task's workspace, and the refusal says so.
 		Get: func(artifactId string, version *int) ArtifactRecord {
-			return options.Artifacts.Get(operation.TaskId, artifactId, version, "task")
+			return options.Artifacts.Get(operation.TaskId, artifactId, version, "")
 		},
 		Read: func(artifactId string, version int, maxBytes int) ArtifactRead {
-			return options.Artifacts.Read(operation.TaskId, artifactId, version, maxBytes, "task")
+			return options.Artifacts.Read(operation.TaskId, artifactId, version, maxBytes, "")
 		},
 		Publish: func(publish PublishArtifactInput) ArtifactRecord {
 			publish.TaskId = operation.TaskId

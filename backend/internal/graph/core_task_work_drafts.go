@@ -49,11 +49,54 @@ func (s *TaskStore) setWorkDraftState(workID string, version, expected int64, ac
 	}
 }
 
-func (s *TaskStore) workDraftInTransaction(workID string, version int64, allowDeleted bool) WorkDraft {
+// How much of a work's drafts one read accepts.
+//
+// A single read answers "what is version N". The listing and the receipt of a
+// state change answer something else - what this work has - so they must keep
+// seeing an archived version after it was archived, while a single read of a
+// version that is no longer a draft must refuse it and say which of the four
+// ways it did.
+const (
+	// draftCurrent accepts only the versions that are still the work's plan.
+	draftCurrent = false
+	// draftAnyState accepts archived and deleted versions too.
+	draftAnyState = true
+)
+
+// draftRefusal raises one of the four ways a draft read fails, with the code
+// leading the message.
+//
+// Each way asks the reader to do something different - create the work, name
+// another version, restore the draft, or widen the scope - so they must not
+// share one message. The code also leads the text because a tool result carries
+// the message and has no code field (agentToolsFailure in runtime_agent_tools.go):
+// without it four distinct facts reach the model as undifferentiated prose.
+func draftRefusal(code, message string) {
+	Raise(code, code+": "+message)
+}
+
+func (s *TaskStore) workDraftInTransaction(workID string, version int64, anyState bool) WorkDraft {
+	if kernelRow(s.Db, "SELECT id FROM work_requests WHERE id=?", workID) == nil {
+		draftRefusal("work_not_found", "work "+workID+" is unknown, so it has no drafts")
+	}
 	row := kernelRow(s.Db, `SELECT d.*,w.revision AS current_revision FROM work_drafts d JOIN work_requests w ON w.id=d.work_id
  WHERE d.work_id=? AND d.version=?`, workID, version)
-	if row == nil || (!allowDeleted && row["deleted_at"] != nil) {
-		Raise("not_found", "Work draft not found")
+	if row == nil {
+		versions := []string{}
+		for _, held := range kernelRows(s.Db, "SELECT version FROM work_drafts WHERE work_id=? AND deleted_at IS NULL ORDER BY version", workID) {
+			versions = append(versions, itoa(int(kernelInt(held["version"]))))
+		}
+		known := "this work has no drafts"
+		if len(versions) > 0 {
+			known = "its versions are " + joinComma(versions)
+		}
+		draftRefusal("draft_version_not_found", "work "+workID+" has no draft version "+itoa(int(version))+"; "+known)
+	}
+	if !anyState && row["deleted_at"] != nil {
+		draftRefusal("draft_deleted", "draft version "+itoa(int(version))+" of work "+workID+" was deleted")
+	}
+	if !anyState && row["archived_at"] != nil {
+		draftRefusal("draft_archived", "draft version "+itoa(int(version))+" of work "+workID+" was archived; read the current draft instead")
 	}
 	var proposal map[string]any
 	if err := json.Unmarshal([]byte(kernelString(row["spec"])), &proposal); err != nil {
@@ -68,7 +111,7 @@ func (s *TaskStore) workDraftInTransaction(workID string, version int64, allowDe
 func (s *TaskStore) WorkDraft(workID string, version int64) WorkDraft {
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
-	return s.workDraftInTransaction(workID, version, false)
+	return s.workDraftInTransaction(workID, version, draftCurrent)
 }
 
 func (s *TaskStore) WorkDrafts(workID string, archived bool) []WorkDraft {
@@ -81,7 +124,7 @@ func (s *TaskStore) WorkDrafts(workID string, archived bool) []WorkDraft {
 	}
 	out := []WorkDraft{}
 	for _, row := range kernelRows(s.Db, "SELECT version FROM work_drafts WHERE work_id=? AND deleted_at IS NULL AND archived_at "+filter+" ORDER BY version", workID) {
-		out = append(out, s.workDraftInTransaction(workID, kernelInt(row["version"]), false))
+		out = append(out, s.workDraftInTransaction(workID, kernelInt(row["version"]), draftAnyState))
 	}
 	return out
 }

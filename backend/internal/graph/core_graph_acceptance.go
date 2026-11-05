@@ -137,6 +137,70 @@ func graphAcceptanceIdentityEqual(left, right *string) bool {
 	return *left == *right
 }
 
+// graphAcceptanceCheckAttempts are one module's attempts, newest first.
+func graphAcceptanceCheckAttempts(kernel *KernelStore, graphID, moduleID string) []map[string]any {
+	return g5Query(kernel.Db, "SELECT id,state,request,result FROM kernel_module_operations WHERE task_id=? AND module_id=? ORDER BY rowid DESC", graphID, moduleID)
+}
+
+// graphAcceptanceAttemptVerdict is what one attempt concluded about its output.
+//
+// "passed" and "failed" are judgments and may bind an acceptance item. Anything
+// else - an attempt that never crossed its send boundary, one that was killed
+// before it produced an exit code, one interrupted after dispatch - concluded
+// nothing, and the reason says which of those it was.
+func graphAcceptanceAttemptVerdict(kernel *KernelStore, attempt map[string]any, outputName string) (string, string, bool) {
+	if g5Str(attempt["state"]) != "settled" || attempt["result"] == nil {
+		return "", "", false
+	}
+	evaluated, _ := kernel.Content.Decode(g5Str(attempt["result"])).(map[string]any)
+	outputs, _ := evaluated["outputs"].(map[string]any)
+	published, _ := outputs[outputName].(map[string]any)
+	if published == nil {
+		return "", "", false
+	}
+	if verdict, ok := published["verdict"].(string); ok {
+		if verdict == "passed" || verdict == "failed" {
+			return verdict, "", true
+		}
+		reason, _ := published["noVerdictReason"].(string)
+		return verdict, reason, false
+	}
+	// An attempt recorded before the verdict field: the exit code is the judgment,
+	// and a missing one is no judgment at all.
+	code, present := published["code"]
+	if !present {
+		return "", "", false
+	}
+	if code == nil {
+		return "unknown", "no_exit_code", false
+	}
+	if passed, _ := published["passed"].(bool); passed {
+		return "passed", "", true
+	}
+	return "failed", "", true
+}
+
+// graphAcceptanceDecidedAttempt is the newest attempt that judged its work.
+func graphAcceptanceDecidedAttempt(kernel *KernelStore, attempts []map[string]any, outputName string) (map[string]any, bool) {
+	for _, attempt := range attempts {
+		if _, _, decided := graphAcceptanceAttemptVerdict(kernel, attempt, outputName); decided {
+			return attempt, true
+		}
+	}
+	return nil, false
+}
+
+// graphAcceptanceUnjudgedReason says why an item has no verdict to bind.
+func graphAcceptanceUnjudgedReason(kernel *KernelStore, attempt map[string]any, outputName string) string {
+	if state := g5Str(attempt["state"]); state != "settled" {
+		return "Host check is " + state
+	}
+	if _, reason, _ := graphAcceptanceAttemptVerdict(kernel, attempt, outputName); reason != "" {
+		return "Host check has no verdict: " + reason
+	}
+	return "Host check has no verdict"
+}
+
 // GraphAcceptance reads operation, publication, and actual-send records.
 func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWorkspace) GraphAcceptanceReport {
 	task := kernel.Store.Task(graphID)
@@ -217,32 +281,42 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 		result := AcceptanceStatus{Id: criterion.Id, Description: criterion.Description, Kind: criterion.Kind, Status: "missing", Reason: "No valid evidence"}
 		switch criterion.Kind {
 		case "check":
-			row, ok := g5One(kernel.Db, "SELECT id,state,request,result FROM kernel_module_operations WHERE task_id=? AND module_id=? ORDER BY rowid DESC LIMIT 1", graphID, criterion.Module)
-			if ok {
+			// The item binds the last attempt that judged its work, not the last
+			// attempt. An interrupted one stayed uncertain and a killed one settled
+			// without an exit code; neither decided anything, so binding it would let
+			// one interruption outrank the settled evidence of the same module and
+			// report the check as unproven forever.
+			attempts := graphAcceptanceCheckAttempts(kernel, graphID, criterion.Module)
+			operation := definition.Modules[criterion.Module].Operation
+			row, decided := graphAcceptanceDecidedAttempt(kernel, attempts, operation.Output)
+			switch {
+			case decided:
 				result.Source = &AcceptanceSource{Id: g5Str(row["id"])}
-				if g5Str(row["state"]) != "settled" || row["result"] == nil {
-					result.Reason = "Host check is " + g5Str(row["state"])
+				evaluated, _ := kernel.Content.Decode(g5Str(row["result"])).(map[string]any)
+				outputs, _ := evaluated["outputs"].(map[string]any)
+				output, _ := outputs[operation.Output].(map[string]any)
+				recorded, _ := kernel.Content.Decode(g5Str(row["request"])).(map[string]any)
+				if CanonicalJSON(recorded["operation"]) != CanonicalJSON(operation) {
+					result.Status = "stale"
+					result.Reason = "Host check used another operation configuration"
+				} else if passed, _ := output["passed"].(bool); !passed {
+					result.Status = "failed"
+					result.Reason = "Host check did not pass"
+				} else if commitText != "" && !graphAcceptanceCommitEqual(output["verifiedCommit"], graphAcceptanceHasKey(output, "verifiedCommit"), commit) {
+					result.Status = "stale"
+					result.Reason = "Host check does not verify the current clean commit"
 				} else {
-					evaluated, _ := kernel.Content.Decode(g5Str(row["result"])).(map[string]any)
-					outputs, _ := evaluated["outputs"].(map[string]any)
-					operation := definition.Modules[criterion.Module].Operation
-					output, _ := outputs[operation.Output].(map[string]any)
-					recorded, _ := kernel.Content.Decode(g5Str(row["request"])).(map[string]any)
-					if CanonicalJSON(recorded["operation"]) != CanonicalJSON(operation) {
-						result.Status = "stale"
-						result.Reason = "Host check used another operation configuration"
-					} else if passed, _ := output["passed"].(bool); !passed {
-						result.Status = "failed"
-						result.Reason = "Host check did not pass"
-					} else if commitText != "" && !graphAcceptanceCommitEqual(output["verifiedCommit"], graphAcceptanceHasKey(output, "verifiedCommit"), commit) {
-						result.Status = "stale"
-						result.Reason = "Host check does not verify the current clean commit"
-					} else {
-						result.Status = "passed"
-						result.Reason = "Host check passed"
-						result.Source.Commit = commit
-					}
+					result.Status = "passed"
+					result.Reason = "Host check passed"
+					result.Source.Commit = commit
 				}
+			case len(attempts) > 0:
+				// Something was tried and nobody judged it. The item is unknown, not
+				// missing: evidence exists, and it is the absence of a verdict. The
+				// newest attempt is named so the reader knows what to look at.
+				result.Source = &AcceptanceSource{Id: g5Str(attempts[0]["id"])}
+				result.Status = "unknown"
+				result.Reason = graphAcceptanceUnjudgedReason(kernel, attempts[0], operation.Output)
 			}
 		case "review":
 			row, ok := g5One(kernel.Db, `SELECT a.artifact_id,a.version,a.producer_operation_id

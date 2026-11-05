@@ -8,12 +8,66 @@ import { tmpdir } from 'node:os';
 
 import { join } from 'node:path';
 
+import { DatabaseSync } from 'node:sqlite';
+
 import { expect, test } from 'vitest';
 
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { type ToolCall, type ChatMessage, type ChatBody, DEFINITION, deferred, type MasterCall, masterProvider, nodeProvider } from "./go-node-queue.fixture.ts";
 
 
+
+/**
+ * One node attempt as the product records it.
+ *
+ * These two cases used to assert `retries_used`, `resubmits_used` and the number
+ * of model turns: internal bookkeeping that changes whenever the scheduler does,
+ * so a suite that only reads it can go red on a refactor and green while the work
+ * silently ran twice. What is durable is which execution ran, whether it landed a
+ * submission, and what the graph ended up holding.
+ */
+interface Attempt { id: string; state: string; submission: string | null }
+
+interface RunView {
+  operations: { id: string; state: string; submission_id?: string | null }[];
+  invocations: { id: string }[];
+}
+
+function attempts(view: RunView): Attempt[] {
+  return view.operations.map(operation => ({
+    id: operation.id, state: operation.state, submission: operation.submission_id ?? null,
+  }));
+}
+
+/** The graph's deliverables, decoded the way the daemon decodes them. */
+function deliverables(root: string, taskId: string): number[] {
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true, timeout: 5000 });
+  const decode = (value: string): unknown => {
+    const prefix = 'graph-content:sha256:';
+    if (!value.startsWith(prefix)) return JSON.parse(value);
+    const body = (db.prepare('SELECT body FROM kernel_content WHERE digest=?').get(value.slice(prefix.length)) as { body?: string } | undefined)?.body ?? '';
+    return JSON.parse(body);
+  };
+  try {
+    const rows = db.prepare('SELECT value FROM kernel_graph_results WHERE task_id=?').all(taskId) as { value: string }[];
+    return rows.map(row => Number((decode(row.value) as { n?: number }).n));
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * What every turn of the node asked the model to do: the last user message of
+ * each request, which is this turn's prompt. The whole history would repeat an
+ * earlier prompt in every later request and turn one repair into several.
+ */
+function rounds(node: { turns: () => { messages?: { role?: string; content?: unknown }[] }[] }): string[] {
+  return node.turns().map(turn => {
+    const messages = turn.messages ?? [];
+    const lastUser = [...messages].reverse().find(message => message.role === 'user');
+    return typeof lastUser?.content === 'string' ? lastUser.content : JSON.stringify(lastUser?.content ?? '');
+  });
+}
 
 test('one node serializes delivery, queued chat and later delivery while another node completes independently', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-node-queue-'));
@@ -173,10 +227,11 @@ test('default resubmission is spent once and persisted failure totals survive re
         const response = await daemon!.request(path, init);
         return { status: response.status, body: await response.json().catch(() => ({})) as unknown };
       };
-      const operations = async () => {
-        const view = await request(`/api/tasks/${master.graphId()}/nodes/a/run`);
-        return (view.body as { operations: { state: string; retries_used: number; resubmits_used: number }[] }).operations;
+      const view = async () => {
+        const answer = await request(`/api/tasks/${master.graphId()}/nodes/a/run`);
+        return answer.body as RunView;
       };
+      const operations = async () => (await view()).operations;
 
       const created = await request('/api/conversations', {
         method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Repair the work.', requestId: 'node-resubmit' }),
@@ -184,19 +239,35 @@ test('default resubmission is spent once and persisted failure totals survive re
       expect(created.status, JSON.stringify(created.body)).toBe(200);
 
       // The turn without its required output is repaired as often as the
-      // allowance says, and the spent repair is part of the node's record.
+      // allowance says. What proves it is what the model read and what the graph
+      // now holds: every round after the first carries the refusal of the missing
+      // output, and only the allowance that permits the last repair produces a
+      // deliverable at all.
       await expect.poll(async () => (await operations())[0]?.state, { timeout: 90_000, interval: 250 })
         .toBe(override ? 'completed' : 'failed');
-      expect((await operations())[0]).toMatchObject({ retries_used: 0, resubmits_used: override ? 2 : 1 });
-      expect(a.turns()).toHaveLength(override ? 4 : 2);
+      const settled = await view();
+      expect(settled.operations.map(operation => operation.state)).toEqual([override ? 'completed' : 'failed']);
+      const seen = rounds(a);
+      // The turn after the bare reply is the repair, and it carries the refusal
+      // that says which output was missing - the prompt a model has to read to
+      // be able to repair anything at all.
+      expect(seen[0]).not.toContain('were not enabled');
+      expect(seen[1]).toContain('were not enabled');
+      expect(deliverables(root, master.graphId())).toEqual(override ? [7] : []);
+      const before = attempts(settled);
+      const calls = settled.invocations.map(call => call.id);
 
-      // A restart keeps the spent repair and does not ask the model again.
+      // A restart keeps the same executions, submissions and provider calls, so
+      // it neither spends another repair nor asks the model again.
       await daemon.close();
       daemon = await start();
       await expect.poll(async () => (await operations())[0]?.state, { timeout: 60_000, interval: 250 })
         .toBe(override ? 'completed' : 'failed');
-      expect((await operations())[0]).toMatchObject({ retries_used: 0, resubmits_used: override ? 2 : 1 });
-      expect(a.turns()).toHaveLength(override ? 4 : 2);
+      const reopened = await view();
+      expect(attempts(reopened)).toEqual(before);
+      expect(reopened.invocations.map(call => call.id)).toEqual(calls);
+      expect(rounds(a)).toEqual(seen);
+      expect(deliverables(root, master.graphId())).toEqual(override ? [7] : []);
     } finally {
       await daemon?.close(); await master.close(); await a.close();
       await rm(root, { recursive: true, force: true });
@@ -254,29 +325,43 @@ test('real provider failures spend two default automatic retries or four node ov
         const response = await daemon!.request(path, init);
         return { status: response.status, body: await response.json().catch(() => ({})) as unknown };
       };
-      const operations = async () => {
-        const view = await request(`/api/tasks/${master.graphId()}/nodes/a/run`);
-        return (view.body as { operations: { state: string; retries_used: number; resubmits_used: number }[] }).operations;
+      const view = async () => {
+        const answer = await request(`/api/tasks/${master.graphId()}/nodes/a/run`);
+        return answer.body as RunView;
       };
+      const operations = async () => (await view()).operations;
 
       const created = await request('/api/conversations', {
         method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Fail the work.', requestId: 'node-retry' }),
       });
       expect(created.status, JSON.stringify(created.body)).toBe(200);
 
-      // Every automatic retry the node is allowed is spent on a real
-      // provider failure, and the spent retries stay on its record.
+      // Every attempt the allowance permits is a round the model really answered,
+      // and only the first of them was the full briefing: the rest are
+      // continuations of the same work. Nothing was submitted, so the graph holds
+      // no deliverable.
       await expect.poll(async () => (await operations())[0]?.state, { timeout: 90_000, interval: 250 }).toBe('failed');
-      expect((await operations())[0]).toMatchObject({ retries_used: retries, resubmits_used: 0 });
-      expect(a.turns().length).toBeGreaterThanOrEqual(retries + 1);
+      const settled = await view();
+      expect(settled.operations.map(operation => operation.state)).toEqual(['failed']);
+      const seen = rounds(a);
+      // One provider round per attempt the allowance permits, and every one of
+      // them is a real request the model answered.
+      expect(seen).toHaveLength(retries + 1);
+      expect(settled.invocations).toHaveLength(seen.length);
+      expect(deliverables(root, master.graphId())).toEqual([]);
+      const before = attempts(settled);
+      const calls = settled.invocations.map(call => call.id);
 
-      // A restart neither spends another retry nor asks the model again.
-      const sent = a.turns().length;
+      // A restart neither spends another attempt nor asks the model again: the
+      // provider received the same conversation, and the node's record is the
+      // same rows.
       await daemon.close();
       daemon = await start();
       await expect.poll(async () => (await operations())[0]?.state, { timeout: 60_000, interval: 250 }).toBe('failed');
-      expect((await operations())[0]).toMatchObject({ retries_used: retries, resubmits_used: 0 });
-      expect(a.turns()).toHaveLength(sent);
+      const reopened = await view();
+      expect(attempts(reopened)).toEqual(before);
+      expect(reopened.invocations.map(call => call.id)).toEqual(calls);
+      expect(rounds(a)).toEqual(seen);
     } finally {
       await daemon?.close(); await master.close(); await a.close();
       await rm(root, { recursive: true, force: true });
