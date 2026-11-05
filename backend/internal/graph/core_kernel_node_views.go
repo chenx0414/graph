@@ -387,8 +387,21 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Timing: map[string]any{"totalMs": totalMs, "runMs": totalMeasured("runMs"), "waitingMs": totalMeasured("waitingMs"),
 			"pauseMs": kernel.NativePauseMs(graphID, nodeID), "userWaitMs": nil, "inProgress": inProgress},
 		Entries: page["entries"], EntryCount: page["entryCount"], Limit: page["limit"], HasOlder: page["hasOlder"], HasNewer: page["hasNewer"],
-		Phase: kernel.Store.Task(graphID).Phase,
+		Phase: kernelNodePhase(kernel, graphID),
 	}
+}
+
+// kernelNodePhase is the graph's own phase, not the task row's: a paused graph
+// keeps phase "running" there and carries the pause in its own column, so reading
+// the row told the console a paused node was busy (measured 2026-11-05 - the node
+// chat showed no pause while the graph was paused).
+func kernelNodePhase(kernel *KernelStore, graphID string) string {
+	phase := GraphPhase(kernel.Store.Task(graphID).Phase)
+	row := kernelRow(kernel.DB, "SELECT paused FROM tasks WHERE id=?", graphID)
+	if row != nil && kernelInt(row["paused"]) != 0 && phase != "completed" && phase != "stopping" && phase != "stopped" {
+		phase = "paused"
+	}
+	return string(phase)
 }
 
 func firstPresent(record map[string]any, keys ...string) any {

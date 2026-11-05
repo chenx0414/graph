@@ -99,6 +99,11 @@ test('a blocked completion stays closed until it is withdrawn, a stopped graph c
             id: 'inspect-queue-settled', name: 'graph_inspect', args: { graphId, query: 'queue' },
             before: async () => {
               await control(graphId, { action: 'pause' });
+              // A paused graph keeps phase "running" in its task row and carries the
+              // pause in its own column. The node chat reads this view to decide
+              // whether to say the task is paused, so it has to see "paused" here.
+              const pausedView = await request(`/api/tasks/${graphId}/nodes/work/run`);
+              expect((pausedView.body as { phase?: string }).phase).toBe('paused');
               const stopped = await control(graphId, { action: 'stop' });
               expect(stopped.status, JSON.stringify(stopped.body)).toBe(200);
               await waitPhase(graphId, 'stopped');
