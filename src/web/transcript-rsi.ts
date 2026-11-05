@@ -15,10 +15,8 @@ export type TranscriptRsi = {
   validation: { command: string; status: string }[];
   restartRequired: boolean;
   activation: 'saved' | 'pending_reload' | 'active' | null;
-  /** When the receipt was written: the moment this change was submitted. */
-  submittedAt: number;
-  /** When the host confirmed the reload, as the receipt records it. */
-  confirmedAt: number | null;
+  /** How long the call itself took (write, gate, commit), as the daemon measured it. */
+  elapsedMs: number | null;
   force: boolean;
   pendingFiles: string[];
   error?: string;
@@ -73,13 +71,9 @@ export function durableRsi(message: ConversationMessage): TranscriptRsi {
       && ['saved', 'pending_reload', 'active'].includes(String((data.activation as Record<string, unknown>).state))
       ? (data.activation as Record<string, unknown>).state as 'saved' | 'pending_reload' | 'active'
       : status === 'applied' ? (data.restartRequired === true ? 'pending_reload' : 'saved') : null,
-    submittedAt: typeof message.createdAt === 'number' ? message.createdAt : Date.now(),
-    confirmedAt: (() => {
-      const activation = data.activation;
-      if (!activation || typeof activation !== 'object' || Array.isArray(activation)) return null;
-      const value = (activation as Record<string, unknown>).confirmedAt;
-      return typeof value === 'number' && Number.isFinite(value) ? value : null;
-    })(),
+    elapsedMs: typeof data.elapsedMs === 'number' && Number.isFinite(data.elapsedMs) && data.elapsedMs >= 0
+      ? data.elapsedMs
+      : null,
     force: data.force === true,
     pendingFiles: stringArray(data.pendingFiles),
     ...(typeof data.error === 'string' ? { error: data.error } : {}),

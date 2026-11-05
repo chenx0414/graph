@@ -107,6 +107,10 @@ type RsiReceipt struct {
 	// OutputPath is the full check output for this attempt, written outside the receipt the
 	// conversation stores.
 	OutputPath *string `json:"outputPath,omitempty"`
+	// ElapsedMs is how long the call itself took: writing the files, running the gate and
+	// committing. It deliberately excludes the reload, which is a separate wait the reader
+	// can already see as 等待重载.
+	ElapsedMs *int64 `json:"elapsedMs,omitempty"`
 }
 
 // RsiActivation is what a turn that changed the harness itself did, in the reviewer's terms.

@@ -47,7 +47,7 @@ test('every self-improvement receipt renders its own label and the copy that goe
         status: 'applied', title: 'A change that is live', problem: 'The harness had a defect.',
         branch: 'rsi/live-1', commit: 'a'.repeat(40), files: ['src/web/App.tsx'],
         validation: [{ command: 'node --run check', status: 'passed' }],
-        restartRequired: true, activation: { state: 'active', confirmedAt: liveSubmittedAt + 65_000 }, report: 'applied',
+        restartRequired: true, activation: { state: 'active', confirmedAt: liveSubmittedAt + 65_000 }, elapsedMs: 46_000, report: 'applied',
       },
     },
     {
@@ -57,7 +57,7 @@ test('every self-improvement receipt renders its own label and the copy that goe
         status: 'applied', title: 'A change that is still waiting', problem: 'The harness had a defect.',
         branch: 'rsi/waiting-1', commit: 'b'.repeat(40), files: ['src/web/App.tsx'],
         validation: [{ command: 'node --run check', status: 'passed' }],
-        restartRequired: true, activation: { state: 'pending_reload' }, report: 'applied',
+        restartRequired: true, activation: { state: 'pending_reload' }, elapsedMs: 3_000, report: 'applied',
       },
     },
     {
@@ -122,18 +122,18 @@ test('every self-improvement receipt renders its own label and the copy that goe
   await live.waitFor({ timeout: 60_000 });
   expect(await live.getAttribute('data-status')).toBe('applied');
   expect(await live.innerText()).toContain('已生效');
-  // A landed change says how long it took; the number comes from the receipt's
-  // own timestamps, not from how long the page happened to be open.
-  expect(await live.getByTestId('rsi-report-elapsed').innerText()).toBe('用时 1m 5s');
+  // The card shows the price of the call the daemon measured (write, gate,
+  // commit), not the reload that followed it.
+  expect(await live.getByTestId('rsi-report-elapsed').innerText()).toBe('耗时 46s');
   await live.getByRole('button', { name: '展开' }).click();
   expect(await live.innerText()).toContain('宿主已确认重载，改动已生效。');
 
   const waiting = card('A change that is still waiting');
   expect(await waiting.getAttribute('data-status')).toBe('applied');
   expect(await waiting.innerText()).toContain('等待重载');
-  // Still waiting: the label counts up from the submission and keeps moving.
-  await expect.poll(async () => (await waiting.getByTestId('rsi-report-elapsed').innerText()), { timeout: 10_000 })
-    .toMatch(/^已等待 \d+s$/);
+  // A change still waiting for its reload already knows what its call cost: the
+  // two waits are different facts and are labelled differently.
+  expect(await waiting.getByTestId('rsi-report-elapsed').innerText()).toBe('耗时 3s');
 
   const failedChecks = card('A change that failed its checks');
   expect(await failedChecks.getAttribute('data-status')).toBe('checks_failed');

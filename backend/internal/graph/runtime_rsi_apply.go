@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +27,20 @@ func (service *RsiService) Apply(input any, context RsiApplyContext) RsiReceipt 
 
 // rsiApplyChange writes the files, runs the gate and commits.
 func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApplyContext) (receipt RsiReceipt) {
+	// The call's own cost, measured here rather than derived from the receipt's timestamp:
+	// the reader asked for the price of calling RSI, and the reload that follows is a
+	// different wait with its own label. A deferred stamp covers every exit, including the
+	// failures the caller most wants timed.
+	started := NowMillis()
+	stamp := func(value RsiReceipt) RsiReceipt {
+		elapsed := NowMillis() - started
+		value.ElapsedMs = &elapsed
+		return value
+	}
+	// The stored receipt and the returned one are two copies: the record is written
+	// before the call returns, so the stamp has to be taken before it, not in a defer.
+	record := func(value RsiReceipt) { service.rsiRecord(context, stamp(value)) }
+	defer func() { receipt = stamp(receipt) }()
 	title := input.Title
 	activate := input.Activate != nil && *input.Activate
 	checks := input.Checks
@@ -41,7 +54,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			Error: &errorText,
 		}
 		failure.Report = rsiUnavailableReport(input, nil, errorText)
-		service.rsiRecord(context, failure)
+		record(failure)
 		return failure
 	}
 
@@ -213,7 +226,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			Error: &message,
 		}
 		failure.Report = rsiFailureReport(input, root, message, nil)
-		service.rsiRecord(context, failure)
+		record(failure)
 		receipt = failure
 	}()
 
@@ -345,7 +358,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			OutputPath: &outputPath,
 		}
 		rehearsal.Report = rsiDryRunReport(input, rehearsal, failed)
-		service.rsiRecord(context, rehearsal)
+		record(rehearsal)
 		return rehearsal
 	}
 	if failed {
@@ -373,7 +386,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			PendingFiles: pendingFiles, OutputPath: &outputPath,
 		}
 		failure.Report = rsiChecksFailedReport(input, failure)
-		service.rsiRecord(context, failure)
+		record(failure)
 		return failure
 	}
 
@@ -480,68 +493,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		applied.Diff = diff
 	}
 	applied.Report = rsiSuccessReport(input, applied, described.Note)
-	service.rsiRecord(context, applied)
+	record(applied)
 	return applied
-}
-
-// rsiChangeContent is the new text of one change: given inline, or read from a
-// file the Agent already wrote in the checkout.
-//
-// The second form exists because the most expensive call this tool served was a
-// file pasted back in: the Agent writes a keeper test with its own tools, runs
-// it, and then had to repeat every line inside `changes[]`. Naming the file
-// commits exactly the bytes that were verified.
-func rsiChangeContent(root string, change RsiFileChange, index int) string {
-	if change.FromPath == nil {
-		if change.Content == nil {
-			Raise("invalid_input", "changes["+itoa(index)+"] has no content: give content or fromPath")
-		}
-		return *change.Content
-	}
-	source, ok := rsiInside(root, *change.FromPath)
-	if !ok {
-		Raise("invalid_input", "changes["+itoa(index)+"].fromPath must stay inside the Graph source root")
-	}
-	raw, err := os.ReadFile(filepath.Join(root, source))
-	if err != nil {
-		if os.IsNotExist(err) {
-			Raise("not_found", "changes["+itoa(index)+"].fromPath "+source+
-				" does not exist in the checkout: write the file first, then name it here instead of pasting its text")
-		}
-		Raise("rsi_edit_conflict", "changes["+itoa(index)+"].fromPath "+source+" could not be read: "+err.Error())
-	}
-	return string(raw)
-}
-
-// rsiEditMismatch names one anchor that does not match exactly once.
-func rsiEditMismatch(index, total, matches int, oldText string) string {
-	head := strings.TrimSpace(strings.Split(oldText, "\n")[0])
-	runes := []rune(head)
-	if len(runes) > 90 {
-		head = string(runes[:90])
-	}
-	return "found " + itoa(matches) + " (edit " + itoa(index+1) + " of " + itoa(total) + ", first line: " + head + ")"
-}
-
-// rsiWriteShrinkRefusal refuses a write that would replace a large file with a
-// stub.
-//
-// The rule is deliberately blunt: a file of rsiWriteShrinkLines lines or more
-// may not be written down to less than a tenth of itself in one write. Anything
-// smaller is ordinary editing; anything larger is either a rewrite that deserves
-// to be spelled out as edits, or the accident this guard exists for.
-const rsiWriteShrinkLines = 200
-
-func rsiWriteShrinkRefusal(path, before, after string) string {
-	oldLines := strings.Count(before, "\n") + 1
-	if oldLines < rsiWriteShrinkLines {
-		return ""
-	}
-	newLines := strings.Count(after, "\n") + 1
-	if newLines*10 >= oldLines {
-		return ""
-	}
-	return fmt.Sprintf(
-		"RSI write to %s would replace %d lines with %d: a whole-file write carries no evidence of what it removed. "+
-			"Use replace with edits that name what goes, or split the deletion into several such edits.", path, oldLines, newLines)
 }

@@ -269,20 +269,10 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const { rsi } = row;
   const [expanded, setExpanded] = useState<boolean | null>(null);
   const open = expanded ?? false;
-  // A change still waiting for its reload counts up while the reader watches;
-  // one that landed shows the time it took. The clock only runs while it can
-  // still move, so a settled transcript costs no timer.
-  const waiting = rsi.status === 'applied' && rsi.activation === 'pending_reload';
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!waiting) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [waiting]);
-  const elapsedMs = rsi.confirmedAt !== null
-    ? rsi.confirmedAt - rsi.submittedAt
-    : waiting ? now - rsi.submittedAt : null;
+  // The number the reader wants is the price of the call: writing the files,
+  // running the gate and committing. The reload is a separate wait with its own
+  // label, and a receipt that has not measured its call shows no number at all.
+  const elapsedMs = rsi.elapsedMs;
   const dryRunFailed = rsi.status === 'dry_run' && rsi.validation.some(item => item.status === 'failed');
   const statusLabel = rsi.status === 'applied' ? (rsi.activation === 'active' ? '已生效' : rsi.activation === 'pending_reload' ? '等待重载' : '已提交')
     : rsi.status === 'checks_failed' ? '检查未通过'
@@ -296,10 +286,8 @@ function RsiReport({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
         <div className="rsi-report-heading">
           <strong>{rsi.title}</strong>
           <span className="rsi-report-badge">{statusLabel}</span>
-          {elapsedMs !== null && elapsedMs >= 0 && (
-            <span className="rsi-report-elapsed" data-testid="rsi-report-elapsed">
-              {waiting && rsi.confirmedAt === null ? `已等待 ${formatElapsed(elapsedMs)}` : `用时 ${formatElapsed(elapsedMs)}`}
-            </span>
+          {elapsedMs !== null && (
+            <span className="rsi-report-elapsed" data-testid="rsi-report-elapsed">{`耗时 ${formatElapsed(elapsedMs)}`}</span>
           )}
         </div>
         <button type="button" className="btn btn-sm" aria-expanded={open} onClick={() => setExpanded(!open)}>{open ? '收起' : '展开'}</button>

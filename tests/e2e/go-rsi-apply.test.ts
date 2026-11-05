@@ -286,11 +286,16 @@ test('a right self-improvement call commits the real checkout', async () => {
   expect(observed.get('check-only')).toContain('没有产生提交');
   expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('2');
 
-  // The receipt is a message of the conversation, not a side channel.
+  // The receipt is a message of the conversation, not a side channel. It carries
+  // the price of the call itself: a real gate ran, so the number is real, and it
+  // is the call's, not the reload's.
   const view = await f.request(`/api/conversations/${conversationId}`);
-  const messages = (view.body as { messages?: { kind: string; data?: { status?: string; validation?: { status: string }[] } }[] }).messages ?? [];
+  const messages = (view.body as { messages?: { kind: string; data?: { status?: string; elapsedMs?: number; validation?: { status: string }[] } }[] }).messages ?? [];
   expect(messages.some(message => message.kind === 'rsi' && message.data?.status === 'applied'
     && message.data.validation?.every(item => item.status === 'passed'))).toBe(true);
+  const applied = messages.find(message => message.kind === 'rsi' && message.data?.status === 'applied');
+  expect(typeof applied?.data?.elapsedMs, 'the receipt carries no call duration').toBe('number');
+  expect(applied?.data?.elapsedMs ?? 0).toBeGreaterThan(0);
 }, 240_000);
 
 test('a self-improvement call that asks for a reload leaves a real reload request behind', async () => {
