@@ -39,12 +39,29 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** The browser this run measures with when the caller named none. */
+// A measurement nobody can start is a measurement nobody runs: the gate command
+// carries no flags, so the common case has to work with none. The list is
+// ordered by what this machine actually has; a host that can launch a browser
+// itself still wins over connectOverCDP, because a launched browser needs no
+// endpoint passed in.
+function detectBrowserExecutable() {
+  const candidates = [
+    process.env.GRAPH_FOLD_EXECUTABLE,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    join(homedir(), 'Library/Caches/ms-playwright/chromium-1243/chrome-mac/Chromium.app/Contents/MacOS/Chromium'),
+    join(homedir(), 'Library/Caches/ms-playwright/chromium-1234/chrome-mac/Chromium.app/Contents/MacOS/Chromium'),
+  ].filter(Boolean);
+  return candidates.find(candidate => existsSync(candidate));
+}
 
 function flag(name, fallback = undefined) {
   const index = process.argv.indexOf(`--${name}`);
@@ -56,7 +73,7 @@ function flag(name, fallback = undefined) {
 const outDir = resolve(String(flag('out', join(repo, 'deliverables/e2e-evidence/fold-policy'))));
 const webDir = resolve(String(flag('web-dir', join(repo, 'dist/web'))));
 const cdpEndpoint = process.env.GRAPH_FOLD_CDP || (typeof flag('cdp') === 'string' ? flag('cdp') : undefined);
-const executable = typeof flag('executable') === 'string' ? flag('executable') : undefined;
+const executable = typeof flag('executable') === 'string' ? flag('executable') : detectBrowserExecutable();
 const keep = flag('keep', false) === true;
 const label = typeof flag('label') === 'string' ? flag('label') : 'run';
 
