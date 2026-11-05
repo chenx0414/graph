@@ -41,6 +41,15 @@ const background = process.env.GRAPH_APP_BACKGROUND === '1' || smoke
   || (process.env.VITEST === 'true' && process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1');
 if (background && process.platform === 'darwin') app.setActivationPolicy('accessory');
 
+// Chromium keeps its own cookie and localStorage key in the login keychain
+// under "Graph Safe Storage", separately from Graph's secrets - and this
+// machine's keychain answers that lookup with the "cannot find keychain" dialog.
+// Measured 2026-11-05: the dialog came back right after a provider login, with
+// Graph's own secret store already off the keychain entirely. The mock keychain
+// is the switch that keeps Chromium away from the OS one; it has to be set
+// before the app is ready.
+app.commandLine.appendSwitch('use-mock-keychain');
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {

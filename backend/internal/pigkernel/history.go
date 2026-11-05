@@ -140,9 +140,8 @@ type historyTool struct {
 func (tool *historyTool) spec() ToolSpec {
 	return ToolSpec{
 		Name: historyToolName,
-		Description: "Search this conversation's whole durable transcript (compaction and reset keep it). " +
-			"No arguments lists recent entries; query finds text anywhere in the conversation, however far back; " +
-			"entryId reads one entry; before continues further back from an id a previous search returned.",
+		Description: "Search the whole durable transcript (compaction and reset keep it). " +
+			"No arguments lists recent entries; query searches all of it; entryId reads one.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
