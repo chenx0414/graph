@@ -93,6 +93,17 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 			Data: parseJSON(kernelString(row["data"])),
 		})
 	}
+	// What the reader typed while this node was busy. The main conversation says so
+	// instead of swallowing the message, and a node that stays silent makes a second
+	// message look lost.
+	queued := []NodeRunQueued{}
+	for _, row := range kernelRows(store.Db, "SELECT seq,payload,created_at FROM kernel_queue WHERE task_id=? AND node_id=? AND state='queued' AND kind='chat' ORDER BY seq", taskId, nodeId) {
+		text := ""
+		if payload := asMap(parseJSON(kernelString(row["payload"]))); payload != nil {
+			text = kernelString(payload["text"])
+		}
+		queued = append(queued, NodeRunQueued{Seq: int64(kernelInt(row["seq"])), Text: text, CreatedAt: int64(kernelInt(row["created_at"]))})
+	}
 	evidence := []NodeRunEvidence{}
 	for _, row := range kernelRows(store.Db, "SELECT acceptance_id,valid,commit_sha FROM evidence WHERE task_id=? AND node_id=? ORDER BY rowid", taskId, nodeId) {
 		item := NodeRunEvidence{AcceptanceID: kernelString(row["acceptance_id"]), Valid: kernelInt(row["valid"]) != 0}
@@ -172,7 +183,7 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 		TaskID: taskId, NodeID: nodeId, Context: ContextView(store, taskId, nodeId),
 		Capabilities: capabilities, CapabilityUsage: usageFacts, CapabilityDigest: capabilityDigest,
 		Node: nodeView, Instance: instance, Session: session, Operations: operations,
-		Invocations: invocations, Questions: questions, Evidence: evidence, Timing: timing,
+		Invocations: invocations, Questions: questions, Queued: queued, Evidence: evidence, Timing: timing,
 		Entries: page.Entries, EntryCount: page.EntryCount, HasOlder: page.HasOlder, HasNewer: page.HasNewer,
 		Phase: task.Phase,
 	}

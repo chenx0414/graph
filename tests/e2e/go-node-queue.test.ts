@@ -90,6 +90,12 @@ test('one node serializes delivery, queued chat and later delivery while another
     // The running turn has not seen the chat that arrived behind it.
     expect(a.turns()).toHaveLength(1);
     expect(JSON.stringify(a.turns()[0])).not.toContain('QUEUED_CHAT_AFTER_FIRST_STARTED');
+    // The reader typed while the node was busy. The node chat has to say the
+    // message is waiting, exactly as the main conversation says it, or a second
+    // message looks like it went nowhere.
+    const waiting = await request(`/api/tasks/${master.graphId()}/nodes/a/run`);
+    expect((waiting.body as { queued: { text: string }[] }).queued.map(item => item.text))
+      .toEqual(['QUEUED_CHAT_AFTER_FIRST_STARTED']);
 
     a.release();
     // The queue settles only after the last turn of the node did, so the
@@ -106,6 +112,10 @@ test('one node serializes delivery, queued chat and later delivery while another
     expect(done.items.map(item => [item.kind, item.state])).toEqual([
       ['delivery', 'done'], ['chat', 'done'], ['delivery', 'done'],
     ]);
+    // Once the node took the message there is nothing left to wait for, so the
+    // bar goes away instead of listing work that already happened.
+    const drained = await request(`/api/tasks/${master.graphId()}/nodes/a/run`);
+    expect((drained.body as { queued: unknown[] }).queued).toEqual([]);
     await expect.poll(() => master.results.get('inspect-executions-a'), { timeout: 90_000, interval: 250 }).toBeTruthy();
     const executionsA = JSON.parse(master.results.get('inspect-executions-a')!) as { items: { state: string }[] };
     expect(executionsA.items.map(item => item.state)).toEqual(['completed', 'completed', 'completed']);

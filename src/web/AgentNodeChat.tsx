@@ -5,7 +5,7 @@ import { api } from './api.ts';
 import { NODE_LABEL } from './labels.ts';
 import { ErrorBox, useTaskStream, type StreamEvent } from './shared.tsx';
 import type { Entry, NodeRun } from './NodeDetail.tsx';
-import { NodeChatPaused, NodeChatQuestions } from './NodeChatAlerts.tsx';
+import { NodeChatPaused, NodeChatPending } from './NodeChatAlerts.tsx';
 import { TranscriptRowView } from './TranscriptRows.tsx';
 import { Button, Empty, Icon, Pill, Spinner } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
@@ -350,7 +350,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
           </button>
         )}
       </div>
-      <NodeChatQuestions taskId={taskId ?? ''} questions={data?.questions ?? []} onDone={refresh} />
+      <NodeChatPending taskId={taskId ?? ''} questions={data?.questions ?? []} queued={data?.queued ?? []} onDone={refresh} />
       {composer}
       </>
     );
@@ -396,7 +396,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
           </div>
         </div>
 
-        <NodeChatQuestions taskId={taskId ?? ''} questions={data?.questions ?? []} onDone={refresh} />
+        <NodeChatPending taskId={taskId ?? ''} questions={data?.questions ?? []} queued={data?.queued ?? []} onDone={refresh} />
         {composer}
       </section>
   );

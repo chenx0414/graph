@@ -51,6 +51,34 @@ export function NodeChatQuestions({ taskId, questions, onDone }: {
 }
 
 /**
+ * The messages the reader typed while this node was busy, in the order the node
+ * will take them. The main conversation shows its queue the same way; without
+ * it, a second message looks like it vanished.
+ */
+export function NodeChatPending({ taskId, questions, queued, onDone }: {
+  taskId: string;
+  questions: unknown[];
+  queued: { seq: number; text: string }[];
+  onDone: () => void;
+}) {
+  return (
+    <>
+      {queued.length > 0 && (
+        <div className="queued-messages" data-testid="node-chat-queued">
+          {queued.map((item, index) => (
+            <div className="queued-message" data-testid="node-chat-queued-item" key={item.seq}>
+              <div className="queued-message-body"><p>{item.text}</p></div>
+              <span className="queued-message-order">{index + 1}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <NodeChatQuestions taskId={taskId} questions={questions} onDone={onDone} />
+    </>
+  );
+}
+
+/**
  * The pause that stops this node's task, said the way the main conversation says
  * it: what happens to the turn in flight, and what happens to what was typed.
  */

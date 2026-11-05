@@ -331,6 +331,25 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		})
 	}
 	page := asMap(ListNodeEntries(kernel.Store, graphID, nodeID, query))
+	// A node conversation without these two reads looks the same whether the node
+	// is waiting for an answer or has nothing to say, and whether the reader's
+	// second message is queued or lost. Both were empty here before: the console
+	// reads this view for every graph node.
+	questions := []any{}
+	for _, row := range kernelRows(kernel.DB, "SELECT id,kind,status,data FROM questions WHERE task_id=? AND node_id=? ORDER BY rowid", graphID, nodeID) {
+		questions = append(questions, map[string]any{
+			"id": kernelString(row["id"]), "kind": kernelString(row["kind"]),
+			"status": kernelString(row["status"]), "data": parseJSON(kernelString(row["data"])),
+		})
+	}
+	queued := []map[string]any{}
+	for _, row := range kernelRows(kernel.DB, "SELECT seq,payload,created_at FROM kernel_queue WHERE task_id=? AND node_id=? AND state='queued' AND kind='chat' ORDER BY seq", graphID, nodeID) {
+		text := ""
+		if payload := asMap(parseJSON(kernelString(row["payload"]))); payload != nil {
+			text = kernelString(payload["text"])
+		}
+		queued = append(queued, map[string]any{"seq": kernelInt(row["seq"]), "text": text, "createdAt": kernelInt(row["created_at"])})
+	}
 	return struct {
 		TaskID           string             `json:"taskId"`
 		NodeID           string             `json:"nodeId"`
@@ -347,6 +366,7 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Operations       []any              `json:"operations"`
 		Invocations      []any              `json:"invocations"`
 		Questions        []any              `json:"questions"`
+		Queued           []map[string]any   `json:"queued"`
 		Evidence         []any              `json:"evidence"`
 		Timing           any                `json:"timing"`
 		Entries          any                `json:"entries"`
@@ -363,7 +383,7 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 			"authorizedBudget": kernel.AuthorizedBudget(graphID, nodeID), "used": used, "budget": budgetValue, "unlimited": unlimited,
 			"reserved": reserved, "modelsUsed": modelsUsed},
 		Session: sessionView, Capabilities: facts, CapabilityDigest: digest, CapabilityUsage: []any{},
-		Operations: operations, Invocations: invocations, Questions: []any{}, Evidence: []any{},
+		Operations: operations, Invocations: invocations, Questions: questions, Queued: queued, Evidence: []any{},
 		Timing: map[string]any{"totalMs": totalMs, "runMs": totalMeasured("runMs"), "waitingMs": totalMeasured("waitingMs"),
 			"pauseMs": kernel.NativePauseMs(graphID, nodeID), "userWaitMs": nil, "inProgress": inProgress},
 		Entries: page["entries"], EntryCount: page["entryCount"], Limit: page["limit"], HasOlder: page["hasOlder"], HasNewer: page["hasNewer"],

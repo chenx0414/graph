@@ -56,6 +56,8 @@ export interface NodeRun {
   instance: { id: string; model: string | null; definitionVersion: string | null; used: number; budget: number | null; unlimited: boolean; modelsUsed: string[] } | null;
   session: { sessionId: string; sessionFile: string | null } | null;
   operations: unknown[]; invocations: unknown[]; questions: unknown[]; evidence: unknown[];
+  /** Messages typed while this node was busy, oldest first. */
+  queued?: { seq: number; text: string; createdAt?: number }[];
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
 }
 

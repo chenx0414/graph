@@ -69,6 +69,15 @@ type NodeRunQuestion struct {
 	Data   Json   `json:"data"`
 }
 
+// NodeRunQueued is one message waiting for this node to become free. Only chat
+// is listed: a delivery or a control row is the runtime handing work around, not
+// something the reader typed and may want to take back or wait out.
+type NodeRunQueued struct {
+	Seq       int64  `json:"seq"`
+	Text      string `json:"text"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
 // NodeRunEvidence is one acceptance item a node proved.
 type NodeRunEvidence struct {
 	AcceptanceID string  `json:"acceptanceId"`
@@ -100,6 +109,7 @@ type NodeRunView struct {
 	Operations       []OperationRun        `json:"operations"`
 	Invocations      []NodeRunInvocation   `json:"invocations"`
 	Questions        []NodeRunQuestion     `json:"questions"`
+	Queued           []NodeRunQueued       `json:"queued"`
 	Evidence         []NodeRunEvidence     `json:"evidence"`
 	Timing           NodeRunTiming         `json:"timing"`
 	Entries          []NodeEntry           `json:"entries"`
