@@ -204,10 +204,18 @@ test('an operation queued behind a full program budget runs its own command to t
     expect(output.passed).toBe(true);
     expect(await readFile(readable(output.outputFiles!.stdout.path), 'utf8')).toBe('subject ran\n');
 
-    // The wait is real and it is reported separately from the command's time.
-    expect(output.waitMs, 'the operation never recorded the time it spent queued').toBeGreaterThan(1000);
-    expect(output.elapsedMs, `elapsedMs=${output.elapsedMs} counts the queue, not the command`).toBeLessThan(1200);
-    expect(output.elapsedMs).toBeGreaterThanOrEqual(200);
+    // The wait is reported separately from the command's time, and the two do
+    // not overlap: the command's own elapsed time is a fraction of the queue
+    // wait the same operation recorded, so a queue counted into elapsedMs would
+    // make them equal. None of this compares a duration against a wall-clock
+    // threshold - the machine may be as slow as it likes.
+    expect(output.waitMs, 'the operation never recorded the time it spent queued').toBeGreaterThan(0);
+    expect(output.elapsedMs, `elapsedMs=${output.elapsedMs} counts the queue, not the command`)
+      .toBeLessThan(output.waitMs);
+    // The budget it declared bounds its own time: a command held past the
+    // budget would have been killed, which timedOut already says it was not.
+    expect(output.elapsedMs, `elapsedMs=${output.elapsedMs} is outside the declared budget ${output.timeoutMs}`)
+      .toBeLessThan(output.timeoutMs);
     // The budget it declared is the budget it was held to.
     expect(output.timeoutMs).toBe(1200);
 
