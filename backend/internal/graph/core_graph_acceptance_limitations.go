@@ -334,7 +334,12 @@ func graphAcceptanceDeliveryMatches(task TaskRow, report GraphAcceptanceReport) 
 	if task.IntegrationBranch == nil || *task.IntegrationBranch == "" {
 		return true
 	}
-	if !graphAcceptanceShaEqual(task.TargetSha, report.Commit) {
+	// The evidence may concern the declared target or the commit the graph's work
+	// actually landed on: a graph that never delivered keeps TargetSha at its
+	// baseline while its checks ran against the integration head (measured
+	// 2026-11-05, baaecc6c: target 0188c29f, integration 006b3721), and demanding
+	// the baseline refused evidence the graph had just produced.
+	if !graphAcceptanceShaEqual(task.TargetSha, report.Commit) && !graphAcceptanceShaEqual(task.IntegrationSha, report.Commit) {
 		return false
 	}
 	// A graph that never delivered has no completion receipt to match, and the
