@@ -1,5 +1,9 @@
 package graph
 
+// staleWorkerMs is how long a dispatch may stay marked active before it is read
+// as an interruption rather than a running worker.
+const staleWorkerMs = 10 * 60 * 1000
+
 // GraphControl drives a graph's execution controls.
 func (service *graphManagementService) GraphControl(input GraphControlInput) any {
 	graph := service.runtime(input.GraphId)
@@ -27,7 +31,7 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if owned != nil {
 			ReconcileOperationResources(service.kernel, operationId)
 		}
-		operation := kernelRow(service.kernel.Db, "SELECT delivery_id,module_id,state,worker_active FROM kernel_module_operations WHERE task_id=? AND id=?", input.GraphId, operationId)
+		operation := kernelRow(service.kernel.Db, "SELECT delivery_id,module_id,state,worker_active,dispatched_at FROM kernel_module_operations WHERE task_id=? AND id=?", input.GraphId, operationId)
 		if operation == nil {
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
 		}
@@ -35,8 +39,18 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if state != "uncertain" && state != "failed" && state != "cancelled" {
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
 		}
+		// A worker that was interrupted leaves worker_active=1 behind, and the guard
+		// that demanded 0 made the worse the interruption the less fixable it was:
+		// an interrupted dispatch could never be cancelled, so the graph could
+		// never be drained or closed (measured 2026-11-05: the same state blocked
+		// three graphs within an hour). Only a stale operation with no provider
+		// call in flight is reclaimed here - the same evidence the question path
+		// uses before it lets a node move on.
 		if kernelInt(operation["worker_active"]) != 0 {
-			Raise("invalid_operation", "Operation still holds execution resources; verify termination before cancelling")
+			if kernelInt(operation["dispatched_at"]) > NowMillis()-staleWorkerMs || service.kernel.HasPendingProviderCall(input.GraphId, kernelString(operation["module_id"])) {
+				Raise("invalid_operation", "Operation still holds execution resources; verify termination before cancelling")
+			}
+			service.kernel.ReleaseModuleOperationWorker(operationId)
 		}
 		if state == "cancelled" {
 			return graph.State()
