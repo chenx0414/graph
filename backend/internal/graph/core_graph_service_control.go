@@ -31,7 +31,12 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if owned != nil {
 			ReconcileOperationResources(service.kernel, operationId)
 		}
-		operation := kernelRow(service.kernel.Db, "SELECT delivery_id,module_id,state,worker_active,dispatched_at FROM kernel_module_operations WHERE task_id=? AND id=?", input.GraphId, operationId)
+		// kernel_module_operations records when a dispatch started as started_at; it
+		// has no dispatched_at column (that one belongs to the master `operations`
+		// table). Asking for the wrong name made this action fail with a SQL error
+		// for every caller, so the stale-worker reclaim it exists to perform could
+		// never run.
+		operation := kernelRow(service.kernel.Db, "SELECT delivery_id,module_id,state,worker_active,COALESCE(started_at,created_at) AS dispatched_at FROM kernel_module_operations WHERE task_id=? AND id=?", input.GraphId, operationId)
 		if operation == nil {
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
 		}
