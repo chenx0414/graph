@@ -223,7 +223,10 @@ func (session *Session) searchHistory(ctx context.Context, args map[string]any) 
 				break
 			}
 		}
-		if len(matches) >= limit || entryId > 0 || page.Next == nil {
+		// An entryId lookup only returns early on a hit, so it keeps walking until
+		// the pages are exhausted or the bound stops it: stopping after the first
+		// page is exactly the window this walk exists to leave behind.
+		if len(matches) >= limit || page.Next == nil {
 			break
 		}
 		if scanned >= scanBudget {
