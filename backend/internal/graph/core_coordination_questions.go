@@ -55,9 +55,22 @@ func (runtime *TaskRuntime) escalateRoutedQuestion(row map[string]any, prompt st
 }
 
 func (runtime *TaskRuntime) receiveRoutedUserAnswer(taskID, questionID string, answer Answer) bool {
-	row := kernelRow(runtime.store.Db, "SELECT id,node_id,data FROM questions WHERE id=? AND task_id=? AND route_stage='user' AND status='open'", questionID, taskID)
+	row := kernelRow(runtime.store.Db, "SELECT id,node_id,kind,data FROM questions WHERE id=? AND task_id=? AND route_stage='user' AND status='open'", questionID, taskID)
 	if row == nil {
 		return false
+	}
+	// A recovery card escalated to the person still offers retry and acknowledge,
+	// and those are settled here: requiring a free-text response made the buttons
+	// the card shows fail with "a response is required".
+	if answer.Type == "retry" || answer.Type == "acknowledge" {
+		if !containsString(questionPolicy(kernelString(row["kind"])).Answers, answer.Type) {
+			Raise("invalid_answer", "Answer type does not match the open question")
+		}
+		runtime.store.ResolveQuestion(questionID, map[string]any{"type": answer.Type})
+		CloseUserWait(runtime.store, taskID, kernelString(row["node_id"]))
+		runtime.store.SetNodePending(taskID, kernelString(row["node_id"]))
+		runtime.store.Event(taskID, "problem.user_answered", map[string]any{"questionId": questionID, "answer": answer.Type})
+		return true
 	}
 	if answer.Type != "respond" || answer.Value == nil || strings.TrimSpace(jsString(answer.Value)) == "" {
 		Raise("invalid_answer", "A response is required")

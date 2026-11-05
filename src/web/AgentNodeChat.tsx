@@ -10,6 +10,9 @@ import { Button, Empty, Icon, Pill, Spinner } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
 
+/** Pages of older node history the chat may fetch on its own; 100 entries each. */
+const AUTO_HISTORY_PAGES = 40;
+
 function mergeEntries(current: Entry[], incoming: Entry[]) {
   const merged = new Map(current.map(entry => [entry.id, entry]));
   for (const entry of incoming) {
@@ -137,14 +140,17 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }
   const hasOlder = Boolean(data && data.entryCount > entries.length && !olderExhausted && (entries[0]?.seq ?? 0) > 1);
 
-  // Collapsed tool batches may make a 200-entry page shorter than the viewport:
-  // there is then no scroll event to request history. Fill that viewport, and continue
-  // loading while a reader remains near the top after prepending a short page.
+  // A node's history opens whole. The reader asked for the earlier records to be
+  // visible, not parked behind a button, so pages load on their own until the run
+  // is complete. The bound only stops one enormous run from paging forever; the
+  // button stays for whatever is left past it.
+  const autoHistoryPages = useRef(0);
   useEffect(() => {
-    const thread = transcriptFollow.threadRef.current;
-    if (!thread || !hasOlder || olderLoading || error) return;
-    if (thread.scrollHeight <= thread.clientHeight + 160 || (thread.scrollTop < 160 && !transcriptFollow.isPinned())) void loadOlder();
-  }, [hasOlder, olderLoading, entries, transcriptFollow.pinned, error]);
+    if (!hasOlder || olderLoading || error) return;
+    if (autoHistoryPages.current >= AUTO_HISTORY_PAGES) return;
+    autoHistoryPages.current += 1;
+    void loadOlder();
+  }, [hasOlder, olderLoading, entries, error]);
 
   useLayoutEffect(() => {
     const anchor = historyAnchor.current;

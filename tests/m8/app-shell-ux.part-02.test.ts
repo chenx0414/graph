@@ -13,8 +13,9 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, expect, test } from 'vitest';
 
 import { build } from 'vite';
+import { launchBrowser } from '../helpers/host-browser.ts';
 
-import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
 
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { cleanup, webDir, temp, git, gitProject, consoleServer, type ScriptedStep, type ScriptedToolCall, type ScriptedMessage, type ScriptedBody, scriptedProvider, libraryPrompt, libraryDisabledTools, workerProposal, createConversation, conversationView, type Daemon, type ConversationView, taskView, catalogView } from "./app-shell-ux.fixture.ts";
@@ -25,9 +26,20 @@ test('agent markdown renders and tool activity appears before the final answer',
   const root = await temp('markdown');
   const server = await consoleServer(root);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  // The composer footer maps the saved thinking level onto the model's own ladder.
+  // Keep that ladder in the fixture, so the assertion reads the contract instead of
+  // whichever models this machine happens to have configured.
+  await page.route('**/api/settings', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      projects: [],
+      models: [{ id: 'local', grade: 'local', reasoning: true, thinkingOptions: [{ level: 'off', label: '关' }, { level: 'minimal', label: '轻' }] }],
+    }),
+  }));
   await page.route('**/api/conversations/synthetic', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -78,17 +90,37 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
   expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
-  // A finished turn folds its thinking and tool calls behind one muted line, so the
-  // answer is what the reader sees.
+  // History opens expanded: a finished turn keeps its thinking and tool rows in
+  // place instead of folding them behind one muted line.
   const folded = page.getByTestId('collapsed-turn');
   await folded.waitFor();
-  expect(await folded.getAttribute('data-open')).toBe('false');
-  expect(await page.getByTestId('tool-activity-group').count()).toBe(0);
+  expect(await folded.getAttribute('data-open')).toBe('true');
+  expect(await page.getByTestId('tool-activity-group').count()).toBe(1);
+  // The turn being open does not open the group inside it: that detail is folded by
+  // policy (2026-11-04 twice: a group that reserved height while folded was as wrong
+  // as a group whose detail could not be reached at all). Folded means no height,
+  // and the rows are still there behind the toggle.
+  const group = page.getByTestId('tool-activity-group').first();
+  await group.scrollIntoViewIfNeeded();
+  expect(await group.getAttribute('data-open')).toBe('false');
+  expect(await group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBe(0);
+  expect(await group.locator('.tool-activity-list li').count()).toBeGreaterThan(0);
+  // One click brings the detail back with real height, so it is folded, not lost.
+  await group.locator('.tool-group-toggle').click();
+  await expect.poll(() => group.getAttribute('data-open')).toBe('true');
+  // The attribute flips at once but the body animates open, so the height is
+  // polled to its settled value instead of read on the frame after the click.
+  await expect.poll(async () => group.locator('.tool-group-content').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+  // The block still folds on demand, so a long history stays readable.
+  await folded.locator('.collapsed-turn-toggle').click();
+  await expect.poll(() => folded.getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
   await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
-  expect(await page.getByTestId('telemetry-thinking').innerText()).toContain('思考 off');
+  // The footer prints the model's own label for the level, so the contract is the
+  // level attribute, not one translated word.
+  expect(await page.getByTestId('telemetry-thinking').getAttribute('data-level')).toBe('off');
 });
 
 
@@ -110,7 +142,7 @@ test('live tool activity groups and streamed markdown follow the transcript tail
     createdAt: index + 1,
     updatedAt: index + 1,
   }));
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.route('**/api/conversations/streaming', route => route.fulfill({
@@ -204,7 +236,7 @@ test('a coarse streamed delta is revealed progressively instead of landing as on
   const root = await temp('coarse-stream');
   const server = await consoleServer(root);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.route('**/api/conversations/coarse-stream', route => route.fulfill({
@@ -289,7 +321,7 @@ test('interrupted retry streams are removed before the durable final answer', as
   const root = await temp('retry-stream');
   const server = await consoleServer(root);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = (await launchBrowser()).browser;
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   const view = {
