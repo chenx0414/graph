@@ -34,9 +34,11 @@ export async function launchShell(cleanup: (() => Promise<void>)[], vendorOrigin
   const app = await _electron.launch({
     executablePath: electronExecutable,
     timeout: 15000,
-    // Chromium's test keychain prevents an OS password dialog in an isolated
-    // HOME. These cases cover windows/processes, not keychain encryption.
-    args: ['--use-mock-keychain', join(process.cwd(), 'desktop/main.mjs')],
+    // Chromium's test keychain and a basic password store: two switches, because
+    // use-mock-keychain alone still lets the cookie store ask the OS keychain for
+    // its key and macOS answers with the "no keychain" dialog (measured
+    // 2026-11-05). These cases cover windows/processes, not keychain encryption.
+    args: ['--use-mock-keychain', '--password-store=basic', join(process.cwd(), 'desktop/main.mjs')],
     env: { ...process.env, ...proxy?.env, HOME: root, GRAPH_APP_USER_DATA: userData, GRAPH_RSI_ROOT: join(root, 'stale'), GRAPH_APP_DEBUG: '1', GRAPH_APP_SMOKE: '', GRAPH_APP_BACKGROUND: process.env.GRAPH_E2E_VISIBLE_WINDOWS === '1' ? '' : '1', ELECTRON_RUN_AS_NODE: '' },
   });
   cleanup.push(() => app.close());

@@ -233,6 +233,14 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 
 // Prompt sends one input and returns the turn it produced.
 func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, error) {
+	return session.PromptContent(ctx, ai.UserText(text))
+}
+
+// PromptContent sends one input that may carry text and images and returns the
+// turn it produced. The content union is the provider-facing shape: a caller
+// with images passes ai.UserContentBlocks, so an image the reader attached
+// travels to the model instead of being dropped on the way in.
+func (session *Session) PromptContent(ctx context.Context, content ai.UserContent) (SessionTurn, error) {
 	session.mutex.Lock()
 	if session.closed {
 		session.mutex.Unlock()
@@ -280,12 +288,12 @@ func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, e
 		submission = admitted
 	} else {
 		requestId := session.admissionId()
-		submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
-			Type:      durable.SubmissionTypeInput,
-			Content:   ai.UserText(text),
-			RequestId: &requestId,
-			WhenBusy:  durable.WhenBusyReject,
-		})
+			submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
+				Type:      durable.SubmissionTypeInput,
+				Content:   content,
+				RequestId: &requestId,
+				WhenBusy:  durable.WhenBusyReject,
+			})
 		if err != nil {
 			return SessionTurn{}, err
 		}

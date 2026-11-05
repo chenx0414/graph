@@ -49,6 +49,15 @@ if (background && process.platform === 'darwin') app.setActivationPolicy('access
 // is the switch that keeps Chromium away from the OS one; it has to be set
 // before the app is ready.
 app.commandLine.appendSwitch('use-mock-keychain');
+// Measured 2026-11-05 (19:34, the dialog photographed again on this machine):
+// use-mock-keychain alone was not enough - the same "no keychain to store 'Graph
+// Key' in" dialog still came back, because the cookie store still asks the OS
+// password store for its key. The automation browser that never shows it runs
+// with both switches, and password-store=basic is the one that keeps the store
+// out of the keychain entirely. The trade-off is stated where it matters: the
+// cookie and localStorage key sit unencrypted in the app's own profile, in
+// exchange for an OS dialog the reader can never dismiss for good.
+app.commandLine.appendSwitch('password-store', 'basic');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

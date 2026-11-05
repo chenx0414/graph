@@ -9,6 +9,7 @@ import (
 
 	"context"
 
+	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
@@ -330,6 +331,24 @@ type pigAgentSession struct {
 	inspect AgentSessionInspect
 }
 
+// pigUserContent is the provider-facing user content of one prompt: the image
+// attachments the turn carried, in front of the text, or plain text when it
+// carried none. The kernel's content union is what makes the image reach the
+// model; without it the attachment was read, counted and then dropped.
+func pigUserContent(text string, images []ImageContent) ai.UserContent {
+	if len(images) == 0 {
+		return ai.UserText(text)
+	}
+	blocks := ai.UserContentBlocks{ai.TextContent{Text: text}}
+	for _, image := range images {
+		if image.Data == "" {
+			continue
+		}
+		blocks = append(blocks, ai.ImageContent{Data: image.Data, MimeType: image.MimeType})
+	}
+	return blocks
+}
+
 // Prompt sends one prompt and returns the turn it produced.
 func (session *pigAgentSession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
 	// The kernel owns the two boundaries of a request: at 70% of the window it
@@ -344,7 +363,7 @@ func (session *pigAgentSession) Prompt(text string, images []ImageContent) (Agen
 	} else if reset {
 		session.emitContextReset(estimated, budget)
 	}
-	turn, err := session.session.Prompt(context.Background(), text)
+	turn, err := session.session.PromptContent(context.Background(), pigUserContent(text, images))
 	if err != nil {
 		return AgentSessionTurn{}, err
 	}
