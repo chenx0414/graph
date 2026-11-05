@@ -10,7 +10,7 @@ import { attachmentImageSource } from './attachments.ts';
 import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
-import { type TranscriptRow } from './transcript-model.ts';
+import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
@@ -156,9 +156,9 @@ function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refres
 
 function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  // Tool calls stay folded away by default, running or finished; the button opens
-  // one group when its detail is needed.
-  const open = manualOpen ?? false;
+  // The default is the transcript's one policy, not this component's choice: a
+  // group starts folded whether it is settled, in flight, or inside an open turn.
+  const open = manualOpen ?? transcriptFoldPolicy.toolGroupExpanded;
   const activeTool = [...row.tools].reverse().find(tool => !tool.done);
   const kind = activeTool ? toolActivity(activeTool.name, activeTool.summary).kind : 'other';
   const orbState: OrbState = kind === 'search' || kind === 'browse' ? 'searching'
@@ -232,7 +232,9 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
  */
 function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const open = manualOpen ?? (!row.collapsed || row.rows.some(child => child.kind === 'tools' && child.tools.some(tool => tool.attachments?.length)));
+  // The turn block is the unit that opens; the groups inside it keep the policy
+  // they have everywhere else, so opening a turn never opens its tool detail.
+  const open = manualOpen ?? (transcriptFoldPolicy.turnExpanded || !row.collapsed);
   return (
     <div className="collapsed-turn" data-testid="collapsed-turn" data-open={open}>
       <button

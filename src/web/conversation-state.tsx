@@ -91,6 +91,10 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
+  // The interrupt a reader asked for. 打断中 stays up while the turn is still
+  // winding down, and 已打断 is what they see once the master stopped: the
+  // request returns long before the turn does.
+  const [interruptPhase, setInterruptPhase] = useState<'idle' | 'interrupting' | 'accepted' | 'interrupted'>('idle');
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
   const { branch, setBranch } = useTargetBranch(settings?.projects ?? null, view?.projectId ?? null);
@@ -109,16 +113,21 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const interruptTurn = useCallback(async () => {
     if (interrupting) return;
     setInterrupting(true);
+    setInterruptPhase('interrupting');
     setActionError('');
     try {
       await api(`/api/conversations/${id}/interrupt`, {
         method: 'POST',
         body: JSON.stringify({ requestId: `interrupt-${crypto.randomUUID()}` }),
       });
+      // The request is accepted, not finished: the turn still has a tool to
+      // kill and a transcript to close.
+      setInterruptPhase('accepted');
       toast('已打断当前模型思考和工具调用。', 'info');
       reload();
       onChanged?.();
     } catch (reason) {
+      setInterruptPhase('idle');
       const message = reason instanceof Error ? reason.message : String(reason);
       setActionError(message);
       toast(message, 'danger');
@@ -126,6 +135,16 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
       setInterrupting(false);
     }
   }, [id, interrupting, onChanged, reload]);
+  useEffect(() => {
+    setInterruptPhase(current => {
+      if (busy) {
+        // A turn that is running after an interrupt ended is a new turn: the
+        // reader sent something and 已打断 belongs to what is over.
+        return current === 'interrupted' ? 'idle' : current;
+      }
+      return current === 'interrupting' || current === 'accepted' ? 'interrupted' : current;
+    });
+  }, [busy]);
   useEffect(() => {
     if (!busy) return;
     const onKey = (event: KeyboardEvent) => {
@@ -158,6 +177,8 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     setPauseAction(null);
     setPausedOverride(null);
     setDismissedQueue([]);
+    // 打断中/已打断 belong to the conversation that was interrupted.
+    setInterruptPhase('idle');
   }, [id]);
   useEffect(() => {
     if (view && pausedOverride !== null && view.paused === pausedOverride) setPausedOverride(null);
@@ -256,6 +277,11 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const { act, changePaused, send, steerQueued, submitEnter, submitPrimary, cancelQueued, selectMasterModel, compactConversation } = conversationActions({ setActionError, reload, onChanged, pauseAction, setPauseAction, id, setPausedOverride, text, agentContext, attachments, setText, setAttachments, setSending, transcriptFollow, steering, interrupting, queuedMessages, setSteering, sending, busy, promptSuggestion, primaryState, hasComposerInput, setDismissedQueue });
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
+  // What the toolbar says about an interrupt: 打断中 until the turn is gone,
+  // then 已打断. Nothing at all when the reader never asked for one.
+  const interruptStatus: string | null = interruptPhase === 'interrupted'
+    ? '已打断'
+    : interruptPhase === 'idle' ? null : '打断中';
   async function loadOlder() {
     if (olderPending.current) return;
     const request = transcript.historyRequest;
@@ -342,5 +368,5 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   // The initialization panels (empty task list, project binding) are declared by
   // the policy module; the view only renders what the policy places in the drawer.
   const deferredInitPanelIds = drawerInitPanelIds();
-  return { fallback: null, sending, steering, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
+  return { fallback: null, sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
 }

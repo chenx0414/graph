@@ -1,21 +1,21 @@
 import { drawerWindowBounds } from './drawer-window.ts';
 import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
-import { currentAppPaths, findPackagedDaemon, readJson, secretsFromKeychain } from './runtime-files.mjs';
+import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runtime-files.mjs';
 /**
  * Owns desktop windows, the Go daemon and the keychain bridge.
  * Secrets pass through the daemon environment and stay out of config files.
  */
 import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, safeStorage, shell, screen } from 'electron';
-import { spawn } from 'node:child_process';
-import { stopDaemonProcess } from './daemon-process.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  restoreConsoleRoute, consoleReloadAction, applySecretRequest, daemonArgs, ensureConfigFile, loadRawSecretEntries,
-  parseBannerAddress, resourceDirectory, rsiRestartDecision, saveSecrets, tailText,
-  taskNotifications, trayIconPath, trayMenuItems,
+  restoreConsoleRoute, consoleReloadAction, applySecretRequest, ensureConfigFile, loadRawSecretEntries,
+  resourceDirectory, rsiRestartDecision, saveSecrets, taskNotifications, trayIconPath, trayMenuItems,
 } from './lib.ts';
+import { crashLabel, conversationIdFromRoute, parseConversationArg } from './crash.ts';
+import { beginRun } from './run-marker.ts';
+import { createDaemonRuntime } from './daemon-runtime.mjs';
 
 app.setName('Graph');
 if (process.env.GRAPH_APP_USER_DATA) app.setPath('userData', resolve(process.env.GRAPH_APP_USER_DATA));
@@ -33,19 +33,29 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   let window = null;
   let drawerBase = null;
-  let child = null;
   let quitting = false;
   let restarting = false;
   let readyUrl = null;
   let pendingReady = null;
-  const routePath = join(app.getPath('userData'), 'last-conversation-route.json');
+  const userData = app.getPath('userData');
+  const routePath = join(userData, 'last-conversation-route.json');
   let lastRoute = null;
   try { lastRoute = JSON.parse(readFileSync(routePath, 'utf8')); } catch { /* first launch */ }
+  const bootedAt = Date.now();
+  // A keeper that restarted us names the conversation to come back to; it wins
+  // over the stored page because the keeper read it from the run that died.
+  const restartConversation = parseConversationArg(process.argv);
+  if (restartConversation) lastRoute = `#/conversations/${restartConversation}`;
   const consoleUrl = url => restoreConsoleRoute(url, typeof lastRoute === 'string' ? lastRoute : null);
+  // Before anything else: claim this run and read what the previous one left.
+  const run = beginRun({
+    userData, pid: process.pid, bootedAt,
+    conversationId: restartConversation ?? conversationIdFromRoute(typeof lastRoute === 'string' ? lastRoute : null),
+    electron: process.versions.electron, appVersion: app.getVersion(),
+  });
+  let lastCrash = run.lastCrash;
   let secrets = {};
   let secretsPath = null;
-  let stdout = '';
-  let stderr = '';
   let notificationState = { primed: false, questions: {}, status: {} };
   let taskPoll = null;
   let secretPoll = null;
@@ -60,6 +70,7 @@ if (!app.requestSingleInstanceLock()) {
       onRoute: route => {
         lastRoute = route;
         try { writeFileSync(routePath, JSON.stringify(route)); } catch { /* optional UI state */ }
+        run.rememberConversation(conversationIdFromRoute(route));
       },
       onClosed: () => { window = null; drawerBase = null; },
     });
@@ -108,71 +119,46 @@ if (!app.requestSingleInstanceLock()) {
     }
   }
 
+  const daemon = createDaemonRuntime({
+    paths: currentPaths,
+    bin: paths => findPackagedDaemon(paths.sourceRoot, devRoot),
+    secrets: () => secrets,
+    // Loading the keychain and seeding the config happens on every (re)start,
+    // before the daemon is spawned, exactly as it did when this loop lived here.
+    prepare: paths => {
+      secrets = secretsFromKeychain(paths);
+      secretsPath = paths.secretsPath;
+      return ensureConfigFile(paths.configPath, existsSync, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
+    },
+    verbose,
+    log: line => console.log(line),
+    isQuitting: () => quitting,
+    isRestarting: () => restarting,
+    rejectPending: error => {
+      if (!pendingReady) return false;
+      const rejectReady = pendingReady.reject;
+      pendingReady = null;
+      rejectReady(error);
+      return true;
+    },
+    onReady: url => daemonReady(url),
+    onGone: (title, message) => { reportDaemonError(title, message, background); app.quit(); },
+  });
+
+  function daemonReady(url) {
+    readyUrl = url;
+    if (pendingReady) {
+      const ready = pendingReady;
+      pendingReady = null;
+      ready.resolve(url);
+      return;
+    }
+    if (window) showConsole(url);
+    else openWindow(url);
+  }
+
   function startDaemon() {
-    const paths = currentPaths();
-    mkdirSync(paths.stateDir, { recursive: true });
-    mkdirSync(dirname(paths.configPath), { recursive: true });
-    const hasConfig = ensureConfigFile(paths.configPath, existsSync, (path, data) => writeFileSync(path, data, { mode: 0o600 }));
-    const config = hasConfig ? readJson(paths.configPath) : undefined;
-    secrets = secretsFromKeychain(paths);
-    secretsPath = paths.secretsPath;
-    // The APP always starts with execute intent in dynamic mode; saved secrets
-    // and config activate the bindings on the same daemon without a restart.
-    const args = daemonArgs({ paths, port: 0, mode: 'execute', hasConfig, dynamic: true });
-    // Sandboxed helpers cannot start the Electron binary (no Helper apps), so
-    // the packaged app ships a real node and points every helper at it.
-    const bundledNode = join(paths.root, 'runtime/node');
-    const daemonBin = findPackagedDaemon(paths.sourceRoot, devRoot);
-    const startedChild = spawn(daemonBin, [...args, '--application-root', paths.sourceRoot], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(existsSync(bundledNode) ? { GRAPH_APP_NODE: bundledNode } : {}), ...secrets },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    child = startedChild;
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', chunk => {
-      if (child !== startedChild) return;
-      stdout += chunk;
-      if (verbose) process.stdout.write(chunk);
-      if (!readyUrl) {
-        const url = parseBannerAddress(stdout);
-        if (url) {
-          readyUrl = url;
-          if (pendingReady) {
-            const ready = pendingReady;
-            pendingReady = null;
-            ready.resolve(url);
-          } else if (window) {
-            showConsole(url);
-          } else {
-            openWindow(url);
-          }
-        }
-      }
-    });
-    child.stderr.on('data', chunk => {
-      if (child !== startedChild) return;
-      stderr += chunk;
-      if (verbose) process.stderr.write(chunk);
-    });
-    child.on('exit', (code, signal) => {
-      if (child !== startedChild) return;
-      if (quitting || restarting) {
-        if (pendingReady) {
-          const rejectReady = pendingReady.reject;
-          pendingReady = null;
-          rejectReady(new Error(`daemon stopped during restart (exit ${code ?? signal})`));
-        }
-        return;
-      }
-      if (!readyUrl) {
-        reportDaemonError('Graph daemon failed to start', tailText(stderr || stdout, 12) || `exit ${code ?? signal}`, background);
-        app.quit();
-        return;
-      }
-      reportDaemonError('Graph daemon stopped', `exit ${code ?? signal}\n${tailText(stderr, 8)}`, background);
-      app.quit();
-    });
+    daemon.start();
   }
 
   function showConsole(url) {
@@ -193,8 +179,6 @@ if (!app.requestSingleInstanceLock()) {
     return new Promise((resolveReady, rejectReady) => {
       void stopDaemon().then(() => {
         readyUrl = null;
-        stdout = '';
-        stderr = '';
         const timer = setTimeout(() => {
           if (pendingReady) {
             pendingReady = null;
@@ -400,10 +384,20 @@ if (!app.requestSingleInstanceLock()) {
 
   function refreshTray() {
     if (!tray) return;
-    tray.setContextMenu(Menu.buildFromTemplate(trayMenuItems(openQuestionTotal).map(item => {
+    tray.setContextMenu(Menu.buildFromTemplate(trayMenuItems(openQuestionTotal, crashLabel(lastCrash)).map(item => {
       if (item.separator) return { type: 'separator' };
       if (item.action === 'open') {
         return { label: item.label, click: () => { if (window) { window.show(); window.focus(); } else if (readyUrl) openWindow(readyUrl); } };
+      }
+      if (item.action === 'open-crash') {
+        return {
+          label: item.label,
+          click: () => {
+            const target = lastCrash?.ips ?? run.recordPath;
+            if (verbose) console.log(`[app] opening the record of the last crash: ${target}`);
+            if (!background) void shell.openPath(target);
+          },
+        };
       }
       if (item.action === 'quit') return { label: item.label, click: () => app.quit() };
       return { label: item.label, enabled: item.enabled ?? true };
@@ -422,7 +416,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function stopDaemon() {
-    return stopDaemonProcess(child);
+    return daemon.stop();
   }
 
   app.on('second-instance', () => {
@@ -444,10 +438,26 @@ if (!app.requestSingleInstanceLock()) {
     // The daemon keeps running when the window closes; reopen via the dock.
   });
 
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, () => {
+      // A stop signal is a normal exit: the app stops its daemon and removes
+      // its run marker, so the next launch owes nobody an apology and the
+      // keeper sees exit code 0 and stays down.
+      if (quitting) return;
+      if (!app.isReady()) {
+        run.removeMarker();
+        app.exit(0);
+        return;
+      }
+      app.quit();
+    });
+  }
+
   app.on('before-quit', event => {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
+    run.removeMarker();
     clearInterval(taskPoll);
     clearInterval(rsiPoll);
     clearInterval(secretPoll);
@@ -458,6 +468,12 @@ if (!app.requestSingleInstanceLock()) {
     if (background) app.dock?.hide();
     registerBridge();
     createTray();
+    if (lastCrash) {
+      console.warn(`[app] ${crashLabel(lastCrash)} — ${lastCrash.reason}`);
+      if (!background && Notification.isSupported()) {
+        new Notification({ title: crashLabel(lastCrash) ?? 'Graph', body: lastCrash.reason }).show();
+      }
+    }
     startDaemon();
     taskPoll = setInterval(pollTasks, 4_000);
     rsiPoll = setInterval(pollRsi, 5_000);

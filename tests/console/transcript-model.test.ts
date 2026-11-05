@@ -256,12 +256,12 @@ test('a finished turn folds its thinking and tool calls above the answer', () =>
     busy: false,
   });
 
-  // The turn folds away: the answer is what the reader sees, and opening the line
-  // brings back the very rows the turn showed while it was running.
+  // The turn stays in place: history opens expanded, and the block still folds on
+  // demand through its own toggle.
   expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
   const activity = rows[1];
-  if (activity?.kind !== 'activity') throw new Error('expected a folded turn');
-  expect(activity.collapsed).toBe(true);
+  if (activity?.kind !== 'activity') throw new Error('expected an activity block');
+  expect(activity.collapsed).toBe(false);
   expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
   expect(activity.rows.map(child => child.kind)).toEqual(['narration', 'tools', 'narration', 'tools']);
   expect(activity.rows[1]).toMatchObject({ kind: 'tools', active: false });
@@ -340,10 +340,10 @@ test('a steered user message stays where it interrupted the turn', () => {
   const steered = rows[2];
   if (steered?.kind !== 'message') throw new Error('expected the steered message row');
   expect(steered.message.text).toBe('插队：改成 B');
-  expect(rows[3]).toMatchObject({ kind: 'activity', collapsed: true });
+  expect(rows[3]).toMatchObject({ kind: 'activity', collapsed: false });
 });
 
-test('older activity without a loaded answer folds when a later turn has finished', () => {
+test('older activity without a loaded answer stays expanded when a later turn has finished', () => {
   const rows = buildTranscriptRows({
     messages: [
       message({ id: 'old', seq: 1, role: 'activity', kind: 'activity', text: '旧回合的思考', operationId: 'old-op' }),
@@ -352,7 +352,7 @@ test('older activity without a loaded answer folds when a later turn has finishe
     ], liveTools: [], streaming: [], busy: false,
   });
   expect(rows.map(row => row.kind)).toEqual(['activity', 'activity', 'assistant']);
-  expect(rows[0]).toMatchObject({ kind: 'activity', collapsed: true });
+  expect(rows[0]).toMatchObject({ kind: 'activity', collapsed: false });
 });
 
 test('a steered message interleaves with the running turn by ordinal', () => {
