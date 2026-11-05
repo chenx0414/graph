@@ -212,6 +212,10 @@ type OperationMessage struct {
 	RequirementVersion int               `json:"requirementVersion"`
 	Attachments        []AttachmentInput `json:"attachments,omitempty"`
 	Command            *string           `json:"command,omitempty"`
+	// FreshSession marks a turn that must judge with its own context instead of
+	// inheriting the conversation's: an acceptance turn reads the objective and
+	// the round's report, not the transcript that produced them.
+	FreshSession bool `json:"freshSession,omitempty"`
 }
 
 type OperationWake struct {

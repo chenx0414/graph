@@ -35,6 +35,18 @@ function clearTurn(turn: number): ResponsePlan[] {
   return [{ text: `第 ${turn} 轮没有报告阻碍`, usage: { prompt_tokens: 40, completion_tokens: 10 } }];
 }
 
+/** The review that follows every finished working round. It never passes here,
+ * and its reason moves each round: three identical review reasons would pause
+ * the goal for its own reason before the blocker rule could be exercised. */
+function review(round: number): ResponsePlan {
+  return { text: `VERDICT: fail\n- [fail] 第 ${round} 轮还差一点：继续推进。`, usage: { prompt_tokens: 10, completion_tokens: 5 } };
+}
+
+/** Rounds in order, each followed by its own review: the loop is work, review. */
+function rounds(...turns: ResponsePlan[][]): ResponsePlan[] {
+  return turns.flatMap((turn, index) => [...turn, review(index + 1)]);
+}
+
 test('the same blocker pauses the goal only after three consecutive rounds of it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-goal-blocked-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -42,14 +54,14 @@ test('the same blocker pauses the goal only after three consecutive rounds of it
   await mkdir(project, { recursive: true });
   await mkdir(join(root, 'web'), { recursive: true });
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
-  const provider = await openaiServer([
-    ...blockedTurn(1),
-    ...blockedTurn(2),
-    ...clearTurn(3),
-    ...blockedTurn(4),
-    ...blockedTurn(5),
-    ...blockedTurn(6),
-  ]);
+  const provider = await openaiServer(rounds(
+    blockedTurn(1),
+    blockedTurn(2),
+    clearTurn(3),
+    blockedTurn(4),
+    blockedTurn(5),
+    blockedTurn(6),
+  ));
   cleanup.push(() => provider.close());
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
@@ -78,12 +90,17 @@ test('the same blocker pauses the goal only after three consecutive rounds of it
 
   await expect.poll(() => goal(conversationId), { timeout: 120_000, interval: 250 }).toMatchObject({ status: 'paused' });
   const transcript = await messages(conversationId);
-  const goalLines = transcript.filter(message => message.kind === 'goal');
+  // Every working round now also announces its review; those lines are about
+  // the review, not about blockers, so the blocker bookkeeping ignores them.
+  const goalLines = transcript.filter(message => message.kind === 'goal' && !(message.text ?? '').includes('进入独立验收'));
 
-  // The report that followed the quiet round started the count over: two lines
-  // say "第 1 轮", the report in round 1 and the report in round 4.
-  expect(goalLines.filter(message => message.text?.includes('第 1 轮')).length, JSON.stringify(goalLines.map(message => message.text))).toBe(2);
-  expect(goalLines.some(message => message.text?.includes('第 2 轮'))).toBe(true);
+  // Only the blocker reports carry round numbers that belong to the goal loop;
+  // a review's line numbers its own reason. The report that followed the quiet
+  // round started the count over: two blocker lines say "第 1 轮", the report in
+  // round 1 and the report in round 4.
+  const blockedLines = goalLines.filter(message => (message.text ?? '').includes('模型报告受阻'));
+  expect(blockedLines.filter(message => message.text?.includes('第 1 轮')).length, JSON.stringify(blockedLines.map(message => message.text))).toBe(2);
+  expect(blockedLines.some(message => message.text?.includes('第 2 轮'))).toBe(true);
   // Round 3 reported nothing, so rounds 2 and 4 never formed a run of three.
   const stopped = goalLines.filter(message => message.text?.includes('卡住 3 轮'));
   expect(stopped.length, JSON.stringify(goalLines.map(message => message.text))).toBe(1);
@@ -92,6 +109,11 @@ test('the same blocker pauses the goal only after three consecutive rounds of it
 
   // Six rounds: the five that report the blocker ask twice (the tool call, then
   // the answer) and the quiet round asks once. Nothing ran after the pause.
-  expect(provider.requests.length).toBe(11);
-  expect(transcript.filter(message => message.role === 'assistant').length).toBe(6);
+  // Six working rounds (two plans each: the goal call, then the answer), five
+  // reviews - the round that reports the third identical blocker pauses the goal
+  // before its own review runs. The loop is work, review, work, review...
+  expect(provider.requests.length, 'work and review turns, in order').toBe(16);
+  // Six working answers and the five reviews that followed them; the paused
+  // round ends the chain before its review.
+  expect(transcript.filter(message => message.role === 'assistant').length).toBe(11);
 }, 240_000);

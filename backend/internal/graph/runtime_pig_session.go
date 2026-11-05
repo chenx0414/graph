@@ -490,10 +490,20 @@ func (session *pigAgentSession) Close() error {
 
 // pigSessionIdentity is the identity one session is known by.
 func pigSessionIdentity(request AgentSessionRequest) string {
+	identity := ""
 	if request.Binding.InstanceId != "" {
-		return request.Binding.InstanceId
+		identity = request.Binding.InstanceId
+	} else {
+		identity = fmt.Sprintf("execution-%s", request.ExecutionId)
 	}
-	return fmt.Sprintf("execution-%s", request.ExecutionId)
+	// The identity is what the kernel keys its durable conversation by, so a turn
+	// that must not inherit the transcript needs an identity of its own. A review
+	// shares one identity across rounds on purpose: it remembers its own earlier
+	// verdicts, and none of the work that produced them.
+	if request.FreshSession {
+		return identity + ":review"
+	}
+	return identity
 }
 
 // pigSessionJson reads one session's own view as JSON.

@@ -129,6 +129,14 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	if turn.AgentContext != nil && turn.AgentContext.ReviewPolicy != nil {
 		request.FreshSession = true
 	}
+	// A goal acceptance turn carries its own reason to start clean: it judges a
+	// round it did not work on.
+	for _, message := range operation.Context.Messages {
+		if message.FreshSession {
+			request.FreshSession = true
+			break
+		}
+	}
 	if options.RecoverySnapshot != nil {
 		record := options.RecoverySnapshot.Record
 		request.SystemPrompt = record.Agent.Instructions

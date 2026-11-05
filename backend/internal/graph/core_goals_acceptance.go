@@ -95,6 +95,42 @@ func goalSourceKind(data string) string {
 	return kind
 }
 
+// BeginRoundAcceptance puts an active goal into acceptance after a working
+// turn, with no completion claim from the worker.
+//
+// Measured 2026-11-05: a person who set a goal watched the worker decide for
+// itself when to stop and then hand the judgement back to them. A goal is work
+// with a reviewer attached: every settled working turn is read by a turn that
+// runs in its own context and answers pass or fail.
+func BeginRoundAcceptance(store *TaskStore, conversationID, answer string, now int64) bool {
+	goal := store.Goal(conversationID)
+	if goal == nil || goal.Status != GoalActive {
+		return false
+	}
+	if len(PendingMessages(store, conversationID, 1)) > 0 {
+		return false
+	}
+	conversation := ConversationRowOf(store, conversationID)
+	if kernelRow(store.Db, "SELECT id FROM questions WHERE task_id=? AND status='open' LIMIT 1", conversation.AnchorTaskId) != nil {
+		return false
+	}
+	goal.CheckNote = ""
+	goal.Status = GoalVerifying
+	updated := store.PutGoal(*goal, now)
+	AppendMessage(store, MessageInput{
+		ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
+		Text:  "本轮工作结束，进入独立验收：" + updated.Objective,
+		State: MessageStateDone,
+		Data:  map[string]any{"source": map[string]any{"kind": "goal_round"}, "action": "acceptance_requested"},
+	})
+	store.Event(goalTaskID(store, conversationID), "goal.acceptance_requested", map[string]any{
+		"conversationId": conversationID, "objective": updated.Objective,
+		"claim":      "（本轮没有声明完成：每一轮都由验收方判定）",
+		"usedTokens": updated.UsedTokens, "sameModel": true, "trigger": "round",
+	})
+	return QueueGoalAcceptance(store, conversationID, answer, now)
+}
+
 // QueueGoalAcceptance starts the independent acceptance turn for a claim that
 // just settled. It respects the same stops a continuation respects: a person's
 // waiting message or an open question is what happens next, not a review.
@@ -113,7 +149,7 @@ func QueueGoalAcceptance(store *TaskStore, conversationID, answer string, now in
 	AppendMessage(store, MessageInput{
 		ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat",
 		Text: goalAcceptancePrompt(goal, goal.CheckNote, answer), State: MessageStatePending,
-		Data: map[string]any{"source": map[string]any{"kind": "goal_acceptance", "objective": goal.Objective}},
+		Data: map[string]any{"source": map[string]any{"kind": "goal_acceptance", "objective": goal.Objective, "freshSession": true}},
 	})
 	return true
 }
@@ -128,6 +164,9 @@ func SettleGoalTurn(store *TaskStore, conversationID string, answer string, now 
 	}
 	switch goal.Status {
 	case GoalActive:
+		if BeginRoundAcceptance(store, conversationID, answer, now) {
+			return
+		}
 		ContinueGoal(store, conversationID, now, "")
 	case GoalVerifying:
 		if goalAcceptanceQueued(store, conversationID) {
@@ -147,8 +186,15 @@ func AdjudicateGoalAcceptance(store *TaskStore, conversationID, answer string, n
 	verdict, reasons := parseGoalVerdict(answer)
 	taskID := goalTaskID(store, conversationID)
 	if verdict == "" {
-		// Not a pass. An acceptance that could not be read is a failed round:
-		// nothing completes and nothing advances.
+		// Never a pass. A completion claim nobody could judge leaves the goal
+		// where it was; a round that was never claimed as finished must not stop
+		// the work, so a reviewer answering in prose goes back into the loop.
+		if strings.TrimSpace(goal.CheckNote) == "" {
+			goal.Status = GoalActive
+			store.PutGoal(*goal, now)
+			ContinueGoal(store, conversationID, now, "上一轮验收没有给出可解析的结论，继续推进；如果目标已经达成，请给出 VERDICT: pass 与逐条理由。")
+			return
+		}
 		FailGoalAcceptance(store, conversationID, "验收回合没有给出可解析的 pass/fail 结论（原文："+utf16Slice(strings.TrimSpace(answer), 200)+"）", now)
 		return
 	}

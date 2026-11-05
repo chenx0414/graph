@@ -68,6 +68,11 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 						if command, ok := data["command"].(string); ok && command != "" {
 							entry.Command = &command
 						}
+						if source, ok := data["source"].(map[string]any); ok {
+							if fresh, ok := source["freshSession"].(bool); ok && fresh {
+								entry.FreshSession = true
+							}
+						}
 					}
 				}
 				messages = append(messages, entry)

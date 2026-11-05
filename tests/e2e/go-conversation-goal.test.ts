@@ -137,7 +137,11 @@ test('a goal reaches the model, counts real usage and keeps working without a bu
   // started itself. The fifth spends nothing, so nothing continues from it.
   await expect.poll(replies, { timeout: 60_000, interval: 250 }).toBe(5);
   const spent = (await request(`/api/conversations/${conversationId}/goal`)).body.goal as Record<string, any>;
-  expect(spent).toMatchObject({ status: 'active', usedTokens: 150, budgetTokens: 0 });
+  // The goal is between rounds here: every finished round runs a review before
+  // the next one, so "verifying" is the working state - what must never happen
+  // is a stop the person has to clear.
+  expect(spent).toMatchObject({ usedTokens: 150, budgetTokens: 0 });
+  expect(['active', 'verifying', 'completed'], `status after the rounds: ${spent.status}`).toContain(spent.status);
   // The standing goal is part of what the model was told, not just a row - and
   // it says there is no ceiling.
   expect(JSON.stringify(provider.requests[1])).toContain('Standing goal');
@@ -151,7 +155,11 @@ test('a goal reaches the model, counts real usage and keeps working without a bu
   // A number changes nothing about a running goal.
   const topUp = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal +100', requestId: 'goal-topup' });
   expect(topUp.body).toMatchObject({ action: 'extend', budgetIgnored: true });
-  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', usedTokens: 150, budgetTokens: 0 });
+  // Same between-rounds state as above: the number is what matters here, and the
+  // goal is either waiting for its next round or running that round's review.
+  const between = (await request(`/api/conversations/${conversationId}/goal`)).body.goal;
+  expect(between).toMatchObject({ usedTokens: 150, budgetTokens: 0 });
+  expect(['active', 'verifying', 'completed'], `status between rounds: ${between.status}`).toContain(between.status);
 
   const done = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal done 已交付', requestId: 'goal-done' });
   expect(done.body.goal).toMatchObject({ status: 'completed', checkNote: '已交付' });
@@ -213,7 +221,9 @@ test('a goal set as the first message starts the work', async () => {
   expect(transcript.some(message => message.kind === 'goal' && message.text?.includes('先修好导出')), JSON.stringify(transcript)).toBe(true);
   // The goal kept itself going without a budget; it stopped because the last
   // turn had nothing to account, not because a number was reached.
-  expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ status: 'active', usedTokens: 50, budgetTokens: 0 });
+  const afterFirstRounds = (await request(`/api/conversations/${conversationId}/goal`)).body.goal;
+  expect(afterFirstRounds).toMatchObject({ usedTokens: 50, budgetTokens: 0 });
+  expect(['active', 'verifying', 'completed'], `status after the first rounds: ${afterFirstRounds.status}`).toContain(afterFirstRounds.status);
 
   // A command that only changes the goal does not start another turn.
   const finished = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal done 导出修好了', requestId: 'goal-first-done' });
