@@ -319,8 +319,9 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	relevant := append([]string{}, uniquePaths...)
 	relevant = append(relevant, ownedOrder...)
 	relevant = append(relevant, changedPaths...)
-	needsBuild := changedPaths == nil || rsiBuildRelevant(relevant)
-	raw := service.validate(RsiValidateInput{Root: work, Checks: checks, Activate: activate, NeedsBuild: needsBuild})
+	needsAppBuild := changedPaths == nil || rsiNeedsAppBuild(relevant)
+	needsWebBuild := changedPaths == nil || rsiNeedsWebBuild(relevant)
+	raw := service.validate(RsiValidateInput{Root: work, Checks: checks, Activate: activate, NeedsAppBuild: needsAppBuild, NeedsWebBuild: needsWebBuild})
 	outputPath := service.rsiWriteReportFile(id, raw)
 	validation := []RsiValidationResult{}
 	for _, item := range raw {

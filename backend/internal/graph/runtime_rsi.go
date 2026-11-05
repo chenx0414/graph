@@ -244,7 +244,8 @@ type RsiValidateInput struct {
 	Root       string
 	Checks     []RsiCommand
 	Activate   bool
-	NeedsBuild bool
+	NeedsAppBuild bool
+	NeedsWebBuild bool
 }
 
 // RsiValidateFunc runs the gate for one change set.

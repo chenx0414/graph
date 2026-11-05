@@ -136,13 +136,31 @@ func rsiSummarizeValidation(result RsiValidationResult) RsiValidationResult {
 	return result
 }
 
-// rsiBuildRelevant reports whether any changed path makes `node --run app:build` meaningful: the web
-// bundle the window serves and the desktop package. A runtime-only change is fully covered by
-// `node --run check`.
-func rsiBuildRelevant(paths []string) bool {
+// rsiNeedsWebBuild reports whether the page the window serves has to be rebuilt.
+//
+// A console change is fully served by `dist/web` in this checkout, so the page is
+// rebuilt and nothing else is touched.
+func rsiNeedsWebBuild(paths []string) bool {
 	for _, path := range paths {
-		if strings.HasPrefix(path, "src/web/") || strings.HasPrefix(path, "desktop/") ||
-			path == "package.json" || path == "index.html" || strings.HasPrefix(path, "vite.config") {
+		if strings.HasPrefix(path, "src/web/") || path == "index.html" || strings.HasPrefix(path, "vite.config") {
+			return true
+		}
+	}
+	return false
+}
+
+// rsiNeedsAppBuild reports whether the packaged macOS bundle has to be rebuilt.
+//
+// Only the Electron side and the packaging itself live in that bundle: the window
+// loads the console from the daemon, which serves `dist/web` out of this checkout.
+// Rebuilding the bundle for a console change was measured on 2026-11-05 to rewrite
+// /Applications/Graph.app on every self-improvement, which changes its ad-hoc code
+// signature and makes macOS lose the keychain grant the app's encrypted secrets
+// depend on - the "找不到用于储存 Graph Key 的钥匙串" alert, once per change.
+func rsiNeedsAppBuild(paths []string) bool {
+	for _, path := range paths {
+		if strings.HasPrefix(path, "desktop/") || path == "package.json" ||
+			path == "scripts/package-app.mjs" || strings.HasPrefix(path, "build/") {
 			return true
 		}
 	}
@@ -226,11 +244,17 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 	if check.Status == "failed" || !input.Activate {
 		return results
 	}
-	if !input.NeedsBuild {
-		return results
+	// The package is rebuilt only when the packaged side moved; a console change
+	// rebuilds the page the daemon serves and leaves the app bundle and its code
+	// signature alone.
+	if input.NeedsAppBuild {
+		build := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}, RSI_BUILD_TIMEOUT_MS)
+		return append(results, build)
 	}
-	build := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}, RSI_BUILD_TIMEOUT_MS)
-	results = append(results, build)
+	if input.NeedsWebBuild {
+		web := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "build:web"}}, RSI_BUILD_TIMEOUT_MS)
+		return append(results, web)
+	}
 	return results
 }
 

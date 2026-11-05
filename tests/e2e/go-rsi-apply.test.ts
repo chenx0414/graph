@@ -190,6 +190,52 @@ function activationScript(): ToolCall[][] {
   }]];
 }
 
+test('a console-only change builds the served page and never the app bundle', async () => {
+  // Rebuilding the bundle rewrites /Applications/Graph.app, which changes its ad-hoc
+  // code signature and costs the app its keychain grant - measured 2026-11-05 as the
+  // "找不到用于储存 Graph Key 的钥匙串" alert on every self-improvement. A console change
+  // is served from this checkout, so it must ask for the page and nothing else.
+  const f = await fixture(() => [[{
+    id: 'console',
+    name: 'apply_rsi_change',
+    arguments: JSON.stringify({
+      title: 'A console change', problem: 'The page has to move', activate: true,
+      // The fixture's own gate reads replace.txt, so the change carries both files:
+      // the console one is what the build decision is about.
+      changes: [
+        { path: 'replace.txt', action: 'replace', edits: [{ oldText: 'original', newText: 'corrected' }] },
+        { path: 'src/web/probe.ts', action: 'write', content: 'export const probe = 1;\n' },
+      ],
+      checks: [check],
+    }),
+  }]]);
+
+  const started = await f.request('/api/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-console-only' }),
+  });
+  expect(started.status, JSON.stringify(started.body)).toBe(200);
+  const { conversationId } = started.body as { conversationId: string };
+
+  // The fixture checkout has no vite project, so the page build itself fails; what
+  // this case pins is the decision the daemon made, which the receipt records
+  // either way.
+  const commands = await (async () => {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      const view = await f.request(`/api/conversations/${conversationId}`);
+      const messages = (view.body as { messages?: { kind: string; data?: { validation?: { command: string }[] } }[] }).messages ?? [];
+      const receipt = messages.find(message => message.kind === 'rsi');
+      const list = receipt?.data?.validation;
+      if (list && list.length) return list.map(item => item.command);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return [];
+  })();
+
+  expect(commands.some(command => /build:web/.test(command)), `no page build was asked for: ${commands.join(' | ')}`).toBe(true);
+  expect(commands.some(command => /app:build/.test(command)), `the app bundle was rebuilt: ${commands.join(' | ')}`).toBe(false);
+}, 240_000);
+
 test('a whole-file write that would gut a large file is refused and nothing is written', async () => {
   const f = await fixture(() => [[{
     id: 'gut',
