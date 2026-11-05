@@ -161,6 +161,7 @@ var controlledTransportSentinelCodes = []struct {
 	{io.EOF, "EOF"},
 	{context.Canceled, "CANCELED"},
 	{context.DeadlineExceeded, "DEADLINE_EXCEEDED"},
+	{providerStreamStalled, "DEADLINE_EXCEEDED"},
 }
 
 // controlledTransportErrorCodes names a transport failure without carrying its

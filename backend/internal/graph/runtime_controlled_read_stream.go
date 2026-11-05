@@ -11,6 +11,16 @@ import (
 	"time"
 )
 
+// providerStreamStalled is why a provider that accepted the request and then
+// stopped talking fails the turn.
+//
+// The bound is a deadline, so the failure is registered with DEADLINE_EXCEEDED:
+// a silent provider is not a connection that broke, and sending the same
+// request again would only wait out the same bound again while the turn, the
+// credential slot and the node stay held. The attempt that gets a fresh
+// connection is the one that died before any byte arrived, never this one.
+var providerStreamStalled = errors.New("The provider stopped sending before the answer was complete")
+
 // readEvents reads the provider event stream.
 //
 // A stream that ends without its terminator was cut: the provider closed the
@@ -68,7 +78,7 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 		if err != nil {
 			readFailure = err
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				failure = errors.New("The provider stopped sending before the answer was complete")
+				failure = providerStreamStalled
 				bodyOpen = true
 			} else if !errors.Is(err, io.EOF) {
 				failure = err
