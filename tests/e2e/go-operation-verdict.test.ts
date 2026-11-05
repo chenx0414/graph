@@ -128,6 +128,39 @@ async function eventOf(events: () => Promise<EventRow[]>, match: (event: EventRo
   throw new Error(`expected ${expected} within 30s; saw ${JSON.stringify(seen.slice(-6))}`);
 }
 
+/**
+ * The record one operation published, read from the output it settled with.
+ *
+ * The file's directory is the broker's own layout - one directory per attempt -
+ * and an operator reading the result should never have to know it. The published
+ * output carries the path, so this asks the record rather than guessing where an
+ * attempt put it.
+ */
+function publishedRecord(root: string, operationId: string): string {
+  const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true });
+  let stored = '';
+  try {
+    stored = ((db.prepare('SELECT result FROM kernel_module_operations WHERE id=?').get(operationId) as { result?: string } | undefined)?.result) ?? '';
+  } finally {
+    db.close();
+  }
+  // A large result travels by digest, so the body is fetched the way the daemon fetches it.
+  let body = stored;
+  const prefix = 'graph-content:sha256:';
+  if (stored.startsWith(prefix)) {
+    const content = new DatabaseSync(join(root, 'state', 'tasks.sqlite'), { readOnly: true });
+    try {
+      body = ((content.prepare('SELECT body FROM kernel_content WHERE digest=?').get(stored.slice(prefix.length)) as { body?: string } | undefined)?.body) ?? '';
+    } finally {
+      content.close();
+    }
+  }
+  const settled = body ? JSON.parse(body) as { outputs?: Record<string, { record?: string }> } : {};
+  const record = Object.values(settled.outputs ?? {}).map(output => output?.record).find(found => typeof found === 'string');
+  if (!record) throw new Error(`operation ${operationId} published no record path: ${stored || 'no stored result'}`);
+  return record;
+}
+
 /** A project with a Git baseline and the scripts a module runs. */
 async function project(root: string, scripts: Record<string, string>): Promise<string> {
   const tree = join(root, 'project');
@@ -234,7 +267,7 @@ test('a module that cannot run yet says so instead of failing, and then settles 
     expect(rows<{ n: number }>(root, 'SELECT COUNT(*) AS n FROM kernel_deliveries WHERE task_id=? AND to_endpoint=?', graphIdOf(), 'check.job'))
       .toEqual([{ n: 1 }]);
     // The module really ran its command, in the attempt that settled.
-    const record = JSON.parse(await readFile(join(root, 'state', 'module-operations', operations()[0]!.id, 'result.json'), 'utf8'));
+    const record = JSON.parse(await readFile(publishedRecord(root, operations()[0]!.id), 'utf8'));
     expect(record).toMatchObject({ operationId: operations()[0]!.id, code: 0, stdout: 'module check ran\n' });
   } finally {
     release();
@@ -287,7 +320,7 @@ test('a command killed by its own timeout is recorded as unjudged, not as a fail
         ? '' : `operations=${JSON.stringify(current)}`;
     }, 120_000);
     const operation = operations()[0]!;
-    const record = JSON.parse(await readFile(join(root, 'state', 'module-operations', operation.id, 'result.json'), 'utf8'));
+    const record = JSON.parse(await readFile(publishedRecord(root, operation.id), 'utf8'));
     expect(record.code).toBe(null);
     expect(record.stderr).toContain('it exceeded the 2000ms timeout');
 
