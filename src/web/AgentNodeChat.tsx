@@ -5,6 +5,7 @@ import { api } from './api.ts';
 import { NODE_LABEL } from './labels.ts';
 import { ErrorBox, useTaskStream, type StreamEvent } from './shared.tsx';
 import type { Entry, NodeRun } from './NodeDetail.tsx';
+import { NodeChatPaused, NodeChatQuestions } from './NodeChatAlerts.tsx';
 import { TranscriptRowView } from './TranscriptRows.tsx';
 import { Button, Empty, Icon, Pill, Spinner } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
@@ -328,6 +329,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     return (
       <>
       <div className="conversation-thread-shell" data-testid="graph-agent-chat" data-page="true" aria-label={`${agentName} 节点对话`}>
+        {data?.phase === 'paused' && <NodeChatPaused />}
         <div
           className="conversation-thread"
           data-testid="node-message-list"
@@ -348,6 +350,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
           </button>
         )}
       </div>
+      <NodeChatQuestions taskId={taskId ?? ''} questions={data?.questions ?? []} onDone={refresh} />
       {composer}
       </>
     );
@@ -380,6 +383,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
           )}
         </header>
 
+        {data?.phase === 'paused' && <NodeChatPaused />}
         <div
           className="conversation-thread agent-chat-thread"
           ref={transcriptFollow.threadRef}
@@ -392,6 +396,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
           </div>
         </div>
 
+        <NodeChatQuestions taskId={taskId ?? ''} questions={data?.questions ?? []} onDone={refresh} />
         {composer}
       </section>
   );
