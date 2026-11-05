@@ -108,3 +108,33 @@ func gitSubdir(repo, root string) string {
 	}
 	return filepath.ToSlash(rel)
 }
+
+// SyncIntegrationSha re-reads the integration worktree's HEAD and records it as
+// the task's integration commit.
+//
+// The delivery path refreshes that field when it runs (`Restore`), but a graph
+// whose work landed while that path was not reached kept a stale value, and its
+// own acceptance then read a passing check as evidence about another commit
+// (measured 2026-11-05, 288f801c: field 9fb2ba8a, branch head b46b309b). The
+// head is read from Git, never supplied by the caller.
+func SyncIntegrationSha(kernel *KernelStore, taskId string) any {
+	store := kernel.Store
+	row, ok := graphDBRow(store.Db, "SELECT path FROM worktrees WHERE instance_id=?", "integration:"+taskId)
+	if !ok {
+		Raise("invalid_state", "The graph has no integration worktree to read a commit from; deliver through the integration branch first")
+	}
+	head := RevParse(graphDBString(row, "path"), "HEAD")
+	if head == nil {
+		Raise("invalid_state", "The integration worktree has no readable HEAD")
+	}
+	task := store.Task(taskId)
+	before := ""
+	if task.IntegrationSha != nil {
+		before = *task.IntegrationSha
+	}
+	if before != *head {
+		store.SetTaskIntegrationSha(taskId, *head)
+	}
+	kernel.Store.Event(taskId, "graph.integration.synced", map[string]any{"before": before, "after": *head})
+	return map[string]any{"integrationSha": *head, "changed": before != *head, "before": before}
+}

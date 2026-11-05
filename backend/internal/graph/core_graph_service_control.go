@@ -63,6 +63,13 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		return ReconcileKernelUsage(service.kernel, input.GraphId, *input.CallId, *input.Usage)
 	case "retry_preparation":
 		return service.retryGraphPreparation(input.GraphId, input.Proof)
+	case "sync_integration":
+		// The integration commit is bookkeeping the delivery path refreshes when it
+		// runs; a graph whose work landed while that path was not reached kept a
+		// stale value and its own acceptance read the passing check as evidence
+		// about another commit (measured 2026-11-05, 288f801c: field 9fb2ba8a,
+		// branch head b46b309b). This re-reads the head instead of trusting it.
+		return SyncIntegrationSha(service.kernel, input.GraphId)
 	case "complete":
 		return graph.Complete()
 	case "withdraw_complete":
