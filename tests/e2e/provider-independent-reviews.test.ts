@@ -11,26 +11,28 @@ import {
 } from './provider-independent-reviews.fixture.ts';
 
 /**
- * Two independent providers, each running for real - and a review that survives
- * its preferred provider breaking the connection.
+ * An independent reviewer that runs for real - and a review that survives its
+ * preferred provider breaking the connection.
  *
- * Grok and ChatGPT are configured as their own model entries and each answers a
- * completion through the daemon's own provider path. The graph's review node
- * prefers ChatGPT and names Grok as its transport fallback, so when the Codex
- * endpoint breaks the connection before answering, the same review turn
- * continues on Grok: the report still reaches the graph, the two model ids are
- * still different, and the failure is kept verbatim in the graph's own record
- * (`graph.provider.fallback` with primaryModel, error, fallbackModel,
- * sameModel) instead of being swallowed.
+ * The live probe only calls a provider this product supports and the current
+ * plan covers: Grok. The ChatGPT platform is concluded (unsupported), so the
+ * product asserts that instead of spending its quota - the catalog names the
+ * reason and the platform that replaced it, and this file checks that reading
+ * rather than dialling a platform the product itself says it cannot serve.
+ *
+ * The graph's review node still prefers the delivered ChatGPT entry and names
+ * Grok as its transport fallback, so when that endpoint breaks the connection
+ * before answering, the same review turn continues on Grok: the report still
+ * reaches the graph, the two model ids are still different, and the failure is
+ * kept verbatim in the graph's own record (`graph.provider.fallback` with
+ * primaryModel, error, fallbackModel, sameModel) instead of being swallowed.
  *
  * The transport failure is made deterministic: the entry the graph uses keeps
  * the delivered id, provider, api and modelId but points at a controlled
  * endpoint that closes the connection, so this proves the fallback on every run
- * rather than only when the real backend happens to break. The delivered entry's
- * real Codex endpoint answers a real completion in the probe above, which is
- * what proves the ChatGPT transport itself.
+ * rather than only when the real backend happens to break.
  */
-test('Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider', async () => {
+test('the review node runs on an independent provider, the concluded ChatGPT platform is reported instead of called, and a broken transport falls back to Grok', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-independent-'));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
@@ -128,9 +130,6 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
         // controlled endpoint that closes the connection, so the transport
         // failure the fallback answers happens on every run.
         { ...entries.chatgpt, baseUrl: closing.baseUrl },
-        // The same delivered settings on the real Codex endpoint: the entry the
-        // probe below proves a real completion with.
-        { ...entries.chatgpt, id: 'chatgpt-live:gpt-6.1-sol', provider: 'chatgpt-live', fallbackModelId: undefined },
       ] },
     }));
     daemon = await launchCli(root, {
@@ -150,7 +149,22 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
     });
     // Each entry really completes: a conversation turn the provider answers.
     const replies: Record<string, string> = {};
-    const probes: [string, string][] = [['grok:grok-4.5', 'grok-ok'], ['chatgpt-live:gpt-6.1-sol', 'chatgpt-ok']];
+    // The concluded ChatGPT platform is read from the catalog, never called:
+    // the product says it cannot serve it, so a live probe would contradict the
+    // product and spend a plan this delivery does not use.
+    const providers = await request('/api/providers');
+    expect(providers.status, JSON.stringify(providers.body)).toBe(200);
+    const platforms = ((providers.body as { platforms?: { id?: string; unsupported?: boolean; unsupportedReason?: string }[] }).platforms) ?? [];
+    const concluded = platforms.find(platform => platform.id === 'chatgpt');
+    expect(concluded?.unsupported, `the catalog still offers chatgpt as usable: ${JSON.stringify(concluded)}`).toBe(true);
+    expect(String(concluded?.unsupportedReason), 'the concluded platform must carry the reason and the replacement')
+      .toMatch(/grok/i);
+    // The delivered entry still names the transport that took over, which is
+    // what the failing ChatGPT leg below falls back to.
+    expect(String(entries.chatgpt.fallbackModelId ?? ''), 'the delivered chatgpt entry must still name its fallback')
+      .toMatch(/grok/);
+
+    const probes: [string, string][] = [['grok:grok-4.5', 'grok-ok']];
     for (const [model, marker] of probes) {
       const created = await request('/api/conversations', {
         method: 'POST',
@@ -182,7 +196,7 @@ test('Grok and ChatGPT are independent model entries, each completes for real, a
       expect(text, `the ${model} completion really answered: ${text}`).toContain(marker);
     }
 
-    // The graph: a local implementer and a real ChatGPT reviewer.
+    // The graph: a local implementer and a reviewer on the independent platform.
     const started = await request('/api/conversations', {
       method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Run the independent review.', requestId: 'independent-begin' }),
     });
