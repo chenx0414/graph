@@ -70,7 +70,10 @@ function flag(name, fallback = undefined) {
   return value && !value.startsWith('--') ? value : true;
 }
 
-const outDir = resolve(String(flag('out', join(repo, 'deliverables/e2e-evidence/fold-policy'))));
+// Evidence goes outside the checkout by default: the gate runs against a clean
+// commit, and a measurement that dirties the tree it measured cannot vouch for
+// that commit. --out still points it anywhere, including the repository.
+const outDir = resolve(String(flag('out', process.env.GRAPH_FOLD_OUT || join(tmpdir(), 'graph-fold-policy'))));
 const webDir = resolve(String(flag('web-dir', join(repo, 'dist/web'))));
 const cdpEndpoint = process.env.GRAPH_FOLD_CDP || (typeof flag('cdp') === 'string' ? flag('cdp') : undefined);
 const executable = typeof flag('executable') === 'string' ? flag('executable') : detectBrowserExecutable();
