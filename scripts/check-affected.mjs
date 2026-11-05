@@ -1,14 +1,22 @@
 #!/usr/bin/env node
-// The blocking gate runs the suite tier a change can actually affect.
+// The blocking gate never runs the whole suite.
 //
-// vitest's own --changed follows import edges, and the e2e tests drive a real
-// daemon process instead of importing the Go backend, so a backend change selects
-// nothing there. This decides by area instead, and says which area it decided:
-//   - web:   src/web, src/core, desktop or tests/m8 changed -> the browser tier runs
-//   - wide:  scripts, package.json, vitest config, tests, presets or docs changed
-//            -> everything runs, because the gate itself or a shared fixture moved
-//   - core:  otherwise the backend tiers run and the browser tier is skipped
-// GRAPH_CHECK_FULL=1 forces everything; GRAPH_CHECK_BASE pins the base revision.
+// Measured 2026-11-05: the full suite is 309-345s and the rest of the gate is
+// about ten seconds warm (backend 1s, typecheck 0-1s, lint 1s, harness gate 7s,
+// ownership/tokens/baseline/evidence ~1s), so a commit waited five minutes for a
+// decision that a bounded run answers in seconds. Everything the blocking run
+// leaves out is proved after the reload by the async full run, which wakes main
+// with the failure instead of holding the commit.
+//
+// What the blocking run does cover, in order of preference:
+//   - the leaf tests the change itself touched (tests/<layer>/<file>.test.ts);
+//   - the in-process layers that need no daemon or window (console, app, m7, m8)
+//     whenever src/web, src/core or desktop moved;
+//   - the pure layers only, for anything else.
+// A change to shared test infrastructure (helpers, fixtures, env-layers,
+// quarantine) deliberately does NOT pull the suite in: that is exactly the case
+// the async full run exists for.
+// GRAPH_CHECK_FULL=1 forces everything, for CI; GRAPH_CHECK_BASE pins the base.
 import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
@@ -43,34 +51,42 @@ function changedPaths(base) {
 }
 
 const WEB = ['src/web/', 'src/core/', 'desktop/'];
-const WIDE = ['scripts/', 'tests/', 'presets/', 'docs/', 'package.json', 'vitest.config.ts', 'tsconfig'];
+// Layers that run in-process: no daemon, no window, no vendor. Seconds, not minutes.
+const IN_PROCESS = ['tests/console', 'tests/app', 'tests/m7', 'tests/m8'];
+const LEAF = /^tests\/[^/]+\/[^/]+\.test\.ts$/;
 
 const base = resolveBase();
 const changed = changedPaths(base);
 const forced = process.env.GRAPH_CHECK_FULL === '1';
-const wide = forced || !base || !changed.length || changed.some(path => WIDE.some(prefix => path.startsWith(prefix)));
-const web = forced || wide || changed.some(path => WEB.some(prefix => path.startsWith(prefix)));
+const leafTests = changed.filter(path => LEAF.test(path));
+const sharedTests = changed.filter(path => path.startsWith('tests/') && !LEAF.test(path));
+const web = changed.some(path => WEB.some(prefix => path.startsWith(prefix)));
+// A change that names no path at all (a detached checkout, an empty diff) runs
+// the in-process layers: bounded, and still every layer that can answer offline.
+const selection = forced
+  ? { label: 'forced full (CI)', files: [] }
+  : leafTests.length
+    ? { label: `${leafTests.length} changed leaf test(s)`, files: leafTests }
+    : { label: web ? 'in-process layers' : 'pure layers', files: web ? IN_PROCESS : ['tests/console', 'tests/app', 'tests/m7'] };
 
 console.log(`check:affected: base ${base ?? '(none)'}, ${changed.length} changed path(s)`);
 for (const path of changed.slice(0, 20)) console.log(`  - ${path}`);
 if (changed.length > 20) console.log(`  … ${changed.length - 20} more`);
-console.log(`check:affected: tier ${wide ? 'wide (everything)' : web ? 'web + core' : 'core only'}${forced ? ' (forced full)' : ''}`);
+console.log(`check:affected: blocking run covers ${selection.label}: ${selection.files.length ? selection.files.join(' ') : 'everything'}`);
+if (sharedTests.length) console.log(`check:affected: shared test infrastructure changed (${sharedTests.join(' ')}); the async full run after the reload is what proves it`);
+console.log('check:affected: the full suite never blocks a commit; it runs after the reload and wakes main if it fails');
 
 if (process.env.GRAPH_CHECK_PLAN_ONLY === '1') {
   // Operators and the agent read the decision without paying for the run.
   console.log('check:affected: plan only, no test was run');
   process.exit(0);
 }
-const args = ['scripts/check-tests.mjs'];
-if (!wide) {
-  // The browser tier is the slow one and only a web change can move it. The
-  // quarantine decision lives in check:tests, so both tiers excuse the same
-  // files instead of one of them blocking on a quarantined flake.
-  args.push('--exclude=**/tests/m8/**');
-}
+// The quarantine decision lives in check:tests, so the bounded run and the async
+// full run excuse the same files instead of one of them blocking on a flake.
+const args = ['scripts/check-tests.mjs', ...selection.files];
 const run = spawnSync(process.execPath, args, { cwd: root, stdio: 'inherit' });
 if (run.status !== 0) {
-  console.error('check:affected: the affected tier failed; the full suite is the async confirmation, not a substitute');
+  console.error('check:affected: the blocking run failed; the async full run is the confirmation, not a substitute');
   process.exit(run.status ?? 1);
 }
-console.log(`check:affected: ${wide ? 'full' : web ? 'web + core' : 'core'} tier passed`);
+console.log(`check:affected: ${selection.label} passed`);

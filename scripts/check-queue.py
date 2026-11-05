@@ -127,11 +127,16 @@ def main():
     if command[:1] == ["--"]:
         command = command[1:]
     if not command:
-        # The fast gate has two halves, and only one of them needs the machine-wide
-        # slot. Static checks write inside this worktree alone, so two sessions can
-        # run them at the same time; the affected tests share daemons and scratch
-        # directories, so they still queue. Serializing the static half made every
-        # activation wait for whoever else was checking, for no shared resource.
+        # The blocking gate takes no machine-wide slot at all.
+        #
+        # Measured 2026-11-05: a commit waited 236s and counting for
+        # "[check queue] Another worktree is checking" while the async full suite
+        # ran in a worktree of its own. That slot protects daemons and scratch
+        # directories shared by full runs; the blocking gate is now bounded to a
+        # handful of files, and the worktree lock below already keeps two gates out
+        # of the same checkout. So it runs beside the full suite instead of behind
+        # it, and the suite it used to wait for is the one that no longer decides
+        # whether a commit lands.
         static = ("check:backend", "typecheck", "lint", "check:ownership", "check:tokens:changed", "check:harness")
         tests = ("check:affected", "check:evidence")
         with protect_worktree(common):
@@ -139,7 +144,7 @@ def main():
                 code = run(["node", "--run", step])
                 if code:
                     return code
-            return run_queued(common, ["/bin/sh", "-c", " && ".join(f"node --run {step}" for step in tests)], False)
+            return run(["/bin/sh", "-c", " && ".join(f"node --run {step}" for step in tests)])
     with protect_worktree(common):
         return run_queued(common, command, continuation)
 
