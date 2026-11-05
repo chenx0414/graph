@@ -20,6 +20,12 @@ test('xAI device-code login shows the real code, stores the token, refreshes it 
   let pending = 2;
   const grants: string[] = [];
   const authorizations: string[] = [];
+  // The vendor's answer is data, asserted in the test body where it can be
+  // awaited. An assertion inside this handler runs detached from the test: it
+  // reaches vitest as an unhandled rejection after the case already passed, and a
+  // straggling refresh from a closing app then fails the whole gate. Measured
+  // 2026-11-05: 'expected b5CHE7VK-… to be refresh-1' arrived this way.
+  const refreshes: { clientId: string | null; refreshToken: string | null }[] = [];
   const vendor = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -41,8 +47,7 @@ test('xAI device-code login shows the real code, stores the token, refreshes it 
       const grant = form.get('grant_type') ?? '';
       grants.push(grant);
       if (grant === 'refresh_token') {
-        expect(form.get('client_id')).toBe('b1a00492-073a-47ea-816f-4c329264a828');
-        expect(form.get('refresh_token')).toBe('refresh-1');
+        refreshes.push({ clientId: form.get('client_id'), refreshToken: form.get('refresh_token') });
         return reply({ access_token: 'access-refreshed', refresh_token: 'refresh-2', expires_in: 3600 });
       }
       if (pending > 0) {
@@ -74,6 +79,20 @@ test('xAI device-code login shows the real code, stores the token, refreshes it 
     headers: { origin: first.url }, data: { requestId: 'xai-probe', id: 'grok' },
   })).json();
 
+  // Start from a clean slate: this case is about the login it performs itself, so
+  // whatever credential the app was already holding is disconnected first. Without
+  // this the first refresh the vendor sees can belong to somebody else's account -
+  // measured 2026-11-05, a real Grok CLI token reached this stub and the case died
+  // with 'expected b5CHE7VK-... to be refresh-1'.
+  const providers = await (await page.request.get(`${first.url}/api/providers`)).json();
+  const grok = providers.platforms.find((platform: { id: string; credentialConfigured?: boolean; credentialRef?: string }) => platform.id === 'grok');
+  if (grok?.credentialConfigured) {
+    await page.request.post(`${first.url}/api/providers/disconnect`, {
+      headers: { origin: first.url }, data: { credentialRef: grok.credentialRef ?? 'grok' },
+    });
+    await expect.poll(async () => (await (await page.request.get(`${first.url}/api/providers`)).json())
+      .platforms.find((platform: { id: string }) => platform.id === 'grok')?.credentialConfigured, { timeout: 20000 }).toBe(false);
+  }
   await page.goto(`${first.url}/#/setup`);
   await page.getByTestId('setup-provider-grok').click();
   const panel = page.getByTestId('provider-login');
@@ -95,6 +114,10 @@ test('xAI device-code login shows the real code, stores the token, refreshes it 
   // The two-second access token is already inside the refresh window, so the
   // daemon has to refresh it and hand the probe the new bearer token.
   await expect.poll(() => grants.filter(grant => grant === 'refresh_token').length, { timeout: 20000 }).toBeGreaterThan(0);
+  // The first refresh is this login's own: the client it was authorised for and
+  // the token the vendor handed out a moment ago - never somebody else's account.
+  expect(refreshes[0]?.clientId).toBe('b1a00492-073a-47ea-816f-4c329264a828');
+  expect(refreshes[0]?.refreshToken).toBe('refresh-1');
   await expect.poll(async () => { await probe(); return authorizations.at(-1) ?? ''; }, { timeout: 20000 }).toBe('Bearer access-refreshed');
   const probed = await probe();
   expect(probed.credentialConfigured).toBe(true);

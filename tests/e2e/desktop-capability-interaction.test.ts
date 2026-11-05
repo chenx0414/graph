@@ -63,6 +63,16 @@ if (!accessibilityGrantedHere()) {
     + '(Graph’s check runner or a terminal).');
 }
 
+/** The macOS grant of one privacy category, read from the tool itself. */
+function permissionState(name: 'accessibility' | 'automation' | 'screen_recording'): string {
+  try {
+    const data = envelopeOf(desktopStdout(['permissions'])).data as Record<string, { state?: string }> | undefined;
+    return data?.[name]?.state ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** The one step only the user can take, printed with every refusal. */
 const USER_STEP = '[desktop] the one step only the user can take: run `agent-desktop permissions --guide` from the app '
   + 'that launches agent-desktop (Graph.app, Terminal, iTerm or Codex) and switch on Accessibility; add Screen '
@@ -120,7 +130,7 @@ test('a desktop observation reports the permission truth before any question of 
   console.log(USER_STEP);
 }, 180_000);
 
-test.skipIf(!accessibilityGrantedHere())('a real Finder interaction acts on a ref_id, sees the tree change, and survives a stale ref', () => {
+test.skipIf(!accessibilityGrantedHere())('a real Finder interaction acts on a ref_id, sees the tree change, and survives a stale ref', t => {
   // The loop the host ran for real, in the order it has to happen: observe, act
   // on a ref_id, observe again because the UI changed, and read the stale-ref
   // refusal as a signal to snapshot again rather than to guess.
@@ -141,6 +151,22 @@ test.skipIf(!accessibilityGrantedHere())('a real Finder interaction acts on a re
   }
 
   const refs = collectRefIds(first.data);
+  if (!refs.length) {
+    // An app macOS has not authorised for Automation answers an empty tree rather
+    // than a refusal: the grant belongs to the app that launches agent-desktop, not
+    // to the tool, and only the user can give it. Measured 2026-11-05 in Graph's own
+    // check runner: accessibility=granted, automation=unknown, and `snapshot -i`
+    // answered ok with no elements. A tree that stays empty while Automation is
+    // granted is still a failure below.
+    const automation = permissionState('automation');
+    if (automation !== 'granted') {
+      console.log(`[desktop] the Finder loop is skipped here on purpose: macOS Automation is "${automation}" for the app `
+        + 'that launches agent-desktop, so Finder answers an empty tree instead of refusing. Grant it once in System '
+        + 'Settings > Privacy & Security > Automation, then run this file again.');
+      t.skip();
+      return;
+    }
+  }
   expect(refs.length, 'the Finder snapshot carries no ref_id nodes').toBeGreaterThan(10);
   const target = refs[0]!;
   expect(envelopeOf(desktopCall(['click', target], environment).stdout).ok, 'the click on a ref_id failed').toBe(true);
