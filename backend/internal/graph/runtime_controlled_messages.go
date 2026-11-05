@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"context"
 )
@@ -82,6 +83,12 @@ func (stream *controlledStream) Result() map[string]any {
 }
 
 // run sends the request and reads the provider stream.
+//
+// One send is tried again on a fresh connection when it died before any answer
+// byte arrived: nothing of it reached the transcript, so nothing that already
+// happened runs twice. The retries belong to this one send, inside the same
+// durable submission - the operation, the user's message and the tool results
+// already in the transcript stay what they were.
 func (stream *controlledStream) run() {
 	record := stream.model
 	if text, ok := record["api"].(string); ok && text != "" && text != string(stream.api) {
@@ -93,9 +100,6 @@ func (stream *controlledStream) run() {
 		stream.fail(err)
 		return
 	}
-	ctx, cancelRequest := context.WithCancel(request.Context())
-	stream.cancelRequest = cancelRequest
-	request = request.WithContext(ctx)
 	reservation := float64(0)
 	if window, ok := controlledSafeCount(record["contextWindow"]); ok {
 		reservation = float64(window)
@@ -103,13 +107,50 @@ func (stream *controlledStream) run() {
 	if tokens, ok := controlledSafeCount(record["maxTokens"]); ok {
 		reservation += float64(tokens)
 	}
+	for attempt := 1; ; attempt++ {
+		// A request body is a stream: the first attempt drains it, so a replay
+		// needs the same bytes again.
+		if attempt > 1 {
+			body, bodyErr := request.GetBody()
+			if bodyErr != nil {
+				stream.fail(bodyErr)
+				return
+			}
+			request.Body = body
+			// The connection that died is not the one to dial again.
+			request.Close = true
+		}
+		failure := stream.attempt(request, reservation, TRANSPORT_RETRIES-(attempt-1))
+		if failure == nil {
+			return
+		}
+		// What a person reading the timeline must see before the replay: how
+		// long the transport waits, and why the attempt produced nothing.
+		delay := transportRetryBackoffMs(attempt)
+		stream.observeReconnect(attempt, delay, failure)
+		stream.discardAttempt()
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
+}
+
+// attempt sends the request once and reads what the provider answered.
+//
+// It returns the failure the same send must be tried again after, or nil when
+// the attempt settled the stream - with an answer, or with the failure the turn
+// ends on. remaining is the retry budget the attempt may still spend: an
+// attempt that will be replayed settles as producing no usage instead of
+// leaving an unknown call behind that refuses the next send.
+func (stream *controlledStream) attempt(request *http.Request, reservation float64, remaining int) error {
+	ctx, cancelRequest := context.WithCancel(request.Context())
+	stream.cancelRequest = cancelRequest
+	request = request.WithContext(ctx)
 	transport, err := ControlledGatedProviderFetch(stream.broker, request, GatedProviderFetchOptions{
 		Reservation:     reservation,
 		RequestIDHeader: controlledRequestIDHeader(stream.candidate),
 		// A send with a fallback may be taken over: an attempt that produced no
 		// answer must not leave an unknown call behind that refuses the fallback.
 		ReclaimUnanswered: stream.usageOptions.HasFallback,
-		OnTransport:     stream.usageOptions.OnTransport,
+		OnTransport:       stream.usageOptions.OnTransport,
 		FetchImpl: func(request *http.Request) (*http.Response, error) {
 			if stream.resolveKey != nil {
 				headers := ModelRequestHeaders(stream.candidate)
@@ -153,7 +194,7 @@ func (stream *controlledStream) run() {
 	})
 	if err != nil {
 		stream.failTransport(err)
-		return
+		return nil
 	}
 	if transport.StatusCode < 200 || transport.StatusCode >= 300 {
 		transport.Body.Close()
@@ -166,9 +207,9 @@ func (stream *controlledStream) run() {
 			stream.broker.Settle(stream.invocation, nil)
 		}
 		stream.failTransport(fmt.Errorf("Provider answered HTTP %d", transport.StatusCode))
-		return
+		return nil
 	}
-	stream.readEvents(transport)
+	return stream.readEvents(transport, remaining)
 }
 
 // acquireSlot takes one host-wide concurrency slot for this send.

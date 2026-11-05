@@ -35,6 +35,13 @@ func RetryDecision(input struct {
 	if strings.TrimSpace(input.Output) == "" {
 		return RetryDecisionRecord{Retry: false, Attempt: attempt, Reason: "节点失败但没有输出，无法判断是否为环境问题，交 main 诊断。", Exhausted: false}
 	}
+	// A failure the transport already sent again is settled: the same request
+	// has been tried to its bound, so a turn retry would run the tools of the
+	// turn a second time and file a second answer for one message.
+	if retries, retried := TransportRetries(input.Output); retried {
+		return RetryDecisionRecord{Retry: false, Attempt: attempt, Exhausted: false,
+			Reason: fmt.Sprintf("连接在收到任何回复前中断或损坏；传输层已有限次重试（自动重试 %d 次仍失败），交 main 处理。", retries)}
+	}
 	if IsDisconnectBeforeReply(input.Output) {
 		// The transport already retried the dropped connection to its bound. A
 		// turn retry would send the whole request again on top of that.
