@@ -1,5 +1,5 @@
 import { QuestionReply } from './Questions.tsx';
-import { Icon } from './ui.tsx';
+import { Button, Icon, Pill } from './ui.tsx';
 
 /** One question a node is waiting on, as the run view reports it. */
 export type NodeQuestion = {
@@ -90,5 +90,73 @@ export function NodeChatPaused() {
         <span><strong>这个节点所在的任务已暂停。</strong> 正在跑的回合会在当前工具调用收尾后停下，不再发起新的模型请求；继续后会接着跑被停下的那个回合。</span>
       </div>
     </section>
+  );
+}
+
+/**
+ * What the composer says under itself: what a stop is doing right now, how the
+ * next message will be taken, and the two controls a running agent node offers.
+ * The conversation window says the same things in the same place.
+ */
+export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSteer, onSteer, onStop }: {
+  stopPhase: 'idle' | 'stopping' | 'stopped';
+  busy: boolean;
+  agentNode: boolean;
+  sending: boolean;
+  canSteer: boolean;
+  onSteer: () => void;
+  onStop: () => void;
+}) {
+  return (
+    <div className="composer-footer">
+      {stopPhase !== 'idle' && (
+        <span className="composer-note" data-testid="node-stop-status" data-phase={stopPhase === 'stopped' ? 'stopped' : 'stopping'}>
+          {stopPhase === 'stopped' ? '已停止。' : '停止中…'}
+        </span>
+      )}
+      <span className="muted">{busy ? 'Enter 排队发送 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span>
+      {busy && agentNode && <span className="row">
+        <Button size="sm" disabled={sending || !canSteer} onClick={onSteer}>立即引导</Button>
+        <Button size="sm" disabled={sending} onClick={onStop}>停止节点</Button>
+      </span>}
+    </div>
+  );
+}
+
+/**
+ * The window's own header: which node this is, what it is doing, and the close
+ * control. It lives beside the rest of the node chat's chrome so the window file
+ * stays about the transcript.
+ */
+export function NodeChatHeader({ agentName, nodeId, status, statusLabel, model, connected, taskId, onClose }: {
+  agentName: string;
+  nodeId: string;
+  status: string;
+  statusLabel: string | null;
+  model: string | null;
+  connected: boolean;
+  taskId: string | null | undefined;
+  onClose?: (() => void) | undefined;
+}) {
+  return (
+    <header className="agent-chat-header">
+      <div className="agent-chat-heading">
+        <div className="drawer-eyebrow">Agent 节点对话</div>
+        <h3>{agentName} <span className="mono muted">{nodeId}</span></h3>
+        <div className="agent-chat-meta">
+          <Pill tone={status === 'succeeded' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'accent' : 'neutral'}>
+            {statusLabel ?? status}
+          </Pill>
+          {model && <span className="mono">{model}</span>}
+          {taskId && <span>{connected ? '实时' : '重连中…'}</span>}
+          <span>节点对话</span>
+        </div>
+      </div>
+      {onClose && (
+        <button type="button" className="icon-button" onClick={onClose} title="关闭节点对话" aria-label="关闭节点对话">
+          <Icon name="close" size={16} />
+        </button>
+      )}
+    </header>
   );
 }

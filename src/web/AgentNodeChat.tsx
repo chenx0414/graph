@@ -5,7 +5,7 @@ import { api } from './api.ts';
 import { NODE_LABEL } from './labels.ts';
 import { ErrorBox, useTaskStream, type StreamEvent } from './shared.tsx';
 import type { Entry, NodeRun } from './NodeDetail.tsx';
-import { NodeChatPaused, NodeChatPending } from './NodeChatAlerts.tsx';
+import { NodeChatHeader, NodeChatPaused, NodeChatPending, NodeComposerFooter } from './NodeChatAlerts.tsx';
 import { TranscriptRowView } from './TranscriptRows.tsx';
 import { Button, Empty, Icon, Pill, Spinner } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
@@ -53,6 +53,9 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const [olderLoading, setOlderLoading] = useState(false);
   const [loadingEntry, setLoadingEntry] = useState<string | null>(null);
   const [unreadEntries, setUnreadEntries] = useState<ReadonlySet<string>>(() => new Set());
+  // What the composer says about a stop: 停止中 while the node winds down,
+  // 已停止 once it is gone - the same words the conversation window uses.
+  const [stopPhase, setStopPhase] = useState<'idle' | 'stopping' | 'stopped'>('idle');
   const autoReadAttempted = useRef<Set<string>>(new Set());
   const [olderExhausted, setOlderExhausted] = useState(false);
   const olderPending = useRef(false);
@@ -168,6 +171,13 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }, [entries, nodeId, scope, taskId]);
 
   const busy = data?.node.status === 'preparing' || data?.node.status === 'running';
+  // 停止中 lasts as long as the node is still winding down, and 已停止 is a fact
+  // about the run that just ended - not a permanent label. A node that starts
+  // again has something new to say, so the note goes away.
+  useEffect(() => {
+    if (stopPhase === 'stopping' && !busy) setStopPhase('stopped');
+    if (stopPhase === 'stopped' && busy) setStopPhase('idle');
+  }, [busy, stopPhase]);
   const transcriptFollow = useTranscriptFollow(scope, Boolean(busy));
   const rows = useMemo(() => buildTranscriptRows({
     messages: nodeMessages(entries, (data?.operations ?? []) as { id: string; state: string; workerActive?: boolean }[], Boolean(busy)),
@@ -222,12 +232,19 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     const command = previous?.action === action && previous.text === message ? previous : { action, text: message, requestId: crypto.randomUUID() };
     pendingControl.current = command;
     setSending(true); setError('');
+    // The request returns only once the node has unwound: say 停止中 on the click,
+    // not after (measured 2026-11-05 - the note never appeared at all).
+    if (action === 'stop_node') setStopPhase('stopping');
     try {
       await api(`/api/tasks/${taskId}/graph/control`, { method: 'POST', body: JSON.stringify({ ...command, nodeId }) });
       if (action === 'steer_node') setText('');
       pendingControl.current = null;
       refresh(); transcriptFollow.scrollToLatest('auto');
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) {
+      // A stop that never reached the daemon must not leave a note claiming it did.
+      if (action === 'stop_node') setStopPhase('idle');
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
     finally { setSending(false); }
   }
   const composer = <div className="conversation-composer-wrap node-chat-composer">
@@ -236,12 +253,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       allowAttachments={false} projectId={null} placeholder={busy ? `向 ${agentName} 发送补充说明…` : `向 ${agentName} 发送返工要求…`}
       onSend={() => void send()} sendDisabled={sending || !taskId || data?.node.kind !== 'agent' || !text.trim()}
       inputTestId="node-chat-input" sendTestId="node-chat-send" history={entries.filter(entry => entry.role === 'user' && entry.kind === 'chat').map(entry => entry.text)} />
-    <div className="composer-footer"><span className="muted">{busy ? 'Enter 排队发送 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span>
-      {busy && data?.node.kind === 'agent' && <span className="row">
-        <Button size="sm" disabled={sending || !text.trim()} onClick={() => void controlNode('steer_node')}>立即引导</Button>
-        <Button size="sm" disabled={sending} onClick={() => void controlNode('stop_node')}>停止节点</Button>
-      </span>}
-    </div>
+    <NodeComposerFooter stopPhase={stopPhase} busy={busy} agentNode={data?.node.kind === 'agent'} sending={sending}
+      canSteer={Boolean(text.trim())} onSteer={() => void controlNode('steer_node')} onStop={() => void controlNode('stop_node')} />
   </div>;
   const onScroll = () => {
     transcriptFollow.onScroll();
@@ -363,25 +376,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
         data-page={page}
         aria-label={`${agentName} 节点对话`}
       >
-        <header className="agent-chat-header">
-          <div className="agent-chat-heading">
-            <div className="drawer-eyebrow">Agent 节点对话</div>
-            <h3>{agentName} <span className="mono muted">{nodeId}</span></h3>
-            <div className="agent-chat-meta">
-              <Pill tone={status === 'succeeded' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'accent' : 'neutral'}>
-                {NODE_LABEL[status] ?? status}
-              </Pill>
-              {data?.instance?.model && <span className="mono">{data.instance.model}</span>}
-              {taskId && <span>{connected ? '实时' : '重连中…'}</span>}
-              <span>节点对话</span>
-            </div>
-          </div>
-          {onClose && (
-            <button type="button" className="icon-button" onClick={onClose} title="关闭节点对话" aria-label="关闭节点对话">
-              <Icon name="close" size={16} />
-            </button>
-          )}
-        </header>
+        <NodeChatHeader agentName={agentName} nodeId={nodeId} status={status} statusLabel={NODE_LABEL[status] ?? null}
+          model={data?.instance?.model ?? null} connected={connected} taskId={taskId} onClose={onClose} />
 
         {data?.phase === 'paused' && <NodeChatPaused />}
         <div
