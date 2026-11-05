@@ -22,8 +22,8 @@ const (
 const ModelApiOpenAICompletions ModelApi = "openai-completions"
 
 // ModelApiOpenAIResponses is the OpenAI Responses transport: typed input items,
-// flat tool declarations and `response.*` events. ChatGPT's Codex backend
-// answers in this shape only.
+// flat tool declarations and `response.*` events. It is one of the three
+// transports the runtime sends, and the only one that is not chat-completions.
 const ModelApiOpenAIResponses ModelApi = "openai-responses"
 
 // ModelApiAnthropicMessages is the Anthropic Messages transport.
@@ -49,6 +49,10 @@ type PlatformPresetRecord struct {
 	Headers             map[string]string `json:"headers,omitempty"`
 	DocsURL             *string           `json:"docsUrl,omitempty"`
 	Notes               []string          `json:"notes"`
+	// Unsupported marks a platform the product has concluded: it stays in the
+	// directory so the console can explain what happened to it, and a
+	// configuration that still names it is refused with the reason.
+	Unsupported bool `json:"unsupported,omitempty"`
 }
 
 // CUSTOM_PLATFORM_ID is the fallback preset for any other OpenAI/Anthropic-
@@ -102,9 +106,30 @@ var PLATFORM_PRESETS = []PlatformPresetRecord{
 		ID: "chatgpt", Label: "ChatGPT", API: ModelApiOpenAIResponses,
 		BaseURL: "https://chatgpt.com/backend-api/codex", CredentialRef: "GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN",
 		CredentialKind: ProviderCredentialKindSubscription, ModelsListSupported: true,
-		Notes: []string{"ChatGPT/Codex 订阅访问令牌；后端只按 Responses 形状（input 项目、扁平工具、response.* 事件）应答，所以该平台注册为 openai-responses，真实补全与工具调用均已按此传输实测。"},
+		// Concluded. The record stays so the console can say what happened to a
+		// configuration that names it; the reason below is what the settings page
+		// shows and what the configuration parser refuses an entry with.
+		Unsupported: true,
+		Notes: []string{
+			"已不再提供：Codex 后端只按 Responses 形状（input 项目、扁平工具、response.* 事件）应答，但它在握手后直接 EOF（连接早关），本仓的流式解析器不接受这条事件流，所以这个端点上没有任何一轮能跑完。",
+			"配置里仍写该平台的模型条目会被拒绝；请改用它的传输 fallback：grok:grok-4.5（api openai-completions，baseUrl https://api.x.ai/v1）。",
+		},
 	},
 }
+
+// unsupportedPlatformReason is the conclusion a record carries: why the platform
+// cannot serve a turn, and what replaces it.
+const unsupportedPlatformReason = "the Codex endpoint closes the connection before answering (EOF) and this runtime " +
+	"does not accept its openai-responses event stream, so no turn can complete on it; use grok (grok:grok-4.5) instead"
+
+// unsupportedPlatforms is the concluded set: the platforms whose records above
+// carry `Unsupported: true`, with the sentence that explains it.
+var unsupportedPlatforms = map[string]string{
+	"chatgpt": unsupportedPlatformReason,
+}
+
+// UnsupportedPlatformReason reports why a platform cannot serve a turn, or "".
+func UnsupportedPlatformReason(id string) string { return unsupportedPlatforms[id] }
 
 func init() {
 	for _, template := range PROVIDER_TEMPLATES {

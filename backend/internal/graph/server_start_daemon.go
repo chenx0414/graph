@@ -28,7 +28,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	}
 	var configStore *ConfigStore
 	if options.ConfigPath != nil {
-		configStore = OpenConfigStore(*options.ConfigPath)
+		configStore = OpenConfigStore(*options.ConfigPath).OwnStateDir(options.StateDir)
 	}
 	revokedPath := filepath.Join(options.StateDir, "revoked-secrets.json")
 	revokedRefs, revocationFailure := readRevocations(revokedPath, config)

@@ -114,7 +114,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `id` | 是 | 本配置内的唯一标识（Graph 侧身份） |
 | `provider` | 是 | 厂商/平台名（用于展示与分组） |
 | `grade` | 是 | `small` / `medium` / `frontier`；历史 `low` / `high` / `highest` 仍可用 |
-| `api` | 是 | `openai-completions`、`openai-responses` 或 `anthropic-messages` |
+| `api` | 是 | `openai-completions`、`openai-responses` 或 `anthropic-messages`（只有这三个拼写，别名会被拒） |
 | `baseUrl` | 是 | 端点基址 |
 | `contextWindow` | 是 | 正整数 |
 | `maxTokens` | 是 | 正整数 |
@@ -127,7 +127,9 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `headers` | 否 | 该模型额外请求头 |
 | `fallbackModelId` | 否 | 传输层失败时接管这次发送的另一个模型 id（必须存在、不能是自己、只能一跳），见 [模型回退](model-fallback.md) |
 
-`openai-responses` 是 OpenAI Responses 传输：请求体是 `instructions` 加类型化的 `input` 项目（消息、`function_call`、`function_call_output`），工具声明是扁平的（`{type:"function",name,description,parameters}`），应答是 `response.*` 事件的 SSE，用量随最后一个 `response.completed` 事件到达。ChatGPT 的 Codex 后端（`https://chatgpt.com/backend-api/codex`）只认这一种契约，用 chat-completions 打过去会 404/400，所以 `chatgpt` 平台按 `openai-responses` 注册；该传输下的文本、工具调用与用量都已在真实补全里跑通。
+`openai-responses` 是 OpenAI Responses 传输：请求体是 `instructions` 加类型化的 `input` 项目（消息、`function_call`、`function_call_output`），工具声明是扁平的（`{type:"function",name,description,parameters}`），应答是 `response.*` 事件的 SSE，用量随最后一个 `response.completed` 事件到达。
+
+**一套词表**：配置解析、订阅目录与运行时分派共用这组三个字符串。未知值在配置层**硬拒**（错误串点名三个可用值），运行时也没有 `default` 兜底（返回 `Unsupported provider api "…"`，不会悄悄发到 `/chat/completions`）；目录的 `Supported` 看**平台**是否仍提供，不看传输。
 
 `models.preferences`：按 grade 给出模型优先顺序（`Partial<Record<grade, string[]>>`）。
 `limits`：`credentials.<id>` 逐凭据 token 上限、`sharedGroups`、`defaultBudgetTokens`（`null` = 不限）。
@@ -141,7 +143,12 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `config_conflict` | `expectedRevision` 与当前不符；重新读 revision 再改 |
 | `config_locked` | 另一个编辑器（App 窗口）正在保存；稍后重试 |
 | `config_in_use` | 删除的模型仍被未完成任务使用；先等任务结束或换模型 |
+| `config_protected` | 保存指向**线上配置**，本守护进程不是它的主人；见下节 |
 | 凭据组错误 | 多个凭据解析到同一密钥值却分属不同 `sharedLimitGroupId` |
+
+### 线上配置的写保护
+
+线上配置（App 的 `<应用目录>/graph.config.json`）**只由拥有它的安装改写**——state 目录在它旁边的那个守护进程。`ConfigStore.Save` 的判断：不是线上文件、或本守护进程 state 目录就在它旁边 → 照常保存（App 设置页照旧工作）；是线上文件而 state 目录在别处（测试、检查、节点起的守护进程）→ `config_protected`，**磁盘字节一个都不改**。model entry 变更用 JSON/diff 交主控，不要自己写线上文件。
 
 ### 生效语义
 
@@ -166,7 +173,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | `opencode-go` | OpenCode Go | openai-completions | `https://opencode.ai/zen/go/v1` | `GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY` | 订阅 | 是 |
 | `command-goat` | Command Goat | openai-completions | `https://api.commandcode.ai/provider/v1` | `GRAPH_SUBSCRIPTION_COMMAND_GOAT_API_KEY` | 订阅 | 是 |
 | `grok` | Grok | openai-completions | `https://api.x.ai/v1` | `GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN` | 订阅 / xAI 设备码登录 | 是 |
-| `chatgpt` | ChatGPT | openai-responses | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | 是 |
+| `chatgpt` | ChatGPT | openai-responses | `https://chatgpt.com/backend-api/codex` | `GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN` | 订阅 | **已移除（unsupported）** |
 | `openai` | OpenAI | openai-completions | `https://api.openai.com/v1` | `OPENAI_API_KEY` | API KEY | 是 |
 | `anthropic` | Anthropic | anthropic-messages | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | API KEY | 是 |
 | `gemini` | Google Gemini | openai-completions | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | API KEY | 是 |
@@ -178,13 +185,15 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 - `deepseek`：官方 API KEY，文档 `https://api-docs.deepseek.com/`。
 - `opencode-go`：OpenCode Zen 订阅凭据，文档 `https://opencode.ai/docs/zen`；所有请求自动附带 `x-opencode-session: graph-console`。
-- `chatgpt`：ChatGPT/Codex 订阅访问令牌。用量适配器从 **Codex CLI 的登录文件** `~/.codex/auth.json` 读取 `tokens.access_token`（可用 `GRAPH_CODEX_AUTH_PATH` 覆盖路径）。
+- `chatgpt`：**已移除**（见下节）。用量适配器仍认 Codex CLI 的登录文件 `~/.codex/auth.json` 里的 `tokens.access_token`（可用 `GRAPH_CODEX_AUTH_PATH` 覆盖路径），但该平台不再提供可用的模型条目。
 - `grok`：xAI 访问令牌。用量适配器从 `~/.grok/auth.json` 读取（可用 `GRAPH_GROK_AUTH_PATH` 覆盖）。
 - `command-goat`：commandcode.ai 订阅凭据；**仓库未声明官方文档链接**，不要编造获取步骤，需要时让用户提供或查询其服务台。
 - `custom`：用户自填「厂商名 + Base URL + 兼容格式 + API KEY」；端点不支持列模型时手动添加模型 id。
 - 环境变量别名（配置 `secretRef` 之外的兜底名，代码内已声明）：`OPENCODE_GO_API_KEY` / `OPENCODE_ZEN_API_KEY` / `OPENCODE_API_KEY`；OpenCode 的本地配置 `~/.config/opencode/opencode.json` 也会被识别。
 
-**注意**：`chatgpt` 的 Codex 后端只认 Responses 契约，所以 preset、目录与运行时都把它注册为 `openai-responses`（探针与设置页的草稿校验同样按该传输发请求）；用 chat-completions 打过去会 404/400。主选万一在传输层断开，可配 `fallbackModelId` 让另一个模型接管（见 [模型回退](model-fallback.md)）。
+### ChatGPT 平台：已移除（unsupported）
+
+Codex 后端与 Responses 契约握手后直接 EOF，本仓解析器不接受它的 `response.*` 事件流，跑不完任何一轮，因此 `chatgpt` 不再提供：`GET /api/providers` 仍列出这条记录但标 `unsupported: true` 并带 `unsupportedReason`（含替代品 `grok:grok-4.5`）；交付记录 `deliverables/independent-model-entries.json` 里该条目标 `status: "unsupported"` 并保留 `fallbackModelId` 与同一理由，**不要再把它当主选**。`provider` 只是分组名，解析器不设白名单——结论落在目录与交付记录上。
 
 ---
 

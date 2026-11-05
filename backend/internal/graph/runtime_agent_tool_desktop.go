@@ -93,16 +93,34 @@ var desktopAccessibilityCommands = map[string]bool{
 // other refusal, and it says where it came from (`details.source`) because the
 // words are the tool's, not the CLI's. It carries no payload, so it is safe to
 // hand over verbatim.
-func desktopPermissionRefusal(command, state, version string) map[string]any {
+//
+// The reading travels with the context it was taken in. A session whose commands
+// run confined reads `denied` from the very binary the user granted on the host,
+// so its refusal says that much: the state is reported, the suggestion points at
+// the host, and `details.notice` states that this reading is not evidence that
+// the grant is missing. Reporting the environment as the user's configuration is
+// the defect this envelope exists to avoid.
+func desktopPermissionRefusal(command, state, version string, context desktopExecutionContext) map[string]any {
+	message := "Accessibility permission is not granted (" + state + "), so " + command + " has no target it could resolve"
+	suggestion := "Run agent-desktop permissions --guide from the app that launches agent-desktop " +
+		"(Graph.app, Terminal, iTerm or Codex) and switch on Accessibility. After a reinstall, upgrade or " +
+		"move of that install, run it again: the grant belongs to the binary path and its cdhash."
+	details := map[string]any{
+		"source": "graph-desktop-tool", "accessibility": state, "checked": "agent-desktop permissions",
+		"executionContext": context.details(),
+	}
+	if context.Sandboxed {
+		message = "Accessibility could not be read from inside the sandbox (" + state + "), so " + command + " has no target it could resolve"
+		suggestion = "Ask for this command where the user's own session owns the accessibility tree, then run it there: " +
+			"a permission reading taken inside the sandbox is not evidence about the host grant. " + suggestion
+		details["notice"] = "This reading was taken in the sandbox (access.mode " + context.AccessMode + ") and is not evidence " +
+			"that Accessibility is missing on the host: the same binary reads the user's real grant only outside the sandbox."
+	}
 	envelope := map[string]any{
 		"ok": false, "command": command,
 		"error": map[string]any{
-			"code":    "PERM_DENIED",
-			"message": "Accessibility permission is not granted (" + state + "), so " + command + " has no target it could resolve",
-			"suggestion": "Run agent-desktop permissions --guide from the app that launches agent-desktop " +
-				"(Graph.app, Terminal, iTerm or Codex) and switch on Accessibility. After a reinstall, upgrade or " +
-				"move of that install, run it again: the grant belongs to the binary path and its cdhash.",
-			"details":     map[string]any{"source": "graph-desktop-tool", "accessibility": state, "checked": "agent-desktop permissions"},
+			"code": "PERM_DENIED", "message": message, "suggestion": suggestion,
+			"details":     details,
 			"disposition": map[string]any{"delivery": "not_delivered", "retry": "safe"},
 		},
 	}

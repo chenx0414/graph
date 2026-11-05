@@ -43,10 +43,13 @@ const (
 // SubscriptionModelApi is the transport a subscription model speaks.
 type SubscriptionModelApi string
 
+// The three values are the ones a configuration model entry may declare:
+// server_config_parse.go refuses anything else, so a catalog that spelled the
+// Responses transport "responses" described a model no configuration could name.
 const (
 	SubscriptionModelApiOpenAICompletions SubscriptionModelApi = "openai-completions"
 	SubscriptionModelApiAnthropicMessages SubscriptionModelApi = "anthropic-messages"
-	SubscriptionModelApiResponses         SubscriptionModelApi = "responses"
+	SubscriptionModelApiResponses         SubscriptionModelApi = "openai-responses"
 )
 
 // UsageWindow is one quota window of a plan.

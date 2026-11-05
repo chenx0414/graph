@@ -57,6 +57,18 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 `graph.command` 程序节点在 OS sandbox 内执行：不能嵌套 `sandbox-exec`，也看不到窗口服务，所以 Electron、真实浏览器自动化、宿主剪贴板在这里跑不起来（`sandbox_apply: Operation not permitted` 是嵌套被拒）。通过 RSI 传的 `checks` 在 checkout 里不受沙箱限制运行，适合需要真实浏览器或宿主能力的诊断；正式验收仍应落在 `graph.command` 节点上，因为验收证据必须来自受控检查。
 
+### 沙箱内的权限读数不可作宿主授权证据
+
+`desktop` 工具在跑任何需要 accessibility 树的命令之前，先问一次 `agent-desktop permissions`，读数的含义是「**跑这次探测的那个进程**有没有 TCC 授权」，不是「这台机器有没有授权」。实测同一份二进制：宿主上下文（`access.mode: full`，命令不过 seatbelt）读到 `granted`；沙箱内的会话读到 `denied`。也就是说，把沙箱里的 `denied` 当成用户没开 Accessibility，会把「读数的环境」错报成「用户的配置」，然后送一个人去改一个可能已经正确的开关。
+
+因此这条读数的落点是**执行上下文**，不是布尔值：
+
+- 拒绝信封的 `error.details.executionContext` 带 `{sandbox, accessMode, role, policyDigest, probe, evidence}`：`evidence` 只有 `host` 与 `sandbox` 两种；`policyDigest` 是本次 session 冻结的访问策略摘要，两次读数是否来自同一上下文可以据此区分。
+- 沙箱上下文（`evidence: "sandbox"`）额外带 `details.notice`，明写这次读数不构成宿主授权缺失的证据，`message` 说「读不到」而不是「没有授权」，`suggestion` 指向到宿主上重跑该命令。
+- standard 模式的 `graph.command` 节点、以及任何在 seatbelt 里执行的会话，其读数一律是沙箱读数。
+
+取舍写在这里：**保留探测并标注上下文**，而不是「探测只在宿主上下文执行」。理由是后者会让 standard 模式的会话彻底失去这条信号（连「读不到」都不再说明），而宿主上的真实拒绝又会被它藏起来——两种情形给出同一个答案，正是这次要修的病。真正的修复动作仍然是到宿主上重跑这条命令，而不是重新授权——沙箱里的读数不支持「该重新授权」这个结论。
+
 ## 浏览器验证与恢复
 
 控制台地址随时可从 `<stateDir>/console.json` 读（含 `url`/`pid`/`mode`）：App 启动的 daemon 用 `--port 0`，地址不写日志也不写其他地方。**停下的 daemon 不删这份记录**（删了下次启动就不知道回哪个端口），所以它可能是一个已停进程的地址——`pid` 告诉你它是谁的。`--port 0` 会**优先复用本状态目录上次的端口**，所以重载通常不换地址、旧标签页仍指向同一个控制台；但过时标签页仍可能默默回答旧端口，用 `tab list` → `tab t<N>` 或直接 `open` 新地址纠正，并在点击前先断言 `location.href`。
