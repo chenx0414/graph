@@ -32,6 +32,11 @@ type ProviderTransportObservation struct {
 	ErrorCodes                    []string
 	ErrorNames                    []string
 	UsageRecoverableFromTransport *bool
+	// Attempt is which attempt of one send this observation belongs to, and
+	// DelayMs is how long the transport waited before it: both are set on a
+	// reconnect, where the wait is the fact being reported.
+	Attempt *int
+	DelayMs *int
 }
 
 // Fields is the observation as the event carries it.
@@ -67,6 +72,12 @@ func (observation ProviderTransportObservation) Fields() map[string]any {
 	}
 	if observation.UsageRecoverableFromTransport != nil {
 		fields["usageRecoverableFromTransport"] = *observation.UsageRecoverableFromTransport
+	}
+	if observation.Attempt != nil {
+		fields["attempt"] = *observation.Attempt
+	}
+	if observation.DelayMs != nil {
+		fields["delayMs"] = *observation.DelayMs
 	}
 	return fields
 }
