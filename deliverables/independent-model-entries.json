@@ -1,5 +1,5 @@
 {
-  "//": "The two independent provider entries, exactly as they are meant to be merged into models.entries of the application's graph.config.json. `credentials.grok` (secretRef GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN, platform grok) and `credentials.chatgpt` (secretRef GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN) must exist; both only ever carry a secretRef, never a key. Grok answers the chat-completions contract on the xAI endpoint; ChatGPT's Codex backend answers the Responses contract only, which is why that entry names openai-responses. The ChatGPT entry names Grok as its transport fallback (`fallbackModelId`): when the Codex backend breaks the connection before answering (EOF / timeout / non-2xx), the same review turn continues on Grok, and the graph records `graph.provider.fallback` with the primary model, the failure verbatim, the fallback model and `sameModel:false`. A model that answered badly is never re-asked elsewhere.",
+  "//": "The two independent provider entries, exactly as they are meant to be merged into models.entries of the application's graph.config.json. `credentials.grok` (secretRef GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN, platform grok) and `credentials.chatgpt` (secretRef GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN) must exist; both only ever carry a secretRef, never a key. Grok answers the chat-completions contract on the xAI endpoint. The ChatGPT entry is CONCLUDED: its Codex backend closes the connection before answering (EOF) and this runtime does not accept its openai-responses event stream, so the catalog marks that platform `unsupported` and the entry stays here as the record of the decision - with the transport fallback it was configured with (`fallbackModelId: grok:grok-4.5`) and the reason below. Do not configure it as a primary model again; a review that used it now runs on Grok, and the graph records `graph.provider.fallback` with the primary model, the failure verbatim, the fallback model and `sameModel:false`. A model that answered badly is never re-asked elsewhere.",
   "models": {
     "entries": [
       {
@@ -19,6 +19,7 @@
       },
       {
         "id": "chatgpt:gpt-6.1-sol",
+        "status": "unsupported",
         "provider": "chatgpt",
         "modelId": "gpt-6.1-sol",
         "grade": "high",
@@ -31,7 +32,8 @@
           "text"
         ],
         "reasoning": true,
-        "fallbackModelId": "grok:grok-4.5"
+        "fallbackModelId": "grok:grok-4.5",
+        "unsupportedReason": "The Codex endpoint closes the connection before answering (EOF) and this runtime does not accept its openai-responses event stream, so no turn completes on it. The entry is kept as the record of the decision, not as a usable primary: the traffic it carried continues on its transport fallback grok:grok-4.5."
       }
     ]
   }
