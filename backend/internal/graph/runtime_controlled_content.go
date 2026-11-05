@@ -132,7 +132,10 @@ func ControlledGatedProviderFetch(broker SendGate, request *http.Request, option
 				broker.Settle(id, nil)
 			}
 			if attempt >= maxAttempts {
-				return nil, failure
+				// The bound is spent: the failure keeps its own words and gains
+				// how many times the transport already sent it again, so the
+				// answer to the user never asks them to do the retry themselves.
+				return nil, TransportRetryExhausted(failure, attempt-1)
 			}
 			if notSent {
 				delay(500 * attempt)

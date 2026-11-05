@@ -46,6 +46,12 @@ func (runtime *TaskRuntime) DelegateFromGlobal(taskID string, input DelegateWork
 		}
 		msg := AppendMessage(runtime.store, MessageInput{ConversationID: target.Id, Role: MessageRoleUser, Kind: "chat", Text: text, State: state, Data: map[string]any{"source": map[string]any{"kind": "agent", "conversationId": caller.Id, "taskId": taskID}, "workId": work.ID}})
 		WakeMaster(runtime.store, WakeIntent{TaskID: target.AnchorTaskId, Kind: "work_delegated", DedupeKey: work.ID, Data: map[string]any{"workId": work.ID, "sourceConversationId": caller.Id}, HasData: true})
+		// The delegation is a message that needs an answer, so it opens its own
+		// door: a turn the provider broke leaves the master parked behind its own
+		// problem, and a delegation that only wrote and woke left the thread
+		// pending for minutes until a person happened to type a chat
+		// (2026-11-05 08:50). Recovering here is what the chat door already does.
+		RecoverMaster(runtime.store, target.AnchorTaskId, "message")
 		runtime.store.Event(target.AnchorTaskId, "work.delegated", map[string]any{"workId": work.ID, "messageId": msg.Id, "sourceConversationId": caller.Id})
 		return map[string]any{"workId": work.ID, "projectId": input.ProjectID, "conversationId": target.Id, "messageId": msg.Id}
 	})

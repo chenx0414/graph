@@ -200,7 +200,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
         <div className="tool-group-content-inner">
           <ol className="tool-activity-list">
             {row.tools.map(tool => (
-              <li key={tool.id} data-error={tool.error} data-done={tool.done}>
+              <li key={tool.id} data-testid="tool-activity-row" data-error={tool.error} data-done={tool.done}>
                 <span className="tool-activity-icon"><Icon name={toolIcon(tool.name)} size={14} /></span>
                 <span className="tool-activity-label">{toolActivity(tool.name, tool.summary).label} <span className="tool-name">{toolActivity(tool.name, tool.summary).name}</span></span>
                 <span className="tool-activity-summary" title={tool.summary}>{tool.summary}</span>

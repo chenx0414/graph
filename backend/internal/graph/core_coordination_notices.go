@@ -136,6 +136,10 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 			TaskID: anchor, Kind: "supervisor_notice", DedupeKey: taskID + ":" + delivery,
 			Data: map[string]any{"conversationId": caller.Id, "taskId": taskID, "milestone": milestone, "workId": workID}, HasData: true,
 		})
+		// A notice is a message written into a conversation that has to be read
+		// and reported, so it releases the same parking a chat does: a master
+		// left parked by a failed turn would otherwise never see the notice.
+		RecoverMaster(store, anchor, "message")
 		store.Event(taskID, "supervisor.notice", map[string]any{"conversationId": globalID, "messageId": message.Id, "milestone": milestone, "workId": workID})
 		return map[string]any{"delivered": true, "conversationId": globalID, "messageId": message.Id, "milestone": milestone, "workId": workID}
 	})

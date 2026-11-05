@@ -18,6 +18,13 @@ func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 	// shown. Reading a stack that merely mentions package_json_reader as a truncated model output
 	// is how a Pi worker that could not load its own modules became an actively misleading notice.
 	detail := failureDetail(reason)
+	// A failure the transport already retried says so, with the original error
+	// next to it. "Send it again" is what the user used to read after the daemon
+	// had already spent two retries on their behalf: the message was never lost,
+	// the endpoint was, and only the user's own resend ever produced a reply.
+	if retries, retried := TransportRetries(reason); retried {
+		return fmt.Sprintf("主 Agent 本轮没有完成回复：已自动重试 %d 次仍失败。", retries) + conversationFailureSuffix(detail)
+	}
 	if failureKind == TurnFailureSetup {
 		return "主 Agent 本轮没有启动起来，回复没有完成。消息已保留，可以再发一次重试。" + conversationFailureSuffix(detail)
 	}
