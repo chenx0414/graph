@@ -36,7 +36,15 @@ export async function independentEntries(): Promise<{ grok: Record<string, unkno
   return { grok: grok as Record<string, unknown>, chatgpt: chatgpt as Record<string, unknown> };
 }
 
-/** The Grok access token the host's Grok CLI is signed in with. */
+/** The Grok access token the host's Grok CLI is signed in with.
+ *
+ * The access token in that file lives about an hour, so a login made earlier in
+ * the day is already dead when the gate runs: measured 2026-11-05, the same file
+ * answered `Provider answered HTTP 403` and blocked every commit for hours after
+ * a successful login. The refresh token the CLI already stored is exchanged
+ * here, in memory - the host's file is never rewritten, and a host that is not
+ * signed in at all still fails instead of faking a completion.
+ */
 export async function grokAccessToken(): Promise<string> {
   const path = join(homedir(), '.grok', 'auth.json');
   let raw: string;
@@ -45,11 +53,29 @@ export async function grokAccessToken(): Promise<string> {
   } catch (error) {
     throw new Error(`no connected Grok subscription: ${path} is unreadable (${String(error)}). This test proves a real completion and cannot fake one`);
   }
-  const scopes = JSON.parse(raw) as Record<string, { key?: unknown }>;
+  const scopes = JSON.parse(raw) as Record<string, { key?: unknown; refresh_token?: unknown; expires_at?: unknown; oidc_issuer?: unknown; oidc_client_id?: unknown }>;
   for (const scope of Object.keys(scopes)) {
     if (!scope.startsWith('https://auth.x.ai::')) continue;
-    const key = scopes[scope]?.key;
-    if (typeof key === 'string' && key.trim() !== '') return key.trim();
+    const entry = scopes[scope]!;
+    const key = entry.key;
+    if (typeof key !== 'string' || key.trim() === '') continue;
+    const expiresAt = typeof entry.expires_at === 'string' ? Date.parse(entry.expires_at) : Number.NaN;
+    const stale = Number.isFinite(expiresAt) ? expiresAt - Date.now() < 120_000 : false;
+    if (!stale) return key.trim();
+    const refreshToken = typeof entry.refresh_token === 'string' ? entry.refresh_token : '';
+    const issuer = typeof entry.oidc_issuer === 'string' ? entry.oidc_issuer : 'https://auth.x.ai';
+    const clientId = typeof entry.oidc_client_id === 'string' ? entry.oidc_client_id : '';
+    if (!refreshToken || !clientId) return key.trim();
+    const response = await fetch(`${issuer}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId }),
+    });
+    const body = await response.json().catch(() => ({})) as { access_token?: unknown };
+    if (!response.ok || typeof body.access_token !== 'string' || body.access_token.trim() === '') {
+      throw new Error(`the Grok CLI login expired at ${String(entry.expires_at)} and its refresh answered ${response.status}: sign in with the Grok CLI again`);
+    }
+    return body.access_token.trim();
   }
   throw new Error(`the Grok auth file ${path} holds no https://auth.x.ai scope with a key`);
 }
