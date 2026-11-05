@@ -7,8 +7,8 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 	interrupted := []string{}
 	kernel.ModuleTransaction(func() any {
 		ReconcileOperationResources(kernel)
-		// A prepared operation never crossed its send boundary; only its unused lease is safe to release.
-		kernelExec(kernel.Db, "UPDATE kernel_module_operations SET worker_active=0 WHERE state='prepared'")
+		// The previous process is gone, and this call runs after the owner lock was acquired, so the program slots it still held are abandoned rather than occupied.
+		ReleaseOperationLeasesOnRestart(kernel, "owner_restart")
 		kernelExec(kernel.Db, "UPDATE kernel_provider_calls SET state='unknown' WHERE state='inflight'")
 		interruptedOperations := kernelRows(kernel.Db, "SELECT id,task_id,module_id,delivery_id FROM kernel_module_operations WHERE state='dispatched'")
 		for _, operation := range interruptedOperations {
