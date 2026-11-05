@@ -7,10 +7,23 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 )
+
+// openPreservedStream opens the file one stream of a sandboxed command is kept in.
+func openPreservedStream(directory, name string) *os.File {
+	if directory == "" {
+		return nil
+	}
+	file, err := os.OpenFile(filepath.Join(directory, name+".log"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		panic(err)
+	}
+	return file
+}
 
 // spawnAndWait starts one restricted process and waits for its result.
 func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launched string, launchedArgs []string, cwd string, environment map[string]string, localNetwork bool) CommandResult {
@@ -106,6 +119,9 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 			state.killTree()
 		}, true)
 	}
+	// The budget starts here, at the process, and not at the attempt: waiting for
+	// a program slot and for the graph's Git lock happened before this call, and a
+	// queue is not the command's time to spend.
 	var timer *time.Timer
 	if command.TimeoutMs > 0 {
 		timer = time.AfterFunc(time.Duration(command.TimeoutMs)*time.Millisecond, func() {
@@ -114,10 +130,27 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 			state.killTree()
 		})
 	}
+	// A sandboxed command keeps its streams like a public one does. Without this,
+	// a timed-out sandboxed operation was the one case whose output existed only
+	// in memory: the kill happened, the result was "no exit code", and there was
+	// no log to say what it had printed before it died.
+	stdoutLog := openPreservedStream(command.ScratchDir, "stdout")
+	stderrLog := openPreservedStream(command.ScratchDir, "stderr")
+	defer func() {
+		if stdoutLog != nil {
+			_ = stdoutLog.Close()
+		}
+		if stderrLog != nil {
+			_ = stderrLog.Close()
+		}
+	}()
 	var pumps sync.WaitGroup
 	pumps.Add(3)
-	go func() { defer pumps.Done(); stdoutBuffer.pump(stdout, command.OnStdout) }()
-	go func() { defer pumps.Done(); stderrBuffer.pump(stderr, nil) }()
+	go func() {
+		defer pumps.Done()
+		stdoutBuffer.pump(preservedStream{reader: stdout, file: stdoutLog}, command.OnStdout)
+	}()
+	go func() { defer pumps.Done(); stderrBuffer.pump(preservedStream{reader: stderr, file: stderrLog}, nil) }()
 	go func() { defer pumps.Done(); state.readChannel(channel) }()
 	if ipc != nil {
 		pumps.Add(1)
@@ -151,24 +184,25 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 	if state.aborted {
 		panic(errors.New("Command aborted by user"))
 	}
-	result := CommandResult{
-		Stdout: stdoutBuffer.String(),
-		Stderr: stderrBuffer.String(),
-	}
+	notes := ""
 	if waitErr != nil {
 		var exitError *exec.ExitError
 		if errors.As(waitErr, &exitError) {
 			if status, ok := exitError.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				name := sandboxSignalName(status.Signal())
 				if state.timedOut {
-					result.Stderr += fmt.Sprintf("Process terminated by %s: it exceeded the %dms timeout\n", name, command.TimeoutMs)
+					notes = fmt.Sprintf("Process terminated by %s: it exceeded the %dms timeout\n", name, command.TimeoutMs)
 				} else {
-					result.Stderr += fmt.Sprintf("Process terminated by %s\n", name)
+					notes = fmt.Sprintf("Process terminated by %s\n", name)
 				}
 			}
 		} else {
-			result.Stderr += waitErr.Error() + "\n"
+			notes = waitErr.Error() + "\n"
 		}
+	}
+	result := CommandResult{
+		Stdout: stdoutBuffer.String(),
+		Stderr: stderrBuffer.String() + notes,
 	}
 	if code := process.ProcessState.ExitCode(); code >= 0 {
 		value := code
