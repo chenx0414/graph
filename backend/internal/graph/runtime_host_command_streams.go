@@ -72,7 +72,7 @@ func hostCommandNumber(value any) bool {
 // same way: a missing exit code alone cannot tell "killed for time" from "the
 // supervisor never answered", and the verdict has to tell them apart.
 func hostCommandTimeoutMarker(timeoutMs int) string {
-	return "Process terminated by SIGKILL: it exceeded " + itoa(timeoutMs) + "ms timeout"
+	return "Process terminated by SIGKILL: it exceeded the " + itoa(timeoutMs) + "ms timeout"
 }
 
 // hostCommandOutputStreams describes the stream files a command left in its own directory.

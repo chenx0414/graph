@@ -84,7 +84,7 @@ test('a command that outlives its budget settles as a timeout with its logs kept
     // The stream file holds what the command printed; why it was killed is the
     // host's own note, and it is published next to the streams.
     expect(await readFile(readable(output.outputFiles!.stderr.path), 'utf8')).toBe('');
-    expect(output.stderr, 'the killed operation does not say its budget stopped it').toContain('it exceeded 1500ms timeout');
+    expect(output.stderr, 'the killed operation does not say its budget stopped it').toContain('it exceeded the 1500ms timeout');
 
     // The same facts are in the durable record the operation published.
     const record = JSON.parse(await readFile(readable(output.record), 'utf8')) as
@@ -142,7 +142,7 @@ test.skipIf(!nestedSandboxAllowed())('a sandboxed command killed by its budget k
     // The sandboxed branch used to keep a killed command's output in memory only.
     expect(output.outputFiles?.stdout?.path, 'a sandboxed timed-out operation kept no stdout log').toBeTruthy();
     expect(await readFile(readable(output.outputFiles!.stdout.path), 'utf8')).toBe('slow started\n');
-    expect(output.stderr).toContain('it exceeded 1500ms timeout');
+    expect(output.stderr).toContain('it exceeded the 1500ms timeout');
   } finally {
     await close();
     await rm(root, { recursive: true, force: true });

@@ -189,11 +189,13 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		var exitError *exec.ExitError
 		if errors.As(waitErr, &exitError) {
 			if status, ok := exitError.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				name := sandboxSignalName(status.Signal())
 				if state.timedOut {
-					notes = fmt.Sprintf("Process terminated by %s: it exceeded the %dms timeout\n", name, command.TimeoutMs)
+					// One wording for one fact: this branch has no field to carry
+					// "the budget did it", so the operation reads the line the host
+					// writes here - the same function on both sides, not a copy.
+					notes = hostCommandTimeoutMarker(command.TimeoutMs) + "\n"
 				} else {
-					notes = fmt.Sprintf("Process terminated by %s\n", name)
+					notes = fmt.Sprintf("Process terminated by %s\n", sandboxSignalName(status.Signal()))
 				}
 			}
 		} else {
