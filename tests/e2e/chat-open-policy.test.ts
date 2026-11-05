@@ -10,8 +10,8 @@ import { launchBrowser } from '../helpers/host-browser.ts';
 import { run } from './go-graph-confirmation.fixture.ts';
 
 /**
- * One transcript policy for every chat window: the turn opens, the tool work
- * inside it does not.
+ * One transcript policy for every chat window: the answer stands alone, and the
+ * thinking above it folds into one line.
  *
  * Measured 2026-11-04, twice, in opposite directions: first a settled node run
  * could keep its last turn in live dress (loose rows that never folded into the
@@ -19,8 +19,9 @@ import { run } from './go-graph-confirmation.fixture.ts';
  * reader wants to watch it — which made a running turn a wall of tool rows with
  * the answer pushed below it, and made the same conversation look different at
  * the two ends of a run. The policy that survived is the one this test pins: a
- * turn block opens, every tool group inside it starts folded — the in-flight
- * turn included — and one click is what opens the detail.
+ * turn block folds once its answer lands (measured 2026-11-05: open-by-default
+ * left a wall of narration above every answer), stays open while the turn is in
+ * flight, and every tool group starts folded — one click opens the detail.
  *
  * This drives the real node chat against a real daemon with one settled turn and
  * one in-flight turn and measures the rendered DOM, not the attributes alone: a
@@ -73,13 +74,22 @@ test('every chat window folds the tool work inside an open turn, live and settle
     await page.goto(`${daemon.url}/#/tasks/${taskId}/nodes/master`);
     await expect.poll(() => page.getByTestId('node-chat-input').isVisible(), { timeout: 30_000 }).toBe(true);
 
-    // The settled turn is one block, and the block is open.
+    // The settled turn is one block, and the answer arriving folded it.
     await expect.poll(() => page.locator('[data-testid="collapsed-turn"]').count(), { timeout: 60_000 }).toBe(1);
     const turn = page.locator('[data-testid="collapsed-turn"]').first();
-    expect(await turn.getAttribute('data-open')).toBe('true');
+    await expect.poll(() => turn.getAttribute('data-open')).toBe('false');
+    // Folded is not empty and not a hiding place for the answer: the answer is a
+    // row of its own below the block, and the block reserves no height for detail.
+    expect(await page.getByText('测试跑完了，全部通过').count()).toBeGreaterThan(0);
+    expect(await turn.locator('.collapsed-turn-body').count()).toBe(0);
+    // One click brings the turn's work back, still with its groups folded.
+    await turn.locator('.collapsed-turn-toggle').click();
+    await expect.poll(() => turn.getAttribute('data-open')).toBe('true');
+    await expect.poll(async () => turn.locator('.collapsed-turn-body').evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThan(0);
 
-    // Both tool groups render folded, and a folded group reserves no height for its
-    // detail: the settled one inside the open turn, and the in-flight one.
+    // Tool groups start folded everywhere, and a folded group reserves no height
+    // for its detail: the settled one now visible inside the turn, and the
+    // in-flight one, which is loose because its turn has no answer yet.
     const groups = page.locator('[data-testid="tool-activity-group"]');
     await expect.poll(() => groups.count(), { timeout: 30_000 }).toBe(2);
     for (let index = 0; index < 2; index += 1) {
@@ -110,7 +120,8 @@ test('every chat window folds the tool work inside an open turn, live and settle
     }
 
     // The settled turn's work belongs to the turn block; the in-flight turn keeps
-    // its rows loose until its answer arrives.
+    // its rows loose until its answer arrives, which is why only one of the two
+    // groups is inside the block.
     expect(await turn.locator('[data-testid="tool-activity-group"]').count()).toBe(1);
   } finally {
     await browser?.close().catch(() => undefined);

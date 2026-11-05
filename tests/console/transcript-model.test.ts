@@ -256,12 +256,12 @@ test('a finished turn folds its thinking and tool calls above the answer', () =>
     busy: false,
   });
 
-  // The turn stays in place: history opens expanded, and the block still folds on
-  // demand through its own toggle.
+  // The turn stays in place and folds once its answer landed: the reader sees the
+  // answer and one line of what came before it, and opens that line on demand.
   expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
   const activity = rows[1];
   if (activity?.kind !== 'activity') throw new Error('expected an activity block');
-  expect(activity.collapsed).toBe(false);
+  expect(activity.collapsed).toBe(true);
   expect(activity.items.map(item => item.kind)).toEqual(['narration', 'tool', 'narration', 'tool']);
   expect(activity.rows.map(child => child.kind)).toEqual(['narration', 'tools', 'narration', 'tools']);
   expect(activity.rows[1]).toMatchObject({ kind: 'tools', active: false });
@@ -340,7 +340,7 @@ test('a steered user message stays where it interrupted the turn', () => {
   const steered = rows[2];
   if (steered?.kind !== 'message') throw new Error('expected the steered message row');
   expect(steered.message.text).toBe('插队：改成 B');
-  expect(rows[3]).toMatchObject({ kind: 'activity', collapsed: false });
+  expect(rows[3]).toMatchObject({ kind: 'activity', collapsed: true });
 });
 
 test('older activity without a loaded answer stays expanded when a later turn has finished', () => {
@@ -352,7 +352,7 @@ test('older activity without a loaded answer stays expanded when a later turn ha
     ], liveTools: [], streaming: [], busy: false,
   });
   expect(rows.map(row => row.kind)).toEqual(['activity', 'activity', 'assistant']);
-  expect(rows[0]).toMatchObject({ kind: 'activity', collapsed: false });
+  expect(rows[0]).toMatchObject({ kind: 'activity', collapsed: true });
 });
 
 test('a steered message interleaves with the running turn by ordinal', () => {

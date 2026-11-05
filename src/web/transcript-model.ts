@@ -23,8 +23,17 @@ export type { TranscriptRsi } from './transcript-rsi.ts';
  * 2026-11-04: the previous policy opened live work and every history group, and
  * a node conversation settled or running looked the same at both ends). */
 export const transcriptFoldPolicy = {
-  /** A turn block renders expanded, settled or in flight. */
-  turnExpanded: true,
+  /**
+   * A settled turn folds its own thinking under one line; the answer stays.
+   *
+   * Measured 2026-11-05: with the block opening by default, every finished turn
+   * left a wall of narration and tool groups above its answer, and scrolling a
+   * conversation meant scrolling past rows the reader had already decided not to
+   * read. The block now folds once the answer lands, and one click opens it -
+   * the same click that opens a tool group inside it. A turn in flight is not
+   * wrapped at all, so live work stays visible while it happens.
+   */
+  turnExpanded: false,
   /** The tool groups inside a turn start folded; opening one is the reader's click. */
   toolGroupExpanded: false,
 } as const;
