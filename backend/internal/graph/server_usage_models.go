@@ -68,7 +68,12 @@ func usageSubscriptionModel(id string, name string, provider UsageProviderId, ap
 		ID: id, Name: name, API: api, BaseURL: baseURL,
 		ContextWindow: 131_072, MaxTokens: 8_192,
 		Reasoning: !usageNonReasoningPattern.MatchString(id),
-		Supported: api != SubscriptionModelApiResponses,
+		// A model is usable when its platform is: the transport is not the
+		// question. The old verdict here (`api != responses`) marked every
+		// Responses model unsupported while the runtime sent that transport and
+		// the configuration accepted it, so the catalog said one thing and the
+		// session did another.
+		Supported: UnsupportedPlatformReason(string(provider)) == "",
 	}
 	if values.ContextWindow != nil {
 		model.ContextWindow = *values.ContextWindow

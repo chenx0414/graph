@@ -10,6 +10,13 @@ const AGENT_EXECUTION_LIMIT = 10
 
 const PROGRAM_EXECUTION_LIMIT = 4
 
+// runtimeLeaseEpoch is the instant this process started.
+//
+// A program lease recorded before it cannot belong to an attempt running here:
+// nothing had been dispatched yet. Together with the single-instance owner lock
+// that is the whole judgment for a stale lease - the holder process is gone.
+var runtimeLeaseEpoch = NowMillis()
+
 type AbortSignal struct {
 	mu        sync.Mutex
 	done      chan struct{}
@@ -118,7 +125,11 @@ func OccupiedSlots(store *TaskStore, kind string) int64 {
 		counted, _ := graphDBRow(store.Db, "SELECT COUNT(*) AS n FROM kernel_executions WHERE state='running' AND waiting_slot=0")
 		kernel = graphDBInt(counted, "n")
 	} else if kind == "program" && hasKernel {
-		counted, _ := graphDBRow(store.Db, "SELECT COUNT(*) AS n FROM kernel_module_operations WHERE worker_active=1")
+		// A program slot is held by an attempt, and an attempt is either prepared
+		// (about to cross its send boundary) or dispatched (running). Counting the
+		// worker flag alone let one interrupted operation hold a slot of four for
+		// ever, and every program operation queued behind it starved.
+		counted, _ := graphDBRow(store.Db, "SELECT COUNT(*) AS n FROM kernel_module_operations WHERE worker_active=1 AND state IN ('prepared','dispatched')")
 		kernel = graphDBInt(counted, "n")
 	}
 	return occupied + kernel
@@ -172,6 +183,10 @@ func WaitForKernelExecutionSlot(kernel *KernelStore, executionId string, signal 
 // WaitForKernelProgramExecutionSlot reserves program capacity before a native operation crosses its send boundary.
 func WaitForKernelProgramExecutionSlot(kernel *KernelStore, operationId string, signal *AbortSignal) {
 	store := kernel.Store
+	// A slot held by a previous process is not capacity, it is a leak, and the
+	// queue behind it waits for ever. It is judged and given back once, before
+	// this attempt joins the queue.
+	ReclaimStaleOperationLeases(kernel, "lease_stale")
 	for {
 		if signal.Aborted() {
 			panic(executionSlotsAborted())

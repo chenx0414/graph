@@ -282,16 +282,7 @@ func (runner *GraphRunner) routeModuleDeliveries(modules *ModuleRuntime) {
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					if re, ok := rec.(*RuntimeError); ok && re.Code == "paused" {
-						return
-					}
-					kernel.SetNodeQueuePaused(graphId, moduleId, true)
-					reason := panicMessage(rec)
-					kernel.Store.Transaction(func() any {
-						kernel.Store.Event(graphId, "graph.module.failed", map[string]any{"moduleId": moduleId, "deliveryId": deliveryId, "reason": reason})
-						WakeForBlockedNode(kernel.Store, graphId, BlockedNodeWake{NodeID: moduleId, Reason: reason, IncidentID: deliveryId, HasIncident: true})
-						return nil
-					})
+					runner.recordRefusedDelivery(moduleId, deliveryId, rec)
 				}
 			}()
 			definition := kernel.Revision(graphId, modules.RevisionVersion).Definition.Modules[moduleId]
@@ -319,9 +310,143 @@ func (runner *GraphRunner) routeModuleDeliveries(modules *ModuleRuntime) {
 			default:
 				evaluation = modules.ConsumeDelivery(moduleId, input, value, deliveryId)
 			}
+			if definition.Type == "operation" {
+				runner.recordSettledVerdict(moduleId, deliveryId)
+			}
 			RouteModuleOutputs(kernel, modules, graphId, moduleId, evaluation, 0, true)
 		}()
 	}
+}
+
+// Why an operation carries no verdict. The set is closed: a reader that groups
+// these words never has to guess what a missing judgment meant.
+const (
+	noVerdictNoExitCode  = "no_exit_code"
+	noVerdictWaiting     = "waiting_integration"
+	noVerdictInterrupted = "interrupted"
+)
+
+// unjudgedEvent states that nobody judged an operation, and why.
+const unjudgedEvent = "graph.operation.unjudged"
+
+// recordRefusedDelivery records what one refused delivery left behind.
+//
+// A delivery whose operation never crossed its send boundary was not judged:
+// nothing ran, so "failed" would be a verdict the host invented. It is recorded
+// as unjudged with the reason, and the delivery stays on the inbox so the same
+// attempt is made again. Waiting for a source execution to integrate is the
+// common case and needs no brake - the wait ends by itself - while the rest keep
+// their module paused, which is a retry brake and not a judgment.
+//
+// Only a refusal of the module's own definition is a failure of the module, and
+// that keeps graph.module.failed: there the module really did judge its input
+// and found it unfit.
+//
+// A waiting attempt keeps the state its broker gave it, and for "paused" that is
+// prepared: the broker refuses to fail an unsent pause (see its unsentPause),
+// because the attempt has not crossed its send boundary and the same one is made
+// again. Nothing here may reclassify it. Two end-to-end cases read that state in
+// the window between the delivery and the source's integration - the module race
+// case and the scratch-isolation case - and both say prepared, so a change that
+// writes unknown for a paused attempt breaks the contract they assert rather
+// than the other way round.
+func (runner *GraphRunner) recordRefusedDelivery(moduleId, deliveryId string, recovered any) {
+	kernel := runner.options.Kernel
+	reason, brake, isDefect := noVerdictNoExitCode, true, false
+	if failure, ok := recovered.(*RuntimeError); ok {
+		switch failure.Code {
+		case "paused":
+			reason, brake = noVerdictWaiting, false
+		case "integration_blocked":
+			reason = noVerdictWaiting
+		case "uncertain_operation":
+			reason = noVerdictInterrupted
+		case "module_defect", "invalid_definition", "invalid_input":
+			isDefect = true
+		}
+	}
+	if isDefect {
+		runner.failModule(moduleId, deliveryId, recovered)
+		return
+	}
+	if brake {
+		kernel.SetNodeQueuePaused(runner.options.GraphId, moduleId, true)
+	}
+	operation := kernel.ModuleOperationOfDelivery(deliveryId)
+	operationId := ""
+	if operation != nil {
+		operationId = operation.Id
+	}
+	runner.recordUnjudged(moduleId, deliveryId, operationId, reason)
+	if brake {
+		message := panicMessage(recovered)
+		kernel.Store.Transaction(func() any {
+			WakeForBlockedNode(kernel.Store, runner.options.GraphId, BlockedNodeWake{NodeID: moduleId, Reason: message, IncidentID: deliveryId, HasIncident: true})
+			return nil
+		})
+	}
+}
+
+// failModule records a module that judged its input and refused it.
+func (runner *GraphRunner) failModule(moduleId, deliveryId string, recovered any) {
+	kernel := runner.options.Kernel
+	kernel.SetNodeQueuePaused(runner.options.GraphId, moduleId, true)
+	reason := panicMessage(recovered)
+	kernel.Store.Transaction(func() any {
+		kernel.Store.Event(runner.options.GraphId, "graph.module.failed", map[string]any{"moduleId": moduleId, "deliveryId": deliveryId, "reason": reason})
+		WakeForBlockedNode(kernel.Store, runner.options.GraphId, BlockedNodeWake{NodeID: moduleId, Reason: reason, IncidentID: deliveryId, HasIncident: true})
+		return nil
+	})
+}
+
+// recordSettledVerdict states that a settled operation carried no verdict.
+//
+// A command its own timeout killed has no exit code, so nobody judged it. The
+// record says so once, instead of letting passed:false pass for a judgment.
+func (runner *GraphRunner) recordSettledVerdict(moduleId, deliveryId string) {
+	kernel := runner.options.Kernel
+	operation := kernel.ModuleOperationOfDelivery(deliveryId)
+	if operation == nil || operation.State != "settled" {
+		return
+	}
+	if !kernelResultHasNoExitCode(kernel, operation.Result) {
+		return
+	}
+	runner.recordUnjudged(moduleId, deliveryId, operation.Id, noVerdictNoExitCode)
+}
+
+// kernelResultHasNoExitCode reports whether one stored result published an exit
+// code of null, which is how a command that was killed looks.
+func kernelResultHasNoExitCode(kernel *KernelStore, result string) bool {
+	if result == "" {
+		return false
+	}
+	settled, _ := kernel.Content.Decode(result).(map[string]any)
+	outputs, _ := settled["outputs"].(map[string]any)
+	for _, value := range outputs {
+		published, _ := value.(map[string]any)
+		if code, present := published["code"]; present && code == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// recordUnjudged states once per delivery and reason that nobody judged it.
+//
+// The fact is stated once because it is a fact about an attempt, not a progress
+// report: a delivery retried while its source is still running would otherwise
+// write the same sentence on every drain.
+func (runner *GraphRunner) recordUnjudged(moduleId, deliveryId, operationId, reason string) {
+	seen, _ := graphDBRow(runner.kernelDB(), `SELECT cursor FROM events WHERE task_id=? AND type=?
+      AND json_extract(data,'$.deliveryId')=? AND json_extract(data,'$.reasonCode')=?`,
+		runner.options.GraphId, unjudgedEvent, deliveryId, reason)
+	if seen != nil {
+		return
+	}
+	runner.options.Kernel.Store.Event(runner.options.GraphId, unjudgedEvent, map[string]any{
+		"moduleId": moduleId, "deliveryId": deliveryId, "operationId": operationId, "reasonCode": reason,
+	})
 }
 
 func (runner *GraphRunner) kernelDB() *sql.DB {

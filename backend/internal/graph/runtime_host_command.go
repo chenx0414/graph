@@ -1,12 +1,10 @@
 package graph
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"hash"
 	"io"
 	"os"
 	"os/exec"
@@ -19,9 +17,14 @@ import (
 	"bufio"
 )
 
-// maxHostOutputBytes is how much of one stream is kept: a check that prints more than this is
-// flooding, not evidencing.
-const maxHostOutputBytes = 32 * 1024 * 1024
+// hostCommandHandshake is how long the supervisor may take to announce that it is ready.
+//
+// It is deliberately not the command's budget: the operation's budget measures
+// the command, and what happens between the spawn and the first byte of work -
+// waiting for a program slot, for the graph's Git lock, or for this handshake -
+// is not the command's time. A supervisor that never announces itself is a
+// broken host rather than a slow command, so it gets its own bound.
+const hostCommandHandshake = 60 * time.Second
 
 // hostCommandWorkerPath is the Node supervisor that runs the command. The worker stays Node
 // (RULEBOOK §7); the Go host speaks its IPC channel.
@@ -109,6 +112,9 @@ type HostCommandResult struct {
 	Stdout      string                           `json:"stdout"`
 	Stderr      string                           `json:"stderr"`
 	OutputFiles map[string]HostCommandOutputFile `json:"outputFiles,omitempty"`
+	// TimedOut says the command was killed by its own budget, not by its work:
+	// it produced no exit code, and "no verdict" is the honest reading.
+	TimedOut bool `json:"timedOut"`
 }
 
 // HostCommandInput is one host command.
@@ -134,14 +140,6 @@ type HostCommandInput struct {
 	Quiescence *ProcessQuiescenceReceipt
 }
 
-// hostOutputStream is one preserved stream.
-type hostOutputStream struct {
-	path  string
-	file  *os.File
-	bytes int64
-	hash  hash.Hash
-}
-
 // hostCommandState is the mutable state of one host command.
 type hostCommandState struct {
 	process       *exec.Cmd
@@ -152,8 +150,11 @@ type hostCommandState struct {
 	mutex         sync.Mutex
 	killTree      func()
 	timer         *time.Timer
+	handshake     *time.Timer
 	abortListener *abortListener
 	timedOut      bool
+	started       bool
+	unstarted     bool
 	truncated     bool
 	result        HostCommandResult
 }
@@ -232,9 +233,8 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 			return
 		}
 		settled = true
-		if state.timer != nil {
-			state.timer.Stop()
-		}
+		state.stopTimers()
+		timedOut, unstarted := state.outcome()
 		if input.Signal != nil && state.abortListener != nil {
 			input.Signal.RemoveEventListener(state.abortListener)
 		}
@@ -245,15 +245,18 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 			panic(admissionFailure)
 		}
 		reason := ""
-		if state.timedOut && input.TimeoutMs != nil {
-			reason = "Process terminated by SIGKILL: it exceeded the " + itoa(*input.TimeoutMs) + "ms timeout\n"
+		if timedOut && input.TimeoutMs != nil {
+			reason = hostCommandTimeoutMarker(*input.TimeoutMs) + "\n"
+		}
+		if unstarted {
+			reason += "Command supervisor never reported ready within " + itoa(int(hostCommandHandshake/time.Millisecond)) + "ms\n"
 		}
 		tail := ""
 		if state.truncated {
 			tail = "Output truncated at " + itoa(maxHostOutputBytes) + " bytes\n"
 		}
 		finalCode := code
-		if state.timedOut {
+		if timedOut {
 			finalCode = nil
 		}
 		var outputFiles map[string]HostCommandOutputFile
@@ -268,6 +271,7 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 			Stdout:      state.stdout.String(),
 			Stderr:      state.stderr.String() + extraStderr + reason + tail,
 			OutputFiles: outputFiles,
+			TimedOut:    timedOut,
 		}
 	}
 	// The worker announces that it is ready for the command; the host admits the
@@ -282,7 +286,7 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 					kind, _ := message["kind"].(string)
 					switch kind {
 					case "ready":
-						if (input.Signal != nil && input.Signal.Aborted()) || state.timedOut {
+						if (input.Signal != nil && input.Signal.Aborted()) || state.timedOutState() {
 							state.killTree()
 							break
 						}
@@ -298,6 +302,7 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 							}()
 						}
 						if admissionFailure == nil {
+							state.begin(input.TimeoutMs)
 							state.send(map[string]any{"kind": "start"})
 						}
 					case "result":
@@ -337,14 +342,17 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 			state.killTree()
 		}, true)
 	}
-	if input.TimeoutMs != nil {
-		state.timer = time.AfterFunc(time.Duration(*input.TimeoutMs)*time.Millisecond, func() {
-			state.mutex.Lock()
-			state.timedOut = true
-			state.mutex.Unlock()
+	state.handshake = time.AfterFunc(hostCommandHandshake, func() {
+		state.mutex.Lock()
+		unstarted := !state.started
+		if unstarted {
+			state.unstarted = true
+		}
+		state.mutex.Unlock()
+		if unstarted {
 			state.killTree()
-		})
-	}
+		}
+	})
 	environment := map[string]string{}
 	for name, value := range input.Env {
 		environment[name] = value
@@ -378,95 +386,50 @@ func RunHostCommand(input HostCommandInput) HostCommandResult {
 	return state.result
 }
 
-// send writes one message to the supervisor.
-func (state *hostCommandState) send(message map[string]any) {
-	if state.channel == nil {
+// begin starts the command's own budget, once the operation crossed its send boundary.
+func (state *hostCommandState) begin(timeoutMs *int) {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	if state.started {
 		return
 	}
-	encoded, err := marshalJSON(message)
-	if err != nil {
+	state.started = true
+	if state.handshake != nil {
+		state.handshake.Stop()
+	}
+	if timeoutMs == nil {
 		return
 	}
-	_, _ = state.channel.Write(append([]byte(encoded), '\n'))
+	state.timer = time.AfterFunc(time.Duration(*timeoutMs)*time.Millisecond, func() {
+		state.mutex.Lock()
+		state.timedOut = true
+		state.mutex.Unlock()
+		state.killTree()
+	})
 }
 
-// readStream keeps one stream of the supervisor and preserves it.
-func (state *hostCommandState) readStream(reader io.Reader, name string) {
-	buffer := make([]byte, 64*1024)
-	for {
-		read, err := reader.Read(buffer)
-		if read > 0 {
-			chunk := buffer[:read]
-			state.preserve(name, chunk)
-			if name == "stdout" {
-				state.stdout.keep(chunk, state)
-			} else {
-				state.stderr.keep(chunk, state)
-			}
-		}
-		if err != nil {
-			return
-		}
+// timedOutState reports whether the command's own budget has expired.
+func (state *hostCommandState) timedOutState() bool {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	return state.timedOut
+}
+
+// stopTimers ends both budgets of one attempt.
+func (state *hostCommandState) stopTimers() {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	if state.handshake != nil {
+		state.handshake.Stop()
 	}
 }
 
-// preserve writes one chunk to the preserved file of a stream.
-func (state *hostCommandState) preserve(name string, chunk []byte) {
-	stream, ok := state.streams[name]
-	if !ok {
-		return
-	}
-	offset := 0
-	for offset < len(chunk) {
-		written, err := stream.file.Write(chunk[offset:])
-		if err != nil {
-			state.killTree()
-			return
-		}
-		offset += written
-	}
-	stream.hash.Write(chunk)
-	stream.bytes += int64(len(chunk))
-}
-
-// hostCommandBuffer keeps the bounded inline view of one stream.
-type hostCommandBuffer struct {
-	mutex  sync.Mutex
-	chunks [][]byte
-	bytes  int
-}
-
-// keep adds one chunk to the inline view.
-func (buffer *hostCommandBuffer) keep(chunk []byte, state *hostCommandState) {
-	buffer.mutex.Lock()
-	defer buffer.mutex.Unlock()
-	if buffer.bytes >= maxHostOutputBytes {
-		state.truncated = true
-		return
-	}
-	room := len(chunk)
-	if remaining := maxHostOutputBytes - buffer.bytes; room > remaining {
-		room = remaining
-	}
-	buffer.chunks = append(buffer.chunks, chunk[:room])
-	if room < len(chunk) {
-		state.truncated = true
-	}
-	buffer.bytes += room
-}
-
-// String returns the inline view of the stream.
-func (buffer *hostCommandBuffer) String() string {
-	buffer.mutex.Lock()
-	defer buffer.mutex.Unlock()
-	return string(bytes.Join(buffer.chunks, nil))
-}
-
-// hostCommandNumber reports whether a value is a number.
-func hostCommandNumber(value any) bool {
-	switch value.(type) {
-	case float64, int, int64:
-		return true
-	}
-	return false
+// outcome reads what ended this attempt: its budget, or a supervisor that never answered.
+func (state *hostCommandState) outcome() (bool, bool) {
+	state.mutex.Lock()
+	defer state.mutex.Unlock()
+	return state.timedOut, state.unstarted
 }

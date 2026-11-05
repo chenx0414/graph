@@ -162,7 +162,11 @@ func (m *ModelRuntime) Send(provider string, request ProviderRequest) (*Provider
 	if err != nil {
 		return nil, err
 	}
-	httpRequest, err := http.NewRequest(http.MethodPost, providerEndpoint(reg.BaseURL, reg.API), bytes.NewReader(body))
+	endpoint, err := providerEndpoint(reg.BaseURL, reg.API)
+	if err != nil {
+		return nil, err
+	}
+	httpRequest, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -182,17 +186,28 @@ func (m *ModelRuntime) Send(provider string, request ProviderRequest) (*Provider
 	return &ProviderResponse{Status: response.StatusCode, Header: response.Header, Body: payload}, nil
 }
 
-// providerEndpoint is the path a provider API takes.
-func providerEndpoint(baseURL string, api ModelApi) string {
+// providerEndpoint is the path a provider API takes, or the reason there is none.
+//
+// The api value is the vocabulary the configuration accepts, and a value outside
+// it is an error here rather than a silent `default:` on the chat-completions
+// path: one wrong guess sends a whole session to an endpoint the transport was
+// never meant for, and the only symptom is a malformed answer.
+func providerEndpoint(baseURL string, api ModelApi) (string, error) {
 	trimmed := strings.TrimRight(baseURL, "/")
 	switch string(api) {
-	case "anthropic-messages":
-		return trimmed + "/messages"
-	case "openai-responses":
-		return trimmed + "/responses"
-	default:
-		return trimmed + "/chat/completions"
+	case string(ModelApiAnthropicMessages):
+		return trimmed + "/messages", nil
+	case string(ModelApiOpenAIResponses):
+		return trimmed + "/responses", nil
+	case string(ModelApiOpenAICompletions):
+		return trimmed + "/chat/completions", nil
 	}
+	return "", errors.New(providerApiProblem(api))
+}
+
+// providerApiProblem is the one sentence for an api value the runtime cannot send.
+func providerApiProblem(api ModelApi) string {
+	return "Unsupported provider api \"" + string(api) + "\": use \"openai-completions\", \"openai-responses\" or \"anthropic-messages\""
 }
 
 // providerRequestHeaders are the auth and routing headers of one provider call.
@@ -258,6 +273,11 @@ func providerRequestBody(api ModelApi, request ProviderRequest) ([]byte, error) 
 			payload[key] = value
 		}
 		return json.Marshal(payload)
+	}
+	if string(api) != string(ModelApiOpenAICompletions) {
+		// Only the three declared transports have a body shape. An unknown value
+		// must not fall through to the chat-completions one.
+		return nil, errors.New(providerApiProblem(api))
 	}
 	payload := map[string]any{
 		"model":    request.Model,

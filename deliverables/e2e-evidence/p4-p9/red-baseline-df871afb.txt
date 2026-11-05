@@ -1,0 +1,51 @@
+=== P4 + P9 red on the baseline tree df871afb (product code unchanged, new E2E only) ===
+
+--- tests/e2e/go-desktop-permission-context.test.ts ---
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/e2e/go-desktop-permission-context.test.ts[2m > [22mthe host session reports its own reading, and the sandboxed session marks its reading as no evidence
+[31m[1mAssertionError[22m: expected error.details.executionContext on the host refusal; got {"accessibility":"denied","checked":"agent-desktop permissions","source":"graph-desktop-tool"}: expected undefined to match object { sandbox: false, …(3) }[39m
+
+[32m- Expected:[39m
+{
+  "accessMode": "full",
+  "evidence": "host",
+  "probe": "agent-desktop permissions",
+  "sandbox": false,
+}
+
+--- tests/e2e/go-provider-api-vocabulary.test.ts -t "the api vocabulary" ---
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/e2e/go-provider-api-vocabulary.test.ts[2m > [22mthe api vocabulary the product publishes is the one it accepts, and an unsupported value names the accepted list
+[31m[1mAssertionError[22m: the catalog still offers chatgpt as usable: {"id":"chatgpt","label":"ChatGPT","api":"openai-responses","baseUrl":"https://chatgpt.com/backend-api/codex","credentialRef":"GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN","credentialKind":"subscription","modelsListSupported":true,"notes":["ChatGPT/Codex 订阅访问令牌；后端只按 Responses 形状（input 项目、扁平工具、response.* 事件）应答，所以该平台注册为 openai-responses，真实补全与工具调用均已按此传输实测。"],"custom":false,"credentialConfigured":false}: expected undefined to be true // Object.is equality[39m
+
+[32m- Expected:[39m
+true
+
+[31m+ Received:[39m
+undefined
+
+--- tests/e2e/go-provider-api-vocabulary.test.ts -t "ChatGPT entry is concluded" ---
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/e2e/go-provider-api-vocabulary.test.ts[2m > [22mthe ChatGPT entry is concluded: the catalog and the delivery record both mark it unsupported, with its fallback and the reason
+[31m[1mAssertionError[22m: the catalog still presents chatgpt as a usable platform: expected undefined to be true // Object.is equality[39m
+
+[32m- Expected:[39m
+true
+
+[31m+ Received:[39m
+undefined
+
+--- tests/e2e/go-provider-api-vocabulary.test.ts -t "live application configuration" ---
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/e2e/go-provider-api-vocabulary.test.ts[2m > [22mthe live application configuration is not writable from a daemon that does not own it, and the file is left byte-identical
+[31m[1mAssertionError[22m: expected the live configuration write to be refused; got 200 {"revision":1,"effectiveRevision":1,"applied":true,"configured":true,"modelCount":1,"enabledModelCount":1,"restartRequired":false}: expected 200 to be 400 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 400[39m
+[31m+ 200[39m

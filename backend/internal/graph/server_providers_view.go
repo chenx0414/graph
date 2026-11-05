@@ -55,6 +55,11 @@ type PlatformView struct {
 	Notes                []string               `json:"notes"`
 	Custom               bool                   `json:"custom"`
 	CredentialConfigured bool                   `json:"credentialConfigured"`
+	// Unsupported marks a platform the product has concluded: the directory still
+	// lists it, so the settings page can explain what happened to a configuration
+	// that names it, and the reason travels with the flag.
+	Unsupported       bool   `json:"unsupported,omitempty"`
+	UnsupportedReason string `json:"unsupportedReason,omitempty"`
 }
 
 // PlatformCatalog is the platform directory for the settings wizard.
@@ -73,6 +78,10 @@ func PlatformCatalogView(secretValues map[string]string) PlatformCatalog {
 			CredentialRef: preset.CredentialRef, CredentialKind: preset.CredentialKind,
 			ModelsListSupported: preset.ModelsListSupported, Headers: preset.Headers,
 			DocsURL: preset.DocsURL, Notes: preset.Notes, Custom: preset.ID == CUSTOM_PLATFORM_ID,
+		}
+		if preset.Unsupported {
+			view.Unsupported = true
+			view.UnsupportedReason = UnsupportedPlatformReason(preset.ID)
 		}
 		if value, ok := secretValues[preset.CredentialRef]; ok && strings.TrimSpace(value) != "" {
 			view.CredentialConfigured = true

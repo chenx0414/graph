@@ -175,14 +175,15 @@ func desktopEnvironment() []string {
 func agentToolsDesktopHandlers(input AgentToolsInput) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"desktop": func(id string, params map[string]any) any {
-			return agentToolsDesktopResult(input.Desktop, params)
+			return agentToolsDesktopResult(input, params)
 		},
 	}
 }
 
 // agentToolsDesktopResult runs one desktop command and answers with what the CLI
 // printed.
-func agentToolsDesktopResult(desktop *AgentToolsDesktop, params map[string]any) any {
+func agentToolsDesktopResult(input AgentToolsInput, params map[string]any) any {
+	desktop := input.Desktop
 	if desktop == nil || desktop.Bin == "" {
 		Raise("permission", "This host has no agent-desktop; install it or set "+GRAPH_DESKTOP_BIN_ENV)
 	}
@@ -207,7 +208,7 @@ func agentToolsDesktopResult(desktop *AgentToolsDesktop, params map[string]any) 
 	}
 	// The permission question is answered before the target question: a command
 	// that reads the accessibility tree has no target to name without the grant.
-	if refusal := desktopPermissionProblem(desktop, command); refusal != nil {
+	if refusal := desktopPermissionProblem(desktop, command, desktopExecutionContextOf(input)); refusal != nil {
 		return agentToolsText(stringifyJSON(refusal))
 	}
 	argv := append([]string{command}, args...)
@@ -274,7 +275,7 @@ func agentToolsDesktopResult(desktop *AgentToolsDesktop, params map[string]any) 
 //
 // A probe that cannot be read is not a denial: the command runs and the CLI's own
 // answer stands, rather than the tool inventing a cause it did not observe.
-func desktopPermissionProblem(desktop *AgentToolsDesktop, command string) map[string]any {
+func desktopPermissionProblem(desktop *AgentToolsDesktop, command string, context desktopExecutionContext) map[string]any {
 	if !desktopAccessibilityCommands[command] {
 		return nil
 	}
@@ -283,7 +284,56 @@ func desktopPermissionProblem(desktop *AgentToolsDesktop, command string) map[st
 	if state == "" || state == "granted" {
 		return nil
 	}
-	return desktopPermissionRefusal(command, state, version)
+	return desktopPermissionRefusal(command, state, version, context)
+}
+
+// desktopExecutionContext is where one permission reading was taken.
+//
+// `agent-desktop permissions` answers with the accessibility grant of the process
+// that runs it, and macOS binds that grant to the environment rather than to the
+// binary: inside the seatbelt profile the same executable the user granted reads
+// `denied`. A refusal that names only the state therefore reports the place the
+// reading came from as the user's own setting, and sends them to repair a grant
+// that may already be there. The context travels with the refusal so the model
+// can tell the two apart and ask for the command on the host instead.
+type desktopExecutionContext struct {
+	// Sandboxed reports a session whose commands run confined instead of on the host.
+	Sandboxed bool
+	// AccessMode is the policy mode the reading was taken under.
+	AccessMode string
+	// Role is the Agent role of the session (master, worker or reviewer).
+	Role string
+	// PolicyDigest identifies the access policy the reading was taken under.
+	PolicyDigest string
+}
+
+// desktopExecutionContextOf reads the context out of the tool input.
+//
+// A session without a resolved policy is marked sandboxed: the tool cannot prove
+// that the reading came from the host, and a reading it cannot place is not
+// evidence of the host grant.
+func desktopExecutionContextOf(input AgentToolsInput) desktopExecutionContext {
+	context := desktopExecutionContext{Sandboxed: true, AccessMode: "unknown", Role: input.Role}
+	if input.Access == nil {
+		return context
+	}
+	context.AccessMode = string(input.Access.Mode)
+	context.PolicyDigest = input.Access.Digest
+	context.Sandboxed = !IsFullAccess(input.Access)
+	return context
+}
+
+// details is the context block a refusal carries.
+func (context desktopExecutionContext) details() map[string]any {
+	evidence := "host"
+	if context.Sandboxed {
+		evidence = "sandbox"
+	}
+	return map[string]any{
+		"sandbox": context.Sandboxed, "accessMode": context.AccessMode,
+		"role": context.Role, "policyDigest": context.PolicyDigest,
+		"probe": "agent-desktop permissions", "evidence": evidence,
+	}
 }
 
 // desktopAccessibilityState reads the accessibility state and the protocol

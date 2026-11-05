@@ -54,10 +54,21 @@ func (k *KernelStore) ModuleOperationPrepared(id string) bool {
 	return ok
 }
 
-// FailModuleOperation records an operation that did not finish. One that was
-// already sent is uncertain rather than failed: it may have had its effect.
+// FailModuleOperation records an operation that stopped without a verdict.
+//
+// A dispatched operation is uncertain: it may have had its effect. One that
+// never crossed its send boundary is unknown, not failed - nothing ran, so
+// there is no judgment to record, and the same delivery may try again. Failed
+// is reserved for a command that really ran and really said no, which settles
+// the operation instead of failing it.
+//
+// Unknown is a retryable state: the broker replays settled, refuses cancelled
+// and reconciles dispatched/uncertain, and everything else - prepared, unknown -
+// is prepared again for the same operation id. An attempt that never left its
+// boundary is not settled by this call: a broker refusing with paused keeps its
+// row prepared, and only the states that really ended come through here.
 func (k *KernelStore) FailModuleOperation(id, reason string, ended int64) {
-	g5Exec(k.Db, "UPDATE kernel_module_operations SET state=CASE WHEN state='dispatched' THEN 'uncertain' ELSE 'failed' END,error=?,ended_at=? WHERE id=? AND state!='settled'",
+	g5Exec(k.Db, "UPDATE kernel_module_operations SET state=CASE WHEN state='dispatched' THEN 'uncertain' ELSE 'unknown' END,error=?,ended_at=? WHERE id=? AND state!='settled'",
 		reason, ended, id)
 }
 
