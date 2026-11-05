@@ -1,8 +1,8 @@
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
 import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { absolutePaths, appRootFilePath, loadSecrets, resolveAppPaths, resolveSourceRoot } from './lib.ts';
+import { absolutePaths, appRootFilePath, loadRawSecretEntries, resolveAppPaths, resolveSourceRoot, saveSecrets } from './lib.ts';
 
 export function findPackagedDaemon(sourceRoot, devRoot) {
   if (process.env.GRAPH_DAEMON_BIN && existsSync(process.env.GRAPH_DAEMON_BIN)) return resolve(process.env.GRAPH_DAEMON_BIN);
@@ -25,15 +25,56 @@ export function findPackagedDaemon(sourceRoot, devRoot) {
 
 /** The secrets this app has stored, opened with the key file beside them.
  *
- * The name survived the move: the store used to live behind the login keychain,
- * and every touch of that keychain raised a macOS dialog the reader could not get
- * rid of (measured 2026-11-05). A value sealed by the keychain in an earlier
- * version now fails to open and reads as an unconfigured provider - the entry is
- * left in the file, untouched, and the keychain is never opened again.
+ * The store used to live behind the login keychain, and every touch raised a macOS
+ * dialog the reader could not get rid of (measured 2026-11-05). One migration is
+ * allowed and only one: when there is no key file yet, values are opened with the
+ * keychain, immediately re-sealed with the new key, and written back. From then on
+ * the keychain is never opened again - and the reader's provider credentials keep
+ * working instead of reading as unconfigured.
  */
 export function secretsFromKeychain(paths) {
-  const codec = fileSecretsCodec(secretsKeyPath(paths.secretsPath));
-  return loadSecrets(paths.secretsPath, codec, path => readFileSync(path, 'utf8'));
+  const keyPath = secretsKeyPath(paths.secretsPath);
+  const file = fileSecretsCodec(keyPath);
+  let raw;
+  try {
+    raw = readFileSync(paths.secretsPath, 'utf8');
+  } catch {
+    return {};
+  }
+  const entries = (() => {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.entries && typeof parsed.entries === 'object' ? parsed.entries : {};
+    } catch {
+      return {};
+    }
+  })();
+  const opened = {};
+  let migrated = false;
+  for (const [ref, value] of Object.entries(entries)) {
+    if (typeof value !== 'string') continue;
+    const sealed = Buffer.from(value, 'base64');
+    try {
+      opened[ref] = file.decryptString(sealed);
+      continue;
+    } catch {
+      // Not sealed by this key file: either a first run after the move, or a value
+      // the keychain sealed before it.
+    }
+    try {
+      opened[ref] = safeStorage.decryptString(sealed);
+      migrated = true;
+    } catch {
+      // A value nothing on this machine can open stays in the file untouched.
+    }
+  }
+  if (migrated) {
+    saveSecrets(paths.secretsPath, file, opened, (path, data) => writeFileSync(path, data, { mode: 0o600 }), {
+      raw: loadRawSecretEntries(paths.secretsPath, path => readFileSync(path, 'utf8')),
+      touched: Object.keys(opened),
+    });
+  }
+  return opened;
 }
 
 export const readJson = path => {
