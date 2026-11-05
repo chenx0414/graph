@@ -129,42 +129,42 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   // A record longer than the store's preview limit keeps only its first 512 runes,
   // and the stub that used to stand for it piled up above the transcript, out of
   // order, until the reader clicked each one. The whole body arrives on its own
-  // instead - the main chat shows a record whole, so a node's chat does too. The
-  // button survives only for a body that could not be read.
+  // instead - the conversation window shows a record whole, so a node's chat does
+  // too. The button survives only for a body that could not be read.
+  //
+  // The read is not tied to the render that started it: measured 2026-11-05, an
+  // effect that cancelled itself whenever `entries` changed aborted every read it
+  // had just started, so each record was marked unread and 69 stubs survived on a
+  // real node page. It is keyed by the scope instead, and the scope check is what
+  // stops a stale answer from landing on another node.
   useEffect(() => {
     if (!taskId) return;
-    const pending = entries.filter(entry => entry.contentTruncated && !autoReadAttempted.current.has(entry.id)).slice(0, 40);
-    if (!pending.length) return;
-    let cancelled = false;
-    void (async () => {
-      for (const entry of pending) {
-        autoReadAttempted.current.add(entry.id);
-        // A read that fails while the daemon is busy must not leave the record
-        // permanently folded: measured 2026-11-05, the same case passed alone in
-        // 2.3s and timed out at 60s inside the full suite, where one unlucky fetch
-        // turned the body into a button nobody clicked.
-        let read = false;
-        for (let attempt = 0; attempt < 3 && !read && !cancelled; attempt += 1) {
-          try {
-            const result = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run?entryId=${encodeURIComponent(entry.id)}`);
-            if (cancelled) return;
-            setEntries(current => mergeEntries(current, result.entries));
-            setUnreadEntries(current => {
-              if (!current.has(entry.id)) return current;
-              const next = new Set(current);
-              next.delete(entry.id);
-              return next;
-            });
-            read = true;
-          } catch {
-            await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
-          }
+    const scopeAtStart = scope;
+    const readOne = async (entry: Entry) => {
+      autoReadAttempted.current.add(entry.id);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const result = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run?entryId=${encodeURIComponent(entry.id)}`);
+          if (scopeRef.current !== scopeAtStart) return;
+          setEntries(current => mergeEntries(current, result.entries));
+          setUnreadEntries(current => {
+            if (!current.has(entry.id)) return current;
+            const next = new Set(current);
+            next.delete(entry.id);
+            return next;
+          });
+          return;
+        } catch {
+          await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+          if (scopeRef.current !== scopeAtStart) return;
         }
-        if (!read && !cancelled) setUnreadEntries(current => new Set(current).add(entry.id));
       }
-    })();
-    return () => { cancelled = true; };
-  }, [entries, nodeId, taskId]);
+      if (scopeRef.current === scopeAtStart) setUnreadEntries(current => new Set(current).add(entry.id));
+    };
+    for (const entry of entries) {
+      if (entry.contentTruncated && !autoReadAttempted.current.has(entry.id)) void readOne(entry);
+    }
+  }, [entries, nodeId, scope, taskId]);
 
   const busy = data?.node.status === 'preparing' || data?.node.status === 'running';
   const transcriptFollow = useTranscriptFollow(scope, Boolean(busy));
