@@ -74,6 +74,9 @@
   color: var(--info);
   font-size: 11px;
 }
+/* The elapsed time sits beside the badge at the same weight: it is a fact about
+   the change, not a decoration, and it is the number the reader waits for. */
+.rsi-report-elapsed { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .rsi-report[data-status="rolled_back"] .rsi-report-badge { background: var(--danger-weak); color: var(--danger); }
 .rsi-report[data-status="checks_failed"] .rsi-report-badge { background: var(--warn-weak); color: var(--warn); }
 .rsi-report[data-status="unavailable"] .rsi-report-badge { background: var(--warn-weak); color: var(--warn); }

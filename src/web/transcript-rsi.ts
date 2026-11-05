@@ -15,12 +15,29 @@ export type TranscriptRsi = {
   validation: { command: string; status: string }[];
   restartRequired: boolean;
   activation: 'saved' | 'pending_reload' | 'active' | null;
+  /** When the receipt was written: the moment this change was submitted. */
+  submittedAt: number;
+  /** When the host confirmed the reload, as the receipt records it. */
+  confirmedAt: number | null;
   force: boolean;
   pendingFiles: string[];
   error?: string;
   diff?: string;
   report: string;
 };
+
+/** How long a change took, in the words a reader counts in.
+ *
+ * Seconds under a minute, then minutes-and-seconds, then hours-and-minutes: a
+ * receipt that said "4187s" would be arithmetically right and useless.
+ */
+export function formatElapsed(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
@@ -56,6 +73,13 @@ export function durableRsi(message: ConversationMessage): TranscriptRsi {
       && ['saved', 'pending_reload', 'active'].includes(String((data.activation as Record<string, unknown>).state))
       ? (data.activation as Record<string, unknown>).state as 'saved' | 'pending_reload' | 'active'
       : status === 'applied' ? (data.restartRequired === true ? 'pending_reload' : 'saved') : null,
+    submittedAt: typeof message.createdAt === 'number' ? message.createdAt : Date.now(),
+    confirmedAt: (() => {
+      const activation = data.activation;
+      if (!activation || typeof activation !== 'object' || Array.isArray(activation)) return null;
+      const value = (activation as Record<string, unknown>).confirmedAt;
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    })(),
     force: data.force === true,
     pendingFiles: stringArray(data.pendingFiles),
     ...(typeof data.error === 'string' ? { error: data.error } : {}),

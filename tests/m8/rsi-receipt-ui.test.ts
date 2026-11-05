@@ -34,14 +34,30 @@ test('every self-improvement receipt renders its own label and the copy that goe
 
   // The titles avoid the words the labels use, so a match can only come from
   // the label itself.
-  const receipts: { title: string; data: Record<string, unknown> }[] = [
+  // One change landed after 1m 5s, one is still waiting. Both are seeded with the
+  // timestamps the runtime writes, so the elapsed label is proved against real
+  // numbers instead of a fake clock.
+  const liveSubmittedAt = Date.now() - 65_000;
+  const waitingSubmittedAt = Date.now() - 12_000;
+  const receipts: { title: string; data: Record<string, unknown>; createdAt?: number }[] = [
     {
       title: 'A change that is live',
+      createdAt: liveSubmittedAt,
       data: {
         status: 'applied', title: 'A change that is live', problem: 'The harness had a defect.',
         branch: 'rsi/live-1', commit: 'a'.repeat(40), files: ['src/web/App.tsx'],
         validation: [{ command: 'node --run check', status: 'passed' }],
-        restartRequired: true, activation: { state: 'active' }, report: 'applied',
+        restartRequired: true, activation: { state: 'active', confirmedAt: liveSubmittedAt + 65_000 }, report: 'applied',
+      },
+    },
+    {
+      title: 'A change that is still waiting',
+      createdAt: waitingSubmittedAt,
+      data: {
+        status: 'applied', title: 'A change that is still waiting', problem: 'The harness had a defect.',
+        branch: 'rsi/waiting-1', commit: 'b'.repeat(40), files: ['src/web/App.tsx'],
+        validation: [{ command: 'node --run check', status: 'passed' }],
+        restartRequired: true, activation: { state: 'pending_reload' }, report: 'applied',
       },
     },
     {
@@ -87,10 +103,11 @@ test('every self-improvement receipt renders its own label and the copy that goe
     `INSERT INTO messages(id,conversation_id,role,kind,text,data,state,operation_id,turn,created_at,updated_at)
      VALUES(?,?,'system','rsi',?,?,'done',NULL,0,?,?)`,
   );
-  let stamp = Date.now() - receipts.length * 1000;
+  let fallback = Date.now() - receipts.length * 1000;
   for (const receipt of receipts) {
+    const stamp = receipt.createdAt ?? fallback;
     insert.run(randomUUID(), created.conversationId, String(receipt.data.report), JSON.stringify(receipt.data), stamp, stamp);
-    stamp += 1000;
+    fallback += 1000;
   }
   db.close();
 
@@ -105,8 +122,18 @@ test('every self-improvement receipt renders its own label and the copy that goe
   await live.waitFor({ timeout: 60_000 });
   expect(await live.getAttribute('data-status')).toBe('applied');
   expect(await live.innerText()).toContain('已生效');
+  // A landed change says how long it took; the number comes from the receipt's
+  // own timestamps, not from how long the page happened to be open.
+  expect(await live.getByTestId('rsi-report-elapsed').innerText()).toBe('用时 1m 5s');
   await live.getByRole('button', { name: '展开' }).click();
   expect(await live.innerText()).toContain('宿主已确认重载，改动已生效。');
+
+  const waiting = card('A change that is still waiting');
+  expect(await waiting.getAttribute('data-status')).toBe('applied');
+  expect(await waiting.innerText()).toContain('等待重载');
+  // Still waiting: the label counts up from the submission and keeps moving.
+  await expect.poll(async () => (await waiting.getByTestId('rsi-report-elapsed').innerText()), { timeout: 10_000 })
+    .toMatch(/^已等待 \d+s$/);
 
   const failedChecks = card('A change that failed its checks');
   expect(await failedChecks.getAttribute('data-status')).toBe('checks_failed');
@@ -132,7 +159,7 @@ test('every self-improvement receipt renders its own label and the copy that goe
   await rolledBack.getByRole('button', { name: '展开' }).click();
   expect(await rolledBack.innerText()).toContain('The change could not be applied');
 
-  // Exactly the five seeded receipts, so a stray delivery card cannot hide
+  // Exactly the six seeded receipts, so a stray delivery card cannot hide
   // among them.
-  expect(await page.getByTestId('rsi-report').count()).toBe(5);
+  expect(await page.getByTestId('rsi-report').count()).toBe(6);
 });
