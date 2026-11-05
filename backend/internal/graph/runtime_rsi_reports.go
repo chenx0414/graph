@@ -175,6 +175,13 @@ func rsiSuccessReport(input RsiChangeInput, receipt RsiReceipt, activationNote s
 	}
 	lines = append(lines, FailureDigest(receipt.Validation)...)
 	lines = append(lines, "- 激活："+activationNote)
+	if receipt.AppInstall != nil {
+		if receipt.AppInstall.State == "installed" {
+			lines = append(lines, "- Graph.app：已安装本次构建的包；**退出并重开 Graph.app 才会用到它**。")
+		} else {
+			lines = append(lines, "- Graph.app：没有更新（"+receipt.AppInstall.Note+"）；此时重开 Graph.app 也不会带上这次改动。")
+		}
+	}
 	if receipt.RestartRequired {
 		lines = append(lines, "- 当前回合已结束；等待宿主重载确认后才能报告“已生效”。")
 	}

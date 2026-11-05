@@ -110,6 +110,15 @@
   color: var(--info);
   font-size: 11.5px;
 }
+.rsi-report-app {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 9px 0 0;
+  color: var(--info);
+  font-size: 11.5px;
+}
+.rsi-report-app[data-state="failed"] { color: var(--warn); }
 .rsi-report-diff-toggle {
   display: inline-flex;
   align-items: center;

@@ -88,6 +88,26 @@ test('every self-improvement receipt renders its own label and the copy that goe
       },
     },
     {
+      title: 'A change that also replaced the app',
+      data: {
+        status: 'applied', title: 'A change that also replaced the app', problem: 'The desktop half is the change.',
+        branch: 'rsi/desktop-1', commit: 'c'.repeat(40), files: ['desktop/main.mjs'],
+        validation: [{ command: 'node --run app:build', status: 'passed' }],
+        restartRequired: true, activation: { state: 'pending_reload' },
+        appInstall: { state: 'installed', note: 'installed /Applications/Graph.app' }, report: 'applied',
+      },
+    },
+    {
+      title: 'A change whose app could not be replaced',
+      data: {
+        status: 'applied', title: 'A change whose app could not be replaced', problem: 'The desktop half is the change.',
+        branch: 'rsi/desktop-2', commit: 'd'.repeat(40), files: ['desktop/main.mjs'],
+        validation: [{ command: 'node --run app:build', status: 'passed' }],
+        restartRequired: true, activation: { state: 'pending_reload' },
+        appInstall: { state: 'failed', note: 'no packaged app at dist/app/mac-arm64/Graph.app' }, report: 'applied',
+      },
+    },
+    {
       title: 'A change that rolled back',
       data: {
         status: 'rolled_back', title: 'A change that rolled back', problem: 'The harness had a defect.',
@@ -151,6 +171,21 @@ test('every self-improvement receipt renders its own label and the copy that goe
   expect(await failedRehearsal.getAttribute('data-status')).toBe('dry_run');
   expect(await failedRehearsal.innerText()).toContain('演练未通过');
 
+  // A desktop change is only live when the app the reader launches contains it;
+  // the card says which of the two happened instead of leaving them to guess.
+  const replaced = card('A change that also replaced the app');
+  await replaced.getByRole('button', { name: '展开' }).click();
+  const appLine = replaced.getByTestId('rsi-report-app');
+  expect(await appLine.getAttribute('data-state')).toBe('installed');
+  expect(await appLine.innerText()).toContain('退出并重开 Graph.app 才会用到它');
+
+  const notReplaced = card('A change whose app could not be replaced');
+  await notReplaced.getByRole('button', { name: '展开' }).click();
+  const failedLine = notReplaced.getByTestId('rsi-report-app');
+  expect(await failedLine.getAttribute('data-state')).toBe('failed');
+  expect(await failedLine.innerText()).toContain('Graph.app 没有更新');
+  expect(await failedLine.innerText()).toContain('no packaged app');
+
   const rolledBack = card('A change that rolled back');
   expect(await rolledBack.getAttribute('data-status')).toBe('rolled_back');
   expect(await rolledBack.innerText()).toContain('已回滚');
@@ -159,7 +194,7 @@ test('every self-improvement receipt renders its own label and the copy that goe
   await rolledBack.getByRole('button', { name: '展开' }).click();
   expect(await rolledBack.innerText()).toContain('The change could not be applied');
 
-  // Exactly the six seeded receipts, so a stray delivery card cannot hide
+  // Exactly the eight seeded receipts, so a stray delivery card cannot hide
   // among them.
-  expect(await page.getByTestId('rsi-report').count()).toBe(6);
+  expect(await page.getByTestId('rsi-report').count()).toBe(8);
 });

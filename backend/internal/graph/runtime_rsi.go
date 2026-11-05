@@ -83,6 +83,15 @@ type RsiReceiptActivation struct {
 	Generation  *int64 `json:"generation,omitempty"`
 }
 
+// RsiAppInstall says whether this change replaced the packaged desktop app the
+// reader actually launches, and why not when it did not. A desktop change whose
+// package stayed behind in `dist/app` never reaches the running window, so a
+// receipt that leaves this silent claims a fix the reader cannot see.
+type RsiAppInstall struct {
+	State string `json:"state"`
+	Note  string `json:"note"`
+}
+
 // RsiReceipt is what one applied change reports.
 type RsiReceipt struct {
 	Id              string                `json:"id"`
@@ -94,6 +103,7 @@ type RsiReceipt struct {
 	Files           []string              `json:"files"`
 	Validation      []RsiValidationResult `json:"validation"`
 	RestartRequired bool                  `json:"restartRequired"`
+	AppInstall      *RsiAppInstall        `json:"appInstall,omitempty"`
 	Activation      *RsiReceiptActivation `json:"activation,omitempty"`
 	Force           bool                  `json:"force,omitempty"`
 	// PendingFiles are files left uncommitted by this or an earlier failed attempt, still fixable.
@@ -241,9 +251,9 @@ type RsiStatus struct {
 
 // RsiValidateInput is what a validation hook receives.
 type RsiValidateInput struct {
-	Root       string
-	Checks     []RsiCommand
-	Activate   bool
+	Root          string
+	Checks        []RsiCommand
+	Activate      bool
 	NeedsAppBuild bool
 	NeedsWebBuild bool
 }

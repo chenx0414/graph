@@ -467,6 +467,17 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	if isolated && committedNow && needsWebBuild {
 		_ = rsiRunCheckWithEnvironmentRetry(*root, RsiCommand{Command: "node", Args: []string{"--run", "build:web"}}, RSI_BUILD_TIMEOUT_MS)
 	}
+	// Building the package proves it can be built; it does not put it where the
+	// reader launches it. Measured 2026-11-05: three receipts reported a desktop
+	// fix as live while /Applications kept the bundle from 2026-10-20, so the app
+	// never contained a line of it. The package comes from the tree that was
+	// verified (the isolated worktree), because this checkout's dist/app predates
+	// the commit.
+	var appInstall *RsiAppInstall
+	if activate && committedNow && needsAppBuild {
+		installed := rsiInstallDesktopApp(*root, work)
+		appInstall = &installed
+	}
 	_ = os.Remove(service.rsiWorkingPath())
 
 	// Activation exists to put a new commit into the running daemon. When this call committed
@@ -491,7 +502,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	described := DescribeActivation(RsiActivationInput{Commit: commit, CommittedNow: committedNow, Activate: activate, Live: live})
 	applied := RsiReceipt{
 		Id: id, Status: "applied", Title: title, Root: root, Branch: &branch, Commit: commit,
-		Files: stagePaths, Validation: validation, RestartRequired: restartRequired,
+		Files: stagePaths, Validation: validation, RestartRequired: restartRequired, AppInstall: appInstall,
 		Activation: &RsiReceiptActivation{State: described.State},
 		OutputPath: &outputPath, Adopted: adopted,
 	}

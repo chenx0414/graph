@@ -14,6 +14,9 @@ export type TranscriptRsi = {
   files: string[];
   validation: { command: string; status: string }[];
   restartRequired: boolean;
+  /** Whether this change replaced the packaged app, which only takes effect when
+   * the reader reopens it; null when the change did not touch the desktop half. */
+  appInstall: { state: string; note: string } | null;
   activation: 'saved' | 'pending_reload' | 'active' | null;
   /** How long the call itself took (write, gate, commit), as the daemon measured it. */
   elapsedMs: number | null;
@@ -67,6 +70,13 @@ export function durableRsi(message: ConversationMessage): TranscriptRsi {
     files: stringArray(data.files),
     validation,
     restartRequired: data.restartRequired === true,
+    appInstall: data.appInstall && typeof data.appInstall === 'object' && !Array.isArray(data.appInstall)
+      && typeof (data.appInstall as Record<string, unknown>).state === 'string'
+      ? {
+        state: (data.appInstall as Record<string, unknown>).state as string,
+        note: typeof (data.appInstall as Record<string, unknown>).note === 'string' ? (data.appInstall as Record<string, unknown>).note as string : '',
+      }
+      : null,
     activation: data.activation && typeof data.activation === 'object' && !Array.isArray(data.activation)
       && ['saved', 'pending_reload', 'active'].includes(String((data.activation as Record<string, unknown>).state))
       ? (data.activation as Record<string, unknown>).state as 'saved' | 'pending_reload' | 'active'
