@@ -9,7 +9,8 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cpSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -30,6 +31,14 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
 </dict>
 </plist>
+`;
+
+const frameworkPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>Mantle</string>
+  <key>CFBundleIdentifier</key><string>dev.graph.fixture.mantle</string>
+  <key>CFBundlePackageType</key><string>FMWK</string>
+</dict></plist>
 `;
 
 async function fixture() {
@@ -77,6 +86,24 @@ test('keeps the copy it replaces, so a bad launch can be undone', async () => {
   expect(again.status).toBe(0);
   expect(await readFile(join(dest, 'Contents/Resources/app/desktop/main.mjs'), 'utf8')).toContain('second');
   expect(await readFile(`${dest}.previous/Contents/Resources/app/desktop/main.mjs`, 'utf8')).toContain('checkout');
+});
+
+test('signs the nested code electron-builder leaves unsigned, instead of giving up on it', async () => {
+  const { root, bundle, dest } = await fixture();
+  // A real Mach-O in a real framework layout: copying the binary is enough for
+  // codesign to treat it as nested code it has to seal.
+  const framework = join(bundle, 'Contents/Frameworks/Mantle.framework');
+  await mkdir(join(framework, 'Versions/A/Resources'), { recursive: true });
+  await cpSync('/bin/echo', join(framework, 'Versions/A/Mantle'));
+  await writeFile(join(framework, 'Versions/A/Resources/Info.plist'), frameworkPlist);
+  await symlink('A', join(framework, 'Versions/Current'));
+  await symlink('Versions/Current/Mantle', join(framework, 'Mantle'));
+  const run = install(root, bundle, dest);
+  expect(run.stderr).toBe('');
+  expect(run.status).toBe(0);
+  const verify = spawnSync('codesign', ['--verify', '--deep', '--strict', dest], { encoding: 'utf8' });
+  expect(verify.stderr).toBe('');
+  expect(verify.status).toBe(0);
 });
 
 test('refuses a package that does not carry this checkout, and leaves the installed app alone', async () => {

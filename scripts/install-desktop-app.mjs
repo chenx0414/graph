@@ -12,7 +12,7 @@
  * Exit: 0 installed, 2 usage, 3 package does not match the checkout, 4 signing failed.
  */
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, readdir, readFile, rm, rename } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,7 +58,10 @@ async function staleCheckoutFile() {
 }
 
 async function sign(target) {
-  execFileSync('codesign', ['--force', '--sign', '-', target], { stdio: 'pipe' });
+  // `--deep` is not decoration: electron-builder leaves the nested frameworks
+  // without a usable signature, and a shallow sign then fails on the first
+  // subcomponent (measured 2026-11-05: "In subcomponent: Mantle.framework").
+  execFileSync('codesign', ['--force', '--deep', '--sign', '-', target], { stdio: 'pipe' });
   execFileSync('codesign', ['--verify', '--strict', target], { stdio: 'pipe' });
 }
 
@@ -91,7 +94,10 @@ if (hadPrevious) {
   await rename(dest, previous);
 }
 try {
-  await cp(bundle, dest, { recursive: true });
+  // ditto, not a recursive copy: a framework carries symlinks (Versions/Current,
+  // the binary alias) and a copy that dereferences them leaves a file in the
+  // framework root, which codesign then refuses to seal (measured 2026-11-05).
+  execFileSync('ditto', [bundle, dest], { stdio: 'pipe' });
   await sign(dest);
 } catch (error) {
   await rm(dest, { recursive: true, force: true });
