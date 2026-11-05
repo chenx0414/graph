@@ -337,7 +337,16 @@ func graphAcceptanceDeliveryMatches(task TaskRow, report GraphAcceptanceReport) 
 	if !graphAcceptanceShaEqual(task.TargetSha, report.Commit) {
 		return false
 	}
-	return report.Delivery.Commit != nil && graphAcceptanceShaEqual(report.Delivery.Commit, report.Commit)
+	// A graph that never delivered has no completion receipt to match, and the
+	// receipt was required before the evidence was compared at all: a blocked
+	// graph with an integration branch could therefore never be closed with
+	// limitations, which is the one thing that path exists for (measured
+	// 2026-11-05: five graphs stuck in exactly that shape). The commit the
+	// evidence concerns is still pinned to the integration target above.
+	if report.Delivery.Commit == nil {
+		return true
+	}
+	return graphAcceptanceShaEqual(report.Delivery.Commit, report.Commit)
 }
 
 // graphAcceptanceClosable reports whether this graph can be closed with recorded
