@@ -47,11 +47,16 @@ test('a subagent chat opens the whole run without a load-older click', async () 
 
     const db = new DatabaseSync(join(root, 'state', 'tasks.sqlite'));
     const insert = db.prepare('INSERT INTO node_entries(id,task_id,node_id,role,kind,text,data,created_at) VALUES(?,?,?,?,?,?,?,?)');
+    // One record longer than the store's 4096-byte preview limit. The marker sits
+    // past the 512-rune preview, so it can only appear once the whole body was
+    // fetched - and it must arrive without a click, exactly like the oldest record.
+    const longBody = `${'x'.repeat(6000)} 长记录末尾标记 LONG-BODY-END-9f3`;
     db.exec('BEGIN');
     for (let index = 1; index <= 450; index += 1) {
       const oldest = index === 1;
       insert.run(`seed-${index}`, taskId, 'master', index % 2 === 1 ? 'assistant' : 'user', 'chat', oldest ? '最早的一条记录' : `历史记录 ${index}`, null, index);
     }
+    insert.run('seed-long', taskId, 'master', 'assistant', 'activity', longBody, null, 500);
     db.exec('COMMIT');
     db.close();
 
@@ -65,6 +70,10 @@ test('a subagent chat opens the whole run without a load-older click', async () 
     // No click: the oldest record has to arrive on its own.
     await expect.poll(() => page.getByText('最早的一条记录').count(), { timeout: 60_000 }).toBeGreaterThan(0);
     expect(await page.getByTestId('node-load-older').count()).toBe(0);
+    // A long record opens itself too: no stub pile above the transcript and no
+    // "读取完整记录" click for it.
+    await expect.poll(() => page.getByText('LONG-BODY-END-9f3').count(), { timeout: 60_000 }).toBeGreaterThan(0);
+    expect(await page.getByTestId('node-read-entry-seed-long').count()).toBe(0);
   } finally {
     await launched?.close().catch(() => undefined);
     await daemon?.close().catch(() => undefined);

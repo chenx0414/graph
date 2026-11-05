@@ -51,6 +51,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const [error, setError] = useState('');
   const [olderLoading, setOlderLoading] = useState(false);
   const [loadingEntry, setLoadingEntry] = useState<string | null>(null);
+  const [unreadEntries, setUnreadEntries] = useState<ReadonlySet<string>>(() => new Set());
+  const autoReadAttempted = useRef<Set<string>>(new Set());
   const [olderExhausted, setOlderExhausted] = useState(false);
   const olderPending = useRef(false);
   const historyAnchor = useRef<{ top: number; height: number } | null>(null);
@@ -92,6 +94,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
 
   useEffect(() => {
     generationRef.current += 1;
+    autoReadAttempted.current = new Set();
+    setUnreadEntries(new Set());
     if (loadedScope.current !== scope) {
       loadedScope.current = scope;
       entriesRef.current = [];
@@ -121,6 +125,46 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     refreshTimer.current = setTimeout(refresh, 120);
   });
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
+
+  // A record longer than the store's preview limit keeps only its first 512 runes,
+  // and the stub that used to stand for it piled up above the transcript, out of
+  // order, until the reader clicked each one. The whole body arrives on its own
+  // instead - the main chat shows a record whole, so a node's chat does too. The
+  // button survives only for a body that could not be read.
+  useEffect(() => {
+    if (!taskId) return;
+    const pending = entries.filter(entry => entry.contentTruncated && !autoReadAttempted.current.has(entry.id)).slice(0, 40);
+    if (!pending.length) return;
+    let cancelled = false;
+    void (async () => {
+      for (const entry of pending) {
+        autoReadAttempted.current.add(entry.id);
+        // A read that fails while the daemon is busy must not leave the record
+        // permanently folded: measured 2026-11-05, the same case passed alone in
+        // 2.3s and timed out at 60s inside the full suite, where one unlucky fetch
+        // turned the body into a button nobody clicked.
+        let read = false;
+        for (let attempt = 0; attempt < 3 && !read && !cancelled; attempt += 1) {
+          try {
+            const result = await api<{ entries: Entry[] }>(`/api/tasks/${taskId}/nodes/${encodeURIComponent(nodeId)}/run?entryId=${encodeURIComponent(entry.id)}`);
+            if (cancelled) return;
+            setEntries(current => mergeEntries(current, result.entries));
+            setUnreadEntries(current => {
+              if (!current.has(entry.id)) return current;
+              const next = new Set(current);
+              next.delete(entry.id);
+              return next;
+            });
+            read = true;
+          } catch {
+            await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+          }
+        }
+        if (!read && !cancelled) setUnreadEntries(current => new Set(current).add(entry.id));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entries, nodeId, taskId]);
 
   const busy = data?.node.status === 'preparing' || data?.node.status === 'running';
   const transcriptFollow = useTranscriptFollow(scope, Boolean(busy));
@@ -258,7 +302,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       {taskId && data && !rows.length && (
         <Empty title="暂无对话记录" hint="节点还没有产生任务说明、工具调用或回复。" />
       )}
-      {entries.filter(entry => entry.contentTruncated).map(entry => (
+      {entries.filter(entry => entry.contentTruncated && unreadEntries.has(entry.id)).map(entry => (
         <div className="node-long-entry" key={`long-${entry.id}`}>
           <span className="muted">长记录 · {entry.role === 'tool' ? '工具' : entry.role === 'assistant' ? '回复' : '任务说明'} · {entry.contentBytes?.toLocaleString()} 字节</span>
           <Button size="sm" data-testid={`node-read-entry-${entry.id}`} disabled={loadingEntry !== null} onClick={() => void readEntry(entry.id)}>
