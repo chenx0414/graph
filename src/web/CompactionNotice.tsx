@@ -15,6 +15,11 @@ function CompactionNotice({ row }: { row: Extract<TranscriptRow, { kind: 'compac
         {row.text}
       </span>
       <span className="compaction-notice-rule" aria-hidden="true" />
+      {row.summary && (
+        <div className="compaction-summary" data-testid="compaction-summary" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', opacity: 0.75, margin: '4px 0 0', gridColumn: '1 / -1' }}>
+          {row.summary}
+        </div>
+      )}
     </div>
   );
 }

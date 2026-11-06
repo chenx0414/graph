@@ -280,6 +280,9 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 				"reason": reason, "operationId": live.operation.Id, "tokensBefore": tokensBefore,
 				"completionSequence": completionSequence,
 			}
+			if summary := result["summary"]; summary != nil {
+				data["summary"] = summary
+			}
 			if estimated, ok := result["estimatedTokensAfter"]; ok {
 				data["tokensAfter"] = estimated
 			}

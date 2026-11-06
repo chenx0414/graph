@@ -8,7 +8,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 const SUMMARY_REQUEST = 'context summarization assistant';
 
 interface Event { type?: string; data?: { data?: { reason?: string } } }
-interface View { messages?: { role?: string; kind?: string; text?: string }[]; master?: { status?: string } }
+interface View { messages?: { role?: string; kind?: string; text?: string; data?: { summary?: string } | null }[]; master?: { status?: string } }
 
 function pointer(conversationId: string) {
   return `你正在继续会话 ${conversationId}。一边进行一边从中检索关键上下文。`;
@@ -49,6 +49,8 @@ async function expectPointer(daemon: Awaited<ReturnType<typeof world>>['daemon']
   const notices = (view.messages ?? []).filter(message => message.kind === 'compaction');
   expect(notices.length, JSON.stringify(notices)).toBe(1);
   expect(notices.at(-1)?.text?.trim().endsWith(pointer(conversationId))).toBe(true);
+  // The UI shows the summary itself, so the row has to carry it.
+  expect(notices.at(-1)?.data?.summary ?? '').toContain('## Goal');
   const events = await (await daemon.request(`/api/tasks/${taskId}/events?after=0&limit=500`)).json() as Event[];
   expect(events.filter(event => event.type === 'session.compacted').length).toBeGreaterThan(0);
 }

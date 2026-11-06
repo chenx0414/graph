@@ -103,5 +103,9 @@ test('a compaction leaves its own line in the chat and its summary names the dur
   await notice.waitFor();
   expect(await notice.innerText()).toContain('上下文已自动压缩');
   expect(await notice.count()).toBe(1);
+  // The summary itself is readable in the chat, in small type under the line.
+  const summary = page.getByTestId('compaction-summary');
+  expect(await summary.innerText()).toContain('Summary of the earlier work.');
+  expect(await summary.evaluate(node => getComputedStyle(node).fontSize)).toBe('12px');
   await page.screenshot({ path: join(root, 'test-evidence/compaction-notice.png') });
 });

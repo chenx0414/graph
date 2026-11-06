@@ -132,7 +132,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 						converted := int64(value)
 						tokensBefore = &converted
 					}
-					state.options.Kernel.Store.Event(graphId, "session.compacted", map[string]any{"nodeId": nodeId, "operationId": executionID, "tokensBefore": tokensBefore})
+					state.options.Kernel.Store.Event(graphId, "session.compacted", map[string]any{"nodeId": nodeId, "operationId": executionID, "tokensBefore": tokensBefore, "summary": summary})
 				} else {
 					message := "compaction aborted"
 					if text := rsiText(data["errorMessage"]); text != "" {
