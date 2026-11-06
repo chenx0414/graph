@@ -326,6 +326,10 @@ func (service *providerLogins) disconnect(ref string) map[string]any {
 	for _, login := range logins {
 		service.cancel(login)
 	}
+	// The daemon's own copy goes too: a file left behind is a refresh token that
+	// outlives the account the person just disconnected.
+	service.dropXaiBundle(ref + xaiRefreshSuffix)
+	service.forgetXaiRelogin(ref)
 	// The xAI device login keeps a companion refresh secret, and leaving it
 	// behind would let a disconnected account come back after the next restart.
 	if service.secrets != nil {

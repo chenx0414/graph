@@ -339,11 +339,10 @@ func (l *OperationLifecycle) recoverCredential(operation Operation, result Opera
 	if !scheduled {
 		return false
 	}
-	// The operation is closed so the dispatch cycle can end; the node stays pending and
-	// the renewal requeues it. A failed turn with a dead credential owes nobody a
-	// question: the renewal files one only when the vendor refuses it.
+	// The operation is closed so the dispatch cycle can end, and nothing else: the node's
+	// state belongs to the renewal, which either requeues it or records the failure.
+	// Requeueing here as well counted one failure twice (stall_count went up by two).
 	l.store.MarkOperationSettled(operation.Id, CanonicalJSON(result))
-	l.store.RetryNodeOutput(operation.TaskId, operation.NodeId, CanonicalJSON(result.Output), operation.Id)
 	l.store.Event(operation.TaskId, "node.credential_refresh_scheduled", map[string]any{
 		"nodeId": operation.NodeId, "operationId": operation.Id, "model": model,
 		"attempt": attempt + 1, "reason": "OAuth 凭据被拒，已安排刷新后重跑本轮",

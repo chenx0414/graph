@@ -39,8 +39,28 @@ async function xaiVendor(options: { acceptRefresh: string | string[] | null; iss
       response.writeHead(status, { 'content-type': 'application/json' });
       response.end(JSON.stringify(value));
     };
+    if ((request.url ?? '').startsWith('/.well-known/openid-configuration')) {
+      return reply(200, {
+        issuer: 'https://auth.x.ai',
+        device_authorization_endpoint: 'https://auth.x.ai/oauth2/device/code',
+        token_endpoint: 'https://auth.x.ai/oauth2/token',
+      });
+    }
+    if ((request.url ?? '').startsWith('/oauth2/device/code')) {
+      return reply(200, {
+        device_code: 'device-1', user_code: 'TEST-CODE',
+        verification_uri: 'https://auth.x.ai/oauth2/device',
+        verification_uri_complete: 'https://auth.x.ai/oauth2/device?user_code=TEST-CODE',
+        expires_in: 600, interval: 2,
+      });
+    }
     if ((request.url ?? '').startsWith('/oauth2/token')) {
       const form = new URLSearchParams(body);
+      if (form.get('grant_type') === 'urn:ietf:params:oauth:grant-type:device_code') {
+        // A device-code login this stub approves at once: the desktop keeper is the
+        // one that drives the whole flow, this stub only has to answer it.
+        return reply(200, { access_token: options.issueAccess, refresh_token: 'login-refresh', expires_in: 3600 });
+      }
       if (form.get('grant_type') !== 'refresh_token') return reply(400, { error: 'unsupported_grant_type' });
       const presented = form.get('refresh_token');
       log.refreshes.push({ refreshToken: presented });

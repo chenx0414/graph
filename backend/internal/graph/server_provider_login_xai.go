@@ -371,14 +371,14 @@ func (service *providerLogins) completeXai(login *providerLogin, tokens xaiToken
 		return
 	}
 	if tokens.RefreshToken != "" {
+		// One login, one rotation, one writer: the daemon copy and the app store must
+		// agree, or a restart prefers a token the vendor has already resumed past.
 		bundle := xaiRefreshBundle{RefreshToken: tokens.RefreshToken, TokenEndpoint: tokenEndpoint, AccessExpiresAt: accessExpiresAt}
-		if encoded, err := json.Marshal(bundle); err == nil {
-			text := string(encoded)
-			if xaiSecretApplied(service.services.PushSecret(refreshRef, &text, nil)) {
-				login.mutex.Lock()
-				login.xai.refreshToken = tokens.RefreshToken
-				login.mutex.Unlock()
-			}
+		if persistErr := service.persistXaiBundle(refreshRef, bundle); persistErr == nil {
+			login.mutex.Lock()
+			login.xai.refreshToken = tokens.RefreshToken
+			login.mutex.Unlock()
+			service.forgetXaiRelogin(ref)
 		}
 	}
 	login.mutex.Lock()
@@ -451,10 +451,8 @@ func (service *providerLogins) watchXai(login *providerLogin) {
 			expires = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 		}
 		bundle := xaiRefreshBundle{RefreshToken: nextRefresh, TokenEndpoint: tokenEndpoint, AccessExpiresAt: expires}
-		if encoded, encodeErr := json.Marshal(bundle); encodeErr == nil {
-			text := string(encoded)
-			_ = service.services.PushSecret(refreshRef, &text, nil)
-		}
+		_ = service.persistXaiBundle(refreshRef, bundle)
+		service.forgetXaiRelogin(ref)
 		login.mutex.Lock()
 		login.xai.refreshToken = nextRefresh
 		login.xai.accessExpiresAt = expires

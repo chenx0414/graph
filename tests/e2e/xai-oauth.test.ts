@@ -104,6 +104,19 @@ test('xAI device-code login shows the real code, stores the token, refreshes it 
   expect(await page.getByTestId('provider-login-open').getAttribute('href')).toBe('https://auth.x.ai/oauth2/device?user_code=TEST-CODE');
   await page.screenshot({ path: '/tmp/graph-xai-login-code.png', fullPage: true });
   await expect.poll(() => status.innerText(), { timeout: 40000 }).toContain('已登录 xAI 账号');
+  // A finished login is the end of any "needs a login" state: the card must not keep
+  // telling the person to do what they just did, and the daemon's own copy of the
+  // refresh token must be the one this login issued - a stale copy would present a
+  // token the vendor has already consumed.
+  await expect.poll(async () => Object.values(((await (await page.request.get(`${first.url}/api/providers`)).json())
+    .credentials ?? {}) as Record<string, { secretRef: string; needsRelogin?: boolean }>)
+    .find(credential => credential.secretRef === 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN')?.needsRelogin ?? false,
+  { timeout: 20000 }).toBe(false);
+  // The daemon keeps its copy under its own state directory, beside the app's user data.
+  const bundlePath = join(fixture.userData, 'state', 'xai-refresh-GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN_REFRESH.json');
+  await expect.poll(async () => (await readFile(bundlePath, 'utf8').catch(() => '')).length, { timeout: 20000 }).toBeGreaterThan(0);
+  const bundle = JSON.parse(await readFile(bundlePath, 'utf8')) as { refreshToken: string };
+  expect(['refresh-1', 'refresh-2']).toContain(bundle.refreshToken);
   expect(grants.filter(grant => grant === 'urn:ietf:params:oauth:grant-type:device_code')).toHaveLength(3);
   const secretsPath = join(fixture.userData, 'secrets.json');
   const stored = await readFile(secretsPath, 'utf8');

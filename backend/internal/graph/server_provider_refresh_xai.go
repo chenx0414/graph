@@ -116,15 +116,9 @@ func (service *providerLogins) xaiRefreshNow(ctx context.Context, ref string) er
 	// an in-memory apply plus a request the desktop has to acknowledge - a daemon that
 	// restarted in between lost the rotation and became unrefreshable. If this write
 	// fails, the old credential stays in use instead of a token nobody remembers.
-	encoded, encodeErr := json.Marshal(next)
-	if encodeErr != nil {
-		return fmt.Errorf("刷新凭据无法编码：%w", encodeErr)
+	if err := service.persistXaiBundle(bundleRef, next); err != nil {
+		return err
 	}
-	text := string(encoded)
-	if err := service.writeXaiBundle(bundleRef, text); err != nil {
-		return fmt.Errorf("刷新凭据未能落盘：%w", err)
-	}
-	xaiSecretApplied(service.services.PushSecret(bundleRef, &text, nil))
 	access := tokens.AccessToken
 	if !xaiSecretApplied(service.services.PushSecret(ref, &access, nil)) {
 		return errors.New("访问令牌未能写入本机安全存储")
@@ -287,4 +281,42 @@ func (service *providerLogins) readXaiBundle(ref string) string {
 		return ""
 	}
 	return string(raw)
+}
+
+// persistXaiBundle is the one place a refresh bundle is written.
+//
+// The daemon's own copy goes first and the app store second, so both hold the same
+// rotation: a copy the daemon writes and the store does not (or the other way around)
+// makes one of them present a refresh token the vendor has already consumed.
+func (service *providerLogins) persistXaiBundle(bundleRef string, bundle xaiRefreshBundle) error {
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		return fmt.Errorf("刷新凭据无法编码：%w", err)
+	}
+	text := string(encoded)
+	if writeErr := service.writeXaiBundle(bundleRef, text); writeErr != nil {
+		return fmt.Errorf("刷新凭据未能落盘：%w", writeErr)
+	}
+	xaiSecretApplied(service.services.PushSecret(bundleRef, &text, nil))
+	return nil
+}
+
+// forgetXaiRelogin clears the dead-credential state: a credential that was just
+// renewed or just logged in again is not waiting for the person any more.
+func (service *providerLogins) forgetXaiRelogin(ref string) {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	if service.relogin != nil {
+		delete(service.relogin, ref)
+	}
+}
+
+// dropXaiBundle removes the daemon's copy, so a disconnected account cannot come back
+// through it after the next restart.
+func (service *providerLogins) dropXaiBundle(bundleRef string) {
+	path := service.xaiBundlePath(bundleRef)
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
 }

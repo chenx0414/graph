@@ -140,6 +140,10 @@ func (app *GraphApp) scheduleCredentialRecovery(request CredentialRecoveryReques
 	}
 	go func() {
 		if err := app.loginService().xaiRefreshNow(context.Background(), ref); err != nil {
+			// The renewal is the one thing that could have saved this turn, so the node
+			// keeps the failure the turn earned and the person is asked once (the
+			// credential question markXaiRelogin files).
+			app.runtime.store.SettleNodeOutput(request.TaskId, request.NodeId, "failed", request.Output, request.OperationId)
 			app.runtime.store.Event(request.TaskId, "node.credential_refresh_failed", map[string]any{
 				"nodeId": request.NodeId, "error": err.Error(),
 			})
