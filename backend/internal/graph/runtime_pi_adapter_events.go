@@ -301,7 +301,7 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 				operationId := live.operation.Id
 				AppendMessage(live.store, MessageInput{
 					ConversationID: live.conversation.Id, Role: MessageRoleSystem, Kind: "compaction",
-					Text: compactionNotice(data), Data: data, OperationID: &operationId,
+					Text: compactionNotice(data) + "\n" + compactionPointer(live.conversation.Id), Data: data, OperationID: &operationId,
 				})
 			}
 			live.store.Event(live.operation.TaskId, "session.compacted", map[string]any{"nodeId": live.operation.NodeId, "data": data})

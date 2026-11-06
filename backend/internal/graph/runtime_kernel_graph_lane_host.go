@@ -125,7 +125,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 					summary := rsiText(result["summary"])
 					AppendNodeEntry(state.options.Kernel.Store, NodeEntryInput{
 						TaskID: graphId, NodeID: nodeId, OperationID: rsiStringValue(executionID),
-						Role: "system", Kind: "compaction", Text: summary,
+						Role: "system", Kind: "compaction", Text: summary + "\n" + compactionPointer(graphId),
 					})
 					tokensBefore := (*int64)(nil)
 					if value, ok := result["tokensBefore"].(float64); ok {

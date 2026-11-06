@@ -15,3 +15,7 @@ func pigCompactionInstructions() string {
 }
 
 const historyToolNameGraph = "history_search"
+
+func compactionPointer(conversationId string) string {
+	return "你正在继续会话 " + conversationId + "。一边进行一边从中检索关键上下文。"
+}
