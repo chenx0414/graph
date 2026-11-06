@@ -42,3 +42,21 @@ func TestAsyncFullRunsNice(t *testing.T) {
 		t.Fatalf("the confirmation has to ask for a lower priority, got %d", command.Nice)
 	}
 }
+
+// A command that never ran has no suite lines to keep, so the summary quotes
+// what the command itself said. Measured 2026-11-07: a wrapper that broke node
+// produced one line ("bad option: -n") and the wake reported it as a plain
+// regression with an empty摘要.
+func TestAsyncFullSummaryKeepsTheCommandlineWhenNothingMatches(t *testing.T) {
+	output := "/Applications/Graph.app/Contents/Resources/app/runtime/node: bad option: -n"
+	summary := rsiAsyncFullSummary(output)
+	if !strings.Contains(summary, "bad option: -n") {
+		t.Fatalf("the summary has to quote the line the command printed, got %q", summary)
+	}
+}
+
+func TestAsyncFullSummaryStaysReadableWithoutOutput(t *testing.T) {
+	if got := rsiAsyncFullSummary("   \n\n  "); !strings.Contains(got, "没有任何输出") {
+		t.Fatalf("an empty log says so, got %q", got)
+	}
+}

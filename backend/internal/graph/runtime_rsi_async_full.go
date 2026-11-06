@@ -84,6 +84,12 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 // rsiAsyncFullSummary keeps the failure message readable: the lines that name
 // what broke, bounded, instead of a whole suite log inside a chat message.
 func rsiAsyncFullSummary(output string) string {
+	all := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			all = append(all, trimmed)
+		}
+	}
 	kept := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -100,7 +106,20 @@ func rsiAsyncFullSummary(output string) string {
 		kept = kept[len(kept)-20:]
 	}
 	if len(kept) == 0 {
-		return "摘要: 日志里没有可归纳的行，请读完整日志。"
+		// Nothing in the suite vocabulary matched, which is what a command that
+		// never reached the suite looks like (a bad flag, a missing binary). Quote
+		// its own first and last lines instead of saying the log says nothing.
+		if len(all) == 0 {
+			return "摘要: 命令没有任何输出，请读完整日志。"
+		}
+		head, tail := all, []string{}
+		if len(head) > 3 {
+			head = head[:3]
+		}
+		if len(all) > 3 {
+			tail = all[len(all)-1:]
+		}
+		return "摘要:\n" + strings.Join(append(head, tail...), "\n")
 	}
 	return "摘要:\n" + strings.Join(kept, "\n")
 }
