@@ -139,8 +139,12 @@ func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 		}
 		source := UsageSourceOf(normalized)
 		if settled != nil {
-			if *settled != CanonicalJSON(normalized) {
-				Raise("result_conflict", "Conflicting usage evidence")
+			claimed := CanonicalJSON(normalized)
+			if *settled != claimed {
+				// The two values are the whole point of the refusal: an operator
+				// reading it has to see which invocation disagreed and about
+				// what, not only that something did.
+				Raise("result_conflict", "Conflicting usage evidence for "+id+": recorded "+*settled+", claimed "+claimed)
 			}
 			return
 		}
