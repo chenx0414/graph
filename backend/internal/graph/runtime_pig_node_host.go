@@ -36,6 +36,9 @@ type PigNodeHostOptions struct {
 	Stream PromptStreamFunc
 	// StreamOptions are the provider options of the turn.
 	StreamOptions func() map[string]any
+	// Codemode is the node's code mode setting: the kernel offers its own
+	// extension when it is enabled.
+	Codemode CodemodeSettings
 	// RequestId is the admission identity of the next turn.
 	RequestId func() string
 	// Usage is the usage the host accounted for the turn.
@@ -141,7 +144,7 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 	// calls will report it, and this binding has no task id to file an event
 	// under.
 	_ = pigExtensionTurnStarted(request.Workspace, text)
-	session, err := openPigSession(context.Background(), host.options.Database, request,
+	session, err := openPigSession(context.Background(), host.options.Database, request, host.options.Codemode,
 		pigProviderBridge(host.options.Stream, host.options.Request.Model, func(map[string]any) map[string]any { return host.providerOptions() }),
 		tools, host.options.OnEvent, host.options.OnToolCall)
 	if err != nil {

@@ -323,13 +323,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 				return agentToolsText(answer.Text), nil
 			},
 		})
-		// The codemode tool reaches the node's own tools from a
-		// script. Its host table is the tool list as it stands now,
-		// so a script cannot start another script.
-		if state.options.Codemode.Enabled {
-			nodeTools = append(nodeTools, CodemodeTool(nodeTools, nativeGate,
-				codemodeSettings(state.options.Codemode, state.options.StateDir)))
-		}
 		nodeRequest := AgentSessionRequest{
 			ExecutionId:            workerConfig.ExecutionId,
 			ExecutionConfiguration: workerConfig.NodeExecutionConfiguration,
@@ -382,6 +375,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			Store:    state.options.Kernel.Store,
 			Request:  nodeRequest,
 			Gate:     nativeGate,
+			Codemode: codemodeSettings(state.options.Codemode, state.options.StateDir),
 			// The `submit` is the host's own tool: the host executes it
 			// against the real execution, so the node's tool gate does
 			// not stand in front of it.

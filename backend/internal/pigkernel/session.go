@@ -33,6 +33,8 @@ type SessionOptions struct {
 	Provider ProviderBridge
 	// Tools are the Graph tools the session may call.
 	Tools []ToolSpec
+	// Codemode enables the kernel's own code mode. Nil leaves it out.
+	Codemode *CodemodeOptions
 	// McpServers are the MCP servers the kernel connects natively. Their
 	// tools reach the model under PiG's own `mcp__<server>__<tool>` names.
 	McpServers []McpServerSpec
@@ -178,9 +180,25 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		registrations = append(registrations, toolRegistrations([]ToolSpec{history.spec()}, recorder, options.ToolResults)...)
 	}
 	extension := &durable.Extension{Name: extensionName(options.Identity), Tools: registrations}
-	if err := resident.registry.Install(extension); err != nil {
-		closeMcpServers(connections)
-		return nil, fmt.Errorf("pig kernel: the session extension is refused: %w", err)
+	extensions := []*durable.Extension{extension}
+	// Code mode is the kernel's own extension: its tool joins the session's
+	// registrations and its prompt section lists what a script can call, so the
+	// daemon neither writes a script host nor describes one.
+	if options.Codemode != nil {
+		codemodeExtension, err := CodemodeExtension(*options.Codemode)
+		if err != nil {
+			closeMcpServers(connections)
+			return nil, fmt.Errorf("pig kernel: the codemode extension is refused: %w", err)
+		}
+		registrations = append(registrations, codemodeExtension.Tools...)
+		extension.Tools = registrations
+		extensions = append(extensions, codemodeExtension)
+	}
+	for _, installed := range extensions {
+		if err := resident.registry.Install(installed); err != nil {
+			closeMcpServers(connections)
+			return nil, fmt.Errorf("pig kernel: the session extension is refused: %w", err)
+		}
 	}
 	// The model is the daemon's: the kernel asks the daemon's own stream for
 	// the answer, and the daemon admits the send.
@@ -209,7 +227,7 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		Instructions: harness.SetTo(options.Instructions),
 		Tools:        harness.SetTo(harness.ToolChange{List: registrations}),
 		ModelTools:   harness.SetTo(harness.ToolChange{List: registrations}),
-		Extensions:   harness.SetTo(harness.ExtensionChange{List: []*durable.Extension{extension}}),
+		Extensions:   harness.SetTo(harness.ExtensionChange{List: extensions}),
 	}
 	conversation, err := conversationFor(ctx, resident.kernel, options.Identity, change)
 	if err != nil {

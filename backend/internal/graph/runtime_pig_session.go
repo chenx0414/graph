@@ -35,7 +35,7 @@ type pigAgentTransport struct {
 
 // Open opens one session on the PiG kernel.
 func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSession, error) {
-	tools := pigToolSpecs(transport.store, request, transport.codemode)
+	tools := pigToolSpecs(transport.store, request)
 	extensions, err := pigExtensionSpecs(context.Background(), request, request.Broker, func(tool string, ms float64, isError bool) {
 		transport.store.RecordToolCall(ToolCallInput{InstanceID: request.Binding.InstanceId, Tool: tool, Ms: ms, IsError: isError})
 	})
@@ -43,7 +43,7 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		return nil, err
 	}
 	tools = append(tools, extensions...)
-	session, err := openPigSession(context.Background(), transport.store.Path, request, pigProviderBridge(request.Stream, request.Model, func(kernelOptions map[string]any) map[string]any {
+	session, err := openPigSession(context.Background(), transport.store.Path, request, transport.codemode, pigProviderBridge(request.Stream, request.Model, func(kernelOptions map[string]any) map[string]any {
 		effective := map[string]any{}
 		for key, value := range pigProviderOptions(request) {
 			effective[key] = value
@@ -107,7 +107,7 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 // The main agent and a graph node open the same session: identity, model,
 // tools, MCP, instructions, and the daemon's model channel. The caller
 // supplies the tools and the channel. The credential stays in that channel.
-func openPigSession(ctx context.Context, database string, request AgentSessionRequest, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
+func openPigSession(ctx context.Context, database string, request AgentSessionRequest, codemode CodemodeSettings, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
 	tools, provider, err := pigDeferredToolSurface(request, tools, provider)
 	if err != nil {
 		return nil, err
@@ -123,6 +123,7 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 		Model:        pigModelSpec(request.Model),
 		Provider:     provider,
 		Tools:        tools,
+		Codemode:     pigCodemodeOptions(codemode),
 		McpServers:   pigMcpServers(request),
 		Instructions: pigSessionInstructions(request),
 		RequestId:    request.InputRequestId,
@@ -177,7 +178,7 @@ func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[stri
 //
 // The tool bodies are the daemon's, and so is the admission gate: every call
 // passes the same gate a model send passes.
-func pigToolSpecs(store *TaskStore, request AgentSessionRequest, codemode CodemodeSettings) []pigkernel.ToolSpec {
+func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.ToolSpec {
 	specs := []pigkernel.ToolSpec{}
 	for _, tool := range request.Tools {
 		definition := tool
@@ -238,10 +239,16 @@ func pigToolSpecs(store *TaskStore, request AgentSessionRequest, codemode Codemo
 			},
 		})
 	}
-	if codemode.Enabled {
-		specs = append(specs, pigCodemodeSpec(request.Tools, request.Broker, codemode))
-	}
 	return specs
+}
+
+// pigCodemodeOptions is the kernel's code mode setting, or nil when the
+// configuration turned code mode off.
+func pigCodemodeOptions(codemode CodemodeSettings) *pigkernel.CodemodeOptions {
+	if !codemode.Enabled {
+		return nil
+	}
+	return &pigkernel.CodemodeOptions{CacheDir: codemode.CacheDir, TimeoutMs: float64(codemode.TimeoutMs)}
 }
 
 // pigProviderOptions are the provider options one session's channel carries.
@@ -254,27 +261,6 @@ func pigProviderOptions(request AgentSessionRequest) map[string]any {
 		return nil
 	}
 	return map[string]any{"reasoning": *request.ThinkingLevel}
-}
-
-// pigCodemodeSpec is the codemode tool one session may call.
-//
-// The sandbox's host table is the session's own tools, so a script reaches
-// exactly the tools the model could have called directly - and every one of
-// them passes the same gate.
-func pigCodemodeSpec(tools []ToolDefinition, broker SendGate, settings CodemodeSettings) pigkernel.ToolSpec {
-	tool := CodemodeTool(tools, broker, settings)
-	return pigkernel.ToolSpec{
-		Name:        tool.Name,
-		Description: tool.Description,
-		Parameters:  asMap(tool.Parameters),
-		Result: func(_ context.Context, args map[string]any) (any, error) {
-			value, err := tool.Execute(graphUUID(), args)
-			if err != nil {
-				return nil, err
-			}
-			return value, nil
-		},
-	}
 }
 
 // recordPigToolCall reports one tool call to the daemon's telemetry.
