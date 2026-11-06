@@ -257,6 +257,9 @@ test('v41 drafts and confirmation provenance survive migration and reopen', asyn
       DROP INDEX conversations_one_global;
       DROP INDEX conversations_one_project;
       ALTER TABLE conversations DROP COLUMN role;
+      -- dispatched_at/settled_at arrive with schema 57: a v41 invocation has neither.
+      ALTER TABLE invocations DROP COLUMN dispatched_at;
+      ALTER TABLE invocations DROP COLUMN settled_at;
       PRAGMA user_version=41;
     `);
     raw.close();
