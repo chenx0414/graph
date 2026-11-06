@@ -33,13 +33,6 @@ const SOURCES = [
     tags: ['团队工作流', '产品', '交付'],
   },
   {
-    repo: 'mattpocock/skills',
-    license: 'MIT',
-    commercialUse: 'allowed',
-    tags: ['TDD', '规范', '架构'],
-    pathPrefixes: ['skills/'],
-  },
-  {
     repo: 'mcncarl/yichen-skills',
     license: 'Custom non-commercial',
     commercialUse: 'restricted',

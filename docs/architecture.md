@@ -1,6 +1,6 @@
 # Graph 实现架构
 
-当前架构依据 [Graph v2 定稿规格](specs/graph-rebuild-v2.md)、[产品范围](graph-mvp.md)、[ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)与 [ADR 0031](adr/0031-pi-durable-agent-kernel.md)。Graph 领域编排与 HTTP/SSE 使用 Go，main 与节点的 Agent 执行迁移至 pi-durable 1.1.0，共享 SQLite、本机 HTTP/SSE 和 React/React Flow。迁移交付状态见 [验证进度](agent/pi-durable-migration-evidence.md)，Go 与 SDK 的边界见 [ADR 0032](adr/0032-go-backend-shared-durable-host.md)。历史 M0–M7 架构不再是当前 graph 执行模型；[进度记录](agent/issue-1-implementation-progress.md)与 [退役审计](agent/issue-1-old-kernel-removal-audit.md)区分实际证据和剩余工作。
+当前架构依据 [Graph v2 定稿规格](specs/graph-rebuild-v2.md)、[产品范围](graph-mvp.md)、[ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)与 [ADR 0031](adr/0031-pi-durable-agent-kernel.md)。Graph 领域编排与 HTTP/SSE 使用 Go，main 与节点的 Agent 执行迁移至 pi-durable 1.1.0，共享 SQLite、本机 HTTP/SSE 和 React/React Flow。迁移交付状态见 验证进度（该文档已删除），Go 与 SDK 的边界见 [ADR 0032](adr/0032-go-backend-shared-durable-host.md)。历史 M0–M7 架构不再是当前 graph 执行模型；进度记录（该文档已删除）与 退役审计（该文档已删除）区分实际证据和剩余工作。
 
 ## 职责与正式对象
 

@@ -1,6 +1,6 @@
 # Matt harness 维护
 
-本项目的工程入口由 [AGENTS.md](../../AGENTS.md)按工作阶段路由到 [CODING_STANDARDS.md](../../CODING_STANDARDS.md)。用户使用 `/ask-matt` 选择技能；规格与任务的项目契约见 [Matt 流程](matt-flow.md)。
+本项目的工程入口由 [AGENTS.md](../../AGENTS.md)按工作阶段路由到 [CODING_STANDARDS.md](../../CODING_STANDARDS.md)。用户使用 `/ask-matt` 选择技能；规格与任务的项目契约见 Matt 流程（该文档已删除）。
 
 ## 来源与配置
 

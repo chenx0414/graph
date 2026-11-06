@@ -17,7 +17,7 @@
 | 7：可视化 | 稳定格点、真实边值/历史、模块解释、独立聊天、prompt 透明、子 graph 折叠 | 真实浏览器/HTTP；点击实际边、查看投递、逐层折叠和按需全文 |
 | 8：切换与交付 | 所有入口统一新内核；删除旧 DAG/loop/转换器/旧 reader，更新当前 docs；默认应用交付 | 活跃调用审计、旧格式拒绝/旧图丢弃、保留配置与 main 会话、当前包和默认 Electron 窗口 |
 
-逐轮实际进度、失败和门禁日志在 [issue-1-implementation-progress.md](agent/issue-1-implementation-progress.md)。[退役审计](agent/issue-1-old-kernel-removal-audit.md)记录删除依据与剩余路径。报告中的 GREEN 只适用于对应证据，不能把阶段表、源文件存在或测试总数当作整体完成。
+逐轮实际进度、失败和门禁日志在 issue-1-implementation-progress.md（该文档已删除）。退役审计（该文档已删除）记录删除依据与剩余路径。报告中的 GREEN 只适用于对应证据，不能把阶段表、源文件存在或测试总数当作整体完成。
 
 ## 工作规则
 

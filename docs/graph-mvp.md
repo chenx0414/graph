@@ -1,6 +1,6 @@
 # Graph 产品范围与执行规则
 
-当前契约：2026-10-01 定稿的 [Graph v2 规格](specs/graph-rebuild-v2.md)，以及使用者确认的 [ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)。本文为实施时使用的产品范围摘要；详细字段、默认值和验收要求以定稿规格为准。当前实施及证据见 [进度记录](agent/issue-1-implementation-progress.md)，不能把已有门禁通过解释为全部交付已完成。
+当前契约：2026-10-01 定稿的 [Graph v2 规格](specs/graph-rebuild-v2.md)，以及使用者确认的 [ADR 0030](adr/0030-graph-v2-interface-delivery-kernel.md)。本文为实施时使用的产品范围摘要；详细字段、默认值和验收要求以定稿规格为准。当前实施及证据见 进度记录（该文档已删除），不能把已有门禁通过解释为全部交付已完成。
 
 ## 产品目标
 

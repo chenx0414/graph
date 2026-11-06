@@ -1,3 +1,4 @@
+<!-- graph:allow-large-file: ADR 是历史决议记录，本次只把已删除文档的链接改成纯文本；拆分等于改写历史 -->
 # ADR 0034：Harness² 的融合方式——移植方法内核，不部署其本体
 
 日期：2026-10-22
@@ -19,7 +20,7 @@ Graph 自己的源码 checkout、跑项目门禁、提交到 `rsi/*` 分支、�
 
 问题是：Harness² 与 Graph 的 RSI 是什么关系？是可以把 Harness² 装进 Graph，还是只能借鉴？
 
-评估结论见 [Harness² 评估与融合方案](../agent/harness2-fusion.md)。关键事实：
+评估结论见 Harness² 评估与融合方案（该文档已删除）。关键事实：
 
 - Harness² 是**面向基准跑分的研究框架**：Python 3.12 + uv、只支持 Linux、依赖 Vertex AI，
   求解器跑在 OpenCode / Codex 上，评测对象是三个公开基准。它的 harness 树是给基准求解器准备的文件树。
