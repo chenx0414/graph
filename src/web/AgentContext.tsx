@@ -2,75 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { RecordedPromptPanel } from './PromptPanel.tsx';
 import { Button, Icon, Pill, Spinner, toast } from './ui.tsx';
-
-type PromptOrigin = 'editable' | 'generated' | 'pi';
-
-export interface AgentPromptPartView {
-  id: string;
-  title: string;
-  origin: PromptOrigin;
-  content: string;
-  source?: string;
-}
-
-export interface AgentPromptSectionView {
-  id: string;
-  title: string;
-  parts: AgentPromptPartView[];
-}
-
-export interface AgentPromptView {
-  key: string;
-  title: string;
-  description: string;
-  group: 'identity' | 'tools' | 'rules' | 'runtime';
-  file: string;
-  content: string;
-  defaultContent: string;
-  customized: boolean;
-  defaultCustomized: boolean;
-}
-
-export interface AgentToolView {
-  name: string;
-  description: string;
-  source: string;
-  version: string | null;
-  capabilityId: string | null;
-  parameters: string[];
-  permission: string;
-  enabled: boolean;
-  available: boolean;
-  runtimeAvailable: boolean | null;
-}
-
-export interface AgentCapabilityView {
-  id: string;
-  version: string;
-  kind: string;
-  name: string;
-  description?: string;
-  tools: string[];
-  networkDomains?: string[];
-  reason?: string;
-}
-
-export interface AgentContextView {
-  root: string;
-  docsRoot: string;
-  definitionVersion: string | null;
-  latestDefinitionVersion: string | null;
-  prompts: AgentPromptView[];
-  disabledTools: string[];
-  tools: AgentToolView[];
-  capabilities: AgentCapabilityView[];
-  preview: {
-    sections: AgentPromptSectionView[];
-    text: string;
-  };
-  /** The exact system prompt the newest master turn sent, recorded at the provider call. */
-  sent: { operationId: string; at: number; text: string; tools: string | null } | null;
-}
+import type { AgentCapabilityView, AgentContextView, AgentPromptView, AgentToolView } from './agent-context-types.ts';
+export type { AgentCapabilityView, AgentContextView, AgentPromptPartView, AgentPromptSectionView, AgentPromptView, AgentToolView } from './agent-context-types.ts';
 
 const GROUP_LABELS: Record<AgentPromptView['group'], string> = {
   identity: '身份',
@@ -102,6 +35,7 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
     setError('');
     const next = await api<AgentContextView>(`/api/agent-context?conversationId=${encodeURIComponent(conversationId)}`);
     setData(next);
+    setLoading(false);
     setDisabled(next.disabledTools);
     const current = next.prompts.find(prompt => prompt.key === selectedPrompt) ?? next.prompts[0];
     if (current) {
@@ -114,26 +48,43 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
 
   useEffect(() => {
     let active = true;
+    let attempts = 0;
+    let retry: number | undefined;
     const onSettingsChanged = () => { void load(); };
     window.addEventListener('graph:settings-changed', onSettingsChanged);
     setLoading(true);
-    api<AgentContextView>(`/api/agent-context?conversationId=${encodeURIComponent(conversationId)}`)
-      .then(next => {
-        if (!active) return;
-        setData(next);
-        setDisabled(next.disabledTools);
-        const first = next.prompts[0];
-        if (first && initialized.current !== conversationId) {
-          initialized.current = conversationId;
-          setSelectedPrompt(first.key);
-          setDraft(first.content);
-          draftRef.current = first.content;
-        }
-      })
-      .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); })
-      .finally(() => { if (active) setLoading(false); });
+    // A reload of the daemon is a few seconds of lost connections, not a broken
+    // page: the first reads retry themselves, and only a standing refusal is
+    // reported - in words a person can act on, with a button to try again.
+    const read = () => {
+      api<AgentContextView>(`/api/agent-context?conversationId=${encodeURIComponent(conversationId)}`)
+        .then(next => {
+          if (!active) return;
+          setData(next);
+          setDisabled(next.disabledTools);
+          const first = next.prompts[0];
+          if (first && initialized.current !== conversationId) {
+            initialized.current = conversationId;
+            setSelectedPrompt(first.key);
+            setDraft(first.content);
+            draftRef.current = first.content;
+          }
+        })
+        .catch(reason => {
+          if (!active) return;
+          attempts += 1;
+          if (attempts < 4) {
+            retry = window.setTimeout(read, 500 * 2 ** (attempts - 1));
+            return;
+          }
+          setError(`无法读取 Agent 上下文：${reason instanceof Error ? reason.message : String(reason)}`);
+        })
+        .finally(() => { if (active) setLoading(false); });
+    };
+    read();
     return () => {
       active = false;
+      if (retry) window.clearTimeout(retry);
       window.removeEventListener('graph:settings-changed', onSettingsChanged);
     };
   }, [conversationId]);
@@ -153,6 +104,16 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
     && data.latestDefinitionVersion
     && data.definitionVersion !== data.latestDefinitionVersion,
   );
+
+  async function retryLoad() {
+    setLoading(true);
+    try {
+      await load();
+    } catch (reason) {
+      setError(`无法读取 Agent 上下文：${reason instanceof Error ? reason.message : String(reason)}`);
+      setLoading(false);
+    }
+  }
 
   function selectPrompt(prompt: AgentPromptView) {
     setSelectedPrompt(prompt.key);
@@ -297,7 +258,12 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                   工具与能力 <span>{data?.tools.length ?? 0}</span>
                 </button>
               </nav>
-              {error && <div className="form-error">{error}</div>}
+              {error && (
+                <div className="form-error" data-testid="agent-context-error">
+                  <span>{error}</span>
+                  <Button size="sm" icon="refresh" disabled={saving} onClick={() => void retryLoad()}>重试</Button>
+                </div>
+              )}
               {definitionChanged && (
                 <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
                   当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。

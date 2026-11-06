@@ -144,6 +144,37 @@ test('the sent tab shows the tool declarations one request carried, with their c
 
 
 
+test('a lost connection while the daemon reloads is retried instead of shown as a raw error', async () => {
+  const root = await temp('agent-context-retry');
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { text: '重连', requestId: 'agent-context-retry' });
+
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const payload = {
+    docsRoot: join(process.cwd(), 'docs', 'agent'),
+    definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
+    prompts: [], disabledTools: [], tools: [], capabilities: [],
+    sent: { operationId: 'op-1', at: 1, text: '<identity>demo</identity>', tools: null },
+  };
+  let calls = 0;
+  // The first reads land in the reload window and fail; the page has to come back on
+  // its own rather than leaving a person staring at "Failed to fetch".
+  await page.route('**/api/agent-context*', route => {
+    calls += 1;
+    if (calls <= 2) return route.abort('failed');
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
+  });
+
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('agent-context-open').click();
+  await page.getByTestId('agent-context-sent-text').waitFor({ timeout: 20_000 });
+  expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>demo</identity>');
+  expect(await page.getByTestId('agent-context-error').count()).toBe(0);
+  expect(await page.locator('body').innerText()).not.toContain('Failed to fetch');
+}, 60_000);
+
 test('draft markdown follows preferences and image attachments survive sending and reload', async () => {
   const root = await temp('draft-image');
   const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
@@ -215,3 +246,33 @@ test('live Markdown edits one source, reveals syntax at the caret and preserves 
   await expect.poll(()=>page.locator('.architecture-stage footer').innerText()).toContain('工作副本');
   await page.screenshot({path:'/tmp/graph-architecture-board.png'});
 });
+
+test('a standing failure says what happened and can be retried from the banner', async () => {
+  const root = await temp('agent-context-error');
+  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
+  const created = await createConversation(server, { text: '读不到', requestId: 'agent-context-error' });
+  const browser = await chromium.launch({ headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const payload = {
+    docsRoot: join(process.cwd(), 'docs', 'agent'),
+    definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
+    prompts: [], disabledTools: [], tools: [], capabilities: [],
+    sent: { operationId: 'op-1', at: 1, text: '<identity>ok</identity>', tools: null },
+  };
+  let failing = true;
+  await page.route('**/api/agent-context*', route => failing
+    ? route.abort('failed')
+    : route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }));
+
+  await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
+  await page.getByTestId('agent-context-open').click();
+  const banner = page.getByTestId('agent-context-error');
+  await banner.waitFor({ timeout: 30_000 });
+  expect(await banner.innerText()).toContain('无法读取 Agent 上下文');
+  failing = false;
+  await banner.getByRole('button', { name: '重试' }).click();
+  await page.getByTestId('agent-context-sent-text').waitFor();
+  expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>ok</identity>');
+  expect(await page.getByTestId('agent-context-error').count()).toBe(0);
+}, 60_000);
