@@ -292,16 +292,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 					},
 				}
 			}
-			// A master session may hand work to any other conversation. The rules and the handoff
-			// ledger live in `conversation-tools.ts`.
-			if channels != nil && channels.Conversations != nil && conversation != nil && role == "master" {
-				tools.Conversations = OpenConversationTools(
-					*channels.Conversations,
-					ConversationToolCaller{ConversationID: conversation.Id, TaskID: operation.TaskId, NodeID: operation.NodeId},
-					input.AccessPolicy != nil && IsFullAccess(input.AccessPolicy),
-					func(record map[string]any) { store.Event(operation.TaskId, "conversation.handed_off", record) },
-				)
-			}
 			if channels != nil {
 				supervisor := channels.Supervisor(operation.TaskId)
 				tools.Supervisor = supervisor

@@ -170,8 +170,6 @@ type AgentToolsInput struct {
 	Peers any
 	// Artifacts is the shared artifact workspace. It holds a PiAdapterArtifactService.
 	Artifacts any
-	// Conversations are the channels to other conversations.
-	Conversations ConversationToolChannel
 	// Supervisor is the conversation control surface.
 	Supervisor PiAdapterSupervisor
 	// GraphManagement is the graph control surface of the main Agent.
@@ -182,10 +180,6 @@ type AgentToolsInput struct {
 	Rsi *AgentToolsRsi
 	// RsiContext names the operation a self-improvement change belongs to.
 	RsiContext PiAdapterRsiContext
-	// PendingHumanChecks lists the human acceptance checks nobody looked at yet.
-	PendingHumanChecks func() any
-	// ReviewHumanCheck records the main Agent's review of a human acceptance check.
-	ReviewHumanCheck func(input AgentToolsHumanCheck) any
 	// ControlTask controls a task of this conversation.
 	ControlTask func(input AgentToolsControlTask) any
 	// Desktop is the host's agent-desktop CLI, nil when the host has none.
@@ -306,18 +300,12 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			GraphState:         input.Supervisor.GraphState != nil,
 			TaskStatus:         input.Supervisor.TaskStatus != nil,
 			ListProjects:       input.Supervisor.ListProjects != nil,
-			BindProject:        input.Supervisor.BindProject != nil,
 			ListProblems:       input.Supervisor.ListProblems != nil,
 			ResolveProblem:     input.Supervisor.ResolveProblem != nil,
 			WithdrawDraft:      input.Supervisor.WithdrawDraft != nil,
 			ConfirmDraft:       input.Supervisor.ConfirmDraft != nil,
-			PendingHumanChecks: input.PendingHumanChecks != nil && input.ReviewHumanCheck != nil,
-			ReviewHumanCheck:   input.PendingHumanChecks != nil && input.ReviewHumanCheck != nil,
 			ControlTask:        input.ControlTask != nil,
 		}
-	}
-	if input.Conversations.List != nil {
-		features.Conversations = &AgentConversationFeatures{Read: true, Write: input.Conversations.Send != nil}
 	}
 	if peers != nil {
 		features.Peers = true
