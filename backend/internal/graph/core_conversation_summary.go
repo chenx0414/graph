@@ -66,15 +66,15 @@ func ConversationMasterUsage(store *TaskStore, conversationId string) Conversati
 		if kernelString(row["purpose"]) == "completion" && total > 0 {
 			value := total
 			contextTokens = &value
-			read := cacheRead
-			cacheReadTokens = &read
-			// A turn that has not settled yet has no time to report: the age would be
-			// measured against the wrong request.
+			// A provider call still inside an open operation has no settled time yet.
+			// The cache pair then keeps describing the last request that really
+			// finished, so the footer does not drop the age in the middle of a turn and
+			// the tokens and the time always belong to the same request.
 			if settled := kernelInt(row["settledAt"]); settled > 0 {
+				read := cacheRead
+				cacheReadTokens = &read
 				usedAt := settled
 				cacheUsedAt = &usedAt
-			} else {
-				cacheUsedAt = nil
 			}
 		}
 	}

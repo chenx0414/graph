@@ -58,6 +58,10 @@ function cacheText(page: Page) {
   return page.getByTestId('telemetry-cache');
 }
 
+/** Held open by the provider until the test has read the ledger mid-turn. */
+let release: () => void = () => undefined;
+const released = new Promise<void>(resolve => { release = () => resolve(); });
+
 test('the composer footer reports the cached prefix and how long ago it was read', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-console-cache-age-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -71,6 +75,11 @@ test('the composer footer reports the cached prefix and how long ago it was read
     { text: 'First answer.', usage: { prompt_tokens: 1_000, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 0 } } },
     // prompt_tokens includes the cached tokens, the way every provider bills it.
     { text: 'Second answer.', usage: { prompt_tokens: 1_100, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 900 } } },
+    // The third turn calls a tool and then waits: its first provider call is already
+    // in the ledger while the operation is still open, which is the state a real turn
+    // spends most of its time in.
+    { tools: [{ id: 'tool-1', name: 'bash', arguments: JSON.stringify({ command: 'true' }) }], usage: { prompt_tokens: 300, completion_tokens: 5 } },
+    { text: 'Third answer.', beforeReply: () => released, usage: { prompt_tokens: 320, completion_tokens: 8 } },
   ]);
   cleanup.push(() => provider.close());
   const configPath = join(root, 'graph.config.json');
@@ -107,7 +116,6 @@ test('the composer footer reports the cached prefix and how long ago it was read
   expect(view.telemetry.cacheUsedAt).not.toBeNull();
   const settledAt = view.telemetry.cacheUsedAt as number;
   expect(Math.abs(Date.now() - settledAt)).toBeLessThan(5 * 60_000);
-
   const { browser } = await launchBrowser();
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
@@ -140,4 +148,20 @@ test('the composer footer reports the cached prefix and how long ago it was read
   await page.getByTestId('conversation').waitFor();
   await expect.poll(async () => await cacheText(page).innerText(), { timeout: 15_000 }).toMatch(/缓存 43%.*900.*4 分钟前/);
   await page.screenshot({ path: join(evidenceDir(root, 'composer-cache-age'), 'aged.png'), fullPage: false });
+
+  // A turn that is still running records its own provider call before its operation
+  // settles. The footer keeps the last finished request then - tokens and age
+  // together - instead of blanking the age in the middle of every turn. The third
+  // turn is held at its second provider call, so the open operation is a fact here,
+  // not a race.
+  const third = await daemon.request(`/api/conversations/${conversationId}/messages`, {
+    method: 'POST', body: JSON.stringify({ text: 'Third question.', requestId: 'cache-third' }),
+  });
+  expect(third.status, await third.text()).toBe(200);
+  await expect.poll(() => provider.requests.length, { timeout: 20_000 }).toBe(4);
+  const midTurn = await conversationView(daemon, conversationId);
+  expect(midTurn.telemetry.cacheUsedAt).toBe(settledAt - 240_000);
+  expect(midTurn.telemetry.cacheReadTokens).toBe(900);
+  release();
+  await waitForAnswer(daemon, conversationId, 'Third answer.');
 });
