@@ -43,3 +43,11 @@ examples/      runtime demos and acceptance fixtures
 src/           Graph runtime, server, and console source
 presets/       immutable bootstrap prompts and definitions
 ```
+
+## Where things live
+
+The repository was reorganised on 2026-11-08: `docs/agents` became `docs/guides`,
+the old `docs/planning` tree was deleted, and `deliverables/`, `notes/`, `plans/`
+and `perf/` moved to `docs/evidence/`, `docs/notes/` and `scripts/perf/`.
+A path in an older document that no longer resolves is one of those moves, not a
+missing feature.
