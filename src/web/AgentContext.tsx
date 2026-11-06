@@ -87,7 +87,7 @@ function availabilityText(tool: AgentToolView) {
 }
 
 export function AgentContextPage({ conversationId }: { conversationId: string }) {
-  const [tab, setTab] = useState<'sent' | 'prompts' | 'tools'>('sent');
+  const [tab, setTab] = useState<'sent' | 'declarations' | 'prompts' | 'tools'>('sent');
   const initialized = useRef<string | null>(null);
   const [data, setData] = useState<AgentContextView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -288,6 +288,9 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                 <button type="button" role="tab" data-testid="agent-context-tab-sent" data-active={tab === 'sent'} aria-selected={tab === 'sent'} onClick={() => setTab('sent')}>
                   实际发出的 Prompt
                 </button>
+                <button type="button" role="tab" data-testid="agent-context-tab-declarations" data-active={tab === 'declarations'} aria-selected={tab === 'declarations'} onClick={() => setTab('declarations')}>
+                  工具声明
+                </button>
                 <button type="button" role="tab" data-testid="agent-context-tab-prompts" data-active={tab === 'prompts'} aria-selected={tab === 'prompts'} onClick={() => setTab('prompts')}>
                   可编辑来源 <span>{data?.prompts.length ?? 0}</span>
                 </button>
@@ -424,9 +427,20 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                     </div>
                   </div>
                 </div>
+              ) : tab === 'declarations' ? (
+                <div className="agent-preview-panel" data-testid="agent-context-declarations">
+                  <RecordedPromptPanel
+                    part="tools"
+                    testId="agent-context-sent"
+                    text={data?.sent?.text ?? null}
+                    tools={data?.sent?.tools ?? null}
+                    emptyText="本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。"
+                  />
+                </div>
               ) : (
                 <div className="agent-preview-panel" data-testid="agent-context-sent">
                   <RecordedPromptPanel
+                    part="prompt"
                     testId="agent-context-sent"
                     text={data?.sent?.text ?? null}
                     tools={data?.sent?.tools ?? null}

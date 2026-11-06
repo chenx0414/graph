@@ -47,7 +47,9 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
   expect(
     (await page.locator('.agent-context-tabs [role="tab"]').allInnerTexts()).map(label => label.split('\n')[0]!.trim()),
-  ).toEqual(['实际发出的 Prompt', '可编辑来源', '工具与能力']);
+  ).toEqual(['实际发出的 Prompt', '工具声明', '可编辑来源', '工具与能力']);
+  // 提示词与工具声明是两个独立标签：prompt 页不再带声明块。
+  expect(await page.getByTestId('agent-context-sent-tools').count()).toBe(0);
 
   // 组装正确性属于产生它的那一层（provider 请求）；接口只给事实：工具、能力、可编辑来源。
   const payload = await page.evaluate(async (conversationId: string) => {
@@ -124,13 +126,18 @@ test('the sent tab shows the tool declarations one request carried, with their c
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   await page.getByTestId('agent-context-open').waitFor();
   await page.getByTestId('agent-context-open').click();
+  // 声明在它自己的标签页里，和 prompt 互不挤占。
+  await page.getByTestId('agent-context-tab-declarations').click();
   await page.getByTestId('agent-context-sent-tools').waitFor();
   const block = await page.getByTestId('agent-context-sent-tools').innerText();
   expect(block).toContain('1 个工具');
   expect(block).toContain(`${recorded.length.toLocaleString()} 字符`);
-  // The same request's prompt still sits above it, unchanged.
-  expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>demo</identity>');
   expect(await page.getByTestId('agent-context-sent-tools-text').innerText()).toContain('propose_graph');
+  expect(await page.getByTestId('agent-context-sent-text').count()).toBe(0);
+  // 回到 prompt 页：同一请求的提示词原样还在，声明块不在。
+  await page.getByTestId('agent-context-tab-sent').click();
+  expect(await page.getByTestId('agent-context-sent-text').innerText()).toBe('<identity>demo</identity>');
+  expect(await page.getByTestId('agent-context-sent-tools').count()).toBe(0);
 }, 60_000);
 
 

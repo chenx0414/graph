@@ -9,8 +9,12 @@ import { Button, toast } from './ui.tsx';
  * view about what "the prompt really sent" looks like. Everything here is read out of the
  * record; nothing is recomposed from settings at render time.
  */
-export function RecordedPromptPanel(input: { testId: string; text: string | null; tools: string | null; emptyText: string }) {
-  const { testId, text, tools, emptyText } = input;
+export function RecordedPromptPanel(input: {
+  testId: string; text: string | null; tools: string | null; emptyText: string;
+  /** Which half to render. The console gives each half its own tab; the node view shows both. */
+  part?: 'both' | 'prompt' | 'tools';
+}) {
+  const { testId, text, tools, emptyText, part = 'both' } = input;
   const declarationCount = useMemo(() => {
     if (!tools) return 0;
     try {
@@ -36,15 +40,15 @@ export function RecordedPromptPanel(input: { testId: string; text: string | null
 
   return (
     <>
-      <div className="agent-preview-meta">
+      {part !== 'tools' && <div className="agent-preview-meta">
         <strong>实际发出（最近一次模型请求）</strong>
         <span>{text ? `${text.length.toLocaleString()} 字符` : emptyText}</span>
         <Button size="sm" icon="file" disabled={!text} onClick={() => void copy(text, '实际发出的 Prompt 已复制')}>复制 Prompt</Button>
-      </div>
-      {text
+      </div>}
+      {part !== 'tools' && (text
         ? <pre className="agent-preview-markdown" data-testid={`${testId}-text`}>{text}</pre>
-        : <p className="agent-preview-notice" data-testid={`${testId}-empty`}>{emptyText}</p>}
-      {tools ? (
+        : <p className="agent-preview-notice" data-testid={`${testId}-empty`}>{emptyText}</p>)}
+      {part !== 'prompt' && tools ? (
         <div className="agent-preview-panel" data-testid={`${testId}-tools`}>
           <div className="agent-preview-meta">
             <strong>实际发送的工具声明</strong>
@@ -53,9 +57,9 @@ export function RecordedPromptPanel(input: { testId: string; text: string | null
           </div>
           <p
             className="agent-preview-notice"
-            title="与上面那份提示词同属同一次请求：内容从这次请求体的 tools 字段原样读出（OpenAI 侧为 function 包装、Anthropic 侧为 input_schema），只读、不参与发送，也不会再给模型发第二份。"
+            title="与「实际发出的 Prompt」标签同属同一次请求：内容从这次请求体的 tools 字段原样读出（OpenAI 侧为 function 包装、Anthropic 侧为 input_schema），只读、不参与发送，也不会再给模型发第二份。"
           >
-            与上面那份提示词同属同一次请求 · 只读，不再发送
+            与同一次请求的 Prompt 同属一份载荷 · 只读，不再发送
           </p>
           <pre className="agent-preview-markdown" data-testid={`${testId}-tools-text`}>{declarationText}</pre>
         </div>

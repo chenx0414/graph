@@ -173,10 +173,6 @@
 .agent-preview-meta > .btn { flex: 0 0 auto; }
 .agent-preview-meta code { color: var(--text); font-size: 10.5px; }
 .agent-preview-meta > .btn { margin-left: auto; }
-/* The prompt and its declarations are one send: the declarations are twice the
-   text, so they get the larger half instead of leaving each box too short to read. */
-.agent-preview-panel > .agent-preview-markdown { flex: 1 1 40%; }
-.agent-preview-panel > .agent-preview-panel { flex: 1 1 60%; }
 .agent-preview-notice {
   flex: 0 0 auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
