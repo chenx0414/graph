@@ -269,7 +269,7 @@ export function App() {
   }, [tabs, path, settingsPage]);
 
   useEffect(() => {
-    document.title = `${settingsPage ? '设置' : shownTabs.tabs.find(tab => tab.id === visibleTabId)?.title ?? '新对话'} · Graph`;
+    document.title = `${settingsPage ? '设置' : shownTabs.tabs.find(tab => tab.id === visibleTabId)?.title ?? 'Graph'} · Graph`;
   }, [settingsPage, shownTabs, visibleTabId]);
 
   if (settingsPage) {

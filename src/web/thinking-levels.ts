@@ -11,7 +11,6 @@
  * a translated word would stop matching what the provider, the config file and
  * the API calls actually say.
  */
-import { defaultThinkingLevelFor } from '../catalog/models.ts';
 export interface ThinkingOptionView {
   level: string;
   label: string;
@@ -40,12 +39,6 @@ export function thinkingLabel(level: string | undefined): string {
  * top level max, ChatGPT calls the off level none), otherwise the level itself. */
 export function thinkingOptionLabel(option: ThinkingOptionView): string {
   return option.label || option.level;
-}
-
-/** The strength a model runs at when nothing is chosen yet: the second strongest
- * level it accepts, from the one rule the server uses too. */
-export function defaultThinkingOption(options: readonly ThinkingOptionView[]): string | undefined {
-  return defaultThinkingLevelFor(options);
 }
 
 export interface ThinkingView {

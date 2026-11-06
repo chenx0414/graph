@@ -119,7 +119,9 @@ test('chat composer toggles full access with one click and settings no longer ho
   await expect.poll(() => toggle.getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
   await expect.poll(() => toggle.innerText(), { timeout: 10_000 }).toContain('完全访问');
   await page.setViewportSize({ width: 390, height: 800 });
-  await expect.poll(() => page.locator('.new-chat-composer .chat-composer-controls').evaluate(element => element.scrollWidth <= element.clientWidth + 1), { timeout: 10_000 }).toBe(true);
+  // The controls row stays inside the viewport at phone width. The composer under
+  // test is the conversation's own: the console has no separate new-chat page.
+  await expect.poll(() => page.locator('.chat-composer .chat-composer-controls').evaluate(element => element.scrollWidth <= element.clientWidth + 1), { timeout: 10_000 }).toBe(true);
 
   await toggle.click();
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
