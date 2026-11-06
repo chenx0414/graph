@@ -53,6 +53,10 @@ async function conversation(prefix: string) {
   const conversationId = (JSON.parse(text) as { conversationId: string }).conversationId;
   const db = join(root, 'state', 'tasks.sqlite');
   const write = (sql: string) => execFileSync('sqlite3', [db, sql]);
+  // The opening turn has to settle before the goal exists, otherwise it can queue a
+  // continuation under the load of a full suite and the case stops being about the
+  // goal at all.
+  await expect.poll(async () => (await (await daemon.request(`/api/conversations/${conversationId}`)).json() as { messages?: Message[] }).messages?.some(message => (message.text ?? '').includes('先做第一步')), { timeout: 60_000, interval: 250 }).toBe(true);
   return { daemon, conversationId, provider, write };
 }
 
