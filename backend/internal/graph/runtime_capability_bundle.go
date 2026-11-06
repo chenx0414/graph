@@ -76,7 +76,7 @@ type CapabilityOperation struct {
 	UnixSockets              []string
 	PiExtensionPaths         []string
 	PiExtensionTools         []string
-	McpAdapterServers        []McpAdapterServerRef
+	McpServers        []McpServerRef
 	Close                    func()
 }
 
@@ -240,19 +240,19 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	input.FrozenFacts = version.input.FrozenFacts
 	loaded = LoadCapabilities(input)
 	opened = true
-	facts := []McpAdapterFact{}
+	facts := []McpFact{}
 	for _, fact := range version.Facts {
 		role := fact.Role
 		if role == "" {
 			role = "tool"
 		}
-		facts = append(facts, McpAdapterFact{Id: fact.Id, Version: fact.Version, Kind: fact.Kind, Path: fact.Path, Role: role})
+		facts = append(facts, McpFact{Id: fact.Id, Version: fact.Version, Kind: fact.Kind, Path: fact.Path, Role: role})
 	}
 	secrets := map[string]string{}
 	if version.input.Secrets != nil {
 		secrets = version.input.Secrets()
 	}
-	adapterServers := McpAdapterServers(facts, secrets)
+	adapterServers := McpServersFor(facts, secrets)
 	readRoots := capabilityUnique(append(append([]string{}, loaded.ReadRoots...), options.AdditionalReadRoots...))
 	if version.SkillFolder != "" && version.input.FrozenFacts == nil {
 		links := []BoundSkillLink{}
@@ -367,7 +367,7 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	allowed = capabilitySortedCopy(capabilityUnique(allowed))
 	closeLoaded := loaded.Close
 	operation = CapabilityOperation{
-		Descriptor:   map[string]any{"definitionVersion": version.DefinitionVersion, "facts": capabilityCloneFacts(version.Facts), "settings": FreezeCapabilitySettings(map[string]any{"env": loaded.Env, "mcpAdapterServers": adapterServers}, secrets)},
+		Descriptor:   map[string]any{"definitionVersion": version.DefinitionVersion, "facts": capabilityCloneFacts(version.Facts), "settings": FreezeCapabilitySettings(map[string]any{"env": loaded.Env, "mcpServers": adapterServers}, secrets)},
 		BundleDigest: version.Digest, ToolPolicyDigest: toolPolicyDigest, RuntimePolicyDigest: runtimePolicyDigest,
 		LegacyPromptDigest: prompts.Digest, Tools: selected.Tools, NativeTools: append([]string{}, selected.NativeTools...),
 		AllowedToolNames: allowed, Prompts: CapabilityOperationPrompts{System: prompts.SystemPrompt, Tool: loaded.Prompts.Tool},
@@ -376,7 +376,7 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 		NetworkDomains: append([]string{}, loaded.NetworkDomains...), AllowUnrestrictedNetwork: loaded.AllowUnrestrictedNetwork,
 		AllowLocalBinding: loaded.AllowLocalBinding, UnixSockets: append([]string{}, loaded.UnixSockets...),
 		PiExtensionPaths: append([]string{}, loaded.PiExtensionPaths...), PiExtensionTools: append([]string{}, selected.ExtensionTools...),
-		McpAdapterServers: append([]McpAdapterServerRef{}, adapterServers...),
+		McpServers: append([]McpServerRef{}, adapterServers...),
 		Close: func() {
 			if closeLoaded != nil {
 				closeLoaded()

@@ -10,14 +10,14 @@ import (
 	"encoding/json"
 )
 
-// McpAdapterServerRef is one server handed to the kernel.
-type McpAdapterServerRef struct {
+// McpServerRef is one server handed to the kernel.
+type McpServerRef struct {
 	Name       string `json:"name"`
 	Definition any    `json:"definition"`
 }
 
-// McpAdapterFact is one bound capability that may be an MCP server.
-type McpAdapterFact struct {
+// McpFact is one bound capability that may be an MCP server.
+type McpFact struct {
 	Id      string
 	Version string
 	Kind    string
@@ -25,9 +25,9 @@ type McpAdapterFact struct {
 	Role    string
 }
 
-// McpAdapterServers reads capability.json and resolves transports. A declaration with no transport is skipped.
-func McpAdapterServers(facts []McpAdapterFact, secrets map[string]string) []McpAdapterServerRef {
-	servers := []McpAdapterServerRef{}
+// McpServers reads capability.json and resolves transports. A declaration with no transport is skipped.
+func McpServersFor(facts []McpFact, secrets map[string]string) []McpServerRef {
+	servers := []McpServerRef{}
 	for _, fact := range facts {
 		if fact.Kind != "mcp" || (fact.Role != "" && fact.Role != "tool") || fact.Path == "" || strings.TrimSpace(fact.Id) == "" {
 			continue
@@ -63,17 +63,17 @@ func McpAdapterServers(facts []McpAdapterFact, secrets map[string]string) []McpA
 		if value, ok := declaration["env"]; ok {
 			input.Env = value
 		}
-		definition := McpAdapterServerDefinitionFrom(input, secrets, fact.Path)
+		definition := McpServerDefinitionFrom(input, secrets, fact.Path)
 		if definition == nil {
 			continue
 		}
-		servers = append(servers, McpAdapterServerRef{Name: McpAdapterServerName(fact.Id), Definition: definition})
+		servers = append(servers, McpServerRef{Name: McpAdapterServerName(fact.Id), Definition: definition})
 	}
 	return servers
 }
 
-// McpAdapterServerDefinition is the server shape the kernel connects.
-type McpAdapterServerDefinition struct {
+// McpServerDefinition is the server shape the kernel connects.
+type McpServerDefinition struct {
 	Command    string
 	Args       []string
 	Env        map[string]string
@@ -218,8 +218,8 @@ func McpAdapterServerName(id string) string {
 	return id
 }
 
-// McpAdapterServerDefinitionFrom translates one capability declaration. It returns nil when no transport is declared.
-func McpAdapterServerDefinitionFrom(declaration McpAdapterServerDeclaration, secrets map[string]string, capabilityDir string) *McpAdapterServerDefinition {
+// McpServerDefinitionFrom translates one capability declaration. It returns nil when no transport is declared.
+func McpServerDefinitionFrom(declaration McpAdapterServerDeclaration, secrets map[string]string, capabilityDir string) *McpServerDefinition {
 	urlText, _ := declaration.Url.(string)
 	urlText = strings.TrimSpace(urlText)
 	if urlText != "" {
@@ -234,7 +234,7 @@ func McpAdapterServerDefinitionFrom(declaration McpAdapterServerDeclaration, sec
 			Raise("capability_unavailable", "Remote MCP urls cannot embed credentials")
 		}
 		headers := HeaderValues(declaration.Headers, declaration.HeadersEnv, secrets)
-		definition := &McpAdapterServerDefinition{Url: urlText}
+		definition := &McpServerDefinition{Url: urlText}
 		if len(headers) > 0 {
 			definition.Headers = headers
 		}
@@ -255,7 +255,7 @@ func McpAdapterServerDefinitionFrom(declaration McpAdapterServerDeclaration, sec
 	}
 	env := EnvironmentValues(declaration.Env, secrets)
 	inherit := false
-	definition := &McpAdapterServerDefinition{Command: command, InheritEnv: &inherit}
+	definition := &McpServerDefinition{Command: command, InheritEnv: &inherit}
 	if resolved != nil {
 		definition.Args = resolved
 	}

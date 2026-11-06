@@ -35,12 +35,11 @@ for await (const line of createInterface({ input: process.stdin })) {
 // The MCP servers of a Graph definition reach the model through the kernel's
 // own native channel.
 //
-// The old path was an extension: pi-mcp-adapter listened on a bus event, the
-// servers arrived as a gateway tool, and the model called "mcp" with a server
-// name inside. The new path has no gateway and no extension: the kernel
-// connects the server itself and offers its tools under PiG's own
-// `mcp__<server>__<tool>` names, so the model calls the server's tool
-// directly.
+// There is one path and it lives in the kernel: the daemon reads the bound
+// capability, the kernel connects the server itself, and the model calls the
+// server's tool directly under PiG's own `mcp__<server>__<tool>` names. The
+// retired pi-mcp-adapter extension (bus event, gateway tool named "mcp") is
+// asserted gone by the assertions below.
 test('a bound MCP server reaches the model through the PiG native channel', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-pig-mcp-session-'));
   const project = join(root, 'project');

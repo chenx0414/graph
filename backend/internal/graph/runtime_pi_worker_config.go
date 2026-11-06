@@ -26,7 +26,6 @@ type PiWorkerConfig struct {
 	SkillFolder               *string               `json:"skillFolder,omitempty"`
 	PiExtensionPaths          []string              `json:"piExtensionPaths"`
 	PiExtensionTools          []string              `json:"piExtensionTools"`
-	McpAdapterServers         []McpAdapterServerRef `json:"mcpAdapterServers,omitempty"`
 	SystemPrompt              string                `json:"systemPrompt"`
 	AllowedToolNames          []string              `json:"allowedToolNames"`
 	BundleDigest              string                `json:"bundleDigest"`

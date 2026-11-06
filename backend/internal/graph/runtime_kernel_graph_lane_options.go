@@ -223,14 +223,12 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 			skillPaths := []string{}
 			piExtensionPaths := []string{}
 			piExtensionTools := []string{}
-			mcpAdapterServers := []McpAdapterServerRef{}
 			var skillFolder *string
 			if session.Operation != nil {
 				nativeTools = append(nativeTools, session.Operation.NativeTools...)
 				skillPaths = append(skillPaths, session.Operation.SkillPaths...)
 				piExtensionPaths = append(piExtensionPaths, session.Operation.PiExtensionPaths...)
 				piExtensionTools = append(piExtensionTools, session.Operation.PiExtensionTools...)
-				mcpAdapterServers = append(mcpAdapterServers, session.Operation.McpAdapterServers...)
 				if session.Operation.SkillFolder != "" {
 					folder := session.Operation.SkillFolder
 					skillFolder = &folder
@@ -283,7 +281,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				SkillFolder:          skillFolder,
 				PiExtensionPaths:     piExtensionPaths,
 				PiExtensionTools:     piExtensionTools,
-				McpAdapterServers:    mcpAdapterServers,
 				SystemPrompt:         session.SystemPrompt,
 				AllowedToolNames:     allowedToolNames,
 				BundleDigest:         session.BundleDigest,

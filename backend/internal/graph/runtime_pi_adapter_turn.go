@@ -44,7 +44,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		Model:     ToPiModel(entry),
 		Stream: GuardHandoffResponses(
 			ControlledOpenAIStream(turn.ObservedGate, entry, input.ResolveKeyFor, input.SlotFor, entry.Api, PiAdapterStreamOptions{
-				EstimateMissing: false,
+				EstimateMissing: true,
 				OnRequest: func(callId string, profile map[string]any) {
 					data := map[string]any{
 						"callId": callId, "operationId": operation.Id, "instanceId": instanceId, "model": entry.Id,
@@ -102,7 +102,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		AllowAppleEvents:        input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.AppleEvents,
 		PiExtensionPaths:        append([]string{}, turn.CapabilityOperation.PiExtensionPaths...),
 		ExtensionProcessAllowed: pigExtensionProcessAllowed(input.AccessPolicy),
-		McpAdapterServers:       append([]McpAdapterServerRef{}, turn.CapabilityOperation.McpAdapterServers...),
+		McpServers:       append([]McpServerRef{}, turn.CapabilityOperation.McpServers...),
 		PiExtensionTools:        append([]string{}, turn.CapabilityOperation.PiExtensionTools...),
 		SystemPrompt:            turn.ComposedPrompt,
 		BundleDigest:            turn.CapabilityOperation.BundleDigest,

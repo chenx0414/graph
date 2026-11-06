@@ -137,8 +137,8 @@ type AgentSessionRequest struct {
 	// host and reaches the network. A session that may not do that itself may
 	// not host an extension either.
 	ExtensionProcessAllowed bool
-	// McpAdapterServers are the MCP servers the adapter registers.
-	McpAdapterServers []McpAdapterServerRef
+	// McpServers are the MCP servers the adapter registers.
+	McpServers []McpServerRef
 	// SystemPrompt is the Graph system prompt.
 	SystemPrompt string
 	// AllowedToolNames are the tools the session may call.

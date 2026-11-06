@@ -293,8 +293,8 @@ func recordPigToolCall(request AgentSessionRequest, tool string, started time.Ti
 // transport does: the kernel connects the server itself.
 func pigMcpServers(request AgentSessionRequest) []pigkernel.McpServerSpec {
 	servers := []pigkernel.McpServerSpec{}
-	for _, server := range request.McpAdapterServers {
-		definition, _ := server.Definition.(*McpAdapterServerDefinition)
+	for _, server := range request.McpServers {
+		definition, _ := server.Definition.(*McpServerDefinition)
 		servers = append(servers, McpServerSpecFrom(server.Name, definition))
 	}
 	return servers

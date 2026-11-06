@@ -283,14 +283,12 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		nativeTools := []string{}
 		readRoots := []string{}
 		writeRoots := []string{}
-		mcpServers := []McpAdapterServerRef{}
 		allowedToolNames := []string{"submit"}
 		if session.Operation != nil {
 			nodeTools = append(nodeTools, session.Operation.Tools...)
 			nativeTools = append(nativeTools, session.Operation.NativeTools...)
 			readRoots = append(readRoots, session.Operation.ReadRoots...)
 			writeRoots = append(writeRoots, session.Operation.WriteRoots...)
-			mcpServers = append(mcpServers, session.Operation.McpAdapterServers...)
 		}
 		for _, name := range session.AllowedToolNames {
 			if name != "submit" {
@@ -378,7 +376,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			BundleDigest:            bundleDigest,
 			ToolPolicyDigest:        toolPolicyDigest,
 			RuntimePolicyDigest:     runtimePolicyDigest,
-			McpAdapterServers:       mcpServers,
 		}
 		host := NewPigNodeHost(PigNodeHostOptions{
 			Database: state.options.Kernel.Store.Path,

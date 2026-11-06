@@ -287,7 +287,7 @@ func PrintPigKernelTurn(opts cliOptions, env map[string]string) error {
 // command, the arguments, the environment, the url and the headers. Only the
 // transport changes: the kernel connects the server itself instead of handing
 // it to an extension.
-func McpServerSpecFrom(name string, definition *McpAdapterServerDefinition) pigkernel.McpServerSpec {
+func McpServerSpecFrom(name string, definition *McpServerDefinition) pigkernel.McpServerSpec {
 	spec := pigkernel.McpServerSpec{Name: name}
 	if definition == nil {
 		return spec
