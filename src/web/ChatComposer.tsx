@@ -33,7 +33,6 @@ import {
   type AttachmentResult,
   type ChatAttachment,
 } from './attachments.ts';
-import { FullAccessToggle } from './FullAccessToggle.tsx';
 import type { AgentCapabilityView, AgentToolView } from './AgentContext.tsx';
 import type { ComposerModel, ComposerTelemetryView, ThinkingLevel } from './ComposerTelemetry.tsx';
 import { thinkingView } from './thinking-levels.ts';
@@ -754,7 +753,6 @@ export function ChatComposer({
             event.currentTarget.value = '';
           }}
         />
-        <FullAccessToggle />
         {leftActions}
         <div className="composer-spacer" />
         <button

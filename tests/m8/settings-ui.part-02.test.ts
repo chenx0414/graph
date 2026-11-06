@@ -100,55 +100,6 @@ test('settings fills new and existing model prices from the local cc-switch snap
 
 
 
-test('chat composer toggles full access with one click and settings no longer hosts the control', async () => {
-  const dir = await temp('access-mode');
-  const stub = await stubProvider();
-  const path = await configFile(dir, stub.baseUrl);
-  const daemon = await start(dir, path);
-  const api = await session(daemon.url);
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${daemon.url}/#/`);
-  const toggle = page.getByTestId('full-access-toggle');
-  await toggle.waitFor();
-  // The page loads its config asynchronously, so every attribute is polled to the value the
-  // fetched config implies: a bare assertion right after waitFor races that load under the
-  // parallel gate (it failed once as `expected 'false' to be 'true'`).
-  await expect.poll(() => toggle.evaluate(element => element.parentElement?.classList.contains('chat-composer-controls')), { timeout: 10_000 }).toBe(true);
-  await expect.poll(() => toggle.getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
-  await expect.poll(() => toggle.innerText(), { timeout: 10_000 }).toContain('完全访问');
-  await page.setViewportSize({ width: 390, height: 800 });
-  // The controls row stays inside the viewport at phone width. The composer under
-  // test is the conversation's own: the console has no separate new-chat page.
-  await expect.poll(() => page.locator('.chat-composer .chat-composer-controls').evaluate(element => element.scrollWidth <= element.clientWidth + 1), { timeout: 10_000 }).toBe(true);
-
-  await toggle.click();
-  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
-  await expect.poll(() => toggle.getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('false');
-  const standard = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
-  expect(standard.config.access).toMatchObject({ mode: 'standard', filesystem: { read: 'workspace-and-bound' } });
-
-  await toggle.click();
-  await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(2);
-  await expect.poll(() => toggle.getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
-  const full = await (await api.get('/api/config')).json() as { config: { access: { mode: string; filesystem: { read: string } } } };
-  expect(full.config.access).toMatchObject({ mode: 'full', filesystem: { read: 'host' } });
-
-  await page.goto(`${daemon.url}/#/settings`);
-  await page.getByTestId('settings-page').waitFor();
-  expect(await page.locator('.settings-nav-item').filter({ hasText: '访问模式' }).count()).toBe(0);
-
-  const created = await (await api.post('/api/conversations', {
-    text: '测试聊天输入区的完全访问开关。',
-    requestId: 'full-access-toggle-conversation',
-  })).json() as { conversationId: string };
-  await page.goto(`${daemon.url}/#/conversations/${created.conversationId}`);
-  await page.getByTestId('full-access-toggle').waitFor();
-}, 120_000);
-
-
-
 test('settings imports detected subscription credentials without exposing their values', async () => {
   const dir = await temp('subscription-sync');
   const stub = await stubProvider();

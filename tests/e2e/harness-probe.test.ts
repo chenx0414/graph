@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -138,7 +137,6 @@ test('the main agent compares the candidates of one task without learning which 
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    access: fullAccessPolicy(),
     credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
     models: { entries: [
       { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },
@@ -284,7 +282,6 @@ test('a harness probe runs one task under two harnesses and reports what each ca
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    access: fullAccessPolicy(),
     credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
     models: { entries: [
       { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },

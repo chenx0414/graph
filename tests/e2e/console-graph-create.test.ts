@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -56,7 +55,6 @@ test('the console creates a graph from a definition on behalf of a conversation,
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    access: fullAccessPolicy(),
     credentials: { local: { secretRef: 'GRAPH_CONSOLE_CREATE_KEY' } },
     models: { entries: [{ id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' }] },
   }));

@@ -141,7 +141,7 @@ func (state *kernelGraphLaneState) nodeAccess(graphId, nodeId string, revisionVe
 		requested = node.Access
 	}
 	context := AccessPolicyContext{StateDir: state.options.StateDir, GraphHome: state.options.GraphHome}
-	ceiling := ResolveAccessPolicy(StandardAccessPolicy(), context)
+	ceiling := ResolveAccessPolicy(FullAccessPolicy(), context)
 	// The TypeScript read is `state.options.access?.() ?? resolveAccessPolicy(...)`, so a host
 	// that has no ceiling to give falls back to the standard policy.
 	if state.options.Access != nil {

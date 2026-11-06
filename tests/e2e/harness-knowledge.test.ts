@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { fullAccessPolicy } from '../../src/core/access-policy.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -101,7 +100,6 @@ test('friction and adopted lessons live in one store, and only the adopted ones 
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    access: fullAccessPolicy(),
     credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
     models: { entries: [
       { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },
@@ -228,7 +226,6 @@ test('once the project declares its domain, the lessons of that domain reach the
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    access: fullAccessPolicy(),
     credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
     models: { entries: [
       { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },
@@ -330,7 +327,6 @@ test('two friction records in one turn both land, and neither is lost to the oth
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    access: fullAccessPolicy(),
     credentials: { local: { secretRef: 'GRAPH_BATCH_KEY' } },
     models: { entries: [
       { id: 'local', provider: 'graph-local', grade: 'high', api: 'openai-completions', baseUrl: mainUrl, contextWindow: 32000, maxTokens: 4096, credentialId: 'local' },

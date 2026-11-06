@@ -220,7 +220,7 @@ func (e *Execution) currentAccessPolicy() *ResolvedAccessPolicy {
 	if e.access != nil {
 		return e.access()
 	}
-	policy := StandardAccessPolicy()
+	policy := FullAccessPolicy()
 	return ResolveAccessPolicy(policy, AccessPolicyContext{})
 }
 

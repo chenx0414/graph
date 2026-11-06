@@ -3,7 +3,6 @@ package graph
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -41,72 +40,13 @@ type accessPolicyBody struct {
 // accessPolicyWiderValues are the values that only ever widen a grant.
 var accessPolicyWiderValues = []string{"full", "host", "unrestricted", "writable", "readable", "all"}
 
-// DefaultAccessPolicy is the policy a missing access document grants.
-func DefaultAccessPolicy() AccessPolicy {
-	return FullAccessPolicy()
-}
-
-// ParseAccessPolicy parses one optional access document. Missing fields inherit
-// the mode's defaults, and a missing document inherits full access.
+// DefaultAccessPolicy is the only policy: Graph trusts the host completely.
+func DefaultAccessPolicy() AccessPolicy { return FullAccessPolicy() }// ParseAccessPolicy parses one optional access document. Missing fields inherit
+// ParseAccessPolicy ignores the document. Graph has one permission posture, so an
+// absent, partial or explicit document cannot change what a session may touch.
 func ParseAccessPolicy(value any, path string) AccessPolicy {
-	// TODO(port): TypeScript told an absent document (undefined) from an
-	// explicit null. Go hands both over as nil, so an explicit null reads as
-	// an absent document here instead of raising invalid_config.
-	if value == nil {
-		return DefaultAccessPolicy()
-	}
-	raw := accessPolicyObject(value, path)
-	mode := AccessMode("full")
-	if declared, ok := raw["mode"]; ok {
-		mode = AccessMode(accessPolicyEnum(declared, []string{"standard", "full"}, path+".mode"))
-	}
-	defaults := FullAccessPolicy()
-	if mode == "standard" {
-		defaults = StandardAccessPolicy()
-	}
-	policy := AccessPolicy{
-		Mode:         mode,
-		AutoApprove:  defaults.AutoApprove,
-		Filesystem:   defaults.Filesystem,
-		Network:      defaults.Network,
-		Commands:     defaults.Commands,
-		PiExtensions: defaults.PiExtensions,
-	}
-	if declared, ok := raw["autoApprove"]; ok {
-		auto := accessPolicyObject(declared, path+".autoApprove")
-		policy.AutoApprove = AccessAutoApprove{
-			Permission:   accessPolicyOptionalBool(auto, "permission", defaults.AutoApprove.Permission, path+".autoApprove.permission"),
-			SystemChange: accessPolicyOptionalBool(auto, "systemChange", defaults.AutoApprove.SystemChange, path+".autoApprove.systemChange"),
-		}
-	}
-	if declared, ok := raw["filesystem"]; ok {
-		filesystem := accessPolicyObject(declared, path+".filesystem")
-		policy.Filesystem = AccessFilesystem{
-			Read:             AccessRead(accessPolicyOptionalEnum(filesystem, "read", []string{"workspace-and-bound", "host"}, string(defaults.Filesystem.Read), path+".filesystem.read")),
-			Write:            AccessWrite(accessPolicyOptionalEnum(filesystem, "write", []string{"workspace-and-bound", "host"}, string(defaults.Filesystem.Write), path+".filesystem.write")),
-			GitMetadata:      GitMetadataAccess(accessPolicyOptionalEnum(filesystem, "gitMetadata", []string{"protected", "writable"}, string(defaults.Filesystem.GitMetadata), path+".filesystem.gitMetadata")),
-			CredentialStores: ProtectedStoreAccess(accessPolicyOptionalEnum(filesystem, "credentialStores", []string{"protected", "readable"}, string(defaults.Filesystem.CredentialStores), path+".filesystem.credentialStores")),
-		}
-	}
-	if declared, ok := raw["network"]; ok {
-		policy.Network = AccessNetwork(accessPolicyEnum(declared, []string{"declared", "unrestricted"}, path+".network"))
-	}
-	if declared, ok := raw["commands"]; ok {
-		policy.Commands = AccessCommands(accessPolicyEnum(declared, []string{"allowlisted", "host"}, path+".commands"))
-	}
-	if declared, ok := raw["piExtensions"]; ok {
-		extensions := accessPolicyObject(declared, path+".piExtensions")
-		policy.PiExtensions = AccessPiExtensions{
-			Runtime:      ExtensionRuntime(accessPolicyOptionalEnum(extensions, "runtime", []string{"declared", "host"}, string(defaults.PiExtensions.Runtime), path+".piExtensions.runtime")),
-			LocalBinding: accessPolicyOptionalBool(extensions, "localBinding", defaults.PiExtensions.LocalBinding, path+".piExtensions.localBinding"),
-			UnixSockets:  UnixSocketAccess(accessPolicyOptionalEnum(extensions, "unixSockets", []string{"declared", "all"}, string(defaults.PiExtensions.UnixSockets), path+".piExtensions.unixSockets")),
-			AppleEvents:  accessPolicyOptionalBool(extensions, "appleEvents", defaults.PiExtensions.AppleEvents, path+".piExtensions.appleEvents"),
-		}
-	}
-	return policy
-}
-
-// CredentialProtectPaths lists the credential stores a protected policy hides.
+	return FullAccessPolicy()
+}// CredentialProtectPaths lists the credential stores a protected policy hides.
 func CredentialProtectPaths(home string) []string {
 	paths := []string{
 		".ssh",
@@ -127,74 +67,16 @@ func CredentialProtectPaths(home string) []string {
 	return out
 }
 
-// ResolveAccessPolicy binds a policy to one host.
+// ResolveAccessPolicy returns the one policy, with no protected paths and the
+// bypass authorization the digest used to distinguish.
 func ResolveAccessPolicy(value AccessPolicy, context AccessPolicyContext) *ResolvedAccessPolicy {
-	policy := value
-	home := context.Home
-	if home == "" {
-		resolved, err := os.UserHomeDir()
-		if err != nil {
-			panic(err)
-		}
-		home = resolved
-	}
-	protectedPaths := []string{}
-	if policy.Mode != "full" {
-		if policy.Filesystem.CredentialStores == "protected" {
-			protectedPaths = append(protectedPaths, CredentialProtectPaths(home)...)
-		}
-		graphHome := context.GraphHome
-		if graphHome == "" {
-			graphHome = filepath.Join(home, ".graph")
-		}
-		stateDir := context.StateDir
-		if stateDir == "" {
-			stateDir = filepath.Join(home, ".local", "state", "graph")
-		}
-		protectedPaths = append(protectedPaths, graphHome, stateDir)
-	}
-	unique := map[string]bool{}
-	for _, path := range protectedPaths {
-		unique[filepath.Clean(path)] = true
-	}
-	paths := make([]string, 0, len(unique))
-	for path := range unique {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	authorization := "standard"
-	if policy.AutoApprove.Permission {
-		authorization = "bypass"
-	}
-	resolved := &ResolvedAccessPolicy{
-		AccessPolicy:   policy,
-		Authorization:  authorization,
-		ProtectedPaths: paths,
-	}
-	resolved.Digest = accessPolicyDigest(accessPolicyBody{
-		AccessPolicy:   policy,
-		Authorization:  authorization,
-		ProtectedPaths: paths,
-	})
-	return resolved
-}
-
-// IsHostRead reports whether the policy reads the whole host.
-func IsHostRead(policy *ResolvedAccessPolicy) bool {
-	return policy != nil && policy.Filesystem.Read == "host"
-}
-
-// IsHostWrite reports whether the policy writes the whole host.
-func IsHostWrite(policy *ResolvedAccessPolicy) bool {
-	return policy != nil && policy.Filesystem.Write == "host"
-}
-
-// IsFullAccess reports whether the policy is the full-access mode.
-func IsFullAccess(policy *ResolvedAccessPolicy) bool {
-	return policy != nil && policy.Mode == "full"
-}
-
-// NodeAccessPolicy lets a node pick its own policy only within the already
+	return &ResolvedAccessPolicy{AccessPolicy: FullAccessPolicy(), Authorization: "bypass"}
+}// IsHostRead is always true: the whole host is readable.
+func IsHostRead(policy *ResolvedAccessPolicy) bool { return true }// IsHostWrite reports whether the policy writes the whole host.
+// IsHostWrite is always true: the whole host is writable.
+func IsHostWrite(policy *ResolvedAccessPolicy) bool { return true }// IsFullAccess reports whether the policy is the full-access mode.
+// IsFullAccess is always true: there is one posture.
+func IsFullAccess(policy *ResolvedAccessPolicy) bool { return true }// NodeAccessPolicy lets a node pick its own policy only within the already
 // authorized host policy.
 func NodeAccessPolicy(value any, ceiling *ResolvedAccessPolicy, context AccessPolicyContext) *ResolvedAccessPolicy {
 	host := DefaultAccessPolicy()

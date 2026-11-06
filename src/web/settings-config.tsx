@@ -7,9 +7,7 @@ import { api } from './api.ts';
 
 
 
-import { standardAccessPolicy } from '../core/access-policy-presets.ts';
 
-import type { AccessPolicy } from '../core/access-policy.ts';
 
 import { MODEL_GRADES,type ModelGrade,type ModelInput,type ModelTier } from '../catalog/models.ts';
 
@@ -42,7 +40,6 @@ export type RawConfig = {
   models?: { entries: RawModel[]; preferences?: Partial<Record<ModelGrade, string[]>> };
   credentials?: Record<string, RawCredential>;
   limits?: { credentials?: Record<string, number>; sharedGroups?: Record<string, number> };
-  access?: AccessPolicy;
 };
 
 export type ConfigResponse = { revision: number; effectiveRevision?: number; config: RawConfig & { path: string | null; credentials?: Record<string, RawCredential & { configured?: boolean }> } };
@@ -113,7 +110,6 @@ export function toDraft(config: ConfigResponse['config']): RawConfig {
     ...(config.models ? { models: { ...config.models, entries: config.models.entries } } : {}),
     credentials,
     limits: config.limits ?? {},
-    access: config.access ?? standardAccessPolicy(),
   };
 }
 

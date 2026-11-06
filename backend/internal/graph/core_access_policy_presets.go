@@ -45,28 +45,6 @@ type AccessPolicy struct {
 	Commands     AccessCommands     `json:"commands"`
 	PiExtensions AccessPiExtensions `json:"piExtensions"`
 }
-
-func StandardAccessPolicy() AccessPolicy {
-	return AccessPolicy{
-		Mode:        "standard",
-		AutoApprove: AccessAutoApprove{Permission: false, SystemChange: false},
-		Filesystem: AccessFilesystem{
-			Read:             "workspace-and-bound",
-			Write:            "workspace-and-bound",
-			GitMetadata:      "protected",
-			CredentialStores: "protected",
-		},
-		Network:  "declared",
-		Commands: "allowlisted",
-		PiExtensions: AccessPiExtensions{
-			Runtime:      "declared",
-			LocalBinding: false,
-			UnixSockets:  "declared",
-			AppleEvents:  false,
-		},
-	}
-}
-
 func FullAccessPolicy() AccessPolicy {
 	return AccessPolicy{
 		Mode:        "full",

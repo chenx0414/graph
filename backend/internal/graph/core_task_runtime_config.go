@@ -141,7 +141,7 @@ func (runtime *TaskRuntime) resolvedAccessPolicy() *ResolvedAccessPolicy {
 	if runtime.access != nil {
 		policy = runtime.access()
 	} else {
-		policy = StandardAccessPolicy()
+		policy = FullAccessPolicy()
 	}
 	graphHome := filepath.Join(taskRuntimeHome(), ".graph")
 	if runtime.catalogOpt.CapabilityRoot != "" {
