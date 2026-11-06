@@ -18,9 +18,12 @@ func NewConversationId() string {
 // the newest completed turn's `input+cacheRead+cacheWrite`; a completion whose usage is
 // missing or adds up to zero (a turn that never really ran) is not a completed turn and
 // must not overwrite a known value. The cache aggregate uses the same denominator over every
-// recorded turn.
+// recorded turn. The same newest completed turn carries `cacheReadTokens` - the prefix the
+// provider served from its cache - and `cacheUsedAt`, the millisecond it settled. Providers
+// report hit and miss counts, never an expiry instant, so the age of that request is the only
+// cache-freshness fact the console can honestly print.
 func ConversationMasterUsage(store *TaskStore, conversationId string) ConversationMasterUsageView {
-	rows := kernelRows(store.Db, `SELECT i.usage AS usage,i.purpose AS purpose
+	rows := kernelRows(store.Db, `SELECT i.usage AS usage,i.purpose AS purpose,o.settled_at AS settledAt
     FROM invocations i
     JOIN operations o ON o.id=i.operation_id
     JOIN tasks t ON t.id=o.task_id
@@ -30,6 +33,8 @@ func ConversationMasterUsage(store *TaskStore, conversationId string) Conversati
 	var cacheInput int64
 	var cachedInput int64
 	var contextTokens *int64
+	var cacheReadTokens *int64
+	var cacheUsedAt *int64
 	for _, row := range rows {
 		text := kernelString(row["usage"])
 		if text == "" {
@@ -61,9 +66,19 @@ func ConversationMasterUsage(store *TaskStore, conversationId string) Conversati
 		if kernelString(row["purpose"]) == "completion" && total > 0 {
 			value := total
 			contextTokens = &value
+			read := cacheRead
+			cacheReadTokens = &read
+			// A turn that has not settled yet has no time to report: the age would be
+			// measured against the wrong request.
+			if settled := kernelInt(row["settledAt"]); settled > 0 {
+				usedAt := settled
+				cacheUsedAt = &usedAt
+			} else {
+				cacheUsedAt = nil
+			}
 		}
 	}
-	return ConversationMasterUsageView{CachedInput: cachedInput, CacheInput: cacheInput, ContextTokens: contextTokens}
+	return ConversationMasterUsageView{CachedInput: cachedInput, CacheInput: cacheInput, ContextTokens: contextTokens, CacheReadTokens: cacheReadTokens, CacheUsedAt: cacheUsedAt}
 }
 
 var (

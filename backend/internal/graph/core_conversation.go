@@ -169,10 +169,15 @@ type TurnFailure struct {
 }
 
 // ConversationMasterUsageView is the cache and context counters of the master agent.
+// CacheUsedAt is the settled time (Unix milliseconds) of the same turn CacheReadTokens came
+// from, so the console can say how long ago the cached prefix was last read. No provider
+// reports a cache expiry instant, and this view does not invent one.
 type ConversationMasterUsageView struct {
-	CachedInput   int64  `json:"cachedInput"`
-	CacheInput    int64  `json:"cacheInput"`
-	ContextTokens *int64 `json:"contextTokens"`
+	CachedInput     int64  `json:"cachedInput"`
+	CacheInput      int64  `json:"cacheInput"`
+	ContextTokens   *int64 `json:"contextTokens"`
+	CacheReadTokens *int64 `json:"cacheReadTokens"`
+	CacheUsedAt     *int64 `json:"cacheUsedAt"`
 }
 
 // RSI_RELOAD_RECEIPT is what a turn says when it committed a change and a reload is pending.

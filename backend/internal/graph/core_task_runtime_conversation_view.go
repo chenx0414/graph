@@ -275,6 +275,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	}
 	knownMasterUsage := ConversationMasterUsage(runtime.store, conversationId)
 	var contextLimit any
+	contextWindow := 0
 	var masterModel any
 	if master != nil {
 		masterModel = master["model"]
@@ -282,7 +283,14 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	if model, ok := masterModel.(string); ok && model != "" {
 		for _, entry := range runtime.liveEntries() {
 			if entry.Id == model {
-				contextLimit = entry.ContextWindow
+				// The catalog holds the window as an int, so the percentage is computed
+				// from that number rather than from a type assertion on the view value:
+				// the assertion never matched, and the footer printed a limit with no
+				// percentage beside it.
+				contextWindow = entry.ContextWindow
+				if contextWindow > 0 {
+					contextLimit = contextWindow
+				}
 				break
 			}
 		}
@@ -292,24 +300,24 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		cacheHitRate = float64(knownMasterUsage.CachedInput) / float64(knownMasterUsage.CacheInput)
 	}
 	var contextPercent any
-	if knownMasterUsage.ContextTokens != nil {
-		if limit, ok := contextLimit.(int64); ok && limit > 0 {
-			percent := float64(*knownMasterUsage.ContextTokens) / float64(limit) * 100
-			if percent > 100 {
-				percent = 100
-			}
-			contextPercent = percent
+	if knownMasterUsage.ContextTokens != nil && contextWindow > 0 {
+		percent := float64(*knownMasterUsage.ContextTokens) / float64(contextWindow) * 100
+		if percent > 100 {
+			percent = 100
 		}
+		contextPercent = percent
 	}
 	telemetry := map[string]any{
-		"model":          masterModel,
-		"thinkingLevel":  conversation.ThinkingLevel,
-		"cacheHitRate":   cacheHitRate,
-		"cachedInput":    knownMasterUsage.CachedInput,
-		"cacheInput":     knownMasterUsage.CacheInput,
-		"contextTokens":  knownMasterUsage.ContextTokens,
-		"contextLimit":   contextLimit,
-		"contextPercent": contextPercent,
+		"model":           masterModel,
+		"thinkingLevel":   conversation.ThinkingLevel,
+		"cacheHitRate":    cacheHitRate,
+		"cachedInput":     knownMasterUsage.CachedInput,
+		"cacheInput":      knownMasterUsage.CacheInput,
+		"cacheReadTokens": knownMasterUsage.CacheReadTokens,
+		"cacheUsedAt":     knownMasterUsage.CacheUsedAt,
+		"contextTokens":   knownMasterUsage.ContextTokens,
+		"contextLimit":    contextLimit,
+		"contextPercent":  contextPercent,
 	}
 	var masterView any
 	if master != nil {

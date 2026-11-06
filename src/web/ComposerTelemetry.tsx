@@ -25,6 +25,10 @@ export type ComposerTelemetryView = {
   cacheHitRate: number | null;
   cachedInput: number;
   cacheInput: number;
+  /** Cached input tokens the newest completed master turn read. */
+  cacheReadTokens?: number | null;
+  /** When that turn settled, Unix milliseconds. No provider reports a cache expiry. */
+  cacheUsedAt?: number | null;
   contextTokens: number | null;
   contextLimit: number | null;
   contextPercent: number | null;
@@ -32,6 +36,19 @@ export type ComposerTelemetryView = {
 
 function telemetryValue(value: number | null | undefined, render: (value: number) => string) {
   return value === null || value === undefined ? '—' : render(value);
+}
+
+/** How long ago the cached prefix was read. Providers report hit and miss counts, never an
+ * expiry instant, so the age of the last request is the only freshness fact available and
+ * the footer names it as an age rather than as a deadline. */
+function cacheAge(usedAt: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - usedAt) / 1000));
+  if (seconds < 60) return '刚刚';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.round(hours / 24)} 天前`;
 }
 
 /** Model and thinking-strength control shared by an existing conversation and
@@ -45,6 +62,16 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftLevel, setDraftLevel] = useState('off');
+  // The age of the last cached request is rendered from its timestamp, so it stays true
+  // while the page sits open: one slow tick keeps it from freezing at the value it had
+  // when the conversation view last arrived.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (telemetry?.cacheUsedAt === null || telemetry?.cacheUsedAt === undefined) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 20_000);
+    return () => clearInterval(tick);
+  }, [telemetry?.cacheUsedAt]);
   const rootRef = useRef<HTMLDivElement>(null);
   const model = models.find(item => item.id === telemetry?.model);
   const view = thinkingView(model, telemetry?.thinkingLevel);
@@ -95,11 +122,20 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   } as CSSProperties;
   const current = view.options.find(option => option.level === view.level);
   const draft = view.options.find(option => option.level === draftLevel);
+  const cacheReadTokens = telemetry?.cacheReadTokens ?? null;
+  const cacheUsedAt = telemetry?.cacheUsedAt ?? null;
+  const cacheTitle = [
+    '缓存输入占全部输入 token 的比例。',
+    cacheReadTokens !== null && cacheReadTokens > 0 ? `上次请求有 ${formatTokens(cacheReadTokens)} tokens 命中缓存。` : '',
+    cacheUsedAt === null ? '' : '服务商不报告缓存过期时刻：缓存由服务端保留并按负载驱逐，空闲越久越可能失效，这里显示的是距上次请求的时间。',
+  ].join('');
   return (
     <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
-      <span title="缓存输入占全部输入 token 的比例" data-testid="telemetry-cache">
+      <span title={cacheTitle} data-testid="telemetry-cache" data-cache-used-at={cacheUsedAt ?? undefined}>
         <Icon name="spark" size={13} />
         缓存 {telemetryValue(telemetry?.cacheHitRate, value => `${(value * 100).toFixed(value >= 0.1 ? 0 : 1)}%`)}
+        {cacheReadTokens !== null && cacheReadTokens > 0 ? ` · ${formatTokens(cacheReadTokens)}` : ''}
+        {cacheUsedAt === null ? '' : ` · ${cacheAge(cacheUsedAt, now)}`}
       </span>
       <span title="最近一次完成请求使用的输入 token 与模型上下文窗口" data-testid="telemetry-context">
         <Icon name="graph" size={13} />

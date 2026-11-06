@@ -155,6 +155,8 @@ export type ConversationView = {
     cacheHitRate: number | null;
     cachedInput: number;
     cacheInput: number;
+    cacheReadTokens?: number | null;
+    cacheUsedAt?: number | null;
     contextTokens: number | null;
     contextLimit: number | null;
     contextPercent: number | null;
