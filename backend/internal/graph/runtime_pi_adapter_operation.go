@@ -305,7 +305,11 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			// belong to the master alone and only to a session that may act on the
 			// host. The status stays available without a checkout - it names the
 			// reason there is none - while an apply needs one to change.
-			if channels != nil && channels.Rsi != nil && role == "master" && input.FullAccess {
+			// RSI changes Graph's own source checkout. That is the main thread's
+			// job: a project supervisor builds graphs, it does not rewrite the
+			// harness it runs on.
+			if channels != nil && channels.Rsi != nil && role == "master" && input.FullAccess &&
+				(conversation == nil || conversation.Role == ConversationGlobal) {
 				tools.Rsi = &AgentToolsRsi{Status: channels.Rsi.Status}
 				if channels.Rsi.Available {
 					tools.Rsi.Apply = channels.Rsi.Apply
