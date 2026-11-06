@@ -44,7 +44,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		Model:     ToPiModel(entry),
 		Stream: GuardHandoffResponses(
 			ControlledOpenAIStream(turn.ObservedGate, entry, input.ResolveKeyFor, input.SlotFor, entry.Api, PiAdapterStreamOptions{
-				EstimateMissing: UnknownUsageIsNonBlocking(store, instanceId),
+				EstimateMissing: false,
 				OnRequest: func(callId string, profile map[string]any) {
 					data := map[string]any{
 						"callId": callId, "operationId": operation.Id, "instanceId": instanceId, "model": entry.Id,

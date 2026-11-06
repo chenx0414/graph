@@ -55,11 +55,6 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					if paused || task.Paused != 0 || phaseClosed(task.Phase) {
 						Raise("paused", "Provider send is paused")
 					}
-					for _, call := range kernel.PendingProviderCalls(graphId, nodeId) {
-						if call.State == "unknown" {
-							Raise("unknown_usage", "Reconcile unknown provider usage before another send")
-						}
-					}
 					var modelJSON any
 					if model != nil {
 						recorded := providerCallModel{
