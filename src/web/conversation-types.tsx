@@ -120,8 +120,6 @@ export type ProposalVersion = {
   archived?: boolean;
 };
 
-export type DrawerPage = ConversationDrawerPage;
-
 export function residentFlag(id: string): 'true' | undefined {
   return isResidentPanel(id) ? 'true' : undefined;
 }

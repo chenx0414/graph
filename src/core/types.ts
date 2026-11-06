@@ -2,7 +2,6 @@ import type { GraphDefinition } from './interface-spec.ts';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-export interface ProjectConfig { id: string; root: string; grants?: string[] }
 export type ContextPurpose = 'discuss' | 'explore' | 'implement' | 'review' | 'verify' | 'rework';
 export type ContextIndependence = 'none' | 'fresh' | 'model-excluded';
 export type ContextFactKind = 'artifact' | 'decision' | 'file' | 'transcript_range' | 'tool_call';
@@ -19,23 +18,6 @@ export interface ReviewIndependencePolicy {
   excludedModels: string[];
   allowedTools: string[] | null;
   reportSchema: { kind: string; version: number };
-}
-export interface ContextHandoffPackage {
-  mode: AgentContextMode;
-  purpose: ContextPurpose;
-  independence: ContextIndependence;
-  requestedFacts: ContextFactRef[];
-  reasonCode: string;
-  sourceNodeId: string | null;
-  sourceInstanceId: string | null;
-  sourceSessionId: string | null;
-  sourceLeafId: string | null;
-  summary: string;
-  decisions: string[];
-  acceptance: { id: string; description: string; checkNode: string }[];
-  artifactRefs: { path: string; digest: string; artifactId?: string; version?: number; uri?: string }[];
-  outputSchema: { kind: string; version: number };
-  briefing: string;
 }
 export interface ResolvedAgentContext {
   mode: AgentContextMode;
@@ -76,10 +58,7 @@ export interface NativeProposal extends ProposalScope {
   definition: GraphDefinition;
 }
 export interface Receipt { taskId: string; cursor: number }
-export interface ProposalReceipt extends Receipt { proposalVersion: number; draftRevision: number }
 export interface TaskUpdate { cursor: number; taskId: string; type: string; data: Json; timestamp: number }
-export interface TaskWatch extends AsyncIterableIterator<TaskUpdate> { return(): Promise<IteratorResult<TaskUpdate>> }
-
 export type { TokenUsage } from './token-usage.ts';
 import type { TokenUsage } from './token-usage.ts';
 import type { ResolvedAccessPolicy } from './access-policy.ts';
@@ -152,26 +131,6 @@ export type Reconciliation =
   | { state: 'completed'; result: OperationResult; quiescent: true; proof: string }
   | { state: 'unknown'; quiescent: boolean; proof: string }
   | { state: 'not_started'; quiescent: true; proof: string };
-/** Trusted host adapter: prepare has no external effects; its callback sends one actual operation. */
-export interface ActionAdapter {
-  kind: NodeSpec['kind']; reserveTokens?: number; grant?: string;
-  prepare(operation: Operation): Promise<() => Promise<OperationResult>>;
-  /** Deliver a steering message into an already dispatched operation. Returns the
-   * turn ordinal the injected message was given, so the transcript can keep it at
-   * the place it interrupted instead of at the top of the turn. */
-  steer?(operation: Operation, text: string): Promise<{ ordinal?: number } | void>;
-  /** Abort active model/tool work now. Text, when present, becomes the next
-   * prompt in the same session and the operation continues until it settles. */
-  interrupt?(operation: Operation, text?: string): Promise<{ ordinal?: number } | void>;
-  /** Soft-stop the turn an operation is running: finish the in-flight tool call,
-   * then end the turn before the next model request, keeping the session. No-op
-   * when the operation has no live session. */
-  stop?(operation: Operation): Promise<void>;
-  reconcile?(operation: Operation): Promise<Reconciliation>;
-  /** Durable adapter evidence that no session/send began; absence of a receipt alone is insufficient. */
-  canReplayBeforeSend?(operation: Operation): boolean;
-}
-
 export class RuntimeError extends Error {
   readonly code: string;
   constructor(code: string, message: string) { super(message); this.name = 'RuntimeError'; this.code = code; }

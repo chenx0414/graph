@@ -151,8 +151,7 @@ test('a pstack skill bound to the main definition is offered in the slash menu b
   const text = await menu.innerText();
   expect(text).toContain('技能');
   for (const name of ['architect', 'setup-pstack', 'why']) expect(text).toContain(name);
-  // The existing entries are still there; the new group did not replace them.
-  const goal = page.getByTestId('slash-system-goal');
-  expect(await goal.innerText()).toContain('设定目标');
+  // The system entries are still there; the new group did not replace them.
+  expect(await page.getByTestId('slash-system-model').count()).toBe(1);
   await page.screenshot({ path: '/tmp/graph-pstack-skills-slash.png' });
 }, 300_000);

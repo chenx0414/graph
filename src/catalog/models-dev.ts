@@ -21,9 +21,6 @@ import { MODEL_THINKING_LEVELS, type ModelCost, type ModelInput, type ModelThink
 
 export const MODELS_DEV_SOURCE_URL = 'https://models.dev/api.json';
 export const MODELS_DEV_ATTRIBUTION = 'models.dev community catalog (MIT). Attribution: https://models.dev';
-/** @deprecated kept for older callers; use MODELS_DEV_ATTRIBUTION. */
-export const MODELS_DEV_LICENSE = MODELS_DEV_ATTRIBUTION;
-
 export interface ModelsDevReasoningOption {
   type?: string;
   values?: unknown[];

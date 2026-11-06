@@ -37,11 +37,3 @@ func CapabilityRoot(home ...string) string {
 	}
 	return filepath.Join(root, "capabilities")
 }
-
-func AgentCombinationPath(home ...string) string {
-	root := GraphHome()
-	if len(home) > 0 && home[0] != "" {
-		root = home[0]
-	}
-	return filepath.Join(root, "agent-combinations.json")
-}

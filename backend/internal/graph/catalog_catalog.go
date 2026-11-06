@@ -151,14 +151,6 @@ func (catalog *Catalog) Definition(key string) CatalogDefinition {
 	return CatalogDefinition{Id: id, Version: version, DefinitionSpec: spec}
 }
 
-func (catalog *Catalog) Preset(id string) map[string]any {
-	return kernelRow(catalog.store.DB, "SELECT id,version,hash,detail,installed_at FROM presets WHERE id=?", id)
-}
-
-func (catalog *Catalog) RecordPreset(id, version, hash string, detail any) {
-	kernelExec(catalog.store.DB, "INSERT OR REPLACE INTO presets VALUES(?,?,?,?,?)", id, version, hash, CanonicalJSON(detail), NowMillis())
-}
-
 func (catalog *Catalog) AgentCombinations() []AgentCombinationView {
 	return catalog.library.AgentCombinations()
 }

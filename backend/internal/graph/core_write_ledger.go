@@ -141,10 +141,6 @@ type WriteLedger struct {
 	store *TaskStore
 }
 
-func NewWriteLedger(store *TaskStore) *WriteLedger {
-	return &WriteLedger{store: store}
-}
-
 func (ledger *WriteLedger) Capture(side string, input WriteCaptureInput) *WriteRecord {
 	path := CapturePathFor(input.ToolName, input.Path)
 	if path == nil {

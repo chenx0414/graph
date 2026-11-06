@@ -80,19 +80,6 @@ func BudgetScopeViewOf(store *TaskStore, scopeID string) *BudgetScopeView {
 	return view
 }
 
-func ShareBudgetScope(store *TaskStore, instanceID, scopeID string) {
-	instanceBudget(store, instanceID)
-	scope, ok := g5One(store.Db, "SELECT limit_tokens,unlimited FROM budget_scopes WHERE id=?", scopeID)
-	if !ok {
-		Raise("not_found", "Unknown budget scope")
-	}
-	limit := int64(0)
-	if scope["limit_tokens"] != nil {
-		limit = g5Int(scope["limit_tokens"])
-	}
-	store.TakeSharedBudget(instanceID, scopeID, limit, int(g5Int(scope["unlimited"])))
-}
-
 func LoadBudgetSnapshot(store *TaskStore, instanceID string) BudgetSnapshot {
 	instance := instanceBudget(store, instanceID)
 	reservedRow, _ := g5One(store.Db, "SELECT COALESCE(SUM(reserved),0) AS reserved FROM operations WHERE instance_id=?", instanceID)

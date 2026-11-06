@@ -91,10 +91,6 @@ export function composerPrimaryDisabled(input: {
   return !input.hasInput && !input.hasSuggestion;
 }
 
-export function queuedUserMessages<T extends { role: string; state: string }>(messages: T[]): T[] {
-  return messages.filter(message => message.role === 'user' && message.state === 'queued');
-}
-
 /** Cancelled messages never appear in the transcript. */
 export function visibleTranscriptMessages<T extends { role: string; state: string }>(messages: T[]): T[] {
   return messages.filter(message => !(message.role === 'user' && message.state === 'cancelled'));

@@ -451,11 +451,3 @@ func writePublic(w http.ResponseWriter, recovered any) {
 }
 
 var configFieldPattern = regexp.MustCompile(`^[A-Za-z0-9_$.\[\]-]+`)
-
-func invalidConfig(message string) {
-	field := message
-	if found := configFieldPattern.FindString(message); found != "" {
-		field = found
-	}
-	RaiseField("invalid_config", message, field)
-}

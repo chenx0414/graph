@@ -28,7 +28,7 @@ submit 事务先核对 execution、有效提交唯一性、本节点输出与全
 
 模块输入按受理序号串行处理。判断、状态更新和 transition/outbox 的持久边界允许重启继续广播而不重复判断或投递。自定义代码和外部命令不在 SQLite 事务中执行。
 
-大型 JSON 由 [kernel-content.ts](../backend/internal/graph/core_kernel_content.go)保存不可变正文、摘要与字节数，正式记录保存引用。提交、投递、队列、模块状态、operation 请求/结果和公开结果的生产读取还原原值；内容与业务引用在同一事务写入。兼容读取既有 inline JSON，不批量改写用户数据。概览 SQL 只读大内容元数据，精确详情查询再取全文。
+大型 JSON 由 [kernel-content.go](../backend/internal/graph/core_kernel_content.go)保存不可变正文、摘要与字节数，正式记录保存引用。提交、投递、队列、模块状态、operation 请求/结果和公开结果的生产读取还原原值；内容与业务引用在同一事务写入。兼容读取既有 inline JSON，不批量改写用户数据。概览 SQL 只读大内容元数据，精确详情查询再取全文。
 
 SSE 传递可恢复的事件与引用，公开结果通过 resultId 主动查询。节点日志保留完整正文，但默认页和 node.entry 事件对大记录发送摘要；按 entryId 查询时验证其 task/node 归属。全文读取不修改 Agent 会话或正式工作队列。
 
@@ -70,13 +70,13 @@ main 与多个 graph 共用全局 Agent 执行名额，最多 10 个正在执行
 
 不可变 artifact 版本属于 graph，子 graph 共用顶层空间；文件、文本、JSON 发布保留来源、作者、修改者与精确引用。普通节点只能修改自己的成果，main 负责协调并可修改全部成果。
 
-代码产物包含真实 commit；worktree 只是访问位置。Git 集成是显式受控路径，最终验收由 [graph-acceptance.ts](../backend/internal/graph/core_graph_acceptance.go)核对真实 check、独立 review 与人工确认。通过状态的路由缓存不更新旧审查的 commit。
+代码产物包含真实 commit；worktree 只是访问位置。Git 集成是显式受控路径，最终验收由 [graph-acceptance.go](../backend/internal/graph/core_graph_acceptance.go)核对真实 check、独立 review 与人工确认。通过状态的路由缓存不更新旧审查的 commit。
 
 最终合入绑定已验证的集成提交。目标变化、脏工作区、未检查的集成提交与未满足验收都要保留现场，不能裸更新 ref 或覆盖人工修改。非代码 graph 仍可完成，不隐含要求 Git 交付。
 
 ## 界面与查询
 
-ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚点；[orthogonal-routes.ts](../backend/internal/graph/core_orthogonal_routes.go)在统一格点上避开可见实心节点。展开容器边界透明；折叠子 graph 成为显示边界，使用同一走线算法重新连接外部边，不改变位置或运行事实。
+ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚点；[orthogonal-routes.go](../backend/internal/graph/core_orthogonal_routes.go)在统一格点上避开可见实心节点。展开容器边界透明；折叠子 graph 成为显示边界，使用同一走线算法重新连接外部边，不改变位置或运行事实。
 
 子 graph 公开接口来自实际映射，显示精确名称、协议版本和内部端点；不能从扁平边猜造公开接口。折叠隐藏内部线，保留外部业务连接与跨边界聊天，详情仍显示原始投递和实际聊天双方。展开恢复原路线，嵌套折叠状态独立。
 
@@ -84,13 +84,13 @@ ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚�
 
 ## 当前代码导航
 
-- 定义、持久模型与生命周期：[interface-spec.ts](../backend/internal/graph/core_interface_spec.go)、[kernel-store.ts](../backend/internal/graph/core_kernel_store.go)、[graph-runtime.ts](../backend/internal/graph/core_graph_runtime.go)、[graph-service.ts](../backend/internal/graph/core_graph_service.go)。
-- 执行与恢复：[graph-runner.ts](../backend/internal/graph/core_graph_runner.go)、[node-executor.ts](../backend/internal/graph/core_node_executor.go)、[node-turn-driver.ts](../backend/internal/graph/core_node_turn_driver.go)、[kernel-recovery.ts](../backend/internal/graph/core_kernel_recovery.go)。
-- Pi 与能力：[kernel-graph-lane.ts](../backend/internal/graph/runtime_kernel_graph_lane.go)、[kernel-node-host.ts](../backend/internal/graph/runtime_kernel_node_host.go)、[agent-context-assembly.ts](../backend/internal/graph/runtime_agent_context_assembly.go)、[capability-library.ts](../backend/internal/graph/catalog_capability_library.go)。
+- 定义、持久模型与生命周期：[interface-spec.go](../backend/internal/graph/core_interface_spec.go)、[kernel-store.go](../backend/internal/graph/core_kernel_store.go)、[graph-runtime.go](../backend/internal/graph/core_graph_runtime.go)、[graph-service.go](../backend/internal/graph/core_graph_service.go)。
+- 执行与恢复：[graph-runner.go](../backend/internal/graph/core_graph_runner.go)、[node-executor.go](../backend/internal/graph/core_node_executor.go)、[node-turn-driver.go](../backend/internal/graph/core_node_turn_driver.go)、[kernel-recovery.go](../backend/internal/graph/core_kernel_recovery.go)。
+- Pi 与能力：[kernel-graph-lane.go](../backend/internal/graph/runtime_kernel_graph_lane.go)、[kernel-node-host.go](../backend/internal/graph/runtime_kernel_node_host.go)、[agent-context-assembly.go](../backend/internal/graph/runtime_agent_context_assembly.go)、[capability-library.go](../backend/internal/graph/catalog_capability_library.go)。
 - durable 内核：[kernel.go](../backend/internal/pigkernel/kernel.go)、[session.go](../backend/internal/pigkernel/session.go)、[turn.go](../backend/internal/pigkernel/turn.go)。
-- 模块：[module-runtime.ts](../backend/internal/graph/core_module_runtime.go)、[module-router.ts](../backend/internal/graph/core_module_router.go)、[module-evaluator.ts](../backend/internal/graph/runtime_module_evaluator.go)、[kernel-operation-broker.ts](../backend/internal/graph/runtime_kernel_operation_broker.go)。
-- 产物与 Git：[artifact-workspace.ts](../backend/internal/graph/core_artifact_workspace.go)、[graph-acceptance.ts](../backend/internal/graph/core_graph_acceptance.go)、[Git 模块](../backend/internal/graph/git_git.go)。
-- 投影与界面：[kernel-views.ts](../backend/internal/graph/core_kernel_views.go)、[kernel-explain.ts](../backend/internal/graph/core_kernel_explain.go)、[node-run.ts](../backend/internal/graph/core_node_run.go)、[layout.ts](../backend/internal/graph/server_layout.go)、[GraphCanvas.tsx](../src/web/GraphCanvas.tsx)、[AgentNodeChat.tsx](../src/web/AgentNodeChat.tsx)。
+- 模块：[module-runtime.go](../backend/internal/graph/core_module_runtime.go)、[module-router.go](../backend/internal/graph/core_module_router.go)、[module-evaluator.go](../backend/internal/graph/runtime_module_evaluator.go)、[kernel-operation-broker.go](../backend/internal/graph/runtime_kernel_operation_broker.go)。
+- 产物与 Git：[artifact-workspace.go](../backend/internal/graph/core_artifact_workspace.go)、[graph-acceptance.go](../backend/internal/graph/core_graph_acceptance.go)、[Git 模块](../backend/internal/graph/git_git.go)。
+- 投影与界面：[kernel-views.go](../backend/internal/graph/core_kernel_views.go)、[kernel-explain.go](../backend/internal/graph/core_kernel_explain.go)、[node-run.go](../backend/internal/graph/core_node_run.go)、[layout.go](../backend/internal/graph/server_layout.go)、[GraphCanvas.tsx](../src/web/GraphCanvas.tsx)、[AgentNodeChat.tsx](../src/web/AgentNodeChat.tsx)。
 
 ## 切换与验证边界
 

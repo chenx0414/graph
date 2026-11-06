@@ -132,10 +132,6 @@ func WakeForAnswer(store *TaskStore, taskID string, data any) bool {
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "answer", DedupeKey: mapString(asMap(data), "questionId", "QuestionID"), Data: data, HasData: true})
 }
 
-func WakeForWaiting(store *TaskStore, taskID string, data any) bool {
-	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "waiting", DedupeKey: mapString(asMap(data), "questionId", "QuestionID"), Data: data, HasData: true})
-}
-
 func sliceLike(v any) bool {
 	if v == nil {
 		return false

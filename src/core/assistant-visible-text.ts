@@ -5,11 +5,6 @@ const OPEN_TAIL = new RegExp(`<${PRIVATE_TAG}>[\\s\\S]*$`, 'i');
 const CLOSING = new RegExp(`<\\/${PRIVATE_TAG}>`, 'gi');
 const OPENING = new RegExp(`<${PRIVATE_TAG}>`, 'i');
 
-/** Whether ordinary text contains an internal marker outside fenced examples. */
-export function hasPrivateMarkup(text: string): boolean {
-  return OPENING.test(text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, ''));
-}
-
 /** Remove private markup emitted as ordinary assistant text. Fenced examples stay visible. */
 export function assistantVisibleText(text: string): string {
   return text.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map(part => {

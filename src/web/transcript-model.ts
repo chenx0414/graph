@@ -435,15 +435,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
 
 export { toolGroupSummary } from './tool-activity.ts';
 
-export function toolActionLabel(name: string) {
-  if (name === 'read' || name === 'list_dir') return '读取';
-  if (name === 'run_command') return '运行';
-  if (['write_file', 'apply_patch', 'edit'].includes(name)) return '编辑';
-  if (['search', 'glob'].includes(name)) return '搜索';
-  if (['fetch', 'web_search'].includes(name)) return '访问';
-  return '调用';
-}
-
 export function activeToolStatus(tools: TranscriptTool[]) {
   const active = [...tools].reverse().find(tool => !tool.done);
   if (!active) return '正在整理结果';

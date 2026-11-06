@@ -450,33 +450,3 @@ func (app *GraphApp) serveConversationStream(w http.ResponseWriter, r *http.Requ
 	after := appEventCursor(r)
 	app.appWriteEventStream(w, r, app.runtime.Conversations().Watch(conversationID, after))
 }
-
-// serveConversationGoal reads the persistent goal of one conversation.
-func (app *GraphApp) serveConversationGoal(w http.ResponseWriter, r *http.Request) {
-	conversationID := r.PathValue("conversationId")
-	goal := app.runtime.store.Goal(conversationID)
-	// The graph is where the work is, so reading the goal is the moment its status can
-	// be stale: a graph that finished while nobody asked must not still read "active".
-	syncGoalFromGraph(app.runtime, goal)
-	writeJSON(w, http.StatusOK, map[string]any{"conversationId": conversationID, "goal": goal})
-}
-
-// serveConversationGoalAction applies one /goal action.
-func (app *GraphApp) serveConversationGoalAction(w http.ResponseWriter, r *http.Request) {
-	body := appJSONBody(w, r)
-	input := GoalInput{
-		Action: appBodyString(body, "action"), Objective: appBodyString(body, "objective"),
-		CheckNote: appBodyString(body, "checkNote"), RequestID: appBodyString(body, "requestId"),
-		Acceptance: appBodyString(body, "acceptance"), ProjectId: appBodyString(body, "projectId"),
-	}
-	if value, ok := body["budgetTokens"].(float64); ok && value >= 0 {
-		input.BudgetTokens = int64(value)
-	}
-	conversationID := r.PathValue("conversationId")
-	applied := app.runtime.Conversations().Goal(conversationID, input)
-	// The card's resume button says the same thing the command says: the goal
-	// goes on, so the turn that works on it starts now instead of waiting for
-	// the person to speak again.
-	startGoalTurn(app.runtime.Conversations(), conversationID, input.Action, applied, input.RequestID)
-	writeJSON(w, http.StatusOK, applied)
-}

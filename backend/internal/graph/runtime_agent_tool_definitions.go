@@ -27,8 +27,6 @@ type AgentToolFeatures struct {
 	Harness         bool
 	Conversations   *AgentConversationFeatures
 	Peers           bool
-	// Goal reports on the standing goal of the session's own conversation.
-	Goal bool
 	// Desktop is the computer-use capability: this host has agent-desktop.
 	Desktop bool
 }

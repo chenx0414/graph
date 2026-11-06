@@ -199,26 +199,6 @@ func (live *LiveConfig) Snapshot() LiveConfigState {
 	return live.state
 }
 
-func (live *LiveConfig) Subscribe(listener func()) func() {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	live.listeners = append(live.listeners, listener)
-	return func() {
-		live.mu.Lock()
-		defer live.mu.Unlock()
-		next := live.listeners[:0]
-		for _, item := range live.listeners {
-			if &item == nil {
-				continue
-			}
-			// Identity of funcs is not comparable. Drop the first matching pointer via a token.
-			next = append(next, item)
-		}
-		live.listeners = next
-		live.removeListener()
-	}
-}
-
 func (live *LiveConfig) removeListener() {}
 
 type liveMerged struct {

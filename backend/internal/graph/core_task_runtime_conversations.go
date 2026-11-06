@@ -34,18 +34,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			panic(err)
 		}
 	}
-	// A `/goal …` line typed as the first message of a new conversation is a
-	// command, not a message the model has to interpret. It is applied after
-	// the create transaction commits, because the goal store writes through
-	// its own statements.
-	firstText := ""
-	if input.Text != nil {
-		firstText = strings.TrimSpace(*input.Text)
-	}
-	goalCommand, goalFirst := ParseGoalCommand(firstText)
-	if len(attachments) > 0 {
-		goalFirst = false
-	}
 	result := runtime.store.Command("conversations", input.RequestId, map[string]any{
 		"type":          "create",
 		"projectId":     input.ProjectId,
@@ -87,8 +75,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		title := "新对话"
 		if input.Title != nil && strings.TrimSpace(*input.Title) != "" {
 			title = strings.TrimSpace(*input.Title)
-		} else if goalFirst {
-			title = goalCommand.Objective
 		} else if text != "" {
 			title = text
 		}
@@ -99,16 +85,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		runtime.store.CreateConversation(conversationId, projectId, workspaceProjectId, taskId, title, sequence, NowMillis())
 		if runtime.master != nil && runtime.masterModel() != nil {
 			runtime.createMasterNode(taskId)
-			if goalFirst {
-				// Creating a master node opens a pending activation, which the
-				// scheduler reads as "a turn to run". A command-only conversation
-				// has no message for that turn to answer, so the activation is
-				// settled before it starts; the first real message re-opens it
-				// through RecoverMaster, the same path every later message uses.
-				activation := kernelRow(runtime.store.Db, "SELECT activation_id FROM nodes WHERE task_id=? AND id='master'", taskId)
-				runtime.store.SetNodeStatus(taskId, "master", "succeeded")
-				runtime.store.SettleActivation(kernelString(activation["activation_id"]), taskId, "master")
-			}
 			requestedModel := ""
 			if input.Model != nil {
 				requestedModel = strings.TrimSpace(*input.Model)
@@ -161,17 +137,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 		}
 		cursor := runtime.store.Event(taskId, "conversation.created", map[string]any{"conversationId": conversationId, "projectId": projectId, "title": title})
 		var messageId any
-		if goalFirst {
-			// No user chat message is admitted: the goal line is written after
-			// the command returns, so the turn never starts for a command.
-			return map[string]any{
-				"conversationId": conversationId,
-				"taskId":         taskId,
-				"title":          title,
-				"messageId":      nil,
-				"cursor":         cursor,
-			}
-		}
 		if text != "" || len(attachments) > 0 {
 			data := any(nil)
 			if len(attachments) > 0 {
@@ -218,28 +183,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 	record, _ := jsonRecord(result)
 	if record == nil {
 		return map[string]any{}
-	}
-	if !goalFirst {
-		return record
-	}
-	goalCommand.RequestID = input.RequestId
-	applied := runtime.Conversations().Goal(conversationId, goalCommand)
-	line := AppendGoalLine(runtime.store, conversationId, goalCommand.Action, applied)
-	// The first message may be the objective itself: then the goal starts the
-	// conversation instead of leaving it waiting for a second message.
-	startGoalTurn(runtime.Conversations(), conversationId, goalCommand.Action, applied, input.RequestId)
-	record["command"] = "goal"
-	record["action"] = goalCommand.Action
-	record["goal"] = applied["goal"]
-	record["messageId"] = line.Id
-	if started := applied["started"]; started != nil {
-		record["started"] = started
-	}
-	if startedMessageId := applied["startedMessageId"]; startedMessageId != nil {
-		record["startedMessageId"] = startedMessageId
-	}
-	if line.Cursor != nil {
-		record["cursor"] = *line.Cursor
 	}
 	return record
 }

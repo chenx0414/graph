@@ -144,8 +144,8 @@ const SKILLS = [
 ];
 
 // A graph node is not a conversation node, so it reads its own ledger. The proof is a
-// real graph that actually called the provider: a goal builds the planning team, the
-// planner's call settles, and the node chat prints its rate from that call.
+// real graph that actually called the provider: the planner's own call settles, and
+// the node chat prints its rate from that call.
 test('the node chat footer of a graph node prints the rate of its own provider call', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-console-tps-graph-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -181,11 +181,24 @@ test('the node chat footer of a graph node prints the rate of its own provider c
   const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '准备开始', requestId: 'tps-graph-conversation' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
-  const set = await request(`/api/conversations/${conversationId}/messages`, {
-    text: '/goal 把导出做成 CSV\n验收：\n1) POST /api/export 返回 CSV', requestId: 'tps-graph-goal',
-  });
-  const graphId = String((set.body.goal as Record<string, any> | undefined)?.graphId ?? '');
-  expect(graphId, JSON.stringify(set.body)).not.toBe('');
+  // A graph with one node, created through the same route the console uses. The
+  // node is asked to plan the way a person talks to it, so the call under test is
+  // the node's own provider request.
+  const definition = {
+    schemaVersion: 2,
+    name: 'TPS 节点',
+    protocols: { job: { type: 'object' }, done: { type: 'object' } },
+    nodes: {
+      planner: { recipe: 'coder@1', model: 'main', task: 'PLAN_THE_WORK', outputs: { out: { protocol: 'done' } }, submission: { required: ['out'] } },
+    },
+    modules: {}, edges: {},
+    outputs: { done: { from: 'planner.out', protocol: 'done' } },
+  };
+  const made = await request('/api/graphs', { conversationId, definition, targetBranch: 'main', requestId: 'tps-graph' });
+  const graphId = String((made.body as Record<string, any>).graphId ?? '');
+  expect(graphId, JSON.stringify(made.body)).not.toBe('');
+  const said = await request(`/api/tasks/${graphId}/nodes/planner/messages`, { text: '计划这次导出。', requestId: 'tps-plan' });
+  expect(said.status, JSON.stringify(said.body)).toBe(200);
 
   // The planner's real call: the graph node's own ledger, not the conversation's.
   const rate = await expect.poll(async () => {

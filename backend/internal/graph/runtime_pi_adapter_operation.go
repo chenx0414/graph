@@ -318,16 +318,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				tools.GraphManagement = supervisor.GraphManagement
 				tools.Catalog = channels.Catalog
 			}
-			// The goal tool acts on the conversation this session answers for: the
-			// model reports complete or blocked on its own objective, and a goal
-			// nobody can report on would only stop by counting turns.
-			if role == "master" && conversation != nil {
-				conversationID := conversation.Id
-				modelID := input.Entry.Id
-				tools.Goal = func(goal AgentToolsGoal) any {
-					return GoalTool(store, conversationID, goal, modelID)
-				}
-			}
 			// The self-improvement tools change the Graph source checkout, so they
 			// belong to the master alone and only to a session that may act on the
 			// host. The status stays available without a checkout - it names the

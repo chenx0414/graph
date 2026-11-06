@@ -198,36 +198,6 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	if nodeSpec.Role == nil || *nodeSpec.Role != "master" || operation.Kind != "agent" {
 		conversation = nil
 	}
-	// The same usage that funds the instance also spends the conversation's
-	// standing goal. A provider that refuses the turn for capacity reasons says
-	// nothing about the objective, so the goal stops as recoverable instead of
-	// counting as work: a 429 ends the run until the quota exists again.
-	if conversation != nil {
-		answer := ""
-		if output, ok := result.Output.(map[string]any); ok {
-			if text, ok := output["text"].(string); ok {
-				answer = text
-			}
-		}
-		goal := l.store.Goal(conversation.Id)
-		switch {
-		case result.Outcome == "failed" && IsCapacityFailure(describeFailure(result.Output)):
-			MarkGoalUsageLimited(l.store, conversation.Id, NowMillis())
-		case result.Outcome == "failed" && goal != nil && goal.Status == GoalVerifying:
-			// The acceptance turn could not run (the provider failed, or the
-			// turn produced nothing). That is not a pass: nothing completes and
-			// nothing advances.
-			FailGoalAcceptance(l.store, conversation.Id, describeFailure(result.Output), NowMillis())
-		case usage != nil:
-			AccountGoalUsage(l.store, conversation.Id, total, NowMillis())
-			// A goal is the work: when a turn ends cleanly, the next turn starts
-			// from the goal - or judges the completion claim it just made -
-			// instead of waiting for a person.
-			if result.Outcome == "completed" && total > 0 {
-				SettleGoalTurn(l.store, conversation.Id, answer, NowMillis())
-			}
-		}
-	}
 	RecordConversationOutput(l.store, operation, result)
 	queuedAfter := 0
 	if conversation != nil {

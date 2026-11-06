@@ -117,15 +117,6 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 	runtime := conversations.runtime
 	runtime.ensureOpen()
 	conversation := ConversationRowOf(runtime.store, conversationId)
-	// /goal is a command, not something the model has to interpret: it acts on
-	// the conversation's goal and leaves one visible line.
-	if command, ok := ParseGoalCommand(input.Text); ok {
-		command.RequestID = input.RequestId
-		result := runtime.Conversations().Goal(conversationId, command)
-		AppendGoalLine(runtime.store, conversationId, command.Action, result)
-		startGoalTurn(conversations, conversationId, command.Action, result, input.RequestId)
-		return result
-	}
 	attachments := CleanAttachments(input.Attachments)
 	result := runtime.store.Command("conversation:"+conversationId, input.RequestId, map[string]any{
 		"type": "chat", "text": input.Text, "attachments": attachments, "command": input.Command, "source": input.Source,
@@ -192,56 +183,6 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 		return map[string]any{}
 	}
 	return record
-}
-
-// startGoalTurn turns a goal the person just set or resumed into the turn that
-// works on it. `set` and `resume` both start work: resuming a paused or
-// usage-limited goal says "go on", and a goal that comes back to life without a
-// turn sits there until the person speaks again. Pause, extend, done, clear and
-// show act on an existing goal, and starting a turn for those would spend model
-// calls nobody asked for. The turn is an ordinary message, so it queues behind
-// a running turn and is answered in order.
-func startGoalTurn(conversations *TaskRuntimeConversations, conversationId, action string, result map[string]any, requestId string) {
-	if action != "set" && action != "resume" {
-		return
-	}
-	runtime := conversations.runtime
-	if runtime.master == nil || runtime.masterModel() == nil || runtime.masterDefinitionVersion() == nil {
-		// No model is configured: the goal is still recorded, and the console
-		// says why nothing can start. A message that can never be answered would
-		// only look like a lost turn.
-		return
-	}
-	var goal *ConversationGoal
-	switch value := result["goal"].(type) {
-	case *ConversationGoal:
-		goal = value
-	case ConversationGoal:
-		copied := value
-		goal = &copied
-	}
-	if goal == nil {
-		return
-	}
-	// A goal with a graph is not worked in this conversation: the graph's nodes do
-	// the planning, the implementation and the review. Starting an in-chat turn as
-	// well would put two agents on one objective and bring the acceptance talk back
-	// into the window the graph was supposed to clear.
-	if goal.GraphId != "" {
-		return
-	}
-	// The round marker comes first: the turn is about to start, and a blocker it
-	// reports belongs to this round.
-	RecordGoalRound(runtime.store, conversationId, action)
-	started := conversations.Chat(conversationId, TaskRuntimeChatInput{
-		Text:      goalStartInstruction(goal),
-		RequestId: requestId + "#goal-start",
-		Source:    map[string]any{"kind": "goal_start", "objective": goal.Objective},
-	})
-	result["started"] = true
-	if messageId, ok := started["messageId"]; ok && messageId != nil {
-		result["startedMessageId"] = messageId
-	}
 }
 
 // Compact asks the master to compact the conversation context.

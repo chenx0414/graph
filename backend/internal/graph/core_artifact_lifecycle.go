@@ -1,8 +1,6 @@
 package graph
 
 import (
-	"os"
-	"path/filepath"
 )
 
 func (w *ArtifactWorkspace) Retire(taskId, artifactId string, version int, reason, requestId string, actor any) ArtifactRecord {
@@ -143,45 +141,4 @@ func (w *ArtifactWorkspace) Promote(input ArtifactPromoteInput) ArtifactRecord {
 		"artifactId": record.ArtifactId, "version": record.Version, "sourceArtifactId": source.ArtifactId, "sourceVersion": source.Version,
 	})
 	return record
-}
-
-func (w *ArtifactWorkspace) GC(retentionMs ...int64) map[string]int {
-	retention := int64(7 * 24 * 60 * 60 * 1000)
-	if len(retentionMs) > 0 {
-		retention = retentionMs[0]
-	}
-	root := w.ensureRoot()
-	referenced := map[string]bool{}
-	for _, row := range kernelRows(w.store.Db, "SELECT DISTINCT digest FROM artifacts") {
-		referenced[kernelString(row["digest"])] = true
-	}
-	removed := 0
-	objects := filepath.Join(root, "objects", "sha256")
-	prefixes, err := os.ReadDir(objects)
-	if err != nil {
-		prefixes = nil
-	}
-	cutoff := NowMillis() - retention
-	for _, prefix := range prefixes {
-		directory := filepath.Join(objects, prefix.Name())
-		entries, err := os.ReadDir(directory)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if referenced[entry.Name()] {
-				continue
-			}
-			path := filepath.Join(directory, entry.Name())
-			info, err := os.Stat(path)
-			if err != nil || !info.Mode().IsRegular() || info.ModTime().UnixMilli() > cutoff {
-				continue
-			}
-			if err := os.Remove(path); err != nil {
-				panic(err)
-			}
-			removed++
-		}
-	}
-	return map[string]int{"removed": removed}
 }

@@ -229,16 +229,6 @@ func (integration *GitIntegration) LastCommit(projectId string) *GitCommitView {
 	return &GitCommitView{Subject: subject, Parents: parents}
 }
 
-func (integration *GitIntegration) MarkPrepareUnresolved(projectId, reason string) {
-	subdir := (*string)(nil)
-	if prep := integration.Preparation(projectId); prep != nil {
-		subdir = prep.ProjectSubdir
-	}
-	integration.recordPreparation(projectId, "failed", gitPreparationFields{
-		ProjectSubdir: subdir, HasDetail: true, Detail: map[string]any{"reason": reason},
-	})
-}
-
 func (integration *GitIntegration) refreshPrepared(projectId string) *ProjectPreparation {
 	prep := integration.Preparation(projectId)
 	if prep == nil || prep.State == "initializing" || prep.State == "failed" {

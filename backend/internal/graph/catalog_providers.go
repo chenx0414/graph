@@ -96,15 +96,6 @@ func init() {
 	}
 }
 
-func ProviderTemplate(id string) *ProviderTemplateRecord {
-	for i := range PROVIDER_TEMPLATES {
-		if PROVIDER_TEMPLATES[i].ID == id {
-			return &PROVIDER_TEMPLATES[i]
-		}
-	}
-	return nil
-}
-
 // TemplateModelEntryRecord is the config entry for one template model; unknown prices stay absent.
 // Field order matches the TypeScript object literal.
 type TemplateModelEntryRecord struct {
@@ -119,12 +110,4 @@ type TemplateModelEntryRecord struct {
 	CredentialID  string        `json:"credentialId"`
 	Cost          *ModelCost    `json:"cost,omitempty"`
 	Pricing       *ModelPricing `json:"pricing,omitempty"`
-}
-
-func TemplateModelEntry(template ProviderTemplateRecord, model ProviderTemplateModel, credentialID string) TemplateModelEntryRecord {
-	return TemplateModelEntryRecord{
-		ID: model.ID, Provider: template.ID, Grade: model.Grade, API: template.API,
-		BaseURL: template.BaseURL, ContextWindow: model.ContextWindow, MaxTokens: model.MaxTokens,
-		Input: model.Input, CredentialID: credentialID, Cost: model.Cost, Pricing: model.Pricing,
-	}
 }

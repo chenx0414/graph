@@ -13,12 +13,12 @@ const GRADE_ALIASES: Record<ModelGrade, readonly ModelGrade[]> = {
 export function modelTier(grade: ModelGrade): ModelTier {
   return grade === 'low' || grade === 'small' ? 'small' : grade === 'medium' ? 'medium' : 'frontier';
 }
+export const MODEL_INPUTS = ['text', 'image'] as const;
+/** Whether a configured grade satisfies the grade a caller asked for. */
 export function modelGradeMatches(requested: ModelGrade, candidate: ModelGrade): boolean {
   return GRADE_ALIASES[requested].includes(candidate);
 }
-/** Auxiliary reviewers preserve the old cheap-first order while including new tier names. */
-export const MODEL_GRADE_ORDER: readonly ModelGrade[] = ['low', 'small', 'medium', 'high', 'highest', 'frontier'];
-export const MODEL_INPUTS = ['text', 'image'] as const;
+
 export type ModelInput = (typeof MODEL_INPUTS)[number];
 /** Transports Graph has actually verified against a provider contract. */
 export type ModelApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
@@ -69,11 +69,6 @@ export interface ModelEntry {
   modelId?: string;
 }
 
-/** A configured model as the console reads it: the stored entry plus the
- * thinking strengths this model accepts. View-only: the field is derived, never
- * written back into the config document. */
-export type ModelEntryView = ModelEntry & { tier: ModelTier; thinkingOptions: ModelThinkingOption[] };
-
 /** The default thinking strength a model uses when the config names none: the
  * second strongest level the model accepts. One rule for the server, the
  * console and every model added later, so a new model never needs the default
@@ -102,50 +97,6 @@ export interface CostSummary {
   currency: string | null;
 }
 
-/** Sum invocation costs per currency. Amounts in different currencies are
- * never added into one meaningless number; unknown stays unknown. */
-export function sumCosts(costs: (Json | null | undefined)[]): CostSummary {
-  const amounts: Record<string, number> = {};
-  let unknown = false;
-  for (const cost of costs) {
-    if (!cost || typeof cost !== 'object' || Array.isArray(cost)) { unknown = true; continue; }
-    const record = cost as Record<string, unknown>;
-    if (record.unknown === true || typeof record.amount !== 'number' || !Number.isFinite(record.amount)) { unknown = true; continue; }
-    const currency = typeof record.currency === 'string' && record.currency ? record.currency : '?';
-    amounts[currency] = (amounts[currency] ?? 0) + record.amount;
-  }
-  const currencies = Object.keys(amounts);
-  return {
-    unknown,
-    amounts,
-    amount: currencies.length === 1 ? amounts[currencies[0]!]! : null,
-    currency: currencies.length === 1 ? currencies[0]! : null,
-  };
-}
-
-export function mergeCosts(summaries: CostSummary[]): CostSummary {
-  const amounts: Record<string, number> = {};
-  let unknown = false;
-  for (const summary of summaries) {
-    unknown = unknown || summary.unknown;
-    for (const [currency, amount] of Object.entries(summary.amounts)) amounts[currency] = (amounts[currency] ?? 0) + amount;
-  }
-  const currencies = Object.keys(amounts);
-  return {
-    unknown,
-    amounts,
-    amount: currencies.length === 1 ? amounts[currencies[0]!]! : null,
-    currency: currencies.length === 1 ? currencies[0]! : null,
-  };
-}
-
-export function parseDefinitionVersion(value: string) {
-  const match = /^(.*)@(\d+)$/.exec(value.trim());
-  if (match) return { id: match[1]!, version: Number(match[2]) };
-  if (!value.trim()) throw new RuntimeError('invalid_input', 'A definition version is required');
-  return { id: value.trim(), version: 1 };
-}
-
 export function estimateCost(usage: TokenUsage, cost?: ModelCost, pricing?: ModelPricing): Json {
   if (!cost) return { unknown: true };
   // A price is a complete set. A missing side (for example `null` from a hand-
@@ -171,28 +122,4 @@ export function estimateCost(usage: TokenUsage, cost?: ModelCost, pricing?: Mode
  * independence, and history stored the config id. */
 export function modelIdentity(entry: Pick<ModelEntry, 'id' | 'modelId'>) {
   return entry.modelId ?? entry.id;
-}
-
-/** Pick a configured model; review nodes pass exclude for implementer models used this round. */
-export function selectModel(input: {
-  requested?: string;
-  grade: ModelGrade;
-  directory: ModelEntry[];
-  preferences?: Partial<Record<ModelGrade, string[]>>;
-  exclude?: string[];
-}) {
-  const blocked = new Set(input.exclude ?? []);
-  const usable = input.directory.filter(model => !blocked.has(modelIdentity(model)) && !blocked.has(model.id));
-  const requested = input.requested ? usable.find(model => model.id === input.requested) : undefined;
-  if (requested) return requested;
-  const preferenceGrades = input.grade === 'small' || input.grade === 'frontier' ? GRADE_ALIASES[input.grade] : [input.grade];
-  for (const grade of preferenceGrades) {
-    const preferred = (input.preferences?.[grade] ?? []).map(id => usable.find(model => model.id === id)).find(model => model);
-    if (preferred) return preferred;
-  }
-  for (const grade of GRADE_ALIASES[input.grade]) {
-    const candidate = usable.find(model => model.grade === grade);
-    if (candidate) return candidate;
-  }
-  return undefined;
 }

@@ -19,14 +19,6 @@ func isSafeInteger(value any) bool {
 	return f >= -maxSafeInteger && f <= maxSafeInteger
 }
 
-func isJSInteger(value any) bool {
-	f, ok := asFloat(value)
-	if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
-		return false
-	}
-	return f == math.Trunc(f)
-}
-
 func asFloat(value any) (float64, bool) {
 	switch v := value.(type) {
 	case float64:

@@ -10,7 +10,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 
 // A deploy replaces the bundle the daemon serves; an open tab keeps running the one
 // it loaded, and the person sees yesterday's console while believing it is today's.
-// Measured 2026-11-06: a deploy that turned the goal card into the goal bar was
+// Measured 2026-11-06: a deploy whose new UI was invisible in an open tab was
 // reported as "not taking effect" because the tab was never reloaded.
 //
 // So the console watches the served bundle:

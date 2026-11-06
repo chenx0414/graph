@@ -273,16 +273,6 @@ func BuiltinModelsDevSnapshot() ModelsDevSnapshot {
 	return *modelsDevCached
 }
 
-func CatalogProvenance(snapshot any) CatalogProvenanceRecord {
-	if snapshot == nil {
-		return catalogProvenanceFromSnapshot(BuiltinModelsDevSnapshot())
-	}
-	if typed, ok := snapshot.(ModelsDevSnapshot); ok {
-		return catalogProvenanceFromSnapshot(typed)
-	}
-	return catalogProvenanceFromSnapshot(NormalizeModelsDevSnapshot(snapshot))
-}
-
 func catalogProvenanceFromSnapshot(source ModelsDevSnapshot) CatalogProvenanceRecord {
 	provenance := CatalogProvenanceRecord{
 		SourceUrl:   source.SourceUrl,

@@ -222,22 +222,6 @@ func safeInteger(n float64) bool {
 	return n >= -9007199254740991 && n <= 9007199254740991
 }
 
-func safeIntegerAny(v any) bool {
-	switch t := v.(type) {
-	case float64:
-		return safeInteger(t)
-	case int:
-		return safeInteger(float64(t))
-	case int64:
-		return safeInteger(float64(t))
-	case json.Number:
-		f, err := t.Float64()
-		return err == nil && safeInteger(f)
-	default:
-		return false
-	}
-}
-
 func newUUID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

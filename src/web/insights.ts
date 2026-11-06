@@ -83,14 +83,6 @@ export function boardStateLabel(status: string): string {
   return boardStateKnown(status) ? label : `${label}（未知）`;
 }
 
-export function boardStateIcon(status: string): string {
-  return BOARD_STATE_META[boardNodeState(status)].icon;
-}
-
-export function boardStateColor(status: string): string {
-  return BOARD_STATE_META[boardNodeState(status)].color;
-}
-
 export interface BoardStateCount extends BoardStateMeta {
   count: number;
 }

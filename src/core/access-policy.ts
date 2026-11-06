@@ -138,33 +138,3 @@ export function resolveAccessPolicy(
     digest: createHash('sha256').update(canonicalJson(resolved)).digest('hex'),
   };
 }
-
-export function isHostRead(policy: ResolvedAccessPolicy | undefined) {
-  return policy?.filesystem.read === 'host';
-}
-
-export function isHostWrite(policy: ResolvedAccessPolicy | undefined) {
-  return policy?.filesystem.write === 'host';
-}
-
-export function isFullAccess(policy: ResolvedAccessPolicy | undefined) {
-  return policy?.mode === 'full';
-}
-
-/** A node may select its own policy only within the already authorized host policy. */
-export function nodeAccessPolicy(value: unknown, ceiling: ResolvedAccessPolicy, context: Partial<AccessPolicyContext> = {}): ResolvedAccessPolicy {
-  if (value === undefined) return ceiling;
-  const requested = parseAccessPolicy(value, 'node.access');
-  const wider = (candidate: unknown, allowed: unknown, path: string) => {
-    if (candidate && typeof candidate === 'object') {
-      for (const [key, field] of Object.entries(candidate)) wider(field, (allowed as Record<string, unknown>)[key], `${path}.${key}`);
-    } else if (candidate !== allowed && (candidate === true || ['full', 'host', 'unrestricted', 'writable', 'readable', 'all'].includes(String(candidate)))) {
-      throw new RuntimeError('permission', `${path} exceeds the host authorization (${String(allowed)})`);
-    }
-  };
-  wider(requested, ceiling, 'node.access');
-  const resolved = resolveAccessPolicy(requested, context);
-  const protectedPaths = [...new Set([...resolved.protectedPaths, ...ceiling.protectedPaths])].sort();
-  const effective = { ...resolved, protectedPaths };
-  return { ...effective, digest: createHash('sha256').update(canonicalJson({ ...requested, authorization: effective.authorization, protectedPaths })).digest('hex') };
-}

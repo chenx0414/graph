@@ -70,17 +70,6 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 			}
 			panic(errors.New("Unsupported write action: use send, steer, pause or resume"))
 		},
-		"goal": func(id string, params map[string]any) any {
-			if input.Goal == nil {
-				panic(errors.New("This conversation has no goal to act on"))
-			}
-			receipt := input.Goal(AgentToolsGoal{
-				Action:    strings.TrimSpace(agentToolsStringOrEmpty(params["action"])),
-				Note:      agentToolsStringOrEmpty(params["note"]),
-				RequestID: strings.TrimSpace(agentToolsStringOrEmpty(params["requestId"])),
-			})
-			return agentToolsText(stringifyJSON(receipt))
-		},
 		"list_peers": func(id string, params map[string]any) any {
 			if peers == nil {
 				panic(errors.New("This Agent session has no graph peers"))

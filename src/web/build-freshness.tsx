@@ -5,8 +5,8 @@ import { api } from './api.ts';
  * A console tab keeps running the bundle it loaded. An update — an RSI reload, an
  * upgrade — leaves the tab looking current while its code is old: measured
  * 2026-11-01, twice a change was reported as "not taking effect" when the page was
- * simply running yesterday's bundle; measured again 2026-11-06, a deploy that
- * replaced the goal card with the goal bar was invisible in an open tab.
+ * simply running yesterday's bundle; measured again 2026-11-06, a deploy whose
+ * new UI was invisible in an open tab for exactly that reason.
  *
  * So this watches the build the daemon serves and acts on the difference:
  *

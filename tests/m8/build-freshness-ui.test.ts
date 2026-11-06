@@ -4,7 +4,7 @@
  *
  * An app update (RSI reload, upgrade) leaves an open tab looking current while its
  * code is old: measured 2026-11-01 twice, and again 2026-11-06 when a deploy that
- * replaced the goal card with the goal bar looked like "nothing happened". This
+ * shipped new UI looked like "nothing happened". This
  * drives the real console in a real browser and makes the daemon report a different
  * bundle: with a draft in the composer nothing reloads and the bar says why; with an
  * empty composer the tab reloads itself.

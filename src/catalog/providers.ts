@@ -119,23 +119,6 @@ export function providerTemplate(id: string): ProviderTemplate | undefined {
   return PROVIDER_TEMPLATES.find(template => template.id === id);
 }
 
-/** Config entry for one template model; unknown prices stay absent. */
-export function templateModelEntry(template: ProviderTemplate, model: ProviderTemplateModel, credentialId: string): Record<string, unknown> {
-  return {
-    id: model.id,
-    provider: template.id,
-    grade: model.grade,
-    api: template.api,
-    baseUrl: template.baseUrl,
-    contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
-    ...(model.input ? { input: model.input } : {}),
-    credentialId,
-    ...(model.cost ? { cost: model.cost } : {}),
-    ...(model.pricing ? { pricing: model.pricing } : {}),
-  };
-}
-
 /** Shared directory for setup, the settings workbench and the HTTP catalog.
  * `oauthProvider` marks the platforms whose account login the host implements
  * (OpenRouter PKCE, xAI device code); a plain subscription token stays a

@@ -243,18 +243,6 @@ func (h *GraphHost) StartDrive() {
 	h.mu.Unlock()
 }
 
-func (h *GraphHost) StopDrive() {
-	h.mu.Lock()
-	h.driving = false
-	h.mu.Unlock()
-}
-
-func (h *GraphHost) Driving() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.driving
-}
-
 func (h *GraphHost) Close() {
 	h.mu.Lock()
 	if h.closed {

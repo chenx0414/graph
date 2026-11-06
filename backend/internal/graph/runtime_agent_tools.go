@@ -190,8 +190,6 @@ type AgentToolsInput struct {
 	ReviewHumanCheck func(input AgentToolsHumanCheck) any
 	// ControlTask controls a task of this conversation.
 	ControlTask func(input AgentToolsControlTask) any
-	// Goal applies one model-reported goal action to this conversation's goal.
-	Goal func(input AgentToolsGoal) any
 	// Desktop is the host's agent-desktop CLI, nil when the host has none.
 	Desktop *AgentToolsDesktop
 	// WriteLedger records the writes one turn makes.
@@ -295,7 +293,6 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		Fetch:           input.Fetch != nil,
 		Catalog:         input.Catalog != nil,
 		Harness:         input.GraphManagement.HarnessCompare != nil,
-		Goal:            input.Goal != nil,
 		Desktop:         input.Desktop != nil && input.Desktop.Bin != "",
 	}
 	if artifacts.present {

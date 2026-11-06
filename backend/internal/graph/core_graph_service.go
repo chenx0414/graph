@@ -120,17 +120,6 @@ func (service *graphManagementService) owner() TaskRow {
 	return service.kernel.Store.Task(service.ownerTaskId)
 }
 
-// goalReferencesGraph reports whether a conversation holds the goal that runs this
-// graph. That is the one case where a conversation may read a graph another
-// conversation owns.
-func goalReferencesGraph(store *TaskStore, conversationID, graphID string) bool {
-	if conversationID == "" || graphID == "" {
-		return false
-	}
-	row := kernelRow(store.Db, `SELECT 1 AS found FROM conversation_goals WHERE conversation_id=? AND graph_id=? LIMIT 1`, conversationID, graphID)
-	return row != nil
-}
-
 func (service *graphManagementService) runtime(graphId string) *GraphRuntime {
 	target := service.kernel.Store.Task(graphId)
 	bindingOwner, _ := service.kernel.GraphOwner(graphId)
@@ -153,15 +142,8 @@ func (service *graphManagementService) runtime(graphId string) *GraphRuntime {
 	}
 	if graphId != service.ownerTaskId && bindingOwner != service.ownerTaskId &&
 		(ownerConversation == "" || targetConversation != ownerConversation) {
-		// A goal does not always run where it was written: a supervisor goal picks a
-		// project, and the graph then belongs to that project's thread. The conversation
-		// that holds the goal owns the responsibility for following it, so reading the
-		// graph is exactly what it must be able to do. Anything else is still refused,
-		// and the refusal names both conversations so the reader knows where to look.
-		if !goalReferencesGraph(service.kernel.Store, ownerConversation, graphId) {
-			Raise("permission", "Graph "+graphId+" belongs to conversation "+targetConversation+
-				", not to this one ("+ownerConversation+"). Read it from that conversation, or ask its owner for the progress.")
-		}
+		Raise("permission", "Graph "+graphId+" belongs to conversation "+targetConversation+
+			", not to this one ("+ownerConversation+"). Read it from that conversation, or ask its owner for the progress.")
 	}
 	if service.kernel.LatestRevision(graphId) == nil {
 		Raise("invalid_graph", "Target has no graph definition")

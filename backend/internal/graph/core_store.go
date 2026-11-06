@@ -63,10 +63,6 @@ func NewTaskStore(db *sql.DB, path string) *TaskStore {
 	return &TaskStore{DB: db, Db: db, Path: path}
 }
 
-func OpenTaskStore(path string) *TaskStore {
-	return NewTaskStore(MustOpenSQLite(path), path)
-}
-
 func (s *TaskStore) Close() {
 	if s == nil || s.DB == nil {
 		return

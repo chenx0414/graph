@@ -11,11 +11,6 @@ func interfaceSpecInvalid(reason string) {
 	Raise("invalid_definition", reason)
 }
 
-func interfaceSpecIsRecord(value any) (map[string]any, bool) {
-	record, ok := value.(map[string]any)
-	return record, ok
-}
-
 func interfaceSpecAsMap(value any) map[string]any {
 	raw, err := json.Marshal(value)
 	if err != nil {
