@@ -5,7 +5,7 @@ import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
-test('CLI conversations and graph execution deliver the host E2E-only policy to main, workers, reviewers and suggestions', async () => {
+test('CLI conversations and graph execution deliver the test-first policy to main, workers, reviewers and suggestions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-testing-policy-'));
   const plans: Parameters<typeof openaiServer>[0] = [];
   const primary = await openaiServer(plans);
@@ -64,9 +64,9 @@ test('CLI conversations and graph execution deliver the host E2E-only policy to 
         const body = sent as { messages: { role: string; content: unknown }[] };
         const system = JSON.stringify(body.messages.filter(message => message.role === 'system' || message.role === 'developer'));
         if (id === 'cheap') expect(system).toContain('Write exactly one concise next message the user may want to send.');
-        expect(system, id).toContain('Only author or modify end-to-end (E2E) tests. Do not write unit tests or integration tests');
-        expect(system, id).toContain('do not mock owned collaborators, fabricate business receipts');
-        expect(system, id).toContain('Reviewers must flag newly authored unit or integration tests');
+        expect(system, id).toContain('Unit, integration and end-to-end tests are all allowed');
+        expect(system, id).toContain('write the test before the code');
+        expect(system, id).toContain('do not weaken an existing check to obtain a pass');
         expect(system, id).toContain('takes precedence over conflicting recipe, skill, project or editable prompt');
       }
     }
