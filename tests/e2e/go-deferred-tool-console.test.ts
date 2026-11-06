@@ -106,6 +106,10 @@ test('A5: 浏览器里后台工具显示进行中，输入可用并能继续对�
 
   await page.goto(daemon.url);
   await page.getByTestId('open-project-p').click();
+  await expect.poll(() => page.url(), { timeout: 30_000 }).toContain('#/conversations/');
+  // The root opened a conversation of its own; reloading here leaves only the project
+  // tab this test drives, so the composer it types into is the visible one.
+  await page.reload();
   const conversation = page.locator('[data-testid="conversation"]:visible');
   const input = conversation.getByTestId('chat-input');
   const send = conversation.getByTestId('chat-send');
@@ -233,6 +237,10 @@ test('A5: 失败与取消之后工具行不再显示进行中，并在界面给�
 
   await page.goto(daemon.url);
   await page.getByTestId('open-project-p').click();
+  await expect.poll(() => page.url(), { timeout: 30_000 }).toContain('#/conversations/');
+  // The root opened a conversation of its own; reloading here leaves only the project
+  // tab this test drives, so the composer it types into is the visible one.
+  await page.reload();
   const conversation = page.locator('[data-testid="conversation"]:visible');
   const input = conversation.getByTestId('chat-input');
   const send = conversation.getByTestId('chat-send');

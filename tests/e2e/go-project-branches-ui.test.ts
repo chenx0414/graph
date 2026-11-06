@@ -104,6 +104,9 @@ test.each(['current', 'prepared-detached', 'unknown-detached'] as const)('the br
   expect(createdResponse.ok()).toBe(true);
   const created = await createdResponse.json() as { conversationId: string };
   await page.goto(`${daemon.url}/#/conversations/${created.conversationId}`);
+  // The root opens a conversation of its own before this URL is followed, so reloading
+  // here leaves exactly the tab this test drives - one drawer, one label.
+  await page.reload();
   await expect.poll(() => page.getByTestId('drawer-entry-label').innerText(), { timeout: 30_000 }).toContain('草稿 v1');
   await page.getByTestId('drawer-entry').click();
   await page.getByTestId('accept-branch').waitFor({ timeout: 30_000 });
