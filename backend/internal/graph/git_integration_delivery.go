@@ -3,6 +3,8 @@ package graph
 import (
 	"path/filepath"
 	"strings"
+
+	"encoding/json"
 )
 
 // Restore rebuilds the integration worktree for a running task.
@@ -116,16 +118,43 @@ func gitSubdir(repo, root string) string {
 // whose work landed while that path was not reached kept a stale value, and its
 // own acceptance then read a passing check as evidence about another commit
 // (measured 2026-11-05, 288f801c: field 9fb2ba8a, branch head b46b309b). The
-// head is read from Git, never supplied by the caller.
+// head is read from Git, never supplied by the caller, unless the graph has no
+// integration worktree at all: then it is the commit the graph's own deliveries name.
+func deliveredCommitOf(store *TaskStore, taskId string) *string {
+	row := kernelRow(store.Db, `SELECT value FROM kernel_deliveries WHERE task_id=? AND value LIKE '%"commit"%' ORDER BY created_at DESC, rowid DESC LIMIT 1`, taskId)
+	if row == nil {
+		return nil
+	}
+	var value map[string]any
+	if err := json.Unmarshal([]byte(kernelString(row["value"])), &value); err != nil {
+		return nil
+	}
+	commit, _ := value["commit"].(string)
+	commit = strings.TrimSpace(commit)
+	if commit == "" {
+		return nil
+	}
+	return &commit
+}
+
 func SyncIntegrationSha(kernel *KernelStore, taskId string) any {
 	store := kernel.Store
+	var head *string
 	row, ok := graphDBRow(store.Db, "SELECT path FROM worktrees WHERE instance_id=?", "integration:"+taskId)
 	if !ok {
-		Raise("invalid_state", "The graph has no integration worktree to read a commit from; deliver through the integration branch first")
-	}
-	head := RevParse(graphDBString(row, "path"), "HEAD")
-	if head == nil {
-		Raise("invalid_state", "The integration worktree has no readable HEAD")
+		// A goal graph is delivered in the project's own checkout, so it never has an
+		// integration worktree: the commit the work was actually delivered at is the
+		// one its submissions name. Reading that is what makes such a graph completable
+		// instead of blocked on bookkeeping it cannot produce.
+		head = deliveredCommitOf(store, taskId)
+		if head == nil {
+			Raise("invalid_state", "The graph has no integration worktree to read a commit from, and no delivered commit to record; deliver through the integration branch first")
+		}
+	} else {
+		head = RevParse(graphDBString(row, "path"), "HEAD")
+		if head == nil {
+			Raise("invalid_state", "The integration worktree has no readable HEAD")
+		}
 	}
 	task := store.Task(taskId)
 	before := ""

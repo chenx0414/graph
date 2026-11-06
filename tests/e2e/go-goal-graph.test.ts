@@ -100,6 +100,17 @@ test('a goal in a project conversation becomes the planning, working and reviewi
   expect(bindings.standards).toContain('matt-team-standards');
   expect(bindings.spec).toContain('matt-team-spec');
 
+  // A goal graph is delivered in the project's own checkout, so it has no integration
+  // worktree. Its integration commit is the one its own delivery names - without that,
+  // both reviews pass and the graph still cannot complete.
+  execFileSync('sqlite3', [dbPath, `INSERT INTO kernel_deliveries(id,task_id,from_endpoint,to_endpoint,value,protocol,revision_version,seq,state,created_at,source)
+    VALUES('probe-delivery','${goal.graphId}','worker.result','spec.job','{"commit":"03320bdbfb284149286c7286ba5a3f0f39605680"}','data',1,99,'accepted',${Date.now()},'submission')`]);
+  const synced = await request(`/api/tasks/${goal.graphId}/graph/control`, { action: 'sync_integration', requestId: 'goal-graph-sync' });
+  expect(synced.status, JSON.stringify(synced.body)).toBe(200);
+  expect(JSON.stringify(synced.body)).toContain('03320bdbfb284149286c7286ba5a3f0f39605680');
+  expect(execFileSync('sqlite3', [dbPath, `SELECT integration_sha FROM tasks WHERE id='${goal.graphId}'`]).toString().trim())
+    .toBe('03320bdbfb284149286c7286ba5a3f0f39605680');
+
   // The graph's completion is the goal's completion: finishing the work in the graph
   // closes the goal, and the conversation never runs an acceptance turn of its own.
   execFileSync('sqlite3', [dbPath, `UPDATE tasks SET phase='completed' WHERE id='${goal.graphId}'`]);
