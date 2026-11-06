@@ -29,10 +29,14 @@
       "capability": "nested-sandbox",
       "probe": "nested-sandbox",
       "files": [
-        "tests/e2e/go-deferred-tool-ordering.test.ts",
-        "tests/e2e/go-deferred-tool-idempotent.test.ts",
         "tests/e2e/go-deferred-tool-cancel-timeout.test.ts",
-        "tests/e2e/harness-tool-fast-path.test.ts"
+        "tests/e2e/go-deferred-tool-idempotent.test.ts",
+        "tests/e2e/go-deferred-tool-ordering.test.ts",
+        "tests/e2e/go-native-shell-output.test.ts",
+        "tests/e2e/harness-cost.test.ts",
+        "tests/e2e/harness-eval-lifecycle.test.ts",
+        "tests/e2e/harness-tool-fast-path.test.ts",
+        "tests/e2e/pig-mcp-session.test.ts"
       ]
     }
   ]

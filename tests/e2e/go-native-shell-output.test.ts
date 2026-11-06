@@ -1,3 +1,7 @@
+// 这个文件在 tests/env-layers.json 里登记为 nested-sandbox 层：它要让 daemon 跑真命令取回
+// 真实输出，而 daemon 的 bash 工具会把命令裹进 macOS seatbelt，seatbelt 不能嵌套。
+// 已经身处 seatbelt 的进程只能得到 `sandbox_apply: Operation not permitted`，命令退出 71、
+// 没有输出，这些用例于是只等到超时。那是缺少能力，不是回归：宿主门禁会跑它。
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

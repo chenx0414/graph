@@ -1,3 +1,8 @@
+// 这个文件在 tests/env-layers.json 里登记为 nested-sandbox 层：它的用例要让 daemon 跑
+// 真命令，而 daemon 的 bash 工具会把命令裹进 macOS seatbelt，seatbelt 不能嵌套。
+// 已经身处 seatbelt 的进程（例如一个 Agent 会话）只能得到
+// `sandbox-exec: sandbox_apply: Operation not permitted`，于是命令退出 71、什么都没做。
+// 那是这台机器缺少能力，不是回归：宿主门禁会跑它。
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
