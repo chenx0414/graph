@@ -22,15 +22,6 @@ func KernelToolGate(kernel *KernelStore, graphID, nodeID string, kind string, cl
 			if execution == nil || closing() || task.Paused != 0 || paused || phaseClosed {
 				Raise("paused", "Node tool dispatch is closed")
 			}
-			unknown := false
-			for _, call := range kernel.PendingProviderCalls(graphID, nodeID) {
-				if call.State == "unknown" {
-					unknown = true
-				}
-			}
-			if unknown {
-				Raise("unknown_usage", "Node usage must be reconciled before tool dispatch")
-			}
 			kernel.Store.Event(graphID, "graph."+kind+".started", map[string]any{"nodeId": nodeID, "executionId": execution.Id, "invocationId": id})
 			return send()
 		},
