@@ -70,10 +70,6 @@ return <aside
                         </div>
                       </>
                     )}
-                <div className="row">
-                  <Button size="sm" data-testid="archive-draft" onClick={() => void act(() => api(`/api/conversations/${id}/drafts/archive`, { method: 'POST', body: JSON.stringify({ proposalVersion: activeProposal.version, requestId: `archive-${crypto.randomUUID()}` }) }), () => setSelectedProposalVersion(null))}>归档草稿</Button>
-                  <Button size="sm" variant="danger" data-testid="delete-draft" onClick={() => void act(() => api(`/api/conversations/${id}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: activeProposal.version, requestId: `delete-${crypto.randomUUID()}` }) }), () => setSelectedProposalVersion(null))}>删除草稿</Button>
-                </div>
                 {/* The drawer names the windows; it does not render them. */}
                 <div className="drawer-entry-links" data-testid="drawer-entry-links">
                   {DRAWER_ENTRY_LINKS.map(entry => (
@@ -105,20 +101,6 @@ return <aside
                     {managementCards.map(item => (
                       <div key={item.version} className="row" data-testid={`active-draft-${item.version}`}>
                         <span className="grow">{`v${item.version}${item.accepted ? ' 已确认' : ' 待确认'} · ${item.summary}`}</span>
-                        <Button size="sm" data-testid={`archive-active-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/archive`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `archive-${crypto.randomUUID()}` }) }))}>归档</Button>
-                        <Button size="sm" variant="danger" data-testid={`delete-active-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `delete-${crypto.randomUUID()}` }) }))}>删除</Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {(view.archivedProposals ?? []).length > 0 && (
-                  <div data-testid="archived-drafts">
-                    <p className="muted">已归档草稿（默认列表不显示）</p>
-                    {(view.archivedProposals ?? []).map(item => (
-                      <div key={item.version} className="row" data-testid={`archived-draft-${item.version}`}>
-                        <span className="grow">{`v${item.version} · ${item.summary}`}</span>
-                        <Button size="sm" data-testid={`restore-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/restore`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `restore-${crypto.randomUUID()}` }) }))}>恢复</Button>
-                        <Button size="sm" variant="danger" data-testid={`delete-archived-draft-${item.version}`} onClick={() => void act(() => api(`/api/conversations/${id}/drafts/delete`, { method: 'POST', body: JSON.stringify({ proposalVersion: item.version, requestId: `delete-${crypto.randomUUID()}` }) }))}>删除</Button>
                       </div>
                     ))}
                   </div>

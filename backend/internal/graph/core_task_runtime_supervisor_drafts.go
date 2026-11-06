@@ -56,35 +56,3 @@ func (input TaskRuntimeConfirmInput) AttestationInstruction() string {
 	return input.Attestation.Instruction
 }
 
-// ArchiveDraft archives one draft of the conversation of the supervisor.
-func (supervisor *TaskRuntimeSupervisor) ArchiveDraft(input TaskRuntimeDraftInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to archive a draft in")
-	}
-	return runtime.Conversations().ArchiveDraft(*conversation, input)
-}
-
-// RestoreDraft restores one draft of the conversation of the supervisor.
-func (supervisor *TaskRuntimeSupervisor) RestoreDraft(input TaskRuntimeDraftInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to restore a draft in")
-	}
-	return runtime.Conversations().RestoreDraft(*conversation, input)
-}
-
-// DeleteDraft deletes one draft of the conversation of the supervisor.
-func (supervisor *TaskRuntimeSupervisor) DeleteDraft(input TaskRuntimeDraftInput) map[string]any {
-	runtime := supervisor.runtime
-	runtime.ensureOpen()
-	conversation := runtime.store.Task(supervisor.taskId).ConversationID
-	if conversation == nil {
-		Raise("invalid_input", "This task has no conversation to delete a draft from")
-	}
-	return runtime.Conversations().DeleteDraft(*conversation, input)
-}

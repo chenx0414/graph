@@ -93,26 +93,5 @@ func agentToolsGraphHandlers(input AgentToolsInput, root string, readRoots []str
 			})
 			return agentToolsText(stringifyJSON(receipt))
 		},
-		"archive_draft": func(id string, params map[string]any) any {
-			version, _ := agentToolsNumberValue(params["proposalVersion"])
-			receipt := input.Supervisor.ArchiveDraft(PiAdapterDraftAction{
-				ProposalVersion: int(version), RequestId: agentToolsString(params["requestId"]),
-			})
-			return agentToolsText(stringifyJSON(receipt))
-		},
-		"restore_draft": func(id string, params map[string]any) any {
-			version, _ := agentToolsNumberValue(params["proposalVersion"])
-			receipt := input.Supervisor.RestoreDraft(PiAdapterDraftAction{
-				ProposalVersion: int(version), RequestId: agentToolsString(params["requestId"]),
-			})
-			return agentToolsText(stringifyJSON(receipt))
-		},
-		"delete_draft": func(id string, params map[string]any) any {
-			version, _ := agentToolsNumberValue(params["proposalVersion"])
-			receipt := input.Supervisor.DeleteDraft(PiAdapterDraftAction{
-				ProposalVersion: int(version), RequestId: agentToolsString(params["requestId"]),
-			})
-			return agentToolsText(stringifyJSON(receipt))
-		},
 	}
 }

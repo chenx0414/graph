@@ -51,9 +51,6 @@ type AgentSupervisorFeatures struct {
 	ResolveProblem     bool
 	WithdrawDraft      bool
 	ConfirmDraft       bool
-	ArchiveDraft       bool
-	RestoreDraft       bool
-	DeleteDraft        bool
 	ControlTask        bool
 	PendingHumanChecks bool
 	ReviewHumanCheck   bool

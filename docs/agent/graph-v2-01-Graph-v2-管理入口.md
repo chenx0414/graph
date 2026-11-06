@@ -12,7 +12,7 @@
 
 确认前重新读取草稿。`confirm_draft({proposalVersion,draftRevision,targetBranch,instruction,requestId})` 必须携带当前内容的 `draftRevision`，由 briefing 或会话视图取得，并遵守用户明确授权确认与指定目标分支的要求。原地修改后，旧修订标识会被拒绝；不得替用户确认尚未查看的新内容。直接任务 accept 接口也要求此标识，可从任务视图或提案回执读取。
 
-main 使用 `archive_draft({proposalVersion,requestId})`、`restore_draft({proposalVersion,requestId})`、`delete_draft({proposalVersion,requestId})` 管理本会话中的指定草稿版本。会话视图的 `proposalHistory` 只列未归档、未删除的卡片，`archivedProposals` 列归档卡片。归档版本可按版本读取、恢复或删除；删除版本不能读取或恢复，版本号不复用。归档或删除已确认的源草稿不会删除正式 graph、任务、聊天、执行记录或验收事实；不要自动批量清理用户的历史草稿。
+草稿版本不提供归档、恢复或删除：`archive_draft`、`restore_draft`、`delete_draft` 三个工具与对应 HTTP 路由已删除（2026-11-07）。会话视图的 `proposalHistory` 列出全部草稿卡片；历史版本号不复用，已确认草稿对应的正式 graph、任务、聊天、执行记录与验收事实不受影响。用 `withdraw_draft` 撤回未确认草稿，用 `confirm_draft` 确认；不要让模型替用户批量清理历史草稿。
 
 提交草稿前可调用 `validate_proposal({proposal})`，传入与 `propose_graph` 完全相同的原生对象；返回 `valid:true` 或 `valid:false` 与错误，不创建草稿、不启动节点。预检不接收旧 `proposalJson` 字符串。
 

@@ -295,27 +295,22 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 	} else {
 		lines = append(lines, "Draft: none yet")
 	}
-	// Archived and deleted cards are not the current draft, but main must still know
-	// they exist so it can restore or delete one by version when the user asks.
+	// Every version is listed, archived or not: main has to know which versions
+	// exist before it confirms or withdraws one.
 	cards := kernelRows(store.Db, "SELECT version,archived_at,draft_revision FROM proposals WHERE task_id=? AND deleted_at IS NULL ORDER BY version", anchor.ID)
 	cardTexts := []string{}
-	hasArchived := false
 	for _, card := range cards {
-		archived := card["archived_at"] != nil
-		if archived {
-			hasArchived = true
-		}
 		text := fmt.Sprintf("v%d", kernelInt(card["version"]))
-		if archived {
+		if card["archived_at"] != nil {
 			text += " (archived)"
 		}
 		text += fmt.Sprintf(" rev%d", kernelInt(card["draft_revision"]))
 		cardTexts = append(cardTexts, text)
 	}
-	// A single archived card must be discoverable too: main sees "Draft: none yet"
-	// otherwise and never learns the user can restore it.
-	if len(cards) > 1 || hasArchived {
-		lines = append(lines, "Draft cards: "+strings.Join(cardTexts, ", ")+" — archive_draft, restore_draft and delete_draft act on one version")
+	// A single card besides the one already named must be discoverable too: main
+	// sees "Draft: none yet" otherwise and never learns the version exists.
+	if len(cards) > 1 {
+		lines = append(lines, "Draft cards: "+strings.Join(cardTexts, ", "))
 	}
 	if master != nil {
 		model := "unknown"

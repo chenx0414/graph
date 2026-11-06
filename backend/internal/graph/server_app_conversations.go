@@ -360,36 +360,6 @@ func (app *GraphApp) serveConversationConfirm(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Confirm(conversationID, input))
 }
 
-// serveConversationDraftArchive archives one draft version.
-func (app *GraphApp) serveConversationDraftArchive(w http.ResponseWriter, r *http.Request) {
-	conversationID := r.PathValue("conversationId")
-	body := appJSONBody(w, r)
-	proposalVersion, _ := appBodyInt(body, "proposalVersion")
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().ArchiveDraft(conversationID, TaskRuntimeDraftInput{
-		ProposalVersion: proposalVersion, RequestId: appBodyString(body, "requestId"),
-	}))
-}
-
-// serveConversationDraftRestore restores one archived draft version.
-func (app *GraphApp) serveConversationDraftRestore(w http.ResponseWriter, r *http.Request) {
-	conversationID := r.PathValue("conversationId")
-	body := appJSONBody(w, r)
-	proposalVersion, _ := appBodyInt(body, "proposalVersion")
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().RestoreDraft(conversationID, TaskRuntimeDraftInput{
-		ProposalVersion: proposalVersion, RequestId: appBodyString(body, "requestId"),
-	}))
-}
-
-// serveConversationDraftDelete deletes one draft version.
-func (app *GraphApp) serveConversationDraftDelete(w http.ResponseWriter, r *http.Request) {
-	conversationID := r.PathValue("conversationId")
-	body := appJSONBody(w, r)
-	proposalVersion, _ := appBodyInt(body, "proposalVersion")
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().DeleteDraft(conversationID, TaskRuntimeDraftInput{
-		ProposalVersion: proposalVersion, RequestId: appBodyString(body, "requestId"),
-	}))
-}
-
 // serveConversationPause pauses one conversation.
 func (app *GraphApp) serveConversationPause(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")

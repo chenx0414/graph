@@ -387,7 +387,7 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 		Supervisor: &AgentSupervisorFeatures{
 			ValidateProposal: true, GraphState: true, TaskStatus: true, ListProjects: true,
 			BindProject: true, ListProblems: true, ResolveProblem: true, WithdrawDraft: true,
-			ConfirmDraft: true, ArchiveDraft: true, RestoreDraft: true, DeleteDraft: true,
+			ConfirmDraft: true,
 			PendingHumanChecks: true, ReviewHumanCheck: true, ControlTask: true,
 		},
 	}

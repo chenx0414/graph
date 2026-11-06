@@ -210,15 +210,6 @@ func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 						},
 					})
 				},
-				ArchiveDraft: func(input PiAdapterDraftAction) any {
-					return supervisor.ArchiveDraft(TaskRuntimeDraftInput{ProposalVersion: input.ProposalVersion, RequestId: input.RequestId})
-				},
-				RestoreDraft: func(input PiAdapterDraftAction) any {
-					return supervisor.RestoreDraft(TaskRuntimeDraftInput{ProposalVersion: input.ProposalVersion, RequestId: input.RequestId})
-				},
-				DeleteDraft: func(input PiAdapterDraftAction) any {
-					return supervisor.DeleteDraft(TaskRuntimeDraftInput{ProposalVersion: input.ProposalVersion, RequestId: input.RequestId})
-				},
 				GraphState:       func() any { return supervisor.GraphState() },
 				TaskStatus:       func(input PiAdapterTaskStatus) any { return supervisor.TaskStatus(TaskRuntimeTaskStatusInput(input)) },
 				ValidateProposal: func(proposal NativeProposal) any { return supervisor.ValidateProposal(proposal) },

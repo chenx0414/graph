@@ -32,9 +32,6 @@ type PiAdapterSupervisor struct {
 	Propose          func(proposal NativeProposal, requestId string, newVersion bool) any
 	WithdrawDraft    func(input PiAdapterDraftAction) any
 	ConfirmDraft     func(input PiAdapterConfirmDraft) any
-	ArchiveDraft     func(input PiAdapterDraftAction) any
-	RestoreDraft     func(input PiAdapterDraftAction) any
-	DeleteDraft      func(input PiAdapterDraftAction) any
 	GraphState       func() any
 	TaskStatus       func(input PiAdapterTaskStatus) any
 	ValidateProposal func(proposal NativeProposal) any

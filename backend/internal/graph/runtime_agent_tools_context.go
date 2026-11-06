@@ -3,7 +3,6 @@ package graph
 // agentToolsSupervisorPresent reports whether one session has a supervisor at all.
 func agentToolsSupervisorPresent(supervisor PiAdapterSupervisor) bool {
 	return supervisor.Propose != nil || supervisor.WithdrawDraft != nil || supervisor.ConfirmDraft != nil ||
-		supervisor.ArchiveDraft != nil || supervisor.RestoreDraft != nil || supervisor.DeleteDraft != nil ||
 		supervisor.GraphState != nil || supervisor.TaskStatus != nil || supervisor.ValidateProposal != nil ||
 		supervisor.ListProjects != nil || supervisor.BindProject != nil || supervisor.ListProblems != nil ||
 		supervisor.ResolveProblem != nil
