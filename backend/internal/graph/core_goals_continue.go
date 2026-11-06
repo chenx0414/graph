@@ -54,6 +54,14 @@ func ContinueGoal(store *TaskStore, conversationID string, now int64, carry stri
 	if goal == nil || goal.Status != GoalActive {
 		return false
 	}
+	// A goal with a graph is worked by that graph, not by this conversation. The
+	// chat used to keep continuing it turn after turn even while the graph owned
+	// it, so the person saw the work (and a failed acceptance) run in the same
+	// context they were talking in, on a page that was supposed to show only a
+	// status bar. When the graph stops, the next step belongs to its owner.
+	if strings.TrimSpace(goal.GraphId) != "" {
+		return false
+	}
 	if len(PendingMessages(store, conversationID, 1)) > 0 {
 		return false
 	}
