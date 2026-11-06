@@ -152,6 +152,10 @@ test('the desktop tool runs the real CLI headless, returns its envelope, and kee
   for (const kept of ['artifact_publish', 'artifact_read', 'propose_graph', 'git', 'graph_create', 'control_task', 'bash', 'read']) {
     expect(names, `${kept} disappeared from the tool surface`).toContain(kept);
   }
-  expect(names.length, 'the surface shrank').toBeGreaterThanOrEqual(50);
+  // The floor is the surface the 2026-11-07 cleanup left: 15 tools that had almost no
+  // recorded use were deleted on purpose, so the old floor of 50 outlived the surface it
+  // guarded. The kept-tool list above is what protects against an accidental removal.
+  expect(names.length, 'the surface shrank below the 35 tools the cleanup left').toBeGreaterThanOrEqual(35);
+  expect(new Set(names).size, 'a tool name appears twice').toBe(names.length);
   expect(conversationId).toBeTruthy();
 }, 240_000);
