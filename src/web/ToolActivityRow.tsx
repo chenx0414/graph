@@ -12,7 +12,7 @@ import type { TranscriptTool } from './transcript-model.ts';
 function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refresh' {
   if (name === 'list_dir') return 'folder';
   if (name === 'search' || name === 'glob' || name === 'web_search') return 'search';
-  if (name === 'run_command') return 'bolt';
+  if (name === 'run_command' || name === 'codemode') return 'bolt';
   if (['write_file', 'apply_patch', 'edit'].includes(name)) return 'file';
   if (name === 'fetch') return 'refresh';
   return 'file';

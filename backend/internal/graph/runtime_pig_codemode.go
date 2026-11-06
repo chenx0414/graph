@@ -53,7 +53,16 @@ func CodemodeTool(tools []ToolDefinition, gate SendGate, settings CodemodeSettin
 	return ToolDefinition{
 		Name:        CodemodeToolName,
 		Label:       "Code mode",
-		Description: "Run JavaScript that calls the other tools. The script runs in a sandbox; every call it makes is admitted like a direct call.",
+		// The description is the only place a model learns the script's shape,
+		// and it is the whole reason code mode is the default way to use tools:
+		// it says how a nested call is written and that one script may replace
+		// many round trips. Without it the tool is a name with no grammar, and
+		// every session calls tools one by one instead.
+		Description: "Run JavaScript that calls the other tools. The input is raw JavaScript, run as an async function body: " +
+			"`await tools.<name>({ ...args })` calls one of this session's tools and resolves with the text it returned, " +
+			"`text(...)`, `console.log(...)` and a top-level `return` are what comes back to you, and `Promise.all` runs calls together. " +
+			"Every nested call passes the same gate a direct call does. " +
+			"Prefer one script over many separate calls: use it whenever the work needs more than one tool call, and whenever the calls can run in parallel.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

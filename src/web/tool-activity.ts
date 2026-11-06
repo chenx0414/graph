@@ -17,6 +17,11 @@ export function toolActivity(name: string, summary = '') {
     // the bare gateway name.
     return { kind: 'mcp', label: 'MCP 调用', name: recorded && recorded !== name ? recorded : name };
   }
+  if (name === 'codemode') {
+    // Code mode runs the session's other tools from one script: the row names the
+    // script, and the group counts scripts apart from single calls.
+    return { kind: 'code', label: '代码模式', name: recorded && recorded !== name ? recorded : name };
+  }
   if (name === 'desktop') {
     // Computer use has its own label, and the recorded subcommand follows it:
     // "桌面 · snapshot --app Finder".
@@ -52,6 +57,7 @@ export function toolGroupSummary(input: TranscriptTool[]) {
     skill: 0,
     mcp: 0,
     desktop: 0,
+    code: 0,
     failed: 0,
   };
   for (const tool of input) {
@@ -64,6 +70,7 @@ export function toolGroupSummary(input: TranscriptTool[]) {
     else if (kind === 'skill') counts.skill += 1;
     else if (kind === 'mcp') counts.mcp += 1;
     else if (kind === 'desktop') counts.desktop += 1;
+    else if (kind === 'code') counts.code += 1;
     else counts.other += 1;
     if (tool.error) counts.failed += 1;
   }
@@ -76,6 +83,7 @@ export function toolGroupSummary(input: TranscriptTool[]) {
   if (counts.skill) parts.push(`读取 ${counts.skill} 个 Skill`);
   if (counts.mcp) parts.push(`MCP 调用 ${counts.mcp} 次`);
   if (counts.desktop) parts.push(`桌面 ${counts.desktop} 项`);
+  if (counts.code) parts.push(`脚本 ${counts.code} 次`);
   if (counts.other) parts.push(`调用 ${counts.other} 个工具`);
   if (counts.failed) parts.push(`${counts.failed} 项失败`);
   return parts.join(' · ') || `${input.length} 个工具`;

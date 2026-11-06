@@ -9,3 +9,7 @@ test('shell activity distinguishes simple commands without disguising its execut
   expect(toolActivity('read', '/repo/.agents/skills/debug/SKILL.md')).toMatchObject({ kind: 'skill', label: '读取 Skill' });
   expect(toolActivity('mcp__search__query')).toMatchObject({ kind: 'mcp' });
 });
+
+test('code mode has its own label and its own kind', () => {
+  expect(toolActivity('codemode', "codemode: const r = await tools.ls({ path: '.' })")).toMatchObject({ kind: 'code', label: '代码模式' });
+});

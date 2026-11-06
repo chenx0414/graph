@@ -388,6 +388,19 @@ func summarizeToolCall(name string, args any) string {
 	}
 	summary := name
 	switch {
+	case name == "codemode":
+		// Code mode is one tool for every script, so the row is useless unless
+		// it says what the script did. The first line that is not a comment
+		// (`// @options:` names the script's limits) is the script's own account
+		// of itself; the whole script stays in the durable record.
+		for _, line := range strings.Split(target("code"), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			summary = truncateRunes(strings.Join(strings.Fields(trimmed), " "), 120)
+			break
+		}
 	case name == "bash":
 		summary = first(target("command"), name)
 	case name == "grep" || name == "rg":
