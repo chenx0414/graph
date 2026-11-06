@@ -98,7 +98,9 @@ var (
 // The numbers come from the call's own row (its usage and its start/settle pair),
 // so the footer cannot disagree with the ledger. A call that has not settled, or
 // one that wrote nothing, yields no rate at all - the footer then shows a dash
-// instead of dividing by a duration that does not exist.
+// instead of dividing by a duration that does not exist. The newest call *that
+// reported output* is the one asked for: a provider that answers without usage
+// (an error, a refusal) must not blank a number a real answer already produced.
 func masterThroughput(store *TaskStore, conversationId string) (*int64, *int64, *float64) {
 	// The master's sends live in the invocation ledger, not in the kernel's provider
 	// table: a conversation turn is not a graph node. One invocation is one send, so
@@ -108,6 +110,7 @@ func masterThroughput(store *TaskStore, conversationId string) (*int64, *int64, 
     JOIN operations o ON o.id=i.operation_id
     JOIN tasks t ON t.id=o.task_id
     WHERE t.conversation_id=? AND i.settled_at > i.dispatched_at
+      AND json_extract(i.usage,'$.output') > 0
       AND EXISTS (SELECT 1 FROM nodes n WHERE n.task_id=o.task_id AND n.id=o.node_id AND json_extract(n.spec,'$.role')='master')
     ORDER BY i.settled_at DESC LIMIT 1`, conversationId)
 	return throughputOf(row)

@@ -38,6 +38,11 @@ async function consoleWithReply(prefix: string) {
     text: '这一轮写满两百多个 token 用来测速。'.repeat(8),
     usage: { prompt_tokens: 900, completion_tokens: 240 },
     beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, 2_000)),
+  }, {
+    // A provider that answers without usage reports no output at all. It must not
+    // blank the rate a real answer already produced.
+    text: '这次没有 usage。',
+    usage: null,
   }]);
   cleanup.push(() => provider.close());
   const configPath = join(root, 'graph.config.json');
@@ -87,6 +92,23 @@ test('the conversation footer prints tokens per second from the provider’s own
   const title = await tps.getAttribute('title');
   expect(title).toContain('240 tokens');
   expect(title).toMatch(/用时 \d+\.\d 秒/);
+
+  // A second turn whose provider answer carries no usage: the footer still shows the
+  // newest request that actually wrote tokens, not a dash.
+  const second = await daemon.request(`/api/conversations/${conversationId}/messages`, {
+    method: 'POST', body: JSON.stringify({ text: '再说一句。', requestId: 'tps-second' }),
+  });
+  expect(second.status, await second.text()).toBe(200);
+  await expect.poll(async () => {
+    const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as { messages?: { role?: string; text?: string }[] };
+    return (view.messages ?? []).map(message => message.text ?? '').join('\n');
+  }, { timeout: 40_000, interval: 250 }).toContain('这次没有 usage');
+  const afterUsageLess = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as {
+    telemetry?: { outputTokens?: number | null; tokensPerSecond?: number | null };
+  };
+  expect(afterUsageLess.telemetry?.outputTokens, 'a usage-less answer must not erase the last measured rate').toBe(240);
+  expect(afterUsageLess.telemetry?.tokensPerSecond).toBeGreaterThan(20);
+  await expect.poll(async () => await tps.innerText(), { timeout: 15_000 }).toMatch(/TPS \d+/);
   await page.screenshot({ path: join(evidenceDir(root, 'console-tps'), 'conversation.png'), fullPage: false });
 }, 180_000);
 

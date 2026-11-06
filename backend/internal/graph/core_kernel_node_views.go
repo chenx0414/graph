@@ -144,6 +144,7 @@ func kernelNodeThroughput(kernel *KernelStore, graphID, nodeID string) NodeThrou
 	row := kernelRow(kernel.DB, `SELECT usage AS usage, created_at AS createdAt, settled_at AS settledAt
     FROM kernel_provider_calls
     WHERE task_id=? AND node_id=? AND settled_at > created_at
+      AND json_extract(usage,'$.output') > 0
     ORDER BY settled_at DESC LIMIT 1`, graphID, nodeID)
 	output, latency, rate := throughputOf(row)
 	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate}

@@ -200,11 +200,13 @@ func nodeThroughput(store *TaskStore, taskId, nodeId string) NodeThroughput {
 	row := kernelRow(store.Db, `SELECT i.usage AS usage, i.dispatched_at AS createdAt, i.settled_at AS settledAt
     FROM invocations i JOIN operations o ON o.id=i.operation_id
     WHERE o.task_id=? AND o.node_id=? AND i.settled_at > i.dispatched_at
+      AND json_extract(i.usage,'$.output') > 0
     ORDER BY i.settled_at DESC LIMIT 1`, taskId, nodeId)
 	if row == nil {
 		row = kernelRow(store.Db, `SELECT usage AS usage, created_at AS createdAt, settled_at AS settledAt
       FROM kernel_provider_calls
       WHERE task_id=? AND node_id=? AND state='settled' AND settled_at > created_at
+        AND json_extract(usage,'$.output') > 0
       ORDER BY settled_at DESC LIMIT 1`, taskId, nodeId)
 	}
 	output, latency, rate := throughputOf(row)
