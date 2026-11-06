@@ -159,7 +159,7 @@ test('provider account edits keep credential identity, names and concurrency whi
   await page.getByTestId('provider-save').click();
   const disk = async () => JSON.parse(await readFile(configPath, 'utf8'));
   await expect.poll(async () => (await disk()).credentials['opencode-go']).toMatchObject({ secretRef: 'GRAPH_CUSTOM_FIRST', displayName: '工作账户 · 已命名', platform: 'opencode-go', sharedLimitGroupId: 'team' });
-  expect((await disk()).limits).toEqual({ defaultBudgetTokens: null, credentials: { 'opencode-go': 5 }, sharedGroups: { team: 9 } });
+  expect((await disk()).limits).toEqual({ credentials: { 'opencode-go': 5 }, sharedGroups: { team: 9 } });
   await expect.poll(() => page.getByTestId('provider-verification').innerText()).toContain('验证成功');
   expect(requests.some(request => request.auth === 'Bearer first-synthetic-key')).toBe(true);
   await page.getByTestId('configured-provider-edit-opencode-go-2').click();
@@ -185,6 +185,6 @@ test('provider account edits keep credential identity, names and concurrency whi
   await page.getByTestId('limit-credential-opencode-go').fill('0');
   await page.getByTestId('limit-group-id-opencode-go').fill('');
   await page.getByTestId('provider-save').click();
-  await expect.poll(async () => (await disk()).limits).toEqual({ defaultBudgetTokens: null, credentials: {}, sharedGroups: {} });
+  await expect.poll(async () => (await disk()).limits).toEqual({ credentials: {}, sharedGroups: {} });
   expect((await disk()).credentials['opencode-go']).not.toHaveProperty('sharedLimitGroupId');
 }, 90_000);

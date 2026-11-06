@@ -118,33 +118,30 @@ test('real config saves preserve model metadata and independent upstream connect
   expect(settings.models.map(model => [model.id, model.modelId])).toEqual([['first', 'same-upstream'], ['second', 'same-upstream']]);
 }, 120_000);
 
-test('the real CLI starts with an unlimited default and rejects zero or negative defaults before serving', async () => {
+test('the real CLI serves without a token ceiling and ignores a leftover defaultBudgetTokens', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-config-startup-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'web'), { recursive: true });
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
   const configPath = join(root, 'graph.config.json');
-  const document = { version: 1, projects: [{ id: 'p', root }], limits: { defaultBudgetTokens: null as number | null } };
+  const document = { version: 1, projects: [{ id: 'p', root }] };
   await writeFile(configPath, JSON.stringify(document));
   const options = { configPath, env: { PI_CODING_AGENT_DIR: join(root, 'pi') } };
   const ready = await launchCli(root, options);
   cleanup.push(() => ready.close());
   const response = await ready.request('/api/config');
   expect(response.status).toBe(200);
-  expect((await response.json() as { config: { limits: { defaultBudgetTokens: number | null } } }).config.limits)
-    .toMatchObject({ defaultBudgetTokens: null });
+  const limits = (await response.json() as { config: { limits: Record<string, unknown> } }).config.limits;
+  expect(Object.keys(limits).sort()).toEqual(['credentials', 'sharedGroups']);
   await ready.close();
-  for (const tokens of [0, -1]) {
+
+  // A document that still names the removed ceiling starts anyway, at any value:
+  // the field is ignored rather than validated.
+  for (const tokens of [null, 0, -1, 1_000_000]) {
     await writeFile(configPath, JSON.stringify({ ...document, limits: { defaultBudgetTokens: tokens } }));
-    let failure: unknown;
-    try {
-      const unexpected = await launchCli(root, options);
-      cleanup.push(() => unexpected.close());
-    } catch (error) { failure = error; }
-    expect(failure).toBeInstanceOf(Error);
-    const message = (failure as Error).message;
-    expect(message).toContain('CLI exited before startup (1)');
-    expect(message).toContain('limits.defaultBudgetTokens');
-    expect(message).toContain('positive integer');
+    const daemon = await launchCli(root, options);
+    const served = await daemon.request('/api/config');
+    expect(served.status, `defaultBudgetTokens=${tokens}`).toBe(200);
+    await daemon.close();
   }
 }, 60_000);
