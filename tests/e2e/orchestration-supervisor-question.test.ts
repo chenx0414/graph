@@ -42,17 +42,17 @@ test.each(['resolve', 'escalate', 'busy'])('a project question follows the globa
       }
       const spoken = new Set(messages.flatMap(message => Array.isArray(message.tool_calls) ? message.tool_calls.map(call => record(call).id) : []));
       let call: { id: string; name: string; args: object } | undefined;
-      const holdingGlobal = mode === 'busy' && names.includes('ask_user') && !globalStarted;
+      const holdingGlobal = mode === 'busy' && names.includes('delegate_work') && !globalStarted;
       if (holdingGlobal) {
         globalStarted = true;
         await globalHold;
       } else if (names.includes('ask_supervisor') && !spoken.has('ask-project')) {
         call = { id: 'ask-project', name: 'ask_supervisor', args: { prompt: 'Which source should I use?', why: 'I checked the project but could not choose.', options: ['API', 'Database'], requestId: 'ask-project' } };
-      } else if (names.includes('ask_user') && !spoken.has('list-global')) {
+      } else if (names.includes('delegate_work') && !spoken.has('list-global')) {
         call = { id: 'list-global', name: 'list_problems', args: {} };
-      } else if (names.includes('ask_user') && mode === 'escalate' && spoken.has('escalate-global') && userSubmitted && !spoken.has('list-after-user')) {
+      } else if (names.includes('delegate_work') && mode === 'escalate' && spoken.has('escalate-global') && userSubmitted && !spoken.has('list-after-user')) {
         call = { id: 'list-after-user', name: 'list_problems', args: {} };
-      } else if (names.includes('ask_user') && !spoken.has('resolve-global') && results.has('list-global') && (mode !== 'escalate' || !spoken.has('escalate-global') || results.has('list-after-user'))) {
+      } else if (names.includes('delegate_work') && !spoken.has('resolve-global') && results.has('list-global') && (mode !== 'escalate' || !spoken.has('escalate-global') || results.has('list-after-user'))) {
         await hold;
         const list = decoded(results.get(mode === 'escalate' && spoken.has('escalate-global') ? 'list-after-user' : 'list-global'));
         if (Array.isArray(list) && list.length) {

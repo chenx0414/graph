@@ -380,7 +380,7 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	}
 	assembly := OpenAgentContextAssembly(assemblyInput)
 	features := AgentToolFeatures{
-		Role: "master", Run: true, AskUser: true, Fetch: true, Catalog: true, GraphManagement: true,
+		Role: "master", Run: true, Fetch: true, Catalog: true, GraphManagement: true,
 		Conversations: &AgentConversationFeatures{Read: true, Write: true},
 		Peers:         false,
 		Artifacts:     agentArtifactAccessForPreview(action),
@@ -401,7 +401,6 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 			features.Supervisor.BindProject = false
 		case ConversationProject:
 			features.Supervisor.ResumeWork = true
-			features.AskUser = false
 			features.AskSupervisor = true
 			features.Supervisor.ProposeWorkGraph = true
 			features.Supervisor.ReadWorkDraft = true

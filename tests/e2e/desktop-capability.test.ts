@@ -149,7 +149,7 @@ test('the desktop tool runs the real CLI headless, returns its envelope, and kee
   expect(average, `the ${tools.length} tool descriptions average ${Math.round(average)} characters`).toBeLessThanOrEqual(200);
   expect(description.length, 'the new tool is longer than the per-tool average allows').toBeLessThanOrEqual(200);
   // Nothing was traded away for the new tool: the surface the agent had is intact.
-  for (const kept of ['artifact_publish', 'artifact_read', 'propose_graph', 'git', 'graph_create', 'ask_user', 'bash', 'read']) {
+  for (const kept of ['artifact_publish', 'artifact_read', 'propose_graph', 'git', 'graph_create', 'control_task', 'bash', 'read']) {
     expect(names, `${kept} disappeared from the tool surface`).toContain(kept);
   }
   expect(names.length, 'the surface shrank').toBeGreaterThanOrEqual(50);

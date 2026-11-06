@@ -16,7 +16,6 @@ type AgentToolFeatures struct {
 	Role            string
 	ReadOnly        bool
 	Run             bool
-	AskUser         bool
 	AskSupervisor   bool
 	Fetch           bool
 	Catalog         bool

@@ -99,10 +99,10 @@ test('the tool schema the provider receives is short enough to read, and keeps t
     const schema = tools.reduce((total, tool) => total + JSON.stringify(tool.input_schema ?? {}).length, 0);
     // The cap ratchets with the product entry. When the default entry became
     // the global supervisor, the schema grew from 7,485 characters over 50
-    // tools to 9,436 over 56: the supervisor gained ask_user, control_task and
-    // the work tools. It grew again with the standing goal (independent
-    // acceptance), the closure-with-limitations action, and history_search:
-    // 10,400 over 54. The cap moved with that scope; the per-tool average
+    // tools to 9,436 over 56: the supervisor gained control_task and the work
+    // tools. It grew again with the closure-with-limitations action and
+    // history_search: 10,400 over 54; the conversation goal and ask_user have
+    // since been removed. The cap moved with that scope; the per-tool average
     // keeps one verbose tool from eating the room.
     expect(prose, `the tool schema spends ${prose} characters on descriptions and ${schema} on parameters:\n`
       + tools.map(tool => `${tool.name}: ${(tool.description ?? '').length}`).join('\n'))

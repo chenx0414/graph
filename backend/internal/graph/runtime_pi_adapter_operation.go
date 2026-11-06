@@ -235,16 +235,9 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			if role != "" {
 				tools.Role = role
 			}
-			// The tool surface records the agent's own question here; the capability
-			// layer above knows nothing about it.
-			if conversation == nil || conversation.Role != ConversationProject {
-				tools.OnAskUser = func(request PiAdapterAskedQuestion) {
-					if askedQuestion == nil {
-						copied := request
-						askedQuestion = &copied
-					}
-				}
-			} else if role == "master" && conversation.AnchorTaskId == operation.TaskId {
+			// The tool surface records a question to the agent's supervisor here; the
+			// capability layer above knows nothing about it.
+			if conversation != nil && conversation.Role == ConversationProject && role == "master" && conversation.AnchorTaskId == operation.TaskId {
 				tools.OnAskSupervisor = func(request PiAdapterAskedQuestion) {
 					if askedQuestion == nil {
 						request.ToSupervisor = true

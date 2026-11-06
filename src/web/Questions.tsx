@@ -48,17 +48,12 @@ const MINUTE = 60_000;
  * the person "this is still on you, and for how long" - and past the published
  * deadline it stops being a note and becomes a warning.
  */
-function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean; autoAnswerChoice?: string; autoAnswerRemainingMs?: number | null }) {
+function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean }) {
   if (typeof question.waitedMs !== 'number') return null;
   const minutes = Math.floor(question.waitedMs / MINUTE);
   const waited = minutes < 1 ? '不到 1 分钟' : `${minutes} 分钟`;
-  // A question the harness answers itself says so, and names the choice: the
-  // generic deadlines below describe a wait that never happens for it.
-  if (typeof question.autoAnswerChoice === 'string') {
-    const left = Math.max(0, Math.ceil((question.autoAnswerRemainingMs ?? 0) / MINUTE));
-    const soon = left < 1 ? '不到 1 分钟内' : `${left} 分钟内`;
-    return `已等待 ${waited}（${soon}没有你的回答，我会按「${question.autoAnswerChoice}」继续；你现在选会优先）`;
-  }
+  // Nothing answers a question on the person's behalf: every question below is a
+  // wait that only the person (or their escalation) ends.
   if (question.suspended) {
     const limit = Math.round((question.suspendedAfterMs ?? 0) / MINUTE);
     return limit > 0
@@ -82,17 +77,11 @@ export function QuestionReply({ taskId, question, onDone }: {
   const [inputTokens, setInputTokens] = useState('0');
   const [outputTokens, setOutputTokens] = useState('0');
   const [value, setValue] = useState('');
-  const [choices, setChoices] = useState<string[]>([]);
   const [proof, setProof] = useState('');
   const [usageMode, setUsageMode] = useState<'usage' | 'reconcile'>('usage');
   const [error, setError] = useState('');
   const decision = question.kind === 'waiting' && question.data.requestType === 'user_decision';
   const waitText = questionWaitText(question);
-  const options = decision && Array.isArray(question.data.options)
-    ? question.data.options.filter((option): option is string => typeof option === 'string' && Boolean(option.trim()))
-    : [];
-  const multiple = question.data.multiple === true;
-  const selectedAnswer = multiple ? [...choices, ...(value.trim() ? [value.trim()] : [])] : value.trim() || choices[0] || '';
   async function submit(answer: unknown) {
     try {
       await api(`/api/tasks/${taskId}/answer`, { method: 'POST', body: JSON.stringify({ questionId: question.id, answer, requestId: `ans-${question.id}-${crypto.randomUUID()}` }) });
@@ -111,7 +100,7 @@ export function QuestionReply({ taskId, question, onDone }: {
         {!decision && <code className="faint">{question.kind}</code>}
         <div className="question-reply-prompt"><Markdown text={decision ? String(question.data.prompt ?? '主 Agent 需要你的一个决定。') : questionPrompt(question.kind, question.data)} /></div>
       </div>
-      {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'} data-auto-answer={typeof question.autoAnswerChoice === 'string' ? question.autoAnswerChoice : undefined}>{waitText}</div>}
+      {waitText && <div className={`question-wait${question.suspended ? ' suspended' : question.overdue ? ' overdue' : ''}`} data-testid={`question-waiting-${question.id}`} data-overdue={question.overdue ? 'true' : 'false'} data-suspended={question.suspended ? 'true' : 'false'}>{waitText}</div>}
       {decision && typeof question.data.why === 'string' && <div className="question-reply-why"><Markdown text={question.data.why} /></div>}
       {question.kind === 'recovery' && <div className="question-reply-why" data-testid={`question-recovery-hint-${question.id}`}>这一轮的结果没有落定：「重跑」会再花一次模型调用并可能重复副作用；「当作已放弃」会把这一轮记为已放弃（不重跑），之后不再占用这个任务。</div>}
       {MASTER_RETRY_KINDS.includes(question.kind) && <>
@@ -126,21 +115,7 @@ export function QuestionReply({ taskId, question, onDone }: {
       <div className="row">
         {question.kind === 'budget' && <input className="input" style={{ width: 130 }} data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
         {decision && <div className="question-answer-options">
-          {options.length > 0 && <div className="question-option-list" role="group" aria-label="选择答复">
-            {options.map(option => <label className="question-option" key={option}>
-              <input type={multiple ? 'checkbox' : 'radio'} name={`question-${question.id}`} checked={choices.includes(option)} onChange={() => {
-                setChoices(current => multiple ? current.includes(option) ? current.filter(item => item !== option) : [...current, option] : [option]);
-                if (!multiple) setValue('');
-              }} />
-              <Markdown text={option} />
-              {String(question.data.recommended ?? '') === option && <span className="faint" data-testid={`question-recommended-${question.id}`}>（推荐：5 分钟后自动选它）</span>}
-            </label>)}
-          </div>}
-          <div className="question-reply-why" data-testid={`question-auto-answer-hint-${question.id}`}>5 分钟不回答，会按推荐选项继续一次；之后你仍可以接着说别的。</div>
-          <textarea className="input question-custom-answer" data-testid="waiting-value" value={value} onChange={event => {
-            setValue(event.target.value);
-            if (!multiple) setChoices([]);
-          }} placeholder={options.length ? '自定义回答…' : '写下你的决定…'} rows={2} />
+          <textarea className="input question-custom-answer" data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder="写下你的决定…" rows={2} />
         </div>}
         {question.kind === 'waiting' && !decision && <input className="input" style={{ width: 220 }} data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder="外部条件已满足的说明" />}
         {question.kind === 'unknown_usage' && <>
@@ -171,9 +146,9 @@ export function QuestionReply({ taskId, question, onDone }: {
         </> : question.kind === 'human_check' ? <>
           <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'acknowledge' })}>确认通过</Button>
           <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'reject', ...(value.trim() ? { reason: value.trim() } : {}) })}>驳回并返工</Button>
-        </> : <Button size="sm" variant="primary" disabled={decision && (multiple ? (selectedAnswer as string[]).length === 0 : !selectedAnswer)} onClick={() => {
+        </> : <Button size="sm" variant="primary" disabled={decision && !value.trim()} onClick={() => {
           if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
-          if (question.kind === 'waiting') return void submit({ type: 'respond', value: decision ? selectedAnswer : value });
+          if (question.kind === 'waiting') return void submit({ type: 'respond', value });
           if (question.kind === 'unknown_usage') {
             if (usageMode === 'reconcile') return void submit({ type: 'reconcile_usage', proof });
             return void submit({ type: 'usage', usage: { input: Number(inputTokens), output: Number(outputTokens), cacheRead: 0, cacheWrite: 0 }, proof });

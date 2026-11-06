@@ -36,7 +36,7 @@ test('a project supervisor notice reaches the global supervisor without blocking
       }
       const transcript = JSON.stringify(messages);
       const isProjectTurn = names.includes('ask_supervisor');
-      if (names.includes('ask_user') && transcript.includes('来自项目主管的通知')) globalSawNotice += 1;
+      if (names.includes('delegate_work') && transcript.includes('来自项目主管的通知')) globalSawNotice += 1;
       const spoken = new Set(messages.flatMap(message => Array.isArray(message.tool_calls) ? message.tool_calls.map(call => record(call).id) : []));
       let call: { id: string; name: string; args: object } | undefined;
       // The project publishes its evidence first, then names it in the notice.

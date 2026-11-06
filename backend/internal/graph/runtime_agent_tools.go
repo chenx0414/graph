@@ -163,8 +163,6 @@ type AgentToolsInput struct {
 	Fetch func(url string, signal *AbortSignal) RetrievalResult
 	// ReadGraph reads one slice of the frozen graph definition.
 	ReadGraph func(input GraphSectionQuery) any
-	// OnAskUser hands a question to the session that can durably record it.
-	OnAskUser       func(request PiAdapterAskedQuestion)
 	OnAskSupervisor func(request PiAdapterAskedQuestion)
 	// OnNotifySupervisor delivers a notice that does not wait for an answer.
 	OnNotifySupervisor func(notice PiAdapterSupervisorNotice) any
@@ -282,7 +280,6 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 	}
 
 	features := AgentToolFeatures{
-		AskUser:         input.OnAskUser != nil,
 		AskSupervisor:   input.OnAskSupervisor != nil || input.OnNotifySupervisor != nil,
 		GraphManagement: input.GraphManagement.GraphCreate != nil,
 		GraphRead:       input.ReadGraph != nil,

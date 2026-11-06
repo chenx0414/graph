@@ -38,7 +38,7 @@ test('a node question travels through both supervisors and the user before resum
     for (const message of messages) if (message.role === 'tool' && typeof message.tool_call_id === 'string') results.set(message.tool_call_id, String(message.content));
     let call: { id: string; name: string; args: object } | undefined;
     let content = 'Understood.';
-    if (tools.includes('ask_supervisor') && !tools.includes('ask_user') && tools.includes('graph_control')) {
+    if (tools.includes('ask_supervisor') && tools.includes('graph_control')) {
       await questionReady;
       if (questionID && !projectEscalated) {
         projectEscalated = true;
@@ -47,7 +47,7 @@ test('a node question travels through both supervisors and the user before resum
         projectResponded = true;
         call = { id: 'project-answer', name: 'resolve_problem', args: { questionId: questionID, expectedRevision: 5, action: 'respond', response: 'Use the project database.', requestId: 'project-answer' } };
       }
-    } else if (tools.includes('ask_user')) {
+    } else if (tools.includes('delegate_work')) {
       if (projectEscalated && !globalEscalated) {
         globalEscalated = true;
         call = { id: 'global-escalate', name: 'resolve_problem', args: { questionId: questionID, expectedRevision: 2, action: 'escalate', response: 'Which source should be used?', requestId: 'global-escalate' } };
