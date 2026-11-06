@@ -93,6 +93,15 @@ const (
 type MessageState string
 
 const (
+	// MessageStateRunning is a tool call that is executing outside the turn
+	// that dispatched it.
+	//
+	// It is deliberately not `pending`: the queue and the stuck-node check read
+	// pending and queued as "somebody still has to act on this message", and a
+	// background tool call is not a message waiting for a turn - it is work
+	// whose outcome will arrive as one. A pending tool row would be picked up
+	// as input, which is how a node wakes itself in a loop.
+	MessageStateRunning   MessageState = "running"
 	MessageStatePending   MessageState = "pending"
 	MessageStateQueued    MessageState = "queued"
 	MessageStateDelivered MessageState = "delivered"

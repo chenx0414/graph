@@ -20,7 +20,7 @@ export const FIXTURES = fileURLToPath(new URL('../fixtures/legacy', import.meta.
 // The version an upgraded state directory must land on: the newest migration in
 // backend/internal/graph/core_store_migrate.go. It moves with every migration, and
 // the upgrade keepers are what notice when a migration forgets to move it.
-export const SCHEMA_VERSION = 55;
+export const SCHEMA_VERSION = 56;
 
 export interface ToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 

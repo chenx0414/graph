@@ -138,7 +138,11 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 			activity = output["toolActivity"]
 		}
 		records := ConversationActivityRecords(activity, reply)
-		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil)
+		// A background tool call is not finished because its turn is: the
+		// turn's own closing keeps it running, so the next read of the
+		// conversation still shows the work in flight.
+		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil,
+			LiveDeferredToolCallIds(store, conversation.Id))
 		if reply != "" && !alreadyReplied {
 			var data any
 			if suggestedPrompt != "" {

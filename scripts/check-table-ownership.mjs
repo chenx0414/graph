@@ -102,6 +102,10 @@ const OWNED = new Map([
   // The limitation ledger is one module's own table, named here so the file that
   // knows what a row means is the only file that writes one.
   ['kernel_acceptance_limitations', 'core_kernel_acceptance_limitations.go'],
+  // A background tool call outlives the turn that dispatched it, so its row is
+  // the thing that outlives the process too: one file admits, binds and settles
+  // it, and the console only ever reads it.
+  ['deferred_tool_calls', 'core_deferred_tool_calls.go'],
 ]);
 
 /**
@@ -111,7 +115,12 @@ const OWNED = new Map([
  * keeps tables of its own, and a statement that names one of those is not
  * a write this rule has an opinion about.
  */
-const SCHEMA_FILES = ['core_store_schema_base.go', 'core_store_schema.go', 'core_store_migrate.go'];
+const SCHEMA_FILES = [
+  'core_store_schema_base.go',
+  'core_store_schema.go',
+  'core_store_schema_deferred_calls.go',
+  'core_store_migrate.go',
+];
 const SCHEMA_TABLE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\s*\(/gi;
 
 function schemaTables() {

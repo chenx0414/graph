@@ -224,6 +224,11 @@ func RenderWakes(wakes []PendingWake) string {
 			lines = append(lines, "- The user answered "+jsString(coalesce(data["kind"], "a question"))+" on node "+jsString(coalesce(data["nodeId"], "?"))+". Act on it so the graph can move on.")
 		case "waiting":
 			lines = append(lines, "- Node "+jsString(coalesce(data["nodeId"], "?"))+" is waiting on a decision only you can make.")
+		case WakeKindToolSettled:
+			// A tool that ran in the background finished while no turn was
+			// running. Its own row is the record; this line is the pointer, and
+			// the model is told not to repeat the call.
+			lines = append(lines, renderDeferredToolWake(data, wake.DedupeKey))
 		case "human_check":
 			lines = append(lines, "- A human acceptance check opened on node "+jsString(coalesce(data["nodeId"], "?"))+" and the user has not seen it yet. Look at the evidence: if it should not have been raised, send it back for rework; if it looks right, approve it so the user is asked with your review attached. Approving is not acceptance - the user still has to pass it themselves.")
 		default:

@@ -158,7 +158,7 @@ func toolOrder(order int) *int { return &order }
 func nativeToolMetadata() []AgentToolPromptEntry {
 	return []AgentToolPromptEntry{
 		{Name: "read", Description: "Read file contents", Source: "Pi", Group: "pi_native", Order: toolOrder(0), Parameters: []string{"path", "offset", "limit"}, Permission: "workspace and granted read roots", Available: true},
-		{Name: "bash", Description: "Execute bash commands (ls, grep, find, etc.)", Source: "Pi", Group: "pi_native", Order: toolOrder(1), Parameters: []string{"command", "timeout"}, Permission: "sandboxed shell", Available: true},
+		{Name: "bash", Description: "Execute bash commands (ls, grep, find, etc.)", Source: "Pi", Group: "pi_native", Order: toolOrder(1), Parameters: []string{"command", "timeout", "async", "requestId"}, Permission: "sandboxed shell", Available: true},
 		{Name: "edit", Description: "Make precise file edits with exact text replacement, including multiple disjoint edits in one call.", Source: "Pi", Group: "pi_native", Order: toolOrder(2), Parameters: []string{"path", "edits"}, Permission: "workspace write", Available: true},
 		{Name: "write", Description: "Create or overwrite files", Source: "Pi", Group: "pi_native", Order: toolOrder(3), Parameters: []string{"path", "content"}, Permission: "workspace write", Available: true},
 		{Name: "ls", Description: "List directory contents", Source: "Pi", Group: "pi_native", Order: toolOrder(4), Parameters: []string{"path", "limit"}, Permission: "workspace and granted read roots", Available: true},

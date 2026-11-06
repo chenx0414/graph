@@ -12,6 +12,7 @@ import { RsiCard } from './RsiCard.tsx';
 import { CompactionNotice } from './CompactionNotice.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
 import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
+import { ToolActivityRow } from './ToolActivityRow.tsx';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
 import { usePacedStreamText } from './use-paced-stream.ts';
@@ -146,15 +147,6 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
   return <div className="message-row" data-role="system" data-testid="message-system"><div className="message-stack"><div className="message-content">{message.text}</div></div></div>;
 }
 
-function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refresh' {
-  if (name === 'list_dir') return 'folder';
-  if (name === 'search' || name === 'glob' || name === 'web_search') return 'search';
-  if (name === 'run_command') return 'bolt';
-  if (['write_file', 'apply_patch', 'edit'].includes(name)) return 'file';
-  if (name === 'fetch') return 'refresh';
-  return 'file';
-}
-
 function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   // The default is the transcript's one policy, not this component's choice: a
@@ -169,7 +161,8 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
     <section
       className="tool-activity-group"
       data-testid="tool-activity-group"
-      data-active={row.active}
+      data-tool-calls={row.tools.map(tool => tool.id).join(' ')}
+      data-active={row.active} data-background={row.background}
       data-open={open}
       data-error={row.tools.some(tool => tool.error)}
     >
@@ -185,7 +178,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
         </span>
         <span className="tool-group-copy">
           <strong>{row.summary}</strong>
-          <span>{row.active ? '进行中' : `${row.tools.length} 项活动`}</span>
+          <span data-testid="tool-group-state">{row.active ? (row.background ? '后台执行中' : '进行中') : `${row.tools.length} 项活动`}</span>
         </span>
         <Icon name="chevron" size={14} className="tool-group-chevron" />
       </button>
@@ -197,17 +190,15 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
           </a> : null;
         })}
       </div>}
+      {row.tools.some(tool => tool.reason) && <ul className="tool-activity-reasons" data-testid="tool-error-reasons">
+        {row.tools.filter(tool => tool.reason).map(tool => (
+          <li key={`reason:${tool.id}`} data-testid="tool-error-reason">{tool.reason}</li>
+        ))}
+      </ul>}
       <div className="tool-group-content" aria-hidden={!open}>
         <div className="tool-group-content-inner">
           <ol className="tool-activity-list">
-            {row.tools.map(tool => (
-              <li key={tool.id} data-testid="tool-activity-row" data-error={tool.error} data-done={tool.done}>
-                <span className="tool-activity-icon"><Icon name={toolIcon(tool.name)} size={14} /></span>
-                <span className="tool-activity-label">{toolActivity(tool.name, tool.summary).label} <span className="tool-name">{toolActivity(tool.name, tool.summary).name}</span></span>
-                <span className="tool-activity-summary" title={tool.summary}>{tool.summary}</span>
-                <span className="tool-activity-state">{tool.error ? '失败' : tool.done ? '完成' : '进行中'}</span>
-              </li>
-            ))}
+            {row.tools.map(tool => <ToolActivityRow key={tool.id} tool={tool} />)}
           </ol>
         </div>
       </div>

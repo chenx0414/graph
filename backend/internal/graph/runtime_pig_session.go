@@ -35,7 +35,7 @@ type pigAgentTransport struct {
 
 // Open opens one session on the PiG kernel.
 func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSession, error) {
-	tools := pigToolSpecs(request, transport.codemode)
+	tools := pigToolSpecs(transport.store, request, transport.codemode)
 	extensions, err := pigExtensionSpecs(context.Background(), request, request.Broker, func(tool string, ms float64, isError bool) {
 		transport.store.RecordToolCall(ToolCallInput{InstanceID: request.Binding.InstanceId, Tool: tool, Ms: ms, IsError: isError})
 	})
@@ -177,7 +177,7 @@ func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[stri
 //
 // The tool bodies are the daemon's, and so is the admission gate: every call
 // passes the same gate a model send passes.
-func pigToolSpecs(request AgentSessionRequest, codemode CodemodeSettings) []pigkernel.ToolSpec {
+func pigToolSpecs(store *TaskStore, request AgentSessionRequest, codemode CodemodeSettings) []pigkernel.ToolSpec {
 	specs := []pigkernel.ToolSpec{}
 	for _, tool := range request.Tools {
 		definition := tool
@@ -216,6 +216,18 @@ func pigToolSpecs(request AgentSessionRequest, codemode CodemodeSettings) []pigk
 					params = map[string]any{}
 				}
 				started := time.Now()
+				// A call that opted into the background is admitted here and
+				// answered with a receipt: the turn does not wait for it, which is
+				// what frees the node while the work runs.
+				if deferredToolWantsBackground(definition, params) {
+					receipt, failure := admitDeferredCall(store, request, definition, params)
+					if failure != nil {
+						recordPigToolCall(request, definition.Name, started, true)
+						return nil, failure
+					}
+					recordPigToolCall(request, definition.Name, started, false)
+					return receipt, nil
+				}
 				value := gated(graphUUID(), params, ctx)
 				if failure, ok := value.(error); ok {
 					recordPigToolCall(request, definition.Name, started, true)

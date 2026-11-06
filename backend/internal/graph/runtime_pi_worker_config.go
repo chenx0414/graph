@@ -84,6 +84,18 @@ type PiTurnUsage struct {
 	Accounted  *bool `json:"accounted,omitempty"`
 }
 
+// piWorkerAdmitWithoutSettle passes one call through the tool gate and leaves
+// the settlement to its new owner.
+//
+// A background call is admitted where every call is admitted - inside the
+// running execution, with the budget reservation that admission makes - and
+// settles when the work is over, which is after the turn ended. Settling it
+// here would release the reservation while the command still runs, and the
+// node would be told the call is finished the moment it was accepted.
+func piWorkerAdmitWithoutSettle(gate SendGate, callId string, admit func() any) any {
+	return gate.Dispatch(callId, 0, admit)
+}
+
 // piWorkerGatedTool is one tool behind the gate every call passes.
 //
 // A tool the host gates itself is called directly: the gate would admit it

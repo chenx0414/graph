@@ -31,6 +31,7 @@
 | `matt-team.md` | 按 ask-matt 装配、保存、复用 Matt 团队，传递精确 plan 并处理双轴审查与原节点返工 |
 | `agent-recipes.md` | 需要新建/改描述/删除子 Agent 配方，或核对配方编译结果 |
 | `troubleshooting.md` | 任务卡住、工具失败、模型不可用、恢复不确定或用户报告异常 |
+| `async-tool-execution.md` | 需要理解或修改长工具如何挂起/恢复：异步工具的范围、取消与超时、requestId 幂等、延迟结果如何回到模型与会话 |
 
 ## 事实优先级
 

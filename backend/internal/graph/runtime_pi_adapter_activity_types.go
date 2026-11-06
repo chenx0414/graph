@@ -26,7 +26,10 @@ type PiAdapterActivityRecord struct {
 	Name       string `json:"name,omitempty"`
 	Summary    string `json:"summary,omitempty"`
 	State      string `json:"state,omitempty"`
-	Ordinal    int    `json:"ordinal"`
+	// Message is why a tool call failed. The transcript row carries it so the
+	// reason reaches the console instead of living only in the node entries.
+	Message string `json:"message,omitempty"`
+	Ordinal int    `json:"ordinal"`
 }
 
 // PiAdapterAskedQuestion is the agent's own question to the user.

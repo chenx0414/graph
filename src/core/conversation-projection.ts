@@ -12,13 +12,11 @@ export interface ConversationMessage {
   updatedAt: number;
 }
 
-export interface LiveTool {
+export interface LiveTool extends ToolCallDisplay {
   toolCallId: string;
   operationId: string;
   name: string;
   summary: string;
-  done: boolean;
-  error: boolean;
   /** Position of this activity inside its turn, so the transcript can interleave
    * text parts and tool calls in the order they happened. */
   ordinal: number;
@@ -35,6 +33,76 @@ export interface LiveText {
   updatedAt: number;
   /** Same ordering domain as LiveTool.ordinal. */
   ordinal: number;
+}
+
+/** Deferred states where the call is still executing. */
+const RUNNING_TOOL_STATES = new Set(['accepted', 'running']);
+/** Deferred states that end a call; each one is written by one settle path. */
+const TERMINAL_TOOL_STATES = new Set(['settled', 'failed', 'cancelled', 'timed_out', 'interrupted']);
+
+/** How one tool call reads: running inside its turn, running after that turn
+ * ended (background), or finished with the reason the server recorded. */
+export interface ToolCallDisplay {
+  done: boolean;
+  error: boolean;
+  /** Still executing after the turn that started it ended: its result arrives
+   * as a later message, so the row must stay instead of being swept away. */
+  background?: boolean;
+  /** The call was dispatched to run outside its turn; its row outlives that turn. */
+  deferred?: boolean;
+  /** The backend's deferred state, when it named one. */
+  state?: string;
+  /** Why the call failed or stopped, verbatim from the server. */
+  reason?: string;
+}
+
+function recordedText(...values: unknown[]) {
+  for (const value of values) if (typeof value === 'string' && value.trim()) return value.trim();
+  return '';
+}
+
+/**
+ * One rule for the durable tool row and the live tool event: a call is either
+ * still running inside its turn (`pending`), still running after that turn
+ * ended (`running` or `deferred`), or finished with one terminal state.
+ */
+export function toolCallDisplay(input: {
+  /** Durable message state: pending / running / done / error. */
+  messageState?: string | null;
+  /** Fields the server put on the tool row or on the live `message.tool` event. */
+  data?: Record<string, unknown> | null;
+  /** A live event marks its own end, which overrides the durable row's lag. */
+  ended?: boolean;
+}): ToolCallDisplay {
+  const data = input.data ?? {};
+  // `state` is what the daemon writes now; `deferredState` is the same fact under
+  // the name an earlier backend used, so a row written by either one still reads.
+  const declared = typeof data.state === 'string' ? data.state
+    : typeof data.deferredState === 'string' ? data.deferredState : '';
+  const toolState = RUNNING_TOOL_STATES.has(declared) || TERMINAL_TOOL_STATES.has(declared) ? declared : '';
+  const messageState = input.messageState ?? '';
+  const reason = recordedText(data.message, data.reason);
+  // A failed tool row is over: the daemon writes `failed` for every terminal state
+  // that is not `settled`, and reading only done/error left those rows running for ever.
+  const messageEnded = messageState === 'done' || messageState === 'error' || messageState === 'failed';
+  // A call the user withdrew is a stop, not a failure: the daemon flags every
+  // non-settled terminal row as an error, and a cancelled row must not read as one.
+  const error = toolState === 'cancelled' ? false
+    : toolState === 'failed' || toolState === 'timed_out' || toolState === 'interrupted'
+      || messageState === 'error' || messageState === 'failed' || data.error === true || data.isError === true;
+  const deferredRunning = data.deferred === true || RUNNING_TOOL_STATES.has(toolState);
+  // An accepted deferred call ends its own tool call at once: only a terminal state,
+  // or the end of a call that never deferred, means the work itself finished.
+  const done = TERMINAL_TOOL_STATES.has(toolState) || messageEnded
+    || (input.ended === true && !deferredRunning);
+  return {
+    done,
+    error,
+    background: !done && (messageState === 'running' || deferredRunning),
+    ...(toolState || data.deferred === true ? { deferred: true } : {}),
+    ...(toolState ? { state: toolState } : {}),
+    ...(reason ? { reason } : {}),
+  };
 }
 
 /** A live text part is identified by its operation, its assistant message and
@@ -112,13 +180,30 @@ function bySequence(left: ConversationMessage, right: ConversationMessage) {
   return left.seq - right.seq;
 }
 
+/** Was this tool row recorded as a call that runs outside its turn? */
+function ranOutsideTurn(message: ConversationMessage) {
+  const declared = typeof message.data?.state === 'string' ? message.data.state
+    : typeof message.data?.deferredState === 'string' ? message.data.deferredState : '';
+  return message.role === 'tool'
+    && (message.state === 'running' || message.data?.deferred === true
+      || (typeof declared === 'string' && (RUNNING_TOOL_STATES.has(declared) || TERMINAL_TOOL_STATES.has(declared))));
+}
+
 function mergeRecords(
   current: Record<string, ConversationMessage>,
   incoming: ConversationMessage[],
 ) {
   let changed = false;
   const next = { ...current };
-  for (const message of incoming) {
+  for (const incomingMessage of incoming) {
+    // A deferred call stays deferred when the server updates its row in place: the
+    // settled row is still not part of the turn's own flow, so keep the mark even
+    // if the update drops it.
+    const message = next[incomingMessage.id] && ranOutsideTurn(next[incomingMessage.id]!)
+      && incomingMessage.role === 'tool' && incomingMessage.data?.toolCallId === next[incomingMessage.id]!.data?.toolCallId
+      && !ranOutsideTurn(incomingMessage)
+      ? { ...incomingMessage, data: { ...(incomingMessage.data ?? {}), deferred: true } }
+      : incomingMessage;
     const previous = next[message.id];
     if (previous && message.updatedAt < previous.updatedAt) continue;
     if (!previous
@@ -261,17 +346,17 @@ function reduceConversationEvent(
           operationId: data.operationId ?? 'stream',
           name: data.toolName ?? 'tool',
           summary: data.summary ?? '',
-          done: data.phase === 'end',
-          error: data.isError === true,
           ordinal: data.ordinal ?? 0,
+          ...toolCallDisplay({ data: data as Record<string, unknown>, ended: data.phase === 'end' }),
         },
       },
     };
   }
   if (TERMINAL_OPERATION_EVENTS.has(event.type) && data?.operationId) {
-    const liveTools = Object.fromEntries(
-      Object.entries(state.liveTools).filter(([, tool]) => tool.operationId !== data.operationId),
-    );
+    // A deferred call outlives the turn that started it: its result arrives as a
+    // later message, so dropping it here would make a running tool disappear.
+    const liveTools = Object.fromEntries(Object.entries(state.liveTools)
+      .filter(([, tool]) => tool.operationId !== data.operationId || (tool.background && !tool.done)));
     return { ...state, liveText: dropOperationStreams(state.liveText, data.operationId), liveTools, streamNeedsResync: false };
   }
   const message = data?.message;

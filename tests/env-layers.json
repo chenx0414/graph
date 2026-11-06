@@ -12,6 +12,7 @@
         "tests/e2e/console-layout.test.ts",
         "tests/e2e/conversation-graph-drawer.test.ts",
         "tests/e2e/desktop-shell.test.ts",
+        "tests/e2e/go-deferred-tool-console.test.ts",
         "tests/e2e/go-insights.test.ts",
         "tests/e2e/go-project-branches-ui.test.ts",
         "tests/e2e/orchestration-browser.test.ts",
@@ -22,6 +23,16 @@
         "tests/e2e/resource-library.test.ts",
         "tests/e2e/xai-oauth.test.ts",
         "tests/m8/**"
+      ]
+    },
+    {
+      "capability": "nested-sandbox",
+      "probe": "nested-sandbox",
+      "files": [
+        "tests/e2e/go-deferred-tool-ordering.test.ts",
+        "tests/e2e/go-deferred-tool-idempotent.test.ts",
+        "tests/e2e/go-deferred-tool-cancel-timeout.test.ts",
+        "tests/e2e/harness-tool-fast-path.test.ts"
       ]
     }
   ]

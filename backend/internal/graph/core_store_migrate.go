@@ -183,6 +183,12 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 55 {
 		execMigration(db, schemaV55)
 	}
+	// v56 is the deferred tool call table: a call that outlives the turn that
+	// started it. It is its own version because v55 is the goal's acceptance and
+	// graph columns - two features must not share one number.
+	if version < 56 {
+		execMigration(db, schemaV56)
+	}
 }
 
 func sqliteColumns(db *sql.DB, table string) map[string]bool {

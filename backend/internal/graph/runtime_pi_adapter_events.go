@@ -173,6 +173,7 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if live.conversation == nil {
 			return
 		}
+		deferred := live.bindDeferredStart(toolName, toolCallId, event["args"])
 		summary := summarizeToolCall(toolName, event["args"])
 		live.toolSummaries[toolCallId] = summary
 		callOrdinal := live.nextOrdinal()
@@ -183,7 +184,12 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		live.flushDeltas(true)
 		live.activeConversationTools[toolCallId] = true
 		PersistConversationActivity(live.store, live.conversation.Id, live.operation.Id, live.operation.Attempt,
-			ConversationActivityRecords(live.activity, ""), live.activeConversationTools)
+			ConversationActivityRecords(live.activity, ""), live.activeConversationTools, deferredRunningIds(deferred))
+		if deferred != nil && !DeferredToolCallActive(deferred.State) {
+			// A fast command can be over before its start is reported. The row
+			// then carries the outcome at once, still as this one call.
+			SettleConversationToolCall(live.store, *deferred)
+		}
 		live.store.Event(live.operation.TaskId, "message.tool", map[string]any{
 			"operationId": live.operation.Id, "phase": "start", "toolCallId": toolCallId, "toolName": toolName,
 			"summary": summary, "ordinal": callOrdinal,
@@ -192,13 +198,14 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		toolName, _ := event["toolName"].(string)
 		toolCallId, _ := event["toolCallId"].(string)
 		isError, _ := event["isError"].(bool)
+		// A failure's reason lives in the result text and nowhere else. Recording only `isError`
+		// throws away the one account of what went wrong, and the transcript row is what
+		// the person reads - so the reason is read once and carried to both.
+		reason := ""
+		if isError {
+			reason = ToolResultText(event["result"], 2_000)
+		}
 		if live.persistEntries {
-			// A failure's reason lives in the result text and nowhere else. Recording only `isError`
-			// throws away the one account of what went wrong.
-			reason := ""
-			if isError {
-				reason = ToolResultText(event["result"], 2_000)
-			}
 			text := "工具执行完成"
 			if isError {
 				text = "工具执行失败：" + truncateRunes(reason, 400)
@@ -220,9 +227,15 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if summary == "" {
 			summary = toolName
 		}
+		deferred := live.bindDeferredEnd(toolCallId, event["result"])
 		state := "done"
 		if isError {
 			state = "error"
+		}
+		if deferred != nil && DeferredToolCallActive(deferred.State) {
+			// The call answered with its receipt; the work is still running, and
+			// the transcript must not say it is over.
+			state = "running"
 		}
 		live.toolActivity = append(live.toolActivity, PiAdapterToolActivity{
 			ToolCallId: toolCallId, Name: toolName, Summary: summary, State: state,
@@ -230,11 +243,19 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		for i := range live.activity {
 			if live.activity[i].Type == "tool" && live.activity[i].ToolCallId == toolCallId {
 				live.activity[i].State = state
+				if isError {
+					live.activity[i].Message = truncateRunes(reason, 400)
+				}
 			}
 		}
 		delete(live.activeConversationTools, toolCallId)
 		PersistConversationActivity(live.store, live.conversation.Id, live.operation.Id, live.operation.Attempt,
-			ConversationActivityRecords(live.activity, ""), live.activeConversationTools)
+			ConversationActivityRecords(live.activity, ""), live.activeConversationTools, deferredRunningIds(deferred))
+		if deferred != nil {
+			// The tool row of a background call is the one place its outcome is
+			// observed: the settle closes that same row, in place.
+			SettleConversationToolCall(live.store, *deferred)
+		}
 		live.store.Event(live.operation.TaskId, "message.tool", map[string]any{
 			"operationId": live.operation.Id, "phase": "end", "toolCallId": toolCallId, "toolName": toolName,
 			"summary": summary, "isError": isError, "ordinal": live.toolOrdinals[toolCallId],
@@ -314,4 +335,55 @@ func compactionNotice(data map[string]any) string {
 		notice += " 压缩后约 " + strconv.FormatInt(tokens, 10) + " tokens。"
 	}
 	return notice
+}
+
+// bindDeferredStart binds a starting tool call to the background call it
+// belongs to, when it is one.
+//
+// The admission left the row waiting for exactly this description - the
+// execution, the tool and the arguments - so the first event that matches it
+// is the call the model made. A tool call that never asked to run in the
+// background has no row waiting, and is left alone.
+func (live *piAdapterLiveTurn) bindDeferredStart(toolName, toolCallId string, args any) *DeferredToolCall {
+	id, ok := claimDeferredToolStart(live.operation.Id, toolName, args)
+	if !ok {
+		return nil
+	}
+	return BindDeferredToolCallModelCall(live.store, id, toolCallId)
+}
+
+// bindDeferredEnd binds a finished tool call to its background call by the
+// receipt the call answered with.
+//
+// This is the path that always works: the receipt names the row, so the bind
+// does not depend on the start event having been delivered first, or on the
+// arguments being readable at all.
+func (live *piAdapterLiveTurn) bindDeferredEnd(toolCallId string, result any) *DeferredToolCall {
+	text := ToolResultText(result, 2_000)
+	id, ok := deferredToolReceiptOf(text)
+	if !ok {
+		return DeferredToolCallByModelCall(live.store, live.conversationId(), toolCallId)
+	}
+	return BindDeferredToolCallModelCall(live.store, id, toolCallId)
+}
+
+// conversationId names the conversation this turn belongs to.
+func (live *piAdapterLiveTurn) conversationId() string {
+	if live.conversation == nil {
+		return ""
+	}
+	return live.conversation.Id
+}
+
+// deferredRunningIds is the transcript's view of one background call: a call
+// that still has work behind it keeps its row running across the turn that
+// dispatched it.
+func deferredRunningIds(call *DeferredToolCall) map[string]bool {
+	if call == nil || !DeferredToolCallActive(call.State) {
+		return nil
+	}
+	if len(call.ToolCallId) >= len(deferredToolCallPlaceholderPrefix) && call.ToolCallId[:len(deferredToolCallPlaceholderPrefix)] == deferredToolCallPlaceholderPrefix {
+		return nil
+	}
+	return map[string]bool{call.ToolCallId: true}
 }

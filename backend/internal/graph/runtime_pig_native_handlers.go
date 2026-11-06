@@ -358,6 +358,35 @@ func pigNativePattern(pattern string) string {
 const maxBashTimeoutMs = 1_800_000
 
 func pigBashTool(input AgentToolsInput) ToolDefinition {
+	run := func(params any, signal *AbortSignal) (any, error) {
+		arguments := agentToolsParams(params)
+		command := agentToolsString(arguments["command"])
+		if command == "" {
+			return nil, errors.New("bash needs a command")
+		}
+		if input.Run == nil && input.RunWithTimeout == nil {
+			return nil, errors.New("This Agent may not run commands")
+		}
+		// The schema promises a per-call limit, so honour it. Accepting the
+		// parameter and dropping it made a long command look like a crash: the
+		// runner's own 120s cap killed it and the tool reported SIGKILL.
+		timeoutMs := pigNativeNumber(arguments["timeout"])
+		if timeoutMs < 0 {
+			timeoutMs = 0
+		}
+		if timeoutMs > maxBashTimeoutMs {
+			timeoutMs = maxBashTimeoutMs
+		}
+		var result CommandResult
+		if timeoutMs > 0 && input.RunWithTimeout != nil {
+			result = input.RunWithTimeout("sh", []string{"-c", command}, signal, timeoutMs)
+		} else {
+			result = input.Run("sh", []string{"-c", command}, signal)
+		}
+		answer := agentToolsText(agentToolsCommandOutput(result))
+		answer["details"] = map[string]any{"shellOutput": result.Stdout + result.Stderr, "exitCode": result.Code}
+		return answer, nil
+	}
 	return ToolDefinition{
 		Name:        "bash",
 		Label:       "Run command",
@@ -365,39 +394,21 @@ func pigBashTool(input AgentToolsInput) ToolDefinition {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "The command to run."},
-				"timeout": map[string]any{"type": "number", "description": "How long the command may run, in milliseconds. Defaults to 120000 and is capped at 1800000."},
+				"command":   map[string]any{"type": "string", "description": "The command to run."},
+				"timeout":   map[string]any{"type": "number", "description": "How long the command may run, in milliseconds. Defaults to 120000 and is capped at 1800000."},
+				"async":     map[string]any{"type": "boolean", "description": "Run it in the background and answer at once; the result arrives as a later message. Use it for builds, tests and installs."},
+				"requestId": map[string]any{"type": "string", "description": "Name this background job. A retry with the same id and the same arguments reuses the running job instead of starting a second one; different arguments under that id are refused."},
 			},
 			"required": []any{"command"},
 		},
 		Execute: func(_ string, params any) (any, error) {
-			arguments := agentToolsParams(params)
-			command := agentToolsString(arguments["command"])
-			if command == "" {
-				return nil, errors.New("bash needs a command")
-			}
-			if input.Run == nil && input.RunWithTimeout == nil {
-				return nil, errors.New("This Agent may not run commands")
-			}
-			// The schema promises a per-call limit, so honour it. Accepting the
-			// parameter and dropping it made a long command look like a crash: the
-			// runner's own 120s cap killed it and the tool reported SIGKILL.
-			timeoutMs := pigNativeNumber(arguments["timeout"])
-			if timeoutMs < 0 {
-				timeoutMs = 0
-			}
-			if timeoutMs > maxBashTimeoutMs {
-				timeoutMs = maxBashTimeoutMs
-			}
-			var result CommandResult
-			if timeoutMs > 0 && input.RunWithTimeout != nil {
-				result = input.RunWithTimeout("sh", []string{"-c", command}, nil, timeoutMs)
-			} else {
-				result = input.Run("sh", []string{"-c", command}, nil)
-			}
-			answer := agentToolsText(agentToolsCommandOutput(result))
-			answer["details"] = map[string]any{"shellOutput": result.Stdout + result.Stderr, "exitCode": result.Code}
-			return answer, nil
+			return run(params, nil)
+		},
+		// The background body is the same command with the daemon's own signal,
+		// so a withdrawn or expired call is really stopped instead of being
+		// left to finish behind a row that already says it is over.
+		Deferred: func(_ string, params any, signal *AbortSignal) (any, error) {
+			return run(params, signal)
 		},
 	}
 }

@@ -10,7 +10,7 @@ import (
 // corrupted. Every migration in core_store_migrate.go has to move it in the same
 // change - a migration that runs without it leaves a database the next start
 // rejects as "belonging to a newer runtime".
-const SCHEMA_VERSION = 55
+const SCHEMA_VERSION = 56
 
 // SchemaVersion is the same constant. Call sites used both spellings.
 const SchemaVersion = SCHEMA_VERSION

@@ -524,6 +524,22 @@
 .tool-activity-state { color: var(--faint); }
 .tool-activity-list li[data-error="true"] .tool-activity-icon,
 .tool-activity-list li[data-error="true"] .tool-activity-state { color: #b43c3c; }
+/* A deferred call keeps running after its turn ended: the row stays visible and
+   says so, so a background command is never mistaken for a stalled one. */
+.tool-activity-group[data-background="true"] { border-style: dashed; }
+.tool-activity-list li[data-background="true"] .tool-activity-state { color: #4d8df7; }
+/* The reason a call failed or stopped shows without opening the group: expanding
+   a folded turn should never be the price of learning why a command died. */
+.tool-activity-reasons {
+  margin: 0;
+  padding: 0 12px 9px 42px;
+  list-style: none;
+  color: #b43c3c;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.tool-activity-reasons li { overflow-wrap: anywhere; white-space: pre-wrap; }
+.tool-activity-group:not([data-error="true"]) .tool-activity-reasons { color: var(--muted); }
 /* A finished turn folds its thinking and tool calls behind one muted line, so the
    final answer is what the reader sees. */
 .collapsed-turn { width: 100%; margin: 0 0 12px; }

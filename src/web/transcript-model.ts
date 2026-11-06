@@ -3,7 +3,7 @@ import { toolActivity } from './tool-activity.ts';
 import { toolGroupSummary } from './tool-activity.ts';
 import { assistantVisibleText } from '../core/assistant-visible-text.ts';
 import { withoutUnexecutedToolCall } from './unexecuted-tool-call.ts';
-import { messageAttachments } from '../core/conversation-projection.ts';
+import { messageAttachments, toolCallDisplay } from '../core/conversation-projection.ts';
 import { durableRsi, type TranscriptRsi } from './transcript-rsi.ts';
 import type {
   ConversationMessage,
@@ -46,6 +46,8 @@ export type TranscriptTool = {
   summary: string;
   done: boolean;
   error: boolean;
+  /** Still running after its turn ended, the backend's deferred terminal state, and why it stopped. */
+  background?: boolean; deferred?: boolean; state?: string; reason?: string;
   attachments?: ReturnType<typeof messageAttachments>;
 };
 
@@ -62,7 +64,7 @@ export type TranscriptRow =
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
-  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string }
+  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'compaction'; id: string; text: string; tokensAfter?: number }
   | { kind: 'thinking'; id: 'thinking' };
@@ -85,50 +87,41 @@ function toolError(message: ConversationMessage) {
 }
 
 function durableTool(message: ConversationMessage): TranscriptTool {
-  return {
-    id: typeof message.data?.toolCallId === 'string' ? message.data.toolCallId : message.id,
-    operationId: message.operationId ?? 'history',
-    name: toolName(message),
-    summary: message.text,
-    done: message.state !== 'pending',
-    error: toolError(message),
-    attachments: messageAttachments(message),
-  };
+  const display = toolCallDisplay({ messageState: message.state, data: message.data });
+  const id = typeof message.data?.toolCallId === 'string' ? message.data.toolCallId : message.id;
+  return { id, operationId: message.operationId ?? 'history', name: toolName(message), summary: message.text,
+    // A deferred call answers for itself: its own state decides, so the text heuristic cannot relabel a cancel.
+    ...display, error: display.deferred ? display.error : display.error || toolError(message),
+    attachments: messageAttachments(message) };
 }
 
 function liveTool(tool: LiveTool): TranscriptTool {
-  return {
-    id: tool.toolCallId,
-    operationId: tool.operationId,
-    name: tool.name,
-    summary: tool.summary,
-    done: tool.done,
-    error: tool.error,
-  };
+  const { toolCallId, operationId, name, summary, done, error, background, deferred, state, reason } = tool;
+  return { id: toolCallId, operationId, name, summary, done, error, ...(background ? { background: true } : {}),
+    ...(deferred ? { deferred: true } : {}), ...(state ? { state } : {}), ...(reason ? { reason } : {}) };
 }
 
-function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptTool) {
+function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptTool): TranscriptTool {
   if (!previous) return incoming;
   const genericResult = /^(工具执行完成|工具执行失败)$/.test(incoming.summary);
-  return {
-    ...previous,
-    ...incoming,
+  const done = previous.done || incoming.done;
+  const state = incoming.state ?? previous.state;
+  const reason = incoming.reason ?? previous.reason;
+  return { ...previous, ...incoming, done,
     summary: genericResult && previous.summary ? previous.summary : incoming.summary,
-    done: previous.done || incoming.done,
     error: previous.error || incoming.error,
-  };
+    // A call that finished is never background again, whatever the earlier record said.
+    background: !done && (previous.background === true || incoming.background === true),
+    ...(incoming.deferred || previous.deferred ? { deferred: true } : {}),
+    ...(state ? { state } : {}), ...(reason ? { reason } : {}) };
 }
 
 function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
   if (!tools.length) return;
   const active = tools.some(tool => !tool.done);
-  rows.push({
-    kind: 'tools',
-    id: `tools:${tools[0]!.id}`,
-    tools,
-    active,
-    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools),
-  });
+  const background = active && tools.every(tool => tool.done || tool.background === true);
+  rows.push({ kind: 'tools', id: `tools:${tools[0]!.id}`, tools, active, background,
+    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools) });
 }
 
 function isActivityMessage(message: ConversationMessage) {
@@ -269,18 +262,26 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       // activity around them visible too once the operation is complete; the
       // block still folds on demand through its own toggle.
       let folded: TranscriptActivityItem[] = [];
+      let running: TranscriptActivityItem[] = [];
       const flushFolded = () => {
         if (!folded.length) return;
         rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: !transcriptFoldPolicy.turnExpanded });
         folded = [];
       };
+      // A deferred call outlives its turn and a failure has to be readable, so neither
+      // is history: folding them would hide the row the reader is waiting on.
+      const flushRunning = () => {
+        if (!running.length) return;
+        rows.push(...activityRows(key, running));
+        running = [];
+      };
       for (const item of ordered) {
-        if (item.kind === 'steer') {
-          flushFolded();
-          rows.push({ kind: 'message', id: item.message.id, message: item.message });
-        } else folded.push(item);
+        if (item.kind === 'steer') { flushFolded(); flushRunning(); rows.push({ kind: 'message', id: item.message.id, message: item.message }); }
+        else if (item.kind === 'tool' && (item.tool.deferred || item.tool.reason)) running.push(item);
+        else folded.push(item);
       }
       flushFolded();
+      flushRunning();
       return;
     }
     // A running turn is not wrapped: its narration bubbles and tool groups sit

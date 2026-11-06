@@ -34,6 +34,17 @@ type ToolDefinition struct {
 	// ExternallyGated marks a tool whose Execute already passes the send gate at its own
 	// effect boundary.
 	ExternallyGated bool
+	// Async marks a tool whose every call runs in the background: the call is
+	// admitted now and its result arrives as a later message. It is for work
+	// whose length is unbounded by nature, never for work that is merely slow
+	// today - a threshold on the wall clock would make the same call behave
+	// differently on a loaded machine.
+	Async bool
+	// Deferred is the body of a background call: the same work as Execute, with
+	// the daemon's own abort signal so a withdrawn or expired call really stops.
+	// A tool without it cannot run in the background, and a call that asks to
+	// is refused instead of silently running synchronously.
+	Deferred func(toolCallId string, params any, signal *AbortSignal) (any, error)
 }
 
 // AgentToolsGraphManagement is the graph control surface the main Agent needs.

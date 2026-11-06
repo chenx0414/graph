@@ -34,6 +34,22 @@ function browserLaunches() {
   return probe.status === 0 ? undefined : (probe.stdout || probe.stderr || 'launch failed').trim();
 }
 
+/**
+ * Can this executor nest the seatbelt profile Graph's own bash tool applies?
+ *
+ * The deferred-tool cases run real commands through the daemon's bash tool, and
+ * that tool wraps every command in /usr/bin/sandbox-exec. An executor that is
+ * itself already seatbelted refuses the nest ("sandbox_apply: Operation not
+ * permitted"), so the command exits 71 before it does anything: an unavailable
+ * capability, not a regression. The probe is the same call, so the skip is a
+ * measurement.
+ */
+function sandboxNests() {
+  const probe = spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { encoding: 'utf8', timeout: 20_000 });
+  if (probe.status === 0) return undefined;
+  return (probe.stderr || probe.stdout || 'sandbox-exec refused').trim().split('\n')[0];
+}
+
 const requested = process.argv.slice(2);
 const requestedExcludes = requested.filter(argument => argument.startsWith('--exclude'));
 const forced = process.env.GRAPH_BROWSER_LAYER;
@@ -47,7 +63,7 @@ const forced = process.env.GRAPH_BROWSER_LAYER;
  * a browser could not start, until nobody trusted the red.
  */
 const layers = JSON.parse(readFileSync(join(root, 'tests/env-layers.json'), 'utf8')).layers;
-const probes = { chromium: browserLaunches };
+const probes = { chromium: browserLaunches, 'nested-sandbox': sandboxNests };
 const skippedLayers = [];
 const layerExcludes = [];
 for (const layer of layers) {

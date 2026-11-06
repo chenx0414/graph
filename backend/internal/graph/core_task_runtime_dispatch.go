@@ -77,7 +77,8 @@ func (runtime *TaskRuntime) SyncProjects() {
 	})
 }
 
-// RecoverMasters creates master nodes for pending tasks.
+// RecoverMasters creates master nodes for pending tasks, and closes the
+// background tool calls the previous process left running.
 //
 // Tasks and conversations created while dispatch was disabled carry no master
 // node. Once a master binding exists they get one and become driveable again;
@@ -85,6 +86,12 @@ func (runtime *TaskRuntime) SyncProjects() {
 // the runtime opens and after a hot configuration apply.
 func (runtime *TaskRuntime) RecoverMasters() int {
 	runtime.ensureOpen()
+	// A background tool call whose job died with the previous process is not
+	// running: it is interrupted, and saying so is what keeps the console from
+	// showing a call that can never end. The reconcile runs with the master
+	// recovery because both answer the same question - what the last process
+	// left unfinished - and it must run even when no master can be created.
+	RecoverDeferredToolCalls(runtime.store)
 	if runtime.master == nil || runtime.masterModel() == nil || runtime.masterDefinitionVersion() == nil {
 		return 0
 	}
