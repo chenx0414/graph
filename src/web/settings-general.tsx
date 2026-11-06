@@ -137,7 +137,7 @@ export function ArchivedConversations() {
     }
   }
   return (
-    <Card title="归档对话" icon="archive" subtitle="归档不会删除消息或任务记录；取消归档后会回到原来的项目或“最近”">
+    <Card title="归档对话" icon="archive" subtitle="归档不会删除消息或任务记录；取消归档后会回到原来的项目">
       {items === null && <Spinner />}
       {items?.length === 0 && <p className="muted" data-testid="archived-empty">还没有归档对话。</p>}
       {items?.map(conversation => (
@@ -145,7 +145,7 @@ export function ArchivedConversations() {
           <div className="grow">
             <a href={`#/conversations/${conversation.id}`}>{conversation.title}</a>
             <div className="muted">
-              {conversation.projectId ?? '最近'}
+              {conversation.projectId ?? '未归属项目'}
               {conversation.archivedAt ? ` · 归档于 ${new Date(conversation.archivedAt).toLocaleString()}` : ''}
             </div>
           </div>

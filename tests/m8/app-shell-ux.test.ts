@@ -22,40 +22,6 @@ import { cleanup, webDir, temp, git, gitProject, consoleServer, type ScriptedSte
 
 
 
-test('conversations archive from the sidebar and restore from settings', async () => {
-  const root = await temp('archive-ui');
-  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
-  const created = await createConversation(server, { projectId: 'alpha', text: '需要归档的对话', requestId: 'archive-ui' });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(server.url);
-  const sidebar = page.getByTestId('conversation-list');
-  await expect.poll(() => sidebar.innerText()).toContain('需要归档的对话');
-  const row = page.locator('.sidebar-conversation-row').filter({ hasText: '需要归档的对话' });
-  const archive = page.getByTestId(`archive-conversation-${created.conversationId}`);
-  expect(await archive.evaluate(element => getComputedStyle(element).opacity)).toBe('0');
-  await row.hover();
-  await expect.poll(() => archive.evaluate(element => getComputedStyle(element).opacity)).toBe('1');
-  await archive.click();
-  await expect.poll(() => sidebar.innerText()).not.toContain('需要归档的对话');
-
-  await page.goto(`${server.url}/#/settings`);
-  await page.locator('.settings-nav-item').filter({ hasText: '归档对话' }).click();
-  await page.getByTestId(`archived-conversation-${created.conversationId}`).waitFor();
-  expect(await page.getByTestId(`archived-conversation-${created.conversationId}`).innerText()).toContain('alpha');
-  await page.getByTestId(`archived-conversation-${created.conversationId}`).getByRole('button', { name: '取消归档' }).click();
-  await page.getByTestId('archived-empty').waitFor();
-
-  await page.goto(server.url);
-  await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('需要归档的对话');
-});
-
-
-
-// The drawer opens on the task graph, so this test renders React Flow inside the drawer:
-// that is slower than the old cheap first page and gets its own budget.
 test('the task graph page keeps the permanent four-state legend', async () => {
   const root = await temp('task-graph-legend');
   const project = join(root, 'project');

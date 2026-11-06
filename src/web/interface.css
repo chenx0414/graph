@@ -106,7 +106,7 @@ p { text-wrap: pretty; }
   .starter-card:not(:disabled):not([aria-disabled="true"]):hover { background: var(--panel-soft); border-color: var(--border-strong); }
 }
 @media (hover: none) {
-  .sidebar-conversation-archive, .tab-close { opacity: 1; }
+  .tab-close { opacity: 1; }
 }
 @media (max-width: 860px) {
   .sidebar { width: 100%; flex-basis: auto; height: auto; min-height: 0; gap: 8px; padding: 8px 12px; }

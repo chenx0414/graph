@@ -86,15 +86,15 @@ test('the browser returns to the same global and project supervisors while retai
   // model-control keeper; here the conversation simply has a level of its own.
   expect(globalView).toMatchObject({ master: { model: 'fast' } });
   expect(String((globalView as { telemetry?: { thinkingLevel?: string } }).telemetry?.thinkingLevel ?? '')).not.toBe('');
-  await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('Earlier conversation');
   const sidebar = page.getByTestId('conversation-list');
-  for (const label of ['项目', '最近']) {
-    const toggle = sidebar.getByRole('button', { name: label, exact: true });
-    await toggle.click();
-    expect(await toggle.getAttribute('aria-expanded')).toBe('false');
-    await toggle.click();
-    expect(await toggle.getAttribute('aria-expanded')).toBe('true');
-  }
+  const projects = sidebar.getByRole('button', { name: '项目', exact: true });
+  await projects.click();
+  expect(await projects.getAttribute('aria-expanded')).toBe('false');
+  await projects.click();
+  expect(await projects.getAttribute('aria-expanded')).toBe('true');
+  // The sidebar carries projects and the main Agent, nothing else: the recent
+  // conversation list and its archive buttons are gone.
+  expect(await sidebar.getByRole('button', { name: '最近', exact: true }).count()).toBe(0);
   // The main Agent entry is one row, not a heading plus a conversation row.
   const globalEntry = page.getByTestId('open-global-agent');
   expect(await globalEntry.evaluate(el => el.tagName)).toBe('BUTTON');
@@ -121,8 +121,7 @@ test('the browser returns to the same global and project supervisors while retai
   // The sidebar has one state: there is no expand/collapse control left to click.
   expect(await page.getByTestId('sidebar-toggle').count()).toBe(0);
   await sidebar.waitFor({ state: 'visible' });
-  expect(await page.getByTestId(`archive-conversation-${priorID}`).count()).toBe(1);
-  expect(await page.getByTestId(`archive-conversation-${globalID}`).count()).toBe(0);
+  expect(await page.getByTestId('archive-conversation').count()).toBe(0);
 
   await page.getByTestId('open-project-p').click();
   await expect.poll(() => page.url(), { timeout: 30_000 }).not.toBe(globalURL);
@@ -145,7 +144,6 @@ test('the browser returns to the same global and project supervisors while retai
   await page.getByTestId('chat-input').locator('visible=true').fill('Review this project');
   await page.getByTestId('chat-send').locator('visible=true').click();
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText(), { timeout: 30_000 }).toContain('Project supervisor reply.');
-  expect(await page.getByTestId(`archive-conversation-${projectID}`).count()).toBe(0);
 
   await page.getByTestId('open-global-agent').click();
   await expect.poll(() => page.url()).toBe(globalURL);

@@ -126,37 +126,6 @@
 .sidebar-project-row[data-active="true"] { background: rgba(26,28,31,0.075); color: var(--text); }
 .sidebar-project-row:disabled { cursor: progress; opacity: .7; }
 .sidebar-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.sidebar-conversations { display: flex; flex-direction: column; gap: 1px; padding: 1px 0 4px 18px; }
-.sidebar-conversation-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  align-items: center;
-  min-height: 34px;
-  border-radius: 9px;
-}
-.sidebar-conversation-row:hover { background: rgba(26,28,31,0.055); }
-.sidebar-conversation-row[data-active="true"] { background: #ececee; }
-.sidebar-conversation {
-  display: flex; align-items: center; gap: 8px;
-  min-height: 34px; padding: 7px 8px; border-radius: 9px;
-  color: var(--sidebar-muted); font-size: 13px;
-}
-a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--text); text-decoration: none; }
-.sidebar-conversation-row .sidebar-conversation { min-width: 0; }
-.sidebar-conversation-row .sidebar-conversation:hover { background: transparent; }
-.sidebar-conversation-row:hover .sidebar-conversation { color: var(--text); text-decoration: none; }
-.sidebar-conversation-row[data-active="true"] .sidebar-conversation { color: var(--text); font-weight: 600; }
-.sidebar-conversation-archive {
-  width: 26px; height: 26px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 0; border-radius: 7px; background: transparent; color: var(--faint);
-  cursor: pointer; opacity: 0; transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
-}
-.sidebar-conversation-row:hover .sidebar-conversation-archive,
-.sidebar-conversation-row:focus-within .sidebar-conversation-archive { opacity: 1; }
-.sidebar-conversation-archive:hover { background: rgba(26,28,31,0.1); color: var(--text); }
-.sidebar-conversation-archive:disabled { cursor: wait; opacity: 0.45; }
-.sidebar-conversation-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-conversation-badge {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
   display: inline-flex; align-items: center; justify-content: center;
