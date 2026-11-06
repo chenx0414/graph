@@ -68,11 +68,23 @@ test('the compaction the daemon asked for is written in the room it reserved', a
     // The user asks for the context to be compacted.
     const compacted = await request(`/api/conversations/${conversationId}/compact`, 'POST', { requestId: 'compaction-2' });
     expect(compacted.status, JSON.stringify(compacted.body)).toBe(200);
-    await expect.poll(async () => {
+    // The compaction is a fact about the turn's context, not a message from
+    // either side: it arrives as a system row of kind `compaction` with the
+    // reason, the summary it wrote and the room that left. Asserting an
+    // assistant line instead waited a minute for a row the product stopped
+    // producing when the notice became its own transcript row.
+    type CompactionRow = { role?: string; kind?: string; text?: string; data?: { reason?: string; summary?: string; tokensAfter?: number } };
+    const notice = async () => {
       const view = await request(`/api/conversations/${conversationId}`);
-      const messages = (view.body as { messages?: { role?: string; kind?: string; text?: string }[] }).messages ?? [];
-      return messages.some(message => message.role === 'assistant' && (message.text ?? '').includes('压缩'));
-    }, { timeout: 60000, interval: 250 }).toBe(true);
+      const messages = (view.body as { messages?: CompactionRow[] }).messages ?? [];
+      return messages.find(message => message.role === 'system' && message.kind === 'compaction');
+    };
+    await expect.poll(async () => (await notice()) !== undefined, { timeout: 60000, interval: 250 }).toBe(true);
+    const compaction = (await notice()) as CompactionRow;
+    expect(compaction.text ?? '', 'the notice has to say the context was compacted').toContain('压缩');
+    expect(compaction.data?.reason, 'a manual request is recorded as one').toBe('manual');
+    expect(compaction.data?.summary, 'the row carries the summary the kernel wrote').toContain('## Goal');
+    expect(compaction.data?.tokensAfter ?? 0, 'the row says how much room is left').toBeGreaterThan(0);
 
     // The summary was asked for in the room the daemon reserved, not in the
     // model's whole output limit: a summary written into the model's limit
