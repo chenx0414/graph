@@ -85,29 +85,8 @@ func agentToolsSupervisorHandlers(input AgentToolsInput, root string, readRoots 
 		"list_projects": func(id string, params map[string]any) any {
 			return agentToolsText(stringifyJSON(input.Supervisor.ListProjects()))
 		},
-		"bind_project": func(id string, params map[string]any) any {
-			return agentToolsText(stringifyJSON(input.Supervisor.BindProject(PiAdapterBindProject{
-				ProjectId: strings.TrimSpace(agentToolsString(params["projectId"])),
-				RequestId: strings.TrimSpace(agentToolsString(params["requestId"])),
-			})))
-		},
 		"list_problems": func(id string, params map[string]any) any {
 			return agentToolsText(stringifyJSON(input.Supervisor.ListProblems()))
-		},
-		"list_human_checks": func(id string, params map[string]any) any {
-			return agentToolsText(stringifyJSON(input.PendingHumanChecks()))
-		},
-		"review_human_check": func(id string, params map[string]any) any {
-			approve, ok := params["approve"].(bool)
-			if !ok {
-				panic(errors.New("review_human_check requires approve as a boolean"))
-			}
-			return agentToolsText(stringifyJSON(input.ReviewHumanCheck(AgentToolsHumanCheck{
-				QuestionId: strings.TrimSpace(agentToolsString(params["questionId"])),
-				Approve:    approve,
-				Note:       strings.TrimSpace(agentToolsStringOrEmpty(params["note"])),
-				RequestId:  strings.TrimSpace(agentToolsString(params["requestId"])),
-			})))
 		},
 		"resolve_problem": func(id string, params map[string]any) any {
 			action := strings.TrimSpace(agentToolsStringOrEmpty(params["action"]))

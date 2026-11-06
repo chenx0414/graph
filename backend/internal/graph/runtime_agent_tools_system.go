@@ -4,8 +4,6 @@ import (
 	"errors"
 	"os"
 	"strings"
-
-	"encoding/json"
 )
 
 // agentToolsSystemHandlers are the handlers of the System tools.
@@ -32,54 +30,6 @@ func agentToolsSystemHandlers(input AgentToolsInput, root string, readRoots []st
 		},
 		"inspect_graph_system": func(id string, params map[string]any) any {
 			return agentToolsText(stringifyJSON(input.SystemContext.SystemDiagnostics()))
-		},
-		"propose_system_change": func(id string, params map[string]any) any {
-			title := strings.TrimSpace(agentToolsString(params["title"]))
-			problem := strings.TrimSpace(agentToolsString(params["problem"]))
-			var impact *string
-			if raw, ok := params["impact"].(string); ok {
-				value := strings.TrimSpace(raw)
-				impact = &value
-			}
-			var risk *string
-			if raw, ok := params["risk"].(string); ok {
-				value := strings.TrimSpace(raw)
-				risk = &value
-			}
-			if title == "" || len(title) > 200 {
-				panic(errors.New("A system-change title of at most 200 characters is required"))
-			}
-			if problem == "" || len(problem) > 4_000 {
-				panic(errors.New("A concrete problem statement of at most 4000 characters is required"))
-			}
-			if impact != nil && len(*impact) > 2_000 {
-				panic(errors.New("System-change impact must be at most 2000 characters"))
-			}
-			if risk != nil && len(*risk) > 2_000 {
-				panic(errors.New("System-change risk must be at most 2000 characters"))
-			}
-			serialized := agentToolsString(params["changeJson"])
-			if strings.TrimSpace(serialized) == "" || len(serialized) > 250_000 {
-				panic(errors.New("changeJson must be a bounded JSON document"))
-			}
-			var change any
-			if err := json.Unmarshal([]byte(serialized), &change); err != nil {
-				panic(errors.New("changeJson must be a bounded JSON document"))
-			}
-			record := asMap(change)
-			if record == nil {
-				panic(errors.New("changeJson must describe one object"))
-			}
-			return agentToolsText(stringifyJSON(input.SystemContext.ProposeSystemChange(AgentToolsSystemChange{
-				Title: title, Problem: problem, Change: record, Impact: impact, Risk: risk,
-			})))
-		},
-		"apply_system_change": func(id string, params map[string]any) any {
-			proposalID := strings.TrimSpace(agentToolsString(params["proposalId"]))
-			if proposalID == "" || len(proposalID) > 200 {
-				panic(errors.New("A bounded proposalId is required"))
-			}
-			return agentToolsText(stringifyJSON(input.SystemContext.ApplySystemChange(proposalID)))
 		},
 		"inspect_rsi_status": func(id string, params map[string]any) any {
 			return agentToolsText(stringifyJSON(input.Rsi.Status(false)))

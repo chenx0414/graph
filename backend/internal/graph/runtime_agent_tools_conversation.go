@@ -12,63 +12,6 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 		"ask_supervisor": func(id string, params map[string]any) any {
 			return agentToolsSupervisor(input.OnAskSupervisor, input.OnNotifySupervisor, params)
 		},
-		"conversation_read": func(id string, params map[string]any) any {
-			if input.Conversations.List == nil {
-				panic(errors.New("This Agent session cannot reach other conversations"))
-			}
-			action := strings.TrimSpace(agentToolsStringOrEmpty(params["action"]))
-			if action == "list" {
-				var archived *bool
-				if value, ok := params["archived"].(bool); ok && value {
-					archived = &value
-				}
-				return agentToolsText(stringifyJSON(input.Conversations.List(archived)))
-			}
-			conversationID := strings.TrimSpace(agentToolsStringOrEmpty(params["conversationId"]))
-			if conversationID == "" {
-				panic(errors.New("conversationId is required for read and follow"))
-			}
-			if action == "read" {
-				return agentToolsText(stringifyJSON(input.Conversations.Read(conversationID,
-					agentToolsBoundedNumber(params["limit"], 50), agentToolsBoundedNumber(params["after"], 0))))
-			}
-			if action == "follow" {
-				return agentToolsText(stringifyJSON(input.Conversations.Follow(conversationID,
-					agentToolsBoundedNumber(params["after"], 0), agentToolsBoundedNumber(params["limit"], 100))))
-			}
-			panic(errors.New("Unsupported read action: use list, read or follow"))
-		},
-		"conversation_write": func(id string, params map[string]any) any {
-			if input.Conversations.Send == nil {
-				panic(errors.New("This Agent session cannot reach other conversations"))
-			}
-			action := strings.TrimSpace(agentToolsStringOrEmpty(params["action"]))
-			conversationID := strings.TrimSpace(agentToolsStringOrEmpty(params["conversationId"]))
-			requestID := strings.TrimSpace(agentToolsStringOrEmpty(params["requestId"]))
-			if conversationID == "" {
-				panic(errors.New("conversationId is required"))
-			}
-			if requestID == "" {
-				panic(errors.New("A bounded requestId is required"))
-			}
-			if action == "send" || action == "steer" {
-				message := strings.TrimSpace(agentToolsStringOrEmpty(params["text"]))
-				if message == "" {
-					panic(errors.New("text is required for " + action))
-				}
-				if action == "send" {
-					return agentToolsText(stringifyJSON(input.Conversations.Send(conversationID, message, requestID)))
-				}
-				return agentToolsText(stringifyJSON(input.Conversations.Steer(conversationID, message, requestID)))
-			}
-			if action == "pause" {
-				return agentToolsText(stringifyJSON(input.Conversations.Pause(conversationID, requestID)))
-			}
-			if action == "resume" {
-				return agentToolsText(stringifyJSON(input.Conversations.Resume(conversationID, requestID)))
-			}
-			panic(errors.New("Unsupported write action: use send, steer, pause or resume"))
-		},
 		"list_peers": func(id string, params map[string]any) any {
 			if peers == nil {
 				panic(errors.New("This Agent session has no graph peers"))

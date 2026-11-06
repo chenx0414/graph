@@ -96,11 +96,12 @@ curl -s -b /tmp/graph-cookie.txt -H "origin: $base" "$base/api/health"
 ## 发现与诊断
 
 - `search_resources`：搜索能力库，只用于发现。
-- `get_resource`：读取一个能力 metadata；不等于绑定。
 - `read_system_capabilities`：读取模型、订阅、配方和 definition 等配置事实。
 - `inspect_graph_system`：只读取当前 conversation 的运行健康，包括无效能力、失败节点、开放问题和待处理系统变更。
 - `get_graph_state`：读取当前 graph revision、phase、nodes、evidence、worktrees 和内部问题。
-- `list_projects` / `bind_project`：列出配置项目并把当前 conversation 绑定到已准备项目。
+- `list_projects`：列出配置项目与准备状态（`bind_project` 已于 2026-11-07 删除）。
 - Node run：查看某实例实际加载的 capability facts 和 tools。
+
+能力目录里的 `get_resource`、`list_agent_combinations`、`get_agent_combination`、`artifact_retire`，以及会话互通的 `conversation_read`/`conversation_write`、人工验收预审 `list_human_checks`/`review_human_check`、草稿 `withdraw_draft`、系统变更 `propose_system_change`/`apply_system_change`、浏览器 `focus_browser_window`/`grant_clipboard_permission` 这些工具已于 2026-11-07 删除；发现能力用 `search_resources` 与 `read_system_capabilities`。
 
 当用户问“为什么没有某个工具”时，先检查 definition 是否绑定、capability 是否有效、实际 session 是否加载，以及 host policy 是否禁用；不要根据历史对话推断。

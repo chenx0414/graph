@@ -69,10 +69,11 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 直接编辑可编辑 prompt 文件是用户配置行为。安装、更新或替换 capability 属于系统变更：
 
-1. Main Agent 用 `propose_system_change` 创建提案；
+1. 用户或 Main Agent 明确写出提案（problem / change / impact / risk）；
 2. 用户批准；
-3. Main Agent 用 `apply_system_change` 应用；
-4. Host 重新扫描并验证。
+3. Host 重新扫描并验证。
+
+`propose_system_change` 与 `apply_system_change` 两个工具已于 2026-11-07 删除；系统变更改由控制台设置页与 RSI 提交完成，不再经过模型工具。
 
 完全访问模式会自动批准运行授权，但仍应保留提案、应用验证和审计记录。暂停、预算、未知用量和恢复问题不阻塞调用；并发上限、人工验收、模型订阅决策和任务图确认仍独立。
 

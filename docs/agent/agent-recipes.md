@@ -1,6 +1,6 @@
 # Graph Agent 配方（recipes）
 
-**什么时候读**：需要新建、改描述、删除子 Agent 配方（recipe），或核对某个配方的编译结果时。**只是选择**已有子 Agent 用 `list_agent_combinations` / `get_agent_combination` 就够了，不必读本文件。
+**什么时候读**：需要新建、改描述、删除子 Agent 配方（recipe），或核对某个配方的编译结果时。**只是选择**已有子 Agent 时看 `read_system_capabilities` 的配方清单就够了（`list_agent_combinations` / `get_agent_combination` 已于 2026-11-07 删除）。
 
 配方的增删改**不在工具表里**（这种低频能力已按奥卡姆剃刀下沉为文档）：它是一份 JSON + 几个控制台 HTTP 路由。每条路由都需要会话 cookie（`GET /` 取）与**本地 `Origin`**，否则 403 `forbidden_origin`。
 

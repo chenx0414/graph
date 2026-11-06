@@ -104,7 +104,7 @@
 
 ## 需要系统变更
 
-先定位到具体文件、行为或配置。用 `propose_system_change` 给出：
+先定位到具体文件、行为或配置，写出提案（`propose_system_change` 工具已于 2026-11-07 删除，改由人工提交）：
 
 - problem；
 - proposed change；

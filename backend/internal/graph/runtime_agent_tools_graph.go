@@ -71,14 +71,6 @@ func agentToolsGraphHandlers(input AgentToolsInput, root string, readRoots []str
 			receipt := input.Supervisor.Propose(proposal, agentToolsString(params["requestId"]), params["newVersion"] == true)
 			return agentToolsText(stringifyJSON(receipt))
 		},
-		"withdraw_draft": func(id string, params map[string]any) any {
-			version, _ := agentToolsNumberValue(params["proposalVersion"])
-			reason := agentToolsStringOrEmpty(params["reason"])
-			receipt := input.Supervisor.WithdrawDraft(PiAdapterDraftAction{
-				ProposalVersion: int(version), Reason: &reason, RequestId: agentToolsString(params["requestId"]),
-			})
-			return agentToolsText(stringifyJSON(receipt))
-		},
 		"confirm_draft": func(id string, params map[string]any) any {
 			instruction := strings.TrimSpace(agentToolsStringOrEmpty(params["instruction"]))
 			if instruction == "" {

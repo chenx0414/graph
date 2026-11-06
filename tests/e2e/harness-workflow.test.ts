@@ -17,7 +17,6 @@ test('evaluation confirms a real draft without dispatching the worker', async ()
   modules:{},edges:{},inputs:{},outputs:{},acceptance:[{id:'behavior',description:'Parser behavior',kind:'human'}],
  }};
  const provider=await openaiServer([
-  {tools:[{id:'catalog',name:'list_agent_combinations',arguments:'{}'}]},
   {tools:[{id:'draft',name:'propose_graph',arguments:JSON.stringify({proposal,requestId:'publish-draft'})}]},
   {text:'The draft is ready.'},
   {text:'Confirmation received; work has not started.'},
@@ -43,8 +42,6 @@ test('evaluation confirms a real draft without dispatching the worker', async ()
   expect(mainCost.requests).toBeGreaterThan(0);
   const workerCost=ledger.tasks.find((task:{id:string})=>task.id===report.workflow.confirmedTaskId);
   expect(workerCost?.requests ?? 0).toBe(0);
-  const catalogReply=(provider.requests[1] as {messages:{role:string;content:unknown}[]}).messages.filter(message=>message.role==='tool');
-  expect(JSON.stringify(catalogReply)).toContain('coder');
   const runPath=join(root,'run.json');await writeFile(runPath,stdout);
   const manifestPath=join(root,'comparison.json');
   const group={name:'workflow',scope:'workflow',runs:[runPath]};

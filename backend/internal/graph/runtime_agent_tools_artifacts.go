@@ -131,12 +131,6 @@ func agentToolsArtifactsHandlers(input AgentToolsInput, root string, readRoots [
 			}
 			return agentToolsText(stringifyJSON(artifacts.publish(publish)))
 		},
-		"artifact_retire": func(id string, params map[string]any) any {
-			version, _ := agentToolsNumberValue(params["version"])
-			return agentToolsText(stringifyJSON(artifacts.retire(
-				agentToolsString(params["artifactId"]), int(version),
-				agentToolsString(params["reason"]), agentToolsString(params["requestId"]))))
-		},
 		"artifact_promote": func(id string, params map[string]any) any {
 			version, _ := agentToolsNumberValue(params["version"])
 			return agentToolsText(stringifyJSON(artifacts.promote(ArtifactPromoteInput{
