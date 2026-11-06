@@ -296,24 +296,16 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                 </button>
               </nav>
               {error && <div className="form-error">{error}</div>}
-              <div className="agent-preview-panel" data-testid="agent-context-sent">
-                <div className="agent-preview-meta">
-                  <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
-                  {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
-                  <span>源码 Docs <code>{data?.docsRoot}</code></span>
-                </div>
-                {definitionChanged && (
-                  <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
-                    当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
-                  </div>
-                )}
-                <RecordedPromptPanel
-                  testId="agent-context-sent"
-                  text={data?.sent?.text ?? null}
-                  tools={data?.sent?.tools ?? null}
-                  emptyText="本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。"
-                />
+              <div className="agent-preview-meta" data-testid="agent-context-meta">
+                <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
+                {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
+                <span>源码 Docs <code>{data?.docsRoot}</code></span>
               </div>
+              {definitionChanged && (
+                <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
+                  当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
+                </div>
+              )}
               {loading ? <Spinner label="正在读取 Agent 上下文…" /> : tab === 'prompts' ? (
                 <div className="agent-prompt-layout">
                   <div className="agent-prompt-list" data-testid="agent-prompt-list">
@@ -380,7 +372,7 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                     ) : <p className="muted">没有可编辑的 Prompt。</p>}
                   </div>
                 </div>
-              ) : (
+              ) : tab === 'tools' ? (
                 <div className="agent-tool-panel" data-testid="agent-tool-panel">
                   <div className="agent-tool-panel-head">
                     <p>关闭工具会同时从实际工具 surface 和最终 Prompt 中移除；权限、预算和审计规则保持不变。</p>
@@ -431,6 +423,15 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                       </div>
                     </div>
                   </div>
+                </div>
+              ) : (
+                <div className="agent-preview-panel" data-testid="agent-context-sent">
+                  <RecordedPromptPanel
+                    testId="agent-context-sent"
+                    text={data?.sent?.text ?? null}
+                    tools={data?.sent?.tools ?? null}
+                    emptyText="本次会话尚未记录到已发出的请求：只有真正发起过模型请求的会话才有这一份。"
+                  />
                 </div>
               )}
             </div>

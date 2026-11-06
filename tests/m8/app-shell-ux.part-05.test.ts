@@ -41,7 +41,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const sentPanel = await page.getByTestId('agent-context-sent').innerText();
   expect(sentPanel).toContain('实际发出');
   expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
-  await expect.poll(() => page.getByTestId('agent-context-sent').innerText(), { timeout: 30_000, interval: 200 }).toContain(`源码 Docs ${join(process.cwd(), 'docs', 'agent')}`);
+  await expect.poll(() => page.getByTestId('agent-context-meta').innerText(), { timeout: 30_000, interval: 200 }).toContain(`源码 Docs ${join(process.cwd(), 'docs', 'agent')}`);
   expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
@@ -86,6 +86,8 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toContain('Use the native Pi tools');
 
   await page.getByTestId('agent-context-tab-tools').click();
+  // 每个标签只显示自己那一块：工具页不再把 prompt 与工具声明挤在上面。
+  expect(await page.getByTestId('agent-context-sent').count()).toBe(0);
   await page.getByTestId('agent-tool-write').uncheck();
   await page.getByRole('button', { name: '保存工具选择' }).click();
   await expect.poll(async () => await libraryDisabledTools(promptRoot)).toContain('write');
