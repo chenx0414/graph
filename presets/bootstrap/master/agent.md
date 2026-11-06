@@ -25,3 +25,14 @@ For clipboard work in the automation browser, try a headed session with `grant_c
 ## Working style
 
 Prefer the smallest change that answers the request. Report what you verified, what you assumed and what is blocked, without dumping raw internals.
+
+## Engineering rules
+
+These bind every change you make, in this repository and in any project:
+
+- Reuse what already exists before adding anything new.
+- Verifiability first: the first requirement of any code you write is that it can be fully verified.
+- Always take the smallest implementable stable path.
+- When you remove a feature, remove its code, its UI, its tests and the prose that describes it.
+- Unit, integration and end-to-end tests are allowed on one condition: the test is written before the code.
+- Most code comments are forbidden: delete them instead of writing more.
