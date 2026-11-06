@@ -29,11 +29,14 @@ const readJson = path => {
 const LOG_CEILING_BYTES = 5 * 1024 * 1024;
 const STARTUP_TIMEOUT_MS = 30_000;
 const WATCH_INTERVAL_MS = 3_000;
+/** How long a vanished daemon may be replaced before the reader is told. */
+const RECOVERY_MS = 15_000;
 
 export function createDaemonRuntime(input) {
   let child = null;
   let adoptedPid = null;
   let watch = null;
+  let recovering = false;
 
   const logPath = stateDir => join(stateDir, 'daemon.log');
 
@@ -89,8 +92,41 @@ export function createDaemonRuntime(input) {
       if (input.isQuitting() || input.isRestarting() || processAlive(known.pid)) return;
       clearWatch();
       if (input.rejectPending(new Error(`adopted daemon ${known.pid} exited`))) return;
-      input.onGone('Graph daemon stopped', `adopted daemon pid ${known.pid} exited\n${logTail(paths.stateDir, 8)}`);
+      void daemonGone(paths, 'Graph daemon stopped', `adopted daemon pid ${known.pid} exited\n${logTail(paths.stateDir, 8)}`);
     }, WATCH_INTERVAL_MS);
+  }
+
+  /**
+   * A daemon that vanished is not automatically a crash.
+   *
+   * Every self-improvement restarts the daemon under a running window, and the
+   * reader used to get a modal "Graph daemon stopped" and an app that quit -
+   * measured 2026-11-06, reported as "桌面有一个 Electron 崩溃退出的提示，遇到好多次".
+   * So: wait for the replacement the host is starting (it publishes its own
+   * console.json), adopt it, and keep the window; only when nothing answers in
+   * RECOVERY_MS spawn one, and let a failing spawn take the onGone path.
+   */
+  async function daemonGone(paths, title, message) {
+    if (recovering || input.isQuitting()) return;
+    recovering = true;
+    try {
+      const hasConfig = input.prepare(paths);
+      const deadline = Date.now() + RECOVERY_MS;
+      while (Date.now() < deadline) {
+        if (input.isQuitting()) return;
+        const candidate = adoptableConsole(readJson(join(paths.stateDir, 'console.json')), processAlive);
+        if (candidate && candidate.pid !== adoptedPid && candidate.pid !== child?.pid) {
+          if (input.verbose) input.log?.(`[app] daemon replaced by pid ${candidate.pid}; adopting it`);
+          await adopt(paths, candidate, hasConfig);
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      if (input.verbose) input.log?.('[app] no replacement daemon appeared; starting one');
+      spawnDaemon(paths, hasConfig);
+    } finally {
+      recovering = false;
+    }
   }
 
   function spawnDaemon(paths, hasConfig) {
@@ -123,7 +159,7 @@ export function createDaemonRuntime(input) {
         input.rejectPending(new Error(`daemon stopped during restart (exit ${code ?? signal})`));
         return;
       }
-      input.onGone('Graph daemon stopped', `exit ${code ?? signal}\n${logTail(paths.stateDir, 8)}`);
+      void daemonGone(paths, 'Graph daemon stopped', `exit ${code ?? signal}\n${logTail(paths.stateDir, 8)}`);
     });
     void waitForAddress(startedChild, paths);
   }
