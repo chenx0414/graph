@@ -26,7 +26,7 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
     const grant = text('grant');
     return grant ? `执行需要你授权：${grant}` : '执行需要你确认一项外部权限。';
   }
-  if (kind === 'budget' || kind === 'reservation_exceeded') return '该 Agent 已达到当前额度边界，需要你决定是否追加预算。';
+  if (kind === 'reservation_exceeded') return '该 Agent 已达到当前额度边界，需要你决定是否追加预算。';
   if (kind === 'human_check') return text('prompt') ?? '需要你完成一项人工验收。';
   if (kind === 'system_change') {
     const title = text('title');
@@ -73,7 +73,6 @@ export function QuestionReply({ taskId, question, onDone }: {
   question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean; autoAnswerChoice?: string; autoAnswerRemainingMs?: number | null };
   onDone: () => void;
 }) {
-  const [tokens, setTokens] = useState('100000');
   const [inputTokens, setInputTokens] = useState('0');
   const [outputTokens, setOutputTokens] = useState('0');
   const [value, setValue] = useState('');
@@ -113,7 +112,6 @@ export function QuestionReply({ taskId, question, onDone }: {
         <pre data-testid={`question-data-${question.id}`} style={{ maxWidth: '100%', margin: '4px 0', fontSize: 12 }}>{JSON.stringify(question.data, null, 2)}</pre>
       </details>
       <div className="row">
-        {question.kind === 'budget' && <input className="input" style={{ width: 130 }} data-testid="budget-tokens" type="number" min={1} value={tokens} onChange={event => setTokens(event.target.value)} />}
         {decision && <div className="question-answer-options">
           <textarea className="input question-custom-answer" data-testid="waiting-value" value={value} onChange={event => setValue(event.target.value)} placeholder="写下你的决定…" rows={2} />
         </div>}
@@ -147,7 +145,6 @@ export function QuestionReply({ taskId, question, onDone }: {
           <Button size="sm" variant="primary" icon="check" onClick={() => void submit({ type: 'acknowledge' })}>确认通过</Button>
           <Button size="sm" variant="danger" icon="close" onClick={() => void submit({ type: 'reject', ...(value.trim() ? { reason: value.trim() } : {}) })}>驳回并返工</Button>
         </> : <Button size="sm" variant="primary" disabled={decision && !value.trim()} onClick={() => {
-          if (question.kind === 'budget') return void submit({ type: 'add_budget', tokens: Number(tokens) });
           if (question.kind === 'waiting') return void submit({ type: 'respond', value });
           if (question.kind === 'unknown_usage') {
             if (usageMode === 'reconcile') return void submit({ type: 'reconcile_usage', proof });

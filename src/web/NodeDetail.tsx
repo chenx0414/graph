@@ -163,9 +163,8 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
               <Stat
                 label="用量"
                 value={overview.instance ? overview.instance.used.toLocaleString('en-US') : '未记录'}
-                hint={overview.instance?.unlimited ? '额度不限' : overview.instance?.budget === null || overview.instance?.budget === undefined ? '预算尚无记录' : `预算 ${overview.instance.budget.toLocaleString('en-US')}`}
+                hint="实际消耗的 token 数"
               />
-              <Stat label="用户授权" value={overview.instance?.authorizedBudget ? overview.instance.authorizedBudget.unlimited ? '不限' : overview.instance.authorizedBudget.budget.toLocaleString('en-US') : '继承默认'} hint="下次执行重新校验" />
               <Stat label="记录" value={overview.entryCount} hint="该节点会话条目数" />
             </div>
           </section>

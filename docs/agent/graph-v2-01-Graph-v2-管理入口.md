@@ -34,7 +34,7 @@
 
 节点可以声明 `harness`：一个「提示键 → 文本」的映射，替换该节点运行时读到的提示文本。键只能是可编辑库的提示文件：`agents/<definition-id>.md`、`rules/{common,main,worker,reviewer}.md`、`tools/{common,main,worker,reviewer}.md` 之外的角色文件、`runtime/node.md`；值必须是非空文本。
 
-`harness` 改变的是"这个 Agent 被告知什么"，不改变宿主强制的权限、闸门与预算，也不改变该节点能调用哪些工具。同一张图里两个节点声明同一个任务、不同的 `harness`，就是同一任务在两个 harness 下各跑一次——这正是对比 harness 改动的实验形状。要跑这样的实验，用 `probe_harness`：宿主会建图、派发、等待并直接给出行为对比。
+`harness` 改变的是"这个 Agent 被告知什么"，不改变宿主强制的权限与闸门，也不改变该节点能调用哪些工具。同一张图里两个节点声明同一个任务、不同的 `harness`，就是同一任务在两个 harness 下各跑一次——这正是对比 harness 改动的实验形状。要跑这样的实验，用 `probe_harness`：宿主会建图、派发、等待并直接给出行为对比。
 
 ## 节点工作目录与权限
 
@@ -42,7 +42,7 @@
 
 例如 `workspace:{base:"worktree",path:"packages/api"},access:{mode:"standard",network:"declared"}`。access 复用现有 AccessPolicy 的字段与默认值，不允许超过宿主已经授权的范围；protectedPaths 继续保留。受理定义不等于权限已经获准：启动时校验实际宿主授权，拒绝时保留输入、暂停节点并通知 main，不消耗自动重试次数。
 
-执行及缺项补交使用启动时冻结的环境。main 修改 workspace/access 后，下一次执行才重绑，保留实例身份、聊天历史和累计预算；成功重绑记录 graph.node.rebound。节点的 system prompt、node_run 与独立聊天窗口显示实际规范工作目录、实际 project/worktree 基础及已解析权限快照，不把下一版本配置当作当前执行环境。选择项目目录的节点不获得只适用于私有 worktree 的 workspace_commit 工具。
+执行及缺项补交使用启动时冻结的环境。main 修改 workspace/access 后，下一次执行才重绑，保留实例身份、聊天历史和累计用量；成功重绑记录 graph.node.rebound。节点的 system prompt、node_run 与独立聊天窗口显示实际规范工作目录、实际 project/worktree 基础及已解析权限快照，不把下一版本配置当作当前执行环境。选择项目目录的节点不获得只适用于私有 worktree 的 workspace_commit 工具。
 
 node_run 的 toolCallCount 是节点所有执行累计的实际工具启动次数，包含失败调用；不受聊天记录分页影响。按真实 Pi 工具启动事件计数；供应商复用工具调用 ID 仍计为新调用，工具返回记录不增加次数。节点概览同步显示累计次数。
 

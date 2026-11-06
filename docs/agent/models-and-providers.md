@@ -133,7 +133,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 **一套词表**：配置解析、订阅目录与运行时分派共用这组三个字符串。未知值在配置层**硬拒**（错误串点名三个可用值），运行时也没有 `default` 兜底（返回 `Unsupported provider api "…"`，不会悄悄发到 `/chat/completions`）；目录的 `Supported` 看**平台**是否仍提供，不看传输。
 
 `models.preferences`：按 grade 给出模型优先顺序（`Partial<Record<grade, string[]>>`）。
-`limits`：`credentials.<id>` 逐凭据 token 上限、`sharedGroups`、`defaultBudgetTokens`（`null` = 不限）。
+`limits`：`credentials.<id>` 逐凭据并发上限、`sharedGroups` 共享组并发上限。token 额度上限已移除，`defaultBudgetTokens` 即使写出也被忽略。
 
 ### 守卫（会拒绝你的保存）
 

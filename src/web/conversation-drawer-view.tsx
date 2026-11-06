@@ -59,7 +59,7 @@ return <aside
                     {confirmableForActive && view.projectId && (
                       <>
                         <p data-testid="draft-budget" className="muted" style={{ fontSize: 12 }}>
-                          主管已用 {formatTokens(view.master?.used ?? 0)} tokens；{!view.master || view.master.unlimited || view.master.budget === null ? '当前不设累计上限' : `当前上限 ${formatTokens(view.master.budget)}`}。
+                          主管已用 {formatTokens(view.master?.used ?? 0)} tokens。
                         </p>
                         <div className="thread-card-actions">
                           <label className="row" style={{ gap: 6 }}>

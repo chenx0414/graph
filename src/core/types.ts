@@ -123,7 +123,7 @@ export interface OperationResult {
   question?: { prompt: string; grant?: string; data?: Json };
   artifacts?: ArtifactInput[];
 }
-export type Answer = { type: 'add_budget'; tokens: number } | { type: 'respond'; value: Json } | { type: 'retry' } | { type: 'grant'; grant: string } | { type: 'acknowledge' }
+export type Answer = { type: 'respond'; value: Json } | { type: 'retry' } | { type: 'grant'; grant: string } | { type: 'acknowledge' }
   | { type: 'reject'; reason?: string }
   | { type: 'usage'; usage: TokenUsage; proof: string }
   | { type: 'reconcile_usage'; proof: string };
