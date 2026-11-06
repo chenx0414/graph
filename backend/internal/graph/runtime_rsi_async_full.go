@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+// rsiAsyncFullCommand is the confirmation, run at a lower CPU priority.
+//
+// Measured 2026-11-07: the full suite takes 309-345s and saturates every core in
+// the worktree right after a reload, so the next change - whose own gate is a
+// couple of minutes - queued behind it and every apply felt like minutes. The
+// confirmation still runs every time; it just stops being the loudest thing on
+// the machine.
+func rsiAsyncFullCommand() RsiCommand {
+	if _, err := exec.LookPath("nice"); err == nil {
+		return RsiCommand{Command: "nice", Args: []string{"-n", "10", "node", "--run", "check:full"}}
+	}
+	return RsiCommand{Command: "node", Args: []string{"--run", "check:full"}}
+}
+
 // rsiStartAsyncFull runs the slow confirmation after a reload.
 //
 // The gate that proves a change before it goes live is the fast one, so the
@@ -37,7 +51,7 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 		// (measured: a moved file looked like a missing module).
 		runRoot, cleanup := rsiSnapshotRoot(root, commit)
 		defer cleanup()
-		result := rsiRunCommand(runRoot, RsiCommand{Command: "node", Args: []string{"--run", "check:full"}}, RSI_ASYNC_FULL_TIMEOUT_MS)
+		result := rsiRunCommand(runRoot, rsiAsyncFullCommand(), RSI_ASYNC_FULL_TIMEOUT_MS)
 		logPath := filepath.Join(stateDir, "rsi", "reports", "async-full-"+activationID+".log")
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err == nil {
 			header := "ran in " + runRoot + "\n"

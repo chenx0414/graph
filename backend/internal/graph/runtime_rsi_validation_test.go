@@ -1,6 +1,10 @@
 package graph
 
-import "testing"
+import (
+	"os/exec"
+	"strings"
+	"testing"
+)
 
 // The default gate runs once.
 //
@@ -25,5 +29,18 @@ func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
 	// default gate is not owed at all.
 	if rsiNeedsDefaultGate([]RsiCommand{gate}, false) || rsiNeedsDefaultGate(nil, false) {
 		t.Fatal("without activation no default gate is owed")
+	}
+}
+
+// The confirmation runs at a lower priority, so a change made right after a
+// reload does not queue behind the whole suite.
+func TestAsyncFullRunsNice(t *testing.T) {
+	command := rsiAsyncFullCommand()
+	joined := command.Command + " " + strings.Join(command.Args, " ")
+	if !strings.Contains(joined, "check:full") {
+		t.Fatalf("the confirmation is still the full suite, got %q", joined)
+	}
+	if _, err := exec.LookPath("nice"); err == nil && !strings.HasPrefix(joined, "nice -n 10 node") {
+		t.Fatalf("where nice exists the confirmation runs under it, got %q", joined)
 	}
 }
