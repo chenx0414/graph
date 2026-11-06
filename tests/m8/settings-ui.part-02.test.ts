@@ -75,7 +75,10 @@ test('settings fills new and existing model prices from the local cc-switch snap
   await page.goto(`${daemon.url}/#/models`);
   await page.getByTestId('configured-models').waitFor();
   await expect.poll(async () => (await configured()).find(entry => entry.id === 'local')?.cost?.input).toBe(1);
-  expect((await configured()).find(entry => entry.id === 'local')?.pricing?.sourceUrl).toBe('~/.cc-switch/model-pricing.json');
+  // 价格以 kernel 目录为准，文件只补 kernel 不认识的模型：条目记下的来源必须如实说明这两层。
+  const source = (await configured()).find(entry => entry.id === 'local')?.pricing?.sourceUrl ?? '';
+  expect(source).toContain('kernel catalog');
+  expect(source).toContain('~/.cc-switch/model-pricing.json');
 
   await openModelEditor(page);
   await page.getByTestId('model-vendor-select').selectOption('local');

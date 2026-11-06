@@ -170,6 +170,10 @@
 }
 .agent-preview-meta code { color: var(--text); font-size: 10.5px; }
 .agent-preview-meta > .btn { margin-left: auto; }
+/* The prompt and its declarations are two halves of one send: they split the
+   panel evenly instead of one taking whatever the other leaves. */
+.agent-preview-panel > .agent-preview-markdown { flex: 1 1 50%; }
+.agent-preview-panel > .agent-preview-panel { flex: 1 1 50%; }
 .agent-preview-notice {
   flex: 0 0 auto;
   padding: 8px 14px;
