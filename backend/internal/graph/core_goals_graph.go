@@ -80,10 +80,48 @@ func (runtime *TaskRuntime) StartGoalGraph(conversationID string, goal Conversat
 	goal.GraphOwnerTask = ownerTask
 	goal.Status = GoalActive
 	saved := runtime.store.PutGoalForced(goal, NowMillis())
+	// A graph that is only created does nothing: every node waits for its input. The
+	// objective is that input, and sending it is what starts the planning.
+	runtime.graphManagement(ownerTask).GraphSend(map[string]any{
+		"graphId": graphID,
+		"input":   "job",
+		"value": map[string]any{
+			"objective": goal.Objective, "acceptance": goalAcceptance(goal),
+			"ticket": runtime.goalGraphTicket(resolved), "baseRef": runtime.goalGraphBaseRef(resolved),
+		},
+	})
 	runtime.store.Event(ownerTask, "goal.graph_created", map[string]any{
 		"conversationId": conversationID, "graphId": graphID, "projectId": resolved,
 	})
+	// The work is not this conversation's any more, but the responsibility for it is:
+	// the global supervisor is told, once, and gets a turn to follow the graph.
+	runtime.wakeGlobalSupervisor("goal_graph_created", "goal-graph:"+graphID,
+		"[目标已开图] "+goal.Objective+" · 图 "+shortGraphId(graphID)+"（项目 "+resolved+
+			"；规划 → 实现 → 独立审查，不通过自动返工）\n去跟一下这张图：读节点进度，遇到阻塞或需要裁决的地方处理，完成后把结论告诉我。",
+		map[string]any{"kind": "goal_graph_created", "conversationId": conversationID, "graphId": graphID, "projectId": resolved})
 	return saved, resolved, nil
+}
+
+// wakeGlobalSupervisor puts one notice into the global supervisor's conversation and
+// wakes it, so a graph that runs somewhere else still has an owner who is watching.
+// One wake per dedupe key: a retried command must not queue a second turn.
+func (runtime *TaskRuntime) wakeGlobalSupervisor(kind WakeKind, dedupeKey string, text string, data map[string]any) {
+	store := runtime.store
+	row := kernelRow(store.Db, `SELECT id, anchor_task_id FROM conversations WHERE role='global' AND archived_at IS NULL LIMIT 1`)
+	if row == nil {
+		// The supervisor thread is created on demand elsewhere; asking for it here is
+		// what makes "tell main" work on a fresh install instead of silently doing nothing.
+		thread := runtime.EnsureGlobalThread(dedupeKey)
+		row = map[string]any{"id": thread.ConversationID, "anchor_task_id": thread.TaskID}
+	}
+	conversationID := kernelString(row["id"])
+	AppendMessage(store, MessageInput{
+		ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat", Text: text, State: MessageStatePending,
+		Data: map[string]any{"source": data},
+	})
+	WakeMaster(store, WakeIntent{
+		TaskID: kernelString(row["anchor_task_id"]), Kind: kind, DedupeKey: dedupeKey, Data: data, HasData: true,
+	})
 }
 
 // goalGraphOwner decides which task owns the goal's graph.
@@ -186,7 +224,8 @@ func goalGraphName(objective string) string {
 
 // syncGoalFromGraph moves a goal's status with its graph, so the conversation row is
 // never stale about work that already finished.
-func syncGoalFromGraph(store *TaskStore, goal *ConversationGoal) {
+func syncGoalFromGraph(runtime *TaskRuntime, goal *ConversationGoal) {
+	store := runtime.store
 	if goal == nil || strings.TrimSpace(goal.GraphId) == "" {
 		return
 	}
@@ -204,6 +243,9 @@ func syncGoalFromGraph(store *TaskStore, goal *ConversationGoal) {
 			goal.Status = GoalCompleted
 			goal.CheckNote = "图的独立审查通过，目标收口"
 			store.PutGoalForced(*goal, NowMillis())
+			runtime.wakeGlobalSupervisor("goal_graph_completed", "goal-graph-done:"+goal.GraphId,
+				"[目标图已收口] "+goal.Objective+" · 图 "+shortGraphId(goal.GraphId)+"：独立审查通过，目标已完成。",
+				map[string]any{"kind": "goal_graph_completed", "graphId": goal.GraphId, "conversationId": goal.ConversationID})
 		}
 	case "blocked":
 		// A blocked graph is not a failed goal: it waits for a decision. Saying it is
@@ -211,6 +253,9 @@ func syncGoalFromGraph(store *TaskStore, goal *ConversationGoal) {
 		if goal.CheckNote != "图被阻塞，等待裁决" {
 			goal.CheckNote = "图被阻塞，等待裁决"
 			store.PutGoalForced(*goal, NowMillis())
+			runtime.wakeGlobalSupervisor("goal_graph_blocked", "goal-graph-blocked:"+goal.GraphId,
+				"[目标图被阻塞] "+goal.Objective+" · 图 "+shortGraphId(goal.GraphId)+"：等一次裁决。去看是哪一步卡住，处理或告诉我需要决定什么。",
+				map[string]any{"kind": "goal_graph_blocked", "graphId": goal.GraphId, "conversationId": goal.ConversationID})
 		}
 	}
 }

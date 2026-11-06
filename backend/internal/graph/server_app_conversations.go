@@ -457,7 +457,7 @@ func (app *GraphApp) serveConversationGoal(w http.ResponseWriter, r *http.Reques
 	goal := app.runtime.store.Goal(conversationID)
 	// The graph is where the work is, so reading the goal is the moment its status can
 	// be stale: a graph that finished while nobody asked must not still read "active".
-	syncGoalFromGraph(app.runtime.store, goal)
+	syncGoalFromGraph(app.runtime, goal)
 	writeJSON(w, http.StatusOK, map[string]any{"conversationId": conversationID, "goal": goal})
 }
 

@@ -158,7 +158,7 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 	switch action {
 	case "show":
 		goal := runtime.store.Goal(conversationID)
-		syncGoalFromGraph(runtime.store, goal)
+		syncGoalFromGraph(runtime, goal)
 		result["goal"] = goal
 	case "set":
 		objective := strings.TrimSpace(input.Objective)

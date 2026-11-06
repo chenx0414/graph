@@ -71,6 +71,26 @@ test('a goal in a project conversation becomes the planning, working and reviewi
   expect(line).toContain('目标已开图执行');
 
   // The graph is the team: a planner, a worker, and two independent reviewers.
+  // The graph is not just created: the objective is delivered into its job input, so
+  // the planner has work instead of waiting for an input nobody sends. The delivery is
+  // the durable record of that, and it exists whether or not a model is reachable.
+  const { execFileSync } = await import('node:child_process');
+  const dbPath = join(root, 'state', 'tasks.sqlite');
+  await expect.poll(() => {
+    const rows = execFileSync('sqlite3', [dbPath, `SELECT COUNT(*) FROM kernel_deliveries WHERE task_id='${goal.graphId}' AND to_endpoint='planner.job' AND value LIKE '%把导出做成 CSV%'`]).toString().trim();
+    return Number(rows);
+  }, { timeout: 30_000, interval: 500 }).toBeGreaterThan(0);
+
+  // And the global supervisor is woken once, with the graph named, so the work has an
+  // owner who is watching it rather than a graph nobody follows.
+  await expect.poll(async () => {
+    const conversations = (await request('/api/conversations')).body as { id: string; role?: string }[];
+    const global = conversations.find(conversation => conversation.role === 'global');
+    if (!global) return '';
+    const view = (await request(`/api/conversations/${global.id}`)).body as { messages?: { kind?: string; text?: string }[] };
+    return (view.messages ?? []).map(message => message.text ?? '').join('\n');
+  }, { timeout: 30_000, interval: 500 }).toContain('目标已开图');
+
   const task = (await request(`/api/tasks/${goal.graphId}`)).body as { nodes?: { id: string; definitionVersion?: string }[] };
   // Each node is bound to the recipe the team assembly compiled: the planner, the
   // worker and both independent reviewers.
@@ -82,8 +102,6 @@ test('a goal in a project conversation becomes the planning, working and reviewi
 
   // The graph's completion is the goal's completion: finishing the work in the graph
   // closes the goal, and the conversation never runs an acceptance turn of its own.
-  const dbPath = join(root, 'state', 'tasks.sqlite');
-  const { execFileSync } = await import('node:child_process');
   execFileSync('sqlite3', [dbPath, `UPDATE tasks SET phase='completed' WHERE id='${goal.graphId}'`]);
   const after = await request(`/api/conversations/${conversationId}/goal`);
   expect((after.body.goal as Record<string, any>).status).toBe('completed');
