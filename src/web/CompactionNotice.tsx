@@ -8,17 +8,17 @@ import type { TranscriptRow } from './transcript-model.ts';
  * search. It is a divider, not a message from either side of the chat. */
 function CompactionNotice({ row }: { row: Extract<TranscriptRow, { kind: 'compaction' }> }) {
   return (
-    <div className="compaction-notice" data-testid="compaction-notice" data-role="system" title={row.text}>
-      <span className="compaction-notice-rule" aria-hidden="true" />
-      <span className="compaction-notice-text">
-        <Icon name="archive" size={13} />
-        {row.text}
-      </span>
-      <span className="compaction-notice-rule" aria-hidden="true" />
+    <div className="compaction-notice" data-testid="compaction-notice" data-role="system">
+      <div className="compaction-notice-head" title={row.text}>
+        <span className="compaction-notice-rule" aria-hidden="true" />
+        <span className="compaction-notice-text">
+          <Icon name="archive" size={13} />
+          上下文已压缩
+        </span>
+        <span className="compaction-notice-rule" aria-hidden="true" />
+      </div>
       {row.summary && (
-        <div className="compaction-summary" data-testid="compaction-summary" style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', opacity: 0.75, margin: '4px 0 0', gridColumn: '1 / -1' }}>
-          {row.summary}
-        </div>
+        <div className="compaction-summary" data-testid="compaction-summary">{row.summary}</div>
       )}
     </div>
   );

@@ -261,7 +261,9 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			// failing the operation as an unknown dispatch.
 			message := compactionErr.Error()
 			if compactRequested && operation.Context.RsiContinuation == nil && IsCompactionNoop(message) {
-				return OperationResult{Outcome: "completed", Output: map[string]any{"text": "上下文已是精简状态，无需再次压缩。"}, Usage: turn.Gate.Total()}
+				// Nothing to compact is not something the user asked to read: the
+				// command completes silently instead of posting a line into the chat.
+				return OperationResult{Outcome: "completed", Output: map[string]any{}, Usage: turn.Gate.Total()}
 			}
 			if compactRequested && !IsCompactionNoop(message) {
 				return OperationResult{Outcome: "failed", Output: map[string]any{"error": "上下文压缩失败：" + message}, Usage: turn.Gate.Total()}

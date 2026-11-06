@@ -70,6 +70,7 @@ test('an automatic threshold compaction ends its summary with the fixed pointer 
     await settled(w.daemon, conversationId, 2);
     expect(w.provider.requests.some(request => JSON.stringify(request).includes(SUMMARY_REQUEST))).toBe(true);
     await expectPointer(w.daemon, taskId, conversationId);
+
   } finally {
     await w.close();
   }
@@ -93,6 +94,16 @@ test('a manual compaction writes the same summary, the same event and the same p
     }, { timeout: 30_000, interval: 100 }).toBeGreaterThan(0);
     expect(w.provider.requests.some(request => JSON.stringify(request).includes(SUMMARY_REQUEST))).toBe(true);
     await expectPointer(w.daemon, taskId, conversationId);
+    // Asking again on an already-tight context says nothing: no "nothing to do"
+    // line lands in the chat.
+    const again = await w.daemon.request(`/api/conversations/${conversationId}/compact`, {
+      method: 'POST', body: JSON.stringify({ requestId: 'manual-compact-again' }),
+    });
+    expect(again.status, await again.text()).toBe(200);
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    const after = await (await w.daemon.request(`/api/conversations/${conversationId}`)).json() as View;
+    expect(JSON.stringify(after.messages)).not.toContain('无需再次压缩');
+    expect((after.messages ?? []).filter(message => message.kind === 'compaction').length).toBeGreaterThan(0);
   } finally {
     await w.close();
   }
