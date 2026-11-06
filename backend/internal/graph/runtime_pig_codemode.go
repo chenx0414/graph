@@ -190,14 +190,23 @@ func codemodeTools(tools []ToolDefinition, gate SendGate) []codemode.Tool {
 					return json.RawMessage("null"), nil
 				}
 				id := graphUUID()
+				// The settle follows the dispatch instead of running inside it.
+				//
+				// A tool that refuses panics; a defer registered inside the send
+				// would settle the call while that refusal unwinds, and the
+				// dispatch's own recovery would then settle it a second time with
+				// no evidence at all. The conflict that produces replaces the
+				// tool's refusal with a bookkeeping error, so the script - and the
+				// person reading the transcript - never learns why the tool said
+				// no. Settling after the dispatch returns keeps the refusal intact.
 				value := gate.Dispatch(id, 0, func() any {
-					defer gate.Settle(id, &TokenUsage{})
 					executed, executeErr := definition.Execute(id, params)
 					if executeErr != nil {
 						return executeErr
 					}
 					return executed
 				})
+				gate.Settle(id, &TokenUsage{})
 				if failure, ok := value.(error); ok {
 					return nil, failure
 				}

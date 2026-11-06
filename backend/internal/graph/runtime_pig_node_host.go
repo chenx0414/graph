@@ -305,14 +305,17 @@ func pigNodeToolSpecs(request AgentSessionRequest, gate SendGate, ungated []stri
 				}
 				id := graphUUID()
 				started := time.Now()
+				// Settled after the dispatch returns, so a tool that refuses
+				// keeps its own reason instead of being replaced by a conflict
+				// between the two settles.
 				value := gate.Dispatch(id, 0, func() any {
-					defer gate.Settle(id, &TokenUsage{})
 					result, executeErr := definition.Execute(id, params)
 					if executeErr != nil {
 						return executeErr
 					}
 					return result
 				})
+				gate.Settle(id, &TokenUsage{})
 				// Every tool call this node makes is reported, the way the
 				// main session reports its own and the way the TypeScript
 				// host reports every call: the statistics table is how a
