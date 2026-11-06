@@ -134,31 +134,6 @@ func scopeReserved(store *TaskStore, scopeID string) int64 {
 	return g5Int(row["reserved"])
 }
 
-func AssertWithinBudget(store *TaskStore, instanceID string, reservation ...int64) {
-	amount := int64(0)
-	if len(reservation) > 0 {
-		amount = reservation[0]
-	}
-	snapshot := LoadBudgetSnapshot(store, instanceID)
-	if snapshot.ScopeId != nil {
-		if snapshot.ScopeUnlimited {
-			return
-		}
-		limit := int64(0)
-		if snapshot.ScopeLimit != nil {
-			limit = *snapshot.ScopeLimit
-		}
-		total := snapshot.ScopeUsed + scopeInFlightUsage(store, *snapshot.ScopeId) + scopeReserved(store, *snapshot.ScopeId) + amount
-		if total > limit || (amount == 0 && total >= limit) {
-			Raise("budget", "Shared context budget exhausted")
-		}
-		return
-	}
-	if !snapshot.Unlimited && (snapshot.Used+snapshot.Reserved+amount > snapshot.Budget || (amount == 0 && snapshot.Used+snapshot.Reserved >= snapshot.Budget)) {
-		Raise("budget", "Token budget exhausted")
-	}
-}
-
 func ReserveOperation(store *TaskStore, operationID string, amount int64) {
 	if !g5SafeInt(amount) || amount < 0 {
 		Raise("invalid_adapter", "A bounded token reservation is required")

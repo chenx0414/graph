@@ -136,32 +136,6 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 		graphDatabaseMu.Unlock()
 		Raise("invalid_adapter", "A bounded token reservation is required")
 	}
-	// A node cannot spend past its ceiling by being trusted: the budget applies
-	// whatever the posture is.
-	if node.InstanceId != nil {
-		failure := func() (failure any) {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					failure = recovered
-				}
-			}()
-			AssertWithinBudget(e.store, *node.InstanceId, reservation)
-			return nil
-		}()
-		if failure != nil {
-			refusal, ok := failure.(*RuntimeError)
-			if !ok || refusal.Code != "budget" {
-				graphDatabaseMu.Unlock()
-				panic(failure)
-			}
-			e.store.Transaction(func() any {
-				e.block(node, "budget", map[string]any{"reason": refusal.Message, "requested": reservation}, nil)
-				return nil
-			})
-			graphDatabaseMu.Unlock()
-			return false
-		}
-	}
 	var workspace *string
 	if e.git != nil {
 		workspace = e.git.Workspace(node.TaskId, node.InstanceId, node.Id, spec.Kind, spec.Action)

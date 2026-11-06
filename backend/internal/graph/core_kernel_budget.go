@@ -71,10 +71,6 @@ func (k *KernelStore) ReserveNodeTokens(taskID, nodeID string, budget TokenBudge
 	}
 	k.Store.Transaction(func() any {
 		k.ensureNodeState(taskID, nodeID)
-		row, _ := g5One(k.Db, "SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?", taskID, nodeID)
-		if !budget.Unlimited && float64(g5Int(row["used"]))+float64(g5Int(row["reserved"]))+amount > budget.Budget {
-			Raise("budget", "Token budget exhausted for node "+nodeID)
-		}
 		g5Exec(k.Db, "UPDATE kernel_node_state SET reserved=reserved+? WHERE task_id=? AND node_id=?", int64(amount), taskID, nodeID)
 		if executionID != "" {
 			g5Exec(k.Db, "UPDATE kernel_executions SET token_reservation=? WHERE id=?", int64(amount), executionID)

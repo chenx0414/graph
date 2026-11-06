@@ -47,11 +47,7 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					if execution == nil {
 						Raise("invalid_adapter", "Provider send has no active execution")
 					}
-					frozen := limit
-					if row := kernel.Execution(execution.Id); row != nil && row.TokenBudget != nil {
-						frozen = row.TokenBudget
-					}
-					used, paused := kernel.NodeUsage(graphId, nodeId)
+					_, paused := kernel.NodeUsage(graphId, nodeId)
 					task := kernel.Store.Task(graphId)
 					if projectArchived(kernel.Store, task.ProjectID) {
 						Raise("paused", "Project is archived")
@@ -59,20 +55,10 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 					if paused || task.Paused != 0 || phaseClosed(task.Phase) {
 						Raise("paused", "Provider send is paused")
 					}
-					calls := kernel.PendingProviderCalls(graphId, nodeId)
-					if frozen == nil || !frozen.Unlimited {
-						for _, call := range calls {
-							if call.State == "unknown" {
-								Raise("budget", "Reconcile unknown provider usage before another send")
-							}
+					for _, call := range kernel.PendingProviderCalls(graphId, nodeId) {
+						if call.State == "unknown" {
+							Raise("unknown_usage", "Reconcile unknown provider usage before another send")
 						}
-					}
-					reserved := 0.0
-					for _, call := range calls {
-						reserved += float64(call.Reserved)
-					}
-					if frozen != nil && !frozen.Unlimited && float64(used)+reserved+reservation > frozen.Budget {
-						Raise("budget", "Token budget exhausted for node "+nodeId)
 					}
 					var modelJSON any
 					if model != nil {
