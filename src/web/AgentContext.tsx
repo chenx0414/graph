@@ -249,7 +249,7 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                   system prompt
                 </button>
                 <button type="button" role="tab" data-testid="agent-context-tab-declarations" data-active={tab === 'declarations'} aria-selected={tab === 'declarations'} onClick={() => setTab('declarations')}>
-                  工具声明
+                  tool calling
                 </button>
                 <button type="button" role="tab" data-testid="agent-context-tab-prompts" data-active={tab === 'prompts'} aria-selected={tab === 'prompts'} onClick={() => setTab('prompts')}>
                   可编辑来源 <span>{data?.prompts.length ?? 0}</span>

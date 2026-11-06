@@ -19,7 +19,7 @@ Graph 把 Agent 可编辑上下文集中到固定目录：
 
 首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。Graph 自身文档不在这里，而是作为只读源码保存在仓库的 `docs/agent/`，并随应用一起打包。
 
-聊天头部「Agent 上下文」抽屉里的 **实际发出** 标签展示的是**某一次真实模型请求**，而不是预览：提示词文本取自该请求的系统消息，工具声明取自同一个请求体的 `tools` 字段，两者都在 provider 调用点（`backend/internal/graph/runtime_controlled_openai.go` 的 fetch 包装器）写入 `operations.system_prompt` / `operations.tool_declarations`。它们是只读展示，不参与发送，也不会使模型多收一份声明。会话里没有真正发过请求（或该请求早于记录功能）时，该标签会明确说「尚未记录到」，而不会拿预览顶替。
+聊天头部「Agent 上下文」抽屉里的 **system prompt** 标签展示的是**某一次真实模型请求**，而不是预览：提示词文本取自该请求的系统消息，**tool calling** 标签里的工具声明取自同一个请求体的 `tools` 字段，两者都在 provider 调用点（`backend/internal/graph/runtime_controlled_openai.go` 的 fetch 包装器）写入 `operations.system_prompt` / `operations.tool_declarations`。它们是只读展示，不参与发送，也不会使模型多收一份声明。会话里没有真正发过请求（或该请求早于记录功能）时，该标签会明确说「尚未记录到」，而不会拿预览顶替。
 
 `defaults/` 保存用户点击「设为默认」后的基线。该动作同时保存当前内容；空文件也是合法默认值。后续「恢复默认」优先回到用户默认，未设置用户默认时才回到代码内置原版；存在自定义默认时，「恢复内置」会清除该文件并回到代码原版。
 

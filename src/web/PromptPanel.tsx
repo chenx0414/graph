@@ -51,9 +51,9 @@ export function RecordedPromptPanel(input: {
       {part !== 'prompt' && tools ? (
         <div className="agent-preview-panel" data-testid={`${testId}-tools`}>
           <div className="agent-preview-meta">
-            <strong>实际发送的工具声明</strong>
+            <strong>tool calling（最近一次模型请求）</strong>
             <span>{`${declarationCount.toLocaleString()} 个工具 · ${tools.length.toLocaleString()} 字符`}</span>
-            <Button size="sm" icon="file" onClick={() => void copy(tools, '实际发送的工具声明已复制')}>复制声明</Button>
+            <Button size="sm" icon="file" onClick={() => void copy(tools, 'tool calling 已复制')}>复制声明</Button>
           </div>
           <pre className="agent-preview-markdown" data-testid={`${testId}-tools-text`}>{declarationText}</pre>
         </div>

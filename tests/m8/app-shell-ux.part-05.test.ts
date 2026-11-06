@@ -49,8 +49,8 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
   expect(
     (await page.locator('.agent-context-tabs [role="tab"]').allInnerTexts()).map(label => label.split('\n')[0]!.trim()),
-  ).toEqual(['system prompt', '工具声明', '可编辑来源', '工具与能力']);
-  // 提示词与工具声明是两个独立标签：prompt 页不再带声明块。
+  ).toEqual(['system prompt', 'tool calling', '可编辑来源', '工具与能力']);
+  // 提示词与 tool calling 是两个独立标签：prompt 页不再带声明块。
   expect(await page.getByTestId('agent-context-sent-tools').count()).toBe(0);
 
   // 组装正确性属于产生它的那一层（provider 请求）；接口只给事实：工具、能力、可编辑来源。
@@ -90,7 +90,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   await expect.poll(() => libraryPrompt(promptRoot, 'runtime/worker.md')).toContain('Use the native Pi tools');
 
   await page.getByTestId('agent-context-tab-tools').click();
-  // 每个标签只显示自己那一块：工具页不再把 prompt 与工具声明挤在上面。
+  // 每个标签只显示自己那一块：工具页不再把 prompt 与 tool calling 挤在上面。
   expect(await page.getByTestId('agent-context-sent').count()).toBe(0);
   await page.getByTestId('agent-tool-write').uncheck();
   await page.getByRole('button', { name: '保存工具选择' }).click();
