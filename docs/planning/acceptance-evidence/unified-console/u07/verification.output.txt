@@ -1,9 +1,0 @@
-=== U07 c67c49b246ab28ad149f7014117eccea83cef4fa 2026年 9月15日 星期二 09时06分42秒 CST ===
-tsc main rc=0
-tsc web rc=0
-✓ built in 73ms
- Test Files  1 failed | 66 passed (67)
-      Tests  1 failed | 322 passed (323)
-   Start at  09:06:43
-   Duration  37.55s (tests 86%, import 14%, transform 1%)
-

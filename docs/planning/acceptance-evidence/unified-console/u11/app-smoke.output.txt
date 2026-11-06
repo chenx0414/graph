@@ -1,3 +1,0 @@
-=== electron app smoke 2026年 9月15日 星期二 09时17分27秒 CST ===
-app smoke rc=0
-APP_SMOKE_OK http://127.0.0.1:60385

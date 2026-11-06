@@ -1,2 +1,0 @@
-{"phase":"parked","queued":20,"providerRequests":0}
-{"phase":"completed","paused":false,"providerRequests":20,"maxProviderInFlight":10,"activeWorkers":0,"activeCredentialSlots":0,"queued":0,"succeeded":20}

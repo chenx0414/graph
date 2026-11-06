@@ -1,2 +1,0 @@
-{"name":"granted-capabilities-callable","extensionWrote":true,"outsideUnchanged":true,"extensionOutsideDenied":true,"remoteMcpCalls":1,"remoteMcpAnswered":true,"retrievalAnswered":true,"questions":[],"zeroUsageInvocations":7}
-{"name":"retrieval-domain-denied","denied":true,"serverHits":7}

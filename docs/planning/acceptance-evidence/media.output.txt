@@ -1,3 +1,0 @@
-{"case":"collect_requires_login","loggedIn":false,"backendStatus":"idle","visibleError":"B站未登录"}
-{"case":"live_progress_and_done","backendProgress":[1,1,1,2,2,2,3,3],"pageShowsRunning":true}
-{"case":"notes_browsable","listed":["fixture.md"],"contentStatus":200,"contentHasBody":true,"readerText":"# Existing note\nReview this note content."}

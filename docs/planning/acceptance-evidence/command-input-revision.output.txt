@@ -1,1 +1,0 @@
-{"revisionRejected":true,"revisionError":"RuntimeError: Revision cannot change the confirmed input of an acceptance check","graphVersion":1,"checkStatus":"blocked","checkInput":{"args":["--test","fail.test.js"],"command":"node"},"evidence":[]}

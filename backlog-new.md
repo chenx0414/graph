@@ -1,3 +1,4 @@
+<!-- graph:allow-large-file: 这是待办清单，删条目不改变它跨多个主题的目的；拆分等于制造两处待办 -->
 # Graph harness backlog
 
 RSI 的输入清单：一行一项，带状态（open / fixed@<commit> / rejected / deferred）与证据。项目级可见。本版取代 `@144`。
@@ -58,7 +59,7 @@ RSI 的输入清单：一行一项，带状态（open / fixed@<commit> / rejecte
 
 ## ▶ 技能沉淀与进化：P1–P4 全部交付（单点实现，不经任务图）+ 一个真缺陷收口
 
-规格：`docs/planning/skill-sedimentation-spec-2026-09-26.md`（制品 `plans/skill-sedimentation-spec@1`）。使用者选定的 P3 形状：**操作收尾后的受限副调用**（不是图上的显式节点）。
+规格：`skill-sedimentation-spec-2026-09-26.md`（制品 `plans/skill-sedimentation-spec@1`）。使用者选定的 P3 形状：**操作收尾后的受限副调用**（不是图上的显式节点）。
 
 | 阶段 | 内容 | 提交 | 验证 |
 |---|---|---|---|

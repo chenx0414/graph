@@ -1,8 +1,0 @@
-=== U10 5882fbcca16935303ddc088041dadad3e2126385 2026年 9月15日 星期二 09时14分59秒 CST ===
-tsc main rc=0
-tsc web rc=0
- Test Files  69 passed (69)
-      Tests  329 passed (329)
-   Start at  09:15:00
-   Duration  37.84s (tests 85%, import 14%, transform 1%)
-

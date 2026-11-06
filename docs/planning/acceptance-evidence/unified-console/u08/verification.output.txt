@@ -1,6 +1,0 @@
-=== U08 790af5e6f8d7e0c2524ee3879a8379226b45d738 2026年 9月15日 星期二 09时11分29秒 CST ===
-tsc web rc=0
-      Tests  6 passed (6)
-   Start at  09:11:30
-   Duration  6.60s (tests 83%, import 14%, transform 3%)
-

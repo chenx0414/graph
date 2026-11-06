@@ -1,3 +1,4 @@
+<!-- graph:allow-large-file: 本文件早于预算；本次只做目录改名后的链接替换，拆分是独立的编辑工作 -->
 # Graph 模型与厂商配置
 
 **何时读**：用户要求配置模型厂商、订阅凭据、新增或调整模型及其参数，或某个模型不可用需要排查时。
@@ -193,7 +194,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 ### ChatGPT 平台：已移除（unsupported）
 
-Codex 后端与 Responses 契约握手后直接 EOF，本仓解析器不接受它的 `response.*` 事件流，跑不完任何一轮，因此 `chatgpt` 不再提供：`GET /api/providers` 仍列出这条记录但标 `unsupported: true` 并带 `unsupportedReason`（含替代品 `grok:grok-4.5`）；交付记录 `deliverables/independent-model-entries.json` 里该条目标 `status: "unsupported"` 并保留 `fallbackModelId` 与同一理由，**不要再把它当主选**。`provider` 只是分组名，解析器不设白名单——结论落在目录与交付记录上。
+Codex 后端与 Responses 契约握手后直接 EOF，本仓解析器不接受它的 `response.*` 事件流，跑不完任何一轮，因此 `chatgpt` 不再提供：`GET /api/providers` 仍列出这条记录但标 `unsupported: true` 并带 `unsupportedReason`（含替代品 `grok:grok-4.5`）；交付记录 `docs/evidence/independent-model-entries.json` 里该条目标 `status: "unsupported"` 并保留 `fallbackModelId` 与同一理由，**不要再把它当主选**。`provider` 只是分组名，解析器不设白名单——结论落在目录与交付记录上。
 
 ---
 

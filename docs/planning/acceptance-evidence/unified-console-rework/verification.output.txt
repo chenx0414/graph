@@ -1,8 +1,0 @@
-=== unified-console rework ab669b0b51376388f914f19efabc35846d073a69 2026年 9月15日 星期二 12时58分32秒 CST node=v24.20.0 ===
-tsc main rc=0
-tsc web rc=0
-vite build rc=0
-      Tests  343 passed (343)
-   Start at  12:58:33
-   Duration  44.43s (tests 87%, import 12%, transform 1%)
-

@@ -26,12 +26,12 @@ export interface Step { id: string; name: string; args: unknown; before?: () => 
  * the delivered file so the artifact and the proof cannot drift apart.
  */
 export async function independentEntries(): Promise<{ grok: Record<string, unknown>; chatgpt: Record<string, unknown> }> {
-  const raw = await readFile(join(process.cwd(), 'deliverables', 'independent-model-entries.json'), 'utf8');
+  const raw = await readFile(join(process.cwd(), 'docs', 'evidence', 'independent-model-entries.json'), 'utf8');
   const parsed = JSON.parse(raw) as { models: { entries: { id: string }[] } };
   const grok = parsed.models.entries.find(entry => entry.id.startsWith('grok:'));
   const chatgpt = parsed.models.entries.find(entry => entry.id.startsWith('chatgpt:'));
   if (grok === undefined || chatgpt === undefined) {
-    throw new Error('deliverables/independent-model-entries.json must carry one grok: entry and one chatgpt: entry');
+    throw new Error('docs/evidence/independent-model-entries.json must carry one grok: entry and one chatgpt: entry');
   }
   return { grok: grok as Record<string, unknown>, chatgpt: chatgpt as Record<string, unknown> };
 }

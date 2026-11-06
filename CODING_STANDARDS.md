@@ -14,9 +14,9 @@
 
 提交或推送前运行 `node --run check`，检查全部通过后继续。
 
-普通测试的截图写入临时目录，保持 [验收证据](docs/planning/acceptance-evidence/) 不变。明确要更新交付证据时，按 [检查操作指南](docs/agents/checks.md#验收证据)执行并审阅证据差异。
+普通测试的截图写入临时目录，保持 [验收证据](acceptance-evidence/) 不变。明确要更新交付证据时，按 [检查操作指南](docs/guides/checks.md#验收证据)执行并审阅证据差异。
 
-需要配置 pre-push、使用测试夹具、在工作树验证或回溯会话时，读取 [检查操作指南](docs/agents/checks.md)的对应章节。
+需要配置 pre-push、使用测试夹具、在工作树验证或回溯会话时，读取 [检查操作指南](docs/guides/checks.md)的对应章节。
 
 ## 测试编写规则
 

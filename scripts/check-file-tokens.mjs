@@ -154,9 +154,9 @@ function optOutReason(head) {
   return match ? match[1].trim() : undefined;
 }
 
-/** Measurement output written by perf/bench/measure.ts. */
+/** Measurement output written by scripts/perf/bench/measure.ts. */
 function isMeasuredOutput(path, head) {
-  return path.startsWith('perf/bench/') && head.subarray(0, HEAD_BYTES).toString('utf8').includes('"measuredAt"');
+  return path.startsWith('scripts/perf/bench/') && head.subarray(0, HEAD_BYTES).toString('utf8').includes('"measuredAt"');
 }
 
 /**

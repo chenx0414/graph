@@ -2,30 +2,30 @@
 
 为已有项目的功能开发编排 Agent：先与主管讨论并确认需求，再自主拆解、并行执行、交接上下文、审查返工和合并。
 
-当前状态：M0–M7 已落地；监听与本地网络返工轮（R6、S4/R8、R9–R13）已由独立验收关闭（见 [R13 最终验收](docs/planning/r13-final-acceptance-2026-09-13.md)）。产品化阶段 T01–T06 已实施并本地复验（[产品化交付报告](docs/planning/productization-reports.md)）；独立验收提出的 PA01–PA05 已修复（同一密钥别名归一限流、等待不占执行名额且恢复时重取、暂停拒绝不误报成功、部分执行后暂停可恢复且未知用量可核对、返工轮次不复用历史成功记录、任务记录生效版本、图页记录与证据实时刷新、冲突共享组保存前拒绝），等待独立复验；本仓库不自行宣布整体完成。历史上 A13 使用克隆、受控本地模型与合成数据，结论保持原记录。Graph 为当前工作名称。
+当前状态：M0–M7 已落地；监听与本地网络返工轮（R6、S4/R8、R9–R13）已由独立验收关闭（见 [R13 最终验收](r13-final-acceptance-2026-09-13.md)）。产品化阶段 T01–T06 已实施并本地复验（[产品化交付报告](productization-reports.md)）；独立验收提出的 PA01–PA05 已修复（同一密钥别名归一限流、等待不占执行名额且恢复时重取、暂停拒绝不误报成功、部分执行后暂停可恢复且未知用量可核对、返工轮次不复用历史成功记录、任务记录生效版本、图页记录与证据实时刷新、冲突共享组保存前拒绝），等待独立复验；本仓库不自行宣布整体完成。历史上 A13 使用克隆、受控本地模型与合成数据，结论保持原记录。Graph 为当前工作名称。
 
 ## 从这里开始
 
 - [工程规范](CODING_STANDARDS.md)：探索、实施、审查与交付的读取规则。
-- [Matt harness 维护](docs/agents/harness.md)：项目技能、工作流与本地适配的维护入口。
+- [Matt harness 维护](docs/guides/harness.md)：项目技能、工作流与本地适配的维护入口。
 
 - [Agent 文档入口](docs/agent/README.md)：源码内只读文档，覆盖 Graph 角色、执行模型、能力、恢复、Git 与自配置；运行时 Prompt 只注入入口、索引和阅读协议。
 - [使用文档](docs/usage.md)：启动、配置、数据目录、停止与排障。
-- [产品化交付报告](docs/planning/productization-reports.md)：T01–T06 的逐项验收与证据。
-- [主 Agent 入口方案](docs/planning/master-agent-entry-plan-2026-09-14.md)与[第四轮返工报告](docs/planning/master-agent-entry-rework4-report-2026-09-14.md)：对话式讨论、草稿确认与执行。
-- [合并报告](docs/planning/merge-report-2026-09-14.md)：`feat/master-agent-entry` 与 `feat/app-console` 合并到 `feat/unified-console` 的冲突解决与验证。
+- [产品化交付报告](productization-reports.md)：T01–T06 的逐项验收与证据。
+- [主 Agent 入口方案](master-agent-entry-plan-2026-09-14.md)与[第四轮返工报告](master-agent-entry-rework4-report-2026-09-14.md)：对话式讨论、草稿确认与执行。
+- [合并报告](merge-report-2026-09-14.md)：`feat/master-agent-entry` 与 `feat/app-console` 合并到 `feat/unified-console` 的冲突解决与验证。
 - [首版产品设计](docs/graph-mvp.md)：范围、执行规则与首个真实任务。
 - [实现架构](docs/architecture.md)：模块 interface、持久化、Pi 接入与恢复方式。
 - [实施计划](docs/implementation-plan.md)：M0–M7、18 个工作包和验收矩阵。首版两组验收均已完成。
-- [M0 验证报告](docs/planning/m0-results.md)：准确依赖、可运行证据、适配方式与生产接入边界。
-- [M1 验证报告](docs/planning/m1-results.md)：任务入口、所有权、调用恢复、名额额度和跨进程示例。
-- [M2 验证报告](docs/planning/m2-results.md)：全部图模式、容器、回环、图修订、三类验证器与八种模板。
-- [M3 验证报告](docs/planning/m3-results.md)：生产 Pi adapter、模型目录、Agent 库、受限能力安装与主管规划。
-- [M4 验证报告](docs/planning/m4-results.md)：实例工作副本、任务集成分支、验收证据与自动合入。
-- [M5 验证报告](docs/planning/m5-results.md)：本机 HTTP/SSE、React 任务图、问题列表与人才库。
-- [M6 验证报告](docs/planning/m6-results.md)：故障注入与 A01–A12 机制验收矩阵。
-- [M7 验证报告](docs/planning/m7-results.md)：Graph 交付 MediaBookmarks B站本机 Web 并合入克隆目标分支。
-- [接手说明](docs/planning/handoff.md)：M0–M7 完成后的工作区状态、边界与后续入口。
+- [M0 验证报告](m0-results.md)：准确依赖、可运行证据、适配方式与生产接入边界。
+- [M1 验证报告](m1-results.md)：任务入口、所有权、调用恢复、名额额度和跨进程示例。
+- [M2 验证报告](m2-results.md)：全部图模式、容器、回环、图修订、三类验证器与八种模板。
+- [M3 验证报告](m3-results.md)：生产 Pi adapter、模型目录、Agent 库、受限能力安装与主管规划。
+- [M4 验证报告](m4-results.md)：实例工作副本、任务集成分支、验收证据与自动合入。
+- [M5 验证报告](m5-results.md)：本机 HTTP/SSE、React 任务图、问题列表与人才库。
+- [M6 验证报告](m6-results.md)：故障注入与 A01–A12 机制验收矩阵。
+- [M7 验证报告](m7-results.md)：Graph 交付 MediaBookmarks B站本机 Web 并合入克隆目标分支。
+- [接手说明](handoff.md)：M0–M7 完成后的工作区状态、边界与后续入口。
 - [领域术语](CONTEXT.md)：Agent 定义、实例、节点、任务与额度的准确含义。
 - [决策记录](docs/adr/)：已作选择的理由与权衡。
 - [运行示例](examples/README.md)：持久任务、验收 fixture 与 runtime contract 示例。
@@ -78,7 +78,7 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 
 ## 桌面 APP（开发预览）
 
-桌面 APP 以子进程方式托管 Go 守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](docs/planning/app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](docs/planning/app-reports.md)。
+桌面 APP 以子进程方式托管 Go 守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](app-reports.md)。
 
 ```sh
 export PATH="$PWD/node_modules/.bin:$PATH"

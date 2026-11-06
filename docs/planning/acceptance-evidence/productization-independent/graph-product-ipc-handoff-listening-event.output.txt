@@ -1,2 +1,0 @@
-{"revision":"23aeef15f515d24349e3c29317a08b47b12a1133","client":{"body":"ok","elapsedMs":246},"elapsedMs":947,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}
-{"revision":"283ffbb","client":{"body":"ok","elapsedMs":250},"elapsedMs":969,"code":0,"stdout":"CALLBACK\nCLOSED\n","stderr":""}

@@ -1,8 +1,8 @@
 # scripts/ 诊断与维护
 
 - 提交与推送规则：[工程规范](../CODING_STANDARDS.md#验证与交付)。
-- 测试环境和依赖准备：[检查操作指南](../docs/agents/checks.md)。
-- 技能来源与本地适配：[harness 维护](../docs/agents/harness.md)。
+- 测试环境和依赖准备：[检查操作指南](../docs/guides/checks.md)。
+- 技能来源与本地适配：[harness 维护](../docs/guides/harness.md)。
 
 ## 只读诊断脚本（diag-a / diag-b / diag-c）
 
@@ -107,7 +107,7 @@ OK: every referenced subcommand, file path and script chain resolves.
 
 ## 历史环境证据：66c23ef 的工作树依赖问题
 
-以下记录保留当时的实验和计数。当前环境准备以 [检查操作指南](../docs/agents/checks.md#在-git-工作树里验证)为准，不能用这份历史记录推断所有工作副本的现状。
+以下记录保留当时的实验和计数。当前环境准备以 [检查操作指南](../docs/guides/checks.md#在-git-工作树里验证)为准，不能用这份历史记录推断所有工作副本的现状。
 
 **与这三个脚本无关，是集成/工作副本的环境问题，不要当成整合质量问题。**
 
@@ -124,7 +124,7 @@ A/B 证据（同一份代码，两个树各跑一次同一个文件）：
 | 主仓 checkout | 真实目录 | 2 passed |
 
 全量形态：软链副本 `Test Files 42 failed | 175 passed (217)`、`Tests 128 failed`。
-把副本的 `node_modules` 按 `docs/agents/checks.md`「在 Git 工作树里验证」一节换成硬链接后，
+把副本的 `node_modules` 按 `docs/guides/checks.md`「在 Git 工作树里验证」一节换成硬链接后，
 同一 tip 的整份提交（66c23ef）在另一个目录里跑到 `Test Files 217 passed (217)`、
 `Tests 1480 passed (1480)`，`node --run check` 退出 0——前提是 `npm` 在 PATH 上。
 

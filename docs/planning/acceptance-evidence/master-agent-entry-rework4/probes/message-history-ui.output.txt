@@ -1,3 +1,0 @@
-{"scenario":"third-page-unreachable","initial":200,"afterFirst":400,"afterSecond":501,"histories":["?before=302&limit=200","?before=102&limit=200"],"firstAccessible":true,"passed":true}
-{"scenario":"sliding-window-hole","had301":true,"retained301":true,"passed":true}
-{"scenario":"conversation-switch-history","title":"B-only-message","ownMessages":1,"foreignConversationMessages":0,"passed":true}

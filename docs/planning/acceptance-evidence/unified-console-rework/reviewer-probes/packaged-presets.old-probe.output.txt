@@ -1,1 +1,0 @@
-{"results":[{"scenario":"source-worktree","capabilities":5,"definitions":4,"missingPresetLog":false},{"scenario":"packaging-source-layout","capabilities":0,"definitions":0,"missingPresetLog":true}],"passed":false,"scope":"Actual daemon running from packaging-equivalent src layout; no electron-builder invocation or packaged Electron run."}

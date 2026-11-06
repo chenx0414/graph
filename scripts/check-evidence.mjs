@@ -10,7 +10,7 @@ const output = execFileSync('git', [
   '--porcelain=v1',
   '--untracked-files=all',
   '--',
-  'docs/planning/acceptance-evidence',
+  'acceptance-evidence',
 ], { encoding: 'utf8' }).trim();
 
 if (!output) {

@@ -1,2 +1,0 @@
-{"scenario":"hidden-master-question-and-cost","anchorQuestions":[{"id":"1bce422a-9cc5-4adc-96d7-e73f71b184d4","kind":"unknown_usage"}],"masterStatus":"blocked","visibleControls":["暂停主 Agent","继续","答复","发送"],"conversationHasMasterQuestions":true,"header":"项目 p（/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-entry-ui-boundaries-72Q3ml/project） · 主 Agent：被阻塞 · 已连接 · 已计量 0 tokens · 费用未知","canFindUnknownUsage":true}
-{"scenario":"feature-task-live-status","before":"running","ledgerAfter":"succeeded","uiAfter":"succeeded","uiAfterReload":"succeeded","passed":true}

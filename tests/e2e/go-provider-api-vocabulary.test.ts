@@ -23,7 +23,7 @@ import { launchCli } from '../helpers/cli-daemon.ts';
  *   3. the legal successor entry (grok, from the delivery that removed ChatGPT)
  *      parses completely, transport fallback included.
  *
- * `deliverables/independent-model-entries.json` is read as the record of that
+ * `docs/evidence/independent-model-entries.json` is read as the record of that
  * decision: the file and the product must agree on what is supported.
  */
 
@@ -159,7 +159,7 @@ test('the ChatGPT entry is concluded: the catalog and the delivery record both m
 
   // The delivery that removed the entry keeps the same decision on the same
   // entry: marked unsupported, with the transport fallback and the reason.
-  const record = JSON.parse(await readFile(join(process.cwd(), 'deliverables', 'independent-model-entries.json'), 'utf8')) as {
+  const record = JSON.parse(await readFile(join(process.cwd(), 'docs', 'evidence', 'independent-model-entries.json'), 'utf8')) as {
     models: { entries: { id: string; status?: string; fallbackModelId?: string; unsupportedReason?: string }[] };
   };
   const chatgpt = record.models.entries.find(entry => entry.id === 'chatgpt:gpt-6.1-sol');
@@ -181,7 +181,7 @@ test('the legal successor entry parses completely, transport fallback included',
 
   // The entry is taken from the delivery file itself, so the document that is
   // meant to be merged into a live configuration is what the parser is given.
-  const record = JSON.parse(await readFile(join(process.cwd(), 'deliverables', 'independent-model-entries.json'), 'utf8')) as {
+  const record = JSON.parse(await readFile(join(process.cwd(), 'docs', 'evidence', 'independent-model-entries.json'), 'utf8')) as {
     models: { entries: Record<string, any>[] };
   };
   const grok = record.models.entries.find(entry => entry.id === GROK.id);

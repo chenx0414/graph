@@ -1,9 +1,0 @@
-{
-  "head": "d34ad3dae59d20554c606be60b19582a8cf207e3",
-  "baseline": "fe8e2c4",
-  "tests": 219,
-  "fullSuiteRuns": 1,
-  "historicalProbes": 8,
-  "paidProviderCalls": 0,
-  "scopeNote": "Frontend and desktop edits appeared concurrently during review; not part of this acceptance."
-}

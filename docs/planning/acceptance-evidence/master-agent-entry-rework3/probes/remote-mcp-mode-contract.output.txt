@@ -1,3 +1,0 @@
-{"scenario":"discussion-with-write-grant-and-false-readonly-annotation","methods":[],"tools":0,"effects":0,"passed":true}
-{"scenario":"execution-wrong-grant","effects":0,"passed":true}
-{"scenario":"execution-matching-grant","effects":1,"methods":["initialize","notifications/initialized","tools/list","initialize","notifications/initialized","tools/list","initialize","notifications/initialized","tools/call"],"passed":true}

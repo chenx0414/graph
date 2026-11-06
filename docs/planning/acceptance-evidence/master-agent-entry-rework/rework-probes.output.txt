@@ -1,6 +1,0 @@
-{"check":"queued-message-after-usage","passed":true,"providerTurns":2,"assistant":["first","second"],"secondState":"delivered"}
-{"check":"queued-message-after-reconcile_usage","passed":true,"providerTurns":2,"assistant":["first","second"],"secondState":"delivered"}
-{"check":"rebind-invalidates-draft","passed":true,"rejected":"stale_proposal","project":"b","stale":true,"confirmedProject":"b"}
-{"check":"message-pagination","passed":true,"total":202,"pageFirst":"message-002","pageLast":"message-201","older":["message-000","message-001"],"forward":0}
-{"check":"unknown-cost-and-decision-digest","passed":true,"unknownCost":true,"digestPresent":true}
-rc=0
