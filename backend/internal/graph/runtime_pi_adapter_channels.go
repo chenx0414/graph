@@ -2,7 +2,6 @@ package graph
 
 type PiAdapterChannels struct {
 	// Conversations is the conversation service, as far as tools over other conversations need it.
-	Conversations *ConversationToolService
 	// Supervisor is the Graph management surface of one task.
 	Supervisor func(taskId string) PiAdapterSupervisor
 	// Catalog is the capability catalog the session reads.
