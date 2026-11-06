@@ -133,9 +133,6 @@ export function App() {
   const [settings, setSettings] = useState<Settings_ | null>(null);
   const [startup, setStartup] = useState<Startup | null>(null);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return window.matchMedia('(max-width: 860px)').matches || localStorage.getItem('graph-sidebar-collapsed') === 'true'; } catch { return false; }
-  });
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedDrawerTaskId, setSelectedDrawerTaskId] = useState<string | null>(null);
   // Which windows are open in the main area. The hash route stays the truth for what is on
@@ -153,7 +150,6 @@ export function App() {
     const onHash = () => {
       const next = route();
       setPath(next);
-      if (window.matchMedia('(max-width: 860px)').matches) setSidebarCollapsed(true);
       setTabs(current => openTab(current, tabForPath(next)));
     };
     const onConversationsChanged = () => void reloadConversations();
@@ -175,9 +171,6 @@ export function App() {
       clearInterval(poll);
     };
   }, [refreshTasks, reloadConversations, reloadSettings]);
-  useEffect(() => {
-    try { localStorage.setItem('graph-sidebar-collapsed', String(sidebarCollapsed)); } catch { /* local persistence is optional */ }
-  }, [sidebarCollapsed]);
   useEffect(() => {
     setDetailOpen(false);
     const taskId = /^\/tasks\/([^/]+)/.exec(path)?.[1];
@@ -286,18 +279,12 @@ export function App() {
     <div className="app-shell">
       <StaleBuildBanner />
       <button type="button" className="skip-link" onClick={() => document.getElementById('workspace-main')?.focus()}>跳到主内容</button>
-      <aside className="sidebar" data-collapsed={sidebarCollapsed}>
+      <aside className="sidebar">
         <div className="sidebar-heading">
           <a className="brand" href="#/" aria-label="Graph 首页"><div className="brand-mark" /><span className="brand-name">Graph</span></a>
           <span className="sidebar-caption">Agent 协作空间</span>
         </div>
         <nav className="rail" data-testid="app-rail" aria-label="主入口">
-          <button type="button" className="rail-button icon-button" data-testid="sidebar-toggle"
-            onClick={() => setSidebarCollapsed(value => !value)} aria-expanded={!sidebarCollapsed}
-            title={sidebarCollapsed ? '展开左侧抽屉' : '收起左侧抽屉'}
-            aria-label={sidebarCollapsed ? '导航：展开左侧抽屉' : '导航：收起左侧抽屉'}>
-            <Icon name="panel-left" size={17} /><span className="rail-label">导航</span>
-          </button>
           <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
             <Icon name="catalog" size={17} /><span className="rail-label">资源库</span>
           </a>

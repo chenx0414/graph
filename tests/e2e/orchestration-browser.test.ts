@@ -118,9 +118,8 @@ test('the browser returns to the same global and project supervisors while retai
   expect(await page.locator('a[href="#/settings"]').getAttribute('aria-label')).toBe('设置');
   expect(await page.locator('a').filter({ hasText: '概览' }).count()).toBe(0);
   expect(await page.locator('a').filter({ hasText: '向导' }).count()).toBe(0);
-  await page.getByTestId('sidebar-toggle').click();
-  await expect.poll(() => sidebar.isHidden()).toBe(true);
-  await page.getByTestId('sidebar-toggle').click();
+  // The sidebar has one state: there is no expand/collapse control left to click.
+  expect(await page.getByTestId('sidebar-toggle').count()).toBe(0);
   await sidebar.waitFor({ state: 'visible' });
   expect(await page.getByTestId(`archive-conversation-${priorID}`).count()).toBe(1);
   expect(await page.getByTestId(`archive-conversation-${globalID}`).count()).toBe(0);

@@ -165,15 +165,6 @@ a.sidebar-conversation:hover { background: rgba(26,28,31,0.055); color: var(--te
 .sidebar-empty { padding: 6px 10px 8px 26px; color: var(--faint); font-size: 12px; }
 .sidebar-footer .nav { margin-bottom: 6px; }
 
-.sidebar[data-collapsed="true"] { width: 58px; flex-basis: 58px; padding-left: 8px; padding-right: 8px; }
-.sidebar[data-collapsed="true"] .brand-row { flex-direction: column; gap: 6px; padding-left: 0; padding-right: 0; }
-.sidebar[data-collapsed="true"] .brand { padding: 0; }
-.sidebar[data-collapsed="true"] .brand-copy,
-.sidebar[data-collapsed="true"] .sidebar-scroll,
-.sidebar[data-collapsed="true"] .nav-label,
-.sidebar[data-collapsed="true"] .nav-badge { display: none; }
-.sidebar[data-collapsed="true"] .nav a { justify-content: center; padding: 9px; }
-.sidebar[data-collapsed="true"] .sidebar-footer { align-items: center; padding-top: 8px; }
 
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 120;
