@@ -1,6 +1,10 @@
 package graph
 
-import "github.com/MichaelKinsy/PiG/ai"
+import (
+	"sort"
+
+	"github.com/MichaelKinsy/PiG/ai"
+)
 
 // usageKernelModels is the kernel's model catalog, seen as the usage page's own.
 //
@@ -85,4 +89,35 @@ func kernelCostAmount(cost ModelCost, usage TokenUsage) float64 {
 		CacheRead: int(usage.CacheRead), CacheWrite: int(usage.CacheWrite),
 	}
 	return ai.CalculateCost(model, &charged).Total
+}
+
+// kernelModelPrices is the kernel catalog as the console's price table.
+//
+// One entry per model id: a model id names the same billed thing across the
+// providers that resell it, so the first provider that prices it answers for
+// the id. Providers are walked in the kernel's own order, which keeps the
+// table stable between runs.
+func kernelModelPrices() []ModelPrice {
+	prices := []ModelPrice{}
+	seen := map[string]bool{}
+	for _, provider := range ai.ListProviders() {
+		for _, generated := range ai.ListModels(provider) {
+			model := generated.ToModel()
+			if model.ID == "" || seen[model.ID] {
+				continue
+			}
+			rates := model.CostRates()
+			if rates.Input == 0 && rates.Output == 0 && rates.CacheRead == 0 && rates.CacheWrite == 0 && len(rates.Tiers) == 0 {
+				continue
+			}
+			seen[model.ID] = true
+			prices = append(prices, ModelPrice{
+				ModelID: model.ID, DisplayName: model.DisplayName,
+				InputCostPerMillion: rates.Input, OutputCostPerMillion: rates.Output,
+				CacheReadCostPerMillion: rates.CacheRead, CacheCreationCostPerMillion: rates.CacheWrite,
+			})
+		}
+	}
+	sort.SliceStable(prices, func(left, right int) bool { return prices[left].ModelID < prices[right].ModelID })
+	return prices
 }

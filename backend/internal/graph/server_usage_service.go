@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -95,9 +96,18 @@ func (service *usageService) usageCredentialInventory(config GraphConfig, env ma
 	}
 }
 
-// usageLoadPricing reads the local price table.
+// usageLoadPricing reads the price table.
+//
+// The kernel catalog is the reference: it is the catalog the runtime bills
+// through, so its number for a model is the one the console shows. The local
+// models.dev file still answers for the models the kernel has never heard of -
+// a fine-tune, a local server - because those have no catalog entry at all.
 func (service *usageService) usageLoadPricing() ModelPricingSnapshot {
-	snapshot := ModelPricingSnapshot{Source: "~/.cc-switch/model-pricing.json", Models: []ModelPrice{}}
+	snapshot := ModelPricingSnapshot{Source: "kernel catalog", Models: kernelModelPrices()}
+	known := map[string]bool{}
+	for _, price := range snapshot.Models {
+		known[price.ModelID] = true
+	}
 	if info, err := os.Stat(service.pricingPath); err == nil {
 		millis := info.ModTime().UnixMilli()
 		snapshot.UpdatedAt = &millis
@@ -106,7 +116,20 @@ func (service *usageService) usageLoadPricing() ModelPricingSnapshot {
 	if err != nil || raw == nil {
 		return snapshot
 	}
-	snapshot.Models = usageParseModelPrices(raw)
+	kept := []ModelPrice{}
+	for _, price := range usageParseModelPrices(raw) {
+		if known[price.ModelID] {
+			continue
+		}
+		kept = append(kept, price)
+	}
+	if len(kept) > 0 {
+		snapshot.Source = "kernel catalog + ~/.cc-switch/model-pricing.json"
+		snapshot.Models = append(snapshot.Models, kept...)
+		sort.SliceStable(snapshot.Models, func(left, right int) bool {
+			return snapshot.Models[left].ModelID < snapshot.Models[right].ModelID
+		})
+	}
 	return snapshot
 }
 
