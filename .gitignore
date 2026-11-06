@@ -1,6 +1,9 @@
 node_modules/
 dist/
 *.log
+# SQLite sidecars: opening a fixture in WAL mode must not dirty the tree.
+*.sqlite-wal
+*.sqlite-shm
 .DS_Store
 *.tsbuildinfo
 
