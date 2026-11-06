@@ -91,6 +91,9 @@ export async function configFile(dir: string, baseUrl: string, extra: Record<str
     version: 1,
     projects: [{ id: 'sample', root: dir }],
     models: { entries: [{ id: 'local', provider: 'stub', grade: 'medium', api: 'openai-completions', baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] },
+    // `access` is written as given: the drift guard in settings-ui.test.ts needs the
+    // daemon to read a document the console built, not the backend's absent-document default.
+    ...(extra.access ? { access: extra.access } : {}),
     credentials: { local: { secretRef: 'GRAPH_SYNTH_KEY' }, ...(extra.credentials ?? {}) },
     limits: { credentials: { local: 1 } },
   }, null, 2));
