@@ -19,8 +19,7 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 	if os.Getenv("GRAPH_MATCH_SEARCH_GUIDANCE") == "1" && commonRules == DEFAULT_COMMON_RULES {
 		searchRule := agentContextSearchRule(DEFAULT_COMMON_RULES)
 		matched := []string{}
-		// BUG(port): the TypeScript list names ffind twice; the duplicate is kept.
-		for _, name := range []string{"ffind", "ffind", "ffgrep", "find", "grep", "bash"} {
+		for _, name := range []string{"find", "grep", "bash"} {
 			if available[name] {
 				matched = append(matched, name)
 			}

@@ -11,19 +11,18 @@ const execute = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
-for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules, boundSearch } of [
-  { boundSearch: false, matchSearch: true, customRules: false, classifyFriction: true, compactDocs: false, cacheField: 'standard' },
-  { boundSearch: true, matchSearch: true, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { boundSearch: false, matchSearch: true, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { boundSearch: false, matchSearch: true, customRules: true, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { boundSearch: false, matchSearch: false, customRules: false, classifyFriction: true, compactDocs: false, cacheField: 'standard' },
-  { boundSearch: false, matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { boundSearch: false, matchSearch: false, customRules: false, classifyFriction: false, compactDocs: true, cacheField: 'deepseek' },
-  { boundSearch: false, matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'kimi' },
-  { boundSearch: false, matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'unreported' },
-  { boundSearch: false, matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'capacity-retry' },
+for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules } of [
+  { matchSearch: true, customRules: false, classifyFriction: true, compactDocs: false, cacheField: 'standard' },
+  { matchSearch: true, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
+  { matchSearch: true, customRules: true, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
+  { matchSearch: false, customRules: false, classifyFriction: true, compactDocs: false, cacheField: 'standard' },
+  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
+  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: true, cacheField: 'deepseek' },
+  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'kimi' },
+  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'unreported' },
+  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'capacity-retry' },
 ]) {
- test.skipIf(boundSearch && !process.env.GRAPH_FFF_EXTENSION_SOURCE)(`boundSearch=${boundSearch}/matchSearch=${matchSearch}/customRules=${customRules}/classifyFriction=${classifyFriction}/compactDocs=${compactDocs}/cache=${cacheField}: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI`, async () => {
+ test(`matchSearch=${matchSearch}/customRules=${customRules}/classifyFriction=${classifyFriction}/compactDocs=${compactDocs}/cache=${cacheField}: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI`, async () => {
   const previousSearch = process.env.GRAPH_MATCH_SEARCH_GUIDANCE;
   process.env.GRAPH_MATCH_SEARCH_GUIDANCE = matchSearch ? '1' : '0';
   cleanup.push(async () => { if (previousSearch === undefined) delete process.env.GRAPH_MATCH_SEARCH_GUIDANCE; else process.env.GRAPH_MATCH_SEARCH_GUIDANCE = previousSearch; });
@@ -41,7 +40,7 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   };
   const provider = await openaiServer([
     ...(cacheField === 'capacity-retry' ? [{ status: 429 }] : []),
-    { tools: [{ id: 'write-proof', name: 'bash', arguments: JSON.stringify({ command: 'printf harness-proof > proof.txt' }) }, ...(boundSearch ? [{id:'indexed-search',name:'fffind',arguments:JSON.stringify({pattern:'find-proof'})}] : [])], usage },
+    { tools: [{ id: 'write-proof', name: 'bash', arguments: JSON.stringify({ command: 'printf harness-proof > proof.txt' }) }, ], usage },
     { tools: [{id:'read-proof',name:'read',arguments:JSON.stringify({path:'proof.txt'})}], usage },
     { text: 'The proof file is ready.', usage },
   ]);
@@ -58,14 +57,7 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
       pricing: { currency: 'USD', unit: 'per_million_tokens', status: 'known', sourceUrl: 'fixture', retrievedAt: '2026-10-16' },
     }] },
   }));
-  if(boundSearch){
-    const source = process.env.GRAPH_FFF_EXTENSION_SOURCE!;
-    const pkg = JSON.parse(await readFile(join(source,'package.json'),'utf8')) as {version:string};
-    const capability = join(root,'graph','capabilities','fff');await mkdir(capability,{recursive:true});
-    await writeFile(join(root,'find-proof.txt'),'indexed file proof');
-    await writeFile(join(capability,'capability.json'),JSON.stringify({id:'fff',kind:'pi-extension',version:pkg.version,name:'Installed FFF',source,base:true,tools:[{name:'fffind',description:'Indexed filename search'},{name:'ffgrep',description:'Indexed content search'}]}));
-  }
-  const ownerRule = '- Search the repository with indexed ffind and ffgrep. Custom owner policy.';
+  const ownerRule = '- Search the repository with rg. Custom owner policy.';
   if(customRules){
     await mkdir(join(root,'graph','prompts','rules'),{recursive:true});
     await writeFile(join(root,'graph','prompts','rules','common.md'),ownerRule);
@@ -90,11 +82,6 @@ for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules
   expect(instructions).toContain('the executor and the improver are the same Agent');
   expect(instructions.includes('Repository search tools available in this session:')).toBe(matchSearch && !customRules);
   if(customRules)expect(instructions).toContain(ownerRule);
-  if(boundSearch){
-    expect(instructions).toContain('Repository search tools available in this session: fffind, ffgrep');
-    const second = provider.requests[1] as {messages:{role:string;content:unknown}[]};
-    expect(JSON.stringify(second.messages.filter(message=>message.role==='tool'))).toContain('find-proof.txt');
-  }
   const events = await (await fetch(`${daemon.url}/api/conversations/${created.conversationId}/events?limit=500`, { headers })).json() as { type: string; data: Record<string, unknown> }[];
   const profiles = events.filter(event => event.type === 'provider.request_profile');
   expect(profiles).toHaveLength(cacheField === 'capacity-retry' ? 4 : 3);

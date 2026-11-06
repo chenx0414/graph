@@ -43,8 +43,8 @@ type ExtensionHost struct {
 	// this host. A host serves every session of the daemon, and an extension
 	// that a second conversation loads again must not be re-initialized: Pi's
 	// contract is one session_start per session, and an extension that tears
-	// its state down on shutdown while refusing to rebuild it twice (pi-fff)
-	// ends up serving a process nobody can use.
+	// its state down on shutdown while refusing to rebuild it twice ends up
+	// serving a process nobody can use.
 	sessionStarted map[string]bool
 	// catalog is the tool list the host reports when an extension reads
 	// pi.getAllTools(). Load publishes it after the extension is ready, so the
@@ -167,9 +167,9 @@ func extensionHostName(path string) string {
 // their browser or their configuration on session_start and release it on
 // session_shutdown. A host that never emits it leaves every one of them half
 // initialized - the tool still exists (its schema is declared eagerly), it just
-// answers from a state nobody built. Measured 2026-11-02: pi-fff answered every
-// search with "FFF picker factory is not initialized", and agent-browser and
-// mcp-adapter subscribe to the same two events.
+// answers from a state nobody built. Measured 2026-11-02: a search extension
+// refused every call until it was initialized, and agent-browser and mcp-adapter
+// subscribe to the same two events.
 //
 // An extension that fails its own setup is reported, not fatal: its tools will
 // fail on use, which is the truth about that extension rather than a reason to

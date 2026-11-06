@@ -28,7 +28,7 @@ runner 在模型调用前核验摘要/目录元数据，安装至本次私有 gr
 
 ## 尚未证明
 
-目录校验不是扩展/MCP 运行成功。当前生产 FFF package source 为 `npm:@ff-labs/pi-fff@>=0.10.6 <0.12.0`，browser 为 `npm:pi-agent-browser-native@^0.6.0`，都是范围；版本字段和本地目录快照不等于锁定 SDK 实际解析的包。命令、远程服务和外部 package source 原样保留，manifest/runtime 报告明确 allRuntimeDependenciesProven=false。下一步须在不改变用户授权范围的前提下核对实际包解析、权限、MCP 初始化和必要绑定加载，不能先做付费性能对照再补这项证据。
+目录校验不是扩展/MCP 运行成功。pi-fff 扩展已于 2026-11-07 卸载，当前不绑定任何 FFF package source；browser 为 `npm:pi-agent-browser-native@^0.6.0`，都是范围；版本字段和本地目录快照不等于锁定 SDK 实际解析的包。命令、远程服务和外部 package source 原样保留，manifest/runtime 报告明确 allRuntimeDependenciesProven=false。下一步须在不改变用户授权范围的前提下核对实际包解析、权限、MCP 初始化和必要绑定加载，不能先做付费性能对照再补这项证据。
 
 本轮系统 prompt 没有新的精简 diff；复制源 Prompt/skills 是恢复基线，不是要求模型少做工作。没有启用已有实验 flag，没有补跑 Step 5、切换既有 main 或修改成功定义。原简化环境样本保留原范围，与新快照不能直接合并计算节省；总体目标仍未达成。
 

@@ -1,3 +1,4 @@
+graph:allow-large-file: 2026-09-17 的能力目录调研快照，按外部 package 逐条成表；按主题拆分只会把同一份证据切成碎片，故保留单篇。
 # Graph 资源库能力目录调研
 
 日期：2026-09-17
@@ -226,7 +227,7 @@ Pi 文档明确说明：package 可能执行代码并影响 Agent 行为；exten
 | `pi-agent-browser-native` | 0.6.13 / MIT | `pi.extensions = ["./dist/extensions/agent-browser/index.js"]`；注册 `agent_browser` | 需要先安装 `agent-browser` CLI 并放入 PATH；完整录屏还依赖 ffmpeg；不是自带浏览器引擎 | [package page](https://pi.dev/packages/pi-agent-browser-native) |
 | `pi-mcp-extension` | 1.5.0 / MIT | `pi.extensions = ["./src/index.ts"]`；把 MCP tools 桥接为 Pi tools | 支持 stdio、`streamable-http`、legacy `sse`；配置在 `~/.pi/agent/mcp.json` 或 `.pi/mcp.json`；自身不等于任何具体 MCP server | [package page](https://pi.dev/packages/pi-mcp-extension) |
 | `pi-web-access` | 0.29.0 / MIT | `pi.extensions = ["./index.ts"]`；提供 `web_search`、`fetch_content`、`get_search_content`、`source_check` | 默认可通过 Exa MCP 零配置使用；更多 provider 可配置 API key；远程 hosted fetch 需要显式 opt-in；YouTube 帧提取可选 ffmpeg/yt-dlp | [package page](https://pi.dev/packages/pi-web-access) |
-| `@ff-labs/pi-fff` | 0.10.6 / MIT | `pi.extensions = ["./src/index.ts"]`；注册 `fffind`、`ffgrep`、`fff-multi-grep` | 本地搜索；官方 README 说明没有网络调用，也没有额外凭据；使用本地索引 | [package page](https://pi.dev/packages/@ff-labs/pi-fff) |
+| `@ff-labs/pi-fff` | 0.10.6 / MIT | `pi.extensions = ["./src/index.ts"]`；注册 `fffind`、`ffgrep`、`fff-multi-grep` | 本地搜索；官方 README 说明没有网络调用，也没有额外凭据；使用本地索引 | [package page](https://pi.dev/packages/@ff-labs/pi-fff)。**已于 2026-11-07 从 Graph 卸载** |
 | `pi-docparser` | 4.0.0 / MIT | `pi.extensions` + `pi.skills`；提供 `document_parse`、`document_search`、`document_screenshot` | 本地 LiteParse；无需 LLM/API key；OCR 可能下载语言数据；Office 文件可能需要 LibreOffice | [package page](https://pi.dev/packages/pi-docparser) |
 
 ### 3.3 兼容性风险
@@ -472,7 +473,7 @@ mapping:
 
 第一批优先：
 
-- `@ff-labs/pi-fff`：本地、无凭据、无网络调用。
+- `@ff-labs/pi-fff`：本地、无凭据、无网络调用（已于 2026-11-07 卸载，见上表）。
 - `pi-docparser`：本地文档解析，无 LLM/API key；但必须标注 LibreOffice/OCR 依赖。
 
 需要网络或额外运行时，先作为可选条目：

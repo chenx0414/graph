@@ -47,7 +47,7 @@ function offeredTools(body: ChatBody | undefined): string[] {
 }
 
 /** The built-in rule about repository search, word for word. */
-const BUILTIN_SEARCH_RULE = '- Search the repository with the indexed extension tools (ffind, ffgrep) instead of shell find/grep: they are git-aware and ranked by how often files are actually accessed. Use shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.';
+const BUILTIN_SEARCH_RULE = '- Search the repository with `rg` through bash for repository search: it is git-aware and fast, and no indexed extension ships with this app any more. Use other shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.';
 
 async function fixture(options: { matchSearch: boolean; classifyFriction: boolean; compactDocs: boolean; ownerRules: boolean }) {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-agent-context-'));
@@ -57,7 +57,7 @@ async function fixture(options: { matchSearch: boolean; classifyFriction: boolea
   await mkdir(join(root, 'web'), { recursive: true });
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
   const graphHome = join(root, 'graph-home');
-  const ownerRule = '- Search the repository with indexed ffind and ffgrep. Custom owner policy.';
+  const ownerRule = '- Search the repository with rg. Custom owner policy.';
   if (options.ownerRules) {
     await mkdir(join(graphHome, 'prompts', 'rules'), { recursive: true });
     // The owner keeps the built-in rule and adds a rule of their own. The host
@@ -127,7 +127,7 @@ test('the built-in search rule stays a rule when the host does not ask for the b
   const instructions = instructionsOf(await oneTurn(f));
 
   expect(instructions).not.toContain('Repository search tools available in this session:');
-  expect(instructions).toContain('- Search the repository with the indexed extension tools');
+  expect(instructions).toContain('- Search the repository with `rg` through bash');
 }, 120_000);
 
 test('an owner rule replaces the built-in search rule and is never rewritten', async () => {

@@ -29,8 +29,8 @@ import (
 // path against it. A single host handed every session the same scratch
 // directory, so an extension that searches its cwd searched `~/.graph/tmp` and
 // never found the project - measured 2026-11-02, right after the same host
-// learned to emit session_start and pi-fff started answering (it returned a
-// patch file from the scratch dir instead of the repository).
+// learned to emit session_start and the first search extension started answering
+// (it returned a patch file from the scratch dir instead of the repository).
 //
 // They are replaceable on purpose. Measured 2026-11-01: an extension reads its
 // own configuration when the host starts, so a server installed while the daemon
@@ -243,8 +243,8 @@ func pigExtensionSpecs(ctx context.Context, request AgentSessionRequest, broker 
 			// serves every session of the daemon: the event is emitted once per
 			// extension per host, right after the load that made it available and
 			// before any of its tools is called. Without it a stateful extension
-			// answers from a state nobody built - measured 2026-11-02: pi-fff
-			// rejected every search with "FFF picker factory is not initialized".
+			// answers from a state nobody built - measured 2026-11-02: a search
+			// extension rejected every call until it had been initialized.
 			for _, failure := range host.EmitSessionStart("startup") {
 				if request.OnEvent != nil {
 					request.OnEvent(map[string]any{

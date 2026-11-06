@@ -1,3 +1,5 @@
+> 状态（2026-11-07）：`@ff-labs/pi-fff` 已卸载，实验依赖的 `GRAPH_FFF_EXTENSION_SOURCE` 已删除；本文只作历史记录，内置搜索行现在指向 shell 的 `rg`。
+
 # 搜索工具指引匹配实际能力：初步组合信号，默认关闭
 
 GRAPH_MATCH_SEARCH_GUIDANCE=1 只在 common 与 DEFAULT_COMMON_RULES 完全相等时重写内置搜索行；用户自定义 common 原文保留。根据当次 available/enabled 工具列出 fffind、ffind、ffgrep、find、grep、bash 的实际子集，缺少索引工具时不再命令调用它们。该提示词实验默认关闭，移除 flag 恢复原文，不改变工具绑定、权限、模型、effort 或角色。
