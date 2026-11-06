@@ -9,11 +9,10 @@ import { useEffect, useRef } from 'react';
 import { Icon } from './ui.tsx';
 import type { WorkspaceTabs } from './workspace-tabs.ts';
 
-export function TabBar({ state, onActivate, onClose, onOpenNew }: {
+export function TabBar({ state, onActivate, onClose }: {
   state: WorkspaceTabs;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
-  onOpenNew: () => void;
 }) {
   const bar = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -21,16 +20,6 @@ export function TabBar({ state, onActivate, onClose, onOpenNew }: {
   }, [state.activeId]);
   return (
     <nav ref={bar} className="tab-bar" data-testid="tab-bar" aria-label="打开的窗口">
-      <button
-        type="button"
-        className="tab-new"
-        data-testid="tab-new"
-        onClick={onOpenNew}
-        title="新对话"
-        aria-label="新对话"
-      >
-        <Icon name="plus" size={15} />
-      </button>
       {state.tabs.map((tab, index) => {
         const active = tab.id === state.activeId;
         return (

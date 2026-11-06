@@ -122,7 +122,7 @@ return (
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {transcript.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
           {/* An empty conversation used to be a blank page. It now shows the same
-              guidance the new-conversation page does, pointed at this Agent. */}
+              guidance the console's welcome block does, pointed at this Agent. */}
           {transcript.messages.length === 0 && !busy && (
             <div className="conversation-intro" data-testid="conversation-intro">
               <ChatIntro

@@ -24,15 +24,17 @@ test('a tab running an old bundle makes itself current unless a draft is being w
   const navigations: string[] = [];
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations.push(frame.url()); });
 
+  // The root lands on the global Agent's conversation, which is the composer this
+  // test writes into - there is no separate new-conversation page any more.
   await page.goto(`${server.url}/#/`);
-  await page.getByTestId('new-conversation-input').waitFor();
+  await page.getByTestId('chat-input').waitFor({ timeout: 30_000 });
   // The goto itself is a navigation; only what happens after it is the question.
   navigations.length = 0;
 
   // A half-written message belongs to the person: nothing reloads under it, and the
   // bar says the tab is old. The deployment is announced only now, so the check that
   // follows is the one that sees it.
-  await page.getByTestId('new-conversation-input').fill('还没发出去的问题');
+  await page.getByTestId('chat-input').fill('还没发出去的问题');
   await page.route('**/api/build', route => route.fulfill({ json: { bundle: 'assets/index-OLDVERSION.js' } }));
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 
@@ -41,10 +43,10 @@ test('a tab running an old bundle makes itself current unless a draft is being w
   expect(await banner.innerText()).toContain('还在跑旧版本');
   await new Promise(resolve => setTimeout(resolve, 2_000));
   expect(navigations.length, 'the page reloaded under a draft').toBe(0);
-  expect(await page.getByTestId('new-conversation-input').innerText()).toContain('还没发出去的问题');
+  expect(await page.getByTestId('chat-input').innerText()).toContain('还没发出去的问题');
 
   // With nothing being written, the tab makes itself current.
-  await page.getByTestId('new-conversation-input').fill('');
+  await page.getByTestId('chat-input').fill('');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect.poll(() => navigations.length, { timeout: 20_000 }).toBeGreaterThan(0);
 }, 120_000);

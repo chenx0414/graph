@@ -139,8 +139,11 @@ test('a pstack skill bound to the main definition is offered in the slash menu b
   const page = await browser.newPage();
   await page.request.get(daemon.url);
   await page.goto(daemon.url);
-  await page.locator('[data-testid="conversations"]').waitFor();
-  await page.getByTestId('new-conversation-input').fill('/');
+  // The root now opens the global Agent's conversation, and the composer there is
+  // the same one the menu belongs to.
+  await page.getByTestId('open-global-agent').waitFor({ timeout: 30_000 });
+  await page.getByTestId('chat-input').waitFor({ timeout: 30_000 });
+  await page.getByTestId('chat-input').fill('/');
   const menu = page.getByTestId('slash-popover');
   await menu.waitFor();
 

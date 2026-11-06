@@ -38,7 +38,9 @@ test('the real desktop drawer reserves display space, restores content bounds an
 
 test('the default desktop window serves the global supervisor entry', async () => {
   const { page } = await launchShell(cleanup);
-  await page.getByTestId('new-conversation-input').waitFor({ timeout: 30000 });
+  // The default window lands on the global Agent's conversation - the root no longer
+  // renders a separate new-conversation page.
+  await page.getByTestId('chat-input').waitFor({ timeout: 30000 });
   await expect.poll(() => page.getByTestId('conversation-list').innerText(), { timeout: 30000 }).toContain('主 Agent');
   expect(await page.getByTestId('open-global-agent').count()).toBe(1);
   expect(await page.getByRole('heading', { name: '与主 Agent 对话', exact: true }).count()).toBe(1);

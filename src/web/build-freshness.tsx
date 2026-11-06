@@ -22,7 +22,7 @@ const RELOADED_FOR = 'graph-stale-reload';
 
 // Every place a person types into the console: the conversation composer, the one on
 // the new-conversation page, and a node chat. A draft in any of them is theirs.
-const COMPOSERS = ['chat-input', 'new-conversation-input', 'node-chat-input'];
+const COMPOSERS = ['chat-input', 'node-chat-input'];
 
 function composerHasDraft() {
   return COMPOSERS.some(testid => {

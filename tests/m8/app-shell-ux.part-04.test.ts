@@ -191,69 +191,6 @@ test('the composer slash menu selects tools, switches model and queues compactio
 
 
 
-test('the new-chat slash menu stays inside the viewport and inserts an inline tool token', async () => {
-  const root = await temp('new-chat-slash');
-  const server = await consoleServer(root);
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(server.url);
-  const input = page.getByTestId('new-conversation-input');
-  await input.waitFor();
-  await input.fill('/');
-  await page.getByTestId('slash-tool-read').waitFor();
-  const popover = page.getByTestId('slash-popover');
-  const box = await popover.boundingBox();
-  const viewport = page.viewportSize();
-  expect(box).not.toBeNull();
-  expect(viewport).not.toBeNull();
-  expect(box!.y).toBeGreaterThanOrEqual(0);
-  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
-  await page.getByTestId('slash-tool-read').click();
-  await expect.poll(() => input.evaluate((element: HTMLInputElement) => element.value)).toBe('/read ');
-});
-
-
-
-test('the new-chat composer supports project mentions and attachments before submitting', async () => {
-  const root = await temp('new-chat-composer');
-  await mkdir(join(root, 'src'), { recursive: true });
-  await writeFile(join(root, 'src', 'index.ts'), 'export const value = 1;\n');
-  const server = await consoleServer(root, { projects: [{ id: 'alpha', root }] });
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage();
-  await page.goto(`${server.url}/#/?project=alpha`);
-  const input = page.getByTestId('new-conversation-input');
-  await input.waitFor();
-  await input.fill('先看 @src');
-  await page.getByTestId('mention-popover').waitFor();
-  await page.getByTestId('mention-file-src/index.ts').waitFor();
-  await page.getByTestId('mention-file-src/index.ts').click();
-  expect(await input.evaluate((element: HTMLInputElement) => element.value)).toBe('先看 @src/index.ts ');
-
-  await page.getByTestId('new-conversation-attachment-input').setInputFiles({
-    name: 'brief.md',
-    mimeType: 'text/markdown',
-    buffer: Buffer.from('# Brief\n\nNew chat attachment.\n'),
-  });
-  await page.getByTestId('composer-attachments').waitFor();
-  await page.getByTestId('new-conversation-start').click();
-  await page.waitForFunction(() => location.hash.startsWith('#/conversations/'));
-
-  const conversationId = await page.evaluate(() => location.hash.split('/').at(-1)!);
-  const view = await conversationView(server, conversationId);
-  const message = view.messages.find(item => item.role === 'user')!;
-  expect(message.text).toContain('@src/index.ts');
-  expect((message.data as { attachments?: unknown } | null)?.attachments).toEqual([
-    { name: 'brief.md', type: 'text/markdown', size: 30, text: '# Brief\n\nNew chat attachment.\n' },
-  ]);
-});
-
-
-
 test('settings opens as a second page with its own navigation and return control', async () => {
   const root = await temp('settings-shell');
   const server = await consoleServer(root);

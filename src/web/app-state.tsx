@@ -184,6 +184,23 @@ export function App() {
     if (taskId) setSelectedDrawerTaskId(taskId);
   }, [path]);
 
+  // There is no "new conversation" page any more: a conversation comes from the global
+  // Agent or from a project's supervisor thread. Landing on the root opens the global
+  // one, so a fresh window still arrives somewhere that can talk.
+  useEffect(() => {
+    if (path !== '/' || !conversations) return;
+    const global = conversations.find(item => 'role' in item && item.role === 'global');
+    if (global) {
+      location.hash = `#/conversations/${global.id}`;
+      return;
+    }
+    void api<{ conversationId: string }>('/api/orchestration/global', {
+      method: 'POST', body: JSON.stringify({ requestId: `open-global-${crypto.randomUUID()}` }),
+    }).then(thread => {
+      window.dispatchEvent(new Event('graph:conversations-changed'));
+      location.hash = `#/conversations/${thread.conversationId}`;
+    }).catch(() => undefined);
+  }, [path, conversations]);
   const pathname = path.split('?')[0];
   // Tabs are named from the data the shell already polls: a conversation by its own title, a
   // task by its request. Until that arrives the tab keeps the generic name it opened with.
@@ -225,9 +242,6 @@ export function App() {
     const hash = active ? active.hash : '#/';
     setPath(hash.slice(1));
     location.hash = hash;
-  }
-  function startNewConversation() {
-    location.hash = '#/';
   }
   // Tab content that only learns its own name after loading (a shared artifact) renames its tab.
   function retitleWorkspaceTab(kind: WorkspaceTabKind, key: string, title: string) {
@@ -277,7 +291,6 @@ export function App() {
           <a className="brand" href="#/" aria-label="Graph 首页"><div className="brand-mark" /><span className="brand-name">Graph</span></a>
           <span className="sidebar-caption">Agent 协作空间</span>
         </div>
-        <a className="sidebar-start" href="#/" aria-label="新对话"><Icon name="plus" size={17} /><span>新对话</span></a>
         <nav className="rail" data-testid="app-rail" aria-label="主入口">
           <button type="button" className="rail-button icon-button" data-testid="sidebar-toggle"
             onClick={() => setSidebarCollapsed(value => !value)} aria-expanded={!sidebarCollapsed}
@@ -315,7 +328,6 @@ export function App() {
             state={shownTabs}
             onActivate={openWorkspaceTab}
             onClose={closeWorkspaceTab}
-            onOpenNew={startNewConversation}
           />
           {/* The bar itself is a window drag region in the desktop app, so everything the user
               can click has to opt out of it - otherwise the control is draggable, not pressable. */}

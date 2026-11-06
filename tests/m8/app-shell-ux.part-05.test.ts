@@ -21,24 +21,6 @@ import { cleanup, webDir, temp, git, gitProject, consoleServer, type ScriptedSte
 
 
 
-test('the compact shell keeps the new-chat composer inside the viewport', async () => {
-  const root = await temp('compact');
-  const server = await consoleServer(root);
-
-  const browser = await chromium.launch({ headless: true });
-  cleanup.push(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await page.goto(server.url);
-  await page.getByTestId('new-conversation-input').waitFor();
-  const composer = await page.locator('.new-chat-composer').boundingBox();
-  expect(composer).not.toBeNull();
-  expect(composer!.x).toBeGreaterThanOrEqual(0);
-  expect(composer!.x + composer!.width).toBeLessThanOrEqual(390);
-  expect(await page.getByTestId('conversation-list').isHidden()).toBe(true);
-});
-
-
-
 test('the chat header exposes editable Agent prompts and Main Agent tools', async () => {
   const root = await temp('agent-context');
   const promptRoot = join(root, 'graph', 'prompts');

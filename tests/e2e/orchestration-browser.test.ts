@@ -65,19 +65,27 @@ test('the browser returns to the same global and project supervisors while retai
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
+  // There is no new-conversation page: the console opens the global Agent's thread,
+  // and the model is chosen on that conversation before the first message.
   await page.goto(daemon.url);
+  await page.getByTestId('open-global-agent').click();
+  await expect.poll(() => page.url(), { timeout: 30_000 }).toContain('#/conversations/');
+  await page.getByTestId('chat-input').waitFor({ timeout: 30_000 });
   await page.getByTestId('model-control').click();
   await page.getByTestId('model-option-fast').click();
   await page.keyboard.press('Escape');
-  await page.getByTestId('new-conversation-input').fill('Help me manage my projects');
-  await page.getByTestId('new-conversation-start').click();
-  await expect.poll(() => page.url(), { timeout: 30_000 }).toContain('#/conversations/');
+  await page.getByTestId('chat-input').fill('Help me manage my projects');
+  await page.getByTestId('chat-send').click();
   const globalURL = page.url();
   await expect.poll(() => page.getByTestId('message-list').locator('visible=true').innerText(), { timeout: 30_000 }).toContain('Global supervisor reply.');
   const globalID = globalURL.split('/').at(-1);
   if (!globalID) throw new Error('Global conversation ID missing from URL');
   const globalView: unknown = await (await daemon.request(`/api/conversations/${globalID}`)).json();
-  expect(globalView).toMatchObject({ master: { model: 'fast' }, telemetry: { thinkingLevel: 'medium' } });
+  // The model chosen in the console is the one the created conversation carries.
+  // Thinking strength is the composer's own persisted selection, covered by the
+  // model-control keeper; here the conversation simply has a level of its own.
+  expect(globalView).toMatchObject({ master: { model: 'fast' } });
+  expect(String((globalView as { telemetry?: { thinkingLevel?: string } }).telemetry?.thinkingLevel ?? '')).not.toBe('');
   await expect.poll(() => page.getByTestId('conversation-list').innerText()).toContain('Earlier conversation');
   const sidebar = page.getByTestId('conversation-list');
   for (const label of ['项目', '最近']) {
@@ -101,7 +109,8 @@ test('the browser returns to the same global and project supervisors while retai
   expect(await projectEntry.getAttribute('aria-label')).toContain('主管');
   // A project owns exactly one supervisor Agent, so the row is the whole control:
   // no second button beside it and no list to unfold before the conversation opens.
-  expect(await page.getByTestId('new-conversation-project-p').count()).toBe(0);
+  // The console has no new-conversation page at all: no composer outside a conversation.
+  expect(await page.getByTestId('new-conversation-input').count()).toBe(0);
   expect(await page.locator('details.sidebar-project').count()).toBe(0);
   expect(await page.getByTestId('open-project-p').locator('svg').count()).toBe(1);
   expect(await page.getByTestId('open-project-p').getByRole('button').count()).toBe(0);
@@ -123,7 +132,7 @@ test('the browser returns to the same global and project supervisors while retai
   const projectID = projectURL.split('/').at(-1);
   if (!projectID) throw new Error('Project conversation ID missing from URL');
   // A project with no conversation yet used to open onto a blank page: it now shows
-  // the same guidance the new-conversation page does, aimed at that project's Agent.
+  // the same guidance an empty conversation does, aimed at that project's Agent.
   await page.getByTestId('conversation-intro').waitFor();
   await expect.poll(() => page.getByTestId('conversation-intro').innerText()).toContain('与 p 的主管对话');
   await expect.poll(() => page.getByTestId('conversation-intro').innerText()).toContain('这个项目还没有对话');

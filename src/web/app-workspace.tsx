@@ -36,7 +36,6 @@ import { Spinner } from './ui.tsx';
 
 
 
-import { NewConversation } from "./app-new-conversation.tsx";
 import type { Settings_,Startup,TaskSummary } from "./app-state.tsx";
 import { CapabilityResourceLibrary,InsightsPage,ModelsPage } from "./app-state.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
@@ -66,7 +65,6 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
   return <div className={`content ${conversationFirst ? 'conversation-content' : ''}`}>
     <div className={`page ${conversationFirst ? 'conversation-page-host' : ''}`}>
             <ErrorBoundary resetKey={path}>
-            {pathname === '/' && <NewConversation settings={settings} initialProjectId={queryParams.get('project') ?? ''} />}
             {contextMatch && <AgentContextPage conversationId={contextMatch[1]!} />}
             {catalogMatch && <Suspense fallback={<Spinner />}><CapabilityResourceLibrary settings={settings} section={catalogMatch[1]} /></Suspense>}
             {pathname === '/insights' && <Suspense fallback={<Spinner />}><InsightsPage settings={settings} conversations={conversations} /></Suspense>}

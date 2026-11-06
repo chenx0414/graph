@@ -236,12 +236,6 @@ details.disclosure summary:hover { color: var(--accent); }
 /* The workspace bar is a drag region in the desktop app: a control placed in it is draggable and
    never receives a click unless it opts out. Keep every interactive child in this group. */
 .workspace-bar-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; -webkit-app-region: no-drag; }
-.tab-new {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px;
-  background: transparent; border: 0; color: var(--muted); cursor: pointer;
-}
-.tab-new:hover { background: var(--bg-soft); color: var(--text); }
 .tab {
   display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
   padding: 2px 4px 2px 10px; border-radius: 9px;
