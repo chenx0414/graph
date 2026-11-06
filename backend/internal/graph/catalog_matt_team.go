@@ -161,6 +161,34 @@ func AssembleMattTeam(catalog MattTeamCatalog, options MattTeamOptions) GraphDef
 			}
 			return map[string]any{name: body}
 		}
+		// The project check is one node of the team, not the team itself: a project that
+		// has no check command (or a goal whose graph runs before one exists) still gets
+		// the planner, the worker and both independent reviewers.
+		modules := map[string]any{
+			"decision": map[string]any{
+				"type": "router", "trigger": "each", "requiredInputs": []any{"standards", "spec"},
+				"inputs": map[string]any{"standards": review, "spec": review}, "outputs": map[string]any{"rework": handoff, "approved": data},
+				"rules": []any{
+					map[string]any{"when": falseWhen, "emit": emit(false)},
+					map[string]any{"when": trueWhen, "emit": emit(true)},
+				},
+			},
+		}
+		inputs := map[string]any{"job": map[string]any{"to": "planner.job", "protocol": "data"}}
+		acceptance := []any{
+			map[string]any{"id": "standards", "description": "Independent standards review of the current integration commit", "kind": "review", "node": "standards"},
+			map[string]any{"id": "spec", "description": "Independent spec review of the current integration commit", "kind": "review", "node": "spec"},
+		}
+		if strings.TrimSpace(options.Check.Command) != "" {
+			modules["check"] = map[string]any{
+				"type": "operation", "trigger": "each", "inputs": map[string]any{"job": data}, "outputs": map[string]any{"result": data},
+				"operation": map[string]any{
+					"action": "workspace.command", "version": 1, "command": options.Check.Command, "args": args, "output": "result", "timeoutMs": timeout,
+				},
+			}
+			inputs["check"] = map[string]any{"to": "check.job", "protocol": "data"}
+			acceptance = append([]any{map[string]any{"id": "check", "description": "Project checks pass on the current clean integration commit", "kind": "check", "module": "check"}}, acceptance...)
+		}
 		return ParseGraphDefinition(map[string]any{
 			"schemaVersion": 2, "name": options.Name,
 			"protocols": map[string]any{
@@ -174,22 +202,7 @@ func AssembleMattTeam(catalog MattTeamCatalog, options MattTeamOptions) GraphDef
 				}},
 			},
 			"nodes": nodes,
-			"modules": map[string]any{
-				"decision": map[string]any{
-					"type": "router", "trigger": "each", "requiredInputs": []any{"standards", "spec"},
-					"inputs": map[string]any{"standards": review, "spec": review}, "outputs": map[string]any{"rework": handoff, "approved": data},
-					"rules": []any{
-						map[string]any{"when": falseWhen, "emit": emit(false)},
-						map[string]any{"when": trueWhen, "emit": emit(true)},
-					},
-				},
-				"check": map[string]any{
-					"type": "operation", "trigger": "each", "inputs": map[string]any{"job": data}, "outputs": map[string]any{"result": data},
-					"operation": map[string]any{
-						"action": "workspace.command", "version": 1, "command": options.Check.Command, "args": args, "output": "result", "timeoutMs": timeout,
-					},
-				},
-			},
+			"modules": modules,
 			"edges": map[string]any{
 				"planned":          map[string]any{"from": "planner.result", "to": "worker.job", "enabled": true},
 				"standards":        map[string]any{"from": "worker.result", "to": "standards.job", "enabled": true},
@@ -198,18 +211,11 @@ func AssembleMattTeam(catalog MattTeamCatalog, options MattTeamOptions) GraphDef
 				"spec-report":      map[string]any{"from": "spec.result", "to": "decision.spec", "enabled": true},
 				"rework":           map[string]any{"from": "decision.rework", "to": "worker.job", "enabled": true},
 			},
-			"inputs": map[string]any{
-				"job":   map[string]any{"to": "planner.job", "protocol": "data"},
-				"check": map[string]any{"to": "check.job", "protocol": "data"},
-			},
+			"inputs": inputs,
 			"outputs": map[string]any{
 				"result": map[string]any{"from": "decision.approved", "protocol": "data"},
 			},
-			"acceptance": []any{
-				map[string]any{"id": "check", "description": "Project checks pass on the current clean integration commit", "kind": "check", "module": "check"},
-				map[string]any{"id": "standards", "description": "Independent standards review of the current integration commit", "kind": "review", "node": "standards"},
-				map[string]any{"id": "spec", "description": "Independent spec review of the current integration commit", "kind": "review", "node": "spec"},
-			},
+			"acceptance": acceptance,
 		})
 	}
 	create()

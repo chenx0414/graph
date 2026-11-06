@@ -223,6 +223,13 @@ func startGoalTurn(conversations *TaskRuntimeConversations, conversationId, acti
 	if goal == nil {
 		return
 	}
+	// A goal with a graph is not worked in this conversation: the graph's nodes do
+	// the planning, the implementation and the review. Starting an in-chat turn as
+	// well would put two agents on one objective and bring the acceptance talk back
+	// into the window the graph was supposed to clear.
+	if goal.GraphId != "" {
+		return
+	}
 	// The round marker comes first: the turn is about to start, and a blocker it
 	// reports belongs to this round.
 	RecordGoalRound(runtime.store, conversationId, action)

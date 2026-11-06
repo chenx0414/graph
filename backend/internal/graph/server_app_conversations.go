@@ -454,7 +454,11 @@ func (app *GraphApp) serveConversationStream(w http.ResponseWriter, r *http.Requ
 // serveConversationGoal reads the persistent goal of one conversation.
 func (app *GraphApp) serveConversationGoal(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
-	writeJSON(w, http.StatusOK, map[string]any{"conversationId": conversationID, "goal": app.runtime.store.Goal(conversationID)})
+	goal := app.runtime.store.Goal(conversationID)
+	// The graph is where the work is, so reading the goal is the moment its status can
+	// be stale: a graph that finished while nobody asked must not still read "active".
+	syncGoalFromGraph(app.runtime.store, goal)
+	writeJSON(w, http.StatusOK, map[string]any{"conversationId": conversationID, "goal": goal})
 }
 
 // serveConversationGoalAction applies one /goal action.
@@ -463,6 +467,7 @@ func (app *GraphApp) serveConversationGoalAction(w http.ResponseWriter, r *http.
 	input := GoalInput{
 		Action: appBodyString(body, "action"), Objective: appBodyString(body, "objective"),
 		CheckNote: appBodyString(body, "checkNote"), RequestID: appBodyString(body, "requestId"),
+		Acceptance: appBodyString(body, "acceptance"), ProjectId: appBodyString(body, "projectId"),
 	}
 	if value, ok := body["budgetTokens"].(float64); ok && value >= 0 {
 		input.BudgetTokens = int64(value)

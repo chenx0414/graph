@@ -55,3 +55,11 @@ const schemaV53 = "\n        CREATE TABLE IF NOT EXISTS conversation_goals(\n   
 // The table is rebuilt because SQLite cannot alter a CHECK constraint, and no
 // column changes: the retired budget column stays and is ignored.
 const schemaV54 = "\n        CREATE TABLE conversation_goals_next(\n          conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),\n          objective TEXT NOT NULL,\n          status TEXT NOT NULL CHECK(status IN ('active','paused','usage_limited','verifying','budget_limited','completed')),\n          budget_tokens INTEGER NOT NULL DEFAULT 0,\n          used_tokens INTEGER NOT NULL DEFAULT 0,\n          check_note TEXT NOT NULL DEFAULT '',\n          created_at INTEGER NOT NULL,\n          updated_at INTEGER NOT NULL);\n        INSERT INTO conversation_goals_next(conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at)\n          SELECT conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at FROM conversation_goals;\n        DROP TABLE conversation_goals;\n        ALTER TABLE conversation_goals_next RENAME TO conversation_goals;\n        PRAGMA user_version=54;"
+
+// schemaV55 gives a goal its own acceptance criteria and the graph that runs it.
+//
+// A goal used to be a loop inside one conversation: the model worked, an acceptance
+// turn judged it, and both talked over the same transcript. With a graph id on the
+// row, the work, the review and the rework happen in the graph, and the conversation
+// keeps only the objective, the criteria and the state.
+const schemaV55 = "\n        ALTER TABLE conversation_goals ADD COLUMN acceptance TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_id TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_owner_task TEXT NOT NULL DEFAULT '';\n        PRAGMA user_version=55;"

@@ -43,7 +43,15 @@ type ConversationGoal struct {
 	// BudgetTokens is the field a goal used to carry a spent-limit in. Budgets
 	// are retired: it reads 0 and is written 0, whatever the column still says.
 	BudgetTokens int64  `json:"budgetTokens"`
-	UsedTokens   int64  `json:"usedTokens"`
+	UsedTokens int64 `json:"usedTokens"`
+	// Acceptance is what the person said "done" means. It travels into the graph as
+	// the specification its review nodes check the work against.
+	Acceptance string `json:"acceptance,omitempty"`
+	// GraphId names the graph that runs this goal, and GraphOwnerTask the task that
+	// owns it (the project supervisor's, or the conversation's own when it has a
+	// project). Empty means the goal still runs inside the conversation.
+	GraphId        string `json:"graphId,omitempty"`
+	GraphOwnerTask string `json:"graphOwnerTask,omitempty"`
 	CheckNote    string `json:"checkNote,omitempty"`
 	CreatedAt    int64  `json:"createdAt"`
 	UpdatedAt    int64  `json:"updatedAt"`
@@ -59,7 +67,7 @@ type ConversationGoal struct {
 // brake anything the day after it was written and then cleared on the next
 // write.
 func (s *TaskStore) Goal(conversationID string) *ConversationGoal {
-	row := kernelRow(s.Db, `SELECT conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at
+	row := kernelRow(s.Db, `SELECT conversation_id,objective,status,budget_tokens,used_tokens,check_note,acceptance,graph_id,graph_owner_task,created_at,updated_at
 		FROM conversation_goals WHERE conversation_id=?`, conversationID)
 	if row == nil {
 		return nil
@@ -72,21 +80,43 @@ func (s *TaskStore) Goal(conversationID string) *ConversationGoal {
 		ConversationID: kernelString(row["conversation_id"]), Objective: kernelString(row["objective"]),
 		Status: status, BudgetTokens: 0,
 		UsedTokens: kernelInt(row["used_tokens"]), CheckNote: kernelString(row["check_note"]),
+		Acceptance: kernelString(row["acceptance"]), GraphId: kernelString(row["graph_id"]),
+		GraphOwnerTask: kernelString(row["graph_owner_task"]),
 		CreatedAt: kernelInt(row["created_at"]), UpdatedAt: kernelInt(row["updated_at"]),
 	}
 }
 
-// PutGoal writes the goal of one conversation.
+// PutGoal writes a status an engine flow computed - a review that settled, a
+// capacity stop, a continuation. It never undoes a stop the person asked for: a
+// review whose provider call was already in flight when somebody clicked pause
+// must not bring the goal back. Everything else in the row is written as given.
 func (s *TaskStore) PutGoal(goal ConversationGoal, now int64) ConversationGoal {
+	if stored := s.Goal(goal.ConversationID); stored != nil && goal.Status != stored.Status &&
+		(stored.Status == GoalPaused || stored.Status == GoalUsageLimited) {
+		goal.Status = stored.Status
+	}
+	return s.putGoalRow(goal, now)
+}
+
+// PutGoalForced writes a status a person asked for, or one the graph is the
+// authority on: pause, resume, done, clear, and the graph's own completion. It
+// is the only way a stopped goal starts again.
+func (s *TaskStore) PutGoalForced(goal ConversationGoal, now int64) ConversationGoal {
+	return s.putGoalRow(goal, now)
+}
+
+func (s *TaskStore) putGoalRow(goal ConversationGoal, now int64) ConversationGoal {
 	created := now
 	if existing := s.Goal(goal.ConversationID); existing != nil {
 		created = existing.CreatedAt
 	}
-	kernelExec(s.Db, `INSERT INTO conversation_goals(conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?)
+	kernelExec(s.Db, `INSERT INTO conversation_goals(conversation_id,objective,status,budget_tokens,used_tokens,check_note,acceptance,graph_id,graph_owner_task,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(conversation_id) DO UPDATE SET objective=excluded.objective,status=excluded.status,
-		budget_tokens=excluded.budget_tokens,used_tokens=excluded.used_tokens,check_note=excluded.check_note,updated_at=excluded.updated_at`,
-		goal.ConversationID, goal.Objective, goal.Status, goal.BudgetTokens, goal.UsedTokens, goal.CheckNote, created, now)
+		budget_tokens=excluded.budget_tokens,used_tokens=excluded.used_tokens,check_note=excluded.check_note,
+		acceptance=excluded.acceptance,graph_id=excluded.graph_id,graph_owner_task=excluded.graph_owner_task,updated_at=excluded.updated_at`,
+		goal.ConversationID, goal.Objective, goal.Status, goal.BudgetTokens, goal.UsedTokens, goal.CheckNote,
+		goal.Acceptance, goal.GraphId, goal.GraphOwnerTask, created, now)
 	goal.CreatedAt, goal.UpdatedAt = created, now
 	return goal
 }
@@ -103,6 +133,12 @@ type GoalInput struct {
 	BudgetTokens int64
 	CheckNote    string
 	RequestID    string
+	// Acceptance is what "done" means, in the person's own words. It becomes the
+	// specification the goal graph's review nodes check the work against.
+	Acceptance string
+	// ProjectId is which project runs the goal when the conversation has none of
+	// its own (the main Agent's conversation). Empty means "pick one".
+	ProjectId string
 }
 
 // Goal applies one `/goal` action to a conversation.
@@ -121,7 +157,9 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 	result := map[string]any{"conversationId": conversationID, "command": "goal", "action": action}
 	switch action {
 	case "show":
-		result["goal"] = runtime.store.Goal(conversationID)
+		goal := runtime.store.Goal(conversationID)
+		syncGoalFromGraph(runtime.store, goal)
+		result["goal"] = goal
 	case "set":
 		objective := strings.TrimSpace(input.Objective)
 		if objective == "" || len(objective) > goalObjectiveMax {
@@ -132,9 +170,23 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 		if input.BudgetTokens > 0 {
 			result["budgetIgnored"] = true
 		}
-		result["goal"] = runtime.store.PutGoal(ConversationGoal{
+		goal := runtime.store.PutGoal(ConversationGoal{
 			ConversationID: conversationID, Objective: objective, Status: GoalActive,
+			Acceptance: utf16Slice(strings.TrimSpace(input.Acceptance), goalObjectiveMax),
 		}, now)
+		// A goal runs as a graph: plan, implement, independent review on two axes,
+		// rework on failure. The conversation keeps the objective, the criteria and the
+		// state - not the work.
+		if graphGoal, graphErr := runtime.StartGoalGraph(conversationID, goal, input.ProjectId); graphErr == nil {
+			goal = graphGoal
+			result["graphId"] = goal.GraphId
+		} else {
+			// A goal that cannot become a graph still runs, inside the conversation, and
+			// says why: a silent fallback would leave the person waiting for a graph that
+			// was never built.
+			result["graphError"] = goalGraphRequired(graphErr)
+		}
+		result["goal"] = goal
 	case "pause", "resume", "clear", "done", "extend":
 		goal := runtime.store.Goal(conversationID)
 		if goal == nil {
@@ -142,8 +194,10 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 		}
 		switch action {
 		case "pause":
-			if goal.Status != GoalActive {
-				Raise("invalid_state", "Only an active goal can be paused")
+			// A goal between rounds is being reviewed; that is a running goal, and
+			// a person pausing it means stop - not "try again in a few seconds".
+			if goal.Status != GoalActive && goal.Status != GoalVerifying {
+				Raise("invalid_state", "Only a running goal can be paused")
 			}
 			goal.Status = GoalPaused
 		case "resume":
@@ -174,7 +228,8 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 			result["cleared"] = true
 			return result
 		}
-		result["goal"] = runtime.store.PutGoal(*goal, now)
+		// The command is the person speaking: it may stop and restart a goal.
+		result["goal"] = runtime.store.PutGoalForced(*goal, now)
 	default:
 		Raise("invalid_input", "Unknown goal action: "+action)
 	}
@@ -198,6 +253,7 @@ func ParseGoalCommand(text string) (GoalInput, bool) {
 	if rest == "done" || strings.HasPrefix(rest, "done ") || strings.HasPrefix(rest, "done\n") {
 		return GoalInput{Action: "done", CheckNote: strings.TrimSpace(strings.TrimPrefix(rest, "done"))}, true
 	}
+	rest, acceptance, project := splitGoalOptions(rest)
 	budget := int64(0)
 	if fields := strings.Fields(rest); len(fields) > 0 && strings.HasPrefix(fields[len(fields)-1], "+") {
 		if value, err := strconv.ParseInt(fields[len(fields)-1][1:], 10, 64); err == nil && value >= 0 {
@@ -210,7 +266,62 @@ func ParseGoalCommand(text string) (GoalInput, bool) {
 	if rest == "" && budget > 0 {
 		return GoalInput{Action: "extend", BudgetTokens: budget}, true
 	}
-	return GoalInput{Action: "set", Objective: rest, BudgetTokens: budget}, true
+	return GoalInput{Action: "set", Objective: rest, BudgetTokens: budget, Acceptance: acceptance, ProjectId: project}, true
+}
+
+// splitGoalOptions reads the two lines a goal may carry beside its objective:
+//   - "验收：" (or "--accept:") starts the criteria block, which runs until the next
+//     option or the end of the command;
+//   - "项目：" (or "--project:") names the project, for a conversation that has none.
+//
+// They are lines rather than flags on one line so the criteria can be written the way
+// they are judged: one item per line.
+func splitGoalOptions(rest string) (objective string, acceptance string, project string) {
+	lines := strings.Split(rest, "\n")
+	objectiveLines := []string{}
+	acceptLines := []string{}
+	section := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if value, ok := goalOptionValue(trimmed, []string{"验收：", "验收:", "--accept:", "--accept="}); ok {
+			section = "accept"
+			if value != "" {
+				acceptLines = append(acceptLines, value)
+			}
+			continue
+		}
+		if value, ok := goalOptionValue(trimmed, []string{"项目：", "项目:", "--project:", "--project="}); ok {
+			section = "project"
+			project = value
+			continue
+		}
+		switch section {
+		case "accept":
+			if trimmed != "" {
+				acceptLines = append(acceptLines, trimmed)
+			}
+		case "project":
+			// Nothing follows a project line; keep the text as the objective rather than
+			// swallowing it.
+			section = ""
+			objectiveLines = append(objectiveLines, line)
+		default:
+			objectiveLines = append(objectiveLines, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(objectiveLines, "\n")), strings.TrimSpace(strings.Join(acceptLines, "\n")), strings.TrimSpace(project)
+}
+
+// goalOptionValue reports whether one trimmed line opens an option, and the value on
+// that same line when it carries one.
+func goalOptionValue(line string, prefixes []string) (string, bool) {
+	lowered := strings.ToLower(line)
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lowered, strings.ToLower(prefix)) {
+			return strings.TrimSpace(line[len(prefix):]), true
+		}
+	}
+	return "", false
 }
 
 // goalStartInstruction is the message a freshly set goal starts its first turn
@@ -234,11 +345,18 @@ func goalLine(action string, goal *ConversationGoal, budgetIgnored bool) string 
 	case "set":
 		// The card is the live view of the goal; this line is the receipt of
 		// the command.
-		line := "目标已设定：" + goal.Objective + "（无预算上限：目标会一直推进到完成、被阻碍或你暂停）"
+		note := "（无预算上限：目标会一直推进到完成、被阻碍或你暂停）"
 		if budgetIgnored {
-			line = "目标已设定：" + goal.Objective + "（已忽略 +N：目标无预算上限，会一直推进到完成、被阻碍或你暂停）"
+			note = "（已忽略 +N：目标无预算上限，会一直推进到完成、被阻碍或你暂停）"
 		}
-		return line
+		// The line says which of the two lives the goal got: a graph that plans,
+		// implements and reviews on its own, or the in-conversation loop with the reason
+		// a graph was not possible.
+		if goal.GraphId != "" {
+			return "目标已开图执行：" + goal.Objective + " · 图 " + shortGraphId(goal.GraphId) +
+				"（规划 → 实现 → 独立审查，不通过自动返工）"
+		}
+		return "目标已设定：" + goal.Objective + note
 	case "clear":
 		return "目标已清除。"
 	case "done":
@@ -267,6 +385,14 @@ func goalLine(action string, goal *ConversationGoal, budgetIgnored bool) string 
 func goalPromptSection(goal *ConversationGoal) string {
 	if goal == nil || goal.Status != GoalActive {
 		return ""
+	}
+	if goal.GraphId != "" {
+		// The work is in the graph. Telling this model to advance it would start a
+		// second worker on the same objective.
+		return "\n\n# Standing goal\nThis conversation has one standing objective, and it runs as the graph " +
+			goal.GraphId + " (plan → implement → independent review). Do not do that work in this chat: " +
+			"read the graph when the person asks about it, and answer their questions about it.\n「" +
+			goal.Objective + "」"
 	}
 	funds := "已用 " + strconv.FormatInt(goal.UsedTokens, 10) + " tokens，未设上限"
 	return "\n\n# Standing goal\nThis conversation has one standing objective the user set outside the chat. Keep it in view for this turn and prefer work that advances it:\n「" + goal.Objective + "」\n" + funds +

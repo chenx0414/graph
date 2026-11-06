@@ -24,7 +24,14 @@ test('a conversation keeps one goal through set, show, pause, resume and clear',
   await mkdir(join(root, 'web'));
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root"></div>');
   const configPath = join(root, 'graph.config.json');
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: join(root, 'project') }] }));
+  // Two projects, and a conversation bound to neither: no single project can own a
+  // graph for this goal, so it stays in the conversation - which is the behaviour this
+  // case is about.
+  await mkdir(join(root, 'second'), { recursive: true });
+  await writeFile(configPath, JSON.stringify({ version: 1, projects: [
+    { id: 'p', root: join(root, 'project') },
+    { id: 'second', root: join(root, 'second') },
+  ] }));
   const daemon = await launchCli(root, { configPath });
   cleanup.push(() => daemon.close());
   const request = async (path: string, body?: object) => {
@@ -33,7 +40,7 @@ test('a conversation keeps one goal through set, show, pause, resume and clear',
   };
   const goalLines = async (conversationId: string) => ((await request(`/api/conversations/${conversationId}`)).body.messages ?? []) as { kind?: string; text?: string; data?: Record<string, any> }[];
 
-  const created = await request('/api/conversations', { projectId: 'p', text: 'hello', requestId: 'conversation' });
+  const created = await request('/api/conversations', { text: 'hello', requestId: 'conversation' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
 
@@ -43,6 +50,7 @@ test('a conversation keeps one goal through set, show, pause, resume and clear',
   const set = await request(`/api/conversations/${conversationId}/messages`, { text: '/goal 把导出做成 CSV +5000', requestId: 'goal-set' });
   expect(set.status, JSON.stringify(set.body)).toBe(200);
   expect(set.body.command).toBe('goal');
+  expect(String(set.body.graphError ?? '')).toContain('项目');
   expect(set.body.budgetIgnored, JSON.stringify(set.body)).toBe(true);
   expect(set.body.goal).toMatchObject({ objective: '把导出做成 CSV', status: 'active', budgetTokens: 0, usedTokens: 0 });
 
@@ -106,7 +114,9 @@ test('a goal reaches the model, counts real usage and keeps working without a bu
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
     version: 1,
-    projects: [{ id: 'p', root: project }],
+    // Two projects and a conversation bound to neither: the goal has no single graph
+    // owner, so it runs in the conversation - the behaviour this case covers.
+    projects: [{ id: 'p', root: project }, { id: 'second', root: project }],
     access: { mode: 'full' },
     models: { entries: [
       { id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
@@ -121,7 +131,7 @@ test('a goal reaches the model, counts real usage and keeps working without a bu
     const response = await daemon.request(path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
     return { status: response.status, body: await response.json().catch(() => ({})) as Record<string, any> };
   };
-  const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '开始工作', requestId: 'goal-start' });
+  const created = await request('/api/conversations', { model: 'main', text: '开始工作', requestId: 'goal-start' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
   const messages = async () => ((await request(`/api/conversations/${conversationId}`)).body.messages ?? []) as { role?: string; kind?: string; text?: string }[];

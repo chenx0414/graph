@@ -82,7 +82,7 @@ func GoalTool(store *TaskStore, conversationID string, input AgentToolsGoal, mod
 					}
 				}
 				goal.Status = GoalPaused
-				updated := store.PutGoal(*goal, now)
+				updated := store.PutGoalForced(*goal, now)
 				AppendMessage(store, MessageInput{
 					ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
 					Text:  "目标被同一个阻碍卡住 " + strconv.Itoa(repeats) + " 轮，已暂停等你裁决：" + note + "。处理完用 /goal resume 继续。",
@@ -101,7 +101,7 @@ func GoalTool(store *TaskStore, conversationID string, input AgentToolsGoal, mod
 				Raise("invalid_state", "Only an active goal can be paused")
 			}
 			goal.Status = GoalPaused
-			updated := store.PutGoal(*goal, now)
+			updated := store.PutGoalForced(*goal, now)
 			AppendMessage(store, MessageInput{
 				ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
 				Text:  "目标已暂停：" + updated.Objective + "（" + note + "）",

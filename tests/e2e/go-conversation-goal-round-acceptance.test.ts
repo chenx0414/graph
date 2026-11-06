@@ -33,7 +33,7 @@ async function fixture(plans: ResponsePlan[], credential: string) {
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
     version: 1,
-    projects: [{ id: 'p', root: project }],
+    projects: [{ id: 'p', root: project }, { id: 'second', root: project }],
     access: { mode: 'full' },
     models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
       baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] },
@@ -69,7 +69,9 @@ test('a finished answer is reviewed without a completion claim, in a context of 
     { text: 'VERDICT: pass\n- [pass] 导出可用：文件存在且内容可读。', usage: { prompt_tokens: 30, completion_tokens: 8 } },
   ], 'GRAPH_GOAL_ROUND_KEY');
 
-  const created = await f.request('/api/conversations', { projectId: 'p', model: 'main', text: '/goal 交付 CSV 导出', requestId: 'goal-round-acceptance' });
+  // No single project can own a graph here, so this goal runs in the conversation and
+  // exercises the in-chat acceptance loop.
+  const created = await f.request('/api/conversations', { model: 'main', text: '/goal 交付 CSV 导出', requestId: 'goal-round-acceptance' });
   expect(created.status, JSON.stringify(created.body)).toBe(200);
   const conversationId = String(created.body.conversationId);
 

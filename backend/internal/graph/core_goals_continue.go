@@ -18,12 +18,12 @@ func AccountGoalUsage(store *TaskStore, conversationID string, total int64, now 
 	if total <= 0 {
 		return
 	}
-	goal := store.Goal(conversationID)
-	if goal == nil || (goal.Status != GoalActive && goal.Status != GoalVerifying) {
-		return
-	}
-	goal.UsedTokens += total
-	store.PutGoal(*goal, now)
+	// The spend is added to the number in the row, not written back from a copy
+	// read earlier: a turn settles after the person may have paused the goal, and
+	// writing the whole row back would undo their pause. The status guard keeps the
+	// count where it belongs - a goal that is paused or finished spends nothing more.
+	kernelExec(store.Db, `UPDATE conversation_goals SET used_tokens=used_tokens+?, updated_at=?
+		WHERE conversation_id=? AND status IN (?,?)`, total, now, conversationID, GoalActive, GoalVerifying)
 }
 
 // goalContinueText is the instruction one automatic continuation starts from.
