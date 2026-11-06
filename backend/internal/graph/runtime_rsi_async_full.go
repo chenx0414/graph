@@ -16,10 +16,7 @@ import (
 // confirmation still runs every time; it just stops being the loudest thing on
 // the machine.
 func rsiAsyncFullCommand() RsiCommand {
-	if _, err := exec.LookPath("nice"); err == nil {
-		return RsiCommand{Command: "nice", Args: []string{"-n", "10", "node", "--run", "check:full"}}
-	}
-	return RsiCommand{Command: "node", Args: []string{"--run", "check:full"}}
+	return RsiCommand{Command: "node", Args: []string{"--run", "check:full"}, Nice: 10}
 }
 
 // rsiStartAsyncFull runs the slow confirmation after a reload.

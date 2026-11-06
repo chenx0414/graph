@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -108,9 +109,17 @@ func rsiEnvList(env map[string]string) []string {
 func rsiRunCommand(root string, command RsiCommand, timeoutMs int) RsiValidationResult {
 	resolved := ValidationCommand(command, nil)
 	label := strings.Join(append([]string{command.Command}, command.Args...), " ")
+	executable, args := resolved.Executable, resolved.Args
+	if command.Nice > 0 {
+		if nice, err := exec.LookPath("nice"); err == nil {
+			executable = nice
+			args = append([]string{"-n", strconv.Itoa(command.Nice), resolved.Executable}, resolved.Args...)
+			label = "nice -n " + strconv.Itoa(command.Nice) + " " + label
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
-	process := exec.CommandContext(ctx, resolved.Executable, resolved.Args...)
+	process := exec.CommandContext(ctx, executable, args...)
 	process.Dir = root
 	process.Env = rsiEnvList(resolved.Env)
 	stdout := &bytes.Buffer{}

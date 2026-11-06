@@ -23,6 +23,11 @@ const RSI_BUILD_TIMEOUT_MS = 20 * 60 * 1000
 type RsiCommand struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
+	// Nice lowers the command's CPU priority when the platform has `nice`.
+	// The prefix is applied after the executable is resolved, because resolution
+	// replaces the first token with the runtime's own node - which is how a
+	// hand-written `nice -n 10 node ...` ends up as `node -n 10 ...`.
+	Nice int `json:"nice,omitempty"`
 }
 
 // RsiFileEdit is one replacement inside a file.

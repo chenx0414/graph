@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -36,11 +35,10 @@ func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
 // reload does not queue behind the whole suite.
 func TestAsyncFullRunsNice(t *testing.T) {
 	command := rsiAsyncFullCommand()
-	joined := command.Command + " " + strings.Join(command.Args, " ")
-	if !strings.Contains(joined, "check:full") {
-		t.Fatalf("the confirmation is still the full suite, got %q", joined)
+	if command.Command != "node" || strings.Join(command.Args, " ") != "--run check:full" {
+		t.Fatalf("the confirmation is still the full suite, got %v %v", command.Command, command.Args)
 	}
-	if _, err := exec.LookPath("nice"); err == nil && !strings.HasPrefix(joined, "nice -n 10 node") {
-		t.Fatalf("where nice exists the confirmation runs under it, got %q", joined)
+	if command.Nice != 10 {
+		t.Fatalf("the confirmation has to ask for a lower priority, got %d", command.Nice)
 	}
 }
