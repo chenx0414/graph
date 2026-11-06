@@ -41,7 +41,9 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   const sentPanel = await page.getByTestId('agent-context-sent').innerText();
   expect(sentPanel).toContain('实际发出');
   expect(sentPanel).toContain('本次会话尚未记录到已发出的请求');
-  await expect.poll(() => page.getByTestId('agent-context-meta').innerText(), { timeout: 30_000, interval: 200 }).toContain(`源码 Docs ${join(process.cwd(), 'docs', 'agent')}`);
+  // 页头只剩标题：说明文字与会话/源码行都已删除。
+  expect(await page.locator('.agent-context-head p').count()).toBe(0);
+  expect(await page.getByTestId('agent-context-meta').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-context-preview"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-context-preview-markdown"]').count()).toBe(0);
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);

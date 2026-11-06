@@ -279,7 +279,6 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
             <header className="agent-context-head">
               <div>
                 <h2>Agent 上下文</h2>
-                <p>这里展示模型实际收到的 system prompt（在发出请求时记录，不做二次渲染），以及可编辑来源与实际工具视图；保存后从下一轮生效。</p>
               </div>
 
             </header>
@@ -299,11 +298,6 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
                 </button>
               </nav>
               {error && <div className="form-error">{error}</div>}
-              <div className="agent-preview-meta" data-testid="agent-context-meta">
-                <span>当前会话 <code>{data?.definitionVersion ?? '未配置'}</code></span>
-                {definitionChanged && <span>最新编译 <code>{data?.latestDefinitionVersion}</code></span>}
-                <span>源码 Docs <code>{data?.docsRoot}</code></span>
-              </div>
               {definitionChanged && (
                 <div className="agent-preview-notice" data-testid="agent-preview-definition-notice">
                   当前会话已绑定 <code>{data?.definitionVersion}</code>；新编译的 <code>{data?.latestDefinitionVersion}</code> 会用于新建会话，不会热替换正在运行的 Pi session。
