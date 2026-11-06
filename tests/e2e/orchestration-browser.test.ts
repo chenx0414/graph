@@ -95,6 +95,8 @@ test('the browser returns to the same global and project supervisors while retai
   // The sidebar carries projects and the main Agent, nothing else: the recent
   // conversation list and its archive buttons are gone.
   expect(await sidebar.getByRole('button', { name: '最近', exact: true }).count()).toBe(0);
+  // The heading is the brand alone: no caption text beside it.
+  expect(await page.locator('.sidebar-caption').count()).toBe(0);
   // The main Agent entry is one row, not a heading plus a conversation row.
   const globalEntry = page.getByTestId('open-global-agent');
   expect(await globalEntry.evaluate(el => el.tagName)).toBe('BUTTON');

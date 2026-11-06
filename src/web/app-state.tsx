@@ -282,7 +282,6 @@ export function App() {
       <aside className="sidebar">
         <div className="sidebar-heading">
           <a className="brand" href="#/" aria-label="Graph 首页"><div className="brand-mark" /><span className="brand-name">Graph</span></a>
-          <span className="sidebar-caption">Agent 协作空间</span>
         </div>
         <nav className="rail" data-testid="app-rail" aria-label="主入口">
           <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
