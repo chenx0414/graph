@@ -187,6 +187,13 @@ type ConversationMasterUsageView struct {
 	ContextTokens   *int64 `json:"contextTokens"`
 	CacheReadTokens *int64 `json:"cacheReadTokens"`
 	CacheUsedAt     *int64 `json:"cacheUsedAt"`
+	// Throughput describes the newest request that produced tokens: how many it
+	// wrote and how long the provider took. TPS is derived from those two, never
+	// from a guess about the machine - a provider that answers in 3s and writes
+	// 400 tokens did 133 tokens/s on that request.
+	OutputTokens    *int64   `json:"outputTokens"`
+	LatencyMs       *int64   `json:"latencyMs"`
+	TokensPerSecond *float64 `json:"tokensPerSecond"`
 }
 
 // RSI_RELOAD_RECEIPT is what a turn says when it committed a change and a reload is pending.

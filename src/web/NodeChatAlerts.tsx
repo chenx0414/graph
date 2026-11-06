@@ -98,7 +98,7 @@ export function NodeChatPaused() {
  * next message will be taken, and the two controls a running agent node offers.
  * The conversation window says the same things in the same place.
  */
-export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSteer, onSteer, onStop }: {
+export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSteer, onSteer, onStop, throughput }: {
   stopPhase: 'idle' | 'stopping' | 'stopped';
   busy: boolean;
   agentNode: boolean;
@@ -106,6 +106,8 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
   canSteer: boolean;
   onSteer: () => void;
   onStop: () => void;
+  /** The node's newest settled request, in the same words the conversation footer uses. */
+  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null } | undefined;
 }) {
   return (
     <div className="composer-footer">
@@ -115,6 +117,15 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
         </span>
       )}
       <span className="muted">{busy ? 'Enter 排队发送 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span>
+      {/* The node's own speed, from its newest settled provider call. */}
+      <span
+        className="muted"
+        title={throughput?.outputTokens && throughput?.latencyMs
+          ? `最近一次完成的请求写了 ${throughput.outputTokens} tokens，用时 ${(throughput.latencyMs / 1000).toFixed(1)} 秒`
+          : '这个节点还没有完成的请求'}
+        data-testid="node-telemetry-tps"
+        data-tps={throughput?.tokensPerSecond ?? undefined}
+      >TPS {typeof throughput?.tokensPerSecond === 'number' ? (throughput.tokensPerSecond >= 10 ? throughput.tokensPerSecond.toFixed(0) : throughput.tokensPerSecond.toFixed(1)) : '—'}</span>
       {busy && agentNode && <span className="row">
         <Button size="sm" disabled={sending || !canSteer} onClick={onSteer}>立即引导</Button>
         <Button size="sm" disabled={sending} onClick={onStop}>停止节点</Button>

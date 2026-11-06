@@ -50,8 +50,8 @@ func (s *TaskStore) InvocationExists(id string) bool {
 // The underlying upstream identity is frozen here, not just the mutable
 // connection id: review independence reads this history later.
 func (s *TaskStore) OpenInvocation(id, operationID, instanceID, model, purpose string) {
-	if _, err := s.DB.Exec("INSERT INTO invocations(id,operation_id,instance_id,model,purpose) VALUES(?,?,?,?,?)",
-		id, operationID, instanceID, model, purpose); err != nil {
+	if _, err := s.DB.Exec("INSERT INTO invocations(id,operation_id,instance_id,model,purpose,dispatched_at) VALUES(?,?,?,?,?,?)",
+		id, operationID, instanceID, model, purpose, NowMillis()); err != nil {
 		panic(err)
 	}
 }
@@ -75,7 +75,7 @@ func (s *TaskStore) InvocationUsage(id string) (*string, bool) {
 
 // RecordInvocationUsage records what an invocation cost.
 func (s *TaskStore) RecordInvocationUsage(id string, usage, cost any) {
-	if _, err := s.DB.Exec("UPDATE invocations SET usage=?,cost=? WHERE id=?", usage, cost, id); err != nil {
+	if _, err := s.DB.Exec("UPDATE invocations SET usage=?,cost=?,settled_at=? WHERE id=?", usage, cost, NowMillis(), id); err != nil {
 		panic(err)
 	}
 }

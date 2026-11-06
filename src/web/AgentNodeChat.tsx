@@ -254,7 +254,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       onSend={() => void send()} sendDisabled={sending || !taskId || data?.node.kind !== 'agent' || !text.trim()}
       inputTestId="node-chat-input" sendTestId="node-chat-send" history={entries.filter(entry => entry.role === 'user' && entry.kind === 'chat').map(entry => entry.text)} />
     <NodeComposerFooter stopPhase={stopPhase} busy={busy} agentNode={data?.node.kind === 'agent'} sending={sending}
-      canSteer={Boolean(text.trim())} onSteer={() => void controlNode('steer_node')} onStop={() => void controlNode('stop_node')} />
+      canSteer={Boolean(text.trim())} onSteer={() => void controlNode('steer_node')} onStop={() => void controlNode('stop_node')}
+      throughput={data?.throughput} />
   </div>;
   const onScroll = () => {
     transcriptFollow.onScroll();

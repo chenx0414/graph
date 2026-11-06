@@ -58,6 +58,8 @@ export interface NodeRun {
   operations: unknown[]; invocations: unknown[]; questions: unknown[]; evidence: unknown[];
   /** Messages typed while this node was busy, oldest first. */
   queued?: { seq: number; text: string; createdAt?: number }[];
+  /** The node's newest settled request: what it wrote and how long the provider took. */
+  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null } | undefined;
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
 }
 

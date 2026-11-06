@@ -189,6 +189,10 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 56 {
 		execMigration(db, schemaV56)
 	}
+	// v57 adds the two instants of one provider call to the invocation ledger.
+	if version < 57 {
+		execMigration(db, schemaV57)
+	}
 }
 
 func sqliteColumns(db *sql.DB, table string) map[string]bool {

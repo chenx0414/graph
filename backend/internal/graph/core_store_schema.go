@@ -63,3 +63,11 @@ const schemaV54 = "\n        CREATE TABLE conversation_goals_next(\n          co
 // row, the work, the review and the rework happen in the graph, and the conversation
 // keeps only the objective, the criteria and the state.
 const schemaV55 = "\n        ALTER TABLE conversation_goals ADD COLUMN acceptance TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_id TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_owner_task TEXT NOT NULL DEFAULT '';\n        PRAGMA user_version=55;"
+
+// schemaV57 gives an invocation the two instants one provider call really has.
+//
+// A turn is not a request: it is a sequence of sends, each with its own latency,
+// and the tokens one send wrote divided by that latency is the only tokens/s a
+// footer can honestly print. The operation's own pair is the whole turn, tools
+// and waiting included, so it cannot answer the question.
+const schemaV57 = "\n        ALTER TABLE invocations ADD COLUMN dispatched_at INTEGER NOT NULL DEFAULT 0;\n        ALTER TABLE invocations ADD COLUMN settled_at INTEGER NOT NULL DEFAULT 0;\n        PRAGMA user_version=57;"

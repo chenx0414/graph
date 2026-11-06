@@ -29,6 +29,10 @@ export type ComposerTelemetryView = {
   cacheReadTokens?: number | null;
   /** When that turn settled, Unix milliseconds. No provider reports a cache expiry. */
   cacheUsedAt?: number | null;
+  /** Tokens the newest settling request wrote, the milliseconds it took, and the rate. */
+  outputTokens?: number | null;
+  latencyMs?: number | null;
+  tokensPerSecond?: number | null;
   contextTokens: number | null;
   contextLimit: number | null;
   contextPercent: number | null;
@@ -136,6 +140,18 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
         缓存 {telemetryValue(telemetry?.cacheHitRate, value => `${(value * 100).toFixed(value >= 0.1 ? 0 : 1)}%`)}
         {cacheReadTokens !== null && cacheReadTokens > 0 ? ` · ${formatTokens(cacheReadTokens)}` : ''}
         {cacheUsedAt === null ? '' : ` · ${cacheAge(cacheUsedAt, now)}`}
+      </span>
+      {/* Tokens per second of the newest request that wrote tokens: output divided by
+          the provider's own latency. A dash when nothing settled yet. */}
+      <span
+        title={telemetry?.outputTokens && telemetry?.latencyMs
+          ? `最近一次完成的请求写了 ${formatTokens(telemetry.outputTokens)} tokens，用时 ${(telemetry.latencyMs / 1000).toFixed(1)} 秒`
+          : '还没有完成的请求，暂时没有 tokens/秒'}
+        data-testid="telemetry-tps"
+        data-tps={telemetry?.tokensPerSecond ?? undefined}
+      >
+        <Icon name="bolt" size={13} />
+        TPS {telemetryValue(telemetry?.tokensPerSecond, value => (value >= 10 ? value.toFixed(0) : value.toFixed(1)))}
       </span>
       <span title="最近一次完成请求使用的输入 token 与模型上下文窗口" data-testid="telemetry-context">
         <Icon name="graph" size={13} />

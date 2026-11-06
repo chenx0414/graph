@@ -184,7 +184,29 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 		Capabilities: capabilities, CapabilityUsage: usageFacts, CapabilityDigest: capabilityDigest,
 		Node: nodeView, Instance: instance, Session: session, Operations: operations,
 		Invocations: invocations, Questions: questions, Queued: queued, Evidence: evidence, Timing: timing,
+		Throughput: nodeThroughput(store, taskId, nodeId),
 		Entries: page.Entries, EntryCount: page.EntryCount, HasOlder: page.HasOlder, HasNewer: page.HasNewer,
 		Phase: task.Phase,
 	}
+}
+
+// nodeThroughput reads the newest settled request of one node.
+//
+// Two ledgers can hold it: a graph node's call is recorded by the kernel, while a
+// conversation's master node (and any node driven by the host adapter) records it as
+// an invocation. The invocation ledger is asked first because every call passes
+// through it, and the kernel's table answers for a node that has no invocation.
+func nodeThroughput(store *TaskStore, taskId, nodeId string) NodeThroughput {
+	row := kernelRow(store.Db, `SELECT i.usage AS usage, i.dispatched_at AS createdAt, i.settled_at AS settledAt
+    FROM invocations i JOIN operations o ON o.id=i.operation_id
+    WHERE o.task_id=? AND o.node_id=? AND i.settled_at > i.dispatched_at
+    ORDER BY i.settled_at DESC LIMIT 1`, taskId, nodeId)
+	if row == nil {
+		row = kernelRow(store.Db, `SELECT usage AS usage, created_at AS createdAt, settled_at AS settledAt
+      FROM kernel_provider_calls
+      WHERE task_id=? AND node_id=? AND state='settled' AND settled_at > created_at
+      ORDER BY settled_at DESC LIMIT 1`, taskId, nodeId)
+	}
+	output, latency, rate := throughputOf(row)
+	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate}
 }

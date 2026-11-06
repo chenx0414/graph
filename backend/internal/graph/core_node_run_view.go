@@ -86,6 +86,15 @@ type NodeRunEvidence struct {
 }
 
 // NodeRunTiming is the time ledger of a node.
+// NodeThroughput is the newest settled request of one node: what it wrote and how
+// long the provider took, so the node chat can print tokens per second next to the
+// same numbers the conversation footer shows.
+type NodeThroughput struct {
+	OutputTokens    *int64   `json:"outputTokens"`
+	LatencyMs       *int64   `json:"latencyMs"`
+	TokensPerSecond *float64 `json:"tokensPerSecond"`
+}
+
 type NodeRunTiming struct {
 	TotalMs    *int64 `json:"totalMs"`
 	RunMs      *int64 `json:"runMs"`
@@ -112,6 +121,7 @@ type NodeRunView struct {
 	Queued           []NodeRunQueued       `json:"queued"`
 	Evidence         []NodeRunEvidence     `json:"evidence"`
 	Timing           NodeRunTiming         `json:"timing"`
+	Throughput       NodeThroughput        `json:"throughput"`
 	Entries          []NodeEntry           `json:"entries"`
 	EntryCount       int                   `json:"entryCount"`
 	HasOlder         bool                  `json:"hasOlder"`

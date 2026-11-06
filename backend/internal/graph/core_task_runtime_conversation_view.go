@@ -318,6 +318,10 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		"contextTokens":   knownMasterUsage.ContextTokens,
 		"contextLimit":    contextLimit,
 		"contextPercent":  contextPercent,
+		// The newest request that wrote tokens: how many, how long, and the rate.
+		"outputTokens":    knownMasterUsage.OutputTokens,
+		"latencyMs":       knownMasterUsage.LatencyMs,
+		"tokensPerSecond": knownMasterUsage.TokensPerSecond,
 	}
 	var masterView any
 	if master != nil {
