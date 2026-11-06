@@ -239,9 +239,13 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 	if len(input.Checks) > 0 && !input.Activate {
 		return results
 	}
-	check := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "check"}}, RSI_CHECK_TIMEOUT_MS)
-	results = append(results, check)
-	if check.Status == "failed" || !input.Activate {
+	if rsiNeedsDefaultGate(input.Checks, input.Activate) {
+		check := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "check"}}, RSI_CHECK_TIMEOUT_MS)
+		results = append(results, check)
+		if check.Status == "failed" || !input.Activate {
+			return results
+		}
+	} else if !input.Activate {
 		return results
 	}
 	// The package is rebuilt only when the packaged side moved; a console change
@@ -256,6 +260,24 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 		return append(results, web)
 	}
 	return results
+}
+
+// rsiNeedsDefaultGate reports whether the whole gate still has to run.
+//
+// The caller's checks come first, and the default gate repeats what they already
+// ran unless one of them IS the default gate. Measured 2026-11-07: every apply
+// listed `node --run check` and the gate then ran it a second time before
+// activating, which is why a console tweak took minutes.
+func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {
+	if !activate {
+		return false
+	}
+	for _, check := range checks {
+		if check.Command == "node" && len(check.Args) == 2 && check.Args[0] == "--run" && check.Args[1] == "check" {
+			return false
+		}
+	}
+	return true
 }
 
 // rsiSlug is the branch name fragment one change contributes.

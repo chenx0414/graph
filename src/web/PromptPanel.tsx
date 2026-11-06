@@ -55,12 +55,6 @@ export function RecordedPromptPanel(input: {
             <span>{`${declarationCount.toLocaleString()} 个工具 · ${tools.length.toLocaleString()} 字符`}</span>
             <Button size="sm" icon="file" onClick={() => void copy(tools, '实际发送的工具声明已复制')}>复制声明</Button>
           </div>
-          <p
-            className="agent-preview-notice"
-            title="与「实际发出的 Prompt」标签同属同一次请求：内容从这次请求体的 tools 字段原样读出（OpenAI 侧为 function 包装、Anthropic 侧为 input_schema），只读、不参与发送，也不会再给模型发第二份。"
-          >
-            与同一次请求的 Prompt 同属一份载荷 · 只读，不再发送
-          </p>
           <pre className="agent-preview-markdown" data-testid={`${testId}-tools-text`}>{declarationText}</pre>
         </div>
       ) : null}
