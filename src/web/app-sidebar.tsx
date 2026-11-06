@@ -50,7 +50,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   // conversation twice, and the way in is already the main row above.
   const listedProjects = projectRows.filter(project => !project.ownCheckout);
   const activeProjects = listedProjects.filter(project => project.archivedAt == null);
-  const archivedProjects = listedProjects.filter(project => project.archivedAt != null);
   async function openGlobalThread() {
     if (openingGlobal) return;
     if (global) {
@@ -143,11 +142,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
               </button>
             );
           })}
-          {archivedProjects.length > 0 && (
-            <a className="sidebar-empty" href="#/settings" data-testid="archived-projects-hint">
-              已归档 {archivedProjects.length} 个项目 · 在设置中恢复
-            </a>
-          )}
           {!projectRows.length && <div className="sidebar-empty">添加项目，让 Agent 了解你的代码。<button type="button" className="sidebar-empty-action" onClick={() => setCreateProject(true)}>添加项目<Icon name="plus" size={13} /></button></div>}
         </div>
       </div>

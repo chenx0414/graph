@@ -54,10 +54,11 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   await page.getByTestId('project-restore-sample').waitFor();
   expect(await page.getByTestId('git-project-sample').getAttribute('data-archived')).toBe('true');
 
-  // 侧栏收起归档项目，只留一句可回到设置的提示。
+  // 侧栏只列活跃项目：归档项目整行消失，也没有任何归档提示。
   await page.goto(`${daemon.url}/#/`);
   await page.getByTestId('conversation-list').waitFor();
-  expect(await page.getByTestId('archived-projects-hint').innerText()).toContain('已归档 1 个项目');
+  expect(await page.getByTestId('archived-projects-hint').count()).toBe(0);
+  expect(await page.getByTestId('conversation-list').innerText()).not.toContain('已归档');
   expect(await page.locator('.sidebar-project-name', { hasText: 'sample' }).count()).toBe(0);
 
   // 恢复：项目回到列表，生命周期重新是活跃。
@@ -70,6 +71,5 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   expect(await (await createWork()).text()).toContain('user message');
   await page.goto(`${daemon.url}/#/`);
   await page.getByTestId('conversation-list').waitFor();
-  expect(await page.getByTestId('archived-projects-hint').count()).toBe(0);
   expect(await page.locator('.sidebar-project-name', { hasText: 'sample' }).count()).toBe(1);
 }, 180_000);
