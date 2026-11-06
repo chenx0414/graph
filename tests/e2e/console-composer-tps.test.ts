@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'vite';
 import { afterEach, expect, test } from 'vitest';
@@ -114,3 +114,80 @@ test('the node chat footer prints the same rate for the node’s own call', asyn
   expect(title).toContain('240 tokens');
   await page.screenshot({ path: join(evidenceDir(root, 'console-tps'), 'node.png'), fullPage: false });
 }, 240_000);
+
+const SKILLS = [
+  'mattpocock-skills-skills-engineering-codebase-design',
+  'mattpocock-skills-skills-engineering-tdd',
+  'mattpocock-skills-skills-engineering-code-review',
+];
+
+// A graph node is not a conversation node, so it reads its own ledger. The proof is a
+// real graph that actually called the provider: a goal builds the planning team, the
+// planner's call settles, and the node chat prints its rate from that call.
+test('the node chat footer of a graph node prints the rate of its own provider call', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-console-tps-graph-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const webDir = join(root, 'web');
+  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
+  // The team assembly needs its skills installed; the daemon under test gets its own copy.
+  const graphHome = join(root, 'graph-home');
+  for (const skill of SKILLS) {
+    await cp(join(homedir(), '.graph', 'capabilities', 'skills', skill), join(graphHome, 'capabilities', 'skills', skill), { recursive: true });
+  }
+  const provider = await openaiServer([{
+    text: '计划：先写壳，再写取数，最后补测试。'.repeat(4),
+    usage: { prompt_tokens: 900, completion_tokens: 240 },
+    beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, 2_000)),
+  }]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    projects: [{ id: 'p', root: project }],
+    credentials: { local: { secretRef: 'GRAPH_TPS_KEY' } },
+    models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 512, credentialId: 'local' }] },
+  }));
+  const daemon = await launchCli(root, { configPath, webDir, graphHome, extraArgs: ['--execute'], env: { GRAPH_TPS_KEY: 'synthetic-only' } });
+  cleanup.push(() => daemon.close());
+  const request = async (path: string, body?: object) => {
+    const response = await daemon.request(path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json().catch(() => ({})) as Record<string, any> };
+  };
+  const created = await request('/api/conversations', { projectId: 'p', model: 'main', text: '准备开始', requestId: 'tps-graph-conversation' });
+  expect(created.status, JSON.stringify(created.body)).toBe(200);
+  const conversationId = String(created.body.conversationId);
+  const set = await request(`/api/conversations/${conversationId}/messages`, {
+    text: '/goal 把导出做成 CSV\n验收：\n1) POST /api/export 返回 CSV', requestId: 'tps-graph-goal',
+  });
+  const graphId = String((set.body.goal as Record<string, any> | undefined)?.graphId ?? '');
+  expect(graphId, JSON.stringify(set.body)).not.toBe('');
+
+  // The planner's real call: the graph node's own ledger, not the conversation's.
+  const rate = await expect.poll(async () => {
+    const run = (await request(`/api/tasks/${graphId}/nodes/planner/run`)).body as { throughput?: { tokensPerSecond?: number | null } };
+    return run.throughput?.tokensPerSecond ?? null;
+  }, { timeout: 120_000, interval: 1_000 }).not.toBeNull();
+
+  const run = (await request(`/api/tasks/${graphId}/nodes/planner/run`)).body as {
+    throughput: { outputTokens?: number; latencyMs?: number; tokensPerSecond?: number };
+  };
+  // The rate is the node's own two facts divided: whatever the provider reported as
+  // output, over the time that call really took. No figure is taken on trust.
+  expect(run.throughput.outputTokens).toBeGreaterThan(0);
+  expect(run.throughput.latencyMs).toBeGreaterThan(0);
+  expect(run.throughput.tokensPerSecond).toBeCloseTo((run.throughput.outputTokens as number) / ((run.throughput.latencyMs as number) / 1000), 3);
+
+  const { browser } = await launchBrowser();
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(daemon.url);
+  await page.goto(`${daemon.url}/#/tasks/${graphId}/nodes/planner`);
+  const footer = page.getByTestId('node-telemetry-tps');
+  await footer.waitFor({ timeout: 30_000 });
+  await expect.poll(async () => await footer.innerText(), { timeout: 20_000 }).toMatch(/TPS \d+/);
+  expect(await footer.getAttribute('title')).toContain(`${run.throughput.outputTokens} tokens`);
+  await page.screenshot({ path: join(evidenceDir(root, 'console-tps'), 'graph-node.png'), fullPage: false });
+}, 300_000);

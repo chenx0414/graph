@@ -138,6 +138,17 @@ func nodeConfigurations(kernel *KernelStore, graphID, nodeID, executionID string
 	return NodeConfigurations{Current: current, Next: next, Pending: pending}
 }
 
+// kernelNodeThroughput is the newest settled provider call of one graph node: what it
+// wrote and how long the provider took, which is what the node chat footer prints.
+func kernelNodeThroughput(kernel *KernelStore, graphID, nodeID string) NodeThroughput {
+	row := kernelRow(kernel.DB, `SELECT usage AS usage, created_at AS createdAt, settled_at AS settledAt
+    FROM kernel_provider_calls
+    WHERE task_id=? AND node_id=? AND settled_at > created_at
+    ORDER BY settled_at DESC LIMIT 1`, graphID, nodeID)
+	output, latency, rate := throughputOf(row)
+	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate}
+}
+
 // KernelNodeRun is the node detail, including transcript page fields from ListNodeEntries.
 func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQuery) any {
 	row, definition := historicalNode(kernel, graphID, nodeID)
@@ -369,6 +380,8 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Queued           []map[string]any   `json:"queued"`
 		Evidence         []any              `json:"evidence"`
 		Timing           any                `json:"timing"`
+		// The node's newest settled request: the footer prints tokens/s from it.
+		Throughput any `json:"throughput"`
 		Entries          any                `json:"entries"`
 		EntryCount       any                `json:"entryCount"`
 		Limit            any                `json:"limit"`
@@ -386,6 +399,7 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Operations: operations, Invocations: invocations, Questions: questions, Queued: queued, Evidence: []any{},
 		Timing: map[string]any{"totalMs": totalMs, "runMs": totalMeasured("runMs"), "waitingMs": totalMeasured("waitingMs"),
 			"pauseMs": kernel.NativePauseMs(graphID, nodeID), "userWaitMs": nil, "inProgress": inProgress},
+		Throughput: kernelNodeThroughput(kernel, graphID, nodeID),
 		Entries: page["entries"], EntryCount: page["entryCount"], Limit: page["limit"], HasOlder: page["hasOlder"], HasNewer: page["hasNewer"],
 		Phase: kernelNodePhase(kernel, graphID),
 	}
