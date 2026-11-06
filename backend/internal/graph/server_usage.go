@@ -297,35 +297,12 @@ type usagePiModel struct {
 	MaxTokens     int
 }
 
-// usageOpenCodeModels is the OpenCode Go model catalog the Pi package ships.
-// The package is a Node module; the table is embedded here because the usage
-// page reports the models a subscription exposes.
-var usageOpenCodeModels = map[string]usagePiModel{
-	"minimax-m3":                   {ID: "minimax-m3", Name: "MiniMax-M3", API: "anthropic-messages", BaseURL: "https://opencode.ai/zen/go", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"qwen3.8-flash":                {ID: "qwen3.8-flash", Name: "Qwen3.8 Flash", API: "anthropic-messages", BaseURL: "https://opencode.ai/zen/go", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"deepseek-v4-flash":            {ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 384000},
-	"deepseek-v4-flash-vision-exp": {ID: "deepseek-v4-flash-vision-exp", Name: "DeepSeek V4 Flash Vision Exp", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 384000},
-	"deepseek-v4-pro":              {ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro (New)", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 384000},
-	"deepseek-v4.1-flash":          {ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 384000},
-	"glm-5.1":                      {ID: "glm-5.1", Name: "GLM-5.1", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 202752, MaxTokens: 32768},
-	"glm-5.2":                      {ID: "glm-5.2", Name: "GLM-5.2", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"glm-5.3":                      {ID: "glm-5.3", Name: "GLM-5.3", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"glm-5.3-flash":                {ID: "glm-5.3-flash", Name: "GLM-5.3-Flash", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"hy3":                          {ID: "hy3", Name: "Hy3", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 256000, MaxTokens: 128000},
-	"hy4-preview":                  {ID: "hy4-preview", Name: "Hy4 preview", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1024000, MaxTokens: 64000},
-	"kimi-k2.6":                    {ID: "kimi-k2.6", Name: "Kimi K2.6", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 262144, MaxTokens: 65536},
-	"kimi-k2.7-code":               {ID: "kimi-k2.7-code", Name: "Kimi K2.7 Code", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 262144, MaxTokens: 262144},
-	"kimi-k3":                      {ID: "kimi-k3", Name: "Kimi K3", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1048576, MaxTokens: 131072},
-	"longcat-2.0":                  {ID: "longcat-2.0", Name: "LongCat-2.0", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"mimo-v2.5":                    {ID: "mimo-v2.5", Name: "MiMo V2.5", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 128000},
-	"mimo-v2.5-pro":                {ID: "mimo-v2.5-pro", Name: "MiMo V2.5 Pro", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1048576, MaxTokens: 128000},
-	"minimax-m2.7":                 {ID: "minimax-m2.7", Name: "MiniMax-M2.7", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 204800, MaxTokens: 131072},
-	"qwen3.6-plus":                 {ID: "qwen3.6-plus", Name: "Qwen3.6 Plus", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 65536},
-	"qwen3.7-max":                  {ID: "qwen3.7-max", Name: "Qwen3.7 Max", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 65536},
-	"qwen3.7-plus":                 {ID: "qwen3.7-plus", Name: "Qwen3.7 Plus", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 65536},
-	"qwen3.8-max":                  {ID: "qwen3.8-max", Name: "Qwen3.8 Max", API: "openai-completions", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1000000, MaxTokens: 131072},
-	"gpt-5.6-luna":                 {ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", API: "openai-responses", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1050000, MaxTokens: 128000},
-	"grok-4.6":                     {ID: "grok-4.6", Name: "Grok 4.6", API: "openai-responses", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 500000, MaxTokens: 500000},
-	"muse-spark-1.2-contributor":   {ID: "muse-spark-1.2-contributor", Name: "Muse Spark 1.2 Contributor", API: "openai-responses", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1048576, MaxTokens: 131072},
-	"muse-spark-1.3-contributor":   {ID: "muse-spark-1.3-contributor", Name: "Muse Spark 1.3 Contributor", API: "openai-responses", BaseURL: "https://opencode.ai/zen/go/v1", Reasoning: true, ContextWindow: 1048576, MaxTokens: 131072},
+// usageOpenCodeModels is the OpenCode Go catalog, read from the kernel.
+//
+// The kernel generates it from PiG's own data, so a model upstream adds or
+// renames reaches the usage page without a second edit here. The kernel also
+// names each model's public inference host; the plan's configured endpoint
+// still decides where a request goes, so the entries carry no base URL.
+func usageOpenCodeModels() map[string]usagePiModel {
+	return usageKernelModels("opencode-go")
 }

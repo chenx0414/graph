@@ -239,6 +239,7 @@ func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPric
 		baseURL = usageDefaultBaseURLs[UsageProviderOpenCodeGo]
 	}
 	configuredKeys := usageOpenCodeConfiguredModelKeys(openCodeConfig, []string{"opencode-go"})
+	catalog := usageOpenCodeModels()
 	status, _, raw, err := usageFetch("GET", usageModelsDevURL, map[string]string{"accept": "application/json"}, nil, usageRequestTimeoutMs)
 	if err != nil {
 		return usageOpenCodeFallbackModels(configuredKeys, baseURL, prices)
@@ -255,7 +256,7 @@ func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPric
 	for id := range models {
 		ids[id] = true
 	}
-	for id := range usageOpenCodeModels {
+	for id := range catalog {
 		ids[id] = true
 	}
 	ordered := make([]string, 0, len(ids))
@@ -267,7 +268,7 @@ func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPric
 	for _, id := range ordered {
 		item := usageRecord(models[id])
 		limit := usageRecord(item["limit"])
-		pi, hasPi := usageOpenCodeModels[id]
+		pi, hasPi := catalog[id]
 		api := SubscriptionModelApiOpenAICompletions
 		if hasPi {
 			if pi.API == "anthropic-messages" {
@@ -282,8 +283,11 @@ func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPric
 		} else if hasPi {
 			name = pi.Name
 		}
+		// The kernel's catalog names the public inference host; the plan was
+		// configured against the endpoint that answers for it, so only a
+		// catalog that names an endpoint may move the request.
 		modelBaseURL := baseURL
-		if hasPi {
+		if hasPi && pi.BaseURL != "" {
 			modelBaseURL = pi.BaseURL
 		}
 		contextWindow := 131_072
