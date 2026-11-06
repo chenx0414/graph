@@ -52,6 +52,11 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 	if _, ok := entry["cost"]; ok {
 		cost := configAsCost(entry["cost"], path+".cost")
 		model.Cost = &cost
+	} else if cost := kernelModelPrice(model.Provider, ModelIdentity(model)); cost != nil {
+		// The price and its volume tiers belong to the catalog, and the catalog
+		// is the kernel's. A configuration that names no cost therefore bills at
+		// the kernel's price instead of recording an unknown one.
+		model.Cost = cost
 	}
 	if _, ok := entry["pricing"]; ok {
 		pricing := configAsPricing(entry["pricing"], path+".pricing")

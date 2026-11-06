@@ -67,6 +67,19 @@ type ModelCost struct {
 	Output     float64 `json:"output"`
 	CacheRead  float64 `json:"cacheRead"`
 	CacheWrite float64 `json:"cacheWrite"`
+	// Tiers are the catalog's volume prices: the highest threshold the whole
+	// prompt crossed replaces every base rate. They come from the kernel
+	// catalog, which is where the numbers are maintained.
+	Tiers []ModelCostTier `json:"tiers,omitempty"`
+}
+
+// ModelCostTier is one volume step of a model's price.
+type ModelCostTier struct {
+	InputTokensAbove float64 `json:"inputTokensAbove"`
+	Input            float64 `json:"input"`
+	Output           float64 `json:"output"`
+	CacheRead        float64 `json:"cacheRead"`
+	CacheWrite       float64 `json:"cacheWrite"`
 }
 
 type ModelPricing struct {
@@ -228,7 +241,7 @@ func EstimateCost(usage TokenUsage, cost *ModelCost, pricing *ModelPricing) any 
 			return map[string]any{"unknown": true}
 		}
 	}
-	amount := (float64(usage.Input)*cost.Input + float64(usage.Output)*cost.Output + float64(usage.CacheRead)*cost.CacheRead + float64(usage.CacheWrite)*cost.CacheWrite) / 1_000_000
+	amount := kernelCostAmount(*cost, usage)
 	if math.IsNaN(amount) || math.IsInf(amount, 0) {
 		return map[string]any{"unknown": true}
 	}
