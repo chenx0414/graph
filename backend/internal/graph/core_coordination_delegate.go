@@ -28,6 +28,12 @@ func (runtime *TaskRuntime) DelegateFromGlobal(taskID string, input DelegateWork
 		}
 		input.SourceMessageID = kernelString(source["id"])
 	}
+	// Delegating this checkout to itself would be main talking to main: the
+	// project that is this repository has no supervisor, so its work is done
+	// here instead of being handed over.
+	if runtime.ownCheckoutProject(input.ProjectID) {
+		Raise("invalid_input", "This project is the Graph checkout itself: do the work here instead of delegating it")
+	}
 	work := runtime.CreateWork(WorkCreate{ConversationID: caller.Id, ProjectID: input.ProjectID, SourceMessageID: input.SourceMessageID, Brief: input.Brief, Acceptance: input.Acceptance}, input.RequestID)
 	thread := runtime.OpenProjectThread(input.ProjectID, input.RequestID+":thread")
 	result := runtime.store.Command("work:delegate:"+work.ID, input.RequestID, map[string]any{"revision": work.Revision, "target": thread.ConversationID}, func() any {
