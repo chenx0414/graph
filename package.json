@@ -60,7 +60,7 @@
     "app:icons": "node scripts/make-icons.mjs",
     "app:build": "node --run build:backend && node scripts/make-icons.mjs && node --run build:web && node scripts/package-app.mjs",
     "build:backend": "node scripts/build-backend.mjs",
-    "check:backend": "node --run build:backend && go -C backend vet ./...",
+    "check:backend": "node --run build:backend && go -C backend vet ./... && go -C backend test ./...",
     "pig:kernel": "node scripts/pig-kernel-update.mjs",
     "pig:update": "node scripts/pig-kernel-update.mjs --set latest",
     "pig:check": "node scripts/pig-kernel-update.mjs --check"
