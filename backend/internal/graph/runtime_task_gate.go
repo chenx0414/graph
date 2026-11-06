@@ -87,6 +87,10 @@ func (gate *TaskSendGate) Check(reservation float64) {
 	if task.Phase != "chatting" && projectArchived(gate.store, task.ProjectID) {
 		Raise("paused", "Project is archived")
 	}
+	// The budget is a cost gate, not a permission gate: it is asserted before the
+	// unrestricted shortcut, so a fully trusted session still cannot send past
+	// what the user is willing to pay for.
+	AssertWithinBudget(gate.store, gate.operation.InstanceId, int64(reservation))
 	if gate.options.Unrestricted {
 		return
 	}
@@ -98,7 +102,6 @@ func (gate *TaskSendGate) Check(reservation float64) {
 		gate.store.OpenUnknownUsageQuestion(gate.operation.TaskId, *gate.nodeId) {
 		Raise("unknown_usage", "Instance paused for unknown usage")
 	}
-	AssertWithinBudget(gate.store, gate.operation.InstanceId, int64(reservation))
 }
 
 // dispatch records the invocation and then lets the send happen.

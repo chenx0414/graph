@@ -27,7 +27,9 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			}
 		})
 	}
-	if IsFullAccess(operation.AccessPolicy) && refusal.Code != "interrupted" {
+	// Full access decides what the host may touch, not whether someone pays for
+	// it: a budget refusal stays parked so the reader sees the limit.
+	if IsFullAccess(operation.AccessPolicy) && refusal.Code != "interrupted" && refusal.Code != "budget" {
 		return l.transaction(func() any {
 			row := l.operationRow(operation.Id)
 			state := kernelString(row["state"])

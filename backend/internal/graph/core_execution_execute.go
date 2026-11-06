@@ -8,7 +8,6 @@ import (
 func (e *Execution) execute(node ExecutionNodeRow) bool {
 	graphDatabaseMu.Lock()
 	accessPolicy := e.currentAccessPolicy()
-	fullAccess := IsFullAccess(accessPolicy)
 	if e.stopping || (e.dispatchAllowed != nil && !e.dispatchAllowed()) || e.store.Task(node.TaskId).Paused != 0 {
 		graphDatabaseMu.Unlock()
 		return false
@@ -137,7 +136,9 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 		graphDatabaseMu.Unlock()
 		Raise("invalid_adapter", "A bounded token reservation is required")
 	}
-	if node.InstanceId != nil && !fullAccess {
+	// A node cannot spend past its ceiling by being trusted: the budget applies
+	// whatever the posture is.
+	if node.InstanceId != nil {
 		failure := func() (failure any) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
