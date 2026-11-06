@@ -161,13 +161,16 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px 18px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 11px;
+  overflow: hidden;
 }
+.agent-preview-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-preview-meta > .btn { flex: 0 0 auto; }
 .agent-preview-meta code { color: var(--text); font-size: 10.5px; }
 .agent-preview-meta > .btn { margin-left: auto; }
 /* The prompt and its declarations are two halves of one send: they split the
@@ -176,7 +179,8 @@
 .agent-preview-panel > .agent-preview-panel { flex: 1 1 50%; }
 .agent-preview-notice {
   flex: 0 0 auto;
-  padding: 8px 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 6px 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--warn) 28%, var(--border));
   background: var(--warn-weak);
   color: var(--warn);
