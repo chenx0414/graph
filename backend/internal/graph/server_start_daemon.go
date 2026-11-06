@@ -346,7 +346,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		Live: &TaskRuntimeLive{
 			Revision: live.Revision, Config: live.Config, Entries: live.Entries, Preferences: live.Preferences,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },
-			MasterModel:   live.MasterModel, DefaultBudgetTokens: live.DefaultBudgetTokens, Projects: live.Projects,
+			MasterModel:   live.MasterModel, Projects: live.Projects,
 		},
 		Master: &TaskRuntimeMaster{
 			Action: "master", Model: live.MasterModel, DefinitionVersion: currentMasterDefinitionVersion,
@@ -355,7 +355,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			CapabilityRoot: filepath.Join(userHome, "capabilities"), RecipesPath: filepath.Join(userHome, "agent-combinations.json"),
 			BootstrapPrompts: bootstrap.Prompts, BootstrapToolPrompt: bootstrap.ToolPrompt,
 		},
-		Limits: &TaskRuntimeLimits{DefaultBudgetTokens: live.DefaultBudgetTokens},
 		Access: live.Access, Usage: usage, Rsi: rsi, AgentContext: agentContext,
 		// SystemContext is deliberately left unset: the daemon has no host
 		// inventory to offer the main Agent yet, so the system tools stay

@@ -187,56 +187,6 @@ func RecordCurrentModelUse(store *TaskStore, instanceID string) {
 	}
 }
 
-func SetBudget(store *TaskStore, instanceID string, tokens *int64) {
-	if tokens != nil && (!g5SafeInt(*tokens) || *tokens <= 0) {
-		Raise("invalid_input", "Budget must be a positive integer or null")
-	}
-	row := instanceBudget(store, instanceID)
-	if row["budget_scope_id"] != nil {
-		scope, ok := g5One(store.Db, `SELECT s.owner_instance_id,
-        (SELECT COUNT(*) FROM instances member WHERE member.budget_scope_id=s.id) AS members
-      FROM budget_scopes s WHERE s.id=?`, row["budget_scope_id"])
-		if ok && g5Int(scope["members"]) > 1 && g5Str(scope["owner_instance_id"]) != instanceID {
-			Raise("shared_budget_owner_required", "Only the shared budget owner can change the scope cap")
-		}
-	}
-	budget := int64(0)
-	unlimited := 0
-	var limit any
-	if tokens == nil {
-		unlimited = 1
-	} else {
-		budget = *tokens
-		limit = *tokens
-	}
-	store.SetInstanceBudget(instanceID, budget, unlimited)
-	if row["budget_scope_id"] != nil {
-		g5Exec(store.Db, "UPDATE budget_scopes SET limit_tokens=?,unlimited=? WHERE id=?", limit, unlimited, row["budget_scope_id"])
-		store.SetScopeMemberBudget(g5Str(row["budget_scope_id"]), budget, unlimited)
-	}
-}
-
-func AddBudget(store *TaskStore, instanceID string, tokens int64) {
-	if !g5SafeInt(tokens) || tokens <= 0 {
-		Raise("invalid_input", "A positive token increment is required")
-	}
-	row := instanceBudget(store, instanceID)
-	if g5Int(row["unlimited"]) != 0 {
-		Raise("invalid_answer", "An unlimited instance has no budget question to add to")
-	}
-	if !g5SafeInt(g5Int(row["budget"]) + tokens) {
-		Raise("invalid_answer", "Budget exceeds the supported range")
-	}
-	store.AddInstanceBudget(instanceID, tokens)
-	if row["budget_scope_id"] != nil {
-		scope, _ := g5One(store.Db, "SELECT limit_tokens,unlimited FROM budget_scopes WHERE id=?", row["budget_scope_id"])
-		if g5Int(scope["unlimited"]) == 0 {
-			g5Exec(store.Db, "UPDATE budget_scopes SET limit_tokens=COALESCE(limit_tokens,0)+? WHERE id=?", tokens, row["budget_scope_id"])
-			store.SyncScopeMemberBudget(g5Str(row["budget_scope_id"]))
-		}
-	}
-}
-
 func boolInt(value bool) int {
 	if value {
 		return 1

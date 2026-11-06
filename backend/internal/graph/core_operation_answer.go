@@ -60,47 +60,7 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			l.rearmQuestion(taskId, questionId)
 			return nil
 		}
-		if kind == "budget" && answer.Type == "add_budget" {
-			if answer.Tokens <= 0 {
-				Raise("invalid_answer", "A positive token increment is required")
-			}
-			kernel := NewKernelStore(l.store)
-			if kernel.LatestRevision(taskId) != nil {
-				var data map[string]any
-				if err := json.Unmarshal([]byte(kernelString(question["data"])), &data); err != nil {
-					panic(err)
-				}
-				executionId := ""
-				if value, ok := data["executionId"].(string); ok {
-					executionId = value
-				}
-				execution := kernel.Execution(executionId)
-				if execution == nil || execution.TaskId != taskId || execution.NodeId != nodeId || execution.TokenBudget == nil {
-					Raise("invalid_answer", "Budget question has no frozen execution quota")
-				}
-				quota := kernel.AuthorizedBudget(taskId, nodeId)
-				budget := execution.TokenBudget.Budget
-				if quota != nil {
-					budget = quota.Budget
-				}
-				unlimited := execution.TokenBudget.Unlimited
-				if quota != nil {
-					unlimited = quota.Unlimited
-				}
-				if unlimited || !jsSafeInteger(int64(budget)+answer.Tokens) {
-					Raise("invalid_answer", "Budget increment requires a finite quota within the safe integer range")
-				}
-				total := int64(budget) + answer.Tokens
-				kernel.SetAuthorizedBudget(taskId, nodeId, &total)
-				l.store.Event(taskId, "instance.budget_changed", map[string]any{"nodeId": nodeId, "tokens": total, "nextExecution": true})
-			} else {
-				instance := kernelRow(l.store.Db, "SELECT id FROM instances WHERE task_id=? AND node_id=?", taskId, nodeId)
-				if instance == nil {
-					Raise("not_found", "Unknown agent node")
-				}
-				AddBudget(l.store, kernelString(instance["id"]), answer.Tokens)
-			}
-		} else if kind == "unknown_usage" && (answer.Type == "usage" || answer.Type == "reconcile_usage") {
+		if kind == "unknown_usage" && (answer.Type == "usage" || answer.Type == "reconcile_usage") {
 			operationId := kernelString(question["operation_id"])
 			l.answerUnknownUsage(operationId, answer, models)
 		} else if kind == "permission" && answer.Type == "grant" {

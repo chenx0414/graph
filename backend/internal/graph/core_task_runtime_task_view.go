@@ -157,7 +157,6 @@ func (task *TaskRuntimeTask) View() map[string]any {
 			used = kernelInt(ledger["used"])
 			reserved = kernelInt(ledger["reserved"])
 		}
-		budget := runtime.liveBudget()
 		nodes = append(nodes, map[string]any{
 			"id":                node.NodeId,
 			"kind":              "agent",
@@ -170,8 +169,8 @@ func (task *TaskRuntimeTask) View() map[string]any {
 			"stallCount":        0,
 			"used":              used,
 			"reserved":          reserved,
-			"unlimited":         budget == nil,
-			"budget":            budget,
+			"unlimited":         true,
+			"budget":            nil,
 			"optional":          false,
 			"boundDefinition":   recipe,
 			"selectedModel":     model,

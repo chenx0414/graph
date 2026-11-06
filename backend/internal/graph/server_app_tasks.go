@@ -70,25 +70,6 @@ func (app *GraphApp) serveTaskResume(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task.Resume(appBodyString(body, "requestId")))
 }
 
-// serveTaskBudget changes the budget of one node.
-func (app *GraphApp) serveTaskBudget(w http.ResponseWriter, r *http.Request) {
-	body := appJSONBody(w, r)
-	input := TaskRuntimeBudgetInput{
-		NodeId:    appBodyString(body, "nodeId"),
-		RequestId: appBodyString(body, "requestId"),
-	}
-	if raw, present := body["tokens"]; present && raw != nil {
-		value, ok := raw.(float64)
-		if !ok {
-			Raise("invalid_input", "tokens must be a number or null")
-		}
-		tokens := int64(value)
-		input.Tokens = &tokens
-	}
-	task := app.runtime.User().Task(r.PathValue("taskId"))
-	writeJSON(w, http.StatusOK, task.SetBudget(input))
-}
-
 // serveTaskAnswer answers one open question.
 func (app *GraphApp) serveTaskAnswer(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)

@@ -63,10 +63,6 @@ async function checkConstraints(state:string){
    await expect(run()).rejects.toThrow(/snapshot is invalid or changed/);expect(provider.requests).toHaveLength(0);return;
   }
   const {stdout}=await run();const report=JSON.parse(stdout);artifactRoot=report.root;
-  if(state.startsWith('limited')){
-   const saved=JSON.parse(await readFile(join(report.root,'config.json'),'utf8'));
-   expect(report.taskSuccess,JSON.stringify({report,savedLimits:saved.limits})).toBe(false);expect(provider.requests).toHaveLength(0);return;
-  }
   expect(report.error,JSON.stringify(report)).toBeUndefined();
   const reply=(provider.requests[1] as {messages:{role:string;content:string}[]}).messages.filter(message=>message.role==='tool').at(-1)!.content;
   expect(reply).toContain('FROZEN_CONTEXT_SKILL');expect(reply).not.toContain('CHANGED_SOURCE_SKILL');
@@ -79,7 +75,7 @@ async function checkConstraints(state:string){
  }
 }
 
-test.each(['missing','tampered','limited','limited-bare'])('evaluation preserves frozen skills and configured constraints: %s',async state=>{
+test.each(['missing','tampered'])('evaluation preserves frozen skills and configured constraints: %s',async state=>{
  await checkConstraints(state);
 },45000);
 

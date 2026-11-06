@@ -75,26 +75,6 @@ func (runtime *TaskRuntime) livePreferences() map[ModelGrade][]string {
 	return preferences
 }
 
-// liveBudget reads the default budget of a new instance.
-func (runtime *TaskRuntime) liveBudget() *int64 {
-	if runtime.live != nil && runtime.live.DefaultBudgetTokens != nil {
-		budget := runtime.live.DefaultBudgetTokens()
-		if budget == nil {
-			return nil
-		}
-		value := int64(*budget)
-		return &value
-	}
-	if runtime.limits != nil && runtime.limits.DefaultBudgetTokens != nil {
-		budget := runtime.limits.DefaultBudgetTokens()
-		if budget == nil {
-			return nil
-		}
-		value := int64(*budget)
-		return &value
-	}
-	return nil
-}
 
 // masterModel reads the master Agent model right now.
 func (runtime *TaskRuntime) masterModel() *string {
@@ -174,16 +154,9 @@ func (runtime *TaskRuntime) executionSystemContext() *ExecutionSystemContext {
 // graphs lists the v2 graphs that currently have queued work.
 func (runtime *TaskRuntime) graphs() []ExecutionGraph {
 	lane := runtime.residentGraphLane()
-	// §9: the budget a node runs under is read live, so a configuration change
-	// reaches the next turn of a graph that is already running.
-	budget := runtime.liveBudgetTokens()
 	if runtime.laneTokenBudget != nil {
 		runtime.laneTokenBudget.Budget = 0
 		runtime.laneTokenBudget.Unlimited = true
-		if budget != nil {
-			runtime.laneTokenBudget.Budget = float64(*budget)
-			runtime.laneTokenBudget.Unlimited = false
-		}
 	}
 	runnable := lane.Runnable()
 	out := make([]ExecutionGraph, 0, len(runnable))
@@ -194,17 +167,6 @@ func (runtime *TaskRuntime) graphs() []ExecutionGraph {
 	return out
 }
 
-// liveBudgetTokens is the default token budget of one node, or nil when the
-// node may spend without a cap.
-func (runtime *TaskRuntime) liveBudgetTokens() *int {
-	if runtime.live != nil && runtime.live.DefaultBudgetTokens != nil {
-		return runtime.live.DefaultBudgetTokens()
-	}
-	if runtime.limits != nil && runtime.limits.DefaultBudgetTokens != nil {
-		return runtime.limits.DefaultBudgetTokens()
-	}
-	return nil
-}
 
 // projectRootFor is the project workspace of one graph.
 func (runtime *TaskRuntime) projectRootFor(graphId string) *string {

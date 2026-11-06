@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -94,54 +93,6 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 				"taskId": target,
 				"cursor": runtime.execution.Abandon(target, &reason, true),
 			}
-		})
-	case "set_budget":
-		nodeId := ""
-		if input.NodeId != nil {
-			nodeId = strings.TrimSpace(*input.NodeId)
-		}
-		if nodeId == "" {
-			Raise("invalid_input", "set_budget needs the node whose budget changes")
-		}
-		if input.Tokens == nil {
-			Raise("invalid_input", "set_budget needs tokens: a positive integer or null for unlimited")
-		}
-		if *input.Tokens <= 0 {
-			Raise("invalid_input", "Budget must be a positive integer or null")
-		}
-		if runtime.kernel.LatestRevision(target) != nil {
-			Raise("invalid_graph", "Native node budgets are declared with graph_patch; only the user can change authorization")
-		}
-		specRow := kernelRow(runtime.store.Db, "SELECT spec FROM nodes WHERE task_id=? AND id=?", target, nodeId)
-		action := ""
-		if specRow != nil {
-			var spec map[string]any
-			if err := json.Unmarshal([]byte(kernelString(specRow["spec"])), &spec); err == nil {
-				action, _ = spec["action"].(string)
-			}
-		}
-		reservation := runtime.execution.ReserveTokensFor(action)
-		var warning *string
-		if input.Tokens != nil && reservation != nil && *input.Tokens < int64(*reservation) {
-			text := "这个上限（" + itoa(int(*input.Tokens)) + "）低于该节点一次派发所需的预留 " + itoa(*reservation) + " tokens：它下一次派发（包括正在跑的这一回合）会被预算挡住并停下来问人。"
-			warning = &text
-		}
-		return runtime.store.Command(scope, input.RequestId, map[string]any{"type": "set_budget", "taskId": target, "nodeId": nodeId, "tokens": input.Tokens}, func() any {
-			instance := kernelRow(runtime.store.Db, "SELECT id FROM instances WHERE task_id=? AND node_id=?", target, nodeId)
-			if instance == nil {
-				Raise("not_found", "Unknown agent node")
-			}
-			SetBudget(runtime.store, kernelString(instance["id"]), input.Tokens)
-			runtime.store.ResolveNodeBudgetQuestions(target, nodeId, map[string]any{"type": "set_budget", "tokens": input.Tokens})
-			event := map[string]any{"nodeId": nodeId, "tokens": input.Tokens, "actor": "agent"}
-			if warning != nil {
-				event["warning"] = *warning
-			}
-			out := map[string]any{"taskId": target, "nodeId": nodeId, "tokens": input.Tokens, "cursor": runtime.store.Event(target, "instance.budget_changed", event)}
-			if warning != nil {
-				out["warning"] = *warning
-			}
-			return out
 		})
 	case "steer":
 		nodeId := ""

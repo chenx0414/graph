@@ -67,12 +67,6 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	RetireLegacyGraphs(runtime.store)
 	interruptedNodes := RecoverKernelExecutions(runtime.kernel)
 
-	if runtime.limits != nil && runtime.limits.DefaultBudgetTokens != nil {
-		budget := runtime.limits.DefaultBudgetTokens()
-		if budget != nil && *budget <= 0 {
-			Raise("invalid_input", "limits.defaultBudgetTokens must be a positive integer or null")
-		}
-	}
 	runtime.store.Transaction(func() any {
 		for _, project := range runtime.configuredProjects() {
 			if strings.TrimSpace(project.Id) == "" || strings.TrimSpace(project.Root) == "" {

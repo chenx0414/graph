@@ -22,7 +22,6 @@ type CredentialConfig struct {
 type LimitsConfig struct {
 	Credentials         map[string]int `json:"credentials"`
 	SharedGroups        map[string]int `json:"sharedGroups"`
-	DefaultBudgetTokens *int           `json:"defaultBudgetTokens"`
 }
 
 // GraphSkills is the skill-library block the document is allowed to carry.
@@ -103,7 +102,7 @@ func EmptyGraphConfig() GraphConfig {
 	return GraphConfig{
 		Path: nil, Configured: false, Projects: []ProjectConfig{}, Models: nil,
 		Credentials:           map[string]CredentialConfig{},
-		Limits:                LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}, DefaultBudgetTokens: nil},
+		Limits:                LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}},
 		Access:                FullAccessPolicy(),
 		Skills:                GraphSkills{Sedimentation: sediment},
 		PiExtensionAutoUpdate: true,

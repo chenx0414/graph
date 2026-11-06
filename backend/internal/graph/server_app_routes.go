@@ -103,7 +103,7 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{taskId}/abandon", app.serveTaskAbandon)
 	mux.HandleFunc("POST /api/tasks/{taskId}/pause", app.serveTaskPause)
 	mux.HandleFunc("POST /api/tasks/{taskId}/resume", app.serveTaskResume)
-	mux.HandleFunc("POST /api/tasks/{taskId}/budget", app.serveTaskBudget)
+
 	mux.HandleFunc("POST /api/tasks/{taskId}/answer", app.serveTaskAnswer)
 	mux.HandleFunc("GET /api/tasks/{taskId}/events", app.serveTaskEvents)
 	mux.HandleFunc("GET /api/tasks/{taskId}/events/stream", app.serveTaskStream)

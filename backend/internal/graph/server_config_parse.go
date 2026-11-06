@@ -100,7 +100,7 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 			credentials[id] = credential
 		}
 	}
-	limits := LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}, DefaultBudgetTokens: nil}
+	limits := LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}, }
 	if value, ok := root["limits"]; ok {
 		rawLimits := asObject(value, "limits")
 		credentialLimits := map[string]any{}
@@ -119,10 +119,6 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 		}
 		for id, item := range groups {
 			limits.SharedGroups[id] = configPositiveInt(item, "limits.sharedGroups."+id)
-		}
-		if current, present := rawLimits["defaultBudgetTokens"]; present && current != nil {
-			budget := configPositiveInt(current, "limits.defaultBudgetTokens")
-			limits.DefaultBudgetTokens = &budget
 		}
 	}
 	projects := []ProjectConfig{}

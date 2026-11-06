@@ -140,11 +140,6 @@ func (live *LiveConfig) MasterModel() string {
 	return live.state.MasterModel
 }
 
-func (live *LiveConfig) DefaultBudgetTokens() *int {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	return live.state.Config.Limits.DefaultBudgetTokens
-}
 
 func (live *LiveConfig) Access() AccessPolicy {
 	live.mu.Lock()

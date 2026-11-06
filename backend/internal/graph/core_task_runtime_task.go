@@ -94,15 +94,9 @@ func taskRuntimeReceipt(result any) Receipt {
 
 // insertInstance records the instance row of one node.
 func (runtime *TaskRuntime) insertInstance(id, taskId, nodeId string, definitionVersion *string, model *string) string {
-	budget := runtime.liveBudget()
-	unlimited := 0
-	amount := int64(0)
-	if budget == nil {
-		unlimited = 1
-	} else {
-		amount = *budget
-	}
-	runtime.store.CreateInstance(id, taskId, nodeId, definitionVersion, model, amount, unlimited)
+	// An instance counts what it spends; it no longer holds a ceiling, so every
+	// instance is created unmetered.
+	runtime.store.CreateInstance(id, taskId, nodeId, definitionVersion, model, 0, 1)
 	return id
 }
 
@@ -194,55 +188,10 @@ func (task *TaskRuntimeTask) Abandon(requestId string, reason *string) Receipt {
 }
 
 // TaskRuntimeBudgetInput is the input of one budget change.
-type TaskRuntimeBudgetInput struct {
+type taskRuntimeUnusedBudgetInput struct {
 	NodeId    string
 	Tokens    *int64
 	RequestId string
-}
-
-// SetBudget changes the budget policy of one node.
-func (task *TaskRuntimeTask) SetBudget(input TaskRuntimeBudgetInput) Receipt {
-	runtime := task.runtime
-	runtime.ensureOpen()
-	if strings.TrimSpace(input.NodeId) == "" {
-		Raise("invalid_input", "A nodeId is required")
-	}
-	if input.Tokens != nil && *input.Tokens <= 0 {
-		Raise("invalid_input", "Budget must be a positive integer or null")
-	}
-	result := runtime.store.Command("user", input.RequestId, map[string]any{
-		"type": "set_budget", "taskId": task.taskId, "nodeId": input.NodeId, "tokens": input.Tokens,
-	}, func() any {
-		if runtime.kernel.LatestRevision(task.taskId) != nil {
-			runtime.kernel.SetAuthorizedBudget(task.taskId, input.NodeId, input.Tokens)
-			changes := runtime.store.ResolveNodeBudgetQuestions(task.taskId, input.NodeId, map[string]any{"type": "set_budget", "tokens": input.Tokens})
-			if changes > 0 {
-				CloseUserWait(runtime.store, task.taskId, input.NodeId)
-			}
-			return map[string]any{
-				"taskId": task.taskId,
-				"cursor": runtime.store.Event(task.taskId, "instance.budget_changed", map[string]any{"nodeId": input.NodeId, "tokens": input.Tokens, "nextExecution": true}),
-			}
-		}
-		instance := kernelRow(runtime.store.Db, "SELECT id FROM instances WHERE task_id=? AND node_id=?", task.taskId, input.NodeId)
-		if instance == nil {
-			Raise("not_found", "Unknown agent node")
-		}
-		SetBudget(runtime.store, kernelString(instance["id"]), input.Tokens)
-		changes := runtime.store.ResolveNodeBudgetQuestions(task.taskId, input.NodeId, map[string]any{"type": "set_budget", "tokens": input.Tokens})
-		if changes > 0 {
-			CloseUserWait(runtime.store, task.taskId, input.NodeId)
-			stillOpen := kernelRow(runtime.store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'", task.taskId, input.NodeId)
-			if stillOpen == nil {
-				runtime.store.SetNodePending(task.taskId, input.NodeId)
-			}
-		}
-		return map[string]any{
-			"taskId": task.taskId,
-			"cursor": runtime.store.Event(task.taskId, "instance.budget_changed", map[string]any{"nodeId": input.NodeId, "tokens": input.Tokens}),
-		}
-	})
-	return taskRuntimeReceipt(result)
 }
 
 // Answer resolves one open question.

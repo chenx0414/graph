@@ -22,7 +22,6 @@ type TaskRuntimeLive struct {
 	Preferences         func() map[string][]string
 	CredentialFor       func(ConfiguredModel) *ResolvedCredential
 	MasterModel         func() string
-	DefaultBudgetTokens func() *int
 	Projects            func() []ProjectConfig
 }
 
@@ -43,7 +42,6 @@ type TaskRuntimeCatalog struct {
 
 // TaskRuntimeLimits are the default budget limits of one runtime.
 type TaskRuntimeLimits struct {
-	DefaultBudgetTokens func() *int
 }
 
 // TaskRuntimeSystemContext is the read-only host inventory of one runtime.
