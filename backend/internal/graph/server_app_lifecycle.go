@@ -25,7 +25,7 @@ func CreateApp(runtime *TaskRuntime, options AppOptions) *GraphApp {
 	// the login uses, so the runtime and the app share one refresher. Wiring it here
 	// keeps the runtime free of the host's secret channel.
 	if runtime != nil {
-		runtime.options.OnCredentialRejected = app.recoverCredential
+		runtime.options.OnCredentialRejected = app.scheduleCredentialRecovery
 	}
 	mux := http.NewServeMux()
 	app.registerRoutes(mux)
@@ -127,17 +127,38 @@ func (app *GraphApp) guard(next http.Handler) http.Handler {
 	})
 }
 
-// recoverCredential renews the credential a rejected model request used.
+// scheduleCredentialRecovery hands a rejected turn to the renewer and returns at once.
 //
-// It resolves the model's provider from the live catalog and only renews a credential
-// that carries a refresh bundle; a plain API key has nothing to renew, and its
-// rejection is the honest answer to the request.
-func (app *GraphApp) recoverCredential(modelId string) error {
-	ref, ok := app.xaiCredentialForModel(modelId)
+// It runs on the dispatcher's goroutine, which holds the database lock, so the
+// renewal starts in its own goroutine: the write of the renewed secret needs that same
+// lock. When the renewal succeeds the node is requeued with the request the turn
+// carried; when the vendor refuses it the person is asked (once, by markXaiRelogin).
+func (app *GraphApp) scheduleCredentialRecovery(request CredentialRecoveryRequest) bool {
+	ref, ok := app.xaiCredentialForModel(request.Model)
 	if !ok {
-		return fmt.Errorf("模型 %s 的凭据不是可刷新的 OAuth 凭据", modelId)
+		return false
 	}
-	return app.loginService().xaiRefreshNow(context.Background(), ref)
+	go func() {
+		if err := app.loginService().xaiRefreshNow(context.Background(), ref); err != nil {
+			app.runtime.store.Event(request.TaskId, "node.credential_refresh_failed", map[string]any{
+				"nodeId": request.NodeId, "error": err.Error(),
+			})
+			return
+		}
+		store := app.runtime.store
+		// The failed operation is the node's output operation: without it the row would
+		// point at an empty id and the foreign key refuses the retry (measured: a
+		// panic that took the daemon down).
+		store.RetryNodeOutput(request.TaskId, request.NodeId, request.Output, request.OperationId)
+		store.RetryActivation(request.ActivationId)
+		store.Event(request.TaskId, "node.credential_refreshed", map[string]any{
+			"nodeId": request.NodeId, "reason": "OAuth 凭据已刷新，重跑本轮",
+		})
+		if app.runtime.execution != nil {
+			app.runtime.execution.Kick()
+		}
+	}()
+	return true
 }
 
 // xaiCredentialForModel names the credential a model uses, when that credential is an
@@ -163,7 +184,7 @@ func (app *GraphApp) xaiCredentialForModel(modelId string) (string, bool) {
 		if preset.ID != provider && preset.OAuthProvider != provider {
 			continue
 		}
-		if strings.TrimSpace(app.appProviderSecrets()[preset.CredentialRef+xaiRefreshSuffix]) == "" {
+		if !app.loginService().hasXaiBundle(preset.CredentialRef) {
 			return "", false
 		}
 		return preset.CredentialRef, true

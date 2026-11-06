@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { build } from 'vite';
 import { afterEach, expect, test } from 'vitest';
+import { launchBrowser } from '../helpers/host-browser.ts';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { vendorProxy } from '../helpers/vendor-proxy.ts';
 
@@ -26,7 +28,8 @@ interface VendorLog {
 }
 
 /** A controlled x.ai: one working refresh token, one that the vendor has revoked. */
-async function xaiVendor(options: { acceptRefresh: string | null; issueAccess: string; rotateTo?: string }) {
+async function xaiVendor(options: { acceptRefresh: string | string[] | null; issueAccess: string; rotateTo?: string }) {
+  const accepted = options.acceptRefresh === null ? [] : Array.isArray(options.acceptRefresh) ? options.acceptRefresh : [options.acceptRefresh];
   const log: VendorLog = { refreshes: [], bearers: [] };
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -41,7 +44,7 @@ async function xaiVendor(options: { acceptRefresh: string | null; issueAccess: s
       if (form.get('grant_type') !== 'refresh_token') return reply(400, { error: 'unsupported_grant_type' });
       const presented = form.get('refresh_token');
       log.refreshes.push({ refreshToken: presented });
-      if (!options.acceptRefresh || presented !== options.acceptRefresh) {
+      if (!presented || !accepted.includes(presented)) {
         // The wording a revoked refresh token really comes back with.
         return reply(400, { error: 'invalid_grant', error_description: 'Refresh token has been revoked' });
       }
@@ -83,13 +86,17 @@ async function xaiVendor(options: { acceptRefresh: string | null; issueAccess: s
   return { origin, log, async close() { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 
-async function launchGraph(vendor: { origin: string }, refreshBundle: unknown) {
+async function launchGraph(vendor: { origin: string }, refreshBundle: unknown, options: { web?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-credential-refresh-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
   await mkdir(join(root, 'web'), { recursive: true });
-  await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
+  if (options.web) {
+    await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: join(root, 'web'), emptyOutDir: true } });
+  } else {
+    await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
+  }
   const proxy = await vendorProxy(root, ['auth.x.ai', 'api.x.ai'], vendor.origin);
   cleanup.push(() => proxy.close());
   const configPath = join(root, 'graph.config.json');
@@ -109,7 +116,7 @@ async function launchGraph(vendor: { origin: string }, refreshBundle: unknown) {
     },
   });
   cleanup.push(() => daemon.close());
-  return { root, daemon };
+  return { root, daemon, proxyEnv: proxy.env };
 }
 
 async function probe(daemon: { request: (path: string, init?: RequestInit) => Promise<Response> }, requestId: string) {
@@ -188,3 +195,124 @@ test('a refresh the vendor refuses is loud: the credential needs a login and the
     { questions: { kind: string }[] };
   expect(after.questions.filter(question => question.kind === 'credential')).toHaveLength(1);
 });
+
+test('a turn whose credential was rejected is renewed and answers on the retry', async () => {
+  const vendor = await xaiVendor({ acceptRefresh: 'refresh-old', issueAccess: 'access-new', rotateTo: 'refresh-rotated' });
+  cleanup.push(() => vendor.close());
+  const { daemon } = await launchGraph(vendor, {
+    refreshToken: 'refresh-old', tokenEndpoint: 'https://auth.x.ai/oauth2/token', accessExpiresAt: '2026-01-01T00:00:00Z',
+  });
+
+  const created = await daemon.request('/api/conversations', {
+    method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'grok', title: 'Credential turn', text: 'Do the work.', requestId: 'credential-turn' }),
+  });
+  const createdText = await created.text();
+  expect(created.status, createdText).toBe(200);
+  const { conversationId, taskId } = JSON.parse(createdText) as { conversationId: string; taskId: string };
+
+  // The turn really was refused with the stale token, then answered with the renewed
+  // one: the person gets an answer instead of a 401.
+  let seen = '';
+  try {
+    await expect.poll(async () => {
+      seen = await (await daemon.request(`/api/conversations/${conversationId}`)).text();
+      return seen.includes('Recovered answer.');
+    }, { timeout: 60_000, interval: 250 }).toBe(true);
+  } catch (error) {
+    throw new Error(`${(error as Error).message}\nbearers: ${JSON.stringify(vendor.log.bearers)}\nrefreshes: ${JSON.stringify(vendor.log.refreshes)}\ndaemon: ${daemon.stderr.slice(-2500)}`);
+  }
+  expect(vendor.log.bearers[0]!.authorization).toBe('Bearer access-stale');
+  expect(vendor.log.bearers.at(-1)!.authorization).toBe('Bearer access-new');
+  const events = await (await daemon.request(`/api/tasks/${taskId}/events?after=0&limit=500`)).text();
+  expect(events).toContain('node.credential_refreshed');
+  // One renewal, not one per attempt: the rotated token is what the next request used.
+  expect(vendor.log.refreshes.length).toBe(1);
+}, 120_000);
+
+test('the rotated refresh token is on disk before it is used, and survives a daemon restart', async () => {
+  const vendor = await xaiVendor({ acceptRefresh: ['refresh-old', 'refresh-rotated'], issueAccess: 'access-new', rotateTo: 'refresh-rotated' });
+  cleanup.push(() => vendor.close());
+  const first = await launchGraph(vendor, {
+    refreshToken: 'refresh-old', tokenEndpoint: 'https://auth.x.ai/oauth2/token', accessExpiresAt: '2026-01-01T00:00:00Z',
+  });
+  // One rejected request rotates the token, and the daemon writes its own copy first.
+  // The vendor here refuses everything but the rotated value, so the file is the only
+  // place that token can come from.
+  const rotatedProbe = await probe(first.daemon, 'write-ahead-first');
+  expect(rotatedProbe.verification.ok).toBe(true);
+  expect(vendor.log.refreshes.map(entry => entry.refreshToken)).toEqual(['refresh-old']);
+  const bundlePath = join(first.root, 'state', 'xai-refresh-GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN_REFRESH.json');
+  await expect.poll(async () => (await readFile(bundlePath, 'utf8').catch(() => '')).length, { timeout: 10_000 }).toBeGreaterThan(0);
+  const written = JSON.parse(await readFile(bundlePath, 'utf8')) as { refreshToken: string };
+  expect(written.refreshToken).toBe('refresh-rotated');
+  await first.daemon.close();
+
+  // The app store still holds the old token and the daemon is restarted. Its startup
+  // refresh must present the rotated one, which only its own copy knows.
+  const bundle = JSON.parse(await readFile(bundlePath, 'utf8')) as { accessExpiresAt: string };
+  await writeFile(bundlePath, JSON.stringify({ ...bundle, accessExpiresAt: '2026-01-01T00:00:00Z' }));
+  const before = vendor.log.refreshes.length;
+  const again = await launchCli(first.root, {
+    configPath: join(first.root, 'graph.config.json'), extraArgs: ['--execute'],
+    // The app store has lost the bundle entirely: only the daemon's own copy holds
+    // the rotated token, which is exactly the state a crash between the two writes
+    // leaves behind.
+    env: { ...first.proxyEnv, GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN: 'access-stale' },
+  });
+  cleanup.push(() => again.close());
+  // The restarted daemon is asked to use the credential; the token it presents comes
+  // from its own copy, not from the app store that still holds the old one.
+  await probe(again, 'write-ahead-restart');
+  await expect.poll(() => vendor.log.refreshes.length, { timeout: 20_000 }).toBeGreaterThan(before);
+  const presented = vendor.log.refreshes.slice(before).map(entry => entry.refreshToken);
+  expect(presented).toContain('refresh-rotated');
+  expect(presented).not.toContain('refresh-old');
+}, 120_000);
+
+test('a dead credential reaches the person: the settings card says so and the question asks', async () => {
+  const vendor = await xaiVendor({ acceptRefresh: null, issueAccess: 'access-new' });
+  cleanup.push(() => vendor.close());
+  const { root, daemon } = await launchGraph(vendor, {
+    refreshToken: 'refresh-revoked', tokenEndpoint: 'https://auth.x.ai/oauth2/token', accessExpiresAt: '2026-01-01T00:00:00Z',
+  }, { web: true });
+  const global = await daemon.request('/api/orchestration/global', {
+    method: 'POST', body: JSON.stringify({ requestId: 'credential-thread-ui' }),
+  });
+  const globalText = await global.text();
+  expect(global.status, globalText).toBe(200);
+  const conversationId = (JSON.parse(globalText) as { conversationId: string; id?: string }).conversationId
+    ?? (JSON.parse(globalText) as { id: string }).id;
+  expect((await probe(daemon, 'credential-ui')).verification.ok).toBe(false);
+  expect(root.length).toBeGreaterThan(0);
+
+  const { browser } = await launchBrowser();
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(`pageerror: ${error.message}`));
+  page.on('console', message => { if (message.type() === 'error') errors.push(`console: ${message.text()}`); });
+  await page.goto(daemon.url);
+  // The models page is reached the way a person reaches it.
+  await page.getByRole('link', { name: '模型', exact: true }).click();
+  const relogin = page.getByTestId('credential-relogin-grok');
+  try {
+    await relogin.waitFor({ timeout: 20_000 });
+  } catch (error) {
+    const text = await page.locator('body').innerText().catch(() => '<none>');
+    const providers = await (await daemon.request('/api/providers')).text();
+    throw new Error(`${(error as Error).message}\nurl=${page.url()}\nbody=${text.slice(0, 400)}\nerrors=${errors.slice(0, 6).join(' | ')}\nproviders=${providers.slice(0, 300)}`);
+  }
+  expect(await relogin.innerText()).toContain('需要重新登录');
+  expect(await page.getByTestId('credential-note-grok').innerText()).toContain('重新登录');
+  await page.screenshot({ path: join(root, 'test-evidence/credential-relogin.png') });
+
+  // And the question itself is readable: it says what to do, not just that something failed.
+  await page.goto(`${daemon.url}/#/conversations/${conversationId}`);
+  await page.getByTestId('conversation').waitFor();
+  // The card is the question the daemon filed: it says what to do, not just that
+  // something failed.
+  const card = page.locator('.question-reply').first();
+  await card.waitFor();
+  await expect.poll(async () => await card.innerText(), { timeout: 15_000 }).toContain('重新登录');
+  await page.screenshot({ path: join(root, 'test-evidence/credential-question.png') });
+}, 120_000);

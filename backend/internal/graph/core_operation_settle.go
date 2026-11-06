@@ -301,17 +301,20 @@ func (l *OperationLifecycle) bindWakes(operation Operation) {
 	})
 }
 
-// recoverCredential renews the credential a failed turn was rejected for, and retries
-// the turn when the renewal worked.
+// recoverCredential hands a credential-rejected turn to the renewer, and settles it
+// without a question.
 //
-// It reports whether the turn was retried: a credential that cannot be renewed stays a
-// failure, and the caller's normal handling (a question for main, or the human) runs
-// exactly as before.
+// It reports whether the turn was handed over. The renewal cannot happen here: this
+// runs under the dispatcher's database lock, and writing a secret goes through the
+// configuration host, which takes the same lock, so waiting for the renewal inside
+// this call deadlocks the dispatch cycle. The request carries everything the renewer
+// needs to requeue the node once the credential is usable again.
 func (l *OperationLifecycle) recoverCredential(operation Operation, result OperationResult) bool {
 	if l.hooks.OnCredentialRejected == nil {
 		return false
 	}
-	if !credentialRejection(describeFailure(result.Output)) {
+	output := describeFailure(result.Output)
+	if !credentialRejection(output) {
 		return false
 	}
 	attempt := int64(0)
@@ -321,23 +324,29 @@ func (l *OperationLifecycle) recoverCredential(operation Operation, result Opera
 	if int(attempt)+1 > MAX_TRANSIENT_RETRIES {
 		return false
 	}
-	model := kernelString(kernelRow(l.store.Db, "SELECT json_extract(spec,'$.model') AS model FROM nodes WHERE task_id=? AND id=?",
+	// The model that was actually picked lives on the instance: the node spec names
+	// the definition's request (`main`), not the provider model the send used.
+	model := kernelString(kernelRow(l.store.Db, "SELECT model FROM instances WHERE task_id=? AND node_id=?",
 		operation.TaskId, operation.NodeId)["model"])
-	if err := l.hooks.OnCredentialRejected(model); err != nil {
-		// The reason is on the credential now (and in the question the app files);
-		// the turn keeps its ordinary failure so nothing is retried against a dead
-		// token.
-		l.store.Event(operation.TaskId, "node.credential_refresh_failed", map[string]any{
-			"nodeId": operation.NodeId, "operationId": operation.Id, "error": err.Error(),
-		})
+	if model == "" {
+		model = kernelString(kernelRow(l.store.Db, "SELECT json_extract(spec,'$.model') AS model FROM nodes WHERE task_id=? AND id=?",
+			operation.TaskId, operation.NodeId)["model"])
+	}
+	scheduled := l.hooks.OnCredentialRejected(CredentialRecoveryRequest{
+		Model: model, TaskId: operation.TaskId, NodeId: operation.NodeId, OperationId: operation.Id,
+		ActivationId: operation.ActivationId, Output: CanonicalJSON(result.Output),
+	})
+	if !scheduled {
 		return false
 	}
+	// The operation is closed so the dispatch cycle can end; the node stays pending and
+	// the renewal requeues it. A failed turn with a dead credential owes nobody a
+	// question: the renewal files one only when the vendor refuses it.
 	l.store.MarkOperationSettled(operation.Id, CanonicalJSON(result))
 	l.store.RetryNodeOutput(operation.TaskId, operation.NodeId, CanonicalJSON(result.Output), operation.Id)
-	l.store.RetryActivation(operation.ActivationId)
-	l.store.Event(operation.TaskId, "node.credential_refreshed", map[string]any{
-		"nodeId": operation.NodeId, "operationId": operation.Id, "attempt": attempt + 1,
-		"reason": "OAuth 凭据被拒后已刷新，重跑本轮",
+	l.store.Event(operation.TaskId, "node.credential_refresh_scheduled", map[string]any{
+		"nodeId": operation.NodeId, "operationId": operation.Id, "model": model,
+		"attempt": attempt + 1, "reason": "OAuth 凭据被拒，已安排刷新后重跑本轮",
 	})
 	return true
 }

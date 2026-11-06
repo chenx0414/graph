@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,11 +135,11 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		SystemContext:   runtime.executionSystemContext(),
 		Access:          runtime.resolvedAccessPolicy,
 		Artifacts:       runtime.artifacts,
-		CredentialRecovery: func(modelId string) error {
+		CredentialRecovery: func(request CredentialRecoveryRequest) bool {
 			if runtime.options.OnCredentialRejected == nil {
-				return errors.New("no credential recovery is wired")
+				return false
 			}
-			return runtime.options.OnCredentialRejected(modelId)
+			return runtime.options.OnCredentialRejected(request)
 		},
 	})
 	// The recovery bootstrap belongs to the kernel that owns the durable

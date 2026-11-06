@@ -18,6 +18,10 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
     if (prompt) return prompt;
     return '主 Agent 需要你的一个决定。';
   }
+  if (kind === 'credential') {
+    // A dead login is the one problem the person must fix outside Graph: say what to do.
+    return text('ask') ?? '有一个凭据已失效，无法自动刷新，需要你在设置里重新登录。';
+  }
   if (kind === 'permission') {
     const grant = text('grant');
     return grant ? `执行需要你授权：${grant}` : '执行需要你确认一项外部权限。';

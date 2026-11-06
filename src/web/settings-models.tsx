@@ -24,9 +24,10 @@ type SnapshotMetadata
 import type { RawConfig } from "./settings-config.tsx";
 import { ccSwitchCost,findCcSwitchPrice,loadCcSwitchPricing } from "./settings-config.tsx";
 
-export function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage, onEdit }: {
+export function ConfiguredModelsPanel({ draft, credentialState, credentialRelogin = {}, mutate, onManage, onEdit }: {
   draft: RawConfig;
   credentialState: Record<string, boolean>;
+  credentialRelogin?: Record<string, string>;
   mutate: (change: (next: RawConfig) => void) => void;
   onManage: (target: 'settings-credentials' | 'settings-models') => void;
   onEdit: (credentialId: string) => void;
@@ -61,12 +62,16 @@ export function ConfiguredModelsPanel({ draft, credentialState, mutate, onManage
         <div className="configured-models-list">
           {matches.map(entry => {
             const connected = Boolean(credentialState[entry.credentialId]);
+            const relogin = credentialRelogin[entry.credentialId];
             const complete = hasRequiredModelFields(entry);
             const isDefault = entry.id === defaultId;
             return <div className="configured-model-item" key={entry.id} data-testid={`configured-model-${entry.id}`}>
               <div className="configured-model-main"><strong>{entry.modelId ?? entry.id}</strong><span className="muted">{draft.credentials?.[entry.credentialId]?.displayName ?? entry.provider} · {entry.id}</span></div>
+              {relogin && <div className="configured-model-note" data-testid={`credential-note-${entry.id}`}>{relogin}</div>}
               <div className="configured-model-meta">
-                <Pill tone={connected && complete ? 'success' : 'warn'}>{!connected ? '凭据缺失' : complete ? '凭据就绪' : '待补全'}</Pill>
+                {relogin
+                  ? <Pill tone="danger" testid={`credential-relogin-${entry.id}`}>需要重新登录</Pill>
+                  : <Pill tone={connected && complete ? 'success' : 'warn'}>{!connected ? '凭据缺失' : complete ? '凭据就绪' : '待补全'}</Pill>}
                 {entry.grade && <Pill>{modelTier(entry.grade as ModelGrade)}</Pill>}
                 {isDefault && <Pill tone="info">新对话默认</Pill>}
               </div>

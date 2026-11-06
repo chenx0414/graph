@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"errors"
 	"fmt"
 	"io"
@@ -468,8 +469,20 @@ func (service *providerLogins) resumeXai() {
 	if service.secrets == nil || service.background == nil {
 		return
 	}
-	for ref, value := range service.secrets() {
-		if !strings.HasSuffix(ref, xaiRefreshSuffix) || value == "" {
+	refs := map[string]bool{}
+	for ref := range service.secrets() {
+		if strings.HasSuffix(ref, xaiRefreshSuffix) {
+			refs[ref] = true
+		}
+	}
+	// The daemon's own copy can be the only one left: it is written first, so a crash
+	// after the rotation leaves the bundle here and nowhere else.
+	for _, ref := range xaiBundleRefs(service.stateDir) {
+		refs[ref] = true
+	}
+	for ref := range refs {
+		value := service.xaiBundleText(ref)
+		if value == "" {
 			continue
 		}
 		var bundle xaiRefreshBundle
@@ -488,4 +501,23 @@ func (service *providerLogins) resumeXai() {
 		}
 		go service.watchXai(login)
 	}
+}
+
+// xaiBundleRefs names the refresh secrets the daemon has its own copy of.
+func xaiBundleRefs(stateDir string) []string {
+	if stateDir == "" {
+		return nil
+	}
+	matches, err := filepath.Glob(filepath.Join(stateDir, "xai-refresh-*.json"))
+	if err != nil {
+		return nil
+	}
+	refs := make([]string, 0, len(matches))
+	for _, path := range matches {
+		name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "xai-refresh-"), ".json")
+		if name != "" {
+			refs = append(refs, name)
+		}
+	}
+	return refs
 }

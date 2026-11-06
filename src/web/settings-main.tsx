@@ -23,6 +23,7 @@ import type { ApiError,ConfigResponse,RawConfig,Startup } from "./settings-confi
 import { GRADES,ccSwitchCost,findCcSwitchPrice,loadCcSwitchPricing,mergeSubscriptionCredentials,toDocument,toDraft } from "./settings-config.tsx";
 import { ArchivedConversations,PreferencesPage,ProjectGitCard,RunningSourceCard,ThemePlaceholder } from "./settings-general.tsx";
 import { ConfiguredModelsPanel,ConfiguredProvidersPanel,SETTINGS_SECTIONS,lookupSnapshot } from "./settings-models.tsx";
+import { loadCredentialRelogin } from './settings-credential-state.ts';
 import { useProviderWorkbenchState } from "./settings-provider-state.tsx";
 import { ProviderWorkbenchView } from "./settings-provider-view.tsx";
 import type { DesktopBridge } from './setup.ts';
@@ -105,6 +106,9 @@ export function ModelsPage() {
 export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active: string; autoSyncSubscriptions: boolean; openGuide: boolean }) {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
+  // A credential the vendor refused to renew cannot be fixed by retrying: the card
+  // says so, and the reason travels with it, instead of looking ready.
+  const [credentialRelogin, setCredentialRelogin] = useState<Record<string, string>>({});
   const [focusCredentialId, setFocusCredentialId] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(openGuide);
   const [editorTarget, setEditorTarget] = useState<string | null>(null);
@@ -125,12 +129,14 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
 
   const load = useCallback(async () => {
     try {
-      const [response, detectedResponse] = await Promise.all([
+      const [response, detectedResponse, providerResponse] = await Promise.all([
         api<ConfigResponse>('/api/config'),
         autoSyncSubscriptions
           ? api<{ credentials: Record<string, string> }>('/api/usage/credentials').catch(() => ({ credentials: {} }))
           : Promise.resolve({ credentials: {} }),
+        loadCredentialRelogin(),
       ]);
+      setCredentialRelogin(providerResponse);
       const detected = detectedResponse.credentials;
       const merged = mergeSubscriptionCredentials(toDraft(response.config), detected);
       const next = merged.config;
@@ -331,7 +337,7 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
       <h2>模型</h2>
       <p className="muted">查看现有模型，或连接厂商并添加模型。配置会自动保存，对新请求立即生效。</p>
       <div className="settings-feature-stack">
-      <ConfiguredModelsPanel draft={draft} credentialState={credentialState} mutate={mutate} onManage={target => {
+      <ConfiguredModelsPanel draft={draft} credentialState={credentialState} credentialRelogin={credentialRelogin} mutate={mutate} onManage={target => {
         setEditorTarget(target);
         setEditorOpen(true);
       }} onEdit={credentialId => {

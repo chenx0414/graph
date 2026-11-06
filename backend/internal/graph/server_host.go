@@ -86,7 +86,7 @@ type GraphServerOptions struct {
 	// OnCredentialRejected renews an OAuth credential after the vendor rejected it.
 	// The app wires it, because the refresh token lives behind the host's secret
 	// store.
-	OnCredentialRejected func(modelId string) error
+	OnCredentialRejected func(request CredentialRecoveryRequest) bool
 }
 
 // How often the harness looks for problems nobody acted on. The sweep is one

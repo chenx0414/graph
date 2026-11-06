@@ -54,6 +54,9 @@ type providerLogins struct {
 	// ask files the question a dead credential owes the person. The app sets it,
 	// because only the app knows which conversation owns the master node.
 	ask func(QuestionInput)
+	// stateDir holds the daemon's own copy of a rotated refresh token, so a restart
+	// never depends on the desktop having acknowledged the write.
+	stateDir string
 }
 
 var providerSecretRef = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -68,7 +71,7 @@ func (app *GraphApp) loginService() *providerLogins {
 		service := &providerLogins{
 			values: map[string]*providerLogin{}, disconnecting: map[string]bool{},
 			services: app.options.AppServices, secrets: app.appProviderSecrets,
-			background: background, stop: stop, ask: app.credentialQuestion,
+			background: background, stop: stop, ask: app.credentialQuestion, stateDir: appSessionStateDir(app.runtime),
 		}
 		app.logins = service
 	}

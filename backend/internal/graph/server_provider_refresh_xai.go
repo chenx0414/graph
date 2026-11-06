@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -71,8 +73,7 @@ func (service *providerLogins) xaiRefreshNow(ctx context.Context, ref string) er
 	bundleRef := ref + xaiRefreshSuffix
 	service.refreshMutex.Lock()
 	defer service.refreshMutex.Unlock()
-	secrets := service.secrets()
-	raw := strings.TrimSpace(secrets[bundleRef])
+	raw := strings.TrimSpace(service.xaiBundleText(bundleRef))
 	if raw == "" {
 		err := errors.New("没有可用的刷新凭据，需要重新登录")
 		service.markXaiRelogin(ref, err.Error())
@@ -110,17 +111,20 @@ func (service *providerLogins) xaiRefreshNow(ctx context.Context, ref string) er
 	if tokens.ExpiresIn > 0 {
 		next.AccessExpiresAt = time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 	}
-	// Write-ahead: the rotated refresh token first. If the host refuses this write,
-	// keep using the credential we already have rather than spending a token the
-	// store will not remember.
+	// Write-ahead: the rotated refresh token is durable *before* the new access token
+	// is used. The daemon writes its own copy first, because the app store's write is
+	// an in-memory apply plus a request the desktop has to acknowledge - a daemon that
+	// restarted in between lost the rotation and became unrefreshable. If this write
+	// fails, the old credential stays in use instead of a token nobody remembers.
 	encoded, encodeErr := json.Marshal(next)
 	if encodeErr != nil {
 		return fmt.Errorf("刷新凭据无法编码：%w", encodeErr)
 	}
 	text := string(encoded)
-	if !xaiSecretApplied(service.services.PushSecret(bundleRef, &text, nil)) {
-		return errors.New("刷新凭据未能写入本机安全存储，未更换访问令牌")
+	if err := service.writeXaiBundle(bundleRef, text); err != nil {
+		return fmt.Errorf("刷新凭据未能落盘：%w", err)
 	}
+	xaiSecretApplied(service.services.PushSecret(bundleRef, &text, nil))
 	access := tokens.AccessToken
 	if !xaiSecretApplied(service.services.PushSecret(ref, &access, nil)) {
 		return errors.New("访问令牌未能写入本机安全存储")
@@ -227,4 +231,60 @@ func credentialQuestionTarget(store *TaskStore) map[string]any {
     FROM conversations c
     JOIN nodes n ON n.task_id=c.anchor_task_id AND json_extract(n.spec,'$.role')='master'
     WHERE c.role='global' AND c.archived_at IS NULL LIMIT 1`)
+}
+
+// xaiBundleText reads the refresh bundle, preferring the daemon's own copy.
+//
+// The daemon writes that copy, so it is always the newest rotation; the app store is a
+// mirror that a desktop acknowledgement makes durable. Reading the mirror first is how
+// a restart could present a refresh token the vendor had already consumed.
+func (service *providerLogins) xaiBundleText(ref string) string {
+	if text := strings.TrimSpace(service.readXaiBundle(ref)); text != "" {
+		return text
+	}
+	return strings.TrimSpace(service.secrets()[ref])
+}
+
+// hasXaiBundle reports whether this credential can be renewed at all: from the app
+// store, or from the daemon's own copy when the store lost it (the copy is written
+// first, so it is the one that survives a restart).
+func (service *providerLogins) hasXaiBundle(ref string) bool {
+	return strings.TrimSpace(service.xaiBundleText(ref+xaiRefreshSuffix)) != ""
+}
+
+// xaiBundlePath is where the daemon keeps the refresh bundle it rotated itself.
+func (service *providerLogins) xaiBundlePath(ref string) string {
+	if service.stateDir == "" {
+		return ""
+	}
+	return filepath.Join(service.stateDir, "xai-refresh-"+ref+".json")
+}
+
+// writeXaiBundle replaces the daemon's copy atomically, readable only by its owner.
+func (service *providerLogins) writeXaiBundle(ref, text string) error {
+	path := service.xaiBundlePath(ref)
+	if path == "" {
+		return nil
+	}
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, []byte(text), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		return err
+	}
+	return nil
+}
+
+// readXaiBundle reads the daemon's copy, empty when it has none.
+func (service *providerLogins) readXaiBundle(ref string) string {
+	path := service.xaiBundlePath(ref)
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }

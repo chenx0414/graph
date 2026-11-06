@@ -217,11 +217,12 @@ func (app *GraphApp) xaiRefreshableRef(target ProbeTarget) (string, bool) {
 	}
 	key := strings.TrimSpace(*target.APIKey)
 	secrets := app.appProviderSecrets()
+	service := app.loginService()
 	for ref, value := range secrets {
 		if strings.HasSuffix(ref, xaiRefreshSuffix) || strings.TrimSpace(value) != key {
 			continue
 		}
-		if strings.TrimSpace(secrets[ref+xaiRefreshSuffix]) != "" {
+		if service.hasXaiBundle(ref) {
 			return ref, true
 		}
 	}

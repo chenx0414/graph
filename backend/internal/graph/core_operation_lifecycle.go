@@ -125,12 +125,25 @@ type OperationRun struct {
 }
 
 // OperationLifecycleHooks lets the host veto a replay before the adapter sent anything.
+// CredentialRecoveryRequest is one turn whose credential the vendor rejected.
+type CredentialRecoveryRequest struct {
+	Model        string
+	TaskId       string
+	NodeId       string
+	OperationId  string
+	ActivationId string
+	Output       string
+}
+
 type OperationLifecycleHooks struct {
 	CanReplayBeforeSend func(operation Operation) bool
-	// OnCredentialRejected renews the credential a rejected request used. It returns
-	// nil when the credential is usable again, so the turn can be retried instead of
-	// filed as a failed one.
-	OnCredentialRejected func(modelId string) error
+	// OnCredentialRejected schedules a renewal for the credential a request was
+	// rejected for, and reports whether it was scheduled. The renewal itself must run
+	// asynchronously: this call happens while the dispatcher holds its database lock,
+	// and a secret write goes through the configuration host, which takes the same
+	// lock. Waiting for it here deadlocks the cycle (measured: a 401 turn stayed
+	// dispatched forever with its token endpoint already called).
+	OnCredentialRejected func(CredentialRecoveryRequest) bool
 }
 
 // OperationAdmitInput is one admission of an operation.
