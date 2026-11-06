@@ -43,7 +43,7 @@ export function RecordedPromptPanel(input: {
       {part !== 'tools' && <div className="agent-preview-meta">
         <strong>实际发出（最近一次模型请求）</strong>
         <span>{text ? `${text.length.toLocaleString()} 字符` : emptyText}</span>
-        <Button size="sm" icon="file" disabled={!text} onClick={() => void copy(text, '实际发出的 Prompt 已复制')}>复制 Prompt</Button>
+        <Button size="sm" icon="file" disabled={!text} onClick={() => void copy(text, 'system prompt 已复制')}>复制 Prompt</Button>
       </div>}
       {part !== 'tools' && (text
         ? <pre className="agent-preview-markdown" data-testid={`${testId}-text`}>{text}</pre>

@@ -246,7 +246,7 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
             <div className="agent-context-body">
               <nav className="agent-context-tabs" role="tablist" aria-label="Agent 上下文页面">
                 <button type="button" role="tab" data-testid="agent-context-tab-sent" data-active={tab === 'sent'} aria-selected={tab === 'sent'} onClick={() => setTab('sent')}>
-                  实际发出的 Prompt
+                  system prompt
                 </button>
                 <button type="button" role="tab" data-testid="agent-context-tab-declarations" data-active={tab === 'declarations'} aria-selected={tab === 'declarations'} onClick={() => setTab('declarations')}>
                   工具声明

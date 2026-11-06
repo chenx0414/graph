@@ -49,7 +49,7 @@ test('the chat header exposes editable Agent prompts and Main Agent tools', asyn
   expect(await page.locator('[data-testid="agent-preview-section-map"]').count()).toBe(0);
   expect(
     (await page.locator('.agent-context-tabs [role="tab"]').allInnerTexts()).map(label => label.split('\n')[0]!.trim()),
-  ).toEqual(['实际发出的 Prompt', '工具声明', '可编辑来源', '工具与能力']);
+  ).toEqual(['system prompt', '工具声明', '可编辑来源', '工具与能力']);
   // 提示词与工具声明是两个独立标签：prompt 页不再带声明块。
   expect(await page.getByTestId('agent-context-sent-tools').count()).toBe(0);
 
