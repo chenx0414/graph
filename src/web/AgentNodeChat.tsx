@@ -7,6 +7,7 @@ import { ErrorBox, useTaskStream, type StreamEvent } from './shared.tsx';
 import type { Entry, NodeRun } from './NodeDetail.tsx';
 import { NodeChatHeader, NodeChatPaused, NodeChatPending, NodeComposerFooter } from './NodeChatAlerts.tsx';
 import { TranscriptRowView } from './TranscriptRows.tsx';
+import { captureHistoryAnchor, restoreHistoryAnchor, wantsOlderHistory } from './older-history.ts';
 import { Button, Empty, Icon, Pill, Spinner } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
@@ -59,7 +60,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const autoReadAttempted = useRef<Set<string>>(new Set());
   const [olderExhausted, setOlderExhausted] = useState(false);
   const olderPending = useRef(false);
-  const historyAnchor = useRef<{ top: number; height: number } | null>(null);
+  const historyAnchor = useRef<ReturnType<typeof captureHistoryAnchor>>(null);
   const loadedScope = useRef<string | null>(null);
   const entriesRef = useRef<Entry[]>([]);
   const generationRef = useRef(0);
@@ -208,9 +209,8 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }, [hasOlder, olderLoading, entries, error]);
 
   useLayoutEffect(() => {
-    const anchor = historyAnchor.current;
     const thread = transcriptFollow.threadRef.current;
-    if (anchor && thread) { thread.scrollTop = anchor.top + thread.scrollHeight - anchor.height; historyAnchor.current = null; }
+    historyAnchor.current = restoreHistoryAnchor(thread, historyAnchor.current);
   }, [entries]);
   async function send() {
     if (!taskId || sending || !text.trim()) return;
@@ -260,7 +260,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const onScroll = () => {
     transcriptFollow.onScroll();
     const thread = transcriptFollow.threadRef.current;
-    if (thread && thread.scrollTop < 160 && !transcriptFollow.isPinned() && hasOlder) void loadOlder();
+    if (wantsOlderHistory(thread, { pinned: transcriptFollow.isPinned(), hasOlder })) void loadOlder();
   };
   async function loadOlder() {
     const first = entries[0]?.seq;
@@ -273,8 +273,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       if (generation !== generationRef.current) return;
       if (!page.entries.length) setOlderExhausted(true);
       else {
-        const thread = transcriptFollow.threadRef.current;
-        if (thread) historyAnchor.current = { top: thread.scrollTop, height: thread.scrollHeight };
+        historyAnchor.current = captureHistoryAnchor(transcriptFollow.threadRef.current);
         setEntries(current => mergeEntries(current, page.entries));
       }
     } catch (reason) {

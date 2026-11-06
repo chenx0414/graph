@@ -46,6 +46,7 @@ import { QuestionReply } from './Questions.tsx';
 import { ErrorBox,costText } from './shared.tsx';
 
 import { TranscriptRowView } from './TranscriptRows.tsx';
+import { wantsOlderHistory } from './older-history.ts';
 
 import { Icon } from './ui.tsx';
 
@@ -113,8 +114,9 @@ return (
             ref={transcriptFollow.threadRef}
             onScroll={() => {
               transcriptFollow.onScroll();
+              // loadOlder keeps its own guard; this page only decides when to ask.
               const thread = transcriptFollow.threadRef.current;
-              if (thread && thread.scrollTop < 160 && !transcriptFollow.pinned) void loadOlder();
+              if (wantsOlderHistory(thread, { pinned: transcriptFollow.pinned, hasOlder: true })) void loadOlder();
             }}
             onWheel={transcriptFollow.onWheel}
             onTouchStart={transcriptFollow.onTouchStart}
