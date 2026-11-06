@@ -124,6 +124,49 @@ func (runtime *TaskRuntime) sedimentSettings() SedimentSettings {
 // piChannels are the host channels the Agent session may use.
 func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 	channels := &PiAdapterChannels{
+		// Tools over other conversations were declared and never wired: a master
+		// session could not read or write a different conversation at all, so the
+		// only way to reach a running peer was to interrupt it from outside.
+		Conversations: &ConversationToolService{
+			List: func(archived *bool) any {
+				value := archived != nil && *archived
+				return runtime.Conversations().List(value)
+			},
+			View: func(conversationID string, limit *int, after *int) any {
+				query := NodeEntryQuery{}
+				if limit != nil {
+					value := float64(*limit)
+					query.Limit = &value
+				}
+				if after != nil {
+					value := float64(*after)
+					query.After = &value
+				}
+				return runtime.Conversations().View(conversationID, query)
+			},
+			Events: func(conversationID string, after *int, limit *int) any {
+				from, take := 0, 200
+				if after != nil {
+					from = *after
+				}
+				if limit != nil {
+					take = *limit
+				}
+				return runtime.Conversations().Events(conversationID, from, take)
+			},
+			Chat: func(conversationID, text, requestID string, source any) any {
+				return runtime.Conversations().Chat(conversationID, TaskRuntimeChatInput{Text: text, RequestId: requestID, Source: source})
+			},
+			Steer: func(conversationID, requestID string) any {
+				return runtime.Conversations().Steer(conversationID, requestID)
+			},
+			Pause: func(conversationID, requestID string) any {
+				return runtime.Conversations().Pause(conversationID, requestID)
+			},
+			Resume: func(conversationID, requestID string) any {
+				return runtime.Conversations().Resume(conversationID, requestID)
+			},
+		},
 		Supervisor: func(taskId string) PiAdapterSupervisor {
 			supervisor := runtime.Supervisor(taskId)
 			channel := PiAdapterSupervisor{

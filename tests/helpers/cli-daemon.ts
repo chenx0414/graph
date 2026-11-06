@@ -75,7 +75,17 @@ export async function launchCli(root: string, options: {
     get stdout() { return stdout; },
     get stderr() { return stderr; },
     request(path: string, init: RequestInit = {}) {
-      return fetch(`${url}${path}`, { ...init, headers: { ...headers, ...init.headers } });
+      // A daemon that accepted the connection and never answered used to hang the
+      // caller until vitest's own test timeout, which names no request and hides
+      // whether the product stalled or the test waited forever. Bound every call
+      // and name the path that did not answer.
+      return fetch(`${url}${path}`, { signal: init.signal ?? AbortSignal.timeout(60_000), ...init, headers: { ...headers, ...init.headers } })
+        .catch(error => {
+          if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+            throw new Error(`The daemon did not answer ${path} within 60s`, { cause: error });
+          }
+          throw error;
+        });
     },
     async close() {
       if (child.exitCode !== null || child.signalCode !== null) return;
