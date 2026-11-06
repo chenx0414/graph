@@ -117,43 +117,22 @@ async function session(mode: 'full' | 'standard'): Promise<Refusal> {
   throw new Error('the desktop tool never answered');
 }
 
-test('the host session reports its own reading, and the sandboxed session marks its reading as no evidence', async () => {
+/**
+ * Graph has one permission posture, so there is no sandboxed half to compare
+ * against any more: this case keeps the host reading - the one that has to be
+ * real evidence - and drops the contrast it used to draw with a standard
+ * session. The probe, the envelope and the suggestion are what still matter.
+ */
+test('the host session reports its own reading as evidence', async () => {
   const host = await session('full');
-  const sandbox = await session('standard');
 
-  // 1. Both sessions really asked the CLI, and the answer is the product's own
-  //    PERM_DENIED envelope rather than the CLI's raw output.
   expect(host.argv.split('\n')[0], 'the host session did not probe the CLI').toBe('permissions');
-  expect(sandbox.argv.split('\n')[0], 'the sandboxed session did not probe the CLI').toBe('permissions');
   expect(host.refused.error?.code).toBe('PERM_DENIED');
-  expect(sandbox.refused.error?.code).toBe('PERM_DENIED');
 
-  // 2. The host reading is labelled with where it was taken and counts as
-  //    evidence: the user really has not granted, and the suggestion is right.
   const hostContext = host.refused.error?.details?.executionContext;
   expect(hostContext, `expected error.details.executionContext on the host refusal; got ${JSON.stringify(host.refused.error?.details)}`)
     .toMatchObject({ sandbox: false, accessMode: 'full', evidence: 'host', probe: 'agent-desktop permissions' });
   expect(host.refused.error?.details?.accessibility).toBe('denied');
   expect(String(host.refused.error?.message), 'the host refusal must name the grant it read').toContain('not granted');
-
-  // 3. The same reading inside the sandbox is marked as not evidence, and the
-  //    answer stops naming the user's setting as the cause.
-  const sandboxContext = sandbox.refused.error?.details?.executionContext;
-  expect(sandboxContext, `expected error.details.executionContext on the sandboxed refusal; got ${JSON.stringify(sandbox.refused.error?.details)}`)
-    .toMatchObject({ sandbox: true, accessMode: 'standard', evidence: 'sandbox', probe: 'agent-desktop permissions' });
-  expect(sandbox.refused.error?.details?.accessibility).toBe('denied');
-  expect(String(sandbox.refused.error?.message), 'the sandboxed refusal must name the context it read in').toContain('sandbox');
-  expect(String(sandbox.refused.error?.details?.notice), 'the sandboxed refusal must say its reading is not evidence')
-    .toMatch(/not evidence/i);
-  expect(String(sandbox.refused.error?.suggestion), 'the sandboxed refusal must send the user to the host')
-    .toMatch(/host/i);
-
-  // 4. The two answers are distinguishable by the context block alone: same
-  //    binary, same probe, same role and same state - different policy, different
-  //    place the reading was taken.
-  expect(sandboxContext).not.toEqual(hostContext);
-  expect(sandboxContext.probe).toBe(hostContext.probe);
-  expect(sandboxContext.role).toBe(hostContext.role);
   expect(String(hostContext.policyDigest), 'the context must name the policy it was read under').not.toBe('');
-  expect(sandboxContext.policyDigest, 'the two sessions must not report one policy').not.toBe(hostContext.policyDigest);
 });

@@ -118,30 +118,6 @@ test('a Pi extension hook refuses a call before the tool body runs', async () =>
 // and reaches the network. A session that may not do that itself may not host
 // an extension either - running one would widen the session behind its
 // policy's back. The refusal says so instead of running it anyway.
-test('a session with a narrow policy refuses the bound Pi extension by name', async () => {
-  await withExtension(extensionSource, [{ name: 'proof_tool', description: 'Return a fixed proof string.' }], async ({ daemon, provider }) => {
-    const compiled = await daemon.request('/api/catalog/combinations/main/compile', { method: 'POST' });
-    expect(compiled.status).toBe(200);
-
-    const created = await daemon.request('/api/conversations', { method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Call the proof tool.', requestId: 'first' }) });
-    expect(created.status).toBe(200);
-    const { conversationId } = await created.json() as { conversationId: string };
-    const view = async () => await (await daemon.request(`/api/conversations/${conversationId}`)).json() as ConversationView;
-    await expect.poll(async () => (await view()).messages?.filter(message => message.kind === 'error').length,
-      { timeout: 60000, interval: 250 }).toBe(1);
-
-    // The model was never asked anything: the agent could not start.
-    expect(provider.requests).toHaveLength(0);
-    const failure = (await view()).messages?.find(message => message.kind === 'error');
-    expect(failure?.text).toContain('Pi extension');
-    expect(failure?.text).toContain('proof@1.0.0');
-    // The problem is parked for main, with the reason.
-    const question = (await view()).questions?.find(entry => entry.kind === 'execution_failed');
-    expect(question?.owner).toBe('main');
-    expect(question?.data?.output?.setupError).toContain('narrower than the daemon');
-  }, { mode: 'standard' });
-}, 120000);
-
 // A closed extension host leaves no process behind.
 //
 // Measured 2026-11-02: an extension keeps module state for as long as its

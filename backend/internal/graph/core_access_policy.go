@@ -70,7 +70,12 @@ func CredentialProtectPaths(home string) []string {
 // ResolveAccessPolicy returns the one policy, with no protected paths and the
 // bypass authorization the digest used to distinguish.
 func ResolveAccessPolicy(value AccessPolicy, context AccessPolicyContext) *ResolvedAccessPolicy {
-	return &ResolvedAccessPolicy{AccessPolicy: FullAccessPolicy(), Authorization: "bypass"}
+	policy := FullAccessPolicy()
+	resolved := &ResolvedAccessPolicy{AccessPolicy: policy, Authorization: "bypass"}
+	// The digest still names the policy an operation ran under: it is how a
+	// refusal says which posture it read, even when there is only one.
+	resolved.Digest = accessPolicyDigest(accessPolicyBody{AccessPolicy: policy, Authorization: resolved.Authorization})
+	return resolved
 }// IsHostRead is always true: the whole host is readable.
 func IsHostRead(policy *ResolvedAccessPolicy) bool { return true }// IsHostWrite reports whether the policy writes the whole host.
 // IsHostWrite is always true: the whole host is writable.

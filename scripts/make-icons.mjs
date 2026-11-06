@@ -4,7 +4,7 @@
  * without committing a font or an image toolchain.
  * Run: export PATH="$PWD/node_modules/.bin:$PATH"; node scripts/make-icons.mjs
  */
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -30,6 +30,14 @@ const tray = (size) => `
 </svg>`;
 
 await mkdir(build, { recursive: true });
+// The icons are committed artefacts and drawing them needs a browser. A machine
+// where Chromium cannot start must still package the app with the icons it has;
+// GRAPH_ICONS=force redraws them.
+if (process.env.GRAPH_ICONS !== 'force') {
+  const outputs = ['icon.png', 'trayTemplate.png', 'trayTemplate@2x.png'].map(name => join(build, name));
+  const present = await Promise.all(outputs.map(path => stat(path).then(() => true, () => false)));
+  if (present.every(Boolean)) { console.log(`icons kept: ${outputs.length}`); process.exit(0); }
+}
 const browser = await chromium.launch({ headless: true });
 try {
   const icon = await browser.newPage({ viewport: { width: 1024, height: 1024 } });

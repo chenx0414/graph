@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ledgerDir = join(root, 'experiments');
-const reportDir = join(root, 'docs/planning');
+const reportDir = join(root, 'docs', 'notes');
 
 const GROUPS = [
   {
