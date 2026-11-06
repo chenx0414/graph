@@ -106,7 +106,9 @@ export function GoalBar({ conversationId }: { conversationId: string }) {
     <span className="goal-bar-fact" data-testid="goal-usage">{goal.status === 'completed' ? `共 ${compact(goal.usedTokens)} tokens` : `${compact(goal.usedTokens)} tokens`}</span>
     {goal.status === 'active' && <Button size="sm" icon="pause" data-testid="goal-pause" disabled={busy} onClick={() => void act('pause')}>暂停</Button>}
     {(goal.status === 'paused' || goal.status === 'usage_limited') && <Button size="sm" icon="play" data-testid="goal-resume" disabled={busy} onClick={() => void act('resume')}>继续</Button>}
-    {goal.status !== 'completed' && <Button size="sm" data-testid="goal-clear" disabled={busy} onClick={() => void act('clear')}>清除</Button>}
+    {/* Clearing is available in every state, including a finished goal: the bar is a
+        line in the window, and its dismissal belongs to the person who set it. */}
+    <Button size="sm" data-testid="goal-clear" disabled={busy} onClick={() => void act('clear')}>清除</Button>
     {error && <span className="field-error" role="alert" data-testid="goal-error">{error}</span>}
   </section>;
 }
