@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"fmt"
+	"strconv"
 )
 
 // piAdapterLiveTurn is the live state of one turn: the assistant text the
@@ -270,7 +271,18 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 				})
 			}
 			// A live.conversation keeps its messages untouched; the compaction is
-			// reported as a session event instead of overwriting history.
+			// reported as a session event instead of overwriting history. The reader
+			// still has to see it: the context shrinks, and a chat that silently
+			// forgets the earlier turns looks like a defect. So the compaction gets
+			// its own line, appended after the turn it belongs to - history is never
+			// rewritten, only described.
+			if !live.persistEntries && live.conversation != nil {
+				operationId := live.operation.Id
+				AppendMessage(live.store, MessageInput{
+					ConversationID: live.conversation.Id, Role: MessageRoleSystem, Kind: "compaction",
+					Text: compactionNotice(data), Data: data, OperationID: &operationId,
+				})
+			}
 			live.store.Event(live.operation.TaskId, "session.compacted", map[string]any{"nodeId": live.operation.NodeId, "data": data})
 			return
 		}
@@ -289,4 +301,17 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 			"nodeId": live.operation.NodeId, "operationId": live.operation.Id, "reason": reason, "error": errorMessage,
 		})
 	}
+}
+
+// compactionNotice is the line the chat shows after the kernel compacted the context.
+//
+// It names what happened and what survived: a reader who sees the earlier turns replaced by a
+// summary needs to know the transcript is still there and how to search it, otherwise the only
+// visible fact is that the agent forgot.
+func compactionNotice(data map[string]any) string {
+	notice := "上下文已自动压缩：更早的对话收进了摘要，原始记录仍在，可用历史检索（history_search）按关键词或条目 id 找回。"
+	if tokens := kernelInt(data["tokensAfter"]); tokens > 0 {
+		notice += " 压缩后约 " + strconv.FormatInt(tokens, 10) + " tokens。"
+	}
+	return notice
 }

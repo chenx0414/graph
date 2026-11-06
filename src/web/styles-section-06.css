@@ -533,3 +533,15 @@
 .recipe-editor { width: min(720px, 94vw); }
 .recipe-form { display: flex; flex-direction: column; gap: 14px; }
 .recipe-form label { display: flex; flex-direction: column; gap: 6px; }
+/* A compaction is a boundary in the agent's context, not a chat message: it reads
+   as a divider so the shrinking context has a visible cause. */
+.compaction-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: .8125rem;
+}
+.compaction-notice-rule { flex: 1; height: 1px; background: var(--border); }
+.compaction-notice-text { display: inline-flex; align-items: center; gap: 6px; text-align: center; }

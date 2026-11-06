@@ -358,7 +358,7 @@ func (session *pigAgentSession) Prompt(text string, images []ImageContent) (Agen
 	// compaction earlier without moving the reset.
 	budget := pigSessionContextBudget(session.request)
 	compactAt := pigSessionCompactionTrigger(session.request)
-	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, "", ""); err != nil {
+	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, pigCompactionInstructions(), ""); err != nil {
 		return AgentSessionTurn{}, err
 	} else if reset {
 		session.emitContextReset(estimated, budget)

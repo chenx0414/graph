@@ -83,7 +83,15 @@ func (session *Session) reportCompaction(ctx context.Context, result durable.Set
 	outcome := result.State.Outcome
 	if outcome != nil && outcome.Status == durable.OutcomeCompleted {
 		if summary := session.compactionSummary(ctx); summary != "" {
-			report["result"] = map[string]any{"summary": summary}
+			// The daemon shows this compaction to the reader, so it needs the size the
+			// context was left at: a summary with no number beside it cannot say whether
+			// the compaction was worth anything. Pi's threshold path reports the same
+			// number, so both compactions describe themselves alike.
+			result := map[string]any{"summary": summary}
+			if view, err := session.conversation.Context(ctx, nil); err == nil {
+				result["estimatedTokensAfter"] = estimateContextTokens(view.Messages)
+			}
+			report["result"] = result
 			session.OnEvent(report)
 			return
 		}

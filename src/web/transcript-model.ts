@@ -64,6 +64,7 @@ export type TranscriptRow =
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; summary: string }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
+  | { kind: 'compaction'; id: string; text: string; tokensAfter?: number }
   | { kind: 'thinking'; id: 'thinking' };
 
 export type TranscriptModelInput = {
@@ -338,6 +339,17 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     }
     if (message.role === 'system' && message.kind === 'rsi') {
       rows.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) });
+      continue;
+    }
+    // A compaction is a fact about the turn's context, not a message from either
+    // side: it gets its own one-line row so the shrinking context has a visible
+    // cause instead of looking like the agent quietly forgot the earlier turns.
+    if (message.role === 'system' && message.kind === 'compaction') {
+      const data = message.data as { tokensAfter?: number } | null | undefined;
+      rows.push({
+        kind: 'compaction', id: `compaction:${message.id}`, text: message.text,
+        ...(typeof data?.tokensAfter === 'number' ? { tokensAfter: data.tokensAfter } : {}),
+      });
       continue;
     }
     rows.push({ kind: 'message', id: message.id, message });

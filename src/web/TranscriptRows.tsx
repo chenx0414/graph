@@ -9,6 +9,7 @@ import { attachmentImageSource } from './attachments.ts';
 import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
 import { RsiCard } from './RsiCard.tsx';
+import { CompactionNotice } from './CompactionNotice.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
 import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
 import { clockLabel, elapsedLabel } from './labels.ts';
@@ -369,8 +370,7 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   );
 }
 
-function ThinkingStatus() {
-  return (
+function ThinkingStatus() {  return (
     <div className="message-row agent-status-row" data-role="assistant" data-testid="agent-thinking">
       <div className="agent-working" role="status">
         <span className="agent-thinking-orb" aria-hidden="true">
@@ -402,6 +402,7 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   if (row.kind === 'narration') return <NarrationRow row={row} />;
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiCard row={row} />;
+  if (row.kind === 'compaction') return <CompactionNotice row={row} />;
   if (row.kind === 'thinking') {
     return <ThinkingStatus />;
   }
