@@ -5,8 +5,12 @@ import (
 	"sync"
 )
 
-// SCHEMA_VERSION is the newest tasks.sqlite this process writes.
-const SCHEMA_VERSION = 54
+// SCHEMA_VERSION is the newest tasks.sqlite this process writes, and the newest it
+// will open: a state directory that has run a newer build is refused rather than
+// corrupted. Every migration in core_store_migrate.go has to move it in the same
+// change - a migration that runs without it leaves a database the next start
+// rejects as "belonging to a newer runtime".
+const SCHEMA_VERSION = 55
 
 // SchemaVersion is the same constant. Call sites used both spellings.
 const SchemaVersion = SCHEMA_VERSION
