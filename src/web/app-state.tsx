@@ -94,7 +94,7 @@ export type NodeView = {
 };
 
 export type Settings_ = {
-  projects: { id: string; root: string; branch?: string | null; archivedAt?: number | null; preparation?: { branch?: string | null } | null }[];
+  projects: { id: string; root: string; branch?: string | null; archivedAt?: number | null; ownCheckout?: boolean; preparation?: { branch?: string | null } | null }[];
   defaultModel?: string | null;
   models: { id: string; grade: string; credentialId?: string; contextWindow?: number; reasoning?: boolean; defaultThinkingLevel?: string; thinkingOptions?: { level: string; label: string }[] }[];
   definitions: { id: string; version: number }[];

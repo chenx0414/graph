@@ -48,6 +48,14 @@ test('the checkout project runs on the main thread while another project keeps i
     expect(other.status, JSON.stringify(other.body)).toBe(200);
     expect(other.body.conversationId).not.toBe(mainConversation);
 
+    // The UI hides the checkout project's row because the main row is its way
+    // in: the settings view has to mark which project that is.
+    const settings = await request('/api/settings');
+    expect(settings.status, JSON.stringify(settings.body)).toBe(200);
+    const projects = (settings.body as { projects?: { id: string; ownCheckout?: boolean }[] }).projects ?? [];
+    expect(projects.find(project => project.id === 'checkout')?.ownCheckout, JSON.stringify(projects)).toBe(true);
+    expect(projects.find(project => project.id === 'other')?.ownCheckout ?? false).toBe(false);
+
     // The same request twice is the same thread: no second supervisor appears.
     const ownAgain = await request('/api/projects/checkout/thread', 'POST', { requestId: 'own-thread-again' });
     expect(ownAgain.body.conversationId).toBe(mainConversation);

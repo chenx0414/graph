@@ -47,8 +47,11 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   // An archived project is put away: its rows leave the project list, and the
   // settings page is where it comes back from.
   const projectRows = settings?.projects ?? [];
-  const activeProjects = projectRows.filter(project => project.archivedAt == null);
-  const archivedProjects = projectRows.filter(project => project.archivedAt != null);
+  // The checkout project is run by the main Agent: its row would open the same
+  // conversation twice, and the way in is already the main row above.
+  const listedProjects = projectRows.filter(project => !project.ownCheckout);
+  const activeProjects = listedProjects.filter(project => project.archivedAt == null);
+  const archivedProjects = listedProjects.filter(project => project.archivedAt != null);
   // The project rows no longer list their conversations, so every conversation that is
   // not a supervisor thread stays reachable from the recent list instead.
   const unbound = ordered.filter(conversation => !('role' in conversation && (conversation.role === 'global' || conversation.role === 'project')));
@@ -156,7 +159,7 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
                 aria-label={`打开 ${project.id} 的主管`}
                 title={project.root}
                 disabled={Boolean(openingProject)}
-                onClick={() => void openProjectThread(project.id, supervisor?.id)}
+                onClick={() => void openProjectThread(project.id)}
               >
                 <Icon name="folder" size={14} />
                 <span className="sidebar-project-name">{project.id}</span>

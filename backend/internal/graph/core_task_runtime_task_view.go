@@ -415,6 +415,9 @@ func (user *TaskRuntimeUser) Projects() []map[string]any {
 			"grants":      taskRuntimeGrants(project.Grants),
 			"branch":      nil,
 			"archivedAt":  projectArchivedAt(runtime.store, project.Id),
+			// The checkout project is run by main, so the console shows no row
+			// of its own for it.
+			"ownCheckout": runtime.ownCheckoutProject(project.Id),
 			"preparation": runtime.git.Preparation(project.Id),
 		}
 		if branch := CheckedOutBranch(root); branch != nil {
