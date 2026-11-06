@@ -83,6 +83,11 @@ test('a goal that has a graph is not continued in the conversation', async () =>
   // The acceptance request happens to quote the phrase "继续推进目标"; what matters is
   // whether a continuation turn was queued, which is what its source records.
   expect(continued(messages), JSON.stringify(messages.map(message => message.data ?? {})).slice(0, 1_500)).toBe(false);
+  // Neither is there an acceptance turn: a second Agent judging in this window is
+  // exactly what the person saw and objected to.
+  expect(messages.map(message => message.text ?? '').join('\n')).not.toContain('进入独立验收');
+  const goal = (await (await daemon.request(`/api/conversations/${conversationId}/goal`)).json()) as { goal?: { status?: string } };
+  expect(goal.goal?.status).toBe('active');
   expect(provider.requests.length).toBeGreaterThan(0);
 }, 120_000);
 
@@ -93,6 +98,9 @@ test('a goal without a graph is still continued', async () => {
     method: 'POST', body: JSON.stringify({ text: '先做第一步。', requestId: 'chat-owned-turn' }),
   });
   await expect.poll(async () => continued(await transcript(daemon, conversationId)), { timeout: 60_000, interval: 250 }).toBe(true);
+  // A goal without a graph keeps its own reviewer in the conversation.
+  await expect.poll(async () => (await transcript(daemon, conversationId)).map(message => message.text ?? '').join('\n'),
+    { timeout: 60_000, interval: 250 }).toContain('进入独立验收');
   // The continuation is a second turn, and it was answered.
   await expect.poll(async () => (await transcript(daemon, conversationId)).map(message => message.text ?? '').join('\n'),
     { timeout: 60_000, interval: 250 }).toContain('继续做第二步。');

@@ -107,6 +107,14 @@ func BeginRoundAcceptance(store *TaskStore, conversationID, answer string, now i
 	if goal == nil || goal.Status != GoalActive {
 		return false
 	}
+	// A goal with a graph is judged by that graph: its reviewers run the two axes and
+	// its acceptance checks are what the person reads. The chat used to run an
+	// acceptance turn of its own over a graph-owned goal, so a second Agent appeared
+	// in the same window to judge work it had not done - measured 2026-11-06, "现在
+	// 还是有之前 goal 的那个另外一个新会话的 Agent 在这里验收".
+	if strings.TrimSpace(goal.GraphId) != "" {
+		return false
+	}
 	if len(PendingMessages(store, conversationID, 1)) > 0 {
 		return false
 	}
@@ -139,6 +147,15 @@ func QueueGoalAcceptance(store *TaskStore, conversationID, answer string, now in
 	if goal == nil || goal.Status != GoalVerifying {
 		return false
 	}
+	// A goal with a graph is judged by that graph: its reviewers run the two axes and
+	// its acceptance checks are what the person reads. The chat used to run an
+	// acceptance turn of its own over a graph-owned goal, so a second Agent appeared
+	// in the same window to judge work it had not done - measured 2026-11-06, "现在
+	// 还是有之前 goal 的那个另外一个新会话的 Agent 在这里验收".
+	if strings.TrimSpace(goal.GraphId) != "" {
+		return false
+	}
+
 	if len(PendingMessages(store, conversationID, 1)) > 0 {
 		return false
 	}
