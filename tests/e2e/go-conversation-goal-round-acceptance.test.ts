@@ -33,7 +33,9 @@ async function fixture(plans: ResponsePlan[], credential: string) {
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
     version: 1,
-    projects: [{ id: 'p', root: project }, { id: 'second', root: project }],
+    // No project: this goal has no graph owner, so it runs in the conversation and
+    // exercises the in-chat acceptance loop.
+    projects: [],
     access: { mode: 'full' },
     models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
       baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] },

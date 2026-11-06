@@ -34,19 +34,16 @@ async function consoleWith(plans: Parameters<typeof openaiServer>[0], prefix: st
   const root = await mkdtemp(join(tmpdir(), `graph-m8-goal-${prefix}-`));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
-  const second = join(root, 'second');
   await mkdir(project, { recursive: true });
-  await mkdir(second, { recursive: true });
   const provider = await openaiServer(plans);
   cleanup.push(() => provider.close());
   const configPath = join(root, 'graph.config.json');
   const credential = `GRAPH_GOAL_${prefix.toUpperCase()}_KEY`;
   await writeFile(configPath, JSON.stringify({
     version: 1,
-    // Two projects and a conversation bound to neither: no single project can own a
-    // graph for these goals, so they stay in the conversation - which is the path
-    // these cases are about (the bar, its spend and its controls).
-    projects: [{ id: 'p', root: project }, { id: 'second', root: second }],
+    // No project at all: these goals have no graph owner, so they stay in the
+    // conversation - the path these cases are about (the bar, its spend and controls).
+    projects: [],
     models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
       baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] },
     credentials: { local: { secretRef: credential } },

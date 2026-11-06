@@ -33,3 +33,21 @@
 .goal-bar .btn { flex: 0 0 auto; }
 .goal-bar [data-testid="goal-usage"] { margin-left: auto; }
 .goal-bar .field-error { flex: 0 0 auto; }
+
+/* The graph is where the work is. One control on the bar opens it; the transcript
+   stays a transcript. */
+.goal-bar-open {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.goal-bar-open:hover { color: var(--text); border-color: var(--accent); }
+.goal-bar-open svg { color: inherit; }

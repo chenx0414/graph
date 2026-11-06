@@ -24,14 +24,10 @@ test('a conversation keeps one goal through set, show, pause, resume and clear',
   await mkdir(join(root, 'web'));
   await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root"></div>');
   const configPath = join(root, 'graph.config.json');
-  // Two projects, and a conversation bound to neither: no single project can own a
-  // graph for this goal, so it stays in the conversation - which is the behaviour this
-  // case is about.
-  await mkdir(join(root, 'second'), { recursive: true });
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [
-    { id: 'p', root: join(root, 'project') },
-    { id: 'second', root: join(root, 'second') },
-  ] }));
+  // No project at all: a graph has nowhere to run, so the goal stays in the
+  // conversation - which is the behaviour this case is about.
+
+  await writeFile(configPath, JSON.stringify({ version: 1, projects: [] }));
   const daemon = await launchCli(root, { configPath });
   cleanup.push(() => daemon.close());
   const request = async (path: string, body?: object) => {
@@ -57,6 +53,8 @@ test('a conversation keeps one goal through set, show, pause, resume and clear',
   const lines = await goalLines(conversationId);
   expect(lines.filter(message => message.kind === 'goal'), JSON.stringify(lines)).toHaveLength(1);
   expect(lines.some(message => message.kind === 'goal' && message.text?.includes('已忽略 +N')), JSON.stringify(lines)).toBe(true);
+  // The receipt says why there is no graph, instead of leaving the person looking for one.
+  expect(lines.some(message => message.kind === 'goal' && message.text?.includes('未能建图')), JSON.stringify(lines)).toBe(true);
 
   expect((await request(`/api/conversations/${conversationId}/goal`)).body.goal).toMatchObject({ objective: '把导出做成 CSV', status: 'active' });
 

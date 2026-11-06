@@ -29,14 +29,14 @@ type GoalGraphError struct {
 func (failure GoalGraphError) Error() string { return failure.Reason }
 
 // StartGoalGraph creates the graph that runs one goal, and records its id on the goal.
-func (runtime *TaskRuntime) StartGoalGraph(conversationID string, goal ConversationGoal, projectID string) (ConversationGoal, error) {
+func (runtime *TaskRuntime) StartGoalGraph(conversationID string, goal ConversationGoal, projectID string) (ConversationGoal, string, error) {
 	conversation := ConversationRowOf(runtime.store, conversationID)
 	ownerTask, resolved, err := runtime.goalGraphOwner(conversation, projectID)
 	if err != nil {
-		return goal, err
+		return goal, "", err
 	}
 	if runtime.catalog == nil {
-		return goal, GoalGraphError{Reason: "能力目录尚未就绪，目标暂时按会话执行"}
+		return goal, "", GoalGraphError{Reason: "能力目录尚未就绪，目标暂时按会话执行"}
 	}
 	// The assembly raises (panics) when a bound skill is missing: that is a reason a
 	// goal cannot run as a graph yet, not a reason the command fails. Same for the graph
@@ -58,7 +58,7 @@ func (runtime *TaskRuntime) StartGoalGraph(conversationID string, goal Conversat
 		})
 	}()
 	if createErr != nil {
-		return goal, createErr
+		return goal, resolved, createErr
 	}
 	created := runtime.graphManagement(ownerTask).GraphCreate(map[string]any{
 		"definition": definition,
@@ -74,7 +74,7 @@ func (runtime *TaskRuntime) StartGoalGraph(conversationID string, goal Conversat
 		graphID = value.GraphId
 	}
 	if graphID == "" {
-		return goal, GoalGraphError{Reason: "建图没有返回图 id"}
+		return goal, resolved, GoalGraphError{Reason: "建图没有返回图 id"}
 	}
 	goal.GraphId = graphID
 	goal.GraphOwnerTask = ownerTask
@@ -83,7 +83,7 @@ func (runtime *TaskRuntime) StartGoalGraph(conversationID string, goal Conversat
 	runtime.store.Event(ownerTask, "goal.graph_created", map[string]any{
 		"conversationId": conversationID, "graphId": graphID, "projectId": resolved,
 	})
-	return saved, nil
+	return saved, resolved, nil
 }
 
 // goalGraphOwner decides which task owns the goal's graph.
@@ -99,19 +99,45 @@ func (runtime *TaskRuntime) goalGraphOwner(conversation ConversationRow, project
 	}
 	chosen := strings.TrimSpace(projectID)
 	if chosen == "" {
-		configured := runtime.configuredProjects()
-		if len(configured) == 1 {
+		// A graph needs a project, and the conversation that asked for the work has
+		// none: the main Agent's conversation is not a project. Deciding is this
+		// runtime's job - the goal must not fall back to the conversation just because
+		// nobody named a project. The project the person is actually working in wins,
+		// measured by the newest message it holds; an installation with one project has
+		// no choice to make.
+		chosen = runtime.mostRecentlyActiveProject()
+	}
+	if chosen == "" {
+		// Nothing has happened in any project yet (a fresh install, or the person has
+		// only talked to the main Agent): one project leaves no choice to make, and with
+		// several the first configured one is the answer - named in the receipt either
+		// way, so the person can see where the work went.
+		if configured := runtime.configuredProjects(); len(configured) > 0 {
 			chosen = configured[0].Id
 		}
 	}
 	if chosen == "" {
-		return "", "", GoalGraphError{Reason: "没有指定项目，也没有唯一的已配置项目可以承载这个目标"}
+		return "", "", GoalGraphError{Reason: "没有可承载这个目标的项目：请先在控制台建立一个项目"}
 	}
 	if !runtime.allowedProjects()[chosen] {
 		return "", "", GoalGraphError{Reason: "项目 " + chosen + " 未配置或不可用"}
 	}
 	thread := runtime.ensureSupervisorThread(&chosen, "goal-graph:"+chosen)
 	return thread.TaskID, chosen, nil
+}
+
+// mostRecentlyActiveProject names the project the person is working in: the one whose
+// supervisor conversation holds the newest message. It answers one question - where
+// does this goal's graph go - for a conversation that has no project of its own.
+func (runtime *TaskRuntime) mostRecentlyActiveProject() string {
+	row := kernelRow(runtime.store.Db, `SELECT c.project_id AS project_id
+		FROM conversations c LEFT JOIN messages m ON m.conversation_id=c.id
+		WHERE c.role='project' AND c.archived_at IS NULL AND c.project_id IS NOT NULL
+		GROUP BY c.project_id ORDER BY MAX(m.created_at) DESC, MAX(c.created_at) DESC LIMIT 1`)
+	if row == nil {
+		return ""
+	}
+	return strings.TrimSpace(kernelString(row["project_id"]))
 }
 
 // goalGraphTicket numbers the goal graph inside its project. The reviewers and the

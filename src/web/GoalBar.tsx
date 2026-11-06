@@ -103,6 +103,16 @@ export function GoalBar({ conversationId }: { conversationId: string }) {
     </span>
     <Pill tone={status.tone} testid="goal-status">{status.label}</Pill>
     {goal.status !== 'completed' && <span className="goal-bar-fact" data-testid="goal-elapsed">{elapsed(goal.createdAt, now)}</span>}
+    {/* The work is in the graph, and a graph that cannot be found is work the person
+        cannot check: this is the one control that opens it (no card, no link in the
+        transcript). The tab it opens is the canvas the console already has. */}
+    {goal.graphId && <button
+      type="button"
+      className="goal-bar-open"
+      data-testid="goal-open-graph"
+      title={`打开图 ${goal.graphId}（规划 → 实现 → 独立审查）`}
+      onClick={() => { location.hash = `#/tasks/${goal.graphId}/graph`; }}
+    ><Icon name="graph" size={12} />任务图</button>}
     <span className="goal-bar-fact" data-testid="goal-usage">{goal.status === 'completed' ? `共 ${compact(goal.usedTokens)} tokens` : `${compact(goal.usedTokens)} tokens`}</span>
     {goal.status === 'active' && <Button size="sm" icon="pause" data-testid="goal-pause" disabled={busy} onClick={() => void act('pause')}>暂停</Button>}
     {(goal.status === 'paused' || goal.status === 'usage_limited') && <Button size="sm" icon="play" data-testid="goal-resume" disabled={busy} onClick={() => void act('resume')}>继续</Button>}

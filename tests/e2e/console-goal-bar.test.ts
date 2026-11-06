@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'vite';
@@ -26,9 +26,7 @@ test('the goal is one status bar with its age, its spend and pause/continue', as
   const root = await mkdtemp(join(tmpdir(), 'graph-console-goal-bar-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
-  const second = join(root, 'second');
   await mkdir(project, { recursive: true });
-  await mkdir(second, { recursive: true });
   const webDir = join(root, 'web');
   await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
   // Enough tiny answers for the rounds the goal starts by itself while the test
@@ -40,9 +38,9 @@ test('the goal is one status bar with its age, its spend and pause/continue', as
   const configPath = join(root, 'graph.config.json');
   await writeFile(configPath, JSON.stringify({
     version: 1,
-    // Two projects and a conversation bound to neither: this goal runs in the
-    // conversation, which is the case where the bar is the only goal UI there is.
-    projects: [{ id: 'p', root: project }, { id: 'second', root: second }],
+    // No project at all: this goal has no graph to run in, so it runs in the
+    // conversation - the case where the bar is the only goal UI there is.
+    projects: [],
     credentials: { local: { secretRef: 'GRAPH_GOAL_BAR_KEY' } },
     models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
       baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] },
@@ -125,4 +123,79 @@ test('the goal is one status bar with its age, its spend and pause/continue', as
   // asked for when they clicked pause.
   await page.getByTestId('goal-pause').click();
   await expect.poll(async () => await page.getByTestId('goal-status').innerText(), { timeout: 15_000 }).toBe('已暂停');
+}, 180_000);
+
+test('a goal with no project named still gets a graph, and the bar opens it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'graph-console-goal-graph-'));
+  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const webDir = join(root, 'web');
+  await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
+  const provider = await openaiServer([{ text: '准备开始', usage: { prompt_tokens: 10, completion_tokens: 2 } }]);
+  cleanup.push(() => provider.close());
+  const configPath = join(root, 'graph.config.json');
+  await writeFile(configPath, JSON.stringify({
+    version: 1,
+    // One project and a conversation that names none: the graph has to go somewhere,
+    // and deciding that is the runtime's job - not the person's.
+    projects: [{ id: 'solo', root: project }],
+    credentials: { local: { secretRef: 'GRAPH_GOAL_GRAPH_KEY' } },
+    models: { entries: [{ id: 'main', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+      baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] },
+  }));
+  // The team assembly needs its skills installed; they are on this machine and the
+  // daemon under test gets its own copy rather than reading the live home.
+  const skills = join(root, 'graph-home', 'capabilities', 'skills');
+  await mkdir(skills, { recursive: true });
+  for (const skill of [
+    'mattpocock-skills-skills-engineering-codebase-design',
+    'mattpocock-skills-skills-engineering-tdd',
+    'mattpocock-skills-skills-engineering-code-review',
+  ]) {
+    await cp(join(process.env.HOME ?? '', '.graph', 'capabilities', 'skills', skill), join(skills, skill), { recursive: true });
+  }
+  const daemon = await launchCli(root, { configPath, webDir, graphHome: join(root, 'graph-home'), extraArgs: ['--execute'], env: { GRAPH_GOAL_GRAPH_KEY: 'synthetic-only' } });
+  cleanup.push(() => daemon.close());
+
+  const created = await daemon.request('/api/conversations', {
+    method: 'POST', body: JSON.stringify({ model: 'main', title: 'Goal graph', text: '准备开始', requestId: 'goal-graph-first' }),
+  });
+  const createdText = await created.text();
+  expect(created.status, createdText).toBe(200);
+  const conversationId = (JSON.parse(createdText) as { conversationId: string }).conversationId;
+
+  const set = await daemon.request(`/api/conversations/${conversationId}/messages`, {
+    method: 'POST', body: JSON.stringify({ text: '/goal 把导出做成 CSV\n验收：POST /api/export 返回 CSV', requestId: 'goal-graph-set' }),
+  });
+  const setBody = await set.json() as { goal?: { graphId?: string }; graphError?: string };
+  expect(set.status, JSON.stringify(setBody)).toBe(200);
+  // No project was named and the conversation has none: the goal still runs as a graph.
+  expect(setBody.graphError ?? '', JSON.stringify(setBody)).toBe('');
+  const graphId = String(setBody.goal?.graphId ?? '');
+  expect(graphId, JSON.stringify(setBody)).not.toBe('');
+
+  // The thread's receipt says which project runs it, so the work is findable.
+  const thread = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as { messages: { kind?: string; text?: string }[] };
+  const receipt = thread.messages.filter(message => message.kind === 'goal').map(message => message.text ?? '').join('\n');
+  expect(receipt).toContain('目标已开图执行');
+  expect(receipt).toContain('项目 solo');
+
+  // The bar carries the one control that opens the graph, and it lands on the canvas.
+  const { browser } = await launchBrowser();
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(daemon.url);
+  await page.goto(`${daemon.url}/#/conversations/${conversationId}`);
+  await page.getByTestId('conversation').waitFor();
+  const bar = page.getByTestId('goal-bar');
+  await bar.waitFor();
+  expect(await bar.getAttribute('data-runner')).toBe('graph');
+  const open = page.getByTestId('goal-open-graph');
+  await open.waitFor();
+  await open.click();
+  await expect.poll(() => page.url(), { timeout: 15_000 }).toContain(`#/tasks/${graphId}/graph`);
+  // The graph window is the real one: the four nodes of the team are on the canvas.
+  await expect.poll(async () => await page.getByText('planner').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+  await page.screenshot({ path: join(evidenceDir(root, 'console-goal-graph'), 'graph-open.png'), fullPage: false });
 }, 180_000);

@@ -177,9 +177,12 @@ func (conversations *TaskRuntimeConversations) Goal(conversationID string, input
 		// A goal runs as a graph: plan, implement, independent review on two axes,
 		// rework on failure. The conversation keeps the objective, the criteria and the
 		// state - not the work.
-		if graphGoal, graphErr := runtime.StartGoalGraph(conversationID, goal, input.ProjectId); graphErr == nil {
+		if graphGoal, graphProject, graphErr := runtime.StartGoalGraph(conversationID, goal, input.ProjectId); graphErr == nil {
 			goal = graphGoal
 			result["graphId"] = goal.GraphId
+			// Which project runs the graph is part of the receipt: the person who set the
+			// goal has to know where the work went, or the graph is invisible to them.
+			result["graphProject"] = graphProject
 		} else {
 			// A goal that cannot become a graph still runs, inside the conversation, and
 			// says why: a silent fallback would leave the person waiting for a graph that
@@ -340,7 +343,7 @@ func goalStartInstruction(goal *ConversationGoal) string {
 const goalToolInstruction = "\n目标真正完成并已验证时，用 goal 工具（action=complete）提交独立验收，并在 note 里报告最终已用 tokens——acceptance 通过才算完成；连续三轮都报告同一个阻碍时用 action=blocked 停下来等我。"
 
 // goalLine is the one visible line a /goal command leaves in the conversation.
-func goalLine(action string, goal *ConversationGoal, budgetIgnored bool) string {
+func goalLine(action string, goal *ConversationGoal, budgetIgnored bool, graphProject string, graphError string) string {
 	switch action {
 	case "set":
 		// The card is the live view of the goal; this line is the receipt of
@@ -353,8 +356,17 @@ func goalLine(action string, goal *ConversationGoal, budgetIgnored bool) string 
 		// implements and reviews on its own, or the in-conversation loop with the reason
 		// a graph was not possible.
 		if goal.GraphId != "" {
+			where := ""
+			if graphProject != "" {
+				where = "项目 " + graphProject + "；"
+			}
 			return "目标已开图执行：" + goal.Objective + " · 图 " + shortGraphId(goal.GraphId) +
-				"（规划 → 实现 → 独立审查，不通过自动返工）"
+				"（" + where + "规划 → 实现 → 独立审查，不通过自动返工）"
+		}
+		// A goal that could not become a graph says so, with the reason: otherwise the
+		// person is waiting for a graph that was never built.
+		if graphError != "" {
+			return "目标已设定：" + goal.Objective + note + "\n未能建图：" + graphError + "；目标改在会话里推进。"
 		}
 		return "目标已设定：" + goal.Objective + note
 	case "clear":
@@ -412,9 +424,11 @@ func AppendGoalLine(store *TaskStore, conversationID, action string, result map[
 		goal = &copied
 	}
 	ignored, _ := result["budgetIgnored"].(bool)
+	project, _ := result["graphProject"].(string)
+	failure, _ := result["graphError"].(string)
 	return AppendMessage(store, MessageInput{
 		ConversationID: conversationID, Role: MessageRoleSystem, Kind: "goal",
-		Text: goalLine(action, goal, ignored), State: MessageStateDone,
+		Text: goalLine(action, goal, ignored, project, failure), State: MessageStateDone,
 		Data: map[string]any{"source": map[string]any{"kind": "goal_command"}, "action": action},
 	})
 }
