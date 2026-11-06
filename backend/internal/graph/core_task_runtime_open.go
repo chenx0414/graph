@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,6 +136,12 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		SystemContext:   runtime.executionSystemContext(),
 		Access:          runtime.resolvedAccessPolicy,
 		Artifacts:       runtime.artifacts,
+		CredentialRecovery: func(modelId string) error {
+			if runtime.options.OnCredentialRejected == nil {
+				return errors.New("no credential recovery is wired")
+			}
+			return runtime.options.OnCredentialRejected(modelId)
+		},
 	})
 	// The recovery bootstrap belongs to the kernel that owns the durable
 	// conversations. The PiG kernel keeps them in this process, so it

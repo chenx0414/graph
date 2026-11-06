@@ -43,6 +43,17 @@ type providerLogins struct {
 	background context.Context
 	stop       context.CancelFunc
 	startOnce  sync.Once
+	// refreshMutex serializes the on-demand refresh: two requests that are
+	// rejected at the same moment must spend the refresh token once, because the
+	// vendor invalidates it on use.
+	refreshMutex sync.Mutex
+	// relogin holds the credentials the vendor refused to renew; refreshed holds
+	// the last successful renewal, so the console can say which of the two it is.
+	relogin   map[string]string
+	refreshed map[string]time.Time
+	// ask files the question a dead credential owes the person. The app sets it,
+	// because only the app knows which conversation owns the master node.
+	ask func(QuestionInput)
 }
 
 var providerSecretRef = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -57,7 +68,7 @@ func (app *GraphApp) loginService() *providerLogins {
 		service := &providerLogins{
 			values: map[string]*providerLogin{}, disconnecting: map[string]bool{},
 			services: app.options.AppServices, secrets: app.appProviderSecrets,
-			background: background, stop: stop,
+			background: background, stop: stop, ask: app.credentialQuestion,
 		}
 		app.logins = service
 	}

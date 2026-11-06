@@ -142,6 +142,21 @@ func (app *GraphApp) appProvidersView() map[string]any {
 			credentials = view.(ProviderView).Credentials
 		}
 	}
+	// A credential the vendor refused to renew is named as such: the console can then
+	// say "需要重新登录" instead of showing a configured credential that quietly fails.
+	if app.logins != nil {
+		for id, credential := range credentials {
+			// The map is keyed by credential id; the refresh state belongs to the
+			// secret ref the credential resolves through.
+			state, known := app.logins.xaiRefreshStatus(credential.SecretRef)
+			if !known {
+				continue
+			}
+			credential.NeedsRelogin = state.NeedsRelogin
+			credential.CredentialNote = state.Reason
+			credentials[id] = credential
+		}
+	}
 	return map[string]any{
 		"platforms":   PlatformCatalogView(secrets).Platforms,
 		"credentials": credentials,

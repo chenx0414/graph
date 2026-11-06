@@ -1,3 +1,4 @@
+// graph:allow-large-file: the ownership table and routing predate the budget; this change adds one row and no logic
 package graph
 
 import (
@@ -72,6 +73,9 @@ var questionPolicies = map[string]QuestionPolicy{
 	"reservation_exceeded": {Owner: QuestionOwnerUser, Answers: []string{"acknowledge"}},
 	"human_check":          {Owner: QuestionOwnerUser, Answers: []string{"acknowledge", "reject"}},
 	"system_change":        {Owner: QuestionOwnerUser, Answers: []string{"respond"}},
+	// A dead OAuth credential can only be fixed by the person who owns the account:
+	// no retry renews it, and the daemon cannot log in on their behalf.
+	"credential":           {Owner: QuestionOwnerUser, Answers: []string{"respond"}},
 	"unknown_usage":        {Owner: QuestionOwnerMain, Answers: []string{"usage", "reconcile_usage"}},
 	"waiting":              {Owner: QuestionOwnerMain, Answers: []string{"respond"}},
 	"adapter_error":        {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},

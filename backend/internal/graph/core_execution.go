@@ -53,6 +53,8 @@ type ExecutionExtras struct {
 	SystemContext   *ExecutionSystemContext
 	Access          func() *ResolvedAccessPolicy
 	Artifacts       *ArtifactWorkspace
+	// CredentialRecovery renews an OAuth credential whose request was rejected.
+	CredentialRecovery func(modelId string) error
 }
 
 // ExecutionDispatch counts the work one dispatch round started.

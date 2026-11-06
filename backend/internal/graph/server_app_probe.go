@@ -117,7 +117,10 @@ func (app *GraphApp) appRunProviderProbe(body map[string]any) appProbeResult {
 	models := []ProviderModelSummary{}
 	var modelsError *string
 	if wantModels {
-		status, payload := appProbeHttp(BuildModelsRequest(target))
+		status, payload := app.probeWithRefresh(&target, func(t ProbeTarget) HttpRequestSpec { return BuildModelsRequest(t) },
+			func(t ProbeTarget, status int, payload any) bool {
+				return xaiCredentialRejected(status, ParseModelsResponse(t, status, payload).Error)
+			})
 		reply := ParseModelsResponse(target, status, payload)
 		if reply.Error == "" {
 			models = append(models, reply.Models...)
@@ -139,7 +142,10 @@ func (app *GraphApp) appRunProviderProbe(body map[string]any) appProbeResult {
 		message := "凭据未解析：" + provider.CredentialRef + "（请在环境变量或钥匙串中提供）"
 		verification.Error = &message
 	case verifyModel != "":
-		status, payload := appProbeHttp(BuildVerifyRequest(target, verifyModel))
+		status, payload := app.probeWithRefresh(&target, func(t ProbeTarget) HttpRequestSpec { return BuildVerifyRequest(t, verifyModel) },
+			func(t ProbeTarget, status int, payload any) bool {
+				return xaiCredentialRejected(status, ParseVerifyResponse(status, payload).Error)
+			})
 		reply := ParseVerifyResponse(status, payload)
 		if reply.OK {
 			verification.OK = true
@@ -173,4 +179,51 @@ func (app *GraphApp) appRunProviderProbe(body map[string]any) appProbeResult {
 		ModelsError:          modelsError,
 		Verification:         verification,
 	}
+}
+
+// probeWithRefresh answers "does this credential work" instead of "did it work a
+// minute ago".
+//
+// The probe is where a person checks a credential, so a token the vendor just
+// rejected is renewed and the same request is sent once more. Only a credential that
+// carries a refresh bundle is renewed: a plain API key has nothing to renew, and its
+// rejection is the honest answer.
+func (app *GraphApp) probeWithRefresh(target *ProbeTarget, build func(ProbeTarget) HttpRequestSpec, rejected func(ProbeTarget, int, any) bool) (int, any) {
+	status, payload := appProbeHttp(build(*target))
+	if !rejected(*target, status, payload) {
+		return status, payload
+	}
+	ref, ok := app.xaiRefreshableRef(*target)
+	if !ok {
+		return status, payload
+	}
+	if err := app.loginService().xaiRefreshNow(context.Background(), ref); err != nil {
+		return status, payload
+	}
+	fresh := strings.TrimSpace(app.appProviderSecrets()[ref])
+	if fresh == "" {
+		return status, payload
+	}
+	key := fresh
+	target.APIKey = &key
+	return appProbeHttp(build(*target))
+}
+
+// xaiRefreshableRef names the credential a probe used, when that credential also has
+// a refresh bundle beside it.
+func (app *GraphApp) xaiRefreshableRef(target ProbeTarget) (string, bool) {
+	if target.APIKey == nil {
+		return "", false
+	}
+	key := strings.TrimSpace(*target.APIKey)
+	secrets := app.appProviderSecrets()
+	for ref, value := range secrets {
+		if strings.HasSuffix(ref, xaiRefreshSuffix) || strings.TrimSpace(value) != key {
+			continue
+		}
+		if strings.TrimSpace(secrets[ref+xaiRefreshSuffix]) != "" {
+			return ref, true
+		}
+	}
+	return "", false
 }

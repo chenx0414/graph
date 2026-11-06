@@ -83,6 +83,10 @@ type GraphServerOptions struct {
 	// Codemode offers the kernel's codemode tool to the Agent sessions. It
 	// is off by default.
 	Codemode GraphCodemode
+	// OnCredentialRejected renews an OAuth credential after the vendor rejected it.
+	// The app wires it, because the refresh token lives behind the host's secret
+	// store.
+	OnCredentialRejected func(modelId string) error
 }
 
 // How often the harness looks for problems nobody acted on. The sweep is one

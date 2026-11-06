@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,6 +20,12 @@ func CreateApp(runtime *TaskRuntime, options AppOptions) *GraphApp {
 		// The layout cache is written on the first graph view, so it has to
 		// exist before the first request arrives.
 		layouts: map[string]GraphLayout{},
+	}
+	// The model path renews a rejected OAuth credential through the same secret store
+	// the login uses, so the runtime and the app share one refresher. Wiring it here
+	// keeps the runtime free of the host's secret channel.
+	if runtime != nil {
+		runtime.options.OnCredentialRejected = app.recoverCredential
 	}
 	mux := http.NewServeMux()
 	app.registerRoutes(mux)
@@ -118,4 +125,48 @@ func (app *GraphApp) guard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// recoverCredential renews the credential a rejected model request used.
+//
+// It resolves the model's provider from the live catalog and only renews a credential
+// that carries a refresh bundle; a plain API key has nothing to renew, and its
+// rejection is the honest answer to the request.
+func (app *GraphApp) recoverCredential(modelId string) error {
+	ref, ok := app.xaiCredentialForModel(modelId)
+	if !ok {
+		return fmt.Errorf("模型 %s 的凭据不是可刷新的 OAuth 凭据", modelId)
+	}
+	return app.loginService().xaiRefreshNow(context.Background(), ref)
+}
+
+// xaiCredentialForModel names the credential a model uses, when that credential is an
+// xAI OAuth credential with a refresh bundle beside it.
+func (app *GraphApp) xaiCredentialForModel(modelId string) (string, bool) {
+	if app.runtime == nil {
+		return "", false
+	}
+	provider := ""
+	for _, entry := range app.runtime.liveEntries() {
+		if entry.Id == modelId {
+			provider = entry.Provider
+			break
+		}
+	}
+	if provider == "" {
+		return "", false
+	}
+	for _, preset := range PLATFORM_PRESETS {
+		if preset.OAuthProvider != "xai" {
+			continue
+		}
+		if preset.ID != provider && preset.OAuthProvider != provider {
+			continue
+		}
+		if strings.TrimSpace(app.appProviderSecrets()[preset.CredentialRef+xaiRefreshSuffix]) == "" {
+			return "", false
+		}
+		return preset.CredentialRef, true
+	}
+	return "", false
 }

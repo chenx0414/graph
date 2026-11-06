@@ -63,6 +63,14 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	estimatedRequiresReconciliation := source == UsageEstimated && !options.Reconciled
 	fullAccess := IsFullAccess(operation.AccessPolicy)
 	if result.Outcome == "failed" {
+		// A rejected credential is renewed and the turn runs again. This sits before
+		// the open-question guard on purpose: that guard exists so a retry cannot
+		// race a decision already waiting for main, but a dead token is not a
+		// decision - it is a one-minute fix, and an old question must not park a
+		// turn the fresh token would finish.
+		if l.recoverCredential(operation, result) {
+			return
+		}
 		if kernelRow(l.store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'",
 			operation.TaskId, operation.NodeId) == nil {
 			attempt := int64(0)
@@ -291,4 +299,45 @@ func (l *OperationLifecycle) bindWakes(operation Operation) {
 		"kinds":       kinds,
 		"dedupeKeys":  dedupeKeys,
 	})
+}
+
+// recoverCredential renews the credential a failed turn was rejected for, and retries
+// the turn when the renewal worked.
+//
+// It reports whether the turn was retried: a credential that cannot be renewed stays a
+// failure, and the caller's normal handling (a question for main, or the human) runs
+// exactly as before.
+func (l *OperationLifecycle) recoverCredential(operation Operation, result OperationResult) bool {
+	if l.hooks.OnCredentialRejected == nil {
+		return false
+	}
+	if !credentialRejection(describeFailure(result.Output)) {
+		return false
+	}
+	attempt := int64(0)
+	if node := kernelRow(l.store.Db, "SELECT stall_count FROM nodes WHERE task_id=? AND id=?", operation.TaskId, operation.NodeId); node != nil {
+		attempt = kernelInt(node["stall_count"])
+	}
+	if int(attempt)+1 > MAX_TRANSIENT_RETRIES {
+		return false
+	}
+	model := kernelString(kernelRow(l.store.Db, "SELECT json_extract(spec,'$.model') AS model FROM nodes WHERE task_id=? AND id=?",
+		operation.TaskId, operation.NodeId)["model"])
+	if err := l.hooks.OnCredentialRejected(model); err != nil {
+		// The reason is on the credential now (and in the question the app files);
+		// the turn keeps its ordinary failure so nothing is retried against a dead
+		// token.
+		l.store.Event(operation.TaskId, "node.credential_refresh_failed", map[string]any{
+			"nodeId": operation.NodeId, "operationId": operation.Id, "error": err.Error(),
+		})
+		return false
+	}
+	l.store.MarkOperationSettled(operation.Id, CanonicalJSON(result))
+	l.store.RetryNodeOutput(operation.TaskId, operation.NodeId, CanonicalJSON(result.Output), operation.Id)
+	l.store.RetryActivation(operation.ActivationId)
+	l.store.Event(operation.TaskId, "node.credential_refreshed", map[string]any{
+		"nodeId": operation.NodeId, "operationId": operation.Id, "attempt": attempt + 1,
+		"reason": "OAuth 凭据被拒后已刷新，重跑本轮",
+	})
+	return true
 }

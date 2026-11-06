@@ -127,6 +127,10 @@ type OperationRun struct {
 // OperationLifecycleHooks lets the host veto a replay before the adapter sent anything.
 type OperationLifecycleHooks struct {
 	CanReplayBeforeSend func(operation Operation) bool
+	// OnCredentialRejected renews the credential a rejected request used. It returns
+	// nil when the credential is usable again, so the turn can be retried instead of
+	// filed as a failed one.
+	OnCredentialRejected func(modelId string) error
 }
 
 // OperationAdmitInput is one admission of an operation.

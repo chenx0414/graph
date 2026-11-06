@@ -10,6 +10,10 @@ type ProviderCredentialView struct {
 	Resolved           bool    `json:"resolved"`
 	DisplayName        *string `json:"displayName,omitempty"`
 	SharedLimitGroupID *string `json:"sharedLimitGroupId,omitempty"`
+	// NeedsRelogin is set when the vendor refused to renew this credential: the only
+	// fix is a new login, and the console says so instead of pretending it is fine.
+	NeedsRelogin   bool   `json:"needsRelogin,omitempty"`
+	CredentialNote string `json:"credentialNote,omitempty"`
 }
 
 // ProviderView is the credential view of the whole configuration.
