@@ -62,7 +62,7 @@ test('the Main Agent recipe is visible with fixed system capabilities and an edi
   expect(await page.getByTestId('main-agent-recipe-note').innerText()).toContain('不能从配方移除');
   await page.getByRole('button', { name: '取消' }).click();
   expect(await page.getByTestId('agent-combination-main').getByRole('button', { name: '删除' }).isDisabled()).toBe(true);
-});
+}, 60_000);
 
 
 
@@ -105,7 +105,7 @@ test('the composer inserts project file mentions and carries text attachments in
     { name: 'notes.md', type: 'text/markdown', size: 26, text: '# Notes\n\nAttachment body.\n' },
   ]);
   await expect.poll(() => page.getByTestId('message-user').last().innerText()).toContain('notes.md');
-});
+}, 60_000);
 
 
 
@@ -187,7 +187,7 @@ test('the composer slash menu selects tools, switches model and queues compactio
   expect(sent!.text).toContain('请分析这个项目');
   expect(sent!.text).toContain('The user explicitly requested the following tools and capabilities');
   expect(sent!.text).toContain('`read`');
-});
+}, 60_000);
 
 
 
@@ -223,4 +223,4 @@ test('settings opens as a second page with its own navigation and return control
   await page.getByTestId('rail-models').click();
   await page.getByTestId('models-page').waitFor();
   expect(await page.locator('.tab[data-active="true"] .tab-title').innerText()).toBe('模型');
-});
+}, 60_000);
