@@ -127,7 +127,9 @@ test('an activation interrupts and records the live work, and the next daemon re
   expect(pauseReceipt.status, JSON.stringify(pauseReceipt.body)).toBe(200);
 
   // The activation turn: it must interrupt the held turn before requesting the reload.
-  const rsi = await request('/api/conversations', { projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi' });
+  const opened = await request('/api/orchestration/global', { requestId: 'rsi-open' });
+  expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+  const rsi = await request(`/api/conversations/${String(opened.body.conversationId)}/messages`, { text: 'RSI workflow', requestId: 'rsi' });
   expect(rsi.status, JSON.stringify(rsi.body)).toBe(200);
   const restartPath = join(root, 'state', 'rsi', 'restart.json');
   try {

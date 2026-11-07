@@ -144,9 +144,14 @@ test('an interrupted change can be read back as committed or not, and a finished
   cleanup.push(() => daemon.close());
 
   const turn = async (marker: string) => {
-    const created = await daemon.request('/api/conversations', {
+    const opened = await daemon.request('/api/orchestration/global', {
+      method: 'POST', body: JSON.stringify({ requestId: 'rsi-attempt-open-' + marker }),
+    });
+    expect(opened.status, JSON.stringify(await opened.clone().text())).toBe(200);
+    const { conversationId } = JSON.parse(await opened.text()) as { conversationId: string };
+    const created = await daemon.request(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow ' + marker, requestId: 'rsi-attempt-' + marker }),
+      body: JSON.stringify({ text: 'RSI workflow ' + marker, requestId: 'rsi-attempt-' + marker }),
     });
     expect(created.status, JSON.stringify(created.body)).toBe(200);
   };

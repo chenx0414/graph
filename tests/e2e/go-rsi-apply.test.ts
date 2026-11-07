@@ -138,6 +138,21 @@ async function fixture(stepsFor: (initialCommit: string) => ToolCall[][]) {
   return { root, checkout, git, initialCommit, provider, daemon, request };
 }
 
+
+async function startMasterConversation(f: Awaited<ReturnType<typeof fixture>>, requestId: string) {
+  const opened = await f.request('/api/orchestration/global', {
+    method: 'POST',
+    body: JSON.stringify({ requestId: `${requestId}-open` }),
+  });
+  expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+  const { conversationId } = opened.body as { conversationId: string };
+  const started = await f.request(`/api/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ text: 'RSI workflow', requestId }),
+  });
+  return { ...started, body: { ...(started.body as Record<string, unknown>), conversationId } };
+}
+
 const base = { title: 'Correct native RSI call', problem: 'Exercise the real apply', activate: false };
 const check = {
   command: 'node',
@@ -210,10 +225,7 @@ test('a console-only change builds the served page and never the app bundle', as
     }),
   }]]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-console-only' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-console-only');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
   const { conversationId } = started.body as { conversationId: string };
 
@@ -247,10 +259,7 @@ test('a whole-file write that would gut a large file is refused and nothing is w
     }),
   }]]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-gut' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-gut');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   // The refusal names the file and both sizes, so the caller can see what it was
@@ -268,10 +277,7 @@ test('a wrong self-improvement call is explained and changes nothing', async () 
     id: entry.id, name: 'apply_rsi_change', arguments: JSON.stringify(entry.args),
   }))]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-malformed' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-malformed');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   await expect.poll(() => f.provider.observed.size, { timeout: 90_000, interval: 250 })
@@ -308,10 +314,7 @@ test('a wrong self-improvement call is explained and changes nothing', async () 
 test('a right self-improvement call commits the real checkout', async () => {
   const f = await fixture(script);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-apply' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-apply');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
   const conversationId = (started.body as { conversationId: string }).conversationId;
 
@@ -347,10 +350,7 @@ test('a right self-improvement call commits the real checkout', async () => {
 test('a self-improvement call that asks for a reload leaves a real reload request behind', async () => {
   const f = await fixture(() => activationScript());
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-activate' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-activate');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const { conversationId } = started.body as { conversationId: string };
@@ -388,10 +388,7 @@ test('a file already written in the workspace is committed without retyping it',
   }]]);
   await writeFile(join(f.checkout, 'keeper.txt'), 'keeper content\n');
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-adopt' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-adopt');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const observed = f.provider.observed;
@@ -425,10 +422,7 @@ test('a batch whose anchors do not match names every bad edit and writes nothing
     }),
   }]]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-several' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-several');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const observed = f.provider.observed;
@@ -472,10 +466,7 @@ test('another track\'s uncommitted work is left alone and stays out of the commi
   await writeFile(join(f.checkout, 'stranger.txt'), 'someone else work\n');
   await writeFile(join(f.checkout, 'delete.txt'), 'someone else edits this\n');
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-stranger' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-stranger');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const observed = f.provider.observed;
@@ -514,10 +505,7 @@ test('a path written in Chinese is committed like any other', async () => {
     }),
   }]]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-cjk' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-cjk');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const observed = f.provider.observed;
@@ -545,10 +533,7 @@ test('a dry run applies the change, runs the check and restores the checkout', a
     }),
   }]]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-dry' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-dry');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const observed = f.provider.observed;
@@ -580,10 +565,7 @@ test('a dry run that fails the gate still restores the checkout and never reload
     }),
   }]]);
 
-  const started = await f.request('/api/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'RSI workflow', requestId: 'rsi-dry-fail' }),
-  });
+  const started = await startMasterConversation(f, 'rsi-dry-fail');
   expect(started.status, JSON.stringify(started.body)).toBe(200);
 
   const observed = f.provider.observed;
