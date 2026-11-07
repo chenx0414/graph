@@ -55,6 +55,10 @@
 - 载荷进入下一轮回合简报（`core_execution_admit.go:247` 的 `RenderWakes`），新增 `tool_settled` 分支：工具名、`toolCallId`、结果摘要或失败原因。
 - **不把延迟结果做成 orphan tool result**：provider 侧会丢弃它——`controlledToolResults`/`controlledOpenAIToolMessages` 丢掉"答复不了本轮任何调用"的结果，并给缺结果的调用补 `No result provided`（`runtime_tool_flow.go:57-100`）。延迟观察走"唤醒 + 系统记录"。
 - 会话里的观察记录**只有一条**：它就是工具行从 `running` 变成 `done`/`error` 的那次更新（同一 `messages.id`、同一 `toolCallId`、同一 `activityKey`），走 `PersistConversationActivity` 的 upsert（`core_conversation_messages.go:95-140`）。不新增第二条同 `toolCallId` 的结果行。
+- **投递分两步，顺序是硬边界**：`finalizeDeferredToolCall` 在自己的事务里只写 `deferred_tool_calls` 收尾行、工具行与那条 `tool_settled` 消息；事务**提交之后**才调用投递（`deliverDeferredResultToRunningTurn` → 运行期注册的 `conversations.Steer`，即 PiG 现成的打断路径）。失败才 `RecoverMaster` 起一轮。理由：投递会自己开事务，在结算事务内嵌套会把这个会话打成 `Session failed after a storage error`（实测两版都如此）。
+- **会话忙 = 打断，不排队**：`Steer` 找到活动的 master operation 就打断它并把结果文本插进这一轮（`WhenBusySteer` 的语义：正在执行的工具会被 abort），消息落成 `delivered`，不再等下一轮；会话空闲时才落 `pending`/`queued` 并起一轮。
+- **投递不能冲掉来源**：`DeliverMessages` 改写消息时 `data` 必须合并（`conversationOrdinalData` 在原有 data 上补 `ordinal`），否则 `source.kind` 丢失、控制台把系统消息画成"我"的气泡。
+- **前端只有一种表现**：`source.kind = tool_settled` 的消息（无论 `delivered` 还是 `queued`）都渲染成系统卡片 `tool-settled-notice`（`data-role=system`），并且不进队列条——渲染层兜底 `toolSettledRowOf`，因为这条消息可能出现在普通消息、活动分组或 steer 三种路径里。
 
 ### 3.4 数据
 
