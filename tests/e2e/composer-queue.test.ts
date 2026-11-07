@@ -191,7 +191,7 @@ test('real main provider prompts preserve attached message anchors and the avail
   await writeFile(join(identity, 'agent.md'), 'You are a coder.\n');
   await f.post('/api/catalog/refresh');
   await f.post('/api/catalog/combinations', { combination: {
-    id: 'coder', name: 'Bob_coder', description: '默认主实现，承担功能开发、维护、修复和基础测试。', recommendedGrade: 'medium', review: false, tags: ['编码'],
+    id: 'coder', name: 'Bob_coder', description: '默认主实现，承担功能开发、维护、修复和基础测试。', review: false, tags: ['编码'],
     resources: [{ resourceId: 'coder-identity', version: '1.0.0', role: 'identity', required: true }],
   } });
   const created = await f.post('/api/conversations', { text: '请查看附件', attachments: [{ name: 'notes.md', type: 'text/markdown', size: 8, text: '# Notes\n' }] });
@@ -204,7 +204,7 @@ test('real main provider prompts preserve attached message anchors and the avail
   expect(prompt).toContain('Attachments supplied by the user');
   expect(prompt).toContain('notes.md (8 bytes, text/markdown)');
   expect(prompt).toContain('# Notes');
-  expect(prompt).toContain('- Agent recipe coder (Bob_coder, medium, valid): 默认主实现，承担功能开发、维护、修复和基础测试。');
+  expect(prompt).toContain('- Agent recipe coder (Bob_coder, valid): 默认主实现，承担功能开发、维护、修复和基础测试。');
   const view = await f.view(created.conversationId);
   expect(view.messages.find((message: { id: string }) => message.id === created.messageId)).toMatchObject({ text: '请查看附件', data: { attachments: [{ name: 'notes.md', text: '# Notes\n' }] } });
   const send = f.page.locator('[data-testid="conversation"]:visible').getByTestId('chat-send');

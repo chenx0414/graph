@@ -57,18 +57,18 @@ test('CLI conversations and graph execution deliver the test-first policy to mai
     for (const nodeId of ['worker', 'review']) {
       await expect.poll(async () => (await request(`/api/tasks/${graphId}/nodes/${nodeId}/run`)).node.status, { timeout: 30000 }).toBe('succeeded');
     }
-    await expect.poll(() => cheap.requests.length, { timeout: 30000 }).toBeGreaterThan(0);
-    for (const [id, provider] of Object.entries(providers)) {
-      expect(provider.requests.length, id).toBeGreaterThan(0);
-      for (const sent of provider.requests) {
-        const body = sent as { messages: { role: string; content: unknown }[] };
-        const system = JSON.stringify(body.messages.filter(message => message.role === 'system' || message.role === 'developer'));
-        if (id === 'cheap') expect(system).toContain('Write exactly one concise next message the user may want to send.');
-        expect(system, id).toContain('Unit, integration and end-to-end tests are all allowed');
-        expect(system, id).toContain('write the test before the code');
-        expect(system, id).toContain('do not weaken an existing check to obtain a pass');
-        expect(system, id).toContain('takes precedence over conflicting recipe, skill, project or editable prompt');
-      }
+    const everyRequest = Object.entries(providers).flatMap(([id, provider]) => provider.requests.map(sent => ({ id, sent })));
+    await expect.poll(() => everyRequest.filter(({ sent }) => JSON.stringify(sent).includes('Write exactly one concise next message')).length, { timeout: 30000 }).toBeGreaterThan(0);
+    for (const id of ['main', 'worker', 'reviewer']) {
+      expect(providers[id as keyof typeof providers].requests.length, id).toBeGreaterThan(0);
+    }
+    for (const { id, sent } of everyRequest) {
+      const body = sent as { messages: { role: string; content: unknown }[] };
+      const system = JSON.stringify(body.messages.filter(message => message.role === 'system' || message.role === 'developer'));
+      expect(system, id).toContain('Unit, integration and end-to-end tests are all allowed');
+      expect(system, id).toContain('write the test before the code');
+      expect(system, id).toContain('do not weaken an existing check to obtain a pass');
+      expect(system, id).toContain('takes precedence over conflicting recipe, skill, project or editable prompt');
     }
   } finally {
     await daemon?.close();
