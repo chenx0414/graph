@@ -137,6 +137,7 @@ func admitDeferredToolCall(input deferredToolAdmission) (any, error) {
 		return nil, fmt.Errorf("the background call has no execution to belong to")
 	}
 	requestId := deferredToolRequestId(input.Params, input.CallId)
+	ReapDeferredToolCalls(input.Store, NowMillis())
 	if existing := DeferredToolCallByRequestId(input.Store, target.ConversationId, requestId); existing == nil {
 		if err := DeferredToolCallSlot(input.Store, target.ConversationId); err != nil {
 			return nil, err
@@ -323,6 +324,7 @@ func RecoverDeferredToolCalls(store *TaskStore) int {
 	if store == nil {
 		return 0
 	}
+	ReapDeferredToolCalls(store, NowMillis())
 	orphans := DeferredToolCallsWithoutJob(store, deferredToolJobOwned)
 	for _, call := range orphans {
 		finalizeDeferredToolCall(store, call, deferredToolOutcome{

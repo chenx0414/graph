@@ -30,6 +30,19 @@ func DeferredToolCallSlot(store *TaskStore, conversationId string) error {
 		active, DeferredToolCallsPerConversation)
 }
 
+func ReapDeferredToolCalls(store *TaskStore, now int64) int {
+	if store == nil {
+		return 0
+	}
+	result := kernelExec(store.Db, `DELETE FROM deferred_tool_calls
+		WHERE state NOT IN ('accepted','running') AND started_at + ? <= ?`, DeferredToolCallRetentionMs, now)
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0
+	}
+	return int(removed)
+}
+
 func deferredToolCallRetentionLeft(call DeferredToolCall) int64 {
 	left := call.StartedAt + DeferredToolCallRetentionMs - time.Now().UnixMilli()
 	if left < 0 {
