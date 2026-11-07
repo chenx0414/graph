@@ -65,7 +65,7 @@ function capabilityEntry(capability: AgentCapabilityView): SlashEntry {
     return {
       id: `skill:${capability.name || capability.id}`,
       label: capability.name || capability.id,
-      description: truncate(`${description} · 选中后把它的正文注入本轮`),
+      description: truncate(`${description} · 本轮以 /skill:${capability.name || capability.id} 注入正文`),
       group: '技能',
       icon: 'file',
       action: {
