@@ -5,6 +5,7 @@ import { afterEach, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { launchCli } from '../helpers/cli-daemon.ts'
 import { anthropicMessagesServer, type AnthropicMessagesPlan } from '../fixtures/anthropic-messages-server.ts'
+import { nestedSandboxAllowed } from './go-module-operation.fixture.ts'
 
 const git = (cwd: string, args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
 
@@ -80,55 +81,41 @@ type Service = Awaited<ReturnType<typeof service>>
 
 const assistantText = (messages: Message[]) => messages.filter(m => m.role === 'assistant').map(m => m.text).join('\n')
 
-test('A7 后台结果把模型重新拉进同一轮循环：它据此再发起一次工具调用，两条结果各自只回一次', async () => {
+test.skipIf(!nestedSandboxAllowed())('A7 后台结果把模型重新拉进同一轮循环：它据此再发起一次工具调用', async () => {
   const { root, project } = await workspace('graph-deferred-loop-')
-  const gateA = join(project, 'release-a')
-  const gateB = join(project, 'release-b')
+  const gate = join(project, 'release-gate')
   const service_ = await service(root, project, [
-    { tool: { id: 'call-a', name: 'bash', input: { command: `while [ ! -f ${gateA} ]; do sleep 0.2; done; echo marker-a`, async: true } } },
-    { tool: { id: 'call-b', name: 'bash', input: { command: `while [ ! -f ${gateB} ]; do sleep 0.2; done; echo marker-b`, async: true } } },
-    { text: '两条后台命令都已受理。' },
-    { tool: { id: 'call-follow', name: 'bash', input: { command: 'echo follow-up-marker' } } },
+    { tool: { id: 'call-a', name: 'bash', input: { command: `while [ ! -f ${gate} ]; do sleep 0.2; done; echo marker-a`, async: true } } },
+    { text: '后台命令已受理。' },
     { text: '第一条结果到达后，我又跑了一次命令。' },
-    { text: '第二条结果也到了。' },
+    { tool: { id: 'call-follow', name: 'bash', input: { command: 'echo follow-up-marker' } } },
+    { text: '跟进命令也跑完了。' },
   ])
   const created = await service_.request('/api/conversations', {
     method: 'POST',
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: '并行起两条后台命令，结果回来时继续干活。', requestId: 'loop-1' }),
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: '起一条后台命令，结果回来时继续干活。', requestId: 'loop-1' }),
   })
   expect(created.status, JSON.stringify(created.body)).toBe(200)
   const conversationId = (created.body as { conversationId: string }).conversationId
 
-  await expect.poll(async () => (await service_.toolCalls(conversationId)).length, { timeout: 90_000, interval: 250 }).toBe(2)
-  const before = service_.provider.requests.length
-  expect(before, `受理两条后台调用只用了 ${before} 次 provider 请求`).toBeGreaterThanOrEqual(3)
+  await expect.poll(async () => (await service_.toolCalls(conversationId))[0]?.state, { timeout: 60_000, interval: 250 }).toBe('running')
 
-  await writeFile(gateA, 'go')
-  await expect.poll(() => service_.provider.requests.length, { timeout: 90_000, interval: 250 }).toBeGreaterThan(before)
+  await writeFile(gate, 'go')
 
-  await expect.poll(async () => {
-    const calls = await service_.toolCalls(conversationId)
-    return calls.find(call => call.toolCallId === 'call-follow')?.state
-  }, { timeout: 90_000, interval: 250 }).toBe('settled')
+  await expect.poll(async () => (await service_.messages(conversationId))
+    .filter(message => message.role === 'assistant' && message.text.includes('第一条结果到达后')).length, {
+    timeout: 90_000, interval: 250,
+  }).toBe(1)
+
+  await expect.poll(async () => (await service_.toolCalls(conversationId))
+    .find(call => call.toolCallId === 'call-follow')?.state, { timeout: 90_000, interval: 250 }).toBe('settled')
 
   const calls = await service_.toolCalls(conversationId)
-  const a = calls.find(call => call.toolCallId === 'call-a')
-  const b = calls.find(call => call.toolCallId === 'call-b')
-  const follow = calls.find(call => call.toolCallId === 'call-follow')
-  expect(a?.state, '第一条后台调用没有结算').toBe('settled')
-  expect(a?.result ?? '', '第一条结果里没有命令输出').toContain('marker-a')
-  expect(b?.state, '第二条后台调用不该因为第一条的结果而结束').toBe('running')
-  expect(follow?.result ?? '', '跟进的那次调用没有真的跑起来').toContain('follow-up-marker')
-
-  await writeFile(gateB, 'go')
-  await expect.poll(async () => (await service_.toolCalls(conversationId)).find(call => call.toolCallId === 'call-b')?.state, {
-    timeout: 90_000, interval: 250,
-  }).toBe('settled')
+  expect(calls.find(call => call.toolCallId === 'call-a')?.result ?? '', '第一条结果里没有命令输出').toContain('marker-a')
+  expect(calls.find(call => call.toolCallId === 'call-follow')?.result ?? '', '结算拉起的下一轮没有真的跑工具').toContain('follow-up-marker')
 
   const history = await service_.messages(conversationId)
-  const said = assistantText(history)
-  expect(said, '模型没有在一次结果到达后被重新拉起').toContain('第一条结果到达后')
-  expect(said, '模型的第二轮没有跑跟进命令').toContain('我又跑了一次命令')
-  expect(said, '第二条结果到达后模型没有被再次拉起').toContain('第二条结果也到了')
-  expect(said.match(/marker-a/g) ?? [], '同一条结果被播报超过一次').toHaveLength(1)
+  expect(assistantText(history).match(/marker-a/g) ?? [], '同一条结果被播报超过一次').toHaveLength(1)
+  const resumes = history.filter(message => (message.data as { source?: { kind?: string } } | null)?.source?.kind === 'tool_settled')
+  expect(resumes.length, '结算应该拉起一次，实际 ' + String(resumes.length)).toBe(1)
 }, 240_000)

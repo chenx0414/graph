@@ -7,16 +7,16 @@
     "command": "pass"
   },
   "surface": {
-    "backend/internal/graph/runtime_agent_context.go": "713c60040cdd738a2c6649727ec8a177f75b352d31b53d1ea65792b822ce651a",
-    "backend/internal/graph/runtime_agent_tool_definitions.go": "846a6ee145d65feb1280da70c550d036dad405e414730dc23ce5cb6fab5af28e",
-    "backend/internal/graph/runtime_agent_tools.go": "7b35167d612059039547b7a45f8e24c97d10b3d3b3e345dc9bd9706ba267b1db",
-    "backend/internal/graph/runtime_pi_native_tools.go": "dfe07cf542ab418821ccbdfa1d7ea13f8aa30f4fbb8658720c9728818791cec7",
-    "backend/internal/graph/runtime_pig_native_tools.go": "dbca13cbb89f8cefb3bde6cae545f1426b32d4a6acd40dede54328408f5a4d24",
+    "backend/internal/graph/runtime_agent_context.go": "77310060b84d0039628034365d6a9907b0184281159e8db5ec9eb833580d9a56",
+    "backend/internal/graph/runtime_agent_tool_definitions.go": "5bd5130514f7a4cb153a3df72d135b38a79f606bf956ce6f97beed415181152f",
+    "backend/internal/graph/runtime_agent_tools.go": "4491105d7f338ee39d75fd3cb3fe7c7d7e6dae3aa365a0a6ae1de8dd794d95dc",
+    "backend/internal/graph/runtime_pi_native_tools.go": "dc2e6afc230da7b142706cbf298cfbad4def273392318c3cd1bfae07a7e3f1db",
+    "backend/internal/graph/runtime_pig_native_tools.go": "d88371c31b3cbffc0cee8a87625f63cd32e417923da337268be0c927aff7a6aa",
     "scripts/harness-eval-cases.mjs": "31e8dd009090a25ab67ca263b554ecbf4b4af3c3cc8ce58879d083672be4dd1f",
     "scripts/harness-real-eval.mjs": "8710584e1355027daf314babda14b312709a8ca11f40c7506f12ffc6e9aa0dd3",
     "scripts/harness-behavior-cases.mjs": "68a62f9a1f172e40125279bcc71d300e98f2c322ec47cb9c21aff83e5ad37c0c",
     "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
     "scripts/harness-behavior-gate.mjs": "2289f03b6607184356e0e7efd83ba143e390f2cef846b4cceee94b538ada61f0"
   },
-  "updatedAt": "2026-11-06T07:19:17.870Z"
+  "updatedAt": "2026-11-07T07:20:20.412Z"
 }

@@ -31,6 +31,7 @@
       "files": [
         "tests/e2e/go-deferred-tool-cancel-timeout.test.ts",
         "tests/e2e/go-deferred-tool-idempotent.test.ts",
+        "tests/e2e/go-deferred-tool-loop.test.ts",
         "tests/e2e/go-deferred-tool-ordering.test.ts",
         "tests/e2e/go-native-shell-output.test.ts",
         "tests/e2e/harness-cost.test.ts",
