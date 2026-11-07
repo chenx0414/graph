@@ -188,3 +188,108 @@ test('a conversation whose workspace is gone answers what is missing instead of 
   expect(body.code).toBe('workspace_missing');
   expect(body.message).toContain('no longer exists');
 }, 120_000);
+
+/**
+ * The console's two panels are named after the request they claim to show:
+ * `system prompt` and `tool calling`. A panel that shows a reconstruction is
+ * worse than no panel - it says what the model was told while the model was
+ * told something else. Both are recorded at the send site from the request
+ * body itself, so the panel and the wire have to be the same bytes.
+ */
+test('the context panels show the request that really left the process', async () => {
+  const f = await fixture({ matchSearch: true, classifyFriction: false, compactDocs: false, ownerRules: false });
+  const sent = await oneTurn(f);
+  const listed = await f.daemon.request('/api/conversations');
+  const conversations = await listed.json() as { id?: string }[];
+  expect(conversations.length, 'the turn created one conversation').toBe(1);
+  const conversationId = conversations[0]!.id!;
+
+  const context = await f.daemon.request(`/api/agent-context?conversationId=${conversationId}`);
+  expect(context.status).toBe(200);
+  const body = await context.json() as {
+    sent?: { operationId?: string; at?: number; text?: string; tools?: string | null } | null;
+  };
+  const recorded = body.sent;
+  expect(recorded, 'the panel says nothing was recorded, but a request was sent').toBeTruthy();
+
+  // The system prompt: exactly the instruction text the request carried.
+  expect(recorded!.text).toBe(instructionsOf(sent));
+
+  // Tool calling: exactly the tools array of the same request, in the same
+  // order. A panel that shows other tools than the ones offered is a lie about
+  // what the model could call.
+  expect(recorded!.tools, 'the request offered tools, the panel shows none').toBeTruthy();
+  expect(JSON.parse(recorded!.tools!)).toEqual(sent.tools);
+
+  // And it points at the operation that sent it, with a time.
+  expect(recorded!.operationId ?? '').not.toBe('');
+  expect(recorded!.at ?? 0).toBeGreaterThan(0);
+
+  // A second turn must move the panel with it: the label says "the latest
+  // model request", so a panel pinned to the first request would keep
+  // describing a request the model is no longer being sent. Turning a tool off
+  // is the real console path (`PUT /api/agent-context/tools`), not a fixture
+  // trick.
+  const offered = (sent.tools ?? []).map(tool => tool.function?.name ?? '').filter(Boolean);
+  const dropped = offered.includes('write') ? 'write' : offered[0]!;
+  const toggled = await f.daemon.request('/api/agent-context/tools', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ disabled: [dropped] }),
+  });
+  expect(toggled.status).toBe(200);
+  const panelOf = async (id: string) => (await (await f.daemon.request(`/api/agent-context?conversationId=${id}`)).json()) as {
+    sent?: { operationId?: string; text?: string; tools?: string | null } | null;
+  };
+  const latestWire = () => f.provider.requests
+    .filter(request => ((request as ChatBody).tools ?? []).length)
+    .at(-1) as ChatBody | undefined;
+  // A second turn in the conversation that already exists: this is what "the
+  // latest model request" has to follow.
+  const turn = async (id: string, requestId: string) => {
+    const reply = await f.daemon.request(`/api/conversations/${id}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Read your instructions again.', requestId }),
+    });
+    expect(reply.status).toBe(200);
+  };
+  const waitSucceeded = async (id: string) => {
+    await expect.poll(async () => {
+      const view = await f.daemon.request(`/api/conversations/${id}`);
+      const state = await view.json() as { master?: { status?: string } };
+      return state.master?.status;
+    }, { timeout: 60_000, interval: 250 }).toBe('succeeded');
+  };
+
+  // A second turn in the same conversation: the panel has to describe the
+  // request that turn really sent, whatever that request contains.
+  const before = f.provider.requests.filter(request => ((request as ChatBody).tools ?? []).length).length;
+  await turn(conversationId, 'agent-context-2');
+  await expect.poll(async () => f.provider.requests.filter(request => ((request as ChatBody).tools ?? []).length).length,
+    { timeout: 60_000, interval: 250 }).toBeGreaterThan(before);
+  const sameConversation = await panelOf(conversationId);
+  expect(sameConversation.sent?.operationId, 'the panel still points at the first request').not.toBe(recorded!.operationId);
+  expect(sameConversation.sent?.text).toBe(instructionsOf(latestWire()));
+  expect(JSON.parse(sameConversation.sent!.tools!)).toEqual(latestWire()?.tools);
+
+  // A session opened after the toggle is a different session, and the toggle
+  // reaches the wire there: the tool the user turned off is not offered, and
+  // the panel of that conversation says so too.
+  const created = await f.daemon.request('/api/conversations', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'Read your instructions.', requestId: 'agent-context-3' }),
+  });
+  expect(created.status).toBe(200);
+  const fresh = (await created.json()) as { conversationId: string };
+  await waitSucceeded(fresh.conversationId);
+  const freshWire = latestWire();
+  const freshNames = (freshWire?.tools ?? []).map(tool => tool.function?.name ?? '').filter(Boolean);
+  expect(freshNames.length, 'the new session still offers tools').toBeGreaterThan(0);
+  expect(freshNames, 'the disabled tool is still offered by a session opened after the toggle').not.toContain(dropped);
+  const freshPanel = await panelOf(fresh.conversationId);
+  expect(freshPanel.sent?.operationId ?? '').not.toBe('');
+  expect(freshPanel.sent?.text).toBe(instructionsOf(freshWire));
+  expect(JSON.parse(freshPanel.sent!.tools!)).toEqual(freshWire?.tools);
+  expect((JSON.parse(freshPanel.sent!.tools!) as { function?: { name?: string } }[]).map(tool => tool.function?.name ?? ''))
+    .not.toContain(dropped);
+});
