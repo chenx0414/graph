@@ -21,9 +21,9 @@ func harnessRecordingId(prefix string, parts ...string) string {
 const HARNESS_KIND_FRICTION = "friction"
 
 const (
-	HARNESS_STATUS_OPEN = "open"
-	HARNESS_STATUS_ADOPTED = "adopted"
-	HARNESS_STATUS_FIXED = "fixed"
+	HARNESS_STATUS_OPEN     = "open"
+	HARNESS_STATUS_ADOPTED  = "adopted"
+	HARNESS_STATUS_FIXED    = "fixed"
 	HARNESS_STATUS_REJECTED = "rejected"
 )
 
@@ -78,16 +78,17 @@ func harnessAdoptedLessons(entries []HarnessExperienceEntry) []HarnessExperience
 }
 
 type HarnessDecisionInput struct {
-	GraphId string
-	Domain  string
-	Axis string
-	Overlay   map[string]string
-	Chosen    string
-	Cue       string
-	Lesson    string
-	Evidence  string
-	Harness   string
-	RequestId string
+	GraphId         string
+	Domain          string
+	Axis            string
+	Overlay         map[string]string
+	Chosen          string
+	Cue             string
+	Lesson          string
+	Evidence        string
+	Harness         string
+	RequestId       string
+	ExpectedVersion *int64
 }
 
 type HarnessDecisionResult struct {
@@ -185,15 +186,16 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 		requestId = harnessRecordingId("harness-decision", scope, entry.Chosen, entry.Cue, entry.Lesson, entry.Evidence, entry.Harness)
 	}
 	published := store.publish(PublishArtifactInput{
-		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
-		Name:      harnessExperienceName(scope),
-		Content:   &content,
-		MediaType: "application/json",
-		Schema:    HARNESS_EXPERIENCE_SCHEMA,
-		Title:     "Harness lessons: " + scope,
-		Summary:   fmt.Sprintf("%d lesson(s) adopted in %s", len(entries), scope),
-		RequestId: requestId,
-		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "chosen": chosen},
+		Namespace:       HARNESS_EXPERIENCE_NAMESPACE,
+		Name:            harnessExperienceName(scope),
+		Content:         &content,
+		MediaType:       "application/json",
+		Schema:          HARNESS_EXPERIENCE_SCHEMA,
+		ExpectedVersion: input.ExpectedVersion,
+		Title:           "Harness lessons: " + scope,
+		Summary:         fmt.Sprintf("%d lesson(s) adopted in %s", len(entries), scope),
+		RequestId:       requestId,
+		Metadata:        map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "chosen": chosen},
 	})
 	promoted := published
 	if store.promote != nil {
@@ -236,13 +238,14 @@ func (service *graphManagementService) harnessCandidateOverlay(graphId, nodeId s
 }
 
 type HarnessFrictionInput struct {
-	Domain    string
-	Axis      string
-	Cue       string
-	Why       string
-	Status    string
-	Ref       string
-	RequestId string
+	Domain          string
+	Axis            string
+	Cue             string
+	Why             string
+	Status          string
+	Ref             string
+	RequestId       string
+	ExpectedVersion *int64
 }
 
 type HarnessFrictionResult struct {
@@ -329,15 +332,16 @@ func harnessRecordFriction(store *harnessArtifactStore, entries []HarnessExperie
 		requestId = harnessRecordingId("harness-friction", scope, entry.Cue, entry.Status, entry.Ref, entry.Note)
 	}
 	published := store.publish(PublishArtifactInput{
-		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
-		Name:      harnessExperienceName(scope),
-		Content:   &content,
-		MediaType: "application/json",
-		Schema:    HARNESS_EXPERIENCE_SCHEMA,
-		Title:     "Harness knowledge: " + scope,
-		Summary:   fmt.Sprintf("%d entry/entries in %s", len(merged), scope),
-		RequestId: requestId,
-		Metadata:  map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "status": status},
+		Namespace:       HARNESS_EXPERIENCE_NAMESPACE,
+		Name:            harnessExperienceName(scope),
+		Content:         &content,
+		MediaType:       "application/json",
+		Schema:          HARNESS_EXPERIENCE_SCHEMA,
+		ExpectedVersion: input.ExpectedVersion,
+		Title:           "Harness knowledge: " + scope,
+		Summary:         fmt.Sprintf("%d entry/entries in %s", len(merged), scope),
+		RequestId:       requestId,
+		Metadata:        map[string]any{"domain": harnessSlug(domain), "scope": scope, "axis": axis, "status": status},
 	})
 	promoted := published
 	if store.promote != nil {

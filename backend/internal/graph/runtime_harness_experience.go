@@ -10,21 +10,21 @@ import (
 )
 
 type HarnessExperienceEntry struct {
-	Domain string `json:"domain"`
-	Axis   string `json:"axis"`
-	Status string `json:"status"`
-	Cue string `json:"cue"`
-	Note string `json:"note,omitempty"`
-	Lesson string `json:"lesson,omitempty"`
-	Evidence string `json:"evidence,omitempty"`
-	Ref string `json:"ref,omitempty"`
-	Source string `json:"source,omitempty"`
-	Chosen string `json:"chosen,omitempty"`
-	Harness string `json:"harness,omitempty"`
+	Domain    string            `json:"domain"`
+	Axis      string            `json:"axis"`
+	Status    string            `json:"status"`
+	Cue       string            `json:"cue"`
+	Note      string            `json:"note,omitempty"`
+	Lesson    string            `json:"lesson,omitempty"`
+	Evidence  string            `json:"evidence,omitempty"`
+	Ref       string            `json:"ref,omitempty"`
+	Source    string            `json:"source,omitempty"`
+	Chosen    string            `json:"chosen,omitempty"`
+	Harness   string            `json:"harness,omitempty"`
 	Overlay   map[string]string `json:"overlay,omitempty"`
 	GraphId   string            `json:"graphId,omitempty"`
 	CreatedAt int64             `json:"createdAt"`
-	Kind string `json:"kind,omitempty"`
+	Kind      string            `json:"kind,omitempty"`
 }
 
 func harnessNormalizeEntry(entry HarnessExperienceEntry) HarnessExperienceEntry {
@@ -43,7 +43,7 @@ func harnessNormalizeEntry(entry HarnessExperienceEntry) HarnessExperienceEntry 
 }
 
 const (
-	HARNESS_AXIS_GENERAL = "general"
+	HARNESS_AXIS_GENERAL  = "general"
 	HARNESS_AXIS_SPECIFIC = "specific"
 )
 
@@ -58,13 +58,14 @@ type harnessExperienceReader interface {
 
 type HarnessExperienceInput struct {
 	Domain string
-	Scope string
+	Scope  string
 }
 
 type HarnessExperienceResult struct {
-	Domain string `json:"domain,omitempty"`
-	Scopes []string `json:"scopes,omitempty"`
+	Domain  string                   `json:"domain,omitempty"`
+	Scopes  []string                 `json:"scopes,omitempty"`
 	Entries []HarnessExperienceEntry `json:"entries,omitempty"`
+	Version int                      `json:"version,omitempty"`
 }
 
 func (service *graphManagementService) HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult {
@@ -75,7 +76,7 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 	}
 	result := HarnessExperienceResult{Domain: domain}
 	if scope != "" {
-		result.Entries = harnessExperienceEntries(service.artifacts, service.ownerTaskId, scope)
+		result.Entries, result.Version = harnessExperienceSnapshot(service.artifacts, service.ownerTaskId, scope)
 		return result
 	}
 	result.Entries = append(
@@ -87,11 +88,11 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 }
 
 type HarnessExperienceView struct {
-	Domain      string                   `json:"domain,omitempty"`
-	Scopes      []string                 `json:"scopes,omitempty"`
-	Entries     []HarnessExperienceEntry `json:"entries"`
-	Total       int                      `json:"total"`
-	Truncated   bool                     `json:"truncated"`
+	Domain    string                   `json:"domain,omitempty"`
+	Scopes    []string                 `json:"scopes,omitempty"`
+	Entries   []HarnessExperienceEntry `json:"entries"`
+	Total     int                      `json:"total"`
+	Truncated bool                     `json:"truncated"`
 }
 
 const HARNESS_EXPERIENCE_READ_MAX = 12
@@ -200,8 +201,13 @@ func harnessSlug(domain string) string {
 }
 
 func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope string) []HarnessExperienceEntry {
+	entries, _ := harnessExperienceSnapshot(reader, taskId, scope)
+	return entries
+}
+
+func harnessExperienceSnapshot(reader harnessExperienceReader, taskId, scope string) ([]HarnessExperienceEntry, int) {
 	if reader == nil {
-		return []HarnessExperienceEntry{}
+		return []HarnessExperienceEntry{}, 0
 	}
 	name := harnessExperienceName(scope)
 	page := reader.List(ArtifactQuery{
@@ -222,20 +228,43 @@ func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope stri
 	}
 	record, ok := best[name]
 	if !ok {
-		return []HarnessExperienceEntry{}
+		return []HarnessExperienceEntry{}, 0
 	}
+	version := harnessExperienceHeadVersion(reader, taskId, name)
 	body := reader.ReadVerifiedContent(taskId, record.ArtifactId, record.Version, HARNESS_EXPERIENCE_MAX_BYTES)
 	if len(body) == 0 {
-		return []HarnessExperienceEntry{}
+		return []HarnessExperienceEntry{}, version
 	}
 	entries := []HarnessExperienceEntry{}
 	if err := json.Unmarshal(body, &entries); err != nil {
-		return []HarnessExperienceEntry{}
+		return []HarnessExperienceEntry{}, version
 	}
 	for index, entry := range entries {
 		entries[index] = harnessNormalizeEntry(entry)
 	}
-	return entries
+	return entries, version
+}
+
+func harnessExperienceHeadVersion(reader harnessExperienceReader, taskId, name string) int {
+	if reader == nil {
+		return 0
+	}
+	page := reader.List(ArtifactQuery{
+		TaskId:    taskId,
+		Namespace: HARNESS_EXPERIENCE_NAMESPACE,
+		Prefix:    HARNESS_EXPERIENCE_PREFIX,
+		Limit:     intPointer(50),
+	})
+	head := 0
+	for _, artifact := range page.Artifacts {
+		if artifact.Name != name || artifact.Scope == "project" {
+			continue
+		}
+		if artifact.Version > head {
+			head = artifact.Version
+		}
+	}
+	return head
 }
 
 func harnessExperienceScopes(reader harnessExperienceReader, taskId string) []string {

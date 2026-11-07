@@ -77,24 +77,27 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 			result := HarnessDecisionResult{}
 			harnessRetryConflict(func() {
 				entries := []HarnessExperienceEntry{}
+				version := int64(0)
 				if input.GraphManagement.HarnessExperience != nil {
 					existing, ok := input.GraphManagement.HarnessExperience(map[string]any{
 						"scope": harnessExperienceScope(domain, axis),
 					}).(HarnessExperienceResult)
 					if ok {
 						entries = existing.Entries
+						version = int64(existing.Version)
 					}
 				}
 				result = input.GraphManagement.HarnessDecision(&artifacts, entries, HarnessDecisionInput{
-					GraphId:   strings.TrimSpace(agentToolsStringOrEmpty(params["graphId"])),
-					Domain:    domain,
-					Axis:      axis,
-					Chosen:    strings.TrimSpace(agentToolsString(params["chosen"])),
-					Cue:       strings.TrimSpace(agentToolsString(params["cue"])),
-					Lesson:    strings.TrimSpace(agentToolsString(params["lesson"])),
-					Evidence:  strings.TrimSpace(agentToolsString(params["evidence"])),
-					Harness:   harness,
-					RequestId: requestId,
+					GraphId:         strings.TrimSpace(agentToolsStringOrEmpty(params["graphId"])),
+					Domain:          domain,
+					Axis:            axis,
+					Chosen:          strings.TrimSpace(agentToolsString(params["chosen"])),
+					Cue:             strings.TrimSpace(agentToolsString(params["cue"])),
+					Lesson:          strings.TrimSpace(agentToolsString(params["lesson"])),
+					Evidence:        strings.TrimSpace(agentToolsString(params["evidence"])),
+					Harness:         harness,
+					RequestId:       requestId,
+					ExpectedVersion: &version,
 				})
 			})
 			return agentToolsText(stringifyJSON(map[string]any{
@@ -174,20 +177,23 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 			result := HarnessFrictionResult{}
 			harnessRetryConflict(func() {
 				entries := []HarnessExperienceEntry{}
+				version := int64(0)
 				if input.GraphManagement.HarnessExperience != nil {
 					existing, ok := input.GraphManagement.HarnessExperience(map[string]any{"scope": scope}).(HarnessExperienceResult)
 					if ok {
 						entries = existing.Entries
+						version = int64(existing.Version)
 					}
 				}
 				result = input.GraphManagement.HarnessFriction(&artifacts, entries, HarnessFrictionInput{
-					Domain:    domain,
-					Axis:      axis,
-					Cue:       strings.TrimSpace(agentToolsStringOrEmpty(params["cue"])),
-					Why:       strings.TrimSpace(agentToolsStringOrEmpty(params["why"])),
-					Status:    strings.TrimSpace(agentToolsStringOrEmpty(params["status"])),
-					Ref:       ref,
-					RequestId: requestId,
+					Domain:          domain,
+					Axis:            axis,
+					Cue:             strings.TrimSpace(agentToolsStringOrEmpty(params["cue"])),
+					Why:             strings.TrimSpace(agentToolsStringOrEmpty(params["why"])),
+					Status:          strings.TrimSpace(agentToolsStringOrEmpty(params["status"])),
+					Ref:             ref,
+					RequestId:       requestId,
+					ExpectedVersion: &version,
 				})
 			})
 			return agentToolsText(stringifyJSON(map[string]any{
