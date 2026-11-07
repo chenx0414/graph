@@ -196,6 +196,25 @@ func TestDeferredResultSteersTheRunningTurnInsteadOfQueueingAMessage(t *testing.
 	}
 }
 
+func TestClosingASessionStopsInjectingIntoItsConversation(t *testing.T) {
+	received := 0
+	unregister := RegisterConversationInjector("c", func(string) bool {
+		received += 1
+		return true
+	})
+	if conversationInjectorOf("c") == nil {
+		t.Fatalf("a registered session was not reachable by its conversation")
+	}
+	unregister()
+	if conversationInjectorOf("c") != nil {
+		t.Fatalf("a closed session kept receiving injections")
+	}
+	unregister()
+	if received != 0 {
+		t.Fatalf("registering injected %d messages by itself", received)
+	}
+}
+
 func TestDeferredResultStartsATurnWhenNothingIsRunning(t *testing.T) {
 	fixture := newAutoDeferFixture(t)
 	call := DeferredToolCall{

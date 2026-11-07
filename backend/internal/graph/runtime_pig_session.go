@@ -58,7 +58,13 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		_ = session.Close()
 		return nil, err
 	}
-	return &pigAgentSession{session: session, request: request}, nil
+	opened := &pigAgentSession{session: session, request: request, unregister: func() {}}
+	if target, ok := deferredToolTargetOf(transport.store, request.ExecutionId); ok {
+		opened.unregister = RegisterConversationInjector(target.ConversationId, func(text string) bool {
+			return opened.Steer(text) == nil
+		})
+	}
+	return opened, nil
 }
 
 func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
@@ -252,10 +258,11 @@ func pigModelSpec(model any) pigkernel.ModelSpec {
 }
 
 type pigAgentSession struct {
-	session *pigkernel.Session
-	request AgentSessionRequest
-	mutex   sync.Mutex
-	inspect AgentSessionInspect
+	session    *pigkernel.Session
+	request    AgentSessionRequest
+	mutex      sync.Mutex
+	inspect    AgentSessionInspect
+	unregister func()
 }
 
 func pigUserContent(text string, images []ImageContent) ai.UserContent {
@@ -389,6 +396,9 @@ func (session *pigAgentSession) Inspect() AgentSessionInspect {
 }
 
 func (session *pigAgentSession) Close() error {
+	if session.unregister != nil {
+		session.unregister()
+	}
 	return session.session.Close()
 }
 
