@@ -76,6 +76,19 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	if spec.Role != nil {
 		role = *spec.Role
 	}
+	// The global supervisor works in the checkout the daemon runs from.
+	//
+	// An unbound conversation has no project, so the synthetic one it gets
+	// points at its own state directory: every relative path then answered
+	// about a snapshot of nothing, and the one Agent whose job is this
+	// repository could not name a file in it without an absolute path.
+	// A project supervisor keeps its project's workspace.
+	if role == "master" && conversation != nil && conversation.ProjectId == nil &&
+		channels != nil && channels.Rsi != nil && channels.Rsi.CheckoutRoot != nil {
+		if root := strings.TrimSpace(rsiStringValue(channels.Rsi.CheckoutRoot())); root != "" {
+			workspace = piAdapterRealpath(root)
+		}
+	}
 	retrieval := piAdapterRetrievalReach(options.Network, input.AccessPolicy, role, observedGate)
 	artifactService := piAdapterArtifactService(options, input, spec, workspace, role)
 

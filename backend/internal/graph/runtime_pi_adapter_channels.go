@@ -104,6 +104,10 @@ type PiAdapterSystemContext struct {
 // PiAdapterRsi is the self-improvement channel.
 type PiAdapterRsi struct {
 	Available bool
+	// CheckoutRoot is the Graph source checkout the daemon runs from. The
+	// global supervisor works there: it is the one Agent whose job is this
+	// repository, and its own conversation has no project to point at.
+	CheckoutRoot func() *string
 	// Status adds the checkout comparison (sync.deploy), which walks both checkouts through git.
 	Status func(compare bool) any
 	Apply  func(input any, context PiAdapterRsiContext) map[string]any

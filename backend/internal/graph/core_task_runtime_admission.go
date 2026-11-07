@@ -129,8 +129,9 @@ func (runtime *TaskRuntime) piRsiChannel() *PiAdapterRsi {
 		return nil
 	}
 	return &PiAdapterRsi{
-		Available: service.Available,
-		Status:    func(compare bool) any { return service.Status(compare) },
+		Available:    service.Available,
+		CheckoutRoot: func() *string { return service.Root },
+		Status:       func(compare bool) any { return service.Status(compare) },
 		Apply: func(input any, context PiAdapterRsiContext) map[string]any {
 			receipt := service.Apply(input, RsiApplyContext{
 				OperationId:    context.OperationId,
