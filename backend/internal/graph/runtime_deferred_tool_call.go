@@ -137,6 +137,11 @@ func admitDeferredToolCall(input deferredToolAdmission) (any, error) {
 		return nil, fmt.Errorf("the background call has no execution to belong to")
 	}
 	requestId := deferredToolRequestId(input.Params, input.CallId)
+	if existing := DeferredToolCallByRequestId(input.Store, target.ConversationId, requestId); existing == nil {
+		if err := DeferredToolCallSlot(input.Store, target.ConversationId); err != nil {
+			return nil, err
+		}
+	}
 	digest := CanonicalJSON(input.Params)
 	now := NowMillis()
 	budget := deferredToolBudgetMs(input.Params)

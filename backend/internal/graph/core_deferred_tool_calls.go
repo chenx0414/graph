@@ -2,6 +2,7 @@ package graph
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -12,6 +13,22 @@ const (
 	DeferredToolCallRetentionMs    int64 = 60 * 60 * 1000
 	DeferredToolCallPollIntervalMs int64 = 2_000
 )
+
+const DeferredToolCallsPerConversation = 4
+
+func DeferredToolCallSlot(store *TaskStore, conversationId string) error {
+	active := 0
+	for _, call := range DeferredToolCallsOfConversation(store, conversationId) {
+		if DeferredToolCallActive(call.State) {
+			active++
+		}
+	}
+	if active < DeferredToolCallsPerConversation {
+		return nil
+	}
+	return fmt.Errorf("this conversation already runs %d background calls (limit %d); wait for one to settle or cancel it before starting another",
+		active, DeferredToolCallsPerConversation)
+}
 
 func deferredToolCallRetentionLeft(call DeferredToolCall) int64 {
 	left := call.StartedAt + DeferredToolCallRetentionMs - time.Now().UnixMilli()
