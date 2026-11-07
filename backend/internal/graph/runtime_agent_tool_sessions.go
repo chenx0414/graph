@@ -8,7 +8,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	main := set.main
 	features := set.features
 	scoped := os.Getenv("GRAPH_SCOPED_SYSTEM_CAPABILITIES") == "1"
-	readSystem := "Read the configuration inventory: redacted subscription plans, model connections, Agent recipes and definitions, graph architectures, quota windows. Secrets are never included. Use it before choosing a model, assembling subagents or claiming that something is available."
+	readSystem := "Read the configuration inventory: redacted subscription plans, model connections, Agent recipes and definitions, graph architectures, quota windows. Secrets are never included. Use it before choosing a model or claiming something exists."
 	readSystemParams := tbObject(nil, nil)
 	if scoped {
 		readSystem += " section returns that one field; omit it for the full inventory."
@@ -17,7 +17,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	rsiArguments := PrepareToolArguments("apply_rsi_change")
 	apply := AgentToolDeclaration{
 		Name: "apply_rsi_change", Label: "Apply self-improvement change",
-		Description: "Change Graph files, check and commit to rsi/*. Each change is a relative path plus write, replace, \"copy\", delete, or fromPath (a file already written); copy mirrors a revision. Failed checks keep edits; changes:[] retries. Activation runs the full gate, ends this operation and schedules reload. Wait while a reload is pending; ask before force interrupts work.",
+		Description: "Change Graph files, check and commit to rsi/*. A change is a path plus write, replace, copy, delete or fromPath (a file already written); copy mirrors a revision. Failed checks keep edits; changes:[] retries. Activation runs the full gate, ends this operation and schedules reload. Wait while a reload is pending; ask before force interrupts work.",
 		Parameters: tbObject([]tbField{
 			{"title", tbString(nil)}, {"problem", tbString(nil)},
 			{"evidence", tbOptional(tbString(nil))}, {"diagnosis", tbOptional(tbString(nil))},
@@ -40,7 +40,7 @@ func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 		apply.PrepareArguments = rsiArguments
 	}
 	return []AgentToolDeclaration{
-		{Name: "search_resources", Label: "Search capability library", Description: "Search the capability directory (Skills, MCP servers, Pi extensions, Graph extensions, prompt identities). Results are discovery only: bind a capability into an Agent recipe or definition to make its tools available.", Parameters: tbObject([]tbField{{"query", tbOptional(tbString(nil))}, {"kind", tbOptional(tbString(nil))}, {"role", tbOptional(tbString(nil))}, {"limit", tbOptional(tbNumber())}, {"offset", tbOptional(tbNumber())}}, nil), Available: main && features.Catalog},
+		{Name: "search_resources", Label: "Search capability library", Description: "Search the capability directory (Skills, MCP servers, Pi extensions, Graph extensions, prompt identities). Discovery only: bind a capability into an Agent recipe or definition to make its tools available.", Parameters: tbObject([]tbField{{"query", tbOptional(tbString(nil))}, {"kind", tbOptional(tbString(nil))}, {"role", tbOptional(tbString(nil))}, {"limit", tbOptional(tbNumber())}, {"offset", tbOptional(tbNumber())}}, nil), Available: main && features.Catalog},
 		{Name: "read_system_capabilities", Label: "Read system capabilities", Description: readSystem, Parameters: readSystemParams, Available: main && features.SystemContext != nil && features.SystemContext.SystemSummary},
 		{Name: "inspect_graph_system", Label: "Inspect Graph health", Description: "Inspect runtime health for this conversation: invalid capabilities, open internal problems, failed nodes, unknown-usage records, artifact counts, pending system changes.", Parameters: tbObject(nil, nil), Available: main && features.SystemContext != nil && features.SystemContext.SystemDiagnostics},
 		{Name: "inspect_rsi_status", Label: "Inspect self-improvement status", Description: "Inspect source root, branch, pending reload, operations, unpublished branches and deployment differences before changing the harness; an interrupted apply is answered here.", Parameters: tbObject(nil, nil), Available: main && features.Rsi != nil && features.Rsi.Status},

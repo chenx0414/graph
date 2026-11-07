@@ -1,5 +1,5 @@
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'vite';
 import { afterEach, expect, test } from 'vitest';
@@ -138,9 +138,9 @@ test('the node chat footer prints the same rate for the node’s own call', asyn
 }, 240_000);
 
 const SKILLS = [
-  'mattpocock-skills-skills-engineering-codebase-design',
-  'mattpocock-skills-skills-engineering-tdd',
-  'mattpocock-skills-skills-engineering-code-review',
+  'skill-codebase-design',
+  'skill-tdd',
+  'skill-code-review',
 ];
 
 // A graph node is not a conversation node, so it reads its own ledger. The proof is a
@@ -153,10 +153,11 @@ test('the node chat footer of a graph node prints the rate of its own provider c
   await mkdir(project, { recursive: true });
   const webDir = join(root, 'web');
   await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
-  // The team assembly needs its skills installed; the daemon under test gets its own copy.
   const graphHome = join(root, 'graph-home');
   for (const skill of SKILLS) {
-    await cp(join(homedir(), '.graph', 'capabilities', 'skills', skill), join(graphHome, 'capabilities', 'skills', skill), { recursive: true });
+    const dir = join(graphHome, 'capabilities', 'skills', skill);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'SKILL.md'), `---\nname: ${skill}\ndescription: fixture skill for the console rate test\n---\n\n# ${skill}\n`);
   }
   const provider = await openaiServer([{
     text: '计划：先写壳，再写取数，最后补测试。'.repeat(4),
