@@ -94,3 +94,13 @@ test('a background tool result never shows up as a message waiting in the queue'
 
   expect(snapshot.queuedMessages.map(entry => entry.id)).toEqual(['typed']);
 });
+
+test('a background result steered into the running turn is a system row too', () => {
+  const settle = {
+    ...message({ id: 'settled', seq: 2, role: 'user', text: 'bash 已经结束（settled）' }),
+    state: 'delivered' as const,
+    data: { source: { kind: 'tool_settled', toolName: 'bash', state: 'settled' } },
+  };
+  const rows = buildTranscriptRows({ messages: [settle], streaming: [], liveTools: [], busy: true });
+  expect(rows[0]?.kind).toBe('toolSettled');
+});

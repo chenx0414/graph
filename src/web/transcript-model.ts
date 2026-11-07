@@ -227,7 +227,17 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         running = [];
       };
       for (const item of ordered) {
-        if (item.kind === 'steer') { flushFolded(); flushRunning(); rows.push({ kind: 'message', id: item.message.id, message: item.message }); }
+        if (item.kind === 'steer') {
+          flushFolded();
+          flushRunning();
+          const steered = toolSettledSource(item.message);
+          rows.push(steered
+            ? {
+              kind: 'toolSettled', id: `toolSettled:${item.message.id}`, text: item.message.text,
+              tool: steered.tool, state: steered.state, delivered: steered.delivered,
+            }
+            : { kind: 'message', id: item.message.id, message: item.message });
+        }
         else if (item.kind === 'tool' && (item.tool.deferred || item.tool.reason)) running.push(item);
         else folded.push(item);
       }
