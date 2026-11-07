@@ -44,6 +44,7 @@ export type TranscriptRow =
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'compaction'; id: string; text: string; tokensAfter?: number; summary?: string }
   | { kind: 'rsiFull'; id: string; text: string; verdict: string; commit: string; environment: boolean; files: string[]; logPath: string }
+  | { kind: 'toolSettled'; id: string; text: string; tool: string; state: string; delivered: boolean }
   | { kind: 'thinking'; id: 'thinking' };
 
 export type TranscriptModelInput = {
@@ -301,6 +302,14 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       rows.push(rsiFullRow(message));
       continue;
     }
+    const settled = toolSettledSource(message);
+    if (message.role === 'user' && settled) {
+      rows.push({
+        kind: 'toolSettled', id: `toolSettled:${message.id}`, text: message.text,
+        tool: settled.tool, state: settled.state, delivered: settled.delivered,
+      });
+      continue;
+    }
     rows.push({ kind: 'message', id: message.id, message });
   }
   const pendingKey = activityKey;
@@ -376,6 +385,16 @@ export function activeToolStatus(tools: TranscriptTool[]) {
   if (!active) return '正在整理结果';
   const action = toolActivity(active.name, active.summary).label;
   return `正在${action}${active.summary ? ` ${active.summary}` : ''}`;
+}
+
+function toolSettledSource(message: ConversationMessage): { tool: string; state: string; delivered: boolean } | null {
+  const data = (message.data ?? {}) as { source?: { kind?: string; toolName?: string; state?: string; delivered?: string } };
+  if (data.source?.kind !== 'tool_settled') return null;
+  return {
+    tool: typeof data.source.toolName === 'string' ? data.source.toolName : '后台工具',
+    state: typeof data.source.state === 'string' ? data.source.state : '',
+    delivered: data.source.delivered === 'steer',
+  };
 }
 
 function rsiFullSource(message: ConversationMessage): boolean {

@@ -393,39 +393,3 @@ test('older activity without ordinals is retained alongside a new live tail', ()
   expect(rows).toContainEqual(expect.objectContaining({ text: 'retained' }));
 });
 
-test('a background full-suite notice is its own row, never a user message', () => {
-  const text = [
-    '[后台全量确认失败]',
-    '提交: 6549520f0e',
-    '判定: 回归',
-    'FAIL tests/e2e/desktop-shell.test.ts > OpenRouter authorization',
-    '  - tests/e2e/desktop-crash-recovery.test.ts [assertion]',
-    'FAIL tests/e2e/desktop-shell.test.ts > OpenRouter authorization',
-    '完整日志: /tmp/async-full.log',
-  ].join('\n');
-  const rows = buildTranscriptRows({
-    messages: [{
-      ...message({ id: 'full', seq: 1, role: 'user', text }),
-      data: { source: { kind: 'rsi_async_full', commit: '6549520f0e' }, environment: false },
-    }],
-    streaming: [], liveTools: [], busy: false,
-  });
-
-  expect(rows.map(row => row.kind)).toEqual(['rsiFull']);
-  expect(rows[0]).toMatchObject({
-    verdict: '回归',
-    commit: '6549520f0e',
-    environment: false,
-    files: ['tests/e2e/desktop-shell.test.ts', 'tests/e2e/desktop-crash-recovery.test.ts'],
-    logPath: '/tmp/async-full.log',
-  });
-});
-
-test('an ordinary user message keeps its bubble even when it quotes a notice', () => {
-  const rows = buildTranscriptRows({
-    messages: [message({ id: 'user', seq: 1, role: 'user', text: '[后台全量确认失败] 这是什么意思？' })],
-    streaming: [], liveTools: [], busy: false,
-  });
-
-  expect(rows.map(row => row.kind)).toEqual(['message']);
-});

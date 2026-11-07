@@ -165,6 +165,53 @@ func dispatchCount(fixture autoDeferFixture) int {
 	return total
 }
 
+func TestDeferredResultSteersTheRunningTurnInsteadOfQueueingAMessage(t *testing.T) {
+	fixture := newAutoDeferFixture(t)
+	var delivered []string
+	unregister := RegisterConversationInjector("c", func(text string) bool {
+		delivered = append(delivered, text)
+		return true
+	})
+	defer unregister()
+	call := DeferredToolCall{
+		Id: "deferred-1", TaskId: "t", ConversationId: "c", NodeId: "n", ToolName: "bash",
+		ToolCallId: "call-1", State: DeferredToolSettled, Result: "late-marker",
+	}
+	resumeConversationForDeferredTool(fixture.store, call)
+	if len(delivered) != 1 {
+		t.Fatalf("the settled call was injected %d times into the running turn", len(delivered))
+	}
+	if !strings.Contains(delivered[0], "bash") {
+		t.Fatalf("the injected text says nothing about the tool: %q", delivered[0])
+	}
+	rows := kernelRows(fixture.store.Db, "SELECT state FROM messages WHERE conversation_id='c' AND json_extract(data,'$.source.kind')='tool_settled'")
+	if len(rows) != 1 {
+		t.Fatalf("the transcript recorded %d rows for the settled call", len(rows))
+	}
+	if kernelString(rows[0]["state"]) != string(MessageStateDone) {
+		t.Fatalf("the recorded row is %q, so it would be queued as a new turn", kernelString(rows[0]["state"]))
+	}
+	if kernelRow(fixture.store.Db, "SELECT id FROM wake_intents WHERE task_id='t'") != nil {
+		t.Fatalf("a delivered result also asked for a new turn")
+	}
+}
+
+func TestDeferredResultStartsATurnWhenNothingIsRunning(t *testing.T) {
+	fixture := newAutoDeferFixture(t)
+	call := DeferredToolCall{
+		Id: "deferred-2", TaskId: "t", ConversationId: "c", NodeId: "n", ToolName: "bash",
+		ToolCallId: "call-2", State: DeferredToolSettled, Result: "late-marker",
+	}
+	resumeConversationForDeferredTool(fixture.store, call)
+	rows := kernelRows(fixture.store.Db, "SELECT state FROM messages WHERE conversation_id='c' AND json_extract(data,'$.source.kind')='tool_settled'")
+	if len(rows) != 1 {
+		t.Fatalf("the transcript recorded %d rows for the settled call", len(rows))
+	}
+	if kernelString(rows[0]["state"]) == string(MessageStateDone) {
+		t.Fatalf("an idle conversation recorded the result as already delivered")
+	}
+}
+
 func TestToolHandsOffOnlyWhenItsBudgetExceedsTheThreshold(t *testing.T) {
 	t.Setenv(deferredToolThresholdEnv, "1000")
 	tools := ToolDefinition{

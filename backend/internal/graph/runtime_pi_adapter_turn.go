@@ -96,7 +96,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		AllowAppleEvents:        input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.AppleEvents,
 		PiExtensionPaths:        append([]string{}, turn.CapabilityOperation.PiExtensionPaths...),
 		ExtensionProcessAllowed: pigExtensionProcessAllowed(input.AccessPolicy),
-		McpServers:       append([]McpServerRef{}, turn.CapabilityOperation.McpServers...),
+		McpServers:              append([]McpServerRef{}, turn.CapabilityOperation.McpServers...),
 		PiExtensionTools:        append([]string{}, turn.CapabilityOperation.PiExtensionTools...),
 		SystemPrompt:            turn.ComposedPrompt,
 		BundleDigest:            turn.CapabilityOperation.BundleDigest,
@@ -106,8 +106,8 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		Broker:                  turn.ObservedGate,
 		NativeTools:             append([]string{}, turn.CapabilityOperation.NativeTools...),
 		AllowWorkspaceChange:    turn.Conversation != nil,
-		Compaction: piAdapterCompactionSettings(entry),
-		OnEvent:    turn.OnEvent,
+		Compaction:              piAdapterCompactionSettings(entry),
+		OnEvent:                 turn.OnEvent,
 	}
 	if input.AccessPolicy != nil {
 		filesystemAccess := "bounded"
@@ -165,6 +165,13 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	input.ActiveMu.Lock()
 	(*input.ActiveInstances)[operation.Id] = session
 	input.ActiveMu.Unlock()
+	unregisterInjector := func() {}
+	if target, ok := deferredToolTargetOf(store, operation.Id); ok {
+		unregisterInjector = RegisterConversationInjector(target.ConversationId, func(text string) bool {
+			return session.Steer(text) == nil
+		})
+	}
+	defer unregisterInjector()
 	inspected := session.Inspect()
 	raisePiExtensionLoadErrors(inspected.ExtensionErrors)
 	if turn.PersistEntries {

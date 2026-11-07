@@ -144,6 +144,11 @@ export interface ConversationProjectionSnapshot {
   historyRequest: ConversationHistoryRequest | null;
 }
 
+function systemAuthored(message: ConversationMessage): boolean {
+  const source = (message.data as { source?: { kind?: string } } | null)?.source;
+  return source?.kind === 'tool_settled' || source?.kind === 'rsi_async_full';
+}
+
 function bySequence(left: ConversationMessage, right: ConversationMessage) {
   return left.seq - right.seq;
 }
@@ -369,7 +374,8 @@ export function conversationProjectionSnapshot(
   options: { busy: boolean },
 ): ConversationProjectionSnapshot {
   const all = Object.values(state.records).sort(bySequence);
-  const queuedMessages = all.filter(message => message.role === 'user' && message.state === 'queued');
+  const queuedMessages = all.filter(message =>
+    message.role === 'user' && message.state === 'queued' && !systemAuthored(message));
   const durableAssistantOps = new Set(
     all.filter(message => message.role === 'assistant' && message.operationId)
       .map(message => message.operationId!),

@@ -354,11 +354,29 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiCard row={row} />;
   if (row.kind === 'rsiFull') return <RsiFullCard row={row} />;
+  if (row.kind === 'toolSettled') return <ToolSettledCard row={row} />;
   if (row.kind === 'compaction') return <CompactionNotice row={row} />;
   if (row.kind === 'thinking') {
     return <ThinkingStatus />;
   }
   return null;
+}
+
+function ToolSettledCard({ row }: { row: Extract<TranscriptRow, { kind: 'toolSettled' }> }) {
+  const failed = row.state !== '' && row.state !== 'settled';
+  return (
+    <div className="compaction-notice" data-testid="tool-settled-notice" data-role="system" data-delivered={row.delivered ? 'steer' : 'turn'}>
+      <div className="compaction-notice-head" title={row.text}>
+        <span className="compaction-notice-rule" aria-hidden="true" />
+        <span className="compaction-notice-text">
+          <Icon name={failed ? 'alert' : 'tool'} size={13} />
+          {row.tool} {failed ? '已结束 · ' + row.state : '已完成'}
+          {row.delivered ? ' · 已插入当前回合' : ' · 结果已回到会话'}
+        </span>
+        <span className="compaction-notice-rule" aria-hidden="true" />
+      </div>
+    </div>
+  );
 }
 
 function RsiFullCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsiFull' }> }) {

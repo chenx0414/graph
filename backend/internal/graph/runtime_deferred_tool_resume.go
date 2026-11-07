@@ -12,6 +12,17 @@ func resumeConversationForDeferredTool(store *TaskStore, call DeferredToolCall) 
 	if anchor.Paused != 0 || (node != nil && (kernelString(node["status"]) == "preparing" || kernelString(node["status"]) == "running")) {
 		state = MessageStateQueued
 	}
+	if inject := conversationInjectorOf(call.ConversationId); inject != nil && inject(deferredToolResumeText(call)) {
+		AppendMessage(store, MessageInput{
+			ConversationID: call.ConversationId, Role: MessageRoleUser, Kind: "chat",
+			Text: deferredToolResumeText(call), State: MessageStateDone,
+			Data: map[string]any{"source": map[string]any{
+				"kind": "tool_settled", "toolCallId": call.ToolCallId, "toolName": call.ToolName, "state": string(call.State),
+				"delivered": "steer",
+			}},
+		})
+		return
+	}
 	AppendMessage(store, MessageInput{
 		ConversationID: call.ConversationId, Role: MessageRoleUser, Kind: "chat",
 		Text: deferredToolResumeText(call), State: state,
