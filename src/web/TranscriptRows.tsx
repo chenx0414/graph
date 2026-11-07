@@ -11,7 +11,7 @@ import { Markdown } from './Markdown.tsx';
 import { RsiCard } from './RsiCard.tsx';
 import { CompactionNotice } from './CompactionNotice.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
-import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
+import { toolSettledRowOf, transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
 import { ToolActivityRow } from './ToolActivityRow.tsx';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
@@ -340,6 +340,8 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   markdown?: boolean;
 }) {
   if (row.kind === 'message') {
+    const settled = toolSettledRowOf(row.message);
+    if (settled) return <ToolSettledCard row={settled} />;
     return userAuthor
       ? <MessageRow message={row.message} userAuthor={userAuthor} copyable={copyText(row)} markdown={markdown} />
       : <MessageRow message={row.message} copyable={copyText(row)} markdown={markdown} />;

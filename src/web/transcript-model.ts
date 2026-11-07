@@ -397,6 +397,15 @@ export function activeToolStatus(tools: TranscriptTool[]) {
   return `正在${action}${active.summary ? ` ${active.summary}` : ''}`;
 }
 
+export function toolSettledRowOf(message: ConversationMessage): Extract<TranscriptRow, { kind: 'toolSettled' }> | null {
+  const settled = toolSettledSource(message);
+  if (!settled) return null;
+  return {
+    kind: 'toolSettled', id: `toolSettled:${message.id}`, text: message.text,
+    tool: settled.tool, state: settled.state, delivered: settled.delivered,
+  };
+}
+
 function toolSettledSource(message: ConversationMessage): { tool: string; state: string; delivered: boolean } | null {
   const data = (message.data ?? {}) as { source?: { kind?: string; toolName?: string; state?: string; delivered?: string } };
   if (data.source?.kind !== 'tool_settled') return null;
