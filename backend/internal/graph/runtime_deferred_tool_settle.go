@@ -28,7 +28,7 @@ func finalizeDeferredToolCall(store *TaskStore, call DeferredToolCall, outcome d
 		finished := FinishDeferredToolCall(store, call.Id, outcome.State, outcome.Reason, outcome.Result, NowMillis())
 		SettleConversationToolCall(store, finished)
 		if WakeForDeferredToolSettled(store, finished) {
-			RecoverMaster(store, finished.TaskId, "message")
+			resumeConversationForDeferredTool(store, finished)
 		}
 		return finished
 	})
