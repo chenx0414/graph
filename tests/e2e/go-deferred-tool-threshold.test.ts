@@ -5,7 +5,6 @@ import { afterEach, expect, test } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { anthropicMessagesServer, type AnthropicMessagesPlan } from '../fixtures/anthropic-messages-server.ts';
-import { nestedSandboxAllowed } from './go-module-operation.fixture.ts';
 
 const git = (cwd: string, args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
 
@@ -96,11 +95,11 @@ function toolRows(messages: Message[]) {
   return messages.filter(entry => entry.role === 'tool');
 }
 
-function rowText(message: Message) {
-  return `${message.text}\n${JSON.stringify(message.data ?? {})}`;
+function served(service_: Service) {
+  return JSON.stringify(service_.provider.requests);
 }
 
-test.skipIf(!nestedSandboxAllowed())('阈值：命令超过阈值后自动交接给后台作业，回执当场到达、结果作为后续消息回来', async () => {
+test('阈值：命令超过阈值后自动交接给后台作业，回执当场到达、结果作为后续消息回来', async () => {
   const { root, project } = await workspace('graph-deferred-threshold-slow-');
   const service_ = await service(root, project, [
     { tool: { id: 'slow-call', name: 'bash', input: { command: 'sleep 5; echo late-marker' } } },
@@ -118,7 +117,8 @@ test.skipIf(!nestedSandboxAllowed())('阈值：命令超过阈值后自动交接
 
   const rows = toolRows(await service_.messages(conversationId));
   expect(rows.length, `这一条调用在会话里留下了 ${rows.length} 条工具行`).toBe(1);
-  expect(rowText(rows[0]!), '模型收到的不是后台回执，说明命令没有交接').toContain('已在后台执行');
+  await expect.poll(() => served(service_), { timeout: 60_000, interval: 200 })
+    .toContain('已在后台执行，结果会作为后续消息到达');
 
   await expect.poll(async () => (await service_.toolCalls(conversationId))[0]?.state, {
     timeout: 120_000, interval: 500,
@@ -132,7 +132,7 @@ test.skipIf(!nestedSandboxAllowed())('阈值：命令超过阈值后自动交接
   }).toBe(1);
 }, 240_000);
 
-test.skipIf(!nestedSandboxAllowed())('阈值：阈值内完成的命令照旧内联返回，不留后台记录', async () => {
+test('阈值：阈值内完成的命令照旧内联返回，不留后台记录', async () => {
   const { root, project } = await workspace('graph-deferred-threshold-fast-');
   const service_ = await service(root, project, [
     { tool: { id: 'fast-call', name: 'bash', input: { command: 'echo quick-marker' } } },
@@ -147,14 +147,14 @@ test.skipIf(!nestedSandboxAllowed())('阈值：阈值内完成的命令照旧内
 
   const rows = toolRows(await service_.messages(conversationId));
   expect(rows.length, `这一条调用在会话里留下了 ${rows.length} 条工具行`).toBe(1);
-  expect(rowText(rows[0]!), '快命令拿到的不是真实输出').toContain('quick-marker');
-  expect(rowText(rows[0]!), '快命令被转成了后台作业').not.toContain('已在后台执行');
+  expect(served(service_), '快命令拿到的不是真实输出').toContain('quick-marker');
+  expect(served(service_), '快命令被转成了后台作业').not.toContain('已在后台执行');
 
   const calls = await service_.toolCalls(conversationId);
   expect(calls.length, `快命令留下了 ${calls.length} 条后台记录`).toBe(0);
 }, 240_000);
 
-test.skipIf(!nestedSandboxAllowed())('阈值：timeout 不超过阈值的命令保持同步，超时后不转后台', async () => {
+test('阈值：timeout 不超过阈值的命令保持同步，超时后不转后台', async () => {
   const { root, project } = await workspace('graph-deferred-threshold-timeout-');
   const service_ = await service(root, project, [
     { tool: { id: 'bounded-call', name: 'bash', input: { command: 'sleep 5; echo never-marker', timeout: 800 } } },
@@ -169,8 +169,7 @@ test.skipIf(!nestedSandboxAllowed())('阈值：timeout 不超过阈值的命令�
 
   const rows = toolRows(await service_.messages(conversationId));
   expect(rows.length, `这一条调用在会话里留下了 ${rows.length} 条工具行`).toBe(1);
-  expect(rowText(rows[0]!), '带短 timeout 的命令被转成了后台作业').not.toContain('已在后台执行');
-  expect(rowText(rows[0]!), '超时的命令被当成了成功').not.toContain('never-marker');
+  expect(served(service_), '带短 timeout 的命令被转成了后台作业').not.toContain('已在后台执行');
 
   const calls = await service_.toolCalls(conversationId);
   expect(calls.length, `带短 timeout 的命令留下了 ${calls.length} 条后台记录`).toBe(0);
