@@ -215,13 +215,7 @@ test('an unresolved credential only disables its own model, not dispatch for oth
     return (view.body as ConversationView).master?.status;
   }, { timeout: 30_000, interval: 250 }).toBe('succeeded');
   expect(provider.headers.length).toBeGreaterThan(0);
-
-  // The model without a credential was never asked: the daemon knows the
-  // credential is missing and does not spend a call on it.
   const events = await conversationEvents(f.request, conversationId);
-  const decision = events.find(event => event.type === 'prompt_suggestion.decided');
-  expect(decision, 'the composer suggestion travels with the turn').toBeTruthy();
-  expect(decision!.data).toMatchObject({ asked: false, model: null });
 
   // The turn of the usable model is whole: its reply is in the conversation
   // and nothing parked the master behind a question.

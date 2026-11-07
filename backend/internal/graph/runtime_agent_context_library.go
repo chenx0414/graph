@@ -36,7 +36,6 @@ func NewAgentContextLibrary(root string, defaults AgentContextDefaults) *AgentCo
 		ReviewerTools:    agentContextDefault(defaults.ReviewerTools, DEFAULT_REVIEWER_TOOL_GUIDANCE),
 		Worker:           agentContextDefault(defaults.Worker, DEFAULT_WORKER_PROMPT),
 		Node:             agentContextDefault(defaults.Node, DEFAULT_NODE_PROMPT),
-		PromptSuggestion: agentContextDefault(defaults.PromptSuggestion, DEFAULT_PROMPT_SUGGESTION_PROMPT),
 	}
 	return library
 }
@@ -106,8 +105,6 @@ func (library *AgentContextLibrary) fallbackContent(name string) string {
 		return library.defaults.Worker
 	case "node":
 		return library.defaults.Node
-	case "promptSuggestion":
-		return library.defaults.PromptSuggestion
 	}
 	return ""
 }

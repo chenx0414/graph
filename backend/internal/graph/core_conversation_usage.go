@@ -96,10 +96,6 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 		if text, ok := output["text"].(string); ok {
 			reply = strings.TrimSpace(text)
 		}
-		suggestedPrompt := ""
-		if text, ok := output["suggestedPrompt"].(string); ok {
-			suggestedPrompt = utf16Slice(strings.TrimSpace(text), 500)
-		}
 		activity := output["activity"]
 		if !conversationActivityIsArray(activity) {
 			activity = output["toolActivity"]
@@ -108,10 +104,6 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil,
 			LiveDeferredToolCallIds(store, conversation.Id))
 		if reply != "" && !alreadyReplied {
-			var data any
-			if suggestedPrompt != "" {
-				data = map[string]any{"suggestedPrompt": suggestedPrompt}
-			}
 			AppendMessage(store, MessageInput{
 				ConversationID: conversation.Id,
 				Role:           MessageRoleAssistant,
@@ -120,7 +112,6 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 				State:          MessageStateDone,
 				OperationID:    &operation.Id,
 				Turn:           operation.Attempt,
-				Data:           data,
 			})
 			MarkOperationReplied(store, &operation.Id)
 		}

@@ -47,7 +47,7 @@ node --run start:execute    # 或 node --run build:backend && node backend/inter
 - 执行期间继续在同一对话里问进度、解释与偏差；主 Agent 忙时输入会进入输入框上方的右侧队列，当前回复结束后按顺序每次发送一条，形成一问一答，不会丢消息。
 - 输入 `@` 可引用项目文件与文件夹；输入 `/` 可浏览当前主 Agent 实际可用的工具、已绑定能力，以及模型、思考强度和上下文压缩等系统命令。工具或能力选中后会作为 `/tool` 或 `/capability:id@version` 直接插入正文，并随消息形成明确的使用指令；模型与思考强度直接作用于下一轮，`/compact` 由同一 Pi session 执行真实上下文压缩。
 - 完全访问默认开启；聊天输入区的开关可切回 standard。full 模式下 Agent 可使用宿主文件系统、任意命令与网络、已绑定 MCP/扩展，并可修改工作区；会话暂停、额度、未知用量和未核对的副作用仍按各自规则控制执行；访问权限不证明失败操作可以重放。
-- 主 Agent 完成回答时可留下灰色候选 prompt：`Tab` 填入输入框，`Enter` 直接发送；忙时输入 `Enter` 会入队，输入框为空且已有队列消息时再按 `Enter` 会把队列作为打断引导送入当前回复。
+- 忙时输入 `Enter` 会入队，输入框为空且已有队列消息时再按 `Enter` 会把队列作为打断引导送入当前回复。
 - 暂停只作用于对话主 Agent；功能任务的暂停/继续仍在对应任务页。重启守护进程后，对话、未处理消息与执行状态都会恢复。
 - main 与每个节点拥有独立、稳定的 durable 会话。返工、重试、配置重绑和重启保留节点身份、历史与累计预算；节点之间通过具名接口和不可变产物协作。
 - 节点详情显示实际运行配置、prompt、工具、用量与预算作用域。独立审查沿用自己的会话和模型独立性约束，读取明确发布的成果及审查目标。
@@ -76,7 +76,7 @@ Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内�
 
 在「最终 Prompt」页可直接查看完整预览；在「可编辑来源」页修改并保存，改动从下一轮开始生效。「设为默认」会把当前内容（包括空内容）写入 `defaults/` 并同时作为当前内容生效；之后「恢复默认」回到这个用户默认基线。未设置用户默认时，恢复默认仍回到代码内置原版；存在自定义默认时，额外的「恢复内置」会清除用户默认并回到代码原版。工具页关闭某个工具后，它同时从 provider tool schema、session allowlist 和最终 Prompt 的工具清单中移除，但不会改变宿主权限、预算、审计或恢复规则。旧版 `tool-awareness.md` 会在首次升级时迁移为 `tools/main.md`，原文件仍保留作人工备份。
 
-四个 runtime prompt 的注入时机不同：`runtime/worker.md` 会在每个非 Main Agent 的 system prompt `<rules>` 中作为 runtime rules 注入；`runtime/prompt-suggestion.md` 只在 Main Agent 完成回复后生成下一条输入建议的独立模型请求中作为 system prompt 使用；`runtime/main-conversation.md` 与 `runtime/main-graph.md` 是早期 Main Agent 工作流文本，当前版本不再注入任何 system prompt，只保留可编辑与迁移用途。
+三个 runtime prompt 的注入时机不同：`runtime/worker.md` 会在每个非 Main Agent 的 system prompt `<rules>` 中作为 runtime rules 注入；`runtime/main-conversation.md` 与 `runtime/main-graph.md` 是早期 Main Agent 工作流文本，当前版本不再注入任何 system prompt，只保留可编辑与迁移用途。
 
 ## 桌面 APP（开发预览）
 

@@ -254,7 +254,6 @@ Graph 在代码/preset 中保留每个可编辑 prompt 文件的原始版本。`
 ## Runtime Prompt 注入时机
 
 - `runtime/worker.md`：每次非 Main Agent operation 组装 system prompt 时，注入 `<rules>` 的 runtime 部分。
-- `runtime/prompt-suggestion.md`：Main Agent 完成回复后，为下一条输入建议启动独立模型请求时作为该请求的 system prompt。
 - `runtime/main-conversation.md`、`runtime/main-graph.md`：早期 Main Agent 工作流文本，当前版本不注入任何 system prompt，仅保留编辑和迁移用途。
 
 ## 不应宣称

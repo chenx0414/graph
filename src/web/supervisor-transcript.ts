@@ -11,7 +11,6 @@ export interface SupervisorTranscript {
   messages: ConversationMessage[];
   queuedMessages: ConversationMessage[];
   rows: TranscriptRow[];
-  promptSuggestion: string;
   streamNeedsResync: boolean;
   historyRequest: ConversationHistoryRequest | null;
 }
@@ -35,7 +34,6 @@ export function supervisorTranscript(
       streaming: snapshot.streaming,
       busy: input.busy,
     }),
-    promptSuggestion: snapshot.promptSuggestion,
     streamNeedsResync: snapshot.streamNeedsResync,
     historyRequest: snapshot.historyRequest,
   };

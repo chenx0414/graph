@@ -7,19 +7,16 @@ const PREFERENCES_PREFIX = 'graph-pref-';
 
 export interface Preferences {
   markdownRendering: boolean;
-  candidatePrompt: boolean;
 }
 
 type PreferenceName = keyof Preferences;
 
 const DEFAULT_PREFERENCES: Preferences = {
   markdownRendering: true,
-  candidatePrompt: false,
 };
 
 const STORAGE_KEYS: Record<PreferenceName, string> = {
   markdownRendering: `${PREFERENCES_PREFIX}markdown-rendering`,
-  candidatePrompt: `${PREFERENCES_PREFIX}candidate-prompt`,
 };
 
 const PREFERENCES_EVENT = 'graph:preferences-changed';
@@ -58,20 +55,12 @@ export function writePreference(
 export function readPreferences(storage: PreferenceStorage | null | undefined): Preferences {
   return {
     markdownRendering: readPreference(storage, 'markdownRendering'),
-    candidatePrompt: readPreference(storage, 'candidatePrompt'),
   };
 }
 
 
 export function markdownEnabled(preferences: Preferences): boolean {
   return preferences.markdownRendering;
-}
-
-export function visibleSuggestion(
-  preferences: Preferences,
-  suggestion: string | null | undefined,
-): string | null {
-  return preferences.candidatePrompt ? suggestion ?? null : null;
 }
 
 function browserStorage(): PreferenceStorage | null {

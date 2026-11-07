@@ -54,7 +54,7 @@ import { Icon } from './ui.tsx';
 import { useConversationPanelState } from "./conversation-state.tsx";
 import { residentFlag } from "./conversation-types.tsx";
 
-export function ConversationPanelView({ sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
+export function ConversationPanelView({ sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
 return (
     <section className="conversation-page" data-testid="conversation">
       {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content" data-drawer={drawerOpen}>
@@ -209,7 +209,6 @@ return (
               onAttachmentsChange={setAttachments}
               projectId={view.projectId}
               placeholder={busy ? '继续输入，消息会排队…' : '发送消息，@ 引用文件…'}
-              suggestion={promptSuggestion}
               slashTools={agentContext?.tools ?? []}
               slashCapabilities={agentContext?.capabilities ?? []}
               slashModels={settings?.models ?? []}
@@ -223,14 +222,12 @@ return (
               paused={paused}
               pausePending={pauseAction !== null}
               queueLength={queuedMessages.length}
-              hasSuggestion={Boolean(promptSuggestion)}
               sendDisabled={composerPrimaryDisabled({
                 sending, steering,
                 pending: pauseAction !== null,
                 paused,
                 busy: Boolean(busy),
                 hasInput: hasComposerInput,
-                hasSuggestion: Boolean(promptSuggestion),
               })}
             />}
             {masterQuestions.length === 0 && taskQuestions.length === 0 && <div className="composer-footer">

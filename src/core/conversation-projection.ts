@@ -139,7 +139,6 @@ export interface ConversationProjectionSnapshot {
   queuedMessages: ConversationMessage[];
   streaming: LiveText[];
   liveTools: LiveTool[];
-  promptSuggestion: string;
   streamNeedsResync: boolean;
   historyRequest: ConversationHistoryRequest | null;
 }
@@ -387,15 +386,11 @@ export function conversationProjectionSnapshot(
   const durableNarration = new Set(all.filter(message => message.role === 'activity' && typeof message.data?.ordinal === 'number')
     .map(message => `${message.operationId}:${message.data!.ordinal}`));
   const latestAssistant = [...all].reverse().find(message => message.role === 'assistant');
-  const suggestedPrompt = typeof latestAssistant?.data?.suggestedPrompt === 'string'
-    ? latestAssistant.data.suggestedPrompt.trim().slice(0, 500)
-    : '';
   return {
     messages: orderMessages(all.filter(message => !(message.role === 'user' && message.state === 'queued'))),
     queuedMessages,
     streaming: Object.values(state.liveText).filter(item => !durableAssistantOps.has(item.operationId) && !durableNarration.has(`${item.operationId}:${item.ordinal}`)),
     liveTools: Object.values(state.liveTools).filter(tool => !durableToolIds.has(tool.toolCallId)),
-    promptSuggestion: !options.busy && !queuedMessages.length ? suggestedPrompt : '',
     streamNeedsResync: state.streamNeedsResync,
     historyRequest: conversationHistoryRequest(state),
   };

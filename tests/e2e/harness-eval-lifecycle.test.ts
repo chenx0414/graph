@@ -14,7 +14,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
 
 const execute = promisify(execFile);
 
-test.each([{stalledUsage:true,missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {suggestion:true,missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:true,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:true,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:false,lane:'main'}])('real evaluation CLI records terminal state and closes its ledger ($lane, case=$caseId, fixedCount=$fixedCount, missingUsage=$missingUsage, timeout=$timedOut, suggestion=$suggestion, stalledUsage=$stalledUsage)', async ({timedOut,lane,caseId,fixedCount,missingUsage,suggestion,stalledUsage}) => {
+test.each([{stalledUsage:true,missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {missingUsage:true,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:false,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'cli',fixedCount:true,timedOut:false,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:true,lane:'main'}, {missingUsage:false,caseId:'parser',fixedCount:false,timedOut:false,lane:'main'}])('real evaluation CLI records terminal state and closes its ledger ($lane, case=$caseId, fixedCount=$fixedCount, missingUsage=$missingUsage, timeout=$timedOut, stalledUsage=$stalledUsage)', async ({timedOut,lane,caseId,fixedCount,missingUsage,stalledUsage}) => {
   const root = await mkdtemp(join(tmpdir(), 'graph-eval-lifecycle-'));
   await writeFile(join(root,'hidden-verifier.txt'),'private-independent-verifier-marker');
   const cliCommand = `cat > greet.mjs <<'EOF'
@@ -29,8 +29,7 @@ EOF`;
 cat > config.js <<'EOF'
 export function parseConfig(text) { return Object.fromEntries(text.split('\\n').filter(line => line.trim()).map(line => { const index = line.indexOf('='); return [line.slice(0,index),line.slice(index+1)]; })); }
 EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage:null} : {})}));
-  const provider=await openaiServer(suggestion?[...plans,...plans]:plans);
-  const auxiliary=suggestion ? await openaiServer(Array.from({length:2},()=>({text:'Run another check.',beforeReply:()=>new Promise<void>(resolve=>setTimeout(resolve,6500))}))) : undefined;
+  const provider=await openaiServer(plans);
   let artifactRoot: string | undefined;
   let defaultArtifactRoot: string | undefined;
   try {
@@ -40,17 +39,11 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
       models: { entries: [{ id: 'local', modelId: 'local', provider: 'graph-openai', grade: 'high',
         api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256,
         credentialId: 'local', cost: { input: 2, output: 4, cacheRead: 0.5, cacheWrite: 1 },
-      },...(auxiliary?[{id:'suggestion',modelId:'suggestion',provider:'graph-suggestion',grade:'low',api:'openai-completions',baseUrl:auxiliary.model.baseUrl,contextWindow:32000,maxTokens:256,credentialId:'local',cost:{input:0,output:0,cacheRead:0,cacheWrite:0}}]:[])] },
+      }] },
     }));
-    const snapshot=join(root,'snapshot');
-    if(auxiliary){
-      const context=join(root,'context');await mkdir(context);
-      await writeFile(join(context,'agent-combinations.json'),JSON.stringify({version:1,combinations:[{id:'main',mode:'main',name:'Main',description:'Handle the requested project work.',recommendedGrade:'high',review:false,tags:[],resources:[]}]}));
-      await execute(process.execPath,['scripts/harness-eval-context.mjs',context,snapshot],{cwd:process.cwd()});
-    }
     const { stdout, stderr } = await execute(process.execPath, ['scripts/harness-real-eval.mjs', configPath, caseId], {
       cwd: process.cwd(), timeout: 45_000,
-      env: { ...process.env, GRAPH_DRAIN_CANCELED_USAGE:'1', HOME: root,...(auxiliary?{GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'1'}:{}), GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? '4000' : '15000' },
+      env: { ...process.env, GRAPH_DRAIN_CANCELED_USAGE:'1', HOME: root, GRAPH_EVAL_LOCAL_KEY: 'fixture-key', GRAPH_EVAL_TIMEOUT_MS: timedOut ? '4000' : '15000' },
     });
     const report = JSON.parse(stdout);
     artifactRoot = report.root;
@@ -85,31 +78,6 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
       const runPath=join(root,'run.json');await writeFile(runPath,stdout);
       const manifestPath=join(root,'comparison.json');
       await writeFile(manifestPath,JSON.stringify({groups:[{name:'observed',scope:'main-operation',runs:[runPath]}],weights:{currency:'USD',perMillion:{input:2,output:4,cacheRead:.5,cacheWrite:1}}}));
-      if(auxiliary){
-        expect(auxiliary.requests).toHaveLength(1);
-        const db=new DatabaseSync(join(report.root,'state','tasks.sqlite'),{readOnly:true});
-        try{
-          const decision=db.prepare("SELECT data FROM events WHERE type='prompt_suggestion.decided'").get() as {data:string};
-          expect(JSON.parse(decision.data)).toMatchObject({model:'suggestion',asked:true,timeoutMs:20000,timedOut:false,error:null});
-        }finally{db.close();}
-        expect(ledger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:0,tokens:{input:25,output:10,cacheRead:15,cacheWrite:0}});
-        const baseline=JSON.parse((await execute(process.execPath,['scripts/harness-real-eval.mjs',configPath,caseId],{
-          cwd:process.cwd(),timeout:45000,
-          env:{...process.env,GRAPH_DRAIN_CANCELED_USAGE:'1',HOME:root,GRAPH_EVAL_CONTEXT_SNAPSHOT:snapshot,GRAPH_EVAL_LOCAL_KEY:'fixture-key',GRAPH_EVAL_TIMEOUT_MS:'15000',GRAPH_EXTENDED_PROMPT_SUGGESTION_TIMEOUT:'0'},
-        })).stdout);
-        defaultArtifactRoot=baseline.root;
-        expect(baseline).toMatchObject({taskSuccess:true,cleanupIncomplete:false});
-        const defaultLedger=JSON.parse(await readFile(join(baseline.root,'cost-report.json'),'utf8'));
-        expect(defaultLedger.models.find((model:{model:string})=>model.model==='suggestion')).toMatchObject({requests:1,unknownUsage:0,estimatedUsage:0,tokens:{input:25,output:10,cacheRead:15,cacheWrite:0}});
-        const defaultDb=new DatabaseSync(join(baseline.root,'state','tasks.sqlite'),{readOnly:true});
-        try{
-          const decision=defaultDb.prepare("SELECT data FROM events WHERE type='prompt_suggestion.decided'").get() as {data:string};
-          expect(JSON.parse(decision.data)).toMatchObject({model:'suggestion',asked:true,timeoutMs:5000,timedOut:true});
-        }finally{defaultDb.close();}
-        expect(auxiliary.requests).toHaveLength(2);
-        await expect(execute(process.execPath,['scripts/harness-eval-summary.mjs',manifestPath],{cwd:process.cwd()})).rejects.toThrow(/mixed-model operation/);
-        return;
-      }
       const comparison=await execute(process.execPath,['scripts/harness-eval-summary.mjs',manifestPath],{cwd:process.cwd()});
       const group=JSON.parse(comparison.stdout).groups[0];
       expect(group).toMatchObject({attempts:1,completed:fixedCount ? 0 : 1});
@@ -123,7 +91,7 @@ EOF` }) }] }, { text: 'Fixed.' }]).map(plan=>({...plan,...(missingUsage ? {usage
     }
     expect(stderr).not.toMatch(/database is not open|ERR_INVALID_STATE/);
   } finally {
-    await provider.close();await auxiliary?.close();
+    await provider.close();
     await rm(root, { recursive: true, force: true });
     if (artifactRoot) await rm(artifactRoot, { recursive: true, force: true });
     if (defaultArtifactRoot) await rm(defaultArtifactRoot,{recursive:true,force:true});

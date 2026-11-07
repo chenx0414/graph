@@ -129,7 +129,6 @@ test('live deltas and tools disappear when durable records arrive, while queued 
     streaming: [],
     liveTools: [],
     queuedMessages: [{ id: 'queued' }],
-    promptSuggestion: '',
   });
 });
 

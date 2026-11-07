@@ -18,13 +18,11 @@ beforeAll(async () => {
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 afterAll(async () => { await rm(webDir, { recursive: true, force: true }); });
 
-export async function fixture(plans: ResponsePlan[], finiteBudget = false, pauseResponse?: Promise<void>, browserOptions: { args?: string[]; suggestionPlans?: ResponsePlan[]; messageResponse?: Promise<void>; steerResponse?: Promise<void>; initiallyDrive?: boolean } = {}) {
+export async function fixture(plans: ResponsePlan[], finiteBudget = false, pauseResponse?: Promise<void>, browserOptions: { args?: string[]; messageResponse?: Promise<void>; steerResponse?: Promise<void>; initiallyDrive?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'graph-composer-lifecycle-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const provider = await openaiServer(plans);
   cleanup.push(() => provider.close());
-  const suggestion = browserOptions.suggestionPlans ? await openaiServer(browserOptions.suggestionPlans) : undefined;
-  if (suggestion) cleanup.push(() => suggestion.close());
   const configPath = join(root, 'config.json');
   await writeFile(configPath, JSON.stringify({
     version: 1, projects: [{ id: 'alpha', root }],
@@ -33,8 +31,6 @@ export async function fixture(plans: ResponsePlan[], finiteBudget = false, pause
     models: { entries: [
       { id: 'local', modelId: 'local', provider: provider.model.provider, grade: 'high', api: 'openai-completions',
         baseUrl: provider.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' },
-      ...(suggestion ? [{ id: 'cheap', modelId: 'cheap', provider: 'graph-suggestion', grade: 'low', api: 'openai-completions',
-        baseUrl: suggestion.model.baseUrl, contextWindow: 32_000, maxTokens: 256, credentialId: 'local' }] : []),
     ] },
   }));
   async function launch(drive: boolean) {
@@ -109,7 +105,7 @@ export async function fixture(plans: ResponsePlan[], finiteBudget = false, pause
   async function answered(id: string, count: number) {
     await expect.poll(async () => (await view(id)).messages.filter((message: { role: string }) => message.role === 'assistant').length, { timeout: 30_000 }).toBe(count);
   }
-  return { root, get url() { return browserUrl; }, page, provider, suggestion, post, view, events, open, answered, async restart() {
+  return { root, get url() { return browserUrl; }, page, provider, post, view, events, open, answered, async restart() {
     await server.close();
     server = await launch(true);
     if (!pauseResponse && !browserOptions.messageResponse && !browserOptions.steerResponse) browserUrl = server.url;

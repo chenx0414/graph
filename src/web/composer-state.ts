@@ -40,7 +40,6 @@ export type ComposerPrimaryAction =
   | 'resume'
   | 'send-and-resume'
   | 'steer'
-  | 'suggestion'
   | 'none';
 
 export interface ComposerPrimaryInput {
@@ -49,7 +48,6 @@ export interface ComposerPrimaryInput {
   pending: boolean;
   hasInput: boolean;
   queueLength: number;
-  hasSuggestion: boolean;
 }
 
 export function composerPrimaryState(input: ComposerPrimaryInput): { mode: ComposerPrimaryMode; action: ComposerPrimaryAction } {
@@ -63,16 +61,15 @@ export function composerPrimaryState(input: ComposerPrimaryInput): { mode: Compo
   }
   if (input.hasInput) return { mode: 'send', action: 'send' };
   if (input.queueLength > 0) return { mode: 'send', action: 'steer' };
-  if (input.hasSuggestion) return { mode: 'send', action: 'suggestion' };
   return { mode: 'send', action: 'none' };
 }
 
 export function composerPrimaryDisabled(input: {
-  sending: boolean; steering: boolean; pending: boolean; paused: boolean; busy: boolean; hasInput: boolean; hasSuggestion: boolean;
+  sending: boolean; steering: boolean; pending: boolean; paused: boolean; busy: boolean; hasInput: boolean;
 }): boolean {
   if (input.sending || input.steering || input.pending) return true;
   if (input.paused || input.busy) return false;
-  return !input.hasInput && !input.hasSuggestion;
+  return !input.hasInput;
 }
 
 export function visibleTranscriptMessages<T extends { role: string; state: string }>(messages: T[]): T[] {

@@ -71,61 +71,6 @@ func piAdapterCompactionSettings(entry ModelEntry) *CompactionSettings {
 	return &settings
 }
 
-func piAdapterGenerateSuggestion(options PiAdapterOptions, entry ModelEntry, gate *TaskSendGate, input piAdapterRunInput, userMessage string, reply string, signal *AbortSignal) (outcome *PromptSuggestionReply) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			outcome = &PromptSuggestionReply{Error: promptErrorString(panicMessage(recovered))}
-		}
-	}()
-	store := options.Store
-	operation := input.Operation
-	systemPrompt := DEFAULT_PROMPT_SUGGESTION_PROMPT
-	if options.Channels != nil && options.Channels.AgentContext != nil {
-		if prompt, err := options.Channels.AgentContext.Prompt("runtime/prompt-suggestion.md"); err == nil && prompt != "" {
-			systemPrompt = prompt
-		}
-	}
-	answer := GeneratePromptSuggestion(struct {
-		Stream         PromptStreamFunc
-		Model          any
-		UserMessage    string
-		AssistantReply string
-		SystemPrompt   string
-		Signal         any
-	}{
-		Stream: ControlledOpenAIStream(piAdapterGateSendGate(gate), entry, input.ResolveKeyFor, input.SlotFor, entry.Api, PiAdapterStreamOptions{
-			EstimateMissing: true,
-			OnTransport: func(observation ProviderTransportObservation) {
-				data := observation.Fields()
-				data["operationId"] = operation.Id
-				data["model"] = entry.Id
-				store.Event(operation.TaskId, "provider.transport", data)
-			},
-			OnRequest: func(callId string, profile map[string]any) {
-				data := map[string]any{
-					"callId": callId, "operationId": operation.Id, "model": entry.Id, "rates": nil, "pricing": nil,
-				}
-				if entry.Cost != nil {
-					data["rates"] = entry.Cost
-				}
-				if entry.Pricing != nil {
-					data["pricing"] = entry.Pricing
-				}
-				for key, value := range profile {
-					data[key] = value
-				}
-				store.Event(operation.TaskId, "provider.request_profile", data)
-			},
-		}),
-		Model:          ToPiModel(entry),
-		UserMessage:    userMessage,
-		AssistantReply: reply,
-		SystemPrompt:   WithAgentTestingPolicy(systemPrompt, DEFAULT_PROMPT_SUGGESTION_PROMPT),
-		Signal:         signal,
-	})
-	return &answer
-}
-
 func piAdapterGateSendGate(gate *TaskSendGate) SendGate {
 	return gate.SendGate
 }

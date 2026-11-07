@@ -35,20 +35,18 @@ describe('③ scroll-to-latest decision', () => {
 });
 
 describe('④ primary button state machine', () => {
-  const idle = { busy: false, paused: false, pending: false, hasInput: false, queueLength: 0, hasSuggestion: false };
+  const idle = { busy: false, paused: false, pending: false, hasInput: false, queueLength: 0 };
 
-  test('idle sends, steers the queue, or takes the suggestion', () => {
+  test('idle sends, steers the queue, or does nothing', () => {
     expect(composerPrimaryState({ ...idle, hasInput: true })).toEqual({ mode: 'send', action: 'send' });
     expect(composerPrimaryState({ ...idle, queueLength: 1 })).toEqual({ mode: 'send', action: 'steer' });
-    expect(composerPrimaryState({ ...idle, hasSuggestion: true })).toEqual({ mode: 'send', action: 'suggestion' });
     expect(composerPrimaryState(idle)).toEqual({ mode: 'send', action: 'none' });
   });
 
   test('stays disabled unless there is something to do', () => {
-    const flags = { sending: false, steering: false, pending: false, paused: false, busy: false, hasInput: false, hasSuggestion: false };
+    const flags = { sending: false, steering: false, pending: false, paused: false, busy: false, hasInput: false };
     expect(composerPrimaryDisabled(flags)).toBe(true);
     expect(composerPrimaryDisabled({ ...flags, hasInput: true })).toBe(false);
-    expect(composerPrimaryDisabled({ ...flags, hasSuggestion: true })).toBe(false);
     expect(composerPrimaryDisabled({ ...flags, busy: true })).toBe(false);
     expect(composerPrimaryDisabled({ ...flags, paused: true })).toBe(false);
     expect(composerPrimaryDisabled({ ...flags, sending: true, hasInput: true })).toBe(true);

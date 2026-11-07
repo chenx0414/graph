@@ -33,7 +33,7 @@ const livePreview = ViewPlugin.fromClass(class {
   update(update: ViewUpdate) { if (update.docChanged || update.selectionSet || update.focusChanged || update.viewportChanged) this.decorations = decorations(update.view); }
 }, { decorations: value => value.decorations });
 
-type Props = TextareaHTMLAttributes<HTMLTextAreaElement> & { live: boolean; 'data-testid'?: string | undefined; 'data-history'?: string | undefined; 'data-suggestion'?: string | undefined };
+type Props = TextareaHTMLAttributes<HTMLTextAreaElement> & { live: boolean; 'data-testid'?: string | undefined; 'data-history'?: string | undefined;  };
 export const MarkdownInput = forwardRef<HTMLTextAreaElement, Props>(function MarkdownInput(props, ref) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
@@ -83,6 +83,6 @@ export const MarkdownInput = forwardRef<HTMLTextAreaElement, Props>(function Mar
       try { view.dispatch({changes:{from:0,to:view.state.doc.length,insert:value}}); } finally { syncing.current = false; }
     }
   },[props.value]);
-  useLayoutEffect(() => { editor.current?.dispatch({effects:[appearance.current.reconfigure(props.live ? livePreview : []),attributes.current.reconfigure([placeholder(props.placeholder ?? ''),EditorView.contentAttributes.of({'data-testid':props['data-testid'] ?? '', 'data-history':props['data-history'] ?? '', 'data-suggestion':props['data-suggestion'] ?? '', 'aria-label':props['aria-label'] ?? '消息', role:'textbox','aria-multiline':'true'})])]}); }, [props.live,props.placeholder,props['data-history'],props['data-suggestion']]);
+  useLayoutEffect(() => { editor.current?.dispatch({effects:[appearance.current.reconfigure(props.live ? livePreview : []),attributes.current.reconfigure([placeholder(props.placeholder ?? ''),EditorView.contentAttributes.of({'data-testid':props['data-testid'] ?? '', 'data-history':props['data-history'] ?? '', 'aria-label':props['aria-label'] ?? '消息', role:'textbox','aria-multiline':'true'})])]}); }, [props.live,props.placeholder,props['data-history']]);
   return <div className="markdown-input" data-live={props.live} ref={host} />;
 });

@@ -91,9 +91,7 @@ export function ChatComposer({
   paused = false,
   pausePending = false,
   queueLength = 0,
-  hasSuggestion = false,
   history,
-  suggestion,
   slashTools = [],
   slashCapabilities = [],
   slashModels = [],
@@ -122,9 +120,7 @@ export function ChatComposer({
   paused?: boolean;
   pausePending?: boolean;
   queueLength?: number;
-  hasSuggestion?: boolean;
   history?: string[];
-  suggestion?: string | null;
   slashTools?: AgentToolView[];
   slashCapabilities?: AgentCapabilityView[];
   slashModels?: ComposerModel[];
@@ -176,13 +172,10 @@ export function ChatComposer({
     () => filterSlashEntries(allSlashEntries, activeSlash?.query ?? ''),
     [allSlashEntries, activeSlash?.query],
   );
-  const availableSuggestion = suggestion?.trim() ?? '';
-  const showingSuggestion = Boolean(availableSuggestion) && value.length === 0
-    && attachments.length === 0 && !mentionOpen && !slashOpen;
   const primaryMode = composerPrimaryState({
     busy, paused, pending: pausePending,
     hasInput: Boolean(value.trim() || attachments.length),
-    queueLength, hasSuggestion,
+    queueLength,
   }).mode;
   const primaryLabel = primaryMode === 'pending'
     ? '正在切换暂停状态…'
@@ -574,8 +567,7 @@ export function ChatComposer({
           event.preventDefault();
           void pasteClipboardAtCaret(event.currentTarget);
         }}
-        placeholder={showingSuggestion ? availableSuggestion : placeholder}
-        data-suggestion={showingSuggestion ? availableSuggestion : undefined}
+        placeholder={placeholder}
         autoFocus={autoFocus}
         onKeyDown={event => {
           selectionEpoch.current++;
@@ -677,19 +669,6 @@ export function ChatComposer({
                 return;
               }
             }
-            return;
-          }
-          if (event.key === 'Tab' && showingSuggestion) {
-            event.preventDefault();
-            rememberEdit(value, availableSuggestion);
-            leaveHistory();
-            onChange(availableSuggestion);
-            setCursor(availableSuggestion.length);
-            requestAnimationFrame(() => {
-              const input = textareaRef.current;
-              input?.focus();
-              input?.setSelectionRange(availableSuggestion.length, availableSuggestion.length);
-            });
             return;
           }
           if (event.key === 'Enter' && !event.shiftKey) {

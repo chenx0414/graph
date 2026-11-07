@@ -10,9 +10,8 @@ describe('blocked storage', () => {
   test('reads degrade to the defaults and writes never throw', () => {
     const blocked = blockedStorage();
     expect(readPreference(blocked, 'markdownRendering')).toBe(true);
-    expect(readPreference(blocked, 'candidatePrompt')).toBe(false);
-    expect(readPreferences(blocked)).toEqual({ markdownRendering: true, candidatePrompt: false });
+    expect(readPreferences(blocked)).toEqual({ markdownRendering: true });
     expect(() => writePreference(blocked, 'markdownRendering', false)).not.toThrow();
-    expect(() => writePreference(null, 'candidatePrompt', true)).not.toThrow();
+    expect(() => writePreference(null, 'markdownRendering', true)).not.toThrow();
   });
 });

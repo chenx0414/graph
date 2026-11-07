@@ -6,14 +6,12 @@ const (
 	InvocationCompletion       InvocationPurpose = "completion"
 	InvocationCompaction       InvocationPurpose = "compaction"
 	InvocationBranchSummary    InvocationPurpose = "branch_summary"
-	InvocationPromptSuggestion InvocationPurpose = "prompt_suggestion"
 )
 
 var INVOCATION_PURPOSES = []InvocationPurpose{
 	InvocationCompletion,
 	InvocationCompaction,
 	InvocationBranchSummary,
-	InvocationPromptSuggestion,
 }
 
 type TaskGateOperation struct {

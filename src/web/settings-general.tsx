@@ -174,19 +174,6 @@ export function PreferencesPage() {
               onChange={event => update('markdownRendering', event.target.checked)}
             />
           </label>
-          <label className="preference-item">
-            <span className="preference-copy">
-              <strong>候选 prompt</strong>
-              <span className="muted">开启后，输入框为空且主 Agent 空闲时显示建议的下一步 prompt。</span>
-            </span>
-            <input
-              type="checkbox"
-              className="preference-toggle"
-              data-testid="pref-candidate-prompt"
-              checked={preferences.candidatePrompt}
-              onChange={event => update('candidatePrompt', event.target.checked)}
-            />
-          </label>
         </div>
       </Card>
     </section>

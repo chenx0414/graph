@@ -17,7 +17,6 @@ const (
 	AgentPromptRulesReviewer                    AgentStaticPromptKey = "rules/reviewer.md"
 	AgentPromptRuntimeWorker                    AgentStaticPromptKey = "runtime/worker.md"
 	AgentPromptRuntimeNode                      AgentStaticPromptKey = "runtime/node.md"
-	AgentPromptRuntimePromptSuggest             AgentStaticPromptKey = "runtime/prompt-suggestion.md"
 	AgentPromptDefaultIdentityText              string               = "You are the Main Agent in Graph. Work with the user to investigate, plan, coordinate and directly carry out scoped workspace work when needed."
 	agentContextToolStateFile                   string               = "tools.json"
 	agentContextUserDefaultRoot                 string               = "defaults"
@@ -31,17 +30,16 @@ const (
 type AgentPromptKey = string
 
 type AgentContextDefaults struct {
-	Identity         *string
-	CommonRules      *string
-	MainRules        *string
-	WorkerRules      *string
-	ReviewerRules    *string
-	MainTools        *string
-	WorkerTools      *string
-	ReviewerTools    *string
-	Worker           *string
-	Node             *string
-	PromptSuggestion *string
+	Identity      *string
+	CommonRules   *string
+	MainRules     *string
+	WorkerRules   *string
+	ReviewerRules *string
+	MainTools     *string
+	WorkerTools   *string
+	ReviewerTools *string
+	Worker        *string
+	Node          *string
 }
 
 type AgentPromptDescriptor struct {
@@ -70,9 +68,6 @@ const DEFAULT_MAIN_APPROVAL_PROMPT = "To add or update a capability, first inspe
 const DEFAULT_WORKER_PROMPT = "Use the native Pi tools to read, search, edit and run commands in the assigned worktree. Use artifact_list/read to discover published task knowledge and artifact_publish for reports, plans, source lists and other shared deliverables that are not code changes. Send required named graph outputs with submit; one execution permits one valid submission, and omitted outputs are disabled. Direct chat may be answered without submitting. Native bash is sandboxed by the workspace and host access policy.{{retrievalNote}}"
 
 const DEFAULT_NODE_PROMPT = "Work within the assigned node task, acceptance criteria, workspace and bound capabilities. Use submit to send the named graph outputs when the task requires them. One execution permits one valid submit; omitted outputs are disabled. A direct chat can be answered without submit. Peer chat and interface delivery are separate channels. Read published artifacts by their exact ID and version. Code and review references must identify the exact commit. Respect the recipe rules and host permissions; a review task does not grant permission to implement changes."
-
-const DEFAULT_PROMPT_SUGGESTION_PROMPT = "Write exactly one concise next message the user may want to send. Use the same language as the user message. Return only that message. Do not explain, quote, label, or mention suggestions or the composer. If there is no useful next message, return an empty string."
-
 
 const DEFAULT_COMMON_RULES = "- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Be concise in your responses\n- Show file paths clearly when working with files\n- Use tool results as evidence.\n- R22 Test order: prove regressions through a real E2E flow before the fix and verify the same flow after it.\n- R23 Test means: only author E2E tests; never write unit or integration tests. Keep repeatable execution evidence.\n- R24 Test boundary: exercise the complete application flow with real owned components; substitute only external services.\n- R27 Test level (high level first): E2E is the only permitted level for newly authored or modified tests. Black-box and golden-file checks qualify only through a complete E2E flow. Run existing tests, preserve independent contracts and report E2E environment blockers instead of adding isolated tests.\n- Search the repository with `rg` through bash for repository search: it is git-aware and fast, and no indexed extension ships with this app any more. Use other shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.\n- MCP servers and extension tools are first-class: when one exists, call it instead of scripting around the same API.\n- When a tool or capability description does not say when to use it, that is a harness defect: fix it or report it."
 

@@ -22,7 +22,7 @@ shouldScrollToLatest,
 writeComposerDraft
 } from './composer-state.ts';
 
-import { usePreferences,visibleSuggestion } from './preferences.ts';
+import { usePreferences } from './preferences.ts';
 
 
 
@@ -238,7 +238,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     (list, messageId) => cancelQueuedMessage(list, messageId),
     transcript.queuedMessages,
   );
-  const promptSuggestion = visibleSuggestion(preferences, transcript.promptSuggestion);
   const hasComposerInput = Boolean(text.trim() || attachments.length);
   const primaryState = composerPrimaryState({
     busy: Boolean(busy),
@@ -246,10 +245,9 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     pending: pauseAction !== null,
     hasInput: hasComposerInput,
     queueLength: queuedMessages.length,
-    hasSuggestion: Boolean(promptSuggestion),
   });
 
-  const { act, changePaused, send, steerQueued, submitEnter, submitPrimary, cancelQueued, selectMasterModel, compactConversation } = conversationActions({ setActionError, reload, onChanged, pauseAction, setPauseAction, id, setPausedOverride, text, agentContext, attachments, setText, setAttachments, setSending, transcriptFollow, steering, interrupting, queuedMessages, setSteering, sending, busy, promptSuggestion, primaryState, hasComposerInput, setDismissedQueue });
+  const { act, changePaused, send, steerQueued, submitEnter, submitPrimary, cancelQueued, selectMasterModel, compactConversation } = conversationActions({ setActionError, reload, onChanged, pauseAction, setPauseAction, id, setPausedOverride, text, agentContext, attachments, setText, setAttachments, setSending, transcriptFollow, steering, interrupting, queuedMessages, setSteering, sending, busy, primaryState, hasComposerInput, setDismissedQueue });
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
   const interruptStatus: string | null = interruptPhase === 'interrupted'
@@ -328,5 +326,5 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     projectBound: Boolean(view.projectId),
   };
   const deferredInitPanelIds = drawerInitPanelIds();
-  return { fallback: null, sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
+  return { fallback: null, sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
 }

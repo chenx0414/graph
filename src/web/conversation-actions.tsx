@@ -13,7 +13,7 @@ import './conversation-drawer.css';
 import { composeSlashDirective,extractSlashTargets } from './SlashCommands.tsx';
 import { toast } from './ui.tsx';
 
-export function conversationActions({ setActionError, reload, onChanged, pauseAction, setPauseAction, id, setPausedOverride, text, agentContext, attachments, setText, setAttachments, setSending, transcriptFollow, steering, interrupting, queuedMessages, setSteering, sending, busy, promptSuggestion, primaryState, hasComposerInput, setDismissedQueue }: {
+export function conversationActions({ setActionError, reload, onChanged, pauseAction, setPauseAction, id, setPausedOverride, text, agentContext, attachments, setText, setAttachments, setSending, transcriptFollow, steering, interrupting, queuedMessages, setSteering, sending, busy, primaryState, hasComposerInput, setDismissedQueue }: {
 setActionError: Dispatch<SetStateAction<string>>;
 reload: () => void;
 onChanged: (() => void) | undefined;
@@ -34,7 +34,6 @@ queuedMessages: ConversationMessage[];
 setSteering: Dispatch<SetStateAction<boolean>>;
 sending: boolean;
 busy: boolean;
-promptSuggestion: string | null;
 primaryState: ReturnType<typeof composerPrimaryState>;
 hasComposerInput: boolean;
 setDismissedQueue: Dispatch<SetStateAction<string[]>>;
@@ -127,7 +126,6 @@ async function act(action: () => Promise<unknown>, after?: () => void) {
     if (sending || steering || interrupting) return;
     if (text.trim() || attachments.length) return send();
     if (busy && queuedMessages.length) return steerQueued();
-    if (!busy && promptSuggestion) return send(promptSuggestion);
   }
 
   async function submitPrimary() {
@@ -142,7 +140,6 @@ async function act(action: () => Promise<unknown>, after?: () => void) {
     }
     if (action === 'send') { await send(); return; }
     if (action === 'steer') { await steerQueued(); return; }
-    if (action === 'suggestion') { if (promptSuggestion) await send(promptSuggestion); return; }
   }
 
   async function cancelQueued(messageId: string) {
