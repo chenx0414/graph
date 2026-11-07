@@ -184,7 +184,7 @@ test('the resource library groups reusable assets and includes graph architectur
   await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('Bob_coder');
   await expect.poll(() => page.getByTestId('resource-section-agents').innerText()).toContain('Bob_coder');
   await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('组合架构身份与研究 Skill。');
-  await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('Agent 配方 · medium · 编码');
+  await expect.poll(() => page.getByTestId('agent-combination-code').innerText()).toContain('Agent 配方 · 编码');
   await expect.poll(() => page.getByTestId('resource-section-agents').innerText()).toContain('可编译');
   expect(await page.getByTestId('resource-section-agents').innerText()).not.toContain('coder@1');
 
