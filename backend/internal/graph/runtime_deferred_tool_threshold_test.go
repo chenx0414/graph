@@ -217,6 +217,36 @@ func TestSettledBackgroundCallFallsBackToANewTurnWhenNothingIsRunning(t *testing
 	}
 }
 
+func TestDeliveringAQueuedMessageKeepsItsSource(t *testing.T) {
+	fixture := newAutoDeferFixture(t)
+	source := `{"source":{"kind":"tool_settled","toolName":"bash"}}`
+	AppendMessage(fixture.store, MessageInput{
+		ConversationID: "c", Role: MessageRoleUser, Kind: "chat", Text: "bash 已经结束（settled）",
+		State: MessageStateQueued, Data: map[string]any{"source": map[string]any{"kind": "tool_settled", "toolName": "bash"}},
+	})
+	row := kernelRow(fixture.store.Db, "SELECT id FROM messages WHERE conversation_id='c'")
+	if row == nil {
+		t.Fatalf("the queued message was not recorded")
+	}
+	message, found := conversationMessageRow(fixture.store, kernelString(row["id"]))
+	if !found {
+		t.Fatalf("the queued message could not be read back")
+	}
+	DeliverMessages(fixture.store, "op", 1, []MessageRow{message}, 3)
+	delivered := kernelRow(fixture.store.Db, "SELECT data FROM messages WHERE id=?", kernelString(row["id"]))
+	if delivered == nil {
+		t.Fatalf("the delivered message is gone")
+	}
+	text := kernelString(delivered["data"])
+	if !strings.Contains(text, "tool_settled") {
+		t.Fatalf("delivering the message dropped its source: %s", text)
+	}
+	if !strings.Contains(text, `"ordinal":3`) {
+		t.Fatalf("delivering the message dropped its ordinal: %s", text)
+	}
+	_ = source
+}
+
 func TestToolHandsOffOnlyWhenItsBudgetExceedsTheThreshold(t *testing.T) {
 	t.Setenv(deferredToolThresholdEnv, "1000")
 	tools := ToolDefinition{

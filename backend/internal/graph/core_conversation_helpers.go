@@ -164,5 +164,13 @@ func conversationParseJson(text string) any {
 }
 
 func conversationOrdinalData(message MessageRow, ordinal int) string {
-	return `{"ordinal":` + itoa(ordinal) + `}`
+	body := map[string]any{}
+	if message.Data != nil {
+		existing := map[string]any{}
+		if err := json.Unmarshal([]byte(*message.Data), &existing); err == nil {
+			body = existing
+		}
+	}
+	body["ordinal"] = ordinal
+	return CanonicalJSON(body)
 }
