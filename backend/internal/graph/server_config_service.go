@@ -199,11 +199,10 @@ func SanitizeConfig(config GraphConfig, env map[string]string) map[string]any {
 			if err := json.Unmarshal(encoded, &record); err != nil {
 				panic(err)
 			}
-			record["tier"] = ModelTier(entry.Grade)
 			record["thinkingOptions"] = ThinkingOptionsFor(entry.ModelEntry)
 			entries[i] = record
 		}
-		models = map[string]any{"entries": entries, "preferences": config.Models.Preferences}
+		models = map[string]any{"entries": entries}
 	}
 	credentials := map[string]any{}
 	for id, credential := range config.Credentials {

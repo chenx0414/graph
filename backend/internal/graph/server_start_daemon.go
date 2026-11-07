@@ -155,9 +155,9 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		if catalog == nil {
 			return
 		}
-		catalog.PublishDefinition("master", DefinitionSpec{RecommendedGrade: "high"})
-		catalog.PublishDefinition("coder", DefinitionSpec{RecommendedGrade: "medium"})
-		catalog.PublishDefinition("reviewer", DefinitionSpec{RecommendedGrade: "high", Review: true})
+		catalog.PublishDefinition("master", DefinitionSpec{})
+		catalog.PublishDefinition("coder", DefinitionSpec{})
+		catalog.PublishDefinition("reviewer", DefinitionSpec{Review: true})
 	}
 	// The master Agent runs the definition the catalog currently holds. The
 	// bootstrap pack ships a 'main' definition; without it the built-in
@@ -340,11 +340,11 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		Codemode:      config.Codemode,
 		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},
 		Models: &TaskRuntimeModels{
-			Entries: live.Entries(), Preferences: live.Preferences(), ModelRuntime: modelRuntime, ModelScheduler: scheduler,
+			Entries: live.Entries(), ModelRuntime: modelRuntime, ModelScheduler: scheduler,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },
 		},
 		Live: &TaskRuntimeLive{
-			Revision: live.Revision, Config: live.Config, Entries: live.Entries, Preferences: live.Preferences,
+			Revision: live.Revision, Config: live.Config, Entries: live.Entries,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },
 			MasterModel:   live.MasterModel, Projects: live.Projects,
 		},

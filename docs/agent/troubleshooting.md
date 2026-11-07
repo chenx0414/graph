@@ -70,7 +70,7 @@
 
 - `configuredModels`；
 - credential 是否配置；
-- model grade 和 review 排除规则；
+- review 排除规则；
 - 当前 instance 的 model；
 - provider/network 错误；
 - quota window。

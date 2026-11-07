@@ -91,7 +91,6 @@ test('settings fills new and existing model prices from the local cc-switch snap
   const index = (await manual.getAttribute('data-testid'))!.replace('provider-model-', '');
   await page.getByTestId(`model-${index}-context`).fill('4096');
   await page.getByTestId(`model-${index}-maxTokens`).fill('256');
-  await page.getByTestId(`model-${index}-grade`).selectOption('high');
   await expect.poll(async () => (await configured()).find(entry => entry.modelId === 'stub-manual')?.cost?.input).toBe(2);
 
   await writePricing(3, 4);
@@ -146,8 +145,8 @@ test('switching the account in step one follows through to the model list in ste
     projects: [{ id: 'sample', root: dir }],
     models: {
       entries: [
-        { id: 'alpha', provider: 'alpha-endpoint', grade: 'medium', api: 'openai-completions', baseUrl: first, contextWindow: 2048, maxTokens: 128, credentialId: 'alpha-account' },
-        { id: 'beta', provider: 'beta-endpoint', grade: 'medium', api: 'openai-completions', baseUrl: second, contextWindow: 2048, maxTokens: 128, credentialId: 'beta-account' },
+        { id: 'alpha', provider: 'alpha-endpoint', api: 'openai-completions', baseUrl: first, contextWindow: 2048, maxTokens: 128, credentialId: 'alpha-account' },
+        { id: 'beta', provider: 'beta-endpoint', api: 'openai-completions', baseUrl: second, contextWindow: 2048, maxTokens: 128, credentialId: 'beta-account' },
       ],
     },
     credentials: { 'alpha-account': { secretRef: 'GRAPH_ALPHA_KEY' }, 'beta-account': { secretRef: 'GRAPH_BETA_KEY' } },

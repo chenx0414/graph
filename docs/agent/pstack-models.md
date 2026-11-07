@@ -43,15 +43,15 @@
 ## Graph 怎么真正选中模型
 
 1. 节点定义了 `model` 就用它——前提是这个 id 在已配置条目里存在。
-2. 否则取配方的 `recommendedGrade`，按 `models.preferences[grade]` 的顺序取第一个可用条目；没有偏好就取第一个同档位的条目。
+2. 否则取 `models.entries` 里的**第一个可用模型**（没有等级、没有偏好表）。
 3. 思考档位按「会话指定的档位 > 模型的 `defaultThinkingLevel` > 该模型支持档位里第二强的那个」取值；请求的档位模型不支持时，SDK **先向上**找最近的更强档（找不到才向下），所以请求 xhigh 会得到 `max`。
 
-所以「角色 → 模型」最终要落到某个节点的 `model` 字段或配方的 `recommendedGrade`；本表是这两者该填什么的唯一依据。
+所以「角色 → 模型」只落到节点的 `model` 字段；本表是写哪个模型 id 的依据。
 
 ## 与上游的差异
 
 - 上游默认面板是 opus 5.5（判断/散文）+ grok 4.7（代码）。本项目的 opencode-go 目录里**没有** opus 5.5，已配置的两个模型又同属 deepseek 家族，因此按现有配置映射为 flash（判断）/ pro（代码）。
-- 上游的 `inherit-parent` / `auto` 在 Graph 里对应「**不写** `model`，交给配方的 `recommendedGrade` + `models.preferences` 解析」。
+- 上游的 `inherit-parent` / `auto` 在 Graph 里对应「**不写** `model`」，于是用配置里的第一个模型。
 - 上游的面板用「一个条目一个子代理」的 fan-out。Graph 里同一件事由不同 `model` 的多个节点承担。
 - 想换家族：先在 `graph.config.json` 增加模型条目（凭据 `opencode-go`），再改本表。改完必须用 `/api/config/test` 真实调用一次验证，别只看 `applied: true`——步骤见 [模型与厂商配置](models-and-providers.md)。
 - 要真正跑在 xhigh，得选**快照里声明了 xhigh** 的模型：`gpt-6-luna` 与 `gpt-5.6-luna`（`none/low/medium/high/xhigh/max`）最完整，`grok-4.7` 与 `grok-4.6` 到 xhigh 但没有 max。别按厂商目录想当然——厂商写着的档位与 Graph 实际发出的档位不是一回事。

@@ -9,7 +9,7 @@ import { openaiServer } from '../fixtures/openai-server.ts';
  * The recipe library of the Go daemon.
  *
  * A recipe is the user's own description of an Agent: which capability it
- * binds, what grade of model it wants, and - when it binds nothing - the
+ * binds, and - when it binds nothing - the
  * system prompt that stands for its identity. The library only means something
  * if the identity behind it is real, so saving a recipe has to compile it and
  * publish the result at once - a recipe the console shows while no definition
@@ -29,7 +29,6 @@ interface Recipe {
   id: string;
   name: string;
   description: string;
-  recommendedGrade: string;
   review: boolean;
   tags: string[];
   resources: { resourceId: string; version: string; role: string; required: boolean }[];
@@ -69,7 +68,6 @@ function workerRecipe(overrides: Partial<Recipe> = {}): Recipe {
     id: 'worker',
     name: 'Worker',
     description: 'Use one skill.',
-    recommendedGrade: 'frontier',
     review: false,
     tags: ['worker'],
     resources: [{ resourceId: 'research', version: '1.0.0', role: 'skill', required: true }],
@@ -127,7 +125,7 @@ async function modelFixture(prefix: string) {
     version: 1,
     projects: [{ id: 'p', root: project }],
     credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY' } },
-    models: { entries: [{ id: 'local', provider: 'graph-openai', grade: 'high', api: 'openai-completions',
+    models: { entries: [{ id: 'local', provider: 'graph-openai', api: 'openai-completions',
       baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' }] },
   }));
   const daemon = await launchCli(root, {
@@ -239,8 +237,7 @@ test('an inline recipe prompt is versioned and reaches the next Agent operation'
   // The Main Agent recipe carries an inline system prompt instead of a bound capability.
   const saved = await f.request<SavedView>('/api/catalog/combinations', {
     method: 'POST', body: JSON.stringify({ combination: {
-      id: 'main', name: 'Atlas_main', description: '持续面对用户、规划任务。', mode: 'main',
-      recommendedGrade: 'high', review: false, tags: ['main', 'system'],
+      id: 'main', name: 'Atlas_main', description: '持续面对用户、规划任务。', mode: 'main', review: false, tags: ['main', 'system'],
       systemPrompt: 'You are a climate data specialist.', resources: [],
     } }),
   });

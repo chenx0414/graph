@@ -36,14 +36,11 @@ func (library *CapabilityLibrary) SearchAgentCombinations(input AgentCombination
 	}
 	matches := []AgentCombinationView{}
 	for _, item := range library.AgentCombinations() {
-		if input.Grade != "" && !ModelGradeMatches(input.Grade, item.RecommendedGrade) {
-			continue
-		}
 		if query == "" {
 			matches = append(matches, item)
 			continue
 		}
-		parts := []string{item.Id, item.Name, item.Description, string(item.RecommendedGrade)}
+		parts := []string{item.Id, item.Name, item.Description}
 		parts = append(parts, item.Tags...)
 		for _, resource := range item.Resources {
 			parts = append(parts, resource.ResourceId)

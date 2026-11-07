@@ -7,7 +7,6 @@ import (
 // TaskRuntimeModels is the static model configuration of one runtime.
 type TaskRuntimeModels struct {
 	Entries        []ConfiguredModel
-	Preferences    map[string][]string
 	APIKey         string
 	ModelRuntime   *ModelRuntime
 	ModelScheduler *ModelScheduler
@@ -19,7 +18,6 @@ type TaskRuntimeLive struct {
 	Revision            func() int
 	Config              func() GraphConfig
 	Entries             func() []ConfiguredModel
-	Preferences         func() map[string][]string
 	CredentialFor       func(ConfiguredModel) *ResolvedCredential
 	MasterModel         func() string
 	Projects            func() []ProjectConfig

@@ -306,9 +306,9 @@ export function useProviderWorkbenchState({ draft, credentialState, bridge, muta
     setBusy(false);
     const missingCaps = prepared.filter(({ metadata }) => {
       const fields = metadataToFields(metadata);
-      return !hasRequiredModelFields({ grade: 'pending', contextWindow: fields.contextWindow, maxTokens: fields.maxTokens });
+      return !hasRequiredModelFields({ contextWindow: fields.contextWindow, maxTokens: fields.maxTokens });
     }).length;
-    toast(`已添加所选模型；请为每个模型选择等级${missingCaps ? `，并为其中 ${missingCaps} 个填写上下文上限/最大输出` : ''}后才能保存（价格等未知项可留空，不会按 0 计算）`, 'info');
+    toast(`已添加所选模型${missingCaps ? `；请为其中 ${missingCaps} 个填写上下文上限/最大输出` : ''}后才能保存（价格等未知项可留空，不会按 0 计算）`, 'info');
   };
 
   const addManual = () => {

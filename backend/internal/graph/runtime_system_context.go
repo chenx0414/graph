@@ -34,8 +34,6 @@ func SystemInventory(input SystemInventoryInput) map[string]any {
 			"id":                   entry.Id,
 			"provider":             entry.Provider,
 			"modelId":              systemInventoryModelID(entry),
-			"grade":                string(entry.Grade),
-			"tier":                 string(ModelTierOf(entry.Grade)),
 			"reasoning":            entry.Reasoning == nil || *entry.Reasoning,
 			"contextWindow":        entry.ContextWindow,
 			"maxTokens":            entry.MaxTokens,

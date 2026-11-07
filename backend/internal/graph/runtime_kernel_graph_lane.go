@@ -50,8 +50,6 @@ type KernelGraphLaneOptions struct {
 	ReserveTokens *float64
 	// Directory is the models the runtime is configured with.
 	Directory func() []ModelEntry
-	// Preferences is the per-grade model preference of the runtime.
-	Preferences func() map[ModelGrade][]string
 	// Scheduler is the host-wide gate for model requests.
 	Scheduler *ModelScheduler
 	// CredentialFor resolves the credential for a model entry; nil means the node cannot run.
@@ -186,12 +184,9 @@ func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForCo
 			requested = strings.TrimSpace(*definition.Defaults.Model)
 		}
 	}
-	input := SelectModelInput{Grade: entry.RecommendedGrade, Directory: directory}
+	input := SelectModelInput{Directory: directory}
 	if requested != "" {
 		input.Requested = requested
-	}
-	if options.Preferences != nil {
-		input.Preferences = options.Preferences()
 	}
 	selected := SelectModel(input)
 	if selected != nil {

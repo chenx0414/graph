@@ -11,7 +11,7 @@ export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhi
 
 export type ComposerModel = {
   id: string;
-  grade: string;
+  modelId?: string;
   credentialId?: string;
   contextWindow?: number;
   reasoning?: boolean;

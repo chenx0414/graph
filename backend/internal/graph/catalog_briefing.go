@@ -10,7 +10,6 @@ type BriefingAgentCombination struct {
 	Id               string `json:"id"`
 	Name             string `json:"name"`
 	Description      string `json:"description"`
-	RecommendedGrade string `json:"recommendedGrade"`
 	Status           string `json:"status"`
 }
 
@@ -146,7 +145,7 @@ func Briefing(operation Operation, extra BriefingExtra) (string, int) {
 			items = append(items, "- capability "+item)
 		}
 		for _, item := range catalogAgentCombinations {
-			items = append(items, fmt.Sprintf("- Agent recipe %s (%s, %s, %s): %s", item.Id, item.Name, item.RecommendedGrade, item.Status, item.Description))
+			items = append(items, fmt.Sprintf("- Agent recipe %s (%s, %s): %s", item.Id, item.Name, item.Status, item.Description))
 		}
 		setup = append(setup, "Catalog:\n"+strings.Join(items, "\n"))
 	}

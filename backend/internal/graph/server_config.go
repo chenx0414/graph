@@ -24,10 +24,9 @@ type LimitsConfig struct {
 	SharedGroups        map[string]int `json:"sharedGroups"`
 }
 
-// GraphModels is the configured directory and grade preferences.
+// GraphModels is the configured model directory.
 type GraphModels struct {
-	Entries     []ConfiguredModel   `json:"entries"`
-	Preferences map[string][]string `json:"preferences"`
+	Entries []ConfiguredModel `json:"entries"`
 }
 
 // GraphCodemode is the codemode block of the configuration.

@@ -68,14 +68,11 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 - 顶层：`version: 1`、`revision`（每次保存 +1）、`projects`、`models`、`credentials`、`limits`、`access`。
 - **密钥永不出现在这个文件里**：只存 `secretRef`（一个环境变量名）。
 
-### 模型分层与历史等级
+### 选模（没有分层）
 
-当前目录按 `small / medium / frontier` 分层。配置条目和配方的 recommendedGrade 可直接使用这些名称；同一字段仍接受历史 low/high/highest，不重写已有配置或已发布配方。
+模型没有等级或分层：目录里只有配置顺序。节点写了 `model` 就用那个模型 id；没写就用**配置里的第一个模型**。配方（Agent combination）也不再带 `recommendedGrade`，它不参与选模。
 
-- small 对应 low；medium 保持原含义；frontier 包含 highest 与 high。
-- 选模先匹配显式模型 ID（仍受独立审查排除约束），再按配置偏好与配方等级选择。新 frontier 配方依次匹配 frontier、highest、high；small 依次匹配 small、low。旧 high 配方仍先匹配 high，不自动扩大为 highest；旧 highest 仍先匹配 highest。新同组名称仅作为已有精确等级之后的别名候选。
-- `/api/settings`、`/api/config` 和 read_system_capabilities 的模型视图公开派生 tier。tier 是只读分组，不保存到配置；grade 保留实际选择。设置页可按三层筛选，配置与配方选择器将新分层和历史等级分开显示。显示顺序或分组不改变新对话的默认模型顺序。
-- main 通过 list_agent_combinations 的 grade 筛选配方；frontier 能找到历史 high/highest 配方。配置厂商和模型仍通过本文 HTTP 流程，无新增常驻配置工具。
+读旧配置时 `grade`、`models.preferences`、配方的 `recommendedGrade` 会被当成未知字段忽略——不报错，也不生效。要把某个角色固定到某个模型，写节点的 `model`，或调整 `models.entries` 的顺序。
 
 ### `credentials.<id>`
 
@@ -114,7 +111,6 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 | --- | --- | --- |
 | `id` | 是 | 本配置内的唯一标识（Graph 侧身份） |
 | `provider` | 是 | 厂商/平台名（用于展示与分组） |
-| `grade` | 是 | `small` / `medium` / `frontier`；历史 `low` / `high` / `highest` 仍可用 |
 | `api` | 是 | `openai-completions`、`openai-responses` 或 `anthropic-messages`（只有这三个拼写，别名会被拒） |
 | `baseUrl` | 是 | 端点基址 |
 | `contextWindow` | 是 | 正整数 |
@@ -132,7 +128,6 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 **一套词表**：配置解析、订阅目录与运行时分派共用这组三个字符串。未知值在配置层**硬拒**（错误串点名三个可用值），运行时也没有 `default` 兜底（返回 `Unsupported provider api "…"`，不会悄悄发到 `/chat/completions`）；目录的 `Supported` 看**平台**是否仍提供，不看传输。
 
-`models.preferences`：按 grade 给出模型优先顺序（`Partial<Record<grade, string[]>>`）。
 `limits`：`credentials.<id>` 逐凭据并发上限、`sharedGroups` 共享组并发上限。token 额度上限已移除，`defaultBudgetTokens` 即使写出也被忽略。
 
 ### 守卫（会拒绝你的保存）
@@ -211,7 +206,7 @@ Codex 后端与 Responses 契约握手后直接 EOF，本仓解析器不接受�
 
 ## 经验（非契约，来自实践；与上文字段规则冲突时以上文为准）
 
-- `grade` 是**用途档位**而不是能力排序：`highest` 留给需要长链推理的规划/审查，`high` 用于实现，`medium` 用于常规改动，`low` 用于机械批量活。
+- 选模没有档位：`models.entries` 的顺序就是默认顺序，第一个可用模型接住所有未显式指定 `model` 的回合。
 - `contextWindow` / `maxTokens` 必须与上游**真实能力**一致，宁小勿大：写大了不会让模型变强，只会让上下文预算判断失真。
 - `defaultThinkingLevel` 只在模型确实支持时才写高；不确定就用 `reasoning: true` + 低档，交由调用方按任务覆盖。
 - 订阅类凭据会更替/过期：出现 401/403 时先按「`/api/config` 里的 `configured` 字段 → 合并视图里是否真有该变量名 → 令牌是否过期」的顺序排查，不要先去动模型条目。

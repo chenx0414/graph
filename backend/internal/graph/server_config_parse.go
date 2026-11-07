@@ -7,10 +7,6 @@ import (
 
 func configParseModel(raw any, path string, credentials map[string]CredentialConfig) ConfiguredModel {
 	entry := asObject(raw, path)
-	grade := configAsString(entry["grade"], path+".grade")
-	if !configGradeOK(grade) {
-		configInvalid(path + ".grade must be one of " + configJoinGrades(MODEL_GRADES))
-	}
 	api := configAsString(entry["api"], path+".api")
 	if api != "openai-completions" && api != "anthropic-messages" && api != "openai-responses" {
 		configInvalid(path + ".api must be \"openai-completions\", \"openai-responses\" or \"anthropic-messages\"")
@@ -25,7 +21,7 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 	}
 	model := ModelEntry{
 		Id: entryID(entry, path), Provider: configAsString(entry["provider"], path+".provider"),
-		Grade: ModelGrade(grade), Api: ModelApi(api),
+		Api: ModelApi(api),
 		BaseUrl:       configAsString(entry["baseUrl"], path+".baseUrl"),
 		ContextWindow: configPositiveInt(entry["contextWindow"], path+".contextWindow"),
 		MaxTokens:     configPositiveInt(entry["maxTokens"], path+".maxTokens"),
@@ -205,25 +201,7 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 				}
 			}
 		}
-		preferences := map[string][]string{}
-		if rawPreferences, present := rawModels["preferences"]; present {
-			for grade, ids := range asObject(rawPreferences, "models.preferences") {
-				if !configGradeOK(grade) {
-					configInvalid("models.preferences." + grade + " is not a model grade")
-				}
-				items := configAsArray(ids, "models.preferences."+grade)
-				values := make([]string, len(items))
-				for index, id := range items {
-					text := configAsString(id, "models.preferences."+grade+"["+itoa(index)+"]")
-					if !seen[text] {
-						configInvalid("models.preferences." + grade + " references unknown model \"" + text + "\"")
-					}
-					values[index] = text
-				}
-				preferences[grade] = values
-			}
-		}
-		models = &GraphModels{Entries: entries, Preferences: preferences}
+		models = &GraphModels{Entries: entries}
 	}
 	pathCopy := configPath
 	return GraphConfig{

@@ -97,15 +97,6 @@ func configAsHeaders(value any, path string) map[string]string {
 	return headers
 }
 
-func configGradeOK(grade string) bool {
-	for _, item := range MODEL_GRADES {
-		if string(item) == grade {
-			return true
-		}
-	}
-	return false
-}
-
 func configThinkingLevel(value any, path string) ModelThinkingLevel {
 	level := configAsString(value, path)
 	for _, item := range MODEL_THINKING_LEVELS {
@@ -113,11 +104,12 @@ func configThinkingLevel(value any, path string) ModelThinkingLevel {
 			return item
 		}
 	}
-	configInvalid(path + " must be one of " + configJoinGrades(MODEL_THINKING_LEVELS))
+	configInvalid(path + " must be one of " + configJoinLevels(MODEL_THINKING_LEVELS))
 	return ""
 }
 
-func configJoinGrades[T ~string](items []T) string {
+// configJoinLevels renders a list for one validation message.
+func configJoinLevels[T ~string](items []T) string {
 	parts := make([]string, len(items))
 	for i, item := range items {
 		parts[i] = string(item)

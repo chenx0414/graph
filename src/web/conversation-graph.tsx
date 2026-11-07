@@ -182,7 +182,6 @@ export function ConversationGraphBoard({
               <>
                 <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                   <Pill tone="accent">独立会话</Pill>
-                  <Pill tone="neutral">{selectedNode.agent.recommendedGrade}</Pill>
                   {selectedNode.agent.review && <Pill tone="warn">独立审查</Pill>}
                 </div>
                 <dl className="kv">

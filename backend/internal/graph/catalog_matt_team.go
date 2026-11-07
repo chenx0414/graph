@@ -226,7 +226,7 @@ func AssembleMattTeam(catalog MattTeamCatalog, options MattTeamOptions) GraphDef
 		}
 		combination := AgentCombination{
 			Id: prefix + "-" + string(role), Name: "Matt " + string(role), Description: identity[role],
-			RecommendedGrade: "medium", Review: role == "standards" || role == "spec",
+			Review: role == "standards" || role == "spec",
 			Tags: []string{"matt-team", string(role)}, SystemPrompt: identity[role], Resources: resources,
 		}
 		result := catalog.SaveAgentCombination(combination)

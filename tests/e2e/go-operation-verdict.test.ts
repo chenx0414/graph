@@ -177,9 +177,9 @@ async function project(root: string, scripts: Record<string, string>): Promise<s
 }
 
 /** A real daemon driving real models against a real project. */
-async function daemonFor(root: string, tree: string, models: { id: string; provider: string; baseUrl: string; grade?: string }[]) {
+async function daemonFor(root: string, tree: string, models: { id: string; provider: string; baseUrl: string; }[]) {
   const configPath = join(root, 'graph.config.json');
-  const entry = { api: 'openai-completions', grade: 'medium', maxTokens: 256, contextWindow: 32000, credentialId: 'verdict' };
+  const entry = { api: 'openai-completions', maxTokens: 256, contextWindow: 32000, credentialId: 'verdict' };
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: tree }],
@@ -230,7 +230,7 @@ test('a module that cannot run yet says so instead of failing, and then settles 
     if (id === 'create' && found) graphs[0] = found[1]!;
   });
 
-  const { daemon, request, events } = await daemonFor(root, tree, [{ id: 'main', provider: 'graph-master', baseUrl: master.baseUrl, grade: 'high' }, { id: 'node', provider: 'graph-node-sender', baseUrl: node.baseUrl }]);
+  const { daemon, request, events } = await daemonFor(root, tree, [{ id: 'main', provider: 'graph-master', baseUrl: master.baseUrl }, { id: 'node', provider: 'graph-node-sender', baseUrl: node.baseUrl }]);
   try {
     const started = await request('/api/conversations', {
       method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Run the check module on the work.', requestId: 'verdict-begin' }),
@@ -305,7 +305,7 @@ test('a command killed by its own timeout is recorded as unjudged, not as a fail
     if (id === 'create' && found) graphs[0] = found[1]!;
   });
 
-  const { daemon, request, events } = await daemonFor(root, tree, [{ id: 'main', provider: 'graph-master', baseUrl: master.baseUrl, grade: 'high' }]);
+  const { daemon, request, events } = await daemonFor(root, tree, [{ id: 'main', provider: 'graph-master', baseUrl: master.baseUrl }]);
   try {
     const started = await request('/api/conversations', {
       method: 'POST', body: JSON.stringify({ projectId: 'p', model: 'main', text: 'Run the hanging check.', requestId: 'verdict-timeout' }),

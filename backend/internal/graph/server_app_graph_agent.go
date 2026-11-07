@@ -28,7 +28,6 @@ type appGraphAgent struct {
 	Version          int                  `json:"version"`
 	Name             string               `json:"name"`
 	Description      string               `json:"description"`
-	RecommendedGrade string               `json:"recommendedGrade"`
 	Review           bool                 `json:"review"`
 	Capabilities     []appGraphCapability `json:"capabilities"`
 	Experience       appGraphExperience   `json:"experience"`
@@ -81,10 +80,6 @@ func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
 			description = value
 		}
 	}
-	recommendedGrade := ""
-	if value, ok := talentDetail["recommendedGrade"].(string); ok {
-		recommendedGrade = value
-	}
 	review := false
 	if value, ok := talentDetail["review"].(bool); ok {
 		review = value
@@ -102,7 +97,7 @@ func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
 	}
 	return appGraphAgent{
 		ID: id, Version: version, Name: name, Description: description,
-		RecommendedGrade: recommendedGrade, Review: review,
+		Review: review,
 		Capabilities: app.appGraphAgentCapabilities(definition),
 		Experience:   appGraphExperience{Task: experience.Task, Samples: reversed},
 	}

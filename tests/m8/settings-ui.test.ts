@@ -129,7 +129,6 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.getByTestId('model-1-price').innerText()).toContain('价格未知');
   await page.getByTestId('model-1-context').fill('4096');
   await page.getByTestId('model-1-maxTokens').fill('256');
-  await page.getByTestId('model-1-grade').selectOption('frontier');
   // ② The added id is persisted with its typed-in required fields, and it keeps
   // reporting an unknown price instead of a fake 0.
   await expect.poll(async () => ((await (await api.get('/api/config')).json() as { config: { models: { entries: { modelId?: string }[] } } }).config.models.entries.some(entry => entry.modelId === 'stub-manual')), { timeout: 10_000 }).toBe(true);
@@ -145,15 +144,13 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   // Seeing the model/default does not mean the last model edit has saved.
   // Finish the browser's writes before introducing the deliberate stale-read race.
   await expect.poll(async () => {
-    const models = (await (await api.get('/api/config')).json() as { config: { models: { entries: { id: string; grade: string; contextWindow: number; maxTokens: number }[] } } }).config.models.entries;
+    const models = (await (await api.get('/api/config')).json() as { config: { models: { entries: { id: string; contextWindow: number; maxTokens: number }[] } } }).config.models.entries;
     return models.find(entry => entry.id === manualLocalId);
-  }).toMatchObject({ grade: 'frontier', tier: 'frontier', contextWindow: 4096, maxTokens: 256 });
-  await page.getByTestId('model-tier-filter').selectOption('frontier');
-  expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(1);
-  expect(await page.getByTestId(`configured-model-${manualLocalId}`).innerText()).toContain('frontier');
-  await page.getByTestId('model-tier-filter').selectOption('small');
-  expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(0);
-  await page.getByTestId('model-tier-filter').selectOption('');
+  }).toMatchObject({ contextWindow: 4096, maxTokens: 256 });
+  // Both configured models stay listed: the tier filter that used to narrow this
+  // list to one row is gone with the tiers themselves.
+  expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(2);
+  expect(await page.getByTestId(`configured-model-${manualLocalId}`).innerText()).not.toContain('frontier');
   await expect.poll(() => page.getByTestId('config-status').innerText()).toContain('已自动保存 revision');
   // Advance the real browser's debounce timers after the save receipt, with no new edit.
   await page.clock.fastForward(1_000);
@@ -236,7 +233,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
     revision: number;
     config: {
       credentials: Record<string, { secretRef: string }>;
-      models: { entries: { modelId?: string; contextWindow?: number; maxTokens?: number; grade?: string; pricing?: { status?: string } }[] };
+      models: { entries: { modelId?: string; contextWindow?: number; maxTokens?: number; pricing?: { status?: string } }[] };
       limits: { credentials: Record<string, number>; sharedGroups: Record<string, number> };
     };
   }).config;
@@ -246,7 +243,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(persisted.credentials.local?.secretRef).toBe('GRAPH_SYNTH_KEY');
   // ② an id added without snapshot metadata is persisted as unknown, not as 0.
   const added = persisted.models.entries.find(entry => entry.modelId === 'stub-manual');
-  expect(added).toMatchObject({ contextWindow: 4096, maxTokens: 256, grade: 'frontier' });
+  expect(added).toMatchObject({ contextWindow: 4096, maxTokens: 256 });
   // No price was invented: an unknown price stays absent, never a 0.
   expect(added).not.toHaveProperty('cost');
   expect(added).not.toHaveProperty('pricing');

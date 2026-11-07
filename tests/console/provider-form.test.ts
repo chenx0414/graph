@@ -113,10 +113,10 @@ describe('snapshot metadata mapping', () => {
     const draft = buildEntryDraft({
       id: 'deepseek:v3', provider: 'deepseek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', credentialId: 'deepseek',
       modelId: 'deepseek-v3',
-      metadata: { contextWindow: 64_000, maxTokens: 8_192, input: ['text'], reasoning: true, defaultThinkingLevel: 'low', grade: 'medium', cost: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 }, currency: 'USD' },
+      metadata: { contextWindow: 64_000, maxTokens: 8_192, input: ['text'], reasoning: true, defaultThinkingLevel: 'low', cost: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 }, currency: 'USD' },
     });
     const entry = draftToModelEntry(draft);
-    expect(entry).toMatchObject({ id: 'deepseek:v3', modelId: 'deepseek-v3', contextWindow: 64_000, maxTokens: 8_192, grade: 'medium' });
+    expect(entry).toMatchObject({ id: 'deepseek:v3', modelId: 'deepseek-v3', contextWindow: 64_000, maxTokens: 8_192 });
     expect(entry.cost).toEqual({ input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 });
     expect(entry.pricing?.status).toBe('known');
   });
@@ -150,25 +150,19 @@ describe('required model fields and credential gating (step 2)', () => {
     expect(errors.maxTokens).toMatch(/请填写/);
     expect(hasRequiredModelFields(unknown)).toBe(false);
 
-    const problems = missingRequiredModelFields([{ id: 'unknown-model' }, { id: 'known', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium' }]);
+    const problems = missingRequiredModelFields([{ id: 'unknown-model' }, { id: 'known', contextWindow: 128_000, maxTokens: 4_096 }]);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatchObject({ index: 0, id: 'unknown-model' });
-    expect(problems[0]!.fields).toEqual(expect.arrayContaining(['contextWindow', 'maxTokens', 'grade']));
+    expect(problems[0]!.fields).toEqual(expect.arrayContaining(['contextWindow', 'maxTokens']));
   });
 
-  it('passes once the user fills the required caps and picks a grade', () => {
-    const entry = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 128_000, maxTokens: 8_192, grade: 'medium' as const };
+  it('passes once the user fills the required caps', () => {
+    const entry = { ...buildEntryDraft({ id: 'x', provider: 'p', baseUrl: 'https://x/v1', api: 'openai-completions', credentialId: 'c', modelId: 'm', metadata: null }), contextWindow: 128_000, maxTokens: 8_192 as const };
     expect(modelFieldErrors(entry)).toEqual({});
     expect(hasRequiredModelFields(entry)).toBe(true);
     expect(missingRequiredModelFields([entry])).toEqual([]);
   });
 
-  it('(e) requires the user to pick a grade instead of defaulting to medium', () => {
-    const unknownGrade = { id: 'm', contextWindow: 128_000, maxTokens: 4_096 };
-    expect(modelFieldErrors(unknownGrade).grade).toMatch(/请选择模型等级/);
-    expect(missingRequiredModelFields([unknownGrade])[0]!.fields).toContain('grade');
-    expect(modelFieldErrors({ ...unknownGrade, grade: 'high' }).grade).toBeUndefined();
-  });
 
   it('blocks model selection while the credential is unresolved and names the daemon ref', () => {
     const blocked = selectionBlockedReason({ resolved: false, credentialRef: 'GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN' });
@@ -184,7 +178,7 @@ describe('price completeness (step 2)', () => {
     expect(costError({ input: 5, output: 6 })).toMatch(/成套/);
     expect(completeCost({ input: 5, output: 6 })).toBeNull();
 
-    const entry = { id: 'm', contextWindow: 128_000, maxTokens: 4_096, grade: 'medium', cost: { input: 5 } };
+    const entry = { id: 'm', contextWindow: 128_000, maxTokens: 4_096, cost: { input: 5 } };
     expect(modelFieldErrors(entry).cost).toMatch(/成套/);
     // The partial cost is never completed with a zero.
     expect(completeCost(entry.cost)).toBeNull();

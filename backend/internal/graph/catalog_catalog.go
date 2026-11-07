@@ -86,9 +86,6 @@ func (catalog *Catalog) PublishDefinition(id string, spec DefinitionSpec) Publis
 	if trimSpace(id) == "" {
 		Raise("invalid_input", "A definition id is required")
 	}
-	if !catalogGradeAllowed(spec.RecommendedGrade) {
-		Raise("invalid_input", "A recommended model grade is required")
-	}
 	for i := range spec.Capabilities {
 		binding := spec.Capabilities[i]
 		catalog.assertBinding("Capability binding", &binding)
@@ -271,11 +268,3 @@ func (catalog *Catalog) CapabilitiesView() []CapabilityRecord {
 	return catalog.library.CapabilitiesView()
 }
 
-func catalogGradeAllowed(grade ModelGrade) bool {
-	for _, item := range MODEL_GRADES {
-		if item == grade {
-			return true
-		}
-	}
-	return false
-}

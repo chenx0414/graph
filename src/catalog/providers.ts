@@ -1,4 +1,4 @@
-import type { ModelApi, ModelGrade, ModelInput, ModelPricing } from './models.ts';
+import type { ModelApi, ModelInput, ModelPricing } from './models.ts';
 import { snapshotFor, snapshotPricing } from './price-snapshot.ts';
 
 /** One first-class connection template: a provider label, the transport Graph
@@ -8,7 +8,6 @@ import { snapshotFor, snapshotPricing } from './price-snapshot.ts';
  * snapshot exists, so unknown never becomes zero. */
 export interface ProviderTemplateModel {
   id: string;
-  grade: ModelGrade;
   contextWindow: number;
   maxTokens: number;
   input?: ModelInput[];
@@ -39,8 +38,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://platform.openai.com/docs/api-reference/chat',
     notes: ['API key 登录；本轮只启用 Chat Completions 传输。仅支持 Responses 的模型需另行验收后才会标注可用。'],
     models: [
-      { id: 'gpt-4o', grade: 'highest', contextWindow: 128_000, maxTokens: 16_384, input: ['text', 'image'] },
-      { id: 'gpt-4o-mini', grade: 'medium', contextWindow: 128_000, maxTokens: 16_384, input: ['text', 'image'] },
+      { id: 'gpt-4o', contextWindow: 128_000, maxTokens: 16_384, input: ['text', 'image'] },
+      { id: 'gpt-4o-mini', contextWindow: 128_000, maxTokens: 16_384, input: ['text', 'image'] },
     ],
   },
   {
@@ -53,8 +52,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://platform.claude.com/docs/en/api/overview',
     notes: ['API key 登录；使用原生 Messages 传输，不复用 OpenAI 请求格式。'],
     models: [
-      { id: 'claude-sonnet-4-5', grade: 'highest', contextWindow: 200_000, maxTokens: 8_192, input: ['text', 'image'] },
-      { id: 'claude-haiku-4-5', grade: 'medium', contextWindow: 200_000, maxTokens: 8_192, input: ['text', 'image'] },
+      { id: 'claude-sonnet-4-5', contextWindow: 200_000, maxTokens: 8_192, input: ['text', 'image'] },
+      { id: 'claude-haiku-4-5', contextWindow: 200_000, maxTokens: 8_192, input: ['text', 'image'] },
     ],
   },
   {
@@ -66,7 +65,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://ai.google.dev/gemini-api/docs/openai',
     notes: ['使用官方 OpenAI 兼容模式；工具与用量按兼容层实际行为验收后才算可用。'],
     models: [
-      { id: 'gemini-2.0-flash', grade: 'medium', contextWindow: 1_048_576, maxTokens: 8_192, input: ['text', 'image'] },
+      { id: 'gemini-2.0-flash', contextWindow: 1_048_576, maxTokens: 8_192, input: ['text', 'image'] },
     ],
   },
   {
@@ -78,8 +77,8 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://api-docs.deepseek.com/guides/function_calling',
     notes: ['使用官方兼容传输；以厂商实际支持的字段与契约为准。'],
     models: [
-      { id: 'deepseek-flash', grade: 'high', contextWindow: 1_048_576, maxTokens: 65_536 },
-      { id: 'deepseek-v4-pro', grade: 'highest', contextWindow: 1_048_576, maxTokens: 65_536 },
+      { id: 'deepseek-flash', contextWindow: 1_048_576, maxTokens: 65_536 },
+      { id: 'deepseek-v4-pro', contextWindow: 1_048_576, maxTokens: 65_536 },
     ],
   },
   {
@@ -91,7 +90,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     docsUrl: 'https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties',
     notes: ['兼容传输；模型目录与价格随路由变化，需刷新并从来源标注，不覆盖历史费用。'],
     models: [
-      { id: 'openrouter/auto', grade: 'high', contextWindow: 128_000, maxTokens: 8_192 },
+      { id: 'openrouter/auto', contextWindow: 128_000, maxTokens: 8_192 },
     ],
   },
   {

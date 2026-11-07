@@ -47,7 +47,7 @@ function modelConfig() {
   return {
     models: {
       entries: [{
-        id: 'local', provider: 'fixture', grade: 'medium', api: 'openai-completions',
+        id: 'local', provider: 'fixture', api: 'openai-completions',
         baseUrl: 'http://127.0.0.1:9/v1', contextWindow: 1000, maxTokens: 100, credentialId: 'local',
       }],
     },
@@ -242,7 +242,7 @@ test('config parsing rejects unknown references and resolves relative project ro
   const entry = modelConfig().models.entries[0];
   for (const [document, reason] of [
     [{ ...base, credentials: {} }, /references unknown credential/],
-    [{ ...base, models: { entries: [{ ...entry, grade: 'urgent' }] } }, /grade must be one of/],
+    [{ ...base, models: { entries: [{ ...entry, contextWindow: 0 }] } }, /contextWindow must be a positive integer/],
     [{ ...base, credentials: { local: { secretRef: 'not a name' } } }, /secretRef must be an environment variable name/],
     [{ ...base, limits: { credentials: { missing: 1 } } }, /references unknown credential/],
     [{ ...base, models: { entries: [entry, entry] } }, /duplicate model id/],

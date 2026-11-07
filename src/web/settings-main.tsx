@@ -20,7 +20,7 @@ thinkingOptionsFromMetadata
 } from './provider-form.ts';
 
 import type { ApiError,ConfigResponse,RawConfig,Startup } from "./settings-config.tsx";
-import { GRADES,ccSwitchCost,findCcSwitchPrice,loadCcSwitchPricing,mergeSubscriptionCredentials,toDocument,toDraft } from "./settings-config.tsx";
+import { ccSwitchCost,findCcSwitchPrice,loadCcSwitchPricing,mergeSubscriptionCredentials,toDocument,toDraft } from "./settings-config.tsx";
 import { ArchivedConversations,PreferencesPage,ProjectGitCard,RunningSourceCard,ThemePlaceholder } from "./settings-general.tsx";
 import { ConfiguredModelsPanel,ConfiguredProvidersPanel,SETTINGS_SECTIONS,lookupSnapshot } from "./settings-models.tsx";
 import { loadCredentialRelogin } from './settings-credential-state.ts';
@@ -359,11 +359,6 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
           if (next.credentials) delete next.credentials[credentialId];
           if (next.models) {
             next.models.entries = next.models.entries.filter(entry => entry.credentialId !== credentialId);
-            const remaining = new Set(next.models.entries.map(entry => entry.id));
-            for (const grade of GRADES) {
-              const preferences = next.models.preferences;
-              if (preferences?.[grade]) preferences[grade] = preferences[grade]!.filter(id => remaining.has(id));
-            }
             if (!next.models.entries.length) delete next.models;
           }
           if (next.limits?.credentials) delete next.limits.credentials[credentialId];

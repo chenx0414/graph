@@ -99,7 +99,6 @@ type CapabilityBundleInput struct {
 // AgentCombinationSearchInput filters the recipe list.
 type AgentCombinationSearchInput struct {
 	Query string     `json:"query,omitempty"`
-	Grade ModelGrade `json:"grade,omitempty"`
 	Limit int        `json:"limit,omitempty"`
 }
 

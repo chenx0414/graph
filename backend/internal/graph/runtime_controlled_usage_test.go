@@ -22,7 +22,7 @@ func TestMissingProviderUsageIsEstimatedOnlyWhenTheCallerAsks(t *testing.T) {
 	defer server.Close()
 
 	entry := ModelEntry{
-		Id: "m", Provider: "p", Grade: "high", Api: "openai-completions",
+		Id: "m", Provider: "p", Api: "openai-completions",
 		BaseUrl: server.URL + "/v1", ContextWindow: 8000, MaxTokens: 256,
 	}
 	request := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hello there"}}}
@@ -81,7 +81,7 @@ func TestExplicitNullUsageIsNoMeasurement(t *testing.T) {
 	defer server.Close()
 
 	entry := ModelEntry{
-		Id: "m", Provider: "p", Grade: "high", Api: "openai-completions",
+		Id: "m", Provider: "p", Api: "openai-completions",
 		BaseUrl: server.URL + "/v1", ContextWindow: 8000, MaxTokens: 256,
 	}
 	request := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hello there"}}}
@@ -142,7 +142,7 @@ func TestEverySendEstimatesItsOwnMissingUsage(t *testing.T) {
 	defer server.Close()
 
 	entry := ModelEntry{
-		Id: "m", Provider: "p", Grade: "high", Api: "openai-completions",
+		Id: "m", Provider: "p", Api: "openai-completions",
 		BaseUrl: server.URL + "/v1", ContextWindow: 8000, MaxTokens: 256,
 	}
 	settled := []*TokenUsage{}

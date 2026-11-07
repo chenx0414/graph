@@ -59,22 +59,6 @@ func (runtime *TaskRuntime) liveEntries() []ModelEntry {
 }
 
 // livePreferences reads the model preferences right now.
-func (runtime *TaskRuntime) livePreferences() map[ModelGrade][]string {
-	preferences := map[ModelGrade][]string{}
-	if runtime.live != nil && runtime.live.Preferences != nil {
-		for key, values := range runtime.live.Preferences() {
-			preferences[ModelGrade(key)] = values
-		}
-		return preferences
-	}
-	if runtime.models != nil {
-		for key, values := range runtime.models.Preferences {
-			preferences[ModelGrade(key)] = values
-		}
-	}
-	return preferences
-}
-
 
 // masterModel reads the master Agent model right now.
 func (runtime *TaskRuntime) masterModel() *string {
@@ -195,7 +179,6 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		TokenBudget:   runtime.laneTokenBudget,
 		ReserveTokens: &reserve,
 		Directory:     runtime.liveEntries,
-		Preferences:   runtime.livePreferences,
 		Scheduler:     runtime.scheduler,
 		CredentialFor: func(entry ModelEntry) *KernelGraphLaneCredential {
 			binding := runtime.liveCredentialFor(entry)

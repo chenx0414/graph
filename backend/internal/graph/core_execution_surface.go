@@ -13,8 +13,6 @@ func NewExecution(store *TaskStore, actions map[string]ActionAdapter, extras Exe
 		actions:         actions,
 		catalog:         extras.Catalog,
 		models:          extras.Models,
-		preferences:     extras.Preferences,
-		preferencesFunc: extras.PreferencesFunc,
 		git:             extras.Git,
 		systemContext:   extras.SystemContext,
 		access:          extras.Access,

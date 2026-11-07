@@ -11,7 +11,6 @@ import { Button,Card,Icon,Pill } from './ui.tsx';
 
 
 
-import { MODEL_TIERS,modelTier,type ModelGrade,type ModelTier } from '../catalog/models.ts';
 
 
 
@@ -33,11 +32,10 @@ export function ConfiguredModelsPanel({ draft, credentialState, credentialRelogi
   onEdit: (credentialId: string) => void;
 }) {
   const [query, setQuery] = useState('');
-  const [tierFilter, setTierFilter] = useState<ModelTier | ''>('');
   const entries = draft.models?.entries ?? [];
   const available = entries.filter(entry => credentialState[entry.credentialId] && hasRequiredModelFields(entry));
   const defaultId = available[0]?.id;
-  const matches = entries.filter(entry => (!tierFilter || (entry.grade && modelTier(entry.grade as ModelGrade) === tierFilter)) && `${entry.id} ${entry.modelId ?? ''} ${entry.provider} ${draft.credentials?.[entry.credentialId]?.displayName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const matches = entries.filter(entry => `${entry.id} ${entry.modelId ?? ''} ${entry.provider} ${draft.credentials?.[entry.credentialId]?.displayName ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <Card title={`已配置模型 · ${entries.length}`} icon="bolt" subtitle="所有厂商的模型集中在这里；可搜索、查看连接状态，并选择新对话的默认模型"
       testid="configured-models"
@@ -54,11 +52,6 @@ export function ConfiguredModelsPanel({ draft, credentialState, credentialRelogi
           <span className="muted">切换默认只影响新对话；已有会话的模型保持原样。</span>
         </div>
         <label className="configured-models-search"><Icon name="search" size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索模型或厂商" aria-label="搜索已配置模型" /></label>
-        <label className="row" style={{ marginBottom: 8 }}>模型分层
-          <select className="select" aria-label="筛选模型分层" data-testid="model-tier-filter" value={tierFilter} onChange={event => setTierFilter(event.target.value as ModelTier | '')}>
-            <option value="">全部</option>{MODEL_TIERS.map(tier => <option key={tier} value={tier}>{tier}</option>)}
-          </select>
-        </label>
         <div className="configured-models-list">
           {matches.map(entry => {
             const connected = Boolean(credentialState[entry.credentialId]);
@@ -72,7 +65,6 @@ export function ConfiguredModelsPanel({ draft, credentialState, credentialRelogi
                 {relogin
                   ? <Pill tone="danger" testid={`credential-relogin-${entry.id}`}>需要重新登录</Pill>
                   : <Pill tone={connected && complete ? 'success' : 'warn'}>{!connected ? '凭据缺失' : complete ? '凭据就绪' : '待补全'}</Pill>}
-                {entry.grade && <Pill>{modelTier(entry.grade as ModelGrade)}</Pill>}
                 {isDefault && <Pill tone="info">新对话默认</Pill>}
               </div>
               <div className="configured-model-actions">

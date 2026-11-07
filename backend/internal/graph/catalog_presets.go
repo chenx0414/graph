@@ -13,7 +13,6 @@ import (
 // BootstrapDefinition is one preset definition the bootstrap pack publishes.
 type BootstrapDefinition struct {
 	Id               string     `json:"id"`
-	RecommendedGrade ModelGrade `json:"recommendedGrade"`
 	Review           bool       `json:"review,omitempty"`
 }
 
@@ -163,7 +162,7 @@ func PublishBootstrap(catalog PresetCatalog, bootstrap PresetBootstrap, log func
 	}
 	ensurer, canEnsure := catalog.(presetDefinitionEnsurer)
 	for _, definition := range bootstrap.Definitions {
-		spec := DefinitionSpec{RecommendedGrade: definition.RecommendedGrade}
+		spec := DefinitionSpec{}
 		if definition.Review {
 			spec.Review = true
 		}

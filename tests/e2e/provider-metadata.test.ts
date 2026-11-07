@@ -34,7 +34,7 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   cleanup.push(async () => { vendor.closeAllConnections(); await new Promise<void>(resolve => vendor.close(() => resolve())); });
   const baseUrl = `http://127.0.0.1:${(vendor.address() as AddressInfo).port}/v1`;
   const configPath = join(root, 'graph.config.json');
-  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY', displayName: 'Gateway' } }, models: { entries: [{ id: 'seed', provider: 'custom', grade: 'high', api: 'openai-completions', baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] } }));
+  await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: { local: { secretRef: 'GRAPH_LOCAL_KEY', displayName: 'Gateway' } }, models: { entries: [{ id: 'seed', provider: 'custom', api: 'openai-completions', baseUrl, contextWindow: 2048, maxTokens: 128, credentialId: 'local' }] } }));
   const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
     env: { HOME: root, GRAPH_LOCAL_KEY: 'synthetic-catalog-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());
@@ -56,12 +56,10 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   expect(await page.getByTestId('model-1-context').inputValue()).toBe('200000');
   expect(await page.getByTestId('model-1-maxTokens').inputValue()).toBe('32000');
   expect(await page.getByTestId('model-1-images').isChecked()).toBe(true);
-  expect(await page.getByTestId('model-1-grade').inputValue()).toBe('');
   expect(await page.getByTestId('model-1-price').innerText()).toContain('EUR');
   expect(await page.getByTestId('model-1-thinking').locator('option').allTextContents()).not.toContain('bogus');
   const disk = async () => JSON.parse(await readFile(configPath, 'utf8'));
   expect((await disk()).models.entries).toHaveLength(1);
-  await page.getByTestId('model-1-grade').selectOption('high');
   await expect.poll(async () => (await disk()).models.entries.find((entry: { modelId?: string }) => entry.modelId === 'flagship')).toMatchObject({ contextWindow: 200_000, maxTokens: 32_000, input: ['text', 'image'], cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, pricing: { currency: 'EUR', unit: 'per_million_tokens', status: 'known' } });
   const saved = (await disk()).models.entries.find((entry: { modelId?: string }) => entry.modelId === 'flagship');
   expect(saved).not.toHaveProperty('defaultThinkingLevel');
@@ -70,7 +68,6 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   await page.getByTestId('model-add-selected').click();
   await page.getByTestId('model-2-context').waitFor();
   expect(await page.getByTestId('model-2-price').innerText()).toContain('价格未知');
-  await page.getByTestId('model-2-grade').selectOption('medium');
   await expect.poll(async () => (await disk()).models.entries.find((entry: { modelId?: string }) => entry.modelId === 'partial')).toMatchObject({ contextWindow: 8000, maxTokens: 2000 });
   expect((await disk()).models.entries.find((entry: { modelId?: string }) => entry.modelId === 'partial')).not.toHaveProperty('cost');
   await page.getByTestId('model-manual-id').fill('unlisted');
@@ -88,7 +85,6 @@ test.each(['meta', 'legacy', 'bare'] as const)('the model editor consumes %s cat
   expect(await page.getByTestId('model-3-price').innerText()).toContain('价格未知');
   await page.getByTestId('model-3-context').fill('9999');
   await page.getByTestId('model-3-maxTokens').fill('1234');
-  await page.getByTestId('model-3-grade').selectOption('high');
   await expect.poll(async () => (await disk()).models.entries.find((entry: { modelId?: string }) => entry.modelId === 'unlisted')).toMatchObject({ contextWindow: 9999, maxTokens: 1234 });
   await page.getByTestId('model-3-input-cost').fill('5');
   await expect.poll(() => page.getByTestId('model-3-cost-error').innerText()).toContain('成套');
@@ -124,7 +120,7 @@ test('provider account edits keep credential identity, names and concurrency whi
   await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root }], credentials: {
     'opencode-go': { secretRef: 'GRAPH_CUSTOM_FIRST', displayName: '工作账户', platform: 'opencode-go', sharedLimitGroupId: 'old-group' },
     'opencode-go-2': { secretRef: 'GRAPH_CUSTOM_SECOND', displayName: '备用账户', platform: 'opencode-go' },
-  }, limits: { credentials: { 'opencode-go': 3 }, sharedGroups: { 'old-group': 8 } }, models: { entries: [{ id: 'go-model', provider: 'opencode-go', modelId: 'space-bunny-free', grade: 'high', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 32000, maxTokens: 256, credentialId: 'opencode-go' }] } }));
+  }, limits: { credentials: { 'opencode-go': 3 }, sharedGroups: { 'old-group': 8 } }, models: { entries: [{ id: 'go-model', provider: 'opencode-go', modelId: 'space-bunny-free', api: 'openai-completions', baseUrl: 'https://opencode.ai/zen/go/v1', contextWindow: 32000, maxTokens: 256, credentialId: 'opencode-go' }] } }));
   const daemon = await launchCli(root, { configPath, stateDir: join(root, 'state'), graphHome: join(root, 'graph'), webDir,
     env: { HOME: root, ...proxy.env, GRAPH_CUSTOM_FIRST: 'first-synthetic-key', GRAPH_CUSTOM_SECOND: 'second-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY: 'preset-synthetic-key', GRAPH_SUBSCRIPTION_OPENCODE_GO_API_KEY_3: 'third-synthetic-key' }, extraArgs: ['--dynamic'] });
   cleanup.push(() => daemon.close());

@@ -114,15 +114,6 @@ func (live *LiveConfig) Entries() []ConfiguredModel {
 	return append([]ConfiguredModel{}, live.state.Directory...)
 }
 
-func (live *LiveConfig) Preferences() map[string][]string {
-	live.mu.Lock()
-	defer live.mu.Unlock()
-	if live.state.Config.Models == nil || live.state.Config.Models.Preferences == nil {
-		return map[string][]string{}
-	}
-	return live.state.Config.Models.Preferences
-}
-
 func (live *LiveConfig) CredentialFor(entry ConfiguredModel) *ResolvedCredential {
 	live.mu.Lock()
 	defer live.mu.Unlock()

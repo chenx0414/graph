@@ -114,11 +114,11 @@ export function slashEntries(input: {
     return input.models.map(model => ({
       id: `model:${model.id}`,
       label: model.id,
-      description: model.grade,
+      description: model.modelId ?? model.id,
       group: '模型',
       icon: 'bolt',
       action: { type: 'model' as const, model },
-      ...(model.id === input.telemetry?.model ? { description: `${model.grade} · 当前模型` } : {}),
+      ...(model.id === input.telemetry?.model ? { description: `${model.modelId ?? model.id} · 当前模型` } : {}),
     }));
   }
   if (input.scope === 'thinking') {

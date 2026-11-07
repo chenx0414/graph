@@ -7,51 +7,11 @@ import (
 	"math"
 )
 
-type ModelTier string
-
-type ModelGrade string
-
 type ModelInput string
 
 type ModelApi string
 
 type ModelThinkingLevel string
-
-var MODEL_TIERS = []ModelTier{"small", "medium", "frontier"}
-
-// MODEL_GRADES keeps historical grades as explicit selectors.
-var MODEL_GRADES = []ModelGrade{"small", "medium", "frontier", "low", "high", "highest"}
-
-var gradeAliases = map[ModelGrade][]ModelGrade{
-	"small":    {"small", "low"},
-	"medium":   {"medium"},
-	"frontier": {"frontier", "highest", "high"},
-	"low":      {"low", "small"},
-	"high":     {"high", "frontier"},
-	"highest":  {"highest", "frontier"},
-}
-
-func ModelTierOf(grade ModelGrade) ModelTier {
-	if grade == "low" || grade == "small" {
-		return "small"
-	}
-	if grade == "medium" {
-		return "medium"
-	}
-	return "frontier"
-}
-
-func ModelGradeMatches(requested, candidate ModelGrade) bool {
-	for _, grade := range gradeAliases[requested] {
-		if grade == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-// MODEL_GRADE_ORDER is the cheap-first order used by auxiliary reviewers.
-var MODEL_GRADE_ORDER = []ModelGrade{"low", "small", "medium", "high", "highest", "frontier"}
 
 var MODEL_INPUTS = []ModelInput{"text", "image"}
 
@@ -94,7 +54,6 @@ type ModelPricing struct {
 type ModelEntry struct {
 	Id                   string             `json:"id"`
 	Provider             string             `json:"provider"`
-	Grade                ModelGrade         `json:"grade"`
 	Api                  ModelApi           `json:"api"`
 	BaseUrl              string             `json:"baseUrl"`
 	ContextWindow        int                `json:"contextWindow"`
@@ -115,7 +74,6 @@ type ModelEntry struct {
 
 type ModelEntryView struct {
 	ModelEntry
-	Tier            ModelTier             `json:"tier"`
 	ThinkingOptions []ModelThinkingOption `json:"thinkingOptions"`
 }
 
@@ -264,12 +222,14 @@ func ModelIdentity(entry ModelEntry) string {
 	return entry.Id
 }
 
+// SelectModelInput is one model choice.
+//
+// There is no tier to resolve any more: the caller either names a model id or
+// gets the first usable model in the configured directory.
 type SelectModelInput struct {
-	Requested   string
-	Grade       ModelGrade
-	Directory   []ModelEntry
-	Preferences map[ModelGrade][]string
-	Exclude     []string
+	Requested string
+	Directory []ModelEntry
+	Exclude   []string
 }
 
 func SelectModel(input SelectModelInput) *ModelEntry {
@@ -291,25 +251,8 @@ func SelectModel(input SelectModelInput) *ModelEntry {
 			}
 		}
 	}
-	preferenceGrades := []ModelGrade{input.Grade}
-	if input.Grade == "small" || input.Grade == "frontier" {
-		preferenceGrades = gradeAliases[input.Grade]
-	}
-	for _, grade := range preferenceGrades {
-		for _, id := range input.Preferences[grade] {
-			for i := range usable {
-				if usable[i].Id == id {
-					return &usable[i]
-				}
-			}
-		}
-	}
-	for _, grade := range gradeAliases[input.Grade] {
-		for i := range usable {
-			if usable[i].Grade == grade {
-				return &usable[i]
-			}
-		}
+	if len(usable) > 0 {
+		return &usable[0]
 	}
 	return nil
 }

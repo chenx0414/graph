@@ -6,7 +6,7 @@
 
 项目使用的三个 Agent 配方如下；派发前在运行应用的配方库中核对其实际发布版本与能力绑定：
 
-| 配方 | 名字 | 身份 | 绑定 | grade / 审查 |
+| 配方 | 名字 | 身份 | 绑定 | 审查 |
 | --- | --- | --- | --- | --- |
 | `matt-implement` | Dan_implementer | `matt-pocock-implement` | `implement-spec`、`tdd` | medium / 否 |
 | `matt-review` | Eve_reviewer | `matt-pocock-review` | `code-review` | medium / **是**（走独立审查通道） |

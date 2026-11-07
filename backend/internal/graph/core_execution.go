@@ -44,8 +44,6 @@ type ExecutionExtras struct {
 	Fallback        *ActionAdapter
 	Catalog         *Catalog
 	Models          func() []ModelEntry
-	Preferences     map[ModelGrade][]string
-	PreferencesFunc func() map[ModelGrade][]string
 	Git             *GitIntegration
 	AutoWake        bool
 	DispatchAllowed func() bool
@@ -70,8 +68,6 @@ type Execution struct {
 	fallback        *ActionAdapter
 	catalog         *Catalog
 	models          func() []ModelEntry
-	preferences     map[ModelGrade][]string
-	preferencesFunc func() map[ModelGrade][]string
 	git             *GitIntegration
 	systemContext   *ExecutionSystemContext
 	access          func() *ResolvedAccessPolicy

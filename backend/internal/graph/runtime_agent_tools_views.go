@@ -158,16 +158,6 @@ func agentToolsUnique(values []string) []string {
 	return out
 }
 
-// agentToolsHasModelGrade reports whether one grade is a known model grade.
-func agentToolsHasModelGrade(grade string) bool {
-	for _, value := range MODEL_GRADES {
-		if string(value) == grade {
-			return true
-		}
-	}
-	return false
-}
-
 // agentToolsContains reports whether one list holds a value.
 func agentToolsContains(values []string, needle string) bool {
 	for _, value := range values {

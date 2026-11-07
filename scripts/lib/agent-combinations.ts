@@ -4,7 +4,6 @@ import { dirname } from 'node:path';
 import { RuntimeError, type Json } from '../../src/core/types.ts';
 import type { CapabilityRecord, DefinitionSpec } from './capability-library.ts';
 import { selectCapabilityRecord } from './capability-select.ts';
-import { MODEL_GRADES, type ModelGrade } from '../../src/catalog/models.ts';
 
 export type AgentCombinationResourceRole = 'identity' | 'tool' | 'skill' | 'mcp' | 'pi-extension' | 'extension';
 export type AgentCombinationMode = 'main' | 'subagent';
@@ -22,7 +21,6 @@ export interface AgentCombination {
   description: string;
   /** Main Agent recipes are compiled into the definition used by the master role. */
   mode?: AgentCombinationMode;
-  recommendedGrade: ModelGrade;
   review: boolean;
   tags: string[];
   /** Versioned identity and domain instructions edited with this recipe. */
@@ -49,7 +47,6 @@ export interface AgentCombinationDocument {
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const GRADES = new Set<ModelGrade>(MODEL_GRADES);
 const ROLES = new Set<AgentCombinationResourceRole>(['identity', 'tool', 'skill', 'mcp', 'pi-extension', 'extension']);
 const MODES = new Set<AgentCombinationMode>(['main', 'subagent']);
 
@@ -88,8 +85,6 @@ export function parseAgentCombinations(value: unknown): AgentCombinationDocument
     const mode = entry.mode === undefined ? undefined : text(entry.mode, `combinations[${index}].mode`) as AgentCombinationMode;
     if (mode && !MODES.has(mode)) throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} has unsupported mode ${mode}`);
     if (mode === 'main' && id !== 'main') throw new RuntimeError('invalid_agent_combination', 'The Main Agent recipe must use id "main"');
-    const recommendedGrade = text(entry.recommendedGrade, `combinations[${index}].recommendedGrade`) as ModelGrade;
-    if (!GRADES.has(recommendedGrade)) throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} has unsupported grade ${recommendedGrade}`);
     if (entry.review !== undefined && typeof entry.review !== 'boolean') throw new RuntimeError('invalid_agent_combination', `combinations[${index}].review must be a boolean`);
     if (entry.systemPrompt !== undefined && (typeof entry.systemPrompt !== 'string' || !entry.systemPrompt.trim() || entry.systemPrompt.length > 40_000)) {
       throw new RuntimeError('invalid_agent_combination', `Agent combination ${id} systemPrompt must contain 1–40000 characters`);
@@ -125,7 +120,6 @@ export function parseAgentCombinations(value: unknown): AgentCombinationDocument
       name: text(entry.name, `combinations[${index}].name`),
       description: text(entry.description, `combinations[${index}].description`),
       ...(mode ? { mode } : {}),
-      recommendedGrade,
       review: entry.review === true,
       tags: textList(entry.tags, `combinations[${index}].tags`),
       ...(entry.systemPrompt ? { systemPrompt: entry.systemPrompt.trim() } : {}),
@@ -220,7 +214,6 @@ export function compileAgentCombinationDefinition(
     throw new RuntimeError('invalid_agent_combination', view.issues.join('; '));
   }
   const definition: DefinitionSpec = {
-    recommendedGrade: combination.recommendedGrade,
     ...(combination.systemPrompt ? { systemPrompt: combination.systemPrompt } : {}),
     ...(combination.review ? { review: true } : {}),
     snapshot: {

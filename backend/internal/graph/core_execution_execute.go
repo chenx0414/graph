@@ -40,16 +40,7 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 		return false
 	}
 	if spec.Kind == "agent" && e.models != nil && node.InstanceId != nil {
-		preferences := e.preferences
-		if e.preferencesFunc != nil {
-			preferences = e.preferencesFunc()
-		}
-		selected := PickModel(PickModelInput{
-			Spec:        spec,
-			Models:      e.models,
-			Catalog:     e.catalog,
-			Preferences: preferences,
-		})
+		selected := PickModel(PickModelInput{Spec: spec, Models: e.models})
 		if selected == nil {
 			e.store.Transaction(func() any {
 				e.block(node, "model_unavailable", map[string]any{"requested": spec.Model}, nil)

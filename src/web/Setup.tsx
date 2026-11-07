@@ -1,6 +1,5 @@
 import { ProviderLogin } from './ProviderLogin.tsx';
 import { ProviderPicker } from './ProviderPicker.tsx';
-import { ModelGradeOptions } from './model-grade-options.tsx';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.ts';
 import { PROVIDER_TEMPLATES, PROVIDER_PRESETS, providerTemplate, type ProviderTemplate } from '../catalog/providers.ts';
@@ -56,7 +55,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
     return () => { stopped = true; };
   }, [credentialId, secretRef]);
   const chosenModels = useMemo<TemplateSetupModel[]>(() => [
-    ...template.models.filter(model => selected[model.id]).map(model => ({ id: model.id, grade: model.grade, contextWindow: model.contextWindow, maxTokens: model.maxTokens })),
+    ...template.models.filter(model => selected[model.id]).map(model => ({ id: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens })),
     ...customModels,
   ], [selected, customModels, template]);
 
@@ -89,7 +88,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
 
   function addCustomModel() {
     const id = `custom-${customModels.length + 1}`;
-    setCustomModels(current => [...current, { id, grade: 'high', contextWindow: 128_000, maxTokens: 8_192 }]);
+    setCustomModels(current => [...current, { id, contextWindow: 128_000, maxTokens: 8_192 }]);
   }
 
   async function pickRoot() {
@@ -140,7 +139,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
         }
       }
       const current = (await api<{ revision: number; config: Record<string, unknown> }>('/api/config')).config;
-      const document = buildTemplateConfigDocument(current, { providerId, api: apiType, baseUrl, credentialId, secretRef, models: chosenModels }, template.models.map(model => ({ id: model.id, grade: model.grade, contextWindow: model.contextWindow, maxTokens: model.maxTokens })));
+      const document = buildTemplateConfigDocument(current, { providerId, api: apiType, baseUrl, credentialId, secretRef, models: chosenModels }, template.models.map(model => ({ id: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens })));
       if (projectId && projectRoot) {
         const projects = Array.isArray(document.projects) ? [...document.projects as Record<string, unknown>[]] : [];
         const index = projects.findIndex(project => (project as { id?: unknown }).id === projectId);
@@ -189,7 +188,8 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
     }
   }
 
-  const reviewModel = chosenModels.find(model => model.grade === 'highest' || model.grade === 'high');
+  // The directory order decides; the review model is the same first model.
+  const reviewModel = chosenModels[0];
   return (
     <div className="stagger" data-testid="setup">
       <Card title="连接模型" icon="wizard" subtitle="选择服务商与认证方式，再选择模型；保存后立即生效，无需重启">
@@ -227,7 +227,7 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
           {template.models.map(model => (
             <label key={model.id} className="list-item" style={{ cursor: 'pointer' }}>
               <input type="checkbox" data-testid={`setup-model-${model.id}`} checked={Boolean(selected[model.id])} onChange={() => toggleModel(model.id)} />
-              <span className="grow">{model.id} <span className="muted">{model.grade} · 上下文 {model.contextWindow.toLocaleString('en-US')} · 输出 {model.maxTokens.toLocaleString('en-US')} · {model.pricing ? `${model.pricing.currency} 参考价（${model.pricing.status}${model.pricing.retrievedAt ? ` · ${model.pricing.retrievedAt}` : ''}${model.pricing.sourceUrl ? ` · ${(() => { try { return new URL(model.pricing.sourceUrl!).host; } catch { return model.pricing.sourceUrl; } })()}` : ''}）` : '价格未知'}</span></span>
+              <span className="grow">{model.id} <span className="muted">上下文 {model.contextWindow.toLocaleString('en-US')} · 输出 {model.maxTokens.toLocaleString('en-US')} · {model.pricing ? `${model.pricing.currency} 参考价（${model.pricing.status}${model.pricing.retrievedAt ? ` · ${model.pricing.retrievedAt}` : ''}${model.pricing.sourceUrl ? ` · ${(() => { try { return new URL(model.pricing.sourceUrl!).host; } catch { return model.pricing.sourceUrl; } })()}` : ''}）` : '价格未知'}</span></span>
             </label>
           ))}
         </div>
@@ -237,9 +237,6 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
         {customModels.map((model, index) => (
           <div className="list-item" key={index} data-testid={`setup-custom-model-${index}`}>
             <input className="input" style={{ width: 200 }} value={model.id} onChange={event => setCustomModels(current => current.map((item, position) => position === index ? { ...item, id: event.target.value } : item))} />
-            <select className="select" value={model.grade} onChange={event => setCustomModels(current => current.map((item, position) => position === index ? { ...item, grade: event.target.value as TemplateSetupModel['grade'] } : item))}>
-              <ModelGradeOptions />
-            </select>
             <Button size="sm" variant="danger" onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>删除</Button>
           </div>
         ))}

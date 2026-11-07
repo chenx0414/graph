@@ -121,7 +121,6 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		Fallback:        fallback,
 		Catalog:         runtime.catalog,
 		Models:          runtime.liveEntries,
-		PreferencesFunc: runtime.livePreferences,
 		Git:             runtime.git,
 		AutoWake:        runtime.autoWake,
 		DispatchAllowed: runtime.dispatchAllowed,

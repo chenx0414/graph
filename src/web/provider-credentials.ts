@@ -16,7 +16,6 @@ import { PROVIDER_PRESETS } from '../catalog/providers.ts';
  * never sends a request and never resolves an API key.
  */
 import {
-MODEL_GRADES,
 MODEL_THINKING_LEVELS,
 type ModelApi
 } from '../catalog/models.ts';
@@ -62,8 +61,6 @@ export const FALLBACK_PLATFORMS: readonly PlatformPreset[] = PROVIDER_PRESETS.ma
 }));
 
 export const COMPATIBILITIES = new Set<string>(PROVIDER_COMPATIBILITIES.map(item => item.id));
-
-export const GRADES = new Set<string>(MODEL_GRADES);
 
 export const THINKING = new Set<string>(MODEL_THINKING_LEVELS);
 

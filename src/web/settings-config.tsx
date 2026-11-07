@@ -9,7 +9,7 @@ import { api } from './api.ts';
 
 
 
-import { MODEL_GRADES,type ModelGrade,type ModelInput,type ModelTier } from '../catalog/models.ts';
+import type { ModelInput } from '../catalog/models.ts';
 
 
 
@@ -22,10 +22,9 @@ type SnapshotMetadata
 export type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type RawModel = {
-  id: string; provider: string; modelId?: string; grade?: string; api: 'openai-completions' | 'openai-responses' | 'anthropic-messages'; baseUrl: string;
+  id: string; provider: string; modelId?: string; api: 'openai-completions' | 'openai-responses' | 'anthropic-messages'; baseUrl: string;
   contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
   /** Per-model strengths the server adds to the view; stripped before saving. */
-  tier?: ModelTier;
   thinkingOptions?: { level: string; label: string }[];
   input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
@@ -37,7 +36,7 @@ export type RawCredential = { secretRef: string; displayName?: string; sharedLim
 export type RawConfig = {
   version: 1;
   projects?: { id: string; root: string; grants?: string[] }[];
-  models?: { entries: RawModel[]; preferences?: Partial<Record<ModelGrade, string[]>> };
+  models?: { entries: RawModel[] };
   credentials?: Record<string, RawCredential>;
   limits?: { credentials?: Record<string, number>; sharedGroups?: Record<string, number> };
 };
@@ -55,7 +54,6 @@ export type Startup = {
 
 export type ApiError = Error & { code?: string; field?: string };
 
-export const GRADES = MODEL_GRADES;
 
 export type CcSwitchPrice = {
   modelId: string;
@@ -117,7 +115,7 @@ export function toDocument(draft: RawConfig): RawConfig {
   if (!draft.models) return draft;
   return {
     ...draft,
-    models: { ...draft.models, entries: draft.models.entries.map(({ thinkingOptions: _derived, tier: _tier, ...entry }) => entry) },
+    models: { ...draft.models, entries: draft.models.entries.map(({ thinkingOptions: _derived, ...entry }) => entry) },
   };
 }
 

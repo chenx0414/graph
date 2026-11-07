@@ -26,7 +26,6 @@ type AgentCombination struct {
 	Name             string                     `json:"name"`
 	Description      string                     `json:"description"`
 	Mode             AgentCombinationMode       `json:"mode,omitempty"`
-	RecommendedGrade ModelGrade                 `json:"recommendedGrade"`
 	Review           bool                       `json:"review"`
 	Tags             []string                   `json:"tags"`
 	SystemPrompt     string                     `json:"systemPrompt,omitempty"`
@@ -55,7 +54,6 @@ type AgentCombinationDocument struct {
 }
 
 type DefinitionSpec struct {
-	RecommendedGrade ModelGrade          `json:"recommendedGrade"`
 	SystemPrompt     string              `json:"systemPrompt,omitempty"`
 	Capabilities     []CapabilityBinding `json:"capabilities,omitempty"`
 	Prompts          *struct {
@@ -110,15 +108,6 @@ func agentCombinationsTextList(value any, label string) []string {
 		out = append(out, trimmed)
 	}
 	return out
-}
-
-func agentCombinationGrade(value string) bool {
-	for _, grade := range MODEL_GRADES {
-		if string(grade) == value {
-			return true
-		}
-	}
-	return false
 }
 
 func agentCombinationInteger(value any) bool {
@@ -189,10 +178,6 @@ func ParseAgentCombinations(value any) AgentCombinationDocument {
 		if mode == "main" && id != "main" {
 			Raise("invalid_agent_combination", "The Main Agent recipe must use id \"main\"")
 		}
-		recommendedGrade := agentCombinationsText(entry["recommendedGrade"], "combinations["+itoa(index)+"].recommendedGrade")
-		if !agentCombinationGrade(recommendedGrade) {
-			Raise("invalid_agent_combination", "Agent combination "+id+" has unsupported grade "+recommendedGrade)
-		}
 		if review, present := entry["review"]; present && review != nil {
 			if _, isBool := review.(bool); !isBool {
 				Raise("invalid_agent_combination", "combinations["+itoa(index)+"].review must be a boolean")
@@ -253,7 +238,7 @@ func ParseAgentCombinations(value any) AgentCombinationDocument {
 		combinations = append(combinations, AgentCombination{
 			Id: id, Name: agentCombinationsText(entry["name"], "combinations["+itoa(index)+"].name"),
 			Description: agentCombinationsText(entry["description"], "combinations["+itoa(index)+"].description"),
-			Mode:        mode, RecommendedGrade: ModelGrade(recommendedGrade), Review: entry["review"] == true,
+			Mode:        mode, Review: entry["review"] == true,
 			Tags:         agentCombinationsTextList(entry["tags"], "combinations["+itoa(index)+"].tags"),
 			SystemPrompt: systemPrompt, Resources: resources,
 		})
@@ -424,7 +409,7 @@ func CompileAgentCombinationDefinition(combination AgentCombination, capabilitie
 	if view.Status != "valid" {
 		Raise("invalid_agent_combination", strings.Join(view.Issues, "; "))
 	}
-	definition := DefinitionSpec{RecommendedGrade: combination.RecommendedGrade}
+	definition := DefinitionSpec{}
 	if combination.SystemPrompt != "" {
 		definition.SystemPrompt = combination.SystemPrompt
 	}

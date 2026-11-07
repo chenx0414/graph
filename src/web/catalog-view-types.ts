@@ -1,5 +1,4 @@
 import type { Json } from '../core/types.ts';
-import type { ModelGrade } from '../catalog/models.ts';
 
 /** What the console reads out of the capability library and saved recipes.
  *
@@ -51,7 +50,6 @@ export interface AgentCombination {
   description: string;
   /** Main Agent recipes are compiled into the definition used by the master role. */
   mode?: AgentCombinationMode;
-  recommendedGrade: ModelGrade;
   review: boolean;
   tags: string[];
   /** Versioned identity and domain instructions edited with this recipe. */

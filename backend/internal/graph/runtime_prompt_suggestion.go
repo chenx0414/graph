@@ -24,7 +24,8 @@ var (
 	promptNone   = regexp.MustCompile("(?i)^(?:none|n/a|no suggestion|没有建议|无)$")
 )
 
-// SelectPromptSuggestionModel picks a cheaper model than the main reply.
+// SelectPromptSuggestionModel picks a model other than the main one, when the
+// configuration has one: a suggestion is an auxiliary request.
 func SelectPromptSuggestionModel(main ModelEntry, directory []ModelEntry) *ModelEntry {
 	mainIdentity := ModelIdentity(main)
 	candidates := []ModelEntry{}
@@ -33,12 +34,8 @@ func SelectPromptSuggestionModel(main ModelEntry, directory []ModelEntry) *Model
 			candidates = append(candidates, model)
 		}
 	}
-	for _, grade := range MODEL_GRADE_ORDER {
-		for i := range candidates {
-			if candidates[i].Grade == grade {
-				return &candidates[i]
-			}
-		}
+	if len(candidates) > 0 {
+		return &candidates[0]
 	}
 	return nil
 }

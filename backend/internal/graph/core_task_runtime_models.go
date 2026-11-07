@@ -14,7 +14,7 @@ func (runtime *TaskRuntime) Models() []map[string]any {
 		// are part of what the console renders. Each entry also carries the
 		// thinking strengths that model accepts, so no console control has to
 		// keep a level list of its own.
-		view := ModelEntryView{ModelEntry: entry, Tier: ModelTierOf(entry.Grade), ThinkingOptions: ThinkingOptionsFor(entry)}
+		view := ModelEntryView{ModelEntry: entry, ThinkingOptions: ThinkingOptionsFor(entry)}
 		raw, err := json.Marshal(view)
 		if err != nil {
 			panic(err)

@@ -64,7 +64,7 @@ return (
                         <header>
                           <div className="agent-combination-title">
                             <strong>{item.name}</strong>
-                            <span>Agent 配方 · {item.recommendedGrade}{item.tags.length ? ` · ${item.tags.join(' · ')}` : ''}</span>
+                            <span>Agent 配方{item.tags.length ? ` · ${item.tags.join(' · ')}` : ''}</span>
                           </div>
                           <code>{item.id}</code>
                         </header>
@@ -75,7 +75,6 @@ return (
                         <div className="chip-row">
                           <Pill tone={item.status === 'valid' ? 'success' : 'danger'}>{item.status === 'valid' ? '可编译' : '引用有误'}</Pill>
                           {item.mode === 'main' && <Pill tone="accent">Main Agent</Pill>}
-                          <Pill tone="neutral">{item.recommendedGrade}</Pill>
                           {item.review && <Pill tone="warn">独立审查</Pill>}
                         </div>
                         {item.mode === 'main' && (

@@ -204,7 +204,6 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 						Id:               item.Id,
 						Name:             item.Name,
 						Description:      item.Description,
-						RecommendedGrade: string(item.RecommendedGrade),
 						Status:           item.Status,
 					})
 				}

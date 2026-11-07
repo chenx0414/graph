@@ -18,12 +18,11 @@ import {
 type ModelApi,
 type ModelCost,
 type ModelEntry,
-type ModelGrade,
 type ModelInput,
 type ModelPricing,
 type ModelThinkingLevel
 } from '../catalog/models.ts';
-import { GRADES,THINKING } from "./provider-credentials.ts";
+import { THINKING } from "./provider-credentials.ts";
 
 export interface SnapshotMetadata {
   contextWindow?: number;
@@ -33,7 +32,6 @@ export interface SnapshotMetadata {
   thinkingLevels?: string[];
   thinkingOptions?: { level: string; label: string }[];
   defaultThinkingLevel?: string;
-  grade?: ModelGrade;
   cost?: ModelCost;
   currency?: string;
   sourceUrl?: string;
@@ -54,7 +52,6 @@ export interface ModelFieldValues {
   reasoning: boolean | null;
   thinkingLevels: ModelThinkingLevel[];
   defaultThinkingLevel: ModelThinkingLevel | null;
-  grade: ModelGrade | null;
   cost: ModelCost | null;
   pricing: ModelPricing;
 }
@@ -90,7 +87,6 @@ export function metadataToFields(metadata: SnapshotMetadata | null | undefined):
       reasoning: null,
       thinkingLevels: [],
       defaultThinkingLevel: null,
-      grade: null,
       cost: null,
       pricing: { ...UNKNOWN_PRICING },
     };
@@ -108,7 +104,6 @@ export function metadataToFields(metadata: SnapshotMetadata | null | undefined):
     reasoning: typeof metadata.reasoning === 'boolean' ? metadata.reasoning : null,
     thinkingLevels: thinkingLevels(metadata.thinkingLevels),
     defaultThinkingLevel,
-    grade: metadata.grade && GRADES.has(metadata.grade) ? metadata.grade : null,
     cost,
     pricing: cost
       ? {
@@ -165,7 +160,6 @@ export interface ModelEntryDraft {
   baseUrl: string;
   api: ModelApi;
   credentialId: string;
-  grade?: ModelGrade;
   contextWindow?: number;
   maxTokens?: number;
   input?: ModelInput[];
@@ -185,12 +179,10 @@ export interface BuildEntryDraftInput {
   credentialId: string;
   modelId: string;
   metadata: SnapshotMetadata | null | undefined;
-  grade?: ModelGrade;
 }
 
 export function buildEntryDraft(input: BuildEntryDraftInput): ModelEntryDraft {
   const fields = metadataToFields(input.metadata);
-  const grade = fields.grade ?? input.grade;
   return {
     id: input.id,
     modelId: input.modelId,
@@ -198,7 +190,6 @@ export function buildEntryDraft(input: BuildEntryDraftInput): ModelEntryDraft {
     baseUrl: input.baseUrl,
     api: input.api,
     credentialId: input.credentialId,
-    ...(grade ? { grade } : {}),
     ...(fields.contextWindow !== null ? { contextWindow: fields.contextWindow } : {}),
     ...(fields.maxTokens !== null ? { maxTokens: fields.maxTokens } : {}),
     input: fields.input,
@@ -216,7 +207,6 @@ export function fillEntryFromMetadata(entry: ModelEntryDraft, metadata: Snapshot
   const next: ModelEntryDraft = { ...entry };
   if (next.contextWindow === undefined && fields.contextWindow !== null) next.contextWindow = fields.contextWindow;
   if (next.maxTokens === undefined && fields.maxTokens !== null) next.maxTokens = fields.maxTokens;
-  if (next.grade === undefined && fields.grade) next.grade = fields.grade;
   if (next.reasoning === undefined && fields.reasoning !== null) next.reasoning = fields.reasoning;
   if (next.defaultThinkingLevel === undefined && fields.defaultThinkingLevel) next.defaultThinkingLevel = fields.defaultThinkingLevel;
   if (next.cost === undefined && fields.cost) next.cost = fields.cost;
@@ -225,11 +215,10 @@ export function fillEntryFromMetadata(entry: ModelEntryDraft, metadata: Snapshot
   return next;
 }
 
-export type PersistedModelEntry = Omit<ModelEntry, 'contextWindow' | 'maxTokens' | 'credentialId' | 'grade'> & {
+export type PersistedModelEntry = Omit<ModelEntry, 'contextWindow' | 'maxTokens' | 'credentialId'> & {
   contextWindow?: number;
   maxTokens?: number;
   credentialId: string;
-  grade?: ModelGrade;
 };
 
 export function draftToModelEntry(draft: ModelEntryDraft): PersistedModelEntry {
@@ -243,7 +232,6 @@ export function draftToModelEntry(draft: ModelEntryDraft): PersistedModelEntry {
     id: draft.id,
     provider: draft.provider,
     ...(draft.modelId !== draft.id ? { modelId: draft.modelId } : {}),
-    ...(draft.grade ? { grade: draft.grade } : {}),
     api: draft.api,
     baseUrl: draft.baseUrl,
     ...(draft.contextWindow !== undefined ? { contextWindow: draft.contextWindow } : {}),
@@ -271,8 +259,6 @@ export function positiveInt(value: unknown): number | undefined {
 }
 
 export interface ModelValidationFields {
-  /** Required by the config parser; unknown means the user must choose. */
-  grade?: string | null;
   contextWindow?: number | null;
   maxTokens?: number | null;
   /** Partial while the user types; a partial price is an error. */
@@ -282,7 +268,6 @@ export interface ModelValidationFields {
 export interface ModelFieldErrors {
   contextWindow?: string;
   maxTokens?: string;
-  grade?: string;
   cost?: string;
 }
 
@@ -290,7 +275,6 @@ export function modelFieldErrors(entry: ModelValidationFields): ModelFieldErrors
   const errors: ModelFieldErrors = {};
   if (positiveInt(entry.contextWindow) === undefined) errors.contextWindow = '上下文上限未知，请填写后再保存';
   if (positiveInt(entry.maxTokens) === undefined) errors.maxTokens = '最大输出未知，请填写后再保存';
-  if (!entry.grade) errors.grade = '请选择模型等级（快照不提供 grade，必须显式选择）';
   const price = costError(entry.cost);
   if (price) errors.cost = price;
   return errors;
@@ -310,7 +294,7 @@ export function missingRequiredModelFields(entries: readonly ({ id?: string } & 
   const problems: MissingModelFields[] = [];
   entries.forEach((entry, index) => {
     const errors = modelFieldErrors(entry);
-    const fields = (['contextWindow', 'maxTokens', 'grade', 'cost'] as const).filter(field => errors[field]);
+    const fields = (['contextWindow', 'maxTokens', 'cost'] as const).filter(field => errors[field]);
     if (fields.length) problems.push({ index, id: entry.id ?? `entries[${index}]`, fields: [...fields] });
   });
   return problems;

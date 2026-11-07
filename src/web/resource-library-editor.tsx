@@ -1,4 +1,3 @@
-import { ModelGradeOptions } from './model-grade-options.tsx';
 
 
 import { useEffect,useRef,useState } from 'react';
@@ -35,7 +34,6 @@ export function AgentCombinationEditor(input: {
   const [id, setId] = useState(input.initial?.id ?? '');
   const [name, setName] = useState(input.initial?.name ?? '');
   const [description, setDescription] = useState(input.initial?.description ?? '');
-  const [grade, setGrade] = useState(input.initial?.recommendedGrade ?? 'medium');
   const [review, setReview] = useState(input.initial?.review ?? false);
   const [tags, setTags] = useState((input.initial?.tags ?? []).join(', '));
   const mode = input.initial?.mode;
@@ -112,7 +110,7 @@ export function AgentCombinationEditor(input: {
         method: 'POST',
         body: JSON.stringify({
           combination: {
-            id, name, description, ...(mode ? { mode } : {}), recommendedGrade: grade, review: main ? false : review,
+            id, name, description, ...(mode ? { mode } : {}), review: main ? false : review,
             tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
             ...(systemPrompt.trim() ? { systemPrompt: systemPrompt.trim() } : {}),
             resources,
@@ -189,7 +187,6 @@ export function AgentCombinationEditor(input: {
             </div>
           )}
           <div className="form-grid">
-            <label><span>模型等级</span><select value={grade} onChange={event => setGrade(event.target.value as typeof grade)}><ModelGradeOptions /></select></label>
             <label className="recipe-check"><input type="checkbox" disabled={main} checked={main ? false : review} onChange={event => setReview(event.target.checked)} /><span>作为独立审查 Agent</span></label>
           </div>
           <label><span>标签</span><input value={tags} onChange={event => setTags(event.target.value)} placeholder="编码, 实现" /></label>

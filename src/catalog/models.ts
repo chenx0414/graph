@@ -1,23 +1,7 @@
 import { RuntimeError, type Json } from '../core/types.ts';
 import type { TokenUsage } from '../core/token-usage.ts';
 
-export const MODEL_TIERS = ['small', 'medium', 'frontier'] as const;
-export type ModelTier = (typeof MODEL_TIERS)[number];
-/** Historical grades remain explicit selectors; existing recipes are never rewritten. */
-export const MODEL_GRADES = [...MODEL_TIERS, 'low', 'high', 'highest'] as const;
-export type ModelGrade = (typeof MODEL_GRADES)[number];
-const GRADE_ALIASES: Record<ModelGrade, readonly ModelGrade[]> = {
-  small: ['small', 'low'], medium: ['medium'], frontier: ['frontier', 'highest', 'high'],
-  low: ['low', 'small'], high: ['high', 'frontier'], highest: ['highest', 'frontier'],
-};
-export function modelTier(grade: ModelGrade): ModelTier {
-  return grade === 'low' || grade === 'small' ? 'small' : grade === 'medium' ? 'medium' : 'frontier';
-}
 export const MODEL_INPUTS = ['text', 'image'] as const;
-/** Whether a configured grade satisfies the grade a caller asked for. */
-export function modelGradeMatches(requested: ModelGrade, candidate: ModelGrade): boolean {
-  return GRADE_ALIASES[requested].includes(candidate);
-}
 
 export type ModelInput = (typeof MODEL_INPUTS)[number];
 /** Transports Graph has actually verified against a provider contract. */
@@ -45,7 +29,6 @@ export interface ModelPricing {
 export interface ModelEntry {
   id: string;
   provider: string;
-  grade: ModelGrade;
   api: ModelApi;
   baseUrl: string;
   contextWindow: number;

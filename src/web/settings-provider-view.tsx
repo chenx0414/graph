@@ -1,7 +1,6 @@
 import { ProviderCredentialsView } from "./settings-credentials-view.tsx";
 
 
-import { ModelGradeOptions } from './model-grade-options.tsx';
 
 
 
@@ -98,12 +97,6 @@ return (
                   <div className="row">
                     <Field label="上下文上限" error={fieldIssues.contextWindow}><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-context`} data-invalid={fieldIssues.contextWindow ? 'true' : undefined} value={entry.contextWindow ?? ''} placeholder="未知，请填写" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.contextWindow; else target.contextWindow = Number(raw); })} /></Field>
                     <Field label="最大输出" error={fieldIssues.maxTokens}><input className="input" style={{ width: 120 }} type="number" data-testid={`model-${index}-maxTokens`} data-invalid={fieldIssues.maxTokens ? 'true' : undefined} value={entry.maxTokens ?? ''} placeholder="未知，请填写" onChange={event => mutate(next => { const target = next.models!.entries[index]!; const raw = event.target.value; if (raw === '') delete target.maxTokens; else target.maxTokens = Number(raw); })} /></Field>
-                    <Field label="模型等级" error={fieldIssues.grade}>
-                      <select className="select" style={{ width: 130 }} data-testid={`model-${index}-grade`} data-invalid={fieldIssues.grade ? 'true' : undefined} value={entry.grade ?? ''} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.grade = event.target.value; else delete target.grade; })}>
-                        <option value="">请选择</option>
-                        <ModelGradeOptions />
-                      </select>
-                    </Field>
                     <Field label="默认思考强度">
                       <select className="select" data-testid={`model-${index}-thinking`} value={selectedThinkingLevel} onChange={event => mutate(next => { const target = next.models!.entries[index]!; if (event.target.value) target.defaultThinkingLevel = event.target.value as ModelThinkingLevel; else delete target.defaultThinkingLevel; })}>
                         {thinkingOptions.map(option => <option key={option.level} value={option.level}>{thinkingOptionLabel(option)}</option>)}

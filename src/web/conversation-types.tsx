@@ -37,7 +37,7 @@ import './conversation-drawer.css';
 
 
 
-export type Settings = { projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[]; models: { id: string; grade: string; credentialId?: string; reasoning?: boolean; thinkingOptions?: { level: string; label: string }[] }[] };
+export type Settings = { projects: { id: string; root: string; branch?: string | null; preparation?: { branch?: string | null } | null }[]; models: { id: string; credentialId?: string; reasoning?: boolean; thinkingOptions?: { level: string; label: string }[] }[] };
 
 export type ConversationSummary = {
   id: string; title: string; projectId: string | null; anchorTaskId: string; createdAt: number; updatedAt: number | null;
@@ -60,7 +60,6 @@ export type GraphAgentDetail = {
   version: number;
   name: string;
   description: string | null;
-  recommendedGrade: string;
   review: boolean;
   capabilities: {
     id: string;

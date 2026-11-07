@@ -20,7 +20,7 @@ curl -s -b /tmp/graph-cookie.txt http://127.0.0.1:<port>/api/catalog
 # 新建或整体替换；注意 body 是 { combination: {...} } 对象，不是 JSON 字符串
 curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' -H 'origin: http://127.0.0.1:<port>' \
   -X POST http://127.0.0.1:<port>/api/catalog/combinations \
-  -d '{"combination":{"id":"my-reviewer","name":"我的审查者","description":"…","recommendedGrade":"medium","review":true,"tags":["review"],"resources":[{"resourceId":"<capability-id>","role":"identity","required":true}]}}'
+  -d '{"combination":{"id":"my-reviewer","name":"我的审查者","description":"…","review":true,"tags":["review"],"resources":[{"resourceId":"<capability-id>","role":"identity","required":true}]}}'
 
 # 只改描述（立刻重新编译）
 curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' -H 'origin: http://127.0.0.1:<port>' \
@@ -37,7 +37,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'origin: http://127.0.0.1:<port>' \
 
 ## 事实（校验与语义）
 
-- 必填：`id`、`name`、`description`、`recommendedGrade`（非空字符串，如 `low` / `medium` / `high`）；`resources[].resourceId` 必须指向已存在的能力，可带 `version`。
+- 必填：`id`、`name`、`description`；`resources[].resourceId` 必须指向已存在的能力，可带 `version`。
 - `POST /api/catalog/combinations` 返回 `{ combination, definition }`；`definition.definitionVersion`（形如 `my-reviewer@1`）才是交给 `propose_graph` 的版本号，**每次保存或编译都会自增**。
 - 删除配方**不会**删除它引用的能力；保存配方也**不会**创建能力或授予权限。
 - `status !== 'valid'`（`issues[]` 非空）的配方不能用于派发。

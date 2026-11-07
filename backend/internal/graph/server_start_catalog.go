@@ -82,7 +82,6 @@ func ensureMainRecipe(catalog *Catalog, bootstrap PresetBootstrap, log func(stri
 				Id: "main", Name: "Atlas_main",
 				Description:      "持续面对用户、规划任务、设计并监控 Graph，并在确认范围内组装和调用 subagents。",
 				Mode:             "main",
-				RecommendedGrade: "high",
 				Tags:             []string{"main", "system"},
 				Resources:        []AgentCombinationResource{},
 			})

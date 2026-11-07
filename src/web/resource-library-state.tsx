@@ -55,7 +55,7 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
   const query = resourceQuery.trim().toLowerCase();
   const filtered = active.items.filter(item => !query || [item.id, item.name, item.description, item.source, item.kind, item.role].some(value => value?.toLowerCase().includes(query)));
   const filteredAgents = agentCombinations.filter(item => !query || [
-    item.id, item.name, item.description, item.recommendedGrade, ...item.tags,
+    item.id, item.name, item.description, ...item.tags,
     ...item.resources.map(resource => resource.resourceId),
   ].some(value => value?.toLowerCase().includes(query)));
   const visibleAgents = filteredAgents.slice(0, resourceLimits.agents ?? 40);

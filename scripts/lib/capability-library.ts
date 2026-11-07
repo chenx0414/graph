@@ -16,7 +16,6 @@ import { homedir } from 'node:os';
 import { CONFIG_DIR_NAME, getAgentDir } from '@earendil-works/pi-coding-agent';
 import { parseCapabilityManifest, scanAgentSkills, scanCapabilities, scanNativeSkills, type CapabilityManifest } from './file-capabilities.ts';
 import { selectCapabilityRecord } from './capability-select.ts';
-import { modelGradeMatches, type ModelGrade } from '../../src/catalog/models.ts';
 
 export type CapabilityKind = 'skill' | 'mcp' | 'extension' | 'pi-extension' | 'prompt';
 
@@ -40,7 +39,6 @@ export interface CapabilityBinding {
 }
 
 export interface DefinitionSpec {
-  recommendedGrade: ModelGrade;
   /** Frozen recipe prompt used by new instances of this definition version. */
   systemPrompt?: string;
   capabilities?: CapabilityBinding[];
@@ -144,7 +142,6 @@ function validateBundleFiles(manifest: CapabilityManifest, files: Record<string,
 
 export interface AgentCombinationSearchInput {
   query?: string;
-  grade?: ModelGrade;
   limit?: number;
 }
 
@@ -314,13 +311,11 @@ export class CapabilityLibrary {
     if (query.length > 200) throw new RuntimeError('invalid_input', 'Agent combination query must be at most 200 characters');
     const limit = Number.isSafeInteger(input.limit) && input.limit! > 0 ? Math.min(input.limit!, 50) : 30;
     const matches = this.agentCombinations().filter(item => {
-      if (input.grade && !modelGradeMatches(input.grade, item.recommendedGrade)) return false;
       if (!query) return true;
       return [
         item.id,
         item.name,
         item.description,
-        item.recommendedGrade,
         ...item.tags,
         ...item.resources.map(resource => resource.resourceId),
       ].join('\n').toLowerCase().includes(query);

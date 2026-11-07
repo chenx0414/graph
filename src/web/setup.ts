@@ -1,4 +1,3 @@
-import type { ModelGrade } from '../catalog/models.ts';
 export interface DesktopBridge {
   isDesktop: boolean;
   setDrawer?(input: { open: boolean; width: number }): Promise<{ expanded: boolean }>;
@@ -15,7 +14,7 @@ declare global {
   }
 }
 
-export interface TemplateSetupModel { id: string; grade: ModelGrade; contextWindow: number; maxTokens: number }
+export interface TemplateSetupModel { id: string; contextWindow: number; maxTokens: number }
 export interface TemplateSetupInput {
   providerId: string;
   api: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
@@ -60,7 +59,6 @@ export function buildTemplateConfigDocument(existing: unknown, input: TemplateSe
       id,
       modelId: merged.id,
       provider: input.providerId,
-      grade: merged.grade,
       api: input.api,
       baseUrl: input.baseUrl,
       contextWindow: merged.contextWindow,
