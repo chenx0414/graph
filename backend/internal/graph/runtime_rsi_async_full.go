@@ -48,6 +48,9 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 		if len(classified.Unmatched) > 0 {
 			verdict += "；未匹配: " + strings.Join(classified.Unmatched, " / ")
 		}
+		if len(classified.Flaky) > 0 {
+			verdict += "；重跑通过（不计为回归，但值得复核）: " + strings.Join(classified.Flaky, " / ")
+		}
 		summary := rsiAsyncFullSummary(result.Output)
 		for _, conversationID := range conversations {
 			text := rsiAsyncFullNotice(commit, verdict, summary, logPath)

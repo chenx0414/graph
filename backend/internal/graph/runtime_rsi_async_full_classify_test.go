@@ -146,3 +146,35 @@ func TestAsyncFullRunnerListOnlyOfKnownFilesIsAnEnvironmentRed(t *testing.T) {
 		t.Fatalf("a run that only failed the three known reds was called a regression: %+v", verdict)
 	}
 }
+
+func TestAsyncFullFlakyFileThatPassedOnARerunIsNotARegression(t *testing.T) {
+	output := "check:tests: 1 file(s) failed once and passed on a re-run: tests/m8/app-shell-ux.part-04.test.ts\n" +
+		"  - tests/m8/app-shell-ux.part-04.test.ts [timing]\n" +
+		"      × some shell layout case — Error: Test timed out in 30000ms. If this is a long-running test, pass a timeout value\n" +
+		"check:tests: 3 file(s) failed twice, so the gate stops here:\n" +
+		"  - tests/e2e/desktop-crash-recovery.test.ts\n" +
+		"  - tests/e2e/desktop-shell.test.ts\n" +
+		"  - tests/e2e/provider-independent-reviews.test.ts\n" +
+		"      × [timing] a killed app restarts on the same conversation with a real crash reason while its daemon and lanes keep working — Error: timed out after 120000ms waiting for the master to create the graph at waitFor (/tmp/graph-async-full-1/tests/e2e/desktop-crash-recovery.fixture.ts:73:9)\n"
+	verdict := ClassifyAsyncFull(output, knownReds())
+	if !verdict.Environment {
+		t.Fatalf("a file the runner re-ran and passed was called a regression: %+v", verdict)
+	}
+	if len(verdict.Unmatched) != 0 {
+		t.Fatalf("the re-run file was reported as unmatched: %v", verdict.Unmatched)
+	}
+	if len(verdict.Flaky) != 1 || !strings.Contains(verdict.Flaky[0], "app-shell-ux.part-04") {
+		t.Fatalf("the re-run file was not reported separately: %v", verdict.Flaky)
+	}
+}
+
+func TestAsyncFullFlakyFileIsStillReportedEvenWithNoOtherFailure(t *testing.T) {
+	output := "check:tests: 1 file(s) failed once and passed on a re-run: tests/m8/app-shell-ux.part-04.test.ts\n"
+	verdict := ClassifyAsyncFull(output, knownReds())
+	if len(verdict.Flaky) != 1 {
+		t.Fatalf("a lone re-run file was dropped: %+v", verdict)
+	}
+	if len(verdict.Unmatched) != 0 {
+		t.Fatalf("a lone re-run file was called a regression: %v", verdict.Unmatched)
+	}
+}

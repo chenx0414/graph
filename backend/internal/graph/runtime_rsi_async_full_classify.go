@@ -27,12 +27,14 @@ type AsyncFullFailure struct {
 type AsyncFullVerdict struct {
 	Environment bool
 	Unmatched   []string
+	Flaky       []string
 }
 
 var (
 	asyncFullFailLine   = regexp.MustCompile(`^\s*FAIL\s+(tests/\S+)\s*>\s*(.+?)\s*$`)
 	asyncFullTestLine   = regexp.MustCompile(`^\s*×\s*(.+?)\s+—\s*(.*)$`)
 	asyncFullRunnerFile = regexp.MustCompile(`^\s*-\s+(tests/\S+\.test\.ts)\s*$`)
+	asyncFullRerunFile  = regexp.MustCompile(`failed once and passed on a re-run:\s*(tests/\S+\.test\.ts)`)
 )
 
 func LoadEnvKnownReds(path string) ([]EnvKnownRed, error) {
@@ -127,10 +129,52 @@ func asyncFullFileStem(file string) string {
 	return strings.TrimSuffix(base, ".test.ts")
 }
 
+func AsyncFullReruns(output string) []string {
+	clean := rsiEscapeCode.ReplaceAllString(output, "")
+	reruns := []string{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(clean, "\n") {
+		match := asyncFullRerunFile.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		file := strings.TrimSpace(match[1])
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		reruns = append(reruns, file)
+	}
+	return reruns
+}
+
 func ClassifyAsyncFull(output string, known []EnvKnownRed) AsyncFullVerdict {
-	verdict := AsyncFullVerdict{Environment: true, Unmatched: []string{}}
-	failures := AsyncFullFailures(output)
+	verdict := AsyncFullVerdict{Environment: true, Unmatched: []string{}, Flaky: []string{}}
+	flaky := map[string]bool{}
+	for _, file := range AsyncFullReruns(output) {
+		flaky[file] = true
+		verdict.Flaky = append(verdict.Flaky, file)
+	}
+	failures := []AsyncFullFailure{}
+	for _, failure := range AsyncFullFailures(output) {
+		if failure.File != "" && flaky[failure.File] {
+			continue
+		}
+		failures = append(failures, failure)
+	}
+	if len(failures) > 0 && asyncFullAllFilesAccounted(failures, known, flaky) {
+		kept := []AsyncFullFailure{}
+		for _, failure := range failures {
+			if failure.File != "" {
+				kept = append(kept, failure)
+			}
+		}
+		failures = kept
+	}
 	if len(failures) == 0 {
+		if len(verdict.Flaky) > 0 {
+			return verdict
+		}
 		if IsEnvironmentFailure(output) {
 			return verdict
 		}
@@ -153,6 +197,21 @@ func ClassifyAsyncFull(output string, known []EnvKnownRed) AsyncFullVerdict {
 		}
 	}
 	return verdict
+}
+
+func asyncFullAllFilesAccounted(failures []AsyncFullFailure, known []EnvKnownRed, flaky map[string]bool) bool {
+	for _, failure := range failures {
+		if failure.File == "" {
+			continue
+		}
+		if flaky[failure.File] {
+			continue
+		}
+		if _, matched := knownRedFor(failure, known); !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func knownRedFor(failure AsyncFullFailure, known []EnvKnownRed) (EnvKnownRed, bool) {
