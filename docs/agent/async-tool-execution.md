@@ -85,7 +85,8 @@ CREATE INDEX IF NOT EXISTS deferred_tool_calls_live ON deferred_tool_calls(state
 ```
 GET  /api/conversations/{conversationId}/tool-calls
 → 200 {"toolCalls":[{"toolCallId","name","summary","state","requestId","operationId",
-                     "startedAt","finishedAt","reason","result"}]}
+                     "startedAt","finishedAt","ttlMs","reason","result"}],
+       "pollIntervalMs":2000}
 
 POST /api/conversations/{conversationId}/tool-calls/{toolCallId}/cancel   {"requestId":"..."}
 → 200 {"toolCallId","state":"cancelled","reason","cursor"}
@@ -308,3 +309,14 @@ laneB 指出一个会直接影响 A5 的放置问题：工具行结算后是否�
 判定全部读行上的 `data.state`（旧名 `data.deferredState` 同义）；deferred 行不再让通用文本/标志启发式（`toolError(message)`）覆盖自己的状态——否则取消会被 `data.error` 压回「失败」。
 
 为什么不是「服务端别写 error」：`data.error` 是给模型与 API 的机器可读事实（§12.4，A3 的断言也依赖它），改它会改动已冻结的契约。两层各自成立：机器读「没有结果」，人读「你自己收回的」。
+
+## 7. 权威在哪：唤醒是加速路径，行是唯一权威
+
+这条是契约，不是实现细节，任何人改异步工具之前先读这一节。
+
+- **权威状态只有一份**：`deferred_tool_calls` 表里那一行。`GET .../tool-calls` 读的就是它，`POST .../cancel` 写的也是它。
+- **唤醒（`wake_intents` → `tool_settled`）只是加速路径**：它让模型在结果到达时立刻拿到简报，少等一轮。唤醒丢了、去重了、被消费却没送达，**都不影响正确性**——结果仍在行里，下一轮简报或一次轮询就能读到。
+- 因此：**不要**把"唤醒到达"当成收尾条件，也不要把唤醒条数当成"结果已交付"的证据。判断结果是去读行（`state` + `result`/`reason`）。
+- 反过来也不成立：唤醒送达不代表行已写；写行先于唤醒（`finalizeDeferredToolCall` 先 `FinishDeferredToolCall`，再 `WakeForDeferredToolSettled`）。顺序反了就会出现"模型看到了结果、行里还是 running"。
+- 建议轮询间隔由服务端给出（`pollIntervalMs`，当前 2000ms），一条调用的保留时长由 `ttlMs` 给出（自 `startedAt` 起算，当前 1 小时，过期后允许服务端清理）。
+- 每个会话的**并发上限**是 4（`DeferredToolCallsPerConversation`）。超出时准入阶段当场拒绝并说明原因，不会先起进程再排队——先跑起来再说不合适，等于把执行名额借走了才通知。

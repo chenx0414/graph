@@ -30,6 +30,7 @@ interface ToolCall {
   finishedAt?: number | null;
   reason?: string;
   result?: string;
+  ttlMs?: number;
 }
 
 interface Message {
@@ -265,3 +266,29 @@ test('A3 重启对账：被 SIGKILL 打断的调用下次启动收成 interrupte
   expect((after[0]!.data ?? {})['error'], '中断的工具行没有标成失败').toBe(true);
   expect(rowText(after[0]!), '中断原因没有到达会话记录').toContain((call!.reason ?? '').trim());
 }, 180_000);
+
+test('A3 列表带建议轮询间隔与每条调用的保留时长', async () => {
+  const { root, project } = await workspace('graph-deferred-interval-');
+  const command = 'sleep 30; echo late-marker';
+  const service_ = await service(root, project, [
+    { tool: { id: 'interval-call', name: 'bash', input: { command, async: true } } },
+    { text: '后台命令已被受理。' },
+  ]);
+  const conversationId = await openConversation(service_, 'interval-conversation');
+
+  await expect.poll(async () => (await toolCall(service_, conversationId, 'interval-call'))?.toolCallId, {
+    timeout: 60_000, interval: 200,
+  }).toBe('interval-call');
+
+  const reply = await service_.request(`/api/conversations/${conversationId}/tool-calls`);
+  expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+  const body = reply.body as { toolCalls?: ToolCall[]; pollIntervalMs?: number };
+  const interval = body.pollIntervalMs ?? 0;
+  expect(interval, '列表没有给出建议的轮询间隔').toBeGreaterThanOrEqual(500);
+  expect(interval, '轮询间隔比一次唤醒还慢，等于让人硬猜').toBeLessThanOrEqual(30_000);
+
+  const call = (body.toolCalls ?? [])[0];
+  expect(call, '列表里没有那条调用').toBeTruthy();
+  expect(call!.ttlMs ?? 0, '列表没有说这条调用还被保留多久').toBeGreaterThan(0);
+  expect(call!.ttlMs ?? 0, '保留时长超过了约定的上限').toBeLessThanOrEqual(60 * 60 * 1000);
+}, 240_000);
