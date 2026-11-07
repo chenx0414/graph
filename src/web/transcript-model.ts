@@ -394,7 +394,9 @@ function rsiFullRow(message: ConversationMessage): TranscriptRow {
     verdict: field('判定:'),
     commit: field('提交:'),
     environment: data.environment === true,
-    files: lines.filter(line => line.startsWith('- ')).map(line => line.slice(2).replace(/\s*\[[^\]]*\]$/, '').trim()),
+    files: [...new Set(lines
+      .map(line => line.match(/([\w./@-]+\.test\.ts)/)?.[1] ?? '')
+      .filter(Boolean))],
     logPath: field('完整日志:'),
   };
 }

@@ -398,8 +398,9 @@ test('a background full-suite notice is its own row, never a user message', () =
     '[后台全量确认失败]',
     '提交: 6549520f0e',
     '判定: 回归',
-    '  - tests/e2e/desktop-shell.test.ts [assertion]',
+    'FAIL tests/e2e/desktop-shell.test.ts > OpenRouter authorization',
     '  - tests/e2e/desktop-crash-recovery.test.ts [assertion]',
+    'FAIL tests/e2e/desktop-shell.test.ts > OpenRouter authorization',
     '完整日志: /tmp/async-full.log',
   ].join('\n');
   const rows = buildTranscriptRows({
