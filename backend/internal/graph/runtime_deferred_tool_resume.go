@@ -19,9 +19,6 @@ func resumeConversationForDeferredTool(store *TaskStore, call DeferredToolCall) 
 			"kind": "tool_settled", "toolCallId": call.ToolCallId, "toolName": call.ToolName, "state": string(call.State),
 		}},
 	})
-	if deliverDeferredResultToRunningTurn(call.ConversationId, "deferred:"+call.Id) {
-		return
-	}
 	RecoverMaster(store, conversation.AnchorTaskId, "message")
 }
 
