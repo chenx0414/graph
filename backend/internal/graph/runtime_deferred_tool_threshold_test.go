@@ -165,6 +165,58 @@ func dispatchCount(fixture autoDeferFixture) int {
 	return total
 }
 
+func settledCallFixture(t *testing.T, fixture autoDeferFixture) DeferredToolCall {
+	t.Helper()
+	call, created := RecordDeferredToolCall(fixture.store, DeferredToolCallInput{
+		TaskId: "t", ConversationId: "c", NodeId: "n", ExecutionId: "op", OperationId: "op",
+		ToolName: "bash", RequestId: "probe", RequestDigest: "digest", StartedAt: NowMillis(),
+	})
+	if !created {
+		t.Fatalf("the probe call was not recorded")
+	}
+	return call
+}
+
+func TestSettledBackgroundCallHandsTheResultToTheRunningTurn(t *testing.T) {
+	fixture := newAutoDeferFixture(t)
+	call := settledCallFixture(t, fixture)
+	delivered := []string{}
+	restore := SetDeferredDeliveryHook(func(conversationId, requestId string) bool {
+		delivered = append(delivered, conversationId+" "+requestId)
+		return true
+	})
+	defer restore()
+	finalizeDeferredToolCall(fixture.store, call, deferredToolOutcome{State: DeferredToolSettled, Result: "late-marker"})
+	if len(delivered) != 1 {
+		t.Fatalf("the settled call was handed to the running turn %d times", len(delivered))
+	}
+	if delivered[0] != "c deferred:"+call.Id {
+		t.Fatalf("the delivery named %q instead of the conversation and the call", delivered[0])
+	}
+	if state := string(DeferredToolCallById(fixture.store, call.Id).State); state != string(DeferredToolSettled) {
+		t.Fatalf("the record ended as %q instead of settled", state)
+	}
+}
+
+func TestSettledBackgroundCallFallsBackToANewTurnWhenNothingIsRunning(t *testing.T) {
+	fixture := newAutoDeferFixture(t)
+	call := settledCallFixture(t, fixture)
+	calls := 0
+	restore := SetDeferredDeliveryHook(func(string, string) bool {
+		calls += 1
+		return false
+	})
+	defer restore()
+	finalizeDeferredToolCall(fixture.store, call, deferredToolOutcome{State: DeferredToolSettled, Result: "late-marker"})
+	if calls != 1 {
+		t.Fatalf("the delivery hook was asked %d times instead of once", calls)
+	}
+	rows := kernelRows(fixture.store.Db, "SELECT id FROM messages WHERE conversation_id='c' AND json_extract(data,'$.source.kind')='tool_settled'")
+	if len(rows) != 1 {
+		t.Fatalf("the fallback recorded %d resume messages instead of one", len(rows))
+	}
+}
+
 func TestToolHandsOffOnlyWhenItsBudgetExceedsTheThreshold(t *testing.T) {
 	t.Setenv(deferredToolThresholdEnv, "1000")
 	tools := ToolDefinition{

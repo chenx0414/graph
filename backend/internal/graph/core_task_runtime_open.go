@@ -136,6 +136,9 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	runtime.abortStalledMasterTurns()
 	runtime.dispatchQueuedMasterMessages()
 	runtime.execution.sweepState()
+	SetDeferredDeliveryHook(func(conversationId, requestId string) bool {
+		return kernelString(runtime.Conversations().Steer(conversationId, requestId)["state"]) == "steered"
+	})
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
 	runtime.RecoverMasters()
 	runtime.markInterruptedGraphPreparations()

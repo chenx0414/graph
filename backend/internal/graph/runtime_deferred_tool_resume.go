@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-func resumeConversationForDeferredTool(store *TaskStore, call DeferredToolCall) {
+func queueDeferredToolResume(store *TaskStore, call DeferredToolCall) string {
 	conversation := ConversationRowOf(store, call.ConversationId)
 	node := kernelRow(store.Db, "SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'", conversation.AnchorTaskId)
 	anchor := store.Task(conversation.AnchorTaskId)
@@ -19,7 +19,11 @@ func resumeConversationForDeferredTool(store *TaskStore, call DeferredToolCall) 
 			"kind": "tool_settled", "toolCallId": call.ToolCallId, "toolName": call.ToolName, "state": string(call.State),
 		}},
 	})
-	RecoverMaster(store, conversation.AnchorTaskId, "message")
+	return conversation.AnchorTaskId
+}
+
+func resumeConversationForDeferredTool(store *TaskStore, call DeferredToolCall) {
+	RecoverMaster(store, queueDeferredToolResume(store, call), "message")
 }
 
 func deferredToolResumeText(call DeferredToolCall) string {
@@ -28,4 +32,12 @@ func deferredToolResumeText(call DeferredToolCall) string {
 		name = "后台工具"
 	}
 	return name + " 已经结束（" + string(call.State) + "），结果在会话的工具调用里；请读它继续。"
+}
+
+func queueDeferredToolAnchor(store *TaskStore, call DeferredToolCall) string {
+	row := kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE id=?", call.ConversationId)
+	if row == nil {
+		return ""
+	}
+	return kernelString(row["anchor_task_id"])
 }

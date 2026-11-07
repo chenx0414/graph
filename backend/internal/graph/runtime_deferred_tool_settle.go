@@ -17,6 +17,7 @@ func finalizeDeferredToolCall(store *TaskStore, call DeferredToolCall, outcome d
 	if outcome.State == "" {
 		outcome.State = DeferredToolSettled
 	}
+	pending := DeferredToolCall{}
 	final := withStoreTx(store, func() any {
 		current := DeferredToolCallById(store, call.Id)
 		if current == nil {
@@ -28,10 +29,16 @@ func finalizeDeferredToolCall(store *TaskStore, call DeferredToolCall, outcome d
 		finished := FinishDeferredToolCall(store, call.Id, outcome.State, outcome.Reason, outcome.Result, NowMillis())
 		SettleConversationToolCall(store, finished)
 		if WakeForDeferredToolSettled(store, finished) {
-			resumeConversationForDeferredTool(store, finished)
+			queueDeferredToolResume(store, finished)
+			pending = finished
 		}
 		return finished
 	})
+	if pending.Id != "" {
+		if !deliverDeferredResultToRunningTurn(pending.ConversationId, "deferred:"+pending.Id) {
+			RecoverMaster(store, queueDeferredToolAnchor(store, pending), "message")
+		}
+	}
 	if outcome.Gate.Settle != nil {
 		outcome.Gate.Settle(outcome.GateCallId, &TokenUsage{})
 	}
