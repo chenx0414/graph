@@ -368,12 +368,12 @@ func pigBashTool(input AgentToolsInput) ToolDefinition {
 	return ToolDefinition{
 		Name:        "bash",
 		Label:       "Run command",
-		Description: "Execute bash commands (ls, grep, find, etc.)",
+		Description: "Execute bash commands (ls, grep, find, etc.). A command that outlives the automatic handoff threshold keeps running in the background and answers with a receipt; its result arrives as a later message.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command":   map[string]any{"type": "string", "description": "The command to run."},
-				"timeout":   map[string]any{"type": "number", "description": "How long the command may run, in milliseconds. Defaults to 120000 and is capped at 1800000."},
+				"timeout":   map[string]any{"type": "number", "description": "How long the command may run, in milliseconds. Defaults to 120000 and is capped at 1800000. A timeout at or below the handoff threshold keeps the call synchronous, so pass a short one only for work that must finish inside this turn."},
 				"async":     map[string]any{"type": "boolean", "description": "Run it in the background and answer at once; the result arrives as a later message. Use it for builds, tests and installs."},
 				"requestId": map[string]any{"type": "string", "description": "Name this background job. A retry with the same id and the same arguments reuses the running job instead of starting a second one; different arguments under that id are refused."},
 			},

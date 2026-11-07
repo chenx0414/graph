@@ -79,7 +79,7 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 		return nil, err
 	}
 	options := pigkernel.SessionOptions{
-		Database: database,
+		Database:     database,
 		Identity:     pigSessionIdentity(request),
 		Model:        pigModelSpec(request.Model),
 		Provider:     provider,
@@ -165,6 +165,18 @@ func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.Too
 					}
 					recordPigToolCall(request, definition.Name, started, false)
 					return receipt, nil
+				}
+				if deferredToolAutoHandsOff(definition, params) {
+					value, failure := runToolWithHandoff(autoToolAdmission{
+						Store: store, Request: request, Definition: definition, Params: params,
+						Gate: request.Broker, ThresholdMs: deferredToolThresholdMs(),
+					}, ctx)
+					if failure != nil {
+						recordPigToolCall(request, definition.Name, started, true)
+						return nil, failure
+					}
+					recordPigToolCall(request, definition.Name, started, false)
+					return value, nil
 				}
 				value := gated(graphUUID(), params, ctx)
 				if failure, ok := value.(error); ok {

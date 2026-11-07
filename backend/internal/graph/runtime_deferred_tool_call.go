@@ -11,18 +11,23 @@ import (
 
 const (
 	deferredToolDefaultTimeoutMs = 120_000
-	deferredToolShutdownGraceMs = 5_000
+	deferredToolShutdownGraceMs  = 5_000
 )
 
 type deferredToolJob struct {
-	id     string
-	signal *AbortSignal
-	gate   SendGate
-	callId  string
-	done    chan struct{}
-	mutex   sync.Mutex
-	cancel  bool
-	expired bool
+	id       string
+	signal   *AbortSignal
+	gate     SendGate
+	callId   string
+	done     chan struct{}
+	settled  chan struct{}
+	mutex    sync.Mutex
+	cancel   bool
+	expired  bool
+	value    any
+	failure  error
+	raised   any
+	finished bool
 }
 
 func (job *deferredToolJob) markCancelled() {
@@ -128,19 +133,25 @@ type deferredToolAdmission struct {
 	Definition ToolDefinition
 	Params     map[string]any
 	Gate       SendGate
-	CallId string
+	CallId     string
 }
 
-func admitDeferredToolCall(input deferredToolAdmission) (any, error) {
+type deferredToolRecord struct {
+	row      DeferredToolCall
+	budgetMs int
+	created  bool
+}
+
+func recordDeferredToolCall(input deferredToolAdmission) (deferredToolRecord, error) {
 	target, ok := deferredToolTargetOf(input.Store, input.Request.ExecutionId)
 	if !ok {
-		return nil, fmt.Errorf("the background call has no execution to belong to")
+		return deferredToolRecord{}, fmt.Errorf("the background call has no execution to belong to")
 	}
 	requestId := deferredToolRequestId(input.Params, input.CallId)
 	ReapDeferredToolCalls(input.Store, NowMillis())
 	if existing := DeferredToolCallByRequestId(input.Store, target.ConversationId, requestId); existing == nil {
 		if err := DeferredToolCallSlot(input.Store, target.ConversationId); err != nil {
-			return nil, err
+			return deferredToolRecord{}, err
 		}
 	}
 	digest := CanonicalJSON(input.Params)
@@ -156,17 +167,31 @@ func admitDeferredToolCall(input deferredToolAdmission) (any, error) {
 	})
 	if !created {
 		if row.RequestDigest != digest {
-			return nil, fmt.Errorf("requestId %s was already used with different arguments; a deferred call is never reinterpreted", requestId)
+			return deferredToolRecord{}, fmt.Errorf("requestId %s was already used with different arguments; a deferred call is never reinterpreted", requestId)
 		}
 		MarkDeferredToolCallRunning(input.Store, row.Id)
-		return deferredToolReceipt(row), nil
+		return deferredToolRecord{row: row, budgetMs: budget}, nil
 	}
 	registerDeferredToolStart(input.Request.ExecutionId, input.Definition.Name, input.Params, row.Id)
 	MarkDeferredToolCallRunning(input.Store, row.Id)
-	job := &deferredToolJob{id: row.Id, signal: NewAbortSignal(), gate: input.Gate, callId: input.CallId, done: make(chan struct{})}
+	return deferredToolRecord{row: row, budgetMs: budget, created: true}, nil
+}
+
+func admitDeferredToolCall(input deferredToolAdmission) (any, error) {
+	record, err := recordDeferredToolCall(input)
+	if err != nil {
+		return nil, err
+	}
+	if !record.created {
+		return deferredToolReceipt(record.row), nil
+	}
+	job := &deferredToolJob{
+		id: record.row.Id, signal: NewAbortSignal(), gate: input.Gate, callId: input.CallId,
+		done: make(chan struct{}),
+	}
 	registerDeferredToolJob(job)
-	go runDeferredToolJob(input, row, job, budget)
-	return deferredToolReceipt(row), nil
+	go runDeferredToolJob(input, record.row, job, record.budgetMs)
+	return deferredToolReceipt(record.row), nil
 }
 
 var deferredToolStarts = struct {
@@ -272,12 +297,20 @@ func runDeferredToolJob(input deferredToolAdmission, call DeferredToolCall, job 
 	defer releaseDeferredToolJob(call.Id)
 	defer forgetDeferredToolStart(input.Request.ExecutionId, input.Definition.Name, input.Params, call.Id)
 	defer func() { _ = recover() }()
+	defer armDeferredToolDeadline(job, budgetMs)()
+	value, err, raised := runDeferredToolBody(input, job)
+	finalizeDeferredToolCall(input.Store, call, deferredToolOutcomeFor(job, call, budgetMs, value, err, raised))
+}
+
+func armDeferredToolDeadline(job *deferredToolJob, budgetMs int) func() {
 	timer := time.AfterFunc(time.Duration(budgetMs)*time.Millisecond, func() {
 		job.markExpired()
 		job.signal.Abort()
 	})
-	defer timer.Stop()
-	value, err, raised := runDeferredToolBody(input, job)
+	return func() { timer.Stop() }
+}
+
+func deferredToolOutcomeFor(job *deferredToolJob, call DeferredToolCall, budgetMs int, value any, err error, raised any) deferredToolOutcome {
 	outcome := deferredToolOutcome{Gate: job.gate, GateCallId: job.callId}
 	switch {
 	case job.cancelled():
@@ -296,7 +329,7 @@ func runDeferredToolJob(input deferredToolAdmission, call DeferredToolCall, job 
 		outcome.State = DeferredToolSettled
 		outcome.Result = ToolResultText(value, 8_000)
 	}
-	finalizeDeferredToolCall(input.Store, call, outcome)
+	return outcome
 }
 
 func runDeferredToolBody(input deferredToolAdmission, job *deferredToolJob) (value any, err error, raised any) {
