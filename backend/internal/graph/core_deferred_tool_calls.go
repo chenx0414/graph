@@ -3,9 +3,23 @@ package graph
 import (
 	"database/sql"
 	"strings"
+	"time"
 )
 
 type DeferredToolCallState string
+
+const (
+	DeferredToolCallRetentionMs    int64 = 60 * 60 * 1000
+	DeferredToolCallPollIntervalMs int64 = 2_000
+)
+
+func deferredToolCallRetentionLeft(call DeferredToolCall) int64 {
+	left := call.StartedAt + DeferredToolCallRetentionMs - time.Now().UnixMilli()
+	if left < 0 {
+		return 0
+	}
+	return left
+}
 
 const (
 	DeferredToolAccepted DeferredToolCallState = "accepted"

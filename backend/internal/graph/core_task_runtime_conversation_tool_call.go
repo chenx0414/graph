@@ -14,6 +14,7 @@ type DeferredToolCallView struct {
 	OperationId string `json:"operationId"`
 	StartedAt   int64  `json:"startedAt"`
 	FinishedAt  *int64 `json:"finishedAt"`
+	TtlMs       int64  `json:"ttlMs"`
 	Reason      string `json:"reason,omitempty"`
 	Result      string `json:"result,omitempty"`
 }
@@ -27,7 +28,7 @@ func (conversations *TaskRuntimeConversations) ToolCalls(conversationId string) 
 	for _, call := range calls {
 		views = append(views, deferredToolCallView(call))
 	}
-	return map[string]any{"toolCalls": views}
+	return map[string]any{"toolCalls": views, "pollIntervalMs": DeferredToolCallPollIntervalMs}
 }
 
 func deferredToolCallView(call DeferredToolCall) DeferredToolCallView {
@@ -35,6 +36,7 @@ func deferredToolCallView(call DeferredToolCall) DeferredToolCallView {
 		ToolCallId: call.ToolCallId, Name: call.ToolName, Summary: call.Summary,
 		State: deferredToolProtocolState(call.State), RequestId: call.RequestId,
 		OperationId: call.OperationId, StartedAt: call.StartedAt, FinishedAt: call.FinishedAt,
+		TtlMs: deferredToolCallRetentionLeft(call),
 	}
 	if !DeferredToolCallActive(call.State) {
 		view.Reason = deferredToolCallReason(call)
