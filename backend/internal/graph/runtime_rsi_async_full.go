@@ -38,10 +38,15 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 		if result.Status == "passed" {
 			return
 		}
-		environment := IsEnvironmentFailure(result.Output)
+		known, _ := LoadEnvKnownReds(filepath.Join(runRoot, "tests", "env-known-reds.json"))
+		classified := ClassifyAsyncFull(result.Output, known)
+		environment := classified.Environment
 		verdict := "回归"
 		if environment {
-			verdict = "环境故障（重试后仍失败），先别当回归追"
+			verdict = "环境故障（失败项都命中 tests/env-known-reds.json 的已知环境问题），先别当回归追"
+		}
+		if len(classified.Unmatched) > 0 {
+			verdict += "；未匹配: " + strings.Join(classified.Unmatched, " / ")
 		}
 		summary := rsiAsyncFullSummary(result.Output)
 		for _, conversationID := range conversations {
