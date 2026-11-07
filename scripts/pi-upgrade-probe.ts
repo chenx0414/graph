@@ -19,9 +19,8 @@ import { modelA, respond, testModelRuntime } from '../tests/fixtures/models.ts';
 // Stands in for what our own composer emits: the three sections Graph owns.
 const IDENTITY = 'MAIN IDENTITY SENTINEL\nYou are the master Agent of one Graph feature task.';
 const RULES = ['- Use tool results as evidence.', '- R'.repeat(1) + 'ules must survive the transcript round trip.'].join('\n');
-const DOCS = 'Graph documentation (read when the user asks about Graph itself):\n' + '- x\n'.repeat(200);
 const PROMPT = [
-  `MAIN IDENTITY SENTINEL\n${IDENTITY}`, `<rules>\n${RULES}\n</rules>`, `<docs>\n${DOCS}</docs>`,
+  `MAIN IDENTITY SENTINEL\n${IDENTITY}`, `<rules>\n${RULES}\n</rules>`,
 ].join('\n\n');
 
 const sent: string[] = [];
@@ -56,10 +55,10 @@ async function main() {
     const report: string[] = [];
     report.push(`requests seen: ${sent.length}`);
     if (sent.length < 2) throw new Error(`expected two provider requests, saw ${sent.length}`);
-    const tags = ['<identity>', '<rules>', '<docs>', '<project_context>', '<available_skills>', '<cwd>', '<tools>'];
+    const tags = ['<identity>', '<rules>', '<project_context>', '<available_skills>', '<cwd>', '<tools>'];
     for (const [index, text] of sent.entries()) {
       const census = tags.map(tag => `${tag}=${text.split(tag).length - 1}`).join(' ');
-      const keepsEverything = text.includes(RULES) && text.includes(DOCS) && text.includes('MAIN IDENTITY SENTINEL');
+      const keepsEverything = text.includes(RULES) && text.includes('MAIN IDENTITY SENTINEL');
       report.push(`request ${index + 1}: ${text.length} chars | every owned section present: ${keepsEverything} | ${census}`);
       // The transcript carries structured system messages (`sections`), so the raw
       // join is only a growth check, not an equality check: the replay is the
@@ -67,7 +66,7 @@ async function main() {
       report.push(`  rendered replay covers the raw transcript text: ${text.length >= transcriptSystem[index]!.length}`);
     }
     const first = sent[0]!;
-    const complete = first.includes(RULES) && first.includes(DOCS) && first.includes('MAIN IDENTITY SENTINEL');
+    const complete = first.includes(RULES) && first.includes('MAIN IDENTITY SENTINEL');
     report.push(`CONCLUSION complete prompt recorded: ${complete}`);
     process.stdout.write(`${report.join('\n')}\n`);
     if (!complete) process.exitCode = 1;

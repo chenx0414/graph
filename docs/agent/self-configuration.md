@@ -17,7 +17,7 @@ Graph 把 Agent 可编辑上下文集中到固定目录：
   tools.json
 ```
 
-首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。Graph 自身文档不在这里，而是作为只读源码保存在仓库的 `docs/agent/`，并随应用一起打包。
+首次启动播种默认文件，之后不覆盖用户修改。用户可以通过聊天头部查看最终拼装结果、编辑来源文件、开关工具，或恢复某个文件的原始默认版本。Graph 自身文档不在这里，而是作为只读源码保存在仓库的 `docs/agent/`，并随应用一起打包；Agent 需要时用自己的工具（`read`、`grep`、`find`）去读，system prompt 里不再插入文档索引段落。
 
 聊天头部「Agent 上下文」抽屉里的 **system prompt** 标签展示的是**某一次真实模型请求**，而不是预览：提示词文本取自该请求的系统消息，**tool calling** 标签里的工具声明取自同一个请求体的 `tools` 字段，两者都在 provider 调用点（`backend/internal/graph/runtime_controlled_openai.go` 的 fetch 包装器）写入 `operations.system_prompt` / `operations.tool_declarations`。它们是只读展示，不参与发送，也不会使模型多收一份声明。会话里没有真正发过请求（或该请求早于记录功能）时，该标签会明确说「尚未记录到」，而不会拿预览顶替。
 
@@ -44,11 +44,11 @@ Pi 在 0.85.1 中还会自动追加 `Current working directory`。UI 必须把�
 ## 可编辑、生成和 Pi 内容
 
 - **editable**：用户维护的 identity、tool guidance、rules 和 runtime prompt 文件。
-- **generated**：从当前 definition、实际工具、capability load facts、项目 instructions、worktree 和源码 docs 路径拼出的内容。
+- **generated**：从当前 definition、实际工具、capability load facts、项目 instructions 和 worktree 拼出的内容。
 - **pi**：Pi 自身自动追加的 system prompt 内容，例如 cwd。
 
 用户编辑 editable 文本不能改变 generated 事实，也不能改变 host-enforced authority。
-Docs section 由源码 `docs/agent/README.md`、topic 索引和阅读协议动态生成；docs 正文不进入可编辑来源列表。
+system prompt 只有 `<identity>`、`<rules>` 和会话追加的 `<cwd>` 等段落：源码文档索引曾作为 `<docs>` 段落注入，现在整段删除，Agent 需要时用 `read` / `grep` / `find` 直接读 `docs/agent/`。
 
 `<tools>` section 先列 Pi 原生 coding tools，再以过渡段引出 Graph tools。工具清单只保留名称与简短说明；参数、版本、权限摘要和运行时可用性保留在 UI 工具详情中。
 

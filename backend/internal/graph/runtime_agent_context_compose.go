@@ -109,5 +109,5 @@ func (assembly *AgentContextAssembly) Preview(features AgentToolFeatures) AgentC
 		tools = append(tools, tool)
 	}
 	sort.SliceStable(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-	return AgentContextPreview{Tools: tools, Capabilities: capabilities, DocsRoot: assembly.DocsRoot}
+	return AgentContextPreview{Tools: tools, Capabilities: capabilities}
 }

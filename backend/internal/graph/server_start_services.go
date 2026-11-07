@@ -117,7 +117,6 @@ func daemonSystemSummary(live *LiveConfig, userHome string, agentContext *AgentC
 		CapabilityRoot:  filepath.Join(userHome, "capabilities"),
 		ApplicationRoot: ApplicationRoot,
 		ApplicationMode: "source",
-		DocsRoot:        GraphDocumentationPathsOf(ApplicationRoot).Root,
 	}
 	if library := agentContext; library != nil {
 		inventory.AgentContextRoot = library.Root

@@ -32,11 +32,9 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 			"- Repository search tools available in this session: "+listed+
 				". Use an available indexed search tool when it fits; otherwise use an available native search tool or shell rg. Indexed search tools absent from this list are not bound to this session.", 1)
 	}
-	docs := GraphDocumentationPathsOf()
 	composeInput := ComposeAgentSystemPromptInput{
 		Identity: identity, DefinitionVersion: assembly.DefinitionVersion, ToolGuidance: assembly.toolGuidance,
-		RulesCommon: commonRules, RulesRole: assembly.roleRules, Docs: docs, Role: assembly.Role,
-		CompactDocumentation: os.Getenv("GRAPH_COMPACT_DOCUMENTATION") == "1",
+		RulesCommon: commonRules, RulesRole: assembly.roleRules, Role: assembly.Role,
 	}
 	if assembly.runtimeRules != nil {
 		composeInput.RulesRuntime = *assembly.runtimeRules
@@ -53,7 +51,7 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 		}
 	}
 	return AgentContextComposition{
-		Tools: tools, Capabilities: capabilities, Composed: ComposeAgentSystemPrompt(composeInput), DocsRoot: docs.Root,
+		Tools: tools, Capabilities: capabilities, Composed: ComposeAgentSystemPrompt(composeInput),
 	}
 }
 

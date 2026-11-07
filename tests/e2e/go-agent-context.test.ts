@@ -49,7 +49,7 @@ function offeredTools(body: ChatBody | undefined): string[] {
 /** The built-in rule about repository search, word for word. */
 const BUILTIN_SEARCH_RULE = '- Search the repository with `rg` through bash for repository search: it is git-aware and fast, and no indexed extension ships with this app any more. Use other shell commands for host facts (git, gh, curl, sqlite, osascript) and for anything no dedicated tool can express.';
 
-async function fixture(options: { matchSearch: boolean; classifyFriction: boolean; compactDocs: boolean; ownerRules: boolean }) {
+async function fixture(options: { matchSearch: boolean; classifyFriction: boolean; ownerRules: boolean }) {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-agent-context-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
@@ -81,7 +81,6 @@ async function fixture(options: { matchSearch: boolean; classifyFriction: boolea
       GRAPH_LOCAL_KEY: 'key-local',
       GRAPH_MATCH_SEARCH_GUIDANCE: options.matchSearch ? '1' : '0',
       GRAPH_CLASSIFY_HARNESS_FRICTION: options.classifyFriction ? '1' : '0',
-      GRAPH_COMPACT_DOCUMENTATION: options.compactDocs ? '1' : '0',
     },
     extraArgs: ['--execute', '--kernel', 'pig'],
   });
@@ -108,8 +107,21 @@ async function oneTurn(f: Awaited<ReturnType<typeof fixture>>): Promise<ChatBody
   return sent!;
 }
 
+test('the prompt carries no documentation block', async () => {
+  // The prompt used to end with a <docs> section naming docs/agent paths. The
+  // Agent reads those files with its own tools like any other source, so the
+  // block is gone: a prompt that still advertises it would be telling the model
+  // about a section nobody sends.
+  const f = await fixture({ matchSearch: true, classifyFriction: false, ownerRules: false });
+  const instructions = instructionsOf(await oneTurn(f));
+  expect(instructions, 'the <docs> section is still in the prompt').not.toContain('<docs>');
+  expect(instructions, 'the prompt still points at the documentation tree').not.toContain('docs/agent/README.md');
+  expect(instructions).toContain('<identity>');
+  expect(instructions).toContain('<rules>');
+}, 120_000);
+
 test('the search rule names only the search tools this session really has', async () => {
-  const f = await fixture({ matchSearch: true, classifyFriction: false, compactDocs: false, ownerRules: false });
+  const f = await fixture({ matchSearch: true, classifyFriction: false, ownerRules: false });
   const sent = await oneTurn(f);
   const instructions = instructionsOf(sent);
 
@@ -123,7 +135,7 @@ test('the search rule names only the search tools this session really has', asyn
 }, 120_000);
 
 test('the built-in search rule stays a rule when the host does not ask for the bound list', async () => {
-  const f = await fixture({ matchSearch: false, classifyFriction: false, compactDocs: false, ownerRules: false });
+  const f = await fixture({ matchSearch: false, classifyFriction: false, ownerRules: false });
   const instructions = instructionsOf(await oneTurn(f));
 
   expect(instructions).not.toContain('Repository search tools available in this session:');
@@ -131,7 +143,7 @@ test('the built-in search rule stays a rule when the host does not ask for the b
 }, 120_000);
 
 test('an owner rule replaces the built-in search rule and is never rewritten', async () => {
-  const f = await fixture({ matchSearch: true, classifyFriction: false, compactDocs: false, ownerRules: true });
+  const f = await fixture({ matchSearch: true, classifyFriction: false, ownerRules: true });
   const instructions = instructionsOf(await oneTurn(f));
 
   expect(instructions).toContain(f.ownerRule);
@@ -142,52 +154,17 @@ test('an owner rule replaces the built-in search rule and is never rewritten', a
 }, 120_000);
 
 test('the maintainer role tells a project failure apart from a harness failure only when asked to', async () => {
-  const plain = await fixture({ matchSearch: false, classifyFriction: false, compactDocs: false, ownerRules: false });
+  const plain = await fixture({ matchSearch: false, classifyFriction: false, ownerRules: false });
   const plainInstructions = instructionsOf(await oneTurn(plain));
   // The executor and the improver are the same Agent - always.
   expect(plainInstructions).toContain('the executor and the improver are the same Agent');
   expect(plainInstructions).not.toContain('A failing project check, missing project configuration');
 
-  const classified = await fixture({ matchSearch: false, classifyFriction: true, compactDocs: false, ownerRules: false });
+  const classified = await fixture({ matchSearch: false, classifyFriction: true, ownerRules: false });
   const classifiedInstructions = instructionsOf(await oneTurn(classified));
   expect(classifiedInstructions).toContain('the executor and the improver are the same Agent');
   expect(classifiedInstructions).toContain('A failing project check, missing project configuration');
 }, 240_000);
-
-test('the documentation pointer can be compacted without losing the paths', async () => {
-  const plain = await fixture({ matchSearch: false, classifyFriction: false, compactDocs: false, ownerRules: false });
-  const plainInstructions = instructionsOf(await oneTurn(plain));
-  expect(plainInstructions).toContain('Graph documentation (read when the user asks about Graph itself');
-  expect(plainInstructions).toContain('docs/agent/README.md');
-
-  const compact = await fixture({ matchSearch: false, classifyFriction: false, compactDocs: true, ownerRules: false });
-  const compactInstructions = instructionsOf(await oneTurn(compact));
-  expect(compactInstructions).toContain('Graph host documentation:');
-  expect(compactInstructions).not.toContain('Graph documentation (read when the user asks about Graph itself');
-  // The paths are still there - a shorter pointer is not a lost pointer.
-  expect(compactInstructions).toContain('docs/agent/README.md');
-}, 240_000);
-
-test('a conversation whose workspace is gone answers what is missing instead of a server error', async () => {
-  const f = await fixture({ matchSearch: false, classifyFriction: false, compactDocs: false, ownerRules: false });
-  const created = await f.daemon.request('/api/conversations', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ projectId: 'p', model: 'local', text: 'Read your instructions.', requestId: 'agent-context-gone' }),
-  });
-  expect(created.status).toBe(200);
-  const { conversationId } = await created.json() as { conversationId: string };
-
-  // Measured 2026-11-02: a conversation from a /private/tmp project kept its row
-  // after the directory was cleaned up, and its context preview answered 500 -
-  // the console could only show it as a failed request.
-  await rm(join(f.root, 'project'), { recursive: true, force: true });
-  const preview = await f.daemon.request(`/api/agent-context?conversationId=${conversationId}`);
-  expect(preview.status).toBe(400);
-  const body = await preview.json() as { code?: string; message?: string };
-  expect(body.code).toBe('workspace_missing');
-  expect(body.message).toContain('no longer exists');
-}, 120_000);
 
 /**
  * The console's two panels are named after the request they claim to show:
@@ -197,7 +174,7 @@ test('a conversation whose workspace is gone answers what is missing instead of 
  * body itself, so the panel and the wire have to be the same bytes.
  */
 test('the context panels show the request that really left the process', async () => {
-  const f = await fixture({ matchSearch: true, classifyFriction: false, compactDocs: false, ownerRules: false });
+  const f = await fixture({ matchSearch: true, classifyFriction: false, ownerRules: false });
   const sent = await oneTurn(f);
   const listed = await f.daemon.request('/api/conversations');
   const conversations = await listed.json() as { id?: string }[];

@@ -71,9 +71,7 @@ type ComposeAgentSystemPromptInput struct {
 	// learned. It is context, not a rule: it says what happened, never what
 	// the host enforces.
 	ExperienceContext    string
-	Docs                 GraphDocumentationPaths
 	Role                 string
-	CompactDocumentation bool
 }
 
 // ComposedAgentSystemPrompt is the rendered sections and their joined text.
@@ -103,7 +101,7 @@ func renderedSection(section AgentPromptSection) string {
 	return "<" + string(section.ID) + ">\n" + strings.Join(chunks, "\n\n") + "\n</" + string(section.ID) + ">"
 }
 
-// ComposeAgentSystemPrompt renders identity, rules, and documentation.
+// ComposeAgentSystemPrompt renders identity and rules.
 func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgentSystemPrompt {
 	rulesParts := []AgentPromptPart{
 		{ID: "rules.common", Title: "Common rules", Origin: "editable", Content: input.RulesCommon, Source: "rules/common.md"},
@@ -127,10 +125,6 @@ func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgent
 	}
 	rulesParts = append(rulesParts, AgentPromptPart{ID: "rules.host", Title: "Host rules", Origin: "generated", Content: host})
 	rules := promptSection("rules", "Rules", rulesParts)
-	docs := promptSection("docs", "Documentation", []AgentPromptPart{{
-		ID: "docs.guide", Title: "Graph documentation and reading protocol", Origin: "generated",
-		Content: GraphDocumentationPrompt(input.Docs, input.CompactDocumentation), Source: "docs/agent/README.md",
-	}})
 	identityParts := []AgentPromptPart{{
 		ID: "identity.agent", Title: "Agent identity", Origin: "editable", Content: input.Identity, Source: "agents/<definition-id>.md",
 	}}
@@ -141,7 +135,7 @@ func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgent
 		identityParts = append(identityParts, AgentPromptPart{ID: "identity.harness", Title: "Harness self-improvement", Origin: "generated", Content: strings.TrimSpace(input.HarnessContext)})
 	}
 	identity := promptSection("identity", "Identity", identityParts)
-	sections := []AgentPromptSection{identity, rules, docs}
+	sections := []AgentPromptSection{identity, rules}
 	rendered := make([]string, len(sections))
 	for i, section := range sections {
 		rendered[i] = renderedSection(section)

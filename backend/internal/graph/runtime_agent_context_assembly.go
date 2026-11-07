@@ -46,14 +46,12 @@ type AgentContextComposition struct {
 	Tools        []AgentContextTool
 	Capabilities []AgentCapabilityPromptEntry
 	Composed     ComposedAgentSystemPrompt
-	DocsRoot     string
 }
 
 // AgentContextPreview is the next-operation projection of the tool surface.
 type AgentContextPreview struct {
 	Tools        []AgentContextTool
 	Capabilities []AgentCapabilityPromptEntry
-	DocsRoot     string
 }
 
 // AgentContextAssembly is the resolved context of one operation.
@@ -66,8 +64,6 @@ type AgentContextAssembly struct {
 	Role string
 	// DefinitionVersion is the recipe the context was built for.
 	DefinitionVersion string
-	// DocsRoot is the read-only Agent documentation directory.
-	DocsRoot string
 
 	common       string
 	roleRules    string

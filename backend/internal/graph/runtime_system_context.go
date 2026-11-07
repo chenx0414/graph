@@ -19,7 +19,6 @@ type SystemInventoryInput struct {
 	Capabilities         []CapabilityRecord
 	CapabilityRoot       string
 	AgentContextRoot     string
-	DocsRoot             string
 	ApplicationRoot      string
 	ApplicationMode      string
 }
@@ -85,7 +84,7 @@ func SystemInventory(input SystemInventoryInput) map[string]any {
 		"capabilities": map[string]any{
 			"root": input.CapabilityRoot, "entries": len(input.Capabilities), "byKind": byKind,
 		},
-		"agentContext": map[string]any{"root": input.AgentContextRoot, "docsRoot": input.DocsRoot},
+		"agentContext": map[string]any{"root": input.AgentContextRoot},
 		"application":  map[string]any{"root": input.ApplicationRoot, "mode": input.ApplicationMode},
 	}
 }

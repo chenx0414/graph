@@ -118,7 +118,6 @@ test('the sent tab shows the tool declarations one request carried, with their c
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
-      docsRoot: join(process.cwd(), 'docs', 'agent'),
       definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
       prompts: [], disabledTools: [], tools: [], capabilities: [],
       sent: { operationId: 'op-1', at: 1, text: '<identity>demo</identity>', tools: recorded },
@@ -153,7 +152,6 @@ test('a lost connection while the daemon reloads is retried instead of shown as 
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   const payload = {
-    docsRoot: join(process.cwd(), 'docs', 'agent'),
     definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
     prompts: [], disabledTools: [], tools: [], capabilities: [],
     sent: { operationId: 'op-1', at: 1, text: '<identity>demo</identity>', tools: null },
@@ -255,7 +253,6 @@ test('a standing failure says what happened and can be retried from the banner',
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   const payload = {
-    docsRoot: join(process.cwd(), 'docs', 'agent'),
     definitionVersion: 'main@1', latestDefinitionVersion: 'main@1',
     prompts: [], disabledTools: [], tools: [], capabilities: [],
     sent: { operationId: 'op-1', at: 1, text: '<identity>ok</identity>', tools: null },

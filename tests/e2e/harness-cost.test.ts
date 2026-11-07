@@ -16,27 +16,24 @@ const execute = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
-for (const { compactDocs, cacheField, classifyFriction, matchSearch, customRules } of [
-  { matchSearch: true, customRules: false, classifyFriction: true, compactDocs: false, cacheField: 'standard' },
-  { matchSearch: true, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { matchSearch: true, customRules: true, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { matchSearch: false, customRules: false, classifyFriction: true, compactDocs: false, cacheField: 'standard' },
-  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'standard' },
-  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: true, cacheField: 'deepseek' },
-  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'kimi' },
-  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'unreported' },
-  { matchSearch: false, customRules: false, classifyFriction: false, compactDocs: false, cacheField: 'capacity-retry' },
+for (const { cacheField, classifyFriction, matchSearch, customRules } of [
+  { matchSearch: true, customRules: false, classifyFriction: true, cacheField: 'standard' },
+  { matchSearch: true, customRules: false, classifyFriction: false, cacheField: 'standard' },
+  { matchSearch: true, customRules: true, classifyFriction: false, cacheField: 'standard' },
+  { matchSearch: false, customRules: false, classifyFriction: true, cacheField: 'standard' },
+  { matchSearch: false, customRules: false, classifyFriction: false, cacheField: 'standard' },
+  { matchSearch: false, customRules: false, classifyFriction: false, cacheField: 'deepseek' },
+  { matchSearch: false, customRules: false, classifyFriction: false, cacheField: 'kimi' },
+  { matchSearch: false, customRules: false, classifyFriction: false, cacheField: 'unreported' },
+  { matchSearch: false, customRules: false, classifyFriction: false, cacheField: 'capacity-retry' },
 ]) {
- test(`matchSearch=${matchSearch}/customRules=${customRules}/classifyFriction=${classifyFriction}/compactDocs=${compactDocs}/cache=${cacheField}: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI`, async () => {
+ test(`matchSearch=${matchSearch}/customRules=${customRules}/classifyFriction=${classifyFriction}/cache=${cacheField}: HTTP conversation executes a real tool and exposes privacy-preserving cost diagnostics through the CLI`, async () => {
   const previousSearch = process.env.GRAPH_MATCH_SEARCH_GUIDANCE;
   process.env.GRAPH_MATCH_SEARCH_GUIDANCE = matchSearch ? '1' : '0';
   cleanup.push(async () => { if (previousSearch === undefined) delete process.env.GRAPH_MATCH_SEARCH_GUIDANCE; else process.env.GRAPH_MATCH_SEARCH_GUIDANCE = previousSearch; });
   const previousFriction = process.env.GRAPH_CLASSIFY_HARNESS_FRICTION;
   process.env.GRAPH_CLASSIFY_HARNESS_FRICTION = classifyFriction ? '1' : '0';
   cleanup.push(async () => { if (previousFriction === undefined) delete process.env.GRAPH_CLASSIFY_HARNESS_FRICTION; else process.env.GRAPH_CLASSIFY_HARNESS_FRICTION = previousFriction; });
-  const previous = process.env.GRAPH_COMPACT_DOCUMENTATION;
-  process.env.GRAPH_COMPACT_DOCUMENTATION = compactDocs ? '1' : '0';
-  cleanup.push(async () => { if (previous === undefined) delete process.env.GRAPH_COMPACT_DOCUMENTATION; else process.env.GRAPH_COMPACT_DOCUMENTATION = previous; });
   const root = await mkdtemp(join(tmpdir(), 'graph-harness-cost-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const usage = cacheField === 'unreported' ? null : { prompt_tokens: 40, completion_tokens: 10,

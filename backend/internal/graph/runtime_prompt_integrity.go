@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 )
 
-// PROMPT_SECTIONS are Graph's own three sections plus the working directory the session appends.
-var PROMPT_SECTIONS = []string{"<identity>", "<rules>", "<docs>", "<cwd>"}
+// PROMPT_SECTIONS are Graph's own sections plus the working directory the session appends.
+var PROMPT_SECTIONS = []string{"<identity>", "<rules>", "<cwd>"}
 
 type PromptIntegrity struct {
 	Checked bool     `json:"checked"`

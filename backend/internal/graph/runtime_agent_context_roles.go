@@ -96,14 +96,13 @@ func OpenAgentContextAssembly(input AgentContextAssemblyOptions) *AgentContextAs
 	if role == "main" && input.Library != nil {
 		disabledTools = input.Library.DisabledTools()
 	}
-	docs := GraphDocumentationPathsOf()
 	definitionVersion := input.DefinitionVersion
 	if definitionVersion == "" {
 		definitionVersion = "unknown@1"
 	}
 	return &AgentContextAssembly{
 		Bundle: bundle, DisabledTools: disabledTools, Role: role, DefinitionVersion: definitionVersion,
-		DocsRoot: docs.Root, common: common, roleRules: roleRules, toolGuidance: toolGuidance,
+		common: common, roleRules: roleRules, toolGuidance: toolGuidance,
 		runtimeRules: runtimeRules, bootstrap: bootstrap, fullAccess: input.FullAccess, rsi: input.Rsi,
 		experience: input.ExperienceContext,
 		catalog:    input.Catalog,

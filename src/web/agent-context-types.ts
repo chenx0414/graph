@@ -52,7 +52,6 @@ export interface AgentCapabilityView {
 
 export interface AgentContextView {
   root: string;
-  docsRoot: string;
   definitionVersion: string | null;
   latestDefinitionVersion: string | null;
   prompts: AgentPromptView[];

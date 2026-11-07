@@ -431,7 +431,6 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 		// nobody is bound by, and nothing else in the product would say so.
 		"ruleSeedGaps":      library.RuleSeedGaps(),
 		"disabledTools":     assembly.DisabledTools,
-		"docsRoot":          preview.DocsRoot,
 		"definitionVersion": definitionVersion, "latestDefinitionVersion": latestDefinitionVersion,
 		"tools": preview.Tools, "capabilities": preview.Capabilities,
 		"sent": nil,
