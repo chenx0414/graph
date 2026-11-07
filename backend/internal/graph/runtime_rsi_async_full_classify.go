@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -31,8 +30,9 @@ type AsyncFullVerdict struct {
 }
 
 var (
-	asyncFullFailLine = regexp.MustCompile(`^\s*FAIL\s+(tests/\S+)\s*>\s*(.+?)\s*$`)
-	asyncFullTestLine = regexp.MustCompile(`^\s*×\s*(.+?)\s+—\s*(.*)$`)
+	asyncFullFailLine   = regexp.MustCompile(`^\s*FAIL\s+(tests/\S+)\s*>\s*(.+?)\s*$`)
+	asyncFullTestLine   = regexp.MustCompile(`^\s*×\s*(.+?)\s+—\s*(.*)$`)
+	asyncFullRunnerFile = regexp.MustCompile(`^\s*-\s+(tests/\S+\.test\.ts)\s*$`)
 )
 
 func LoadEnvKnownReds(path string) ([]EnvKnownRed, error) {
@@ -59,40 +59,72 @@ func LoadEnvKnownReds(path string) ([]EnvKnownRed, error) {
 
 func AsyncFullFailures(output string) []AsyncFullFailure {
 	clean := rsiEscapeCode.ReplaceAllString(output, "")
+	files := []string{}
+	fileSeen := map[string]bool{}
+	headers := map[string]string{}
 	messages := map[string]string{}
-	failures := []AsyncFullFailure{}
-	seen := map[string]bool{}
+	order := []string{}
 	for _, line := range strings.Split(clean, "\n") {
 		if match := asyncFullFailLine.FindStringSubmatch(line); match != nil {
-			test := strings.TrimSpace(match[2])
-			if seen[test] {
-				continue
+			headers[strings.TrimSpace(match[2])] = strings.TrimSpace(match[1])
+			continue
+		}
+		if match := asyncFullRunnerFile.FindStringSubmatch(line); match != nil {
+			file := strings.TrimSpace(match[1])
+			if !fileSeen[file] {
+				fileSeen[file] = true
+				files = append(files, file)
 			}
-			seen[test] = true
-			failures = append(failures, AsyncFullFailure{File: strings.TrimSpace(match[1]), Test: test})
 			continue
 		}
 		if match := asyncFullTestLine.FindStringSubmatch(line); match != nil {
 			test := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(match[1]), "[timing] "))
 			if _, found := messages[test]; !found {
 				messages[test] = strings.TrimSpace(match[2])
+				order = append(order, test)
 			}
 		}
 	}
-	for index := range failures {
-		failures[index].Message = messages[failures[index].Test]
-	}
-	extra := []string{}
-	for test := range messages {
-		if !seen[test] {
-			extra = append(extra, test)
+	failures := []AsyncFullFailure{}
+	attributed := map[string]bool{}
+	for _, test := range order {
+		message := messages[test]
+		file := headers[test]
+		if file == "" {
+			file = asyncFullFileInMessage(message, files)
 		}
+		if file != "" {
+			attributed[file] = true
+		}
+		failures = append(failures, AsyncFullFailure{File: file, Test: test, Message: message})
 	}
-	sort.Strings(extra)
-	for _, test := range extra {
-		failures = append(failures, AsyncFullFailure{Test: test, Message: messages[test]})
+	for _, file := range files {
+		if attributed[file] {
+			continue
+		}
+		failures = append(failures, AsyncFullFailure{File: file})
 	}
 	return failures
+}
+
+func asyncFullFileInMessage(message string, files []string) string {
+	if message == "" {
+		return ""
+	}
+	for _, file := range files {
+		if strings.Contains(message, file) || strings.Contains(message, asyncFullFileStem(file)) {
+			return file
+		}
+	}
+	return ""
+}
+
+func asyncFullFileStem(file string) string {
+	base := file
+	if index := strings.LastIndex(base, "/"); index >= 0 {
+		base = base[index+1:]
+	}
+	return strings.TrimSuffix(base, ".test.ts")
 }
 
 func ClassifyAsyncFull(output string, known []EnvKnownRed) AsyncFullVerdict {

@@ -69,6 +69,13 @@ test('a large command result is written to a file and the model is given the han
     expect(spilled).toContain('line-0');
     expect(spilled).toContain('line-7999');
     expect(spilled.length).toBeGreaterThan(70_000);
+
+    // The summary must not promise more than the handle holds: a handle to a
+    // short file is a result the model can never read back.
+    const claimedChars = /(\d+) chars/.exec(text)?.[1];
+    if (claimedChars) {
+      expect(spilled.length, 'the handle holds the characters the summary claims').toBe(Number(claimedChars));
+    }
   } finally {
     await daemon.close();
     await provider.close();

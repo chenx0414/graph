@@ -113,3 +113,36 @@ func TestLoadEnvKnownRedsRejectsAnUnreadableFile(t *testing.T) {
 		t.Fatalf("a missing list must mean no known reds, got %v %v", reds, err)
 	}
 }
+
+func TestAsyncFullRunnerListAttributesAMessageThatHasNoFailHeader(t *testing.T) {
+	output := "check:tests: 4 file(s) failed twice, so the gate stops here:\n" +
+		"  - tests/e2e/desktop-crash-recovery.test.ts\n" +
+		"  - tests/e2e/desktop-shell.test.ts\n" +
+		"  - tests/e2e/provider-independent-reviews.test.ts\n" +
+		"  - tests/e2e/tool-result-spill.test.ts\n" +
+		"      × [timing] a killed app restarts on the same conversation with a real crash reason while its daemon and lanes keep working — Error: timed out after 120000ms waiting for the master to create the graph at waitFor (/tmp/graph-async-full-1/tests/e2e/desktop-crash-recovery.fixture.ts:73:9)\n" +
+		" ❯ tests/e2e/tool-result-spill.test.ts:70:21\n" +
+		"     68|     const spilled = await readFile(handle!, 'utf8');\n"
+	verdict := ClassifyAsyncFull(output, knownReds())
+	if verdict.Environment {
+		t.Fatalf("a real failure in the same run was excused because the known reds were in it: %+v", verdict)
+	}
+	joined := strings.Join(verdict.Unmatched, " | ")
+	if !strings.Contains(joined, "tool-result-spill.test.ts") {
+		t.Fatalf("the unrelated failure was not named: %v", verdict.Unmatched)
+	}
+	if strings.Contains(joined, "desktop-crash-recovery") {
+		t.Fatalf("the known red was reported as unmatched because its message arrived without a FAIL header: %v", verdict.Unmatched)
+	}
+}
+
+func TestAsyncFullRunnerListOnlyOfKnownFilesIsAnEnvironmentRed(t *testing.T) {
+	output := "check:tests: 3 file(s) failed twice, so the gate stops here:\n" +
+		"  - tests/e2e/desktop-crash-recovery.test.ts\n" +
+		"  - tests/e2e/desktop-shell.test.ts\n" +
+		"  - tests/e2e/provider-independent-reviews.test.ts\n"
+	verdict := ClassifyAsyncFull(output, knownReds())
+	if !verdict.Environment {
+		t.Fatalf("a run that only failed the three known reds was called a regression: %+v", verdict)
+	}
+}
