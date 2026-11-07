@@ -123,27 +123,17 @@ func autoToolInlineResult(job *deferredToolJob) (any, error) {
 }
 
 func bindAutoToolRow(input autoToolAdmission, job *deferredToolJob) (DeferredToolCall, error) {
-	var failure error
-	var bound DeferredToolCall
-	piWorkerAdmitWithoutSettle(input.Gate, job.callId, func() any {
-		record, err := recordDeferredToolCall(deferredToolAdmission{
-			Store: input.Store, Request: input.Request, Definition: input.Definition,
-			Params: input.Params, Gate: input.Gate, CallId: job.callId,
-		})
-		if err != nil {
-			failure = err
-			return nil
-		}
-		bound = record.row
-		job.id = record.row.Id
-		registerDeferredToolJob(job)
-		return nil
+	record, failure := recordDeferredToolCall(deferredToolAdmission{
+		Store: input.Store, Request: input.Request, Definition: input.Definition,
+		Params: input.Params, Gate: input.Gate, CallId: job.callId,
 	})
 	if failure != nil {
 		return DeferredToolCall{}, failure
 	}
-	if bound.Id == "" {
+	if record.row.Id == "" {
 		return DeferredToolCall{}, fmt.Errorf("the background call was not recorded")
 	}
-	return bound, nil
+	job.id = record.row.Id
+	registerDeferredToolJob(job)
+	return record.row, nil
 }

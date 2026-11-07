@@ -9,9 +9,10 @@ import (
 )
 
 type autoDeferFixture struct {
-	store  *TaskStore
-	modes  *[]string
-	closed func()
+	store      *TaskStore
+	modes      *[]string
+	dispatched *map[string]int
+	closed     func()
 }
 
 func newAutoDeferFixture(t *testing.T) autoDeferFixture {
@@ -40,13 +41,20 @@ func newAutoDeferFixture(t *testing.T) autoDeferFixture {
 	}
 	NewKernelStore(store)
 	modes := []string{}
-	return autoDeferFixture{store: store, modes: &modes, closed: closeStore}
+	dispatched := map[string]int{}
+	return autoDeferFixture{store: store, modes: &modes, dispatched: &dispatched, closed: closeStore}
 }
 
 func (fixture autoDeferFixture) input(body func() (any, error), threshold int) autoToolAdmission {
 	gate := SendGate{
-		Dispatch: func(_ string, _ float64, send func() any) any { return send() },
-		Settle:   func(_ string, _ *TokenUsage) { *fixture.modes = append(*fixture.modes, "settled") },
+		Dispatch: func(id string, _ float64, send func() any) any {
+			(*fixture.dispatched)[id] += 1
+			if (*fixture.dispatched)[id] > 1 {
+				Raise("invalid_input", "Invocation already dispatched")
+			}
+			return send()
+		},
+		Settle: func(_ string, _ *TokenUsage) { *fixture.modes = append(*fixture.modes, "settled") },
 	}
 	return autoToolAdmission{
 		Store: fixture.store,
@@ -98,6 +106,9 @@ func TestToolInsideTheThresholdAnswersInlineAndLeavesNoRecord(t *testing.T) {
 	if calls := *fixture.modes; len(calls) != 1 {
 		t.Fatalf("the inline call settled the gate %d times", len(calls))
 	}
+	if count := dispatchCount(fixture); count != 1 {
+		t.Fatalf("the inline call dispatched %d invocations instead of one", count)
+	}
 }
 
 func TestToolPastTheThresholdHandsOffAndSettlesTheSameRecord(t *testing.T) {
@@ -141,6 +152,17 @@ func TestToolPastTheThresholdHandsOffAndSettlesTheSameRecord(t *testing.T) {
 	if len(resume) != 1 {
 		t.Fatalf("the settled call left %d resume messages instead of one", len(resume))
 	}
+	if count := dispatchCount(fixture); count != 1 {
+		t.Fatalf("the handed-off call dispatched %d invocations instead of one", count)
+	}
+}
+
+func dispatchCount(fixture autoDeferFixture) int {
+	total := 0
+	for _, count := range *fixture.dispatched {
+		total += count
+	}
+	return total
 }
 
 func TestToolHandsOffOnlyWhenItsBudgetExceedsTheThreshold(t *testing.T) {
