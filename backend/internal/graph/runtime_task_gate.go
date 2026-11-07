@@ -9,7 +9,6 @@ const (
 	InvocationCompaction       InvocationPurpose = "compaction"
 	InvocationBranchSummary    InvocationPurpose = "branch_summary"
 	InvocationPromptSuggestion InvocationPurpose = "prompt_suggestion"
-	InvocationSkillSediment    InvocationPurpose = "skill_sediment"
 )
 
 // INVOCATION_PURPOSES is every purpose a provider send may declare.
@@ -18,7 +17,6 @@ var INVOCATION_PURPOSES = []InvocationPurpose{
 	InvocationCompaction,
 	InvocationBranchSummary,
 	InvocationPromptSuggestion,
-	InvocationSkillSediment,
 }
 
 // TaskGateOperation is the operation one gate belongs to.

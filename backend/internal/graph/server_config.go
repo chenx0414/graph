@@ -24,11 +24,6 @@ type LimitsConfig struct {
 	SharedGroups        map[string]int `json:"sharedGroups"`
 }
 
-// GraphSkills is the skill-library block the document is allowed to carry.
-type GraphSkills struct {
-	Sedimentation SedimentSettings `json:"sedimentation"`
-}
-
 // GraphModels is the configured directory and grade preferences.
 type GraphModels struct {
 	Entries     []ConfiguredModel   `json:"entries"`
@@ -70,7 +65,6 @@ type GraphConfig struct {
 	Credentials           map[string]CredentialConfig `json:"credentials"`
 	Limits                LimitsConfig                `json:"limits"`
 	Access                AccessPolicy                `json:"access"`
-	Skills                GraphSkills                 `json:"skills"`
 	PiExtensionAutoUpdate bool                        `json:"piExtensionAutoUpdate"`
 	Codemode              GraphCodemode               `json:"codemode"`
 }
@@ -98,13 +92,11 @@ func configInvalid(message string) {
 
 // EmptyGraphConfig is the unconfigured document.
 func EmptyGraphConfig() GraphConfig {
-	sediment := DEFAULT_SEDIMENT_SETTINGS
 	return GraphConfig{
 		Path: nil, Configured: false, Projects: []ProjectConfig{}, Models: nil,
 		Credentials:           map[string]CredentialConfig{},
 		Limits:                LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}},
 		Access:                FullAccessPolicy(),
-		Skills:                GraphSkills{Sedimentation: sediment},
 		PiExtensionAutoUpdate: true,
 	}
 }

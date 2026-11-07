@@ -81,12 +81,7 @@ func piAdapterTurnOutcome(options PiAdapterOptions, input piAdapterRunInput, tur
 		}
 		store.Event(operation.TaskId, "prompt_suggestion.decided", decision)
 	}
-	// Sedimentation runs after the turn like the composer suggestion does: one extra call on
-	// a cheaper model, through the same gate, and the write happens in `applySedimentProposal`
 	// so it cannot escape the project's skill folder. Never allowed to break the turn.
-	if turn.Conversation != nil && options.Sediment != nil {
-		piAdapterRunSediment(options, input, turn, entry, reply, lastUserMessage)
-	}
 	// The reload handoff keeps its own output: the console shows the receipt, while the review
 	// above already read the change itself.
 	if turn.ReloadReceipt != nil && *turn.ReloadReceipt != nil {

@@ -105,7 +105,7 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 			credentials[id] = credential
 		}
 	}
-	limits := LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}, }
+	limits := LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}}
 	if value, ok := root["limits"]; ok {
 		rawLimits := asObject(value, "limits")
 		credentialLimits := map[string]any{}
@@ -225,12 +225,10 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 		}
 		models = &GraphModels{Entries: entries, Preferences: preferences}
 	}
-	_, skillsPresent := root["skills"]
 	pathCopy := configPath
 	return GraphConfig{
 		Path: &pathCopy, Configured: true, Projects: projects, Models: models, Credentials: credentials, Limits: limits,
 		Access: ParseAccessPolicy(root["access"], "access"),
-		Skills: configParseSkills(root["skills"], models, skillsPresent),
 		PiExtensionAutoUpdate: func() bool {
 			if flag := configOptionalBool(root["piExtensionAutoUpdate"], "piExtensionAutoUpdate", mapHas(root, "piExtensionAutoUpdate")); flag != nil {
 				return *flag

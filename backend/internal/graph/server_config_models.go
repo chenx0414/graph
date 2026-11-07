@@ -14,59 +14,6 @@ func configPositiveInt(value any, path string) int {
 	return n
 }
 
-func configParseSkills(value any, models *GraphModels, present bool) GraphSkills {
-	sediment := DEFAULT_SEDIMENT_SETTINGS
-	if !present {
-		return GraphSkills{Sedimentation: sediment}
-	}
-	root := asObject(value, "skills")
-	raw, rawPresent := root["sedimentation"]
-	var block map[string]any
-	if rawPresent {
-		block = asObject(raw, "skills.sedimentation")
-	}
-	var model *string
-	if block != nil {
-		if current, ok := block["model"]; ok && current != nil {
-			text := configAsString(current, "skills.sedimentation.model")
-			model = &text
-		}
-	}
-	if model != nil && models != nil {
-		found := false
-		for _, entry := range models.Entries {
-			if entry.Id == *model {
-				found = true
-				break
-			}
-		}
-		if !found {
-			configInvalid("skills.sedimentation.model references unknown model \"" + *model + "\"")
-		}
-	}
-	enabled := false
-	if block != nil {
-		if flag := configOptionalBool(block["enabled"], "skills.sedimentation.enabled", mapHas(block, "enabled")); flag != nil {
-			enabled = *flag
-		}
-	}
-	after := sediment.AfterToolCalls
-	budget := sediment.BudgetTokens
-	if block != nil {
-		if _, ok := block["afterToolCalls"]; ok {
-			after = configPositiveInt(block["afterToolCalls"], "skills.sedimentation.afterToolCalls")
-		}
-		if _, ok := block["budgetTokens"]; ok {
-			budget = configPositiveInt(block["budgetTokens"], "skills.sedimentation.budgetTokens")
-		}
-	}
-	sediment.Enabled = enabled
-	sediment.AfterToolCalls = after
-	sediment.Model = model
-	sediment.BudgetTokens = budget
-	return GraphSkills{Sedimentation: sediment}
-}
-
 func configAsCost(value any, path string) ModelCost {
 	raw := asObject(value, path)
 	field := func(name string) float64 {

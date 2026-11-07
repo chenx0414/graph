@@ -29,7 +29,6 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		ApiKeyFor:    runtime.apiKeyFor,
 		BindingFor:   runtime.liveCredentialFor,
 		Scheduler:    runtime.scheduler,
-		Sediment:     runtime.sedimentSettings,
 		ModelRuntime: runtime.modelRuntime(),
 		Channels:     runtime.piChannels(),
 		TaskSetups:   runtime.taskSetups,
@@ -111,14 +110,6 @@ func (runtime *TaskRuntime) modelRuntime() *ModelRuntime {
 		return nil
 	}
 	return runtime.models.ModelRuntime
-}
-
-// sedimentSettings reads the post-operation skill review settings live.
-func (runtime *TaskRuntime) sedimentSettings() SedimentSettings {
-	if runtime.live == nil || runtime.live.Config == nil {
-		return SedimentSettingsFrom(nil)
-	}
-	return SedimentSettingsFrom(runtime.live.Config())
 }
 
 // piChannels are the host channels the Agent session may use.

@@ -222,7 +222,7 @@ func SanitizeConfig(config GraphConfig, env map[string]string) map[string]any {
 	return map[string]any{
 		"path": config.Path, "configured": config.Configured, "piExtensionAutoUpdate": config.PiExtensionAutoUpdate,
 		"projects": config.Projects, "models": models, "credentials": credentials, "limits": config.Limits,
-		"access": config.Access, "skills": config.Skills,
+		"access": config.Access,
 	}
 }
 

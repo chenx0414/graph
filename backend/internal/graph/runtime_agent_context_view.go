@@ -78,11 +78,6 @@ var agentLegacyPromptDefaults = map[AgentPromptKey][]string{
 }
 
 var agentLegacyPromptReplacements = map[AgentPromptKey][][2]string{
-	"runtime/sediment.md": {
-		{"Answer with one JSON object and nothing else:", "Answer with one line of metadata, then the skill itself:"},
-		{"{\"action\":\"create\"|\"update\"|\"nothing\",\"id\":\"<lowercase-slug>\",\"description\":\"<one sentence saying when to use it>\",\"body\":\"<markdown>\",\"reason\":\"<one line>\"}", "{\"action\":\"create\"|\"update\"|\"nothing\",\"id\":\"<lowercase-slug>\",\"description\":\"<one sentence saying when to use it>\",\"reason\":\"<one line>\"}\nKeep that line to metadata only — never put markdown in it. When the action is create or update, follow it with the skill in a fenced block:\n```markdown\n<the skill: the procedure in order, the commands that work, the pitfalls>\n```"},
-		{"body is markdown, at most 20000 characters, and is the skill itself.", "The fenced block is the skill itself: markdown, at most 20000 characters, the thing a future operation follows."},
-	},
 }
 
 // agentContextUniqueSorted removes duplicates and sorts the names.

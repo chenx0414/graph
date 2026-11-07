@@ -35,9 +35,6 @@ type PiAdapterOptions struct {
 	BindingFor func(entry ModelEntry) *PiAdapterBinding
 	// Scheduler is the shared model scheduler.
 	Scheduler *ModelScheduler
-	// Sediment is the settings for the post-operation skill review, read live so the switch needs
-	// no restart.
-	Sediment func() SedimentSettings
 	// ModelRuntime is the provider registry.
 	ModelRuntime *ModelRuntime
 	// Network is the reach the operation was granted.

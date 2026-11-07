@@ -25,7 +25,6 @@ var agentStaticPrompts = []agentStaticPrompt{
 	{Key: "runtime/worker.md", Title: "Worker 运行规则", Description: "普通实现、审查和验证 Agent 每次 operation 注入 system prompt 的 runtime rules。", Group: "runtime", Fallback: "worker"},
 	{Key: "runtime/node.md", Title: "Graph 节点运行规则", Description: "接口投递内核中实现和审查节点使用的运行规则；任务和输出要求由节点声明。", Group: "runtime", Fallback: "node"},
 	{Key: "runtime/prompt-suggestion.md", Title: "输入建议生成", Description: "仅主 Agent 回复后生成下一条输入建议的独立模型请求使用。", Group: "runtime", Fallback: "promptSuggestion"},
-	{Key: "runtime/sediment.md", Title: "技能沉淀自省", Description: "仅在开关开启时，操作收尾后为沉淀技能而发起的独立模型请求使用。", Group: "runtime", Fallback: "sediment"},
 }
 
 // resolvedAgentContextDefaults holds the effective text of every prompt slot.
@@ -41,7 +40,6 @@ type resolvedAgentContextDefaults struct {
 	Worker           string
 	Node             string
 	PromptSuggestion string
-	Sediment         string
 }
 
 // agentToolStateFile is the on-disk shape of tools.json.

@@ -44,7 +44,6 @@ func NewAgentContextLibrary(root string, defaults AgentContextDefaults) *AgentCo
 		Worker:           agentContextDefault(defaults.Worker, DEFAULT_WORKER_PROMPT),
 		Node:             agentContextDefault(defaults.Node, DEFAULT_NODE_PROMPT),
 		PromptSuggestion: agentContextDefault(defaults.PromptSuggestion, DEFAULT_PROMPT_SUGGESTION_PROMPT),
-		Sediment:         agentContextDefault(defaults.Sediment, DEFAULT_SEDIMENT_PROMPT),
 	}
 	return library
 }
@@ -123,8 +122,6 @@ func (library *AgentContextLibrary) fallbackContent(name string) string {
 		return library.defaults.Node
 	case "promptSuggestion":
 		return library.defaults.PromptSuggestion
-	case "sediment":
-		return library.defaults.Sediment
 	}
 	return ""
 }

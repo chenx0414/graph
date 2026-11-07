@@ -88,10 +88,11 @@ test('the privileged secret bridge keeps the latest pending write until the desk
   expect(config.status).toBe(200);
   const view = config.body as {
     pendingSecretRefs: string[];
-    config: { skills: { sedimentation: unknown }; credentials: Record<string, { secretRef: string; configured: boolean }> };
+    config: { skills?: unknown; credentials: Record<string, { secretRef: string; configured: boolean }> };
   };
   expect(view.pendingSecretRefs).toEqual(['GRAPH_LOCAL_KEY']);
-  expect(view.config.skills.sedimentation).toEqual({ enabled: false, afterToolCalls: 10, model: null, budgetTokens: 40000 });
+  // The skill sedimentation switch is gone: the config carries no skills block at all.
+  expect(view.config.skills, 'the removed sedimentation setting is still served').toBeUndefined();
   expect(view.config.credentials.local).toMatchObject({ secretRef: 'GRAPH_LOCAL_KEY', configured: true });
   expect(JSON.stringify(config.body)).not.toContain('synthetic-last');
   expect(await readFile(configPath, 'utf8')).not.toContain('synthetic-last');
