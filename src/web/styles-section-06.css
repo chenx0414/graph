@@ -543,9 +543,10 @@
   color: var(--muted);
   font-size: .8125rem;
 }
-.compaction-notice-head { display: flex; align-items: center; gap: 10px; }
+.compaction-notice-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.compaction-notice-details { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 2px; color: var(--faint); overflow-wrap: anywhere; }
 .compaction-notice-rule { flex: 1; height: 1px; background: var(--border); }
-.compaction-notice-text { display: inline-flex; align-items: center; gap: 6px; text-align: center; white-space: nowrap; }
+.compaction-notice-text { display: inline-flex; align-items: center; gap: 6px; text-align: center; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .compaction-summary {
   margin: 0 0 0 22px;
   padding: 8px 12px;

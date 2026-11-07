@@ -378,6 +378,7 @@
   height: 100%;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 22px 24px 30px;
   overscroll-behavior: contain;
 }

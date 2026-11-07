@@ -43,7 +43,7 @@ export type TranscriptRow =
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'compaction'; id: string; text: string; tokensAfter?: number; summary?: string }
-  | { kind: 'rsiFull'; id: string; text: string; verdict: string; commit: string; environment: boolean; files: string[]; logPath: string }
+  | { kind: 'rsiFull'; id: string; text: string; verdict: string; verdictDetails: string[]; commit: string; environment: boolean; files: string[]; logPath: string }
   | { kind: 'toolSettled'; id: string; text: string; tool: string; state: string; delivered: boolean }
   | { kind: 'thinking'; id: 'thinking' };
 
@@ -425,11 +425,13 @@ function rsiFullRow(message: ConversationMessage): TranscriptRow {
   const lines = message.text.split('\n').map(line => line.trim()).filter(Boolean);
   const field = (label: string) => lines.find(line => line.startsWith(label))?.slice(label.length).trim() ?? '';
   const data = (message.data ?? {}) as { environment?: unknown };
+  const clauses = field('判定:').split('；').map(clause => clause.trim()).filter(Boolean);
   return {
     kind: 'rsiFull',
     id: `rsiFull:${message.id}`,
     text: message.text,
-    verdict: field('判定:'),
+    verdict: clauses[0] ?? '',
+    verdictDetails: clauses.slice(1),
     commit: field('提交:'),
     environment: data.environment === true,
     files: [...new Set(lines

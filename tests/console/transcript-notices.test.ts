@@ -58,6 +58,30 @@ test('a background full-suite notice is its own row, never a user message', () =
   });
 });
 
+test('a long verdict is split so the card headline stays one short line', () => {
+  const text = [
+    '[后台全量确认失败]',
+    '提交: 11138f1c4392',
+    '判定: 回归；未匹配: tests/e2e/desktop-shell.test.ts: locator.click: Timeout 30000ms exceeded；合并了 3 次确认请求，只跑一次全量',
+    '完整日志: /tmp/async-full.log',
+  ].join('\n');
+  const rows = buildTranscriptRows({
+    messages: [{
+      ...message({ id: 'long', seq: 1, role: 'user', text }),
+      data: { source: { kind: 'rsi_async_full', commit: '11138f1c4392' }, environment: false },
+    }],
+    streaming: [], liveTools: [], busy: false,
+  });
+  expect(rows.map(row => row.kind)).toEqual(['rsiFull']);
+  expect(rows[0]).toMatchObject({
+    verdict: '回归',
+    verdictDetails: [
+      '未匹配: tests/e2e/desktop-shell.test.ts: locator.click: Timeout 30000ms exceeded',
+      '合并了 3 次确认请求，只跑一次全量',
+    ],
+  });
+});
+
 test('an ordinary user message keeps its bubble even when it quotes a notice', () => {
   const rows = buildTranscriptRows({
     messages: [message({ id: 'user', seq: 1, role: 'user', text: '[后台全量确认失败] 这是什么意思？' })],

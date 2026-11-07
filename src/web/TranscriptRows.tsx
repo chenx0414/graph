@@ -393,6 +393,11 @@ function RsiFullCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsiFull' }>
         </span>
         <span className="compaction-notice-rule" aria-hidden="true" />
       </div>
+      {row.verdictDetails.length > 0 && (
+        <ul className="compaction-notice-details" data-testid="rsi-full-details">
+          {row.verdictDetails.map(detail => <li key={detail}>{detail}</li>)}
+        </ul>
+      )}
       <div className="compaction-summary" data-testid="rsi-full-summary">
         {failed > 0 ? `${failed} 个文件失败` : '没有解析出失败文件'}
         {row.commit ? ` · 提交 ${row.commit.slice(0, 8)}` : ''}
