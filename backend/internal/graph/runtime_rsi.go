@@ -16,7 +16,7 @@ const RSI_BUILD_TIMEOUT_MS = 20 * 60 * 1000
 type RsiCommand struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
-	Nice int `json:"nice,omitempty"`
+	Nice    int      `json:"nice,omitempty"`
 }
 
 type RsiFileEdit struct {
@@ -25,12 +25,12 @@ type RsiFileEdit struct {
 }
 
 type RsiFileChange struct {
-	Path    string        `json:"path"`
-	Action  string        `json:"action"`
-	Content *string       `json:"content,omitempty"`
-	Edits   []RsiFileEdit `json:"edits,omitempty"`
-	From    *string       `json:"from,omitempty"`
-	FromPath *string `json:"fromPath,omitempty"`
+	Path     string        `json:"path"`
+	Action   string        `json:"action"`
+	Content  *string       `json:"content,omitempty"`
+	Edits    []RsiFileEdit `json:"edits,omitempty"`
+	From     *string       `json:"from,omitempty"`
+	FromPath *string       `json:"fromPath,omitempty"`
 }
 
 type RsiChangeInput struct {
@@ -43,15 +43,15 @@ type RsiChangeInput struct {
 	Changes   []RsiFileChange `json:"changes"`
 	Checks    []RsiCommand    `json:"checks,omitempty"`
 	Activate  *bool           `json:"activate,omitempty"`
-	DryRun bool `json:"dryRun,omitempty"`
-	Force bool `json:"force,omitempty"`
+	DryRun    bool            `json:"dryRun,omitempty"`
+	Force     bool            `json:"force,omitempty"`
 }
 
 type RsiValidationResult struct {
-	Command string `json:"command"`
-	Status  string `json:"status"`
-	Output  string `json:"output"`
-	Environment bool `json:"environment,omitempty"`
+	Command     string `json:"command"`
+	Status      string `json:"status"`
+	Output      string `json:"output"`
+	Environment bool   `json:"environment,omitempty"`
 }
 
 type RsiReceiptActivation struct {
@@ -78,25 +78,25 @@ type RsiReceipt struct {
 	AppInstall      *RsiAppInstall        `json:"appInstall,omitempty"`
 	Activation      *RsiReceiptActivation `json:"activation,omitempty"`
 	Force           bool                  `json:"force,omitempty"`
-	PendingFiles []string `json:"pendingFiles,omitempty"`
-	Error        *string  `json:"error,omitempty"`
-	Diff         *string  `json:"diff,omitempty"`
-	Adopted []string `json:"adopted,omitempty"`
-	Report  string   `json:"report"`
-	OutputPath *string `json:"outputPath,omitempty"`
-	ElapsedMs *int64 `json:"elapsedMs,omitempty"`
+	PendingFiles    []string              `json:"pendingFiles,omitempty"`
+	Error           *string               `json:"error,omitempty"`
+	Diff            *string               `json:"diff,omitempty"`
+	Adopted         []string              `json:"adopted,omitempty"`
+	Report          string                `json:"report"`
+	OutputPath      *string               `json:"outputPath,omitempty"`
+	ElapsedMs       *int64                `json:"elapsedMs,omitempty"`
 }
 
 type RsiActivation struct {
 	State string `json:"state"`
-	Note string `json:"note"`
+	Note  string `json:"note"`
 }
 
 type RsiActivationInput struct {
-	Commit *string
+	Commit       *string
 	CommittedNow bool
 	Activate     bool
-	Live bool
+	Live         bool
 }
 
 type RsiPendingRestart struct {
@@ -117,11 +117,11 @@ type RsiSyncEntry struct {
 }
 
 type RsiSyncState struct {
-	Unpublished []RsiSyncEntry `json:"unpublished"`
-	Expected  []RsiSyncEntry `json:"expected"`
-	LocalOnly int            `json:"localOnly"`
-	Deploy *DeployDriftReport `json:"deploy,omitempty"`
-	Note string `json:"note"`
+	Unpublished    []RsiSyncEntry     `json:"unpublished"`
+	Expected       []RsiSyncEntry     `json:"expected"`
+	LocalOnly      int                `json:"localOnly"`
+	Deploy         *DeployDriftReport `json:"deploy,omitempty"`
+	Note           string             `json:"note"`
 	deployCompared bool
 }
 
@@ -166,18 +166,18 @@ type RsiLastActivation struct {
 }
 
 type RsiStatus struct {
-	Available bool    `json:"available"`
-	Root      *string `json:"root"`
-	Branch    *string `json:"branch"`
-	Reason *string `json:"reason,omitempty"`
-	Sync           *RsiSyncState      `json:"sync"`
-	PendingRestart *RsiPendingRestart `json:"pendingRestart"`
-	LastActivation *RsiLastActivation `json:"lastActivation"`
+	Available          bool                   `json:"available"`
+	Root               *string                `json:"root"`
+	Branch             *string                `json:"branch"`
+	Reason             *string                `json:"reason,omitempty"`
+	Sync               *RsiSyncState          `json:"sync"`
+	PendingRestart     *RsiPendingRestart     `json:"pendingRestart"`
+	LastActivation     *RsiLastActivation     `json:"lastActivation"`
 	InterruptedAttempt *RsiInterruptedAttempt `json:"interruptedAttempt"`
 	ActiveOperations   int                    `json:"activeOperations"`
 	Operations         []RsiOperation         `json:"operations"`
-	OperationsKnown bool `json:"operationsKnown"`
-	CanRestart      bool `json:"canRestart"`
+	OperationsKnown    bool                   `json:"operationsKnown"`
+	CanRestart         bool                   `json:"canRestart"`
 }
 
 type RsiValidateInput struct {
@@ -191,7 +191,7 @@ type RsiValidateInput struct {
 type RsiValidateFunc func(input RsiValidateInput) []RsiValidationResult
 
 type RsiServiceOptions struct {
-	Root *string
+	Root     *string
 	StateDir string
 	Validate RsiValidateFunc
 }
@@ -215,8 +215,8 @@ type ValidationCommandPlan struct {
 }
 
 type RsiService struct {
-	reload *RsiReloadHooks
-	Root *string
+	reload    *RsiReloadHooks
+	Root      *string
 	Available bool
 
 	stateDir      string
@@ -224,5 +224,5 @@ type RsiService struct {
 	runningCommit *string
 	mu            sync.Mutex
 	changing      bool
-	asyncFull sync.Map
+	asyncFull     rsiAsyncFullState
 }

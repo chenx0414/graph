@@ -5,7 +5,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,59 +17,160 @@ func rsiAsyncFullCommand() RsiCommand {
 	return RsiCommand{Command: "node", Args: []string{"--run", "check:full"}, Nice: 10}
 }
 
+type rsiAsyncFullJob struct {
+	ActivationID  string
+	Commit        string
+	Conversations []string
+	Coalesced     int
+}
+
+type rsiAsyncFullState struct {
+	mu      sync.Mutex
+	running bool
+	pending *rsiAsyncFullJob
+	report  string
+	exec    func(*TaskStore, rsiAsyncFullJob)
+}
+
 func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, commit string, conversations []string) {
 	if service.Root == nil || activationID == "" || len(conversations) == 0 {
 		return
 	}
-	key := activationID + "|" + commit
-	if _, running := service.asyncFull.LoadOrStore(key, true); running {
+	job := rsiAsyncFullJob{ActivationID: activationID, Commit: commit, Conversations: append([]string{}, conversations...), Coalesced: 1}
+	state := &service.asyncFull
+	state.mu.Lock()
+	if state.running {
+		state.pending = rsiAsyncFullCoalesce(state.pending, job)
+		state.mu.Unlock()
 		return
 	}
-	root := *service.Root
-	stateDir := service.stateDir
-	go func() {
-		defer service.asyncFull.Delete(key)
-		runRoot, cleanup := rsiSnapshotRoot(root, commit)
-		defer cleanup()
-		result := rsiRunCommand(runRoot, rsiAsyncFullCommand(), RSI_ASYNC_FULL_TIMEOUT_MS)
-		logPath := filepath.Join(stateDir, "rsi", "reports", "async-full-"+activationID+".log")
-		if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err == nil {
-			header := "ran in " + runRoot + "\n"
-			_ = os.WriteFile(logPath, []byte(header+result.Output), 0o600)
+	state.running = true
+	state.mu.Unlock()
+	go service.rsiDrainAsyncFull(store, job)
+}
+
+func rsiAsyncFullCoalesce(pending *rsiAsyncFullJob, job rsiAsyncFullJob) *rsiAsyncFullJob {
+	if pending == nil {
+		return &job
+	}
+	merged := rsiAsyncFullJob{ActivationID: job.ActivationID, Commit: job.Commit, Coalesced: pending.Coalesced + 1}
+	seen := map[string]bool{}
+	for _, conversationID := range append(append([]string{}, pending.Conversations...), job.Conversations...) {
+		if seen[conversationID] {
+			continue
 		}
-		if result.Status == "passed" {
+		seen[conversationID] = true
+		merged.Conversations = append(merged.Conversations, conversationID)
+	}
+	return &merged
+}
+
+func (service *RsiService) rsiDrainAsyncFull(store *TaskStore, job rsiAsyncFullJob) {
+	state := &service.asyncFull
+	for {
+		service.rsiExecuteAsyncFull(store, job)
+		state.mu.Lock()
+		pending := state.pending
+		state.pending = nil
+		if pending == nil {
+			state.running = false
+			state.mu.Unlock()
 			return
 		}
-		known, _ := LoadEnvKnownReds(filepath.Join(runRoot, "tests", "env-known-reds.json"))
-		classified := ClassifyAsyncFull(result.Output, known)
-		environment := classified.Environment
-		verdict := "回归"
-		if environment {
-			verdict = "环境故障（失败项都命中 tests/env-known-reds.json 的已知环境问题），先别当回归追"
-		}
-		if len(classified.Unmatched) > 0 {
-			verdict += "；未匹配: " + strings.Join(classified.Unmatched, " / ")
-		}
-		if len(classified.Flaky) > 0 {
-			verdict += "；重跑通过（不计为回归，但值得复核）: " + strings.Join(classified.Flaky, " / ")
-		}
-		summary := rsiAsyncFullSummary(result.Output)
-		for _, conversationID := range conversations {
-			text := rsiAsyncFullNotice(commit, verdict, summary, logPath)
-			AppendMessage(store, MessageInput{
-				ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat", Text: text, State: MessageStatePending,
-				Data: map[string]any{
-					"source":      map[string]any{"kind": "rsi_async_full", "activationId": activationID, "commit": commit},
-					"environment": environment,
-				},
-			})
-			anchor := graphDBString(kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE id=?", conversationID), "anchor_task_id")
-			WakeMaster(store, WakeIntent{
-				TaskID: anchor, Kind: "rsi_async_full", DedupeKey: activationID + ":" + conversationID,
-				Data: map[string]any{"activationId": activationID, "commit": commit, "environment": environment}, HasData: true,
-			})
-		}
-	}()
+		state.mu.Unlock()
+		job = *pending
+	}
+}
+
+func (service *RsiService) rsiExecuteAsyncFull(store *TaskStore, job rsiAsyncFullJob) {
+	if service.asyncFull.exec != nil {
+		service.asyncFull.exec(store, job)
+		return
+	}
+	service.rsiRunAsyncFull(store, job)
+}
+
+func (service *RsiService) rsiRunAsyncFull(store *TaskStore, job rsiAsyncFullJob) {
+	root := *service.Root
+	stateDir := service.stateDir
+	runRoot, cleanup := rsiSnapshotRoot(root, job.Commit)
+	defer cleanup()
+	result := rsiRunCommand(runRoot, rsiAsyncFullCommand(), RSI_ASYNC_FULL_TIMEOUT_MS)
+	logPath := filepath.Join(stateDir, "rsi", "reports", "async-full-"+job.ActivationID+".log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err == nil {
+		header := "ran in " + runRoot + "\n"
+		_ = os.WriteFile(logPath, []byte(header+result.Output), 0o600)
+	}
+	if result.Status == "passed" {
+		service.rsiAsyncFullNotePass()
+		return
+	}
+	known, _ := LoadEnvKnownReds(filepath.Join(runRoot, "tests", "env-known-reds.json"))
+	classified := ClassifyAsyncFull(result.Output, known)
+	environment := classified.Environment
+	verdict := "回归"
+	if environment {
+		verdict = "环境故障（失败项都命中 tests/env-known-reds.json 的已知环境问题），先别当回归追"
+	}
+	if len(classified.Unmatched) > 0 {
+		verdict += "；未匹配: " + strings.Join(classified.Unmatched, " / ")
+	}
+	if len(classified.Flaky) > 0 {
+		verdict += "；重跑通过（不计为回归，但值得复核）: " + strings.Join(classified.Flaky, " / ")
+	}
+	if job.Coalesced > 1 {
+		verdict += "；合并了 " + itoa(job.Coalesced) + " 次确认请求，只跑一次全量"
+	}
+	causes := []string{}
+	for _, failure := range AsyncFullFailures(result.Output) {
+		causes = append(causes, failure.File)
+	}
+	causes = append(causes, classified.Unmatched...)
+	causes = append(causes, classified.Flaky...)
+	if !service.rsiAsyncFullShouldReport(verdict, causes) {
+		return
+	}
+	summary := rsiAsyncFullSummary(result.Output)
+	for _, conversationID := range job.Conversations {
+		text := rsiAsyncFullNotice(job.Commit, verdict, summary, logPath)
+		AppendMessage(store, MessageInput{
+			ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat", Text: text, State: MessageStatePending,
+			Data: map[string]any{
+				"source":      map[string]any{"kind": "rsi_async_full", "activationId": job.ActivationID, "commit": job.Commit},
+				"environment": environment,
+			},
+		})
+		anchor := graphDBString(kernelRow(store.Db, "SELECT anchor_task_id FROM conversations WHERE id=?", conversationID), "anchor_task_id")
+		WakeMaster(store, WakeIntent{
+			TaskID: anchor, Kind: "rsi_async_full", DedupeKey: job.ActivationID + ":" + conversationID,
+			Data: map[string]any{"activationId": job.ActivationID, "commit": job.Commit, "environment": environment}, HasData: true,
+		})
+	}
+}
+
+func (service *RsiService) rsiAsyncFullShouldReport(verdict string, causes []string) bool {
+	fingerprint := rsiAsyncFullFingerprint(verdict, causes)
+	state := &service.asyncFull
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.report == fingerprint {
+		return false
+	}
+	state.report = fingerprint
+	return true
+}
+
+func (service *RsiService) rsiAsyncFullNotePass() {
+	state := &service.asyncFull
+	state.mu.Lock()
+	state.report = ""
+	state.mu.Unlock()
+}
+
+func rsiAsyncFullFingerprint(verdict string, causes []string) string {
+	sorted := append([]string{}, causes...)
+	sort.Strings(sorted)
+	return verdict + "\x00" + strings.Join(sorted, "\x00")
 }
 
 func rsiAsyncFullNotice(commit, verdict, summary, logPath string) string {
