@@ -4,9 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var rsiEscapeCode = regexp.MustCompile("\\x1b\\[[0-9;]*[A-Za-z]")
 
 func rsiAsyncFullCommand() RsiCommand {
 	return RsiCommand{Command: "node", Args: []string{"--run", "check:full"}, Nice: 10}
@@ -42,7 +45,7 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 		}
 		summary := rsiAsyncFullSummary(result.Output)
 		for _, conversationID := range conversations {
-			text := "[后台全量确认失败]\n提交: " + commit + "\n判定: " + verdict + "\n" + summary + "\n完整日志: " + logPath
+			text := rsiAsyncFullNotice(commit, verdict, summary, logPath)
 			AppendMessage(store, MessageInput{
 				ConversationID: conversationID, Role: MessageRoleUser, Kind: "chat", Text: text, State: MessageStatePending,
 				Data: map[string]any{
@@ -59,7 +62,24 @@ func (service *RsiService) rsiStartAsyncFull(store *TaskStore, activationID, com
 	}()
 }
 
+func rsiAsyncFullNotice(commit, verdict, summary, logPath string) string {
+	lines := []string{"[后台全量确认失败]", "提交: " + commit, "判定: " + verdict}
+	for _, line := range strings.Split(rsiEscapeCode.ReplaceAllString(summary, ""), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lines = append(lines, trimmed)
+		if len(lines) >= 7 {
+			break
+		}
+	}
+	lines = append(lines, "完整日志: "+logPath)
+	return strings.Join(lines, "\n")
+}
+
 func rsiAsyncFullSummary(output string) string {
+	output = rsiEscapeCode.ReplaceAllString(output, "")
 	all := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
