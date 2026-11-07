@@ -43,6 +43,7 @@ export type TranscriptRow =
   | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'compaction'; id: string; text: string; tokensAfter?: number; summary?: string }
+  | { kind: 'rsiFull'; id: string; text: string; verdict: string; commit: string; environment: boolean; files: string[]; logPath: string }
   | { kind: 'thinking'; id: 'thinking' };
 
 export type TranscriptModelInput = {
@@ -296,6 +297,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       });
       continue;
     }
+    if (message.role === 'user' && rsiFullSource(message)) {
+      rows.push(rsiFullRow(message));
+      continue;
+    }
     rows.push({ kind: 'message', id: message.id, message });
   }
   const pendingKey = activityKey;
@@ -371,4 +376,25 @@ export function activeToolStatus(tools: TranscriptTool[]) {
   if (!active) return '正在整理结果';
   const action = toolActivity(active.name, active.summary).label;
   return `正在${action}${active.summary ? ` ${active.summary}` : ''}`;
+}
+
+function rsiFullSource(message: ConversationMessage): boolean {
+  const data = (message.data ?? {}) as { source?: { kind?: string } };
+  return data.source?.kind === 'rsi_async_full';
+}
+
+function rsiFullRow(message: ConversationMessage): TranscriptRow {
+  const lines = message.text.split('\n').map(line => line.trim()).filter(Boolean);
+  const field = (label: string) => lines.find(line => line.startsWith(label))?.slice(label.length).trim() ?? '';
+  const data = (message.data ?? {}) as { environment?: unknown };
+  return {
+    kind: 'rsiFull',
+    id: `rsiFull:${message.id}`,
+    text: message.text,
+    verdict: field('判定:'),
+    commit: field('提交:'),
+    environment: data.environment === true,
+    files: lines.filter(line => line.startsWith('- ')).map(line => line.slice(2).replace(/\s*\[[^\]]*\]$/, '').trim()),
+    logPath: field('完整日志:'),
+  };
 }
