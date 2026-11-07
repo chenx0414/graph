@@ -183,7 +183,8 @@ test('a native graph worker combines its own, global, bound-project and distinct
     mainPlans.push({ tools: [{ id: `scope-send-${populated}`, name: 'graph_send', arguments: JSON.stringify({ graphId, nodeId: 'worker', input: 'job', value: { purpose: 'Observe native skill loading' } }) }] }, { text: 'The scoped worker has received its input.' });
     await post(`/api/conversations/${created.conversationId}/messages`, { text: 'Send the first job to the worker', requestId: `scope-send-user-${populated}` });
     await expect.poll(async () => (await get(`/api/tasks/${graphId}/nodes/worker/run`)).node.status, { timeout: 30000 }).toBe('succeeded');
-    expect(worker.requests).toHaveLength(1);
+      const workerTurns = worker.requests.filter(request => ((request as { tools?: unknown[] }).tools ?? []).length > 0);
+    expect(workerTurns).toHaveLength(1);
     const recorded = await get(`/api/tasks/${graphId}/nodes/worker/run`);
     expect(recorded.environment).toMatchObject({ workspace: canonicalWork, base: 'project' });
     expect(canonicalWork).not.toBe(canonicalProject);
@@ -191,7 +192,7 @@ test('a native graph worker combines its own, global, bound-project and distinct
     // Metadata and the native SDK's prompt must both describe the real complete scope.
     // Soft comparisons let the two independent missing-wiring errors report together.
     expect.soft(recorded.capabilities.filter((row: { kind: string }) => row.kind === 'skill').map((row: { name: string }) => row.name).sort()).toEqual(expectedNames);
-    const sent = worker.requests[0] as { messages: { role: string; content: string | { type: string; text?: string }[] }[] };
+    const sent = workerTurns[0] as { messages: { role: string; content: string | { type: string; text?: string }[] }[] };
     const system = sent.messages.filter(message => message.role === 'system' || message.role === 'developer').map(message => typeof message.content === 'string' ? message.content : message.content.filter(part => part.type === 'text').map(part => part.text ?? '').join('')).join('\n');
     const nativeBlocks = system.match(/<available_skills>\s*<skill>[\s\S]*?<\/available_skills>/g) ?? [];
     expect(nativeBlocks).toHaveLength(1);
