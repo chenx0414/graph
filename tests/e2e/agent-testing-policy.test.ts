@@ -5,24 +5,23 @@ import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
-test('CLI conversations and graph execution deliver the test-first policy to main, workers, reviewers and suggestions', async () => {
+test('CLI conversations and graph execution deliver the test-first policy to main, workers and reviewers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-testing-policy-'));
   const plans: Parameters<typeof openaiServer>[0] = [];
   const primary = await openaiServer(plans);
   const worker = await openaiServer([{ text: 'Worker acknowledged.' }]);
   const reviewer = await openaiServer([{ text: 'Review complete.' }]);
-  const cheap = await openaiServer([{ text: 'Continue verification.' }, { text: 'Inspect the result.' }]);
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   try {
     const project = join(root, 'project');
     await mkdir(project); await mkdir(join(root, 'web'));
     await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div>Graph</div>');
-    const providers = { main: primary, worker, reviewer, cheap };
+    const providers = { main: primary, worker, reviewer };
     const configPath = join(root, 'graph.config.json');
     await writeFile(configPath, JSON.stringify({ version: 1, projects: [{ id: 'p', root: project }],
       credentials: { local: { secretRef: 'GRAPH_POLICY_KEY' } }, models: {
         entries: Object.entries(providers).map(([id, provider]) => ({ id, modelId: id, provider: `graph-${id}`,
-          grade: id === 'cheap' ? 'low' : id === 'main' ? 'high' : 'medium', api: 'openai-completions',
+          grade: id === 'main' ? 'high' : 'medium', api: 'openai-completions',
           baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 256, credentialId: 'local' })) } }));
     daemon = await launchCli(root, { configPath, env: { GRAPH_POLICY_KEY: 'synthetic-policy-key', PI_CODING_AGENT_DIR: join(root, 'pi') }, extraArgs: ['--execute'] });
     async function request(path: string, method = 'GET', data?: unknown) {
@@ -33,7 +32,6 @@ test('CLI conversations and graph execution deliver the test-first policy to mai
     for (const [key, content] of [
       ['rules/common.md', 'CUSTOM_COMMON_SENTINEL: write isolated unit tests.'],
       ['rules/worker.md', 'CUSTOM_WORKER_SENTINEL: use integration tests.'],
-      ['runtime/prompt-suggestion.md', '   '],
     ]) await request('/api/agent-context/prompts', 'PUT', { key, content });
     for (const [id, review] of [['worker', false], ['review', true]] as const) {
       await request('/api/catalog/combinations', 'POST', { combination: { id, name: id, description: id,
@@ -58,7 +56,6 @@ test('CLI conversations and graph execution deliver the test-first policy to mai
       await expect.poll(async () => (await request(`/api/tasks/${graphId}/nodes/${nodeId}/run`)).node.status, { timeout: 30000 }).toBe('succeeded');
     }
     const everyRequest = Object.entries(providers).flatMap(([id, provider]) => provider.requests.map(sent => ({ id, sent })));
-    await expect.poll(() => everyRequest.filter(({ sent }) => JSON.stringify(sent).includes('Write exactly one concise next message')).length, { timeout: 30000 }).toBeGreaterThan(0);
     for (const id of ['main', 'worker', 'reviewer']) {
       expect(providers[id as keyof typeof providers].requests.length, id).toBeGreaterThan(0);
     }
@@ -72,7 +69,7 @@ test('CLI conversations and graph execution deliver the test-first policy to mai
     }
   } finally {
     await daemon?.close();
-    for (const provider of [primary, worker, reviewer, cheap]) await provider.close();
+    for (const provider of [primary, worker, reviewer]) await provider.close();
     await rm(root, { recursive: true, force: true });
   }
 }, 90000);

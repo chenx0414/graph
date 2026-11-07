@@ -30,9 +30,7 @@ test('the browser returns to the same global and project supervisors while retai
   await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
   const provider = await openaiServer([
     { text: 'Previous conversation reply.' },
-    { text: 'Next question.' },
     { text: 'Global supervisor reply.' },
-    { text: 'Next question.' },
     { text: 'Project supervisor reply.' },
   ]);
   cleanup.push(() => provider.close());
