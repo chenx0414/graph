@@ -165,58 +165,31 @@ func dispatchCount(fixture autoDeferFixture) int {
 	return total
 }
 
-func TestDeferredResultSteersTheRunningTurnInsteadOfQueueingAMessage(t *testing.T) {
+func TestDeferredResultIsDeliveredToTheRunningTurnInsteadOfWaitingInTheQueue(t *testing.T) {
 	fixture := newAutoDeferFixture(t)
-	var delivered []string
-	unregister := RegisterConversationInjector("c", func(text string) bool {
-		delivered = append(delivered, text)
+	delivered := []string{}
+	restore := SetDeferredDeliveryHook(func(conversationId, requestId string) bool {
+		delivered = append(delivered, conversationId+" "+requestId)
 		return true
 	})
-	defer unregister()
+	defer restore()
 	call := DeferredToolCall{
 		Id: "deferred-1", TaskId: "t", ConversationId: "c", NodeId: "n", ToolName: "bash",
 		ToolCallId: "call-1", State: DeferredToolSettled, Result: "late-marker",
 	}
 	resumeConversationForDeferredTool(fixture.store, call)
 	if len(delivered) != 1 {
-		t.Fatalf("the settled call was injected %d times into the running turn", len(delivered))
+		t.Fatalf("the settled call was handed to the running turn %d times", len(delivered))
 	}
-	if !strings.Contains(delivered[0], "bash") {
-		t.Fatalf("the injected text says nothing about the tool: %q", delivered[0])
-	}
-	rows := kernelRows(fixture.store.Db, "SELECT state FROM messages WHERE conversation_id='c' AND json_extract(data,'$.source.kind')='tool_settled'")
-	if len(rows) != 1 {
-		t.Fatalf("the transcript recorded %d rows for the settled call", len(rows))
-	}
-	if kernelString(rows[0]["state"]) != string(MessageStateDone) {
-		t.Fatalf("the recorded row is %q, so it would be queued as a new turn", kernelString(rows[0]["state"]))
-	}
-	if kernelRow(fixture.store.Db, "SELECT id FROM wake_intents WHERE task_id='t'") != nil {
-		t.Fatalf("a delivered result also asked for a new turn")
+	if delivered[0] != "c deferred:deferred-1" {
+		t.Fatalf("the delivery named %q instead of the conversation and the call", delivered[0])
 	}
 }
 
-func TestClosingASessionStopsInjectingIntoItsConversation(t *testing.T) {
-	received := 0
-	unregister := RegisterConversationInjector("c", func(string) bool {
-		received += 1
-		return true
-	})
-	if conversationInjectorOf("c") == nil {
-		t.Fatalf("a registered session was not reachable by its conversation")
-	}
-	unregister()
-	if conversationInjectorOf("c") != nil {
-		t.Fatalf("a closed session kept receiving injections")
-	}
-	unregister()
-	if received != 0 {
-		t.Fatalf("registering injected %d messages by itself", received)
-	}
-}
-
-func TestDeferredResultStartsATurnWhenNothingIsRunning(t *testing.T) {
+func TestDeferredResultFallsBackToANewTurnWhenNothingIsRunning(t *testing.T) {
 	fixture := newAutoDeferFixture(t)
+	restore := SetDeferredDeliveryHook(func(string, string) bool { return false })
+	defer restore()
 	call := DeferredToolCall{
 		Id: "deferred-2", TaskId: "t", ConversationId: "c", NodeId: "n", ToolName: "bash",
 		ToolCallId: "call-2", State: DeferredToolSettled, Result: "late-marker",
@@ -227,7 +200,34 @@ func TestDeferredResultStartsATurnWhenNothingIsRunning(t *testing.T) {
 		t.Fatalf("the transcript recorded %d rows for the settled call", len(rows))
 	}
 	if kernelString(rows[0]["state"]) == string(MessageStateDone) {
-		t.Fatalf("an idle conversation recorded the result as already delivered")
+		t.Fatalf("a conversation with no running turn recorded the result as already delivered")
+	}
+}
+
+func TestDeferredDeliveryHookCanBeReplacedAndCleared(t *testing.T) {
+	first := 0
+	restoreFirst := SetDeferredDeliveryHook(func(string, string) bool {
+		first += 1
+		return true
+	})
+	if !deliverDeferredResultToRunningTurn("c", "deferred:1") {
+		t.Fatalf("a registered hook did not deliver")
+	}
+	second := 0
+	restoreSecond := SetDeferredDeliveryHook(func(string, string) bool {
+		second += 1
+		return false
+	})
+	if deliverDeferredResultToRunningTurn("c", "deferred:2") {
+		t.Fatalf("a refusing hook was reported as delivered")
+	}
+	restoreSecond()
+	restoreFirst()
+	if first != 1 || second != 1 {
+		t.Fatalf("the hooks were called %d and %d times", first, second)
+	}
+	if deliverDeferredResultToRunningTurn("c", "deferred:3") {
+		t.Fatalf("a cleared hook still delivered")
 	}
 }
 

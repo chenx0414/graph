@@ -165,13 +165,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	input.ActiveMu.Lock()
 	(*input.ActiveInstances)[operation.Id] = session
 	input.ActiveMu.Unlock()
-	unregisterInjector := func() {}
-	if target, ok := deferredToolTargetOf(store, operation.Id); ok {
-		unregisterInjector = RegisterConversationInjector(target.ConversationId, func(text string) bool {
-			return session.Steer(text) == nil
-		})
-	}
-	defer unregisterInjector()
 	inspected := session.Inspect()
 	raisePiExtensionLoadErrors(inspected.ExtensionErrors)
 	if turn.PersistEntries {

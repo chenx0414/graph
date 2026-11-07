@@ -2,27 +2,29 @@ package graph
 
 import "sync"
 
-var conversationInjectors = struct {
+var deferredDeliveryHook = struct {
 	mutex sync.Mutex
-	by    map[string]func(string) bool
-}{by: map[string]func(string) bool{}}
+	hook  func(conversationId string, requestId string) bool
+}{}
 
-func RegisterConversationInjector(conversationId string, inject func(string) bool) func() {
-	if conversationId == "" || inject == nil {
-		return func() {}
-	}
-	conversationInjectors.mutex.Lock()
-	conversationInjectors.by[conversationId] = inject
-	conversationInjectors.mutex.Unlock()
+func SetDeferredDeliveryHook(hook func(conversationId string, requestId string) bool) func() {
+	deferredDeliveryHook.mutex.Lock()
+	previous := deferredDeliveryHook.hook
+	deferredDeliveryHook.hook = hook
+	deferredDeliveryHook.mutex.Unlock()
 	return func() {
-		conversationInjectors.mutex.Lock()
-		delete(conversationInjectors.by, conversationId)
-		conversationInjectors.mutex.Unlock()
+		deferredDeliveryHook.mutex.Lock()
+		deferredDeliveryHook.hook = previous
+		deferredDeliveryHook.mutex.Unlock()
 	}
 }
 
-func conversationInjectorOf(conversationId string) func(string) bool {
-	conversationInjectors.mutex.Lock()
-	defer conversationInjectors.mutex.Unlock()
-	return conversationInjectors.by[conversationId]
+func deliverDeferredResultToRunningTurn(conversationId, requestId string) bool {
+	deferredDeliveryHook.mutex.Lock()
+	hook := deferredDeliveryHook.hook
+	deferredDeliveryHook.mutex.Unlock()
+	if hook == nil {
+		return false
+	}
+	return hook(conversationId, requestId)
 }
