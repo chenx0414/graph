@@ -2,24 +2,12 @@ package graph
 
 import "strings"
 
-// controlledCompat is what one provider accepts.
-//
-// A provider asked in the wrong way refuses the whole request: the instruction
-// role, the way a thinking strength is asked for, and whether the plain effort
-// field is understood at all. The SDK detects the provider's answer from its
-// name and its base URL, and so does this: one detection, one set of rules.
 type controlledCompat struct {
-	// supportsDeveloperRole reports whether the provider accepts the `developer`
-	// role instead of `system`.
 	supportsDeveloperRole bool
-	// supportsReasoningEffort reports whether the provider understands the plain
-	// `reasoning_effort` field.
 	supportsReasoningEffort bool
-	// thinkingFormat is the way this provider is asked for a thinking strength.
 	thinkingFormat string
 }
 
-// controlledCompatFor reads what the provider of one model accepts.
 func controlledCompatFor(model map[string]any) controlledCompat {
 	provider, _ := model["provider"].(string)
 	baseURL, _ := model["baseUrl"].(string)

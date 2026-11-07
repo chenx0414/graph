@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 )
 
-// failureDetail is the one line worth showing from a failure blob: its longest early line
-// carries the message while stack frames stay short. Single line, bounded.
 func failureDetail(reason string) string {
 	lines := []string{}
 	for _, part := range strings.Split(reason, "\n") {
@@ -29,7 +27,6 @@ func failureDetail(reason string) string {
 	return utf16Slice(best, 240)
 }
 
-// conversationFailureSuffix renders the optional reason of a failed turn.
 func conversationFailureSuffix(detail string) string {
 	if detail == "" {
 		return ""
@@ -37,7 +34,6 @@ func conversationFailureSuffix(detail string) string {
 	return " 原因：" + detail
 }
 
-// conversationProjectLine describes the project a conversation is bound to.
 func conversationProjectLine(store *TaskStore, projectId *string) string {
 	if projectId == nil || *projectId == "" {
 		return "Project: not bound (ask the user to choose one from the configured projects)"
@@ -49,7 +45,6 @@ func conversationProjectLine(store *TaskStore, projectId *string) string {
 	return "Project: " + *projectId + " (root " + kernelString(row["root"]) + ")"
 }
 
-// conversationQuestionSummary is the one short line that answers "what is this problem".
 func conversationQuestionSummary(kind string, data any) string {
 	body, _ := data.(map[string]any)
 	for _, key := range []string{"prompt", "reason", "message", "grant", "requested"} {
@@ -60,7 +55,6 @@ func conversationQuestionSummary(kind string, data any) string {
 	return "执行问题：" + kind
 }
 
-// conversationNodeSummary lists the nodes of one task and their status.
 func conversationNodeSummary(store *TaskStore, kernel *KernelStore, taskId string) string {
 	if kernel.LatestRevision(taskId) != nil {
 		nodes := kernel.ListNodes(taskId)
@@ -78,7 +72,6 @@ func conversationNodeSummary(store *TaskStore, kernel *KernelStore, taskId strin
 	return strings.Join(parts, ", ")
 }
 
-// conversationNodeSpec reads the spec of one node.
 func conversationNodeSpec(store *TaskStore, taskId, nodeId string) NodeSpec {
 	row := kernelRow(store.Db, "SELECT spec FROM nodes WHERE task_id=? AND id=?", taskId, nodeId)
 	if row == nil {
@@ -91,7 +84,6 @@ func conversationNodeSpec(store *TaskStore, taskId, nodeId string) NodeSpec {
 	return spec
 }
 
-// conversationMessageRow reads one message row.
 func conversationMessageRow(store *TaskStore, id string) (MessageRow, bool) {
 	row := kernelRow(store.Db, "SELECT * FROM messages WHERE id=?", id)
 	if row == nil {
@@ -100,7 +92,6 @@ func conversationMessageRow(store *TaskStore, id string) (MessageRow, bool) {
 	return conversationMessageFromRow(row), true
 }
 
-// conversationMessageRows maps message rows.
 func conversationMessageRows(rows []map[string]any) []MessageRow {
 	messages := make([]MessageRow, 0, len(rows))
 	for _, row := range rows {
@@ -109,7 +100,6 @@ func conversationMessageRows(rows []map[string]any) []MessageRow {
 	return messages
 }
 
-// conversationMessageFromRow maps one messages table row.
 func conversationMessageFromRow(row map[string]any) MessageRow {
 	return MessageRow{
 		Seq:            kernelInt(row["seq"]),
@@ -127,7 +117,6 @@ func conversationMessageFromRow(row map[string]any) MessageRow {
 	}
 }
 
-// conversationReverseRows reverses a page read backwards.
 func conversationReverseRows(rows []map[string]any) []map[string]any {
 	reversed := make([]map[string]any, 0, len(rows))
 	for index := len(rows) - 1; index >= 0; index-- {
@@ -136,7 +125,6 @@ func conversationReverseRows(rows []map[string]any) []map[string]any {
 	return reversed
 }
 
-// conversationNullableString reads a nullable text column.
 func conversationNullableString(value any) *string {
 	switch typed := value.(type) {
 	case string:
@@ -149,7 +137,6 @@ func conversationNullableString(value any) *string {
 	}
 }
 
-// conversationNullableInt reads a nullable integer column.
 func conversationNullableInt(value any) *int64 {
 	switch typed := value.(type) {
 	case int64:
@@ -165,7 +152,6 @@ func conversationNullableInt(value any) *int64 {
 	}
 }
 
-// conversationParseJson reads one stored JSON payload.
 func conversationParseJson(text string) any {
 	if text == "" {
 		return nil
@@ -177,14 +163,6 @@ func conversationParseJson(text string) any {
 	return value
 }
 
-// conversationOrdinalData renders the payload a delivered message carries when the turn it
-// joined has an ordinal.
-//
-// BUG(port): the TypeScript helper this mirrors (messageData) read the raw `data` column,
-// which stores a JSON string, and then asked whether that value was an object. A string never
-// is, so the helper always answered null and the delivered row kept only its ordinal: the
-// earlier payload of the message was never merged back in. The TypeScript behaves the same
-// way, so the port reproduces that instead of the intent behind it.
 func conversationOrdinalData(message MessageRow, ordinal int) string {
 	return `{"ordinal":` + itoa(ordinal) + `}`
 }

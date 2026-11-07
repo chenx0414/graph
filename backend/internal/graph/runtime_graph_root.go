@@ -16,15 +16,11 @@ import (
 	"crypto/rand"
 )
 
-// GraphApplicationRoot is graphApplicationRoot. With no module URL it returns
-// ApplicationRoot once the CLI has set it.
 func GraphApplicationRoot(moduleURL ...string) string {
 	if len(moduleURL) == 0 || moduleURL[0] == "" {
 		if ApplicationRoot != "" {
 			return ApplicationRoot
 		}
-		// TODO(port): TypeScript defaults moduleUrl to import.meta.url. Go has no
-		// module URL, so an unset ApplicationRoot falls back to the working directory.
 		cwd, err := os.Getwd()
 		if err != nil {
 			panic(err)
@@ -152,9 +148,6 @@ func sqlFloat(v any) float64 {
 	}
 }
 
-// stringifyJSON is JSON.stringify: no HTML escaping, trailing newline stripped.
-// nil encodes as null. A nil map encodes as null, matching JSON.stringify(undefined)
-// only when the caller passes the undefined sentinel instead.
 func stringifyJSON(v any) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

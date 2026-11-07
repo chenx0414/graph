@@ -14,7 +14,6 @@ func nodeCommandLock(scope, requestID string) *sync.Mutex {
 	return &nodeSteerLocks[hash.Sum32()%uint32(len(nodeSteerLocks))]
 }
 
-// steerGraphNode keeps retries tied to the execution that first received the instruction.
 func (runtime *TaskRuntime) steerGraphNode(caller, graphID, nodeID, text, requestID string) any {
 	scope := "node-steer:" + caller
 	lock := nodeCommandLock(scope, requestID)

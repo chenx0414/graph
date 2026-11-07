@@ -7,17 +7,7 @@ import (
 	"strings"
 )
 
-// Writing one change: the bytes a `changes[]` entry names, and the refusals that
-// keep an edit honest. Kept beside the apply loop rather than inside it, so the
-// loop stays readable and no file outgrows the budget a reader can hold.
 
-// rsiChangeContent is the new text of one change: given inline, or read from a
-// file the Agent already wrote in the checkout.
-//
-// The second form exists because the most expensive call this tool served was a
-// file pasted back in: the Agent writes a keeper test with its own tools, runs
-// it, and then had to repeat every line inside `changes[]`. Naming the file
-// commits exactly the bytes that were verified.
 func rsiChangeContent(root string, change RsiFileChange, index int) string {
 	if change.FromPath == nil {
 		if change.Content == nil {
@@ -40,7 +30,6 @@ func rsiChangeContent(root string, change RsiFileChange, index int) string {
 	return string(raw)
 }
 
-// rsiEditMismatch names one anchor that does not match exactly once.
 func rsiEditMismatch(index, total, matches int, oldText string) string {
 	head := strings.TrimSpace(strings.Split(oldText, "\n")[0])
 	runes := []rune(head)
@@ -50,13 +39,6 @@ func rsiEditMismatch(index, total, matches int, oldText string) string {
 	return "found " + itoa(matches) + " (edit " + itoa(index+1) + " of " + itoa(total) + ", first line: " + head + ")"
 }
 
-// rsiWriteShrinkRefusal refuses a write that would replace a large file with a
-// stub.
-//
-// The rule is deliberately blunt: a file of rsiWriteShrinkLines lines or more
-// may not be written down to less than a tenth of itself in one write. Anything
-// smaller is ordinary editing; anything larger is either a rewrite that deserves
-// to be spelled out as edits, or the accident this guard exists for.
 const rsiWriteShrinkLines = 200
 
 func rsiWriteShrinkRefusal(path, before, after string) string {

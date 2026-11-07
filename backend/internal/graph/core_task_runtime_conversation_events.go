@@ -9,9 +9,6 @@ import (
 	"context"
 )
 
-// taskRuntimeTaskCost sums the cost receipts of one task. The kernel provider
-// calls are native sends without a frozen monetary price receipt yet, so a
-// missing price cannot mean free.
 func taskRuntimeTaskCost(runtime *TaskRuntime, taskId string) CostSummary {
 	costs := []any{}
 	for _, row := range InvocationRows(runtime.store, taskId) {
@@ -23,7 +20,6 @@ func taskRuntimeTaskCost(runtime *TaskRuntime, taskId string) CostSummary {
 	return SumCosts(costs)
 }
 
-// Proposal reads one proposal version of a conversation.
 func (conversations *TaskRuntimeConversations) Proposal(conversationId string, version int) any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -39,7 +35,6 @@ func (conversations *TaskRuntimeConversations) Proposal(conversationId string, v
 	return proposal
 }
 
-// Events reads the events of one conversation.
 func (conversations *TaskRuntimeConversations) Events(conversationId string, after int, limit int) []TaskUpdate {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -68,7 +63,6 @@ func (conversations *TaskRuntimeConversations) Events(conversationId string, aft
 	return out
 }
 
-// conversationTaskIds is the anchor plus every feature task of one conversation.
 func (runtime *TaskRuntime) conversationTaskIds(conversationId string) []string {
 	anchor := ConversationRowOf(runtime.store, conversationId).AnchorTaskId
 	seen := map[string]bool{}
@@ -95,7 +89,6 @@ func (runtime *TaskRuntime) conversationTaskIds(conversationId string) []string 
 	return ids
 }
 
-// conversationEventRows reads the events of several tasks.
 func (runtime *TaskRuntime) conversationEventRows(ids []string, after int, limit int) []map[string]any {
 	if len(ids) == 0 {
 		return nil
@@ -109,7 +102,6 @@ func (runtime *TaskRuntime) conversationEventRows(ids []string, after int, limit
 	return kernelRows(runtime.store.Db, "SELECT cursor,task_id,type,data,timestamp FROM events WHERE task_id IN ("+placeholders+") AND cursor>? ORDER BY cursor LIMIT ?", params...)
 }
 
-// Watch streams the events of one conversation.
 func (conversations *TaskRuntimeConversations) Watch(conversationId string, after int) TaskWatch {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -135,9 +127,6 @@ func (conversations *TaskRuntimeConversations) Watch(conversationId string, afte
 					pending = pending[1:]
 					return update, true
 				}
-				// The stream covers the anchor and every task the conversation created,
-				// re-reading the task set each iteration so a new task is included
-				// without reconnecting. The global event cursor stays monotonic.
 				wake := runtime.store.WaitForChange(ctx)
 				rows := runtime.conversationEventRows(runtime.conversationTaskIds(conversationId), cursor, 100)
 				if len(rows) > 0 {
@@ -171,7 +160,6 @@ func (conversations *TaskRuntimeConversations) Watch(conversationId string, afte
 	}
 }
 
-// Attachment reads one image attachment of a message.
 func (conversations *TaskRuntimeConversations) Attachment(messageId string, index int) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -189,7 +177,6 @@ func (conversations *TaskRuntimeConversations) Attachment(messageId string, inde
 	return map[string]any{"type": attachment.Type, "bytes": attachment.Data}
 }
 
-// taskRuntimeAttachmentAt reads one attachment of a message payload.
 func taskRuntimeAttachmentAt(row map[string]any, index int) *AttachmentInput {
 	if row["data"] == nil {
 		return nil
@@ -223,7 +210,6 @@ func taskRuntimeAttachmentAt(row map[string]any, index int) *AttachmentInput {
 	return &AttachmentInput{Name: name, Type: kind, Size: size, Text: text, Data: &encoded}
 }
 
-// History reads the message history of one conversation.
 func (conversations *TaskRuntimeConversations) History(conversationId string, query NodeEntryQuery) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -231,7 +217,6 @@ func (conversations *TaskRuntimeConversations) History(conversationId string, qu
 	return map[string]any{"messages": ListMessages(runtime.store, conversationId, messageQueryOf(query))}
 }
 
-// SelectModel changes the model of one conversation.
 func (conversations *TaskRuntimeConversations) SelectModel(conversationId, model, thinkingLevel, requestId string) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -291,7 +276,6 @@ func (conversations *TaskRuntimeConversations) SelectModel(conversationId, model
 	return record
 }
 
-// TaskRuntimeSupervisor is the control surface the main Agent sees.
 type TaskRuntimeSupervisor struct {
 	runtime *TaskRuntime
 	taskId  string

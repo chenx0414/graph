@@ -8,10 +8,6 @@ import (
 	"os"
 )
 
-// pigSessionInstructions is the system prompt of one PiG session.
-//
-// The order is the SDK's: Graph's own prompt first, then what only the
-// environment knows.
 func pigSessionInstructions(request AgentSessionRequest) string {
 	parts := []string{}
 	if request.SystemPrompt != "" {
@@ -29,11 +25,6 @@ func pigSessionInstructions(request AgentSessionRequest) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// pigProjectContextPrompt is the project context of one session.
-//
-// The context files are the ones the SDK looked for: the agent directory's own
-// file first, then the working directory's and its ancestors, the outermost
-// ancestor first.
 func pigProjectContextPrompt(workspace string, agentDir string) string {
 	type contextFile struct {
 		path    string
@@ -53,8 +44,6 @@ func pigProjectContextPrompt(workspace string, agentDir string) string {
 		files = append(files, contextFile{path: path, content: content})
 	}
 	add(agentDir)
-	// The SDK collects the ancestors from the working directory upwards and
-	// puts the outermost one first.
 	ancestors := []contextFile{}
 	for dir := workspace; dir != ""; {
 		path, content, ok := agentContextProjectInstructions(dir)
@@ -87,11 +76,6 @@ func pigProjectContextPrompt(workspace string, agentDir string) string {
 	return b.String()
 }
 
-// pigSessionSkills are the skills one session may load.
-//
-// The list is the one the sidecar handed to the SDK: the Agent's own folder
-// first, then the folders the session may read. A name belongs to the first
-// folder that offers it, and a file reached through two folders is one skill.
 func pigSessionSkills(request AgentSessionRequest) []LoadedSkill {
 	paths := []string{}
 	if request.SkillFolder != "" {
@@ -104,8 +88,6 @@ func pigSessionSkills(request AgentSessionRequest) []LoadedSkill {
 	for _, path := range paths {
 		for _, skill := range pigSkillsIn(path) {
 			if strings.TrimSpace(skill.Description) == "" {
-				// A skill without a description cannot be matched to a task,
-				// so the SDK never offered it.
 				continue
 			}
 			file := pigSkillFilePath(skill)
@@ -121,12 +103,6 @@ func pigSessionSkills(request AgentSessionRequest) []LoadedSkill {
 	return skills
 }
 
-// pigSkillsIn are the skills one folder offers.
-//
-// A folder offers itself when it holds a SKILL.md, and otherwise every
-// subfolder that does. A symbolic link to a folder is followed: the bound
-// capabilities are linked into the Agent's own folder, and the model is told
-// where to read them.
 func pigSkillsIn(path string) []LoadedSkill {
 	if skill, ok := readSkillFile(path); ok {
 		return []LoadedSkill{skill}
@@ -160,12 +136,6 @@ func pigSkillsIn(path string) []LoadedSkill {
 	return found
 }
 
-// pigSkillsPrompt is the skills block of one session.
-//
-// It is the block the SDK wrote, in the SDK's shape: the model is told that
-// the skills carry specialized instructions and how to load one. A skill that
-// disables model invocation stays out of the prompt - it is only ever
-// invoked by name.
 func pigSkillsPrompt(skills []LoadedSkill) string {
 	visible := []LoadedSkill{}
 	for _, skill := range skills {
@@ -194,18 +164,13 @@ func pigSkillsPrompt(skills []LoadedSkill) string {
 		)
 	}
 	lines = append(lines, "</available_skills>")
-	// The SDK's block opens with a blank line of its own.
 	return "\n\n" + strings.Join(lines, "\n")
 }
 
-// pigSkillFilePath is the file one skill lives in.
 func pigSkillFilePath(skill LoadedSkill) string {
 	return filepath.Join(skill.FilePath, "SKILL.md")
 }
 
-// pigCanonicalPath is the path without its symbolic links.
-//
-// Two paths that lead to the same file are one skill, however they are named.
 func pigCanonicalPath(path string) string {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -214,7 +179,6 @@ func pigCanonicalPath(path string) string {
 	return resolved
 }
 
-// pigSkillXML escapes the text of a skill for the XML block.
 func pigSkillXML(value string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;").Replace(value)
 }

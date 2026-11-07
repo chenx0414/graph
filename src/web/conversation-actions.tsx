@@ -130,9 +130,6 @@ async function act(action: () => Promise<unknown>, after?: () => void) {
     if (!busy && promptSuggestion) return send(promptSuggestion);
   }
 
-  /** The context-sensitive primary button: pause while the master is
-   * outputting, resume when paused, and send + auto-continue when paused with
-   * something to send. */
   async function submitPrimary() {
     if (sending || steering || interrupting || pauseAction) return;
     const action = primaryState.action;

@@ -1,13 +1,9 @@
 package graph
 
-// RecoverKernelExecutions settles the executions the previous process left
-// behind. It is called once, after acquiring the runtime owner lock; never
-// during a live tick.
 func RecoverKernelExecutions(kernel *KernelStore) []string {
 	interrupted := []string{}
 	kernel.ModuleTransaction(func() any {
 		ReconcileOperationResources(kernel)
-		// The previous process is gone, and this call runs after the owner lock was acquired, so the program slots it still held are abandoned rather than occupied.
 		ReleaseOperationLeasesOnRestart(kernel, "owner_restart")
 		kernelExec(kernel.Db, "UPDATE kernel_provider_calls SET state='unknown' WHERE state='inflight'")
 		interruptedOperations := kernelRows(kernel.Db, "SELECT id,task_id,module_id,delivery_id FROM kernel_module_operations WHERE state='dispatched'")
@@ -32,8 +28,6 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 		rows := kernelRows(kernel.Db, "SELECT id,task_id,node_id,submission_id,token_reservation FROM kernel_executions WHERE state='running'")
 		for _, row := range rows {
 			interrupted = append(interrupted, kernelString(row["id"]))
-			// Calls are journaled before sending. With no unresolved call, this turn's
-			// unused hold is safe to release; a resumed turn will reserve afresh.
 			unresolvedCall := kernelRow(kernel.Db, "SELECT 1 FROM kernel_provider_calls WHERE execution_id=? AND state IN ('inflight','unknown') LIMIT 1", row["id"])
 			reservation := kernelInt(row["token_reservation"])
 			if reservation > 0 && unresolvedCall == nil {
@@ -50,8 +44,6 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 				executionState = "failed"
 				queueState = "failed"
 			}
-			// The process died without a closing boundary. Do not charge owner downtime
-			// as work or pretend the execution's full duration was measured.
 			kernelExec(kernel.Db, "UPDATE kernel_executions SET state=?,waiting_slot=0,ended_at=?,run_ms=NULL,waiting_ms=NULL,run_since=NULL,waiting_since=NULL WHERE id=?",
 				executionState, NowMillis(), row["id"])
 			kernelExec(kernel.Db, "UPDATE kernel_queue SET state=?,reason=? WHERE task_id=? AND node_id=? AND state='claimed'",
@@ -73,8 +65,6 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 				"reason":      reason,
 			})
 		}
-		// Earlier interruptions may have left a recorded question on an already
-		// blocked execution. Its original queued input is still the continuation.
 		for _, row := range kernelRows(kernel.Db, `SELECT n.execution_id FROM node_questions n
  JOIN kernel_executions e ON e.id=n.execution_id
  JOIN kernel_queue q ON q.task_id=n.task_id AND q.node_id=n.node_id AND q.seq=n.queue_seq
@@ -83,8 +73,6 @@ func RecoverKernelExecutions(kernel *KernelStore) []string {
 		}
 		return nil
 	})
-	// A graph the previous process left stalled never reached blocked by itself,
-	// and every closure that records limitations is refused until it does.
 	kernel.Store.ParkStalledTasks()
 	return interrupted
 }

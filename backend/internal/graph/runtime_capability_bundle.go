@@ -47,10 +47,6 @@ type CapabilityOperationOptions struct {
 	NativeTools          []string
 	OnPermissionRequired func(CapabilityPermissionRequest)
 	HostTools            func(readRoots []string) []ToolDefinition
-	// NativeToolsProvider builds the native tools the granted native names
-	// stand for. It is set when the kernel runs without an SDK of its own:
-	// the TypeScript SDK provided read, write, edit, ls, find, grep and the
-	// shell, and nothing replaces them on the PiG kernel but the daemon.
 	NativeToolsProvider func(granted []string) []ToolDefinition
 }
 
@@ -280,9 +276,6 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	}
 	selected := SelectAgentToolSurface(append(hostTools, loaded.Tools...), options.NativeTools, options.DisabledTools, loaded.PiExtensionTools)
 	if options.NativeToolsProvider != nil {
-		// The native tools stand in for the Graph tools they supersede: they
-		// carry the names the SDK published, so the model's prompt and its
-		// habits hold, and the digest covers the surface the session really has.
 		native := options.NativeToolsProvider(selected.NativeTools)
 		for _, tool := range native {
 			if !capabilityToolAllowed(tool.Name, selected.Tools) {

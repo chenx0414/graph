@@ -4,16 +4,11 @@ import (
 	"strings"
 )
 
-// PublishConversationDelta persists one appendable live response, publishing only the new
-// suffix in the common case. A reset carries the full active text so a reconnect can
-// repair any missing prefix without guessing.
 func PublishConversationDelta(store *TaskStore, input PiAdapterConversationDelta) {
 	previous := kernelRow(store.Db, "SELECT * FROM conversation_streams WHERE operation_id=? AND entry_id=? AND part_id=?",
 		input.OperationId, input.EntryId, input.PartId)
 	appendable := false
 	if previous != nil {
-		// The caller writes the length of a text part in the same unit the
-		// TypeScript string length used, so the delta is counted the same way.
 		appendable = strings.HasPrefix(input.Text, kernelString(previous["text"])) &&
 			int(kernelInt(previous["length"]))+utf16Len(input.Delta) == input.Length
 	}
@@ -47,12 +42,10 @@ func PublishConversationDelta(store *TaskStore, input PiAdapterConversationDelta
 	})
 }
 
-// ClearConversationStream drops the live text parts of one operation.
 func ClearConversationStream(store *TaskStore, operationId string) {
 	kernelExec(store.Db, "DELETE FROM conversation_streams WHERE operation_id=?", operationId)
 }
 
-// ConversationStreams lists the live text parts of the operations that are still running.
 func ConversationStreams(store *TaskStore, conversationId string) []ConversationStream {
 	rows := kernelRows(store.Db, `SELECT s.* FROM conversation_streams s
     JOIN operations o ON o.id=s.operation_id

@@ -4,7 +4,6 @@ import (
 	"sort"
 )
 
-// View is the whole library as the settings panel sees it.
 func (library *AgentContextLibrary) View(variables map[string]string) AgentContextView {
 	prompts := []AgentPromptDescriptor{}
 	for _, descriptor := range library.descriptors() {
@@ -80,7 +79,6 @@ var agentLegacyPromptDefaults = map[AgentPromptKey][]string{
 var agentLegacyPromptReplacements = map[AgentPromptKey][][2]string{
 }
 
-// agentContextUniqueSorted removes duplicates and sorts the names.
 func agentContextUniqueSorted(values []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -95,5 +93,4 @@ func agentContextUniqueSorted(values []string) []string {
 	return out
 }
 
-// agentContextDefaultDisabledTools are the tools that are off until the user says otherwise.
 var agentContextDefaultDisabledTools = []string{"powershell"}

@@ -7,15 +7,12 @@ import (
 	"encoding/json"
 )
 
-// OperationNode identifies the node an operation belongs to.
 type OperationNode struct {
 	Id           string
 	TaskId       string
 	ActivationId string
 }
 
-// OperationIntent is the operation without its identity: id, generation and attempt
-// are assigned by the lifecycle when the intent becomes durable.
 type OperationIntent struct {
 	TaskId             string
 	NodeId             string
@@ -36,7 +33,6 @@ type OperationIntent struct {
 	Workspace          *string
 }
 
-// operation materializes the intent as the durable operation.
 func (intent OperationIntent) operation(id string, generation, attempt int) Operation {
 	dependencies := intent.Dependencies
 	if dependencies == nil {
@@ -78,8 +74,6 @@ func (intent OperationIntent) operation(id string, generation, attempt int) Oper
 	}
 }
 
-// OperationIntentEvent is what an `operation.intent` event carries: enough to identify
-// the operation in a timeline, and nothing else.
 func OperationIntentEvent(operation Operation) map[string]any {
 	return map[string]any{
 		"operationId":        operation.Id,
@@ -96,7 +90,6 @@ func OperationIntentEvent(operation Operation) map[string]any {
 	}
 }
 
-// OperationSnapshot is one operation row plus its parsed state.
 type OperationSnapshot struct {
 	Id           string           `json:"id"`
 	Operation    Operation        `json:"operation"`
@@ -108,7 +101,6 @@ type OperationSnapshot struct {
 	SettledAt    *int64           `json:"settledAt"`
 }
 
-// OperationRun is the per-node run projection.
 type OperationRun struct {
 	Id           string  `json:"id"`
 	State        string  `json:"state"`
@@ -124,8 +116,6 @@ type OperationRun struct {
 	Usage        Json    `json:"usage"`
 }
 
-// OperationLifecycleHooks lets the host veto a replay before the adapter sent anything.
-// CredentialRecoveryRequest is one turn whose credential the vendor rejected.
 type CredentialRecoveryRequest struct {
 	Model        string
 	TaskId       string
@@ -137,16 +127,9 @@ type CredentialRecoveryRequest struct {
 
 type OperationLifecycleHooks struct {
 	CanReplayBeforeSend func(operation Operation) bool
-	// OnCredentialRejected schedules a renewal for the credential a request was
-	// rejected for, and reports whether it was scheduled. The renewal itself must run
-	// asynchronously: this call happens while the dispatcher holds its database lock,
-	// and a secret write goes through the configuration host, which takes the same
-	// lock. Waiting for it here deadlocks the cycle (measured: a 401 turn stayed
-	// dispatched forever with its token endpoint already called).
 	OnCredentialRejected func(CredentialRecoveryRequest) bool
 }
 
-// OperationAdmitInput is one admission of an operation.
 type OperationAdmitInput struct {
 	Node        OperationNode
 	Reservation int64
@@ -154,7 +137,6 @@ type OperationAdmitInput struct {
 	AfterIntent func(operation Operation)
 }
 
-// OperationQuery selects operation rows.
 type OperationQuery struct {
 	After  *string
 	Before *string
@@ -165,7 +147,6 @@ type OperationQuery struct {
 
 var operationDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-// operationInstanceId is the instance of an operation, or the empty string.
 func operationInstanceId(operation Operation) string {
 	if operation.InstanceId == nil {
 		return ""
@@ -173,17 +154,14 @@ func operationInstanceId(operation Operation) string {
 	return *operation.InstanceId
 }
 
-// operationLifecycleStringPtr is the optional-string helper of this file.
 func operationLifecycleStringPtr(value string) *string {
 	return &value
 }
 
-// operationLifecycleTokenTotal is the total of one disjoint token count.
 func operationLifecycleTokenTotal(usage TokenUsage) int64 {
 	return TokenUsageTotal(usage)
 }
 
-// operationFrom parses the stored operation spec.
 func operationFrom(row map[string]any) Operation {
 	var operation Operation
 	if err := json.Unmarshal([]byte(kernelString(row["spec"])), &operation); err != nil {
@@ -192,8 +170,6 @@ func operationFrom(row map[string]any) Operation {
 	return operation
 }
 
-// describeFailure flattens the words a failed operation left behind, so the
-// environment-failure predicate sees text instead of a shape.
 func describeFailure(output Json) string {
 	if output == nil {
 		return ""
@@ -217,7 +193,6 @@ func describeFailure(output Json) string {
 	return jsonStringify(output)
 }
 
-// sumKnownUsage adds the known usage rows and keeps the weakest provenance.
 func sumKnownUsage(rows []map[string]any) TokenUsage {
 	total := TokenUsage{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0}
 	var source *UsageSource

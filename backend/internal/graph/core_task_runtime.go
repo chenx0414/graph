@@ -6,40 +6,16 @@ import (
 	"strings"
 )
 
-// THINKING_LEVELS is the vocabulary of thinking strengths the runtime accepts.
 var THINKING_LEVELS = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 
-// DECISION_DIGEST_MAX_MESSAGES bounds the compatibility decision snapshot.
-//
-// When the master declares no decisions the harness freezes the conversation's
-// consumed user messages instead. That is deliberate: it is how a constraint the
-// user states in chat reaches the node doing the work. But it had no bound, so
-// one real task carried 636 entries of its whole chat history into every node.
-//
-// The window keeps BOTH ends. Dropping the oldest instead would defeat the
-// feature, because the original request and the constraints stated with it are
-// the oldest messages there are.
 const DECISION_DIGEST_MAX_MESSAGES = 20
 
-// DECISION_DIGEST_HEAD is how many of the oldest messages the window keeps.
 const DECISION_DIGEST_HEAD = 6
 
-// DECISION_DIGEST_TAIL is how many of the newest messages the window keeps.
 const DECISION_DIGEST_TAIL = DECISION_DIGEST_MAX_MESSAGES - DECISION_DIGEST_HEAD
 
-// DECISION_DIGEST_MAX_CHARS bounds the frozen decision snapshot.
 const DECISION_DIGEST_MAX_CHARS = 4_000
 
-// StatesADecision reports whether a user message says anything worth carrying
-// into every node's briefing.
-//
-// The fallback exists so a constraint the user states in chat reaches the
-// worker, and that is exactly why it cannot be a length rule: "别动 login" is
-// shorter than "好的，继续吧" and is the kind of line the fallback is for. What
-// it can drop is a message that states no decision at all - a slash command, or
-// a bare acknowledgement or continuation - because those cost window space in
-// every briefing while reading like a constraint to a model that is looking for
-// one (HB-190).
 func StatesADecision(text string) bool {
 	bare := strings.TrimSpace(text)
 	bare = strings.TrimRight(bare, "。.!！？?，,、;；:： \t\r\n")
@@ -55,7 +31,6 @@ func StatesADecision(text string) bool {
 
 var taskRuntimeDecisionPattern = regexp.MustCompile(`(?i)^(?:continue|go on|ok(?:ay)?|yes|yep|thanks|thank you|继续|接着(?:做|干)?|好的|好|是|是的|对|可以|行|收到|谢谢|多谢)$`)
 
-// taskRuntimeAsThinkingLevel validates one thinking level.
 func taskRuntimeAsThinkingLevel(value string) string {
 	for _, level := range THINKING_LEVELS {
 		if level == value {
@@ -66,7 +41,6 @@ func taskRuntimeAsThinkingLevel(value string) string {
 	return ""
 }
 
-// taskRuntimeSteeringText renders one queued message as steering text.
 func taskRuntimeSteeringText(row MessageRow) string {
 	parts := []string{}
 	if trimmed := strings.TrimSpace(row.Text); trimmed != "" {
@@ -103,8 +77,6 @@ func taskRuntimeSteeringText(row MessageRow) string {
 						attachment.Data = &data
 					}
 					if IsImageAttachment(attachment) {
-						// Steering is text-only today; keep the image visible by name
-						// instead of silently dropping the reference.
 						parts = append(parts, "附件 "+name+"（图片，请在发送消息中查看）")
 					}
 				}
@@ -114,7 +86,6 @@ func taskRuntimeSteeringText(row MessageRow) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// taskRuntimeProposalRow is one stored proposal row.
 type taskRuntimeProposalRow struct {
 	Version            int
 	RequirementVersion int
@@ -126,7 +97,6 @@ type taskRuntimeProposalRow struct {
 	DeletedAt          *int64
 }
 
-// taskRuntimeProposalSummary is the short form of one proposal row.
 type taskRuntimeProposalSummary struct {
 	Version            int    `json:"version"`
 	RequirementVersion int    `json:"requirementVersion"`
@@ -138,7 +108,6 @@ type taskRuntimeProposalSummary struct {
 	Archived           bool   `json:"archived"`
 }
 
-// taskRuntimeProposalCards is the draft projection every formal read path shares.
 type taskRuntimeProposalCards struct {
 	Current           *taskRuntimeProposalSummary  `json:"current"`
 	ProposalHistory   []taskRuntimeProposalSummary `json:"proposalHistory"`
@@ -179,7 +148,6 @@ func taskRuntimeOptionalInt(value any) *int64 {
 	return &number
 }
 
-// taskRuntimeDraftProjection is the current draft card plus the management metadata.
 func taskRuntimeDraftProjection(store *TaskStore, taskId string, task TaskRow) taskRuntimeProposalCards {
 	rows := taskRuntimeProposalRows(store, taskId)
 	formal := func(row taskRuntimeProposalRow) bool {
@@ -236,7 +204,6 @@ func taskRuntimeDraftProjection(store *TaskStore, taskId string, task TaskRow) t
 	return taskRuntimeProposalCards{Current: current, ProposalHistory: history, ArchivedProposals: archived}
 }
 
-// taskRuntimeConversationProposal reads one proposal version of a conversation.
 func taskRuntimeConversationProposal(store *TaskStore, taskId string, version int, currentRequirementVersion int, includeArchived bool) any {
 	row := kernelRow(store.Db, "SELECT version,requirement_version,spec,decision_snapshot,draft_revision,draft_digest,archived_at,deleted_at FROM proposals WHERE task_id=? AND version=?", taskId, version)
 	if row == nil {
@@ -274,7 +241,6 @@ func taskRuntimeConversationProposal(store *TaskStore, taskId string, version in
 	}
 }
 
-// taskRuntimeConversationTarget names the task a command may act on.
 func taskRuntimeConversationTarget(store *TaskStore, supervisorTaskId string, requested *string, what string) string {
 	if requested == nil || *requested == supervisorTaskId {
 		return supervisorTaskId
@@ -289,7 +255,6 @@ func taskRuntimeConversationTarget(store *TaskStore, supervisorTaskId string, re
 	return *requested
 }
 
-// taskRuntimeMissingTaskNode is the error for a node the task does not have.
 func taskRuntimeMissingTaskNode(kernel *KernelStore, taskId, nodeId string) {
 	hint := ""
 	revision := kernel.LatestRevision(taskId)
@@ -302,7 +267,6 @@ func taskRuntimeMissingTaskNode(kernel *KernelStore, taskId, nodeId string) {
 	Raise("not_found", "Task "+taskId+" has no node "+nodeId+hint)
 }
 
-// taskRuntimeStatusView is a compact projection of one task.
 func taskRuntimeStatusView(store *TaskStore, kernel *KernelStore, taskId string, nodeId *string) map[string]any {
 	task := store.Task(taskId)
 	native := kernel.LatestRevision(taskId)

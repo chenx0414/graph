@@ -1,12 +1,3 @@
-/**
- * Shared artifact views: the compact list the right drawer hosts and the detail a
- * tab opens.
- *
- * Both read the same records the artifact workspace already serves, and the two
- * groups are what the drawer has to tell apart: what this task produced, and what
- * belongs to the project itself - promoted knowledge such as the harness backlog,
- * which no single task owns and which therefore has to stand on its own.
- */
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ArtifactRecord } from './kernel-view-types.ts';
 import { api } from './api.ts';
@@ -56,7 +47,6 @@ function Group({ title, hint, records, onOpenDetail, testid, action }: {
   );
 }
 
-/** The drawer's 「共享产物」 page: this entry's artifacts plus the project's own. */
 export function ArtifactList({ records, loading, onOpenDetail, tasks }: {
   records: readonly ArtifactRecord[];
   loading?: boolean;
@@ -93,15 +83,9 @@ export function ArtifactList({ records, loading, onOpenDetail, tasks }: {
   );
 }
 
-/**
- * One artifact in a tab of its own: the version, who produced it and its content.
- * The record is read through the task the user came from, which is the workspace
- * that may see it.
- */
 export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
   taskId: string;
   artifactId: string;
-  /** The version the row pointed at; without it the newest one is shown. */
   version?: number;
   onTitle?: (title: string) => void;
 }) {
@@ -143,8 +127,6 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
     return () => { cancelled = true; };
   }, [taskId, artifactId, version, reloadToken]);
 
-  /** Promotion is what turns a task's artifact into the project's own; it lives here
-   * because this tab is where one artifact is looked at as a whole. */
   async function promote() {
     const record = content?.artifact;
     if (!record || promoting || record.scope === 'project') return;

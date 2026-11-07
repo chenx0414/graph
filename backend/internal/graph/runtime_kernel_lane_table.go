@@ -2,7 +2,6 @@ package graph
 
 import "sync"
 
-// laneTable protects one per-node table shared by the lane's goroutines.
 type laneTable[T any] struct {
 	mutex  sync.Mutex
 	values map[string]T

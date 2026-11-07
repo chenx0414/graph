@@ -16,7 +16,6 @@ func (k *KernelStore) NodeState(taskID, nodeID string) NodeStateRow {
 	}
 }
 
-// AuthorizedBudget is the explicit user quota, or nil when unset.
 func (k *KernelStore) AuthorizedBudget(taskID, nodeID string) *TokenBudget {
 	row, ok := g5One(k.Db, "SELECT authorized_budget FROM kernel_node_state WHERE task_id=? AND node_id=?", taskID, nodeID)
 	if !ok || row["authorized_budget"] == nil || g5Str(row["authorized_budget"]) == "" {
@@ -29,7 +28,6 @@ func (k *KernelStore) AuthorizedBudget(taskID, nodeID string) *TokenBudget {
 	return budget
 }
 
-// SetAuthorizedBudget records an explicit quota. Nil tokens means unlimited.
 func (k *KernelStore) SetAuthorizedBudget(taskID, nodeID string, tokens *int64) {
 	phase := k.Store.Task(taskID).Phase
 	if phase == "completed" || phase == "stopping" || phase == "stopped" {
@@ -57,14 +55,12 @@ func (k *KernelStore) SetAuthorizedBudget(taskID, nodeID string, tokens *int64) 
 	g5Exec(k.Db, "UPDATE kernel_node_state SET authorized_budget=? WHERE task_id=? AND node_id=?", string(raw), taskID, nodeID)
 }
 
-// BudgetState reports spent and held tokens against a caller-supplied quota.
 func (k *KernelStore) BudgetState(taskID, nodeID string, budget TokenBudget) NodeBudgetState {
 	k.ensureNodeState(taskID, nodeID)
 	row, _ := g5One(k.Db, "SELECT used,reserved FROM kernel_node_state WHERE task_id=? AND node_id=?", taskID, nodeID)
 	return NodeBudgetState{Budget: budget.Budget, Unlimited: budget.Unlimited, Used: float64(g5Int(row["used"])), Reserved: float64(g5Int(row["reserved"]))}
 }
 
-// ReserveNodeTokens holds a reservation or refuses the send.
 func (k *KernelStore) ReserveNodeTokens(taskID, nodeID string, budget TokenBudget, amount float64, executionID string) {
 	if !isSafeInteger(amount) || amount < 0 {
 		Raise("invalid_adapter", "A bounded token reservation is required")
@@ -79,7 +75,6 @@ func (k *KernelStore) ReserveNodeTokens(taskID, nodeID string, budget TokenBudge
 	})
 }
 
-// ReleaseNodeTokens returns a hold.
 func (k *KernelStore) ReleaseNodeTokens(taskID, nodeID string, amount float64, executionID string) {
 	if !isSafeInteger(amount) || amount < 0 {
 		return
@@ -94,21 +89,18 @@ func (k *KernelStore) ReleaseNodeTokens(taskID, nodeID string, amount float64, e
 	})
 }
 
-// PauseNode holds a node without dropping its queue.
 func (k *KernelStore) PauseNode(taskID, nodeID string) {
 	k.ensureNodeState(taskID, nodeID)
 	g5Exec(k.Db, "UPDATE kernel_node_state SET paused=1 WHERE task_id=? AND node_id=?", taskID, nodeID)
 	k.Store.Event(taskID, "graph.node.paused", map[string]any{"nodeId": nodeID})
 }
 
-// ResumeNode clears a node pause.
 func (k *KernelStore) ResumeNode(taskID, nodeID string) {
 	k.ensureNodeState(taskID, nodeID)
 	g5Exec(k.Db, "UPDATE kernel_node_state SET paused=0 WHERE task_id=? AND node_id=?", taskID, nodeID)
 	k.Store.Event(taskID, "graph.node.resumed", map[string]any{"nodeId": nodeID})
 }
 
-// ProviderCalls lists actual sends for a graph, optionally one node.
 func (k *KernelStore) ReconcileNodeUsage(taskID, nodeID, decision string) {
 	k.Store.Transaction(func() any {
 		k.ensureNodeState(taskID, nodeID)
@@ -124,7 +116,6 @@ func (k *KernelStore) ReconcileNodeUsage(taskID, nodeID, decision string) {
 	})
 }
 
-// BlockNode parks a node without counting a failed attempt.
 func (k *KernelStore) RequestBudget(taskID, nodeID, executionID, reason string) {
 	execution := k.Execution(executionID)
 	if execution == nil || execution.TaskId != taskID || execution.NodeId != nodeID || execution.TokenBudget == nil || execution.TokenBudget.Unlimited {
@@ -143,12 +134,6 @@ func (k *KernelStore) RequestBudget(taskID, nodeID, executionID, reason string) 
 	})
 }
 
-// CommitNodeUsage adds a reported amount to what the node already spent.
-//
-// The node budget has one write rule: a reported amount is added to the
-// spend, never written over it. The provider gate settles one call at a
-// time and the node executor settles a whole turn, and both come through
-// here so the two of them cannot disagree about what a node has used.
 func (k *KernelStore) CommitNodeUsage(taskID, nodeID string, amount int64) {
 	if !isSafeInteger(amount) || amount < 0 {
 		return
@@ -157,8 +142,6 @@ func (k *KernelStore) CommitNodeUsage(taskID, nodeID string, amount int64) {
 	g5Exec(k.Db, "UPDATE kernel_node_state SET used=used+?,last_committed=used+? WHERE task_id=? AND node_id=?", amount, amount, taskID, nodeID)
 }
 
-// SettleNodeReservation releases the hold a node keeps on its budget once no
-// provider call and no execution of that node is still waiting.
 func (k *KernelStore) SettleNodeReservation(taskID, nodeID string) {
 	k.ensureNodeState(taskID, nodeID)
 	g5Exec(k.Db, "UPDATE kernel_node_state SET reserved=0 WHERE task_id=? AND node_id=?", taskID, nodeID)

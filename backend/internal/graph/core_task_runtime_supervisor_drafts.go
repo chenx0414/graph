@@ -2,12 +2,10 @@ package graph
 
 import "strings"
 
-// ListProjects reads the projects of the runtime.
 func (supervisor *TaskRuntimeSupervisor) ListProjects() []map[string]any {
 	return supervisor.runtime.User().Projects()
 }
 
-// BindProject binds the conversation of the supervisor to a project.
 func (supervisor *TaskRuntimeSupervisor) BindProject(projectId, requestId string) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -18,7 +16,6 @@ func (supervisor *TaskRuntimeSupervisor) BindProject(projectId, requestId string
 	return runtime.Conversations().Bind(conversation.Id, projectId, requestId)
 }
 
-// ConfirmDraft confirms one draft on behalf of the user.
 func (supervisor *TaskRuntimeSupervisor) ConfirmDraft(input TaskRuntimeConfirmInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -48,7 +45,6 @@ func (supervisor *TaskRuntimeSupervisor) ConfirmDraft(input TaskRuntimeConfirmIn
 	return runtime.Conversations().Confirm(*conversation, input)
 }
 
-// AttestationInstruction reads the recorded instruction of a confirmation.
 func (input TaskRuntimeConfirmInput) AttestationInstruction() string {
 	if input.Attestation == nil {
 		return ""

@@ -8,12 +8,6 @@ import (
 	"encoding/json"
 )
 
-// configParseCodemode reads the codemode block of the configuration.
-//
-// The block is optional and the sandbox is on unless the configuration says
-// otherwise: the kernel has codemode, and the sandbox changes how a call is
-// written rather than whether it is admitted. `codemode.enabled: false` is
-// how a deployment asks for the model to call its tools one by one.
 func configParseCodemode(value any) GraphCodemode {
 	codemode := GraphCodemode{Enabled: true}
 	if value == nil {
@@ -30,7 +24,6 @@ func configParseCodemode(value any) GraphCodemode {
 	return codemode
 }
 
-// LoadGraphConfig reads and parses one file. A missing file is invalid_config.
 func LoadGraphConfig(configPath string) GraphConfig {
 	text, err := os.ReadFile(configPath)
 	if err != nil {
@@ -46,7 +39,6 @@ func LoadGraphConfig(configPath string) GraphConfig {
 	return ParseGraphConfig(raw, configPath)
 }
 
-// AssertCredentialGroups rejects aliases of one key that name different shared groups.
 func AssertCredentialGroups(config GraphConfig, env map[string]string) {
 	pointers := map[string]*string{}
 	for key, value := range env {
@@ -88,7 +80,6 @@ func AssertCredentialGroups(config GraphConfig, env map[string]string) {
 	}
 }
 
-// ResolveCredentialSecret reads the environment variable a credential names.
 func ResolveCredentialSecret(config GraphConfig, credentialID string, env map[string]*string) CredentialSecret {
 	credential, ok := config.Credentials[credentialID]
 	if !ok {

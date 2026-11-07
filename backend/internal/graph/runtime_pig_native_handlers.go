@@ -11,13 +11,8 @@ import (
 	"errors"
 )
 
-// pigNativeImageLimit is the largest image one read hands the model.
-//
-// The transcript carries the bytes: an oversized picture costs the whole
-// context and buys nothing the model can use.
 const pigNativeImageLimit = 8 << 20
 
-// pigReadTool is the SDK's read tool.
 func pigReadTool(paths *pigNativePaths) ToolDefinition {
 	return ToolDefinition{
 		Name:        "read",
@@ -38,9 +33,6 @@ func pigReadTool(paths *pigNativePaths) ToolDefinition {
 			if requested == "" {
 				return nil, errors.New("read needs a path")
 			}
-			// An image reaches the model as an image, not as its bytes: the
-			// daemon's session declares the modalities its model accepts, and a
-			// picture read as text is 50KB of noise in the transcript.
 			if mimeType := agentToolsImageMimeType(requested); mimeType != "" {
 				body := paths.readBytes(requested)
 				if len(body) > pigNativeImageLimit {
@@ -81,10 +73,6 @@ func pigWriteTool(paths *pigNativePaths) ToolDefinition {
 	}
 }
 
-// pigEditTool is the SDK's edit tool.
-//
-// An edit replaces an exact text. Every replacement must match exactly once:
-// an ambiguous replacement is refused rather than guessed.
 func pigEditTool(paths *pigNativePaths) ToolDefinition {
 	return ToolDefinition{
 		Name:        "edit",
@@ -138,7 +126,6 @@ func pigEditTool(paths *pigNativePaths) ToolDefinition {
 	}
 }
 
-// pigLsTool is the SDK's ls tool.
 func pigLsTool(paths *pigNativePaths) ToolDefinition {
 	return ToolDefinition{
 		Name:        "ls",
@@ -168,7 +155,6 @@ func pigLsTool(paths *pigNativePaths) ToolDefinition {
 	}
 }
 
-// pigFindTool is the SDK's find tool.
 func pigFindTool(paths *pigNativePaths) ToolDefinition {
 	return ToolDefinition{
 		Name:        "find",
@@ -209,8 +195,6 @@ func pigFindTool(paths *pigNativePaths) ToolDefinition {
 				}
 				if expression.MatchString(info.Name()) {
 					found = append(found, path)
-					// The walk stops at the limit: a tree with a million
-					// matching files costs the memory of the limit.
 					if len(found) >= limit {
 						more = true
 						return filepath.SkipAll
@@ -231,7 +215,6 @@ func pigFindTool(paths *pigNativePaths) ToolDefinition {
 	}
 }
 
-// pigGrepTool is the SDK's grep tool.
 func pigGrepTool(paths *pigNativePaths) ToolDefinition {
 	return ToolDefinition{
 		Name:        "grep",
@@ -353,8 +336,6 @@ func pigNativePattern(pattern string) string {
 	return string(out)
 }
 
-// maxBashTimeoutMs caps what one bash call may ask for, so a stuck command
-// cannot hold a session slot for an unbounded time.
 const maxBashTimeoutMs = 1_800_000
 
 func pigBashTool(input AgentToolsInput) ToolDefinition {
@@ -367,9 +348,6 @@ func pigBashTool(input AgentToolsInput) ToolDefinition {
 		if input.Run == nil && input.RunWithTimeout == nil {
 			return nil, errors.New("This Agent may not run commands")
 		}
-		// The schema promises a per-call limit, so honour it. Accepting the
-		// parameter and dropping it made a long command look like a crash: the
-		// runner's own 120s cap killed it and the tool reported SIGKILL.
 		timeoutMs := pigNativeNumber(arguments["timeout"])
 		if timeoutMs < 0 {
 			timeoutMs = 0
@@ -404,9 +382,6 @@ func pigBashTool(input AgentToolsInput) ToolDefinition {
 		Execute: func(_ string, params any) (any, error) {
 			return run(params, nil)
 		},
-		// The background body is the same command with the daemon's own signal,
-		// so a withdrawn or expired call is really stopped instead of being
-		// left to finish behind a row that already says it is over.
 		Deferred: func(_ string, params any, signal *AbortSignal) (any, error) {
 			return run(params, signal)
 		},

@@ -12,7 +12,6 @@ import (
 
 const piExtensionInstallSnapshotFile = ".graph-install.json"
 
-// piExtensionInstallTree is one digest per installed package: the sorted list of its files.
 func piExtensionInstallTree(root string) (map[string]string, error) {
 	nodeModules := filepath.Join(root, "node_modules")
 	entries, err := os.ReadDir(nodeModules)
@@ -63,8 +62,6 @@ func piExtensionInstallTree(root string) (map[string]string, error) {
 	return tree, nil
 }
 
-// RecordInstallSnapshot records what is installed now; a diagnostic baseline, never a trigger for
-// deleting anything.
 func RecordInstallSnapshot(root string) error {
 	tree, err := piExtensionInstallTree(root)
 	if err != nil {
@@ -77,15 +74,6 @@ func RecordInstallSnapshot(root string) error {
 	return os.WriteFile(filepath.Join(root, piExtensionInstallSnapshotFile), body, 0o600)
 }
 
-// EnsureRequiredPeers installs the peers a package declares but does not ship.
-//
-// The Pi SDK installs a source with `--omit=peer`, and the host supplies only `@earendil-works/*`
-// to loaded extensions, so a plain non-optional peer such as `zod` would never resolve and the
-// extension could not load at all. Install those peers into the same root and verify them
-// afterwards; an already complete peer is a no-op. A partial npm extraction in that shared root is
-// the real failure this guards: the incident left `zod` present but stripped of its whole `v4/`
-// directory, with another package's declared entry missing in the same tree, so the presence of a
-// directory proves nothing.
 func EnsureRequiredPeers(entry string) error {
 	root := piExtensionInstallRootFor(entry)
 	if root == "" {
@@ -131,10 +119,6 @@ func EnsureRequiredPeers(entry string) error {
 	if len(broken) == 0 {
 		return nil
 	}
-	// `--prefer-online` keeps a stale entry in npm's own cache from handing back the very tree that
-	// made the peer unloadable. Repair stays best effort on purpose: a static gap check can be wrong
-	// about an exotic export map, and turning that guess into a thrown error would block a session
-	// that would otherwise load — the load itself stays the authority.
 	args := []string{"install"}
 	for _, name := range broken {
 		version, _ := peers[name].(string)

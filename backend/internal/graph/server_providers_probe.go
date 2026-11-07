@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 )
 
-// ProbeRequest is one probe request the console sends.
 type ProbeRequest struct {
 	RequestID   string           `json:"requestId"`
 	Provider    ResolvedProvider `json:"provider"`
@@ -14,27 +13,16 @@ type ProbeRequest struct {
 	ProbeModels *bool            `json:"probeModels,omitempty"`
 }
 
-// ShouldProbeModels reports whether a probe should ask the vendor for its
-// model list. The directory's `modelsListSupported` flag is advisory copy only
-// and must never gate the request: only an explicit `probeModels:false`
-// suppresses it. The vendor's real response is the source of truth - a
-// rejection surfaces its own error text and the wizard can still add a model id
-// by hand.
 func ShouldProbeModels(probeModels *bool) bool {
 	return probeModels == nil || *probeModels
 }
 
-// ProbeRequestValidation is the outcome of parsing a probe body.
 type ProbeRequestValidation struct {
 	OK      bool
 	Request ProbeRequest
 	Errors  []ProviderDraftError
 }
 
-// ValidateProbeRequest parses a probe body. `requestId` is the idempotency
-// key the console POST must always carry; the provider draft lives under
-// `provider` (a flat body is also accepted for convenience) and is validated
-// by ValidateProviderDraft.
 func ValidateProbeRequest(input any) ProbeRequestValidation {
 	body := map[string]any{}
 	if record, ok := input.(map[string]any); ok && record != nil {
@@ -76,17 +64,13 @@ func ValidateProbeRequest(input any) ProbeRequestValidation {
 	return ProbeRequestValidation{OK: true, Request: request}
 }
 
-// ProbeTarget is the provider endpoint a probe talks to.
 type ProbeTarget struct {
 	BaseURL string   `json:"baseUrl"`
 	API     ModelApi `json:"api"`
-	// APIKey is the resolved secret value; present only inside the daemon
-	// during a probe.
 	APIKey  *string           `json:"apiKey,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// HttpRequestSpec is one outbound request the probe makes.
 type HttpRequestSpec struct {
 	Method  string            `json:"method"`
 	URL     string            `json:"url"`
@@ -94,13 +78,10 @@ type HttpRequestSpec struct {
 	Body    *string           `json:"body,omitempty"`
 }
 
-// joinProviderURL joins a base URL and a path with exactly one separator.
 func joinProviderURL(baseURL, suffix string) string {
 	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(suffix, "/")
 }
 
-// AuthHeaders are the auth headers per transport. Anthropic uses x-api-key +
-// version; the OpenAI-compatible transports use a bearer token.
 func AuthHeaders(target ProbeTarget) map[string]string {
 	if target.APIKey == nil {
 		return map[string]string{}
@@ -111,9 +92,6 @@ func AuthHeaders(target ProbeTarget) map[string]string {
 	return map[string]string{"authorization": "Bearer " + *target.APIKey}
 }
 
-// BuildModelsRequest is the model-listing request for the provider
-// (OpenAI-compatible `<base>/models`, Anthropic-compatible `<base>/models`).
-// Pure: builds the shape only.
 func BuildModelsRequest(target ProbeTarget) HttpRequestSpec {
 	headers := map[string]string{"accept": "application/json"}
 	for name, value := range AuthHeaders(target) {
@@ -125,8 +103,6 @@ func BuildModelsRequest(target ProbeTarget) HttpRequestSpec {
 	return HttpRequestSpec{Method: "GET", URL: joinProviderURL(target.BaseURL, "models"), Headers: headers}
 }
 
-// BuildVerifyRequest is the minimal chat request used to prove a credential +
-// model work.
 func BuildVerifyRequest(target ProbeTarget, modelID string) HttpRequestSpec {
 	anthropic := target.API == ModelApiAnthropicMessages
 	responses := target.API == ModelApiOpenAIResponses
@@ -149,9 +125,6 @@ func BuildVerifyRequest(target ProbeTarget, modelID string) HttpRequestSpec {
 		"messages": []any{map[string]any{"role": "user", "content": "ping"}},
 	}
 	if responses {
-		// The Responses transport has no chat messages: the turn is an input item
-		// and its text is an input_text part. A draft that declares this transport
-		// must be probed with it, or the probe rejects a correct draft.
 		payload = map[string]any{
 			"model": modelID, "stream": false, "store": false, "max_output_tokens": 16,
 			"input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "ping"}}}},

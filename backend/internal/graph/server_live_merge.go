@@ -25,8 +25,6 @@ func liveMergeValue(config GraphConfig, env, secrets map[string]string, revoked 
 }
 
 func liveCredentialIDs(config GraphConfig) []string {
-	// TODO(port): Go maps have no insertion order. Sorted ids keep the canonical alias stable
-	// because the TypeScript identity also sorts aliases before choosing one.
 	ids := make([]string, 0, len(config.Credentials))
 	for id := range config.Credentials {
 		ids = append(ids, id)

@@ -41,13 +41,6 @@ type BriefingExtra struct {
 	SystemContext *BriefingSystemContext
 }
 
-// Briefing is the external main briefing: request, acceptance, own messages and available capabilities.
-//
-// It returns the briefing and the length of its setup: the tail that describes the
-// environment the task runs in - the bound capabilities, the catalog and the system
-// context. The setup is the same text in every operation of a task, and the session
-// reads it once. A caller that knows the session still carries it may send the
-// briefing without that tail.
 func Briefing(operation Operation, extra BriefingExtra) (string, int) {
 	catalogDefinitions := []string{}
 	catalogCapabilities := []string{}
@@ -178,8 +171,6 @@ func Briefing(operation Operation, extra BriefingExtra) (string, int) {
 		}
 	}
 	kept = append(kept, keptSetup...)
-	// The setup is the tail of the briefing: the length is what a caller needs to
-	// take it off again.
 	setupText := strings.Join(keptSetup, "\n")
 	setupLength := 0
 	if setupText != "" && strings.HasSuffix(strings.Join(kept, "\n"), setupText) {

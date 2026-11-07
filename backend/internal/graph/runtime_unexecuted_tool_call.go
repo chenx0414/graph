@@ -17,13 +17,9 @@ func HasUnexecutedToolCall(text string) bool {
 	if unexecutedDSML.MatchString(prose) || unexecutedInvoke.MatchString(prose) {
 		return true
 	}
-	// Some OpenAI-compatible providers emit only parameter tags, even for
-	// several attempted calls. Two closed fields distinguish this from prose
-	// mentioning a single parameter tag.
 	return len(unexecutedParam.FindAllString(prose, -1)) >= 2
 }
 
-// WithoutUnexecutedToolCall keeps narration before a leaked call; its parameter text was never executed.
 func WithoutUnexecutedToolCall(text string) string {
 	if !HasUnexecutedToolCall(text) {
 		return text

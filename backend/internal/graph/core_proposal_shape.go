@@ -5,13 +5,6 @@ import (
 	"strings"
 )
 
-// ProposalShapeNotes says where a draft spends a node without buying anything.
-//
-// It is advice, never a gate: whether a node earns its place is a judgement
-// call, and a gate would only teach authors to phrase around it. The notes are
-// mechanical so they cannot be argued away - a node nobody mentions, two nodes
-// doing the same job, a node wired to nothing - and the author answers them in
-// the draft or drops the node.
 func ProposalShapeNotes(proposal NativeProposal) []string {
 	definition := proposal.Definition
 	ids := make([]string, 0, len(definition.Nodes))
@@ -19,8 +12,6 @@ func ProposalShapeNotes(proposal NativeProposal) []string {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	// One node is the baseline: there is nothing to justify until a draft spends
-	// a second one.
 	if len(ids) < 2 {
 		return nil
 	}
@@ -70,7 +61,6 @@ func ProposalShapeNotes(proposal NativeProposal) []string {
 	return notes
 }
 
-// endpointNode reads the node of a "node.port" endpoint.
 func endpointNode(endpoint string) string {
 	if at := strings.Index(endpoint, "."); at >= 0 {
 		return endpoint[:at]

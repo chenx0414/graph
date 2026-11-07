@@ -12,28 +12,12 @@ import (
 	"github.com/MichaelKinsy/PiG/durable"
 )
 
-// The kernel keeps two things beside the live context: a summary written when
-// the context is compacted, and the durable transcript itself. A compaction
-// replaces the context with the summary; a reset replaces it with a pointer.
-// Either way the entries stay readable, and history_search is how the next
-// turn reaches them: the model asks for what it needs instead of the daemon
-// deciding in advance what must survive.
 
 const (
-	// estimateCharsPerToken is pi-ai's chars/token estimate, the one the
-	// kernel's own threshold compaction uses.
 	estimateCharsPerToken = 3.5
-	// estimateImageChars is pi-ai's allowance for one image, in characters.
 	estimateImageChars = 4800
 )
 
-// estimateContextTokens estimates the request the next turn will send.
-//
-// The last measured assistant message is the anchor: its usage is what the
-// provider billed for the whole prefix up to it, so only the messages after it
-// are estimated. JSON bytes are not a token count - escaped HTML and tool
-// results inflated the old estimate by 30-170% and reset sessions that still
-// fit. This mirrors the estimate the kernel's own threshold compaction uses.
 func estimateContextTokens(messages []ai.Message) int {
 	anchor := 0.0
 	start := 0
@@ -60,7 +44,6 @@ func estimateContextTokens(messages []ai.Message) int {
 	return int(math.Ceil(total))
 }
 
-// estimateTextTokens estimates one pending text the way pi-ai does.
 func estimateTextTokens(text string) float64 {
 	if text == "" {
 		return 0
@@ -68,7 +51,6 @@ func estimateTextTokens(text string) float64 {
 	return math.Ceil(float64(utf16Units(text)) / estimateCharsPerToken)
 }
 
-// estimateMessageTokens estimates one message the way pi-ai does.
 func estimateMessageTokens(message ai.Message) float64 {
 	chars := 0
 	switch value := message.(type) {
@@ -101,7 +83,6 @@ func estimateMessageTokens(message ai.Message) float64 {
 	return math.Ceil(float64(chars) / estimateCharsPerToken)
 }
 
-// userContentChars counts a user message's characters.
 func userContentChars(content ai.UserContent) int {
 	switch value := content.(type) {
 	case ai.UserText:
@@ -121,22 +102,16 @@ func userContentChars(content ai.UserContent) int {
 	return 0
 }
 
-// utf16Units is JavaScript's string length: the unit pi-ai's estimate uses.
 func utf16Units(value string) int {
 	return len(utf16.Encode([]rune(value)))
 }
 
-// historyToolName is the tool that reads the durable transcript.
 const historyToolName = "history_search"
 
-// historyTool is the session-bound handler of history_search. The tool schema
-// is registered with the kernel before the session exists, so the handler
-// resolves the session on its first call.
 type historyTool struct {
 	session *Session
 }
 
-// spec is the tool the model sees.
 func (tool *historyTool) spec() ToolSpec {
 	return ToolSpec{
 		Name: historyToolName,
@@ -160,15 +135,6 @@ func (tool *historyTool) spec() ToolSpec {
 	}
 }
 
-// searchHistory reads the durable transcript of this conversation.
-//
-// It walks the whole transcript, newest first, one page at a time. It used to
-// read the newest 2000 entries and stop: compaction promises that nothing is
-// lost because this tool can reach the transcript, and a keyword from before
-// that window answered "no entry matches" (measured 2026-11-05 on a 16,041
-// entry conversation - 87% of it was unreachable). The walk is bounded so one
-// search cannot page forever; when the bound is what stopped it, the answer
-// says so and hands back the cursor to continue from.
 func (session *Session) searchHistory(ctx context.Context, args map[string]any) (string, error) {
 	const pageLimit = 2000
 	const scanBudget = 40000
@@ -222,9 +188,6 @@ func (session *Session) searchHistory(ctx context.Context, args map[string]any) 
 				break
 			}
 		}
-		// An entryId lookup only returns early on a hit, so it keeps walking until
-		// the pages are exhausted or the bound stops it: stopping after the first
-		// page is exactly the window this walk exists to leave behind.
 		if len(matches) >= limit || page.Next == nil {
 			break
 		}
@@ -257,7 +220,6 @@ func (session *Session) searchHistory(ctx context.Context, args map[string]any) 
 	return header + "\n\n" + truncateRunes(strings.Join(matches, "\n"), 16000), nil
 }
 
-// entryText is the entry's readable text and the roles that contributed it.
 func entryText(entry durable.EntryRecord) (string, string) {
 	parts := []string{}
 	roles := []string{}
@@ -276,8 +238,6 @@ func entryText(entry durable.EntryRecord) (string, string) {
 	return strings.Join(roles, ","), strings.Join(parts, "\n")
 }
 
-// messageText is one message's role and text, with tool calls named so a
-// search finds the command that produced a result.
 func messageText(message ai.Message) (string, string) {
 	switch value := message.(type) {
 	case ai.UserMessage:
@@ -311,7 +271,6 @@ func messageText(message ai.Message) (string, string) {
 	return "", ""
 }
 
-// userText is a user message's text without its images.
 func userText(content ai.UserContent) string {
 	switch value := content.(type) {
 	case ai.UserText:
@@ -328,7 +287,6 @@ func userText(content ai.UserContent) string {
 	return ""
 }
 
-// excerptAround returns the text around the first match of query.
 func excerptAround(text, query string, radius int) string {
 	lower := strings.ToLower(text)
 	at := strings.Index(lower, strings.ToLower(query))
@@ -357,7 +315,6 @@ func excerptAround(text, query string, radius int) string {
 	return prefix + string(runes[start:end]) + suffix
 }
 
-// truncateRunes shortens text to at most limit runes.
 func truncateRunes(text string, limit int) string {
 	runes := []rune(text)
 	if len(runes) <= limit {
@@ -366,13 +323,11 @@ func truncateRunes(text string, limit int) string {
 	return string(runes[:limit]) + "…"
 }
 
-// valueString reads a string argument.
 func valueString(value any) string {
 	text, _ := value.(string)
 	return text
 }
 
-// valueInt64 reads a number argument; the tool arguments arrive as JSON.
 func valueInt64(value any) int64 {
 	switch number := value.(type) {
 	case float64:
@@ -388,8 +343,6 @@ func valueInt64(value any) int64 {
 	return 0
 }
 
-// toolRegistered reports whether the daemon already declared a tool with this
-// name, so the kernel's own reader never shadows a daemon tool.
 func toolRegistered(tools []ToolSpec, name string) bool {
 	for _, tool := range tools {
 		if tool.Name == name {

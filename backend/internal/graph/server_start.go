@@ -10,7 +10,6 @@ import (
 	"context"
 )
 
-// DaemonOptions is the console process configuration.
 type DaemonOptions struct {
 	ConfigPath  *string
 	StateDir    string
@@ -25,7 +24,6 @@ type DaemonOptions struct {
 	PriceVerify func(PriceSnapshot) bool
 }
 
-// ApplyConfigResult is one config or secret apply.
 type ApplyConfigResult struct {
 	Revision          int                  `json:"revision"`
 	EffectiveRevision int                  `json:"effectiveRevision"`
@@ -37,7 +35,6 @@ type ApplyConfigResult struct {
 	Results           []PriceRefreshResult `json:"results"`
 }
 
-// GraphDaemon is the running console.
 type GraphDaemon struct {
 	URL               string
 	StateDir          string
@@ -55,22 +52,18 @@ type GraphDaemon struct {
 	refreshPrices     func(int) ApplyConfigResult
 }
 
-// ApplyConfig validates and activates one document.
 func (daemon *GraphDaemon) ApplyConfig(document any, expectedRevision int) ApplyConfigResult {
 	return daemon.applyConfig(document, expectedRevision)
 }
 
-// PushSecret applies one APP-supplied secret. A nil value revokes it.
 func (daemon *GraphDaemon) PushSecret(ref string, value *string, persisted ...bool) ApplyConfigResult {
 	return daemon.pushSecret(ref, value, persisted...)
 }
 
-// RefreshPrices re-verifies archived prices and activates the result.
 func (daemon *GraphDaemon) RefreshPrices(expectedRevision int) ApplyConfigResult {
 	return daemon.refreshPrices(expectedRevision)
 }
 
-// Close stops the HTTP server and the runtime it owns.
 func (daemon *GraphDaemon) Close() {
 	if daemon.watch != nil {
 		daemon.watch.Stop()
@@ -131,13 +124,6 @@ func missingSecrets(config GraphConfig, entries []ConfiguredModel, env map[strin
 	return missing
 }
 
-// priceVerifierFor reads where a price refresh verifies its entries.
-//
-// The archived official page is the default. An operator may point the daemon
-// at another page that carries the same prices - a mirror, a proxy, a local
-// service - without changing what the verification means: the page still has
-// to mention the model, and a page that does not is a failed verification,
-// never a silent re-stamp.
 func priceVerifierFor(env map[string]string) func(PriceSnapshot) bool {
 	source := ""
 	if env != nil {
@@ -151,11 +137,6 @@ func priceVerifierFor(env map[string]string) func(PriceSnapshot) bool {
 	}
 }
 
-// verifyPricePage reads one price page and says whether it still names the
-// model.
-//
-// A network or parse failure is a verification failure: an entry that cannot
-// be re-verified keeps its old amount and is marked stale.
 func verifyPricePage(sourceUrl string, modelId string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

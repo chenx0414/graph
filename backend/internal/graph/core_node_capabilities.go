@@ -1,8 +1,5 @@
 package graph
 
-// CapabilityLoadFact is the canonical capability load fact (src/core/node-run.ts).
-// The runtime declares the same name with more fields; that one is
-// RuntimeCapabilityLoadFact, which lives with the runtime loader.
 type CapabilityLoadFact struct {
 	ID          string   `json:"id"`
 	Version     string   `json:"version"`
@@ -16,7 +13,6 @@ type CapabilityLoadFact struct {
 	Tools       []string `json:"tools,omitempty"`
 }
 
-// CapabilityUsageFact is one capability's tool-call statistics.
 type CapabilityUsageFact struct {
 	ID           string   `json:"id"`
 	Version      string   `json:"version"`
@@ -31,7 +27,6 @@ type CapabilityUsageFact struct {
 	SuccessRate  *float64 `json:"successRate"`
 }
 
-// NodeCapabilityLoadInput is one recorded capability load.
 type NodeCapabilityLoadInput struct {
 	TaskId              string
 	NodeId              string
@@ -44,7 +39,6 @@ type NodeCapabilityLoadInput struct {
 	RuntimePolicyDigest string
 }
 
-// nodeCapabilityLoadRecord is the stored `loaded` document.
 type nodeCapabilityLoadRecord struct {
 	Version             int                         `json:"version"`
 	Digest              *string                     `json:"digest"`
@@ -53,7 +47,6 @@ type nodeCapabilityLoadRecord struct {
 	Facts               []RuntimeCapabilityLoadFact `json:"facts"`
 }
 
-// nodeEntryOptional maps an absent digest onto JSON null.
 func nodeEntryOptional(value string) *string {
 	if value == "" {
 		return nil
@@ -61,8 +54,6 @@ func nodeEntryOptional(value string) *string {
 	return &value
 }
 
-// RecordCapabilityLoad stores what was actually loaded for one node run, so a
-// later projection never has to guess from catalog status.
 func RecordCapabilityLoad(store *TaskStore, input NodeCapabilityLoadInput) {
 	facts := input.Report
 	if facts == nil {
@@ -81,7 +72,6 @@ func RecordCapabilityLoad(store *TaskStore, input NodeCapabilityLoadInput) {
 		nodeEntryReadOnly(input.ReadOnly), CanonicalJSON(record), NowMillis())
 }
 
-// nodeEntryReadOnly maps the read-only flag onto the stored integer.
 func nodeEntryReadOnly(readOnly bool) int {
 	if readOnly {
 		return 1
@@ -89,7 +79,6 @@ func nodeEntryReadOnly(readOnly bool) int {
 	return 0
 }
 
-// RecordNodeSession records the Pi session a node instance is bound to.
 func RecordNodeSession(store *TaskStore, instanceId, sessionId, sessionFile string) {
 	kernelExec(store.Db, "INSERT OR REPLACE INTO node_sessions VALUES(?,?,?,?)",
 		instanceId, sessionId, nodeEntryID(sessionFile), NowMillis())

@@ -1,10 +1,7 @@
 package graph
 
-// staleWorkerMs is how long a dispatch may stay marked active before it is read
-// as an interruption rather than a running worker.
 const staleWorkerMs = 10 * 60 * 1000
 
-// GraphControl drives a graph's execution controls.
 func (service *graphManagementService) GraphControl(input GraphControlInput) any {
 	graph := service.runtime(input.GraphId)
 	phase := GraphPhase("")
@@ -31,11 +28,6 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if owned != nil {
 			ReconcileOperationResources(service.kernel, operationId)
 		}
-		// kernel_module_operations records when a dispatch started as started_at; it
-		// has no dispatched_at column (that one belongs to the master `operations`
-		// table). Asking for the wrong name made this action fail with a SQL error
-		// for every caller, so the stale-worker reclaim it exists to perform could
-		// never run.
 		operation := kernelRow(service.kernel.Db, "SELECT delivery_id,module_id,state,worker_active,COALESCE(started_at,created_at) AS dispatched_at FROM kernel_module_operations WHERE task_id=? AND id=?", input.GraphId, operationId)
 		if operation == nil {
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
@@ -44,13 +36,6 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		if state != "uncertain" && state != "failed" && state != "unknown" && state != "cancelled" {
 			Raise("invalid_operation", "Only an interrupted or failed operation can be cancelled; stop active work first")
 		}
-		// A worker that was interrupted leaves worker_active=1 behind, and the guard
-		// that demanded 0 made the worse the interruption the less fixable it was:
-		// an interrupted dispatch could never be cancelled, so the graph could
-		// never be drained or closed (measured 2026-11-05: the same state blocked
-		// three graphs within an hour). Only a stale operation with no provider
-		// call in flight is reclaimed here - the same evidence the question path
-		// uses before it lets a node move on.
 		if kernelInt(operation["worker_active"]) != 0 {
 			if kernelInt(operation["dispatched_at"]) > NowMillis()-staleWorkerMs || service.kernel.HasPendingProviderCall(input.GraphId, kernelString(operation["module_id"])) {
 				Raise("invalid_operation", "Operation still holds execution resources; verify termination before cancelling")
@@ -65,9 +50,6 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 		service.kernel.ModuleTransaction(func() any {
 			service.kernel.CancelModuleOperation(operationId)
 			service.kernel.MarkDeliveryProcessed(deliveryId)
-			// A cancel ends the attempt, it does not judge the work: the delivery
-			// was consumed without a verdict and says so, so nothing downstream
-			// reads "processed" as "somebody decided".
 			service.kernel.Store.Event(input.GraphId, unjudgedEvent, map[string]any{
 				"operationId": operationId,
 				"deliveryId":  deliveryId,
@@ -92,20 +74,12 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 	case "retry_preparation":
 		return service.retryGraphPreparation(input.GraphId, input.Proof)
 	case "sync_integration":
-		// The integration commit is bookkeeping the delivery path refreshes when it
-		// runs; a graph whose work landed while that path was not reached kept a
-		// stale value and its own acceptance read the passing check as evidence
-		// about another commit (measured 2026-11-05, 288f801c: field 9fb2ba8a,
-		// branch head b46b309b). This re-reads the head instead of trusting it.
 		return SyncIntegrationSha(service.kernel, input.GraphId)
 	case "complete":
 		return graph.Complete()
 	case "withdraw_complete":
 		return graph.WithdrawComplete()
 	case "complete_with_limitations":
-		// A separate action on purpose: complete keeps its hard gate. This one
-		// closes a blocked graph on decisions recorded in
-		// kernel_acceptance_limitations, and it is the only place that does.
 		return service.completeWithLimitations(input.GraphId, input)
 	case "stop":
 		return graph.Stop()
@@ -186,7 +160,6 @@ func (service *graphManagementService) GraphControl(input GraphControlInput) any
 			Raise("invalid_queue", "Queue item is absent, still executing, or already settled")
 		}
 		nodeId := kernelString(row["node_id"])
-		// Stable node ids are literal text, never a wildcard expression.
 		base := "exec-" + input.GraphId + "-" + nodeId + "-" + itoa(seq)
 		submitted := kernelRow(service.kernel.Db, "SELECT submission_id FROM kernel_executions WHERE task_id=? AND node_id=? AND submission_id IS NOT NULL AND (id=? OR instr(id,?)=1)",
 			input.GraphId, nodeId, base, base+"-")

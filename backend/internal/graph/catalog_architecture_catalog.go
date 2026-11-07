@@ -1,13 +1,11 @@
 package graph
 
-// GraphArchitecture is one canonical architecture example shown in the resource library.
 type GraphArchitecture struct {
 	Name        string `json:"name"`
 	Flow        string `json:"flow"`
 	Description string `json:"description"`
 }
 
-// GRAPH_ARCHITECTURES are the canonical architecture examples exposed to the master Agent.
 var GRAPH_ARCHITECTURES = []GraphArchitecture{
 	{Name: "顺序执行", Flow: "A → B → C", Description: "每一步使用前一步产物，适合依赖明确的实现与检查流程。"},
 	{Name: "条件路由", Flow: "A → B / C", Description: "先判断输入或状态，再把任务交给一条匹配的分支。"},

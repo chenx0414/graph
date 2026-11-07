@@ -10,14 +10,12 @@ type piAdapterSlot struct {
 	acquire func(signal *AbortSignal) (func(), error)
 }
 
-// piAdapterPending is one in-flight system-change application.
 type piAdapterPending struct {
 	done  chan struct{}
 	value any
 	err   error
 }
 
-// piAdapterRunInput is the prepared state of one operation.
 type piAdapterRunInput struct {
 	Operation         Operation
 	Entry             ModelEntry
@@ -37,13 +35,9 @@ type piAdapterRunInput struct {
 	TurnOrdinalsMu    *sync.Mutex
 	SystemChanges     *map[string]*piAdapterPending
 	SystemChangesMu   *sync.Mutex
-	// InterruptSignal fires when this operation is interrupted. A tool hands it
-	// to the command runner so the process dies with the turn instead of running
-	// to its own end.
 	InterruptSignal *AbortSignal
 }
 
-// stringValue reads an optional string.
 func stringValue(value *string) string {
 	if value == nil {
 		return ""
@@ -51,7 +45,6 @@ func stringValue(value *string) string {
 	return *value
 }
 
-// canonicalJSONString is the TypeScript JSON.stringify of a value, for comparison.
 func canonicalJSONString(value any) string {
 	if value == nil {
 		return "{}"
@@ -63,7 +56,6 @@ func canonicalJSONString(value any) string {
 	return string(raw)
 }
 
-// piAdapterRealpath is realpath() with the TypeScript fallback to the original path.
 func piAdapterRealpath(path string) string {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -72,9 +64,6 @@ func piAdapterRealpath(path string) string {
 	return resolved
 }
 
-// piAdapterOptionalRealpath is realpath() with the TypeScript `.catch(() => undefined)`
-// fallback. A root that cannot be resolved is dropped from the grant list instead
-// of being handed to the sandbox as a path that does not exist.
 func piAdapterOptionalRealpath(path string) string {
 	if path == "" {
 		return ""
@@ -86,7 +75,6 @@ func piAdapterOptionalRealpath(path string) string {
 	return resolved
 }
 
-// piAdapterTurnInput is the state one turn runs with.
 type piAdapterTurnInput struct {
 	Gate                    *TaskSendGate
 	ObservedGate            SendGate

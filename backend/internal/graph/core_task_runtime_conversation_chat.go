@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// List reads the conversation list.
 func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -49,7 +48,6 @@ func (conversations *TaskRuntimeConversations) List(archived bool) []map[string]
 	return out
 }
 
-// Archive archives one conversation.
 func (conversations *TaskRuntimeConversations) Archive(conversationId, requestId string) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -80,7 +78,6 @@ func (conversations *TaskRuntimeConversations) Archive(conversationId, requestId
 	return record
 }
 
-// Unarchive restores one archived conversation.
 func (conversations *TaskRuntimeConversations) Unarchive(conversationId, requestId string) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -103,7 +100,6 @@ func (conversations *TaskRuntimeConversations) Unarchive(conversationId, request
 	return record
 }
 
-// TaskRuntimeChatInput is one user message of a conversation.
 type TaskRuntimeChatInput struct {
 	Text        string
 	RequestId   string
@@ -112,7 +108,6 @@ type TaskRuntimeChatInput struct {
 	Source      Json
 }
 
-// Chat adds one user message to a conversation.
 func (conversations *TaskRuntimeConversations) Chat(conversationId string, input TaskRuntimeChatInput) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -128,12 +123,6 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 		if strings.TrimSpace(input.Text) == "" && len(attachments) == 0 && input.Command == nil {
 			Raise("invalid_input", "A nonempty message, attachment or command is required")
 		}
-		// The message is appended before the master is woken. The TypeScript host
-		// did both in one synchronous block, so a turn could never start before the
-		// message it has to answer existed. The Go host runs the command and the
-		// dispatch on separate goroutines, so the message comes first. The state
-		// reads the same status either way: recovering the master only moves a node
-		// that was not busy, and a node that is not busy is pending in both readings.
 		node := kernelRow(runtime.store.Db, "SELECT status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master'", conversation.AnchorTaskId)
 		anchor := runtime.store.Task(conversation.AnchorTaskId)
 		state := "pending"
@@ -163,9 +152,6 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 			Data:           data,
 		})
 		RecoverMaster(runtime.store, conversation.AnchorTaskId, "message")
-		// A turn that cannot start is told so: the message stays pending, but
-		// the user learns why nothing is happening instead of waiting for a
-		// reply that cannot come.
 		runtime.refuseUndispatchableTurn(conversationId)
 		return map[string]any{
 			"conversationId": conversationId,
@@ -185,7 +171,6 @@ func (conversations *TaskRuntimeConversations) Chat(conversationId string, input
 	return record
 }
 
-// Compact asks the master to compact the conversation context.
 func (conversations *TaskRuntimeConversations) Compact(conversationId, requestId string) map[string]any {
 	command := "compact"
 	return conversations.Chat(conversationId, TaskRuntimeChatInput{
@@ -195,7 +180,6 @@ func (conversations *TaskRuntimeConversations) Compact(conversationId, requestId
 	})
 }
 
-// Bind binds one conversation to a project.
 func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, requestId string) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -219,8 +203,6 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 		runtime.store.SetTaskProject(conversation.AnchorTaskId, projectId)
 		invalidated := false
 		if previous != nil {
-			// A draft was investigated against the old project; switching the
-			// project makes every existing draft unconfirmable, not just hidden.
 			invalidated = true
 			runtime.store.BumpRequirementVersion(conversation.AnchorTaskId)
 			runtime.store.RebindConversation(conversationId)
@@ -256,7 +238,6 @@ func (conversations *TaskRuntimeConversations) Bind(conversationId, projectId, r
 	return record
 }
 
-// TaskRuntimeConfirmInput confirms one draft of a conversation.
 type TaskRuntimeConfirmInput struct {
 	ProposalVersion int
 	DraftRevision   int
@@ -265,7 +246,6 @@ type TaskRuntimeConfirmInput struct {
 	Attestation     *TaskRuntimeAttestation
 }
 
-// TaskRuntimeAttestation records who authorised a confirmation.
 type TaskRuntimeAttestation struct {
 	Actor       string
 	OnBehalfOf  string

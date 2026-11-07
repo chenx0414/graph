@@ -5,8 +5,6 @@ import { thinkingLabel, thinkingOptionLabel, thinkingView } from './thinking-lev
 
 export { thinkingLabel };
 
-/** Pi's own thinking vocabulary: the only value Graph stores or sends. Which of
- * these a given model accepts is decided per model (see thinking-levels.ts). */
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type ComposerModel = {
@@ -25,11 +23,8 @@ export type ComposerTelemetryView = {
   cacheHitRate: number | null;
   cachedInput: number;
   cacheInput: number;
-  /** Cached input tokens the newest completed master turn read. */
   cacheReadTokens?: number | null;
-  /** When that turn settled, Unix milliseconds. No provider reports a cache expiry. */
   cacheUsedAt?: number | null;
-  /** Tokens the newest settling request wrote, the milliseconds it took, and the rate. */
   outputTokens?: number | null;
   latencyMs?: number | null;
   tokensPerSecond?: number | null;
@@ -42,9 +37,6 @@ function telemetryValue(value: number | null | undefined, render: (value: number
   return value === null || value === undefined ? '—' : render(value);
 }
 
-/** How long ago the cached prefix was read. Providers report hit and miss counts, never an
- * expiry instant, so the age of the last request is the only freshness fact available and
- * the footer names it as an age rather than as a deadline. */
 function cacheAge(usedAt: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - usedAt) / 1000));
   if (seconds < 60) return '刚刚';
@@ -55,8 +47,6 @@ function cacheAge(usedAt: number, now: number): string {
   return `${Math.round(hours / 24)} 天前`;
 }
 
-/** Model and thinking-strength control shared by an existing conversation and
- * the pre-creation composer. The parent owns persistence/state via onSelect. */
 export function ComposerTelemetry({ telemetry, models, onSelect, disabled = false }: {
   telemetry?: ComposerTelemetryView | undefined;
   models: ComposerModel[];
@@ -66,9 +56,6 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftLevel, setDraftLevel] = useState('off');
-  // The age of the last cached request is rendered from its timestamp, so it stays true
-  // while the page sits open: one slow tick keeps it from freezing at the value it had
-  // when the conversation view last arrived.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (telemetry?.cacheUsedAt === null || telemetry?.cacheUsedAt === undefined) return;
@@ -99,8 +86,6 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   }, [open]);
   async function applySelection(nextModel: ComposerModel | undefined, nextLevel: string) {
     if (!nextModel || saving || disabled) return false;
-    // The level is re-resolved against the model being switched to: a model with
-    // fewer strengths must never be handed one it does not accept.
     const level = thinkingView(nextModel, nextLevel).level;
     setSaving(true);
     try {

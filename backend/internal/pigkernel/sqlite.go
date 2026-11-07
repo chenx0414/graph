@@ -11,11 +11,6 @@ import (
 	chordsqlite "github.com/MichaelKinsy/PiG/chord/sqlite"
 )
 
-// reportStorageError writes one storage failure to the daemon's error stream.
-//
-// The kernel and the daemon share one SQLite file. A write that loses the race
-// against the daemon's own writer must be visible: a silent storage error
-// reads like a lost turn.
 func reportStorageError(operation string, err error) {
 	if err == nil {
 		return
@@ -23,33 +18,14 @@ func reportStorageError(operation string, err error) {
 	_, _ = os.Stderr.WriteString("pig kernel: durable storage " + operation + " failed: " + err.Error() + "\n")
 }
 
-// The Graph daemon owns the formal SQLite database. The durable kernel needs
-// its own connection to the same file: the daemon writes domain facts, the
-// kernel writes the durable namespace, and neither may close the other's
-// handle.
-//
-// PiG ships drivers for Node and Cloudflare only. The Graph daemon already
-// speaks to SQLite through modernc.org/sqlite, so the kernel adapts that
-// driver to PiG's portable database facade instead of pulling in a second one.
 
 type sqliteDatabase struct {
 	db *sql.DB
-	// transactions serializes them. The facade requires that unrelated work
-	// waits for the running transaction instead of interleaving with it.
 	transactions sync.Mutex
 }
 
 var _ chordsqlite.SqliteDatabase = (*sqliteDatabase)(nil)
 
-// openSqliteDatabase opens one connection to the Graph database the way the
-// daemon opens it: a single connection, foreign keys on, WAL, and a bounded
-// busy wait so a durable write never blocks the daemon's own writer forever.
-//
-// The kernel's transactions take the write lock when they start. A deferred
-// transaction that starts as a reader and later writes cannot wait for the
-// daemon's own writer: SQLite refuses the upgrade at once instead of running
-// the busy handler, and the durable write fails with SQLITE_BUSY. An
-// immediate transaction waits instead, so the two writers queue.
 func openSqliteDatabase(path string) (*sqliteDatabase, error) {
 	db, err := sql.Open("sqlite", kernelDatabaseDSN(path))
 	if err != nil {
@@ -60,11 +36,6 @@ func openSqliteDatabase(path string) (*sqliteDatabase, error) {
 	return &sqliteDatabase{db: db}, nil
 }
 
-// kernelDatabaseDSN is the connection string of the kernel's own connection.
-//
-// The pragmas travel with the connection string, so every connection of the
-// pool carries them: a busy timeout set on one connection only protects that
-// connection.
 func kernelDatabaseDSN(path string) string {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -130,10 +101,6 @@ func (database *sqliteDatabase) All(sql string, params ...chordsqlite.SqliteValu
 	return collected, nil
 }
 
-// Transaction runs the callback in one immediate transaction. The callback must
-// use the handle it is given: the database has a single connection, so a
-// statement issued on the database itself would wait for the transaction that
-// is waiting for it.
 func (database *sqliteDatabase) Transaction(callback func(transaction chordsqlite.SqliteExecutor) error) error {
 	database.transactions.Lock()
 	defer database.transactions.Unlock()
@@ -157,7 +124,6 @@ func (database *sqliteDatabase) Transaction(callback func(transaction chordsqlit
 	return nil
 }
 
-// Close releases the connection. It never touches a connection the daemon owns.
 func (database *sqliteDatabase) Close() error {
 	return database.db.Close()
 }
@@ -213,8 +179,6 @@ func (transaction *sqliteTransaction) All(sql string, params ...chordsqlite.Sqli
 	return collected, nil
 }
 
-// scanRow reads one row into the portable shape: INTEGER, REAL, TEXT, BLOB and
-// NULL keep their SQLite types.
 func scanRow(rows *sql.Rows) (chordsqlite.SqliteRow, error) {
 	columns, err := rows.Columns()
 	if err != nil {

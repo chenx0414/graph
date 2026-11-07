@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 )
 
-// Workspace is the node work copy, or the integration tree for a non-agent lane.
 func (integration *GitIntegration) Workspace(taskId string, instanceId *string, nodeId, kind, action string) *string {
 	integration.ensureIntegrationWorkspace(taskId)
 	task := integration.store.Task(taskId)

@@ -50,24 +50,8 @@ const schemaV42 = "\n        ALTER TABLE proposals ADD COLUMN draft_revision INT
 
 const schemaV53 = "\n        CREATE TABLE IF NOT EXISTS conversation_goals(\n          conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),\n          objective TEXT NOT NULL,\n          status TEXT NOT NULL CHECK(status IN ('active','paused','budget_limited','completed')),\n          budget_tokens INTEGER NOT NULL DEFAULT 0,\n          used_tokens INTEGER NOT NULL DEFAULT 0,\n          check_note TEXT NOT NULL DEFAULT '',\n          created_at INTEGER NOT NULL,\n          updated_at INTEGER NOT NULL);\n        PRAGMA user_version=53;"
 
-// schemaV54 lets a goal say "usage_limited": a provider that refuses a turn for
-// capacity reasons stops the goal without claiming the objective is finished.
-// The table is rebuilt because SQLite cannot alter a CHECK constraint, and no
-// column changes: the retired budget column stays and is ignored.
 const schemaV54 = "\n        CREATE TABLE conversation_goals_next(\n          conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),\n          objective TEXT NOT NULL,\n          status TEXT NOT NULL CHECK(status IN ('active','paused','usage_limited','verifying','budget_limited','completed')),\n          budget_tokens INTEGER NOT NULL DEFAULT 0,\n          used_tokens INTEGER NOT NULL DEFAULT 0,\n          check_note TEXT NOT NULL DEFAULT '',\n          created_at INTEGER NOT NULL,\n          updated_at INTEGER NOT NULL);\n        INSERT INTO conversation_goals_next(conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at)\n          SELECT conversation_id,objective,status,budget_tokens,used_tokens,check_note,created_at,updated_at FROM conversation_goals;\n        DROP TABLE conversation_goals;\n        ALTER TABLE conversation_goals_next RENAME TO conversation_goals;\n        PRAGMA user_version=54;"
 
-// schemaV55 gives a goal its own acceptance criteria and the graph that runs it.
-//
-// A goal used to be a loop inside one conversation: the model worked, an acceptance
-// turn judged it, and both talked over the same transcript. With a graph id on the
-// row, the work, the review and the rework happen in the graph, and the conversation
-// keeps only the objective, the criteria and the state.
 const schemaV55 = "\n        ALTER TABLE conversation_goals ADD COLUMN acceptance TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_id TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_owner_task TEXT NOT NULL DEFAULT '';\n        PRAGMA user_version=55;"
 
-// schemaV57 gives an invocation the two instants one provider call really has.
-//
-// A turn is not a request: it is a sequence of sends, each with its own latency,
-// and the tokens one send wrote divided by that latency is the only tokens/s a
-// footer can honestly print. The operation's own pair is the whole turn, tools
-// and waiting included, so it cannot answer the question.
 const schemaV57 = "\n        ALTER TABLE invocations ADD COLUMN dispatched_at INTEGER NOT NULL DEFAULT 0;\n        ALTER TABLE invocations ADD COLUMN settled_at INTEGER NOT NULL DEFAULT 0;\n        PRAGMA user_version=57;"

@@ -8,11 +8,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// MIN_FREE_BYTES is the room packaging needs before it starts.
-// One build leaves 778 MiB of output, and the dmg step failed once at 786 MiB free.
 const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
 
-// FormatBytes sizes the way a person reads them back off `df -h`.
 func FormatBytes(bytes int64) string {
 	if bytes >= 1024*1024*1024 {
 		return fmt.Sprintf("%.1f GiB", float64(bytes)/float64(1024*1024*1024))
@@ -26,7 +23,6 @@ func FormatBytes(bytes int64) string {
 	return fmt.Sprintf("%d B", bytes)
 }
 
-// FreeBytesAt reports free space on the volume that holds path.
 func FreeBytesAt(path string) int64 {
 	var stats unix.Statfs_t
 	if err := unix.Statfs(path, &stats); err != nil {
@@ -35,8 +31,6 @@ func FreeBytesAt(path string) int64 {
 	return int64(stats.Bavail) * int64(stats.Bsize)
 }
 
-// DiskSpaceWarning is what to print before packaging, or nil when there is room.
-// Deliberately a message and not a throw.
 func DiskSpaceWarning(freeBytes int64, neededBytes ...int64) *string {
 	needed := int64(MIN_FREE_BYTES)
 	if len(neededBytes) > 0 {

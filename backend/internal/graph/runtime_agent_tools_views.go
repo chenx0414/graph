@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// agentToolsOptionalString is one trimmed string argument, or none.
 func agentToolsOptionalString(params map[string]any, key string) *string {
 	raw, ok := params[key].(string)
 	if !ok {
@@ -19,7 +18,6 @@ func agentToolsOptionalString(params map[string]any, key string) *string {
 	return &trimmed
 }
 
-// agentToolsTrimmedString is one trimmed string argument, or the empty string.
 func agentToolsTrimmedString(value any) string {
 	text, ok := value.(string)
 	if !ok {
@@ -28,7 +26,6 @@ func agentToolsTrimmedString(value any) string {
 	return strings.TrimSpace(text)
 }
 
-// agentToolsBoundedNumber is one non-negative integer argument, or the fallback.
 func agentToolsBoundedNumber(value any, fallback int) int {
 	number, ok := agentToolsNumber(value)
 	if !ok {
@@ -40,7 +37,6 @@ func agentToolsBoundedNumber(value any, fallback int) int {
 	return int(number)
 }
 
-// agentToolsNumber is one finite number argument.
 func agentToolsNumber(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
@@ -64,7 +60,6 @@ func agentToolsNumber(value any) (float64, bool) {
 	return 0, false
 }
 
-// agentToolsNumberValue is the JavaScript Number() conversion of one argument.
 func agentToolsNumberValue(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case nil:
@@ -88,7 +83,6 @@ func agentToolsNumberValue(value any) (float64, bool) {
 	return agentToolsNumber(value)
 }
 
-// agentToolsTruthy reports whether one argument is truthy in JavaScript.
 func agentToolsTruthy(value any) bool {
 	switch typed := value.(type) {
 	case nil:
@@ -109,8 +103,6 @@ func agentToolsTruthy(value any) bool {
 	return true
 }
 
-// agentToolsStringOrEmpty is the String() conversion of one argument, with a
-// missing argument read as the empty string.
 func agentToolsStringOrEmpty(value any) string {
 	if value == nil {
 		return ""
@@ -118,7 +110,6 @@ func agentToolsStringOrEmpty(value any) string {
 	return agentToolsString(value)
 }
 
-// agentToolsString is the String() conversion of one argument.
 func agentToolsString(value any) string {
 	switch typed := value.(type) {
 	case nil:
@@ -144,7 +135,6 @@ func agentToolsString(value any) string {
 	return stringifyJSON(value)
 }
 
-// agentToolsUnique removes duplicates and keeps the order.
 func agentToolsUnique(values []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -158,7 +148,6 @@ func agentToolsUnique(values []string) []string {
 	return out
 }
 
-// agentToolsContains reports whether one list holds a value.
 func agentToolsContains(values []string, needle string) bool {
 	for _, value := range values {
 		if value == needle {
@@ -168,7 +157,6 @@ func agentToolsContains(values []string, needle string) bool {
 	return false
 }
 
-// agentToolsTruncate cuts a string to at most the given number of characters.
 func agentToolsTruncate(value string, limit int) string {
 	if len(value) <= limit {
 		return value

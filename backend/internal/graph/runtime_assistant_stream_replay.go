@@ -7,11 +7,6 @@ import (
 	"encoding/json"
 )
 
-// ReplayAssistantStream rebuilds the live events from compact frames.
-//
-// Worker side: the frames carry only the block offsets and deltas, so the live message is
-// rebuilt exactly like a provider stream built it. Frames never carry terminal settlement;
-// it is passed separately so the caller can persist it.
 func ReplayAssistantStream(frames []AssistantMessageFrame, settlement AssistantMessage) []AssistantMessageEvent {
 	var partial *AssistantMessage
 	live := func() *AssistantMessage {
@@ -48,8 +43,6 @@ func ReplayAssistantStream(frames []AssistantMessageFrame, settlement AssistantM
 		}
 		return block
 	}
-	// Tool-call arguments stream as raw JSON text, so the replay accumulates the
-	// same text instead of re-serializing partially parsed arguments.
 	toolJson := map[int]string{}
 	events := []AssistantMessageEvent{}
 	for _, frame := range frames {
@@ -137,9 +130,6 @@ func ReplayAssistantStream(frames []AssistantMessageFrame, settlement AssistantM
 			if frame.Name != nil {
 				toolCall.Name = *frame.Name
 			}
-			// The argument value travels as it is: a call whose arguments
-			// are not an object must reach the validator unchanged, so the
-			// validator can name the mistake.
 			toolCall.Arguments = assistantToolCallArguments(frame.Arguments)
 			if frame.ThoughtSignature != nil {
 				value := *frame.ThoughtSignature
@@ -162,7 +152,6 @@ func ReplayAssistantStream(frames []AssistantMessageFrame, settlement AssistantM
 	return events
 }
 
-// assistantTerminalEvent is the event the settlement produces.
 func assistantTerminalEvent(settlement AssistantMessage) AssistantMessageEvent {
 	switch settlement.StopReason {
 	case "error", "aborted":
@@ -177,7 +166,6 @@ func assistantTerminalEvent(settlement AssistantMessage) AssistantMessageEvent {
 	return AssistantMessageEvent{Type: "done", Reason: &reason, Message: &message}
 }
 
-// assistantFrameText reads the authoritative text one end frame carries.
 func assistantFrameText(frame AssistantMessageFrame) string {
 	if text, ok := frame.Content.(string); ok {
 		return text
@@ -185,13 +173,11 @@ func assistantFrameText(frame AssistantMessageFrame) string {
 	return ""
 }
 
-// capabilityFrameTextPointer reads the authoritative text one end frame carries.
 func capabilityFrameTextPointer(frame AssistantMessageFrame) *string {
 	text := assistantFrameText(frame)
 	return &text
 }
 
-// assistantFrameTextBlock reads the text block one start frame carries.
 func assistantFrameTextBlock(frame AssistantMessageFrame) AssistantContentBlock {
 	block := AssistantContentBlock{Type: "text"}
 	if content, ok := assistantFrameContentBlock(frame); ok {
@@ -204,7 +190,6 @@ func assistantFrameTextBlock(frame AssistantMessageFrame) AssistantContentBlock 
 	return block
 }
 
-// assistantFrameThinkingBlock reads the thinking block one start frame carries.
 func assistantFrameThinkingBlock(frame AssistantMessageFrame) AssistantContentBlock {
 	block := AssistantContentBlock{Type: "thinking"}
 	if content, ok := assistantFrameContentBlock(frame); ok {
@@ -221,8 +206,6 @@ func assistantFrameThinkingBlock(frame AssistantMessageFrame) AssistantContentBl
 	return block
 }
 
-// assistantFrameContentBlock reads the content block one start frame carries. A frame that
-// travelled over the worker channel carries a plain JSON object.
 func assistantFrameContentBlock(frame AssistantMessageFrame) (AssistantContentBlock, bool) {
 	switch content := frame.Content.(type) {
 	case AssistantContentBlock:
@@ -241,7 +224,6 @@ func assistantFrameContentBlock(frame AssistantMessageFrame) (AssistantContentBl
 	return AssistantContentBlock{}, false
 }
 
-// setAssistantContent writes one content block at its index.
 func setAssistantContent(message *AssistantMessage, index int, block AssistantContentBlock) {
 	if index < 0 {
 		panic(fmt.Errorf("Assistant frames reference missing content block %d", index))
@@ -252,7 +234,6 @@ func setAssistantContent(message *AssistantMessage, index int, block AssistantCo
 	message.Content[index] = block
 }
 
-// assistantFrameToolCallBlock reads the tool call one start frame carries.
 func assistantFrameToolCallBlock(frame AssistantMessageFrame) AssistantContentBlock {
 	block := AssistantContentBlock{Type: "toolCall"}
 	if frame.ToolCall != nil {
@@ -265,7 +246,6 @@ func assistantFrameToolCallBlock(frame AssistantMessageFrame) AssistantContentBl
 	return block
 }
 
-// cloneAssistantMessage copies one live message so a replayed event keeps its own state.
 func cloneAssistantMessage(message *AssistantMessage) *AssistantMessage {
 	if message == nil {
 		return nil

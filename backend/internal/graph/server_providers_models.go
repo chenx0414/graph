@@ -6,22 +6,16 @@ import (
 	"encoding/json"
 )
 
-// ProviderModelSummary is one model the vendor lists.
 type ProviderModelSummary struct {
 	ID   string  `json:"id"`
 	Name *string `json:"name,omitempty"`
 }
 
-// ModelsResponse is the parsed `<base>/models` reply. A non-2xx reply always
-// carries the vendor's original text in Error.
 type ModelsResponse struct {
 	Models []ProviderModelSummary
 	Error  string
 }
 
-// VendorErrorText extracts the vendor's own error text. Never generalized: a
-// JSON error body contributes its message, a plain-text body is preserved
-// verbatim.
 func VendorErrorText(body any, status int) string {
 	switch value := body.(type) {
 	case string:
@@ -60,7 +54,6 @@ func VendorErrorText(body any, status int) string {
 	return "HTTP " + itoa(status)
 }
 
-// tryProviderJSON parses JSON text. The second result reports success.
 func tryProviderJSON(value string) (any, bool) {
 	var parsed any
 	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
@@ -69,7 +62,6 @@ func tryProviderJSON(value string) (any, bool) {
 	return parsed, true
 }
 
-// readProviderModelRow reads one row of a vendor model list.
 func readProviderModelRow(row any) *ProviderModelSummary {
 	if text, ok := row.(string); ok {
 		if strings.TrimSpace(text) == "" {
@@ -106,8 +98,6 @@ func readProviderModelRow(row any) *ProviderModelSummary {
 	return summary
 }
 
-// ParseModelsResponse parses `<base>/models`. Non-2xx always yields the
-// vendor's original text.
 func ParseModelsResponse(provider ProbeTarget, status int, body any) ModelsResponse {
 	if status < 200 || status >= 300 {
 		return ModelsResponse{Error: VendorErrorText(body, status)}
@@ -137,15 +127,12 @@ func ParseModelsResponse(provider ProbeTarget, status int, body any) ModelsRespo
 	return ModelsResponse{Models: models}
 }
 
-// VerifyResponse is the parsed minimal chat reply.
 type VerifyResponse struct {
 	OK     bool   `json:"ok"`
 	Status int    `json:"status"`
 	Error  string `json:"error,omitempty"`
 }
 
-// ParseVerifyResponse parses the minimal chat response. Failures keep the
-// vendor's raw wording.
 func ParseVerifyResponse(status int, body any) VerifyResponse {
 	if status >= 200 && status < 300 {
 		return VerifyResponse{OK: true, Status: status}

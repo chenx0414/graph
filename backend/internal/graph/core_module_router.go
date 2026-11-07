@@ -1,9 +1,7 @@
 package graph
 
-// MAX_ROUTING_DEPTH is how deep one routing pass may cascade through module-to-module edges.
 const MAX_ROUTING_DEPTH = 8
 
-// Landing is one value that reached a node queue or another module input.
 type Landing struct {
 	EdgeId       string `json:"edgeId"`
 	FromEndpoint string `json:"fromEndpoint"`
@@ -29,7 +27,6 @@ func stringsIndex(value string) int {
 	return -1
 }
 
-// RouteModuleOutputs lands one module evaluation on every enabled downstream edge.
 func RouteModuleOutputs(kernel *KernelStore, modules *ModuleRuntime, graphID, moduleID string, evaluation ModuleEvaluation, depth int, queueOnly bool) []Landing {
 	if !evaluation.Emitted || len(evaluation.Outputs) == 0 {
 		return []Landing{}

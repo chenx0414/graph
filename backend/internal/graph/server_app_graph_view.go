@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// serveGraph is the graph view of one task.
 func (app *GraphApp) serveGraph(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskId")
 	view := app.runtime.User().Task(taskID).View()
@@ -30,7 +29,6 @@ func (app *GraphApp) serveGraph(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// appKernelGraph is the native graph view of one task.
 type appKernelGraph struct {
 	GraphID      string                `json:"graphId"`
 	Definition   GraphDefinition       `json:"definition"`
@@ -42,19 +40,16 @@ type appKernelGraph struct {
 	StateModules []appGraphStateModule `json:"-"`
 }
 
-// appGraphStateNode is the execution state of one graph node.
 type appGraphStateNode struct {
 	NodeID string `json:"nodeId"`
 	Status string `json:"status"`
 }
 
-// appGraphStateModule is the execution state of one graph module.
 type appGraphStateModule struct {
 	ModuleID  string `json:"moduleId"`
 	Triggered bool   `json:"triggered"`
 }
 
-// appKernelGraphOf reads the native graph view the runtime returns.
 func (app *GraphApp) appKernelGraph(taskID string) *appKernelGraph {
 	value := app.runtime.KernelGraph(taskID)
 	if value == nil {
@@ -80,7 +75,6 @@ func (app *GraphApp) appKernelGraph(taskID string) *appKernelGraph {
 	return graph
 }
 
-// appGraphNode is one node of the graph structure view.
 type appGraphNode struct {
 	ID                string                 `json:"id"`
 	Kind              string                 `json:"kind"`
@@ -96,14 +90,11 @@ type appGraphNode struct {
 	VisualKind        string                 `json:"visualKind"`
 }
 
-// appGraphNodePicture is the label and visual kind the layout module already uses
-// to size the box. The canvas draws these fields and does not recompute them.
 func appGraphNodePicture(id, kind, action string) (string, string) {
 	node := GraphNodeLike{Id: id, Kind: kind, Action: action}
 	return GraphNodeLabel(node), string(GraphNodeVisualKind(node))
 }
 
-// appGraphContainer is one subgraph instance of the graph structure view.
 type appGraphContainer struct {
 	ID       string                 `json:"id"`
 	Parent   string                 `json:"parent,omitempty"`
@@ -114,7 +105,6 @@ type appGraphContainer struct {
 	Nodes    []string               `json:"nodes"`
 }
 
-// appGraphStructure is the graph the console draws.
 type appGraphStructure struct {
 	Nodes      []appGraphNode      `json:"nodes"`
 	Containers []appGraphContainer `json:"containers"`
@@ -122,8 +112,6 @@ type appGraphStructure struct {
 	Layout     GraphLayout         `json:"layout"`
 }
 
-// appSortedKeys returns the sorted keys of a map. The TypeScript object kept
-// the definition order; the Go map does not.
 func appSortedKeys[T any](values map[string]T) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -133,8 +121,6 @@ func appSortedKeys[T any](values map[string]T) []string {
 	return keys
 }
 
-// appNativeGraphStructure is the topology of one graph. Drafts and running
-// graphs share topology; execution state never determines layout.
 func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native *appKernelGraph) appGraphStructure {
 	groups := appSortedKeys(definition.SubgraphInstances)
 	containerFor := func(id string) string {
@@ -241,15 +227,12 @@ func (app *GraphApp) appNativeGraphStructure(definition GraphDefinition, native 
 	return appGraphStructure{Nodes: nodes, Containers: containers, Loops: []any{}, Layout: layout}
 }
 
-// appGraphEdge is one edge of the graph structure view.
 type appGraphEdge struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
 	Target string `json:"target"`
 }
 
-// appGraphLayout places the graph. The stored layout of the same topology is
-// reused; a changed topology is laid out again.
 func (app *GraphApp) appGraphLayout(input LayoutInput, native *appKernelGraph) GraphLayout {
 	key := CanonicalJSON(input)
 	if native == nil {
@@ -289,7 +272,6 @@ func (app *GraphApp) appGraphLayout(input LayoutInput, native *appKernelGraph) G
 	}
 }
 
-// appFreshLayout places a graph that has no stored layout yet.
 func (app *GraphApp) appFreshLayout(input LayoutInput, key string) GraphLayout {
 	app.layoutMutex.Lock()
 	defer app.layoutMutex.Unlock()
@@ -306,7 +288,6 @@ func (app *GraphApp) appFreshLayout(input LayoutInput, key string) GraphLayout {
 	return layout
 }
 
-// appLayoutOf reads a stored layout.
 func (app *GraphApp) appLayoutOf(value any) GraphLayout {
 	if value == nil {
 		return appEmptyLayout()
@@ -328,7 +309,6 @@ func (app *GraphApp) appLayoutOf(value any) GraphLayout {
 	return layout
 }
 
-// appLayoutInput reads the stored topology of a layout.
 func (app *GraphApp) appLayoutInput(topology string) (LayoutInput, error) {
 	input := LayoutInput{}
 	if err := json.Unmarshal([]byte(topology), &input); err != nil {

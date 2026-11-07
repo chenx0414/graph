@@ -4,26 +4,19 @@ import (
 	"strings"
 )
 
-// ProviderCredentialView is one credential as the browser may see it.
 type ProviderCredentialView struct {
 	SecretRef          string  `json:"secretRef"`
 	Resolved           bool    `json:"resolved"`
 	DisplayName        *string `json:"displayName,omitempty"`
 	SharedLimitGroupID *string `json:"sharedLimitGroupId,omitempty"`
-	// NeedsRelogin is set when the vendor refused to renew this credential: the only
-	// fix is a new login, and the console says so instead of pretending it is fine.
 	NeedsRelogin   bool   `json:"needsRelogin,omitempty"`
 	CredentialNote string `json:"credentialNote,omitempty"`
 }
 
-// ProviderView is the credential view of the whole configuration.
 type ProviderView struct {
 	Credentials map[string]ProviderCredentialView `json:"credentials"`
 }
 
-// SanitizeProviderView is the credential view safe for the browser/API: names
-// and resolved flags only, never a secret value. `secretValues` is read inside
-// the daemon and dropped.
 func SanitizeProviderView(config GraphConfig, secretValues map[string]string) ProviderView {
 	credentials := map[string]ProviderCredentialView{}
 	for id, credential := range config.Credentials {
@@ -44,7 +37,6 @@ func SanitizeProviderView(config GraphConfig, secretValues map[string]string) Pr
 	return ProviderView{Credentials: credentials}
 }
 
-// PlatformView is one platform in the settings wizard directory.
 type PlatformView struct {
 	OAuthProvider        string                 `json:"oauthProvider,omitempty"`
 	ID                   string                 `json:"id"`
@@ -59,21 +51,14 @@ type PlatformView struct {
 	Notes                []string               `json:"notes"`
 	Custom               bool                   `json:"custom"`
 	CredentialConfigured bool                   `json:"credentialConfigured"`
-	// Unsupported marks a platform the product has concluded: the directory still
-	// lists it, so the settings page can explain what happened to a configuration
-	// that names it, and the reason travels with the flag.
 	Unsupported       bool   `json:"unsupported,omitempty"`
 	UnsupportedReason string `json:"unsupportedReason,omitempty"`
 }
 
-// PlatformCatalog is the platform directory for the settings wizard.
 type PlatformCatalog struct {
 	Platforms []PlatformView `json:"platforms"`
 }
 
-// PlatformCatalogView is the platform directory for the settings wizard, with
-// per-platform credential resolution status derived from the daemon's merged
-// secret view.
 func PlatformCatalogView(secretValues map[string]string) PlatformCatalog {
 	platforms := make([]PlatformView, 0, len(PLATFORM_PRESETS))
 	for _, preset := range PLATFORM_PRESETS {
@@ -95,8 +80,6 @@ func PlatformCatalogView(secretValues map[string]string) PlatformCatalog {
 	return PlatformCatalog{Platforms: platforms}
 }
 
-// ProviderRegistration is one provider endpoint the runtime may dispatch to.
-// The credential value never leaves the daemon.
 type ProviderRegistration struct {
 	BaseURL string
 	API     ModelApi
@@ -105,5 +88,4 @@ type ProviderRegistration struct {
 	Headers map[string]string
 }
 
-// providerStringPointer returns a pointer to the value.
 func providerStringPointer(value string) *string { return &value }

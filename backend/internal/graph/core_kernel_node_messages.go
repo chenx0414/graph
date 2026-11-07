@@ -19,7 +19,6 @@ type nodeMessageCommand struct {
 	From *string `json:"from"`
 }
 
-// SendKernelNodeMessage enqueues one durable chat item. It never steers or invalidates descendants.
 func SendKernelNodeMessage(kernel *KernelStore, graphID, nodeID string, input NodeMessageInput, from *string) any {
 	text := strings.TrimSpace(input.Text)
 	if text == "" || len([]rune(text)) > 100000 {
@@ -57,7 +56,6 @@ func SendKernelNodeMessage(kernel *KernelStore, graphID, nodeID string, input No
 	})
 }
 
-// SendKernelMainMessage delivers chat to the external graph owner in its existing conversation.
 func SendKernelMainMessage(kernel *KernelStore, graphID, from string, input NodeMessageInput) any {
 	text := strings.TrimSpace(input.Text)
 	if text == "" || len([]rune(text)) > 100000 {

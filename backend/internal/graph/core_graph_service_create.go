@@ -1,6 +1,5 @@
 package graph
 
-// GraphCreate creates an independently owned graph from a complete definition.
 func (service *graphManagementService) GraphCreate(input GraphCreateInput) any {
 	definition := ParseGraphDefinition(input.Definition)
 	requestId := graphUUID()

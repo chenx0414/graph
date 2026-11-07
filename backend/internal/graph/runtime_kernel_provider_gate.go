@@ -18,7 +18,6 @@ type providerCallModel struct {
 	Pricing  *ModelPricing   `json:"pricing,omitempty"`
 }
 
-// KernelProviderGate admits and charges provider sends independently of Pi turn boundaries.
 func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *TokenBudget, model *ModelEntry, recipe *ProviderRecipe, purpose string) SendGate {
 	if purpose == "" {
 		purpose = "completion"
@@ -118,8 +117,6 @@ func KernelProviderGate(kernel *KernelStore, graphId, nodeId string, limit *Toke
 	}
 }
 
-// frozenProviderModel is the cost and pricing frozen with one provider call.
-// ReconcileKernelUsage is explicit and idempotent. It never resumes a node.
 func ReconcileKernelUsage(kernel *KernelStore, graphId, callId string, usage TokenUsage) any {
 	for _, value := range []any{usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite} {
 		if !isSafeInteger(value) || asFloatMust(value) < 0 {

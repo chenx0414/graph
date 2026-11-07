@@ -7,70 +7,34 @@ import (
 	"regexp"
 )
 
-// ToolDefinition is one tool the Agent may call.
-//
-// It mirrors the Pi SDK's ToolDefinition (node_modules/@earendil-works/pi-coding-agent,
-// dist/core/extensions/types.d.ts). The SDK is not ported: the Go process hands the tool
-// surface to the Node worker as data (PiWorkerTool) and calls Execute itself.
 type ToolDefinition struct {
-	// Name is the tool name the LLM uses in a tool call.
 	Name string
-	// Label is the human-readable label for the UI.
 	Label string
-	// Description is the description the LLM sees.
 	Description string
-	// PromptSnippet is the one-line snippet for the available-tools section of the default
-	// system prompt. It is optional: a custom tool is omitted from that section without it.
 	PromptSnippet *string
-	// PromptGuidelines are the guideline bullets appended to the system prompt Guidelines
-	// section while this tool is active.
 	PromptGuidelines []string
-	// Parameters is the JSON schema of the tool arguments.
 	Parameters Json
-	// PrepareArguments prepares the raw tool call arguments before schema validation.
 	PrepareArguments func(args any) any
-	// Execute runs the tool.
 	Execute func(toolCallId string, params any) (any, error)
-	// ExternallyGated marks a tool whose Execute already passes the send gate at its own
-	// effect boundary.
 	ExternallyGated bool
-	// Async marks a tool whose every call runs in the background: the call is
-	// admitted now and its result arrives as a later message. It is for work
-	// whose length is unbounded by nature, never for work that is merely slow
-	// today - a threshold on the wall clock would make the same call behave
-	// differently on a loaded machine.
 	Async bool
-	// Deferred is the body of a background call: the same work as Execute, with
-	// the daemon's own abort signal so a withdrawn or expired call really stops.
-	// A tool without it cannot run in the background, and a call that asks to
-	// is refused instead of silently running synchronously.
 	Deferred func(toolCallId string, params any, signal *AbortSignal) (any, error)
 }
 
-// AgentToolsGraphManagement is the graph control surface the main Agent needs.
 type AgentToolsGraphManagement struct {
 	GraphCreate  func(input map[string]any) any
 	GraphPatch   func(input map[string]any) any
 	GraphInspect func(input map[string]any) any
 	GraphControl func(input map[string]any) any
 	GraphSend    func(input map[string]any) any
-	// HarnessCompare reads the behavioral contrast of the candidates of one
-	// task. It is the comparison half of the self-improvement loop and it
-	// lives with the graph facts it reads.
 	HarnessCompare func(input map[string]any) any
-	// HarnessExperience reads the lessons earlier tasks adopted per domain.
 	HarnessExperience func(input map[string]any) any
-	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
-	// HarnessEvidence reads the evidence of the caller's own run.
 	HarnessEvidence func(input HarnessEvidenceInput) HarnessEvidenceResult
-	// HarnessDecision records the adopted candidate and the lesson it taught.
 	HarnessDecision func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
-	// HarnessFriction records friction the project met but has not solved.
 	HarnessFriction func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
 }
 
-// AgentToolsSystemChange is one proposed change of the Graph host itself.
 type AgentToolsSystemChange struct {
 	Title   string
 	Problem string
@@ -79,7 +43,6 @@ type AgentToolsSystemChange struct {
 	Risk    *string
 }
 
-// AgentToolsSystemContext is the read-only host inventory the system tools need.
 type AgentToolsSystemContext struct {
 	SystemSummary       func() map[string]any
 	SystemDiagnostics   func() map[string]any
@@ -87,13 +50,11 @@ type AgentToolsSystemContext struct {
 	ApplySystemChange   func(proposalID string) map[string]any
 }
 
-// AgentToolsRsi is the self-improvement surface the RSI tools need.
 type AgentToolsRsi struct {
 	Status func(compare bool) any
 	Apply  func(input any, context PiAdapterRsiContext) map[string]any
 }
 
-// AgentToolsHumanCheck is the main Agent's review of one human acceptance check.
 type AgentToolsHumanCheck struct {
 	QuestionId string
 	Approve    bool
@@ -101,7 +62,6 @@ type AgentToolsHumanCheck struct {
 	RequestId  string
 }
 
-// AgentToolsControlTask is one task control action of the main Agent.
 type AgentToolsControlTask struct {
 	Action          string
 	TaskId          *string
@@ -114,7 +74,6 @@ type AgentToolsControlTask struct {
 	Instruction     string
 }
 
-// AgentToolsWriteLedger records the writes one turn makes.
 type AgentToolsWriteLedger struct {
 	Ledger     *WriteLedger
 	TaskId     string
@@ -123,11 +82,8 @@ type AgentToolsWriteLedger struct {
 	TurnId     string
 }
 
-// AgentToolsArtifactService is the shared artifact surface the tools need.
 type AgentToolsArtifactService struct {
-	// AllowedNamespaces are the artifact namespaces this Agent may write.
 	AllowedNamespaces []string
-	// CanPromote reports whether this Agent may promote an artifact.
 	CanPromote bool
 	List       func(query ArtifactQuery) ArtifactPage
 	Get        func(artifactId string, version *int) ArtifactRecord
@@ -137,58 +93,32 @@ type AgentToolsArtifactService struct {
 	Promote    func(input ArtifactPromoteInput) ArtifactRecord
 }
 
-// AgentToolsInput is everything one Agent session's tool surface is built from.
 type AgentToolsInput struct {
-	// Workspace is the work copy the tools read and write.
 	Workspace string
-	// Role is master, worker or reviewer.
 	Role string
-	// ReadRoots are the directories beside the workspace the tools may read.
 	ReadRoots []string
-	// Catalog is the capability catalog the resource tools read.
 	Catalog *Catalog
-	// Access is the resolved host access policy.
 	Access *ResolvedAccessPolicy
-	// ReadOnly turns off the tools that change business files.
 	ReadOnly bool
-	// Run executes one allowed command in the work copy.
 	Run func(command string, args []string, signal *AbortSignal) CommandResult
-	// RunWithTimeout is Run with a per-call limit, for a tool whose schema
-	// exposes the limit to the model. A non-positive timeoutMs keeps the
-	// runner's own limit.
 	RunWithTimeout func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult
-	// CommitWorkspace commits the named paths of the work copy.
 	CommitWorkspace func(paths []string, message string) any
-	// Fetch reads one granted HTTP document.
 	Fetch func(url string, signal *AbortSignal) RetrievalResult
-	// ReadGraph reads one slice of the frozen graph definition.
 	ReadGraph func(input GraphSectionQuery) any
 	OnAskSupervisor func(request PiAdapterAskedQuestion)
-	// OnNotifySupervisor delivers a notice that does not wait for an answer.
 	OnNotifySupervisor func(notice PiAdapterSupervisorNotice) any
-	// Peers is the same-graph Agent channel. It holds a PiAdapterPeerTools.
 	Peers any
-	// Artifacts is the shared artifact workspace. It holds a PiAdapterArtifactService.
 	Artifacts any
-	// Supervisor is the conversation control surface.
 	Supervisor PiAdapterSupervisor
-	// GraphManagement is the graph control surface of the main Agent.
 	GraphManagement AgentToolsGraphManagement
-	// SystemContext is the read-only host inventory.
 	SystemContext *AgentToolsSystemContext
-	// Rsi is the self-improvement surface.
 	Rsi *AgentToolsRsi
-	// RsiContext names the operation a self-improvement change belongs to.
 	RsiContext PiAdapterRsiContext
-	// ControlTask controls a task of this conversation.
 	ControlTask func(input AgentToolsControlTask) any
-	// Desktop is the host's agent-desktop CLI, nil when the host has none.
 	Desktop *AgentToolsDesktop
-	// WriteLedger records the writes one turn makes.
 	WriteLedger *AgentToolsWriteLedger
 }
 
-// agentToolsImageMimeTypes are the image types the read tool returns inline.
 var agentToolsImageMimeTypes = map[string]string{
 	".bmp":  "image/bmp",
 	".gif":  "image/gif",
@@ -198,31 +128,22 @@ var agentToolsImageMimeTypes = map[string]string{
 	".webp": "image/webp",
 }
 
-// agentToolsGitReadSubcommands are the read-only git subcommands the tool allows.
 var agentToolsGitReadSubcommands = []string{
 	"status", "log", "diff", "show", "blame", "describe", "rev-parse", "ls-files", "shortlog", "grep", "rev-list",
 }
 
-// agentToolsGitOutputLimit caps the git output before it falls back to --stat.
 const agentToolsGitOutputLimit = 20_000
 
-// agentToolsArtifactTrusts are the trust levels the artifact tools accept.
 var agentToolsArtifactTrusts = []string{"unverified", "reviewed", "accepted"}
 
-// agentToolsCapabilityKinds are the capability kinds the search tool accepts.
 var agentToolsCapabilityKinds = []string{"skill", "mcp", "extension", "pi-extension", "prompt"}
 
-// agentToolsControlActions are the task control actions the tool accepts.
 var agentToolsControlActions = []string{"pause", "resume", "abandon", "set_budget", "steer", "stop_node"}
 
-// agentToolsProblemActions are the problem actions the tool accepts.
 var agentToolsProblemActions = []string{"retry", "acknowledge", "respond", "reconcile_usage", "escalate"}
 
-// agentToolsVersionedID matches a recipe id with a version suffix.
 var agentToolsVersionedID = regexp.MustCompile(`^(.*)@[1-9]\d*$`)
 
-// AgentTools is the workspace, result, supervisor and granted retrieval tools
-// of one production Agent session.
 func AgentTools(input AgentToolsInput) []ToolDefinition {
 	root, err := filepath.EvalSymlinks(input.Workspace)
 	if err != nil {
@@ -328,20 +249,11 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 			Parameters: declaration.Parameters, PrepareArguments: declaration.PrepareArguments,
 			ExternallyGated: declaration.ExternallyGated,
 		}
-		// A free-form parameter (an empty schema: tbAny) is the one shape a model
-		// keeps encoding by hand. Measured 2026-11-04: graph_send value and
-		// graph_create definition both arrived as JSON strings while every typed
-		// parameter arrived as the object it was, so the graph refused them with
-		// "must be object, received a string". Decoding every encoded object or
-		// array on a free-form parameter is done here once, for every tool, so a
-		// typed parameter is never reinterpreted.
 		if tool.PrepareArguments == nil {
 			tool.PrepareArguments = PrepareFreeFormArguments(declaration.Parameters)
 		}
 		if handler, ok := handlers[declaration.Name]; ok {
 			tool.Execute = func(id string, raw any) (result any, err error) {
-				// The TypeScript handler throws; the host turns that refusal into
-				// the tool error the model reads, instead of losing the turn.
 				defer func() {
 					recovered := recover()
 					if recovered == nil {
@@ -364,14 +276,6 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 	return tools
 }
 
-// agentToolsFailure is the tool result a refusal answers with.
-//
-// The TypeScript daemon threw inside the tool body and the SDK turned that
-// throw into the error result the model reads, reason and all. The Go daemon
-// refuses from its own process, and a bare error crossing that boundary is
-// not a tool result at all: the worker would answer "Tool returned an invalid
-// content result" and the model would never learn why the call was refused.
-// The refusal travels as the result the worker already understands.
 func agentToolsFailure(failure error) map[string]any {
 	reason := "The tool call was refused"
 	if failure != nil {

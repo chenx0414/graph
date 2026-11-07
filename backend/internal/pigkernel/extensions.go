@@ -14,69 +14,24 @@ import (
 	"github.com/MichaelKinsy/PiG/coding/extension/host/subprocess"
 )
 
-// The Pi extensions a session binds.
-//
-// PiG runs a TypeScript extension in a Node process of its own and speaks to
-// it over PiG's extension wire: the extension declares the tools it registers
-// and the hooks it watches, and the host calls them. An extension tool reaches
-// the model only when Graph's own policy allows it, and its call passes the
-// same gate every other tool passes.
-//
-// The extension's process belongs to the extension. The daemon cannot confine
-// it, so a session whose policy is narrower than the daemon's own reach must
-// not host one. That rule is the caller's; the kernel only says what it can
-// do.
-//
-// The daemon/kernel division of labour is documented in docs/architecture.md,
-// section daemon 与内核的分工.
 
-// ExtensionHost hosts the Pi extensions one daemon loads.
-//
-// The host is resident: an extension's Node process is expensive to start and
-// worth keeping, so an extension is loaded once and every session that binds
-// it uses that one.
 type ExtensionHost struct {
 	host   *subprocess.Host
 	mutex  sync.Mutex
 	loaded map[string]*LoadedExtension
-	// sessionStarted remembers which extensions already heard session_start in
-	// this host. A host serves every session of the daemon, and an extension
-	// that a second conversation loads again must not be re-initialized: Pi's
-	// contract is one session_start per session, and an extension that tears
-	// its state down on shutdown while refusing to rebuild it twice ends up
-	// serving a process nobody can use.
 	sessionStarted map[string]bool
-	// catalog is the tool list the host reports when an extension reads
-	// pi.getAllTools(). Load publishes it after the extension is ready, so the
-	// answer never waits on the lock Load holds while the extension process
-	// starts.
 	catalog atomic.Pointer[[]subprocess.ToolInfo]
 }
 
-// LoadedExtension is one loaded Pi extension.
 type LoadedExtension struct {
-	// Name is the extension's name in the host's registry.
 	Name string
-	// Path is the file the extension was loaded from.
 	Path      string
 	extension *extension.Extension
 }
 
-// NewExtensionHost returns a host that loads extensions for cwd.
-//
-// PiG answers an extension's host calls through a UI bridge, and a host with no
-// bridge answers every one of them with an error. A Graph session is headless,
-// but an extension still reads the session catalog while it works: agent_browser
-// calls pi.getAllTools() and pi.getCommands() before it picks the directory it
-// launches in, and with no bridge that read failed and the tool never ran. The
-// bridge answers the catalog reads and leaves the rendering calls to PiG's
-// headless defaults.
 func NewExtensionHost(cwd string) *ExtensionHost {
 	host := &ExtensionHost{host: subprocess.NewHost(cwd), loaded: map[string]*LoadedExtension{}, sessionStarted: map[string]bool{}}
 	bridge := subprocess.NewUIBridge(nil)
-	// The host holds the extensions' own tools, not the session's built-in ones:
-	// Graph's tool policy belongs to the session, and one host serves every
-	// session of the daemon.
 	bridge.SetHostAction("getAllTools", func() []subprocess.ToolInfo {
 		if catalog := host.catalog.Load(); catalog != nil {
 			return *catalog
@@ -88,11 +43,6 @@ func NewExtensionHost(cwd string) *ExtensionHost {
 	return host
 }
 
-// Load loads the Pi extension at path, once per host.
-//
-// The path is the extension's entry module. PiG runs it in a Node process of
-// its own and calls the module's default export with the extension API, so
-// the extension is loaded the way its author wrote it.
 func (h *ExtensionHost) Load(ctx context.Context, path string) (*LoadedExtension, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -118,11 +68,6 @@ func (h *ExtensionHost) Load(ctx context.Context, path string) (*LoadedExtension
 	return entry, nil
 }
 
-// publishCatalog republishes the tools the host holds for pi.getAllTools().
-//
-// The caller holds the lock; a reader takes the published slice through the
-// atomic pointer, so an extension that asks while another one loads is answered
-// instead of waiting.
 func (h *ExtensionHost) publishCatalog() {
 	catalog := []subprocess.ToolInfo{}
 	for _, loaded := range h.loaded {
@@ -138,7 +83,6 @@ func (h *ExtensionHost) publishCatalog() {
 	h.catalog.Store(&catalog)
 }
 
-// Close stops every extension process the host started.
 func (h *ExtensionHost) Close() {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
@@ -147,11 +91,6 @@ func (h *ExtensionHost) Close() {
 	h.host.Shutdown("the daemon is closing")
 }
 
-// extensionHostName is the name one extension is known by in the host.
-//
-// The capability directory carries the id and the version of the capability
-// ("proof-1.0.0"), which is the name a user would recognize; the entry file
-// alone ("index.mjs") says nothing.
 func extensionHostName(path string) string {
 	directory := filepath.Base(filepath.Dir(path))
 	if directory == "." || directory == string(filepath.Separator) {
@@ -160,20 +99,6 @@ func extensionHostName(path string) string {
 	return directory
 }
 
-// EmitSessionStart tells every extension that has not heard it yet that the
-// session it serves has begun.
-//
-// Pi extensions are stateful participants in a session: they build their index,
-// their browser or their configuration on session_start and release it on
-// session_shutdown. A host that never emits it leaves every one of them half
-// initialized - the tool still exists (its schema is declared eagerly), it just
-// answers from a state nobody built. Measured 2026-11-02: a search extension
-// refused every call until it was initialized, and agent-browser and mcp-adapter
-// subscribe to the same two events.
-//
-// An extension that fails its own setup is reported, not fatal: its tools will
-// fail on use, which is the truth about that extension rather than a reason to
-// refuse the turn.
 func (h *ExtensionHost) EmitSessionStart(reason string) []error {
 	type pending struct {
 		path  string
@@ -202,16 +127,11 @@ func (h *ExtensionHost) EmitSessionStart(reason string) []error {
 	return failures
 }
 
-// EmitBeforeAgentStart tells every extension one turn is about to start.
-//
-// The event carries the prompt the turn answers, which is what an extension
-// reads to inject context, filter tools or prepare a per-turn state.
 func (h *ExtensionHost) EmitBeforeAgentStart(prompt string) []error {
 	event := extension.BeforeAgentStartEvent{Type: "before_agent_start", Prompt: prompt}
 	return h.emitEverywhere("before_agent_start", event)
 }
 
-// emitEverywhere delivers one event to every loaded extension.
 func (h *ExtensionHost) emitEverywhere(event string, payload any) []error {
 	h.mutex.Lock()
 	loaded := make([]*LoadedExtension, 0, len(h.loaded))
@@ -229,11 +149,6 @@ func (h *ExtensionHost) emitEverywhere(event string, payload any) []error {
 	return failures
 }
 
-// emit delivers one event to the handlers this extension subscribed to.
-//
-// The handlers the subprocess host hands back are proxies: invoking one sends
-// the event over the same wire a tool call travels, so the extension's own
-// pi.on(...) callback runs in its own process.
 func (entry *LoadedExtension) emit(event string, payload any) error {
 	if entry == nil || entry.extension == nil {
 		return nil
@@ -250,21 +165,13 @@ func (entry *LoadedExtension) emit(event string, payload any) error {
 	return fmt.Errorf("%s: the %s handler failed: %s", entry.Name, event, strings.Join(failures, "; "))
 }
 
-// ExtensionTool is one tool an extension registered.
 type ExtensionTool struct {
-	// Name is the tool name the model calls.
 	Name string
-	// Description is what the model is told about the tool.
 	Description string
-	// Parameters is the tool's JSON schema.
 	Parameters map[string]any
 	definition extension.ToolDefinition
 }
 
-// Execute runs the tool inside the extension's own process.
-//
-// The result is the extension's own shape: a tool that returns an image or
-// structured details keeps them.
 func (tool ExtensionTool) Execute(ctx context.Context, toolCallID string, args map[string]any) (any, error) {
 	encoded, err := json.Marshal(args)
 	if err != nil {
@@ -273,20 +180,12 @@ func (tool ExtensionTool) Execute(ctx context.Context, toolCallID string, args m
 	return tool.definition.Execute(ctx, toolCallID, json.RawMessage(encoded), nil)
 }
 
-// ExtensionVerdict is what the extension's tool_call hook decided about a call.
 type ExtensionVerdict struct {
-	// Block refuses the call.
 	Block bool
-	// Reason is why the call was refused.
 	Reason string
-	// Terminate asks the agent to stop after the current batch.
 	Terminate bool
 }
 
-// ExtensionResult is the result of one extension tool call, in Pi's shape.
-//
-// The content blocks and the details are the extension's own: a tool that
-// returns an image or a details object keeps them.
 type ExtensionResult struct {
 	Content           []any           `json:"content"`
 	Details           any             `json:"details,omitempty"`
@@ -294,11 +193,6 @@ type ExtensionResult struct {
 	IsError           bool            `json:"isError"`
 }
 
-// ExtensionResultOf reads the result an extension returned.
-//
-// The extension's own result keeps its shape: a tool that returns an image
-// or structured details keeps them. Only the names are normalized, so the
-// result reads the same as one of Pi's own tools.
 func ExtensionResultOf(value any) ExtensionResult {
 	result := ExtensionResult{}
 	if value == nil {
@@ -314,11 +208,6 @@ func ExtensionResultOf(value any) ExtensionResult {
 	return result
 }
 
-// BeforeToolCall asks the extension whether a call may go ahead.
-//
-// The hook is Pi's own: a handler that returns `{block: true, reason}` refuses
-// the call, and `{terminate: true}` asks the agent to stop. A handler may also
-// edit the call's input, and the edited input is what the tool receives.
 func (e *LoadedExtension) BeforeToolCall(ctx context.Context, toolName, toolCallID string, input map[string]any) (ExtensionVerdict, error) {
 	verdict := ExtensionVerdict{}
 	handlers := e.extension.EventHandlers("tool_call")
@@ -350,10 +239,6 @@ func (e *LoadedExtension) BeforeToolCall(ctx context.Context, toolName, toolCall
 	return verdict, nil
 }
 
-// AfterToolResult lets the extension patch the result of a call it watched.
-//
-// A handler may replace the content, the details, the structured content or
-// the error flag; what it does not touch stays as it was.
 func (e *LoadedExtension) AfterToolResult(ctx context.Context, toolName, toolCallID string, input map[string]any, result ExtensionResult) (ExtensionResult, error) {
 	handlers := e.extension.EventHandlers("tool_result")
 	if len(handlers) == 0 {
@@ -399,7 +284,6 @@ func (e *LoadedExtension) AfterToolResult(ctx context.Context, toolName, toolCal
 	return result, nil
 }
 
-// Tools returns the tools the extension registered, in registration order.
 func (e *LoadedExtension) Tools() []ExtensionTool {
 	tools := []ExtensionTool{}
 	for _, name := range e.extension.ToolOrder {
@@ -417,7 +301,6 @@ func (e *LoadedExtension) Tools() []ExtensionTool {
 	if len(tools) > 0 {
 		return tools
 	}
-	// A host that recorded no order still knows the tools it holds.
 	for name, registered := range e.extension.Tools {
 		tools = append(tools, ExtensionTool{
 			Name:        registered.Definition.Name,
@@ -430,7 +313,6 @@ func (e *LoadedExtension) Tools() []ExtensionTool {
 	return tools
 }
 
-// extensionToolParameters reads a tool's JSON schema as a map.
 func extensionToolParameters(parameters json.RawMessage) map[string]any {
 	if len(parameters) == 0 {
 		return map[string]any{}
@@ -442,7 +324,6 @@ func extensionToolParameters(parameters json.RawMessage) map[string]any {
 	return decoded
 }
 
-// decodeExtensionVerdict reads the verdict of a tool_call hook.
 func decodeExtensionVerdict(reply any) (extension.ToolCallEventResult, error) {
 	verdict := extension.ToolCallEventResult{}
 	body, err := json.Marshal(reply)
@@ -458,7 +339,6 @@ func decodeExtensionVerdict(reply any) (extension.ToolCallEventResult, error) {
 	return verdict, nil
 }
 
-// decodeExtensionResultPatch reads the patch of a tool_result hook.
 func decodeExtensionResultPatch(reply any) (extension.ToolResultEventResult, bool, error) {
 	patch := extension.ToolResultEventResult{}
 	body, err := json.Marshal(reply)

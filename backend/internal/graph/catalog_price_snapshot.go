@@ -2,10 +2,8 @@ package graph
 
 import "encoding/json"
 
-// PRICE_SNAPSHOT_BASE is the retrieval date frozen into archived prices.
 const PRICE_SNAPSHOT_BASE = "2026-09-15"
 
-// PriceSnapshot is one archived official price.
 type PriceSnapshot struct {
 	Provider        string
 	ModelId         string
@@ -18,7 +16,6 @@ type PriceSnapshot struct {
 	Note            string
 }
 
-// PRICE_SNAPSHOT is the archived default price table. Unverified models are absent, never zero-filled.
 var PRICE_SNAPSHOT = []PriceSnapshot{
 	{Provider: "anthropic", ModelId: "claude-sonnet-4-5", Cost: ModelCost{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75}, Currency: "USD", Unit: "per_million_tokens", SourceUrl: "https://www.anthropic.com/pricing", RetrievedAt: PRICE_SNAPSHOT_BASE, CatalogRevision: PRICE_SNAPSHOT_BASE + ".anthropic"},
 	{Provider: "anthropic", ModelId: "claude-haiku-4-5", Cost: ModelCost{Input: 1, Output: 5, CacheRead: 0.1, CacheWrite: 1.25}, Currency: "USD", Unit: "per_million_tokens", SourceUrl: "https://www.anthropic.com/pricing", RetrievedAt: PRICE_SNAPSHOT_BASE, CatalogRevision: PRICE_SNAPSHOT_BASE + ".anthropic"},
@@ -26,7 +23,6 @@ var PRICE_SNAPSHOT = []PriceSnapshot{
 	{Provider: "deepseek", ModelId: "deepseek-v4-pro", Cost: ModelCost{Input: 1.32, Output: 3.96, CacheRead: 0.044, CacheWrite: 1.32}, Currency: "USD", Unit: "per_million_tokens", SourceUrl: "https://api-docs.deepseek.com/quick_start/pricing", RetrievedAt: PRICE_SNAPSHOT_BASE, CatalogRevision: PRICE_SNAPSHOT_BASE + ".deepseek.peak", Note: "DeepSeek peak rate (off-peak is half); cache write conservatively priced at the miss rate."},
 }
 
-// SnapshotFor looks up one archived entry by provider and upstream model id.
 func SnapshotFor(provider, modelId string) *PriceSnapshot {
 	for i := range PRICE_SNAPSHOT {
 		if PRICE_SNAPSHOT[i].Provider == provider && PRICE_SNAPSHOT[i].ModelId == modelId {
@@ -36,7 +32,6 @@ func SnapshotFor(provider, modelId string) *PriceSnapshot {
 	return nil
 }
 
-// SnapshotPricing copies provenance without copying the frozen cost.
 func SnapshotPricing(snapshot PriceSnapshot, options ...string) ModelPricing {
 	revision := ""
 	retrievedAt := ""
@@ -55,7 +50,6 @@ func SnapshotPricing(snapshot PriceSnapshot, options ...string) ModelPricing {
 	return ModelPricing{Currency: snapshot.Currency, Unit: snapshot.Unit, SourceUrl: snapshot.SourceUrl, RetrievedAt: retrievedAt, CatalogRevision: revision, Status: "known"}
 }
 
-// PriceRefreshResult is one model's refresh outcome.
 type PriceRefreshResult struct {
 	ModelId   string  `json:"modelId"`
 	Provider  string  `json:"provider"`
@@ -64,7 +58,6 @@ type PriceRefreshResult struct {
 	Reason    *string `json:"reason,omitempty"`
 }
 
-// ApplyPriceSnapshot re-stamps archived entries. It never zero-fills and never rewrites historical invocation cost.
 func ApplyPriceSnapshot(document any, verify func(PriceSnapshot) bool, revision, retrievedAt string) (any, []PriceRefreshResult) {
 	results := []PriceRefreshResult{}
 	if document == nil {

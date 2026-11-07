@@ -12,7 +12,6 @@ import { Button, Empty, Icon, Pill, Spinner } from './ui.tsx';
 import { buildTranscriptRows } from './transcript-model.ts';
 import { useTranscriptFollow } from './use-transcript-follow.ts';
 
-/** Pages of older node history the chat may fetch on its own; 100 entries each. */
 const AUTO_HISTORY_PAGES = 40;
 
 function mergeEntries(current: Entry[], incoming: Entry[]) {
@@ -31,15 +30,12 @@ function eventNodeId(event: StreamEvent) {
   return typeof nodeId === 'string' ? nodeId : null;
 }
 
-/** Node transcript and directed messages, sharing the main chat rows and composer. */
 export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate, page = false }: {
   taskId: string | null;
   nodeId: string;
   agentName: string;
-  /** Overlay use (the graph inspector) closes; a tab keeps the transcript resident. */
   onClose?: () => void;
   onRunUpdate?: (run: NodeRun) => void;
-  /** `page` drops the overlay shell and the close button: the tab is the frame. */
   page?: boolean;
 }) {
   const [text, setText] = useState('');
@@ -54,8 +50,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   const [olderLoading, setOlderLoading] = useState(false);
   const [loadingEntry, setLoadingEntry] = useState<string | null>(null);
   const [unreadEntries, setUnreadEntries] = useState<ReadonlySet<string>>(() => new Set());
-  // What the composer says about a stop: 停止中 while the node winds down,
-  // 已停止 once it is gone - the same words the conversation window uses.
   const [stopPhase, setStopPhase] = useState<'idle' | 'stopping' | 'stopped'>('idle');
   const autoReadAttempted = useRef<Set<string>>(new Set());
   const [olderExhausted, setOlderExhausted] = useState(false);
@@ -131,17 +125,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   });
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
 
-  // A record longer than the store's preview limit keeps only its first 512 runes,
-  // and the stub that used to stand for it piled up above the transcript, out of
-  // order, until the reader clicked each one. The whole body arrives on its own
-  // instead - the conversation window shows a record whole, so a node's chat does
-  // too. The button survives only for a body that could not be read.
-  //
-  // The read is not tied to the render that started it: measured 2026-11-05, an
-  // effect that cancelled itself whenever `entries` changed aborted every read it
-  // had just started, so each record was marked unread and 69 stubs survived on a
-  // real node page. It is keyed by the scope instead, and the scope check is what
-  // stops a stale answer from landing on another node.
   useEffect(() => {
     if (!taskId) return;
     const scopeAtStart = scope;
@@ -172,9 +155,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }, [entries, nodeId, scope, taskId]);
 
   const busy = data?.node.status === 'preparing' || data?.node.status === 'running';
-  // 停止中 lasts as long as the node is still winding down, and 已停止 is a fact
-  // about the run that just ended - not a permanent label. A node that starts
-  // again has something new to say, so the note goes away.
   useEffect(() => {
     if (stopPhase === 'stopping' && !busy) setStopPhase('stopped');
     if (stopPhase === 'stopped' && busy) setStopPhase('idle');
@@ -186,8 +166,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     streaming: [],
     busy: Boolean(busy),
   }), [entries, data?.operations, busy]);
-  // Expanding a saved answer is a history attachment, not a provider delta.
-  // Remount that answer once so the transcript starts with its entire loaded text.
   const expandedAnswers = new Set<string>();
   const lastAnswers = new Map<string, Entry>();
   for (const entry of entries) if (entry.role === 'assistant' && entry.operationId) lastAnswers.set(entry.operationId, entry);
@@ -196,10 +174,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }
   const hasOlder = Boolean(data && data.entryCount > entries.length && !olderExhausted && (entries[0]?.seq ?? 0) > 1);
 
-  // A node's history opens whole. The reader asked for the earlier records to be
-  // visible, not parked behind a button, so pages load on their own until the run
-  // is complete. The bound only stops one enormous run from paging forever; the
-  // button stays for whatever is left past it.
   const autoHistoryPages = useRef(0);
   useEffect(() => {
     if (!hasOlder || olderLoading || error) return;
@@ -232,8 +206,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     const command = previous?.action === action && previous.text === message ? previous : { action, text: message, requestId: crypto.randomUUID() };
     pendingControl.current = command;
     setSending(true); setError('');
-    // The request returns only once the node has unwound: say 停止中 on the click,
-    // not after (measured 2026-11-05 - the note never appeared at all).
     if (action === 'stop_node') setStopPhase('stopping');
     try {
       await api(`/api/tasks/${taskId}/graph/control`, { method: 'POST', body: JSON.stringify({ ...command, nodeId }) });
@@ -241,7 +213,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
       pendingControl.current = null;
       refresh(); transcriptFollow.scrollToLatest('auto');
     } catch (reason) {
-      // A stop that never reached the daemon must not leave a note claiming it did.
       if (action === 'stop_node') setStopPhase('idle');
       setError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -297,7 +268,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
   }
 
   const status = data?.node.status ?? 'draft';
-  // The rows are the same rows the main chat renders; only the frame differs.
   const entriesView = (
     <>
       {hasOlder && (
@@ -335,9 +305,6 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     </>
   );
 
-  // As a window of its own the transcript uses the main chat's classes, so a node's
-  // conversation reads exactly like the conversation it belongs to. The frame (header, the
-  // node's overview and its prompt) belongs to the tab, not to this transcript.
   if (page) {
     return (
       <>

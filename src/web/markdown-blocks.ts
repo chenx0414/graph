@@ -39,11 +39,6 @@ function tableStart(lines: SourceLine[], index: number) {
   return Boolean(header && divider && markdownTableAlignments(divider)?.length === header.length);
 }
 
-/**
- * Split a Markdown document into the same top-level shapes rendered by
- * Markdown.tsx. Stable source ranges let React memoize every settled block and
- * only remount/reparse the last two while text is streaming.
- */
 export function splitMarkdownBlocks(text: string): MarkdownBlock[] {
   const lines = sourceLines(text);
   const blocks: MarkdownBlock[] = [];
@@ -118,14 +113,8 @@ function markerCount(text: string, marker: string) {
   return count;
 }
 
-/**
- * Close only display-level Markdown markers that are still hanging. The
- * canonical source is never rewritten; this keeps already painted text from
- * reflowing when the real closing marker arrives later.
- */
 export function mendStreamingMarkdown(source: string) {
   if (!source) return source;
-  // An unclosed fence already renders verbatim and must not gain a fake fence.
   if (markerCount(source, '```') % 2 === 1) return source;
 
   let mended = source;

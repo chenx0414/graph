@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 )
 
-// FreezeCapabilitySettings retains literal configuration while replacing secret
-// values by their original named binding, matching the durable SDK descriptor.
 func FreezeCapabilitySettings(value any, credentials map[string]string) any {
 	all := map[string]string{}
 	for _, item := range os.Environ() {
@@ -88,8 +86,6 @@ func freezeCapabilitySetting(value any, credentials map[string]string) any {
 	}
 }
 
-// RestoreCapabilitySettings resolves only the original named credentials. It
-// never obtains replacement literals from a currently edited capability.
 func RestoreCapabilitySettings(value any, credentials map[string]string) any {
 	setting := asMap(value)
 	switch mapString(setting, "kind") {

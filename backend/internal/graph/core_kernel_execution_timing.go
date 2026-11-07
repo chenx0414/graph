@@ -1,7 +1,5 @@
 package graph
 
-// SetExecutionWaiting opens or closes the credential/slot wait on one
-// running execution.
 func (k *KernelStore) SetExecutionWaiting(executionID string, waiting bool, now ...int64) {
 	at := NowMillis()
 	if len(now) > 0 {
@@ -34,7 +32,6 @@ func (k *KernelStore) SetExecutionWaiting(executionID string, waiting bool, now 
 	k.Store.Transaction(update)
 }
 
-// CloseExecutionTiming ends a measured segment at its terminal boundary.
 func (k *KernelStore) CloseExecutionTiming(executionID string, now ...int64) {
 	at := NowMillis()
 	if len(now) > 0 {

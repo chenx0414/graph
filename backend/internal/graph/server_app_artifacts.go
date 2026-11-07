@@ -6,21 +6,18 @@ import (
 	"strconv"
 )
 
-// serveTaskArtifacts is the artifact list of one task.
 func (app *GraphApp) serveTaskArtifacts(w http.ResponseWriter, r *http.Request) {
 	query := appArtifactQuery(r)
 	query.TaskId = r.PathValue("taskId")
 	writeJSON(w, http.StatusOK, app.runtime.Artifacts().List(query))
 }
 
-// serveProjectArtifacts is the artifact list of one project.
 func (app *GraphApp) serveProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 	query := appArtifactQuery(r)
 	query.IncludeTaskArtifacts = r.URL.Query().Get("include") == "task"
 	writeJSON(w, http.StatusOK, app.runtime.Artifacts().ListProject(r.PathValue("projectId"), query))
 }
 
-// serveArtifact is one artifact record.
 func (app *GraphApp) serveArtifact(w http.ResponseWriter, r *http.Request) {
 	scope := r.URL.Query().Get("scope")
 	if scope != "" && scope != "task" && scope != "project" {
@@ -37,7 +34,6 @@ func (app *GraphApp) serveArtifact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.Artifacts().Get(r.PathValue("taskId"), r.PathValue("artifactId"), version, scope))
 }
 
-// serveArtifactContent is the content of one artifact version.
 func (app *GraphApp) serveArtifactContent(w http.ResponseWriter, r *http.Request) {
 	version, err := strconv.Atoi(r.PathValue("version"))
 	if err != nil {
@@ -65,7 +61,6 @@ func (app *GraphApp) serveArtifactContent(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// serveArtifactRetire retires one artifact version.
 func (app *GraphApp) serveArtifactRetire(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
 	reason, reasonOK := body["reason"].(string)
@@ -81,7 +76,6 @@ func (app *GraphApp) serveArtifactRetire(w http.ResponseWriter, r *http.Request)
 		r.PathValue("taskId"), r.PathValue("artifactId"), version, reason, requestID, nil))
 }
 
-// serveArtifactPromote promotes one artifact version.
 func (app *GraphApp) serveArtifactPromote(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
 	requestID, ok := body["requestId"].(string)

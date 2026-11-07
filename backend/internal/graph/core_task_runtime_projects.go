@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// Prepare authorizes the Git preparation of one project.
 func (runtime *TaskRuntime) Prepare(input TaskRuntimeProjectPrepareInput) any {
 	runtime.ensureOpen()
 	if !runtime.allowedProjects()[input.ProjectId] {
@@ -38,7 +37,6 @@ func (runtime *TaskRuntime) Prepare(input TaskRuntimeProjectPrepareInput) any {
 	return runtime.settlePrepare(opId, input.RequestId, payload, prep, map[string]any{"state": prep.State, "baselineSha": prep.BaselineSha})
 }
 
-// settlePrepare persists the settled prepare receipt idempotently.
 func (runtime *TaskRuntime) settlePrepare(opId, requestId string, payload map[string]any, prep *ProjectPreparation, result map[string]any) any {
 	encoded := CanonicalJSON(payload)
 	return runtime.store.Transaction(func() any {
@@ -60,7 +58,6 @@ func (runtime *TaskRuntime) settlePrepare(opId, requestId string, payload map[st
 	})
 }
 
-// Preparation reads the recorded preparation of one project.
 func (runtime *TaskRuntime) Preparation(projectId string) *ProjectPreparation {
 	runtime.ensureOpen()
 	prep := runtime.git.Preparation(projectId)
@@ -70,16 +67,10 @@ func (runtime *TaskRuntime) Preparation(projectId string) *ProjectPreparation {
 	return prep
 }
 
-// Artifacts reads the artifact workspace of the runtime.
 func (runtime *TaskRuntime) Artifacts() *ArtifactWorkspace {
 	return runtime.artifacts
 }
 
-// ListConversationArtifacts lists the artifacts of every task of one conversation.
-//
-// Every task in the conversation sees the same project-scoped artifacts, so the union
-// has to be deduplicated by artifact and version or a shared artifact would be listed
-// once per task.
 func (runtime *TaskRuntime) ListConversationArtifacts(conversationId string, query ArtifactQuery) ArtifactPage {
 	seen := map[string]ArtifactRecord{}
 	for _, taskId := range runtime.conversationTaskIds(conversationId) {
@@ -112,13 +103,10 @@ func (runtime *TaskRuntime) ListConversationArtifacts(conversationId string, que
 	return ArtifactPage{Artifacts: records[:limit], NextCursor: nil, Total: len(records)}
 }
 
-// Catalog reads the capability catalog of the runtime.
 func (runtime *TaskRuntime) Catalog() *Catalog {
 	return runtime.catalog
 }
 
-// Talent is the definition detail plus the per-metric experience statistics from the
-// ledger.
 func (runtime *TaskRuntime) Talent(id string, version *int, allVersions bool) any {
 	runtime.ensureOpen()
 	return map[string]any{
@@ -129,14 +117,6 @@ func (runtime *TaskRuntime) Talent(id string, version *int, allVersions bool) an
 	}
 }
 
-// ControlGraph applies one graph control action.
-// CreateGraph creates a graph on behalf of a conversation.
-//
-// The graph's owner is the conversation's own task, which is exactly what
-// happens when the main Agent calls graph_create: a console caller may start a
-// graph without a model turn, and the ownership it records is the same one an
-// Agent-created graph would record. An unknown conversation is refused rather
-// than attached to a guess.
 func (runtime *TaskRuntime) CreateGraph(conversationId string, input map[string]any) any {
 	runtime.ensureOpen()
 	owner := ConversationRowOf(runtime.store, conversationId).AnchorTaskId
@@ -190,8 +170,6 @@ func (runtime *TaskRuntime) ControlGraph(taskId string, input GraphControlInput)
 		payload["limitations"] = input.Limitations
 	}
 	if input.RequestID != "" {
-		// The console door names its request too, so a retried control action
-		// replays its receipt instead of doing the same thing twice.
 		payload["requestId"] = input.RequestID
 	}
 	result := runtime.graphManagement(taskId).GraphControl(payload)
@@ -201,12 +179,6 @@ func (runtime *TaskRuntime) ControlGraph(taskId string, input GraphControlInput)
 	return result
 }
 
-// WaiveAcceptance records the user's own waiver of one acceptance item.
-//
-// It is not a graph control action: graph_control runs as the Agent, and the
-// service refuses a human acceptance item for any actor that is not the user. The
-// record it appends is the same append-only ledger an Agent's limitation goes
-// into, so one read shows every decision a closure rests on.
 func (runtime *TaskRuntime) WaiveAcceptance(taskId string, input GraphAcceptanceWaiveInput) any {
 	runtime.ensureOpen()
 	input.GraphId = taskId
@@ -217,11 +189,6 @@ func (runtime *TaskRuntime) WaiveAcceptance(taskId string, input GraphAcceptance
 	return result
 }
 
-// PiExtensionUpdates lists the Pi extension sources that have a newer version than the
-// one on disk.
-//
-// A source that cannot be inspected is reported with its error, never dropped: "we could
-// not look" and "the extension is current" are different facts.
 func (runtime *TaskRuntime) PiExtensionUpdates() any {
 	runtime.ensureOpen()
 	updates := []PiExtensionUpdate{}
@@ -250,8 +217,6 @@ func (runtime *TaskRuntime) PiExtensionUpdates() any {
 	return map[string]any{"updates": updates}
 }
 
-// UpdatePiExtension installs or upgrades one Pi extension source, then rescans the
-// capability library.
 func (runtime *TaskRuntime) UpdatePiExtension(id string, version string) any {
 	runtime.ensureOpen()
 	record := runtime.catalog.Capability(id, version)
@@ -269,10 +234,6 @@ func (runtime *TaskRuntime) UpdatePiExtension(id string, version string) any {
 	return result
 }
 
-// AgentContextPreview is the prompt library view of the next main Agent turn.
-//
-// The master follows the latest definition of its own recipe on the next turn, so the
-// preview has to describe that same version instead of the one the instance last ran.
 func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	runtime.ensureOpen()
 	library := runtime.agentContextLibrary()
@@ -407,9 +368,6 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 		}
 	}
 	if runtime.systemCtx != nil {
-		// The preview must say what the next turn really gets. The four system
-		// tools travel together: the inventory, the health view, and the
-		// proposal flow that asks a person before the host is changed.
 		features.SystemContext = &AgentSystemFeatures{
 			SystemSummary:       runtime.systemCtx.SystemSummary != nil,
 			SystemDiagnostics:   true,
@@ -427,8 +385,6 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	})
 	answer := map[string]any{
 		"root": libraryView.Root, "prompts": libraryView.Prompts,
-		// A shipped rule that the effective library no longer carries is a rule
-		// nobody is bound by, and nothing else in the product would say so.
 		"ruleSeedGaps":      library.RuleSeedGaps(),
 		"disabledTools":     assembly.DisabledTools,
 		"definitionVersion": definitionVersion, "latestDefinitionVersion": latestDefinitionVersion,
@@ -452,7 +408,6 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	return answer
 }
 
-// agentArtifactAccessForPreview is the artifact surface the main Agent preview shows.
 func agentArtifactAccessForPreview(action string) *AgentArtifactAccess {
 	access := AgentArtifactAccessFor(struct {
 		Role   string

@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// openPreservedStream opens the file one stream of a sandboxed command is kept in.
 func openPreservedStream(directory, name string) *os.File {
 	if directory == "" {
 		return nil
@@ -25,7 +24,6 @@ func openPreservedStream(directory, name string) *os.File {
 	return file
 }
 
-// spawnAndWait starts one restricted process and waits for its result.
 func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launched string, launchedArgs []string, cwd string, environment map[string]string, localNetwork bool) CommandResult {
 	process := exec.Command(launched, launchedArgs...)
 	process.Dir = cwd
@@ -43,8 +41,6 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 	if err != nil {
 		panic(err)
 	}
-	// The worker channel is duplex: the child writes its notifications on it
-	// and the host answers on the same channel.
 	channel, channelFile, err := newDuplexChannel(process)
 	if err != nil {
 		panic(err)
@@ -62,16 +58,12 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 	if err := process.Start(); err != nil {
 		panic(err)
 	}
-	// The parent's copies of the inherited descriptors are closed: a parent
-	// that keeps the child's end open never sees the channel reach its end.
 	_ = channelFile.Close()
 	if ipcFile != nil {
 		_ = ipcFile.Close()
 	}
 	pid := process.Process.Pid
 	execDebugTimeline("launched pid=%d timeoutMs=%d", pid, command.TimeoutMs)
-	// The host writes the child's request on stdin, and the host may steer the
-	// same stream afterwards. One lock keeps those writes from interleaving.
 	var stdinMutex sync.Mutex
 	writeStdin := func(payload string) bool {
 		stdinMutex.Lock()
@@ -119,9 +111,6 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 			state.killTree()
 		}, true)
 	}
-	// The budget starts here, at the process, and not at the attempt: waiting for
-	// a program slot and for the graph's Git lock happened before this call, and a
-	// queue is not the command's time to spend.
 	var timer *time.Timer
 	if command.TimeoutMs > 0 {
 		timer = time.AfterFunc(time.Duration(command.TimeoutMs)*time.Millisecond, func() {
@@ -130,10 +119,6 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 			state.killTree()
 		})
 	}
-	// A sandboxed command keeps its streams like a public one does. Without this,
-	// a timed-out sandboxed operation was the one case whose output existed only
-	// in memory: the kill happened, the result was "no exit code", and there was
-	// no log to say what it had printed before it died.
 	stdoutLog := openPreservedStream(command.ScratchDir, "stdout")
 	stderrLog := openPreservedStream(command.ScratchDir, "stderr")
 	defer func() {
@@ -156,11 +141,6 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		pumps.Add(1)
 		go func() { defer pumps.Done(); state.readIpc(ipc) }()
 	}
-	// The child reads its request from stdin. A kept-open stdin lets the host
-	// steer a long-running worker, so the request is written and the stream
-	// stays open; every other command ends the stream so the child sees EOF.
-	// The write runs on its own goroutine: a child that never reads its stdin
-	// must not block the host before the timeout reaps it.
 	go func() {
 		if command.Input != "" && !writeStdin(command.Input) {
 			return
@@ -190,9 +170,6 @@ func (executor *sandboxExecutor) spawnAndWait(command RestrictedCommand, launche
 		if errors.As(waitErr, &exitError) {
 			if status, ok := exitError.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				if state.timedOut {
-					// One wording for one fact: this branch has no field to carry
-					// "the budget did it", so the operation reads the line the host
-					// writes here - the same function on both sides, not a copy.
 					notes = hostCommandTimeoutMarker(command.TimeoutMs) + "\n"
 				} else {
 					notes = fmt.Sprintf("Process terminated by %s\n", sandboxSignalName(status.Signal()))

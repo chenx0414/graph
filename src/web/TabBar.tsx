@@ -1,10 +1,3 @@
-/**
- * The workspace tab strip: what the user has open in the main area, in the
- * order they opened it, with the tab in front marked.
- *
- * Presentation only — which tabs exist and which one is in front is decided by
- * `workspace-tabs.ts`, and the shell owns navigating to the tab that is picked.
- */
 import { useEffect, useRef } from 'react';
 import { Icon } from './ui.tsx';
 import type { WorkspaceTabs } from './workspace-tabs.ts';

@@ -12,7 +12,6 @@ import (
 	"bytes"
 )
 
-// usageFetch performs one bounded HTTP request and reads the whole body.
 func usageFetch(method, url string, headers map[string]string, body []byte, timeoutMs int) (int, http.Header, []byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
@@ -39,7 +38,6 @@ func usageFetch(method, url string, headers map[string]string, body []byte, time
 	return response.StatusCode, response.Header, raw, nil
 }
 
-// usageResponseJSON reads a JSON object reply.
 func usageResponseJSON(status int, raw []byte, label string) (map[string]any, error) {
 	if status < 200 || status >= 300 {
 		return nil, fmt.Errorf("%s HTTP %d", label, status)
@@ -55,7 +53,6 @@ func usageResponseJSON(status int, raw []byte, label string) (map[string]any, er
 	return body, nil
 }
 
-// usageWindowDetails are the optional numbers a quota window carries.
 type usageWindowDetails struct {
 	Used  *float64
 	Limit *float64

@@ -6,57 +6,32 @@ import (
 	"encoding/json"
 )
 
-// DriverHost is the part of the resident host a turn needs. Deliberately the
-// same shape ExecutorHost requires, so one host value satisfies both and the
-// executor can hand it straight to a driver.
 type DriverHost interface {
 	Start() HostProcess
 	Alive() bool
 	Turn(text string) TurnReport
 }
 
-// NodeTurnDriverOptions configures one node's turn driver.
 type NodeTurnDriverOptions struct {
 	Kernel  *KernelStore
 	GraphId string
 	NodeId  string
 	Host    DriverHost
 	Submit  func(executionId string) *TurnInjection
-	// The full first-turn briefing (§7); omitted in tests that do not need it.
 	InitialContext func() string
-	// Work arriving with this turn — a delivery or a chat line (§7 first vs. follow-up).
 	TurnText func(injection *TurnInjection) string
-	// The durable gap names for an execution that was refused; used after a restart.
 	MissingRequiredNames func(executionId string) []string
 }
 
-// NodeTurnDriver is the production turn runner NodeExecutor plugs into.
-//
-// NodeExecutor already knows WHAT to do with a turn's outcome — retry,
-// resubmit, or move on — but it takes that outcome from a TurnRunner. This is
-// the production runner: it starts a dead worker, builds the right prompt for
-// this attempt, drives one turn, and then reads the KERNEL back to decide what
-// actually happened. The kernel is the authority: a turn counts as done only
-// when a submission for this execution really exists, never because the process
-// said something reassuring.
-//
-// Prompts follow §7. The first turn of an execution carries the whole briefing;
-// later turns are continuations that do not repeat it. A resubmit names the
-// required output that is still missing and says the work already done stands,
-// so the node corrects a field instead of redoing the implementation.
 type NodeTurnDriver struct {
 	options NodeTurnDriverOptions
 }
 
-// NewNodeTurnDriver creates one node's turn driver.
 func NewNodeTurnDriver(options NodeTurnDriverOptions) *NodeTurnDriver {
 	return &NodeTurnDriver{options: options}
 }
 
-// Run drives one turn for this execution. Called by NodeExecutor.runOne, which
-// owns the attempt, retry and resubmit budgets.
 func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *TurnInjection, input *QueueRow) TurnReport {
-	// A crash rebuild keeps the same execution: rebuild before the turn, not instead of it.
 	if !driver.options.Host.Alive() {
 		driver.options.Host.Start()
 	}
@@ -67,16 +42,11 @@ func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *Tu
 		Role: "user", Kind: "message", Text: prompt,
 	})
 	turn := driver.options.Host.Turn(prompt)
-	// Kept for every exit below: a turn that costs something must be charged even when it
-	// fails or is resubmitted, or the budget under-counts exactly the turns that misbehave.
 	var usage *TurnUsage
 	if turn.Usage != nil {
 		usage = &TurnUsage{Total: turn.Usage.Total, Accounted: turn.Usage.Accounted}
 	}
 
-	// TODO(port): the TypeScript driver read the last assistant message's stopReason out
-	// of turn.inspect; the ported ExecutorHost contract reports a failed turn as
-	// TurnReport.Error instead, so that is the signal read here.
 	if turn.Error != nil {
 		return TurnReport{Done: false, Error: turn.Error, Usage: usage}
 	}
@@ -87,13 +57,11 @@ func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *Tu
 		return TurnReport{QuestionPending: true, Usage: usage}
 	}
 
-	// The node's submit runs against the kernel; a refusal is reported, not swallowed.
 	var gap *TurnInjection
 	if driver.options.Submit != nil {
 		gap = driver.options.Submit(executionId)
 	}
 
-	// The kernel decides: a real submission means done, whatever the process said.
 	if driver.submissionExists(executionId) {
 		return TurnReport{Done: true, Usage: usage}
 	}
@@ -102,8 +70,6 @@ func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *Tu
 		return TurnReport{Done: false, Missing: gap.Missing, Usage: usage}
 	}
 
-	// The execution's own missing-required mark is the durable record of a refusal: it
-	// survives a process restart, so a crash mid-submit still resumes as a resubmit.
 	if driver.missingRequired(executionId) {
 		var names []string
 		if driver.options.MissingRequiredNames != nil {
@@ -126,19 +92,16 @@ func (driver *NodeTurnDriver) Run(executionId string, attempt int, injection *Tu
 	return TurnReport{Done: input != nil, Usage: usage}
 }
 
-// submissionExists reports whether the kernel holds a submission for this execution.
 func (driver *NodeTurnDriver) submissionExists(executionId string) bool {
 	row := kernelRow(driver.options.Kernel.DB, "SELECT 1 FROM kernel_submissions WHERE execution_id=? LIMIT 1", executionId)
 	return row != nil
 }
 
-// missingRequired reports the execution's own missing-required mark.
 func (driver *NodeTurnDriver) missingRequired(executionId string) bool {
 	row := kernelRow(driver.options.Kernel.DB, "SELECT missing_required FROM kernel_executions WHERE id=?", executionId)
 	return row != nil && kernelInt(row["missing_required"]) == 1
 }
 
-// requiredOutputs are the outputs a submission of this execution must enable.
 func (driver *NodeTurnDriver) requiredOutputs(executionId string) []string {
 	execution := driver.options.Kernel.Execution(executionId)
 	if execution == nil {
@@ -158,8 +121,6 @@ func (driver *NodeTurnDriver) requiredOutputs(executionId string) []string {
 	return required
 }
 
-// promptFor is the prompt for this attempt: an injected gap, a continuation, or
-// the full briefing.
 func (driver *NodeTurnDriver) promptFor(executionId string, attempt int, injection *TurnInjection, input *QueueRow) string {
 	answers := kernelRows(driver.options.Kernel.Db, `SELECT q.id,q.answer FROM node_questions n JOIN questions q ON q.id=n.question_id
  WHERE n.execution_id=? AND n.state='answered' AND q.status='resolved' ORDER BY n.rowid`, executionId)
@@ -180,7 +141,6 @@ func (driver *NodeTurnDriver) promptFor(executionId string, attempt int, injecti
 	if attempt == 1 {
 		return driver.firstTurnPrompt(executionId, input)
 	}
-	// A later attempt is a continuation: it must not repeat the whole briefing (§7).
 	parts := []string{"Your previous turn did not produce a valid submission. Continue the same work and submit this time."}
 	if driver.options.TurnText != nil {
 		parts = append(parts, "", driver.options.TurnText(nil))
@@ -188,7 +148,6 @@ func (driver *NodeTurnDriver) promptFor(executionId string, attempt int, injecti
 	return strings.Join(parts, "\n")
 }
 
-// firstTurnPrompt is the full first-turn briefing of one execution.
 func (driver *NodeTurnDriver) firstTurnPrompt(executionId string, input *QueueRow) string {
 	execution := driver.options.Kernel.Execution(executionId)
 	if execution == nil {
@@ -255,14 +214,12 @@ func (driver *NodeTurnDriver) firstTurnPrompt(executionId string, input *QueueRo
 	return strings.Join(parts, "\n\n")
 }
 
-// priorExecutions counts the other executions this node already ran.
 func (driver *NodeTurnDriver) priorExecutions(taskId, nodeId, executionId string) int {
 	row := kernelRow(driver.options.Kernel.DB, "SELECT COUNT(*) AS n FROM kernel_executions WHERE task_id=? AND node_id=? AND id<>?",
 		taskId, nodeId, executionId)
 	return int(kernelInt(row["n"]))
 }
 
-// previousRevisionVersion is the revision of the newest other execution of this node.
 func (driver *NodeTurnDriver) previousRevisionVersion(taskId, nodeId, executionId string) (int, bool) {
 	row := kernelRow(driver.options.Kernel.DB, "SELECT revision_version FROM kernel_executions WHERE task_id=? AND node_id=? AND id<>? ORDER BY rowid DESC LIMIT 1",
 		taskId, nodeId, executionId)
@@ -272,20 +229,17 @@ func (driver *NodeTurnDriver) previousRevisionVersion(taskId, nodeId, executionI
 	return int(kernelInt(row["revision_version"])), true
 }
 
-// nodeTurnGraphCounts is the size of a graph overview.
 type nodeTurnGraphCounts struct {
 	Nodes   int `json:"nodes"`
 	Modules int `json:"modules"`
 	Edges   int `json:"edges"`
 }
 
-// nodeTurnPort is one interface port of a node or module.
 type nodeTurnPort struct {
 	Protocol string `json:"protocol"`
 	Version  *int   `json:"version,omitempty"`
 }
 
-// nodeTurnNodePreview is one node of a graph overview.
 type nodeTurnNodePreview struct {
 	Recipe  string                  `json:"recipe"`
 	Task    string                  `json:"task"`
@@ -293,14 +247,12 @@ type nodeTurnNodePreview struct {
 	Outputs map[string]nodeTurnPort `json:"outputs"`
 }
 
-// nodeTurnOperationPreview is one operation module of a graph overview.
 type nodeTurnOperationPreview struct {
 	Action  string   `json:"action"`
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
 }
 
-// nodeTurnModulePreview is one module of a graph overview.
 type nodeTurnModulePreview struct {
 	Type      string                    `json:"type"`
 	Inputs    map[string]nodeTurnPort   `json:"inputs"`
@@ -308,7 +260,6 @@ type nodeTurnModulePreview struct {
 	Operation *nodeTurnOperationPreview `json:"operation,omitempty"`
 }
 
-// nodeTurnGraphOverview is the abbreviated graph a first turn receives.
 type nodeTurnGraphOverview struct {
 	Counts  nodeTurnGraphCounts              `json:"counts"`
 	Nodes   map[string]nodeTurnNodePreview   `json:"nodes"`
@@ -318,7 +269,6 @@ type nodeTurnGraphOverview struct {
 	Outputs map[string]GraphOutput           `json:"outputs"`
 }
 
-// graphContext is the briefing a first turn carries.
 func (driver *NodeTurnDriver) graphContext(definition GraphDefinition, node NodeDefinition, decisions, reviewDelivery string) string {
 	lines := []string{
 		"GRAPH OVERVIEW: " + definition.Name,
@@ -346,7 +296,6 @@ func (driver *NodeTurnDriver) graphContext(definition GraphDefinition, node Node
 	return strings.Join(lines, "\n")
 }
 
-// graphOverview abbreviates the graph a first turn receives.
 func (driver *NodeTurnDriver) graphOverview(definition GraphDefinition) nodeTurnGraphOverview {
 	overview := nodeTurnGraphOverview{
 		Counts:  nodeTurnGraphCounts{Nodes: len(definition.Nodes), Modules: len(definition.Modules), Edges: len(definition.Edges)},
@@ -356,7 +305,6 @@ func (driver *NodeTurnDriver) graphOverview(definition GraphDefinition) nodeTurn
 		Inputs:  map[string]GraphIo{},
 		Outputs: map[string]GraphOutput{},
 	}
-	// TODO(port): TypeScript kept the definition's insertion order; Go maps sort by key.
 	for _, id := range sortedKeys(definition.Nodes) {
 		if len(overview.Nodes) >= 20 {
 			break
@@ -410,7 +358,6 @@ func (driver *NodeTurnDriver) graphOverview(definition GraphDefinition) nodeTurn
 	return overview
 }
 
-// nodeTurnInterfaces abbreviates the ports of a node or module.
 func nodeTurnInterfaces(refs map[string]ProtocolRef) map[string]nodeTurnPort {
 	out := map[string]nodeTurnPort{}
 	for _, id := range sortedKeys(refs) {
@@ -422,7 +369,6 @@ func nodeTurnInterfaces(refs map[string]ProtocolRef) map[string]nodeTurnPort {
 	return out
 }
 
-// nodeTurnProtocolRefs is the raw interface map of a node.
 func nodeTurnProtocolRefs(refs map[string]ProtocolRef) map[string]ProtocolRef {
 	if refs == nil {
 		return map[string]ProtocolRef{}
@@ -430,7 +376,6 @@ func nodeTurnProtocolRefs(refs map[string]ProtocolRef) map[string]ProtocolRef {
 	return refs
 }
 
-// nodeTurnOwnProtocols are the graph protocols this node's own ports promise.
 func nodeTurnOwnProtocols(definition GraphDefinition, node NodeDefinition) map[string]ProtocolSpec {
 	own := map[string]bool{}
 	for _, port := range node.Inputs {
@@ -448,7 +393,6 @@ func nodeTurnOwnProtocols(definition GraphDefinition, node NodeDefinition) map[s
 	return out
 }
 
-// nodeTurnAcceptancePreview abbreviates the graph acceptance list.
 func nodeTurnAcceptancePreview(acceptance []AcceptanceCriterion) []AcceptanceCriterion {
 	out := []AcceptanceCriterion{}
 	for index, item := range acceptance {
@@ -461,7 +405,6 @@ func nodeTurnAcceptancePreview(acceptance []AcceptanceCriterion) []AcceptanceCri
 	return out
 }
 
-// nodeTurnStringList is an absent list as an empty array.
 func nodeTurnStringList(values []string) []string {
 	if values == nil {
 		return []string{}
@@ -469,16 +412,13 @@ func nodeTurnStringList(values []string) []string {
 	return values
 }
 
-// nodeTurnNodeConfig is the node declaration a changed configuration reports.
 func nodeTurnNodeConfig(node NodeDefinition, hasNode bool) string {
 	if !hasNode {
-		// JSON.stringify(undefined) rendered as the bare word in the template.
 		return "undefined"
 	}
 	return nodeTurnJSON(node)
 }
 
-// nodeTurnPreview abbreviates a long description.
 func nodeTurnPreview(value string) string {
 	runes := []rune(value)
 	if len(runes) > 240 {
@@ -487,7 +427,6 @@ func nodeTurnPreview(value string) string {
 	return value
 }
 
-// nodeTurnJSON serializes one prompt fragment.
 func nodeTurnJSON(value any) string {
 	raw, err := json.Marshal(value)
 	if err != nil {

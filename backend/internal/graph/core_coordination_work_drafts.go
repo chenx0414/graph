@@ -68,8 +68,6 @@ func (runtime *TaskRuntime) ChangeWorkDraft(workID string, input WorkDraftAction
 		runtime.store.setWorkDraftState(workID, input.Version, input.ExpectedDraftRevision, input.Action, NowMillis())
 		conversation := ConversationRowOf(runtime.store, work.ConversationID)
 		runtime.store.Event(conversation.AnchorTaskId, "work.draft."+input.Action, map[string]any{"workId": workID, "version": input.Version})
-		// The receipt of an archive or a delete is the draft that just changed
-		// state, so it is read in whatever state the action left it.
 		return runtime.store.workDraftInTransaction(workID, input.Version, draftAnyState)
 	})
 	return workDraftReceipt(result)
@@ -108,12 +106,6 @@ func (runtime *TaskRuntime) ProposeWorkGraph(taskID string, input WorkDraftToolI
 	return runtime.PutWorkDraft(input.WorkID, input.Draft, input.RequestID)
 }
 
-// ReadWorkDraft reads one draft version of a work this thread supervises.
-//
-// Who may read is decided here and nowhere else, and the refusal is a permission
-// and never a not-found: "no such draft" and "not yours" send an Agent in
-// opposite directions. It is written with draftRefusal for the same reason as
-// the four not-found kinds - the tool result carries the code as text.
 func (runtime *TaskRuntime) ReadWorkDraft(taskID, workID string, version int64) WorkDraft {
 	conversation := ConversationForTask(runtime.store, taskID)
 	if conversation == nil || conversation.AnchorTaskId != taskID {

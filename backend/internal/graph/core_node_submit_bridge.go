@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// SubmitDefect is the field-level correction a model is expected to apply.
 type SubmitDefect struct {
 	Code     string `json:"code"`
 	Path     string `json:"path"`
@@ -25,10 +24,6 @@ type BridgeReceipt struct {
 	MissingRequired []string       `json:"missingRequired"`
 }
 
-// SubmitRefusal is the structured refusal of one submission.
-//
-// The module that writes the delivery raises it. The bridge reads the defects
-// as they were decided; it does not parse an English sentence to learn them.
 type SubmitRefusal struct {
 	Defects []SubmitDefect
 	Missing []string
@@ -78,7 +73,6 @@ func submitDefectsOf(recovered any) (defects []SubmitDefect, missing []string, o
 	return defects, missing, ok
 }
 
-// RefusalText is the short field-level refusal. The work already done stands.
 func RefusalText(defects []SubmitDefect) string {
 	lines := []string{"submit refused: the kernel cannot accept this submission yet."}
 	for _, defect := range defects {
@@ -93,7 +87,6 @@ type submitCall struct {
 	defect  *SubmitDefect
 }
 
-// ReadSubmitCall requires exactly {"outputs": {...}}.
 func ReadSubmitCall(args any) submitCall {
 	record, _ := jsonRecord(args)
 	if record == nil {
@@ -162,10 +155,6 @@ func jsType(value any) string {
 	}
 }
 
-// SubmitNodeCall submits one tool call against the execution that admitted it.
-//
-// The execution is the one the turn was frozen with. A later row for the same
-// node is a different turn, and this call does not belong to it.
 func SubmitNodeCall(kernel *KernelStore, executionID string, args any) (ok bool, text string) {
 	if executionID == "" {
 		return false, "no execution is running for this node"
@@ -181,10 +170,6 @@ func SubmitNodeCall(kernel *KernelStore, executionID string, args any) (ok bool,
 	return false, RefusalText(receipt.Defects)
 }
 
-// HostSubmitCall is the host side of one submit tool call.
-//
-// It addresses the latest execution of the node. A lane that already knows
-// the admitted execution calls SubmitNodeCall with that execution instead.
 func HostSubmitCall(kernel *KernelStore, taskId, nodeId string, args any) (ok bool, text string) {
 	execution, found := graphDBRow(kernel.Store.Db, "SELECT id FROM kernel_executions WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1", taskId, nodeId)
 	if !found {
@@ -212,7 +197,6 @@ type bridgeSubmitRequest struct {
 	SubmissionId string
 }
 
-// Submit one output set for this execution, or get the field-level correction.
 func (b *NodeSubmitBridge) Submit(request SubmitRequest) BridgeReceipt {
 	var receipt SubmitReceipt
 	failed := false
@@ -255,7 +239,6 @@ func (b *NodeSubmitBridge) Submit(request SubmitRequest) BridgeReceipt {
 	}
 }
 
-// RefusalMessage is the refusal the node sees.
 func (b *NodeSubmitBridge) RefusalMessage(receipt BridgeReceipt) string {
 	if receipt.Accepted {
 		Raise("invalid_submit", "There is no refusal to describe")

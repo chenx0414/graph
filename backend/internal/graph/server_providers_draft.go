@@ -4,8 +4,6 @@ import (
 	"strings"
 )
 
-// ResolvedProvider is a fully resolved provider draft: every field the probe
-// and save paths need.
 type ResolvedProvider struct {
 	ID                  string                 `json:"id"`
 	Label               string                 `json:"label"`
@@ -18,10 +16,6 @@ type ResolvedProvider struct {
 	Custom              bool                   `json:"custom"`
 }
 
-// ProviderDraftBody is the provider draft as the settings page sends it in a
-// probe/save request. Field names are the shared contract: the display name is
-// `label` and the credential reference is `credentialRef` (never `name` /
-// `secretRef`).
 type ProviderDraftBody struct {
 	ID                  *string           `json:"id"`
 	Label               *string           `json:"label"`
@@ -32,23 +26,17 @@ type ProviderDraftBody struct {
 	ModelsListSupported *bool             `json:"modelsListSupported"`
 }
 
-// ProviderDraftError names the field that failed validation.
 type ProviderDraftError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
 }
 
-// ProviderDraftValidation is the outcome of validating a provider draft.
 type ProviderDraftValidation struct {
 	OK       bool
 	Provider ResolvedProvider
 	Errors   []ProviderDraftError
 }
 
-// ValidateProviderDraft validates a provider draft coming from the settings
-// page. A supported platform only needs a credential reference (label/baseUrl/
-// api default from the directory); `自定义` must supply label + baseUrl +
-// compatibility api + credentialRef itself.
 func ValidateProviderDraft(input any) ProviderDraftValidation {
 	draft := map[string]any{}
 	if record, ok := input.(map[string]any); ok && record != nil {
@@ -66,8 +54,6 @@ func ValidateProviderDraft(input any) ProviderDraftValidation {
 		preset = PlatformPreset(rawID)
 	}
 	custom := preset == nil || preset.ID == CUSTOM_PLATFORM_ID
-	// The `custom` preset only carries UI hints; its required fields must come
-	// from the draft so an explicit compatibility format is always chosen.
 	errors := []ProviderDraftError{}
 
 	if hasRawID && preset == nil && rawID != CUSTOM_PLATFORM_ID {

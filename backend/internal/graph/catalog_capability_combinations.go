@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// Search filters the capability list.
 func (library *CapabilityLibrary) Search(input CapabilitySearchInput) CapabilitySearchResult {
 	query := strings.ToLower(strings.TrimSpace(input.Query))
 	terms := []string{}

@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// piAdapterRunTurn opens, sends and settles one operation.
 func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport, input piAdapterRunInput, turn piAdapterTurnInput) OperationResult {
 	operation := input.Operation
 	entry := input.Entry
@@ -16,8 +15,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	if operation.InstanceId != nil {
 		instanceId = *operation.InstanceId
 	}
-	// The skills the session may read must match the block Graph renders: the bound
-	// snapshots plus the SDK's own global and project folders.
 	skillReadPaths := piAdapterUnique(append(append([]string{}, turn.CapabilityOperation.SkillPaths...),
 		NativeSkillDirs([]string{turn.Workspace, input.ProjectRoot}, "", "")...))
 	request := AgentSessionRequest{
@@ -28,7 +25,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		Binding: AgentSessionBinding{
 			InstanceId: instanceId, NodeId: operation.NodeId, DefinitionVersion: input.DefinitionVersion,
 		},
-		// Tool telemetry must not break a turn.
 		OnToolCall: func(call PiAdapterToolCall) {
 			defer func() { _ = recover() }()
 			target := any(nil)
@@ -65,8 +61,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 					if sent.SystemPrompt != nil {
 						store.RecordOperationSystemPrompt(operation.Id, *sent.SystemPrompt, sent.ToolDeclarations)
 					}
-					// The site that records the truth also reports when a part of it is
-					// gone: reporting only, a send is never blocked or rewritten.
 					ReportPromptIntegrity(filepath.Join(options.InstancesDir, instanceId), operation.Id, sent.SystemPrompt, nil)
 				},
 				OnTransport: func(observation ProviderTransportObservation) {
@@ -112,8 +106,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		Broker:                  turn.ObservedGate,
 		NativeTools:             append([]string{}, turn.CapabilityOperation.NativeTools...),
 		AllowWorkspaceChange:    turn.Conversation != nil,
-		// Auto-compaction stays on for workers, reviewers and the master;
-		// thresholds follow the model that will receive the summary.
 		Compaction: piAdapterCompactionSettings(entry),
 		OnEvent:    turn.OnEvent,
 	}
@@ -129,8 +121,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	if turn.AgentContext != nil && turn.AgentContext.ReviewPolicy != nil {
 		request.FreshSession = true
 	}
-	// A goal acceptance turn carries its own reason to start clean: it judges a
-	// round it did not work on.
 	for _, message := range operation.Context.Messages {
 		if message.FreshSession {
 			request.FreshSession = true
@@ -151,9 +141,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		request.ReadRoots = record.Policy.ReadRoots
 		request.WriteRoots = record.Policy.WriteRoots
 		request.ProtectedPaths = record.Policy.ProtectedPaths
-		// The tools it was given are the ones the capability declared then.
-		// A capability that declares a different tool since must not change
-		// what this turn may call.
 		request.PiExtensionTools = append([]string{}, record.Policy.PiExtensionTools...)
 		request.AllowedToolNames = append([]string{}, record.Policy.AllowedToolNames...)
 		request.BundleDigest = record.Policy.BundleDigest
@@ -168,18 +155,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	}
 	session, err := transport.Open(request)
 	if err != nil {
-		// A session that cannot be opened is a failed turn, not a crash.
-		//
-		// A crash here would leave the runtime with a turn it believes was
-		// never sent: the node goes back to pending and the same turn is
-		// dispatched again, forever, with the reason nowhere. A failed turn
-		// says what happened and lets the user decide.
 		if errors.Is(err, errPiExtensionNotHosted) {
-			// The bound Pi extension could not be hosted for this session.
-			// The model was never asked anything: the agent could not start
-			// at all. That is a setup failure, and the runtime words it as
-			// one - the message says the agent never came up, not that it ran
-			// and gave up.
 			return OperationResult{Outcome: "failed", Output: map[string]any{
 				"setupError": piExtensionRefusalText(request.CapabilityDescriptor, request.PiExtensionPaths) + ": " + err.Error(),
 			}, Usage: turn.Gate.Total()}
@@ -227,16 +203,10 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			break
 		}
 	}
-	// The kernel's own threshold compaction decides when a context is
-	// summarized; this block is the manual request and the bounded handoff
-	// instructions that go with it.
 	compacted := false
 	if compactRequested {
 		compactionErr := session.Compact(COMPACTION_INSTRUCTIONS)
 		if compactionErr == nil {
-			// The compaction replaced the context that held the task setup.
-			// The setup is sent again below, and the session has it again
-			// once that send succeeds.
 			compacted = true
 			options.TaskSetups.Forget(instanceId)
 			turn.FlushDeltas(true)
@@ -255,14 +225,8 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 				return OperationResult{Outcome: "completed", Output: map[string]any{"text": text}, Usage: turn.Gate.Total()}
 			}
 		} else {
-			// A summarizer that hits its output cap must not poison the
-			// turn: the `compaction_end` event already recorded why, so
-			// keep going (or report it for a manual request) instead of
-			// failing the operation as an unknown dispatch.
 			message := compactionErr.Error()
 			if compactRequested && operation.Context.RsiContinuation == nil && IsCompactionNoop(message) {
-				// Nothing to compact is not something the user asked to read: the
-				// command completes silently instead of posting a line into the chat.
 				return OperationResult{Outcome: "completed", Output: map[string]any{}, Usage: turn.Gate.Total()}
 			}
 			if compactRequested && !IsCompactionNoop(message) {
@@ -276,10 +240,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	} else {
 		briefing = "Continue work for " + operation.NodeId
 	}
-	// The setup is the tail of the briefing: the description of the environment
-	// the task runs in. The session reads it once; the operation prompt would
-	// otherwise carry it into the transcript of every operation, and the
-	// transcript is read again by every request that follows.
 	setupText := ""
 	setupSent := false
 	if operation.Context.BriefingSetupLength != nil {
@@ -306,10 +266,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		attachments = append(attachments, message.Attachments...)
 	}
 	userImages := PromptImagesFromAttachments(attachments)
-	// A bound skill is knowledge the model cannot call, and a `disable-model-invocation`
-	// skill is not in the system prompt at all: the only way its body reaches a turn is
-	// the user selecting it. Only this turn's messages are read; a briefing would
-	// re-inject forever.
 	turnTexts := []string{}
 	for _, message := range operation.Context.Messages {
 		if strings.TrimSpace(message.Text) != "" {
@@ -331,18 +287,14 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			})
 		}()
 	}
-	// A Pi extension hears each turn start before it runs.
 	pigExtensionTurnStart(store, operation.TaskId, operation.Id, operation.NodeId, request.Workspace, skillInjection.Text)
 	result, err := session.Prompt(skillInjection.Text, userImages)
 	if err == nil && setupSent {
-		// The provider answered, so the session carries the setup.
 		options.TaskSetups.Record(instanceId, inspected.SessionId, setupText)
 	}
 	if err != nil {
 		panic(err)
 	}
-	// A recovery records the admission and stops. The real session sends the
-	// prompt; this adapter must not settle an empty answer of its own.
 	if result.StopReason != nil && *result.StopReason == "admitted" {
 		return OperationResult{Outcome: "admitted", Usage: turn.Gate.Total()}
 	}
@@ -350,8 +302,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	if *turn.GateRefusal != nil {
 		panic(*turn.GateRefusal)
 	}
-	// A provider or transport error ends the turn with an assistant
-	// error message; that is a failure, never a successful operation.
 	if result.StopReason != nil && *result.StopReason == "error" {
 		message := "Model request failed"
 		if result.ErrorMessage != nil {
@@ -359,11 +309,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		}
 		return OperationResult{Outcome: "failed", Output: map[string]any{"error": message}, Usage: turn.Gate.Total()}
 	}
-	// A turn the kernel could not answer is a failure too. The kernel reports
-	// it as an unanswered submission with its own reason, and a turn that
-	// produced no answer must not be settled as one that did: that is how a
-	// provider stream that ended before the answer was complete became a
-	// successful turn with nothing in it.
 	if result.ErrorMessage != nil && strings.TrimSpace(*result.ErrorMessage) != "" {
 		return OperationResult{Outcome: "failed", Output: map[string]any{"error": *result.ErrorMessage}, Usage: turn.Gate.Total()}
 	}
@@ -377,7 +322,6 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 			Usage:   turn.Gate.Total(),
 		}
 	}
-	// An explicit question ends the turn; its answer is the next input.
 	if turn.AskedQuestion != nil && *turn.AskedQuestion != nil {
 		question := **turn.AskedQuestion
 		requestType := "user_decision"

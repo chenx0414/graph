@@ -1,19 +1,4 @@
 
-/**
- * Pure logic for the two-step model-provider flow (B-1).
- *
- * Step 1 「配置厂商」 validates a provider draft, normalizes the platform
- * catalog served by `GET /api/providers` and edits the concurrency limits that
- * live *inside* a provider entry. Step 2 「选择模型」 merges the models probed
- * from `<baseUrl>/models` with the metadata mapped from the vendored models.dev
- * snapshot.
- *
- * The field names here mirror the daemon contract in `backend/internal/graph/server_providers.go`:
- * the display name is `label`, the credential reference is `credentialRef`
- * (never `name` / `secretRef`), and the probe body carries a `requestId`
- * idempotency key. This module stays presentational: it never reads the DOM,
- * never sends a request and never resolves an API key.
- */
 import {
 type ModelApi
 } from '../catalog/models.ts';
@@ -26,9 +11,7 @@ export interface ModelVendorConfig {
 }
 
 export interface ModelVendor {
-  /** Config credential id (`credentials[<id>]`) — the models of this vendor. */
   id: string;
-  /** Probe platform id: the preset id, or `custom` for a user-defined ref. */
   platformId: string;
   label: string;
   baseUrl: string;
@@ -94,10 +77,7 @@ export function shouldAutoProbe(selectedVendorId: string, previous: string | nul
 }
 
 export interface AutoProbeDecision {
-  /** True when a probe request must go out now. */
   probe: boolean;
-  /** What to remember as "already probed": the new id only after a request is
-   * really issued, otherwise the previous value unchanged. */
   recorded: string | null;
 }
 
@@ -116,9 +96,7 @@ export interface KeyEntryGuidance {
   mode: 'desktop' | 'browser';
   title: string;
   lines: readonly string[];
-  /** Environment variable name the daemon resolves for this credential. */
   envVar: string;
-  /** One-click-copyable shell line; the value stays a placeholder (no secret). */
   exportLine: string;
 }
 

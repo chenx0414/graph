@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// taskRuntimeGrants renders the sorted, deduplicated grant list of one project.
 func taskRuntimeGrants(grants []string) string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -21,7 +20,6 @@ func taskRuntimeGrants(grants []string) string {
 	return CanonicalJSON(out)
 }
 
-// configuredProjects reads the projects of the current configuration.
 func (runtime *TaskRuntime) configuredProjects() []ProjectConfig {
 	if runtime.live != nil && runtime.live.Projects != nil {
 		return runtime.live.Projects()
@@ -29,7 +27,6 @@ func (runtime *TaskRuntime) configuredProjects() []ProjectConfig {
 	return runtime.projects
 }
 
-// allowedProjects is the set of project ids that may still receive work.
 func (runtime *TaskRuntime) allowedProjects() map[string]bool {
 	allowed := map[string]bool{}
 	for _, project := range runtime.configuredProjects() {
@@ -38,7 +35,6 @@ func (runtime *TaskRuntime) allowedProjects() map[string]bool {
 	return allowed
 }
 
-// liveEntries reads the configured models right now.
 func (runtime *TaskRuntime) liveEntries() []ModelEntry {
 	if runtime.live != nil && runtime.live.Entries != nil {
 		entries := runtime.live.Entries()
@@ -58,9 +54,7 @@ func (runtime *TaskRuntime) liveEntries() []ModelEntry {
 	return []ModelEntry{}
 }
 
-// livePreferences reads the model preferences right now.
 
-// masterModel reads the master Agent model right now.
 func (runtime *TaskRuntime) masterModel() *string {
 	if runtime.master == nil {
 		return nil
@@ -75,7 +69,6 @@ func (runtime *TaskRuntime) masterModel() *string {
 	return &model
 }
 
-// masterDefinitionVersion reads the master Agent definition right now.
 func (runtime *TaskRuntime) masterDefinitionVersion() *string {
 	if runtime.master == nil {
 		return nil
@@ -90,7 +83,6 @@ func (runtime *TaskRuntime) masterDefinitionVersion() *string {
 	return &version
 }
 
-// configRevision reads the configuration revision recorded with new tasks.
 func (runtime *TaskRuntime) configRevision() *int {
 	if runtime.live != nil && runtime.live.Revision != nil {
 		revision := runtime.live.Revision()
@@ -99,7 +91,6 @@ func (runtime *TaskRuntime) configRevision() *int {
 	return nil
 }
 
-// resolvedAccessPolicy is the policy frozen for each admitted execution.
 func (runtime *TaskRuntime) resolvedAccessPolicy() *ResolvedAccessPolicy {
 	policy := AccessPolicy{}
 	if runtime.access != nil {
@@ -118,7 +109,6 @@ func (runtime *TaskRuntime) resolvedAccessPolicy() *ResolvedAccessPolicy {
 	})
 }
 
-// dispatchAllowed reports whether the host still permits dispatch.
 func (runtime *TaskRuntime) dispatchAllowed() bool {
 	if runtime.rsi == nil {
 		return true
@@ -126,7 +116,6 @@ func (runtime *TaskRuntime) dispatchAllowed() bool {
 	return !runtime.rsi.HasPendingRestart()
 }
 
-// executionSystemContext is the host inventory the main Agent may read.
 func (runtime *TaskRuntime) executionSystemContext() *ExecutionSystemContext {
 	return &ExecutionSystemContext{
 		Resources:         true,
@@ -135,7 +124,6 @@ func (runtime *TaskRuntime) executionSystemContext() *ExecutionSystemContext {
 	}
 }
 
-// graphs lists the v2 graphs that currently have queued work.
 func (runtime *TaskRuntime) graphs() []ExecutionGraph {
 	lane := runtime.residentGraphLane()
 	if runtime.laneTokenBudget != nil {
@@ -152,7 +140,6 @@ func (runtime *TaskRuntime) graphs() []ExecutionGraph {
 }
 
 
-// projectRootFor is the project workspace of one graph.
 func (runtime *TaskRuntime) projectRootFor(graphId string) *string {
 	row := kernelRow(runtime.store.Db, "SELECT p.root AS root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?", graphId)
 	if row == nil {
@@ -162,8 +149,6 @@ func (runtime *TaskRuntime) projectRootFor(graphId string) *string {
 	return &root
 }
 
-// residentGraphLane is the resident v2 lane of this runtime. Native graphs run
-// through one resident Pi host per node.
 func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 	if runtime.graphLane != nil {
 		return runtime.graphLane

@@ -11,7 +11,6 @@ import (
 	"strings"
 )
 
-// usageGrokCredential resolves the Grok credential.
 func usageGrokCredential(home string, env map[string]string) (*usageCredential, error) {
 	envToken := usageSelectedCredential(env, UsageProviderGrok, []string{"GRAPH_GROK_ACCESS_TOKEN", "GROK_ACCESS_TOKEN"}, usageDefaultBaseURLs[UsageProviderGrok])
 	if envToken != nil {
@@ -73,26 +72,22 @@ func usageGrokCredential(home string, env map[string]string) (*usageCredential, 
 	}, nil
 }
 
-// usageProtoField is one fixed32 field of a protobuf scan.
 type usageProtoField struct {
 	Path  []int
 	Value float64
 	Order int
 }
 
-// usageProtoVarint is one varint field of a protobuf scan.
 type usageProtoVarint struct {
 	Path  []int
 	Value float64
 }
 
-// usageProtoScan collects the fields of a protobuf reply.
 type usageProtoScan struct {
 	Fixed32 []usageProtoField
 	Varint  []usageProtoVarint
 }
 
-// usageReadVarint reads one protobuf varint.
 func usageReadVarint(data []byte, cursor *int) (float64, bool) {
 	value := 0.0
 	shift := 0
@@ -108,7 +103,6 @@ func usageReadVarint(data []byte, cursor *int) (float64, bool) {
 	return 0, false
 }
 
-// usageScanProtobuf walks a protobuf reply and collects its fields.
 func usageScanProtobuf(data []byte, depth int, path []int, order *int, scan *usageProtoScan) {
 	cursor := 0
 	for cursor < len(data) {
@@ -155,7 +149,6 @@ func usageScanProtobuf(data []byte, depth int, path []int, order *int, scan *usa
 	}
 }
 
-// usageGrpcFrames splits a gRPC-web reply into its message frames.
 func usageGrpcFrames(data []byte) [][]byte {
 	frames := [][]byte{}
 	cursor := 0
@@ -178,13 +171,11 @@ func usageGrpcFrames(data []byte) [][]byte {
 	return frames
 }
 
-// usageGrokUsage is the Grok quota the billing reply reports.
 type usageGrokUsage struct {
 	UsedPercent float64
 	ResetAt     *int64
 }
 
-// usageParseGrokBilling reads the Grok billing reply.
 func usageParseGrokBilling(data []byte, now int64) (usageGrokUsage, error) {
 	payloads := usageGrpcFrames(data)
 	if len(payloads) == 0 && len(data) > 0 && (data[0]>>3) > 0 {
@@ -274,7 +265,6 @@ func usageParseGrokBilling(data []byte, now int64) (usageGrokUsage, error) {
 	return usageGrokUsage{UsedPercent: used, ResetAt: resetAt}, nil
 }
 
-// usageJoinProtoPath renders a protobuf field path.
 func usageJoinProtoPath(path []int) string {
 	parts := make([]string, 0, len(path))
 	for _, value := range path {
@@ -283,7 +273,6 @@ func usageJoinProtoPath(path []int) string {
 	return strings.Join(parts, ".")
 }
 
-// usageGrokWindowLabel names a Grok quota window.
 func usageGrokWindowLabel(resetAt *int64, now int64) string {
 	if resetAt == nil {
 		return "额度"
@@ -298,7 +287,6 @@ func usageGrokWindowLabel(resetAt *int64, now int64) string {
 	return "额度"
 }
 
-// usageFetchGrok reads the Grok quota.
 func usageFetchGrok(credential *usageCredential, now int64, prices []ModelPrice) (UsagePlan, error) {
 	status, header, raw, err := usageFetch("POST", usageGrokBillingURL, map[string]string{
 		"authorization": "Bearer " + credential.Value, "origin": "https://grok.com",

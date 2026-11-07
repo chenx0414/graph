@@ -124,8 +124,6 @@ export function residentFlag(id: string): 'true' | undefined {
 }
 
 export type AnchorQuestion = { id: string; nodeId: string; operationId: string | null; kind: string; status: string; owner?: string; data: Record<string, unknown>; answer: Record<string, unknown> | null; taskId: string;
-  // How long this question has waited for the person who has to answer it.
-  // overdueAfterMs is the published deadline; nothing answers the question for you.
   askedAt?: number | null; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean };
 
 export type ConversationView = {

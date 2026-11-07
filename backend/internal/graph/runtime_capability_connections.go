@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// capabilityLocalConnectionInput is one local MCP connection request.
 type capabilityLocalConnectionInput struct {
 	executor                 capabilityRestrictedExecutor
 	gate                     SendGate
@@ -26,7 +25,6 @@ type capabilityLocalConnectionInput struct {
 	hostCommands             bool
 }
 
-// capabilityLocalConnection opens one local MCP connection.
 func capabilityLocalConnection(input capabilityLocalConnectionInput) McpExchange {
 	resolved := capabilityResolveLocalMcpCommand(input.manifest["command"], input.hostCommands)
 	args := []string{}
@@ -69,7 +67,6 @@ func capabilityLocalConnection(input capabilityLocalConnectionInput) McpExchange
 		Args:       append(append([]string{}, resolved.argsPrefix...), capabilityResolveArgs(input.snapshot, args, input.secrets)...),
 		Env:        env,
 		ReadPaths:  readPaths,
-		// Discussion turns may read the business directory but only write scratch.
 		WritePaths: writePaths,
 	}
 	if len(env) > 0 {
@@ -107,7 +104,6 @@ func capabilityLocalConnection(input capabilityLocalConnectionInput) McpExchange
 	return StdioExchange(endpoint)
 }
 
-// capabilityResolveArgs expands the manifest arguments of one local MCP command.
 func capabilityResolveArgs(snapshot string, args []string, secrets CapabilitySecrets) []string {
 	out := []string{}
 	for _, arg := range args {
@@ -116,7 +112,6 @@ func capabilityResolveArgs(snapshot string, args []string, secrets CapabilitySec
 	return out
 }
 
-// capabilityEnsureMcpProvisioned provisions one local MCP capability when it needs it.
 func capabilityEnsureMcpProvisioned(gate SendGate, manifest map[string]any, snapshot string, workspace string, scratchDir string, secrets CapabilitySecrets, runtimeDomains []string, hostCommands bool, allowUnrestrictedNetwork bool, access *ResolvedAccessPolicy) (*capabilityProvisioningPlan, error) {
 	plan := capabilityProvisioningPlanFor(manifest, snapshot, secrets)
 	if plan == nil {
@@ -153,7 +148,6 @@ func capabilityEnsureMcpProvisioned(gate SendGate, manifest map[string]any, snap
 	return plan, nil
 }
 
-// capabilityListMcpTools reads the tools one MCP server lists.
 func capabilityListMcpTools(connection McpExchange) error {
 	defer func() {
 		_ = recover()
@@ -162,7 +156,6 @@ func capabilityListMcpTools(connection McpExchange) error {
 	return nil
 }
 
-// capabilityLocalCommandSearchDirectories are the directories one command is looked up in.
 func capabilityLocalCommandSearchDirectories(command string) []string {
 	configured := []string{}
 	for _, entry := range strings.Split(os.Getenv("PATH"), ":") {
@@ -185,7 +178,6 @@ func capabilityLocalCommandSearchDirectories(command string) []string {
 	return capabilityUniqueStrings(append(configured, preferred...))
 }
 
-// capabilityFindExecutable looks one command up on PATH.
 func capabilityFindExecutable(command string) string {
 	for _, directory := range capabilityLocalCommandSearchDirectories(command) {
 		candidate := filepath.Clean(filepath.Join(directory, command))
@@ -196,14 +188,12 @@ func capabilityFindExecutable(command string) string {
 	return ""
 }
 
-// capabilityResolvedLocalCommand is one local MCP command the loader resolved.
 type capabilityResolvedLocalCommand struct {
 	executable string
 	argsPrefix []string
 	readPaths  []string
 }
 
-// capabilityResolveLocalMcpCommand resolves the command one local MCP manifest names.
 func capabilityResolveLocalMcpCommand(value any, hostCommands bool) capabilityResolvedLocalCommand {
 	text, ok := value.(string)
 	if !ok || strings.TrimSpace(text) == "" {
@@ -235,7 +225,6 @@ func capabilityResolveLocalMcpCommand(value any, hostCommands bool) capabilityRe
 	if command == "npx" {
 		return capabilityResolvedLocalCommand{
 			executable: execPath, argsPrefix: []string{target},
-			// npx-cli.js loads npm's package files relative to its real path.
 			readPaths: capabilityUniqueStrings(append(append([]string{}, capabilityLocalNodeReadPaths(execPath, electron)...),
 				append(baseReadPaths, filepath.Dir(filepath.Dir(execPath)), filepath.Dir(filepath.Dir(target)))...)),
 		}
@@ -243,7 +232,6 @@ func capabilityResolveLocalMcpCommand(value any, hostCommands bool) capabilityRe
 	return capabilityResolvedLocalCommand{executable: candidate, argsPrefix: []string{}, readPaths: baseReadPaths}
 }
 
-// capabilityExtensionConnectionInput is one Graph extension connection request.
 type capabilityExtensionConnectionInput struct {
 	executor   capabilityRestrictedExecutor
 	gate       SendGate
@@ -255,7 +243,6 @@ type capabilityExtensionConnectionInput struct {
 	access     *ResolvedAccessPolicy
 }
 
-// capabilityExtensionConnection opens one Graph extension connection.
 func capabilityExtensionConnection(input capabilityExtensionConnectionInput) McpExchange {
 	declared := "./index.mjs"
 	if value, ok := input.manifest["entry"].(string); ok && strings.TrimSpace(value) != "" {
@@ -286,8 +273,6 @@ func capabilityExtensionConnection(input capabilityExtensionConnectionInput) Mcp
 		Command:    execPath,
 		Args:       []string{worker, capabilityRealPath(entry)},
 		ReadPaths:  append(append([]string{input.snapshot}, NodeReadPaths(execPath, electron)...), filepath.Dir(worker)),
-		// Extension register() and every tool call share this restriction, so a
-		// bound extension cannot write business files during discussion.
 		WritePaths: writePaths,
 	}
 	if input.access != nil {
@@ -306,12 +291,10 @@ func capabilityExtensionConnection(input capabilityExtensionConnectionInput) Mcp
 	return StdioExchange(endpoint)
 }
 
-// capabilityExtensionWorkerPath is the Node helper that loads one extension.
 func capabilityExtensionWorkerPath() string {
 	return filepath.Join(ApplicationRoot, "src", "runtime", "extension-worker.mjs")
 }
 
-// capabilityAuthorization is the grant state one MCP capability is loaded under.
 type capabilityAuthorization struct {
 	grants               []string
 	onPermissionRequired func(CapabilityPermissionRequest)

@@ -23,8 +23,6 @@ Options:
   --protocol <name>      Protocol of the module ports (default: data)
   -h, --help             Print this help`
 
-// reviewModuleDescriptor is the module declaration the command prints. The
-// field order is the order the declaration reads in.
 type reviewModuleDescriptor struct {
 	Type           string           `json:"type"`
 	Trigger        string           `json:"trigger"`
@@ -39,8 +37,6 @@ type reviewModuleCode struct {
 	Version int    `json:"version"`
 }
 
-// runReviewModule is the `graphd review-module` command. The policy rules
-// live in core_review_policy.go; this is the entry point that can reach them.
 func runReviewModule(args []string, cwd string) int {
 	policyPath := ""
 	entryPath := ""
@@ -86,8 +82,6 @@ func runReviewModule(args []string, cwd string) int {
 	if err := json.Unmarshal(raw, &policy); err != nil {
 		Raise("invalid_definition", "The policy is not valid JSON: "+err.Error())
 	}
-	// The policy is checked before anything is written: a broken policy must
-	// not leave a half-written entry behind.
 	inputs := ReviewPolicyInputs(policy)
 	code := ReviewPolicyCode(policy)
 	entry := resolvePath(cwd, entryPath)
@@ -106,7 +100,6 @@ func runReviewModule(args []string, cwd string) int {
 	return 0
 }
 
-// reviewModuleVersion reads the code version option.
 func reviewModuleVersion(raw string) int {
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 1 {
@@ -115,8 +108,6 @@ func reviewModuleVersion(raw string) int {
 	return value
 }
 
-// reviewModulePorts declares the given ports with one protocol, in the order
-// they were named.
 func reviewModulePorts(names []string, protocol string) json.RawMessage {
 	var buf bytes.Buffer
 	buf.WriteByte('{')
@@ -135,14 +126,10 @@ func reviewModulePorts(names []string, protocol string) json.RawMessage {
 	return json.RawMessage(buf.String())
 }
 
-// writeNewEntry writes the module code to a path that does not exist yet. A
-// published code entry is never overwritten; a revision takes a new path.
 func writeNewEntry(entry string, code string) error {
 	return writeNewFile(entry, code, 0o600)
 }
 
-// writeNewFile writes content to a path that does not exist yet. An existing
-// file is never overwritten.
 func writeNewFile(path string, content string, mode os.FileMode) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
@@ -153,7 +140,6 @@ func writeNewFile(path string, content string, mode os.FileMode) error {
 	return err
 }
 
-// writeReviewModuleDescriptor prints the module declaration.
 func writeReviewModuleDescriptor(descriptor reviewModuleDescriptor) {
 	raw, err := json.MarshalIndent(descriptor, "", "  ")
 	if err != nil {

@@ -4,19 +4,13 @@ import (
 	"strings"
 )
 
-// AgentContextLibrary is the editable prompt library of one Graph installation.
 type AgentContextLibrary struct {
 	Root        string
 	ContextRoot string
 	defaults    resolvedAgentContextDefaults
-	// overlay replaces the text of the named prompts. It is how one node runs
-	// under a different harness than the rest: the replacement has to live in
-	// the library the session reads, not beside it.
 	overlay map[string]string
 }
 
-// WithOverlay returns a library that replaces the named prompts with the given
-// texts. The base library is untouched.
 func (library *AgentContextLibrary) WithOverlay(overlay map[string]string) *AgentContextLibrary {
 	if library == nil || len(overlay) == 0 {
 		return library
@@ -29,7 +23,6 @@ func (library *AgentContextLibrary) WithOverlay(overlay map[string]string) *Agen
 	return &copied
 }
 
-// NewAgentContextLibrary opens a prompt library with optional built-in overrides.
 func NewAgentContextLibrary(root string, defaults AgentContextDefaults) *AgentContextLibrary {
 	library := &AgentContextLibrary{Root: root, ContextRoot: root}
 	library.defaults = resolvedAgentContextDefaults{
@@ -48,7 +41,6 @@ func NewAgentContextLibrary(root string, defaults AgentContextDefaults) *AgentCo
 	return library
 }
 
-// OpenAgentContextLibrary opens the prompt library of one state directory.
 func OpenAgentContextLibrary(root string, defaults ...AgentContextDefaults) *AgentContextLibrary {
 	selected := AgentContextDefaults{}
 	if len(defaults) > 0 {
@@ -57,7 +49,6 @@ func OpenAgentContextLibrary(root string, defaults ...AgentContextDefaults) *Age
 	return NewAgentContextLibrary(root, selected)
 }
 
-// agentContextDefault keeps a trimmed override, or the built-in text.
 func agentContextDefault(value *string, fallback string) string {
 	if value == nil {
 		return fallback
@@ -69,7 +60,6 @@ func agentContextDefault(value *string, fallback string) string {
 	return trimmed
 }
 
-// descriptor returns the fixed metadata of one prompt key.
 func (library *AgentContextLibrary) descriptor(key AgentPromptKey) agentStaticPrompt {
 	for _, prompt := range agentStaticPrompts {
 		if string(prompt.Key) == key {
@@ -80,24 +70,20 @@ func (library *AgentContextLibrary) descriptor(key AgentPromptKey) agentStaticPr
 	return agentStaticPrompt{}
 }
 
-// promptPath is the file one prompt key owns.
 func (library *AgentContextLibrary) promptPath(key AgentPromptKey) string {
 	library.descriptor(key)
 	return agentContextPath(library.Root, key)
 }
 
-// userDefaultPath is the file that holds the user-owned reset default.
 func (library *AgentContextLibrary) userDefaultPath(key AgentPromptKey) string {
 	library.descriptor(key)
 	return agentContextPath(library.Root, agentContextUserDefaultRoot+"/"+key)
 }
 
-// builtInContent is the shipped text of one prompt.
 func (library *AgentContextLibrary) builtInContent(key AgentPromptKey) string {
 	return library.fallbackContent(library.descriptor(key).Fallback)
 }
 
-// fallbackContent is the shipped text of one defaults slot.
 func (library *AgentContextLibrary) fallbackContent(name string) string {
 	switch name {
 	case "identity":
@@ -126,7 +112,6 @@ func (library *AgentContextLibrary) fallbackContent(name string) string {
 	return ""
 }
 
-// descriptors lists every prompt of the library.
 func (library *AgentContextLibrary) descriptors() []AgentPromptDescriptor {
 	out := make([]AgentPromptDescriptor, 0, len(agentStaticPrompts))
 	for _, prompt := range agentStaticPrompts {
@@ -147,12 +132,10 @@ func (library *AgentContextLibrary) descriptors() []AgentPromptDescriptor {
 	return out
 }
 
-// userDefault reads the user-owned reset default of one prompt.
 func (library *AgentContextLibrary) userDefault(key AgentPromptKey) (string, bool, error) {
 	return agentContextReadOptional(library.userDefaultPath(key))
 }
 
-// effectiveDefault is the text a reset restores: the user default, else the built-in.
 func (library *AgentContextLibrary) effectiveDefault(key AgentPromptKey) (string, error) {
 	value, ok, err := library.userDefault(key)
 	if err != nil {

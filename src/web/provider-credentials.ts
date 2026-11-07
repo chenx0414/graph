@@ -1,20 +1,5 @@
 import { PROVIDER_PRESETS } from '../catalog/providers.ts';
 
-/**
- * Pure logic for the two-step model-provider flow (B-1).
- *
- * Step 1 「配置厂商」 validates a provider draft, normalizes the platform
- * catalog served by `GET /api/providers` and edits the concurrency limits that
- * live *inside* a provider entry. Step 2 「选择模型」 merges the models probed
- * from `<baseUrl>/models` with the metadata mapped from the vendored models.dev
- * snapshot.
- *
- * The field names here mirror the daemon contract in `backend/internal/graph/server_providers.go`:
- * the display name is `label`, the credential reference is `credentialRef`
- * (never `name` / `secretRef`), and the probe body carries a `requestId`
- * idempotency key. This module stays presentational: it never reads the DOM,
- * never sends a request and never resolves an API key.
- */
 import {
 MODEL_THINKING_LEVELS,
 type ModelApi
@@ -40,15 +25,11 @@ export interface PlatformPreset {
   label: string;
   api: ModelApi;
   baseUrl: string;
-  /** Environment variable / keychain entry name; config stores only this. */
   credentialRef: string;
   credentialKind: CredentialKind;
   oauthProvider?: 'openrouter' | 'xai';
-  /** True when the vendor is known to expose `<baseUrl>/models`. Display-only:
-   * a probe always attempts `/models` and lets the vendor's response decide. */
   modelsListSupported: boolean;
   custom?: boolean;
-  /** Whether the daemon could already resolve this platform's credential. */
   credentialConfigured?: boolean;
   headers?: Record<string, string>;
   docsUrl?: string;
@@ -69,15 +50,11 @@ export const CREDENTIAL_ID = /^[a-z0-9][a-z0-9-_]*$/;
 export const SECRET_REF = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export interface ProviderDraft {
-  /** Preset id or `custom` (sent as the probe `provider.id`). */
   platformId: string;
-  /** Display name; required for a custom provider only. */
   label: string;
   baseUrl: string;
   api: ModelApi;
-  /** Config credential key (the `credentials[<id>]` entry). */
   credentialId: string;
-  /** Environment variable / keychain entry name, sent as `credentialRef`. */
   credentialRef: string;
 }
 
@@ -86,9 +63,7 @@ export type ProviderDraftField = 'label' | 'baseUrl' | 'api' | 'credentialId' | 
 export type ProviderDraftErrors = Partial<Record<ProviderDraftField, string>>;
 
 export interface ValidateProviderOptions {
-  /** `custom` drafts must type the display name, base URL and compatibility. */
   custom: boolean;
-  /** A key is present in the form (desktop keychain push) or already resolved. */
   hasKey: boolean;
 }
 
@@ -141,7 +116,6 @@ export function accountCredentialEntry(previous: AccountCredentialEntry | undefi
     secretRef: input.credentialRef,
     displayName: input.label || input.credentialId,
   };
-  // A custom provider is somebody's own gateway, not an account of a subscription platform.
   if (input.custom) delete entry.platform;
   else entry.platform = input.platformId;
   return entry;
@@ -186,7 +160,6 @@ export function hasProviderErrors(errors: ProviderDraftErrors): boolean {
 
 export interface CredentialResolution {
   resolved: boolean;
-  /** Environment variable name the daemon resolves (platform.credentialRef). */
   credentialRef: string;
 }
 
@@ -261,11 +234,8 @@ export function draftForCredential(
 }
 
 export interface CredentialValueState {
-  /** The daemon's per-credential answer: did the account's own variable resolve? */
   credentialState?: boolean | undefined;
-  /** Whether the keychain holds a value for this account. */
   keyResolved?: boolean | undefined;
-  /** The platform-wide flag, used only when the account has no answer of its own. */
   platformConfigured?: boolean | undefined;
 }
 

@@ -1,12 +1,10 @@
 package graph
 
-// SystemDefinition is one published definition the inventory reports.
 type SystemDefinition struct {
 	ID      string
 	Version int64
 }
 
-// SystemInventoryInput is everything the host inventory is built from.
 type SystemInventoryInput struct {
 	Models               []ConfiguredModel
 	CredentialConfigured func(ConfiguredModel) bool
@@ -23,10 +21,8 @@ type SystemInventoryInput struct {
 	ApplicationMode      string
 }
 
-// systemInventoryKinds are the capability kinds the inventory counts.
 var systemInventoryKinds = []string{"skill", "mcp", "extension", "pi-extension", "prompt"}
 
-// SystemInventory is the host inventory the main Agent may read.
 func SystemInventory(input SystemInventoryInput) map[string]any {
 	models := []any{}
 	for _, entry := range input.Models {
@@ -87,7 +83,6 @@ func SystemInventory(input SystemInventoryInput) map[string]any {
 	}
 }
 
-// systemInventoryModelID is the vendor-side model id of one configured model.
 func systemInventoryModelID(entry ConfiguredModel) string {
 	if entry.ModelId != "" {
 		return entry.ModelId
@@ -95,7 +90,6 @@ func systemInventoryModelID(entry ConfiguredModel) string {
 	return entry.Id
 }
 
-// systemInventoryPricingStatus says whether the price of one model is known.
 func systemInventoryPricingStatus(entry ConfiguredModel) string {
 	if entry.Pricing != nil && entry.Pricing.Status != "" {
 		return entry.Pricing.Status
@@ -106,7 +100,6 @@ func systemInventoryPricingStatus(entry ConfiguredModel) string {
 	return "unknown"
 }
 
-// systemInventoryPlan is one subscription plan without its credential.
 func systemInventoryPlan(plan UsagePlan) map[string]any {
 	models := []any{}
 	for _, model := range plan.Models {

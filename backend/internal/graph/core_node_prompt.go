@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 )
 
-// RecordedPrompt is one send's own record: the system prompt and tool
-// declarations the model really received.
 type RecordedPrompt struct {
 	OperationID string  `json:"operationId"`
 	At          int64   `json:"at"`
@@ -16,21 +14,11 @@ type RecordedPrompt struct {
 	Tools       *string `json:"tools"`
 }
 
-// NodeBriefing is the first user message of a node's own session: the briefing
-// the worker really read.
 type NodeBriefing struct {
 	Text        string `json:"text"`
 	SessionFile string `json:"sessionFile"`
 }
 
-// NodePromptDetail reports what one subagent node really sent.
-//
-// Both halves come from durable records: the system prompt and tool
-// declarations are the ones recorded at the provider call of the node's newest
-// send, and the briefing is the first user message of the node's own session
-// file. Nothing is recomposed here, so the panel shows the send rather than a
-// lookalike - and a node that never sent, or a program node that is never sent
-// a prompt, says exactly that.
 func NodePromptDetail(store *TaskStore, taskId, nodeId string) NodePromptView {
 	row := kernelRow(store.Db, "SELECT spec, instance_id, status FROM nodes WHERE task_id = ? AND id = ?", taskId, nodeId)
 	if row == nil {
@@ -89,8 +77,6 @@ func NodePromptDetail(store *TaskStore, taskId, nodeId string) NodePromptView {
 	}
 }
 
-// firstUserMessage is the first user message in a Pi session file, read from the
-// session's own JSONL.
 func firstUserMessage(file string) *string {
 	raw, err := os.ReadFile(file)
 	if err != nil {
@@ -136,9 +122,6 @@ func firstUserMessage(file string) *string {
 	return nil
 }
 
-// promptRole is the role a send is assembled for, by the same rule the
-// assembler uses: the master node is main, an action that says review is the
-// independent reviewer, everything else is a worker.
 func promptRole(spec NodeSpec, kind string) *string {
 	if kind != "agent" {
 		return nil

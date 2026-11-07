@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// execDebugTimeline appends one line to the timeline named by GRAPH_EXEC_DEBUG.
-//
-// It exists because a command that never returns can only be diagnosed from the
-// inside: the caller never comes back, so the executor has to say when it
-// launched, when its timer fired, what the kill returned and whether the pipes
-// ever drained. Off unless the variable names a file.
 var execDebugMutex sync.Mutex
 
 func execDebugTimeline(format string, values ...any) {

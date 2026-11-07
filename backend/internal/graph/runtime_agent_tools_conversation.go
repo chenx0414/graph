@@ -6,7 +6,6 @@ import (
 	"errors"
 )
 
-// agentToolsConversationHandlers are the handlers of the Conversation tools.
 func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"ask_supervisor": func(id string, params map[string]any) any {
@@ -79,7 +78,6 @@ func agentToolsConversationHandlers(input AgentToolsInput, root string, readRoot
 			}
 			receipt := input.ControlTask(control)
 			result := agentToolsText(stringifyJSON(receipt))
-			// Abandoning ends the task, so there is nothing left to continue in this turn.
 			if action == "abandon" {
 				result["terminate"] = true
 			}
@@ -122,9 +120,6 @@ func agentToolsAsk(ask func(PiAdapterAskedQuestion), params map[string]any) any 
 			options = options[:8]
 		}
 	}
-	// The option a person would have picked if they were here. It is explicit
-	// rather than "the first one": a question that times out answers as the
-	// asker intended, not as the list happened to be ordered.
 	recommended := strings.TrimSpace(agentToolsStringOrEmpty(params["recommended"]))
 	if recommended != "" && !agentToolsContains(options, recommended) {
 		panic(errors.New("A recommended option must be one of the options"))
@@ -133,7 +128,6 @@ func agentToolsAsk(ask func(PiAdapterAskedQuestion), params map[string]any) any 
 		Prompt: agentToolsTruncate(prompt, 2_000), Why: agentToolsTruncate(why, 1_000),
 		Options: options, Recommended: recommended, Multiple: params["multiple"] == true, RequestID: requestID,
 	})
-	// The turn stops here on purpose: the answer is the next turn's input.
 	result := agentToolsText(stringifyJSON(map[string]any{"status": "asked", "prompt": prompt}))
 	result["terminate"] = true
 	return result

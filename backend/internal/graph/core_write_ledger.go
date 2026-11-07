@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 )
 
-// WRITE_TOOLS are the tools whose effect on one path can be observed.
 var WRITE_TOOLS = map[string]bool{
 	"write_file":  true,
 	"edit":        true,
@@ -21,10 +20,8 @@ var WRITE_TOOLS = map[string]bool{
 	"apply_patch": true,
 }
 
-// MAX_CAPTURE_TEXT_BYTES is the text kept beside a digest.
 const MAX_CAPTURE_TEXT_BYTES = 2 * 1024 * 1024
 
-// WriteSnapshot is one file's identity before or after a write.
 type WriteSnapshot struct {
 	Exists    bool    `json:"exists"`
 	Digest    *string `json:"digest"`
@@ -34,7 +31,6 @@ type WriteSnapshot struct {
 	Binary    bool    `json:"binary"`
 }
 
-// WriteRecord is one captured write.
 type WriteRecord struct {
 	TaskID     string
 	NodeID     string
@@ -48,7 +44,6 @@ type WriteRecord struct {
 	CreatedAt  int64
 }
 
-// WriteCaptureInput is one side of a tool write.
 type WriteCaptureInput struct {
 	TaskID     string
 	NodeID     string
@@ -60,7 +55,6 @@ type WriteCaptureInput struct {
 	Workspace  string
 }
 
-// LaneChange is a manifest-shaped change derived from the ledger.
 type LaneChange struct {
 	Path         string
 	BeforeDigest *string
@@ -68,7 +62,6 @@ type LaneChange struct {
 	Status       string
 }
 
-// CapturePathFor returns the path a write tool acts on.
 func CapturePathFor(toolName string, path any) *string {
 	if !WRITE_TOOLS[toolName] {
 		return nil
@@ -84,7 +77,6 @@ func missingSnapshot() WriteSnapshot {
 	return WriteSnapshot{}
 }
 
-// SnapshotFile reads one file's identity and refuses a path that escapes the lane.
 func SnapshotFile(workspace, path string) WriteSnapshot {
 	root, err := filepath.EvalSymlinks(filepath.Clean(workspace))
 	if err != nil {
@@ -119,7 +111,6 @@ func SnapshotFile(workspace, path string) WriteSnapshot {
 	return snapshot
 }
 
-// RelativeLanePath is a lane-relative forward-slashed path.
 func RelativeLanePath(workspace, path string) string {
 	root := filepath.Clean(workspace)
 	target := path
@@ -136,7 +127,6 @@ func RelativeLanePath(workspace, path string) string {
 	return filepath.ToSlash(target[len(root)+1:])
 }
 
-// WriteLedger records what a lane actually wrote.
 type WriteLedger struct {
 	store *TaskStore
 }
@@ -235,7 +225,6 @@ func scanWrite(row *sql.Row) *WriteRecord {
 	return &record
 }
 
-// Records returns every file the node touched, oldest first.
 func (ledger *WriteLedger) Records(taskID, nodeID string) []WriteRecord {
 	rows, err := ledger.store.Db.Query("SELECT task_id,node_id,instance_id,turn_id,path,tool_name,tool_call_id,before,after,created_at FROM node_write_captures WHERE task_id=? AND node_id=? ORDER BY created_at, path", taskID, nodeID)
 	if err != nil {
@@ -271,7 +260,6 @@ func (ledger *WriteLedger) Records(taskID, nodeID string) []WriteRecord {
 	return out
 }
 
-// Changes is the lane change set a manifest is judged against.
 func (ledger *WriteLedger) Changes(taskID, nodeID string) []LaneChange {
 	changes := []LaneChange{}
 	for _, record := range ledger.Records(taskID, nodeID) {

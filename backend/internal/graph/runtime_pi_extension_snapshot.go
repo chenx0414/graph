@@ -8,14 +8,6 @@ import (
 	"strings"
 )
 
-// PackageGaps reports the relative paths a package declares as its own runtime entry points but
-// does not have on disk.
-//
-// A truncated install — the incident this exists for: a package was present under `node_modules`
-// while its whole `v4/` directory was missing, so the extension that needed it died with
-// `Cannot find module './v4/classic/external.js'` — is invisible to a directory check, so completeness has to be
-// checked per declared target. Type declarations are ignored here: a package may legitimately ship
-// none, and a missing `.d.ts` never stops a load.
 func PackageGaps(dir string, rootOnly bool) ([]string, error) {
 	manifest, ok := piExtensionPackageManifestAt(dir)
 	if !ok {
@@ -37,14 +29,10 @@ func PackageGaps(dir string, rootOnly bool) ([]string, error) {
 			return
 		case map[string]any:
 			for key, item := range typed {
-				// A subpath export ("./v4/classic/external.js") is a real file the package must ship; a
-				// custom condition name ("standard-schema-spec") is not a runtime entry for us and may
-				// legitimately point at sources the published package leaves out.
 				subpath := strings.HasPrefix(key, ".")
 				if !subpath && !piExtensionRuntimeConditions[key] {
 					continue
 				}
-				// "." is the package's own root entry, not a subpath: a dependency only has to satisfy it.
 				if rootOnly && subpath && key != "." {
 					continue
 				}
@@ -62,8 +50,6 @@ func PackageGaps(dir string, rootOnly bool) ([]string, error) {
 	sort.Strings(ordered)
 	gaps := []string{}
 	for _, target := range ordered {
-		// `main` is often written without a `./` prefix (`ajv` ships `dist/ajv.js`, `cross-spawn`
-		// ships `index.js`); only absolute paths and URLs are outside the package.
 		if strings.HasPrefix(target, "/") || piExtensionURLPattern.MatchString(target) {
 			continue
 		}
@@ -77,10 +63,6 @@ func PackageGaps(dir string, rootOnly bool) ([]string, error) {
 
 var piExtensionURLPattern = regexp.MustCompile(`^[a-zA-Z]+:`)
 
-// piExtensionTargetExists applies the same resolution Node itself applies to a plain path: the
-// exact file, the file with a runtime extension, or the directory's index. Declaring `main:
-// "./index"` while shipping `index.js` is perfectly normal (`ms` does exactly that), and a gap check
-// that called such a package broken would reinstall a healthy tree.
 func piExtensionTargetExists(dir string, relative string) bool {
 	for _, suffix := range []string{"", ".js", ".mjs", ".cjs", ".json", "/index.js", "/index.mjs", "/index.cjs", "/index.json"} {
 		if _, err := os.Stat(filepath.Join(dir, relative+suffix)); err == nil {
@@ -90,14 +72,6 @@ func piExtensionTargetExists(dir string, relative string) bool {
 	return false
 }
 
-// InstallRootGaps reports every top-level package in one install root that declares an entry point
-// it does not ship.
-//
-// Diagnostic only: neither a gap nor a snapshot difference proves damage — a published package may
-// declare a root entry it never ships (`@modelcontextprotocol/sdk@1.30.1` declares
-// `dist/esm/index.js` and the official tarball has no such file), and a change in that tree can be
-// another source's legitimate update. The install root is shared by every temporary npm source, so
-// resolving one source must never remove it.
 func InstallRootGaps(root string) ([]string, error) {
 	nodeModules := filepath.Join(root, "node_modules")
 	entries, err := os.ReadDir(nodeModules)

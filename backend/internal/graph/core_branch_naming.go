@@ -6,15 +6,12 @@ import (
 	"regexp"
 )
 
-// MAX_SLUG_LENGTH is the longest slug kept.
 const MAX_SLUG_LENGTH = 40
 
-// DEFAULT_SLUG is the fallback when a summary has no usable characters.
 const DEFAULT_SLUG = "task"
 
 var asciiAlnum = regexp.MustCompile(`^[A-Za-z0-9]$`)
 
-// TaskSlug turns an arbitrary task summary into a branch-safe slug.
 func TaskSlug(request string) string {
 	source := request
 	var tokens []string
@@ -52,7 +49,6 @@ func TaskSlug(request string) string {
 	return truncated
 }
 
-// TaskShortId is the first 8 characters of the task id with separators removed.
 func TaskShortId(taskId string) string {
 	compact := nonAlnum.ReplaceAllString(taskId, "")
 	if len(compact) > 8 {
@@ -66,22 +62,18 @@ func TaskShortId(taskId string) string {
 
 var nonAlnum = regexp.MustCompile(`[^0-9a-zA-Z]`)
 
-// TaskBranchName is the integration branch `graph/task/<slug>-<shortId>`.
 func TaskBranchName(request, taskId string) string {
 	return "graph/task/" + TaskSlug(request) + "-" + TaskShortId(taskId)
 }
 
-// WorkCopyBranchName is the per-instance work-copy branch.
 func WorkCopyBranchName(request, taskId, nodeId string) string {
 	return "graph/copy/" + TaskSlug(request) + "-" + TaskShortId(taskId) + "/" + nodeId
 }
 
-// TaskWorktreeDirName is the per-task worktree directory name.
 func TaskWorktreeDirName(request, taskId string) string {
 	return TaskSlug(request) + "-" + TaskShortId(taskId)
 }
 
-// UniqueWorktreeDirName is the first free directory name for a node.
 func UniqueWorktreeDirName(preferred string, taken []string) string {
 	used := map[string]bool{}
 	for _, name := range taken {

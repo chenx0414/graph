@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 )
 
-// renderShellOutput keeps the command's bytes separate from its exit status.
 func renderShellOutput(stateDir string, value any, compact bool) any {
 	details := asMap(asMap(value)["details"])
 	output, present := details["shellOutput"].(string)

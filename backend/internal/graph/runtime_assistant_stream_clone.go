@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// cloneAssistantStartMessage copies the start message with an empty content list.
 func cloneAssistantStartMessage(message *AssistantMessage) *AssistantMessage {
 	if message == nil {
 		return &AssistantMessage{Role: "assistant", Content: []AssistantContentBlock{}}
@@ -35,7 +34,6 @@ func cloneAssistantStartMessage(message *AssistantMessage) *AssistantMessage {
 	return clone
 }
 
-// cloneAssistantTextBlock copies one text block.
 func cloneAssistantTextBlock(block AssistantContentBlock) AssistantContentBlock {
 	clone := AssistantContentBlock{Type: "text", Text: block.Text}
 	if block.TextSignature != nil {
@@ -45,7 +43,6 @@ func cloneAssistantTextBlock(block AssistantContentBlock) AssistantContentBlock 
 	return clone
 }
 
-// cloneAssistantThinkingBlock copies one thinking block.
 func cloneAssistantThinkingBlock(block AssistantContentBlock) AssistantContentBlock {
 	clone := AssistantContentBlock{Type: "thinking", Thinking: block.Thinking}
 	if block.ThinkingSignature != nil {
@@ -59,7 +56,6 @@ func cloneAssistantThinkingBlock(block AssistantContentBlock) AssistantContentBl
 	return clone
 }
 
-// cloneAssistantToolCall copies one tool call.
 func cloneAssistantToolCall(block AssistantContentBlock) *AssistantToolCall {
 	clone := &AssistantToolCall{
 		Type: "toolCall", Id: block.Id, Name: block.Name,
@@ -76,9 +72,6 @@ func cloneAssistantToolCall(block AssistantContentBlock) *AssistantToolCall {
 	return clone
 }
 
-// cloneAssistantArguments copies one tool-call argument value. A value that is
-// not an object is kept as it is: rewriting it would hide the model's mistake
-// from the validator that is meant to name it.
 func cloneAssistantArguments(arguments any) any {
 	typed, ok := arguments.(map[string]any)
 	if !ok {
@@ -91,7 +84,6 @@ func cloneAssistantArguments(arguments any) any {
 	return clone
 }
 
-// assistantSerializedArguments serializes tool-call arguments.
 func assistantSerializedArguments(arguments any) string {
 	if arguments == nil {
 		arguments = map[string]any{}
@@ -103,15 +95,12 @@ func assistantSerializedArguments(arguments any) string {
 	return string(encoded)
 }
 
-// assistantEmptyParsedToolArguments is what an empty argument stream parses to.
 var assistantEmptyParsedToolArguments = assistantSerializedArguments(assistantParsedToolArguments(""))
 
-// assistantParsedToolArguments parses a possibly incomplete argument stream.
 func assistantParsedToolArguments(text string) any {
 	return ParseStreamingJSON(text)
 }
 
-// assistantIsJsonPrefix reports whether current extends snapshot.
 func assistantIsJsonPrefix(snapshot any, current any) bool {
 	switch typed := snapshot.(type) {
 	case string:

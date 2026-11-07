@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 )
 
-// ConfigWatchReport is the watcher's last outcome.
 type ConfigWatchReport struct {
 	Watching     bool
 	Events       int
@@ -22,7 +21,6 @@ type ConfigWatchReport struct {
 	FileRevision *int64
 }
 
-// ConfigWatch reads the configuration file when it changes.
 type ConfigWatch struct {
 	mu         sync.Mutex
 	path       string
@@ -43,7 +41,6 @@ type ConfigWatchParsed struct {
 	Revision *int64
 }
 
-// ConfigDigest is a stable digest of the document, so key order and whitespace never count as a change.
 func ConfigDigest(config any) string {
 	sum := sha256.Sum256([]byte(CanonicalJSON(config)))
 	return hex.EncodeToString(sum[:])
@@ -94,8 +91,6 @@ func CreateConfigWatch(options ConfigWatchOptions) *ConfigWatch {
 		enabled = *options.Watch
 	}
 	if enabled {
-		// PERF(port): poll the directory's file identity. fsnotify is not an allowed dependency,
-		// and a watch on the file itself would miss an atomic rename the way Node's file watch did.
 		watch.stopPoll = make(chan struct{})
 		watch.report.Watching = true
 		go watch.poll()

@@ -1,7 +1,6 @@
 import type { Json } from '../core/types.ts';
 import type { GraphDefinition, NodeDefinition } from '../core/interface-spec.ts';
 
-/** What the console reads out of a node's declared configuration. */
 export interface NodeConfigurationSnapshot {
   revision: number;
   definition: NodeDefinition;
@@ -18,7 +17,6 @@ export interface InputExplanation {
   name: string;
   protocol: string;
   delivered: boolean;
-  /** True exactly when nothing was ever delivered to this input. */
   missing: boolean;
   value: Json;
   valueTruncated: boolean; valueBytes: number; valuePreview: string | null;
@@ -33,7 +31,6 @@ export interface TransitionExplanation {
   inputValue: Json;
   stateBefore: Json;
   stateAfter: Json;
-  /** The verdict text, or null when this record judged nothing (e.g. a reopen). */
   verdict: string | null;
   outputs: Record<string, Json>;
   ruleVersion: number;
@@ -44,9 +41,7 @@ export interface TransitionExplanation {
 export interface ModuleExplanation {
   moduleId: string;
   type: string;
-  /** `each` judges on every update; `once` latches after it fires. */
   trigger: string;
-  /** Whether a `once` module has fired and is now latched. */
   triggered: boolean;
   state: Json;
   stateTruncated: boolean; stateBytes: number; statePreview: string | null;
@@ -56,7 +51,6 @@ export interface ModuleExplanation {
   transitions: TransitionExplanation[];
 }
 
-/** One published artifact, as the console lists and renders it. */
 export type ArtifactScope = 'task' | 'project';
 export type ArtifactTrust = 'unverified' | 'reviewed' | 'accepted';
 export type ArtifactState = 'published' | 'retired';

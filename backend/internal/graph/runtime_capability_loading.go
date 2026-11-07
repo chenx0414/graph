@@ -9,12 +9,6 @@ import (
 	"strings"
 )
 
-// LoadCapabilities loads the capabilities bound by an Agent definition version.
-//
-// Skills become Pi resources and a read-only tool; local MCP servers and
-// extensions run one restricted process per call; remote MCP talks to a host in
-// the runtime's granted domains. Every tool call passes the same send gate as
-// model calls.
 func LoadCapabilities(input CapabilityLoadInput) LoadedCapabilities {
 	state := &capabilityLoadState{
 		skillPaths: []string{}, piExtensionPaths: []string{}, piExtensionTools: []string{},
@@ -25,8 +19,6 @@ func LoadCapabilities(input CapabilityLoadInput) LoadedCapabilities {
 		state.agentPrompt = strings.TrimSpace(input.Bootstrap.Agent)
 		state.toolPrompt = strings.TrimSpace(input.Bootstrap.Tool)
 	}
-	// Actual load facts: later projections must never guess these from catalog
-	// status alone.
 	report := []RuntimeCapabilityLoadFact{}
 	closeLoaded := func() {
 		for index := len(state.releases) - 1; index >= 0; index-- {
@@ -99,7 +91,6 @@ func LoadCapabilities(input CapabilityLoadInput) LoadedCapabilities {
 		found = true
 	}
 	if !found {
-		// Unpublished definitions keep briefing-only behavior.
 		return finish()
 	}
 	bindings := capabilityDefinitionBindings(definition, input.Catalog)
@@ -116,9 +107,6 @@ func LoadCapabilities(input CapabilityLoadInput) LoadedCapabilities {
 			bindings = append(bindings, capabilityBinding{bound: CapabilityBinding{Id: fact.Id, Version: fact.Version}, role: role})
 		}
 	}
-	// Bindings the definition declares itself are a promise to the user, so they stay fail-closed.
-	// The rest come from base capabilities: a convenience layer nobody asked for, which must never
-	// be able to stop a session (see the 2026-09-25 incident).
 	declaredKeys := map[string]bool{}
 	if input.FrozenFacts != nil {
 		for _, binding := range bindings {
@@ -177,7 +165,6 @@ func LoadCapabilities(input CapabilityLoadInput) LoadedCapabilities {
 	return finish()
 }
 
-// capabilityFailureMessage reads the message of one load failure.
 func capabilityFailureMessage(failure any) string {
 	if err, ok := failure.(*RuntimeError); ok && err != nil {
 		return err.Message
@@ -188,7 +175,6 @@ func capabilityFailureMessage(failure any) string {
 	return fmt.Sprintf("%v", failure)
 }
 
-// capabilityOptionalString turns an empty text into an absent value.
 func capabilityOptionalString(value string) *string {
 	if value == "" {
 		return nil
@@ -197,8 +183,6 @@ func capabilityOptionalString(value string) *string {
 	return &text
 }
 
-// capabilityLoadOne loads one bound capability. It returns the facts it produced, or the
-// failure that stopped it.
 func capabilityLoadOne(input CapabilityLoadInput, binding capabilityBinding, state *capabilityLoadState) ([]RuntimeCapabilityLoadFact, any) {
 	record := capabilityInputRecord(input, binding)
 	if record == nil || record.Status != "available" {
@@ -346,10 +330,6 @@ func capabilityLoadOne(input CapabilityLoadInput, binding capabilityBinding, sta
 	}
 	discovered := ListMcpTools(connection)
 	if authorization != nil {
-		// Binding a capability to the Agent definition is the default
-		// authorization boundary. Keep explicit task grants as additional
-		// evidence, but do not require a second per-tool approval for tools
-		// that are already present in the bound, versioned capability.
 		grants := append([]string{}, authorization.grants...)
 		for _, tool := range discovered {
 			grants = append(grants, McpGrant(binding.bound.Id, tool.Name))
@@ -358,8 +338,6 @@ func capabilityLoadOne(input CapabilityLoadInput, binding capabilityBinding, sta
 		authorization.grants = capabilityUniqueStrings(grants)
 	}
 	state.tools = append(state.tools, capabilityTools(connection, discovered, binding.bound.Id, binding.bound.Version, authorization)...)
-	// "Loaded" is discovery; "executable" reflects the effective grants
-	// assembled for this operation.
 	executable := true
 	grantReason := ""
 	if authorization != nil && len(discovered) > 0 {

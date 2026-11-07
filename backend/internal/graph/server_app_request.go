@@ -10,7 +10,6 @@ import (
 	"bytes"
 )
 
-// appReadBody reads the request body under the 24 MiB JSON limit.
 func appReadBody(w http.ResponseWriter, r *http.Request) []byte {
 	limited := http.MaxBytesReader(w, r.Body, appBodyLimit)
 	raw, err := io.ReadAll(limited)
@@ -24,7 +23,6 @@ func appReadBody(w http.ResponseWriter, r *http.Request) []byte {
 	return raw
 }
 
-// appJSONBody reads and parses the JSON body of one request.
 func appJSONBody(w http.ResponseWriter, r *http.Request) map[string]any {
 	raw := appReadBody(w, r)
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -41,13 +39,11 @@ func appJSONBody(w http.ResponseWriter, r *http.Request) map[string]any {
 	return record
 }
 
-// appBodyString reads a string field of the JSON body.
 func appBodyString(body map[string]any, field string) string {
 	value, _ := body[field].(string)
 	return value
 }
 
-// appBodyInt reads an integer field of the JSON body.
 func appBodyInt(body map[string]any, field string) (int, bool) {
 	value, ok := body[field].(float64)
 	if !ok {
@@ -56,7 +52,6 @@ func appBodyInt(body map[string]any, field string) (int, bool) {
 	return int(value), true
 }
 
-// appQueryNumber reads a numeric query parameter.
 func appQueryNumber(r *http.Request, field string) (float64, bool) {
 	raw := r.URL.Query().Get(field)
 	if raw == "" {
@@ -69,7 +64,6 @@ func appQueryNumber(r *http.Request, field string) (float64, bool) {
 	return value, true
 }
 
-// appQueryInt reads an integer query parameter.
 func appQueryInt(r *http.Request, field string) (int, bool) {
 	value, ok := appQueryNumber(r, field)
 	if !ok {
@@ -78,12 +72,10 @@ func appQueryInt(r *http.Request, field string) (int, bool) {
 	return int(value), true
 }
 
-// appQueryBool reads a boolean query parameter.
 func appQueryBool(r *http.Request, field string) bool {
 	return r.URL.Query().Get(field) == "true"
 }
 
-// appEventCursor reads the after cursor of an event stream.
 func appEventCursor(r *http.Request) int {
 	raw := r.URL.Query().Get("after")
 	if raw == "" {
@@ -96,22 +88,18 @@ func appEventCursor(r *http.Request) int {
 	return value
 }
 
-// appConfigStore is the configuration store the console reads and writes.
 func (app *GraphApp) appConfigStore() *ConfigStore {
 	return app.options.ConfigStore
 }
 
-// appUsageService is the subscription-usage service the console reads.
 func (app *GraphApp) appUsageService() UsageService {
 	return app.options.Usage
 }
 
-// appAgentContextLibrary is the prompt library the console edits.
 func (app *GraphApp) appAgentContextLibrary() *AgentContextLibrary {
 	return app.options.AgentContext
 }
 
-// appConfigEnv is the environment the configuration store resolves secrets in.
 func (app *GraphApp) appConfigEnv() map[string]string {
 	env := map[string]string{}
 	for key, value := range app.options.ConfigEnv {
@@ -122,9 +110,6 @@ func (app *GraphApp) appConfigEnv() map[string]string {
 	return env
 }
 
-// appProviderSecrets is the merged secret view the provider directory reads.
-// The runtime's merged view is authoritative: it already drops revoked refs
-// even when the process environment still names the variable.
 func (app *GraphApp) appProviderSecrets() map[string]string {
 	if app.options.AppServices != nil && app.options.AppServices.CapabilityConfig != nil {
 		return app.options.AppServices.CapabilityConfig.SecretValues()
@@ -132,7 +117,6 @@ func (app *GraphApp) appProviderSecrets() map[string]string {
 	return app.appConfigEnv()
 }
 
-// appProvidersView is the provider directory and the credential view.
 func (app *GraphApp) appProvidersView() map[string]any {
 	secrets := app.appProviderSecrets()
 	credentials := map[string]ProviderCredentialView{}
@@ -142,12 +126,8 @@ func (app *GraphApp) appProvidersView() map[string]any {
 			credentials = view.(ProviderView).Credentials
 		}
 	}
-	// A credential the vendor refused to renew is named as such: the console can then
-	// say "需要重新登录" instead of showing a configured credential that quietly fails.
 	if app.logins != nil {
 		for id, credential := range credentials {
-			// The map is keyed by credential id; the refresh state belongs to the
-			// secret ref the credential resolves through.
 			state, known := app.logins.xaiRefreshStatus(credential.SecretRef)
 			if !known {
 				continue

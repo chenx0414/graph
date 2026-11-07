@@ -19,9 +19,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	gate := TaskGate(store, TaskGateOperation{
 		Id: operation.Id, TaskId: operation.TaskId, InstanceId: instanceId, NodeId: &nodeId,
 	}, entry, TaskGateOptions{Unrestricted: input.FullAccess})
-	// A pre-send gate refusal (pause, budget, unknown usage) surfaces as an
-	// error inside the Pi session; keep it so the operation is not recorded
-	// as a success with zero provider requests.
 	var gateRefusal error
 	observedGate := SendGate{
 		Dispatch: func(id string, reservation float64, send func() any) any {
@@ -76,13 +73,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	if spec.Role != nil {
 		role = *spec.Role
 	}
-	// The global supervisor works in the checkout the daemon runs from.
-	//
-	// An unbound conversation has no project, so the synthetic one it gets
-	// points at its own state directory: every relative path then answered
-	// about a snapshot of nothing, and the one Agent whose job is this
-	// repository could not name a file in it without an absolute path.
-	// A project supervisor keeps its project's workspace.
 	if role == "master" && conversation != nil && conversation.ProjectId == nil &&
 		channels != nil && channels.Rsi != nil && channels.Rsi.CheckoutRoot != nil {
 		if root := strings.TrimSpace(rsiStringValue(channels.Rsi.CheckoutRoot())); root != "" {
@@ -168,8 +158,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			assemblyInput.SkillFolder = ""
 		}
 		if role == "master" && options.Artifacts != nil {
-			// The main Agent is the one that improves the harness, so it is the
-			// one that starts with what earlier runs learned.
 			assemblyInput.ExperienceContext = harnessExperiencePrompt(options.Artifacts, operation.TaskId)
 		}
 		contextAssembly = OpenAgentContextAssembly(assemblyInput)
@@ -190,9 +178,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			}
 			masterReadRoots = piAdapterUnique(masterReadRoots)
 		}
-		// The work copy is dependency-free on disk; the project's own install
-		// is linked in and granted to the sandbox so a worker command resolves
-		// the project toolchain the way it would in the project root.
 		dependencies := LinkProjectDependencies(workspace, nil)
 		commandReadPaths := []string(nil)
 		if dependencies != nil {
@@ -227,14 +212,11 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				}
 			},
 		}
-		// The native tools of the PiG kernel are the daemon's own: the kernel owns
-		// no environment, so the tools the SDK used to provide are built here.
 		var nativeToolInput *AgentToolsInput
 		operationInput.HostTools = func(readRoots []string) []ToolDefinition {
 			tools := AgentToolsInput{
 				Workspace: workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog,
 				Access: input.AccessPolicy,
-				// The host's own computer-use CLI: declared only where it exists.
 				Desktop: OpenDesktopTools(desktopCapabilityRoot(options.Catalog)),
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
 					return piAdapterRunToolCommand(commands, input.InterruptSignal, command, args, signal, 0)
@@ -248,8 +230,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			if role != "" {
 				tools.Role = role
 			}
-			// The tool surface records a question to the agent's supervisor here; the
-			// capability layer above knows nothing about it.
 			if conversation != nil && conversation.Role == ConversationProject && role == "master" && conversation.AnchorTaskId == operation.TaskId {
 				tools.OnAskSupervisor = func(request PiAdapterAskedQuestion) {
 					if askedQuestion == nil {
@@ -257,15 +237,11 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 						askedQuestion = &request
 					}
 				}
-				// A notice is the non-blocking half of the same channel: the project
-				// supervisor says what happened and its own turn keeps running.
 				tools.OnNotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
 					notice.EvidenceExcerpt, notice.EvidenceFailure = noticeEvidenceExcerpt(notice.ArtifactID, notice.ArtifactVersion, func(id string, version int, maxBytes int) ArtifactRead {
 						if artifactService == nil {
 							Raise("invalid_state", "This session has no artifact workspace")
 						}
-						// No version means newest: Get answers latest only for a nil
-						// version, and Read insists on a real number.
 						if version <= 0 {
 							version = artifactService.Get(id, nil).Version
 						}
@@ -285,8 +261,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			if artifactService != nil {
 				tools.Artifacts = artifactService
 			}
-			// A graph node may talk to the other Agents of its OWN graph. The reach rule is the
-			// graph itself: a node of another graph is not a peer, so naming one is refused.
 			if role != "master" && channels != nil && channels.Peers != nil {
 				peers := channels.Peers(operation.TaskId)
 				tools.Peers = PiAdapterPeerTools{
@@ -309,18 +283,9 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				supervisor := channels.Supervisor(operation.TaskId)
 				tools.Supervisor = supervisor
 				tools.ControlTask = supervisor.ControlTask
-				// The TypeScript supervisor carries the graph control surface, so
-				// the graph tools read it from the same place.
 				tools.GraphManagement = supervisor.GraphManagement
 				tools.Catalog = channels.Catalog
 			}
-			// The self-improvement tools change the Graph source checkout, so they
-			// belong to the master alone and only to a session that may act on the
-			// host. The status stays available without a checkout - it names the
-			// reason there is none - while an apply needs one to change.
-			// RSI changes Graph's own source checkout. That is the main thread's
-			// job: a project supervisor builds graphs, it does not rewrite the
-			// harness it runs on.
 			if channels != nil && channels.Rsi != nil && role == "master" && input.FullAccess &&
 				(conversation == nil || conversation.Role == ConversationGlobal) {
 				tools.Rsi = &AgentToolsRsi{Status: channels.Rsi.Status}
@@ -334,9 +299,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 				}
 				tools.RsiContext = rsiContext
 			}
-			// The system tools belong to the master alone: they tell it what the
-			// host looks like, and they are the only ones that may ask for a
-			// change to the host itself.
 			if channels != nil && channels.SystemContext != nil && role == "master" {
 				tools.SystemContext = &AgentToolsSystemContext{
 					SystemSummary: channels.SystemContext.SystemSummary,
@@ -385,13 +347,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	}()
 
 	tools := append([]ToolDefinition{}, capabilityOperation.Tools...)
-	// A stored level can predate a catalog refresh, or name a model the
-	// snapshot does not list: clamp it to a level this model accepts before
-	// the turn runs, using the same SDK rule the console displays.
-	//
-	// An operation without a conversation is a graph node: it has no stored
-	// level of its own, and running it without reasoning is not what its model
-	// was made for. It runs at the level the model accepts by default.
 	thinkingLevel := "off"
 	if conversation != nil && conversation.ThinkingLevel != nil {
 		thinkingLevel = *conversation.ThinkingLevel
@@ -414,17 +369,12 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 	composedPrompt := contextAssembly.ForOperation(capabilityOperation).Composed.Text
 	composedPrompt += masterPromptSuffix(store, conversation, role)
 	agentContext := operation.Context.AgentContext
-	// Record what was actually loaded for this operation so the node
-	// projection cannot later guess from catalog status.
 	RecordCapabilityLoad(store, NodeCapabilityLoadInput{
 		TaskId: operation.TaskId, NodeId: operation.NodeId, InstanceId: instanceId,
 		OperationId: operation.Id, ReadOnly: false, Report: capabilityOperation.Report,
 		Digest: capabilityOperation.BundleDigest, ToolPolicyDigest: capabilityOperation.ToolPolicyDigest,
 		RuntimePolicyDigest: capabilityOperation.RuntimePolicyDigest,
 	})
-	// Live conversation text and tool activity are separate from the final
-	// message: deltas are coalesced for reconnect, the durable record is
-	// written by the kernel when the operation settles.
 	live := newPiAdapterLiveTurn(store, operation, instanceId, gate, conversation)
 	input.TurnOrdinalsMu.Lock()
 	(*input.TurnOrdinals)[operation.Id] = live.nextOrdinal

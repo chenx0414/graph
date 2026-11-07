@@ -12,19 +12,14 @@ import (
 	"context"
 )
 
-// MODULE_IMAGE is the pinned runtime, prepared by the operator. Evaluations never pull an image or use the network.
 const MODULE_IMAGE = "node:24.20.0-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e"
 
-// MODULE_MEMORY_MB is the default resident memory a module process may use.
 const MODULE_MEMORY_MB = 256
 
-// moduleDockerTimeout bounds every helper docker call.
 const moduleDockerTimeout = 5 * time.Second
 
-// moduleDockerOutputLimit is how much helper output is kept for diagnostics.
 const moduleDockerOutputLimit = 4096
 
-// ModuleContainerInput is one module evaluation request.
 type ModuleContainerInput struct {
 	Directory      string
 	Payload        string
@@ -33,14 +28,12 @@ type ModuleContainerInput struct {
 	MaxOutputBytes int
 }
 
-// ModuleContainerResult is the container's exit code and captured output.
 type ModuleContainerResult struct {
 	Code   *int   `json:"code"`
 	Stdout string `json:"stdout"`
 	Stderr string `json:"stderr"`
 }
 
-// moduleDocker runs one docker helper command and reports its answer.
 func moduleDocker(args []string) ModuleContainerResult {
 	ctx, cancel := context.WithTimeout(context.Background(), moduleDockerTimeout)
 	defer cancel()
@@ -53,7 +46,6 @@ func moduleDocker(args []string) ModuleContainerResult {
 	result := ModuleContainerResult{Stdout: stdout.String(), Stderr: stderr.String()}
 	if err != nil {
 		if ctx.Err() != nil {
-			// The helper was killed before it answered: the code is unknown, not zero.
 			return result
 		}
 		var exit *exec.ExitError
@@ -70,7 +62,6 @@ func moduleDocker(args []string) ModuleContainerResult {
 	return result
 }
 
-// moduleCapture keeps the first bounded slice of one output stream.
 type moduleCapture struct {
 	mu     sync.Mutex
 	buffer strings.Builder
@@ -96,7 +87,6 @@ func (capture *moduleCapture) String() string {
 	return capture.buffer.String()
 }
 
-// moduleOutputLimit counts the combined stdout and stderr of one module run.
 type moduleOutputLimit struct {
 	mu      sync.Mutex
 	total   int
@@ -105,7 +95,6 @@ type moduleOutputLimit struct {
 	trigger func()
 }
 
-// record adds one chunk and fires the trigger once the output budget is gone.
 func (limit *moduleOutputLimit) record(chunk []byte) {
 	limit.mu.Lock()
 	defer limit.mu.Unlock()
@@ -121,14 +110,12 @@ func (limit *moduleOutputLimit) record(chunk []byte) {
 	}
 }
 
-// exceeded reports the limit message once the budget is gone.
 func (limit *moduleOutputLimit) exceeded() string {
 	limit.mu.Lock()
 	defer limit.mu.Unlock()
 	return limit.message
 }
 
-// RunModuleContainer runs one module inside the pinned container and reports what it said.
 func RunModuleContainer(input ModuleContainerInput) ModuleContainerResult {
 	if !jsSafeInteger(input.MemoryMb) || input.MemoryMb < 64 || input.MemoryMb > 16384 {
 		panic(errors.New("Module process memory limit must be between 64 and 16384 MiB"))
@@ -218,9 +205,6 @@ func RunModuleContainer(input ModuleContainerInput) ModuleContainerResult {
 			result.Stderr = waitErr.Error()
 		}
 	} else {
-		// A module that answered has an exit code of zero. Leaving the code
-		// empty made every successful evaluation look like an unknown exit,
-		// and the host reported it as a failed module.
 		code := 0
 		result.Code = &code
 	}

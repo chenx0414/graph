@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// fail records the failure of one send as the stream's terminal event.
 func (stream *controlledStream) fail(err error) {
 	message := &AssistantMessage{
 		Role: "assistant", Content: []AssistantContentBlock{},
@@ -21,15 +20,6 @@ func (stream *controlledStream) fail(err error) {
 	stream.events = append(stream.events, event)
 }
 
-// failTransport records a failure the provider boundary caused before any answer
-// byte arrived.
-//
-// Nothing was answered, so the attempt is settled as producing no usage instead
-// of leaving an unknown call that would refuse the next send - and the failure
-// is marked as one a configured fallback model may take over. A send that
-// already delivered part of an answer is not a transport failure: its usage
-// stays unknown and its failure stands, because a half-written answer is
-// evidence somebody has to look at, not a reason to ask elsewhere.
 func (stream *controlledStream) failTransport(err error) {
 	if stream.message == nil || len(stream.message.Content) == 0 {
 		stream.transport = true
@@ -37,19 +27,16 @@ func (stream *controlledStream) failTransport(err error) {
 	stream.fail(err)
 }
 
-// providerOf reads the provider one model names.
 func providerOf(model map[string]any) string {
 	provider, _ := model["provider"].(string)
 	return provider
 }
 
-// modelIDOf reads the model id one model names.
 func modelIDOf(model map[string]any) string {
 	id, _ := model["id"].(string)
 	return id
 }
 
-// assistantUsageOf is the usage one settled send carries into the transcript.
 func assistantUsageOf(usage *TokenUsage) AssistantUsage {
 	if usage == nil {
 		return AssistantUsage{}
@@ -60,10 +47,6 @@ func assistantUsageOf(usage *TokenUsage) AssistantUsage {
 	}
 }
 
-// estimateUsage estimates the usage one response used when the provider reported none.
-//
-// TODO(port): the Pi SDK's estimateTextTokens and estimateContextTokens are not in this module.
-// The byte heuristic of the request profiler is used instead.
 func (stream *controlledStream) estimateUsage(response *http.Response) *TokenUsage {
 	if response == nil || response.Body == nil {
 		return nil
@@ -80,7 +63,6 @@ func (stream *controlledStream) estimateUsage(response *http.Response) *TokenUsa
 	return &TokenUsage{Input: int64(input), Output: int64(output), UsageSource: stringPointer(string(UsageEstimated))}
 }
 
-// controlledEstimateTokens estimates the tokens one text costs.
 func controlledEstimateTokens(text string) int {
 	if text == "" {
 		return 0
@@ -88,7 +70,6 @@ func controlledEstimateTokens(text string) int {
 	return (len(text) + 3) / 4
 }
 
-// controlledContextText reads the text one context carries.
 func controlledContextText(context map[string]any) string {
 	var b strings.Builder
 	for _, item := range controlledContextMessages(context) {
@@ -102,7 +83,6 @@ func controlledContextText(context map[string]any) string {
 	return b.String()
 }
 
-// settle records the usage one provider send produced.
 func (stream *controlledStream) settle(usage *TokenUsage) {
 	if stream.settled {
 		return
@@ -114,7 +94,6 @@ func (stream *controlledStream) settle(usage *TokenUsage) {
 	stream.broker.Settle(stream.invocation, usage)
 }
 
-// handleEvent reads one provider event.
 func (stream *controlledStream) handleEvent(event map[string]any) {
 	switch stream.api {
 	case "anthropic-messages":
@@ -126,7 +105,6 @@ func (stream *controlledStream) handleEvent(event map[string]any) {
 	}
 }
 
-// handleOpenAIEvent reads one OpenAI chat-completions event.
 func (stream *controlledStream) handleOpenAIEvent(event map[string]any) {
 	choices, _ := event["choices"].([]any)
 	for _, item := range choices {
@@ -163,7 +141,6 @@ func (stream *controlledStream) handleOpenAIEvent(event map[string]any) {
 	}
 }
 
-// controlledOpenAIStopReason maps one provider stop reason onto the runtime vocabulary.
 func controlledOpenAIStopReason(reason string) string {
 	switch reason {
 	case "stop":
@@ -176,7 +153,6 @@ func controlledOpenAIStopReason(reason string) string {
 	return "stop"
 }
 
-// handleAnthropicEvent reads one Anthropic messages event.
 func (stream *controlledStream) handleAnthropicEvent(event map[string]any) {
 	kind, _ := event["type"].(string)
 	index := 0
@@ -225,7 +201,6 @@ func (stream *controlledStream) handleAnthropicEvent(event map[string]any) {
 	}
 }
 
-// controlledAnthropicStopReason maps one provider stop reason onto the runtime vocabulary.
 func controlledAnthropicStopReason(reason string) string {
 	switch reason {
 	case "end_turn":
@@ -238,12 +213,10 @@ func controlledAnthropicStopReason(reason string) string {
 	return "stop"
 }
 
-// partial is the live message one event carries.
 func (stream *controlledStream) partial() map[string]any {
 	return asMap(stream.message)
 }
 
-// appendText adds text to the current text block.
 func (stream *controlledStream) appendText(text string) {
 	index := len(stream.message.Content) - 1
 	if index < 0 || stream.message.Content[index].Type != "text" {
@@ -253,7 +226,6 @@ func (stream *controlledStream) appendText(text string) {
 	stream.appendTextAt(index, text)
 }
 
-// appendTextAt adds text to one text block.
 func (stream *controlledStream) appendTextAt(index int, text string) {
 	if index < 0 || index >= len(stream.message.Content) {
 		return
@@ -265,7 +237,6 @@ func (stream *controlledStream) appendTextAt(index int, text string) {
 	})
 }
 
-// startText opens one text block.
 func (stream *controlledStream) startText(index int) {
 	for len(stream.message.Content) <= index {
 		stream.message.Content = append(stream.message.Content, AssistantContentBlock{})
@@ -276,7 +247,6 @@ func (stream *controlledStream) startText(index int) {
 	})
 }
 
-// appendThinking adds thinking to the current thinking block.
 func (stream *controlledStream) appendThinking(text string) {
 	index := len(stream.message.Content) - 1
 	if index < 0 || stream.message.Content[index].Type != "thinking" {
@@ -286,7 +256,6 @@ func (stream *controlledStream) appendThinking(text string) {
 	stream.appendThinkingAt(index, text)
 }
 
-// appendThinkingAt adds thinking to one thinking block.
 func (stream *controlledStream) appendThinkingAt(index int, text string) {
 	if index < 0 || index >= len(stream.message.Content) {
 		return
@@ -298,7 +267,6 @@ func (stream *controlledStream) appendThinkingAt(index int, text string) {
 	})
 }
 
-// startThinking opens one thinking block.
 func (stream *controlledStream) startThinking(index int) {
 	for len(stream.message.Content) <= index {
 		stream.message.Content = append(stream.message.Content, AssistantContentBlock{})
@@ -309,12 +277,6 @@ func (stream *controlledStream) startThinking(index int) {
 	})
 }
 
-// startToolCall opens one tool call block of an OpenAI answer.
-//
-// The provider's index names the call inside the call list, not the place of the
-// call in the turn: a turn that reasons before it calls a tool carries the
-// reasoning in the first block and the call in the second. The call keeps the
-// block the turn gave it, so the reasoning before it survives.
 func (stream *controlledStream) startToolCall(index int, id string, name string) {
 	block := len(stream.message.Content)
 	stream.message.Content = append(stream.message.Content, AssistantContentBlock{Type: "toolCall", Id: id, Name: name, Arguments: map[string]any{}})
@@ -325,7 +287,6 @@ func (stream *controlledStream) startToolCall(index int, id string, name string)
 	})
 }
 
-// appendToolCall reads one OpenAI tool-call delta.
 func (stream *controlledStream) appendToolCall(index int, entry map[string]any) {
 	call, ok := stream.toolCalls[index]
 	if !ok {
@@ -347,7 +308,6 @@ func (stream *controlledStream) appendToolCall(index int, entry map[string]any) 
 	}
 }
 
-// appendToolArguments adds raw JSON arguments to one tool call.
 func (stream *controlledStream) appendToolArguments(index int, text string) {
 	call, ok := stream.toolCalls[index]
 	if !ok {
@@ -365,7 +325,6 @@ func (stream *controlledStream) appendToolArguments(index int, text string) {
 	})
 }
 
-// controlledToolArguments parses the raw JSON arguments one tool call carries.
 func controlledToolArguments(text string) any {
 	return ParseStreamingJSON(text)
 }

@@ -1,37 +1,19 @@
-/**
- * Pure attachment rules for the console composer.
- *
- * This module owns classification, validation and payload shaping for the
- * composer's paste/drop/attach gesture. It never touches the DOM: the React
- * component reads clipboard/drop files, hands over their metadata and already
- * read content, and renders whatever this module decides. Keeping it pure is
- * what lets the sandbox check exercise every rule without a browser.
- *
- * The wire shape matches `AttachmentInput` in `src/core/types.ts`: text files
- * reuse `text`, images carry base64 in `data` with a whitelisted image mime and
- * an empty `text`. `preview` is a local DataURL for the composer chip only and
- * is stripped before the payload is sent.
- */
 
 export interface ChatAttachment {
   name: string;
   type: string;
   size: number;
   text: string;
-  /** Image payload as base64 (no `data:` prefix). Absent for text files. */
   data?: string;
-  /** Local DataURL preview shown above the input. Never sent to the server. */
   preview?: string;
 }
 
-/** The metadata every paste/drop/file-picker event provides. */
 export interface AttachmentCandidate {
   name: string;
   type: string;
   size: number;
 }
 
-/** The JSON body shape accepted by the message endpoints. */
 export interface AttachmentPayload {
   name: string;
   type: string;
@@ -94,26 +76,21 @@ export function isImageAttachmentType(type: string): boolean {
   return IMAGE_MIME_TYPES.includes(normalizeMime(type));
 }
 
-/** The canonical whitelisted mime for an image candidate, or null. */
 export function imageMimeFor(candidate: AttachmentCandidate): string | null {
   const type = normalizeMime(candidate.type);
   if (isImageAttachmentType(type)) return type;
   return IMAGE_MIME_BY_EXTENSION[fileExtension(candidate.name)] ?? null;
 }
 
-/** SVG is text, not one of the whitelisted raster images. */
 export function isSvgText(candidate: AttachmentCandidate): boolean {
   return normalizeMime(candidate.type) === 'image/svg+xml'
     || fileExtension(candidate.name) === 'svg';
 }
 
-/** Classify a candidate as an accepted kind, or null when unsupported. */
 export function attachmentKind(candidate: AttachmentCandidate): AttachmentKind | null {
   const type = normalizeMime(candidate.type);
   if (isSvgText(candidate)) return 'text';
   if (isImageAttachmentType(type)) return 'image';
-  // An explicit, non-whitelisted image (bmp, tiff, pdf-like scans) is refused
-  // rather than downgraded, even when the extension looks harmless.
   if (type.startsWith('image/')) return null;
   if (IMAGE_MIME_BY_EXTENSION[fileExtension(candidate.name)]) return 'image';
   if (type.startsWith('text/') || TEXT_MIME_TYPES.has(type)) return 'text';
@@ -130,9 +107,6 @@ export type AttachmentValidation =
   | { ok: true; kind: AttachmentKind }
   | { ok: false; reason: string };
 
-/** Reject with a concrete, user-visible reason; never silently drop a file.
- * Reasons stay name-less so the composer can pair each one with the file it
- * belongs to when rendering the visible notice line. */
 export function validateAttachment(candidate: AttachmentCandidate, existing: readonly ChatAttachment[]): AttachmentValidation {
   const name = (candidate.name ?? '').trim() || '未命名文件';
   if (existing.length >= MAX_ATTACHMENTS) {
@@ -172,18 +146,12 @@ export type AttachmentBuild =
   | { ok: true; attachment: ChatAttachment }
   | { ok: false; reason: string };
 
-/** Strip the `data:*;base64,` prefix from a local preview URL. */
 export function base64FromDataUrl(dataUrl: string): string {
   const comma = (dataUrl ?? '').indexOf(',');
   if (comma < 0) return '';
   return dataUrl.slice(comma + 1).replace(/\s/g, '');
 }
 
-/**
- * Build a composer attachment from already-read content. Images read a local
- * DataURL (base64 payload + preview); text files read their text and are
- * refused when the bytes are not text at all.
- */
 export function buildAttachment(
   candidate: AttachmentCandidate,
   content: { text?: string; dataUrl?: string } = {},
@@ -209,7 +177,6 @@ export function isImageAttachment(attachment: ChatAttachment): boolean {
   return typeof attachment.data === 'string' && attachment.data.length > 0;
 }
 
-/** The wire body for the message endpoints: drops the local `preview`. */
 export function attachmentPayload(attachments: readonly ChatAttachment[]): AttachmentPayload[] {
   return attachments.map(attachment => {
     if (isImageAttachment(attachment)) {
@@ -226,9 +193,6 @@ export function attachmentSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** One visible line per rejected file, so a drop is never silently ignored.
- * Accepted files never appear here, and the file name is paired with its own
- * reason (type unsupported / over an explicitly stated limit). */
 export interface AttachmentResult {
   name: string;
   accepted: boolean;
@@ -253,7 +217,6 @@ export function removeComposerAttachment(state: readonly ChatAttachment[], targe
   return state.filter(item => !(item.name === target.name && item.size === target.size));
 }
 
-/** Render raster attachments independently of the Markdown display preference. */
 export function attachmentImageSource(attachment: Pick<ChatAttachment, 'type' | 'data'> & { imageUrl?: string }): string | undefined {
   if (!isImageAttachmentType(attachment.type)) return undefined;
   if (attachment.data) return `data:${normalizeMime(attachment.type)};base64,${attachment.data}`;

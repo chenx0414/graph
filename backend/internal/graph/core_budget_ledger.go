@@ -36,7 +36,6 @@ func instanceBudget(store *TaskStore, instanceID string) map[string]any {
 	return row
 }
 
-// EnsureBudgetScope establishes the durable scope shared by an instance and its forks.
 func EnsureBudgetScope(store *TaskStore, taskID, instanceID string) string {
 	instance := instanceBudget(store, instanceID)
 	if instance["budget_scope_id"] != nil {
@@ -103,7 +102,6 @@ func LoadBudgetSnapshot(store *TaskStore, instanceID string) BudgetSnapshot {
 	return snapshot
 }
 
-// UnknownUsageIsNonBlocking is true when an unlimited instance can record missing usage without a question.
 func UnknownUsageIsNonBlocking(store *TaskStore, instanceID string) bool {
 	if instanceID == "" {
 		return false

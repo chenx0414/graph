@@ -4,13 +4,6 @@ import (
 	"strings"
 )
 
-// AcceptanceLimitationRow is one recorded limitation: why one acceptance item
-// was allowed to stay unmet, on whose word, and for which version.
-//
-// The table is append-only. A recorded limitation is history: it is what the
-// closure rested on at the commit it names, so nothing rewrites or deletes a
-// row. A later version needs a later decision, and the commit on the row is
-// what keeps the two apart.
 type AcceptanceLimitationRow struct {
 	AcceptanceId    string  `json:"acceptanceId"`
 	Reason          string  `json:"reason"`
@@ -22,7 +15,6 @@ type AcceptanceLimitationRow struct {
 	CreatedAt       int64   `json:"createdAt"`
 }
 
-// AcceptanceLimitationEntry is one limitation to append.
 type AcceptanceLimitationEntry struct {
 	AcceptanceId    string
 	Reason          string
@@ -33,7 +25,6 @@ type AcceptanceLimitationEntry struct {
 	RequestId       *string
 }
 
-// acceptanceLimitationRowOf reads one row of the limitation ledger.
 func acceptanceLimitationRowOf(row map[string]any) AcceptanceLimitationRow {
 	record := AcceptanceLimitationRow{
 		AcceptanceId: kernelString(row["acceptance_id"]), Reason: kernelString(row["reason"]),
@@ -51,11 +42,6 @@ func acceptanceLimitationRowOf(row map[string]any) AcceptanceLimitationRow {
 	return record
 }
 
-// RecordAcceptanceLimitations appends the limitations one decision rests on.
-//
-// It is the only writer of kernel_acceptance_limitations, and it only ever
-// inserts: the row records a decision somebody already made, so a replay of the
-// same request must not add a second copy of it.
 func (k *KernelStore) RecordAcceptanceLimitations(taskID string, entries []AcceptanceLimitationEntry) []AcceptanceLimitationRow {
 	k.tx(func() any {
 		created := NowMillis()
@@ -78,7 +64,6 @@ func (k *KernelStore) RecordAcceptanceLimitations(taskID string, entries []Accep
 	return k.AcceptanceLimitations(taskID)
 }
 
-// AcceptanceLimitations reads every limitation recorded for one graph, oldest first.
 func (k *KernelStore) AcceptanceLimitations(taskID string) []AcceptanceLimitationRow {
 	rows := g5Query(k.Db, `SELECT acceptance_id,reason,evidence,actor,commit_sha,revision_version,request_id,created_at
     FROM kernel_acceptance_limitations WHERE task_id=? ORDER BY seq`, taskID)
@@ -89,8 +74,6 @@ func (k *KernelStore) AcceptanceLimitations(taskID string) []AcceptanceLimitatio
 	return out
 }
 
-// AcceptanceLimitationsOfRequest reads what one request already recorded. It is
-// how a replayed request recognises itself instead of recording again.
 func (k *KernelStore) AcceptanceLimitationsOfRequest(taskID, requestID string) []AcceptanceLimitationRow {
 	if strings.TrimSpace(requestID) == "" {
 		return []AcceptanceLimitationRow{}

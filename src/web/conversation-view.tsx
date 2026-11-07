@@ -87,8 +87,6 @@ return (
             <span className="drawer-entry-label" data-testid="drawer-entry-label">{proposal && !acceptedVersions.has(proposal.version) ? `草稿 v${proposal.version}` : `任务 ${view.tasks.length}`}</span>
             {(draftStatus === 'pending' || draftStatus === 'stale') && <span className="drawer-entry-dot" data-tone={draftStatus === 'stale' ? 'warn' : 'accent'} aria-hidden="true" />}
           </button>
-          {/* The pause/resume control lives on the composer's primary button
-              (same action, same flag); the header no longer repeats it. */}
 
         </div>
       </div>, document.getElementById('conversation-toolbar')!)}
@@ -102,8 +100,6 @@ return (
         </section>
       )}
 
-      {/* The chat column is the conversation: its artifacts live in the drawer, and a single
-          artifact opens as its own tab. */}
       <div className="conversation-body" data-drawer={drawerOpen} data-view="chat" data-resident-panels={residentPanelIds().join(' ')}>
         <div className="conversation-main">
           <div className="conversation-thread-shell">
@@ -114,7 +110,6 @@ return (
             ref={transcriptFollow.threadRef}
             onScroll={() => {
               transcriptFollow.onScroll();
-              // loadOlder keeps its own guard; this page only decides when to ask.
               const thread = transcriptFollow.threadRef.current;
               if (wantsOlderHistory(thread, { pinned: transcriptFollow.pinned, hasOlder: true })) void loadOlder();
             }}
@@ -123,8 +118,6 @@ return (
           >
           <div className="conversation-thread-inner" ref={transcriptFollow.contentRef}>
           {transcript.historyRequest && <button type="button" className="btn btn-sm" data-testid="load-older" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? '加载中…' : '载入更早消息'}</button>}
-          {/* An empty conversation used to be a blank page. It now shows the same
-              guidance the console's welcome block does, pointed at this Agent. */}
           {transcript.messages.length === 0 && !busy && (
             <div className="conversation-intro" data-testid="conversation-intro">
               <ChatIntro
@@ -241,9 +234,6 @@ return (
               })}
             />}
             {masterQuestions.length === 0 && taskQuestions.length === 0 && <div className="composer-footer">
-              {/* The interrupt the reader asked for, where the reader is after
-                  pressing Escape: 打断中 while the turn winds down, 已打断 once
-                  it is gone. Nothing at all when they never asked for one. */}
               {interruptStatus && <span className="composer-note" data-testid="interrupt-status" data-phase={interruptStatus === '已打断' ? 'interrupted' : 'interrupting'}>
                 {interruptStatus === '已打断' ? '已打断。' : '打断中…'}
               </span>}

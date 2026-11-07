@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// agentToolsGraphHandlers are the handlers of the Graph tools.
 func agentToolsGraphHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"resume_work": func(id string, params map[string]any) any {

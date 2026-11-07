@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// ScanNativeSkills lists hand-made skill folders. Symlinks are the bound mirror and are skipped.
 func ScanNativeSkills(skillsDir, owner string, origin CapabilityOrigin) []CapabilityRecord {
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -52,7 +51,6 @@ func ScanNativeSkills(skillsDir, owner string, origin CapabilityOrigin) []Capabi
 	return records
 }
 
-// ScanAgentSkills lists skills placed in any Agent folder.
 func ScanAgentSkills(agentsRoot string) []CapabilityRecord {
 	agents, err := os.ReadDir(agentsRoot)
 	if err != nil {

@@ -12,7 +12,6 @@ type PiAdapterArtifactService struct {
 	Promote func(input ArtifactPromoteInput) ArtifactRecord
 }
 
-// piAdapterArtifactService is the artifact surface one operation may use.
 func piAdapterArtifactService(options PiAdapterOptions, input piAdapterRunInput, spec NodeSpec, workspace string, role string) *PiAdapterArtifactService {
 	if options.Artifacts == nil {
 		return nil
@@ -31,13 +30,6 @@ func piAdapterArtifactService(options PiAdapterOptions, input piAdapterRunInput,
 			query.TaskId = operation.TaskId
 			return options.Artifacts.List(query)
 		},
-		// Neither the artifact id nor its version names a scope, and List above
-		// returns this task's own artifacts together with the project knowledge of
-		// its project. Reading with the scope pinned to "task" therefore answered
-		// "Artifact not found" for a project-scope artifact List had just shown.
-		// The scope is left open here and decided per record: assertScope refuses
-		// an artifact of another task or another project, so the boundary is still
-		// this task's workspace, and the refusal says so.
 		Get: func(artifactId string, version *int) ArtifactRecord {
 			return options.Artifacts.Get(operation.TaskId, artifactId, version, "")
 		},
@@ -66,13 +58,11 @@ func piAdapterArtifactService(options PiAdapterOptions, input piAdapterRunInput,
 	return service
 }
 
-// piAdapterCompletionSequence is the last completion sequence number of one instance.
 func piAdapterCompletionSequence(store *TaskStore, instanceId string) int64 {
 	row, _ := graphDBRow(store.Db, "SELECT COALESCE(MAX(rowid),0) AS sequence FROM invocations WHERE instance_id=? AND purpose='completion'", instanceId)
 	return graphDBInt(row, "sequence")
 }
 
-// compactionSettingsForEntry derives the compaction thresholds of one model.
 func piAdapterCompactionSettings(entry ModelEntry) *CompactionSettings {
 	settings := CompactionSettingsFor(struct {
 		ContextWindow int
@@ -81,13 +71,6 @@ func piAdapterCompactionSettings(entry ModelEntry) *CompactionSettings {
 	return &settings
 }
 
-// piAdapterGenerateSuggestion asks one fresh model call for a composer line.
-//
-// The suggestion is an observer of the turn, never a step in it: a model whose
-// credential cannot be resolved, a provider that refuses and a transport that
-// fails are facts about the suggestion. None of them may take the reply the
-// user already received down with them, so the outcome is reported and the
-// turn continues.
 func piAdapterGenerateSuggestion(options PiAdapterOptions, entry ModelEntry, gate *TaskSendGate, input piAdapterRunInput, userMessage string, reply string, signal *AbortSignal) (outcome *PromptSuggestionReply) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -143,7 +126,6 @@ func piAdapterGenerateSuggestion(options PiAdapterOptions, entry ModelEntry, gat
 	return &answer
 }
 
-// piAdapterGateSendGate is the send gate a task gate offers to the provider transport.
 func piAdapterGateSendGate(gate *TaskSendGate) SendGate {
 	return gate.SendGate
 }

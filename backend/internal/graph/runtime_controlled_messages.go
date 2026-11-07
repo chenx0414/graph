@@ -12,14 +12,12 @@ import (
 	"context"
 )
 
-// controlledToolCall is the tool call one provider stream is building.
 type controlledToolCall struct {
 	id        string
 	name      string
 	arguments strings.Builder
 }
 
-// controlledStream is one controlled provider send.
 type controlledStream struct {
 	broker         SendGate
 	candidate      ModelEntry
@@ -39,17 +37,10 @@ type controlledStream struct {
 	settled        bool
 	invocation     string
 	finishReason   string
-	// transport is set when the send failed at the provider boundary before any
-	// answer byte arrived: such a failure may be taken over by the model's
-	// configured fallback, and it is settled as producing no usage.
 	transport bool
-	// cancelRequest ends the provider request. It is called when the provider
-	// stops answering: the connection is still open then, and everything that
-	// reads the rest of it would wait for the provider to stop talking.
 	cancelRequest func()
 }
 
-// Next returns the next event of the provider stream.
 func (stream *controlledStream) Next() (map[string]any, bool) {
 	if stream.index < len(stream.events) {
 		event := stream.events[stream.index]
@@ -69,7 +60,6 @@ func (stream *controlledStream) Next() (map[string]any, bool) {
 	return nil, false
 }
 
-// Result returns the terminal message of the provider stream.
 func (stream *controlledStream) Result() map[string]any {
 	for {
 		if _, ok := stream.Next(); !ok {
@@ -82,13 +72,6 @@ func (stream *controlledStream) Result() map[string]any {
 	return asMap(stream.message)
 }
 
-// run sends the request and reads the provider stream.
-//
-// One send is tried again on a fresh connection when it died before any answer
-// byte arrived: nothing of it reached the transcript, so nothing that already
-// happened runs twice. The retries belong to this one send, inside the same
-// durable submission - the operation, the user's message and the tool results
-// already in the transcript stay what they were.
 func (stream *controlledStream) run() {
 	record := stream.model
 	if text, ok := record["api"].(string); ok && text != "" && text != string(stream.api) {
@@ -108,8 +91,6 @@ func (stream *controlledStream) run() {
 		reservation += float64(tokens)
 	}
 	for attempt := 1; ; attempt++ {
-		// A request body is a stream: the first attempt drains it, so a replay
-		// needs the same bytes again.
 		if attempt > 1 {
 			body, bodyErr := request.GetBody()
 			if bodyErr != nil {
@@ -117,15 +98,12 @@ func (stream *controlledStream) run() {
 				return
 			}
 			request.Body = body
-			// The connection that died is not the one to dial again.
 			request.Close = true
 		}
 		failure := stream.attempt(request, reservation, TRANSPORT_RETRIES-(attempt-1))
 		if failure == nil {
 			return
 		}
-		// What a person reading the timeline must see before the replay: how
-		// long the transport waits, and why the attempt produced nothing.
 		delay := transportRetryBackoffMs(attempt)
 		stream.observeReconnect(attempt, delay, failure)
 		stream.discardAttempt()
@@ -133,13 +111,6 @@ func (stream *controlledStream) run() {
 	}
 }
 
-// attempt sends the request once and reads what the provider answered.
-//
-// It returns the failure the same send must be tried again after, or nil when
-// the attempt settled the stream - with an answer, or with the failure the turn
-// ends on. remaining is the retry budget the attempt may still spend: an
-// attempt that will be replayed settles as producing no usage instead of
-// leaving an unknown call behind that refuses the next send.
 func (stream *controlledStream) attempt(request *http.Request, reservation float64, remaining int) error {
 	ctx, cancelRequest := context.WithCancel(request.Context())
 	stream.cancelRequest = cancelRequest
@@ -147,8 +118,6 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 	transport, err := ControlledGatedProviderFetch(stream.broker, request, GatedProviderFetchOptions{
 		Reservation:     reservation,
 		RequestIDHeader: controlledRequestIDHeader(stream.candidate),
-		// A send with a fallback may be taken over: an attempt that produced no
-		// answer must not leave an unknown call behind that refuses the fallback.
 		ReclaimUnanswered: stream.usageOptions.HasFallback,
 		OnTransport:       stream.usageOptions.OnTransport,
 		FetchImpl: func(request *http.Request) (*http.Response, error) {
@@ -199,9 +168,6 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 	if transport.StatusCode < 200 || transport.StatusCode >= 300 {
 		transport.Body.Close()
 		if stream.usageOptions.HasFallback {
-			// Nothing was answered, so the call produced no usage - and the
-			// fallback's own send must not be refused as a send after an unknown
-			// one. Without a fallback the attempt keeps its unknown usage.
 			stream.settle(&controlledZeroUsage)
 		} else {
 			stream.broker.Settle(stream.invocation, nil)
@@ -212,7 +178,6 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 	return stream.readEvents(transport, remaining)
 }
 
-// acquireSlot takes one host-wide concurrency slot for this send.
 func (stream *controlledStream) acquireSlot() func() {
 	if stream.slot == nil {
 		return nil
@@ -228,12 +193,10 @@ func (stream *controlledStream) acquireSlot() func() {
 	return release
 }
 
-// entry is the model entry one send uses.
 func (stream *controlledStream) entry() ModelEntry {
 	return stream.candidate
 }
 
-// signal is the abort signal one send carries.
 func (stream *controlledStream) signal() *AbortSignal {
 	if stream.options == nil {
 		return nil
@@ -249,7 +212,6 @@ func (stream *controlledStream) signal() *AbortSignal {
 	return signal
 }
 
-// requestBodyOf reads the body one request carries.
 func requestBodyOf(request *http.Request) []byte {
 	if request == nil || request.GetBody == nil {
 		return nil
@@ -266,7 +228,6 @@ func requestBodyOf(request *http.Request) []byte {
 	return content
 }
 
-// buildRequest builds the provider request one send carries.
 func (stream *controlledStream) buildRequest() (*http.Request, error) {
 	record := stream.model
 	baseURL, _ := record["baseUrl"].(string)
@@ -291,8 +252,6 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		body["model"] = modelID
 		body["stream"] = true
 		if system := controlledSystemPrompt(stream.context); system != "" {
-			// The system prompt is the first thing every request of the
-			// session repeats, so it is the first thing worth keeping.
 			body["system"] = []any{map[string]any{
 				"type": "text", "text": system, "cache_control": controlledAnthropicCacheControl(),
 			}}
@@ -300,8 +259,6 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		messages := controlledAnthropicMessages(transcript)
 		messages = controlledAnthropicCachedMessages(messages)
 		body["messages"] = messages
-		// Anthropic is asked for a budget of thinking tokens rather than for a
-		// named strength, and the ceiling it answers under grows with it.
 		ceiling, thinking := ControlledAnthropicThinking(record, stream.options)
 		if ceiling > 0 {
 			body["max_tokens"] = ceiling
@@ -319,8 +276,6 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		endpoint += "/responses"
 		body["model"] = modelID
 		body["stream"] = true
-		// The transcript travels every turn: the provider keeps nothing, so no
-		// stored response id can go missing between two requests.
 		body["store"] = false
 		if instructions := controlledSystemPrompt(stream.context); instructions != "" {
 			body["instructions"] = instructions
@@ -347,9 +302,6 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 		if tools := controlledOpenAITools(transcript); len(tools) > 0 {
 			body["tools"] = tools
 		}
-		// The thinking strength the user chose travels with the request: the
-		// provider is asked to think at that level, not at whatever it defaults
-		// to. A model that runs no thinking sends no effort at all.
 		for name, value := range ControlledThinkingFields(record, stream.options) {
 			body[name] = value
 		}
@@ -379,8 +331,6 @@ func (stream *controlledStream) buildRequest() (*http.Request, error) {
 			request.Header.Set("anthropic-version", "2023-06-01")
 		}
 		if thinkingEnabled {
-			// Interleaved thinking is what lets a model think again between two
-			// tool calls. A configuration that names its own beta wins.
 			if _, explicit := request.Header["Anthropic-Beta"]; !explicit {
 				request.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
 			}

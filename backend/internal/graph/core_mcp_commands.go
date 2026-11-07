@@ -1,6 +1,5 @@
 package graph
 
-// Local MCP commands accepted by both capability scanning and runtime launch.
 var LOCAL_MCP_COMMANDS = []string{"node", "npx", "uvx"}
 
 func IsLocalMcpCommand(value string) bool {

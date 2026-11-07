@@ -33,12 +33,6 @@ function reducedMotion() {
     && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 }
 
-/**
- * One owner for transcript follow intent. Content growth is consumed by a
- * feed-forward spring; only real user input breaks the pin. A short runway
- * below the latest content keeps the first part of a new answer from forcing
- * an immediate viewport jump.
- */
 export function useTranscriptFollow(key: string | null, active = false) {
   const threadRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -173,8 +167,6 @@ export function useTranscriptFollow(key: string | null, active = false) {
     const growth = thread.scrollHeight - lastScrollHeight.current;
     lastScrollHeight.current = thread.scrollHeight;
     if (programmaticUntil.current > performance.now()) return;
-    // Layout growth is not user intent. Do not unpin merely because the tail
-    // grew under a viewport that was intentionally following it.
     if (growth > 1) {
       lastDistance.current = distance;
       return;
@@ -221,10 +213,6 @@ export function useTranscriptFollow(key: string | null, active = false) {
         runwayRef.current = next;
         setRunway(next);
       }
-      // A pinned reader follows every growth, not only a transcript that is
-      // shorter than the viewport and owns a runway. When the spring has already
-      // settled at the bottom, content that arrives afterwards must re-arm it,
-      // otherwise the viewport stays behind the newest answer.
       if (pinnedRef.current) wake();
     };
     measureRef.current = measure;
@@ -260,7 +248,6 @@ export function useTranscriptFollow(key: string | null, active = false) {
     threadRef,
     contentRef,
     pinned,
-    // Scroll handlers need the intent from this event, before React renders it.
     isPinned: () => pinnedRef.current,
     showJump,
     runway,

@@ -4,7 +4,6 @@ import (
 	"os"
 )
 
-// pump dispatches the work that is ready.
 func (runtime *TaskRuntime) pump() {
 	if runtime.execution == nil {
 		return
@@ -12,7 +11,6 @@ func (runtime *TaskRuntime) pump() {
 	runtime.execution.Pump()
 }
 
-// ensureOpen refuses work after the runtime closed.
 func (runtime *TaskRuntime) ensureOpen() {
 	runtime.mu.Lock()
 	closed := runtime.closed
@@ -22,7 +20,6 @@ func (runtime *TaskRuntime) ensureOpen() {
 	}
 }
 
-// Close stops the runtime, drains the executor and releases the owner lock.
 func (runtime *TaskRuntime) Close() {
 	runtime.mu.Lock()
 	if runtime.closed {
@@ -38,7 +35,6 @@ func (runtime *TaskRuntime) Close() {
 	runtime.store.Close()
 }
 
-// taskRuntimeHome is the home directory of the current user.
 func taskRuntimeHome() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -47,7 +43,6 @@ func taskRuntimeHome() string {
 	return home
 }
 
-// taskRuntimeInvocations lists the provider invocations of one task.
 func (runtime *TaskRuntime) taskRuntimeInvocations(taskId string) []map[string]any {
 	nodes := map[string]string{}
 	for _, node := range runtime.kernel.ListNodes(taskId) {
@@ -78,14 +73,12 @@ func (runtime *TaskRuntime) taskRuntimeInvocations(taskId string) []map[string]a
 			"model":       model,
 			"usage":       call.Usage,
 			"usageSource": "unknown",
-			// Native sends have no frozen monetary price receipt yet. Missing prices cannot mean free.
 			"cost": map[string]any{"unknown": true},
 		})
 	}
 	return out
 }
 
-// TaskRuntimeUser is the user side of one runtime.
 type TaskRuntimeUser struct {
 	runtime *TaskRuntime
 }

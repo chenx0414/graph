@@ -49,9 +49,6 @@ func configParseModel(raw any, path string, credentials map[string]CredentialCon
 		cost := configAsCost(entry["cost"], path+".cost")
 		model.Cost = &cost
 	} else if cost := kernelModelPrice(model.Provider, ModelIdentity(model)); cost != nil {
-		// The price and its volume tiers belong to the catalog, and the catalog
-		// is the kernel's. A configuration that names no cost therefore bills at
-		// the kernel's price instead of recording an unknown one.
 		model.Cost = cost
 	}
 	if _, ok := entry["pricing"]; ok {
@@ -68,7 +65,6 @@ func entryID(entry map[string]any, path string) string {
 	return configAsString(entry["id"], path+".id")
 }
 
-// ParseGraphConfig reads a version-1 document. Relative project roots resolve against the file directory.
 func ParseGraphConfig(raw any, configPath string) GraphConfig {
 	root := asObject(raw, configPath)
 	if version, ok := configFiniteInt(root["version"]); !ok || version != 1 {
@@ -182,9 +178,6 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 				configInvalid("models.entries[" + itoa(index) + "].baseUrl: provider \"" + entry.Provider + "\" must use one baseUrl across its models")
 			}
 		}
-		// A fallback is one hop to a model that exists: a chain would make the
-		// same review silently walk an unknown number of providers, and a
-		// fallback to itself would pretend to have switched.
 		for index, entry := range entries {
 			if entry.FallbackModelId == "" {
 				continue

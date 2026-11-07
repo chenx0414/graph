@@ -8,7 +8,6 @@ import (
 	"bytes"
 )
 
-// usageBasePlan is the unconfigured plan of one platform.
 func usageBasePlan(id UsageProviderId, configured bool, status UsageStatus) UsagePlan {
 	blueprint := usagePlanBlueprints[id]
 	return UsagePlan{
@@ -22,7 +21,6 @@ func usageBasePlan(id UsageProviderId, configured bool, status UsageStatus) Usag
 	}
 }
 
-// usageStatusFor reads the plan status from its quota windows.
 func usageStatusFor(windows []UsageWindow) UsageStatus {
 	maxUsed := 0.0
 	for _, window := range windows {
@@ -39,7 +37,6 @@ func usageStatusFor(windows []UsageWindow) UsageStatus {
 	return UsageStatusOK
 }
 
-// usageErrorMessage is the message of a failed plan.
 func usageErrorMessage(err error) string {
 	if err == nil {
 		return ""
@@ -47,8 +44,6 @@ func usageErrorMessage(err error) string {
 	return err.Error()
 }
 
-// marshalUsageJSON encodes a value the way JSON.stringify does: without HTML
-// escaping and without a trailing newline.
 func marshalUsageJSON(value any) ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
@@ -59,7 +54,6 @@ func marshalUsageJSON(value any) ([]byte, error) {
 	return bytes.TrimRight(buffer.Bytes(), "\n"), nil
 }
 
-// usageCredential is one resolved subscription credential.
 type usageCredential struct {
 	ID          string
 	SecretRef   string
@@ -71,8 +65,6 @@ type usageCredential struct {
 	AccountID   *string
 }
 
-// usageSelectedCredential reads the first environment variable that holds a
-// credential for the platform.
 func usageSelectedCredential(env map[string]string, provider UsageProviderId, names []string, baseURL string) *usageCredential {
 	for _, name := range names {
 		value := strings.TrimSpace(env[name])
@@ -87,7 +79,6 @@ func usageSelectedCredential(env map[string]string, provider UsageProviderId, na
 	return nil
 }
 
-// usageConfigCredential reads the credential a configured model uses.
 func usageConfigCredential(config *GraphConfig, env map[string]string, provider UsageProviderId, match func(ConfiguredModel) bool) *usageCredential {
 	if config == nil || config.Models == nil {
 		return nil
@@ -112,11 +103,6 @@ func usageConfigCredential(config *GraphConfig, env map[string]string, provider 
 	return nil
 }
 
-// usagePlatformAccountCredentials are every credential that declares itself an
-// account of the platform. The platform's own credential (from the
-// environment, the vendor config or the model that uses it) stays the primary
-// one; these are the additional accounts an operator added, and each is
-// queried with its own secret.
 func usagePlatformAccountCredentials(config *GraphConfig, env map[string]string, platform UsageProviderId) []usageCredential {
 	accounts := []usageCredential{}
 	if config == nil {
@@ -126,8 +112,6 @@ func usagePlatformAccountCredentials(config *GraphConfig, env map[string]string,
 	for id := range config.Credentials {
 		ids = append(ids, id)
 	}
-	// The TypeScript object kept the file order; the Go map does not, so the
-	// accounts are reported in a stable order instead.
 	sort.Strings(ids)
 	for _, id := range ids {
 		credential := config.Credentials[id]
@@ -139,9 +123,6 @@ func usagePlatformAccountCredentials(config *GraphConfig, env map[string]string,
 		if displayName == "" {
 			displayName = id
 		}
-		// An account the operator configured must never vanish from 用量 just
-		// because its key is not resolvable in this process; it shows up as
-		// waiting for a key.
 		name := displayName
 		accounts = append(accounts, usageCredential{
 			ID: id, SecretRef: credential.SecretRef, Configured: value != "", Value: value,
@@ -151,7 +132,6 @@ func usagePlatformAccountCredentials(config *GraphConfig, env map[string]string,
 	return accounts
 }
 
-// usageLiteralCredential reads a credential written as a literal value.
 func usageLiteralCredential(value any, provider UsageProviderId, source string, baseURL string) *usageCredential {
 	text, ok := value.(string)
 	if !ok {
@@ -170,8 +150,6 @@ func usageLiteralCredential(value any, provider UsageProviderId, source string, 
 	}
 }
 
-// usageOpenCodeProviderCredential reads a credential from the local OpenCode
-// configuration.
 func usageOpenCodeProviderCredential(config any, providerID UsageProviderId, ids []string, baseHint string) *usageCredential {
 	providers := usageRecord(usageRecord(config)["provider"])
 	if providers == nil {
@@ -204,7 +182,6 @@ func usageOpenCodeProviderCredential(config any, providerID UsageProviderId, ids
 	return nil
 }
 
-// usageContainsFold reports whether the list holds the name, case-insensitively.
 func usageContainsFold(names []string, name string) bool {
 	lowered := strings.ToLower(name)
 	for _, candidate := range names {
@@ -215,7 +192,6 @@ func usageContainsFold(names []string, name string) bool {
 	return false
 }
 
-// usageFirstCredential returns the first credential that resolved.
 func usageFirstCredential(values ...*usageCredential) *usageCredential {
 	for _, value := range values {
 		if value != nil {
@@ -225,8 +201,6 @@ func usageFirstCredential(values ...*usageCredential) *usageCredential {
 	return nil
 }
 
-// usageCredentialInfo is the credential view a plan reports. The secret value
-// never leaves the daemon.
 func usageCredentialInfo(credential *usageCredential) UsageCredential {
 	return UsageCredential{
 		ID: credential.ID, SecretRef: credential.SecretRef, Source: credential.Source,

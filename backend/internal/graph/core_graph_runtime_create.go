@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 )
 
-// NewGraphRuntime binds one graph id to the shared kernel.
 func NewGraphRuntime(kernel *KernelStore, graphId string, artifacts *ArtifactWorkspace) *GraphRuntime {
 	return &GraphRuntime{kernel: kernel, graphId: graphId, artifacts: artifacts}
 }
@@ -19,7 +18,6 @@ func (runtime *GraphRuntime) ensureTask() {
 	}
 }
 
-// Create validates the whole definition and produces the first revision.
 func (runtime *GraphRuntime) Create(definition any, request, projectId string) CreatedGraph {
 	parsed := ParseGraphDefinition(definition)
 	if projectId == "" {
@@ -41,7 +39,6 @@ func (runtime *GraphRuntime) Create(definition any, request, projectId string) C
 	return created
 }
 
-// Patch publishes a new revision. A stale base changes nothing.
 func (runtime *GraphRuntime) Patch(baseRevision int, changes PatchChange) GraphPatchResult {
 	runtime.ensureTask()
 	phase := runtime.State().Phase

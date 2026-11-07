@@ -6,11 +6,6 @@ import (
 	"encoding/json"
 )
 
-// AcceptanceStatus is one criterion's evidence.
-//
-// Status "waived" is not evidence: somebody decided this item may stay unmet,
-// and the limitation says who, why, and on which commit. Ready still counts only
-// passed items, so a waived item never makes a graph ready on its own.
 type AcceptanceStatus struct {
 	Id          string                `json:"id"`
 	Description string                `json:"description"`
@@ -22,18 +17,12 @@ type AcceptanceStatus struct {
 	Limitation  *AcceptanceLimitation `json:"limitation,omitempty"`
 }
 
-// AcceptanceSource names the row or artifact that decided a criterion.
 type AcceptanceSource struct {
 	Id      string  `json:"id"`
 	Version *int    `json:"version,omitempty"`
 	Commit  *string `json:"commit,omitempty"`
 }
 
-// GraphAcceptanceReport is the final acceptance of one graph.
-//
-// Ready keeps its one meaning: every item passed, nothing is pending, nothing is
-// paused. Limitations and Closable answer a different question - which decisions
-// let this graph close anyway - and neither of them makes Ready true.
 type GraphAcceptanceReport struct {
 	Ready       bool                      `json:"ready"`
 	Drained     bool                      `json:"drained"`
@@ -45,7 +34,6 @@ type GraphAcceptanceReport struct {
 	Closable    bool                      `json:"closable"`
 }
 
-// GraphAcceptanceDelivery is the Git receipt, when one is required.
 type GraphAcceptanceDelivery struct {
 	Required bool    `json:"required"`
 	Commit   *string `json:"commit"`
@@ -70,9 +58,6 @@ func graphAcceptanceReportBytes(artifacts *ArtifactWorkspace, graphID, artifactI
 	return record
 }
 
-// graphAcceptanceCommitEqual mirrors TypeScript equality between a JSON value
-// and a commit that is string | null. A missing key is undefined, and
-// undefined never equals null, so presence is part of the comparison.
 func graphAcceptanceCommitEqual(value any, present bool, commit *string) bool {
 	if !present {
 		return false
@@ -90,8 +75,6 @@ func graphAcceptanceCommitEqual(value any, present bool, commit *string) bool {
 	return text == *commit
 }
 
-// graphAcceptanceCommitText is the commit as text. A null commit is empty,
-// which is how TypeScript tests it for truthiness.
 func graphAcceptanceCommitText(commit *string) string {
 	if commit == nil {
 		return ""
@@ -99,9 +82,6 @@ func graphAcceptanceCommitText(commit *string) string {
 	return *commit
 }
 
-// graphAcceptanceShaEqual compares two nullable commits by value. TypeScript
-// compares string | null with ===, so two nulls are equal and a null never
-// equals a string.
 func graphAcceptanceShaEqual(left, right *string) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
@@ -109,8 +89,6 @@ func graphAcceptanceShaEqual(left, right *string) bool {
 	return *left == *right
 }
 
-// graphAcceptanceHasKey reports whether a decoded JSON object carries a key.
-// TypeScript distinguishes a missing key (undefined) from a null value.
 func graphAcceptanceHasKey(record map[string]any, key string) bool {
 	if record == nil {
 		return false
@@ -119,9 +97,6 @@ func graphAcceptanceHasKey(record map[string]any, key string) bool {
 	return ok
 }
 
-// graphAcceptanceIdentity is a decoded model identity as text. An identity that
-// is not a string is absent, because TypeScript compares parsed values with ===
-// and two separately parsed objects are never the same object.
 func graphAcceptanceIdentity(value any) *string {
 	text, ok := value.(string)
 	if !ok {
@@ -137,17 +112,10 @@ func graphAcceptanceIdentityEqual(left, right *string) bool {
 	return *left == *right
 }
 
-// graphAcceptanceCheckAttempts are one module's attempts, newest first.
 func graphAcceptanceCheckAttempts(kernel *KernelStore, graphID, moduleID string) []map[string]any {
 	return g5Query(kernel.Db, "SELECT id,state,request,result FROM kernel_module_operations WHERE task_id=? AND module_id=? ORDER BY rowid DESC", graphID, moduleID)
 }
 
-// graphAcceptanceAttemptVerdict is what one attempt concluded about its output.
-//
-// "passed" and "failed" are judgments and may bind an acceptance item. Anything
-// else - an attempt that never crossed its send boundary, one that was killed
-// before it produced an exit code, one interrupted after dispatch - concluded
-// nothing, and the reason says which of those it was.
 func graphAcceptanceAttemptVerdict(kernel *KernelStore, attempt map[string]any, outputName string) (string, string, bool) {
 	if g5Str(attempt["state"]) != "settled" || attempt["result"] == nil {
 		return "", "", false
@@ -165,8 +133,6 @@ func graphAcceptanceAttemptVerdict(kernel *KernelStore, attempt map[string]any, 
 		reason, _ := published["noVerdictReason"].(string)
 		return verdict, reason, false
 	}
-	// An attempt recorded before the verdict field: the exit code is the judgment,
-	// and a missing one is no judgment at all.
 	code, present := published["code"]
 	if !present {
 		return "", "", false
@@ -180,7 +146,6 @@ func graphAcceptanceAttemptVerdict(kernel *KernelStore, attempt map[string]any, 
 	return "failed", "", true
 }
 
-// graphAcceptanceDecidedAttempt is the newest attempt that judged its work.
 func graphAcceptanceDecidedAttempt(kernel *KernelStore, attempts []map[string]any, outputName string) (map[string]any, bool) {
 	for _, attempt := range attempts {
 		if _, _, decided := graphAcceptanceAttemptVerdict(kernel, attempt, outputName); decided {
@@ -190,7 +155,6 @@ func graphAcceptanceDecidedAttempt(kernel *KernelStore, attempts []map[string]an
 	return nil, false
 }
 
-// graphAcceptanceUnjudgedReason says why an item has no verdict to bind.
 func graphAcceptanceUnjudgedReason(kernel *KernelStore, attempt map[string]any, outputName string) string {
 	if state := g5Str(attempt["state"]); state != "settled" {
 		return "Host check is " + state
@@ -201,7 +165,6 @@ func graphAcceptanceUnjudgedReason(kernel *KernelStore, attempt map[string]any, 
 	return "Host check has no verdict"
 }
 
-// GraphAcceptance reads operation, publication, and actual-send records.
 func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWorkspace) GraphAcceptanceReport {
 	task := kernel.Store.Task(graphID)
 	definition := kernel.LatestRevision(graphID).Definition
@@ -281,11 +244,6 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 		result := AcceptanceStatus{Id: criterion.Id, Description: criterion.Description, Kind: criterion.Kind, Status: "missing", Reason: "No valid evidence"}
 		switch criterion.Kind {
 		case "check":
-			// The item binds the last attempt that judged its work, not the last
-			// attempt. An interrupted one stayed uncertain and a killed one settled
-			// without an exit code; neither decided anything, so binding it would let
-			// one interruption outrank the settled evidence of the same module and
-			// report the check as unproven forever.
 			attempts := graphAcceptanceCheckAttempts(kernel, graphID, criterion.Module)
 			operation := definition.Modules[criterion.Module].Operation
 			row, decided := graphAcceptanceDecidedAttempt(kernel, attempts, operation.Output)
@@ -311,9 +269,6 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 					result.Source.Commit = commit
 				}
 			case len(attempts) > 0:
-				// Something was tried and nobody judged it. The item is unknown, not
-				// missing: evidence exists, and it is the absence of a verdict. The
-				// newest attempt is named so the reader knows what to look at.
 				result.Source = &AcceptanceSource{Id: g5Str(attempts[0]["id"])}
 				result.Status = "unknown"
 				result.Reason = graphAcceptanceUnjudgedReason(kernel, attempts[0], operation.Output)
@@ -404,9 +359,6 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 		}
 		items = append(items, result)
 	}
-	// A recorded limitation replaces "no evidence" with "decided": the item is
-	// waived for the commit the record names, and Ready stays false because
-	// nothing about it passed.
 	records := kernel.AcceptanceLimitations(graphID)
 	waived := graphAcceptanceWaivedItems(records, commit)
 	for index := range items {
@@ -424,8 +376,6 @@ func GraphAcceptance(kernel *KernelStore, graphID string, artifacts *ArtifactWor
 			Commit: record.Commit, CreatedAt: record.CreatedAt,
 		}
 	}
-	// A waived criterion is no longer waiting for the user: it is decided. Leaving
-	// it in the human list would ask the same question again on the next settle.
 	if len(waived) > 0 {
 		waiting := make([]AcceptanceCriterion, 0, len(human))
 		for _, criterion := range human {

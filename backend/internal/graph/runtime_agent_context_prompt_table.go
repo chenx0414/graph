@@ -4,7 +4,6 @@ import (
 	"regexp"
 )
 
-// agentStaticPrompt is the fixed metadata of one prompt file.
 type agentStaticPrompt struct {
 	Key         AgentStaticPromptKey
 	Title       string
@@ -27,7 +26,6 @@ var agentStaticPrompts = []agentStaticPrompt{
 	{Key: "runtime/prompt-suggestion.md", Title: "输入建议生成", Description: "仅主 Agent 回复后生成下一条输入建议的独立模型请求使用。", Group: "runtime", Fallback: "promptSuggestion"},
 }
 
-// resolvedAgentContextDefaults holds the effective text of every prompt slot.
 type resolvedAgentContextDefaults struct {
 	Identity         string
 	CommonRules      string
@@ -42,7 +40,6 @@ type resolvedAgentContextDefaults struct {
 	PromptSuggestion string
 }
 
-// agentToolStateFile is the on-disk shape of tools.json.
 type agentToolStateFile struct {
 	Version  int      `json:"version"`
 	Disabled []string `json:"disabled"`

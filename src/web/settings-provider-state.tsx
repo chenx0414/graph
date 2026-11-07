@@ -133,11 +133,7 @@ export function useProviderWorkbenchState({ draft, credentialState, bridge, muta
     setVerification(null);
     setErrors({});
   }, [active.credentialId]);
-  // ② 选择模型 has its own vendor picker: only credentials the config already
-  // holds (or the daemon resolved) are listed; everything else stays hidden.
   const vendors = modelVendorsFrom(draft, platforms);
-  // 切账户（凭据 id）之后，② 的模型列表必须跟着走：那些行是从另一个账户的端点取回来的，留在屏幕上就等于
-  // 把 A 的模型按到 B 头上（保存时写进 B）。列表属于账户，所以切到同名厂商让它重新获取一次。
   const shownAccount = useRef<string | undefined>(undefined);
   useEffect(() => {
     const previous = shownAccount.current;
@@ -159,14 +155,9 @@ export function useProviderWorkbenchState({ draft, credentialState, bridge, muta
   const vendorEntries = selectedVendor ? entries.filter(entry => entry.credentialId === selectedVendor.id) : [];
   const keyGuidance = keyEntryGuidance({ hasBridge: Boolean(bridge), credentialRef: active.credentialRef });
   const limitIds = concurrencyControlIds(active.credentialId);
-  // Ids the user typed because the endpoint has no /models reply must stay
-  // visible as rows, otherwise 手动添加 looks like it did nothing.
   const manualRows: ProbeModel[] = picks
     .filter(pick => pick.manual && !probeModels.some(model => model.id === pick.modelId))
     .map(pick => ({ id: pick.modelId, ...(pick.name ? { name: pick.name } : {}) }));
-  /** A save must verify a real model. A vendor without a model list has no
-   * `/models` reply to fall back on, so fall back to the model that this
-   * credential already uses instead of skipping verification. */
   const verifyCandidate = (): string | undefined =>
     picks.find(pick => pick.selected)?.modelId?.trim()
     ?? (manualId.trim() || undefined)
@@ -219,8 +210,6 @@ export function useProviderWorkbenchState({ draft, credentialState, bridge, muta
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
       if (updateVerification) setVerification({ ok: false, error: message });
-      // Never drop the vendor's own rejection wording: it is the only clue for
-      // the manual-id fallback.
       if (updateList) setNote(probeFailureNote(message));
     } finally {
       setBusy(false);

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 )
 
-// PROMPT_SECTIONS are Graph's own sections plus the working directory the session appends.
 var PROMPT_SECTIONS = []string{"<identity>", "<rules>", "<cwd>"}
 
 type PromptIntegrity struct {
@@ -33,8 +32,6 @@ func PromptIntegrityCheck(text *string, expected []string) PromptIntegrity {
 	return PromptIntegrity{Checked: true, OK: len(missing) == 0, Missing: missing}
 }
 
-// ReportPromptIntegrity checks one outgoing prompt and, when a part is missing, appends a line.
-// Never panics: a diagnostic must not break a send.
 func ReportPromptIntegrity(stateDir, operationID string, text *string, expected []string) PromptIntegrity {
 	result := PromptIntegrityCheck(text, expected)
 	if result.Checked && !result.OK {

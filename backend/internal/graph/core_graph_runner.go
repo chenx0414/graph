@@ -7,7 +7,6 @@ import (
 	"database/sql"
 )
 
-// ModuleOperationRequest is one host operation a module asked the runner to perform.
 type ModuleOperationRequest struct {
 	ModuleId        string
 	DeliveryId      string
@@ -18,7 +17,6 @@ type ModuleOperationRequest struct {
 	Signal          *AbortSignal
 }
 
-// ModuleOperationResponse is the host operation result.
 type ModuleOperationResponse struct {
 	Ok          bool
 	State       any
@@ -26,7 +24,6 @@ type ModuleOperationResponse struct {
 	Diagnostics []string
 }
 
-// GraphRunnerOptions drives one v2 graph.
 type GraphRunnerOptions struct {
 	Kernel          *KernelStore
 	GraphId         string
@@ -44,14 +41,12 @@ type GraphRunnerOptions struct {
 	MaxStuckPasses  *int
 }
 
-// RunResult is one drain of a graph.
 type RunResult struct {
 	Drained      bool
 	Executions   int
 	BlockedNodes []string
 }
 
-// GraphRunner drives queue, executor, turn driver, modules and the router together.
 type GraphRunner struct {
 	options GraphRunnerOptions
 }
@@ -95,7 +90,6 @@ func (runner *GraphRunner) signature() string {
 	return itoa(int(graphDBInt(queue, "n"))) + ":" + itoa(int(graphDBInt(transitions, "n"))) + ":" + itoa(int(graphDBInt(paused, "n"))) + ":" + itoa(int(graphDBInt(completed, "n")))
 }
 
-// Drain runs queued work and the deliveries it produces until the graph is idle or stuck.
 func (runner *GraphRunner) Drain() RunResult {
 	kernel := runner.options.Kernel
 	revision := kernel.LatestRevision(runner.options.GraphId)
@@ -318,38 +312,14 @@ func (runner *GraphRunner) routeModuleDeliveries(modules *ModuleRuntime) {
 	}
 }
 
-// Why an operation carries no verdict. The set is closed: a reader that groups
-// these words never has to guess what a missing judgment meant.
 const (
 	noVerdictNoExitCode  = "no_exit_code"
 	noVerdictWaiting     = "waiting_integration"
 	noVerdictInterrupted = "interrupted"
 )
 
-// unjudgedEvent states that nobody judged an operation, and why.
 const unjudgedEvent = "graph.operation.unjudged"
 
-// recordRefusedDelivery records what one refused delivery left behind.
-//
-// A delivery whose operation never crossed its send boundary was not judged:
-// nothing ran, so "failed" would be a verdict the host invented. It is recorded
-// as unjudged with the reason, and the delivery stays on the inbox so the same
-// attempt is made again. Waiting for a source execution to integrate is the
-// common case and needs no brake - the wait ends by itself - while the rest keep
-// their module paused, which is a retry brake and not a judgment.
-//
-// Only a refusal of the module's own definition is a failure of the module, and
-// that keeps graph.module.failed: there the module really did judge its input
-// and found it unfit.
-//
-// A waiting attempt keeps the state its broker gave it, and for "paused" that is
-// prepared: the broker refuses to fail an unsent pause (see its unsentPause),
-// because the attempt has not crossed its send boundary and the same one is made
-// again. Nothing here may reclassify it. Two end-to-end cases read that state in
-// the window between the delivery and the source's integration - the module race
-// case and the scratch-isolation case - and both say prepared, so a change that
-// writes unknown for a paused attempt breaks the contract they assert rather
-// than the other way round.
 func (runner *GraphRunner) recordRefusedDelivery(moduleId, deliveryId string, recovered any) {
 	kernel := runner.options.Kernel
 	reason, brake, isDefect := noVerdictNoExitCode, true, false
@@ -387,7 +357,6 @@ func (runner *GraphRunner) recordRefusedDelivery(moduleId, deliveryId string, re
 	}
 }
 
-// failModule records a module that judged its input and refused it.
 func (runner *GraphRunner) failModule(moduleId, deliveryId string, recovered any) {
 	kernel := runner.options.Kernel
 	kernel.SetNodeQueuePaused(runner.options.GraphId, moduleId, true)
@@ -399,10 +368,6 @@ func (runner *GraphRunner) failModule(moduleId, deliveryId string, recovered any
 	})
 }
 
-// recordSettledVerdict states that a settled operation carried no verdict.
-//
-// A command its own timeout killed has no exit code, so nobody judged it. The
-// record says so once, instead of letting passed:false pass for a judgment.
 func (runner *GraphRunner) recordSettledVerdict(moduleId, deliveryId string) {
 	kernel := runner.options.Kernel
 	operation := kernel.ModuleOperationOfDelivery(deliveryId)
@@ -415,8 +380,6 @@ func (runner *GraphRunner) recordSettledVerdict(moduleId, deliveryId string) {
 	runner.recordUnjudged(moduleId, deliveryId, operation.Id, noVerdictNoExitCode)
 }
 
-// kernelResultHasNoExitCode reports whether one stored result published an exit
-// code of null, which is how a command that was killed looks.
 func kernelResultHasNoExitCode(kernel *KernelStore, result string) bool {
 	if result == "" {
 		return false
@@ -432,11 +395,6 @@ func kernelResultHasNoExitCode(kernel *KernelStore, result string) bool {
 	return false
 }
 
-// recordUnjudged states once per delivery and reason that nobody judged it.
-//
-// The fact is stated once because it is a fact about an attempt, not a progress
-// report: a delivery retried while its source is still running would otherwise
-// write the same sentence on every drain.
 func (runner *GraphRunner) recordUnjudged(moduleId, deliveryId, operationId, reason string) {
 	seen, _ := graphDBRow(runner.kernelDB(), `SELECT cursor FROM events WHERE task_id=? AND type=?
       AND json_extract(data,'$.deliveryId')=? AND json_extract(data,'$.reasonCode')=?`,

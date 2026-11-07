@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 )
 
-// resolvePiExtensionSourceOnce installs the source if needed and reads its extension entries.
 func resolvePiExtensionSourceOnce(input PiExtensionSourceInput) (ResolvedPiExtensionSource, error) {
 	parsed := parsePiExtensionSource(input.Source)
 	baseDir, err := piExtensionInstallPackage(parsed, input)
@@ -41,7 +40,6 @@ func resolvePiExtensionSourceOnce(input PiExtensionSourceInput) (ResolvedPiExten
 	}, nil
 }
 
-// piExtensionInstallPackage installs the source in temporary scope and returns the package root.
 func piExtensionInstallPackage(parsed piExtensionSource, input PiExtensionSourceInput) (string, error) {
 	switch parsed.kind {
 	case "npm":

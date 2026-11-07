@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// DirectoryFingerprint fingerprints a directory that is not a Git repository.
 func DirectoryFingerprint(root, stateDir string) string {
 	stateRel := gitStateRel(root, stateDir)
 	hash := sha256.New()
@@ -56,7 +55,6 @@ func DirectoryFingerprint(root, stateDir string) string {
 	return "dir:" + itoa(count) + ":" + hex.EncodeToString(hash.Sum(nil))
 }
 
-// InitRepo creates a hermetic repository on main, then writes host excludes.
 func InitRepo(root string) {
 	result := Git(root, []string{"init", "--template=", "-b", "main"}, nil, nil)
 	if result.Code != 0 {
@@ -75,7 +73,6 @@ func InitRepo(root string) {
 	EnsureHostExcludes(root, nil)
 }
 
-// CommitBaseline commits exactly the given scope, never the whole index.
 func CommitBaseline(cwd, message, subdir, stateDir string) string {
 	var extra []string
 	if stateRel := gitStateRel(cwd, stateDir); stateRel != nil {

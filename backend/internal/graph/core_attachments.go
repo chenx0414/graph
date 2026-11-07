@@ -10,17 +10,14 @@ const (
 	MAX_MESSAGE_IMAGE_BYTES          = 8 * 1024 * 1024
 )
 
-// IMAGE_ATTACHMENT_TYPES are the image mime types a message may carry.
 var IMAGE_ATTACHMENT_TYPES = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
 
-// ImageContent is the prompt image passed to an agent session.
 type ImageContent struct {
 	Type     string `json:"type"`
 	Data     string `json:"data"`
 	MimeType string `json:"mimeType"`
 }
 
-// IsImageAttachmentType reports whether type is a whitelisted image mime.
 func IsImageAttachmentType(mime string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(mime))
 	for _, allowed := range IMAGE_ATTACHMENT_TYPES {
@@ -31,7 +28,6 @@ func IsImageAttachmentType(mime string) bool {
 	return false
 }
 
-// IsImageAttachment reports whether the attachment carries base64 image bytes.
 func IsImageAttachment(attachment AttachmentInput) bool {
 	return attachment.Data != nil && *attachment.Data != ""
 }
@@ -54,7 +50,6 @@ func hasBase64Shape(data string) bool {
 	return true
 }
 
-// CleanAttachments rejects every attachment that breaks the message contract.
 func CleanAttachments(input []AttachmentInput) []AttachmentInput {
 	attachments := input
 	if attachments == nil {
@@ -113,7 +108,6 @@ func CleanAttachments(input []AttachmentInput) []AttachmentInput {
 	return cleaned
 }
 
-// PromptImagesFromAttachments maps image attachments to prompt images.
 func PromptImagesFromAttachments(attachments []AttachmentInput) []ImageContent {
 	images := []ImageContent{}
 	for _, attachment := range attachments {
@@ -125,7 +119,6 @@ func PromptImagesFromAttachments(attachments []AttachmentInput) []ImageContent {
 	return images
 }
 
-// StripAttachmentData removes image base64 from one message data payload.
 func StripAttachmentData(data any) any {
 	record, ok := data.(map[string]any)
 	if !ok || record == nil {

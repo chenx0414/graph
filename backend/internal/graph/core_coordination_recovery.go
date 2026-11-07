@@ -16,7 +16,6 @@ func (runtime *TaskRuntime) recoverWorkGraphs() {
 	}
 }
 
-// recoverTransferredGraphPreparations continues the original creation request under the new owner.
 func (runtime *TaskRuntime) recoverTransferredGraphPreparations() {
 	rows := kernelRows(runtime.store.Db, `SELECT r.graph_id,r.owner_task_id,r.request_id,r.content,t.project_id
  FROM kernel_create_requests r JOIN kernel_graph_owners g ON g.task_id=r.graph_id
@@ -53,7 +52,6 @@ func (runtime *TaskRuntime) recoverTransferredGraphPreparations() {
 	}
 }
 
-// markInterruptedGraphPreparations never repeats an external Git operation with an unknown outcome.
 func (runtime *TaskRuntime) markInterruptedGraphPreparations() {
 	runtime.store.Transaction(func() any {
 		rows := kernelRows(runtime.store.Db, `SELECT r.graph_id FROM kernel_create_requests r WHERE r.state='preparing'

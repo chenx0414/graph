@@ -48,9 +48,6 @@ const COPY: Record<string, LoginCopy> = {
   },
 };
 
-/** Tokens and authorization codes stay in the host. The browser sees only the
- * provider's authorization address, the device code the user must type, and a
- * safe lifecycle status. */
 export function ProviderLogin({ providerId = 'openrouter', credentialRef, configured, onChange }: {
   providerId?: string;
   credentialRef: string;

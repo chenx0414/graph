@@ -15,16 +15,7 @@ import (
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
 
-// One agent turn on the PiG kernel.
-//
-// The daemon/kernel division of labour is documented in docs/architecture.md,
-// section daemon 与内核的分工.
 
-// ModelSpec is the model a turn runs on, described in the daemon's terms.
-//
-// The credential travels with the specification because the kernel performs the
-// provider call itself: PiG's ai package speaks the provider protocols, while
-// the daemon decides which model, which key and which admission apply.
 type ModelSpec struct {
 	ProviderID    string
 	Id            string
@@ -36,57 +27,32 @@ type ModelSpec struct {
 	ContextWindow int
 	MaxTokens     int
 	Reasoning     bool
-	// Input are the input modalities the model accepts. Empty means text:
-	// the kernel declares what the daemon knows, never more.
 	Input         []string
 	ThinkingLevel string
 }
 
-// ToolResultRenderer rewrites one tool result before the model reads it.
-//
-// It is the seam where a result too large to carry is written to a file the
-// model can read by offset and limit. A nil renderer leaves the result as the
-// tool produced it.
 type ToolResultRenderer func(name string, args map[string]any, value any) any
 
-// ToolSpec is one tool the model may call during the turn.
 type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
-	// Execute runs the tool. The daemon/kernel division of labour is
-	// documented in docs/architecture.md, section daemon 与内核的分工.
 	Execute func(ctx context.Context, args map[string]any) (string, error)
-	// Result runs the tool and returns the SDK's own tool result. It is the
-	// faithful shape: a tool that returns an image or structured details
-	// keeps them. It wins over Execute when both are set.
 	Result func(ctx context.Context, args map[string]any) (any, error)
 }
 
-// TurnOptions configure one turn.
 type TurnOptions struct {
-	// Database is the formal Graph database the durable records live in.
 	Database string
-	// Identity is the stable identity of the session, the instance in Graph.
 	Identity string
-	// Model is the model the turn sends to.
 	Model ModelSpec
-	// Tools are the tools the model may call.
 	Tools []ToolSpec
-	// McpServers are the MCP servers the kernel connects natively. Their tools
-	// reach the model under PiG's own `mcp__<server>__<tool>` names.
 	McpServers []McpServerSpec
-	// Instructions are the system instructions of the session.
 	Instructions string
-	// Prompt is the user input of the turn.
 	Prompt string
-	// OnEvent receives the kernel's events.
 	OnEvent func(event string)
-	// ToolResults rewrites a tool result before the model reads it.
 	ToolResults ToolResultRenderer
 }
 
-// TurnResult is what one turn produced.
 type TurnResult struct {
 	ConversationId int64    `json:"conversationId"`
 	SubmissionId   int64    `json:"submissionId"`
@@ -98,28 +64,16 @@ type TurnResult struct {
 	Entries        int      `json:"entries"`
 }
 
-// identitiesDoc maps a Graph identity to its durable conversation.
-//
-// The mapping is a durable document, so the identity of a session survives the
-// restart of the daemon and the kernel can find the very same transcript again.
-//
-// The document's shape is the one the TypeScript kernel wrote: the identities
-// live under `conversations`. Both kernels therefore address the same document
-// and find the same conversation, so a database the old kernel wrote keeps its
-// history when the new kernel takes it over.
 var identitiesDoc = durable.DefineDoc[map[string]any](durable.DocDefinition[map[string]any]{
 	CommonDocDefinition: durable.CommonDocDefinition[map[string]any]{
 		Kind:    "graph.identities",
 		Version: 1,
 		Initial: func() map[string]any { return map[string]any{"conversations": map[string]any{}} },
-		// Every change is stored as a complete base, for the same reason the
-		// frozen executions are: one small map, read whole on the next turn.
 		CheckpointWhen: func(map[string]any, []durable.Op, durable.CheckpointInfo) bool { return true },
 	},
 	DocumentSemantics: durable.DocumentSemantics{Scope: durable.ScopeSession},
 })
 
-// RunTurn runs one agent turn on the kernel and persists everything it did.
 func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	registry := harness.CreateRegistry()
 	models, model := buildModels(options.Model)
@@ -131,8 +85,6 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 
 	recorder := &callRecorder{}
 	registrations := toolRegistrations(options.Tools, recorder, options.ToolResults)
-	// The MCP servers are connected by the kernel itself: the model reaches
-	// their tools directly, without a gateway tool and without an extension.
 	mcpConnections, mcpTools, err := connectMcpServers(ctx, options.McpServers, recorder)
 	if err != nil {
 		return TurnResult{}, err
@@ -140,18 +92,11 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	defer closeMcpServers(mcpConnections)
 	registrations = append(registrations, mcpTools...)
 
-	// The extension is installed under the name the identity owns, the same
-	// name the resident session path uses. Two derivations of one name would
-	// let the last writer replace the tool bodies the other conversation's
-	// durable selection still points at.
 	extension := &durable.Extension{Name: extensionName(options.Identity), Tools: registrations}
 	if err := registry.Install(extension); err != nil {
 		return TurnResult{}, err
 	}
 
-	// The model is offered the tools it may call, and the tools may call the
-	// same ones. PiG keeps the two lists apart: a tool that is only callable
-	// is never offered to the model.
 	conversation, err := conversationFor(ctx, kernel, options.Identity, harness.AgentChange{
 		Model:        harness.SetTo(durable.ModelRef{Provider: model.ProviderMeta.ProviderID, ModelId: model.ID}),
 		Instructions: harness.SetTo(options.Instructions),
@@ -163,8 +108,6 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 		return TurnResult{}, err
 	}
 
-	// The request id deduplicates an admission: the same input must not be
-	// admitted twice, and a second, different input needs its own id.
 	requestId := options.Identity + ":turn:" + newRequestId()
 	submission, err := conversation.Submit(ctx, durable.SubmissionDraft{
 		Type:      durable.SubmissionTypeInput,
@@ -207,8 +150,6 @@ func RunTurn(ctx context.Context, options TurnOptions) (TurnResult, error) {
 	return result, nil
 }
 
-// conversationFor finds the durable conversation of one identity, creating and
-// configuring it the first time the identity is seen.
 func conversationFor(ctx context.Context, kernel *Kernel, identity string, change harness.AgentChange) (harness.Conversation, error) {
 	root, err := kernel.Harness().Root(ctx, nil)
 	if err != nil {
@@ -258,15 +199,12 @@ func conversationFor(ctx context.Context, kernel *Kernel, identity string, chang
 	if conversation == nil {
 		return nil, fmt.Errorf("pig kernel: the durable conversation %d is missing", conversationId)
 	}
-	// The agent is configured on every open: a reopened session may run on
-	// another model, with other tools or other instructions.
 	if err := conversation.Configure(ctx, change); err != nil {
 		return nil, err
 	}
 	return conversation, nil
 }
 
-// answerText reads the assistant answer of a settled submission.
 func answerText(ctx context.Context, conversation harness.Conversation, answer durable.EntryId) (string, string, *Usage, error) {
 	var text string
 	var stopReason string
@@ -308,12 +246,6 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 	return text, stopReason, usage, nil
 }
 
-// toolRegistrations turns the tools one session may call into the
-// registrations the kernel offers.
-//
-// The tool bodies are the daemon's: the kernel carries the call and the
-// result, and the daemon decides whether the call is allowed and what it
-// does.
 func toolRegistrations(tools []ToolSpec, recorder *callRecorder, renderer ToolResultRenderer) []*durable.ToolRegistration {
 	registrations := make([]*durable.ToolRegistration, 0, len(tools))
 	for _, tool := range tools {
@@ -324,10 +256,6 @@ func toolRegistrations(tools []ToolSpec, recorder *callRecorder, renderer ToolRe
 				Description: spec.Description,
 				Parameters:  spec.Parameters,
 			},
-			// The renderer is the one authority on how much of a result the
-			// model reads. The kernel's own truncation would cut the result
-			// before the renderer could spill it, and a cut result has no
-			// handle to read the rest from.
 			OutputLimits: toolOutputLimits(renderer),
 			Execute: func(ctx context.Context, args any, _ durable.ToolExecutionApi) (durable.ToolExecutionResult, error) {
 				recorder.record(spec.Name)
@@ -374,12 +302,6 @@ func toolRegistrations(tools []ToolSpec, recorder *callRecorder, renderer ToolRe
 	return registrations
 }
 
-// toolOutputLimits are the limits the kernel puts on a tool result.
-//
-// Without a renderer the kernel's own limits stand: a result too large is cut
-// there, and the cut is final. With a renderer the renderer decides, so the
-// kernel's limits are lifted - a result the renderer spilled is read from the
-// file it wrote, byte for byte.
 func toolOutputLimits(renderer ToolResultRenderer) *durable.ToolOutputLimits {
 	if renderer == nil {
 		return nil
@@ -388,11 +310,6 @@ func toolOutputLimits(renderer ToolResultRenderer) *durable.ToolOutputLimits {
 	return &durable.ToolOutputLimits{MaxBytes: &unlimited, MaxLines: &unlimited}
 }
 
-// toolExecutionResult reads the SDK's own tool result.
-//
-// The daemon's tools answer with the SDK's tool result shape: the content
-// blocks the model reads and the details the console shows. The kernel stores
-// exactly that, so nothing of the answer is lost on the way.
 func toolExecutionResult(value any) durable.ToolExecutionResult {
 	result := durable.ToolExecutionResult{}
 	if value == nil {
@@ -414,8 +331,6 @@ func toolExecutionResult(value any) durable.ToolExecutionResult {
 	return result
 }
 
-// pigModelInputs maps the daemon's modalities onto PiG's. An empty list is
-// text: the kernel never claims a modality the daemon did not report.
 func pigModelInputs(values []string) []ai.ModelInputModality {
 	inputs := []ai.ModelInputModality{}
 	seen := map[string]bool{}
@@ -439,10 +354,6 @@ func pigModelInputs(values []string) []ai.ModelInputModality {
 	return inputs
 }
 
-// buildModels registers the turn's model with PiG's model runtime.
-//
-// The provider is the Graph provider: the base URL, the key and the headers
-// are the daemon's, and PiG speaks the provider protocol.
 func buildModels(spec ModelSpec) (durable.Models, *ai.Model) {
 	api := ai.API(spec.API)
 	if api == "" {
@@ -484,8 +395,6 @@ func buildModels(spec ModelSpec) (durable.Models, *ai.Model) {
 
 func boolPointer(value bool) *bool { return &value }
 
-// callRecorder records the tools a turn called. The harness runs tools on its
-// own goroutines, so the record is guarded.
 type callRecorder struct {
 	mutex sync.Mutex
 	names []string
@@ -503,7 +412,6 @@ func (recorder *callRecorder) calls() []string {
 	return append([]string{}, recorder.names...)
 }
 
-// newRequestId is one unique admission id.
 func newRequestId() string {
 	buffer := make([]byte, 16)
 	if _, err := rand.Read(buffer); err != nil {
@@ -512,8 +420,6 @@ func newRequestId() string {
 	return hex.EncodeToString(buffer)
 }
 
-// conversationNumber reads a durable conversation identifier out of a document
-// value, which JSON stores as a number.
 func conversationNumber(value any) (int64, bool) {
 	switch number := value.(type) {
 	case int64:

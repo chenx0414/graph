@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// Apply validates and applies one self-improvement change.
 func (service *RsiService) Apply(input any, context RsiApplyContext) RsiReceipt {
 	service.mu.Lock()
 	if service.changing {
@@ -25,20 +24,13 @@ func (service *RsiService) Apply(input any, context RsiApplyContext) RsiReceipt 
 	return service.rsiApplyChange(normalized, context)
 }
 
-// rsiApplyChange writes the files, runs the gate and commits.
 func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApplyContext) (receipt RsiReceipt) {
-	// The call's own cost, measured here rather than derived from the receipt's timestamp:
-	// the reader asked for the price of calling RSI, and the reload that follows is a
-	// different wait with its own label. A deferred stamp covers every exit, including the
-	// failures the caller most wants timed.
 	started := NowMillis()
 	stamp := func(value RsiReceipt) RsiReceipt {
 		elapsed := NowMillis() - started
 		value.ElapsedMs = &elapsed
 		return value
 	}
-	// The stored receipt and the returned one are two copies: the record is written
-	// before the call returns, so the stamp has to be taken before it, not in a defer.
 	record := func(value RsiReceipt) { service.rsiRecord(context, stamp(value)) }
 	defer func() { receipt = stamp(receipt) }()
 	title := input.Title
@@ -98,8 +90,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		branch = *originalBranch
 	}
 
-	// A failed attempt keeps its files uncommitted so the Agent can keep fixing
-	// them. Those paths stay editable; unrelated user edits still block.
 	working := service.rsiReadWorking()
 	owned := map[string]bool{}
 	ownedOrder := []string{}
@@ -111,19 +101,9 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			}
 		}
 	}
-	// An empty change list is valid when there is pending work to re-check or a
-	// custom check to run; the default validation always runs anyway.
 	if len(input.Changes) == 0 && len(checks) == 0 && len(owned) == 0 {
 		Raise("invalid_input", "Provide at least one file change or one check to run")
 	}
-	// Checks run against the whole working tree, so a green run only proves the commit when the
-	// commit contains everything that was dirty while they ran. Anything else is refused up front
-	// instead of being silently left out of the commit that gets reported as verified.
-	// A path this change writes is not "outside" it, even when the Agent's own
-	// tools already put it on disk: the change overwrites it before the checks run
-	// and the commit holds exactly the content that was checked. Anything else
-	// that is dirty still blocks - the checks would verify work the commit cannot
-	// contain.
 	claimed := map[string]bool{}
 	for _, path := range append(append([]string{}, ownedOrder...), uniquePaths...) {
 		claimed[path] = true
@@ -140,8 +120,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 	}
 
-	// Recorded before anything else, so a call that never returns can still be
-	// answered afterwards; every normal exit clears it.
 	service.rsiBeginAttempt(id, title, *root, branch, *originalHead, uniquePaths)
 	defer service.rsiClearAttempt()
 
@@ -154,9 +132,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		createdBranch = true
 	}
 
-	// Paths this change does not own are somebody else's uncommitted work: they
-	// must not decide whether it lands, and they must never end up inside it. See
-	// runtime_rsi_isolated.go for the tree the change is built in instead.
 	claimedPaths := append(append([]string{}, uniquePaths...), ownedOrder...)
 	work := *root
 	isolated := false
@@ -164,8 +139,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	if len(blocked) > 0 {
 		snapshot, ok, cleanup := rsiIsolatedWorktree(*root, claimedPaths)
 		if !ok {
-			// Fail closed: without an isolated tree the checks would measure work the
-			// commit cannot contain, which is the reason this guard exists.
 			Raise("rsi_dirty", RsiDirtyMessage(*root, blocked))
 		}
 		work, isolated, isolatedCleanup = snapshot, true, cleanup
@@ -192,11 +165,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			_ = os.MkdirAll(filepath.Dir(absolute), 0o700)
 			_ = os.WriteFile(absolute, []byte(*content), 0o644)
 		}
-		// Restoring the files leaves the index alone, and an index entry outlives the attempt that made it:
-		// `git add -A -- good ignored` stages the good path and then fails on the ignored one, so a
-		// rolled-back call used to leave `A good` behind - which the next attempt reads as somebody else's
-		// uncommitted work and refuses to run. The harness never starts with unowned dirty paths, so
-		// resetting these can only undo our own staging.
 		touched := []string{}
 		touchedSeen := map[string]bool{}
 		for _, path := range append(append([]string{}, uniquePaths...), ownedOrder...) {
@@ -208,8 +176,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		if len(touched) > 0 {
 			Git(*root, append([]string{"reset", "-q", "--"}, touched...), nil, nil)
 		}
-		// Restore only what this attempt wrote; keep files a prior failed attempt
-		// still owns so its fix is not lost either.
 		if len(owned) > 0 {
 			_ = service.rsiWriteWorking(branch, ownedOrder)
 		} else {
@@ -251,11 +217,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		switch change.Action {
 		case "write":
 			value := rsiChangeContent(*root, change, changeIndex)
-			// A whole-file write carries no evidence of what it removed. The one
-			// mistake it invites - pasting a placeholder instead of the file - reads
-			// as a successful change to every check that does not open the content,
-			// so a write that guts a large file is refused and the caller is pointed
-			// at the form that names what it deletes.
 			if existing != nil {
 				if refusal := rsiWriteShrinkRefusal(path, *existing, value); refusal != "" {
 					Raise("rsi_edit_conflict", refusal)
@@ -309,9 +270,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 	}
 
-	// `app:build` only matters when the served page or the desktop package can move; a runtime-only
-	// change is fully covered by `node --run check`, and rebuilding would overwrite the bundle the
-	// running window serves with this checkout's own build.
 	var changedPaths []string
 	if service.runningCommit != nil {
 		changedPaths = rsiChangedSince(work, *service.runningCommit)
@@ -335,10 +293,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 	}
 	if input.DryRun {
-		// A rehearsal leaves nothing behind: the files go back to the snapshots the
-		// moment the verdict is in, and a branch created just for it goes away.
-		// Nothing is staged yet - staging runs after this point - so the index is
-		// already untouched.
 		for _, path := range snapshotOrder {
 			content := snapshots[path]
 			absolute := filepath.Join(work, path)
@@ -363,8 +317,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		return rehearsal
 	}
 	if failed {
-		// Keep the working tree so the Agent can iterate; a flaky or genuinely
-		// failing check must not discard the change.
 		pendingFiles := []string{}
 		pendingSeen := map[string]bool{}
 		for _, path := range append(append([]string{}, ownedOrder...), uniquePaths...) {
@@ -375,9 +327,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		}
 		sort.Strings(pendingFiles)
 		if isolated {
-			// The gate measured the isolated tree, so that is the tree the next attempt
-			// has to iterate on. Only this change's own paths move; the foreign files in
-			// the shared checkout stay exactly as they are.
 			rsiCopyPaths(work, *root, pendingFiles)
 		}
 		_ = service.rsiWriteWorking(branch, pendingFiles)
@@ -391,15 +340,8 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		return failure
 	}
 
-	// The checks just ran against the working tree, so they verified every path that is dirty
-	// here: a run that leaves the checkout dirty must not be committed as if it were green.
-	// Paths this attempt wrote are expected to be dirty; anything else was verified by the checks
-	// but would stay out of the commit, so the green run must not become a commit.
 	unverified := []string{}
 	for _, path := range rsiDirtyPaths(work) {
-		// The isolated tree links the real checkout's dependencies, and a checkout
-		// whose ignore rules do not cover them would read that link as work nobody
-		// declared. It is the one entry in that tree HEAD does not own.
 		if isolated && (path == "node_modules" || strings.HasPrefix(path, "node_modules/")) {
 			continue
 		}
@@ -411,9 +353,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		Raise("rsi_dirty", RsiDirtyMessage(*root, unverified))
 	}
 
-	// Commit every path this attempt or a prior attempt owns, so a checks-only
-	// re-run still lands the pending files. Stage only paths that exist now or
-	// were tracked before, so a delete of a never-tracked file cannot fail.
 	commitPaths := []string{}
 	commitSeen := map[string]bool{}
 	for _, path := range append(append([]string{}, uniquePaths...), ownedOrder...) {
@@ -459,20 +398,9 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	if isolated && committedNow && commit != nil {
 		rsiLandIsolatedCommit(*root, work, *commit, claimedPaths)
 	}
-	// The page the window loads is served from THIS checkout, so a console change
-	// proved in an isolated worktree has not reached the reader until this tree's
-	// dist/web is rebuilt. Measured 2026-11-05: after two console commits the served
-	// bundle was still the one built at 11:15, and a live check read the old code
-	// (69 「读取完整记录」 stubs) while the change itself was correct.
 	if isolated && committedNow && needsWebBuild {
 		_ = rsiRunCheckWithEnvironmentRetry(*root, RsiCommand{Command: "node", Args: []string{"--run", "build:web"}}, RSI_BUILD_TIMEOUT_MS)
 	}
-	// Building the package proves it can be built; it does not put it where the
-	// reader launches it. Measured 2026-11-05: three receipts reported a desktop
-	// fix as live while /Applications kept the bundle from 2026-10-20, so the app
-	// never contained a line of it. The package comes from the tree that was
-	// verified (the isolated worktree), because this checkout's dist/app predates
-	// the commit.
 	var appInstall *RsiAppInstall
 	if activate && committedNow && needsAppBuild {
 		installed := rsiInstallDesktopApp(*root, work)
@@ -480,15 +408,9 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	}
 	_ = os.Remove(service.rsiWorkingPath())
 
-	// Activation exists to put a new commit into the running daemon. When this call committed
-	// nothing and the daemon already runs HEAD (a checks-only re-run, for example), a reload would
-	// only interrupt the user, so it is skipped and reported as such.
 	live := commit != nil && service.runningCommit != nil && *commit == *service.runningCommit
 	restartRequired := activate && !live
 	if restartRequired {
-		// Stop what is running before the daemon is replaced: a reload must not
-		// queue behind somebody else's long tool call. The tasks this pauses are
-		// written down and resumed by the next daemon.
 		_ = rsiPauseForReload(service, context.Store, context.TaskId)
 		generation := rsiRuntimeGeneration(context.Store)
 		if err := service.rsiWriteRestart(id, *root, branch, commit, NowMillis(), int(generation), input.Force); err != nil {

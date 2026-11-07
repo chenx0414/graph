@@ -2,10 +2,8 @@ package graph
 
 import "strings"
 
-// AgentPromptOrigin is who authored one prompt part.
 type AgentPromptOrigin string
 
-// AgentPromptPart is one block inside a system-prompt section.
 type AgentPromptPart struct {
 	ID      string
 	Title   string
@@ -14,7 +12,6 @@ type AgentPromptPart struct {
 	Source  string
 }
 
-// AgentPromptSectionID names a section Graph itself renders.
 type AgentPromptSectionID string
 
 const (
@@ -23,14 +20,12 @@ const (
 	AgentPromptSectionDocs     AgentPromptSectionID = "docs"
 )
 
-// AgentPromptSection is identity, rules, or docs.
 type AgentPromptSection struct {
 	ID    AgentPromptSectionID
 	Title string
 	Parts []AgentPromptPart
 }
 
-// AgentToolPromptEntry is one tool declaration that travels outside the prompt text.
 type AgentToolPromptEntry struct {
 	Name             string
 	Description      string
@@ -44,7 +39,6 @@ type AgentToolPromptEntry struct {
 	RuntimeAvailable *bool
 }
 
-// AgentCapabilityPromptEntry is one capability the agent may use.
 type AgentCapabilityPromptEntry struct {
 	ID             string   `json:"id"`
 	Version        string   `json:"version"`
@@ -57,7 +51,6 @@ type AgentCapabilityPromptEntry struct {
 	Reason         *string  `json:"reason,omitempty"`
 }
 
-// ComposeAgentSystemPromptInput is what Graph itself renders into the system prompt.
 type ComposeAgentSystemPromptInput struct {
 	Identity          string
 	IdentityContext   string
@@ -67,14 +60,10 @@ type ComposeAgentSystemPromptInput struct {
 	RulesCommon       string
 	RulesRole         string
 	RulesRuntime      string
-	// ExperienceContext carries the lessons earlier runs of this project
-	// learned. It is context, not a rule: it says what happened, never what
-	// the host enforces.
 	ExperienceContext    string
 	Role                 string
 }
 
-// ComposedAgentSystemPrompt is the rendered sections and their joined text.
 type ComposedAgentSystemPrompt struct {
 	Sections []AgentPromptSection
 	Text     string
@@ -101,7 +90,6 @@ func renderedSection(section AgentPromptSection) string {
 	return "<" + string(section.ID) + ">\n" + strings.Join(chunks, "\n\n") + "\n</" + string(section.ID) + ">"
 }
 
-// ComposeAgentSystemPrompt renders identity and rules.
 func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgentSystemPrompt {
 	rulesParts := []AgentPromptPart{
 		{ID: "rules.common", Title: "Common rules", Origin: "editable", Content: input.RulesCommon, Source: "rules/common.md"},
@@ -116,8 +104,6 @@ func ComposeAgentSystemPrompt(input ComposeAgentSystemPromptInput) ComposedAgent
 		host += "\n\nThis directory is this operation's own Git worktree: relative paths resolve here, and it is neither necessarily the project root nor another Agent's worktree."
 	}
 	if input.ExperienceContext != "" {
-		// The lessons sit before the host rules: they are what earlier runs
-		// learned, and the host's own rules stay the last word.
 		rulesParts = append(rulesParts, AgentPromptPart{
 			ID: "rules.experience", Title: "Lessons earlier runs learned", Origin: "generated",
 			Content: input.ExperienceContext, Source: "harness experience",

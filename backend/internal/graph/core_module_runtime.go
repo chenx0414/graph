@@ -5,7 +5,6 @@ import (
 	"sync"
 )
 
-// ModuleEvaluation is one judgment of a module.
 type ModuleEvaluation struct {
 	TransitionId string
 	Emitted      bool
@@ -25,7 +24,6 @@ type moduleEvalEnv struct {
 
 type moduleEvalFn func(moduleEvalEnv) ModuleEvaluationResult
 
-// ModuleRuntime judges one revision's modules.
 type ModuleRuntime struct {
 	kernel          *KernelStore
 	taskId          string

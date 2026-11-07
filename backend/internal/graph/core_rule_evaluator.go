@@ -52,7 +52,6 @@ func ruleTruthy(value any, present bool) bool {
 }
 
 func ruleJSON(value any) string {
-	// TODO(port): encoding/json sorts object keys. TypeScript JSON.stringify keeps insertion order.
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return "null"
@@ -137,7 +136,6 @@ func evaluateRuleNode(node *ruleNode, environment RuleEnvironment) ruleValue {
 		return ruleValue{present: true, value: value}
 	case "exists":
 		if node.Input == "state" {
-			// A decoded null state is still defined. Missing means the key was never supplied.
 			present := true
 			if node.Negated {
 				return ruleValue{present: true, value: !present}

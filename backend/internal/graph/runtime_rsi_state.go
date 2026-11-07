@@ -14,7 +14,6 @@ import (
 	"bytes"
 )
 
-// rsiDiffFor is the diff of one commit, bounded to the report size.
 func rsiDiffFor(root, commit string) *string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -35,24 +34,14 @@ func rsiDiffFor(root, commit string) *string {
 	return &diff
 }
 
-// rsiRestartPath is where the pending reload request lives.
 func (service *RsiService) rsiRestartPath() string {
 	return filepath.Join(service.stateDir, "rsi", "restart.json")
 }
 
-// rsiWorkingPath is where the files of a failed attempt live.
 func (service *RsiService) rsiWorkingPath() string {
 	return filepath.Join(service.stateDir, "rsi", "working.json")
 }
 
-// rsiDirtyPaths lists the uncommitted paths in the checkout. Checks run against the working tree, so a
-// path here that the commit would not contain makes a green run prove the wrong thing.
-//
-// Measured 2026-11-03: git C-quotes a non-ASCII name by default ("说明.md" came
-// back as "\350\257\264\346\230\216.md"), so the quoted form never equalled the
-// path a change declared and the change's own file read as somebody else's
-// uncommitted work - every documentation path written in Chinese was
-// uncommittable. `-z` hands back the bytes of each path instead of a rendering.
 func rsiDirtyPaths(root string) []string {
 	seen := map[string]bool{}
 	for _, args := range [][]string{{"diff", "--name-only", "-z", "HEAD"}, {"ls-files", "--others", "--exclude-standard", "-z"}} {
@@ -70,13 +59,11 @@ func rsiDirtyPaths(root string) []string {
 	return paths
 }
 
-// HasPendingRestart keeps queued work intact while the desktop drains existing operations.
 func (service *RsiService) HasPendingRestart() bool {
 	_, err := os.Stat(service.rsiRestartPath())
 	return err == nil
 }
 
-// rsiWriteReportFile keeps the full check output for one attempt out of the receipt the conversation stores.
 func (service *RsiService) rsiWriteReportFile(id string, validation []RsiValidationResult) string {
 	directory := filepath.Join(service.stateDir, "rsi", "reports")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -93,7 +80,6 @@ func (service *RsiService) rsiWriteReportFile(id string, validation []RsiValidat
 	return path
 }
 
-// rsiReadRestart reads the pending reload request.
 func (service *RsiService) rsiReadRestart() *RsiPendingRestart {
 	raw, err := os.ReadFile(service.rsiRestartPath())
 	if err != nil {
@@ -116,9 +102,6 @@ func (service *RsiService) rsiReadRestart() *RsiPendingRestart {
 	return &restart
 }
 
-// rsiReadWorking reads the files a previous failed attempt left uncommitted. They stay editable so the
-// Main Agent can keep fixing the same change instead of losing it to a flaky check, while unrelated
-// user edits still block the change set.
 func (service *RsiService) rsiReadWorking() *RsiWorkingFiles {
 	raw, err := os.ReadFile(service.rsiWorkingPath())
 	if err != nil {
@@ -145,13 +128,11 @@ func (service *RsiService) rsiReadWorking() *RsiWorkingFiles {
 	return &RsiWorkingFiles{Branch: branch, Paths: paths}
 }
 
-// RsiWorkingFiles are the files a failed attempt left uncommitted.
 type RsiWorkingFiles struct {
 	Branch string
 	Paths  []string
 }
 
-// rsiWriteWorking records the files a failed attempt left behind.
 func (service *RsiService) rsiWriteWorking(branch string, paths []string) error {
 	unique := map[string]bool{}
 	for _, path := range paths {
@@ -180,7 +161,6 @@ func (service *RsiService) rsiWriteWorking(branch string, paths []string) error 
 	return rsiWriteAtomic(service.rsiWorkingPath(), strings.Join(lines, "\n")+"\n")
 }
 
-// rsiWriteRestart records the reload request the host has to confirm.
 func (service *RsiService) rsiWriteRestart(id, root, branch string, commit *string, requestedAt int64, generation int, force bool) error {
 	lines := []string{
 		"{",
@@ -199,7 +179,6 @@ func (service *RsiService) rsiWriteRestart(id, root, branch string, commit *stri
 	return rsiWriteAtomic(service.rsiRestartPath(), strings.Join(lines, "\n")+"\n")
 }
 
-// Status is the whole self-improvement surface as one read.
 func (service *RsiService) Status(compare bool) RsiStatus {
 	status := RsiStatus{
 		Operations:      []RsiOperation{},
@@ -230,15 +209,12 @@ func (service *RsiService) Status(compare bool) RsiStatus {
 	}
 	canRestart := false
 	if status.PendingRestart != nil {
-		// A forced request reloads even with operations in flight; a normal one
-		// waits for the ledger to drain.
 		canRestart = status.PendingRestart.Force || (status.OperationsKnown && status.ActiveOperations == 0)
 	}
 	status.CanRestart = canRestart
 	return status
 }
 
-// rsiReadActivation reads the last confirmed reload.
 func (service *RsiService) rsiReadActivation() *RsiLastActivation {
 	raw, err := os.ReadFile(filepath.Join(service.stateDir, "rsi", "activated.json"))
 	if err != nil {
@@ -258,7 +234,6 @@ func (service *RsiService) rsiReadActivation() *RsiLastActivation {
 	return &activation
 }
 
-// rsiReadOperations reads the in-flight operations from the task ledger.
 func rsiReadOperations(stateDir string) ([]RsiOperation, bool) {
 	dbPath := filepath.Join(stateDir, "tasks.sqlite")
 	if _, err := os.Stat(dbPath); err != nil {
@@ -305,12 +280,6 @@ func rsiReadOperations(stateDir string) ([]RsiOperation, bool) {
 	return operations, known
 }
 
-// rsiSyncState says which local branches are ahead of the copy they were published to, which of those
-// are local work lines that are never published, and how many were never published at all.
-//
-// This exists because unpublished work is otherwise silent: the application line sat 61 commits
-// ahead of its remote across several sessions and nothing in the harness said so, so a broken push
-// channel looked exactly like a working one.
 func (service *RsiService) rsiSyncState(root string, compare bool) *RsiSyncState {
 	state := &RsiSyncState{Unpublished: []RsiSyncEntry{}, Expected: []RsiSyncEntry{}}
 	heads := Git(root, []string{"for-each-ref", "--format=%(refname:short)", "refs/heads"}, nil, nil)
@@ -354,7 +323,6 @@ func (service *RsiService) rsiSyncState(root string, compare bool) *RsiSyncState
 	}
 	sort.Slice(state.Unpublished, func(left, right int) bool { return state.Unpublished[left].Branch < state.Unpublished[right].Branch })
 	sort.Slice(state.Expected, func(left, right int) bool { return state.Expected[left].Branch < state.Expected[right].Branch })
-	// Debt first when there is any, so the actionable line is never buried behind a standing one.
 	parts := []string{}
 	if len(state.Unpublished) > 0 {
 		entries := []string{}
@@ -383,7 +351,6 @@ func (service *RsiService) rsiSyncState(root string, compare bool) *RsiSyncState
 	return state
 }
 
-// rsiParseCount reads one ahead/behind count.
 func rsiParseCount(value string) (int, bool) {
 	number := 0
 	if value == "" {
@@ -398,10 +365,6 @@ func rsiParseCount(value string) (int, bool) {
 	return number, true
 }
 
-// rsiDeployState compares the checkout with the development line, when there is one to compare with.
-//
-// Several checkouts of the same repository can sit in one place; the one this checkout still agrees
-// with most closely is the useful answer, and it is named in the note so the reader knows which.
 func (service *RsiService) rsiDeployState(root string) *DeployDriftReport {
 	drifts := []DeployDriftReport{}
 	for _, candidate := range DevelopmentCandidates(root, nil) {
@@ -418,7 +381,6 @@ func (service *RsiService) rsiDeployState(root string) *DeployDriftReport {
 	return &drift
 }
 
-// rsiUnavailableReason says why the service cannot work.
 func (service *RsiService) rsiUnavailableReason() string {
 	if service.Root == nil {
 		return "No Graph source checkout was found. Set GRAPH_RSI_ROOT to the checkout the app runs from."
@@ -429,17 +391,12 @@ func (service *RsiService) rsiUnavailableReason() string {
 	return *service.Root + " is not a Git checkout root; run Graph from a source checkout to enable self-improvement."
 }
 
-// AckRestart clears a pending restart once the host has actually reloaded the daemon for
-// that exact request. A stale id never clears a newer request, so a crashed
-// restart keeps its intent instead of silently dropping it.
 func (service *RsiService) AckRestart(id string, store *TaskStore) RsiAckRestart {
 	current := service.rsiReadRestart()
 	if current == nil || current.Id != id {
 		return RsiAckRestart{Cleared: false, PendingRestart: current}
 	}
 	generation := int(rsiRuntimeGeneration(store))
-	// A matching HTTP response alone is not proof: the daemon must have
-	// restarted onto the requested commit, rather than still running old code.
 	if current.Root != rsiStringValue(service.Root) || !rsiSameOptional(current.Commit, service.runningCommit) ||
 		(current.Generation != nil && int64(generation) <= *current.Generation) {
 		return RsiAckRestart{Cleared: false, PendingRestart: current}
@@ -484,16 +441,11 @@ func (service *RsiService) AckRestart(id string, store *TaskStore) RsiAckRestart
 		panic(err)
 	}
 	_ = os.Remove(service.rsiRestartPath())
-	// The reload is confirmed and dispatch is open again: continue what this
-	// reload paused. Doing it at boot was wrong - a pending restart blocks every
-	// dispatch until the ack, so the continuation would be appended and never run.
 	rsiConsumeResume(service, store, nil)
-	// The change is live; now prove the rest of the suite, off this path.
 	service.rsiStartAsyncFull(store, id, rsiStringValue(current.Commit), touched)
 	return RsiAckRestart{Cleared: true, PendingRestart: nil}
 }
 
-// rsiRuntimeGeneration reads the runtime generation the daemon counts reloads with.
 func rsiRuntimeGeneration(store *TaskStore) int64 {
 	row := kernelRow(store.Db, "SELECT generation FROM runtime")
 	if row == nil {
@@ -502,7 +454,6 @@ func rsiRuntimeGeneration(store *TaskStore) int64 {
 	return graphDBInt(row, "generation")
 }
 
-// rsiStringValue is the value of an optional string, or the empty string.
 func rsiStringValue(value *string) string {
 	if value == nil {
 		return ""
@@ -510,7 +461,6 @@ func rsiStringValue(value *string) string {
 	return *value
 }
 
-// rsiSameOptional compares two optional strings the way TypeScript compares `string | null`.
 func rsiSameOptional(left, right *string) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil

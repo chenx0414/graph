@@ -8,10 +8,8 @@ import (
 	"reflect"
 )
 
-// PI_NATIVE_TOOL_NAMES are Pi's built-in tools. powershell is windows-only.
 var PI_NATIVE_TOOL_NAMES = []string{"read", "bash", "edit", "write", "ls", "find", "grep", "powershell"}
 
-// PiNativeToolNamesForPlatform drops powershell unless the platform is win32 or windows.
 func PiNativeToolNamesForPlatform(platform ...string) []string {
 	name := runtime.GOOS
 	if len(platform) > 0 && platform[0] != "" {
@@ -30,7 +28,6 @@ func PiNativeToolNamesForPlatform(platform ...string) []string {
 
 var legacyGraphAliases = map[string]string{"read": "read", "bash": "run_command", "write": "write_file", "ls": "list_dir"}
 
-// GraphToolsSupersededByNative is the set of tool names a native tool replaces, including legacy aliases.
 func GraphToolsSupersededByNative(nativeTools []string) map[string]bool {
 	superseded := map[string]bool{}
 	for _, name := range nativeTools {
@@ -44,14 +41,12 @@ func GraphToolsSupersededByNative(nativeTools []string) map[string]bool {
 	return superseded
 }
 
-// AgentToolSurface is the disabled/native replacement applied to one tool list.
 type AgentToolSurface[T any] struct {
 	NativeTools    []string
 	Tools          []T
 	ExtensionTools []string
 }
 
-// SelectAgentToolSurface keeps discovery order out of the schema prefix.
 func SelectAgentToolSurface[T any](tools []T, nativeTools, disabledTools, extensionTools []string) AgentToolSurface[T] {
 	disabled := map[string]bool{}
 	for _, name := range disabledTools {
@@ -130,7 +125,6 @@ func toolListHas(tools []string, name string) bool {
 	return false
 }
 
-// PiNativeToolPromptEntries returns prompt metadata for the enabled native tools.
 func PiNativeToolPromptEntries(enabledNames ...[]string) []AgentToolPromptEntry {
 	names := PiNativeToolNamesForPlatform()
 	if len(enabledNames) > 0 && enabledNames[0] != nil {
@@ -152,7 +146,6 @@ func PiNativeToolPromptEntries(enabledNames ...[]string) []AgentToolPromptEntry 
 	return out
 }
 
-// toolOrder is the optional order a native tool declaration carries.
 func toolOrder(order int) *int { return &order }
 
 func nativeToolMetadata() []AgentToolPromptEntry {

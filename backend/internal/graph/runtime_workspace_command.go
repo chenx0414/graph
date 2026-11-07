@@ -7,22 +7,18 @@ import (
 	"os"
 )
 
-// READ_ONLY_GIT is the git subcommands a work copy may run.
 var workspaceReadOnlyGit = map[string]bool{"status": true, "diff": true, "log": true, "show": true}
 
 var workspaceInlineNode = map[string]bool{"-e": true, "--eval": true, "-p": true, "--print": true, "--input-type": true}
 
-// RUNTIME_NODE_ENV names the bundled node binary.
 const RUNTIME_NODE_ENV = "GRAPH_APP_NODE"
 
-// CommandResult is one finished process.
 type CommandResult struct {
 	Code   *int   `json:"code"`
 	Stdout string `json:"stdout"`
 	Stderr string `json:"stderr"`
 }
 
-// ResolvedCommand is an executable plus the grants it needs.
 type ResolvedCommand struct {
 	Executable string
 	Args       []string
@@ -30,13 +26,6 @@ type ResolvedCommand struct {
 	Env        map[string]string
 }
 
-// GraphNodeRuntime is the node that hosts Graph. A packaged app names it in GRAPH_APP_NODE.
-//
-// The TypeScript host answered with process.execPath because it ran on node itself.
-// The Go daemon is not a node host, so the helpers it spawns need the node binary
-// the system provides. TODO(port): Electron's process.versions.electron is not visible
-// to the Go host, so the Electron-binary branch is absent; the desktop shell points
-// the daemon at the bundled node through GRAPH_APP_NODE.
 func GraphNodeRuntime(env map[string]string) (execPath string, electron string) {
 	if env == nil {
 		env = environMap()
@@ -55,7 +44,6 @@ func GraphNodeRuntime(env map[string]string) (execPath string, electron string) 
 	return path, ""
 }
 
-// lookupNodeOnPath finds the node binary in the environment's PATH.
 func lookupNodeOnPath(env map[string]string) string {
 	path := env["PATH"]
 	if path == "" {
@@ -90,7 +78,6 @@ func gitExecutable() string {
 	return "/usr/bin/git"
 }
 
-// ResolveNodeCommand points a node invocation at Graph's runtime and, unless shim is false, the loopback resolver.
 func ResolveNodeCommand(args []string, execPath, electron string, shim bool) ResolvedCommand {
 	if execPath == "" {
 		execPath, electron = GraphNodeRuntime(nil)
@@ -114,7 +101,6 @@ func ResolveNodeCommand(args []string, execPath, electron string, shim bool) Res
 	return ResolvedCommand{Executable: execPath, Args: shimArgs, ReadPaths: reads, Env: map[string]string{"ELECTRON_RUN_AS_NODE": "1"}}
 }
 
-// ValidateWorkspaceCommand allowlists build/test commands plus read-only Git.
 func ValidateWorkspaceCommand(command string, args []string) ResolvedCommand {
 	if command == "node" {
 		for _, arg := range args {
@@ -170,7 +156,6 @@ func resolveHostCommand(command string, args []string) ResolvedCommand {
 	return pathCommand(command, args)
 }
 
-// ResolveUnsandboxedCommand runs a check the way the project runs it, without the allowlist or the sandbox shim.
 func ResolveUnsandboxedCommand(command string, args []string) ResolvedCommand {
 	if command == "node" {
 		return ResolveNodeCommand(args, "", "", false)
@@ -178,14 +163,6 @@ func ResolveUnsandboxedCommand(command string, args []string) ResolvedCommand {
 	return pipefailShell(pathCommand(command, args))
 }
 
-// pipefailShell makes a shell command report a failing stage of its pipeline.
-//
-// `sh -c 'a | tail'` answers with tail's status, which is 0 however badly a
-// failed: a check whose command ends in `| tail -60` reported passed while its
-// own output said FAIL (measured 2026-11-05 on a graph acceptance item that had
-// never been measured at all). bash's pipefail is the smallest change that
-// makes the exit status mean what the check author meant, and the shell the
-// command already asked for is the only thing swapped.
 func pipefailShell(command ResolvedCommand) ResolvedCommand {
 	base := filepath.Base(command.Executable)
 	if base != "sh" && base != "bash" {
@@ -201,7 +178,6 @@ func pipefailShell(command ResolvedCommand) ResolvedCommand {
 	return command
 }
 
-// WorkspaceCommandRunner runs one restricted command through the send gate.
 type WorkspaceCommandRunner struct {
 	workspace                      string
 	scratchDir                     string
@@ -216,7 +192,6 @@ type WorkspaceCommandRunner struct {
 	closed                         bool
 }
 
-// OpenWorkspaceCommandRunner resolves the workspace and keeps one restricted executor.
 func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, readPaths []string, env map[string]string, localNetwork bool, access *ResolvedAccessPolicy, gitMetadataWritesInsideScratch bool, timeoutMs int) *WorkspaceCommandRunner {
 	resolved, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
@@ -231,15 +206,10 @@ func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, rea
 	}
 }
 
-// Run executes one command inside the verified sandbox, with the runner's own
-// limit.
 func (runner *WorkspaceCommandRunner) Run(command string, args []string, signal *AbortSignal) CommandResult {
 	return runner.run(command, args, signal, 0)
 }
 
-// RunWithTimeout executes one command with a per-call limit. A non-positive
-// timeoutMs keeps the runner's own limit, so a caller that does not care leaves
-// the daemon-wide policy in charge.
 func (runner *WorkspaceCommandRunner) RunWithTimeout(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
 	return runner.run(command, args, signal, timeoutMs)
 }
@@ -306,7 +276,6 @@ func (runner *WorkspaceCommandRunner) run(command string, args []string, signal 
 	return runner.acquired.Executor.Run(cmd)
 }
 
-// Close releases the shared executor.
 func (runner *WorkspaceCommandRunner) Close() {
 	if runner.closed {
 		return

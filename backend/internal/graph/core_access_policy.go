@@ -11,9 +11,6 @@ import (
 	"crypto/sha256"
 )
 
-// ResolvedAccessPolicy is an access policy bound to one host: the policy
-// itself plus the authorization it was granted under, the paths it protects,
-// and the digest of that authorization.
 type ResolvedAccessPolicy struct {
 	AccessPolicy
 	Authorization  string   `json:"authorization"`
@@ -21,29 +18,21 @@ type ResolvedAccessPolicy struct {
 	Digest         string   `json:"digest"`
 }
 
-// AccessPolicyContext names the host directories a policy is resolved against.
-// An empty field means the host default.
 type AccessPolicyContext struct {
 	Home      string
 	StateDir  string
 	GraphHome string
 }
 
-// accessPolicyBody is the object the policy digest is computed over. It is
-// the policy without its own digest, exactly as the TypeScript spread was.
 type accessPolicyBody struct {
 	AccessPolicy
 	Authorization  string   `json:"authorization"`
 	ProtectedPaths []string `json:"protectedPaths"`
 }
 
-// accessPolicyWiderValues are the values that only ever widen a grant.
 var accessPolicyWiderValues = []string{"full", "host", "unrestricted", "writable", "readable", "all"}
 
-// DefaultAccessPolicy is the only policy: Graph trusts the host completely.
 func DefaultAccessPolicy() AccessPolicy { return FullAccessPolicy() }// ParseAccessPolicy parses one optional access document. Missing fields inherit
-// ParseAccessPolicy ignores the document. Graph has one permission posture, so an
-// absent, partial or explicit document cannot change what a session may touch.
 func ParseAccessPolicy(value any, path string) AccessPolicy {
 	return FullAccessPolicy()
 }// CredentialProtectPaths lists the credential stores a protected policy hides.
@@ -67,22 +56,15 @@ func CredentialProtectPaths(home string) []string {
 	return out
 }
 
-// ResolveAccessPolicy returns the one policy, with no protected paths and the
-// bypass authorization the digest used to distinguish.
 func ResolveAccessPolicy(value AccessPolicy, context AccessPolicyContext) *ResolvedAccessPolicy {
 	policy := FullAccessPolicy()
 	resolved := &ResolvedAccessPolicy{AccessPolicy: policy, Authorization: "bypass"}
-	// The digest still names the policy an operation ran under: it is how a
-	// refusal says which posture it read, even when there is only one.
 	resolved.Digest = accessPolicyDigest(accessPolicyBody{AccessPolicy: policy, Authorization: resolved.Authorization})
 	return resolved
 }// IsHostRead is always true: the whole host is readable.
 func IsHostRead(policy *ResolvedAccessPolicy) bool { return true }// IsHostWrite reports whether the policy writes the whole host.
-// IsHostWrite is always true: the whole host is writable.
 func IsHostWrite(policy *ResolvedAccessPolicy) bool { return true }// IsFullAccess reports whether the policy is the full-access mode.
-// IsFullAccess is always true: there is one posture.
 func IsFullAccess(policy *ResolvedAccessPolicy) bool { return true }// NodeAccessPolicy lets a node pick its own policy only within the already
-// authorized host policy.
 func NodeAccessPolicy(value any, ceiling *ResolvedAccessPolicy, context AccessPolicyContext) *ResolvedAccessPolicy {
 	host := DefaultAccessPolicy()
 	if ceiling != nil {
@@ -166,9 +148,6 @@ func accessPolicyOptionalBool(record map[string]any, key string, fallback bool, 
 	return accessPolicyBoolean(value, path)
 }
 
-// accessPolicyWider rejects a requested field that widens the host grant. The
-// fields are read in the policy's own key order, so the first refusal names
-// the same field the TypeScript walk refused.
 func accessPolicyWider(requested AccessPolicy, ceiling AccessPolicy, path string) {
 	accessPolicyWiderField(requested.Mode, ceiling.Mode, path+".mode")
 	accessPolicyWiderField(requested.AutoApprove.Permission, ceiling.AutoApprove.Permission, path+".autoApprove.permission")
@@ -185,7 +164,6 @@ func accessPolicyWider(requested AccessPolicy, ceiling AccessPolicy, path string
 	accessPolicyWiderField(requested.PiExtensions.AppleEvents, ceiling.PiExtensions.AppleEvents, path+".piExtensions.appleEvents")
 }
 
-// accessPolicyWiderField refuses one field that widens the host grant.
 func accessPolicyWiderField(candidate any, allowed any, path string) {
 	if accessPolicySame(candidate, allowed) {
 		return
@@ -235,7 +213,6 @@ func accessPolicySame(left, right any) bool {
 	return left == right
 }
 
-// accessPolicyText is the JavaScript String() of one policy value.
 func accessPolicyText(value any) string {
 	switch typed := value.(type) {
 	case nil:

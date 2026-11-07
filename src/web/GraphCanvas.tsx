@@ -44,7 +44,6 @@ type NodeData = {
   tone: NodeTone;
   status: string;
   boardState: BoardNodeState;
-  /** Status the four-state board did not recognise; shown with a visible 未知 badge. */
   unknown: boolean;
 };
 
@@ -60,8 +59,6 @@ const NODE_TYPE_LABEL: Record<string, string> = {
 
 const handleStyle = { opacity: 0, width: 1, height: 1, border: 0, background: 'transparent' };
 
-/** Node card with a status dot and the original "id status" text, so both the
- * screenshot reader and the UI tests keep working. */
 function GraphNode({ data, selected }: NodeProps) {
   const info = data as unknown as NodeData;
   return (
@@ -110,13 +107,6 @@ function GraphContainer({ data }: NodeProps) {
 
 const nodeTypes = { graphNode: GraphNode, graphContainer: GraphContainer };
 
-/**
- * The label an edge carries, drawn at its midpoint.
- *
- * React Flow only renders `label` for its built-in edges; these edges are custom, so a label passed
- * in options was silently dropped — which is how the existing "结果交接" text never appeared either.
- * Drawing it here keeps named interface connections and peer messages readable.
- */
 function EdgeLabel({ text, x, y, color }: { text: string; x: number; y: number; color: string }) {
   const width = text.length * 6.2 + 10;
   return (
@@ -324,8 +314,6 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
       return {
         id: node.id, ariaLabel: `${node.label}，${boardStateLabel(node.status)}，按 Enter 打开`, ariaRole: 'button', type: 'graphNode', position: relativePosition(node.id, position),
         data: { id: node.id, label: node.label, nodeType: node.visualKind, tone, status: node.status, boardState: boardNodeState(node.status), unknown: !boardStateKnown(node.status) } satisfies NodeData,
-        // Layout already knows the size; providing it keeps event-driven
-        // remounts from waiting on a ResizeObserver measurement.
         measured: { width: position.width, height: position.height },
         style: { width: position.width, height: position.height },
         ...(node.container ? { parentId: node.container } : {}),
@@ -359,8 +347,6 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
     if (!group || !collapsed[owner]) return endpoint;
     const ports = direction === 'input' ? group.inputs ?? {} : group.outputs ?? {};
     const mapped = Object.entries(ports).filter(([, port]) => ('to' in port ? port.to : port.from) === endpoint).map(([name]) => name);
-    // An explicit connection to an internal port is still shown as internal;
-    // no public interface may be inferred merely because its node was hidden.
     return mapped.length ? `${owner}.${mapped.join(' / ')}` : endpoint;
   };
   const edges: Edge[] = projectedEdges.map(edge => {
@@ -403,8 +389,6 @@ export function GraphCanvas({ taskId, graph, collapsed, onSelect, selected, onRe
   const currentEdge = edges.find(edge => edge.id === selectedEdge);
   const currentMessages = currentEdge?.id.startsWith('message:')
     ? messageGroups.get(`${currentEdge.source}\u0000${currentEdge.target}`) ?? [] : [];
-  // The four-state legend is rendered here so every view that draws a task
-  // graph (task page and conversation drawer) shows the same permanent legend.
   const statuses = graph.nodes.map(node => node.status);
   const legend = boardStateCounts(statuses);
   const unknownCount = boardUnknownCount(statuses);

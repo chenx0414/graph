@@ -9,8 +9,6 @@ class Bullet extends WidgetType {
   toDOM() { const span=document.createElement('span'); span.textContent='•'; span.className='md-bullet'; return span; }
   ignoreEvent() { return false; }
 }
-// Markdown stays the source of truth. Decorations only change its appearance;
-// selection reveals delimiters, without converting or rewriting the document.
 function decorations(view: EditorView): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const selection = view.state.selection.main;
@@ -36,8 +34,6 @@ const livePreview = ViewPlugin.fromClass(class {
 }, { decorations: value => value.decorations });
 
 type Props = TextareaHTMLAttributes<HTMLTextAreaElement> & { live: boolean; 'data-testid'?: string | undefined; 'data-history'?: string | undefined; 'data-suggestion'?: string | undefined };
-/** Adapts the composer's existing text/selection port to CodeMirror. The event
- * boundary keeps paste, mention, slash menu and prompt-history policy in one owner. */
 export const MarkdownInput = forwardRef<HTMLTextAreaElement, Props>(function MarkdownInput(props, ref) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
@@ -67,8 +63,6 @@ export const MarkdownInput = forwardRef<HTMLTextAreaElement, Props>(function Mar
       }),
     ]}) });
     editor.current = view;
-    // Text/selection compatibility for the surrounding composer and accessibility
-    // tooling. The visible editor is one contenteditable, never a preview panel.
     const content = view.contentDOM;
     Object.defineProperties(content, {
       value: { get: () => view.state.doc.toString() },

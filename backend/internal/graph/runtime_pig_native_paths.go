@@ -18,7 +18,6 @@ func (paths *pigNativePaths) readText(requested string) string {
 	return string(paths.readBytes(requested))
 }
 
-// readBytes reads one file, refusing anything the read policy does not mount.
 func (paths *pigNativePaths) readBytes(requested string) []byte {
 	if filepath.IsAbs(requested) {
 		if paths.hostRead {
@@ -41,7 +40,6 @@ func (paths *pigNativePaths) writeText(requested, content string) {
 	WriteBounded(paths.root, requested, content)
 }
 
-// listNames lists one directory the native tools may reach.
 func (paths *pigNativePaths) listNames(requested string) []string {
 	names, _ := paths.listNamesLimited(requested, 0)
 	return names

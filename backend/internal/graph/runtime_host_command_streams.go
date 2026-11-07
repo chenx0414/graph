@@ -12,11 +12,8 @@ import (
 	"sync"
 )
 
-// maxHostOutputBytes is how much of one stream is kept: a check that prints more than this is
-// flooding, not evidencing.
 const maxHostOutputBytes = 32 * 1024 * 1024
 
-// hostOutputStream is one preserved stream.
 type hostOutputStream struct {
 	path  string
 	file  *os.File
@@ -24,14 +21,12 @@ type hostOutputStream struct {
 	hash  hash.Hash
 }
 
-// hostCommandBuffer keeps the bounded inline view of one stream.
 type hostCommandBuffer struct {
 	mutex  sync.Mutex
 	chunks [][]byte
 	bytes  int
 }
 
-// keep adds one chunk to the inline view.
 func (buffer *hostCommandBuffer) keep(chunk []byte, state *hostCommandState) {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
@@ -50,14 +45,12 @@ func (buffer *hostCommandBuffer) keep(chunk []byte, state *hostCommandState) {
 	buffer.bytes += room
 }
 
-// String returns the inline view of the stream.
 func (buffer *hostCommandBuffer) String() string {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
 	return string(bytes.Join(buffer.chunks, nil))
 }
 
-// hostCommandNumber reports whether a value is a number.
 func hostCommandNumber(value any) bool {
 	switch value.(type) {
 	case float64, int, int64:
@@ -66,19 +59,10 @@ func hostCommandNumber(value any) bool {
 	return false
 }
 
-// hostCommandTimeoutMarker is the line a command killed by its own budget leaves behind.
-//
-// The host writes it and the operation reads it, so both sides name the kill the
-// same way: a missing exit code alone cannot tell "killed for time" from "the
-// supervisor never answered", and the verdict has to tell them apart.
 func hostCommandTimeoutMarker(timeoutMs int) string {
 	return "Process terminated by SIGKILL: it exceeded the " + itoa(timeoutMs) + "ms timeout"
 }
 
-// hostCommandOutputStreams describes the stream files a command left in its own directory.
-//
-// A sandboxed command's streams are written by the spawner rather than by the
-// supervisor, so the operation has to be able to name and digest them afterwards.
 func hostCommandOutputStreams(directory string) map[string]HostCommandOutputFile {
 	files := map[string]HostCommandOutputFile{}
 	for _, name := range []string{"stdout", "stderr"} {
@@ -93,10 +77,6 @@ func hostCommandOutputStreams(directory string) map[string]HostCommandOutputFile
 	return files
 }
 
-// preservedStream copies every byte of one stream into its file while the pump reads it.
-//
-// The bytes are copied, not the decoded text: a stream may carry bytes that are
-// not valid UTF-8, and a preserved stream is evidence rather than a message.
 type preservedStream struct {
 	reader io.Reader
 	file   *os.File
@@ -112,7 +92,6 @@ func (stream preservedStream) Read(chunk []byte) (int, error) {
 	return read, err
 }
 
-// send writes one message to the supervisor.
 func (state *hostCommandState) send(message map[string]any) {
 	if state.channel == nil {
 		return
@@ -124,7 +103,6 @@ func (state *hostCommandState) send(message map[string]any) {
 	_, _ = state.channel.Write(append([]byte(encoded), '\n'))
 }
 
-// readStream keeps one stream of the supervisor and preserves it.
 func (state *hostCommandState) readStream(reader io.Reader, name string) {
 	buffer := make([]byte, 64*1024)
 	for {
@@ -144,7 +122,6 @@ func (state *hostCommandState) readStream(reader io.Reader, name string) {
 	}
 }
 
-// preserve writes one chunk to the preserved file of a stream.
 func (state *hostCommandState) preserve(name string, chunk []byte) {
 	stream, ok := state.streams[name]
 	if !ok {

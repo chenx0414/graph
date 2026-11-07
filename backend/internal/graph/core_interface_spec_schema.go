@@ -43,9 +43,6 @@ func interfaceSpecCompile(spec map[string]any) map[string]any {
 			}
 		}
 		if key == "type" {
-			// A protocol that promises a type the validator does not know can
-			// never be satisfied. Refuse the definition here instead of
-			// accepting a graph whose every value is rejected later.
 			names, ok := interfaceSpecTypeNames(value)
 			if !ok {
 				panic(fmt.Errorf("keyword \"type\" value must be string or array of strings"))
@@ -179,7 +176,6 @@ func interfaceSpecCheck(schema map[string]any, value any, path string) *interfac
 				}
 			}
 		case []any:
-			// The tuple form: every position has its own schema.
 			for index, item := range items {
 				if index >= len(declared) {
 					break
@@ -202,8 +198,6 @@ func interfaceSpecCheck(schema map[string]any, value any, path string) *interfac
 			for key, child := range record {
 				childSchema, ok := properties[key].(map[string]any)
 				if !ok {
-					// A property the schema does not name is only a problem
-					// when the schema closed itself to unknown properties.
 					if hasAdditional && additionalIsSchema {
 						if err := interfaceSpecCheck(additionalSchema, child, path+"/"+interfaceSpecEscape(key)); err != nil {
 							return err
@@ -263,7 +257,6 @@ func interfaceSpecTypeOK(name string, value any) bool {
 	}
 }
 
-// ValidateProtocolValue checks one value against the receiving protocol and never rewrites it.
 func ValidateProtocolValue(spec ProtocolSpec, value Json, path string) *string {
 	defer func() {
 		_ = recover()

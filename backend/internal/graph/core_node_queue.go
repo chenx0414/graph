@@ -43,8 +43,6 @@ type NodeQueue struct {
 	defaults NodeQueueDefaults
 }
 
-// NewNodeQueue mirrors the TypeScript constructor, whose defaults argument is
-// optional and defaults to an empty object.
 func NewNodeQueue(kernel *KernelStore, taskId string, defaults ...NodeQueueDefaults) *NodeQueue {
 	queue := &NodeQueue{kernel: kernel, taskId: taskId}
 	if len(defaults) > 0 {
@@ -60,7 +58,6 @@ func queueText(value *string) string {
 	return *value
 }
 
-// Enqueue appends one input and returns the accepted row.
 func (q *NodeQueue) Enqueue(input QueueInput) QueueRow {
 	var payload any
 	switch input.Kind {
@@ -82,7 +79,6 @@ func (q *NodeQueue) Enqueue(input QueueInput) QueueRow {
 	return q.kernel.Enqueue(q.taskId, QueueInsert{NodeId: input.NodeId, Kind: input.Kind, Payload: payload})
 }
 
-// Next is the oldest queued item, or nil when the node is paused or empty.
 func (q *NodeQueue) Next(nodeId string) *QueueRow {
 	if q.Paused(nodeId) {
 		return nil
@@ -90,7 +86,6 @@ func (q *NodeQueue) Next(nodeId string) *QueueRow {
 	return q.kernel.NextQueued(q.taskId, nodeId)
 }
 
-// Claim takes the node's next item and runs it as the node's one execution.
 func (q *NodeQueue) Claim(nodeId string) *QueueRow {
 	if q.Paused(nodeId) {
 		return nil
@@ -103,13 +98,10 @@ func (q *NodeQueue) Claim(nodeId string) *QueueRow {
 		return nil
 	}
 	claimed := q.kernel.ClaimQueued(q.taskId, next.Seq)
-	// Work that can run again un-parks a graph parked by ParkStalledTask: the
-	// phase says what the graph is doing, not what it once was.
 	q.kernel.Store.StartTaskPhase(q.taskId, "running", "blocked")
 	return claimed
 }
 
-// Complete settles a successful submit, or marks a failure and pauses the node's queue.
 func (q *NodeQueue) Complete(seq int64, outcome QueueCompletion) {
 	nodeRow, ok := graphDBRow(q.kernel.Store.Db, "SELECT node_id FROM kernel_queue WHERE task_id=? AND seq=?", q.taskId, seq)
 	if !ok {
@@ -118,8 +110,6 @@ func (q *NodeQueue) Complete(seq int64, outcome QueueCompletion) {
 	switch outcome.Kind {
 	case "submitted":
 		q.kernel.FinishQueued(q.taskId, seq, "done")
-		// The turn that just ended may have been the last work the graph had, and a
-		// node that failed earlier is still waiting to be seen: park it here too.
 		q.kernel.Store.ParkStalledTask(q.taskId)
 		return
 	case "blocked":
@@ -136,12 +126,10 @@ func (q *NodeQueue) Paused(nodeId string) bool {
 	return q.kernel.NodeState(q.taskId, nodeId).Paused
 }
 
-// Resume reopens a paused node queue.
 func (q *NodeQueue) Resume(nodeId string) {
 	q.kernel.SetNodeQueuePaused(q.taskId, nodeId, false)
 }
 
-// RetryBudget is the node's retry budget. A restart does not reset it.
 func (q *NodeQueue) RetryBudget(nodeId string) RetryBudget {
 	state := q.kernel.NodeState(q.taskId, nodeId)
 	retries := DEFAULT_RETRIES
@@ -159,17 +147,14 @@ func (q *NodeQueue) RetryBudget(nodeId string) RetryBudget {
 	return RetryBudget{Attempts: state.Attempts, RetriesAllowed: retries, ResubmitsAllowed: resubmits, ResubmitsUsed: state.ResubmitsUsed}
 }
 
-// NoteAttempt counts one attempt before each execution.
 func (q *NodeQueue) NoteAttempt(nodeId string) {
 	q.kernel.NoteNodeAttempt(q.taskId, nodeId)
 }
 
-// NoteResubmit counts one automatic resubmit.
 func (q *NodeQueue) NoteResubmit(nodeId string) {
 	q.kernel.NoteNodeResubmit(q.taskId, nodeId, q.RetryBudget(nodeId).ResubmitsAllowed)
 }
 
-// Configure overrides the graph default retry budget for one node.
 func (q *NodeQueue) Configure(nodeId string, config NodeRetryConfig) {
 	q.kernel.ConfigureNodeRetries(q.taskId, nodeId, config)
 }

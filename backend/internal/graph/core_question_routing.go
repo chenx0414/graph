@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 )
 
-// QuestionOwner is who may answer a parked question.
 type QuestionOwner string
 
 const (
@@ -16,7 +15,6 @@ const (
 	QuestionOwnerMain QuestionOwner = "main"
 )
 
-// ProblemAction is one action the settlement path can actually accept.
 type ProblemAction string
 
 const (
@@ -27,10 +25,6 @@ const (
 	ProblemActionEscalate       ProblemAction = "escalate"
 )
 
-// QuestionPolicy is the ownership, offered actions and answer acceptance of
-// one question kind. Ownership, offered actions and answer acceptance share
-// the same policy. Message retries are deliberately narrower than
-// configuration recovery.
 type QuestionPolicy struct {
 	Owner          QuestionOwner
 	Answers        []string
@@ -38,14 +32,12 @@ type QuestionPolicy struct {
 	Escalate       bool
 }
 
-// QuestionAutoAnswer is the answer a policy already approved.
 type QuestionAutoAnswer struct {
 	Answer       Answer
 	PolicyDigest string
 	Resume       *bool
 }
 
-// QuestionInput is one durable question to insert.
 type QuestionInput struct {
 	TaskId      string
 	NodeId      string
@@ -55,26 +47,17 @@ type QuestionInput struct {
 	AutoAnswer  *QuestionAutoAnswer
 }
 
-// QuestionInsertResult is the inserted question and the owner it went to.
 type QuestionInsertResult struct {
 	Id    string        `json:"id"`
 	Owner QuestionOwner `json:"owner"`
 }
 
-// questionPolicies is the ownership table of every known question kind.
-//
-// A problem the harness hands to a person offers three real answers, not one:
-// retry (run that turn again), wait (keep the problem open and start the clock
-// over) and pause (stop the task for now - pausing is recoverable, abandoning is
-// a different action this card does not offer).
 var questionPolicies = map[string]QuestionPolicy{
 	"permission":           {Owner: QuestionOwnerUser, Answers: []string{"grant"}},
 	"budget":               {Owner: QuestionOwnerUser, Answers: []string{"add_budget"}},
 	"reservation_exceeded": {Owner: QuestionOwnerUser, Answers: []string{"acknowledge"}},
 	"human_check":          {Owner: QuestionOwnerUser, Answers: []string{"acknowledge", "reject"}},
 	"system_change":        {Owner: QuestionOwnerUser, Answers: []string{"respond"}},
-	// A dead OAuth credential can only be fixed by the person who owns the account:
-	// no retry renews it, and the daemon cannot log in on their behalf.
 	"credential":           {Owner: QuestionOwnerUser, Answers: []string{"respond"}},
 	"unknown_usage":        {Owner: QuestionOwnerMain, Answers: []string{"usage", "reconcile_usage"}},
 	"waiting":              {Owner: QuestionOwnerMain, Answers: []string{"respond"}},
@@ -83,30 +66,18 @@ var questionPolicies = map[string]QuestionPolicy{
 	"model_unavailable":    {Owner: QuestionOwnerMain, Answers: []string{"retry"}},
 	"git_conflict":         {Owner: QuestionOwnerMain, Answers: []string{"retry"}, RetryOnMessage: true},
 	"context_rejected":     {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, RetryOnMessage: true, Escalate: true},
-	// A recovery problem is the only signal a turn whose outcome was never proven
-	// has, and no other reader can answer it: its task's master is parked, the
-	// global main never sees another task's problems, and closing the operation
-	// waits for the decision. Ten of them waited nine hours (2026-11-02) with
-	// nobody asked, so it takes the same escalation path as a failed turn and
-	// reaches the person with both of its own actions.
 	"recovery":             {Owner: QuestionOwnerMain, Answers: []string{"retry", "acknowledge"}, RetryOnMessage: true, Escalate: true},
 	"result_noncompliant":  {Owner: QuestionOwnerMain, Answers: []string{"retry", "wait", "pause"}, Escalate: true},
 	"git_dirty":            {Owner: QuestionOwnerMain, Answers: []string{"acknowledge"}},
-	// A node stuck for three rounds or returned for rework may need a decision
-	// only the user can make. Escalating hands the decision over with the main
-	// Agent's own explanation attached instead of looping on a retry that
-	// cannot change the outcome.
 	"rework":  {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
 	"stalled": {Owner: QuestionOwnerMain, Answers: []string{"respond", "retry", "wait", "pause"}, Escalate: true},
 }
 
-// questionMaster is the master node of one task.
 type questionMaster struct {
 	Id     string
 	Status string
 }
 
-// questionPolicy reads the policy of one question kind.
 func questionPolicy(kind string) QuestionPolicy {
 	if rule, ok := questionPolicies[kind]; ok {
 		return rule
@@ -114,7 +85,6 @@ func questionPolicy(kind string) QuestionPolicy {
 	return QuestionPolicy{Owner: QuestionOwnerMain, Answers: []string{}}
 }
 
-// ProblemActions only exposes actions that the settlement path can accept.
 func ProblemActions(kind string) []ProblemAction {
 	rule := questionPolicy(kind)
 	if rule.Owner != QuestionOwnerMain {
@@ -133,24 +103,14 @@ func ProblemActions(kind string) []ProblemAction {
 	return actions
 }
 
-// AssertQuestionAnswer rejects an answer the open question does not accept.
-// Value validation and settlement effects remain with OperationLifecycle.
 func AssertQuestionAnswer(kind string, answer Answer) {
 	if !containsString(questionPolicy(kind).Answers, answer.Type) {
 		Raise("invalid_answer", "Answer type does not match the open question")
 	}
 }
 
-// QuestionOwnerOf routes a question to its owner. Only decisions the user
-// alone can make bypass the main Agent. Everything else is first routed to the
-// main Agent for diagnosis and resolution.
 func QuestionOwnerOf(kind string, data any) QuestionOwner {
 	body := questionRecord(data)
-	// A worker or the main Agent may hand a decision back to the user through a
-	// waiting question; those request types are the user's to answer.
-	// A master question of its own is the user's decision to make: it routes to
-	// the inbox instead of becoming an internal problem nobody outside the
-	// runtime can answer.
 	if kind == "waiting" {
 		switch body["requestType"] {
 		case "model_access", "noncompliance_decision", "user_decision":
@@ -160,7 +120,6 @@ func QuestionOwnerOf(kind string, data any) QuestionOwner {
 	return questionPolicy(kind).Owner
 }
 
-// QuestionSummary is the one-line description of a parked question.
 func QuestionSummary(kind string, data any) string {
 	body := questionRecord(data)
 	for _, key := range []string{"prompt", "reason", "message", "grant", "requested"} {
@@ -177,15 +136,6 @@ func QuestionSummary(kind string, data any) string {
 	return "执行问题：" + kind
 }
 
-// IsMasterParked reports whether a pending master is parked. Callers must not
-// infer readiness from status alone.
-//
-// Parking follows the question kind, not its current owner: handing a problem
-// to the person is not a decision, so an escalated failure still parks the turn
-// it came from. Measured 2026-11-01: the unattended sweep re-owned a failed
-// master turn's question to the person, the master stopped looking parked, took
-// a turn with nothing to answer, and its own failure then parked the retry the
-// person had just asked for.
 func IsMasterParked(store *TaskStore, taskId, nodeId string) bool {
 	for _, row := range kernelRows(store.Db, "SELECT kind FROM questions WHERE task_id=? AND node_id=? AND status='open'", taskId, nodeId) {
 		if questionPolicy(kernelString(row["kind"])).Owner == QuestionOwnerMain {
@@ -195,9 +145,6 @@ func IsMasterParked(store *TaskStore, taskId, nodeId string) bool {
 	return false
 }
 
-// InsertQuestion inserts one durable question and routes it to the correct
-// owner. Main-owned questions wake the conversation master; user-owned
-// questions open the human wait ledger and become visible in the inbox.
 func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult {
 	id := graphUUID()
 	preferred := QuestionOwnerOf(input.Kind, input.Data)
@@ -210,10 +157,6 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 	if preferred == QuestionOwnerMain && master != nil {
 		owner = QuestionOwnerMain
 	}
-	// A problem on the master node itself cannot be resolved by waking the same
-	// master: it would immediately hit the identical failure again. It stays a
-	// main-owned problem (invisible to the user) and is parked from the
-	// scheduler until an explicit retry or configuration recovery releases it.
 	selfOwned := master != nil && anchorTaskId == input.TaskId && master.Id == input.NodeId
 	store.OpenQuestion(id, input.TaskId, input.NodeId, questionOptionalOperationId(input.OperationId), input.Kind, input.Data, owner)
 	routeGlobal := false
@@ -274,16 +217,9 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 			"summary":    QuestionSummary(input.Kind, input.Data),
 			"owner":      string(owner),
 		}
-		// The main Agent runs as the conversation master. Its prompt reads the
-		// structured problem list; no user-visible raw error message is inserted.
 		if master.Status != "preparing" && master.Status != "running" {
 			store.SetNodePending(anchorTaskId, master.Id)
 		}
-		// Record the same durable, deduplicated intent every other wake uses, so a
-		// problem that is observed again does not become a second turn. A problem
-		// on the master's own node is parked instead: waking the master about
-		// itself would hit the identical failure again, which is what "parked" has
-		// always meant here.
 		if !selfOwned {
 			WakeForBlockedNode(store, input.TaskId, BlockedNodeWake{NodeID: input.NodeId, Reason: input.Kind})
 		}
@@ -294,21 +230,8 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 		store.Event(anchorTaskId, eventType, routing)
 	} else {
 		OpenUserWait(store, input.TaskId, input.NodeId)
-		// A node that stopped because only a person can unblock it is still a fact
-		// the conversation's master should hear about once: it is the actor
-		// holding the context to say what this means and what happens next. The
-		// wake is idempotent, so observing the same block again does not queue a
-		// second turn.
-		//
-		// A question the master raised itself must not wake that same master: it
-		// would start a turn whose only content is the question it just asked.
 		if !selfOwned {
 			if input.Kind == "human_check" {
-				// Review-before-the-user: the master looks at the evidence first, so
-				// a check that should never have been raised can be sent back
-				// through rework instead of interrupting the person. Approving here
-				// is deliberately not acceptance - see approveHumanCheck - because
-				// acceptance stays the person's own decision.
 				WakeForHumanCheck(store, input.TaskId, map[string]any{"nodeId": input.NodeId, "questionId": id})
 			} else {
 				WakeForBlockedNode(store, input.TaskId, BlockedNodeWake{NodeID: input.NodeId, Reason: input.Kind})
@@ -329,9 +252,6 @@ func InsertQuestion(store *TaskStore, input QuestionInput) QuestionInsertResult 
 	return QuestionInsertResult{Id: id, Owner: owner}
 }
 
-// HumanCheckPreReview reads the evidence a human acceptance check is resting
-// on, or nil when the question is not an open human check. This is what the
-// master reads before deciding whether the person should be asked at all.
 func HumanCheckPreReview(store *TaskStore, questionId string) map[string]any {
 	row := kernelRow(store.Db, "SELECT id,task_id,node_id,kind,status,data FROM questions WHERE id=?", questionId)
 	if row == nil || kernelString(row["kind"]) != "human_check" {
@@ -356,15 +276,6 @@ func HumanCheckPreReview(store *TaskStore, questionId string) map[string]any {
 	return review
 }
 
-// PendingHumanChecks lists the open human checks of one conversation that are
-// waiting for the master's look.
-//
-// Scoped by conversation, not by a task id, because the check belongs to
-// whichever graph task raised it - a different task from the conversation's
-// anchor.
-//
-// A check that has already been approved is not listed: the master reviewed
-// it, and listing it again is how the same check gets reviewed twice.
 func PendingHumanChecks(store *TaskStore, conversationId string) []map[string]any {
 	rows := kernelRows(store.Db, `SELECT q.id,q.task_id,q.node_id,q.data FROM questions q
     JOIN tasks t ON t.id=q.task_id
@@ -384,17 +295,6 @@ func PendingHumanChecks(store *TaskStore, conversationId string) []map[string]an
 	return checks
 }
 
-// ApproveHumanCheck records the master's approval of a human check.
-//
-// Approving is **not** acceptance. The check stays open and stays the user's
-// to answer, because acceptance is the person's own judgement and a machine
-// that signs for them makes "human acceptance" a name for something it is
-// not. What changes is that the master's look is now a durable, visible fact,
-// so an unapproved check is one nobody has examined rather than one nobody
-// mentioned.
-//
-// Idempotent: approving an already-approved check writes nothing and returns
-// false, so a retried command cannot manufacture a second approval.
 func ApproveHumanCheck(store *TaskStore, questionId, note string) bool {
 	apply := func() any {
 		row := kernelRow(store.Db, "SELECT task_id,node_id,data FROM questions WHERE id=? AND kind='human_check' AND status='open'", questionId)
@@ -426,7 +326,6 @@ func ApproveHumanCheck(store *TaskStore, questionId, note string) bool {
 	return approved
 }
 
-// questionMasterNode reads the master node of one task.
 func questionMasterNode(store *TaskStore, taskId string) *questionMaster {
 	row := kernelRow(store.Db, "SELECT id,status FROM nodes WHERE task_id=? AND json_extract(spec,'$.role')='master' LIMIT 1", taskId)
 	if row == nil {
@@ -435,10 +334,6 @@ func questionMasterNode(store *TaskStore, taskId string) *questionMaster {
 	return &questionMaster{Id: kernelString(row["id"]), Status: kernelString(row["status"])}
 }
 
-// questionConversationAnchor reads the conversation a task belongs to.
-// TODO(port): conversation.ts owns conversationForTask. This reads the same
-// row directly so the routing file does not depend on that translation's
-// row type.
 func questionConversationAnchor(store *TaskStore, taskId string) (string, bool) {
 	row := kernelRow(store.Db, `SELECT c.anchor_task_id FROM tasks t
  LEFT JOIN kernel_graph_owners g ON g.task_id=t.id LEFT JOIN tasks owner ON owner.id=g.owner_task_id

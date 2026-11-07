@@ -5,17 +5,11 @@ import (
 	"strings"
 )
 
-// OpenAgentContextAssembly resolves the prompt, the rules and the tool surface
-// of one operation. Opening it never starts an MCP or a Pi process.
 func OpenAgentContextAssembly(input AgentContextAssemblyOptions) *AgentContextAssembly {
 	workspace := ""
 	if input.Workspace != "" {
 		resolved, err := filepath.EvalSymlinks(input.Workspace)
 		if err != nil {
-			// A workspace directory that no longer exists is a fact about the
-			// data, not a broken daemon: measured 2026-11-02, a conversation from
-			// a /private/tmp project kept answering 500 for its context preview,
-			// which the console reported as a failed request.
 			Raise("workspace_missing", "The conversation workspace no longer exists: "+input.Workspace)
 		}
 		workspace = resolved
@@ -89,8 +83,6 @@ func OpenAgentContextAssembly(input AgentContextAssemblyOptions) *AgentContextAs
 			runtimeRules = &text
 		}
 	}
-	// The TypeScript read the project instructions here and never used them.
-	// The read is kept so the behaviour of the library does not change.
 	_, _, _ = agentContextProjectInstructions(workspace)
 	disabledTools := []string{}
 	if role == "main" && input.Library != nil {

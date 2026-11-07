@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// validateOperationArtifacts refuses evidence the harness cannot use.
 func validateOperationArtifacts(artifacts []ArtifactInput) {
 	seen := map[string]bool{}
 	for _, artifact := range artifacts {
@@ -30,7 +29,6 @@ func validateOperationArtifacts(artifacts []ArtifactInput) {
 	}
 }
 
-// OperationSnapshots lists the operations of one task.
 func OperationSnapshots(store *TaskStore, taskId string, query OperationQuery) []OperationSnapshot {
 	filters := []string{"task_id=?"}
 	params := []any{taskId}
@@ -69,7 +67,6 @@ func OperationSnapshots(store *TaskStore, taskId string, query OperationQuery) [
 	return out
 }
 
-// NodeOperationRuns lists the operation runs of one node.
 func NodeOperationRuns(store *TaskStore, taskId, nodeId string) []OperationRun {
 	rows := kernelRows(store.Db, `SELECT id,state,reserved,worker_active,waiting_slot,result,usage,dispatched_at,settled_at,waiting_ms,activation_id
     FROM operations WHERE task_id=? AND node_id=? ORDER BY rowid`, taskId, nodeId)
@@ -123,7 +120,6 @@ func NodeOperationRuns(store *TaskStore, taskId, nodeId string) []OperationRun {
 	return out
 }
 
-// MarkOperationCredentialWait records that an operation waits for a credential slot.
 func MarkOperationCredentialWait(store *TaskStore, operationId string, now ...int64) {
 	at := NowMillis()
 	if len(now) > 0 {
@@ -132,7 +128,6 @@ func MarkOperationCredentialWait(store *TaskStore, operationId string, now ...in
 	store.HoldOperationSlot(operationId, at)
 }
 
-// FinishOperationCredentialWait records that the credential slot is free again.
 func FinishOperationCredentialWait(store *TaskStore, operationId string, now ...int64) {
 	at := NowMillis()
 	if len(now) > 0 {
@@ -141,7 +136,6 @@ func FinishOperationCredentialWait(store *TaskStore, operationId string, now ...
 	store.CloseOperationSlot(operationId, at)
 }
 
-// ClearOperationCredentialWait drops the credential wait without accounting for it.
 func ClearOperationCredentialWait(store *TaskStore, operationId string) {
 	store.ClearOperationSlot(operationId)
 }

@@ -66,7 +66,6 @@ func clampThinkingLevel(reasoning bool, thinkingLevelMap map[string]*string, lev
 	return available[0]
 }
 
-// ThinkingOptionsFor lists the strengths this model accepts, in Pi's canonical order.
 func ThinkingOptionsFor(entry ModelEntry) []ModelThinkingOption {
 	labels := map[string]string{}
 	if meta := ModelMetadataFor(entry); meta != nil {
@@ -87,10 +86,6 @@ func ThinkingOptionsFor(entry ModelEntry) []ModelThinkingOption {
 	return out
 }
 
-// ControlledThinkingLevelMap reads the level map one model carries.
-//
-// The map is the model's own answer to "which effort means what here": a denied
-// level is a null and an allowed level is the value the provider expects for it.
 func ControlledThinkingLevelMap(model map[string]any) map[string]*string {
 	raw, ok := model["thinkingLevelMap"].(map[string]any)
 	if !ok {
@@ -112,7 +107,6 @@ func ControlledThinkingLevelMap(model map[string]any) map[string]*string {
 	return out
 }
 
-// EffectiveThinkingLevel is the level a model will actually run at.
 func EffectiveThinkingLevel(entry ModelEntry, requested *string) ModelThinkingLevel {
 	wanted := "off"
 	switch {
@@ -134,11 +128,6 @@ func EffectiveThinkingLevel(entry ModelEntry, requested *string) ModelThinkingLe
 	return ModelThinkingLevel(clampThinkingLevel(model.Reasoning, model.ThinkingLevelMap, wanted))
 }
 
-// controlledClampedLevel is the strength one request asks for.
-//
-// The stored strength is clamped to what the model accepts, and a strength of
-// "off" is not a strength at all: it is dropped on the way out, exactly as the
-// worker drops it, so a model that runs no thinking is asked for no thinking.
 func controlledClampedLevel(model map[string]any, options map[string]any) string {
 	requested, _ := options["reasoning"].(string)
 	if requested == "" || requested == "off" {
@@ -154,10 +143,6 @@ func controlledClampedLevel(model map[string]any, options map[string]any) string
 	return clampThinkingLevel(reasoning, ControlledThinkingLevelMap(model), requested)
 }
 
-// ControlledMaxTokens is the ceiling one request carries.
-//
-// The caller's cap wins over the model's own limit: a call that asks for a
-// short answer must not be handed the whole budget.
 func ControlledMaxTokens(model map[string]any, options map[string]any) int64 {
 	if value, ok := controlledSafeCount(options["maxTokens"]); ok && value > 0 {
 		return value
@@ -168,11 +153,6 @@ func ControlledMaxTokens(model map[string]any, options map[string]any) int64 {
 	return 0
 }
 
-// controlledThinkingBudget is the token budget one strength asks for.
-//
-// These are the SDK's budgets, and the two strongest strengths share the
-// strongest budget: a provider that names no budget of its own gets the one
-// this table holds.
 func controlledThinkingBudget(level string) (int64, bool) {
 	switch level {
 	case "minimal":
@@ -187,15 +167,8 @@ func controlledThinkingBudget(level string) (int64, bool) {
 	return 0, false
 }
 
-// MIN_ANSWER_TOKENS is the room the answer always keeps under the ceiling.
 const MIN_ANSWER_TOKENS = 1024
 
-// ControlledAnthropicThinking is the thinking part of one Anthropic request.
-//
-// Anthropic is asked for a budget of tokens rather than for a named strength:
-// the strength names the budget, the ceiling grows by the budget (but never
-// past the model's own limit), and the answer keeps a share of the ceiling for
-// itself. These are the SDK's rules.
 func ControlledAnthropicThinking(model map[string]any, options map[string]any) (int64, map[string]any) {
 	base := ControlledMaxTokens(model, options)
 	modelMax, _ := controlledSafeCount(model["maxTokens"])
@@ -227,12 +200,6 @@ func ControlledAnthropicThinking(model map[string]any, options map[string]any) (
 	}
 }
 
-// ControlledThinkingFields is the thinking part of one provider request.
-//
-// The SDK gives every provider its own way of asking for a strength, and a
-// provider asked in the wrong way refuses the whole request. These are the
-// SDK's rules: the same clamp, the same fields, and no field at all for a model
-// that runs no thinking.
 func ControlledThinkingFields(model map[string]any, options map[string]any) map[string]any {
 	out := map[string]any{}
 	level := controlledClampedLevel(model, options)
@@ -270,10 +237,6 @@ func ControlledThinkingFields(model map[string]any, options map[string]any) map[
 	return out
 }
 
-// controlledEffortValue is the effort the provider expects for one level.
-//
-// The model's own level map names it when the catalog says so; otherwise the
-// level itself is the value.
 func controlledEffortValue(levels map[string]*string, level string) string {
 	if effort, ok := levels[level]; ok && effort != nil {
 		return *effort
@@ -281,10 +244,6 @@ func controlledEffortValue(levels map[string]*string, level string) string {
 	return level
 }
 
-// controlledMappedEffort is the effort the model itself names for one level.
-//
-// A level the model denies has no name to send, and a request that carries
-// none is the honest one.
 func controlledMappedEffort(levels map[string]*string, level string) (string, bool) {
 	effort, ok := levels[level]
 	if !ok || effort == nil {

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// DisabledTools lists the tool names the user turned off.
 func (library *AgentContextLibrary) DisabledTools() []string {
 	path := filepath.Join(library.Root, agentContextToolStateFile)
 	body, ok, err := agentContextReadOptional(path)
@@ -40,7 +39,6 @@ func (library *AgentContextLibrary) DisabledTools() []string {
 	return agentContextUniqueSorted(names)
 }
 
-// SetDisabledTools turns tools off and reports the stored names.
 func (library *AgentContextLibrary) SetDisabledTools(values []string) []string {
 	candidates := []string{}
 	for _, value := range values {

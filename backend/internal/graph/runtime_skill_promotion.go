@@ -18,7 +18,6 @@ var skillNamePattern = regexp.MustCompile(`(?m)^name:\s*(.*)$`)
 
 var skillDescriptionPattern = regexp.MustCompile(`(?m)^description:\s*(.*)$`)
 
-// PromotionResult is a copied skill declaration. Binding stays a user decision.
 type PromotionResult struct {
 	Promoted struct {
 		ID       string
@@ -62,7 +61,6 @@ func digestSkill(dir string) string {
 	return fmt.Sprintf("%x", hash.Sum(nil))[:12]
 }
 
-// PromoteProjectSkill copies one project skill into the capability library.
 func PromoteProjectSkill(projectRoot, skillID, capabilityRoot string) PromotionResult {
 	source := filepath.Join(projectRoot, ".agents", "skills", skillID)
 	skillFile := filepath.Join(source, "SKILL.md")
@@ -165,7 +163,6 @@ func copySkillTree(source, target string) error {
 	})
 }
 
-// PromoteSkillFromProjects promotes the skill from whichever known project holds it.
 func PromoteSkillFromProjects(projectRoots []string, skillID, capabilityRoot string) PromotionResult {
 	holder := ""
 	for _, root := range projectRoots {

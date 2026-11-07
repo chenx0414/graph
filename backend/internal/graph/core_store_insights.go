@@ -5,12 +5,6 @@ import (
 	"strings"
 )
 
-// InsightsSummary is the one page that answers "what did this installation spend".
-//
-// Everything here is folded from what the installation already recorded: the
-// provider calls carry the billed token buckets and their cost, the tool calls
-// carry the tool side of the same work. Nothing is estimated, so a number on the
-// page can always be traced back to rows.
 type InsightsSummary struct {
 	GeneratedAt int64              `json:"generatedAt"`
 	Scope       InsightsScope      `json:"scope"`
@@ -21,7 +15,6 @@ type InsightsSummary struct {
 	Tools       []ToolCallStat     `json:"tools"`
 }
 
-// InsightsScope says which slice of the record was folded.
 type InsightsScope struct {
 	Kind  string `json:"kind"`
 	ID    string `json:"id,omitempty"`
@@ -36,7 +29,6 @@ type InsightsOverview struct {
 	CostMicros int64 `json:"costMicros"`
 }
 
-// InsightsTokens is the disjoint bucket total the provider reported.
 type InsightsTokens struct {
 	Input        int64   `json:"input"`
 	Output       int64   `json:"output"`
@@ -46,7 +38,6 @@ type InsightsTokens struct {
 	CacheHitRate float64 `json:"cacheHitRate"`
 }
 
-// InsightsTiming splits wall time into the two things that took it.
 type InsightsTiming struct {
 	ModelMs    int64 `json:"modelMs"`
 	ModelCalls int64 `json:"modelCalls"`
@@ -54,7 +45,6 @@ type InsightsTiming struct {
 	ToolCalls  int64 `json:"toolCalls"`
 }
 
-// InsightsModelRow is one billed model.
 type InsightsModelRow struct {
 	Model      string  `json:"model"`
 	Provider   string  `json:"provider"`
@@ -67,11 +57,6 @@ type InsightsModelRow struct {
 	AvgMs      float64 `json:"avgMs"`
 }
 
-// InsightsScopeFilter turns a scope into the task-id predicate both tables share.
-//
-// The two tables that carry the record are keyed by task, so a project or a
-// conversation scope is the set of tasks that belong to it. A scope that names
-// nothing is the whole installation, which is what the page opens on.
 func InsightsScopeFilter(scope InsightsScope) (string, []any) {
 	switch scope.Kind {
 	case "project":
@@ -100,7 +85,6 @@ func whereClause(filter string, extra ...string) string {
 	return " WHERE " + strings.Join(parts, " AND ")
 }
 
-// Insights folds the record for one scope.
 func (s *TaskStore) Insights(scope InsightsScope) InsightsSummary {
 	filter, args := InsightsScopeFilter(scope)
 	summary := InsightsSummary{GeneratedAt: NowMillis(), Scope: scope, Models: []InsightsModelRow{}, Tools: []ToolCallStat{}}
@@ -117,10 +101,6 @@ func (s *TaskStore) Insights(scope InsightsScope) InsightsSummary {
 	return summary
 }
 
-// insightProviderTotals folds the billed buckets and the model wall time.
-//
-// A row without a usage is a reservation that never settled: it still counts as
-// a step and as elapsed time, because the wait happened, but it adds no tokens.
 func (s *TaskStore) insightProviderTotals(filter string, args []any) (InsightsTokens, InsightsOverview, InsightsTiming) {
 	tokens := InsightsTokens{}
 	overview := InsightsOverview{}
@@ -140,7 +120,6 @@ func (s *TaskStore) insightProviderTotals(filter string, args []any) (InsightsTo
 		&overview.Steps, &tokens.Input, &tokens.Output, &tokens.CacheRead, &tokens.CacheWrite,
 		&cost, &timing.ModelMs, &timing.ModelCalls)
 	tokens.Total = tokens.Input + tokens.Output + tokens.CacheRead + tokens.CacheWrite
-	// The hit rate is the cached share of everything the provider had to read.
 	read := tokens.Input + tokens.CacheRead
 	if read > 0 {
 		tokens.CacheHitRate = float64(tokens.CacheRead) / float64(read)
@@ -149,7 +128,6 @@ func (s *TaskStore) insightProviderTotals(filter string, args []any) (InsightsTo
 	return tokens, overview, timing
 }
 
-// insightModelRows lists the models behind the totals, most expensive first.
 func (s *TaskStore) insightModelRows(filter string, args []any) []InsightsModelRow {
 	query := `SELECT
         coalesce(json_extract(model,'$.identity'), json_extract(model,'$.id'), ''),
@@ -182,11 +160,6 @@ func (s *TaskStore) insightModelRows(filter string, args []any) []InsightsModelR
 	return out
 }
 
-// insightTurns counts the turns the record actually holds for the scope.
-//
-// A turn is one user→agent exchange, so the count is distinct turn numbers in
-// the transcript, not messages: a turn carries many messages and still happened
-// once.
 func (s *TaskStore) insightTurns(scope InsightsScope) int64 {
 	query := `SELECT count(*) FROM (SELECT DISTINCT conversation_id, turn FROM messages`
 	args := []any{}

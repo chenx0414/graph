@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 )
 
-// execute dispatches one node: admit, prepare, dispatch, settle.
 func (e *Execution) execute(node ExecutionNodeRow) bool {
 	graphDatabaseMu.Lock()
 	accessPolicy := e.currentAccessPolicy()
@@ -138,7 +137,6 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	}
 	graphDatabaseMu.Unlock()
 
-	// The adapter prepares and dispatches outside the store lock: both are real I/O.
 	dispatch, prepareFailure := e.prepareDispatch(adapter, operation)
 	if prepareFailure != "" {
 		graphDatabaseMu.Lock()
@@ -181,7 +179,6 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	return true
 }
 
-// currentAccessPolicy is the policy frozen for this execution.
 func (e *Execution) currentAccessPolicy() *ResolvedAccessPolicy {
 	if e.access != nil {
 		return e.access()
@@ -190,13 +187,11 @@ func (e *Execution) currentAccessPolicy() *ResolvedAccessPolicy {
 	return ResolveAccessPolicy(policy, AccessPolicyContext{})
 }
 
-// conversationArchived reports whether the conversation of a task is archived.
 func conversationArchived(store *TaskStore, taskId string) bool {
 	conversation := ConversationForTask(store, taskId)
 	return conversation != nil && conversation.ArchivedAt != nil
 }
 
-// prepareDispatch asks the adapter for its dispatch callback.
 func (e *Execution) prepareDispatch(adapter *ActionAdapter, operation Operation) (func() OperationResult, string) {
 	if adapter.Prepare == nil {
 		return nil, "prepare must return a dispatch callback"
@@ -220,7 +215,6 @@ func (e *Execution) prepareDispatch(adapter *ActionAdapter, operation Operation)
 	return dispatch, ""
 }
 
-// runDispatch runs the adapter's dispatch callback.
 func (e *Execution) runDispatch(dispatch func() OperationResult) (result OperationResult, failure any) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -230,7 +224,6 @@ func (e *Execution) runDispatch(dispatch func() OperationResult) (result Operati
 	return dispatch(), nil
 }
 
-// dispatchFailureText renders the error a dispatch raised.
 func dispatchFailureText(failure any) string {
 	switch typed := failure.(type) {
 	case error:
@@ -242,8 +235,6 @@ func dispatchFailureText(failure any) string {
 	}
 }
 
-// reportResult settles the operation with the result the worker produced.
-// The caller holds the database lock.
 func (e *Execution) reportResult(operation Operation, result OperationResult) (failure any) {
 	defer func() {
 		if recovered := recover(); recovered != nil {

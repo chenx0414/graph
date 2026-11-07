@@ -1,11 +1,5 @@
 package graph
 
-// masterPromptSuffix is what the adapter appends to a master turn's prompt on
-// top of the shared agent context: for supervisor threads, the role the thread
-// plays.
-//
-// It lives beside the adapter rather than inside it because the role text is
-// read and edited as prose, and keeping it here leaves the turn setup readable.
 func masterPromptSuffix(store *TaskStore, conversation *ConversationRow, role string) string {
 	if conversation == nil || role != "master" {
 		return ""

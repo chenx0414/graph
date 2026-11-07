@@ -5,34 +5,19 @@ import (
 	"regexp"
 )
 
-// ProviderCredentialKind is the provider-credential category shown by the
-// settings wizard: a plain API key or a subscription access token. The wire
-// value is always an environment variable name (secretRef); the secret itself
-// never enters this module.
 type ProviderCredentialKind string
 
 const (
-	// ProviderCredentialKindAPIKey is a plain vendor API key.
 	ProviderCredentialKindAPIKey ProviderCredentialKind = "api-key"
-	// ProviderCredentialKindSubscription is a subscription access token.
 	ProviderCredentialKindSubscription ProviderCredentialKind = "subscription"
 )
 
-// ModelApiOpenAICompletions is the OpenAI-compatible chat transport.
 const ModelApiOpenAICompletions ModelApi = "openai-completions"
 
-// ModelApiOpenAIResponses is the OpenAI Responses transport: typed input items,
-// flat tool declarations and `response.*` events. It is one of the three
-// transports the runtime sends, and the only one that is not chat-completions.
 const ModelApiOpenAIResponses ModelApi = "openai-responses"
 
-// ModelApiAnthropicMessages is the Anthropic Messages transport.
 const ModelApiAnthropicMessages ModelApi = "anthropic-messages"
 
-// PlatformPresetRecord is one first-class provider Graph can configure with a
-// single credential. Presets carry the endpoint and transport defaults so the
-// wizard only has to collect a KEY (or subscription token), while `自定义`
-// collects all fields.
 type PlatformPresetRecord struct {
 	OAuthProvider  string                 `json:"oauthProvider,omitempty"`
 	ID             string                 `json:"id"`
@@ -41,40 +26,22 @@ type PlatformPresetRecord struct {
 	BaseURL        string                 `json:"baseUrl"`
 	CredentialRef  string                 `json:"credentialRef"`
 	CredentialKind ProviderCredentialKind `json:"credentialKind"`
-	// ModelsListSupported is advisory only: it hints whether the vendor is known
-	// to answer `<baseUrl>/models`. It never gates the probe - a wrong local
-	// guess must not hide a vendor that really does list models - so it only
-	// shapes copy. False means "expect a manual model id", not "do not request".
 	ModelsListSupported bool              `json:"modelsListSupported"`
 	Headers             map[string]string `json:"headers,omitempty"`
 	DocsURL             *string           `json:"docsUrl,omitempty"`
 	Notes               []string          `json:"notes"`
-	// Unsupported marks a platform the product has concluded: it stays in the
-	// directory so the console can explain what happened to it, and a
-	// configuration that still names it is refused with the reason.
 	Unsupported bool `json:"unsupported,omitempty"`
 }
 
-// CUSTOM_PLATFORM_ID is the fallback preset for any other OpenAI/Anthropic-
-// compatible endpoint.
 const CUSTOM_PLATFORM_ID = "custom"
 
-// ProviderRoutes are the console provider endpoints. They are deliberately
-// registered on the session-cookie `/api` face, NOT under `/api/app/*`: that
-// prefix requires the desktop bridge token the browser console cannot read, so
-// probing would never reach the daemon from the settings page.
 type ProviderRoutes struct {
 	List  string
 	Probe string
 }
 
-// PROVIDER_ROUTES are the console provider endpoints.
 var PROVIDER_ROUTES = ProviderRoutes{List: "/api/providers", Probe: "/api/providers/probe"}
 
-// PLATFORM_PRESETS are the built-in supported platforms. `custom` is the
-// fallback for any other OpenAI/Anthropic-compatible endpoint. Credential env
-// names are shared with the usage adapters (src/server/usage.ts) so one key
-// configures both.
 var PLATFORM_PRESETS = []PlatformPresetRecord{
 	{
 		ID: "opencode-go", Label: "OpenCode Go", API: ModelApiOpenAICompletions,
@@ -106,9 +73,6 @@ var PLATFORM_PRESETS = []PlatformPresetRecord{
 		ID: "chatgpt", Label: "ChatGPT", API: ModelApiOpenAIResponses,
 		BaseURL: "https://chatgpt.com/backend-api/codex", CredentialRef: "GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN",
 		CredentialKind: ProviderCredentialKindSubscription, ModelsListSupported: true,
-		// Concluded. The record stays so the console can say what happened to a
-		// configuration that names it; the reason below is what the settings page
-		// shows and what the configuration parser refuses an entry with.
 		Unsupported: true,
 		Notes: []string{
 			"已不再提供：Codex 后端只按 Responses 形状（input 项目、扁平工具、response.* 事件）应答，但它在握手后直接 EOF（连接早关），本仓的流式解析器不接受这条事件流，所以这个端点上没有任何一轮能跑完。",
@@ -117,18 +81,13 @@ var PLATFORM_PRESETS = []PlatformPresetRecord{
 	},
 }
 
-// unsupportedPlatformReason is the conclusion a record carries: why the platform
-// cannot serve a turn, and what replaces it.
 const unsupportedPlatformReason = "the Codex endpoint closes the connection before answering (EOF) and this runtime " +
 	"does not accept its openai-responses event stream, so no turn can complete on it; use grok (grok:grok-4.5) instead"
 
-// unsupportedPlatforms is the concluded set: the platforms whose records above
-// carry `Unsupported: true`, with the sentence that explains it.
 var unsupportedPlatforms = map[string]string{
 	"chatgpt": unsupportedPlatformReason,
 }
 
-// UnsupportedPlatformReason reports why a platform cannot serve a turn, or "".
 func UnsupportedPlatformReason(id string) string { return unsupportedPlatforms[id] }
 
 func init() {
@@ -149,7 +108,6 @@ func init() {
 	}
 }
 
-// PLATFORM_CREDENTIAL_REFS maps every preset id to its environment variable.
 var PLATFORM_CREDENTIAL_REFS = func() map[string]string {
 	refs := map[string]string{}
 	for _, preset := range PLATFORM_PRESETS {
@@ -171,8 +129,6 @@ var providerSecretRefPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var providerHeaderNamePattern = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 
-// sanitizeProviderHeaders accepts only string header maps (values are bounded,
-// names token-safe).
 func sanitizeProviderHeaders(value any) map[string]string {
 	record, ok := value.(map[string]any)
 	if !ok || record == nil {
@@ -195,13 +151,11 @@ func sanitizeProviderHeaders(value any) map[string]string {
 	return headers
 }
 
-// isHttpURL reports whether the value is an absolute http(s) address.
 func isHttpURL(value string) bool {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return false
 	}
-	// url.URL.Scheme never carries the colon, so it is compared without one.
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return false
 	}

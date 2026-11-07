@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// agentToolsSupervisor routes the two shapes of the supervisor channel: a
-// question waits for an answer and stops the turn, a notice does neither.
 func agentToolsSupervisor(ask func(PiAdapterAskedQuestion), notify func(notice PiAdapterSupervisorNotice) any, params map[string]any) any {
 	kind := strings.TrimSpace(agentToolsStringOrEmpty(params["kind"]))
 	if kind == "" || kind == "question" {
@@ -39,6 +37,5 @@ func agentToolsSupervisor(ask func(PiAdapterAskedQuestion), notify func(notice P
 		ArtifactVersion: version,
 		RequestID:       requestID,
 	})
-	// No terminate: the sender keeps working after telling its supervisor.
 	return agentToolsText(stringifyJSON(delivered))
 }

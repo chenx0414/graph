@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// ConsoleAddress is where the console is listening, written for tools that have to find it.
 type ConsoleAddress struct {
 	URL       string `json:"url"`
 	PID       int    `json:"pid"`
@@ -19,7 +18,6 @@ func ConsoleAddressPath(stateDir string) string {
 	return filepath.Join(stateDir, "console.json")
 }
 
-// WriteConsoleAddress publishes the bound address. Written once, when the socket is already listening.
 func WriteConsoleAddress(stateDir string, address ConsoleAddress) {
 	raw, err := json.MarshalIndent(address, "", "  ")
 	if err != nil {
@@ -30,7 +28,6 @@ func WriteConsoleAddress(stateDir string, address ConsoleAddress) {
 	}
 }
 
-// ReadConsoleAddress returns the recorded address, or nil when there is none or it does not read as one.
 func ReadConsoleAddress(stateDir string) *ConsoleAddress {
 	raw, err := os.ReadFile(ConsoleAddressPath(stateDir))
 	if err != nil {

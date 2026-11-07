@@ -52,23 +52,12 @@ type NodeDefinition struct {
 	Recipe       string `json:"recipe"`
 	Task         string `json:"task"`
 	Instructions string `json:"instructions,omitempty"`
-	// Harness overrides the prompt texts of this node only. The keys are prompt
-	// keys of the editable library (rules/<role>.md, tools/<role>.md,
-	// runtime/node.md, agents/<definition-id>.md); the values replace the text
-	// that would otherwise be read from the library. It is how one task can run
-	// under several harnesses at once.
 	Harness     map[string]string      `json:"harness,omitempty"`
 	Workspace   *NodeWorkspace         `json:"workspace,omitempty"`
 	Access      map[string]any         `json:"access,omitempty"`
 	Acceptance  []string               `json:"acceptance,omitempty"`
 	Submission  NodeSubmission         `json:"submission"`
 	Deliverable *NodeDeliverable       `json:"deliverable,omitempty"`
-	// Integrate puts this node's committed work into the graph's integration
-	// tip when it settles. A nil value means yes, which is what an
-	// implementation lane wants. An experiment does not: candidates that ran
-	// the same task can produce the same path, and the second one to settle is
-	// then refused by the integration tip for a collision that says nothing
-	// about which candidate did better.
 	Integrate   *bool                  `json:"integrate,omitempty"`
 	Inputs      map[string]ProtocolRef `json:"inputs"`
 	Outputs     map[string]ProtocolRef `json:"outputs"`
@@ -186,13 +175,10 @@ type GraphDefinition struct {
 	SubgraphInstances map[string]SubgraphInstanceBinding `json:"subgraphInstances,omitempty"`
 }
 
-// interfaceSpecJSONEqual compares two JSON values by their canonical form.
 func interfaceSpecJSONEqual(left, right any) bool {
 	return jsonStringify(left) == jsonStringify(right)
 }
 
-// interfaceSpecPattern compiles one schema pattern and keeps it for the next
-// value that needs it.
 func interfaceSpecPattern(pattern string) (*regexp.Regexp, error) {
 	interfaceSpecPatternsMutex.Lock()
 	defer interfaceSpecPatternsMutex.Unlock()
@@ -214,7 +200,6 @@ var interfaceSpecPatterns = map[string]*regexp.Regexp{}
 
 var interfaceSpecPatternsMutex sync.Mutex
 
-// interfaceSpecTypeNames lists the type names a schema promises.
 func interfaceSpecTypeNames(value any) ([]string, bool) {
 	switch typed := value.(type) {
 	case string:
@@ -230,7 +215,6 @@ func interfaceSpecTypeNames(value any) ([]string, bool) {
 	return nil, false
 }
 
-// interfaceSpecTypeKnown reports whether the validator knows the type name.
 func interfaceSpecTypeKnown(name string) bool {
 	switch name {
 	case "object", "array", "string", "boolean", "null", "number", "integer":

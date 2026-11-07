@@ -11,21 +11,18 @@ type NodeEntryQuery struct {
 	EntryID *string
 }
 
-// NodeConfigurationSnapshot is the declaration frozen for one revision.
 type NodeConfigurationSnapshot struct {
 	Revision   int                `json:"revision"`
 	Definition NodeDefinition     `json:"definition"`
 	Defaults   *ExecutionSettings `json:"defaults"`
 }
 
-// NodeConfigurations compares the running declaration with the next one.
 type NodeConfigurations struct {
 	Current *NodeConfigurationSnapshot `json:"current"`
 	Next    *NodeConfigurationSnapshot `json:"next"`
 	Pending bool                       `json:"pending"`
 }
 
-// NodePromptView is the prompt a node was actually sent.
 func KernelConversationNodes(kernel *KernelStore, graphID string) []any {
 	rows := kernelRows(kernel.DB, `SELECT n.node_id,n.spec,n.status,b.role,b.model_id,s.used,e.token_budget
     FROM kernel_nodes n LEFT JOIN kernel_node_bindings b ON b.task_id=n.task_id AND b.node_id=n.node_id
@@ -138,8 +135,6 @@ func nodeConfigurations(kernel *KernelStore, graphID, nodeID, executionID string
 	return NodeConfigurations{Current: current, Next: next, Pending: pending}
 }
 
-// kernelNodeThroughput is the newest settled provider call of one graph node: what it
-// wrote and how long the provider took, which is what the node chat footer prints.
 func kernelNodeThroughput(kernel *KernelStore, graphID, nodeID string) NodeThroughput {
 	row := kernelRow(kernel.DB, `SELECT usage AS usage, created_at AS createdAt, settled_at AS settledAt
     FROM kernel_provider_calls
@@ -150,7 +145,6 @@ func kernelNodeThroughput(kernel *KernelStore, graphID, nodeID string) NodeThrou
 	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate}
 }
 
-// KernelNodeRun is the node detail, including transcript page fields from ListNodeEntries.
 func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQuery) any {
 	row, definition := historicalNode(kernel, graphID, nodeID)
 	if row == nil || definition == nil {
@@ -343,10 +337,6 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		})
 	}
 	page := asMap(ListNodeEntries(kernel.Store, graphID, nodeID, query))
-	// A node conversation without these two reads looks the same whether the node
-	// is waiting for an answer or has nothing to say, and whether the reader's
-	// second message is queued or lost. Both were empty here before: the console
-	// reads this view for every graph node.
 	questions := []any{}
 	for _, row := range kernelRows(kernel.DB, "SELECT id,kind,status,data FROM questions WHERE task_id=? AND node_id=? ORDER BY rowid", graphID, nodeID) {
 		questions = append(questions, map[string]any{
@@ -381,7 +371,6 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 		Queued           []map[string]any   `json:"queued"`
 		Evidence         []any              `json:"evidence"`
 		Timing           any                `json:"timing"`
-		// The node's newest settled request: the footer prints tokens/s from it.
 		Throughput any `json:"throughput"`
 		Entries          any                `json:"entries"`
 		EntryCount       any                `json:"entryCount"`
@@ -406,10 +395,6 @@ func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQ
 	}
 }
 
-// kernelNodePhase is the graph's own phase, not the task row's: a paused graph
-// keeps phase "running" there and carries the pause in its own column, so reading
-// the row told the console a paused node was busy (measured 2026-11-05 - the node
-// chat showed no pause while the graph was paused).
 func kernelNodePhase(kernel *KernelStore, graphID string) string {
 	phase := GraphPhase(kernel.Store.Task(graphID).Phase)
 	row := kernelRow(kernel.DB, "SELECT paused FROM tasks WHERE id=?", graphID)

@@ -26,22 +26,16 @@ Options:
   --min-age-days <n>       Only work whose last event is older than this (default: 1)
   -h, --help               Print this help`
 
-// reclaimReport is what the command tells the caller.
 type reclaimReport struct {
 	State string `json:"state"`
 	File  string `json:"file"`
 	Bytes int64  `json:"bytes"`
-	// Plan is what a reclaim would delete.
 	Plan RetentionPlan `json:"plan"`
-	// Applied is what a reclaim did delete; absent for a dry run.
 	Applied *RetentionApplied `json:"applied,omitempty"`
-	// Backup is the copy taken before a reclaim.
 	Backup string `json:"backup,omitempty"`
-	// BytesAfter is the size of the database after the reclaim.
 	BytesAfter int64 `json:"bytesAfter,omitempty"`
 }
 
-// reclaimNumber reads a non-negative integer option.
 func reclaimNumber(raw string, name string) int {
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 0 {
@@ -50,8 +44,6 @@ func reclaimNumber(raw string, name string) int {
 	return value
 }
 
-// runReclaim is the `graphd reclaim` command. The rules live in
-// core_state_retention.go; this is the entry point that can reach them.
 func runReclaim(args []string, cwd string) int {
 	stateDir := ""
 	apply := false
@@ -92,8 +84,6 @@ func runReclaim(args []string, cwd string) int {
 	}
 	stateDir = resolvePath(cwd, stateDir)
 	database := filepath.Join(stateDir, "tasks.sqlite")
-	// The daemon's own lock: if it refuses us, a Graph is running and this
-	// state is off limits.
 	release := AcquireOwner(filepath.Join(stateDir, "owner.sqlite"))
 	defer release()
 	db, err := OpenSQLite(database)
@@ -134,7 +124,6 @@ func runReclaim(args []string, cwd string) int {
 	return 0
 }
 
-// copyStateFile copies the database and the sidecars a WAL database leaves.
 func copyStateFile(database string, backup string) error {
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		raw, err := os.ReadFile(database + suffix)
@@ -142,7 +131,6 @@ func copyStateFile(database string, backup string) error {
 			if suffix == "" {
 				return err
 			}
-			// The sidecar may not exist.
 			continue
 		}
 		if err := os.WriteFile(backup+suffix, raw, 0o600); err != nil {
@@ -152,7 +140,6 @@ func copyStateFile(database string, backup string) error {
 	return nil
 }
 
-// writeReclaimReport prints the report as JSON.
 func writeReclaimReport(report reclaimReport) {
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

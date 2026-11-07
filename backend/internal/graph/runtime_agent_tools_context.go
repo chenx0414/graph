@@ -1,6 +1,5 @@
 package graph
 
-// agentToolsSupervisorPresent reports whether one session has a supervisor at all.
 func agentToolsSupervisorPresent(supervisor PiAdapterSupervisor) bool {
 	return supervisor.Propose != nil || supervisor.WithdrawDraft != nil || supervisor.ConfirmDraft != nil ||
 		supervisor.GraphState != nil || supervisor.TaskStatus != nil || supervisor.ValidateProposal != nil ||
@@ -8,7 +7,6 @@ func agentToolsSupervisorPresent(supervisor PiAdapterSupervisor) bool {
 		supervisor.ResolveProblem != nil
 }
 
-// agentToolsArtifacts is the normalized artifact surface of one session.
 type agentToolsArtifacts struct {
 	present bool
 	access  AgentArtifactAccess
@@ -20,7 +18,6 @@ type agentToolsArtifacts struct {
 	promote func(input ArtifactPromoteInput) ArtifactRecord
 }
 
-// agentToolsArtifactsOf normalizes the artifact surface of one session.
 func agentToolsArtifactsOf(value any) agentToolsArtifacts {
 	switch service := value.(type) {
 	case *PiAdapterArtifactService:
@@ -52,13 +49,11 @@ func agentToolsArtifactsOf(value any) agentToolsArtifacts {
 	return agentToolsArtifacts{}
 }
 
-// agentToolsPeers is the normalized peer surface of one session.
 type agentToolsPeers struct {
 	list func() []PiAdapterPeerNode
 	send func(request PiAdapterPeerRequest) any
 }
 
-// agentToolsPeersOf normalizes the peer surface of one session.
 func agentToolsPeersOf(value any) *agentToolsPeers {
 	switch service := value.(type) {
 	case PiAdapterPeerTools:

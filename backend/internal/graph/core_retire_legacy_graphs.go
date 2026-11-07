@@ -2,8 +2,6 @@ package graph
 
 // graph:table-writes-exempt: retiring a graph and everything of it is one fact about many tables
 
-// RetireLegacyGraphs stops pre-interface dispatch without deleting its historical identities.
-// ADR 0031 preserves drafts, artifacts, worktrees and accounting provenance.
 func RetireLegacyGraphs(store *TaskStore) {
 	candidates := kernelRows(store.DB, `SELECT t.id FROM tasks t
     WHERE NOT EXISTS (SELECT 1 FROM kernel_revisions k WHERE k.task_id=t.id)
@@ -17,10 +15,6 @@ func RetireLegacyGraphs(store *TaskStore) {
 		return
 	}
 	store.Transaction(func() any {
-		// Retain every source identity, draft, artifact and accounting record.
-		// A stopped task fences its former dispatcher without deleting provenance:
-		// the user's own work, the artifacts they published and what the run
-		// cost them stay readable after the upgrade.
 		for _, row := range candidates {
 			if row["id"] == nil {
 				panic("retired graph id is null")

@@ -13,8 +13,6 @@ func (state *kernelGraphLaneState) modelChannel(graphId, nodeId string, session 
 		panic(errorString("Invalid model context"))
 	}
 	channel := &kernelGraphLaneNodeChannel{}
-	// A send whose model configures a fallback may be taken over, and its failed
-	// attempt is settled as producing nothing so the fallback can be sent.
 	fallback := kernelGraphLaneFallback(state.options, model)
 	execution := state.options.Kernel.RunningExecution(graphId, nodeId)
 	if execution == nil {
@@ -39,8 +37,6 @@ func (state *kernelGraphLaneState) modelChannel(graphId, nodeId string, session 
 			release()
 		}
 	}
-	// One send for one model: its own gate, credential and slot, so the provider
-	// call of either attempt is charged to the model that really answered.
 	var open func(candidate ModelEntry) (ModelEventStream, error)
 	open = func(candidate ModelEntry) (ModelEventStream, error) {
 		candidateCredential := state.options.CredentialFor(candidate)
@@ -87,8 +83,6 @@ func (state *kernelGraphLaneState) modelChannel(graphId, nodeId string, session 
 			EstimateMissing: kernelGraphLaneUnlimited(state.options.Kernel, executionID),
 			HasFallback:     fallback != nil,
 			OnRequest: func(callId string, profile map[string]any) {
-				// The TypeScript event spreads the profile into the event object,
-				// so the profile's own keys sit beside callId and model.
 				event := map[string]any{
 					"callId": callId, "executionId": executionID, "nodeId": nodeId, "model": candidate.Id,
 					"rates": candidate.Cost, "pricing": candidate.Pricing,
@@ -113,9 +107,6 @@ func (state *kernelGraphLaneState) modelChannel(graphId, nodeId string, session 
 		return nil, err
 	}
 	channel.inner = StreamWithModelFallback(stream, model.Id, fallback, open, func(record ModelFallbackRecord) {
-		// The four facts are recorded where the kernel keeps its own events: a
-		// fallback that is not visible here would be the same as a model that
-		// silently replaced another one.
 		state.options.Kernel.Store.Event(graphId, "graph.provider.fallback", map[string]any{
 			"nodeId": nodeId, "executionId": executionID,
 			"primaryModel": record.PrimaryModel, "error": record.Error,
@@ -125,8 +116,6 @@ func (state *kernelGraphLaneState) modelChannel(graphId, nodeId string, session 
 	return channel, nil
 }
 
-// kernelGraphLaneFallback is the model one entry falls back to when the provider
-// boundary breaks, or nil when the entry configures none.
 func kernelGraphLaneFallback(options KernelGraphLaneOptions, model ModelEntry) *ModelEntry {
 	if model.FallbackModelId == "" || options.Directory == nil || model.FallbackModelId == model.Id {
 		return nil

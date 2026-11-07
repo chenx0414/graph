@@ -6,8 +6,6 @@ import (
 	"fmt"
 )
 
-// sessionFor assembles the node's session: the resident process, the
-// bound model and the tools the turn may call.
 func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVersion int) NodeSession {
 	if state.closing.Load() {
 		panic(errorString("Graph runtime is state.closing.Load()"))
@@ -34,9 +32,6 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 	} else if recipe != "" && state.options.Catalog.Definition(recipe).Review {
 		role = "reviewer"
 	}
-	// A node may replace the prompt texts it runs under. That is how one
-	// task runs under several harnesses at once: the harness is the
-	// difference between the candidates, the task is what they all answer.
 	library := state.options.Library
 	if node, ok := revision.Definition.Nodes[nodeId]; ok && len(node.Harness) > 0 {
 		library = state.options.Library.WithOverlay(node.Harness)
@@ -114,15 +109,11 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		bindings.AskSupervisor = func(question PiAdapterAskedQuestion) {
 			state.options.Kernel.RecordNodeQuestion(graphId, nodeId, question)
 		}
-		// A notice reaches the global supervisor's thread directly; it is not a
-		// node question and nothing in this graph waits for it.
 		bindings.NotifySupervisor = func(notice PiAdapterSupervisorNotice) any {
 			notice.EvidenceExcerpt, notice.EvidenceFailure = noticeEvidenceExcerpt(notice.ArtifactID, notice.ArtifactVersion, func(id string, version int, maxBytes int) ArtifactRead {
 				if state.options.Artifacts == nil {
 					Raise("invalid_state", "This session has no artifact workspace")
 				}
-				// A notice that names no version means the newest one; Get answers
-				// latest only for a nil version, and Read insists on a real number.
 				if version <= 0 {
 					version = state.options.Artifacts.Get(graphId, id, nil, "").Version
 				}
@@ -162,9 +153,6 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 			})
 		}
 	}
-	// The peer surface is the shape the agent tools read: PiAdapterPeerTools.
-	// TODO(port): the TypeScript peer entry is {id, href}; the Go peer node has no
-	// href field, so the graph:// address of a peer is not reported to the model.
 	bindings.Peers = PiAdapterPeerTools{
 		List: func() []PiAdapterPeerNode {
 			peers := []PiAdapterPeerNode{}
@@ -189,7 +177,6 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 	}
 	if state.options.Artifacts != nil {
 		artifacts := state.options.Artifacts
-		// The artifact surface is the shape the agent tools read: AgentToolsArtifactService.
 		bindings.Artifacts = &AgentToolsArtifactService{
 			AllowedNamespaces: []string{"plans", "research", "reviews", "deliverables", "summaries"},
 			CanPromote:        false,
@@ -226,8 +213,6 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 				}
 				return artifacts.Publish(published)
 			},
-			// The TypeScript binding has no promote method at all; a node may not
-			// promote, so the tool is never offered and this only guards a direct call.
 			Promote: func(input ArtifactPromoteInput) ArtifactRecord {
 				Raise("forbidden", "This node may not promote artifacts")
 				return ArtifactRecord{}
@@ -247,8 +232,6 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		Workspace:          workspace,
 		InstancesDir:       state.options.InstancesDir,
 		Bindings:           bindings,
-		// The PiG kernel has no SDK of its own, so the daemon provides the
-		// native tools the TypeScript SDK used to publish.
 		DaemonNativeTools: true,
 	}
 	if library != nil {

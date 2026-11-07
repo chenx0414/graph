@@ -1,16 +1,3 @@
-/**
- * Archived default price snapshot (C01).
- *
- * Every entry carries the official page it was read from and the date it was
- * read, so the wizard can show a reference price with provenance instead of an
- * invented number. Models that could not be verified stay unknown: this module
- * never zero-fills a price. Amounts are normalized per million tokens.
- *
- * The snapshot is intentionally a plain data module: refreshing is an explicit
- * user action (`applyPriceSnapshot`), and a refresh only re-stamps/re-verifies
- * the archived entries against their source pages; it never rewrites the cost
- * already frozen on historical invocations.
- */
 import type { ModelCost, ModelPricing } from './models.ts';
 
 export interface PriceSnapshot {
@@ -20,29 +7,13 @@ export interface PriceSnapshot {
   currency: string;
   unit: 'per_million_tokens';
   sourceUrl: string;
-  /** ISO date (UTC) the source page was read. */
   retrievedAt: string;
-  /** Revision frozen into every invocation cost produced from this entry. */
   catalogRevision: string;
-  /** Human-readable caveat, for example peak/off-peak basis or an upper bound. */
   note?: string;
 }
 
-/** Bump when the archived amounts change; the date stays the retrieval date. */
 export const PRICE_SNAPSHOT_BASE = '2026-09-15';
 
-/**
- * Verified 2026-09-15:
- * - Anthropic: https://www.anthropic.com/pricing (standard API rates; cache
- *   read 0.1x, 5m cache write 1.25x).
- * - DeepSeek: https://api-docs.deepseek.com/quick_start/pricing (peak rates
- *   used as a conservative upper bound; off-peak is half. DeepSeek publishes
- *   no separate cache-write rate, so the cache-miss rate is reused as an upper
- *   bound rather than a zero).
- * OpenAI, Google Gemini and OpenRouter pages were not readable from this
- * environment (HTTP 403 / no static table), so their template models carry no
- * price and stay unknown.
- */
 export const PRICE_SNAPSHOT: PriceSnapshot[] = [
   {
     provider: 'anthropic', modelId: 'claude-sonnet-4-5',
@@ -76,7 +47,6 @@ export const PRICE_SNAPSHOT: PriceSnapshot[] = [
   },
 ];
 
-/** Lookup by provider template and upstream model id. */
 export function snapshotFor(provider: string, modelId: string): PriceSnapshot | undefined {
   return PRICE_SNAPSHOT.find(entry => entry.provider === provider && entry.modelId === modelId);
 }
@@ -103,11 +73,8 @@ export interface PriceRefreshResult {
 }
 
 export interface PriceRefreshOptions {
-  /** Re-verification of one archived entry against its official page. */
   verify: (snapshot: PriceSnapshot) => boolean;
-  /** Revision stamped on entries verified in this refresh. */
   revision: string;
-  /** ISO date of this refresh. */
   retrievedAt: string;
 }
 
@@ -115,16 +82,6 @@ interface ConfigDocument {
   models?: { entries?: Record<string, unknown>[] };
 }
 
-/**
- * Apply the archived snapshot to one raw config document.
- *
- * Rules (C01):
- * - verified entry: frozen amounts + new revision/date;
- * - unverifiable entry with a previous price: amounts kept, status 'stale';
- * - no archived entry: untouched, status 'unknown' (never zero-filled);
- * - manual override without a snapshot entry: kept as-is, status 'manual'.
- * Historical invocation cost JSON is stored elsewhere and never touched here.
- */
 export function applyPriceSnapshot(document: unknown, options: PriceRefreshOptions): { document: unknown; results: PriceRefreshResult[] } {
   const results: PriceRefreshResult[] = [];
   if (!document || typeof document !== 'object') return { document, results };

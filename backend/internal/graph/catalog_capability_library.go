@@ -5,9 +5,6 @@ import (
 	"sort"
 )
 
-// CapabilityKind is the kind of a capability entry: skill, mcp, extension,
-// pi-extension or prompt. It stays an alias of string because the manifest
-// parser hands plain strings around.
 type CapabilityKind = string
 
 const (
@@ -18,14 +15,6 @@ const (
 	CapabilityKindPrompt      CapabilityKind = "prompt"
 )
 
-// CapabilityOrigin is where a skill entry came from. The order matters: it decides
-// which of several entries that share a name the library shows.
-//
-// A library entry comes first because it is the only one that can be bound, and binding
-// mirrors it into the Agent's own folder, which is where the native loader looks first - so
-// the bound copy is the one that actually reaches the model. A hand-placed entry in the
-// Agent's folder comes next (it wins while nothing is bound), then the global folders and
-// finally the project's own folders.
 type CapabilityOrigin string
 
 const (
@@ -35,8 +24,6 @@ const (
 	CapabilityOriginProject CapabilityOrigin = "project"
 )
 
-// capabilityOriginOrder ranks the origins. The library entry wins, then a hand-placed
-// Agent entry, then the global folders, then the project's own folders.
 var capabilityOriginOrder = map[CapabilityOrigin]int{
 	CapabilityOriginLibrary: 0,
 	CapabilityOriginAgent:   1,
@@ -44,14 +31,12 @@ var capabilityOriginOrder = map[CapabilityOrigin]int{
 	CapabilityOriginProject: 3,
 }
 
-// CapabilityDuplicate is a same-name entry the library folded into another one.
 type CapabilityDuplicate struct {
 	Id      string `json:"id"`
 	Version string `json:"version"`
 	Source  string `json:"source"`
 }
 
-// CapabilityRecord is one entry of the capability library.
 type CapabilityRecord struct {
 	Id            string                `json:"id"`
 	Kind          CapabilityKind        `json:"kind"`
@@ -71,7 +56,6 @@ type CapabilityRecord struct {
 	Duplicates    []CapabilityDuplicate `json:"duplicates,omitempty"`
 }
 
-// CapabilitySearchInput filters the capability list.
 type CapabilitySearchInput struct {
 	Query  string         `json:"query,omitempty"`
 	Kind   CapabilityKind `json:"kind,omitempty"`
@@ -80,7 +64,6 @@ type CapabilitySearchInput struct {
 	Offset int            `json:"offset,omitempty"`
 }
 
-// CapabilitySearchResult is one page of the capability list.
 type CapabilitySearchResult struct {
 	Total   int                `json:"total"`
 	Offset  int                `json:"offset"`
@@ -89,53 +72,43 @@ type CapabilitySearchResult struct {
 	Items   []CapabilityRecord `json:"items"`
 }
 
-// CapabilityBundleInput is one capability bundle to install into the capability root.
 type CapabilityBundleInput struct {
 	Manifest  Json              `json:"manifest"`
 	Files     map[string]string `json:"files,omitempty"`
 	Overwrite bool              `json:"overwrite,omitempty"`
 }
 
-// AgentCombinationSearchInput filters the recipe list.
 type AgentCombinationSearchInput struct {
 	Query string     `json:"query,omitempty"`
 	Limit int        `json:"limit,omitempty"`
 }
 
-// AgentCombinationSearchResult is one page of the recipe list.
 type AgentCombinationSearchResult struct {
 	Total int                    `json:"total"`
 	Items []AgentCombinationView `json:"items"`
 }
 
-// CapabilityLibraryOptions are the filesystem locations the library reads.
 type CapabilityLibraryOptions struct {
 	CapabilityRoot string
 	RecipesPath    string
-	// Projects are the configured projects, read at refresh time, so their own skill
-	// folders are listed.
 	Projects func() []ProjectConfig
 }
 
-// CapabilityLibrarySnapshot is the library view after a refresh.
 type CapabilityLibrarySnapshot struct {
 	Capabilities      []CapabilityRecord     `json:"capabilities"`
 	AgentCombinations []AgentCombinationView `json:"agentCombinations"`
 }
 
-// CapabilityBundleResult is an installed capability bundle.
 type CapabilityBundleResult struct {
 	Capability CapabilityRecord `json:"capability"`
 	Directory  string           `json:"directory"`
 }
 
-// DeletedAgentCombination reports a removed recipe.
 type DeletedAgentCombination struct {
 	Id      string `json:"id"`
 	Deleted bool   `json:"deleted"`
 }
 
-// capabilityBundleDirectories is where each kind of bundle is installed.
 var capabilityBundleDirectories = map[CapabilityKind]string{
 	CapabilityKindSkill:       "skills",
 	CapabilityKindMCP:         "mcp",
@@ -149,7 +122,6 @@ var (
 	capabilityBundleHeaderRef = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
 )
 
-// CapabilitySourceLabel is what the library view calls one entry's source.
 func CapabilitySourceLabel(record CapabilityRecord) string {
 	if record.Owner != "" {
 		return record.Owner
@@ -167,12 +139,6 @@ func capabilityOriginRank(record CapabilityRecord) int {
 	return capabilityOriginOrder[record.Origin]
 }
 
-// GroupCapabilitiesByName folds same-name skill entries into one row.
-//
-// One row per skill name: several entries that share a name resolve to a single skill for
-// the native loader, so the library shows the one that decides the outcome and lists the
-// rest. The origin order picks the entry; within one origin the shortest id wins, then the
-// alphabet, so the result never depends on scan order.
 func GroupCapabilitiesByName(records []CapabilityRecord) []CapabilityRecord {
 	groups := map[string][]CapabilityRecord{}
 	order := []string{}

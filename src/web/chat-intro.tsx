@@ -1,6 +1,5 @@
 import { Icon, type IconName } from './ui.tsx';
 
-// The welcome block is what an empty conversation shows instead of a blank page.
 export function ChatIntro({ eyebrow, title, body }: { eyebrow?: string; title: string; body: string }) {
   return (
     <div className="new-chat-intro">

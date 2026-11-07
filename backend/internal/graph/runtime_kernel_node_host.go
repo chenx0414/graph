@@ -7,14 +7,12 @@ import (
 	"encoding/json"
 )
 
-// NodeSessionBinding is the resident worker's persisted identity.
 type NodeSessionBinding struct {
 	InstanceId        string `json:"instanceId"`
 	NodeId            string `json:"nodeId"`
 	DefinitionVersion string `json:"definitionVersion"`
 }
 
-// NodeSessionEnvironment is the frozen workspace a session was built from.
 type NodeSessionEnvironment struct {
 	Revision  int                   `json:"revision"`
 	Workspace string                `json:"workspace"`
@@ -22,7 +20,6 @@ type NodeSessionEnvironment struct {
 	Access    *ResolvedAccessPolicy `json:"access"`
 }
 
-// NodeSession is one v2 node's assembled prompt, tools, and digests.
 type NodeSession struct {
 	Environment         *NodeSessionEnvironment
 	Role                string
@@ -37,7 +34,6 @@ type NodeSession struct {
 	RuntimePolicyDigest string
 }
 
-// NodeSessionOptions assembles one node from its immutable recipe.
 type NodeSessionOptions struct {
 	Frozen             *FrozenExecutionRecovery
 	RetainCapabilities bool
@@ -53,26 +49,18 @@ type NodeSessionOptions struct {
 	InstancesDir       string
 	Gate               *SendGate
 	Library            *AgentContextLibrary
-	// DaemonNativeTools makes the daemon provide the native tools the
-	// TypeScript SDK used to publish. It is set when the kernel runs without
-	// an SDK of its own, so nothing else would offer read, write, edit, ls,
-	// find, grep and the shell to the model.
 	DaemonNativeTools bool
 }
 
-// NodeSessionBindings are the host tools a node may call.
 type NodeSessionBindings struct {
 	Peers           any
 	Artifacts       any
 	AskSupervisor   func(PiAdapterAskedQuestion)
-	// NotifySupervisor lets a graph node report a milestone to the global
-	// supervisor without waiting for an answer.
 	NotifySupervisor func(notice PiAdapterSupervisorNotice) any
 	CommitWorkspace func(paths []string, message string) any
 	Fetch           func(url string, signal *AbortSignal) RetrievalResult
 }
 
-// GraphSectionQuery reads one slice of a frozen definition.
 type GraphSectionQuery struct {
 	Section string
 	Id      *string
@@ -106,7 +94,6 @@ func kernelPassthroughGate() SendGate {
 	}
 }
 
-// NodeSessionRequest assembles one node's session from its recipe.
 func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 	recipe := kernelNodeRecipe(options.Kernel, options.GraphId, options.NodeId, options.RevisionVersion)
 	if options.Frozen == nil && !options.Catalog.HasDefinition(recipe) {
@@ -189,7 +176,6 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 							entries = append(entries, kernelSectionEntry{id: value.Id, value: value})
 						}
 					} else {
-						// TODO(port): definition section walks are sorted; TypeScript Object.entries keeps insertion order.
 						entries = kernelSectionEntries(definition, section)
 					}
 					selected := []kernelSectionEntry{}

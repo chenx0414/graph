@@ -11,42 +11,22 @@ import (
 	"github.com/MichaelKinsy/PiG/mcp"
 )
 
-// The kernel connects MCP servers itself.
-//
-// The model reaches a server's tools under PiG's own naming,
-// `mcp__<server>__<tool>`, so no gateway tool and no extension stand between
-// the model and the server.
-//
-// The daemon/kernel division of labour is documented in docs/architecture.md,
-// section daemon 与内核的分工.
 
-// McpServerSpec is one MCP server the kernel connects.
 type McpServerSpec struct {
-	// Name is the server name. The tool namespace is `mcp__<name>__`.
 	Name string
-	// Command and Args start a stdio server.
 	Command string
 	Args    []string
 	Cwd     string
-	// Env is the environment the stdio server runs with.
 	Env map[string]string
-	// URL connects a streamable HTTP server. It wins over Command.
 	URL string
-	// Headers are the headers an HTTP server receives.
 	Headers map[string]string
 }
 
-// mcpConnection is one connected MCP server.
 type mcpConnection struct {
 	spec   McpServerSpec
 	client *mcp.Client
 }
 
-// connectMcpServers connects the servers and returns their tools.
-//
-// A server that cannot be connected is an error: the session promised the
-// model those tools, and a session that silently loses one is worse than a
-// session that refuses to start.
 func connectMcpServers(ctx context.Context, specs []McpServerSpec, recorder *callRecorder) ([]*mcpConnection, []*durable.ToolRegistration, error) {
 	connections := []*mcpConnection{}
 	registrations := []*durable.ToolRegistration{}
@@ -75,14 +55,12 @@ func connectMcpServers(ctx context.Context, specs []McpServerSpec, recorder *cal
 	return connections, registrations, nil
 }
 
-// closeMcpServers closes the connections of a failed setup.
 func closeMcpServers(connections []*mcpConnection) {
 	for _, connection := range connections {
 		_ = connection.client.Close()
 	}
 }
 
-// mcpTransport builds the transport of one server.
 func mcpTransport(spec McpServerSpec) (mcp.Transport, error) {
 	if spec.URL != "" {
 		headers := map[string]string{}
@@ -106,7 +84,6 @@ func mcpTransport(spec McpServerSpec) (mcp.Transport, error) {
 	}), nil
 }
 
-// toolRegistration turns one server tool into a tool the model may call.
 func (connection *mcpConnection) toolRegistration(tool mcp.Tool, recorder *callRecorder) *durable.ToolRegistration {
 	server := connection.spec.Name
 	name := tool.Name
@@ -135,13 +112,10 @@ func (connection *mcpConnection) toolRegistration(tool mcp.Tool, recorder *callR
 	}
 }
 
-// mcpToolName is the name the model calls one server tool by.
 func mcpToolName(server, tool string) string {
 	return "mcp__" + mcpNamePart(server) + "__" + mcpNamePart(tool)
 }
 
-// mcpNamePart sanitizes one name part: every character other than letters,
-// digits and an underscore becomes an underscore.
 func mcpNamePart(value string) string {
 	out := []rune{}
 	for _, character := range value {
@@ -155,7 +129,6 @@ func mcpNamePart(value string) string {
 	return string(out)
 }
 
-// mcpResultText renders a tool result as the text the model reads.
 func mcpResultText(result *mcp.CallToolResult) string {
 	if result == nil {
 		return ""
@@ -173,9 +146,6 @@ func mcpResultText(result *mcp.CallToolResult) string {
 	return text
 }
 
-// jsonSchemaToParameters turns an MCP input schema into the parameter map a
-// tool registration carries. The schema is JSON, and the parameters of a tool
-// are read as JSON, so the schema is decoded and kept.
 func jsonSchemaToParameters(schema json.RawMessage) map[string]any {
 	if len(schema) == 0 {
 		return map[string]any{"type": "object", "properties": map[string]any{}}

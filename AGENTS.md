@@ -5,7 +5,11 @@
 - 分诊或调整分诊标签前，读取 [标签映射](docs/guides/triage-labels.md)。
 - 用 pstack 技能（`/skill:poteto-mode` 及其 playbook）给节点分配模型或思考档位前，读取 [pstack 角色与模型映射](docs/agent/pstack-models.md)。
 
-- 测试编写仅允许真正的 E2E，禁止新增或改写单元、集成测试；本规则适用于我和所有子 Agent。细则见 [测试编写规则](CODING_STANDARDS.md#测试编写规则)。
+- 测试：单元、集成、E2E 都可以，唯一前提是**先写测试再写代码**；先红后绿，回归必须先演示失败。适用于我和所有子 Agent，细则见 [测试编写规则](CODING_STANDARDS.md#测试编写规则)。
+
+- 可验证性第一：每段代码都要有一条命令能判定它对不对，没有断言路径的代码不提交。见 [可验证性](CODING_STANDARDS.md#可验证性)。
+
+- 禁止解释性注释，只保留机器指令行（`// graph:`、`//go:`、`// @ts-`、`/// <reference`）。`node --run check:comments` 是门禁，改动只能删不能加，见 [注释](CODING_STANDARDS.md#注释)。
 
 - Keep every source file at or below 500 LOC. Tests, docs and CSS are exempt. Markdown is documentation, not source. Split a source file before completion if your change takes it over the limit.
 

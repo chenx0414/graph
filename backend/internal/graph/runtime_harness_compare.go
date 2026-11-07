@@ -18,9 +18,6 @@ type HarnessCandidateFacts struct {
 	ToolCalls    int               `json:"toolCalls"`
 	ToolErrors   int               `json:"toolErrors"`
 	Tools        []string          `json:"tools"`
-	// Harness is the prompt text this candidate ran under, when the node
-	// replaced it. It says why two candidates behaved differently, which is
-	// what a later composition of the two needs.
 	Harness      map[string]string `json:"harness,omitempty"`
 	InputTokens  int64             `json:"inputTokens"`
 	OutputTokens int64             `json:"outputTokens"`
@@ -38,8 +35,6 @@ type HarnessDifference struct {
 type HarnessComparison struct {
 	GraphId string `json:"graphId"`
 	Domain  string `json:"domain,omitempty"`
-	// Baseline is the anonymous id of the candidate the others are compared
-	// against; BaselineNodeId names the node it is.
 	Baseline     string                         `json:"baseline"`
 	BaselineNode string                         `json:"baselineNodeId"`
 	Candidates   []HarnessCandidateFacts        `json:"candidates"`
@@ -47,7 +42,6 @@ type HarnessComparison struct {
 	Experience   []HarnessExperienceEntry       `json:"experience"`
 }
 
-// HarnessCompareInput asks for the contrast of some candidates of one graph.
 type HarnessCompareInput struct {
 	GraphId        string
 	NodeIds        []string
@@ -115,10 +109,6 @@ func (service *graphManagementService) HarnessCompare(input HarnessCompareInput)
 		comparison.Differences[candidate.AnonId] = harnessDifferences(baseFacts, candidate)
 	}
 	if comparison.Domain != "" {
-		// The lessons travel with the comparison: a new candidate is judged
-		// against what earlier tasks learned. The domain's own lessons come
-		// first, then the general ones - a general lesson holds for every
-		// kind of work, so it reaches this domain too.
 		comparison.Experience = append(
 			harnessExperienceEntries(service.artifacts, service.ownerTaskId, harnessSlug(comparison.Domain)),
 			harnessExperienceEntries(service.artifacts, service.ownerTaskId, HARNESS_GENERAL_SCOPE)...,
@@ -178,10 +168,6 @@ func (service *graphManagementService) harnessCandidateFacts(graphId string, nod
 		facts.Outputs = names
 		facts.OutputValues = values
 	}
-	// The tool calls of a candidate are read from its transcript entries: a node
-	// that runs in the durable kernel records its calls there, with the tool name
-	// and the result, and the statistics table only holds the calls of the
-	// session that owns the instance.
 	tools := map[string]map[string]bool{}
 	calls := map[string]int{}
 	errors := map[string]int{}

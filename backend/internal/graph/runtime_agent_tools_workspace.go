@@ -7,7 +7,6 @@ import (
 	"errors"
 )
 
-// agentToolsWorkspaceHandlers are the handlers of the Workspace tools.
 func agentToolsWorkspaceHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"read": func(id string, params map[string]any) any {

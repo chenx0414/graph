@@ -4,10 +4,6 @@ import (
 	"fmt"
 )
 
-// durableCompletion is the kernel's receipt of a turn it finished.
-//
-// The kernel kept the answer the model gave, so the Graph can settle the
-// operation from it instead of asking the model again.
 type durableCompletion struct {
 	ExecutionId               string   `json:"executionId"`
 	Identity                  string   `json:"identity"`
@@ -17,11 +13,6 @@ type durableCompletion struct {
 	StopReason                string   `json:"stopReason"`
 }
 
-// acceptDurableCompletion settles an operation from the kernel's receipt.
-//
-// The receipt is the proof that the turn is still there: the model answered
-// it, and the answer is what the operation settles with. The usage that is
-// not known stays unknown.
 func (lifecycle *OperationLifecycle) acceptDurableCompletion(receipt durableCompletion) {
 	lifecycle.transaction(func() any {
 		row := lifecycle.operationRow(receipt.ExecutionId)

@@ -4,14 +4,12 @@ func (k *KernelStore) EnqueueDelivery(taskID, nodeID string, payload any) {
 	g5Exec(k.Db, "INSERT INTO kernel_queue(task_id,node_id,kind,payload,created_at) VALUES(?,?,?,?,?)", taskID, nodeID, "delivery", k.Content.Encode(payload), NowMillis())
 }
 
-// EnqueueInCurrentTransaction appends one queue row for a caller already inside a transaction.
 func (k *KernelStore) EnqueueInCurrentTransaction(taskID string, input QueueInsert) QueueRow {
 	createdAt := NowMillis()
 	_, lastID := g5Exec(k.Db, "INSERT INTO kernel_queue(task_id,node_id,kind,payload,state,created_at) VALUES(?,?,?,?,?,?)", taskID, input.NodeId, input.Kind, k.Content.Encode(input.Payload), "queued", createdAt)
 	return QueueRow{Seq: lastID, TaskId: taskID, NodeId: input.NodeId, Kind: input.Kind, Payload: input.Payload, State: "queued", CreatedAt: createdAt}
 }
 
-// Enqueue appends one input, joining the current transaction when one is open.
 func (k *KernelStore) Enqueue(taskID string, input QueueInsert) QueueRow {
 	if k.Store.IsTransaction() {
 		return k.EnqueueInCurrentTransaction(taskID, input)
@@ -49,7 +47,6 @@ func (k *KernelStore) queueFrom(row map[string]any) QueueRow {
 	}
 }
 
-// QueueHistory pages queue rows, including failed inputs.
 func (k *KernelStore) QueueHistory(taskID string, query HistoryQuery) QueueHistoryPage {
 	after, limit := k.historyWindow(query)
 	var node any
@@ -73,7 +70,6 @@ func (k *KernelStore) QueueHistory(taskID string, query HistoryQuery) QueueHisto
 	return QueueHistoryPage{Items: items, Next: next}
 }
 
-// ExecutionHistory pages frozen execution facts.
 func (k *KernelStore) ExecutionHistory(taskID string, query HistoryQuery) ExecutionHistoryPage {
 	after, limit := k.historyWindow(query)
 	var node any
@@ -97,7 +93,6 @@ func (k *KernelStore) ExecutionHistory(taskID string, query HistoryQuery) Execut
 	return ExecutionHistoryPage{Items: items, Next: next}
 }
 
-// NextQueued is the oldest queued item, or nil.
 func (k *KernelStore) NextQueued(taskID, nodeID string) *QueueRow {
 	row, ok := g5One(k.Db, "SELECT * FROM kernel_queue WHERE task_id=? AND node_id=? AND state='queued' ORDER BY seq LIMIT 1", taskID, nodeID)
 	if !ok {
@@ -107,7 +102,6 @@ func (k *KernelStore) NextQueued(taskID, nodeID string) *QueueRow {
 	return &queued
 }
 
-// ClaimQueued marks one queued item claimed.
 func (k *KernelStore) ClaimQueued(taskID string, seq int64) *QueueRow {
 	return k.Store.Transaction(func() any {
 		row, ok := g5One(k.Db, "SELECT * FROM kernel_queue WHERE task_id=? AND seq=?", taskID, seq)
@@ -124,18 +118,14 @@ func (k *KernelStore) ClaimQueued(taskID string, seq int64) *QueueRow {
 	}).(*QueueRow)
 }
 
-// FinishQueued sets a terminal queue state.
 func (k *KernelStore) FinishQueued(taskID string, seq int64, state string) {
 	g5Exec(k.Db, "UPDATE kernel_queue SET state=? WHERE task_id=? AND seq=?", state, taskID, seq)
 }
 
-// RequeueFailedItem puts a failed queue item back, with the reason it was
-// put back.
 func (k *KernelStore) RequeueFailedItem(taskID, nodeID, reason string) {
 	g5Exec(k.Db, "UPDATE kernel_queue SET state='queued',reason=? WHERE task_id=? AND node_id=? AND state='failed'", reason, taskID, nodeID)
 }
 
-// FailQueuedItem fails the queue items of a node that will not run again.
 func (k *KernelStore) FailQueuedItem(taskID, nodeID, reason string) {
 	g5Exec(k.Db, "UPDATE kernel_queue SET state='failed',reason=? WHERE task_id=? AND node_id=? AND state IN ('queued','claimed')", reason, taskID, nodeID)
 }

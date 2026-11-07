@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// appGraphCapability is one capability a bound Agent declares.
 type appGraphCapability struct {
 	ID      string  `json:"id"`
 	Version string  `json:"version"`
@@ -16,13 +15,11 @@ type appGraphCapability struct {
 	Source  *string `json:"source"`
 }
 
-// appGraphExperience is the recorded experience of one bound Agent.
 type appGraphExperience struct {
 	Task    TalentStats `json:"task"`
 	Samples []any       `json:"samples"`
 }
 
-// appGraphAgent is the Agent bound to one graph node.
 type appGraphAgent struct {
 	ID               string               `json:"id"`
 	Version          int                  `json:"version"`
@@ -33,7 +30,6 @@ type appGraphAgent struct {
 	Experience       appGraphExperience   `json:"experience"`
 }
 
-// appGraphAgentDetail is the Agent bound to one graph node.
 func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
 	if definitionVersion == "" {
 		return nil
@@ -103,7 +99,6 @@ func (app *GraphApp) appGraphAgentDetail(definitionVersion string) any {
 	}
 }
 
-// appGraphAgentCapabilities are the capabilities one bound Agent declares.
 func (app *GraphApp) appGraphAgentCapabilities(definition CatalogDefinition) []appGraphCapability {
 	capabilities := []appGraphCapability{}
 	bound := []struct {

@@ -45,8 +45,6 @@ func everySecretRef(config GraphConfig) []string {
 	return refs
 }
 
-// runtimeCatalog is the catalog the runtime owns. The daemon publishes the
-// bootstrap definitions and the built-in recipes into it.
 func runtimeCatalog(host *GraphHost) *Catalog {
 	if host == nil {
 		return nil
@@ -57,9 +55,6 @@ func runtimeCatalog(host *GraphHost) *Catalog {
 	return host.Runtime.catalog
 }
 
-// ensureMainRecipe keeps the 'main' Agent combination in the shape the master
-// Agent needs. A recipe that cannot be written is reported and the bootstrap
-// master@1 stays in use.
 func ensureMainRecipe(catalog *Catalog, bootstrap PresetBootstrap, log func(string)) {
 	if catalog == nil || bootstrap.Prompts["main"] == "" {
 		return

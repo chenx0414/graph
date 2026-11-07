@@ -8,7 +8,6 @@ import (
 	"errors"
 )
 
-// AgentToolFeatures are the host bindings a declaration may see. A non-nil object is truthy.
 type AgentToolFeatures struct {
 	GraphManagement bool
 	GraphRead       bool
@@ -26,17 +25,14 @@ type AgentToolFeatures struct {
 	Harness         bool
 	Conversations   *AgentConversationFeatures
 	Peers           bool
-	// Desktop is the computer-use capability: this host has agent-desktop.
 	Desktop bool
 }
 
-// AgentArtifactAccess is the artifact namespaces one role may use.
 type AgentArtifactAccess struct {
 	AllowedNamespaces []string
 	CanPromote        bool
 }
 
-// AgentSupervisorFeatures are the conversation controls offered to main.
 type AgentSupervisorFeatures struct {
 	ResumeWork         bool
 	DelegateWork       bool
@@ -56,7 +52,6 @@ type AgentSupervisorFeatures struct {
 	ReviewHumanCheck   bool
 }
 
-// AgentSystemFeatures are the read-only host inventory tools.
 type AgentSystemFeatures struct {
 	SystemSummary       bool
 	SystemDiagnostics   bool
@@ -64,26 +59,21 @@ type AgentSystemFeatures struct {
 	ApplySystemChange   bool
 }
 
-// AgentRsiFeatures are the self-improvement tools.
 type AgentRsiFeatures struct {
 	Status bool
 	Apply  bool
 }
 
-// AgentConversationFeatures are channels to other conversations.
 type AgentConversationFeatures struct {
 	Read  bool
 	Write bool
 }
 
-// agentToolContext carries what the declaration groups share: the role of the
-// agent and the host bindings it may see.
 type agentToolContext struct {
 	main     bool
 	features AgentToolFeatures
 }
 
-// AgentToolDeclaration is a tool surface before a handler is bound.
 type AgentToolDeclaration struct {
 	Name             string
 	Label            string
@@ -94,12 +84,10 @@ type AgentToolDeclaration struct {
 	ExternallyGated  bool
 }
 
-// AGENT_TOOL_ARGUMENT_HINTS are host-free argument hints attached by tool name.
 var AGENT_TOOL_ARGUMENT_HINTS = map[string]func(args any) string{
 	"apply_rsi_change": RsiChangeShapeHint,
 }
 
-// PrepareToolArguments returns the hint seam, or nil when the tool has none.
 func PrepareToolArguments(name string) func(args any) any {
 	hint := AGENT_TOOL_ARGUMENT_HINTS[name]
 	if hint == nil {
@@ -114,13 +102,6 @@ func PrepareToolArguments(name string) func(args any) any {
 	}
 }
 
-// PrepareFreeFormArguments returns the seam that reads the free-form parameters
-// of one tool the way a model actually sends them.
-//
-// A free-form parameter is declared with an empty schema (tbAny), which is
-// exactly the shape a model tends to encode by hand: "value": "{\"a\":1}"
-// instead of the object. Typed parameters are left untouched, so a string field
-// that happens to contain braces is never reinterpreted.
 func PrepareFreeFormArguments(parameters any) func(args any) any {
 	fields := freeFormParameterNames(parameters)
 	if len(fields) == 0 {
@@ -142,8 +123,6 @@ func PrepareFreeFormArguments(parameters any) func(args any) any {
 	}
 }
 
-// freeFormParameterNames lists the top-level properties whose schema constrains
-// nothing: no type, no union, no enum, no reference.
 func freeFormParameterNames(parameters any) map[string]bool {
 	schema, ok := parameters.(map[string]any)
 	if !ok {
@@ -173,7 +152,6 @@ func freeFormParameterNames(parameters any) map[string]bool {
 	return names
 }
 
-// AgentArtifactAccessFor is the namespace grant for one role and action.
 func AgentArtifactAccessFor(input struct {
 	Role   string
 	Action string
@@ -192,7 +170,6 @@ func toolReviewAction(action string) bool {
 	return strings.Contains(lower, "review") || strings.Contains(lower, "verify") || strings.Contains(lower, "critic") || strings.Contains(lower, "jury")
 }
 
-// DescribeAgentTools returns the declarations that are available for these features.
 func DescribeAgentTools(features AgentToolFeatures) []AgentToolDeclaration {
 	declared := agentToolDeclarations(features)
 	out := []AgentToolDeclaration{}

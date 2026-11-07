@@ -7,7 +7,6 @@ import (
 
 var graphPreparationLocks sync.Map
 
-// prepareGraph serializes preparation of one graph while preserving the original request receipt.
 func (service *graphManagementService) prepareGraph(graphID, sourceOwner, requestID, targetBranch, projectID string, retryFailed bool) (reason string) {
 	value, _ := graphPreparationLocks.LoadOrStore(graphID, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
@@ -81,7 +80,6 @@ func (service *graphManagementService) prepareGraph(graphID, sourceOwner, reques
 	return ""
 }
 
-// retryGraphPreparation records a human or supervisor's inspection before repeating Git preparation.
 func (service *graphManagementService) retryGraphPreparation(graphID, proof string) any {
 	proof = strings.TrimSpace(proof)
 	if proof == "" {

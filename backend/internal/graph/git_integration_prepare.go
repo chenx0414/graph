@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 )
 
-// Exclusive runs actions for one task one at a time. A failed action still releases the next.
 func (integration *GitIntegration) Exclusive(taskId string, action func() any) any {
 	integration.mu.Lock()
 	lock := integration.tails[taskId]
@@ -62,7 +61,6 @@ func (integration *GitIntegration) Preparation(projectId string) *ProjectPrepara
 	return prep
 }
 
-// VisiblePaths lists read-only project paths for chat references.
 func (integration *GitIntegration) VisiblePaths(projectId, query string, limit int) []ProjectPathEntry {
 	if limit == 0 {
 		limit = 80
@@ -85,7 +83,6 @@ func (integration *GitIntegration) recordPreparation(projectId, state string, fi
 		optionalText(fields.BaselineSha), detail, NowMillis())
 }
 
-// PrepareProject records scoped readiness. A plain directory is initialized only when asked.
 func (integration *GitIntegration) PrepareProject(projectId string, initialize, createBaseline bool) *ProjectPreparation {
 	row, ok := graphDBRow(integration.store.Db, "SELECT root FROM projects WHERE id=?", projectId)
 	if !ok {
@@ -182,7 +179,6 @@ func (integration *GitIntegration) PrepareProject(projectId string, initialize, 
 	return record("ready", map[string]any{"dirty": 0})
 }
 
-// ProjectHead is the repository HEAD, or nil when the project is not a repository.
 func (integration *GitIntegration) ProjectHead(projectId string) *string {
 	row, ok := graphDBRow(integration.store.Db, "SELECT root FROM projects WHERE id=?", projectId)
 	if !ok {
@@ -196,7 +192,6 @@ func (integration *GitIntegration) ProjectHead(projectId string) *string {
 	return RevParse(*repo, "HEAD")
 }
 
-// ProjectFingerprint is the content fingerprint used to replay an interrupted baseline.
 func (integration *GitIntegration) ProjectFingerprint(projectId string) *string {
 	row, ok := graphDBRow(integration.store.Db, "SELECT root FROM projects WHERE id=?", projectId)
 	if !ok {
@@ -213,7 +208,6 @@ func (integration *GitIntegration) ProjectFingerprint(projectId string) *string 
 	return &fingerprint
 }
 
-// LastCommit is the tip subject and parents, used to recognize a concluded effect.
 func (integration *GitIntegration) LastCommit(projectId string) *GitCommitView {
 	row, ok := graphDBRow(integration.store.Db, "SELECT root FROM projects WHERE id=?", projectId)
 	if !ok {
@@ -252,7 +246,6 @@ func (integration *GitIntegration) refreshPrepared(projectId string) *ProjectPre
 	return integration.PrepareProject(projectId, false, false)
 }
 
-// RequirePrepared auto-prepares a plain directory and requires a ready project.
 func (integration *GitIntegration) RequirePrepared(projectId string) *ProjectPreparation {
 	prep := integration.refreshPrepared(projectId)
 	if prep.State == "ready" {
@@ -269,7 +262,6 @@ func (integration *GitIntegration) RequirePrepared(projectId string) *ProjectPre
 	return nil
 }
 
-// RequireTargetBranch checks readiness and that the target branch exists.
 func (integration *GitIntegration) RequireTargetBranch(projectId, branch string) *ProjectPreparation {
 	prep := integration.RequirePrepared(projectId)
 	if prep.RepoRoot == nil || RevParse(*prep.RepoRoot, branch) == nil {

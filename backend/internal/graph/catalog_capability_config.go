@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 )
 
-// CapabilityConfigField is one environment value a capability still needs.
 type CapabilityConfigField struct {
 	Env    string `json:"env"`
 	Label  string `json:"label"`
@@ -16,7 +15,6 @@ type CapabilityConfigField struct {
 	Reason string `json:"reason"`
 }
 
-// CapabilityConfigView is the console view of one capability's missing configuration.
 type CapabilityConfigView struct {
 	Id         string                  `json:"id"`
 	Version    string                  `json:"version"`
@@ -88,7 +86,6 @@ func capabilityConfigObject(value any) map[string]any {
 	return object
 }
 
-// CapabilityConfigViewOf reads the manifest and reports which env refs are set.
 func CapabilityConfigViewOf(record CapabilityRecord, values map[string]string) (view CapabilityConfigView) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -208,7 +205,6 @@ func stringList(value any) []string {
 	}
 }
 
-// CapabilityConfigViews keeps capabilities that declare fields or failed to load.
 func CapabilityConfigViews(records []CapabilityRecord, values map[string]string) []CapabilityConfigView {
 	views := []CapabilityConfigView{}
 	for _, record := range records {

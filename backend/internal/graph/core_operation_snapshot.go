@@ -4,15 +4,12 @@ import (
 	"encoding/json"
 )
 
-// OperationLifecycle owns the durable ordering around the adapter's work: intent,
-// dispatch, reconciliation, settlement, blocking questions and rework.
 type OperationLifecycle struct {
 	generation int
 	store      *TaskStore
 	hooks      OperationLifecycleHooks
 }
 
-// NewOperationLifecycle binds the lifecycle to one task store.
 func NewOperationLifecycle(store *TaskStore, hooks OperationLifecycleHooks) *OperationLifecycle {
 	return &OperationLifecycle{store: store, hooks: hooks}
 }
@@ -40,7 +37,6 @@ func (l *OperationLifecycle) nodeRow(taskId, nodeId string) map[string]any {
 	return row
 }
 
-// Get reads one operation snapshot.
 func (l *OperationLifecycle) Get(id string) *OperationSnapshot {
 	row := kernelRow(l.store.Db, "SELECT * FROM operations WHERE id=?", id)
 	if row == nil {
@@ -75,7 +71,6 @@ func operationSnapshotOf(row map[string]any) *OperationSnapshot {
 	return snapshot
 }
 
-// Recover enters a new runtime generation and conservatively recovers prior work.
 func (l *OperationLifecycle) Recover() int {
 	return l.transaction(func() any {
 		l.store.BumpRuntimeGeneration()
@@ -92,7 +87,6 @@ func (l *OperationLifecycle) Recover() int {
 			if l.restoreUnsentConversation(row) {
 				continue
 			}
-			// Access grants cannot prove that an interrupted effect never happened.
 
 			l.store.RecoverOperationAsUnknown(kernelString(row["id"]))
 			l.store.Event(kernelString(row["task_id"]), "operation.unknown", map[string]any{

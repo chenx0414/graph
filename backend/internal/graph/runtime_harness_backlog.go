@@ -6,22 +6,15 @@ import (
 	"regexp"
 )
 
-// HARNESS_BACKLOG_ARTIFACT is the artifact the retired convention used.
 const HARNESS_BACKLOG_ARTIFACT = "harness-backlog"
 
-// HARNESS_SOURCE_BACKLOG says that a record came from the retired backlog.
 const HARNESS_SOURCE_BACKLOG = "backlog"
 
 var (
-	// harnessBacklogID finds the item id a legacy entry is known by.
 	harnessBacklogID = regexp.MustCompile(`\*\*([A-Za-z]{2,4}-[0-9]+)\*\*`)
-	// harnessBacklogFixed finds what addressed a legacy entry.
 	harnessBacklogFixed = regexp.MustCompile("Fixed@\\s*`?([0-9a-f]{7,40})`?")
 )
 
-// harnessBacklogEntries reads the retired backlog artifact and returns its
-// items as knowledge records: what the project met, and where each item
-// stands. None of them is a lesson, so none of them travels into a prompt.
 func harnessBacklogEntries(reader harnessExperienceReader, taskId string) []HarnessExperienceEntry {
 	if reader == nil || taskId == "" {
 		return []HarnessExperienceEntry{}
@@ -53,8 +46,6 @@ func harnessBacklogEntries(reader harnessExperienceReader, taskId string) []Harn
 	return harnessParseBacklog(string(body))
 }
 
-// harnessParseBacklog reads the legacy backlog: a markdown document with one
-// item per bullet, under a heading that says where the items stand.
 func harnessParseBacklog(content string) []HarnessExperienceEntry {
 	entries := []HarnessExperienceEntry{}
 	section := ""
@@ -85,12 +76,6 @@ func harnessParseBacklog(content string) []HarnessExperienceEntry {
 	return entries
 }
 
-// harnessBacklogEntry turns one legacy item into a record.
-//
-// The cue is the situation the item opens with - a legacy item has no key of
-// its own, so the first line of it is what a later lesson can be filed under.
-// The whole item stays as the note, and the id the project knows the item by
-// stays in it.
 func harnessBacklogEntry(section string, lines []string) HarnessExperienceEntry {
 	text := strings.TrimSpace(strings.Join(lines, " "))
 	status := HARNESS_STATUS_OPEN

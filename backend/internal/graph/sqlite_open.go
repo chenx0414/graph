@@ -6,9 +6,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// OpenSQLite opens one SQLite connection the way node:sqlite DatabaseSync did:
-// a single connection, foreign keys on, WAL, synchronous FULL, busy_timeout 0.
-// Callers run the same PRAGMA user_version migrations as TaskStore.
 func OpenSQLite(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -23,7 +20,6 @@ func OpenSQLite(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// MustOpenSQLite opens the database or raises, matching a constructor that threw.
 func MustOpenSQLite(path string) *sql.DB {
 	db, err := OpenSQLite(path)
 	if err != nil {

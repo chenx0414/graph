@@ -62,6 +62,5 @@ export interface AgentContextView {
     sections: AgentPromptSectionView[];
     text: string;
   };
-  /** The exact system prompt the newest master turn sent, recorded at the provider call. */
   sent: { operationId: string; at: number; text: string; tools: string | null } | null;
 }

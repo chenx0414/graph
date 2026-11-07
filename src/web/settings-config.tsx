@@ -24,7 +24,6 @@ export type ModelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' |
 export type RawModel = {
   id: string; provider: string; modelId?: string; api: 'openai-completions' | 'openai-responses' | 'anthropic-messages'; baseUrl: string;
   contextWindow?: number; maxTokens?: number; reasoning?: boolean; defaultThinkingLevel?: ModelThinkingLevel; credentialId: string; cost?: ModelCostDraft;
-  /** Per-model strengths the server adds to the view; stripped before saving. */
   thinkingOptions?: { level: string; label: string }[];
   input?: ModelInput[];
   pricing?: { currency: string; unit: 'per_million_tokens'; status: 'known' | 'stale' | 'unknown'; sourceUrl?: string; retrievedAt?: string; catalogRevision?: string };
@@ -45,10 +44,6 @@ export type ConfigResponse = { revision: number; effectiveRevision?: number; con
 
 export type Startup = {
   effectiveRevision?: number;
-  /**
-   * The code the daemon is running. The console shows it because "committed" and "live" are
-   * different facts: a change lands in a checkout, and only a reload makes the daemon run it.
-   */
   source?: { root: string; commit: string | null; branch: string | null; dirty: boolean | null };
 };
 

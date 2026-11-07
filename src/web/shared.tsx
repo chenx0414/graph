@@ -3,7 +3,6 @@ import { nextEventCursor } from './event-cursor.ts';
 import { defaultTargetBranch, type ProjectBranchView } from './project-branch.ts';
 import { Button, Icon } from './ui.tsx';
 
-/** One unambiguous rendering for possibly multi-currency costs. */
 export function costText(cost: { unknown?: boolean; amounts?: Record<string, number>; amount?: number | null } | null | undefined) {
   if (!cost) return '无记录';
   const amounts = cost.amounts ?? (typeof cost.amount === 'number' ? { '': cost.amount } : {});
@@ -26,7 +25,6 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
   );
 }
 
-/** Target branch for a new task: the project's own branch, not a guessed default. */
 export function useTargetBranch(projects: ProjectBranchView[] | null | undefined, projectId: string | null) {
   const [branch, setBranch] = useState('main');
   const touched = useRef(false);
@@ -44,13 +42,9 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
   const [loading, setLoading] = useState(true);
   const loadRef = useRef(load);
   loadRef.current = load;
-  // Every request gets a generation; a late response from an old key must
-  // never overwrite the record the user is looking at now.
   const generation = useRef(0);
   const previousDeps = useRef(deps);
   useEffect(() => {
-    // React Activity reconnects effects when a tab becomes visible. Keep its loaded
-    // snapshot while revalidating; only a different resource should clear it.
     if (deps.some((value, index) => !Object.is(value, previousDeps.current[index]))) {
       setData(null);
       setError(null);
@@ -67,7 +61,6 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
       .finally(() => { if (generation.current === current) setLoading(false); });
   }, deps);
   useEffect(() => {
-    // A discarded mount (including StrictMode's effect replay) must not start IO.
     let active = true;
     queueMicrotask(() => { if (active) reload(); });
     return () => { active = false; };
@@ -77,9 +70,6 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
 
 export type StreamEvent = { cursor: number; type: string; taskId?: string; data?: unknown; timestamp?: number };
 
-/** EventSource with an event cursor. Reconnects from the last applied cursor,
- * so a drop replays only what was missed and duplicate deliveries are ignored.
- * A null URL keeps the stream closed until the record is known. */
 export function useEventStream(url: string | null, onEvent: (event: StreamEvent) => void, initialCursor = 0) {
   const [connected, setConnected] = useState(false);
   const cursor = useRef(0);

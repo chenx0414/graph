@@ -1,19 +1,4 @@
 
-/**
- * Pure logic for the two-step model-provider flow (B-1).
- *
- * Step 1 「配置厂商」 validates a provider draft, normalizes the platform
- * catalog served by `GET /api/providers` and edits the concurrency limits that
- * live *inside* a provider entry. Step 2 「选择模型」 merges the models probed
- * from `<baseUrl>/models` with the metadata mapped from the vendored models.dev
- * snapshot.
- *
- * The field names here mirror the daemon contract in `backend/internal/graph/server_providers.go`:
- * the display name is `label`, the credential reference is `credentialRef`
- * (never `name` / `secretRef`), and the probe body carries a `requestId`
- * idempotency key. This module stays presentational: it never reads the DOM,
- * never sends a request and never resolves an API key.
- */
 import {
 type ModelApi,
 type ModelCost,
@@ -167,7 +152,6 @@ export interface ModelEntryDraft {
   defaultThinkingLevel?: ModelThinkingLevel;
   cost?: ModelCostDraft;
   pricing?: ModelPricing;
-  /** User-edited fields are never overwritten by a later probe. */
   manual?: boolean;
 }
 
@@ -261,7 +245,6 @@ export function positiveInt(value: unknown): number | undefined {
 export interface ModelValidationFields {
   contextWindow?: number | null;
   maxTokens?: number | null;
-  /** Partial while the user types; a partial price is an error. */
   cost?: ModelCostDraft | null;
 }
 
@@ -306,7 +289,6 @@ export interface ConcurrencyConfig {
 }
 
 export interface ConcurrencyDraft {
-  /** Raw input; `''` means the platform default applies. */
   credentialLimit: string;
   sharedGroupId: string;
   sharedGroupLimit: string;

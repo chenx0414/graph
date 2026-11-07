@@ -8,8 +8,6 @@ import (
 	"os"
 )
 
-// LoadedSkill is one skill directory the Agent can see.
-// TODO(port): Pi loadSkills diagnostics and formatSkillsForPrompt whitespace are not the SDK's exact text.
 type LoadedSkill struct {
 	Name                   string `json:"name"`
 	Description            string `json:"description"`
@@ -17,25 +15,21 @@ type LoadedSkill struct {
 	DisableModelInvocation bool   `json:"disableModelInvocation"`
 }
 
-// SkillDiagnostic is one loader note. The filesystem scan currently records none.
 type SkillDiagnostic struct {
 	Message string `json:"message"`
 }
 
-// AgentSkillSet is the loaded list plus the single available-skills block.
 type AgentSkillSet struct {
 	Skills      []LoadedSkill     `json:"skills"`
 	Diagnostics []SkillDiagnostic `json:"diagnostics"`
 	Block       string            `json:"block"`
 }
 
-// BoundSkillLink is one capability mirrored into an Agent skills folder.
 type BoundSkillLink struct {
 	ID     string
 	Target string
 }
 
-// AgentSkillsScope lists every folder the native loader would read.
 type AgentSkillsScope struct {
 	Folder      string
 	Cwd         string
@@ -46,12 +40,10 @@ type AgentSkillsScope struct {
 
 const piConfigDirName = ".pi"
 
-// AgentSkillsDir is <graph home>/agents/<id>/skills.
 func AgentSkillsDir(agentID, home string) string {
 	return filepath.Join(home, "agents", agentID, "skills")
 }
 
-// AgentSkillOwnedRoots are the capability roots Graph itself may retarget.
 func AgentSkillOwnedRoots(capabilityRoot, stateDir string) []string {
 	roots := []string{}
 	if capabilityRoot != "" {
@@ -93,7 +85,6 @@ func agentOwnedLink(path string, ownedRoots []string) bool {
 	return false
 }
 
-// SyncAgentSkills mirrors bound skills and leaves hand-made entries alone.
 func SyncAgentSkills(dir string, ownedRoots []string, links []BoundSkillLink) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic(err)
@@ -146,8 +137,6 @@ func SyncAgentSkills(dir string, ownedRoots []string, links []BoundSkillLink) {
 }
 
 func defaultPiAgentDir() string {
-	// The Pi SDK reads PI_CODING_AGENT_DIR first: the global skills folder follows
-	// the agent directory, so the override has to be honoured here too.
 	if dir := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR")); dir != "" {
 		return expandTildePath(dir)
 	}
@@ -155,11 +144,9 @@ func defaultPiAgentDir() string {
 	if err != nil {
 		home = ""
 	}
-	// TODO(port): Pi getAgentDir() is typically ~/.pi/agent.
 	return filepath.Join(home, ".pi", "agent")
 }
 
-// expandTildePath resolves a leading ~ to the home directory.
 func expandTildePath(path string) string {
 	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return filepath.Clean(path)
@@ -174,7 +161,6 @@ func expandTildePath(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
-// NativeSkillDirs lists the global and project skill folders that exist.
 func NativeSkillDirs(cwds []string, home, agentDir string) []string {
 	if agentDir == "" {
 		agentDir = defaultPiAgentDir()
@@ -295,7 +281,6 @@ func formatSkillsBlock(skills []LoadedSkill) string {
 	return b.String()
 }
 
-// AgentSkills loads one folder or a full scope from the filesystem.
 func AgentSkills(input any) AgentSkillSet {
 	scope := AgentSkillsScope{}
 	switch value := input.(type) {

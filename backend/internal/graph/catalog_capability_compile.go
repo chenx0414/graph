@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// AgentCombinations validates every recipe against the current capability projection.
 func (library *CapabilityLibrary) AgentCombinations() []AgentCombinationView {
 	views := make([]AgentCombinationView, 0, len(library.recipes))
 	for _, recipe := range library.recipes {
@@ -13,7 +12,6 @@ func (library *CapabilityLibrary) AgentCombinations() []AgentCombinationView {
 	return views
 }
 
-// AgentCombination resolves one recipe by id.
 func (library *CapabilityLibrary) AgentCombination(id string) *AgentCombinationView {
 	views := library.AgentCombinations()
 	for i := range views {
@@ -24,7 +22,6 @@ func (library *CapabilityLibrary) AgentCombination(id string) *AgentCombinationV
 	return nil
 }
 
-// SearchAgentCombinations filters the recipe list.
 func (library *CapabilityLibrary) SearchAgentCombinations(input AgentCombinationSearchInput) AgentCombinationSearchResult {
 	query := strings.ToLower(strings.TrimSpace(input.Query))
 	if len(query) > 200 {
@@ -56,7 +53,6 @@ func (library *CapabilityLibrary) SearchAgentCombinations(input AgentCombination
 	return AgentCombinationSearchResult{Total: len(matches), Items: items}
 }
 
-// SaveAgentCombination persists one recipe and returns its validated view.
 func (library *CapabilityLibrary) SaveAgentCombination(combination AgentCombination) AgentCombinationView {
 	if library.recipesPath == "" {
 		Raise("unsupported", "This runtime has no agent-combination file")
@@ -88,7 +84,6 @@ func (library *CapabilityLibrary) SaveAgentCombination(combination AgentCombinat
 	return ValidateAgentCombination(combination, library.capabilitiesCache)
 }
 
-// UpdateAgentCombinationDescription rewrites one recipe description.
 func (library *CapabilityLibrary) UpdateAgentCombinationDescription(id string, description string) AgentCombinationView {
 	if library.recipesPath == "" {
 		Raise("unsupported", "This runtime has no agent-combination file")
@@ -116,7 +111,6 @@ func (library *CapabilityLibrary) UpdateAgentCombinationDescription(id string, d
 	return library.SaveAgentCombination(current)
 }
 
-// DeleteAgentCombination removes one recipe.
 func (library *CapabilityLibrary) DeleteAgentCombination(id string) DeletedAgentCombination {
 	if library.recipesPath == "" {
 		Raise("unsupported", "This runtime has no agent-combination file")

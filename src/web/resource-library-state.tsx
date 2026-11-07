@@ -80,7 +80,6 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
   const [browseHits, setBrowseHits] = useState<OfficialPackage[]>([]);
   const [browseBusy, setBrowseBusy] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
-  // Read-only: this browses the official channel, it never writes a capability.
   const loadBrowse = async () => {
     setBrowseBusy(true);
     setBrowseError(null);
@@ -99,7 +98,6 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
     setBrowseOpen(next);
     if (next && !browseHits.length) await loadBrowse();
   };
-  // The switch is a daemon setting, so it lives in the config file rather than browser preferences.
   useEffect(() => {
     let live = true;
     void api<{ revision: number; config?: { piExtensionAutoUpdate?: boolean } }>('/api/config')
@@ -118,7 +116,6 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
       toast(cause instanceof Error ? cause.message : String(cause), 'danger');
     }
   };
-  // Pi extension sources are checked once per page open; the server caches the registry answer.
   useEffect(() => {
     let live = true;
     void api<{ updates: { id: string; version: string; installed: string | null; latest: string | null; available: boolean }[] }>('/api/catalog/pi-extension-updates')
@@ -144,9 +141,6 @@ export function useResourceLibraryState({ settings, section }: { settings: Resou
       toast(cause instanceof Error ? cause.message : String(cause), 'danger');
     }
   };
-  // A capability installed while the app is running is invisible until a new
-  // extension host reads its configuration: this is the action that replaces
-  // the host without restarting the app.
   const reloadExtensions = () => {
     void api<{ reloaded: boolean; deferred: boolean }>('/api/extensions/reload', {
       method: 'POST',

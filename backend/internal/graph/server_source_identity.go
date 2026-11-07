@@ -8,8 +8,6 @@ import (
 	"os"
 )
 
-// SourceIdentity is which code the running daemon is actually executing.
-// It is read once, at startup.
 type SourceIdentity struct {
 	Root   string  `json:"root"`
 	Commit *string `json:"commit"`
@@ -28,8 +26,6 @@ func sourceIdentityRun(root string, args ...string) (ok bool, out string) {
 	return true, strings.TrimSpace(string(output))
 }
 
-// ReadSourceIdentity reads the running source identity.
-// A root without package.json, or a git failure, leaves commit, branch and dirty unknown.
 func ReadSourceIdentity(root string) SourceIdentity {
 	if _, err := os.Stat(filepath.Join(root, "package.json")); err != nil {
 		return SourceIdentity{Root: root}

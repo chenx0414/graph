@@ -6,56 +6,32 @@ import (
 	"sync"
 )
 
-// One Pi operation is a whole session of provider calls, not a single request.
-// This bound covers a long planning or coding session while still stopping a
-// runaway loop for user acknowledgement inside the 20M instance budget.
 const PI_SESSION_RESERVE = 2_000_000
 
-// CONVERSATION_DELTA_FLUSH_MS coalesces live conversation text.
 const CONVERSATION_DELTA_FLUSH_MS = 60
 
-// PROMPT_SUGGESTION_TIMEOUT_MS bounds the composer suggestion call.
 const PROMPT_SUGGESTION_TIMEOUT_MS = 5_000
 
-// piModelView is the SDK model Graph sends with. It is exported through ToPiModel so the
-// thinking-strength view is computed from the very object the transport uses.
 type PiAdapterOptions struct {
 	RecoverySnapshot *FrozenExecutionRecovery
 	Store            *TaskStore
 	InstancesDir     string
 	Catalog          *Catalog
 	Artifacts        *ArtifactWorkspace
-	// Directory is the live model directory.
 	Directory func() []ModelEntry
-	// ApiKey is the fallback key for entries without a per-model credential binding.
 	ApiKey *string
-	// ApiKeyFor resolves the key per model so aliases on different credentials never share one.
 	ApiKeyFor func(entry ModelEntry) *string
-	// BindingFor is the full credential binding for one model.
 	BindingFor func(entry ModelEntry) *PiAdapterBinding
-	// Scheduler is the shared model scheduler.
 	Scheduler *ModelScheduler
-	// ModelRuntime is the provider registry.
 	ModelRuntime *ModelRuntime
-	// Network is the reach the operation was granted.
 	Network *PiAdapterNetwork
-	// TaskSetups remembers which task setup a session already read.
 	TaskSetups *TaskSetupLedger
-	// CapabilitySecrets are the secrets a capability may read.
 	CapabilitySecrets func() map[string]string
-	// Channels are the host channels.
 	Channels *PiAdapterChannels
-	// Transport opens the Agent session.
 	Transport AgentSessionTransport
-	// DaemonNativeTools makes the daemon provide the native tools the
-	// TypeScript SDK used to publish. It is set when the kernel runs without
-	// an SDK of its own, so nothing else would offer read, write, edit, ls,
-	// find, grep and the shell to the model.
 	DaemonNativeTools bool
 }
 
-// CreatePiAdapter is the production Agent adapter: one Task Runtime operation opens a restored Pi
-// instance and sends one prompt.
 func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 	reserve := PI_SESSION_RESERVE
 	transport := options.Transport
@@ -64,14 +40,8 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 	}
 	activeInstances := map[string]AgentSession{}
 	activeInstancesMu := sync.Mutex{}
-	// The live turn's ordinal allocator, so a steering message can take its place
-	// in the order of the turn it interrupts.
 	turnOrdinals := map[string]func() int{}
 	turnOrdinalsMu := sync.Mutex{}
-	// The interrupt signal of each running operation. The kernel can only mark
-	// the tool task aborted; the process belongs to the daemon's own command
-	// runner, so the daemon is the only one that can kill it. A tool call runs
-	// with this signal, and an interruption fires it.
 	interruptSignals := map[string]*AbortSignal{}
 	interruptSignalsMu := sync.Mutex{}
 	signalFor := func(operationId string) *AbortSignal {
@@ -97,9 +67,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		ReserveTokens: &reserve,
 	}
 	adapter.CanReplayBeforeSend = func(operation Operation) bool {
-		// Capability load is recorded before transport.open can start the Pi
-		// session (including extension hooks). A model send is also recorded
-		// before it reaches the provider. Only replay before both boundaries.
 		capability, _ := graphDBRow(options.Store.Db, "SELECT 1 FROM node_capabilities WHERE operation_id=? LIMIT 1", operation.Id)
 		invocation, _ := graphDBRow(options.Store.Db, "SELECT 1 FROM invocations WHERE operation_id=? LIMIT 1", operation.Id)
 		return capability == nil && invocation == nil
@@ -114,8 +81,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		if err := active.Steer(text); err != nil {
 			panic(err)
 		}
-		// The injected message takes the next ordinal of the turn it interrupted, so
-		// the transcript can show it where it landed instead of above the turn.
 		turnOrdinalsMu.Lock()
 		allocate := turnOrdinals[operation.Id]
 		turnOrdinalsMu.Unlock()
@@ -141,10 +106,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 			}
 			panic(err)
 		}
-		// The abort request is issued before the process is killed: the kernel
-		// stops advancing an abort-marked turn, so a killed tool's result cannot
-		// become one more model request and one more tool call. Steering
-		// (replacement text) keeps the turn, and its running command with it.
 		if interrupting {
 			signal.Abort()
 		}
@@ -159,9 +120,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		}
 		return map[string]any{"ordinal": allocate()}
 	}
-	// Soft-stop the turn an operation is running: the in-flight tool call
-	// finishes, the turn ends before the next model request, and the session is
-	// retained. Idempotent when the operation has no live session.
 	adapter.Stop = func(operation Operation) {
 		activeInstancesMu.Lock()
 		active := activeInstances[operation.Id]
@@ -259,8 +217,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 			Raise("model_unavailable", "No credential bound for model "+entry.Id)
 		}
 		scheduler := options.Scheduler
-		// waiting_slot is what keeps a parked operation out of execution
-		// accounting; a failed write must fail the operation, not be hidden.
 		setWaitingSlot := func(waiting bool) {
 			now := NowMillis()
 			if waiting {
@@ -278,10 +234,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 				return nil
 			}
 			return &piAdapterSlot{acquire: func(signal *AbortSignal) (func(), error) {
-				// Waiting on a credential releases the execution slot; after the
-				// credential slot is granted the operation must take an execution
-				// slot back before it may send, or many waiters resuming at once
-				// would exceed the global Agent limit.
 				setWaitingSlot(true)
 				var releaseCredential func()
 				released := false
@@ -306,11 +258,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 						setWaitingSlot(false)
 						Raise("model_unavailable", "No credential bound for model "+candidate.Id)
 					}
-					// The queued binding can change under a hot config apply. The
-					// waiter asks for the live key/limits on every grant decision;
-					// when the identity changed after the grant, the old slot is
-					// returned and the request re-queues under the new identity
-					// instead of sending with a stale or wrong-platform key.
 					request := SlotRequest{
 						CredentialId:  current.CredentialId,
 						ApiKey:        current.ApiKey,
@@ -400,11 +347,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 	return adapter
 }
 
-// piAdapterCallableModels keeps the models a turn could actually call.
-//
-// A model whose credential cannot be resolved is not a candidate for an
-// auxiliary call: choosing it would turn a missing key into a failure of the
-// work that is already running.
 func piAdapterCallableModels(directory []ModelEntry, resolve func(candidate ModelEntry) *PiAdapterBinding) []ModelEntry {
 	if resolve == nil {
 		return directory
@@ -418,7 +360,6 @@ func piAdapterCallableModels(directory []ModelEntry, resolve func(candidate Mode
 	return callable
 }
 
-// piAdapterCallableModel reports whether one model could be called right now.
 func piAdapterCallableModel(resolve func(candidate ModelEntry) *PiAdapterBinding, candidate ModelEntry) (callable bool) {
 	defer func() {
 		if recover() != nil {

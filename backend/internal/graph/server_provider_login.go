@@ -17,10 +17,6 @@ import (
 	"bytes"
 )
 
-// Browser authorization is owned by the host. Neither codes nor keys enter a
-// renderer response; the existing desktop secret channel persists the result.
-// Two flows share this record: the OpenRouter PKCE browser callback and the xAI
-// device-code login. `xai` is set only for the latter.
 type providerLogin struct {
 	id, provider, ref, state, address, verifier, path string
 	failure                                           string
@@ -37,25 +33,14 @@ type providerLogins struct {
 	values        map[string]*providerLogin
 	disconnecting map[string]bool
 	services      *AppServices
-	// secrets reads the values the host already holds. The xAI refresh loop
-	// needs the companion refresh secret after a daemon restart.
 	secrets    func() map[string]string
 	background context.Context
 	stop       context.CancelFunc
 	startOnce  sync.Once
-	// refreshMutex serializes the on-demand refresh: two requests that are
-	// rejected at the same moment must spend the refresh token once, because the
-	// vendor invalidates it on use.
 	refreshMutex sync.Mutex
-	// relogin holds the credentials the vendor refused to renew; refreshed holds
-	// the last successful renewal, so the console can say which of the two it is.
 	relogin   map[string]string
 	refreshed map[string]time.Time
-	// ask files the question a dead credential owes the person. The app sets it,
-	// because only the app knows which conversation owns the master node.
 	ask func(QuestionInput)
-	// stateDir holds the daemon's own copy of a rotated refresh token, so a restart
-	// never depends on the desktop having acknowledged the write.
 	stateDir string
 }
 
@@ -77,8 +62,6 @@ func (app *GraphApp) loginService() *providerLogins {
 	}
 	service := app.logins
 	app.mutex.Unlock()
-	// Resuming the xAI refresh loop reads the host secrets, so it must happen
-	// outside app.mutex.
 	service.startOnce.Do(func() { service.resumeXai() })
 	return service
 }
@@ -296,8 +279,6 @@ func (service *providerLogins) cancel(login *providerLogin) {
 	login.mutex.Unlock()
 	if !saving {
 		login.cancel()
-		// A device-code login has no callback listener; only the PKCE flow owns
-		// an HTTP server here.
 		if login.server != nil {
 			_ = login.server.Close()
 		}
@@ -326,12 +307,8 @@ func (service *providerLogins) disconnect(ref string) map[string]any {
 	for _, login := range logins {
 		service.cancel(login)
 	}
-	// The daemon's own copy goes too: a file left behind is a refresh token that
-	// outlives the account the person just disconnected.
 	service.dropXaiBundle(ref + xaiRefreshSuffix)
 	service.forgetXaiRelogin(ref)
-	// The xAI device login keeps a companion refresh secret, and leaving it
-	// behind would let a disconnected account come back after the next restart.
 	if service.secrets != nil {
 		if _, stored := service.secrets()[ref+xaiRefreshSuffix]; stored || service.pending(ref+xaiRefreshSuffix) {
 			_ = service.services.PushSecret(ref+xaiRefreshSuffix, nil, nil)

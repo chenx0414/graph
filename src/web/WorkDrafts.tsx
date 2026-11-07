@@ -119,14 +119,7 @@ export function WorkDrafts({ role, conversationId, projectId, projects, cursor }
     }
   }
 
-  // A delegated draft is the global supervisor's decision, not the person's:
-  // it is read and confirmed with confirm_work_draft, so a confirm card here
-  // would only ask the user to repeat the choice they already delegated. A
-  // project conversation keeps the card for the drafts it wrote itself.
   if (role !== 'project') return null;
-  // A work with no draft has nothing to confirm. The panel used to stand under
-  // every conversation as an empty "工作草稿 / 刷新" strip; it refreshes itself
-  // on every event and after every action, so the button was its only content.
   if (!items.some(item => item.drafts.length > 0)) {
     return error
       ? <section className="thread-card" data-testid="work-drafts" aria-label="工作草稿"><p role="alert">{error}</p></section>

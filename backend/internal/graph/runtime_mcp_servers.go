@@ -10,13 +10,11 @@ import (
 	"encoding/json"
 )
 
-// McpServerRef is one server handed to the kernel.
 type McpServerRef struct {
 	Name       string `json:"name"`
 	Definition any    `json:"definition"`
 }
 
-// McpFact is one bound capability that may be an MCP server.
 type McpFact struct {
 	Id      string
 	Version string
@@ -25,7 +23,6 @@ type McpFact struct {
 	Role    string
 }
 
-// McpServers reads capability.json and resolves transports. A declaration with no transport is skipped.
 func McpServersFor(facts []McpFact, secrets map[string]string) []McpServerRef {
 	servers := []McpServerRef{}
 	for _, fact := range facts {
@@ -72,7 +69,6 @@ func McpServersFor(facts []McpFact, secrets map[string]string) []McpServerRef {
 	return servers
 }
 
-// McpServerDefinition is the server shape the kernel connects.
 type McpServerDefinition struct {
 	Command    string
 	Args       []string
@@ -82,7 +78,6 @@ type McpServerDefinition struct {
 	Headers    map[string]string
 }
 
-// McpAdapterServerDeclaration is the MCP fields a capability manifest may declare.
 type McpAdapterServerDeclaration struct {
 	Command    any
 	Args       any
@@ -154,7 +149,6 @@ func mcpLookup(secrets map[string]string, name string) (string, bool) {
 	return os.LookupEnv(name)
 }
 
-// HeaderValues resolves manifest headers and headersEnv into literal header values.
 func HeaderValues(headers, headersEnv any, secrets map[string]string) map[string]string {
 	values := map[string]string{}
 	merge := func(source any, resolveValue func(string) string, label string) {
@@ -192,7 +186,6 @@ func mcpWholeReference(value string) string {
 	return ""
 }
 
-// EnvironmentValues resolves whole-string $VAR and ${VAR} references in a manifest env map.
 func EnvironmentValues(env any, secrets map[string]string) map[string]string {
 	mapped := mcpStringMap(env, "MCP manifest env")
 	if mapped == nil {
@@ -213,12 +206,10 @@ func EnvironmentValues(env any, secrets map[string]string) map[string]string {
 	return values
 }
 
-// McpAdapterServerName uses the capability id unchanged.
 func McpAdapterServerName(id string) string {
 	return id
 }
 
-// McpServerDefinitionFrom translates one capability declaration. It returns nil when no transport is declared.
 func McpServerDefinitionFrom(declaration McpAdapterServerDeclaration, secrets map[string]string, capabilityDir string) *McpServerDefinition {
 	urlText, _ := declaration.Url.(string)
 	urlText = strings.TrimSpace(urlText)
@@ -287,7 +278,6 @@ func mcpDeclaredArg(capabilityDir, value string, secrets map[string]string) (out
 	return ResolveManifestArg(capabilityDir, value, secrets)
 }
 
-// ResolveManifestArg expands a whole-string env reference, or joins a snapshot-relative path.
 func ResolveManifestArg(snapshot, value string, env map[string]string) string {
 	if reference := mcpWholeReference(value); reference != "" {
 		resolved, ok := env[reference]

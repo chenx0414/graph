@@ -5,7 +5,6 @@ import (
 	"strconv"
 )
 
-// LayoutGraph places nodes with elkjs, then draws orthogonal connectors in Go.
 func LayoutGraph(input LayoutInput, previous *LayoutPrevious) GraphLayout {
 	containers := input.Containers
 	nested := map[string]bool{}

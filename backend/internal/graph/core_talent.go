@@ -108,7 +108,6 @@ type TalentExperience struct {
 	All     TalentStats    `json:"all"`
 }
 
-// TalentExperience is one instance per recorded experience for a definition.
 func TalentExperienceOf(store *TaskStore, id string, version *int, allVersions bool) TalentExperience {
 	latest, _ := g5One(store.Db, "SELECT MAX(version) AS version FROM definitions WHERE id=?", id)
 	var scopeVersion *int
@@ -123,7 +122,6 @@ func TalentExperienceOf(store *TaskStore, id string, version *int, allVersions b
 	like := id + "@%"
 	clause := "LIKE ?"
 	if version != nil && !allVersions {
-		// TS uses options.version === undefined to choose LIKE, even when allVersions is set.
 	}
 	if version != nil {
 		clause = "=?"
@@ -337,7 +335,6 @@ func talentStats(list []TalentSample) TalentStats {
 	return stats
 }
 
-// TalentDetail is one definition with its versions and bound capabilities.
 func TalentDetail(store *TaskStore, id string, version *int, capability func(id, version string) *CapabilityRecord) map[string]any {
 	rows := g5Query(store.Db, "SELECT version,spec FROM definitions WHERE id=? ORDER BY version", id)
 	type versionSpec struct {

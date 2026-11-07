@@ -2,7 +2,6 @@ package graph
 
 import "fmt"
 
-// ExecutorHost is the slice of the resident host this loop turns.
 type ExecutorHost interface {
 	Start() HostProcess
 	Alive() bool
@@ -13,7 +12,6 @@ type HostProcess struct {
 	ProcessId int
 }
 
-// TurnReport is what one turn reported back.
 type TurnReport struct {
 	Error           *string
 	Done            bool
@@ -79,7 +77,6 @@ func (e *NodeExecutor) hasValidSubmission(executionId string) bool {
 	return ok
 }
 
-// RunNode drains the node's queue until it is empty or the node pauses.
 func (e *NodeExecutor) RunNode(nodeId string, run TurnRunner) NodeOutcome {
 	last := NodeOutcomeIdle
 	consumed := 0
@@ -202,11 +199,6 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 	recovered := e.kernel.Execution(executionId)
 	attempt := recovered.Attempt
 	retriesUsed := recovered.RetriesUsed
-	// The resubmit allowance is the node's, not this execution's. The node's
-	// durable counter is the one that survives a restart, and the contract
-	// says a reopened database does not refresh the automatic allowance: a
-	// node that used its one resubmit has used it, whichever execution it
-	// used it in.
 	resubmitsUsed := e.kernel.NodeState(e.graphId, nodeId).ResubmitsUsed
 	var injection *TurnInjection
 	if len(recovered.PendingGap) > 0 {
@@ -400,11 +392,6 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 			}
 			e.kernel.FinishExecution(executionId, "completed")
 			e.kernel.CompleteNode(e.graphId, nodeId)
-			// A delivered job that landed is a fact main has to see: main starts what
-			// comes after the node, and nothing else wakes it for a success. A chat
-			// turn is a conversation, not a step, so it does not wake main on its own.
-			// The status is read back because a stopped node is cancelled by
-			// CompleteNode and must not be reported as a success.
 			if item.Kind != "chat" && e.kernel.NodeStatus(e.graphId, nodeId) == "succeeded" {
 				WakeForNodeSettled(e.kernel.Store, e.graphId, nodeId, "succeeded", executionId)
 			}

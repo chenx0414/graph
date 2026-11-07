@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// encode turns one event into one frame, or nothing when the event carries no new bytes.
 func (encoder *assistantMessageFrameEncoder) encode(event AssistantMessageEvent) *AssistantMessageFrame {
 	if encoder.terminal {
 		panic(errors.New("Assistant message event " + event.Type + " follows a terminal event"))
@@ -108,9 +107,6 @@ func (encoder *assistantMessageFrameEncoder) encode(event AssistantMessageEvent)
 		}
 		arguments := assistantParsedToolArguments(state.catchupJson)
 		if assistantSerializedArguments(arguments) != state.snapshotArguments {
-			// Legacy grammar calls include the initial input in toolcall_start, but their
-			// JSON delta stream still begins at an empty input. Its parsed arguments can
-			// therefore extend, rather than exactly reproduce, the start snapshot.
 			snapshot := assistantParsedToolArguments(state.snapshotArguments)
 			if !assistantIsJsonPrefix(snapshot, arguments) {
 				return nil
@@ -136,8 +132,6 @@ func (encoder *assistantMessageFrameEncoder) encode(event AssistantMessageEvent)
 		frame := &AssistantMessageFrame{
 			Type: "toolcall_end", ContentIndex: event.ContentIndex,
 			Id: &event.ToolCall.Id, Name: &event.ToolCall.Name,
-			// The arguments value is never absent: a call that takes no
-			// parameters still travels as `{}`.
 			Arguments: assistantToolCallArguments(event.ToolCall.Arguments),
 		}
 		if event.ToolCall.ThoughtSignature != nil {

@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// CapabilityPrompts builds the identity prompt from the exact loaded bundle.
-// The generated tool section is authoritative even when a tool.md capability is bound.
 func CapabilityPrompts(input CapabilityPromptsInput) CapabilityPromptsResult {
 	systemPrompt := ""
 	if input.AgentPrompt != nil {
@@ -48,17 +46,14 @@ func CapabilityPrompts(input CapabilityPromptsInput) CapabilityPromptsResult {
 	return CapabilityPromptsResult{SystemPrompt: systemPrompt, Digest: digest}
 }
 
-// capabilityRuntimeError is one capability failure.
 func capabilityRuntimeError(code string, message string) *RuntimeError {
 	return &RuntimeError{Code: code, Message: message}
 }
 
-// capabilityRestrictedExecutor is the executor the MCP client runs commands with.
 type capabilityRestrictedExecutor interface {
 	Run(command RestrictedCommand) McpRunResult
 }
 
-// capabilityRestrictedExecutorOf adapts the executor one lease carries to the MCP reply shape.
 func capabilityRestrictedExecutorOf(executor any) (capabilityRestrictedExecutor, bool) {
 	adapter, ok := executor.(interface {
 		Run(command RestrictedCommand) CommandResult

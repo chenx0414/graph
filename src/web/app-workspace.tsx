@@ -40,8 +40,6 @@ import type { Settings_,Startup,TaskSummary } from "./app-state.tsx";
 import { CapabilityResourceLibrary,InsightsPage,ModelsPage } from "./app-state.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 
-/** An old address that still has to land somewhere. The tab the user asked for
- * is replaced rather than stacked, so history does not grow a hop per visit. */
 function Redirect({ to }: { to: string }) {
   useEffect(() => { window.location.replace(to); }, [to]);
   return <Spinner label="正在打开洞察…" />;

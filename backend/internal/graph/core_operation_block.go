@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// HandleDispatchRefusal handles a refusal raised at the send boundary.
 func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal *RuntimeError, reservation int64) bool {
 	refusalCodes := []string{"paused", "budget", "unknown_usage", "context_rejected", "interrupted"}
 	if !containsString(refusalCodes, refusal.Code) {
@@ -27,8 +26,6 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			}
 		})
 	}
-	// Full access decides what the host may touch, not whether someone pays for
-	// it: a budget refusal stays parked so the reader sees the limit.
 	if IsFullAccess(operation.AccessPolicy) && refusal.Code != "interrupted" && refusal.Code != "budget" {
 		return l.transaction(func() any {
 			row := l.operationRow(operation.Id)
@@ -136,7 +133,6 @@ func usageForEvent(unknown bool, total int64) any {
 	return total
 }
 
-// MarkUncertain records a post-dispatch error whose external outcome cannot be proven.
 func (l *OperationLifecycle) MarkUncertain(operation Operation, reason string, quiescent bool) bool {
 	return l.transaction(func() any {
 		current := kernelRow(l.store.Db, "SELECT state FROM operations WHERE id=?", operation.Id)

@@ -1,12 +1,10 @@
 package graph
 
-// PauseContinuation is a durable "continue the turn I just soft-stopped" intent.
 type PauseContinuation struct {
 	RequestId   string `json:"requestId"`
 	OperationId string `json:"operationId"`
 }
 
-// AwaitPauseContinuation records a waiting continuation for a live master turn.
 func AwaitPauseContinuation(store *TaskStore, requestId, taskId, operationId string) bool {
 	master := kernelRow(store.DB, `SELECT o.node_id FROM operations o
     JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
@@ -20,7 +18,6 @@ func AwaitPauseContinuation(store *TaskStore, requestId, taskId, operationId str
 	return true
 }
 
-// ResumePauseContinuations turns every waiting intent into a dispatchable wake-up.
 func ResumePauseContinuations(store *TaskStore, taskId string) []map[string]any {
 	rows := kernelRows(store.DB, "SELECT request_id AS requestId,node_id AS nodeId FROM pause_continuations WHERE task_id=? AND state='waiting' ORDER BY rowid", taskId)
 	for _, row := range rows {
@@ -31,7 +28,6 @@ func ResumePauseContinuations(store *TaskStore, taskId string) []map[string]any 
 	return rows
 }
 
-// PendingPauseContinuation returns the oldest ready continuation for a node.
 func PendingPauseContinuation(store *TaskStore, taskId, nodeId string) *PauseContinuation {
 	row := kernelRow(store.DB, `SELECT request_id AS requestId,operation_id AS operationId
     FROM pause_continuations WHERE task_id=? AND node_id=? AND state='ready' ORDER BY rowid LIMIT 1`, taskId, nodeId)
@@ -41,7 +37,6 @@ func PendingPauseContinuation(store *TaskStore, taskId, nodeId string) *PauseCon
 	return &PauseContinuation{RequestId: kernelString(row["requestId"]), OperationId: kernelString(row["operationId"])}
 }
 
-// ConsumePauseContinuation binds every ready intent of the node to the operation that continues it.
 func ConsumePauseContinuation(store *TaskStore, taskId, nodeId, operationId string) bool {
 	changed := kernelChanges(store.DB, "UPDATE pause_continuations SET state='consumed',resumed_operation_id=? WHERE task_id=? AND node_id=? AND state='ready'", operationId, taskId, nodeId)
 	if changed > 0 {

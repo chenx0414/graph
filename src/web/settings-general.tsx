@@ -42,9 +42,6 @@ export function ProjectGitCard() {
       await load().catch(() => undefined);
     }
   };
-  // Archiving pauses the project's unfinished work and refuses new delegations.
-  // Restoring only lifts the archive: the work it paused stays paused until the
-  // user asks for it by name.
   const setArchived = async (project: ProjectRow, action: 'archive' | 'restore') => {
     if (archiving) return;
     setArchiving(project.id);

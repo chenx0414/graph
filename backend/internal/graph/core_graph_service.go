@@ -1,48 +1,32 @@
 package graph
 
-// GraphManagement is the main-agent management contract. Every target remains
-// in the owner's conversation.
 type GraphManagement interface {
 	GraphCreate(input GraphCreateInput) any
 	GraphPatch(input GraphPatchInput) any
 	GraphInspect(input GraphInspectInput) any
 	GraphControl(input GraphControlInput) any
-	// WaiveAcceptance records the user's own waiver of one acceptance item.
-	// It is a separate door from GraphControl on purpose: the actor that signs
-	// for the user is the door, never a payload.
 	WaiveAcceptance(input GraphAcceptanceWaiveInput) any
 	GraphSend(input GraphSendInput) any
-	// HarnessFriction records friction the project met but has not solved.
 	HarnessFriction(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
-	// HarnessCompare reads the behavioral contrast of the candidates of one
-	// task. It belongs to the graph facts it reads, so it lives here.
 	HarnessCompare(input HarnessCompareInput) HarnessComparison
-	// HarnessExperience reads the lessons earlier tasks adopted per domain.
 	HarnessExperience(input HarnessExperienceInput) HarnessExperienceResult
-	// HarnessDecision records the adopted candidate and the lesson it taught.
 	HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
-	// HarnessProbe runs one task under several harnesses and contrasts them.
 	HarnessProbe(input HarnessProbeInput) HarnessProbeResult
-	// HarnessEvidence reads the evidence of the caller's own run: the
-	// trajectory, the tool failures, the blocked work and the usage.
 	HarnessEvidence(input HarnessEvidenceInput) HarnessEvidenceResult
 }
 
-// GraphCreateInput creates an independently owned graph.
 type GraphCreateInput struct {
 	Definition   any
 	TargetBranch *string
 	RequestId    *string
 }
 
-// GraphPatchInput publishes a new revision of a graph.
 type GraphPatchInput struct {
 	GraphId      string
 	BaseRevision int
 	Changes      PatchChange
 }
 
-// GraphInspectInput reads a graph's facts.
 type GraphInspectInput struct {
 	GraphId      string
 	Query        *string
@@ -53,7 +37,6 @@ type GraphInspectInput struct {
 	Limit        *int
 }
 
-// GraphControlInput drives a graph's execution controls.
 type GraphControlInput struct {
 	GraphId         string
 	Action          string
@@ -69,11 +52,9 @@ type GraphControlInput struct {
 	RequestID       string
 	Text            string
 	Proof           string
-	// Limitations is what complete_with_limitations closes a blocked graph on.
 	Limitations []GraphAcceptanceLimitation
 }
 
-// GraphSendInput delivers a public input or a chat message.
 type GraphSendInput struct {
 	GraphId string
 	NodeId  *string
@@ -82,7 +63,6 @@ type GraphSendInput struct {
 	Text    *string
 }
 
-// GraphCreateResult is the graph a create returns.
 type GraphCreateResult struct {
 	GraphId    string          `json:"graphId"`
 	Definition GraphDefinition `json:"definition"`
@@ -91,7 +71,6 @@ type GraphCreateResult struct {
 	Replayed   bool            `json:"replayed"`
 }
 
-// GraphCreateBlocked is the result of a create whose Git preparation failed.
 type GraphCreateBlocked struct {
 	GraphId    string          `json:"graphId"`
 	Definition GraphDefinition `json:"definition"`
@@ -101,7 +80,6 @@ type GraphCreateBlocked struct {
 	Reason     string          `json:"reason"`
 }
 
-// graphManagementService is the GraphManagement bound to one owner task.
 type graphManagementService struct {
 	kernel      *KernelStore
 	ownerTaskId string
@@ -109,9 +87,6 @@ type graphManagementService struct {
 	artifacts   *ArtifactWorkspace
 }
 
-// NewGraphManagement binds the management surface to one owner task.
-// The TypeScript export was graphManagement; the interface kept the
-// GraphManagement name, so the factory follows the constructor spelling.
 func NewGraphManagement(kernel *KernelStore, ownerTaskId string, prepare func(graphId string, branch string), artifacts *ArtifactWorkspace) GraphManagement {
 	return &graphManagementService{kernel: kernel, ownerTaskId: ownerTaskId, prepare: prepare, artifacts: artifacts}
 }

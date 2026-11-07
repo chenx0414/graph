@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// piExtensionManifestEntries reads the package's own `pi.extensions` list.
 func piExtensionManifestEntries(packageRoot string) ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(packageRoot, "package.json"))
 	if err != nil {
@@ -33,8 +32,6 @@ func piExtensionManifestEntries(packageRoot string) ([]string, error) {
 	return entries, nil
 }
 
-// piExtensionNpmInstallRoot is the SDK's temporary npm install root:
-// `<agentDir>/tmp/extensions/npm/<sha256("npm-")[:8]>`.
 func piExtensionNpmInstallRoot(agentDir string) string {
 	base := filepath.Join(agentDir, "tmp", "extensions")
 	if err := os.MkdirAll(base, 0o700); err == nil {
@@ -45,7 +42,6 @@ func piExtensionNpmInstallRoot(agentDir string) string {
 	return filepath.Join(base, "npm", hash)
 }
 
-// piExtensionGitInstallPath is the SDK's temporary git install path.
 func piExtensionGitInstallPath(parsed piExtensionSource, agentDir string) string {
 	base := filepath.Join(agentDir, "tmp", "extensions")
 	prefix := "git-" + parsed.host
@@ -54,7 +50,6 @@ func piExtensionGitInstallPath(parsed piExtensionSource, agentDir string) string
 	return filepath.Join(base, prefix, hash, filepath.Base(strings.TrimSuffix(parsed.path, ".git")))
 }
 
-// piExtensionEnsureNpmProject makes the install root an npm project, like the SDK does.
 func piExtensionEnsureNpmProject(root string) error {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
@@ -70,8 +65,6 @@ func piExtensionEnsureNpmProject(root string) error {
 	return os.WriteFile(manifest, body, 0o600)
 }
 
-// piExtensionInstallRootFor is the install root npm used for a temporary source:
-// `<root>/node_modules/<pkg>/…`.
 func piExtensionInstallRootFor(entry string) string {
 	current := filepath.Dir(entry)
 	for {
@@ -86,7 +79,6 @@ func piExtensionInstallRootFor(entry string) string {
 	}
 }
 
-// piExtensionUnique keeps the first occurrence of every path.
 func piExtensionUnique(paths []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -100,7 +92,6 @@ func piExtensionUnique(paths []string) []string {
 	return out
 }
 
-// piExtensionPackageManifestAt is the nearest package.json at or above one path.
 func piExtensionPackageManifestAt(start string) (map[string]any, bool) {
 	current := start
 	for {

@@ -7,9 +7,7 @@ import {
 import { visibleTranscriptMessages } from './composer-state.ts';
 import { buildTranscriptRows, type TranscriptRow } from './transcript-model.ts';
 
-/** What the supervisor thread shows. Streaming order and the activity fold stay behind this record. */
 export interface SupervisorTranscript {
-  /** Durable messages the thread and the composer history read. Cancelled user messages are already absent. Queued messages are listed separately. */
   messages: ConversationMessage[];
   queuedMessages: ConversationMessage[];
   rows: TranscriptRow[];
@@ -18,7 +16,6 @@ export interface SupervisorTranscript {
   historyRequest: ConversationHistoryRequest | null;
 }
 
-/** Fold one supervisor projection into the picture the thread renders. */
 export function supervisorTranscript(
   state: ConversationProjectionState,
   input: {

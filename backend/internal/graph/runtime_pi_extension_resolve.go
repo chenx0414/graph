@@ -4,17 +4,12 @@ import (
 	"strings"
 )
 
-// ResolvePiExtensionSource resolves one Pi extension capability source exactly the way the Pi SDK
-// does it: `npm:<spec>`, a git URL, or a local path. The package is installed (temporary scope,
-// under `<agentDir>/tmp/extensions`) and the package's own `pi.extensions` list is read, so Graph
-// neither vendors a copy nor hand-writes the entry file.
 func ResolvePiExtensionSource(input PiExtensionSourceInput) (ResolvedPiExtensionSource, error) {
 	return withExtensionInstall(input.AgentDir, func() (ResolvedPiExtensionSource, error) {
 		return resolvePiExtensionSourceOnce(input)
 	})
 }
 
-// piExtensionSource is a parsed source string.
 type piExtensionSource struct {
 	kind    string // "npm", "git" or "local"
 	spec    string
@@ -26,7 +21,6 @@ type piExtensionSource struct {
 	path    string
 }
 
-// parsePiExtensionSource mirrors the SDK's parseSource.
 func parsePiExtensionSource(source string) piExtensionSource {
 	trimmed := strings.TrimSpace(source)
 	if strings.HasPrefix(trimmed, "npm:") {
@@ -40,7 +34,6 @@ func parsePiExtensionSource(source string) piExtensionSource {
 	return piExtensionSource{kind: "local", path: trimmed}
 }
 
-// parseNpmSpec mirrors the SDK's parseNpmSpec: `name` or `name@version`.
 func parseNpmSpec(spec string) (string, string) {
 	at := strings.LastIndex(spec, "@")
 	if at <= 0 {
@@ -49,7 +42,6 @@ func parseNpmSpec(spec string) (string, string) {
 	return spec[:at], spec[at+1:]
 }
 
-// parseGitSource recognises the git URL shapes the SDK recognises.
 func parseGitSource(source string) (piExtensionSource, bool) {
 	if source == "" {
 		return piExtensionSource{}, false

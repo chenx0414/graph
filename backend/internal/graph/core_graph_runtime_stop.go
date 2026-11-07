@@ -1,6 +1,5 @@
 package graph
 
-// Stop cancels queued work and blocks new dispatch.
 func (runtime *GraphRuntime) Stop() GraphStateRow {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
@@ -16,7 +15,6 @@ func (runtime *GraphRuntime) Stop() GraphStateRow {
 	return *runtime.State()
 }
 
-// SettleStop settles once queued work is cancelled and in-flight executions stop.
 func (runtime *GraphRuntime) SettleStop() string {
 	runtime.ensureTask()
 	if runtime.State().Phase == "stopped" {
@@ -41,7 +39,6 @@ func (runtime *GraphRuntime) SettleStop() string {
 	return "stopped"
 }
 
-// Inspect reads summary, revision, or nodes.
 func (runtime *GraphRuntime) Inspect(kind string) any {
 	runtime.ensureTask()
 	latest := runtime.kernel.LatestRevision(runtime.graphId)

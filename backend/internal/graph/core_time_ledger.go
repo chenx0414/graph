@@ -28,7 +28,6 @@ func CloseUserWaitForOperation(store *TaskStore, operationID string, now ...int6
 	}
 }
 
-// NodeTimeLedger is one node's pause and user-wait totals. Nil means never recorded.
 type NodeTimeLedger struct {
 	PauseMs    *int64 `json:"pauseMs,omitempty"`
 	UserWaitMs *int64 `json:"userWaitMs,omitempty"`

@@ -1,8 +1,6 @@
 import type { ConversationMessage } from '../core/conversation-projection.ts';
 export interface Entry { seq: number; id: string; role: string; kind: string; text: string; data: Record<string, unknown> | null; operationId: string | null; createdAt: number; contentTruncated?: boolean; contentBytes?: number }
 
-/** Session assistant messages include intermediate narration. Only the last
- * assistant record of a settled operation is its final answer. */
 export function nodeMessages(entries: Entry[], operations: { id: string; state: string; workerActive?: boolean }[], busy: boolean): ConversationMessage[] {
   let legacyTurn = 0;
   entries = entries.map(entry => {
@@ -11,8 +9,6 @@ export function nodeMessages(entries: Entry[], operations: { id: string; state: 
   });
   const last = new Map<string, Entry>();
   for (const entry of entries) if (entry.operationId && entry.role === 'assistant') last.set(entry.operationId, entry);
-  // A turn is in flight only while the run is. A settled run must not keep its
-  // last turn in live dress: live rows stay unfolded, wrapped turns fold.
   const active = busy
     ? new Set(operations.filter(operation => operation.workerActive || ['prepared', 'dispatched', 'running'].includes(operation.state)).map(operation => operation.id))
     : new Set<string>();

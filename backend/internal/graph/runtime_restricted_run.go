@@ -9,7 +9,6 @@ import (
 	"sync"
 )
 
-// sandboxExecutor runs commands inside the macOS seatbelt sandbox.
 type sandboxExecutor struct {
 	mutex  sync.Mutex
 	closed bool
@@ -22,15 +21,12 @@ func newSandboxExecutor() *sandboxExecutor {
 	return &sandboxExecutor{}
 }
 
-// Close releases the sandbox this executor owns.
 func (executor *sandboxExecutor) Close() {
 	executor.mutex.Lock()
 	defer executor.mutex.Unlock()
 	executor.closed = true
 }
 
-// Run executes one command inside the verified sandbox and returns its
-// finished result.
 func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 	cwd := canonicalGrant(command.Cwd)
 	readPaths := canonicalGrantAll(command.ReadPaths)
@@ -61,16 +57,12 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 			tempDir = "/tmp"
 		}
 	}
-	// The macOS Git shim resolves its developer directory through
-	// /private/var/select and then executes the Command Line Tools binaries.
 	systemReads := []string{"/System", "/usr", "/bin", "/sbin", "/Library/Apple", "/dev"}
 	for _, shim := range []string{"/private/var/select", "/Library/Developer/CommandLineTools"} {
 		if _, err := os.Stat(shim); err == nil {
 			systemReads = append(systemReads, shim)
 		}
 	}
-	// Checks may resolve loopback host names. The resolver reads /etc/hosts and
-	// friends, and the profile's subpath filters only match directories.
 	if _, err := os.Stat("/etc"); err == nil {
 		if real, err := filepath.EvalSymlinks("/etc"); err == nil {
 			systemReads = append(systemReads, real)
@@ -114,11 +106,6 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 			strictProtectedWritePaths = append(strictProtectedWritePaths, path)
 		}
 	}
-	// A command that opts in (every check) may write Git metadata inside its
-	// own scratch directory, so the blanket regex below is replaced by denies
-	// for the repositories that exist outside it: the scan skips the scratch,
-	// and a deny in this sandbox always beats a later allow, so the blanket
-	// form also blocked the temporary repository the check had just created.
 	gitPaths := []string{}
 	if hostFilesystem {
 		if command.GitMetadataWritesInsideScratch {
@@ -163,11 +150,6 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 	} else {
 		profile = pinnedFilesystemProfile(allowedReads, append(append([]string{}, deviceWrites...), writePaths...), gitPaths)
 	}
-	// The sandbox proxy enforces one process-global allowlist. An unrestricted
-	// Pi extension can live for the whole Agent turn, so it cannot hold that
-	// lock without deadlocking host-side MCP calls from the same turn. Give
-	// only that process a static direct-network profile instead; allowlisted
-	// executions still use the serialized sandbox proxy.
 	networkProfile := []string{}
 	if command.AllowUnrestrictedNetwork {
 		networkProfile = append(networkProfile, "(allow network-outbound)")
@@ -189,9 +171,6 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 			`(allow mach-lookup (global-name-regex #"^org\.chromium\."))`,
 			`(allow mach-register (global-name-regex #"^com\.google\.chrome(?:\.|$)"))`,
 			`(allow mach-lookup (global-name-regex #"^com\.google\.chrome(?:\.|$)"))`,
-			// macOS name resolution goes through mDNSResponder rather than a
-			// plain DNS socket, so direct-network browser processes need this
-			// additional lookup even when network-outbound is unrestricted.
 			`(allow mach-lookup (global-name "com.apple.mDNSResponder"))`,
 			`(allow mach-lookup (global-name "com.apple.SystemConfiguration.DNSConfiguration"))`,
 			"(allow system-socket (socket-domain AF_UNIX))",
@@ -199,8 +178,6 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 			`(allow file-read* (literal "/Library/Preferences/com.apple.networkd.plist"))`,
 			`(allow file-read-metadata (literal "/var"))`,
 			`(allow file-read-metadata (literal "/etc"))`,
-			// Chrome reads kern.hv_vmm_present during startup on macOS. The
-			// sandbox otherwise denies that read and Chrome aborts.
 			`(allow sysctl-read (sysctl-name "kern.hv_vmm_present"))`)
 	}
 	if len(unixSockets) > 0 {
@@ -219,14 +196,10 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 	for _, argument := range command.Args {
 		commandText += " " + shellQuote(argument)
 	}
-	// Even setup writes happen after confinement. A mutable cwd must never
-	// cause the host to create directories outside the original grant.
 	launch := "exec " + commandText
 	if !hostFilesystem {
 		launch = "/bin/mkdir -p " + shellQuote(homeDir) + " " + shellQuote(tempDir) + " && exec " + commandText
 	}
-	// The sandbox proxy is per run, so two capabilities can never inherit one
-	// another's network grant.
 	proxy, proxyEnvironment := executor.openNetworkProxy(command, unixSockets)
 	if proxy != nil {
 		defer proxy.Close()
@@ -282,9 +255,6 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 		if err := os.WriteFile(listenGuardPath, []byte(loopbackListenGuard), 0o600); err != nil {
 			panic(err)
 		}
-		// --test-isolation=none keeps node --test files in the process that
-		// owns the IPC channel; an isolation child would have no route to the
-		// host.
 		options := []string{}
 		if value, ok := commandEnv(command.Env, "NODE_OPTIONS"); ok && value != "" {
 			options = append(options, value)
@@ -293,9 +263,6 @@ func (executor *sandboxExecutor) Run(command RestrictedCommand) CommandResult {
 		environment[listenGuardEnv] = "1"
 		environment["NODE_OPTIONS"] = strings.Join(options, " ")
 	}
-	// bash with pipefail, for the same reason the unsandboxed path uses it: a
-	// command that ends in `| tail` must still report the failing stage, or a
-	// check records passed while its own output says FAIL.
 	launched := "/usr/bin/sandbox-exec"
 	launchedArgs := []string{"-p", boundedProfile, "/bin/bash", "-o", "pipefail", "-c", launch}
 	if command.Unsandboxed {

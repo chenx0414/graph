@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// usagePercentWindow builds one quota window.
 func usagePercentWindow(id string, label string, used float64, resetAt *int64, details usageWindowDetails) UsageWindow {
 	normalized := clampPercent(used)
 	return UsageWindow{
@@ -15,7 +14,6 @@ func usagePercentWindow(id string, label string, used float64, resetAt *int64, d
 	}
 }
 
-// usageOpenCodeWindows reads the quota windows of an OpenCode Go reply.
 func usageOpenCodeWindows(body map[string]any, now int64) []UsageWindow {
 	usage := usageRecord(body["usage"])
 	if usage == nil {
@@ -41,9 +39,6 @@ func usageOpenCodeWindows(body map[string]any, now int64) []UsageWindow {
 		}
 		windows = append(windows, usagePercentWindow(entry.id, entry.label, *percent, resetAt, usageWindowDetails{}))
 	}
-	// The legacy HTML/DOM endpoint used rollingUsage, weeklyUsage and
-	// monthlyUsage. Keep this fallback so a dashboard format rollback does not
-	// make the card empty.
 	if len(windows) == 0 {
 		legacy := []struct {
 			key   string
@@ -71,7 +66,6 @@ func usageOpenCodeWindows(body map[string]any, now int64) []UsageWindow {
 	return windows
 }
 
-// usageOpenCodeCredential resolves the OpenCode Go credential.
 func usageOpenCodeCredential(config *GraphConfig, env map[string]string, openCodeConfig any) *usageCredential {
 	return usageFirstCredential(
 		usageSelectedCredential(env, UsageProviderOpenCodeGo, []string{"OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_API_KEY"}, usageDefaultBaseURLs[UsageProviderOpenCodeGo]),
@@ -82,7 +76,6 @@ func usageOpenCodeCredential(config *GraphConfig, env map[string]string, openCod
 	)
 }
 
-// usageFetchOpenCode reads the OpenCode Go quota.
 func usageFetchOpenCode(credential *usageCredential, now int64, prices []ModelPrice, openCodeConfig any) (UsagePlan, error) {
 	status, _, raw, err := usageFetch("GET", usageOpenCodeURL, map[string]string{
 		"authorization": "Bearer " + credential.Value, "accept": "application/json",
@@ -112,7 +105,6 @@ func usageFetchOpenCode(credential *usageCredential, now int64, prices []ModelPr
 	return plan, nil
 }
 
-// usageCommandWindow reads one CommandCode quota window.
 func usageCommandWindow(id string, label string, raw map[string]any) *UsageWindow {
 	if raw == nil {
 		return nil
@@ -135,7 +127,6 @@ func usageCommandWindow(id string, label string, raw map[string]any) *UsageWindo
 	return &window
 }
 
-// usageCommandGoatCredential resolves the Command Goat credential.
 func usageCommandGoatCredential(config *GraphConfig, env map[string]string, openCodeConfig any) *usageCredential {
 	return usageFirstCredential(
 		usageSelectedCredential(env, UsageProviderCommandGoat, []string{"COMMANDCODE_API_KEY", "COMMAND_GOAT_API_KEY", "COMMANDCODE_GO_API_KEY"}, usageDefaultBaseURLs[UsageProviderCommandGoat]),
@@ -146,13 +137,10 @@ func usageCommandGoatCredential(config *GraphConfig, env map[string]string, open
 	)
 }
 
-// usageFetchCommandGoat reads the Command Goat quota and balance.
 func usageFetchCommandGoat(credential *usageCredential, now int64, prices []ModelPrice, openCodeConfig any) (UsagePlan, error) {
 	headers := map[string]string{"authorization": "Bearer " + credential.Value, "accept": "application/json"}
 	creditsURL := usageCommandCodeBase + "/alpha/billing/credits"
 	subscriptionURL := usageCommandCodeBase + "/alpha/billing/subscriptions"
-	// The TypeScript read both replies concurrently; the two round-trips are
-	// independent, so they overlap here too.
 	type fetchResult struct {
 		status int
 		raw    []byte
@@ -266,7 +254,6 @@ func usageFetchCommandGoat(credential *usageCredential, now int64, prices []Mode
 	return plan, nil
 }
 
-// usageMonthlyUsed is Math.max(0, total - remaining).
 func usageMonthlyUsed(total, remaining float64) float64 {
 	value := total - remaining
 	if value < 0 {
@@ -275,7 +262,6 @@ func usageMonthlyUsed(total, remaining float64) float64 {
 	return value
 }
 
-// usageDeepSeekCredential resolves the DeepSeek credential.
 func usageDeepSeekCredential(config *GraphConfig, env map[string]string) *usageCredential {
 	return usageFirstCredential(
 		usageSelectedCredential(env, UsageProviderDeepSeek, []string{"DEEPSEEK_API_KEY"}, usageDefaultBaseURLs[UsageProviderDeepSeek]),
@@ -285,7 +271,6 @@ func usageDeepSeekCredential(config *GraphConfig, env map[string]string) *usageC
 	)
 }
 
-// usageFetchDeepSeek reads the DeepSeek account balance.
 func usageFetchDeepSeek(credential *usageCredential, prices []ModelPrice) (UsagePlan, error) {
 	status, _, raw, err := usageFetch("GET", usageDeepSeekURL, map[string]string{
 		"authorization": "Bearer " + credential.Value, "accept": "application/json",

@@ -9,7 +9,6 @@ import (
 	"sync"
 )
 
-// usageSummarize counts the plans by state.
 func usageSummarize(plans []UsagePlan) UsageSummary {
 	summary := UsageSummary{}
 	for _, plan := range plans {
@@ -31,7 +30,6 @@ func usageSummarize(plans []UsagePlan) UsageSummary {
 	return summary
 }
 
-// usageService is the live usage service.
 type usageService struct {
 	mu           sync.Mutex
 	env          map[string]string
@@ -46,9 +44,6 @@ type usageService struct {
 	lastError    error
 }
 
-// CreateUsageService is createUsageService. It reads the local subscription
-// configuration and the vendor quotas; nothing it returns carries a secret
-// value.
 func CreateUsageService(options UsageServiceOptions) UsageService {
 	env := options.Env
 	if env == nil {
@@ -68,8 +63,6 @@ func CreateUsageService(options UsageServiceOptions) UsageService {
 	}
 }
 
-// usageCurrentConfig reads the configuration and the environment the service
-// works with.
 func (service *usageService) usageCurrentConfig() (GraphConfig, map[string]string) {
 	if service.loadConfig != nil {
 		return service.loadConfig()
@@ -77,7 +70,6 @@ func (service *usageService) usageCurrentConfig() (GraphConfig, map[string]strin
 	return EmptyGraphConfig(), service.env
 }
 
-// usageCredentialInventory resolves the credential of every platform.
 func (service *usageService) usageCredentialInventory(config GraphConfig, env map[string]string, openCodeConfig any) map[UsageProviderId]*usageCredential {
 	chatgpt, chatgptError := usageChatGptCredential(service.home, env)
 	if chatgptError != nil {
@@ -96,12 +88,6 @@ func (service *usageService) usageCredentialInventory(config GraphConfig, env ma
 	}
 }
 
-// usageLoadPricing reads the price table.
-//
-// The kernel catalog is the reference: it is the catalog the runtime bills
-// through, so its number for a model is the one the console shows. The local
-// models.dev file still answers for the models the kernel has never heard of -
-// a fine-tune, a local server - because those have no catalog entry at all.
 func (service *usageService) usageLoadPricing() ModelPricingSnapshot {
 	snapshot := ModelPricingSnapshot{Source: "kernel catalog", Models: kernelModelPrices()}
 	known := map[string]bool{}
@@ -133,7 +119,6 @@ func (service *usageService) usageLoadPricing() ModelPricingSnapshot {
 	return snapshot
 }
 
-// usageJob is one plan the snapshot reads.
 type usageJob struct {
 	platform   UsageProviderId
 	planID     string
@@ -142,7 +127,6 @@ type usageJob struct {
 	run        func() (UsagePlan, error)
 }
 
-// usageLoad reads every platform and builds the snapshot.
 func (service *usageService) usageLoad() (UsageSnapshot, error) {
 	generatedAt := NowMillis()
 	config, env := service.usageCurrentConfig()
@@ -185,8 +169,6 @@ func (service *usageService) usageLoad() (UsageSnapshot, error) {
 			},
 		})
 		for _, account := range usagePlatformAccountCredentials(&config, env, platform) {
-			// The credential already reported as the platform's primary one is
-			// not repeated.
 			if credential != nil && account.ID == credential.ID {
 				continue
 			}
@@ -206,8 +188,6 @@ func (service *usageService) usageLoad() (UsageSnapshot, error) {
 	}
 
 	plans := make([]UsagePlan, len(jobs))
-	// The TypeScript read every platform concurrently; the vendor calls are
-	// independent round-trips, so they overlap here too.
 	var group sync.WaitGroup
 	for index := range jobs {
 		group.Add(1)
@@ -245,8 +225,6 @@ func (service *usageService) usageLoad() (UsageSnapshot, error) {
 	}, nil
 }
 
-// Get returns the usage snapshot. A forced read always refetches; a read that
-// is already running is shared with the callers that wait for it.
 func (service *usageService) Get(force bool) (UsageSnapshot, error) {
 	for {
 		service.mu.Lock()
@@ -286,14 +264,10 @@ func (service *usageService) Get(force bool) (UsageSnapshot, error) {
 	}
 }
 
-// Pricing is the local price snapshot, without querying subscription
-// providers.
 func (service *usageService) Pricing() (ModelPricingSnapshot, error) {
 	return service.usageLoadPricing(), nil
 }
 
-// Credentials are the detected subscription providers mapped to the
-// credential ref Graph should use.
 func (service *usageService) Credentials() (map[string]string, error) {
 	config, env := service.usageCurrentConfig()
 	openCodeConfig, err := readUsageJSONSafe(service.openCodePath)
@@ -310,8 +284,6 @@ func (service *usageService) Credentials() (map[string]string, error) {
 	return credentials, nil
 }
 
-// SecretValues are the secret values imported from local subscription
-// configuration or login files. They stay inside the daemon.
 func (service *usageService) SecretValues() map[string]string {
 	config, env := service.usageCurrentConfig()
 	openCodeConfig, err := readUsageJSONSafe(service.openCodePath)
@@ -328,7 +300,6 @@ func (service *usageService) SecretValues() map[string]string {
 	return values
 }
 
-// DisplayNameValue is the account name the console shows.
 func (credential *usageCredential) DisplayNameValue() string {
 	if credential.DisplayName == nil {
 		return credential.ID
@@ -336,8 +307,6 @@ func (credential *usageCredential) DisplayNameValue() string {
 	return *credential.DisplayName
 }
 
-// readUsageJSONSafe reads and parses a JSON file. A missing file is nil; a
-// broken file is an error the caller decides about.
 func readUsageJSONSafe(path string) (any, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

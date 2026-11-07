@@ -152,5 +152,4 @@ func transitionField(value any) string {
 	return ""
 }
 
-// moduleRuntimeSource is the source label a module input was delivered with.
 func moduleRuntimeSource(source string) *string { return &source }

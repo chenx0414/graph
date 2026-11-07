@@ -7,8 +7,6 @@ import (
 	"os"
 )
 
-// GraphHome is the user-owned Graph state directory.
-// Capabilities and recipes stay outside the daemon DB.
 func GraphHome(env ...map[string]string) string {
 	configured := ""
 	if len(env) > 0 && env[0] != nil {

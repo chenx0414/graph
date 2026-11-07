@@ -5,39 +5,18 @@ import (
 	"strings"
 )
 
-// SupervisorNotice is what a project supervisor tells the global supervisor
-// without asking anything back.
-//
-// A question opens a decision and stops the asking turn until it is answered. A
-// notice is the other half of that channel: the project says what happened and
-// keeps working, and the global supervisor's thread receives a message it can
-// accept from.
 type SupervisorNotice struct {
 	Text      string
 	Milestone string
-	// WorkID is the work the milestone belongs to. With it the notice is
-	// delivered once per work and milestone, however many tool calls say it
-	// again; without it the request id is the only identity there is.
 	WorkID   string
 	Evidence string
-	// EvidenceExcerpt is the artifact body the sender read on the receiver's
-	// behalf. The receiver cannot open the sender's task workspace, so a bare
-	// pointer is not evidence: it is a claim that cannot be checked.
 	EvidenceExcerpt string
 	ArtifactID      string
 	ArtifactVersion int
-	// EvidenceFailure says why the excerpt is missing, so a receiver reads a
-	// reason instead of guessing at an empty attachment.
 	EvidenceFailure string
 	RequestID       string
 }
 
-// noticeEvidenceExcerpt reads the named artifact in the sender's own scope and
-// returns a bounded excerpt for the delivery.
-//
-// A missing artifact must not swallow the notice: the receiver still has to hear
-// that the milestone happened, and it has to know why the evidence did not come
-// with it. So a failed read returns the reason, and the notifier says it.
 func noticeEvidenceExcerpt(artifactId string, version int, read func(id string, version int, maxBytes int) ArtifactRead) (excerpt string, failure string) {
 	if strings.TrimSpace(artifactId) == "" {
 		return "", ""
@@ -60,12 +39,6 @@ func noticeEvidenceExcerpt(artifactId string, version int, read func(id string, 
 	return text, ""
 }
 
-// RecordSupervisorNotice delivers one notice into the global conversation and
-// wakes its master.
-//
-// The notice is not a question: no question row opens, nothing waits for an
-// answer, and the sender's turn continues. The request id makes the delivery
-// idempotent, so a retried tool call does not wake the global supervisor twice.
 func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNotice) any {
 	caller := ConversationForTask(store, taskID)
 	if caller == nil || caller.Role != ConversationProject {
@@ -94,9 +67,6 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 	}
 	evidence := strings.TrimSpace(notice.Evidence)
 	workID := strings.TrimSpace(notice.WorkID)
-	// One delivery per work and milestone: the scope key of the command is what
-	// makes a repeated notice a no-op instead of a second message and a second
-	// wake. Without a work id the call's own request id is the identity.
 	delivery := "notice:" + requestID
 	if workID != "" {
 		delivery = workID + ":" + milestone
@@ -136,9 +106,6 @@ func RecordSupervisorNotice(store *TaskStore, taskID string, notice SupervisorNo
 			TaskID: anchor, Kind: "supervisor_notice", DedupeKey: taskID + ":" + delivery,
 			Data: map[string]any{"conversationId": caller.Id, "taskId": taskID, "milestone": milestone, "workId": workID}, HasData: true,
 		})
-		// A notice is a message written into a conversation that has to be read
-		// and reported, so it releases the same parking a chat does: a master
-		// left parked by a failed turn would otherwise never see the notice.
 		RecoverMaster(store, anchor, "message")
 		store.Event(taskID, "supervisor.notice", map[string]any{"conversationId": globalID, "messageId": message.Id, "milestone": milestone, "workId": workID})
 		return map[string]any{"delivered": true, "conversationId": globalID, "messageId": message.Id, "milestone": milestone, "workId": workID}

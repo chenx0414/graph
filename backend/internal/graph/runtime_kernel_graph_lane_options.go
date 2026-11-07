@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 )
 
-// laneOptions are the lane's own hooks: the graph lifecycle, the
-// workspace, the module operations and the resident host.
 func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 	return GraphLaneOptions{
 		Kernel: state.options.Kernel,
@@ -41,8 +39,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				return
 			}
 			state.options.Git.Exclusive(execution.TaskId, func() any {
-				// The TypeScript check is ['stopping', 'stopped']; a completed task is
-				// not a closed integration.
 				phase := state.options.Kernel.Store.Task(execution.TaskId).Phase
 				if state.closing.Load() || phase == "stopping" || phase == "stopped" {
 					Raise("paused", "Git integration is closed")
@@ -56,14 +52,9 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 					return nil
 				}
 				known := state.options.Catalog.HasDefinition(node.Recipe)
-				// Reviewer reports are shared artifacts; they must not become implementation changes.
 				if known && state.options.Catalog.Definition(node.Recipe).Review {
 					return nil
 				}
-				// An experiment's candidates are compared, not delivered. Landing
-				// both would make the second lane collide with the first on any
-				// shared path, and the collision would read as "this harness did
-				// worse" when it only means "this lane settled later".
 				if node.Integrate != nil && !*node.Integrate {
 					return nil
 				}
@@ -109,8 +100,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 					RevisionVersion: request.RevisionVersion, Operation: request.Operation, Workspace: *workspace,
 					ScratchRoot: state.options.StateDir, State: request.State, Inputs: request.Inputs, Signal: request.Signal,
 					Program: program,
-					// The same facts settleWorkspace uses decide whether this delivery's source owes the
-					// integration branch a commit, so a check never waits on a source that never integrates.
 					IntegratesSource: func(executionId string) bool {
 						execution := state.options.Kernel.Execution(executionId)
 						if execution == nil {
@@ -136,7 +125,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				}
 				return ExecuteModuleOperation(input)
 			}
-			// A check observes one integration tip; managed merges cannot race its receipt.
 			if state.options.Git != nil {
 				return state.options.Git.Exclusive(graphId, func() any { return execute() }).(ModuleOperationResponse)
 			}
@@ -177,8 +165,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 			state.hostConfigs.Clear()
 			state.boundModels.Clear()
 		},
-		// A node's declared deliverable is settled from its own work copy into the shared
-		// artifact store, so work the node produced is published without a tool call (§13.8).
 		Workspace: func(graphId, nodeId string) *string {
 			return state.nodeWorkspace(graphId, nodeId, nil)
 		},
@@ -216,8 +202,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 					tools = append(tools, PiWorkerTool{Name: tool.Name, Label: tool.Label, Description: tool.Description, Parameters: tool.Parameters})
 				}
 			}
-			// §5: the node's graph output tool is `submit`. The host executes the call against the
-			// real execution (HB-262), so the model can never forge an executionId.
 			tools = append(tools, kernelGraphLaneSubmitTool())
 			nativeTools := []string{}
 			skillPaths := []string{}
@@ -296,16 +280,10 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 			workerConfig.CredentialReference = map[string]any{"modelId": model.Id, "provider": model.Provider, "credentialId": model.CredentialId}
 			workerConfig.CapabilityDescriptor = session.Operation.Descriptor
 			if frozen := state.restoring.Get(graphId + "/" + nodeId); frozen != nil {
-				// The turn is sent again with the admission it was accepted
-				// with: the configuration it was admitted with, the credential
-				// it may spend and the capability surface it was given.
 				configuration := frozen.Record.Configuration
 				workerConfig.NodeExecutionConfiguration = asMap(configuration.ExecutionConfiguration)
 				workerConfig.CredentialReference = asMap(configuration.CredentialReference)
 				workerConfig.CapabilityDescriptor = frozen.Descriptor
-				// The tools it was given are the ones the capability declared
-				// then. A capability that declares a different tool since
-				// must not change what this turn may call.
 				workerConfig.PiExtensionTools = append([]string{}, frozen.Record.Policy.PiExtensionTools...)
 				workerConfig.AllowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
 				allowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
@@ -313,8 +291,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 			return workerConfig
 
 		},
-		// One resident process per node, reused across turns.
-		// One resident process per node, reused across turns.
 		Host: func(graphId, nodeId string, config any, revisionVersion int) ExecutorHost {
 			return state.host(graphId, nodeId, config, revisionVersion)
 		},

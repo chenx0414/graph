@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// ToolCallStat is one tool/role aggregate. Role is JSON null when the call had no role.
 type ToolCallStat struct {
 	Tool     string  `json:"tool"`
 	Role     *string `json:"role"`
@@ -26,11 +25,6 @@ func (s *TaskStore) ToolCallStats(keepDays ...int) []ToolCallStat {
 	return s.ToolCallStatsFor("", nil)
 }
 
-// ToolCallStatsFor is the same aggregate narrowed to one scope.
-//
-// The insights page folds the tool side of a project or a conversation, and it
-// has to see exactly the rows that scope recorded - not the installation total
-// with a filter applied afterwards in Go.
 func (s *TaskStore) ToolCallStatsFor(filter string, args []any) []ToolCallStat {
 	predicate := ""
 	if filter = strings.TrimSpace(filter); filter != "" {

@@ -13,7 +13,6 @@ import (
 	"bufio"
 )
 
-// restrictedProcessState is the mutable state of one running process.
 type restrictedProcessState struct {
 	process       *exec.Cmd
 	stdin         io.WriteCloser
@@ -29,7 +28,6 @@ type restrictedProcessState struct {
 	bytes         int
 }
 
-// killTree reaps the whole process group of the sandbox child.
 func (state *restrictedProcessState) killTree() {
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
@@ -45,7 +43,6 @@ func (state *restrictedProcessState) killTree() {
 	execDebugTimeline("kill(-%d) sent", pid)
 }
 
-// readChannel reads the worker's newline-delimited protocol channel.
 func (state *restrictedProcessState) readChannel(reader io.Reader) {
 	buffer := make([]byte, 64*1024)
 	for {
@@ -82,8 +79,6 @@ func (state *restrictedProcessState) readChannel(reader io.Reader) {
 	}
 }
 
-// handleLine answers one worker message. It reports whether the channel
-// reader may continue.
 func (state *restrictedProcessState) handleLine(line []byte) bool {
 	var parsed any
 	if err := json.Unmarshal(line, &parsed); err != nil {
@@ -128,7 +123,6 @@ func (state *restrictedProcessState) handleLine(line []byte) bool {
 	return true
 }
 
-// readIpc answers the host's Node IPC channel in local-network mode.
 func (state *restrictedProcessState) readIpc(connection net.Conn) {
 	reader := bufio.NewReader(connection)
 	for {
@@ -142,7 +136,6 @@ func (state *restrictedProcessState) readIpc(connection net.Conn) {
 	}
 }
 
-// handleIpcLine answers one loopback-listener request of the check.
 func (state *restrictedProcessState) handleIpcLine(line []byte) {
 	var request map[string]any
 	if err := json.Unmarshal(line, &request); err != nil {
@@ -155,10 +148,6 @@ func (state *restrictedProcessState) handleIpcLine(line []byte) {
 		if !ok {
 			return
 		}
-		// TODO(port): the host binds the requested port, but Node's IPC
-		// protocol carries a socket descriptor as a native handle and the Go
-		// host cannot mint one. The request is refused instead of handing a
-		// descriptor over.
 		state.replyIpc(map[string]any{
 			"type":    "graph-check-listener-result",
 			"id":      int(id),
@@ -167,13 +156,10 @@ func (state *restrictedProcessState) handleIpcLine(line []byte) {
 			"message": "EPERM: the Go host cannot hand a bound listener to the check",
 		})
 	case "graph-check-listener-close", "graph-check-listener-adopted":
-		// The host owns no descriptor for a request it refused.
 	}
 }
 
 func (state *restrictedProcessState) replyIpc(payload map[string]any) {
-	// The IPC connection is closed with the process; a failed write means the
-	// check is gone.
 	if state.ipcConnection == nil {
 		return
 	}
@@ -191,14 +177,12 @@ func (state *restrictedProcessState) appendStderr(text string) {
 	state.stderr.Write(text)
 }
 
-// lockedBuffer collects one stream of a running process.
 type lockedBuffer struct {
 	mutex  sync.Mutex
 	buffer []byte
 	carry  []byte
 }
 
-// pump reads one stream and hands its decoded chunks to the host.
 func (buffer *lockedBuffer) pump(reader io.Reader, onChunk func(string)) {
 	chunk := make([]byte, 64*1024)
 	for {
@@ -223,22 +207,18 @@ func (buffer *lockedBuffer) pump(reader io.Reader, onChunk func(string)) {
 	}
 }
 
-// String returns everything the stream produced.
 func (buffer *lockedBuffer) String() string {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
 	return string(buffer.buffer)
 }
 
-// Write adds text the host produced to the stream.
 func (buffer *lockedBuffer) Write(text string) {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
 	buffer.buffer = append(buffer.buffer, text...)
 }
 
-// utf8Boundary returns the length of the prefix that ends on a rune boundary,
-// so a multibyte character split across two reads is not decoded twice.
 func utf8Boundary(data []byte) int {
 	end := len(data)
 	for end > 0 && !utf8.RuneStart(data[end-1]) {

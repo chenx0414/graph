@@ -7,7 +7,6 @@ import (
 	"errors"
 )
 
-// InputExplanation is one declared module input and whether a value arrived.
 type InputExplanation struct {
 	Name           string  `json:"name"`
 	Protocol       string  `json:"protocol"`
@@ -21,7 +20,6 @@ type InputExplanation struct {
 	UpdatedAt      *int64  `json:"updatedAt"`
 }
 
-// TransitionExplanation is one durable module judgment.
 type TransitionExplanation struct {
 	Cursor           int64   `json:"cursor"`
 	ID               string  `json:"id"`
@@ -39,7 +37,6 @@ type TransitionExplanation struct {
 	PayloadPreview   *string `json:"payloadPreview"`
 }
 
-// ModuleExplanation is the current module state and a page of judgments.
 type ModuleExplanation struct {
 	ModuleID         string                  `json:"moduleId"`
 	Type             string                  `json:"type"`
@@ -56,7 +53,6 @@ type ModuleExplanation struct {
 	Transitions      []TransitionExplanation `json:"transitions"`
 }
 
-// EdgeDeliveryExplanation is one real delivery, not an empty stand-in.
 type EdgeDeliveryExplanation struct {
 	ID                string           `json:"id"`
 	Value             any              `json:"value"`
@@ -73,7 +69,6 @@ type EdgeDeliveryExplanation struct {
 	Receiver          EdgeReceiver     `json:"receiver"`
 }
 
-// ArtifactRefHit is an explicit versioned artifact reference found in a value.
 type ArtifactRefHit struct {
 	TaskID     string  `json:"taskId"`
 	ArtifactID string  `json:"artifactId"`
@@ -81,7 +76,6 @@ type ArtifactRefHit struct {
 	Digest     *string `json:"digest"`
 }
 
-// EdgeReceiver is the durable receipt state of a delivery.
 type EdgeReceiver struct {
 	Kind        string  `json:"kind"`
 	State       string  `json:"state"`
@@ -89,7 +83,6 @@ type EdgeReceiver struct {
 	Reason      *string `json:"reason"`
 }
 
-// EdgeExplanation is an edge, its enabled bit, and its delivery history.
 type EdgeExplanation struct {
 	EdgeID          string                    `json:"edgeId"`
 	From            string                    `json:"from"`
@@ -102,7 +95,6 @@ type EdgeExplanation struct {
 	Deliveries      []EdgeDeliveryExplanation `json:"deliveries"`
 }
 
-// ModuleHistoryQuery pages module transitions.
 type ModuleHistoryQuery struct {
 	After              any
 	Limit              any
@@ -111,7 +103,6 @@ type ModuleHistoryQuery struct {
 	IncludeTransitions *bool
 }
 
-// EdgeHistoryQuery pages edge deliveries.
 type EdgeHistoryQuery struct {
 	Before     any
 	Limit      any
@@ -214,7 +205,6 @@ func explainLimit(value any, fallback float64) float64 {
 	return sqlFloat(value)
 }
 
-// ExplainModule reads the kernel's own rows for one module.
 func ExplainModule(kernel *KernelStore, taskID, moduleID string, query ModuleHistoryQuery) ModuleExplanation {
 	after := explainLimit(query.After, 0)
 	limit := explainLimit(query.Limit, 20)
@@ -343,7 +333,6 @@ func ExplainModule(kernel *KernelStore, taskID, moduleID string, query ModuleHis
 	}
 }
 
-// ExplainEdge reads an edge's endpoints and its real delivery history.
 func ExplainEdge(kernel *KernelStore, taskID, edgeID string, revisionVersion *int, query EdgeHistoryQuery) EdgeExplanation {
 	var revision = kernel.LatestRevision(taskID)
 	if revisionVersion != nil {

@@ -4,12 +4,10 @@ import (
 	"strings"
 )
 
-// Supervisor returns the control surface of one task.
 func (runtime *TaskRuntime) Supervisor(taskId string) *TaskRuntimeSupervisor {
 	return &TaskRuntimeSupervisor{runtime: runtime, taskId: taskId}
 }
 
-// TaskRuntimeControlInput is one control action of the main Agent.
 type TaskRuntimeControlInput struct {
 	Action          string
 	TaskId          *string
@@ -22,7 +20,6 @@ type TaskRuntimeControlInput struct {
 	Instruction     string
 }
 
-// ControlTask applies one control action of the main Agent.
 func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInput) any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -136,7 +133,6 @@ func (supervisor *TaskRuntimeSupervisor) ControlTask(input TaskRuntimeControlInp
 	return nil
 }
 
-// controlTarget names the task a control action may act on.
 func (supervisor *TaskRuntimeSupervisor) controlTarget(requested *string) string {
 	target := supervisor.taskId
 	if requested != nil && strings.TrimSpace(*requested) != "" {
@@ -153,7 +149,6 @@ func (supervisor *TaskRuntimeSupervisor) controlTarget(requested *string) string
 	return target
 }
 
-// runtime2Conversation reads the conversation of one task.
 func runtime2Conversation(runtime *TaskRuntime, taskId string) *string {
 	if owner, ok := runtime.kernel.GraphOwner(taskId); ok {
 		return runtime.store.Task(owner).ConversationID
@@ -162,7 +157,6 @@ func runtime2Conversation(runtime *TaskRuntime, taskId string) *string {
 	return conversation
 }
 
-// TaskRuntimeProposeInput is one proposal of the main Agent.
 type TaskRuntimeProposeInput struct {
 	ProposalVersion int
 	Summary         string
@@ -174,7 +168,6 @@ type TaskRuntimeProposeInput struct {
 	NewVersion      bool
 }
 
-// Propose records one draft of the main Agent.
 func (supervisor *TaskRuntimeSupervisor) Propose(input TaskRuntimeProposeInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -289,22 +282,18 @@ func (supervisor *TaskRuntimeSupervisor) Propose(input TaskRuntimeProposeInput) 
 	if record == nil {
 		return map[string]any{}
 	}
-	// The notes travel with the receipt so the author reads them without asking
-	// for a second opinion they did not know existed.
 	if notes := ProposalShapeNotes(proposal); len(notes) > 0 {
 		record["shapeNotes"] = notes
 	}
 	return record
 }
 
-// TaskRuntimeWithdrawInput withdraws one draft of the main Agent.
 type TaskRuntimeWithdrawInput struct {
 	ProposalVersion int
 	Reason          *string
 	RequestId       string
 }
 
-// WithdrawDraft retires the current unconfirmed draft.
 func (supervisor *TaskRuntimeSupervisor) WithdrawDraft(input TaskRuntimeWithdrawInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -358,7 +347,6 @@ func (supervisor *TaskRuntimeSupervisor) WithdrawDraft(input TaskRuntimeWithdraw
 	return record
 }
 
-// ValidateProposal checks one draft against the current requirement.
 func (supervisor *TaskRuntimeSupervisor) ValidateProposal(proposal NativeProposal) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()

@@ -6,9 +6,6 @@ import (
 	"database/sql"
 )
 
-// AcquireOwner holds an OS lock for the owner's entire lifetime.
-// No heartbeat timeout can steal a live daemon; process death releases the lock.
-// OpenSQLite is wrong here: this file uses DELETE journal mode, not WAL.
 func AcquireOwner(path string) func() {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {

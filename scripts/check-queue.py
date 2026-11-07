@@ -386,7 +386,7 @@ def main():
         # of the same checkout. So it runs beside the full suite instead of behind
         # it, and the suite it used to wait for is the one that no longer decides
         # whether a commit lands.
-        static = ("check:backend", "typecheck", "lint", "check:ownership", "check:tokens:changed", "check:harness")
+        static = ("check:backend", "typecheck", "lint", "check:comments", "check:ownership", "check:tokens:changed", "check:harness")
         tests = ("check:affected", "check:evidence")
         with protect_worktree(common):
             for step in static:

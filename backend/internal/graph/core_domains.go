@@ -31,8 +31,6 @@ func ipv4Address(value string) bool {
 	return true
 }
 
-// NormalizeDomainPattern validates one capability-declared domain pattern.
-// Wildcards are limited to a leading `*.`. Invalid patterns panic with a plain error.
 func NormalizeDomainPattern(value string) string {
 	pattern := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
 	if pattern == "" || pattern == "*" || domainBad.MatchString(pattern) {
@@ -68,7 +66,6 @@ func NormalizeDomainPattern(value string) string {
 	return pattern
 }
 
-// NormalizeDomains lowercases, dedupes and strips leading dots.
 func NormalizeDomains(domains []string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -86,7 +83,6 @@ func NormalizeDomains(domains []string) []string {
 	return out
 }
 
-// SandboxNetworkDomains expands a bare domain to itself and its subtree.
 func SandboxNetworkDomains(domains []string) []string {
 	var expanded []string
 	seen := map[string]bool{}
@@ -109,7 +105,6 @@ func SandboxNetworkDomains(domains []string) []string {
 	return expanded
 }
 
-// AllowedDomain reports whether hostname is covered by a granted domain.
 func AllowedDomain(domains []string, hostname string) bool {
 	host := strings.ToLower(hostname)
 	for _, domain := range domains {

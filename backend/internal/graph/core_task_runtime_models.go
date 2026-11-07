@@ -4,16 +4,10 @@ import (
 	"encoding/json"
 )
 
-// Models reads the configured models right now.
 func (runtime *TaskRuntime) Models() []map[string]any {
 	runtime.ensureOpen()
 	out := []map[string]any{}
 	for _, entry := range runtime.liveEntries() {
-		// The settings view shows the configured model as the user wrote it:
-		// the upstream model id, the account it belongs to and what it costs
-		// are part of what the console renders. Each entry also carries the
-		// thinking strengths that model accepts, so no console control has to
-		// keep a level list of its own.
 		view := ModelEntryView{ModelEntry: entry, ThinkingOptions: ThinkingOptionsFor(entry)}
 		raw, err := json.Marshal(view)
 		if err != nil {
@@ -28,25 +22,21 @@ func (runtime *TaskRuntime) Models() []map[string]any {
 	return out
 }
 
-// DefaultModel is the model a new conversation would use before any override.
 func (runtime *TaskRuntime) DefaultModel() *string {
 	runtime.ensureOpen()
 	return runtime.masterModel()
 }
 
-// CurrentAccessPolicy is the policy the next admitted operation would get.
 func (runtime *TaskRuntime) CurrentAccessPolicy() *ResolvedAccessPolicy {
 	runtime.ensureOpen()
 	return runtime.resolvedAccessPolicy()
 }
 
-// ModelLimits reports which credentials are busy and which requests wait.
 func (runtime *TaskRuntime) ModelLimits() ModelSchedulerSnapshot {
 	runtime.ensureOpen()
 	return runtime.scheduler.Snapshot()
 }
 
-// ModelsInUse lists the model ids bound to tasks that have not finished.
 func (runtime *TaskRuntime) ModelsInUse() []string {
 	runtime.ensureOpen()
 	seen := map[string]bool{}
@@ -70,7 +60,6 @@ func (runtime *TaskRuntime) ModelsInUse() []string {
 	return out
 }
 
-// GraphMessages reads the peer messages of one task.
 func (runtime *TaskRuntime) GraphMessages(taskId string) []map[string]any {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
@@ -89,7 +78,6 @@ func (runtime *TaskRuntime) GraphMessages(taskId string) []map[string]any {
 	return out
 }
 
-// GraphLayout reads the stored layout of one graph revision.
 func (runtime *TaskRuntime) GraphLayout(taskId string, revision int) map[string]any {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
@@ -98,7 +86,6 @@ func (runtime *TaskRuntime) GraphLayout(taskId string, revision int) map[string]
 	return map[string]any{"epoch": epoch, "snapshot": snapshot}
 }
 
-// SaveGraphLayout stores the layout of one graph revision.
 func (runtime *TaskRuntime) SaveGraphLayout(taskId string, revision int, topology string, layout Json, epoch int64) bool {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
@@ -110,27 +97,23 @@ func (runtime *TaskRuntime) SaveGraphLayout(taskId string, revision int, topolog
 	return true
 }
 
-// GraphModule explains one module of a graph.
 func (runtime *TaskRuntime) GraphModule(taskId, moduleId string, query ModuleHistoryQuery) ModuleExplanation {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
 	return ExplainModule(runtime.kernel, taskId, moduleId, query)
 }
 
-// GraphEdge explains one edge of a graph.
 func (runtime *TaskRuntime) GraphEdge(taskId, edgeId string, query EdgeHistoryQuery) EdgeExplanation {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
 	return ExplainEdge(runtime.kernel, taskId, edgeId, nil, query)
 }
 
-// KernelGraph reads the native graph of one task.
 func (runtime *TaskRuntime) KernelGraph(taskId string) any {
 	runtime.ensureOpen()
 	return KernelGraphView(runtime.kernel, taskId)
 }
 
-// NodeRun reads the node detail of one task.
 func (runtime *TaskRuntime) NodeRun(taskId, nodeId string, query NodeEntryQuery) any {
 	runtime.ensureOpen()
 	if runtime.kernel.LatestRevision(taskId) != nil {
@@ -139,7 +122,6 @@ func (runtime *TaskRuntime) NodeRun(taskId, nodeId string, query NodeEntryQuery)
 	return NodeRun(runtime.store, taskId, nodeId, query)
 }
 
-// NodePrompt reads the recorded prompt of one node.
 func (runtime *TaskRuntime) NodePrompt(taskId, nodeId string) NodePromptView {
 	runtime.ensureOpen()
 	if runtime.kernel.LatestRevision(taskId) != nil {
@@ -148,7 +130,6 @@ func (runtime *TaskRuntime) NodePrompt(taskId, nodeId string) NodePromptView {
 	return NodePromptDetail(runtime.store, taskId, nodeId)
 }
 
-// AgentWorkspace reads the workspace identity of one node.
 func (runtime *TaskRuntime) AgentWorkspace(taskId, nodeId string) *string {
 	runtime.ensureOpen()
 	row := kernelRow(runtime.store.Db, "SELECT instance_id,spec FROM nodes WHERE task_id=? AND id=?", taskId, nodeId)
@@ -177,7 +158,6 @@ func (runtime *TaskRuntime) AgentWorkspace(taskId, nodeId string) *string {
 	return &root
 }
 
-// ProjectEntries reads the visible paths of one project.
 func (runtime *TaskRuntime) ProjectEntries(projectId, query string, limit int) []ProjectPathEntry {
 	runtime.ensureOpen()
 	if !runtime.allowedProjects()[projectId] {
@@ -186,7 +166,6 @@ func (runtime *TaskRuntime) ProjectEntries(projectId, query string, limit int) [
 	return runtime.git.VisiblePaths(projectId, query, limit)
 }
 
-// SendNodeMessage hands a message to one node of a task.
 func (runtime *TaskRuntime) SendNodeMessage(taskId, nodeId string, input NodeMessageInput) any {
 	runtime.ensureOpen()
 	receipt := SendKernelNodeMessage(runtime.kernel, taskId, nodeId, input, nil)
@@ -196,14 +175,12 @@ func (runtime *TaskRuntime) SendNodeMessage(taskId, nodeId string, input NodeMes
 	return receipt
 }
 
-// TaskRuntimePeerInput is one peer message.
 type TaskRuntimePeerInput struct {
 	To        string
 	Text      string
 	RequestId string
 }
 
-// SendPeerMessage hands a message to the peer of one node.
 func (runtime *TaskRuntime) SendPeerMessage(taskId, from string, input TaskRuntimePeerInput) any {
 	runtime.ensureOpen()
 	nodeInput := NodeMessageInput{Text: input.Text, RequestID: input.RequestId}

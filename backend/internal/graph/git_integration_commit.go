@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// CommitWorkspace publishes a stable code version before workflow submit.
 func (integration *GitIntegration) CommitWorkspace(input GitCommitInput) GitWorkspaceCommit {
 	if len(input.Paths) == 0 || len(input.Paths) > 256 || strings.TrimSpace(input.Message) == "" || len(input.Message) > 4096 {
 		Raise("invalid_input", "Commit requires 1–256 paths and a bounded message")
@@ -64,7 +63,6 @@ func (integration *GitIntegration) CommitWorkspace(input GitCommitInput) GitWork
 	return GitWorkspaceCommit{Repository: input.Workspace, Worktree: input.Workspace, Commit: *commit}
 }
 
-// Integrate merges an agent work copy into the integration branch.
 func (integration *GitIntegration) Integrate(operation GitIntegrateInput) *GitMergeResult {
 	if operation.InstanceId == nil || *operation.InstanceId == "" || operation.Kind != "agent" {
 		return nil
@@ -94,7 +92,6 @@ func (integration *GitIntegration) Integrate(operation GitIntegrateInput) *GitMe
 	return &merged
 }
 
-// TryDeliver fast-forwards the target branch to the verified integration commit.
 func (integration *GitIntegration) TryDeliver(taskId string, expectedCommit *string) GitDeliverResult {
 	task := integration.store.Task(taskId)
 	if task.IntegrationBranch == nil || task.TargetBranch == nil {

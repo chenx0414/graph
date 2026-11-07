@@ -6,19 +6,15 @@ import (
 	"os"
 )
 
-// ForOperation is the tool surface and the prompt of a running operation.
 func (assembly *AgentContextAssembly) ForOperation(operation CapabilityOperation) AgentContextComposition {
 	facts := operation.Report
 	return assembly.compose(operation.Prompts.System, agentContextLoadedTools(facts, operation.Tools, operation.NativeTools),
 		agentContextLoadedCapabilities(facts))
 }
 
-// Preview is the next-operation configuration of the tool surface.
 func (assembly *AgentContextAssembly) Preview(features AgentToolFeatures) AgentContextPreview {
 	declared := []AgentContextTool{}
 	capabilities := []AgentCapabilityPromptEntry{}
-	// The TypeScript read the agent prompt of an agent capability here and never
-	// used it. The read is kept so the behaviour does not change.
 	identity := ""
 	if assembly.bootstrap != nil {
 		identity = assembly.bootstrap.Agent

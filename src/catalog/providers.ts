@@ -1,17 +1,11 @@
 import type { ModelApi, ModelInput, ModelPricing } from './models.ts';
 import { snapshotFor, snapshotPricing } from './price-snapshot.ts';
 
-/** One first-class connection template: a provider label, the transport Graph
- * has verified for it and a small set of model defaults. Templates are not
- * "official support" by themselves; a transport counts only after the contract
- * tests in this round pass. Prices are intentionally absent unless a verified
- * snapshot exists, so unknown never becomes zero. */
 export interface ProviderTemplateModel {
   id: string;
   contextWindow: number;
   maxTokens: number;
   input?: ModelInput[];
-  /** Set only with a verifiable source; absent means the price is unknown. */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   pricing?: ModelPricing;
 }
@@ -23,7 +17,6 @@ export interface ProviderTemplate {
   baseUrl: string;
   credentialRefHint: string;
   docsUrl: string;
-  /** Boundaries the wizard must state, for example compatibility modes. */
   notes: string[];
   models: ProviderTemplateModel[];
 }
@@ -46,7 +39,6 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     id: 'anthropic',
     label: 'Anthropic',
     api: 'anthropic-messages',
-    // The Messages transport appends /v1/messages to the host root.
     baseUrl: 'https://api.anthropic.com',
     credentialRefHint: 'ANTHROPIC_API_KEY',
     docsUrl: 'https://platform.claude.com/docs/en/api/overview',
@@ -118,10 +110,6 @@ export function providerTemplate(id: string): ProviderTemplate | undefined {
   return PROVIDER_TEMPLATES.find(template => template.id === id);
 }
 
-/** Shared directory for setup, the settings workbench and the HTTP catalog.
- * `oauthProvider` marks the platforms whose account login the host implements
- * (OpenRouter PKCE, xAI device code); a plain subscription token stays a
- * pasted credential. */
 export interface ProviderPreset {
   id: string;
   label: string;
@@ -150,7 +138,6 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     label: template.label,
     api: template.api,
     baseUrl: template.baseUrl,
-    // Preserve the reference already used by the settings workbench.
     credentialRef: template.id === 'deepseek' ? 'GRAPH_SUBSCRIPTION_DEEPSEEK_API_KEY'
       : template.id === 'custom' ? 'GRAPH_PROVIDER_API_KEY' : template.credentialRefHint,
     credentialKind: 'api-key' as const,

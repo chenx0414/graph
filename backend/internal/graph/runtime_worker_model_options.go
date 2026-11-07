@@ -1,7 +1,5 @@
 package graph
 
-// WorkerModelOptions is the generation settings that cross IPC.
-// Credentials, headers, callbacks and cancellation stay with the host.
 type WorkerModelOptions struct {
 	Reasoning       *string          `json:"reasoning,omitempty"`
 	SessionId       *string          `json:"sessionId,omitempty"`
@@ -10,7 +8,6 @@ type WorkerModelOptions struct {
 	ThinkingBudgets *ThinkingBudgets `json:"thinkingBudgets,omitempty"`
 }
 
-// ThinkingBudgets is the per-level token budget carried to the worker.
 type ThinkingBudgets struct {
 	Minimal *int64 `json:"minimal,omitempty"`
 	Low     *int64 `json:"low,omitempty"`
@@ -22,7 +19,6 @@ var workerReasoningLevels = map[string]bool{
 	"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
 }
 
-// WorkerModelOptionsOf keeps only the generation settings a worker may see.
 func WorkerModelOptionsOf(value any) WorkerModelOptions {
 	input, ok := value.(map[string]any)
 	if !ok || value == nil {

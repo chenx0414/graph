@@ -10,8 +10,6 @@ const TARGET_LIMIT = 256
 
 var targetKeys = []string{"path", "file_path", "filePath", "target"}
 
-// ToolCallTarget resolves against the instance workspace so derivation is a plain prefix match later on.
-// An empty string is the TypeScript null.
 func ToolCallTarget(_tool string, args any, workspace string) string {
 	record := asMap(args)
 	if record == nil {

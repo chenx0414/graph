@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// conversationActivityKey is the identity of one activity record inside a turn.
 func conversationActivityKey(record ConversationActivityRecord, index int) string {
 	if record.Kind == ConversationActivityTool {
 		if value, ok := record.Data["toolCallId"]; ok && value != nil {
@@ -23,7 +22,6 @@ func conversationActivityKey(record ConversationActivityRecord, index int) strin
 	return "text:" + itoa(index)
 }
 
-// conversationActivityItems reads the entries of one activity list.
 func conversationActivityItems(activity any) []any {
 	if activity == nil {
 		return nil
@@ -48,7 +46,6 @@ func conversationActivityItems(activity any) []any {
 	return items
 }
 
-// conversationActivityIsArray reports whether one value is a list.
 func conversationActivityIsArray(value any) bool {
 	if value == nil {
 		return false
@@ -60,7 +57,6 @@ func conversationActivityIsArray(value any) bool {
 	return reflected.Kind() == reflect.Slice || reflected.Kind() == reflect.Array
 }
 
-// conversationActivityEntry reads one activity entry as a loose record.
 func conversationActivityEntry(item any) (map[string]any, bool) {
 	if item == nil {
 		return nil, false
@@ -100,7 +96,6 @@ func conversationActivityEntry(item any) (map[string]any, bool) {
 	return record, true
 }
 
-// conversationActivityOrdinal reads the optional ordinal of one activity entry.
 func conversationActivityOrdinal(value any) *int {
 	switch typed := value.(type) {
 	case int:
@@ -117,7 +112,6 @@ func conversationActivityOrdinal(value any) *int {
 	}
 }
 
-// conversationActivityString reads one activity field as text.
 func conversationActivityString(value any) string {
 	if text, ok := value.(string); ok {
 		return text
@@ -125,7 +119,6 @@ func conversationActivityString(value any) string {
 	return ""
 }
 
-// conversationActivityStringify renders one activity field the way String() did.
 func conversationActivityStringify(value any) string {
 	switch typed := value.(type) {
 	case nil:

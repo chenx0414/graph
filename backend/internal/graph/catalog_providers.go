@@ -34,7 +34,6 @@ var PROVIDER_TEMPLATES = []ProviderTemplateRecord{
 	},
 	{
 		ID: "anthropic", Label: "Anthropic", API: "anthropic-messages",
-		// The Messages transport appends /v1/messages to the host root.
 		BaseURL: "https://api.anthropic.com", CredentialRefHint: "ANTHROPIC_API_KEY",
 		DocsURL: "https://platform.claude.com/docs/en/api/overview",
 		Notes:   []string{"API key 登录；使用原生 Messages 传输，不复用 OpenAI 请求格式。"},
@@ -80,8 +79,6 @@ var PROVIDER_TEMPLATES = []ProviderTemplateRecord{
 }
 
 func init() {
-	// Attach only archived, source-dated prices. Models without a verified entry
-	// keep cost/pricing absent so the wizard shows "价格未知" instead of zero.
 	for i := range PROVIDER_TEMPLATES {
 		for j := range PROVIDER_TEMPLATES[i].Models {
 			snapshot := SnapshotFor(PROVIDER_TEMPLATES[i].ID, PROVIDER_TEMPLATES[i].Models[j].ID)
@@ -96,8 +93,6 @@ func init() {
 	}
 }
 
-// TemplateModelEntryRecord is the config entry for one template model; unknown prices stay absent.
-// Field order matches the TypeScript object literal.
 type TemplateModelEntryRecord struct {
 	ID            string        `json:"id"`
 	Provider      string        `json:"provider"`

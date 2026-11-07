@@ -74,7 +74,6 @@ func translateEvent(event harness.AgentEvent) []map[string]any {
 	return nil
 }
 
-// messageMap reads one transcript message as the daemon's own map.
 func messageMap(message ai.Message) map[string]any {
 	body, err := json.Marshal(message)
 	if err != nil {
@@ -87,7 +86,6 @@ func messageMap(message ai.Message) map[string]any {
 	return decoded
 }
 
-// toolResultText reads the text of one tool result.
 func toolResultText(message ai.ToolResultMessage) string {
 	text := ""
 	for _, block := range message.Content {

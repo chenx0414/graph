@@ -11,27 +11,8 @@ import (
 	"time"
 )
 
-// providerStreamStalled is why a provider that accepted the request and then
-// stopped talking fails the turn.
-//
-// The bound is a deadline, so the failure is registered with DEADLINE_EXCEEDED:
-// a silent provider is not a connection that broke, and sending the same
-// request again would only wait out the same bound again while the turn, the
-// credential slot and the node stay held. The attempt that gets a fresh
-// connection is the one that died before any byte arrived, never this one.
 var providerStreamStalled = errors.New("The provider stopped sending before the answer was complete")
 
-// readEvents reads the provider event stream.
-//
-// A stream that ends without its terminator was cut: the provider closed the
-// connection, or the transport failed, before the answer was complete. Such a
-// stream is a failed send, not a successful turn whose missing text happens
-// to parse as an empty answer. Reporting it as a success is what let a
-// half-written tool call reach the tools as a call with no arguments.
-//
-// It returns the failure the same send has to be sent again after, and nil when
-// the attempt settled the stream - with an answer, or with the failure the turn
-// ends on. remaining is the retry budget this attempt may still spend.
 func (stream *controlledStream) readEvents(response *http.Response, remaining int) error {
 	defer response.Body.Close()
 	stream.message = &AssistantMessage{
@@ -45,8 +26,6 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 	evidence := controlledUsageEvidence{}
 	terminated := false
 	var failure error
-	// readFailure is the error that ended the read, when there was one: it is
-	// the original failure a cut stream is explained with.
 	var readFailure error
 	bodyOpen := false
 	lastEvent := time.Now()
@@ -87,12 +66,6 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 			break
 		}
 	}
-	// A provider that stopped answering is still holding the connection open,
-	// and everything that reads the rest of the body would wait for it: the
-	// estimate below reads the body to its end, and closing the body drains
-	// what is left of it. Both would hold the turn, the credential slot and
-	// the node for exactly as long as the provider keeps talking, so the
-	// request is cancelled first and the body is not read again.
 	if bodyOpen {
 		stream.cancelRequest()
 	}
@@ -102,10 +75,6 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 	if failure == nil {
 		failure = stream.brokenToolCall()
 	}
-	// The attempt is sent again only when nothing of it was answered and the
-	// failure is one a fresh connection can change. A partial answer is
-	// evidence somebody has to read, and a stopped attempt is the caller's own
-	// decision: neither may be replayed behind their back.
 	replay := failure != nil && remaining > 0 && stream.answeredNothing() && controlledReplayableFailure(failure)
 	usage := evidence.result(stream.api)
 	if usage == nil && !bodyOpen && !replay {
@@ -120,35 +89,19 @@ func (stream *controlledStream) readEvents(response *http.Response, remaining in
 		usage = &TokenUsage{UsageSource: stringPointer(string(UsageUnknown))}
 	}
 	if replay {
-		// Nothing was answered and the very same request is about to go again:
-		// the dead attempt settles as producing no usage, or the gate would
-		// refuse the next send over an unknown call nobody can reconcile.
 		usage = &controlledZeroUsage
 	}
-	// The transcript keeps the usage the provider billed. The kernel's own
-	// context estimate anchors on the last measured message; without this
-	// every session looked like it had never been billed, so its threshold
-	// compaction measured a context that never grew and never compacted.
 	stream.message.Usage = assistantUsageOf(usage)
 	stream.settle(usage)
 	if replay {
 		return failure
 	}
 	if failure != nil {
-		// A timeout or a stream the provider cut is a boundary failure when no
-		// answer byte arrived; failTransport decides that and leaves a partial
-		// answer's failure standing as it is.
 		reported := failure
 		retries := TRANSPORT_RETRIES - remaining
 		if retries > 0 && readFailure != nil && !errors.Is(reported, readFailure) {
-			// Name the original failure next to the cut it caused: the retry
-			// count alone does not say whether the connection broke or the
-			// provider went quiet.
 			reported = fmt.Errorf("%s: %w", reported.Error(), readFailure)
 		}
-		// The retry budget this send spent is named in the failure, so the user
-		// reads how many times the daemon already tried instead of being asked
-		// to send the message again.
 		stream.failTransport(TransportRetryExhausted(reported, retries))
 		return nil
 	}

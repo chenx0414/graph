@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// ProjectPathEntry is one visible project path.
 type ProjectPathEntry struct {
 	Path string `json:"path"`
 	Kind string `json:"kind"`
@@ -19,7 +18,6 @@ type projectPathOptions struct {
 	Limit    int
 }
 
-// ProjectPathEntries lists visible project paths for chat references.
 func ProjectPathEntries(root string, options projectPathOptions) []ProjectPathEntry {
 	projectRoot := gitReal(root)
 	repo := DetectRepo(projectRoot)

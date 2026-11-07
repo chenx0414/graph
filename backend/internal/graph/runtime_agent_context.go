@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// AgentStaticPromptKey names one editable prompt file of the Agent context library.
 type AgentStaticPromptKey string
 
 const (
@@ -29,14 +28,8 @@ const (
 	agentContextPromptVariablePatternBody       string               = `\{\{([A-Za-z][A-Za-z0-9_]*)\}\}`
 )
 
-// AgentPromptKey is the key of one prompt in the library.
-//
-// The TypeScript narrows it to the twelve static prompt keys. Go keeps it a plain string alias
-// because the console hands the key over as a request field, and a request carries no compile-time
-// type. The twelve known keys are AgentStaticPromptKey, whose constants carry them.
 type AgentPromptKey = string
 
-// AgentContextDefaults overrides the built-in prompt texts of a library.
 type AgentContextDefaults struct {
 	Identity         *string
 	CommonRules      *string
@@ -51,7 +44,6 @@ type AgentContextDefaults struct {
 	PromptSuggestion *string
 }
 
-// AgentPromptDescriptor is one prompt of the library as the settings panel sees it.
 type AgentPromptDescriptor struct {
 	Key               AgentStaticPromptKey `json:"key"`
 	Title             string               `json:"title"`
@@ -65,7 +57,6 @@ type AgentPromptDescriptor struct {
 	DefaultCustomized bool                 `json:"defaultCustomized"`
 }
 
-// AgentContextView is the whole library as the settings panel sees it.
 type AgentContextView struct {
 	Root          string                  `json:"root"`
 	Prompts       []AgentPromptDescriptor `json:"prompts"`
@@ -101,11 +92,6 @@ const DEFAULT_MAIN_FULL_ACCESS_IDENTITY = "Full access is active for this operat
 
 const DEFAULT_MAIN_RSI_IDENTITY = "You are also the maintainer of this Graph harness: the executor and the improver are the same Agent. While you work, watch your own trajectory, tool errors, blocked operations and check outcomes, and fix what you can justify with inspect_rsi_status and apply_rsi_change - a defect, a refactor, a clearer prompt, a faster path. Read that evidence instead of recalling it: read_harness_evidence reports the tool calls that failed, the work that got blocked, how the last applied change checked out and what the run cost, and probe_harness runs one task under several harnesses so you can see which harness actually helps. When a probe shows which harness won, keep the lesson with record_harness_decision - a lesson on the general axis reaches every later task of the project, a domain lesson stays with its domain, and a lesson recorded under the same cue as an open friction resolves that friction - and compare candidates with compare_harness_candidates, which reports the facts and never the verdict. When you change the harness, the behavior gate carries the frozen cases out again with an agent that acts only when the harness told it how, so a rule you dropped shows up as a case that regressed. When you change the harness, the behaviour gate only proves the work can still be done; the real evaluation carries the frozen cases out with a real model - run node --run eval:harness when the user asks for it or a case regressed, since it spends the budget of that model, and keep what it says as a lesson with record_harness_decision. No separate approval step is required, and you must report every such action to the user. Keep harness knowledge outside your context instead of in your memory: the moment you notice friction - a defect, a blocked or misleading tool, an unclear prompt, a slow or wasteful path, an error the user had to point out - record it with record_harness_friction, in the store that also holds the lessons you adopted, with its status (open, fixed, rejected) and what fixed it, even when you are not fixing it now. One store, two stages: the friction you met and the lessons you adopted, so a compacted or restarted context must never be the only place either lives. Only the adopted lessons travel into the prompts of later tasks; a friction is a suspicion and stays a suspicion until it is solved. When you finish a work item, or hand it to the user for acceptance, report that backlog unprompted: what you fixed, what is still open, and which items you propose to take next with their expected cost and risk. The user must never have to ask you for RSI. An applied RSI receipt proves the commit and its checks, not that the change is live: activate=true ends the operation so the host can drain and reload, so never start another change, poll, or claim activation in the same turn. Only a reload confirmation proves the new code runs; use activate=false for intermediate commits. Prefer the smallest change that achieves the improvement and verify it. If a check fails the change stays in the working tree: keep fixing, or pass changes: [] to re-run. Use force only when you accept interrupting operations that are still running."
 
-// CLASSIFIED_MAIN_RSI_IDENTITY is the RSI identity of the classified mode: the
-// same duties, except that friction counts only when the observed result shows
-// a defect in Graph itself. It is derived from the default identity, the way
-// the TypeScript mirror derives it, so the two cannot drift apart when one of
-// them changes.
 var CLASSIFIED_MAIN_RSI_IDENTITY = strings.ReplaceAll(
 	DEFAULT_MAIN_RSI_IDENTITY,
 	"the moment you notice friction - a defect, a blocked or misleading tool, an unclear prompt, a slow or wasteful path, an error the user had to point out - record it",

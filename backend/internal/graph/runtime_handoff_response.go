@@ -6,14 +6,11 @@ import (
 	"regexp"
 )
 
-// ModelEventStream is one model call's events plus its terminal message.
-// TODO(port): the Pi SDK stream object is not reimplemented. Adapters expose events as maps.
 type ModelEventStream interface {
 	Next() (map[string]any, bool)
 	Result() map[string]any
 }
 
-// PromptStreamFunc is the Pi stream callback without exporting the colliding StreamFn name.
 type PromptStreamFunc func(model any, context map[string]any, options map[string]any) (ModelEventStream, error)
 
 const (
@@ -139,7 +136,6 @@ func (stream *handoffListStream) Next() (map[string]any, bool) {
 
 func (stream *handoffListStream) Result() map[string]any { return stream.result }
 
-// GuardHandoffResponses retries one malformed assistant reply through the same stream.
 func GuardHandoffResponses(stream PromptStreamFunc, enabled func() bool, onRecovery func(string)) PromptStreamFunc {
 	correctionAvailable := true
 	return func(model any, context map[string]any, options map[string]any) (ModelEventStream, error) {

@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// Confirm confirms one draft and creates the feature task it describes.
 func (conversations *TaskRuntimeConversations) Confirm(conversationId string, input TaskRuntimeConfirmInput) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -94,7 +93,6 @@ func (conversations *TaskRuntimeConversations) Confirm(conversationId string, in
 	return record
 }
 
-// TaskRuntimeDraftInput archives, restores or deletes one draft version.
 type TaskRuntimeDraftInput struct {
 	ProposalVersion int
 	RequestId       string
@@ -105,19 +103,16 @@ func (conversations *TaskRuntimeConversations) Pause(conversationId, requestId s
 	return conversations.runtime.User().Task(conversation.AnchorTaskId).Pause(requestId)
 }
 
-// Resume resumes the anchor task of one conversation.
 func (conversations *TaskRuntimeConversations) Resume(conversationId, requestId string) Receipt {
 	conversation := ConversationRowOf(conversations.runtime.store, conversationId)
 	return conversations.runtime.User().Task(conversation.AnchorTaskId).Resume(requestId)
 }
 
-// TaskRuntimeCancelInput cancels one queued message.
 type TaskRuntimeCancelInput struct {
 	MessageId string
 	RequestId string
 }
 
-// CancelMessage drops one still-queued message of a conversation.
 func (conversations *TaskRuntimeConversations) CancelMessage(conversationId string, input TaskRuntimeCancelInput) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -148,7 +143,6 @@ func (conversations *TaskRuntimeConversations) CancelMessage(conversationId stri
 	return record
 }
 
-// Steer hands the queued messages of a conversation to the live master turn.
 func (conversations *TaskRuntimeConversations) Steer(conversationId, requestId string) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -209,7 +203,6 @@ func (conversations *TaskRuntimeConversations) Steer(conversationId, requestId s
 	return record
 }
 
-// Interrupt stops the live master turn of a conversation.
 func (conversations *TaskRuntimeConversations) Interrupt(conversationId, requestId string) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()

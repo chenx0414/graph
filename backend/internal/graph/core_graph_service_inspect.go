@@ -1,11 +1,9 @@
 package graph
 
-// GraphPatch publishes a new revision of a graph.
 func (service *graphManagementService) GraphPatch(input GraphPatchInput) any {
 	return service.runtime(input.GraphId).Patch(input.BaseRevision, input.Changes)
 }
 
-// GraphInspect reads a graph's summary, revision, nodes, history, or evidence.
 func (service *graphManagementService) GraphInspect(input GraphInspectInput) any {
 	graph := service.runtime(input.GraphId)
 	query := ""

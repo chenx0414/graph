@@ -8,22 +8,18 @@ import (
 	"encoding/json"
 )
 
-// controlledZeroUsage is the settlement of a send that produced no tokens.
 var controlledZeroUsage = TokenUsage{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0, UsageSource: stringPointer(string(UsageAuthoritative))}
 
-// controlledRetryableTransportCodes are the transport failures that prove nothing was sent.
 var controlledRetryableTransportCodes = map[string]bool{
 	"ECONNREFUSED":            true,
 	"ENOTFOUND":               true,
 	"UND_ERR_CONNECT_TIMEOUT": true,
 }
 
-// stringPointer reads one text as an optional value.
 func stringPointer(value string) *string {
 	return &value
 }
 
-// stringPointerValue reads an optional value as one text.
 func stringPointerValue(value *string) string {
 	if value == nil {
 		return ""
@@ -31,7 +27,6 @@ func stringPointerValue(value *string) string {
 	return *value
 }
 
-// ControlledProviderUsage parses the usage one provider reported.
 func ControlledProviderUsage(value any, api ModelApi) *TokenUsage {
 	switch api {
 	case "anthropic-messages":
@@ -42,7 +37,6 @@ func ControlledProviderUsage(value any, api ModelApi) *TokenUsage {
 	return controlledOpenAIUsage(value)
 }
 
-// controlledOpenAIUsage parses one OpenAI usage object.
 func controlledOpenAIUsage(value any) *TokenUsage {
 	raw, ok := value.(map[string]any)
 	if !ok {
@@ -78,7 +72,6 @@ func controlledOpenAIUsage(value any) *TokenUsage {
 	return &TokenUsage{Input: input - cache, Output: output, CacheRead: cache, CacheWrite: 0, UsageSource: stringPointer(string(UsageAuthoritative))}
 }
 
-// controlledAnthropicUsage parses one Anthropic usage object.
 func controlledAnthropicUsage(value any) *TokenUsage {
 	raw, ok := value.(map[string]any)
 	if !ok {
@@ -102,7 +95,6 @@ func controlledAnthropicUsage(value any) *TokenUsage {
 	return &TokenUsage{Input: input, Output: output, CacheRead: cacheRead, CacheWrite: cacheWrite, UsageSource: stringPointer(string(UsageAuthoritative))}
 }
 
-// controlledSafeCount reads one nonnegative integer count.
 func controlledSafeCount(value any) (int64, bool) {
 	switch typed := value.(type) {
 	case float64:
@@ -124,9 +116,7 @@ func controlledSafeCount(value any) (int64, bool) {
 	return 0, false
 }
 
-// ControlledReadUsage reads the usage one provider response carries.
 func ControlledReadUsage(response *http.Response, api ModelApi) *TokenUsage {
-	// A bounded clone observes raw evidence; an SDK's zero-filled error is not evidence.
 	if response == nil || response.Body == nil {
 		return nil
 	}
@@ -165,8 +155,6 @@ func (evidence *controlledUsageEvidence) result(api ModelApi) *TokenUsage {
 	if api == "anthropic-messages" && (!evidence.complete || !evidence.terminal) {
 		return nil
 	}
-	// A Responses answer reports its usage in its last event only: a stream that
-	// stopped before it has no usage to report, not a zero one.
 	if api == "openai-responses" && !evidence.terminal {
 		return nil
 	}

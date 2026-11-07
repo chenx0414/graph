@@ -12,14 +12,12 @@ import (
 	"bytes"
 )
 
-// ModuleOperationProgram is the program declaration one operation runs under.
 type ModuleOperationProgram struct {
 	ReadPaths       []string
 	Env             map[string]string
 	NodeModulesPath *string
 }
 
-// ModuleOperationInput is one module operation to execute.
 type ModuleOperationInput struct {
 	Kernel           *KernelStore
 	GraphId          string
@@ -37,7 +35,6 @@ type ModuleOperationInput struct {
 	Program          *ModuleOperationProgram
 }
 
-// moduleOperationRecord is the durable record of one dispatched operation.
 type moduleOperationRecord struct {
 	OperationId    string                           `json:"operationId"`
 	Command        string                           `json:"command"`
@@ -52,23 +49,14 @@ type moduleOperationRecord struct {
 	CleanAfter     bool                             `json:"cleanAfter"`
 	VerifiedCommit *string                          `json:"verifiedCommit"`
 	Sandboxed      bool                             `json:"sandboxed"`
-	// Verdict is what this attempt concluded: a command that ran and exited
-	// judged its work; one that never produced an exit code did not.
 	Verdict string `json:"verdict"`
-	// NoVerdictReason says why there is no verdict, so "unknown" is actionable.
 	NoVerdictReason string `json:"noVerdictReason,omitempty"`
-	// TimedOut says this attempt's own budget killed it.
 	TimedOut bool `json:"timedOut"`
-	// TimeoutMs is the budget that really applied, not the one in the definition.
 	TimeoutMs int `json:"timeoutMs"`
-	// WaitMs is the time spent queued for a program slot: it is reported, and it
-	// is not part of the budget.
 	WaitMs int64 `json:"waitMs"`
-	// ElapsedMs is the attempt's own time, counted from the moment it held a slot.
 	ElapsedMs int64 `json:"elapsedMs"`
 }
 
-// moduleOperationOutput is the value the operation publishes under its output name.
 type moduleOperationOutput struct {
 	Passed          bool                             `json:"passed"`
 	Code            *int                             `json:"code"`
@@ -87,7 +75,6 @@ type moduleOperationOutput struct {
 	ElapsedMs       int64                            `json:"elapsedMs"`
 }
 
-// moduleOperationEvaluated is the settled result of one operation, as it is stored.
 type moduleOperationEvaluated struct {
 	Ok          bool           `json:"ok"`
 	State       any            `json:"state"`
@@ -95,8 +82,6 @@ type moduleOperationEvaluated struct {
 	Diagnostics []string       `json:"diagnostics"`
 }
 
-// moduleOperationOutputValue renders one operation output as the plain JSON object
-// the protocol validators and the module's outputs see.
 func moduleOperationOutputValue(output moduleOperationOutput) map[string]any {
 	raw, err := json.Marshal(output)
 	if err != nil {
@@ -109,7 +94,6 @@ func moduleOperationOutputValue(output moduleOperationOutput) map[string]any {
 	return value
 }
 
-// rsiDecodeModuleOperation reads a settled operation result.
 func rsiDecodeModuleOperation(value any) ModuleOperationResponse {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -122,7 +106,6 @@ func rsiDecodeModuleOperation(value any) ModuleOperationResponse {
 	return response
 }
 
-// rsiModuleTail keeps the last characters of one stream.
 func rsiModuleTail(value string, limit int) string {
 	runes := []rune(value)
 	if len(runes) <= limit {
@@ -131,12 +114,6 @@ func rsiModuleTail(value string, limit int) string {
 	return string(runes[len(runes)-limit:])
 }
 
-// moduleOperationAttemptDir reserves a directory for one attempt of one operation.
-//
-// The ordinal is the number of attempts already recorded there - the evidence of
-// the attempts before it - so the name is a count and not a random suffix, and
-// nothing an earlier attempt left is deleted to make room for this one. `Mkdir`
-// is what makes it exclusive: two attempts cannot be handed the same directory.
 func moduleOperationAttemptDir(root, operationId string) string {
 	base := filepath.Join(root, "module-operations", operationId)
 	if err := os.MkdirAll(base, 0o700); err != nil {
@@ -154,11 +131,6 @@ func moduleOperationAttemptDir(root, operationId string) string {
 	}
 }
 
-// moduleOperationVerdict is what one attempt concluded.
-//
-// Only a command that ran and produced an exit code judged its work: a killed or
-// interrupted one has no verdict, and its reason says so instead of turning into
-// a failure the module has to repair.
 func moduleOperationVerdict(code *int) (string, string) {
 	if code == nil {
 		return "unknown", "no_exit_code"
@@ -169,9 +141,6 @@ func moduleOperationVerdict(code *int) (string, string) {
 	return "failed", ""
 }
 
-// ExecuteModuleOperation runs one module operation and returns what it published.
-//
-// Host operations keep a durable send boundary; replaying a result never re-runs its command.
 func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationResponse {
 	kernel := options.Kernel
 	operation := options.Operation
@@ -231,15 +200,6 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		}
 	}
 
-	// Each attempt gets a directory of its own.
-	//
-	// A delivery that gave its attempt back is dispatched again under the same
-	// operation id, so the attempts of one operation share that id; they do not
-	// share the run they belong to. Each one opens exclusive stream files before
-	// it crosses its send boundary, may be killed by its own budget, and leaves a
-	// record, and none of that belongs to the attempt after it (measured: task
-	// 288f801c failed its delivery for good with
-	// `open <state>/module-operations/<id>/stdout.log: file exists`).
 	scratchDir := moduleOperationAttemptDir(options.ScratchRoot, id)
 	cancellation := NewAbortSignal()
 	abort := func() { cancellation.Abort() }
@@ -291,8 +251,6 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		panic(recovered)
 	}()
 
-	// The slot wait is a queue, and a queue is not the command's time: it is
-	// measured here and published, so the budget cannot quietly absorb it.
 	queued := NowMillis()
 	WaitForKernelProgramExecutionSlot(kernel, id, cancellation)
 	started := NowMillis()
@@ -368,8 +326,6 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 		command := runner.Run(operation.Command, operation.Args, cancellation)
 		result = HostCommandResult{
 			Code: command.Code, Stdout: command.Stdout, Stderr: command.Stderr,
-			// The spawner writes this branch's streams into the attempt's own
-			// directory; the two branches publish their logs the same way.
 			OutputFiles: hostCommandOutputStreams(scratchDir),
 			TimedOut:    strings.Contains(command.Stderr, hostCommandTimeoutMarker(timeoutMs)),
 		}
@@ -416,9 +372,6 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	}
 	evaluated := moduleOperationEvaluated{
 		Ok: true, State: options.State,
-		// The published value is a plain JSON object: it travels into the module's
-		// outputs, and the protocol validator reads a JSON object there, not a
-		// Go struct.
 		Outputs:     map[string]any{operation.Output: moduleOperationOutputValue(output)},
 		Diagnostics: []string{"workspace.command " + id},
 	}

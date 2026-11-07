@@ -108,7 +108,6 @@ func configThinkingLevel(value any, path string) ModelThinkingLevel {
 	return ""
 }
 
-// configJoinLevels renders a list for one validation message.
 func configJoinLevels[T ~string](items []T) string {
 	parts := make([]string, len(items))
 	for i, item := range items {

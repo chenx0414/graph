@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 )
 
-// capabilityRuntimeDeclaration reads the runtime declaration of one manifest.
 func capabilityRuntimeDeclaration(value any) *capabilityPiExtensionRuntime {
 	if value == nil {
 		return nil
@@ -72,7 +71,6 @@ func capabilityRuntimeDeclaration(value any) *capabilityPiExtensionRuntime {
 	return declaration
 }
 
-// capabilityRuntimeStrings reads one array of nonempty strings.
 func capabilityRuntimeStrings(value any, label string) []string {
 	list, ok := value.([]any)
 	if !ok {
@@ -89,7 +87,6 @@ func capabilityRuntimeStrings(value any, label string) []string {
 	return out
 }
 
-// capabilityRuntimePlaceholders are the values one runtime declaration may reference.
 func capabilityRuntimePlaceholders(snapshot string, workspace string, scratchDir string, stateDir string, secrets CapabilitySecrets) map[string]string {
 	placeholders := map[string]string{
 		"HOME":       capabilityHomeDir(),
@@ -106,7 +103,6 @@ func capabilityRuntimePlaceholders(snapshot string, workspace string, scratchDir
 	return placeholders
 }
 
-// capabilityHomeDir is the home directory of the running user.
 func capabilityHomeDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -115,7 +111,6 @@ func capabilityHomeDir() string {
 	return home
 }
 
-// capabilityExpandRuntimeValue expands the environment references of one value.
 func capabilityExpandRuntimeValue(value string, placeholders map[string]string, label string) string {
 	expanded := capabilityEnvironmentPattern.ReplaceAllStringFunc(value, func(match string) string {
 		name := capabilityEnvironmentPattern.FindStringSubmatch(match)[1]
@@ -137,7 +132,6 @@ func capabilityExpandRuntimeValue(value string, placeholders map[string]string, 
 	return expanded
 }
 
-// capabilityRuntimePath resolves one runtime path against the snapshot.
 func capabilityRuntimePath(value string, snapshot string, placeholders map[string]string, label string) string {
 	expanded := capabilityExpandRuntimeValue(value, placeholders, label)
 	if filepath.IsAbs(expanded) {
@@ -146,14 +140,12 @@ func capabilityRuntimePath(value string, snapshot string, placeholders map[strin
 	return filepath.Clean(filepath.Join(snapshot, expanded))
 }
 
-// capabilityResolvedCommand is one command a runtime declaration resolved.
 type capabilityResolvedCommand struct {
 	command   string
 	path      string
 	readPaths []string
 }
 
-// capabilityResolveRuntimeCommand resolves one command a runtime declaration names.
 func capabilityResolveRuntimeCommand(command string, snapshot string) capabilityResolvedCommand {
 	execPath, electron := GraphNodeRuntime(nil)
 	if command == "node" {
@@ -190,7 +182,6 @@ func capabilityResolveRuntimeCommand(command string, snapshot string) capability
 	}
 }
 
-// capabilityIsExecutable reports whether a path may be executed.
 func capabilityIsExecutable(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
@@ -199,7 +190,6 @@ func capabilityIsExecutable(path string) bool {
 	return info.Mode().Perm()&0o111 != 0
 }
 
-// capabilityRealPath resolves a path, falling back to its cleaned form.
 func capabilityRealPath(path string) string {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -208,7 +198,6 @@ func capabilityRealPath(path string) string {
 	return resolved
 }
 
-// capabilityUniqueStrings keeps the first occurrence of every value.
 func capabilityUniqueStrings(values []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -222,7 +211,6 @@ func capabilityUniqueStrings(values []string) []string {
 	return out
 }
 
-// capabilityResolvedRuntime is the runtime one Pi extension resolved.
 type capabilityResolvedRuntime struct {
 	env                      map[string]string
 	readPaths                []string
@@ -233,7 +221,6 @@ type capabilityResolvedRuntime struct {
 	unixSockets              []string
 }
 
-// capabilityResolvePiExtensionRuntime resolves the runtime declaration of one manifest.
 func capabilityResolvePiExtensionRuntime(manifest map[string]any, snapshot string, workspace string, scratchDir string, stateDir string, secrets CapabilitySecrets) *capabilityResolvedRuntime {
 	declaration := capabilityRuntimeDeclaration(manifest["runtime"])
 	if declaration == nil {
@@ -281,9 +268,6 @@ func capabilityResolvePiExtensionRuntime(manifest map[string]any, snapshot strin
 	}
 }
 
-// PiExtensionCacheDir is where the SDK installs Pi extension sources. One cache per Graph home
-// rather than per state directory: the install is a download cache for the declared source, so a
-// second daemon (or a test) reuses it instead of installing the same package again.
 func PiExtensionCacheDir(catalog *Catalog) string {
 	root := ""
 	if catalog != nil {
@@ -295,15 +279,12 @@ func PiExtensionCacheDir(catalog *Catalog) string {
 	return filepath.Join(os.TempDir(), "graph-pi-extensions")
 }
 
-// SyncCapabilityVersion reports the version the source actually resolved to: the manifest's
-// `version` follows the source instead of decaying into a stale pin.
 func SyncCapabilityVersion(snapshot string, version *string) {
 	if version == nil || *version == "" {
 		return
 	}
 	file := filepath.Join(snapshot, "capability.json")
 	defer func() {
-		// A manifest we cannot rewrite must never fail the load that triggered it.
 		_ = recover()
 	}()
 	content, err := os.ReadFile(file)
@@ -328,7 +309,6 @@ func SyncCapabilityVersion(snapshot string, version *string) {
 	_ = os.WriteFile(file, append(encoded, '\n'), 0o644)
 }
 
-// capabilityManifestOf reads the manifest of one snapshot.
 func capabilityManifestOf(snapshot string) map[string]any {
 	content, err := os.ReadFile(filepath.Join(snapshot, "capability.json"))
 	if err != nil {
@@ -344,7 +324,6 @@ func capabilityManifestOf(snapshot string) map[string]any {
 	return manifest
 }
 
-// capabilityPromptText reads one prompt file of a snapshot.
 func capabilityPromptText(snapshot string, name string) string {
 	content, err := os.ReadFile(filepath.Join(snapshot, name))
 	if err != nil {
@@ -356,7 +335,6 @@ func capabilityPromptText(snapshot string, name string) string {
 	return string(content)
 }
 
-// capabilityFileDigest is the sha256 of one file.
 func capabilityFileDigest(path string) string {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -366,13 +344,11 @@ func capabilityFileDigest(path string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// capabilityTextDigest is the sha256 of one text.
 func capabilityTextDigest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
 
-// capabilityExtensionEntry is the entry file one manifest names.
 func capabilityExtensionEntry(manifest map[string]any, snapshot string) string {
 	value := "./index.mjs"
 	if declared, ok := manifest["entry"].(string); ok && strings.TrimSpace(declared) != "" {
@@ -388,7 +364,6 @@ func capabilityExtensionEntry(manifest map[string]any, snapshot string) string {
 	return path
 }
 
-// capabilitySkillMetadata reads the frontmatter of one skill file.
 func capabilitySkillMetadata(text string) map[string]string {
 	values := map[string]string{}
 	front := capabilityFrontmatter(text)
@@ -415,7 +390,6 @@ func capabilitySkillMetadata(text string) map[string]string {
 	return values
 }
 
-// capabilityFrontmatter reads the YAML frontmatter of one skill file.
 func capabilityFrontmatter(text string) string {
 	trimmed := strings.TrimPrefix(text, "\ufeff")
 	if !strings.HasPrefix(trimmed, "---") {

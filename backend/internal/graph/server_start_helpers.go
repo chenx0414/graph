@@ -7,7 +7,6 @@ import (
 	"sort"
 )
 
-// failedDefinitionsSuffix describes the bootstrap entries that did not install.
 func failedDefinitionsSuffix(failed []PresetFailure) string {
 	if len(failed) == 0 {
 		return ""
@@ -93,8 +92,6 @@ func stringIn(values []string, needle string) bool {
 	return false
 }
 
-// cliCwd is the working directory this process runs in. The RSI root falls back to it
-// when no explicit root is configured.
 func cliCwd() string {
 	wd, err := os.Getwd()
 	if err != nil {

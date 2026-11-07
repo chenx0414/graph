@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 )
 
-// ValidateProposal checks static structure before any node or instance is created.
-// A map keeps legacy keys (nodes, loops, containers) that a struct unmarshal drops.
 func ValidateProposal(proposal any) {
 	invalid := func(reason string) { Raise("invalid_proposal", reason) }
 	record, legacy := proposalRecord(proposal)

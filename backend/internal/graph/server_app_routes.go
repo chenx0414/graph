@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 )
 
-// registerRoutes registers every route of the console. The paths and methods
-// are the ones RULEBOOK §6 lists.
 func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", app.serveHome)
 	mux.HandleFunc("GET /api/health", app.serveHealth)
@@ -41,8 +39,6 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tool-stats/clear", app.serveToolStatsClear)
 	mux.HandleFunc("GET /api/skill-stats", app.serveSkillStats)
 	mux.HandleFunc("POST /api/skills/promote", app.serveSkillPromote)
-	// The configuration routes exist whether or not a configuration file was
-	// opened: a daemon without one answers with the reason, not with a 404.
 	mux.HandleFunc("GET /api/config", app.serveConfig)
 	mux.HandleFunc("POST /api/config", app.serveConfigSave)
 	if app.options.AppServices != nil && app.options.AppServices.RefreshPrices != nil {
@@ -145,15 +141,6 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	}
 }
 
-// serveHome reads the console shell on every request and sets the session
-// cookie. A rebuilt bundle must never sit behind a stale page.
-//
-// The document is the only thing that names the bundle, so a client that keeps
-// it keeps loading the old bundle. Measured: without this header the response
-// carried no cache directive at all, which leaves the client free to reuse the
-// previous index.html and reads as "my change did not ship". Both branches
-// below (the real console and the fallback page) hand out that document, so
-// the header is set before either one writes.
 func (app *GraphApp) serveHome(w http.ResponseWriter, r *http.Request) {
 	SetSessionCookie(w.Header(), app.session)
 	body := appDefaultPage()

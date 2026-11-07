@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 )
 
-// CredentialConfig names an environment variable. The secret value is never stored.
 type CredentialConfig struct {
 	DisplayName        string `json:"displayName,omitempty"`
 	SecretRef          string `json:"secretRef"`
@@ -18,34 +17,20 @@ type CredentialConfig struct {
 	Platform           string `json:"platform,omitempty"`
 }
 
-// LimitsConfig is the token-cap table. A nil default budget means unlimited.
 type LimitsConfig struct {
 	Credentials         map[string]int `json:"credentials"`
 	SharedGroups        map[string]int `json:"sharedGroups"`
 }
 
-// GraphModels is the configured model directory.
 type GraphModels struct {
 	Entries []ConfiguredModel `json:"entries"`
 }
 
-// GraphCodemode is the codemode block of the configuration.
-//
-// The kernel has codemode built in, and Graph offers it by default: the
-// sandbox changes how a call is written, not whether it is admitted, so a
-// session that never asked for one still gets the same admission. The
-// configuration turns it off when a deployment wants the model to call
-// tools one by one.
 type GraphCodemode struct {
 	Enabled bool `json:"enabled"`
-	// TimeoutMs is the deadline of one script, in milliseconds. Zero is the
-	// kernel's own default.
 	TimeoutMs *int `json:"timeoutMs,omitempty"`
 }
 
-// ConfiguredModel is a ModelEntry that always names its credential.
-// ID, BaseURL, API, CredentialID and ModelID mirror the embedded entry for callers
-// that spell those fields the way server_start.go does.
 type ConfiguredModel struct {
 	ModelEntry
 	ID           string `json:"-"`
@@ -55,7 +40,6 @@ type ConfiguredModel struct {
 	ModelID      string `json:"-"`
 }
 
-// GraphConfig is the versioned on-disk configuration.
 type GraphConfig struct {
 	Path                  *string                     `json:"path"`
 	Configured            bool                        `json:"configured"`
@@ -68,7 +52,6 @@ type GraphConfig struct {
 	Codemode              GraphCodemode               `json:"codemode"`
 }
 
-// CredentialSecret is one resolved environment binding.
 type CredentialSecret struct {
 	Configured bool
 	SecretRef  string
@@ -89,7 +72,6 @@ func configInvalid(message string) {
 	RaiseField("invalid_config", message, field)
 }
 
-// EmptyGraphConfig is the unconfigured document.
 func EmptyGraphConfig() GraphConfig {
 	return GraphConfig{
 		Path: nil, Configured: false, Projects: []ProjectConfig{}, Models: nil,
@@ -100,12 +82,10 @@ func EmptyGraphConfig() GraphConfig {
 	}
 }
 
-// DefaultConfigPath is graph.config.json beside the working directory.
 func DefaultConfigPath(cwd string) string {
 	return filepath.Join(cwd, "graph.config.json")
 }
 
-// DefaultStateDir follows XDG_STATE_HOME, then ~/.local/state/graph.
 func DefaultStateDir(env map[string]string) string {
 	home := strings.TrimSpace(env["HOME"])
 	if home == "" {

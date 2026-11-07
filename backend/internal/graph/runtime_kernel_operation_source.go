@@ -1,6 +1,5 @@
 package graph
 
-// rsiAdmitSource refuses a workspace.command that would read code the integration tree does not hold.
 func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, operation *ModuleOperation, integratesSource func(string) bool) {
 	if operation == nil || operation.Action != "workspace.command" {
 		return
@@ -20,13 +19,9 @@ func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, 
 	if !found {
 		return
 	}
-	// Main-delivered and module-to-module input has no causal producer to wait for.
 	if executionID == nil {
 		return
 	}
-	// Whether this source owes the integration branch a commit is a production fact (its frozen recipe,
-	// its admitted work location), not the absence of a commit row - a node may submit first and be
-	// committed automatically at settle. The host answers it; a commit row cannot.
 	integrates := false
 	if integratesSource != nil {
 		integrates = integratesSource(*executionID)
@@ -38,13 +33,6 @@ func rsiAdmitSource(kernel *KernelStore, graphID, deliveryID, workspace string, 
 	}
 	merged := kernelRow(kernel.Db, "SELECT sha FROM git_commits WHERE task_id=? AND operation_id=? AND kind='integration'", graphID, *executionID)
 	if merged == nil {
-		// A short wait, not a repair: the delivery stays pending and the same one is
-		// retried. It cannot block here instead: this operation runs under the
-		// graph's Git lock (Git.Exclusive), and the source execution's own
-		// integration needs that same lock (SettleWorkspace). Waiting for the
-		// commit while holding the lock would wait for a commit that cannot be
-		// made, so the operation gives the attempt back and the delivery is
-		// retried after the source integrated.
 		if sourceState == "running" {
 			Raise("paused", "Delivery source "+*executionID+" has not been integrated yet")
 		}

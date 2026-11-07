@@ -37,11 +37,6 @@ type SkillUsageInput struct {
 	Now            *int64
 }
 
-// SkillUsage reports which skills were actually read, and which never were.
-//
-// Read-only by construction: it derives from the tool calls the runtime already recorded, so it
-// needs no second write path of its own. A call counts for a skill when it touched a file inside
-// that skill's folder — the SKILL.md itself or a reference it pulled in.
 func SkillUsage(input SkillUsageInput) SkillUsageReport {
 	keepDays := skillUsageRetentionDays
 	if input.KeepDays != nil {
@@ -100,8 +95,6 @@ func SkillUsage(input SkillUsageInput) SkillUsageReport {
 					lastReadAt = &stamp
 				}
 			}
-			// One skill can live in several folders (a project dir and the mirror); keep the first sighting
-			// but let a used copy win over an identical unused one.
 			replaced := false
 			for i := range skills {
 				if skills[i].ID != entry.Name() {

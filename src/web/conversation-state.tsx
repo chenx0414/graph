@@ -76,8 +76,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     () => selectedProposalVersion
       ? api<ProposalDetail>(`/api/conversations/${id}/proposals/${selectedProposalVersion}`)
       : Promise.resolve(null),
-    // The credential is part of the identity of a draft: editing the same version
-    // in place must re-read the preview instead of showing the previous content.
     [id, selectedProposalVersion, view?.proposal?.draftRevision, view?.proposal?.draftDigest],
   );
   const { data: draftGraph, loading: draftGraphLoading } = useAsync(
@@ -91,9 +89,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const [sending, setSending] = useState(false);
   const [steering, setSteering] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
-  // The interrupt a reader asked for. 打断中 stays up while the turn is still
-  // winding down, and 已打断 is what they see once the master stopped: the
-  // request returns long before the turn does.
   const [interruptPhase, setInterruptPhase] = useState<'idle' | 'interrupting' | 'accepted' | 'interrupted'>('idle');
   const [actionError, setActionError] = useState('');
   const [bindId, setBindId] = useState('');
@@ -120,8 +115,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
         method: 'POST',
         body: JSON.stringify({ requestId: `interrupt-${crypto.randomUUID()}` }),
       });
-      // The request is accepted, not finished: the turn still has a tool to
-      // kill and a transcript to close.
       setInterruptPhase('accepted');
       toast('已打断当前模型思考和工具调用。', 'info');
       reload();
@@ -138,8 +131,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   useEffect(() => {
     setInterruptPhase(current => {
       if (busy) {
-        // A turn that is running after an interrupt ended is a new turn: the
-        // reader sent something and 已打断 belongs to what is over.
         return current === 'interrupted' ? 'idle' : current;
       }
       return current === 'interrupting' || current === 'accepted' ? 'interrupted' : current;
@@ -158,7 +149,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const transcriptFollow = useTranscriptFollow(view?.id ?? null, Boolean(busy));
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refresh = useCallback(() => {
-    // One event usually means several records changed; coalesce the refetches.
     clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => reload(), 150);
   }, [reload]);
@@ -177,16 +167,12 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     setPauseAction(null);
     setPausedOverride(null);
     setDismissedQueue([]);
-    // 打断中/已打断 belong to the conversation that was interrupted.
     setInterruptPhase('idle');
   }, [id]);
   useEffect(() => {
     if (view && pausedOverride !== null && view.paused === pausedOverride) setPausedOverride(null);
   }, [view, pausedOverride]);
   useEffect(() => {
-    // Selecting a card that is no longer active (archived or deleted) must not
-    // survive a reload: fall back to the current draft, then to the newest active
-    // card.
     const active = view?.proposalHistory ?? [];
     setSelectedProposalVersion(current => {
       if (current !== null && active.some(item => item.version === current)) return current;
@@ -198,9 +184,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   }, [selectedProposalVersion]);
   useEffect(() => {
     if (!view || !drawerOpen) return;
-    // The draft page owns its cards whether they are active or archived, so only
-    // an empty draft page falls back to the task section. A page that still has
-    // something to manage stays where the user put it.
     const activeDraft = Boolean(view.proposal && !view.accepted.some(item => item.proposalVersion === view.proposal!.version));
     const draftCards = activeDraft || (view.archivedProposals ?? []).length > 0;
     const resolved = resolveDrawerSection({
@@ -208,9 +191,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
       selectedTaskId,
       taskIds: view.tasks.map(task => task.id),
     });
-    // A live draft always surfaces, so an overturned draft replaces the old one on
-    // screen. Archived-only content must not hijack the task section (the entry
-    // point for it is openDrawerRoot), and nothing else overrides the user choice.
     if (activeDraft) resolved.section = 'draft';
     else if (!draftCards) resolved.section = 'task';
     if (resolved.section !== drawerSection) setDrawerSection(resolved.section);
@@ -234,9 +214,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   useEffect(() => {
     if (transcript.streamNeedsResync) reload();
   }, [reload, transcript.streamNeedsResync]);
-  // Entering a conversation (or reopening the window) starts at the newest
-  // message once the transcript window has rendered. Leaving and re-entering
-  // the chat tab re-arms the jump without yanking a reader on new arrivals.
   const enteredScrollRef = useRef(false);
   useEffect(() => {
     const jump = shouldScrollToLatest({
@@ -261,8 +238,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     (list, messageId) => cancelQueuedMessage(list, messageId),
     transcript.queuedMessages,
   );
-  // Candidate prompts are an opt-in preference; when off, the composer never
-  // shows (nor sends) a suggested next prompt.
   const promptSuggestion = visibleSuggestion(preferences, transcript.promptSuggestion);
   const hasComposerInput = Boolean(text.trim() || attachments.length);
   const primaryState = composerPrimaryState({
@@ -277,8 +252,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
   const { act, changePaused, send, steerQueued, submitEnter, submitPrimary, cancelQueued, selectMasterModel, compactConversation } = conversationActions({ setActionError, reload, onChanged, pauseAction, setPauseAction, id, setPausedOverride, text, agentContext, attachments, setText, setAttachments, setSending, transcriptFollow, steering, interrupting, queuedMessages, setSteering, sending, busy, promptSuggestion, primaryState, hasComposerInput, setDismissedQueue });
 
   const masterQuestions = (view.questions ?? []).filter(question => question.status === 'open' && (question.owner ?? 'user') === 'user');
-  // What the toolbar says about an interrupt: 打断中 until the turn is gone,
-  // then 已打断. Nothing at all when the reader never asked for one.
   const interruptStatus: string | null = interruptPhase === 'interrupted'
     ? '已打断'
     : interruptPhase === 'idle' ? null : '打断中';
@@ -320,10 +293,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
         ? 'stale'
         : 'pending';
   const confirmableForActive = Boolean(activeProposal && proposal && activeProposal.version === proposal.version && confirmable);
-  // A confirmed card is confirmed, not stale. Confirming advances the anchor's
-  // requirement, so the source card is stale by construction afterwards; reading
-  // staleness first would label it "re-discuss" and invite a second graph for a task
-  // that already has one. Execution changes go to the original graph instead.
   const activeAccepted = Boolean(activeProposal && acceptedVersions.has(activeProposal.version));
   const activeStale = Boolean(activeProposal && activeProposal.stale && !activeAccepted);
   const managementCards = proposalHistory.filter(item => !(drawerSection === 'draft' && item.version === activeProposal?.version));
@@ -342,18 +311,11 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     unlimited: Boolean(view.usage.unlimited),
     openQuestions: masterQuestions.length + tasks.reduce((count, task) => count + task.openQuestions.length, 0),
   };
-  /** The header entry: one click opens the drawer on the draft, or on the first
-   * task when there is no draft to show. */
   function openDrawerRoot() {
-    // The draft page owns the draft cards, including the archived ones: with every
-    // card archived there is still something to see and restore, so the task
-    // section must not swallow it.
     const archived = (view?.archivedProposals ?? []).length > 0;
     if (archived || (proposal && !acceptedVersions.has(proposal.version))) {
       setDrawerSection('draft');
     } else {
-      // No draft to show: the drawer opens on the task section, which always has something to
-      // offer - the shared artifacts exist whether or not a task does.
       setDrawerSection('task');
       if (tasks[0]) setSelectedTaskId(tasks[0].id);
     }
@@ -365,8 +327,6 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     taskCount: tasks.length,
     projectBound: Boolean(view.projectId),
   };
-  // The initialization panels (empty task list, project binding) are declared by
-  // the policy module; the view only renders what the policy places in the drawer.
   const deferredInitPanelIds = drawerInitPanelIds();
   return { fallback: null, sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, promptSuggestion, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
 }

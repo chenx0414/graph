@@ -6,20 +6,17 @@ import (
 	"regexp"
 )
 
-// Private response dialect markers observed in ordinary provider text.
 var (
 	privateTagOpen  = regexp.MustCompile(`(?i)<(analysis|review[\s_]*of[\s_]*last[\s_]*turn)>`)
 	privateTagClose = regexp.MustCompile(`(?i)</(?:analysis|review[\s_]*of[\s_]*last[\s_]*turn)>`)
 	fencedBlock     = regexp.MustCompile("(?s)```[\\s\\S]*?```|~~~[\\s\\S]*?~~~")
 )
 
-// HasPrivateMarkup reports whether ordinary text contains an internal marker outside fenced examples.
 func HasPrivateMarkup(text string) bool {
 	stripped := fencedBlock.ReplaceAllString(text, "")
 	return privateTagOpen.MatchString(stripped)
 }
 
-// AssistantVisibleText removes private markup emitted as ordinary assistant text. Fenced examples stay visible.
 func AssistantVisibleText(text string) string {
 	var b strings.Builder
 	last := 0

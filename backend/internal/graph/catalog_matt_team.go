@@ -37,7 +37,6 @@ func mattTeamSkill(name string) string {
 
 var mattTeamPrefix = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// AssembleMattTeam builds published role recipes and returns an ordinary v2 definition.
 func AssembleMattTeam(catalog MattTeamCatalog, options MattTeamOptions) GraphDefinition {
 	fields := []struct {
 		key   string
@@ -161,9 +160,6 @@ func AssembleMattTeam(catalog MattTeamCatalog, options MattTeamOptions) GraphDef
 			}
 			return map[string]any{name: body}
 		}
-		// The project check is one node of the team, not the team itself: a project that
-		// has no check command (or a goal whose graph runs before one exists) still gets
-		// the planner, the worker and both independent reviewers.
 		modules := map[string]any{
 			"decision": map[string]any{
 				"type": "router", "trigger": "each", "requiredInputs": []any{"standards", "spec"},

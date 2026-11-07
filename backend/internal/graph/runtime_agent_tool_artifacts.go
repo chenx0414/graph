@@ -4,8 +4,6 @@ import (
 	"strings"
 )
 
-// artifactToolDeclarations are the tools that work with the workspace of the
-// instance, with the artifacts it publishes and with the shell it runs in.
 func artifactToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	main := set.main
 	features := set.features

@@ -81,7 +81,6 @@ func scopedStatus(repo, subdir, stateDir string) []gitStatusRecord {
 	return out
 }
 
-// BaselineFiles is the explicit candidate list for a scoped baseline.
 func BaselineFiles(repo, subdir, stateDir string) []string {
 	paths := map[string]bool{}
 	order := []string{}
@@ -100,7 +99,6 @@ func BaselineFiles(repo, subdir, stateDir string) []string {
 	return order
 }
 
-// ScopedDirty lists dirty entries a scoped baseline cannot capture.
 func ScopedDirty(repo, subdir, stateDir string) []string {
 	out := []string{}
 	for _, record := range scopedStatus(repo, subdir, stateDir) {
@@ -113,7 +111,6 @@ func ScopedDirty(repo, subdir, stateDir string) []string {
 	return out
 }
 
-// RepoFingerprint is the readiness fingerprint of a repository scope.
 func RepoFingerprint(repo, subdir, stateDir string) string {
 	records := scopedStatus(repo, subdir, stateDir)
 	existing := []string{}

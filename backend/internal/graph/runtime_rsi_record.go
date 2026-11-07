@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// rsiHasGitComponent reports whether a path names the .git directory.
 func rsiHasGitComponent(path string) bool {
 	for _, part := range strings.Split(path, "/") {
 		if part == ".git" {
@@ -15,7 +14,6 @@ func rsiHasGitComponent(path string) bool {
 	return false
 }
 
-// rsiFirstText is the first nonempty text.
 func rsiFirstText(value, fallback string) string {
 	if value != "" {
 		return value
@@ -23,7 +21,6 @@ func rsiFirstText(value, fallback string) string {
 	return fallback
 }
 
-// rsiPanicMessage is the message of a recovered failure.
 func rsiPanicMessage(recovered any) string {
 	switch err := recovered.(type) {
 	case *RuntimeError:
@@ -35,7 +32,6 @@ func rsiPanicMessage(recovered any) string {
 	}
 }
 
-// rsiRecord writes the receipt into the conversation and the event log.
 func (service *RsiService) rsiRecord(context RsiApplyContext, receipt RsiReceipt) {
 	context.Store.Transaction(func() any {
 		if receipt.RestartRequired && receipt.Commit != nil && context.OperationId != nil {
@@ -56,10 +52,6 @@ func (service *RsiService) rsiRecord(context RsiApplyContext, receipt RsiReceipt
 			ConversationID: conversationID, Role: "system", Kind: "rsi",
 			OperationID: context.OperationId, Text: receipt.Report, Data: receipt, State: "done",
 		})
-		// Scheduling a reload drains the daemon, which can close the Agent process
-		// before the turn settles. The turn's visible receipt is therefore written
-		// here, while the reload is only requested, so the user always sees the
-		// outcome of the change and never has to ask for it again.
 		if receipt.RestartRequired {
 			AppendMessage(context.Store, MessageInput{
 				ConversationID: conversationID, Role: "assistant", Kind: "chat",
@@ -72,16 +64,6 @@ func (service *RsiService) rsiRecord(context RsiApplyContext, receipt RsiReceipt
 	})
 }
 
-// RsiChangeShapeHint answers the model's own mistakes about the shape of `changes[]`, in its terms.
-//
-// The SDK validates the call before this service sees it and prints every schema fact it finds
-// (`changes.0.path: must have required properties path`, followed by the received arguments) - accurate,
-// and never a word about what went wrong: a top-level field nested one level too deep, or a whole change
-// written inside `edits[]`. A missing `path` is answered here too: it measured as the single most frequent
-// mistake (a `replace` entry carrying `edits` drops it), and the schema's wording never names the entry it
-// lost. Everything else that is only a field problem stays the schema's business.
-//
-// The empty string means the shape is fine.
 func RsiChangeShapeHint(args any) string {
 	top := rsiPlainObject(args)
 	if top == nil {
@@ -108,16 +90,11 @@ func RsiChangeShapeHint(args any) string {
 			return "changes[" + itoa(index) + "] is one file change: {path, action, content, edits}. \"" + stray +
 				"\" belongs at the top level of the call - it is nested one level too deep."
 		}
-		// Every change needs a path, whatever its action. The measured mistake is a `replace` entry that
-		// carries `edits` and quietly drops `path`, and the SDK answers only "must have required
-		// properties path" - no index, no shape, so the same call comes back. Name it here instead.
 		if _, ok := entry["path"].(string); !ok {
 			return "changes[" + itoa(index) + "] is missing \"path\": every change needs one path per file. Write it as " +
 				"{path, action: \"write\", content or fromPath} | {path, action: \"replace\", edits: [{oldText, newText}] or fromPath}" +
 				" | {path, action: \"copy\", from: \"<revision>\"} | {path, action: \"delete\"}."
 		}
-		// A mirror names a revision instead of retyping content. Shape mistakes in that one field are
-		// answered here, before any file is touched, by the same rule the parser enforces.
 		if rsiText(entry["action"]) == "copy" {
 			if refusal := RevisionRefusal(entry["from"]); refusal != "" {
 				return "changes[" + itoa(index) + "].from " + refusal

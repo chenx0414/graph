@@ -1,5 +1,3 @@
-/** Unconfirmed versions preview the proposal. Once accepted, this same window
- * shows the runtime GraphPanel and follows its revisions through completion. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { ConversationGraphBoard, type DraftGraph, type ProposalDetail } from './Conversation.tsx';
@@ -29,8 +27,6 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
   const [graph, setGraph] = useState<DraftGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(true);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  // The window names its own version, so it reads that version's proposal rather than whichever
-  // one the conversation last drafted.
   const [chosen, setChosen] = useState<ProposalDetail | null>(null);
   const chosenGeneration = useRef(0);
   const graphGeneration = useRef(0);
@@ -43,9 +39,6 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
 
   const latest = view?.proposal ?? null;
   const selected = version ?? latest?.version ?? null;
-  // The card the window is showing, wherever it currently lives: an in-place edit
-  // keeps the version number, so the credential is what tells the preview to
-  // reload, and a card that left both lists must drop its cached preview.
   const chosenCard = (view?.proposalHistory ?? []).find(item => item.version === selected)
     ?? (view?.archivedProposals ?? []).find(item => item.version === selected)
     ?? null;
@@ -61,13 +54,8 @@ export function DraftGraphTab({ conversationId, version }: { conversationId: str
     return () => { cancelled = true; };
   }, [conversationId, selected, latest, chosenCard, view]);
   const proposal = chosen;
-  // Confirmed cards that are still live: the board shows one of them (the accepted
-  // source), but every other confirmed version stays manageable from here too.
-  // If this draft has already been accepted, the board reads that task's live node states.
   const acceptedTaskId = view?.accepted?.find(item => item.proposalVersion === selected)?.taskId ?? null;
   const load = useCallback(async () => {
-    // Invalidate first: an early return or an unmount must also drop any older
-    // in-flight load, and an in-place edit of the same version must reload.
     const mine = ++graphGeneration.current;
     if (acceptedTaskId || selected === null) { setGraph(null); setGraphLoading(false); return; }
     setGraphLoading(true);

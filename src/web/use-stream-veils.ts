@@ -31,11 +31,6 @@ function frameBoost(activeChunks: number) {
   return 1 + 0.3 * Math.max(0, activeChunks - 2);
 }
 
-/**
- * Fade only the exact suffix that arrived since the previous render. The text
- * itself is committed immediately, so opacity changes never participate in
- * layout. Multiple fast chunks can fade concurrently and never reanimate.
- */
 export function useStreamVeils(text: string, key: string, active: boolean): MarkdownVeil[] {
   const [, setFrame] = useState(0);
   const keyRef = useRef(key);

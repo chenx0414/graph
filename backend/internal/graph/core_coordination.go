@@ -21,16 +21,12 @@ func (runtime *TaskRuntime) OpenProjectThread(projectID, requestID string) Super
 		Raise("invalid_input", "A project is required")
 	}
 	runtime.EnsureGlobalThread("project:" + projectID + ":global")
-	// The project that IS this checkout has no supervisor of its own: main runs
-	// it directly, so asking for its thread returns main's conversation.
 	if runtime.ownCheckoutProject(projectID) {
 		return runtime.EnsureGlobalThread(requestID)
 	}
 	return runtime.ensureSupervisorThread(&projectID, requestID)
 }
 
-// ownCheckoutProject reports whether the project is the Graph source checkout
-// itself. Only that one is run by main; every other project keeps a supervisor.
 func (runtime *TaskRuntime) ownCheckoutProject(projectID string) bool {
 	if runtime.rsi == nil || runtime.rsi.Root == nil {
 		return false
@@ -100,7 +96,6 @@ func (runtime *TaskRuntime) ensureSupervisorThread(projectID *string, requestID 
 		runtime.store.Event(taskID, "conversation.created", map[string]any{"conversationId": id, "projectId": projectID, "role": role})
 		return supervisorThreadOf(ConversationRowOf(runtime.store, id))
 	})
-	// Command replays are decoded JSON, while fresh receipts are typed.
 	if thread, ok := result.(SupervisorThread); ok {
 		return thread
 	}

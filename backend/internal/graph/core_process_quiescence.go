@@ -8,13 +8,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ProcessQuiescenceReceipt is a supervisor's durable proof that its command has closed.
 type ProcessQuiescenceReceipt struct {
 	Path  string `json:"path"`
 	Nonce string `json:"nonce"`
 }
 
-// HasProcessQuiescence reads the receipt without following a symlink.
 func HasProcessQuiescence(receipt ProcessQuiescenceReceipt) bool {
 	fd, err := unix.Open(receipt.Path, unix.O_RDONLY|unix.O_NOFOLLOW, 0)
 	if err != nil {

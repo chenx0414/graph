@@ -4,8 +4,6 @@ import (
 	"math"
 )
 
-// KernelToolGate admits host tools against the running execution.
-// Tool usage is distinct from provider usage.
 func KernelToolGate(kernel *KernelStore, graphID, nodeID string, kind string, closing func() bool) SendGate {
 	return SendGate{
 		Dispatch: func(id string, reservation float64, send func() any) any {

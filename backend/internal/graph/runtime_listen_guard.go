@@ -1,24 +1,11 @@
 package graph
 
-// listenGuardEnv marks the one process that owns the host's IPC channel; the
-// guard clears the mark so a forked descendant never installs the shim.
 const listenGuardEnv = "GRAPH_LISTEN_GUARD"
 
-// A model turn can legitimately include large tool results and inline images.
 const maxWorkerRequestBytes = 32 * 1024 * 1024
 
 const maxWorkerReplyBytes = 32 * 1024 * 1024
 
-// loopbackListenGuard is the preload the host installs when a confirmed check
-// may bind loopback. It is the routing shim of the TypeScript implementation:
-// the host owns the only listening socket of a local-network check, so the
-// check's own listen call is refused unless the host grants it.
-//
-// TODO(port): the shim still speaks the host's Node IPC channel, so the Go
-// host has to answer it over the same channel. The socket hand-off itself is
-// not portable: Node's IPC protocol carries a socket descriptor as a native
-// handle, and the Go host cannot mint one. The Go host therefore refuses the
-// listener request instead of handing the descriptor over.
 const loopbackListenGuard = `'use strict';
 // Routing shim only: the sandbox denies every bind and the host owns the only
 // loopback listeners. The host binds the exact requested port, duplicates the

@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// OpenTaskRuntime opens the backend runtime over one state directory.
 func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	runtime := &TaskRuntime{options: options, stateDir: options.StateDir, projects: options.Projects, taskSetups: NewTaskSetupLedger()}
 	if options.AutoDrive != nil {
@@ -21,8 +20,6 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	}
 	runtime.stateDir = resolved
 
-	// The option bags stay non-nil so a runtime opened without one still has
-	// an empty configuration to read.
 	runtime.models = options.Models
 	if runtime.models == nil {
 		runtime.models = &TaskRuntimeModels{}
@@ -135,26 +132,11 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 			return runtime.options.OnCredentialRejected(request)
 		},
 	})
-	// The recovery bootstrap belongs to the kernel that owns the durable
-	// conversations. The PiG kernel keeps them in this process, so it
-	// recovers on its own: the kernel's own receipts settle the turns it
-	// finished, and the turns it never sent are sent again.
 	runtime.bootstrapPigRecovery(interruptedNodes)
-	// A restart that cut through a tool leaves work the kernel will not run
-	// again; it must not hold the conversation, or no later turn can start.
 	runtime.abortStalledMasterTurns()
-	// A message queued behind that work is still the user's request: release
-	// the questions it would have released and let the master run it.
 	runtime.dispatchQueuedMasterMessages()
-	// The state the last run left behind is reclaimed before this one
-	// starts: a daemon that only reclaimed while it was running would let the
-	// state of every run before it grow for ever.
 	runtime.execution.sweepState()
 	runtime.Host = &TaskRuntimeHost{runtime: runtime}
-	// Tasks and conversations created while dispatch was disabled carry no
-	// master node. Once a master binding exists they get one and become
-	// driveable again; queued conversation messages stay pending until then.
-	// The same scan runs after a hot configuration apply.
 	runtime.RecoverMasters()
 	runtime.markInterruptedGraphPreparations()
 	if runtime.autoWake {

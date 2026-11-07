@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// serveConfig is the configuration the console edits.
 func (app *GraphApp) serveConfig(w http.ResponseWriter, r *http.Request) {
 	store := app.appConfigStore()
 	if store == nil {
@@ -40,7 +39,6 @@ func (app *GraphApp) serveConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-// serveConfigSave stores and activates one configuration document.
 func (app *GraphApp) serveConfigSave(w http.ResponseWriter, r *http.Request) {
 	store := app.appConfigStore()
 	if store == nil {
@@ -73,9 +71,6 @@ func (app *GraphApp) serveConfigSave(w http.ResponseWriter, r *http.Request) {
 		Raise("config_in_use", "Models in use by unfinished tasks cannot be removed: "+strings.Join(removed, ", "))
 	}
 	if app.options.AppServices != nil {
-		// Hot apply: persist through the same atomic store, then activate the
-		// candidate on this daemon. A rejected candidate keeps the previous
-		// effective bindings and reports why instead of a false success.
 		applied, ok := app.options.AppServices.ApplyConfig(document, expectedRevision).(ApplyConfigResult)
 		if !ok {
 			Raise("internal", "The configuration apply returned no result")
@@ -89,7 +84,6 @@ func (app *GraphApp) serveConfigSave(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// appDocumentModelIDs reads the model ids of a configuration document.
 func appDocumentModelIDs(document any) (map[string]bool, bool) {
 	record, ok := document.(map[string]any)
 	if !ok {
@@ -115,7 +109,6 @@ func appDocumentModelIDs(document any) (map[string]bool, bool) {
 	return ids, true
 }
 
-// servePricingRefresh re-verifies the archived prices.
 func (app *GraphApp) servePricingRefresh(w http.ResponseWriter, r *http.Request) {
 	if app.options.AppServices == nil || app.options.AppServices.RefreshPrices == nil {
 		Raise("invalid_config", "The daemon was started without the app bridge")
@@ -132,7 +125,6 @@ func (app *GraphApp) servePricingRefresh(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, appApplyResultOf(refreshed, false))
 }
 
-// serveConfigTest proves that one configured model can be reached.
 func (app *GraphApp) serveConfigTest(w http.ResponseWriter, r *http.Request) {
 	if app.options.ConfigTest == nil {
 		Raise("invalid_config", "The daemon was started without a configuration file")
@@ -145,11 +137,8 @@ func (app *GraphApp) serveConfigTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.options.ConfigTest(strings.TrimSpace(modelID)))
 }
 
-// serveSettings is the settings page payload.
 func (app *GraphApp) serveSettings(w http.ResponseWriter, r *http.Request) {
 	catalog := app.runtime.Catalog()
-	// The resource library renders the grouped view: one row per skill name,
-	// duplicates folded. The capability configuration reads the same list.
 	capabilities := catalog.CapabilitiesView()
 	view := appSettingsView{
 		Projects:              app.runtime.User().Projects(),
@@ -166,7 +155,6 @@ func (app *GraphApp) serveSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-// appCapabilitySecrets is the secret view the capability configuration reads.
 func (app *GraphApp) appCapabilitySecrets() map[string]string {
 	if app.options.AppServices != nil && app.options.AppServices.CapabilityConfig != nil {
 		return app.options.AppServices.CapabilityConfig.SecretValues()
@@ -182,13 +170,11 @@ func (app *GraphApp) appCapabilitySecrets() map[string]string {
 	return secrets
 }
 
-// appDefinitionSummary is one published definition of the catalog.
 type appDefinitionSummary struct {
 	ID      string `json:"id"`
 	Version int64  `json:"version"`
 }
 
-// appDefinitionSummaries maps the catalog definition list into the wire shape.
 func appDefinitionSummaries(definitions []struct {
 	Id      string
 	Version int64
@@ -200,7 +186,6 @@ func appDefinitionSummaries(definitions []struct {
 	return summaries
 }
 
-// appOptionalString turns an empty path into a null.
 func appOptionalString(value string) *string {
 	if value == "" {
 		return nil
@@ -209,7 +194,6 @@ func appOptionalString(value string) *string {
 	return &copied
 }
 
-// serveCapabilityConfig is the capability configuration view.
 func (app *GraphApp) serveCapabilityConfig(w http.ResponseWriter, r *http.Request) {
 	items := CapabilityConfigViews(app.runtime.Catalog().Capabilities(), app.appCapabilitySecrets())
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})

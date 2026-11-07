@@ -53,9 +53,6 @@ export function AgentContextPage({ conversationId }: { conversationId: string })
     const onSettingsChanged = () => { void load(); };
     window.addEventListener('graph:settings-changed', onSettingsChanged);
     setLoading(true);
-    // A reload of the daemon is a few seconds of lost connections, not a broken
-    // page: the first reads retry themselves, and only a standing refusal is
-    // reported - in words a person can act on, with a button to try again.
     const read = () => {
       api<AgentContextView>(`/api/agent-context?conversationId=${encodeURIComponent(conversationId)}`)
         .then(next => {

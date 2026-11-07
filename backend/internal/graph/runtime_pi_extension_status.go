@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// NpmSourceName is the package name inside an `npm:` source; nil for git and local sources.
 func NpmSourceName(source string) *string {
 	if !strings.HasPrefix(source, "npm:") {
 		return nil
@@ -28,8 +27,6 @@ func NpmSourceName(source string) *string {
 	return &name
 }
 
-// piExtensionPackageVersionAt is the version in the nearest package.json above an entry; `name`
-// narrows which manifest counts.
 func piExtensionPackageVersionAt(entry string, name *string) (*string, error) {
 	directory := filepath.Dir(entry)
 	for depth := 0; depth < 8; depth++ {
@@ -59,8 +56,6 @@ func piExtensionPackageVersionAt(entry string, name *string) (*string, error) {
 	return nil, nil
 }
 
-// piExtensionInstallRootOf is the install root npm wrote: the folder that owns the `node_modules`
-// the entry lives in.
 func piExtensionInstallRootOf(entry string) string {
 	at := strings.Index(entry, string(filepath.Separator)+"node_modules"+string(filepath.Separator))
 	if at > 0 {
@@ -69,7 +64,6 @@ func piExtensionInstallRootOf(entry string) string {
 	return ""
 }
 
-// piExtensionNpmLatest is the newest version the registry has for a spec.
 func piExtensionNpmLatest(spec string, cwd string) *string {
 	stdout, err := piExtensionRunCommand("npm", []string{"view", spec, "version", "--json"}, cwd, piExtensionQueryTimeout)
 	if err != nil {

@@ -6,8 +6,6 @@ import (
 	"os"
 )
 
-// LinkProjectDependencies links the project's installed toolchain into a work copy.
-// The returned path is the sandbox read grant. A missing candidate yields no path.
 func LinkProjectDependencies(workspace string, candidate *string) *string {
 	if candidate == nil || *candidate == "" {
 		return nil

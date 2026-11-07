@@ -212,9 +212,6 @@ type OperationMessage struct {
 	RequirementVersion int               `json:"requirementVersion"`
 	Attachments        []AttachmentInput `json:"attachments,omitempty"`
 	Command            *string           `json:"command,omitempty"`
-	// FreshSession marks a turn that must judge with its own context instead of
-	// inheriting the conversation's: an acceptance turn reads the objective and
-	// the round's report, not the transcript that produced them.
 	FreshSession bool `json:"freshSession,omitempty"`
 }
 
@@ -238,8 +235,6 @@ type OperationContext struct {
 	Answers         []OperationAnswer  `json:"answers"`
 	Messages        []OperationMessage `json:"messages,omitempty"`
 	Briefing        *string            `json:"briefing,omitempty"`
-	// BriefingSetupLength is the length of the briefing's setup tail: the
-	// description of the environment the task runs in.
 	BriefingSetupLength *int                  `json:"briefingSetupLength,omitempty"`
 	AgentContext        *ResolvedAgentContext `json:"agentContext,omitempty"`
 	OutputSchema        *SchemaRef            `json:"outputSchema,omitempty"`

@@ -1,19 +1,6 @@
 package graph
 
-// The OpenAI Responses transport (api: "openai-responses").
-//
-// A Responses request is not a chat-completions request on another path: the
-// transcript travels as typed input items (messages, the function calls a turn
-// made and the output each call returned), the tool declarations are flat, and
-// the answer arrives as `response.*` events. ChatGPT's Codex backend answers in
-// this shape only, so the model entry that names it is the reason this
-// transport exists.
 
-// controlledResponsesInput renders the transcript as Responses input items.
-//
-// The system prompt is the request's `instructions`, not an item; a tool result
-// is the `function_call_output` of the call it answers, and it travels beside
-// that call so the provider reads the flow in the order it happened.
 func controlledResponsesInput(messages []any) []any {
 	out := []any{}
 	for index := 0; index < len(messages); index++ {
@@ -24,10 +11,8 @@ func controlledResponsesInput(messages []any) []any {
 		role, _ := message["role"].(string)
 		switch role {
 		case "toolResult":
-			// Rendered with the assistant turn that asked for it.
 			continue
 		case "system", "developer":
-			// The prompt is the request's instructions.
 			continue
 		case "assistant":
 			results, next := controlledToolResults(messages, index+1)
@@ -40,7 +25,6 @@ func controlledResponsesInput(messages []any) []any {
 	return out
 }
 
-// controlledResponsesAssistant renders one assistant turn in the order it was produced.
 func controlledResponsesAssistant(message map[string]any, results map[string]map[string]any) []any {
 	out := []any{}
 	for _, block := range controlledAssistantContent(message) {
@@ -70,7 +54,6 @@ func controlledResponsesAssistant(message map[string]any, results map[string]map
 	return out
 }
 
-// controlledResponsesTextItem is one text item of the input.
 func controlledResponsesTextItem(role, partType, text string) map[string]any {
 	return map[string]any{
 		"role":    role,
@@ -78,8 +61,6 @@ func controlledResponsesTextItem(role, partType, text string) map[string]any {
 	}
 }
 
-// controlledResponsesTools renders the transcript tools as Responses declarations:
-// flat, with the name and the schema on the tool itself.
 func controlledResponsesTools(messages []any) []any {
 	out := []any{}
 	for _, tool := range controlledCurrentTools(messages) {
@@ -103,12 +84,6 @@ func controlledResponsesTools(messages []any) []any {
 	return out
 }
 
-// controlledResponsesReasoning reads the thinking strength one entry asks for.
-//
-// A Responses request carries the effort as a named strength inside `reasoning`;
-// the entry's own default and the turn's chosen level are read the same way the
-// chat-completions fields are, so one configuration means the same thing on both
-// transports.
 func controlledResponsesReasoning(record map[string]any, options map[string]any) map[string]any {
 	for name, value := range ControlledThinkingFields(record, options) {
 		if name != "reasoning_effort" {
@@ -123,7 +98,6 @@ func controlledResponsesReasoning(record map[string]any, options map[string]any)
 	return nil
 }
 
-// handleResponsesEvent reads one Responses event.
 func (stream *controlledStream) handleResponsesEvent(event map[string]any) {
 	switch rsiText(event["type"]) {
 	case "response.output_text.delta":
@@ -142,8 +116,6 @@ func (stream *controlledStream) handleResponsesEvent(event map[string]any) {
 			stream.appendToolArguments(int(controlledResponsesIndex(event)), delta)
 		}
 	case "response.completed":
-		// A turn that called a tool is a tool-use turn whatever the model said
-		// after it: the runtime stops the turn on the calls it must run.
 		if len(stream.toolCalls) > 0 {
 			stream.finishReason = "toolUse"
 			return
@@ -154,7 +126,6 @@ func (stream *controlledStream) handleResponsesEvent(event map[string]any) {
 	}
 }
 
-// controlledResponsesIndex is the position one output item holds in the answer.
 func controlledResponsesIndex(event map[string]any) int64 {
 	index, ok := controlledSafeCount(event["output_index"])
 	if !ok {
@@ -163,7 +134,6 @@ func controlledResponsesIndex(event map[string]any) int64 {
 	return index
 }
 
-// controlledResponsesReason is the reason a failed response names.
 func controlledResponsesReason(event map[string]any) string {
 	response := asMap(event["response"])
 	if reason := rsiText(asMap(response["error"])["message"]); reason != "" {
@@ -182,11 +152,6 @@ func controlledResponsesReason(event map[string]any) string {
 	return "no reason given (" + code + ")"
 }
 
-// controlledResponsesUsage parses the usage one Responses answer reports.
-//
-// The counts are the ones the provider billed: `input_tokens` includes the
-// cached prefix, so the cache read is taken out of the input the same way the
-// chat-completions adapter does it.
 func controlledResponsesUsage(value any) *TokenUsage {
 	raw, ok := value.(map[string]any)
 	if !ok {

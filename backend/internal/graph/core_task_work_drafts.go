@@ -49,28 +49,11 @@ func (s *TaskStore) setWorkDraftState(workID string, version, expected int64, ac
 	}
 }
 
-// How much of a work's drafts one read accepts.
-//
-// A single read answers "what is version N". The listing and the receipt of a
-// state change answer something else - what this work has - so they must keep
-// seeing an archived version after it was archived, while a single read of a
-// version that is no longer a draft must refuse it and say which of the four
-// ways it did.
 const (
-	// draftCurrent accepts only the versions that are still the work's plan.
 	draftCurrent = false
-	// draftAnyState accepts archived and deleted versions too.
 	draftAnyState = true
 )
 
-// draftRefusal raises one of the four ways a draft read fails, with the code
-// leading the message.
-//
-// Each way asks the reader to do something different - create the work, name
-// another version, restore the draft, or widen the scope - so they must not
-// share one message. The code also leads the text because a tool result carries
-// the message and has no code field (agentToolsFailure in runtime_agent_tools.go):
-// without it four distinct facts reach the model as undifferentiated prose.
 func draftRefusal(code, message string) {
 	Raise(code, code+": "+message)
 }

@@ -6,16 +6,13 @@ import (
 	"strconv"
 )
 
-// Why the master of a conversation is being woken.
 type WakeKind string
 
 type WakeIntent struct {
 	TaskID    string
 	Kind      WakeKind
 	DedupeKey string
-	// Data nil means the TypeScript property was omitted (SQL NULL), not JSON null.
 	Data any
-	// HasData is set when the caller passed data, including an explicit JSON null.
 	HasData bool
 }
 
@@ -27,7 +24,6 @@ type PendingWake struct {
 	Data      *string
 }
 
-// WakeMaster records one wake for the conversation's master and makes it dispatchable.
 func WakeMaster(store *TaskStore, intent WakeIntent) bool {
 	apply := func() any {
 		row, ok := sqliteOne(store.DB, `SELECT c.id AS conversation_id,c.anchor_task_id,c.archived_at,m.id AS master_id
@@ -50,9 +46,6 @@ func WakeMaster(store *TaskStore, intent WakeIntent) bool {
 		if intent.HasData {
 			data = intent.Data
 		}
-		// The TypeScript stored the data whenever the property was present, so a
-		// caller that passes data without the flag still gets it stored. Only an
-		// omitted property is SQL NULL.
 		var stored any
 		if intent.HasData || intent.Data != nil {
 			data = intent.Data
@@ -100,11 +93,6 @@ func WakeForBlockedNode(store *TaskStore, taskID string, block BlockedNodeWake) 
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "node_blocked", DedupeKey: dedupe, Data: data, HasData: true})
 }
 
-// WakeForNodeSettled tells the supervisor that a node's turn landed and its
-// output is committed. The scheduler dispatches the node's input, but the next
-// step after that node (a review, a follow-up turn, a decision) is main's job:
-// without this fact a graph whose worker succeeded simply stops moving while
-// every view still calls it "in progress".
 func WakeForNodeSettled(store *TaskStore, taskID, nodeID, status, operationID string) bool {
 	data := map[string]any{"graphId": taskID, "nodeId": nodeID, "status": status, "operationId": operationID}
 	return WakeMaster(store, WakeIntent{TaskID: taskID, Kind: "node_settled", DedupeKey: taskID + ":" + nodeID + ":" + operationID, Data: data, HasData: true})
@@ -167,7 +155,6 @@ func ReleaseWakes(store *TaskStore, operationID string) int64 {
 	return sqliteChanges(store.DB, "UPDATE wake_intents SET state='ready',consumed_operation_id=NULL WHERE consumed_operation_id=? AND state='consumed'", operationID)
 }
 
-// RenderWakes is what the master is told about why it is awake. One line per fact, oldest first.
 func RenderWakes(wakes []PendingWake) string {
 	lines := make([]string, 0, len(wakes))
 	for _, wake := range wakes {
@@ -221,9 +208,6 @@ func RenderWakes(wakes []PendingWake) string {
 		case "waiting":
 			lines = append(lines, "- Node "+jsString(coalesce(data["nodeId"], "?"))+" is waiting on a decision only you can make.")
 		case WakeKindToolSettled:
-			// A tool that ran in the background finished while no turn was
-			// running. Its own row is the record; this line is the pointer, and
-			// the model is told not to repeat the call.
 			lines = append(lines, renderDeferredToolWake(data, wake.DedupeKey))
 		case "human_check":
 			lines = append(lines, "- A human acceptance check opened on node "+jsString(coalesce(data["nodeId"], "?"))+" and the user has not seen it yet. Look at the evidence: if it should not have been raised, send it back for rework; if it looks right, approve it so the user is asked with your review attached. Approving is not acceptance - the user still has to pass it themselves.")

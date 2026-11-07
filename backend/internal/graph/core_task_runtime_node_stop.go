@@ -2,7 +2,6 @@ package graph
 
 import "strings"
 
-// stopGraphNode pauses future work before interrupting the currently bound execution.
 func (runtime *TaskRuntime) stopGraphNode(caller, graphID, nodeID, requestID string) any {
 	scope := "node-stop:" + caller
 	lock := nodeCommandLock(scope, requestID)

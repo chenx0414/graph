@@ -6,10 +6,6 @@ import (
 	"encoding/json"
 )
 
-// NodeEntryInput is one display entry appended to a node transcript.
-//
-// The optional identifiers are plain strings: the empty string stands for the
-// SQL NULL the TypeScript `string | null | undefined` produced.
 type NodeEntryInput struct {
 	TaskID       string `json:"taskId"`
 	NodeID       string `json:"nodeId"`
@@ -22,7 +18,6 @@ type NodeEntryInput struct {
 	Data         Json   `json:"data,omitempty"`
 }
 
-// nodeEntryEvent is the payload of the node.entry event.
 type nodeEntryEvent struct {
 	NodeID           string `json:"nodeId"`
 	ID               string `json:"id"`
@@ -34,8 +29,6 @@ type nodeEntryEvent struct {
 	ContentTruncated bool   `json:"contentTruncated"`
 }
 
-// parseJSONDocument parses one JSON document and reports failure instead of
-// panicking, the way the TypeScript try/catch did.
 func parseJSONDocument(text string) (any, bool) {
 	dec := json.NewDecoder(strings.NewReader(text))
 	dec.UseNumber()
@@ -46,7 +39,6 @@ func parseJSONDocument(text string) (any, bool) {
 	return normalizeParsed(value), true
 }
 
-// nodeEntryID maps an absent identifier onto SQL NULL.
 func nodeEntryID(value string) any {
 	if value == "" {
 		return nil
@@ -54,8 +46,6 @@ func nodeEntryID(value string) any {
 	return value
 }
 
-// nodeEntryData maps an absent payload onto SQL NULL and a present one onto its
-// canonical JSON.
 func nodeEntryData(data Json) any {
 	if data == nil {
 		return nil
@@ -63,9 +53,6 @@ func nodeEntryData(data Json) any {
 	return CanonicalJSON(data)
 }
 
-// AppendNodeEntry appends one display entry from a real Pi session event. The
-// task event stream also receives it so node details can update without a
-// refetch race.
 func AppendNodeEntry(store *TaskStore, input NodeEntryInput) int64 {
 	id := newUUID()
 	insert := func() {
@@ -85,7 +72,6 @@ func AppendNodeEntry(store *TaskStore, input NodeEntryInput) int64 {
 	truncated := textBytes > 4096
 	text := input.Text
 	if truncated {
-		// TODO(port): TypeScript sliced UTF-16 code units; this slices runes.
 		text = truncateRunes(input.Text, 512)
 	}
 	store.Event(input.TaskID, "node.entry", nodeEntryEvent{

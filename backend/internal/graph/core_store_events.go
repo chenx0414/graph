@@ -72,20 +72,6 @@ func (s *TaskStore) setTx(active bool) {
 	s.mu.Unlock()
 }
 
-// Transaction runs one database transaction.
-//
-// Only one transaction is open at a time, so the host behaves like the
-// single-threaded TypeScript event loop it was ported from. A transaction
-// opened while another one is already running joins it: SQLite has no nested
-// BEGIN, and the TypeScript host would have refused the same nesting.
-//
-// A transaction opened from inside another one does not join it: this
-// method takes the transaction lock before it looks at the depth, so the
-// inner call waits for a lock the outer call is holding and the host stops
-// there. A store method that has to run inside somebody else's transaction
-// therefore does not open one of its own - a single statement is atomic by
-// itself - and a method that needs several statements names itself
-// InCurrentTransaction, which asks the caller to hold the transaction.
 func (s *TaskStore) Transaction(action any) any {
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
@@ -118,7 +104,6 @@ func (s *TaskStore) Transaction(action any) any {
 	return result
 }
 
-// storeTransactionAction runs the body of a transaction.
 func storeTransactionAction(action any) any {
 	switch fn := action.(type) {
 	case func():
@@ -155,8 +140,6 @@ func (s *TaskStore) Command(scope, requestID string, payload any, apply func() a
 	})
 }
 
-// RecordCommand records the receipt of one command, so a repeated request
-// with the same id gets the same answer.
 func (s *TaskStore) RecordCommand(scope, requestID, encoded, receipt string) {
 	if _, err := s.DB.Exec("INSERT INTO commands VALUES(?,?,?,?)", scope, requestID, encoded, receipt); err != nil {
 		panic(err)

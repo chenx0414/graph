@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// PromptSuggestionReply is one composer suggestion, including a refusal.
 type PromptSuggestionReply struct {
 	Text       string  `json:"text"`
 	Raw        string  `json:"raw"`
@@ -15,7 +14,6 @@ type PromptSuggestionReply struct {
 	Error      *string `json:"error"`
 }
 
-// NO_SUGGESTION is a finished call that had nothing to add.
 var NO_SUGGESTION = PromptSuggestionReply{Text: "", Raw: "", StopReason: nil, Error: nil}
 
 var (
@@ -24,8 +22,6 @@ var (
 	promptNone   = regexp.MustCompile("(?i)^(?:none|n/a|no suggestion|没有建议|无)$")
 )
 
-// SelectPromptSuggestionModel picks a model other than the main one, when the
-// configuration has one: a suggestion is an auxiliary request.
 func SelectPromptSuggestionModel(main ModelEntry, directory []ModelEntry) *ModelEntry {
 	mainIdentity := ModelIdentity(main)
 	candidates := []ModelEntry{}
@@ -86,10 +82,6 @@ func normalizeSuggestion(value string) string {
 	return first
 }
 
-// GeneratePromptSuggestion asks one fresh model call for a composer line.
-//
-// The context crosses as a plain system prompt and a user message; the controlled
-// adapter folds it into the transcript the way the Pi SDK's normalizeContext does.
 func GeneratePromptSuggestion(input struct {
 	Stream         PromptStreamFunc
 	Model          any

@@ -9,7 +9,6 @@ import (
 	"context"
 )
 
-// View reads the full task projection.
 func (task *TaskRuntimeTask) View() map[string]any {
 	runtime := task.runtime
 	runtime.ensureOpen()
@@ -299,7 +298,6 @@ func taskRuntimeIntPtr(value int) *int {
 	return &value
 }
 
-// Watch streams the events of one task.
 func (task *TaskRuntimeTask) Watch(after int) TaskWatch {
 	runtime := task.runtime
 	runtime.ensureOpen()
@@ -344,9 +342,6 @@ func (task *TaskRuntimeTask) Watch(after int) TaskWatch {
 					}
 					continue
 				}
-				// The wake normally fires immediately; the bounded fallback
-				// heals any writer that could not notify and keeps the
-				// stream caught up with the database.
 				select {
 				case <-wake.Promise:
 				case <-time.After(250 * time.Millisecond):
@@ -360,7 +355,6 @@ func (task *TaskRuntimeTask) Watch(after int) TaskWatch {
 	}
 }
 
-// List reads the task list.
 func (user *TaskRuntimeUser) List() []map[string]any {
 	runtime := user.runtime
 	runtime.ensureOpen()
@@ -399,7 +393,6 @@ func (user *TaskRuntimeUser) List() []map[string]any {
 	return out
 }
 
-// Projects reads the configured projects with their preparation state.
 func (user *TaskRuntimeUser) Projects() []map[string]any {
 	runtime := user.runtime
 	runtime.ensureOpen()
@@ -415,8 +408,6 @@ func (user *TaskRuntimeUser) Projects() []map[string]any {
 			"grants":      taskRuntimeGrants(project.Grants),
 			"branch":      nil,
 			"archivedAt":  projectArchivedAt(runtime.store, project.Id),
-			// The checkout project is run by main, so the console shows no row
-			// of its own for it.
 			"ownCheckout": runtime.ownCheckoutProject(project.Id),
 			"preparation": runtime.git.Preparation(project.Id),
 		}
@@ -428,7 +419,6 @@ func (user *TaskRuntimeUser) Projects() []map[string]any {
 	return out
 }
 
-// Events reads the events of one task.
 func (runtime *TaskRuntime) Events(taskId string, after int, limit int) []TaskUpdate {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)
@@ -456,7 +446,6 @@ func (runtime *TaskRuntime) Events(taskId string, after int, limit int) []TaskUp
 	return out
 }
 
-// Operations reads the operations of one task.
 func (runtime *TaskRuntime) Operations(taskId string, query OperationQuery) []map[string]any {
 	runtime.ensureOpen()
 	runtime.store.Task(taskId)

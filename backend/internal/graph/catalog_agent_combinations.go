@@ -121,7 +121,6 @@ func agentCombinationInteger(value any) bool {
 	return !math.IsNaN(number) && !math.IsInf(number, 0) && number == math.Trunc(number) && number >= 1 && math.Abs(number) <= maxSafeInteger
 }
 
-// ParseAgentCombinations checks one recipe document.
 func ParseAgentCombinations(value any) AgentCombinationDocument {
 	record, ok := value.(map[string]any)
 	if !ok {

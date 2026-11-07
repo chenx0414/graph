@@ -1,6 +1,5 @@
 package graph
 
-// AppendMessage appends one durable message and publishes it on the conversation stream.
 func AppendMessage(store *TaskStore, input MessageInput) AppendedMessage {
 	now := NowMillis()
 	operationId := ""
@@ -39,7 +38,6 @@ func AppendMessage(store *TaskStore, input MessageInput) AppendedMessage {
 	return AppendedMessage{ConversationMessage: PublicMessage(row), Cursor: &cursor}
 }
 
-// PendingMessages lists the messages the next master turn must answer.
 func PendingMessages(store *TaskStore, conversationId string, limit int) []MessageRow {
 	if limit <= 0 {
 		limit = 50
@@ -48,12 +46,7 @@ func PendingMessages(store *TaskStore, conversationId string, limit int) []Messa
 	return conversationMessageRows(rows)
 }
 
-// DeliverMessages moves accepted queued messages to the current end of the stream before
-// marking them delivered. This keeps a queued turn after the assistant reply that
-// preceded it instead of reusing the timestamp at which the user typed.
 func DeliverMessages(store *TaskStore, operationId string, turn int, messages []MessageRow, ordinal ...int) {
-	// A delivered message can carry the ordinal of the turn it joined, so a steering
-	// message keeps the place it interrupted in the transcript.
 	hasOrdinal := len(ordinal) > 0
 	for _, message := range messages {
 		var rowData any
@@ -71,14 +64,11 @@ func DeliverMessages(store *TaskStore, operationId string, turn int, messages []
 	}
 }
 
-// MessagesForOperation lists the messages bound to one operation, used by failure paths
-// to requeue or report.
 func MessagesForOperation(store *TaskStore, operationId string) []MessageRow {
 	rows := kernelRows(store.Db, "SELECT * FROM messages WHERE operation_id=? ORDER BY seq", operationId)
 	return conversationMessageRows(rows)
 }
 
-// PublishMessageUpdate publishes one durable message record on the conversation stream.
 func PublishMessageUpdate(store *TaskStore, messageId string) {
 	row, ok := conversationMessageRow(store, messageId)
 	if !ok {
@@ -88,11 +78,6 @@ func PublishMessageUpdate(store *TaskStore, messageId string) {
 	store.Event(anchor, "message.updated", map[string]any{"message": PublicMessage(row)})
 }
 
-// CancelQueuedMessage cancels one message that is still waiting in the conversation queue.
-// Only a message that belongs to this conversation and is still `queued` can be cancelled:
-// a delivered message and the running turn are never touched, and a message that was
-// already cancelled stays cancelled without a new event. The state change is published so
-// every viewer drops the row from its queue.
 func CancelQueuedMessage(store *TaskStore, conversationId, messageId string) MessageCancellation {
 	row := kernelRow(store.Db, "SELECT conversation_id,state FROM messages WHERE id=?", messageId)
 	if row == nil || kernelString(row["conversation_id"]) != conversationId {

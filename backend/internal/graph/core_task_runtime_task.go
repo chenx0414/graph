@@ -5,30 +5,25 @@ import (
 	"strings"
 )
 
-// User returns the user side of the runtime.
 func (runtime *TaskRuntime) User() *TaskRuntimeUser {
 	return &TaskRuntimeUser{runtime: runtime}
 }
 
-// TaskRuntimeTask is one task of the user side.
 type TaskRuntimeTask struct {
 	runtime *TaskRuntime
 	taskId  string
 }
 
-// Task returns the commands of one task.
 func (user *TaskRuntimeUser) Task(taskId string) *TaskRuntimeTask {
 	return &TaskRuntimeTask{runtime: user.runtime, taskId: taskId}
 }
 
-// BeginInput starts one new task.
 type TaskRuntimeBeginInput struct {
 	ProjectId string
 	Request   string
 	RequestId string
 }
 
-// Begin starts one new task.
 func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 	runtime := user.runtime
 	runtime.ensureOpen()
@@ -62,8 +57,6 @@ func (user *TaskRuntimeUser) Begin(input TaskRuntimeBeginInput) Receipt {
 				runtime.store.SetRuntimeActiveTask(taskId)
 			}
 		} else {
-			// The task is kept - the request is the user's work - and the reason
-			// it cannot start is asked of the person who can fix it.
 			runtime.refuseUndispatchableTask(taskId)
 		}
 		return map[string]any{
@@ -92,20 +85,15 @@ func taskRuntimeReceipt(result any) Receipt {
 	return receipt
 }
 
-// insertInstance records the instance row of one node.
 func (runtime *TaskRuntime) insertInstance(id, taskId, nodeId string, definitionVersion *string, model *string) string {
-	// An instance counts what it spends; it no longer holds a ceiling, so every
-	// instance is created unmetered.
 	runtime.store.CreateInstance(id, taskId, nodeId, definitionVersion, model, 0, 1)
 	return id
 }
 
-// TaskRuntimePauseInput is the input of one pause or resume.
 type TaskRuntimePauseInput struct {
 	RequestId string
 }
 
-// Pause stops the dispatch of a task.
 func (task *TaskRuntimeTask) Pause(requestId string) Receipt {
 	receipt, stoppedMaster := task.setPaused(true, requestId)
 	if stoppedMaster {
@@ -114,7 +102,6 @@ func (task *TaskRuntimeTask) Pause(requestId string) Receipt {
 	return receipt
 }
 
-// Resume restarts the dispatch of a task.
 func (task *TaskRuntimeTask) Resume(requestId string) Receipt {
 	receipt, _ := task.setPaused(false, requestId)
 	if task.runtime.autoWake {
@@ -146,10 +133,6 @@ func (task *TaskRuntimeTask) setPaused(paused bool, requestId string) (Receipt, 
 	return taskRuntimeReceipt(result), stoppedMaster
 }
 
-// pauseMasterTurn parks the task and stops the master turn that is running for
-// it, if any. It is the one implementation of "stop this task for now": the
-// pause endpoint and the problem card's stop action both end up here, so a
-// person gets the same recoverable stop whichever door they came through.
 func pauseMasterTurn(runtime *TaskRuntime, taskId, requestId string) bool {
 	OpenPause(runtime.kernel, taskId)
 	active := kernelRow(runtime.store.Db, `SELECT o.id FROM operations o
@@ -169,7 +152,6 @@ func taskRuntimePauseType(paused bool) string {
 	return "resume"
 }
 
-// Abandon stops the task for good.
 func (task *TaskRuntimeTask) Abandon(requestId string, reason *string) Receipt {
 	runtime := task.runtime
 	runtime.ensureOpen()
@@ -187,14 +169,12 @@ func (task *TaskRuntimeTask) Abandon(requestId string, reason *string) Receipt {
 	return taskRuntimeReceipt(result)
 }
 
-// TaskRuntimeBudgetInput is the input of one budget change.
 type taskRuntimeUnusedBudgetInput struct {
 	NodeId    string
 	Tokens    *int64
 	RequestId string
 }
 
-// Answer resolves one open question.
 func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId string) Receipt {
 	runtime := task.runtime
 	runtime.ensureOpen()
@@ -202,8 +182,6 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 		"type": "answer", "taskId": task.taskId, "questionId": questionId, "answer": answer,
 	}, func() any {
 		if answer.Type == "pause" {
-			// Stop the task for now, then close the question that asked: the same
-			// pause the task menu performs, so resuming still works.
 			runtime.store.SetTaskPaused(task.taskId, true)
 			pauseMasterTurn(runtime, task.taskId, requestId)
 			runtime.store.Event(task.taskId, "task.pause_requested", map[string]any{"questionId": questionId})
@@ -216,9 +194,6 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 		if kernelRow(runtime.store.Db, "SELECT id FROM questions WHERE id=? AND task_id=? AND route_stage IN ('project','global') AND status='open'", questionId, task.taskId) != nil {
 			Raise("permission", "This question is being handled by a supervisor")
 		}
-		// A task that could not start has no master node to re-pend: the answer
-		// is about the task itself, and it is settled before the runtime sees
-		// the question.
 		runtime.answerUndispatchableTask(task.taskId, questionId, answer)
 		runtime.execution.Answer(task.taskId, questionId, answer)
 		return map[string]any{"taskId": task.taskId, "cursor": runtime.store.Event(task.taskId, "question.answered", map[string]any{"questionId": questionId, "answer": answer})}
@@ -229,7 +204,6 @@ func (task *TaskRuntimeTask) Answer(questionId string, answer Answer, requestId 
 	return taskRuntimeReceipt(result)
 }
 
-// Say adds a user message to the requirement of a task.
 func (task *TaskRuntimeTask) Say(text string, requestId string) Receipt {
 	runtime := task.runtime
 	runtime.ensureOpen()
@@ -266,7 +240,6 @@ func (task *TaskRuntimeTask) Say(text string, requestId string) Receipt {
 	return taskRuntimeReceipt(result)
 }
 
-// TaskRuntimeAcceptInput is the input of one acceptance.
 type TaskRuntimeAcceptInput struct {
 	ProposalVersion int
 	DraftRevision   int
@@ -274,7 +247,6 @@ type TaskRuntimeAcceptInput struct {
 	RequestId       string
 }
 
-// Accept confirms the current proposal of a task.
 func (task *TaskRuntimeTask) Accept(input TaskRuntimeAcceptInput) Receipt {
 	runtime := task.runtime
 	runtime.ensureOpen()

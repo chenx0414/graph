@@ -56,7 +56,6 @@ export interface LibraryEntrySplit<T> {
   configured: T[];
   unconfigured: T[];
   counts: LibraryEntryCounts;
-  /** Entries to render for the active filter, configured group first. */
   visible: T[];
 }
 

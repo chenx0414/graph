@@ -6,7 +6,6 @@ import (
 	"database/sql"
 )
 
-// MigrateTaskSchema applies store.ts migrations in order. user_version is written by the SQL.
 func MigrateTaskSchema(db *sql.DB) {
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
@@ -183,13 +182,9 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 55 {
 		execMigration(db, schemaV55)
 	}
-	// v56 is the deferred tool call table: a call that outlives the turn that
-	// started it. It is its own version because v55 is the goal's acceptance and
-	// graph columns - two features must not share one number.
 	if version < 56 {
 		execMigration(db, schemaV56)
 	}
-	// v57 adds the two instants of one provider call to the invocation ledger.
 	if version < 57 {
 		execMigration(db, schemaV57)
 	}

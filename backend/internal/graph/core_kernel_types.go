@@ -9,7 +9,6 @@ type TokenBudget struct {
 	Unlimited bool    `json:"unlimited"`
 }
 
-// RevisionRow is one immutable graph definition.
 type RevisionRow struct {
 	TaskId     string
 	Version    int
@@ -18,7 +17,6 @@ type RevisionRow struct {
 	CreatedAt  int64
 }
 
-// DeliveryRow is one accepted value landing.
 type DeliveryRow struct {
 	Id              string  `json:"id"`
 	TaskId          string  `json:"taskId"`
@@ -35,17 +33,11 @@ type DeliveryRow struct {
 	CreatedAt       int64   `json:"createdAt"`
 }
 
-// DeliveryEdge is one endpoint pair that work has travelled over.
 type DeliveryEdge struct {
 	From string
 	To   string
 }
 
-// ExecutionRow is one node attempt.
-//
-// The JSON names are the ones the graph views read: an execution history page
-// hands these records to a reader that asks for `retriesUsed`, not
-// `RetriesUsed`.
 type ExecutionRow struct {
 	Id              string       `json:"id"`
 	TaskId          string       `json:"taskId"`
@@ -63,19 +55,16 @@ type ExecutionRow struct {
 	EndedAt         *int64       `json:"endedAt"`
 }
 
-// SubmitOutput is one named output in a submission.
 type SubmitOutput struct {
 	Enable bool `json:"enable"`
 	Value  any  `json:"value,omitempty"`
 }
 
-// SubmitRequest is one execution's output set.
 type SubmitRequest struct {
 	Outputs      map[string]SubmitOutput
 	SubmissionId string
 }
 
-// SubmitReceipt is the durable result of submit.
 type SubmitReceipt struct {
 	SubmissionId string
 	Replayed     bool
@@ -83,7 +72,6 @@ type SubmitReceipt struct {
 	NoRecipients bool
 }
 
-// QueueRow is one serial node input.
 type QueueRow struct {
 	Seq        int64   `json:"seq"`
 	TaskId     string  `json:"taskId"`
@@ -96,7 +84,6 @@ type QueueRow struct {
 	CreatedAt  int64   `json:"createdAt"`
 }
 
-// NodeStateRow is the per-node retry and pause counters.
 type NodeStateRow struct {
 	Attempts         int
 	ResubmitsUsed    int
@@ -106,26 +93,22 @@ type NodeStateRow struct {
 	Rebinds          int
 }
 
-// DirectDelivery is a main-agent input and its landing.
 type DirectDelivery struct {
 	Delivery DeliveryRow `json:"delivery"`
 	Queue    *QueueRow   `json:"queue,omitempty"`
 }
 
-// AdmitNodeInput records the instance a node is admitted with.
 type AdmitNodeInput struct {
 	InstanceId string
 	InstanceID string
 	Kind       string
 }
 
-// AdmitModuleInput records a module's type and trigger.
 type AdmitModuleInput struct {
 	ModuleType string
 	Trigger    string
 }
 
-// StartExecutionRequest opens or resumes one execution.
 type StartExecutionRequest struct {
 	ExecutionId     string
 	NodeId          string
@@ -133,14 +116,12 @@ type StartExecutionRequest struct {
 	TokenBudget     *TokenBudget
 }
 
-// QueueInsert is one queue append.
 type QueueInsert = struct {
 	NodeId  string
 	Kind    string
 	Payload any
 }
 
-// KernelNodeView is one admitted node.
 type KernelNodeView struct {
 	NodeId          string `json:"nodeId"`
 	InstanceId      string `json:"instanceId"`
@@ -149,7 +130,6 @@ type KernelNodeView struct {
 	RevisionVersion int    `json:"revisionVersion"`
 }
 
-// NodeBudgetState is the spent and held tokens of one node.
 type NodeBudgetState struct {
 	Budget    float64
 	Unlimited bool
@@ -157,11 +137,6 @@ type NodeBudgetState struct {
 	Reserved  float64
 }
 
-// KernelProviderCall is one actual provider send.
-//
-// The JSON names are the ones a reader of the graph sees: `provider_calls` and
-// the node run view both read these records as they are stored, and a record
-// without tags would answer `State` where the reader asks for `state`.
 type KernelProviderCall struct {
 	Id          string             `json:"id"`
 	NodeId      string             `json:"nodeId"`
@@ -176,7 +151,6 @@ type KernelProviderCall struct {
 	SettledAt   *int64             `json:"settledAt"`
 }
 
-// ModuleInputRow is the latest value of one module input.
 type ModuleInputRow struct {
 	ModuleId  string
 	Name      string
@@ -186,7 +160,6 @@ type ModuleInputRow struct {
 	UpdatedAt int64
 }
 
-// ModuleTransitionInput is one module judgment.
 type ModuleTransitionInput struct {
 	ModuleId    string
 	InputName   string
@@ -199,39 +172,33 @@ type ModuleTransitionInput struct {
 	Reason      string
 }
 
-// ModuleTransitionRow is a stored judgment.
 type ModuleTransitionRow struct {
 	ModuleTransitionInput
 	Id        string
 	CreatedAt int64
 }
 
-// HistoryQuery pages queue or execution facts.
 type HistoryQuery struct {
 	NodeId *string
 	After  *int
 	Limit  *int
 }
 
-// QueueHistoryPage is one queue page.
 type QueueHistoryPage struct {
 	Items []QueueRow `json:"items"`
 	Next  *int64     `json:"next"`
 }
 
-// ExecutionHistoryItem is one frozen execution plus its cursor.
 type ExecutionHistoryItem struct {
 	Cursor int64 `json:"cursor"`
 	ExecutionRow
 }
 
-// ExecutionHistoryPage is one execution page.
 type ExecutionHistoryPage struct {
 	Items []ExecutionHistoryItem `json:"items"`
 	Next  *int64                 `json:"next"`
 }
 
-// CreateRequest is one request to create an independently owned graph.
 type CreateRequest struct {
 	OwnerTaskID string
 	RequestID   string
@@ -240,7 +207,6 @@ type CreateRequest struct {
 	State       string
 }
 
-// KernelStore is the v2 durable layer on the shared task database.
 type KernelStore struct {
 	Store                   *TaskStore
 	Db                      *sql.DB

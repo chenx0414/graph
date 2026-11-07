@@ -60,9 +60,6 @@ function MessageMeta({ createdAt, elapsedMs }: { createdAt?: number | undefined;
 }
 
 function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { message: ConversationMessage; userAuthor?: string; copyable?: string; markdown?: boolean }) {
-  // A command turn is an action the user asked the Agent to perform, not words
-  // the user typed: it renders as one system action line with its time instead
-  // of a user bubble that reads as if the person had said "压缩当前会话上下文".
   const command = message.data && typeof (message.data as Record<string, unknown>).command === 'string'
     ? String((message.data as Record<string, unknown>).command)
     : undefined;
@@ -78,8 +75,6 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
   }
   if (message.role === 'user') {
     const attachments = messageAttachments(message);
-    // A peer Agent's message arrived like a prompt; label it with its sender rather than "我" so the
-    // reader never mistakes another Agent's words for the human's.
     const peerFrom = message.data && (message.data as Record<string, unknown>).peer === true && typeof (message.data as Record<string, unknown>).from === 'string'
       ? (message.data as Record<string, unknown>).from as string
       : undefined;
@@ -132,8 +127,6 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
 
 function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools' }> }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  // The default is the transcript's one policy, not this component's choice: a
-  // group starts folded whether it is settled, in flight, or inside an open turn.
   const open = manualOpen ?? transcriptFoldPolicy.toolGroupExpanded;
   const activeTool = [...row.tools].reverse().find(tool => !tool.done);
   const kind = activeTool ? toolActivity(activeTool.name, activeTool.summary).kind : 'other';
@@ -200,15 +193,8 @@ function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration'
   );
 }
 
-/**
- * One finished turn's thinking and tool calls, folded behind a single muted line
- * above the final answer. Opening it brings back the same rows the turn showed
- * while it was running: narration bubbles with the tool groups interleaved.
- */
 function CollapsedTurn({ row, markdown = true }: { row: Extract<TranscriptRow, { kind: 'activity' }>; markdown?: boolean }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  // The turn block is the unit that opens; the groups inside it keep the policy
-  // they have everywhere else, so opening a turn never opens its tool detail.
   const open = manualOpen ?? (transcriptFoldPolicy.turnExpanded || !row.collapsed);
   return (
     <div className="collapsed-turn" data-testid="collapsed-turn" data-open={open}>
@@ -245,10 +231,6 @@ const AssistantMarkdownBlock = memo(function AssistantMarkdownBlock(input: {
   return <Markdown text={input.source} veils={input.veils} />;
 }, (previous, next) => previous.source === next.source && sameVeils(previous.veils, next.veils));
 
-/**
- * Plain-text rendering that keeps the streaming veil fade without running the
- * Markdown parser; used when the "Markdown 渲染" preference is off.
- */
 function PlainText({ text, veils }: { text: string; veils: MarkdownVeil[] }) {
   if (!veils.length) return <>{text}</>;
   const cuts = new Set<number>([0, text.length]);
@@ -277,15 +259,10 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
   copyable?: string;
   markdown?: boolean;
 }) {
-  // Pacing and veils are keyed by the operation, not by the row id: the live row
-  // and the durable reply row are two rows of the same turn, and the reveal has
-  // to survive that handoff.
   const paced = usePacedStreamText(row.text, row.operationId, row.streaming, row.attached);
   const visualStreaming = row.streaming || paced.revealing;
   const veils = useStreamVeils(paced.text, row.operationId, visualStreaming);
   const blocks = splitMarkdownBlocks(paced.text);
-  // A completed narration is a normal bubble; only the part still growing keeps
-  // the "生成中" label and the caret.
   const authorLabel = visualStreaming
     ? '思考与过程 · 生成中'
     : author ?? (row.narration ? '思考与过程' : '主 Agent · 最终回答');

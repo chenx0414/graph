@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// capabilityTools exposes the tools one MCP capability offers.
 func capabilityTools(connection McpExchange, tools []McpTool, capabilityId string, capabilityVersion string, authorization *capabilityAuthorization) []ToolDefinition {
 	out := []ToolDefinition{}
 	for _, tool := range tools {
@@ -30,12 +29,9 @@ func capabilityTools(connection McpExchange, tools []McpTool, capabilityId strin
 			Label:       toolName + " (" + capabilityId + ")",
 			Description: description,
 			Parameters:  parameters,
-			// Extensions load only inside the restricted worker, never in the background process.
 			ExternallyGated: true,
 		}
 		definition.Execute = func(toolCallId string, raw any) (any, error) {
-			// The bound capability loader pre-authorizes every discovered tool.
-			// Explicit task grants remain an audit-compatible additional source.
 			if authorization != nil {
 				grant := McpGrant(capabilityId, toolName)
 				if !capabilityStringListHas(authorization.grants, grant) {
@@ -69,7 +65,6 @@ func capabilityTools(connection McpExchange, tools []McpTool, capabilityId strin
 	return out
 }
 
-// capabilityStringListHas reports whether a list holds a value.
 func capabilityStringListHas(values []string, value string) bool {
 	for _, candidate := range values {
 		if candidate == value {
@@ -79,10 +74,6 @@ func capabilityStringListHas(values []string, value string) bool {
 	return false
 }
 
-// capabilityDefinitionBindings are the bindings one Agent definition resolves: its own
-// declarations, then every available capability marked `base`. A base capability therefore
-// reaches every Agent without being bound anywhere, and dispatch, the console preview and the
-// tests agree by construction. An explicit binding of the same id wins.
 func capabilityDefinitionBindings(definition CatalogDefinition, catalog *Catalog) []capabilityBinding {
 	declared := definition.Capabilities
 	bound := map[string]bool{}
@@ -113,7 +104,6 @@ func capabilityDefinitionBindings(definition CatalogDefinition, catalog *Catalog
 	return out
 }
 
-// capabilityDefinition reads one definition, reporting a missing one.
 func capabilityDefinition(catalog *Catalog, version string) (CatalogDefinition, bool) {
 	if catalog == nil {
 		return CatalogDefinition{}, false
@@ -132,7 +122,6 @@ func capabilityDefinition(catalog *Catalog, version string) (CatalogDefinition, 
 	return definition, found
 }
 
-// ResolveCapabilityFacts resolves the capabilities one definition version binds.
 func ResolveCapabilityFacts(catalog *Catalog, definitionVersion string) []ResolvedCapabilityFact {
 	facts := []ResolvedCapabilityFact{}
 	if definitionVersion == "" {
@@ -195,7 +184,6 @@ func ResolveCapabilityFacts(catalog *Catalog, definitionVersion string) []Resolv
 		}
 		if record.Kind == CapabilityKindPiExtension {
 			declared := capabilityDeclaredToolsFromManifest(manifest)
-			// A sourced extension has no local entry: the SDK resolves the package source at load time.
 			packageSource := ""
 			if value, ok := manifest["source"].(string); ok && strings.TrimSpace(value) != "" {
 				packageSource = strings.TrimSpace(value)
@@ -288,12 +276,10 @@ func ResolveCapabilityFacts(catalog *Catalog, definitionVersion string) []Resolv
 	return facts
 }
 
-// capabilityFactSortKey is the key the resolved facts are ordered by.
 func capabilityFactSortKey(fact ResolvedCapabilityFact) string {
 	return fact.Kind + ":" + fact.Role + ":" + fact.Id + "@" + fact.Version
 }
 
-// capabilityLoadState is what one load accumulates.
 type capabilityLoadState struct {
 	skillPaths                 []string
 	piExtensionPaths           []string

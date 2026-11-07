@@ -8,41 +8,16 @@ import (
 	"github.com/MichaelKinsy/PiG/ai"
 )
 
-// The provider stream the daemon owns.
-//
-// PiG's provider runtime accepts any stream implementation, so the daemon can
-// hand the kernel its own controlled stream. The kernel therefore never owns
-// an ungated provider channel, and the Graph admission rules keep their force
-// over every send.
-//
-// The daemon/kernel division of labour is documented in docs/architecture.md,
-// section daemon 与内核的分工.
 
-// EventStream is the provider answer stream the daemon owns.
-//
-// It is the shape Graph's own model stream already has, so the daemon hands it
-// over without a conversion.
 type EventStream interface {
-	// Next returns the next event of the answer, if there is one.
 	Next() (map[string]any, bool)
-	// Result returns the settlement of the answer.
 	Result() map[string]any
 }
 
-// StreamFunc sends one transcript to the model and returns its answer stream.
 type StreamFunc func(ctx context.Context, transcript []map[string]any, options map[string]any) (EventStream, error)
 
-// MaxTokensOption is the option one request's own output budget travels under.
-//
-// The kernel knows how much room a request may take: a summary asks for a
-// bounded handoff, a conversation turn asks for the model's own limit. The
-// budget belongs to the request, so it travels with the request.
 const MaxTokensOption = "maxTokens"
 
-// requestOptions are the options one request reaches the daemon with.
-//
-// The kernel's own options for the request come first; the daemon's standing
-// options fill in what the request did not say.
 func requestOptions(bridge ProviderBridge, options ai.StreamOptions) map[string]any {
 	merged := map[string]any{}
 	for key, value := range bridge.Options {
@@ -54,20 +29,11 @@ func requestOptions(bridge ProviderBridge, options ai.StreamOptions) map[string]
 	return merged
 }
 
-// ProviderBridge is the daemon's model channel, seen from the kernel.
 type ProviderBridge struct {
-	// Stream sends the transcript to the model the daemon chose.
 	Stream StreamFunc
-	// Options are the provider options the daemon's stream expects.
 	Options map[string]any
 }
 
-// BridgeAPI turns the daemon's stream into the provider implementation the
-// kernel generates with.
-//
-// The kernel asks for the model's answer; the daemon's stream is what produces
-// it. The events the daemon emits are the SDK's own events, so the kernel sees
-// the same live message and the same tool calls the SDK would have seen.
 func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 	stream := func(ctx context.Context, model *ai.Model, request ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
 		output := ai.NewAssistantMessageEventStream()
@@ -109,12 +75,6 @@ func BridgeAPI(bridge ProviderBridge, api ai.API) ai.ProviderAPIs {
 	return ai.ProviderAPIMap{api: &ai.ProviderStreams{Stream: stream, StreamSimple: stream}}
 }
 
-// bridgeRequestOptions merges the kernel's own request options into the
-// daemon's options.
-//
-// The kernel asks for a summary with a budget of its own: the summary is
-// written into that budget, and a request that asks for the model's whole
-// output limit instead writes the summary until it is cut off.
 func bridgeRequestOptions(base map[string]any, options ai.StreamOptions) map[string]any {
 	merged := map[string]any{}
 	for key, value := range base {
@@ -126,14 +86,6 @@ func bridgeRequestOptions(base map[string]any, options ai.StreamOptions) map[str
 	return merged
 }
 
-// TranscriptMessages reads the kernel's transcript as the SDK's own message
-// maps.
-//
-// The kernel keeps the transcript in PiG's message types. The daemon's stream
-// reads Pi's message maps, so the transcript crosses the boundary as the JSON
-// both sides already agree on: the same system message with its tool
-// declarations, the same user turn, the same assistant turn and the same tool
-// results.
 func TranscriptMessages(request ai.TranscriptContext) ([]map[string]any, error) {
 	messages := request.Messages()
 	out := make([]map[string]any, 0, len(messages))
@@ -151,10 +103,6 @@ func TranscriptMessages(request ai.TranscriptContext) ([]map[string]any, error) 
 	return out, nil
 }
 
-// ConvertProviderEvent turns one event of the daemon's answer into the
-// kernel's own event.
-//
-// The second answer reports whether the event ended the answer.
 func ConvertProviderEvent(event map[string]any) (ai.AssistantMessageEvent, bool, error) {
 	kind, _ := event["type"].(string)
 	index := 0
@@ -249,7 +197,6 @@ func ConvertProviderEvent(event map[string]any) (ai.AssistantMessageEvent, bool,
 	return nil, false, nil
 }
 
-// pushSettlement ends the answer with the settlement the daemon reported.
 func pushSettlement(output *ai.AssistantMessageEventStream, model *ai.Model, settlement map[string]any) {
 	if settlement == nil {
 		pushFailure(output, model, "The provider stream ended without a terminal event")
@@ -267,7 +214,6 @@ func pushSettlement(output *ai.AssistantMessageEventStream, model *ai.Model, set
 	_ = output.Push(ai.DoneEvent{Reason: stopReason(string(message.StopReason)), Message: message})
 }
 
-// pushFailure ends the answer with an error the kernel reports to the model.
 func pushFailure(output *ai.AssistantMessageEventStream, model *ai.Model, reason string) {
 	message := &ai.AssistantMessage{
 		Content:      []ai.AssistantContentBlock{},
@@ -281,7 +227,6 @@ func pushFailure(output *ai.AssistantMessageEventStream, model *ai.Model, reason
 	_ = output.Push(ai.ErrorEvent{Reason: ai.StopReasonError, Error: message})
 }
 
-// assistantMessage reads one assistant message the daemon reported.
 func assistantMessage(value any) (*ai.AssistantMessage, error) {
 	if value == nil {
 		return nil, fmt.Errorf("pig kernel: the provider reported no assistant message")
@@ -298,13 +243,6 @@ func assistantMessage(value any) (*ai.AssistantMessage, error) {
 	return message, nil
 }
 
-// restoreToolCallArguments gives every tool call of the message its arguments back.
-//
-// The daemon's own message shape leaves the arguments of a call with none out
-// of the JSON, and the kernel reads a tool call's arguments as a JSON value: a
-// missing value is the null that fails the object schema of every tool, so a
-// call that asked for nothing was refused for the shape of its asking. A call
-// with no arguments is a call with an empty object.
 func restoreToolCallArguments(message *ai.AssistantMessage) {
 	for index, block := range message.Content {
 		call, ok := block.(ai.ToolCall)
@@ -323,7 +261,6 @@ func restoreMissingArguments(call *ai.ToolCall) {
 	}
 }
 
-// toolCall reads one tool call the daemon reported.
 func toolCall(value any) (ai.ToolCall, error) {
 	call := ai.ToolCall{}
 	if value == nil {
@@ -342,7 +279,6 @@ func toolCall(value any) (ai.ToolCall, error) {
 	return call, nil
 }
 
-// stopReason reads the SDK's stop reason as the kernel's own.
 func stopReason(reason string) ai.StopReason {
 	switch reason {
 	case "stop":

@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// Ensure seeds the library on first launch. It never overwrites an existing file.
 func (library *AgentContextLibrary) Ensure() {
 	if err := os.MkdirAll(library.Root, 0o700); err != nil {
 		panic(err)
@@ -79,8 +78,6 @@ func (library *AgentContextLibrary) Ensure() {
 	}
 }
 
-// Prompt renders the effective text of one prompt. An unknown key is refused
-// with the error the TypeScript library rejected its promise with.
 func (library *AgentContextLibrary) Prompt(key AgentPromptKey, variables ...map[string]string) (result string, err error) {
 	defer func() {
 		recovered := recover()
@@ -121,7 +118,6 @@ func (library *AgentContextLibrary) Prompt(key AgentPromptKey, variables ...map[
 	return agentContextTrimEnd(render(fallback, values)), nil
 }
 
-// AgentPrompt is the identity override of one published Agent definition.
 func (library *AgentContextLibrary) AgentPrompt(definitionID string, fallback *string) string {
 	ids := []string{definitionID}
 	if definitionID == "master" {
@@ -155,7 +151,6 @@ func (library *AgentContextLibrary) AgentPrompt(definitionID string, fallback *s
 	return ""
 }
 
-// Override is the user-edited text of one prompt, if there is one.
 func (library *AgentContextLibrary) Override(key AgentPromptKey) (string, bool, error) {
 	current, ok, err := agentContextReadOptional(library.promptPath(key))
 	if err != nil {
@@ -175,7 +170,6 @@ func (library *AgentContextLibrary) Override(key AgentPromptKey) (string, bool, 
 	return value, ok, nil
 }
 
-// SavePrompt writes the user-edited text of one prompt.
 func (library *AgentContextLibrary) SavePrompt(key AgentPromptKey, content string) {
 	if len(content) > agentContextMaxPromptLength {
 		Raise("invalid_input", "Prompt content must be at most 250000 characters")
@@ -183,7 +177,6 @@ func (library *AgentContextLibrary) SavePrompt(key AgentPromptKey, content strin
 	agentContextWriteAtomic(library.promptPath(key), agentContextTrimEnd(content)+"\n")
 }
 
-// SetPromptDefault writes the user-owned reset default and the prompt itself.
 func (library *AgentContextLibrary) SetPromptDefault(key AgentPromptKey, content string) {
 	if len(content) > agentContextMaxPromptLength {
 		Raise("invalid_input", "Prompt content must be at most 250000 characters")
@@ -193,7 +186,6 @@ func (library *AgentContextLibrary) SetPromptDefault(key AgentPromptKey, content
 	agentContextWriteAtomic(library.promptPath(key), normalized)
 }
 
-// ClearPromptDefault drops the user-owned reset default and restores the built-in.
 func (library *AgentContextLibrary) ClearPromptDefault(key AgentPromptKey) {
 	if err := os.Remove(library.userDefaultPath(key)); err != nil && !os.IsNotExist(err) {
 		panic(err)
@@ -202,7 +194,6 @@ func (library *AgentContextLibrary) ClearPromptDefault(key AgentPromptKey) {
 	agentContextWriteAtomic(library.promptPath(key), agentContextTrimEnd(builtIn)+"\n")
 }
 
-// ResetPrompt restores the effective default of one prompt.
 func (library *AgentContextLibrary) ResetPrompt(key AgentPromptKey) {
 	fallback, err := library.effectiveDefault(key)
 	if err != nil {

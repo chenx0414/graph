@@ -27,13 +27,9 @@ type ModelCost struct {
 	Output     float64 `json:"output"`
 	CacheRead  float64 `json:"cacheRead"`
 	CacheWrite float64 `json:"cacheWrite"`
-	// Tiers are the catalog's volume prices: the highest threshold the whole
-	// prompt crossed replaces every base rate. They come from the kernel
-	// catalog, which is where the numbers are maintained.
 	Tiers []ModelCostTier `json:"tiers,omitempty"`
 }
 
-// ModelCostTier is one volume step of a model's price.
 type ModelCostTier struct {
 	InputTokensAbove float64 `json:"inputTokensAbove"`
 	Input            float64 `json:"input"`
@@ -66,9 +62,6 @@ type ModelEntry struct {
 	Headers              map[string]string  `json:"headers,omitempty"`
 	CredentialId         string             `json:"credentialId,omitempty"`
 	ModelId              string             `json:"modelId,omitempty"`
-	// FallbackModelId names the model this one falls back to when a send fails
-	// at the provider boundary (connection error, timeout, non-2xx, a stream
-	// that ended before its answer). It is one hop: a fallback names no fallback.
 	FallbackModelId string `json:"fallbackModelId,omitempty"`
 }
 
@@ -87,7 +80,6 @@ func DefaultThinkingLevelFor(options []struct{ Level string }) string {
 	return options[len(options)-1].Level
 }
 
-// ModelRequestHeaders are the provider headers that travel with every model request.
 func ModelRequestHeaders(entry ModelEntry) map[string]string {
 	openCodeGo := entry.Provider == "opencode-go" || strings.Contains(entry.BaseUrl, "opencode.ai/zen/go")
 	if !openCodeGo {
@@ -154,7 +146,6 @@ func MergeCosts(summaries []CostSummary) CostSummary {
 			amounts[currency] += amount
 		}
 	}
-	// TODO(port): merged currency key order follows each summary's map iteration, then first-seen.
 	return costSummary(unknown, amounts, order)
 }
 
@@ -222,10 +213,6 @@ func ModelIdentity(entry ModelEntry) string {
 	return entry.Id
 }
 
-// SelectModelInput is one model choice.
-//
-// There is no tier to resolve any more: the caller either names a model id or
-// gets the first usable model in the configured directory.
 type SelectModelInput struct {
 	Requested string
 	Directory []ModelEntry

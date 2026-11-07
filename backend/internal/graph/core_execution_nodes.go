@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 )
 
-// startRun runs one node in its own goroutine.
 func (e *Execution) startRun(node ExecutionNodeRow) {
 	go func() {
 		_, _ = e.run(node)
 	}()
 }
 
-// run dispatches one node and reports whether it was dispatched.
 func (e *Execution) run(node ExecutionNodeRow) (bool, any) {
 	e.mu.Lock()
 	e.running++
@@ -39,8 +37,6 @@ func (e *Execution) runGuardedBool(action func() bool) (result bool, failure any
 	return action(), nil
 }
 
-// laneTasks lists the conversation masters and the single active task.
-// The caller holds the database lock.
 func (e *Execution) laneTasks() []string {
 	rows := kernelRows(e.store.Db, `SELECT t.id FROM tasks t
       LEFT JOIN conversations c ON c.id=t.conversation_id
@@ -57,7 +53,6 @@ func (e *Execution) laneTasks() []string {
 	return chatting
 }
 
-// nodeSpec parses one node spec.
 func (e *Execution) nodeSpec(node ExecutionNodeRow) NodeSpec {
 	var spec NodeSpec
 	if err := json.Unmarshal([]byte(node.Spec), &spec); err != nil {
@@ -66,8 +61,6 @@ func (e *Execution) nodeSpec(node ExecutionNodeRow) NodeSpec {
 	return spec
 }
 
-// refreshDefinition follows the latest version of the node's own recipe.
-// The caller holds the database lock.
 func (e *Execution) refreshDefinition(node ExecutionNodeRow) ExecutionNodeRow {
 	spec := e.nodeSpec(node)
 	id := ""
@@ -108,7 +101,6 @@ func (e *Execution) refreshDefinition(node ExecutionNodeRow) ExecutionNodeRow {
 	return node
 }
 
-// readyNodes lists every node that may be dispatched now.
 func (e *Execution) readyNodes() []ExecutionNodeRow {
 	if e.stopping || (e.dispatchAllowed != nil && !e.dispatchAllowed()) {
 		return nil
@@ -125,7 +117,6 @@ func (e *Execution) readyNodes() []ExecutionNodeRow {
 	return nodes
 }
 
-// readyNodesFor lists the ready nodes of one task. The caller holds the database lock.
 func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 	task := e.store.Task(taskId)
 	if task.Phase == "chatting" {
@@ -133,23 +124,10 @@ func (e *Execution) readyNodesFor(taskId string) []ExecutionNodeRow {
 		if conversation == nil || conversation.ArchivedAt != nil || conversation.Role == ConversationHistory {
 			return nil
 		}
-		// A conversation that has no message yet is still being created: the
-		// TypeScript host appended the first message in the same synchronous block
-		// that created the master node, so the node could never be dispatched
-		// before the message it has to answer existed. The Go host runs the
-		// creation and the dispatch on separate goroutines, so a master whose
-		// conversation still has no message waits for one.
 		if kernelInt(kernelRow(e.store.Db, "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=?", conversation.Id)["count"]) == 0 &&
 			kernelRow(e.store.Db, "SELECT id FROM wake_intents WHERE task_id=? AND state='ready' LIMIT 1", taskId) == nil {
 			return nil
 		}
-		// A blocked master is normally not dispatched. The exception is a
-		// supervisor that owns the question blocking it *and* has a queued message
-		// waiting behind that question: nothing else can ever answer it, and the
-		// user's work would wait for ever. Without such a queued message the
-		// block stands - a retry nobody asked for would spend model calls the
-		// failure did not earn. No operation of the task may be in flight either:
-		// a recovered turn still owns the conversation.
 		busy := kernelRow(e.store.Db, "SELECT id FROM operations WHERE task_id=? AND state IN ('dispatched','unknown') LIMIT 1", taskId) != nil
 		stranded := kernelRow(e.store.Db, "SELECT id FROM messages WHERE conversation_id=? AND state IN ('pending','queued') LIMIT 1", conversation.Id) != nil
 		rows := kernelRows(e.store.Db, `SELECT * FROM nodes n

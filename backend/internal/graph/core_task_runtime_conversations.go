@@ -7,12 +7,10 @@ import (
 	"strings"
 )
 
-// Conversations returns the conversation side of the runtime.
 func (runtime *TaskRuntime) Conversations() *TaskRuntimeConversations {
 	return &TaskRuntimeConversations{runtime: runtime}
 }
 
-// TaskRuntimeConversationInput starts one conversation.
 type TaskRuntimeConversationInput struct {
 	ProjectId     *string
 	Title         *string
@@ -23,7 +21,6 @@ type TaskRuntimeConversationInput struct {
 	RequestId     string
 }
 
-// Create starts one conversation.
 func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversationInput) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -64,8 +61,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			}
 			workspaceProjectId = *projectId
 		} else {
-			// The host-owned scratch workspace keeps an unbound conversation on
-			// the ordinary project/grant path without granting any real root.
 			root := filepath.Join(runtime.stateDir, "conversations", conversationId)
 			runtime.store.RegisterProject("conversation:"+conversationId, root, "[]")
 			workspaceProjectId = "conversation:" + conversationId
@@ -152,12 +147,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 			})
 			messageId = message.Id
 			if runtime.master != nil {
-				// The node was just created, so it is already pending. The TypeScript
-				// host wrote this status in the same synchronous block that created the
-				// node, so it could never park a turn that was already running. The Go
-				// host runs the creation and the dispatch on separate goroutines, so the
-				// same write is guarded the way `say` guards it: a master that is
-				// already preparing or running keeps its turn.
 				row := kernelRow(runtime.store.Db, "SELECT status FROM nodes WHERE task_id=? AND id='master'", taskId)
 				status := kernelString(row["status"])
 				if status != "preparing" && status != "running" {
@@ -168,9 +157,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 				cursor = *message.Cursor
 			}
 		}
-		// A turn that cannot start is told so: the message stays pending, but
-		// the user learns why nothing is happening instead of waiting for a
-		// reply that cannot come.
 		runtime.refuseUndispatchableTurn(conversationId)
 		return map[string]any{
 			"conversationId": conversationId,
@@ -187,7 +173,6 @@ func (conversations *TaskRuntimeConversations) Create(input TaskRuntimeConversat
 	return record
 }
 
-// liveConfiguredEntries reads the configured models as configuration entries.
 func (runtime *TaskRuntime) liveConfiguredEntries() []ConfiguredModel {
 	if runtime.live != nil && runtime.live.Entries != nil {
 		return runtime.live.Entries()
@@ -198,7 +183,6 @@ func (runtime *TaskRuntime) liveConfiguredEntries() []ConfiguredModel {
 	return []ConfiguredModel{}
 }
 
-// createMasterNode records the master node of one task.
 func (runtime *TaskRuntime) createMasterNode(taskId string) string {
 	model := runtime.masterModel()
 	definitionVersion := runtime.masterDefinitionVersion()

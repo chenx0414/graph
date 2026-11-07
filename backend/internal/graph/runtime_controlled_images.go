@@ -1,14 +1,6 @@
 package graph
 
-// Images in the transcript.
-//
-// A transcript carries an image as its own content part: `{type: "image",
-// data, mimeType}`. Flattening that part to text leaves an empty string, so the
-// model reads a tool that answered with a picture as a tool that answered with
-// nothing. Every wire format below keeps the part as an image, in the shape the
-// provider expects, and keeps a content value with no image exactly as it was.
 
-// controlledImageParts are the images one content value carries, in order.
 func controlledImageParts(value any) []map[string]any {
 	parts := []map[string]any{}
 	visit := func(item any) {
@@ -40,8 +32,6 @@ func controlledImageParts(value any) []map[string]any {
 	return parts
 }
 
-// controlledOpenAIContent renders one content value the way an OpenAI message
-// carries it: the text when it holds no image, the parts array when it does.
 func controlledOpenAIContent(value any) any {
 	images := controlledImageParts(value)
 	if len(images) == 0 {
@@ -62,8 +52,6 @@ func controlledOpenAIContent(value any) any {
 	return parts
 }
 
-// controlledAnthropicContent renders one content value as Anthropic content
-// blocks. A value with no image is the text it carries, exactly as before.
 func controlledAnthropicContent(value any) any {
 	images := controlledImageParts(value)
 	if len(images) == 0 {

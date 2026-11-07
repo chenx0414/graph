@@ -4,7 +4,6 @@ const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
 
 const ARTIFACT_TASK_QUOTA_BYTES = 256 * 1024 * 1024
 
-// ARTIFACT_MAX_VERSIONS is a version-number ceiling. Retirement does not free a number.
 const ARTIFACT_MAX_VERSIONS = 1000
 
 const ARTIFACT_MAX_PUBLISHES_PER_OPERATION = 32

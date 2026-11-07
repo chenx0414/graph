@@ -9,8 +9,6 @@ import (
 	"bufio"
 )
 
-// networkProxy is the loopback HTTP proxy that enforces the domain allowlist
-// of one restricted command.
 type networkProxy struct {
 	listener net.Listener
 	domains  []string
@@ -18,12 +16,8 @@ type networkProxy struct {
 	closed   bool
 }
 
-// openNetworkProxy starts the proxy of one command and returns the
-// environment the child needs to reach it.
 func (executor *sandboxExecutor) openNetworkProxy(command RestrictedCommand, unixSockets []string) (*networkProxy, map[string]string) {
 	if command.AllowUnrestrictedNetwork {
-		// The static direct-network profile must not inherit the dynamic
-		// proxy that belongs to another execution's allowlist.
 		return nil, map[string]string{"NO_PROXY": "*", "no_proxy": "*"}
 	}
 	domains := command.NetworkDomains
@@ -51,7 +45,6 @@ func (executor *sandboxExecutor) openNetworkProxy(command RestrictedCommand, uni
 	}
 }
 
-// startNetworkProxy listens on loopback and serves the allowed domains only.
 func startNetworkProxy(domains []string) (*networkProxy, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -62,7 +55,6 @@ func startNetworkProxy(domains []string) (*networkProxy, error) {
 	return proxy, nil
 }
 
-// Port is the loopback port the proxy listens on.
 func (proxy *networkProxy) Port() int {
 	if proxy == nil || proxy.listener == nil {
 		return 0
@@ -74,7 +66,6 @@ func (proxy *networkProxy) Port() int {
 	return address.Port
 }
 
-// Close stops the proxy.
 func (proxy *networkProxy) Close() {
 	if proxy == nil {
 		return
@@ -98,7 +89,6 @@ func (proxy *networkProxy) serve() {
 	}
 }
 
-// handle serves one proxied request.
 func (proxy *networkProxy) handle(connection net.Conn) {
 	defer connection.Close()
 	reader := bufio.NewReader(connection)

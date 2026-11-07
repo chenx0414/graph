@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// GraphState reads the graph projection the main Agent sees.
 func (supervisor *TaskRuntimeSupervisor) GraphState() map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -40,7 +39,6 @@ func (supervisor *TaskRuntimeSupervisor) GraphState() map[string]any {
 	return state
 }
 
-// TaskRuntimeTaskStatusInput is one status query of the main Agent.
 type TaskRuntimeTaskStatusInput struct {
 	TaskId      *string
 	NodeId      *string
@@ -48,13 +46,6 @@ type TaskRuntimeTaskStatusInput struct {
 	TimeoutMs   *int
 }
 
-// TaskStatus reads the compact status projection of one task.
-//
-// A query that names no task asks about the supervisor's own task. The
-// TypeScript original guards its owner lookup with the same check - it
-// asks the owner table only when a task id was given - and the port had
-// dropped the guard, so a query without a task id dereferenced a nil
-// pointer and the model read a Go runtime message instead of an answer.
 func (supervisor *TaskRuntimeSupervisor) TaskStatus(input TaskRuntimeTaskStatusInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -148,7 +139,6 @@ func (supervisor *TaskRuntimeSupervisor) TaskStatus(input TaskRuntimeTaskStatusI
 	return current
 }
 
-// ListProblems reads the main-owned problems of one conversation.
 func (supervisor *TaskRuntimeSupervisor) ListProblems() []map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -208,7 +198,6 @@ func (supervisor *TaskRuntimeSupervisor) ListProblems() []map[string]any {
 	return out
 }
 
-// TaskRuntimeResolveInput resolves one main-owned problem.
 type TaskRuntimeResolveInput struct {
 	QuestionId       string
 	Action           string
@@ -218,7 +207,6 @@ type TaskRuntimeResolveInput struct {
 	ExpectedRevision *int64
 }
 
-// ResolveProblem answers one main-owned problem.
 func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolveInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -359,7 +347,6 @@ func (supervisor *TaskRuntimeSupervisor) ResolveProblem(input TaskRuntimeResolve
 	return record
 }
 
-// PendingHumanChecks reads the open human acceptance checks of one conversation.
 func (supervisor *TaskRuntimeSupervisor) PendingHumanChecks() []any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()
@@ -374,7 +361,6 @@ func (supervisor *TaskRuntimeSupervisor) PendingHumanChecks() []any {
 	return out
 }
 
-// TaskRuntimeReviewInput reviews one human acceptance check.
 type TaskRuntimeReviewInput struct {
 	QuestionId string
 	Approve    bool
@@ -382,7 +368,6 @@ type TaskRuntimeReviewInput struct {
 	RequestId  string
 }
 
-// ReviewHumanCheck approves or sends back one human acceptance check.
 func (supervisor *TaskRuntimeSupervisor) ReviewHumanCheck(input TaskRuntimeReviewInput) map[string]any {
 	runtime := supervisor.runtime
 	runtime.ensureOpen()

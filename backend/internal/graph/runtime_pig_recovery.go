@@ -11,18 +11,11 @@ import (
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
-// bootstrapPigRecovery rebinds the Graph to the turns the kernel kept.
-//
-// The recovery runs before the daemon serves anything. A turn that has to be
-// sent again must not wait for a daemon that is not up yet, and an operation
-// that is already settled must not be dispatched a second time.
 func (runtime *TaskRuntime) bootstrapPigRecovery(interruptedNodes []string) {
 	pendingNodes := map[string]bool{}
 	for _, id := range interruptedNodes {
 		pendingNodes[id] = true
 	}
-	// The lane owns the restored configuration of a node, so it has to exist
-	// before the recovery restores one.
 	runtime.residentGraphLane()
 	executions, err := pigkernel.FrozenExecutions(context.Background(), runtime.store.Path)
 	if err != nil {
@@ -39,13 +32,6 @@ func (runtime *TaskRuntime) bootstrapPigRecovery(interruptedNodes []string) {
 	}
 }
 
-// abortStalledMasterTurns ends kernel work that a restart left unable to run.
-//
-// A master turn interrupted while a tool was executing cannot be replayed: the
-// kernel keeps the tool pending because its side effects are unknown, and the
-// generation waiting on it holds the conversation busy for ever. Aborting that
-// conversation lets the pending messages dispatch again; the interrupted
-// operation keeps its recovery question.
 func (runtime *TaskRuntime) abortStalledMasterTurns() int {
 	rows := kernelRows(runtime.store.Db, `SELECT n.task_id, n.instance_id FROM nodes n
         JOIN conversations c ON c.anchor_task_id = n.task_id
@@ -75,14 +61,6 @@ func (runtime *TaskRuntime) abortStalledMasterTurns() int {
 	return aborted
 }
 
-// dispatchQueuedMasterMessages starts the messages a restart left queued.
-//
-// A message sent while the master was working waits in the conversation queue.
-// The command that queued it also ran the wake that would have dispatched it;
-// a restart between those two leaves the message pending with nobody to start
-// it. The message itself is the user's decision to retry, so the recovery
-// questions it would have released are released here, and the execution is
-// told there is work.
 func (runtime *TaskRuntime) dispatchQueuedMasterMessages() int {
 	rows := kernelRows(runtime.store.Db, `SELECT DISTINCT c.anchor_task_id FROM conversations c
         JOIN messages m ON m.conversation_id = c.id
@@ -99,7 +77,6 @@ func (runtime *TaskRuntime) dispatchQueuedMasterMessages() int {
 	return released
 }
 
-// recoverPigExecution rebinds one frozen execution to its Graph operation.
 func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecution) {
 	if execution.ExecutionId == "" || execution.Identity == "" || execution.InputRequestId == "" {
 		return
@@ -124,15 +101,7 @@ func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecut
 	case pigTurnKernelDone:
 		runtime.settlePigCompletion(operation, execution, receipt)
 	case pigTurnReachedModel:
-		// The credential was spent and the side effects may have happened.
-		// The operation stays unknown and the user reconciles it. The kernel's
-		// own turn needs no stopping: the generation resumes from its
-		// checkpoint, and a request the model already received is not
-		// requested a second time.
 	default:
-		// A recovery that already failed is not tried again: the same send
-		// would fail the same way after every boot, and the operation would
-		// stay unknown for ever.
 		if reason, failed := pigkernel.RecoveryFailure(execution.Record); failed {
 			runtime.reportPigRecoveryBlocked(operation, reason)
 			return
@@ -141,10 +110,6 @@ func (runtime *TaskRuntime) recoverPigExecution(execution pigkernel.FrozenExecut
 	}
 }
 
-// settlePigCompletion settles an operation from the kernel's own receipt.
-//
-// The kernel finished the turn; the Graph did not hear about it. The receipt
-// is the proof, and the model is not asked again.
 func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution pigkernel.FrozenExecution, receipt pigkernel.ExecutionReceipt) {
 	lifecycle := NewOperationLifecycle(runtime.store, OperationLifecycleHooks{})
 	lifecycle.acceptDurableCompletion(durableCompletion{
@@ -157,11 +122,6 @@ func (runtime *TaskRuntime) settlePigCompletion(operation Operation, execution p
 	})
 }
 
-// reportPigRecoveryBlocked records that a recovery could not send a turn.
-//
-// The operation stays unknown - the turn may have reached the model - but the
-// reason is durable and the user sees it, so the wait is a decision and not
-// a silence.
 func (runtime *TaskRuntime) reportPigRecoveryBlocked(operation Operation, reason string) {
 	message := "The interrupted turn could not be sent again: " + reason
 	runtime.store.Transaction(func() any {
@@ -173,18 +133,7 @@ func (runtime *TaskRuntime) reportPigRecoveryBlocked(operation Operation, reason
 	reportPigRecoveryFailure(message)
 }
 
-// reattachPigExecution sends the interrupted turn again.
-//
-// The turn never reached the model, so nothing was spent and nothing
-// happened. It runs with the configuration it was admitted with: the frozen
-// model, the frozen policy and the original admission, so the kernel
-// recognises the input it already accepted instead of admitting a second one.
-//
-// The turn runs in the background: the daemon must come up even when the
-// model is slow, and the operation is unknown until the turn settles it.
 func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution pigkernel.FrozenExecution) {
-	// The attempt is recorded before it happens: a turn that is attempted and
-	// fails must not be attempted again after the next boot.
 	runtime.store.Transaction(func() any {
 		runtime.store.Event(operation.TaskId, "graph.recovery.attempted", map[string]any{
 			"operationId": operation.Id, "nodeId": operation.NodeId,
@@ -203,8 +152,6 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 		prepared = CreatePiAdapter(options).Prepare(operation)()
 		preparedOk = true
 	}()
-	// The adapter records the admission and returns. The value is on the
-	// capture when Prepare returns, so nothing races a closed channel.
 	if !capture.opened || !capture.prompted {
 		reason := "the interrupted turn could not be prepared" + pigRecoveryReason(prepared, preparedOk)
 		runtime.markPigRecoveryFailure(execution, reason)
@@ -214,8 +161,6 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 	go func() {
 		defer catchPigRecoveryFailure("the interrupted turn could not be sent again")
 		transport := CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
-		// This open resumes the very turn it is recovering; waiting for that
-		// turn to become idle would wait for this prompt to run.
 		capture.request.Recovering = true
 		session, err := transport.Open(capture.request)
 		if err != nil {
@@ -236,7 +181,6 @@ func (runtime *TaskRuntime) reattachPigExecution(operation Operation, execution 
 	}()
 }
 
-// pigRecoveryReason names why the capture could not produce a turn.
 func pigRecoveryReason(result OperationResult, ok bool) string {
 	if !ok || result.Outcome == "" || result.Outcome == "completed" {
 		return ""
@@ -256,29 +200,16 @@ func pigRecoveryReason(result OperationResult, ok bool) string {
 	return ": " + message
 }
 
-// reportPigRecoveryFailure writes one recovery failure to the daemon's error
-// stream.
-//
-// A recovery that fails silently reads like a turn that never happened: the
-// operation stays unknown and nobody knows why.
 func reportPigRecoveryFailure(reason string) {
 	_, _ = os.Stderr.WriteString("pig kernel: " + reason + "\n")
 }
 
-// catchPigRecoveryFailure reports a recovery failure that panicked.
-//
-// The recovery runs in the background: a panic there would end the goroutine
-// and leave the operation unknown with no trace of why.
 func catchPigRecoveryFailure(reason string) {
 	if failure := recover(); failure != nil {
 		reportPigRecoveryFailure(reason + ": " + fmt.Sprintf("%v", failure))
 	}
 }
 
-// settlePigTurn settles a recovered turn.
-//
-// The turn is the original one: the operation keeps its identity, its attempt
-// and its budget, and only the outcome is new.
 func (runtime *TaskRuntime) settlePigTurn(operation Operation, turn AgentSessionTurn) {
 	usage := TokenUsage{}
 	if turn.Usage != nil {
@@ -299,10 +230,6 @@ func (runtime *TaskRuntime) settlePigTurn(operation Operation, turn AgentSession
 	}, operationSettleOptions{})
 }
 
-// markPigRecoveryFailure records that a recovery could not send a turn.
-//
-// The record is what the next boot reads: a recovery that already failed is
-// not tried again, so the same doomed send does not run after every restart.
 func (runtime *TaskRuntime) markPigRecoveryFailure(execution pigkernel.FrozenExecution, reason string) {
 	func() {
 		defer func() { _ = recover() }()
@@ -310,11 +237,6 @@ func (runtime *TaskRuntime) markPigRecoveryFailure(execution pigkernel.FrozenExe
 	}()
 }
 
-// pigExecutionCalledProvider reports whether the execution reached the model.
-//
-// The frozen record names the invocations that existed before the execution
-// started. An invocation beyond them is a provider call this execution made,
-// and the turn must not be replayed.
 func pigExecutionCalledProvider(store *TaskStore, operation Operation, execution pigkernel.FrozenExecution) bool {
 	seen := []string{}
 	for _, call := range kernelRows(store.Db, "SELECT id FROM invocations WHERE operation_id=?", operation.Id) {
@@ -323,11 +245,6 @@ func pigExecutionCalledProvider(store *TaskStore, operation Operation, execution
 	return pigCallsBeyond(frozenExecutionOfRecord(execution.Record).PreAdmissionInvocationIds, seen)
 }
 
-// pigRecoveryCapture records the admission the adapter would open.
-//
-// The PiG kernel lives in this process, so the recovery opens the real
-// session itself. The capture keeps the request and the prompt, and its
-// prompt tells the adapter to stop before a turn is sent.
 type pigRecoveryCapture struct {
 	request  AgentSessionRequest
 	prompt   string
@@ -335,73 +252,43 @@ type pigRecoveryCapture struct {
 	prompted bool
 }
 
-// Open records the session the adapter would open.
 func (capture *pigRecoveryCapture) Open(request AgentSessionRequest) (AgentSession, error) {
 	capture.request = request
 	capture.opened = true
 	return &pigRecoverySession{capture: capture}, nil
 }
 
-// pigRecoverySession is the session the capture hands back.
-//
-// It records the input the adapter would have sent and answers nothing: the
-// real turn runs on the PiG kernel, in the recovery's own goroutine.
 type pigRecoverySession struct {
 	capture *pigRecoveryCapture
 }
 
-// Prompt records the input the adapter would send and stops the adapter.
-//
-// The stop reason is the signal that this was a recording, not a turn. The
-// adapter returns the admission instead of settling an empty answer.
 func (session *pigRecoverySession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
 	session.capture.prompt = text
 	session.capture.prompted = true
 	return AgentSessionTurn{StopReason: stringPointer("admitted")}, nil
 }
 
-// Compact does nothing.
 func (session *pigRecoverySession) Compact(instructions string) error { return nil }
 
-// Steer does nothing.
 func (session *pigRecoverySession) Steer(text string) error { return nil }
 
-// Interrupt does nothing.
 func (session *pigRecoverySession) Interrupt(text *string) error { return nil }
 
-// Stop does nothing.
 func (session *pigRecoverySession) Stop() error { return nil }
 
-// Inspect reports an empty session.
 func (session *pigRecoverySession) Inspect() AgentSessionInspect { return AgentSessionInspect{} }
 
-// Close does nothing.
 func (session *pigRecoverySession) Close() error { return nil }
 
-// pigFrozenExecution is the durable record of one PiG execution.
-//
-// The record is what the recovery reads after a crash: which execution the
-// kernel was running, the model it was admitted with and the input it was
-// waiting for. The credential never enters it: the daemon keeps the live
-// binding, and the record only names the headers it may restore.
 func pigFrozenExecution(request AgentSessionRequest, preAdmission []string) map[string]any {
 	return frozenExecutionRecord(frozenExecutionOfRequest(request, preAdmission))
 }
 
-// pigNestedMap reads one nested object of a frozen record.
-//
-// The object is read in place, not copied: a frozen record that is copied is a
-// frozen record whose edits are lost.
 func pigNestedMap(record map[string]any, key string) map[string]any {
 	nested, _ := record[key].(map[string]any)
 	return nested
 }
 
-// pigCredentialHeaders removes the credential headers of one frozen model.
-//
-// A frozen record outlives the process that wrote it, so a credential never
-// enters it. The header names are returned instead: the recovery restores the
-// values from the daemon's live binding.
 func pigCredentialHeaders(model map[string]any) []string {
 	if model == nil {
 		return nil

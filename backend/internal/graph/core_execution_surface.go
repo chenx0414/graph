@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 )
 
-// NewExecution builds the executor over one task store.
 func NewExecution(store *TaskStore, actions map[string]ActionAdapter, extras ExecutionExtras) *Execution {
 	execution := &Execution{
 		store:           store,
@@ -27,8 +26,6 @@ func NewExecution(store *TaskStore, actions map[string]ActionAdapter, extras Exe
 	}
 	execution.unsubscribe = store.OnEvent(func(eventType string) {
 		if execution.autoWake && eventType == "problem.routed" {
-			// The TypeScript runtime queued a microtask here; Go hands it to its
-			// own goroutine so the event is delivered after the current statement.
 			go execution.Kick()
 		}
 	})
@@ -51,7 +48,6 @@ func NewExecution(store *TaskStore, actions map[string]ActionAdapter, extras Exe
 	return execution
 }
 
-// adapterFor resolves the adapter of one action exactly like dispatch does.
 func (e *Execution) adapterFor(action string) *ActionAdapter {
 	if adapter, ok := e.actions[action]; ok {
 		return &adapter
@@ -59,8 +55,6 @@ func (e *Execution) adapterFor(action string) *ActionAdapter {
 	return e.fallback
 }
 
-// Drain stops the executor. Shutdown is bounded: a provider stream can hang
-// indefinitely, so the daemon must not wait past its stop deadline.
 func (e *Execution) Drain() {
 	e.mu.Lock()
 	e.stopping = true
@@ -80,7 +74,6 @@ func (e *Execution) Drain() {
 	}
 }
 
-// SettleGraphShutdown finishes all kernel writers before closing SQLite.
 func (e *Execution) SettleGraphShutdown() {
 	for {
 		e.mu.Lock()
@@ -93,7 +86,6 @@ func (e *Execution) SettleGraphShutdown() {
 	}
 }
 
-// ReserveTokensFor is the token reservation one dispatch of this action needs.
 func (e *Execution) ReserveTokensFor(action string) *int {
 	if action == "" {
 		return nil
@@ -105,7 +97,6 @@ func (e *Execution) ReserveTokensFor(action string) *int {
 	return adapter.ReserveTokens
 }
 
-// Report settles one operation with the result a worker produced.
 func (e *Execution) Report(id string, generation int, result OperationResult) {
 	graphDatabaseMu.Lock()
 	e.lifecycle.Report(id, generation, result)
@@ -115,7 +106,6 @@ func (e *Execution) Report(id string, generation int, result OperationResult) {
 	}
 }
 
-// Reconcile resolves an unknown external outcome.
 func (e *Execution) Reconcile(id string) {
 	graphDatabaseMu.Lock()
 	initial := e.lifecycle.Get(id)
@@ -138,7 +128,6 @@ func (e *Execution) Reconcile(id string) {
 	}, nil)
 }
 
-// StopActiveMasterTurns soft-stops the live master turn of a task.
 func (e *Execution) StopActiveMasterTurns(taskId string) int {
 	graphDatabaseMu.Lock()
 	rows := kernelRows(e.store.Db, `SELECT o.id,o.spec FROM operations o
@@ -165,7 +154,6 @@ func (e *Execution) StopActiveMasterTurns(taskId string) int {
 	return stopped
 }
 
-// Steer hands a running turn an operator message.
 func (e *Execution) Steer(operationId, text string) *int64 {
 	return e.lifecycle.Steer(operationId, func(operation Operation) *int64 {
 		adapter := e.adapterFor(operation.Action)
@@ -176,7 +164,6 @@ func (e *Execution) Steer(operationId, text string) *int64 {
 	})
 }
 
-// Interrupt stops a running turn.
 func (e *Execution) Interrupt(operationId string, text *string) *int64 {
 	return e.lifecycle.Interrupt(operationId, func(operation Operation) *int64 {
 		adapter := e.adapterFor(operation.Action)
@@ -194,7 +181,6 @@ func (e *Execution) Interrupt(operationId string, text *string) *int64 {
 	})
 }
 
-// steerOrdinal reads the ordinal an adapter returned, when it returned one.
 func steerOrdinal(result any) *int64 {
 	record, ok := jsonRecord(result)
 	if !ok {
@@ -218,14 +204,12 @@ func steerOrdinal(result any) *int64 {
 	return nil
 }
 
-// Answer resolves a human answer. It is called only inside the authenticated command transaction.
 func (e *Execution) Answer(taskId, questionId string, answer Answer) {
 	graphDatabaseMu.Lock()
 	defer graphDatabaseMu.Unlock()
 	e.lifecycle.Answer(taskId, questionId, answer, e.models)
 }
 
-// Escalate hands a main-owned problem to the user with an explanation.
 func (e *Execution) Escalate(taskId, questionId, prompt string) {
 	graphDatabaseMu.Lock()
 	_ = e.lifecycle.Escalate(taskId, questionId, prompt)
@@ -235,7 +219,6 @@ func (e *Execution) Escalate(taskId, questionId, prompt string) {
 	}
 }
 
-// Abandon stops a task for good, releasing the active slot to the queue.
 func (e *Execution) Abandon(taskId string, reason *string, allowMasterTurn bool) int64 {
 	graphDatabaseMu.Lock()
 	defer graphDatabaseMu.Unlock()
@@ -274,7 +257,6 @@ func reasonValue(reason *string) any {
 	return *reason
 }
 
-// block parks a node behind a question.
 func (e *Execution) block(node ExecutionNodeRow, kind string, data Json, operationId *string) {
 	e.lifecycle.Block(node.TaskId, node.Id, kind, data, operationId)
 }

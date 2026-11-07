@@ -36,7 +36,6 @@ export interface ResolvedAgentContext {
   reviewPolicy?: ReviewIndependencePolicy;
   sourceLeafId?: string;
 }
-/** Internal record for main; graph declarations use NodeDefinition. */
 export interface NodeSpec {
   id: string;
   kind: 'agent' | 'program';
@@ -50,10 +49,8 @@ interface ProposalScope {
   requirementVersion: number;
   summary: string;
   acceptance: { id: string; description: string; checkNode: string }[];
-  /** Main-authored decisions/constraints frozen with this draft version. */
   decisions?: string[];
 }
-/** A declarative graph draft. Main belongs outside its definition. */
 export interface NativeProposal extends ProposalScope {
   definition: GraphDefinition;
 }
@@ -87,10 +84,6 @@ export interface Operation {
   context: {
     previousOutput: Json;
     rsiContinuation?: { requestId: string; operationId: string; commit: string };
-    /**
-     * Why the harness woke this node, beyond any user message. Present only on a turn
-     * that is carrying a wake; the master reads it instead of re-deriving what changed.
-     */
     wakes?: { kind: string; dedupeKey: string; taskId: string; data: string | null }[];
     answers: { questionId: string; value: Json }[];
     messages?: {
@@ -102,21 +95,15 @@ export interface Operation {
     }[];
     briefing?: string;
     agentContext?: ResolvedAgentContext;
-    /** Structured result this operation must submit, so tools can validate in-turn. */
     outputSchema?: { kind: 'agent_result'; version: number };
   };
   grants: string[];
-  /** Effective access policy frozen when this operation was admitted. */
   accessPolicy?: ResolvedAccessPolicy;
   activationId: string; graphVersion: number;
   dependencySources: Record<string, DependencySource[]>;
   inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;
   workspace?: string;
 }
-/** A user-supplied attachment. Text files carry their body in `text`; image
- * files carry base64 bytes in `data` and an image mime in `type`, with `text`
- * left empty. The base64 payload is never written to disk and never returned
- * by the conversation view. */
 export interface AttachmentInput { name: string; type: string; size: number; text: string; data?: string }
 export interface OperationResult {
   outcome: 'completed' | 'continue' | 'waiting' | 'failed' | 'skipped'; output: Json; usage?: TokenUsage | null; evidence?: EvidenceInput[];

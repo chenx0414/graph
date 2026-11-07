@@ -45,16 +45,9 @@ function formatWhen(at: number): string {
   return hours < 48 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`;
 }
 
-/**
- * Per-tool telemetry the harness collects itself: how often each tool is called, how often it
- * fails and how long it takes. The numbers come from the durable `tool_calls` table, so they
- * accumulate across reloads instead of dying with the process that happened to observe them.
- */
 export interface SkillUsageSnapshot {
   generatedAt: number;
   retentionDays: number;
-  // The server reports the scan itself under `report`: the counts and the rows
-  // travel together, and the client reads them from where they actually are.
   report: {
     skills: { id: string; path: string; source: 'project' | 'agent' | 'library'; reads: number; lastReadAt: number | null; neverRead: boolean }[];
     summary: { skills: number; neverRead: number };

@@ -4,8 +4,6 @@ export interface GraphArchitecture {
   description: string;
 }
 
-/** Canonical architecture examples shown in the resource library and exposed
- * to the master Agent through its read-only system inventory. */
 export const GRAPH_ARCHITECTURES: readonly GraphArchitecture[] = [
   { name: '顺序执行', flow: 'A → B → C', description: '每一步使用前一步产物，适合依赖明确的实现与检查流程。' },
   { name: '条件路由', flow: 'A → B / C', description: '先判断输入或状态，再把任务交给一条匹配的分支。' },

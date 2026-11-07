@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// ExpandInput pins one subgraph template into a parent fragment.
 type ExpandInput struct {
 	Instance        string
 	Template        GraphDefinition
@@ -16,7 +15,6 @@ type ExpandInput struct {
 	OutputWiring    map[string]string
 }
 
-// ExpandedSubgraph is the rewritten fragment. Expansion adds no execution.
 type ExpandedSubgraph struct {
 	Instance        string
 	TemplateVersion int
@@ -39,7 +37,6 @@ func subgraphEndpoint(instance, reference string) string {
 	return instance + "/" + reference[:dot] + reference[dot:]
 }
 
-// ExpandSubgraph rewrites a template into instance-prefixed paths.
 func ExpandSubgraph(input ExpandInput) ExpandedSubgraph {
 	if strings.TrimSpace(input.Instance) == "" {
 		panic(fmt.Errorf("A subgraph instance requires a name"))

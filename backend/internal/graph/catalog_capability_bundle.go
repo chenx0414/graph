@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// CompileAgentCombination compiles one recipe into a definition spec.
 func (library *CapabilityLibrary) CompileAgentCombination(id string) CompiledAgentCombination {
 	combination := AgentCombination{}
 	found := false
@@ -24,7 +23,6 @@ func (library *CapabilityLibrary) CompileAgentCombination(id string) CompiledAge
 	return CompileAgentCombinationDefinition(combination, library.capabilitiesCache)
 }
 
-// UpsertCapabilityBundle installs one capability bundle into the capability root.
 func (library *CapabilityLibrary) UpsertCapabilityBundle(input CapabilityBundleInput) CapabilityBundleResult {
 	if library.capabilityRoot == "" {
 		Raise("unsupported", "This runtime has no writable capability directory")
@@ -59,7 +57,6 @@ func (library *CapabilityLibrary) UpsertCapabilityBundle(input CapabilityBundleI
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	// TODO(port): TypeScript wrote the manifest keys in insertion order; Go sorts them.
 	body, err := json.MarshalIndent(capabilityBundleManifestJSON(manifest), "", "  ")
 	if err != nil {
 		panic(err)

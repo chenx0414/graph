@@ -13,8 +13,6 @@ import (
 
 const boundedGitMetadata = ".git"
 
-// BoundedPathOptions names the host grants around a workspace root.
-// allowSymlinks is accepted and unused, matching the TypeScript options object.
 type BoundedPathOptions struct {
 	AllowGitMetadata             bool
 	AllowSymlinks                bool
@@ -54,8 +52,6 @@ func boundedProtected(target string, protectedPaths, exceptions []string) bool {
 	return false
 }
 
-// boundedContainsGit mirrors the TypeScript check: the path is split on the
-// separator and any component that is exactly the Git metadata name counts.
 func boundedContainsGit(target string) bool {
 	for _, part := range strings.Split(target, string(filepath.Separator)) {
 		if part == boundedGitMetadata {
@@ -77,7 +73,6 @@ func boundedNlink(info os.FileInfo) uint64 {
 	return uint64(stat.Nlink)
 }
 
-// ResolveBounded resolves a relative path under a trusted root without following links.
 func ResolveBounded(root, relative, mode string) string {
 	if relative == "" || stringsContainsNull(relative) {
 		panic(errors.New("A nonempty path is required"))
@@ -214,13 +209,11 @@ func resolveHostPath(path, mode string, options BoundedPathOptions) string {
 	return target
 }
 
-// ReadHost reads a host file as text.
 func ReadHost(path string, options BoundedPathOptions) string {
 	body := ReadHostBytes(path, options)
 	return string(body)
 }
 
-// ReadHostBytes reads a host file.
 func ReadHostBytes(path string, options BoundedPathOptions) []byte {
 	target := resolveHostPath(path, "read", options)
 	info, err := os.Lstat(target)
@@ -237,7 +230,6 @@ func ReadHostBytes(path string, options BoundedPathOptions) []byte {
 	return body
 }
 
-// WriteHost writes a host file, refusing links and hard links.
 func WriteHost(path, content string, options BoundedPathOptions) {
 	target := resolveHostPath(path, "write", options)
 	existing, err := os.Lstat(target)
@@ -262,18 +254,11 @@ func WriteHost(path, content string, options BoundedPathOptions) {
 	}
 }
 
-// ListHost lists one host directory.
 func ListHost(path string, options BoundedPathOptions) []string {
 	names, _ := ListHostLimit(path, options, 0)
 	return names
 }
 
-// ListHostLimit lists one host directory up to a limit.
-//
-// The entries are read in batches, so a directory with a hundred thousand
-// files costs the memory of the limit and not of the directory. The second
-// answer says whether the directory holds more entries than were returned.
-// A limit of zero lists the whole directory.
 func ListHostLimit(path string, options BoundedPathOptions, limit int) ([]string, bool) {
 	target := resolveHostPath(path, "read", options)
 	info, err := os.Lstat(target)
@@ -337,12 +322,10 @@ func sameFile(left, right os.FileInfo) bool {
 	return ls.Dev == rs.Dev && ls.Ino == rs.Ino
 }
 
-// ReadBounded reads a workspace file as text.
 func ReadBounded(root, relative string) string {
 	return string(ReadBoundedBytes(root, relative))
 }
 
-// ReadBoundedBytes reads a workspace file.
 func ReadBoundedBytes(root, relative string) []byte {
 	file := openBounded(root, relative, "read")
 	defer file.Close()
@@ -353,7 +336,6 @@ func ReadBoundedBytes(root, relative string) []byte {
 	return body
 }
 
-// WriteBounded writes a workspace file.
 func WriteBounded(root, relative, content string) {
 	file := openBounded(root, relative, "write")
 	defer file.Close()
@@ -362,18 +344,11 @@ func WriteBounded(root, relative, content string) {
 	}
 }
 
-// ListBounded lists a workspace directory. The root itself skips lstat.
 func ListBounded(root, relative string) []string {
 	names, _ := ListBoundedLimit(root, relative, 0)
 	return names
 }
 
-// ListBoundedLimit lists a workspace directory up to a limit.
-//
-// The entries are read in batches, so a directory with a hundred thousand
-// files costs the memory of the limit and not of the directory. The second
-// answer says whether the directory holds more entries than were returned.
-// A limit of zero lists the whole directory.
 func ListBoundedLimit(root, relative string, limit int) ([]string, bool) {
 	target := ResolveBounded(root, relative, "read")
 	if target != root {
@@ -388,11 +363,6 @@ func ListBoundedLimit(root, relative string, limit int) ([]string, bool) {
 	return listDirectoryLimited(target, limit)
 }
 
-// listDirectoryLimited reads the entries of one directory up to a limit.
-//
-// The entries come back sorted: a directory is read in batches, and a batch
-// is not in the order the directory holds. The listing a model reads is
-// alphabetical, so it stays that way.
 func listDirectoryLimited(target string, limit int) ([]string, bool) {
 	directory, err := os.Open(target)
 	if err != nil {
@@ -402,8 +372,6 @@ func listDirectoryLimited(target string, limit int) ([]string, bool) {
 	names := []string{}
 	more := false
 	for {
-		// A batch of entries is read at a time: the whole directory is never
-		// in memory at once.
 		batch, err := directory.ReadDir(256)
 		for _, entry := range batch {
 			if limit > 0 && len(names) >= limit {

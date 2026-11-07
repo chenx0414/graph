@@ -8,22 +8,18 @@ import (
 	"bytes"
 )
 
-// DEFAULT_V2_RESERVE_TOKENS is what one v2 turn is expected to cost when the runtime has not said otherwise.
 const DEFAULT_V2_RESERVE_TOKENS = 200_000
 
-// KernelGraphLaneNetwork is the network grant a lane's nodes run under.
 type KernelGraphLaneNetwork struct {
 	RetrievalDomains []string
 }
 
-// KernelGraphLaneProgram is the program grant a lane's modules run under.
 type KernelGraphLaneProgram struct {
 	ReadPaths       []string
 	Env             map[string]string
 	NodeModulesPath *string
 }
 
-// KernelGraphLaneCredential is the credential a lane resolved for one model.
 type KernelGraphLaneCredential struct {
 	ApiKey        string
 	CredentialId  *string
@@ -32,7 +28,6 @@ type KernelGraphLaneCredential struct {
 	GroupLimit    *int
 }
 
-// KernelGraphLaneOptions is the production wiring of the v2 graph lane.
 type KernelGraphLaneOptions struct {
 	Kernel  *KernelStore
 	Access  func() *ResolvedAccessPolicy
@@ -40,67 +35,40 @@ type KernelGraphLaneOptions struct {
 	Program *KernelGraphLaneProgram
 	Catalog *Catalog
 	Library *AgentContextLibrary
-	// Codemode offers the kernel's codemode tool to the node sessions. It
-	// is off by default.
 	Codemode GraphCodemode
-	// TokenBudget is the token budget a node runs under. Absent means unmetered - which is the
-	// right default for a program node, but NOT for an agent that can spend real tokens, so the
-	// runtime supplies one whenever limits are configured.
 	TokenBudget   *TokenBudget
 	ReserveTokens *float64
-	// Directory is the models the runtime is configured with.
 	Directory func() []ModelEntry
-	// Scheduler is the host-wide gate for model requests.
 	Scheduler *ModelScheduler
-	// CredentialFor resolves the credential for a model entry; nil means the node cannot run.
 	CredentialFor func(entry ModelEntry) *KernelGraphLaneCredential
-	// InstancesDir is where per-node session directories live.
 	InstancesDir string
-	// StateDir is the state root; worker configs are written beneath it.
 	StateDir  string
 	GraphHome string
-	// WorkspaceFor is the project workspace for a graph, resolved from its task row.
 	WorkspaceFor func(graphId string) *string
-	// Git is the real Git integration, used to give each node its OWN work copy.
 	Git *GitIntegration
-	// Artifacts is the artifact store a node's declared deliverable is published to.
 	Artifacts *ArtifactWorkspace
-	// GateFor is the gate for a node; absent means an unmetered passthrough.
 	GateFor func(graphId, nodeId string) *SendGate
-	// OnMainMessage answers a node's message to the main agent.
 	OnMainMessage func(graphId, nodeId, text, requestId string) any
-	// OnToolCall answers a tool the node called that the session does not offer.
 	OnToolCall func(graphId, nodeId, name string, args any) PiToolAnswer
 }
 
-// ModelForContext names the node a model is selected for.
 type ModelForContext struct {
 	GraphId         string
 	NodeId          string
 	RevisionVersion int
 }
 
-// kernelGraphLaneNodeLocation is where one node works.
 type kernelGraphLaneNodeLocation struct {
 	Workspace string
 	Base      string
 }
 
-// kernelGraphLaneNodeChannels are the node's own channels.
-//
-// The node's turn runs on the kernel, in this process. The telemetry it
-// records, the events it publishes and the tools it may call are the lane's,
-// and the kernel session reads them.
 type kernelGraphLaneNodeChannels struct {
-	// OnTelemetry records every tool call the node makes.
 	OnTelemetry func(call PiAdapterToolCall)
-	// OnEvent publishes one kernel event.
 	OnEvent func(event any)
-	// OnToolCall runs one tool the model called.
 	OnToolCall func(name string, args any) (PiToolAnswer, error)
 }
 
-// ModelFor selects against immutable implementer history, including aliases and routing cycles.
 func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForContext) *ModelEntry {
 	entry := options.Catalog.Definition(recipe)
 	excluded := map[string]bool{}
@@ -119,7 +87,6 @@ func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForCo
 			}
 			predecessors[target][source] = true
 		}
-		// Disabling an edge cannot erase the identity of work already received over it.
 		for _, edge := range definition.Edges {
 			connect(edge.From, edge.To)
 		}
@@ -198,7 +165,6 @@ func ModelFor(options KernelGraphLaneOptions, recipe string, context *ModelForCo
 	return nil
 }
 
-// KernelGraphLane wires the production v2 lane.
 func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 	state := newKernelGraphLaneState(options)
 	lane := NewGraphLane(state.laneOptions())
@@ -237,10 +203,6 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		if execution == nil {
 			return nil, nil
 		}
-		// The kernel reports the frozen identity out of the record it
-		// stored, so this reads the record's own identity twice over and
-		// cannot fail on a record the kernel wrote. It stays as the lane's
-		// refusal for a record that came from somewhere else.
 		if wrapper.Identity != wrapper.Record.Identity {
 			return nil, fmt.Errorf("Frozen node identity mismatch")
 		}
@@ -249,27 +211,17 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 		originalState := execution.State
 		state.options.Kernel.SetExecutionState(id, "running")
 		defer state.options.Kernel.SetExecutionState(id, originalState)
-		// The PiG kernel runs the node's turn in this process, so there is no
-		// sidecar admission to restore. The frozen configuration is what the
-		// re-run needs, and building the node's config from it is what puts
-		// that configuration in the lane.
 		return &NodeRecoveryBinding{Config: map[string]any{}}, nil
 	})
 	return lane
 }
 
-// kernelGraphLaneWorkingEnvironment is the environment the node's system prompt names.
-//
-// The key order is the TypeScript object literal order.
 type kernelGraphLaneWorkingEnvironment struct {
 	Workspace string                `json:"workspace"`
 	Base      string                `json:"base"`
 	Access    *ResolvedAccessPolicy `json:"access"`
 }
 
-// kernelGraphLaneBindingEnvironment is the environment the node binding stores.
-//
-// The key order is the TypeScript object literal order.
 type kernelGraphLaneBindingEnvironment struct {
 	Revision  int                   `json:"revision"`
 	Workspace string                `json:"workspace"`
@@ -277,7 +229,6 @@ type kernelGraphLaneBindingEnvironment struct {
 	Access    *ResolvedAccessPolicy `json:"access"`
 }
 
-// kernelGraphLaneAccess is the access policy of a session environment, when it has one.
 func kernelGraphLaneAccess(environment *NodeSessionEnvironment) *ResolvedAccessPolicy {
 	if environment == nil {
 		return nil
@@ -285,7 +236,6 @@ func kernelGraphLaneAccess(environment *NodeSessionEnvironment) *ResolvedAccessP
 	return environment.Access
 }
 
-// kernelGraphLaneTruthy is the JavaScript truthiness of one value.
 func kernelGraphLaneTruthy(value any) bool {
 	switch typed := value.(type) {
 	case nil:
@@ -305,7 +255,6 @@ func kernelGraphLaneTruthy(value any) bool {
 	}
 }
 
-// kernelGraphLaneAdmittedNode is the admitted instance of one node.
 func kernelGraphLaneAdmittedNode(kernel *KernelStore, graphId, nodeId string) KernelNodeView {
 	for _, node := range kernel.ListNodes(graphId) {
 		if node.NodeId == nodeId {
@@ -315,13 +264,11 @@ func kernelGraphLaneAdmittedNode(kernel *KernelStore, graphId, nodeId string) Ke
 	return KernelNodeView{NodeId: nodeId}
 }
 
-// kernelGraphLaneUnlimited reports whether one execution may estimate missing usage.
 func kernelGraphLaneUnlimited(kernel *KernelStore, executionId string) bool {
 	execution := kernel.Execution(executionId)
 	return execution != nil && execution.TokenBudget != nil && execution.TokenBudget.Unlimited
 }
 
-// kernelGraphLaneMessageText is the text of one assistant message.
 func kernelGraphLaneMessageText(content any) string {
 	if text, ok := content.(string); ok {
 		return text
@@ -345,7 +292,6 @@ func kernelGraphLaneMessageText(content any) string {
 	return out.String()
 }
 
-// kernelGraphLaneStreamOptions are the provider options one turn runs with.
 func kernelGraphLaneStreamOptions(options WorkerModelOptions, abort *AbortSignal) map[string]any {
 	raw := map[string]any{}
 	if options.Reasoning != nil {
@@ -364,7 +310,6 @@ func kernelGraphLaneStreamOptions(options WorkerModelOptions, abort *AbortSignal
 	return raw
 }
 
-// kernelGraphLaneSlot reserves one credential slot for a node that has a limit.
 func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, credential *KernelGraphLaneCredential, executionId string) func(candidate ModelEntry) *piAdapterSlot {
 	if options.Scheduler == nil || (credential.Limit == nil && credential.GroupLimit == nil) {
 		return nil
@@ -396,8 +341,6 @@ func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, crede
 				return SlotRequest{
 					CredentialId: credentialID, ApiKey: binding.ApiKey, Limit: binding.Limit,
 					SharedGroupId: rsiStringValue(binding.SharedGroupId), GroupLimit: binding.GroupLimit,
-					// The scheduler re-reads the binding when it grants the slot, so a
-					// hot config apply cannot hand out a stale key.
 					Refresh: request,
 				}
 			}
@@ -428,13 +371,11 @@ func kernelGraphLaneSlot(options KernelGraphLaneOptions, model ModelEntry, crede
 	}
 }
 
-// kernelGraphLaneToolCall is one tool call a node made.
 type kernelGraphLaneToolCall struct {
 	Name string `json:"name"`
 	Args any    `json:"args"`
 }
 
-// kernelGraphLaneJSON serializes one value the way JSON.stringify does.
 func kernelGraphLaneJSON(value any) string {
 	buffer := &bytes.Buffer{}
 	encoder := json.NewEncoder(buffer)
@@ -445,7 +386,6 @@ func kernelGraphLaneJSON(value any) string {
 	return strings.TrimRight(buffer.String(), "\n")
 }
 
-// kernelGraphLaneEncodeURIComponent encodes one path segment the way encodeURIComponent does.
 func kernelGraphLaneEncodeURIComponent(value string) string {
 	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
 	builder := strings.Builder{}

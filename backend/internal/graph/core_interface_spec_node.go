@@ -11,14 +11,8 @@ var interfaceSpecDeliverableSlug = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[
 
 var interfaceSpecSchemaKind = regexp.MustCompile(`^([a-z][a-z0-9._-]*)@([1-9]\d*)$`)
 
-// interfaceSpecHarnessRoles are the role files a node's harness may replace.
 var interfaceSpecHarnessRoles = map[string]bool{"common": true, "main": true, "worker": true, "reviewer": true}
 
-// interfaceSpecValidateHarness checks the prompt overrides of one node.
-//
-// The keys name prompt files of the editable library. Only those files are
-// replaceable: a harness changes what the agent is told, not what the host
-// enforces.
 func interfaceSpecValidateHarness(id string, raw any) {
 	record, ok := raw.(map[string]any)
 	if !ok {
@@ -56,7 +50,6 @@ func interfaceSpecValidateHarness(id string, raw any) {
 	}
 }
 
-// interfaceSpecHarnessKeyAgent accepts an agent identity file name.
 func interfaceSpecHarnessKeyAgent(key string) bool {
 	id := strings.TrimSuffix(strings.TrimPrefix(key, "agents/"), ".md")
 	return id != "" && !strings.ContainsAny(id, "/\\ \t")

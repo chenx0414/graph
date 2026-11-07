@@ -8,7 +8,6 @@ import (
 	"database/sql"
 )
 
-// RetentionOptions is the conservative reclaim window for one task database.
 type RetentionOptions struct {
 	Now                      int64
 	KeepEventsPerTask        int
@@ -17,7 +16,6 @@ type RetentionOptions struct {
 	MinAgeMs                 int64
 }
 
-// RetentionPlan is what apply would delete.
 type RetentionPlan struct {
 	Events       int
 	Capabilities int
@@ -25,7 +23,6 @@ type RetentionPlan struct {
 	Bytes        int
 }
 
-// RetentionApplied is the row counts actually deleted.
 type RetentionApplied struct {
 	Events       int
 	Capabilities int
@@ -73,7 +70,6 @@ func doomed(options RetentionOptions) retentionDoomed {
 	}
 }
 
-// PlanRetention counts doomed rows without deleting them.
 func PlanRetention(db *sql.DB, options RetentionOptions) RetentionPlan {
 	sqlText := doomed(options)
 	var events, bytes, capabilities, handoffs int
@@ -89,7 +85,6 @@ func PlanRetention(db *sql.DB, options RetentionOptions) RetentionPlan {
 	return RetentionPlan{Events: events, Capabilities: capabilities, Handoffs: handoffs, Bytes: bytes}
 }
 
-// ApplyRetention deletes the doomed rows inside BEGIN IMMEDIATE.
 func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 	sqlText := doomed(options)
 	if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
@@ -107,11 +102,6 @@ func ApplyRetention(db *sql.DB, options RetentionOptions) RetentionApplied {
 	return applied
 }
 
-// ApplyRetention deletes the doomed rows of one store.
-//
-// The deletes take the store's transaction lock, so they cannot interleave
-// with another writer's transaction: the reclaim runs inside a daemon that
-// keeps writing.
 func (s *TaskStore) ApplyRetention(options RetentionOptions) RetentionApplied {
 	s.txMu.Lock()
 	defer s.txMu.Unlock()

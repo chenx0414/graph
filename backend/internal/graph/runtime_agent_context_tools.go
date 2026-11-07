@@ -6,7 +6,6 @@ import (
 	"os"
 )
 
-// compose renders the system prompt of one operation.
 func (assembly *AgentContextAssembly) compose(identity string, tools []AgentContextTool, capabilities []AgentCapabilityPromptEntry) AgentContextComposition {
 	available := map[string]bool{}
 	for _, tool := range tools {
@@ -15,7 +14,6 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 		}
 	}
 	commonRules := assembly.common
-	// Match only the built-in rules; user-owned text is never rewritten.
 	if os.Getenv("GRAPH_MATCH_SEARCH_GUIDANCE") == "1" && commonRules == DEFAULT_COMMON_RULES {
 		searchRule := agentContextSearchRule(DEFAULT_COMMON_RULES)
 		matched := []string{}
@@ -55,7 +53,6 @@ func (assembly *AgentContextAssembly) compose(identity string, tools []AgentCont
 	}
 }
 
-// agentContextSearchRule is the built-in rule line about repository search.
 func agentContextSearchRule(rules string) string {
 	for _, line := range strings.Split(rules, "\n") {
 		if strings.HasPrefix(line, "- Search the repository with the indexed extension tools") {
@@ -65,7 +62,6 @@ func agentContextSearchRule(rules string) string {
 	return ""
 }
 
-// agentContextHostTool is one declared tool of the host surface.
 func agentContextHostTool(declaration AgentToolDeclaration) AgentContextTool {
 	return AgentContextTool{
 		Name: declaration.Name, Description: declaration.Description, Source: "Graph",
@@ -74,7 +70,6 @@ func agentContextHostTool(declaration AgentToolDeclaration) AgentContextTool {
 	}
 }
 
-// agentContextNativeTools is the native tool surface of one operation.
 func agentContextNativeTools(names []string) []AgentContextTool {
 	out := []AgentContextTool{}
 	for _, tool := range PiNativeToolPromptEntries(names) {

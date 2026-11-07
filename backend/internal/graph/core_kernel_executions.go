@@ -13,7 +13,6 @@ func (k *KernelStore) PublishRevision(taskID string, definition GraphDefinition,
 	return k.tx(func() any { return k.InsertRevision(taskID, parsed, reason, version...) }).(*RevisionRow)
 }
 
-// InsertRevision writes one revision without opening a transaction.
 func (k *KernelStore) InsertRevision(taskID string, definition GraphDefinition, reason string, version ...int) *RevisionRow {
 	if strings.TrimSpace(reason) == "" {
 		Raise("invalid_definition", "A revision reason is required")
@@ -33,7 +32,6 @@ func (k *KernelStore) InsertRevision(taskID string, definition GraphDefinition, 
 	return &RevisionRow{TaskId: taskID, Version: next, Definition: definition, Reason: reason, CreatedAt: createdAt}
 }
 
-// Revision reads one immutable definition.
 func (k *KernelStore) Revision(taskID string, version int) *RevisionRow {
 	row, ok := g5One(k.Db, "SELECT definition,reason,created_at FROM kernel_revisions WHERE task_id=? AND version=?", taskID, version)
 	if !ok {
@@ -46,7 +44,6 @@ func (k *KernelStore) Revision(taskID string, version int) *RevisionRow {
 	return &RevisionRow{TaskId: taskID, Version: version, Definition: definition, Reason: g5Str(row["reason"]), CreatedAt: g5Int(row["created_at"])}
 }
 
-// LatestRevision is the highest published version, or nil.
 func (k *KernelStore) LatestRevision(taskID string) *RevisionRow {
 	row, ok := g5One(k.Db, "SELECT version FROM kernel_revisions WHERE task_id=? ORDER BY version DESC LIMIT 1", taskID)
 	if !ok {
@@ -55,7 +52,6 @@ func (k *KernelStore) LatestRevision(taskID string) *RevisionRow {
 	return k.Revision(taskID, int(g5Int(row["version"])))
 }
 
-// ModuleTransaction runs a module judgment in the current transaction or a new one.
 func (k *KernelStore) ModuleTransaction(action func() any) any {
 	if k.moduleTransactionActive {
 		return action()
@@ -74,7 +70,6 @@ func (input AdmitNodeInput) instance() string {
 	return input.InstanceID
 }
 
-// AdmitNode inserts one node and inherits a recorded graph pause.
 func (k *KernelStore) AdmitNode(taskID string, revisionVersion int, nodeID string, input AdmitNodeInput) {
 	revision := k.Revision(taskID, revisionVersion)
 	if revision == nil {
@@ -94,7 +89,6 @@ func (k *KernelStore) AdmitNode(taskID string, revisionVersion int, nodeID strin
 	}
 }
 
-// AdmitModule inserts one module row.
 func (k *KernelStore) AdmitModule(taskID string, revisionVersion int, moduleID string, input AdmitModuleInput) {
 	revision := k.Revision(taskID, revisionVersion)
 	if revision == nil {
@@ -106,7 +100,6 @@ func (k *KernelStore) AdmitModule(taskID string, revisionVersion int, moduleID s
 	g5Exec(k.Db, "INSERT INTO kernel_modules(task_id,revision_version,module_id,module_type,trigger) VALUES(?,?,?,?,?)", taskID, revisionVersion, moduleID, input.ModuleType, input.Trigger)
 }
 
-// StartExecution opens a running execution, or resumes a blocked one with the same id.
 func (k *KernelStore) StartExecution(taskID string, input StartExecutionRequest) ExecutionRow {
 	return k.Store.Transaction(func() any {
 		existing := k.Execution(input.ExecutionId)
@@ -134,21 +127,14 @@ func (k *KernelStore) StartExecution(taskID string, input StartExecutionRequest)
 	}).(ExecutionRow)
 }
 
-// BlockQueued parks a claimed item back on the queue.
 func (k *KernelStore) BlockQueued(taskID string, seq int64) {
 	g5Exec(k.Db, "UPDATE kernel_queue SET state='queued' WHERE task_id=? AND seq=? AND state='claimed'", taskID, seq)
 }
 
-// SetExecutionState records the state of one execution.
-//
-// The lane sets an execution to running while it restores a frozen turn
-// and puts the old state back afterwards. That is a fact about the
-// execution, so the store records it.
 func (k *KernelStore) SetExecutionState(executionID, state string) {
 	g5Exec(k.Db, "UPDATE kernel_executions SET state=? WHERE id=?", state, executionID)
 }
 
-// FinishExecution records a terminal execution state.
 func (k *KernelStore) FinishExecution(executionID, state string) {
 	finish := func() {
 		now := NowMillis()
@@ -162,7 +148,6 @@ func (k *KernelStore) FinishExecution(executionID, state string) {
 	k.Store.Transaction(func() any { finish(); return nil })
 }
 
-// Execution reads one execution row.
 func (k *KernelStore) Execution(executionID string) *ExecutionRow {
 	row, ok := g5One(k.Db, "SELECT * FROM kernel_executions WHERE id=?", executionID)
 	if !ok {
@@ -171,9 +156,6 @@ func (k *KernelStore) Execution(executionID string) *ExecutionRow {
 	return kernelExecutionRow(row)
 }
 
-// RunningExecution is the execution a node is running right now, if it has
-// one. The lane used to ask the table this same question in eight places,
-// each with its own copy of the query.
 func (k *KernelStore) RunningExecution(taskID, nodeID string) *ExecutionRow {
 	row, ok := g5One(k.Db, "SELECT * FROM kernel_executions WHERE task_id=? AND node_id=? AND state='running' ORDER BY rowid DESC LIMIT 1", taskID, nodeID)
 	if !ok {
@@ -182,7 +164,6 @@ func (k *KernelStore) RunningExecution(taskID, nodeID string) *ExecutionRow {
 	return kernelExecutionRow(row)
 }
 
-// kernelExecutionRow reads one execution row.
 func kernelExecutionRow(row map[string]any) *ExecutionRow {
 	var submission *string
 	if row["submission_id"] != nil {
@@ -216,7 +197,6 @@ func kernelExecutionRow(row map[string]any) *ExecutionRow {
 	}
 }
 
-// NoteExecutionContinuation counts a retry or resubmit before it is sent.
 func (k *KernelStore) NoteExecutionContinuation(executionID, kind string, missing []string) {
 	if missing == nil {
 		missing = []string{}
@@ -232,7 +212,6 @@ func (k *KernelStore) NoteExecutionContinuation(executionID, kind string, missin
 	g5Exec(k.Db, "UPDATE kernel_executions SET "+column+"="+column+"+1,pending_gap=? WHERE id=?", string(raw), executionID)
 }
 
-// NoteExecutionAttempt increments the attempt counter and returns it.
 func (k *KernelStore) NoteExecutionAttempt(executionID string) int {
 	g5Exec(k.Db, "UPDATE kernel_executions SET attempt=attempt+1 WHERE id=?", executionID)
 	return k.Execution(executionID).Attempt
@@ -245,7 +224,6 @@ func (k *KernelStore) assertOutputsOpen(taskID string) {
 	}
 }
 
-// Submit validates and writes one submission, or replays an identical one.
 func (k *KernelStore) Submit(executionID string, request SubmitRequest) SubmitReceipt {
 	return k.Store.Transaction(func() any {
 		execution := k.Execution(executionID)
@@ -414,8 +392,6 @@ func (k *KernelStore) replayOrRefuse(execution ExecutionRow, request SubmitReque
 	return SubmitReceipt{}
 }
 
-// BlockFailedExecution parks an execution that failed, so the recovery can
-// settle it rather than send it again.
 func (k *KernelStore) BlockFailedExecution(executionID string) {
 	g5Exec(k.Db, "UPDATE kernel_executions SET state='blocked' WHERE id=? AND state='failed'", executionID)
 }

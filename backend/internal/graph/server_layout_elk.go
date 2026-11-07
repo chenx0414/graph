@@ -29,7 +29,6 @@ func layoutNumberDefault(value any, fallback float64) float64 {
 	return layoutNumber(value)
 }
 
-// PERF(port): elkjs has no sanctioned Go library. Layout shells out to node and elkjs from ApplicationRoot.
 func layoutElk(graph map[string]any) map[string]any {
 	payload, err := json.Marshal(graph)
 	if err != nil {

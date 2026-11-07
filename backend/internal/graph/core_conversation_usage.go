@@ -7,21 +7,12 @@ import (
 	"encoding/json"
 )
 
-// TurnFailureText turns an internal failure into a short, actionable line for the chat.
-// Raw exception text, stack traces and JSON stay in the problem ledger.
 func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 	failureKind := TurnFailureRun
 	if len(kind) > 0 {
 		failureKind = kind[0]
 	}
-	// A setup failure never reached the model, so its text is the environment story and has to be
-	// shown. Reading a stack that merely mentions package_json_reader as a truncated model output
-	// is how a Pi worker that could not load its own modules became an actively misleading notice.
 	detail := failureDetail(reason)
-	// A failure the transport already retried says so, with the original error
-	// next to it. "Send it again" is what the user used to read after the daemon
-	// had already spent two retries on their behalf: the message was never lost,
-	// the endpoint was, and only the user's own resend ever produced a reply.
 	if retries, retried := TransportRetries(reason); retried {
 		return fmt.Sprintf("主 Agent 本轮没有完成回复：已自动重试 %d 次仍失败。", retries) + conversationFailureSuffix(detail)
 	}
@@ -40,17 +31,8 @@ func TurnFailureText(reason string, kind ...TurnFailureKind) string {
 	return "主 Agent 本轮没有完成回复，消息已保留，可以再发一次重试。" + conversationFailureSuffix(detail)
 }
 
-// turnFailureOutputKeys are the fields a failed turn carries its reason in.
-//
-// A run failure carries error, a setup failure carries setupError. Reading the
-// field is what keeps a setup failure from being described as a truncated
-// model output.
 var turnFailureOutputKeys = []string{"error", "setupError"}
 
-// TurnFailureReason reads the concrete reason behind a failed master turn plus the field it
-// came from: a run failure carries error, a setup failure carries setupError, and anything
-// else falls back to the raw result. Reading the field is what keeps a setup failure from
-// being described as a truncated model output.
 func TurnFailureReason(result OperationResult) TurnFailure {
 	output, _ := result.Output.(map[string]any)
 	for _, key := range turnFailureOutputKeys {
@@ -69,9 +51,6 @@ func TurnFailureReason(result OperationResult) TurnFailure {
 	return TurnFailure{Reason: reason, Kind: TurnFailureRun}
 }
 
-// OperationReplied reports whether one turn already recorded its final answer. The marker
-// lives on the operation, so it cannot be confused with a user message that shares the
-// operation id and the kind.
 func OperationReplied(store *TaskStore, operationId *string) bool {
 	if operationId == nil || *operationId == "" {
 		return false
@@ -84,7 +63,6 @@ func OperationReplied(store *TaskStore, operationId *string) bool {
 	if !ok || value == nil {
 		return false
 	}
-	// The row object is always truthy, so the marker itself has to be inspected.
 	switch value.(type) {
 	case int64, int, float64:
 		return true
@@ -92,8 +70,6 @@ func OperationReplied(store *TaskStore, operationId *string) bool {
 	return false
 }
 
-// MarkOperationReplied marks one turn as answered. Callers write it in the same transaction
-// as the reply, so the marker and the reply become durable together.
 func MarkOperationReplied(store *TaskStore, operationId *string) {
 	if operationId == nil || *operationId == "" {
 		return
@@ -101,8 +77,6 @@ func MarkOperationReplied(store *TaskStore, operationId *string) {
 	store.MarkOperationReplied(*operationId, NowMillis())
 }
 
-// RecordConversationOutput persists the durable side of one master turn: its assistant
-// reply and the summarized tool activity. Idempotent per operation.
 func RecordConversationOutput(store *TaskStore, operation Operation, result OperationResult) {
 	if operation.Kind != "agent" {
 		return
@@ -115,9 +89,6 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 	if conversation == nil {
 		return
 	}
-	// The marker is an explicit fact about the turn: a user message carries the same
-	// operation id and kind='chat', so a message query cannot be trusted to decide
-	// whether this turn already answered.
 	alreadyReplied := OperationReplied(store, &operation.Id)
 	output, _ := result.Output.(map[string]any)
 	if result.Outcome == "completed" {
@@ -129,18 +100,11 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 		if text, ok := output["suggestedPrompt"].(string); ok {
 			suggestedPrompt = utf16Slice(strings.TrimSpace(text), 500)
 		}
-		// The turn's activity keeps its own order: the narration the Agent emitted
-		// between tool calls and the tool calls themselves, written before the reply
-		// so the transcript reads in the order it happened. Rewritten on a retry
-		// instead of duplicated, and the final reply stays the idempotency marker.
 		activity := output["activity"]
 		if !conversationActivityIsArray(activity) {
 			activity = output["toolActivity"]
 		}
 		records := ConversationActivityRecords(activity, reply)
-		// A background tool call is not finished because its turn is: the
-		// turn's own closing keeps it running, so the next read of the
-		// conversation still shows the work in flight.
 		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil,
 			LiveDeferredToolCallIds(store, conversation.Id))
 		if reply != "" && !alreadyReplied {
@@ -174,8 +138,6 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 	}
 }
 
-// RecordConversationInterruption records one plain-language interruption for a master turn
-// whose outcome is uncertain and which will therefore not reach RecordConversationOutput.
 func RecordConversationInterruption(store *TaskStore, operation Operation, reason string, kind ...TurnFailureKind) {
 	if operation.Kind != "agent" {
 		return
@@ -188,9 +150,6 @@ func RecordConversationInterruption(store *TaskStore, operation Operation, reaso
 	if conversation == nil {
 		return
 	}
-	// A turn that already delivered its reply was not lost, even if the process died
-	// afterwards (a reload can close it right after the receipt became durable), so a
-	// second notice would only contradict what the user read.
 	if OperationReplied(store, &operation.Id) {
 		return
 	}
@@ -208,9 +167,6 @@ func RecordConversationInterruption(store *TaskStore, operation Operation, reaso
 	})
 }
 
-// ReleaseMessages queues the messages of a refused send again; a pre-send refusal proves
-// the model never saw the message. The state change is published so incremental caches
-// catch up.
 func ReleaseMessages(store *TaskStore, operationId string) {
 	rows := MessagesForOperation(store, operationId)
 	released := []MessageRow{}
@@ -228,9 +184,6 @@ func ReleaseMessages(store *TaskStore, operationId string) {
 	}
 }
 
-// ListMessages pages through the message list without ever hiding the newest records: the
-// default page is the latest window, `after` walks forward (incremental reads) and `before`
-// walks backward (history).
 func ListMessages(store *TaskStore, conversationId string, query MessageQuery) []ConversationMessage {
 	pageSize := 200
 	if query.Limit != nil && *query.Limit > 0 {
@@ -260,9 +213,6 @@ func ListMessages(store *TaskStore, conversationId string, query MessageQuery) [
 	return messages
 }
 
-// ConversationDigest is the compact, factual execution status handed to the master on
-// every turn. It is a projection of recorded state, never a fabricated summary: questions,
-// phases, commits and node states come straight from the ledger.
 func ConversationDigest(store *TaskStore, conversationId string) string {
 	kernel := NewKernelStore(store)
 	conversation := ConversationRowOf(store, conversationId)
@@ -295,8 +245,6 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 	} else {
 		lines = append(lines, "Draft: none yet")
 	}
-	// Every version is listed, archived or not: main has to know which versions
-	// exist before it confirms or withdraws one.
 	cards := kernelRows(store.Db, "SELECT version,archived_at,draft_revision FROM proposals WHERE task_id=? AND deleted_at IS NULL ORDER BY version", anchor.ID)
 	cardTexts := []string{}
 	for _, card := range cards {
@@ -307,8 +255,6 @@ func ConversationDigest(store *TaskStore, conversationId string) string {
 		text += fmt.Sprintf(" rev%d", kernelInt(card["draft_revision"]))
 		cardTexts = append(cardTexts, text)
 	}
-	// A single card besides the one already named must be discoverable too: main
-	// sees "Draft: none yet" otherwise and never learns the version exists.
 	if len(cards) > 1 {
 		lines = append(lines, "Draft cards: "+strings.Join(cardTexts, ", "))
 	}

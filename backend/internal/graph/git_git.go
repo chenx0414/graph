@@ -15,7 +15,6 @@ var sqliteName = regexp.MustCompile(`\.sqlite(-wal|-shm)?$`)
 
 var secretName = regexp.MustCompile(`\.(pem|key|p12|pfx)$`)
 
-// GitIdentity is the author and committer recorded on host commits.
 type GitIdentity struct {
 	Name  string
 	Email string
@@ -100,24 +99,20 @@ func runGit(cwd string, args []string, input *string, identity *GitIdentity, ext
 	return gitRun{Code: code, Stdout: stdout.String(), Stderr: strings.TrimSpace(stderr.String())}
 }
 
-// Git runs git and trims stdout.
 func Git(cwd string, args []string, input *string, identity *GitIdentity) gitRun {
 	result := runGit(cwd, args, input, identity, nil)
 	result.Stdout = strings.TrimSpace(result.Stdout)
 	return result
 }
 
-// GitRaw keeps stdout bytes, including a leading status space and a trailing newline.
 func GitRaw(cwd string, args []string, input *string, extraEnv map[string]string) gitRun {
 	return runGit(cwd, args, input, nil, extraEnv)
 }
 
-// HasHead reports whether HEAD resolves.
 func HasHead(cwd string) bool {
 	return Git(cwd, []string{"rev-parse", "--verify", "-q", "HEAD"}, nil, nil).Code == 0
 }
 
-// HeadSha is HEAD, or nil when the repository has no commit.
 func HeadSha(cwd string) *string { return RevParse(cwd, "HEAD") }
 
 var HOST_EXCLUDES = []string{

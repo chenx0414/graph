@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// RunReady dispatches every currently ready node and waits for them.
 func (e *Execution) RunReady() ExecutionDispatch {
 	nodes := e.readyNodes()
 	results := make([]bool, len(nodes))
@@ -38,7 +37,6 @@ func (e *Execution) RunReady() ExecutionDispatch {
 	return ExecutionDispatch{Dispatched: dispatched}
 }
 
-// Drive dispatches newly ready work as completions land.
 func (e *Execution) Drive() ExecutionDispatch {
 	e.mu.Lock()
 	e.driveActive++
@@ -83,7 +81,6 @@ func (e *Execution) Drive() ExecutionDispatch {
 	return ExecutionDispatch{Dispatched: dispatched}
 }
 
-// Pump dispatches every currently ready node and returns without waiting for the workers.
 func (e *Execution) Pump() ExecutionDispatch {
 	e.mu.Lock()
 	if e.stopping || e.pumping {
@@ -109,7 +106,6 @@ func (e *Execution) Pump() ExecutionDispatch {
 	return ExecutionDispatch{Dispatched: dispatched}
 }
 
-// pumpGraphs runs every v2 graph that currently has queued work.
 func (e *Execution) pumpGraphs() int {
 	if e.graphs == nil {
 		return 0
@@ -165,7 +161,6 @@ func (e *Execution) pumpGraphs() int {
 	return dispatched
 }
 
-// runGuarded runs one action and reports the panic it raised, if any.
 func (e *Execution) runGuarded(action func()) (failure any) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -176,7 +171,6 @@ func (e *Execution) runGuarded(action func()) (failure any) {
 	return nil
 }
 
-// reportGraphFailure makes a graph that could not run visible.
 func (e *Execution) reportGraphFailure(taskId string, failure any) {
 	reason := dispatchFailureText(failure)
 	graphDatabaseMu.Lock()
@@ -195,7 +189,6 @@ func (e *Execution) reportGraphFailure(taskId string, failure any) {
 	}()
 }
 
-// Kick ensures a newly queued message is dispatched even if no drive loop is active.
 func (e *Execution) Kick() {
 	e.sweepWorkcopies()
 	e.sweepState()
@@ -210,7 +203,6 @@ func (e *Execution) Kick() {
 	}
 }
 
-// sweepWorkcopies drops the work copies of a task that reached a terminal phase.
 func (e *Execution) sweepWorkcopies() {
 	now := NowMillis()
 	e.mu.Lock()
@@ -233,7 +225,6 @@ func (e *Execution) sweepWorkcopies() {
 	}()
 }
 
-// remainingSlots is the free execution capacity of one node kind.
 func (e *Execution) remainingSlots(kind string) int64 {
 	slot := "program"
 	if kind == "agent" {
@@ -242,7 +233,6 @@ func (e *Execution) remainingSlots(kind string) int64 {
 	return int64(ExecutionLimit(slot)) - OccupiedSlots(e.store, slot)
 }
 
-// notifyWork wakes the drive loop.
 func (e *Execution) notifyWork() {
 	e.mu.Lock()
 	close(e.changed)
@@ -250,7 +240,6 @@ func (e *Execution) notifyWork() {
 	e.mu.Unlock()
 }
 
-// waitForWork blocks until one unit of work settles or the drive loop is woken.
 func (e *Execution) waitForWork() {
 	e.mu.Lock()
 	signal := e.changed

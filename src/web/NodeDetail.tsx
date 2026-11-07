@@ -1,13 +1,3 @@
-/**
- * The node chat tab: one graph node's subagent, opened as its own window.
- *
- * Two things live here and nothing else: what the node was actually told (its
- * injected system prompt and the briefing its session carries, both read back
- * from the ledger and the session file rather than recomputed), and its own
- * transcript. Usage, capability lists, context provenance and the
- * operation ledger used to sit next to them; they are deliberately gone - the
- * graph and the task records are where that belongs.
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api.ts';
@@ -34,7 +24,6 @@ interface NodePromptView {
 type NodeEnvironment = { revision: number; workspace: string; base: string;
   access: { mode: string; network: string; filesystem: { read: string; write: string } } };
 
-/** What the overview reads: enough to say who this node is and how it is doing. */
 interface NodeOverview {
   toolCallCount?: number;
   environment?: NodeEnvironment | null;
@@ -44,11 +33,9 @@ interface NodeOverview {
   entryCount: number;
 }
 
-/** One transcript entry, as the node's session records it. */
 export type { Entry } from './node-transcript.ts';
 import type { Entry } from './node-transcript.ts';
 
-/** The node-run payload the transcript reader consumes. */
 export interface NodeRun {
   environment?: NodeEnvironment | null;
   taskId: string; nodeId: string;
@@ -56,9 +43,7 @@ export interface NodeRun {
   instance: { id: string; model: string | null; definitionVersion: string | null; used: number; budget: number | null; unlimited: boolean; modelsUsed: string[] } | null;
   session: { sessionId: string; sessionFile: string | null } | null;
   operations: unknown[]; invocations: unknown[]; questions: unknown[]; evidence: unknown[];
-  /** Messages typed while this node was busy, oldest first. */
   queued?: { seq: number; text: string; createdAt?: number }[];
-  /** The node's newest settled request: what it wrote and how long the provider took. */
   throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null } | undefined;
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
 }
@@ -75,9 +60,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
   nodeId: string;
   agentName?: string | null;
 }) {
-  // Display actual send records separately from the next configured turn.
   const [prompt, setPrompt] = useState<NodePromptView | null>(null);
-  // The window is named after the agent that runs the node, and only the graph knows that name.
   const [named, setNamed] = useState<string | null>(agentName ?? null);
   const [overview, setOverview] = useState<NodeOverview | null>(null);
   const [loading, setLoading] = useState(true);

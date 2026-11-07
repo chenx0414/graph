@@ -1,6 +1,5 @@
 package graph
 
-// Admit creates the durable intent before any adapter can cause an external effect.
 func (l *OperationLifecycle) Admit(input OperationAdmitInput) Operation {
 	return l.transaction(func() any {
 		if input.Reservation < 0 {

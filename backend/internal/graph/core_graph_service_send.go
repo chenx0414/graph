@@ -6,14 +6,6 @@ import (
 	"strings"
 )
 
-// graphSendValue reads the value one agent sent to a graph input.
-//
-// Measured 2026-11-04: a model that has an object to hand over sometimes
-// encodes it as a JSON string ("value": "{\"commit\":\"a5df4002\"}"), and the
-// graph's input protocol then refuses the delivery with "must be object,
-// received a string" no matter how carefully the shape is described. Only an
-// encoded object or array is decoded: a plain string stays itself, so a text
-// value is never rewritten into something else.
 func graphSendValue(value any) any {
 	text, ok := value.(string)
 	if !ok {
@@ -34,7 +26,6 @@ func graphSendValue(value any) any {
 	return value
 }
 
-// GraphSend delivers a public input or a chat message to a graph.
 func (service *graphManagementService) GraphSend(input GraphSendInput) any {
 	graph := service.runtime(input.GraphId)
 	if input.Input != nil {

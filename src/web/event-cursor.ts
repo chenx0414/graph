@@ -1,7 +1,3 @@
-/** Decide whether a stream frame advances the task cursor. Duplicate or
- * out-of-order deliveries return null so callers never apply an old state.
- * The payload is preserved so stream consumers can apply incremental updates
- * (assistant deltas and tool activity) before refetching the record. */
 export interface StreamEvent {
   cursor: number;
   type: string;

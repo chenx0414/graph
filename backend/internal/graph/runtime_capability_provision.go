@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// capabilityResolveManifestDomains resolves the host patterns one manifest declares.
 func capabilityResolveManifestDomains(declared any, label string, granted []string, secrets CapabilitySecrets) []string {
 	if declared == nil {
 		return NormalizeDomains(granted)
@@ -62,7 +61,6 @@ func capabilityResolveManifestDomains(declared any, label string, granted []stri
 	return NormalizeDomains(append(append([]string{}, granted...), resolved...))
 }
 
-// capabilityDomainPattern normalizes one host pattern, reporting an invalid one.
 func capabilityDomainPattern(host string) (string, bool) {
 	pattern := ""
 	recovered := false
@@ -80,12 +78,10 @@ func capabilityDomainPattern(host string) (string, bool) {
 	return pattern, true
 }
 
-// capabilityManifestNetworkDomains resolves the host patterns one manifest declares.
 func capabilityManifestNetworkDomains(manifest map[string]any, granted []string, secrets CapabilitySecrets) []string {
 	return capabilityResolveManifestDomains(manifest["networkDomains"], "MCP networkDomains", granted, secrets)
 }
 
-// capabilityProvisioningPlan is how one capability provisions its package.
 type capabilityProvisioningPlan struct {
 	manager   string
 	domains   []string
@@ -94,7 +90,6 @@ type capabilityProvisioningPlan struct {
 	key       string
 }
 
-// capabilityProvisioningPlanFor plans the provisioning of one manifest.
 func capabilityProvisioningPlanFor(manifest map[string]any, snapshot string, secrets CapabilitySecrets) *capabilityProvisioningPlan {
 	command := ""
 	if declared, ok := manifest["command"].(string); ok {
@@ -152,7 +147,6 @@ func capabilityProvisioningPlanFor(manifest map[string]any, snapshot string, sec
 	}
 }
 
-// capabilityProvisioningEnvironment is the environment one provisioning phase needs.
 func capabilityProvisioningEnvironment(plan *capabilityProvisioningPlan, phase string) map[string]string {
 	cache := filepath.Join(plan.root, "cache")
 	if plan.manager == "uv" {
@@ -179,7 +173,6 @@ func capabilityProvisioningEnvironment(plan *capabilityProvisioningPlan, phase s
 	return env
 }
 
-// capabilityRemoteConnection is the exchange one remote MCP capability uses.
 func capabilityRemoteConnection(manifest map[string]any, gate SendGate, mcpDomains []string, secrets CapabilitySecrets) McpExchange {
 	declared, ok := manifest["url"].(string)
 	if !ok || strings.TrimSpace(declared) == "" {
@@ -208,9 +201,6 @@ func capabilityRemoteConnection(manifest map[string]any, gate SendGate, mcpDomai
 	})
 }
 
-// NodeReadPaths are the read paths a sandboxed helper needs to start the Node runtime itself.
-// Inside a packaged Electron app `process.execPath` is the bundle binary, and
-// loading it needs the sibling `Frameworks` directory, not just `MacOS`.
 func NodeReadPaths(execPath string, electron string) []string {
 	macos := filepath.Dir(execPath)
 	if electron != "" {
@@ -219,7 +209,6 @@ func NodeReadPaths(execPath string, electron string) []string {
 	return []string{macos}
 }
 
-// capabilityLocalNodeReadPaths are the read paths the local Node runtime needs.
 func capabilityLocalNodeReadPaths(execPath string, electron string) []string {
 	paths := NodeReadPaths(execPath, electron)
 	if strings.HasPrefix(execPath, "/opt/homebrew/") {
@@ -238,15 +227,12 @@ func capabilityLocalNodeReadPaths(execPath string, electron string) []string {
 	return capabilityUniqueStrings(paths)
 }
 
-// capabilityGrants are the canonical paths one sandboxed helper may use.
 type capabilityGrants struct {
 	workspace  string
 	scratchDir string
 }
 
-// capabilityRunGrants canonicalizes the grants one helper runs with.
 func capabilityRunGrants(workspace string, scratchDir string) capabilityGrants {
-	// The verified OS sandbox requires canonical, already-existing grants.
 	canonicalWorkspace := capabilityRealPath(workspace)
 	if err := os.MkdirAll(scratchDir, 0o700); err != nil {
 		panic(err)
@@ -254,12 +240,10 @@ func capabilityRunGrants(workspace string, scratchDir string) capabilityGrants {
 	return capabilityGrants{workspace: canonicalWorkspace, scratchDir: capabilityRealPath(scratchDir)}
 }
 
-// capabilityBindingKey identifies one binding of one role.
 func capabilityBindingKey(bound CapabilityBinding, role string) string {
 	return bound.Id + "@" + bound.Version + ":" + role
 }
 
-// capabilityStableFact is the projection one load fact contributes to a digest.
 func capabilityStableFact(fact any) map[string]any {
 	record := asMap(fact)
 	if record == nil {
@@ -280,7 +264,6 @@ func capabilityStableFact(fact any) map[string]any {
 	}
 }
 
-// capabilityMapValue reads one optional value out of a fact view.
 func capabilityMapValue(record map[string]any, keys ...string) any {
 	for _, key := range keys {
 		if value, present := record[key]; present {
@@ -290,7 +273,6 @@ func capabilityMapValue(record map[string]any, keys ...string) any {
 	return nil
 }
 
-// capabilityMapList reads one optional list out of a fact view.
 func capabilityMapList(record map[string]any, keys ...string) []any {
 	value := capabilityMapValue(record, keys...)
 	if value == nil {

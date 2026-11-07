@@ -17,7 +17,6 @@ func (k *KernelStore) ModuleInput(taskID, moduleID, name string) *ModuleInputRow
 	return &ModuleInputRow{ModuleId: moduleID, Name: g5Str(row["name"]), Delivered: g5Int(row["delivered"]) == 1, Value: value, Source: source, UpdatedAt: g5Int(row["updated_at"])}
 }
 
-// SetModuleInput records the latest accepted delivery for one input.
 func (k *KernelStore) SetModuleInput(taskID, moduleID, name string, value any, source *string) {
 	k.ModuleTransaction(func() any {
 		k.setModuleInputInTransaction(taskID, moduleID, name, value, source)
@@ -34,7 +33,6 @@ func (k *KernelStore) setModuleInputInTransaction(taskID, moduleID, name string,
       ON CONFLICT(task_id,module_id,name) DO UPDATE SET delivered=1, value=excluded.value, source=excluded.source, updated_at=excluded.updated_at`, taskID, moduleID, name, k.Content.Encode(value), stored, NowMillis())
 }
 
-// RecordModuleTransition stores one judgment and its outbox row.
 func (k *KernelStore) RecordModuleTransition(taskID string, input ModuleTransitionInput) ModuleTransitionRow {
 	id := graphUUID()
 	createdAt := NowMillis()
@@ -59,12 +57,10 @@ func (k *KernelStore) RecordModuleTransition(taskID string, input ModuleTransiti
 	return ModuleTransitionRow{ModuleTransitionInput: input, Id: id, CreatedAt: createdAt}
 }
 
-// ResetModuleTrigger says a module has not been triggered yet.
 func (k *KernelStore) ResetModuleTrigger(taskID, moduleID string) {
 	g5Exec(k.Db, "UPDATE kernel_modules SET triggered=0 WHERE task_id=? AND module_id=?", taskID, moduleID)
 }
 
-// ModuleTransitions lists judgments in creation order.
 func (k *KernelStore) ModuleTransitions(taskID, moduleID string) []ModuleTransitionRow {
 	rows := g5Query(k.Db, "SELECT * FROM kernel_module_transitions WHERE task_id=? AND module_id=? ORDER BY created_at", taskID, moduleID)
 	out := make([]ModuleTransitionRow, 0, len(rows))

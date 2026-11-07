@@ -4,27 +4,16 @@ import (
 	"strings"
 )
 
-// acceptanceLimitationActorUser is the only actor that may waive a human
-// acceptance item. It is written by the door that speaks as the user - the
-// HTTP waiver route - and never read from a payload: an Agent that could name
-// itself the user could sign an acceptance the user never made.
 const acceptanceLimitationActorUser = "user"
 
-// acceptanceLimitationActorAgent is every other actor: graph_control is the
-// door the Agent, and the console acting on the Agent's behalf, use.
 const acceptanceLimitationActorAgent = "agent"
 
-// GraphAcceptanceLimitation is one limitation a caller asks the kernel to
-// record for one acceptance item.
 type GraphAcceptanceLimitation struct {
 	AcceptanceId string `json:"acceptanceId"`
 	Reason       string `json:"reason"`
 	Evidence     string `json:"evidence"`
 }
 
-// AcceptanceLimitation is why one acceptance item may stay unmet, and on whose
-// word. It is what an item reads as when a decision replaced its missing
-// evidence.
 type AcceptanceLimitation struct {
 	Reason    string  `json:"reason"`
 	Evidence  string  `json:"evidence"`
@@ -33,8 +22,6 @@ type AcceptanceLimitation struct {
 	CreatedAt int64   `json:"createdAt"`
 }
 
-// GraphAcceptanceWaiveInput is one user-side waiver: the user's own wording of
-// why one acceptance item may stay unmet, and where that decision is recorded.
 type GraphAcceptanceWaiveInput struct {
 	GraphId      string
 	AcceptanceId string
@@ -43,25 +30,15 @@ type GraphAcceptanceWaiveInput struct {
 	RequestId    string
 }
 
-// GraphAcceptanceClosure is what recording limitations answers with: the phase
-// the graph is in now, every limitation the closure rests on, and the acceptance
-// report read back after the write.
 type GraphAcceptanceClosure struct {
 	GraphId string `json:"graphId"`
 	Phase   string `json:"phase"`
-	// Replayed is true only when this request was recognised as an earlier one by
-	// a row it wrote. A closure with nothing left to limit writes no row, so a
-	// repeat of it has nothing to be recognised by and is not a replay.
 	Replayed bool `json:"replayed"`
-	// Records is how many limitation rows this request wrote. Zero is the honest
-	// answer for a closure over a graph that had nothing left to limit: it says
-	// "nothing to record" instead of claiming a decision nobody made.
 	Records     int                       `json:"records"`
 	Limitations []AcceptanceLimitationRow `json:"limitations"`
 	Acceptance  GraphAcceptanceReport     `json:"acceptance"`
 }
 
-// graphAcceptanceLimitationsOf reads the limitations array of a control payload.
 func graphAcceptanceLimitationsOf(raw any) []GraphAcceptanceLimitation {
 	switch typed := raw.(type) {
 	case []GraphAcceptanceLimitation:
@@ -89,8 +66,6 @@ func graphAcceptanceText(value any) string {
 	return text
 }
 
-// graphAcceptanceLimitationsOfPayload is the same read for the payload map the
-// console and the Agent tool both hand over.
 func graphAcceptanceLimitationsOfPayload(payload map[string]any) []GraphAcceptanceLimitation {
 	if payload == nil {
 		return []GraphAcceptanceLimitation{}
@@ -98,7 +73,6 @@ func graphAcceptanceLimitationsOfPayload(payload map[string]any) []GraphAcceptan
 	return graphAcceptanceLimitationsOf(payload["limitations"])
 }
 
-// completeWithLimitations closes a blocked graph on recorded limitations.
 func (service *graphManagementService) completeWithLimitations(graphId string, input GraphControlInput) any {
 	return service.applyAcceptanceLimitations(acceptanceLimitationPlan{
 		graphId: graphId, actor: acceptanceLimitationActorAgent, limitations: input.Limitations,
@@ -106,9 +80,6 @@ func (service *graphManagementService) completeWithLimitations(graphId string, i
 	})
 }
 
-// WaiveAcceptance records the user's own waiver of one acceptance item. It never
-// completes the graph: the user decides what the user accepts, and the closure
-// of the graph is a separate, explicit action that reads these records.
 func (service *graphManagementService) WaiveAcceptance(input GraphAcceptanceWaiveInput) any {
 	return service.applyAcceptanceLimitations(acceptanceLimitationPlan{
 		graphId: input.GraphId, actor: acceptanceLimitationActorUser,
@@ -117,8 +88,6 @@ func (service *graphManagementService) WaiveAcceptance(input GraphAcceptanceWaiv
 	})
 }
 
-// acceptanceLimitationPlan is one decision to record: who decided it, which
-// items it covers, and whether the graph closes on it.
 type acceptanceLimitationPlan struct {
 	graphId     string
 	actor       string
@@ -127,14 +96,6 @@ type acceptanceLimitationPlan struct {
 	requestId   string
 }
 
-// applyAcceptanceLimitations is the one implementation both doors use.
-//
-// The order of the checks is the order a caller can act on them: the graph has
-// to be blocked at all, the decision has to say something, every unmet item has
-// to be covered by the closure, the items that may not be waived are refused by
-// name, and a Git delivery that does not match the current commit is refused
-// last. Nothing is written before every check passed, so a refusal leaves no
-// record behind.
 func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanceLimitationPlan) any {
 	graph := service.runtime(plan.graphId)
 	if replay, ok := graphAcceptanceClosureReplay(service, plan); ok {
@@ -145,11 +106,6 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		phase = string(state.Phase)
 	}
 	if phase != "blocked" {
-		// A closure that records nothing has no row to recognise its replay by, so
-		// a repeat cannot be told apart from the first call. It is not a replay and
-		// must not claim to be one: the graph is already completed, this request
-		// wrote no record, and the receipt says exactly that (records: 0, replayed:
-		// false) instead of reporting a decision it never made.
 		if plan.complete && len(plan.limitations) == 0 && phase == "completed" {
 			return graphAcceptanceClosureResult(service, plan.graphId, false, 0)
 		}
@@ -179,10 +135,6 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 		covered[limitation.AcceptanceId] = true
 	}
 	if len(plan.limitations) == 0 {
-		// An empty list is a closure with nothing left to limit: every item passed
-		// or was waived by the user. It is the one door left to a graph whose only
-		// debt was an acceptance only the user could decide, and refusing it would
-		// report closable=true with no door at all.
 		if !plan.complete {
 			Raise("invalid_input", "A waiver must name the acceptance item it covers")
 		}
@@ -190,8 +142,6 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 			Raise("invalid_input", "complete_with_limitations requires one limitation {acceptanceId,reason,evidence} for each unmet item: "+strings.Join(unmet, ", "))
 		}
 	}
-	// Coverage is the closure's rule, not one waiver's: a user waiving the one
-	// item they are deciding about does not thereby decide about the others.
 	if plan.complete {
 		uncovered := []string{}
 		for _, id := range unmet {
@@ -245,9 +195,6 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 			})
 		}
 		records := service.kernel.RecordAcceptanceLimitations(plan.graphId, entries)
-		// The decision answers the question the item was still asking: an open
-		// human check of a waived item would keep the graph blocked on a question
-		// nobody is going to answer, and would ask it again on the next settle.
 		for _, limitation := range plan.limitations {
 			answered := service.kernel.Store.ResolveOpenHumanChecks(plan.graphId, limitation.AcceptanceId, map[string]any{
 				"type": "waived", "actor": plan.actor, "reason": strings.TrimSpace(limitation.Reason),
@@ -270,8 +217,6 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 			if task.IntegrationSha != nil {
 				sha = *task.IntegrationSha
 			}
-			// The wake and the event carry the same records the closure rests on,
-			// so whoever reads why the graph finished reads the decisions too.
 			WakeForTaskCompleted(service.kernel.Store, plan.graphId, map[string]any{
 				"phase": "completed", "integrationSha": sha, "limitations": records,
 			})
@@ -284,10 +229,6 @@ func (service *graphManagementService) applyAcceptanceLimitations(plan acceptanc
 	return graphAcceptanceClosureResult(service, plan.graphId, false, len(plan.limitations))
 }
 
-// graphAcceptanceClosureReplay answers a request that already recorded its
-// limitations with the same closure, instead of recording a second copy of a
-// decision somebody made once. It runs first: a replay after the graph finished
-// is still the same request, and the graph is no longer blocked then.
 func graphAcceptanceClosureReplay(service *graphManagementService, plan acceptanceLimitationPlan) (any, bool) {
 	request := strings.TrimSpace(plan.requestId)
 	if request == "" {
@@ -299,7 +240,6 @@ func graphAcceptanceClosureReplay(service *graphManagementService, plan acceptan
 	return graphAcceptanceClosureResult(service, plan.graphId, true, 0), true
 }
 
-// graphAcceptanceClosureResult reads the closure back the way a caller sees it.
 func graphAcceptanceClosureResult(service *graphManagementService, graphId string, replayed bool, records int) GraphAcceptanceClosure {
 	phase := "unknown"
 	if state := service.runtime(graphId).State(); state != nil {
@@ -312,10 +252,6 @@ func graphAcceptanceClosureResult(service *graphManagementService, graphId strin
 	}
 }
 
-// graphAcceptanceWaivedItems is the latest recorded limitation per item that was
-// decided for this commit. A record written for another commit is history: it
-// never waives evidence about a different version, and the item has to be
-// decided again.
 func graphAcceptanceWaivedItems(records []AcceptanceLimitationRow, commit *string) map[string]AcceptanceLimitationRow {
 	out := map[string]AcceptanceLimitationRow{}
 	for _, record := range records {
@@ -327,38 +263,19 @@ func graphAcceptanceWaivedItems(records []AcceptanceLimitationRow, commit *strin
 	return out
 }
 
-// graphAcceptanceDeliveryMatches reports whether the recorded Git delivery is the
-// current integration commit. A graph without an integration branch has nothing
-// to match.
 func graphAcceptanceDeliveryMatches(task TaskRow, report GraphAcceptanceReport) bool {
 	if task.IntegrationBranch == nil || *task.IntegrationBranch == "" {
 		return true
 	}
-	// The evidence may concern the declared target or the commit the graph's work
-	// actually landed on: a graph that never delivered keeps TargetSha at its
-	// baseline while its checks ran against the integration head (measured
-	// 2026-11-05, baaecc6c: target 0188c29f, integration 006b3721), and demanding
-	// the baseline refused evidence the graph had just produced.
 	if !graphAcceptanceShaEqual(task.TargetSha, report.Commit) && !graphAcceptanceShaEqual(task.IntegrationSha, report.Commit) {
 		return false
 	}
-	// A graph that never delivered has no completion receipt to match, and the
-	// receipt was required before the evidence was compared at all: a blocked
-	// graph with an integration branch could therefore never be closed with
-	// limitations, which is the one thing that path exists for (measured
-	// 2026-11-05: five graphs stuck in exactly that shape). The commit the
-	// evidence concerns is still pinned to the integration target above.
 	if report.Delivery.Commit == nil {
 		return true
 	}
 	return graphAcceptanceShaEqual(report.Delivery.Commit, report.Commit)
 }
 
-// graphAcceptanceClosable reports whether this graph can be closed with recorded
-// limitations right now, by the Agent: nothing is still running, the Git delivery
-// matches, and every item that is not passed is missing evidence the Agent may
-// waive. A missing human acceptance keeps the answer false until the user waives
-// it themselves.
 func graphAcceptanceClosable(task TaskRow, report GraphAcceptanceReport) bool {
 	if !report.Drained || task.Paused != 0 || !graphAcceptanceDeliveryMatches(task, report) {
 		return false

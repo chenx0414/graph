@@ -1,7 +1,5 @@
 package graph
 
-// InvocationPurpose is what one provider send is for. Pi compaction and branch summaries are real
-// billed requests and must be attributable separately from normal turns.
 type InvocationPurpose string
 
 const (
@@ -11,7 +9,6 @@ const (
 	InvocationPromptSuggestion InvocationPurpose = "prompt_suggestion"
 )
 
-// INVOCATION_PURPOSES is every purpose a provider send may declare.
 var INVOCATION_PURPOSES = []InvocationPurpose{
 	InvocationCompletion,
 	InvocationCompaction,
@@ -19,26 +16,18 @@ var INVOCATION_PURPOSES = []InvocationPurpose{
 	InvocationPromptSuggestion,
 }
 
-// TaskGateOperation is the operation one gate belongs to.
 type TaskGateOperation struct {
 	Id         string
 	TaskId     string
 	InstanceId string
-	// NodeId is absent when the caller does not know it yet; the gate then reads the
-	// operation row.
 	NodeId *string
 }
 
-// TaskGateOptions are the two relaxations one gate may carry.
 type TaskGateOptions struct {
-	// Optional lets a send settle unknown usage without asking the user.
 	Optional bool
-	// Unrestricted skips the pause, budget and unknown-usage checks.
 	Unrestricted bool
 }
 
-// TaskSendGate is the task-store invocation gate: pause, unknown usage, and budget are checked
-// before every provider send.
 type TaskSendGate struct {
 	SendGate
 	store       *TaskStore
@@ -52,7 +41,6 @@ type TaskSendGate struct {
 	totalSource *UsageSource
 }
 
-// TaskGate opens the task-store invocation gate for one operation.
 func TaskGate(store *TaskStore, operation TaskGateOperation, model ModelEntry, options TaskGateOptions) *TaskSendGate {
 	gate := &TaskSendGate{store: store, operation: operation, model: model, options: options, purpose: InvocationCompletion}
 	if operation.NodeId != nil {
@@ -71,12 +59,10 @@ func TaskGate(store *TaskStore, operation TaskGateOperation, model ModelEntry, o
 	return gate
 }
 
-// hasNode reports whether the gate knows the node the operation runs on.
 func (gate *TaskSendGate) hasNode() bool {
 	return gate.nodeId != nil && *gate.nodeId != ""
 }
 
-// Check refuses a send the task is not allowed to make.
 func (gate *TaskSendGate) Check(reservation float64) {
 	if !jsSafeInteger(reservation) || reservation < 0 {
 		Raise("invalid_input", "A token reservation is required")
@@ -98,7 +84,6 @@ func (gate *TaskSendGate) Check(reservation float64) {
 	}
 }
 
-// dispatch records the invocation and then lets the send happen.
 func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() any) any {
 	if id == "" {
 		Raise("invalid_input", "An invocation id is required")
@@ -123,7 +108,6 @@ func (gate *TaskSendGate) dispatch(id string, reservation float64, send func() a
 	return send()
 }
 
-// settle records the usage evidence of one invocation.
 func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 	gate.store.Transaction(func() {
 		settled, found := gate.store.InvocationUsage(id)
@@ -139,9 +123,6 @@ func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 		if settled != nil {
 			claimed := CanonicalJSON(normalized)
 			if *settled != claimed {
-				// The two values are the whole point of the refusal: an operator
-				// reading it has to see which invocation disagreed and about
-				// what, not only that something did.
 				Raise("result_conflict", "Conflicting usage evidence for "+id+": recorded "+*settled+", claimed "+claimed)
 			}
 			return
@@ -199,7 +180,6 @@ func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 	})
 }
 
-// SetPurpose declares what the next sends are for.
 func (gate *TaskSendGate) SetPurpose(purpose InvocationPurpose) {
 	known := false
 	for _, candidate := range INVOCATION_PURPOSES {
@@ -214,7 +194,6 @@ func (gate *TaskSendGate) SetPurpose(purpose InvocationPurpose) {
 	gate.purpose = purpose
 }
 
-// Total is the usage this gate accounted for, or nil when usage went unaccounted.
 func (gate *TaskSendGate) Total() *TokenUsage {
 	if gate.unknown {
 		return nil
@@ -228,7 +207,6 @@ func (gate *TaskSendGate) Total() *TokenUsage {
 	return &total
 }
 
-// InvocationRows are the invocations one task recorded, oldest first.
 func InvocationRows(store *TaskStore, taskId string) []InvocationRow {
 	return store.InvocationRows(taskId)
 }

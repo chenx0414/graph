@@ -1,6 +1,5 @@
 package graph
 
-// RecordNodeQuestion preserves the request before the model turn stops.
 func (k *KernelStore) RecordNodeQuestion(taskID, nodeID string, question PiAdapterAskedQuestion) {
 	request := map[string]any{"prompt": question.Prompt, "why": question.Why, "options": question.Options, "multiple": question.Multiple}
 	active := k.RunningExecution(taskID, nodeID)
@@ -81,7 +80,6 @@ func (k *KernelStore) BlockRecordedNodeQuestion(executionID, reason string) {
 	})
 }
 
-// ParkNodeQuestion preserves the original queue identity and only then notifies its supervisor.
 func (k *KernelStore) ParkNodeQuestion(executionID string) {
 	k.Store.Transaction(func() any {
 		row := kernelRow(k.Db, "SELECT * FROM node_questions WHERE execution_id=? AND state='recorded'", executionID)
@@ -103,7 +101,6 @@ func (k *KernelStore) ParkNodeQuestion(executionID string) {
 	})
 }
 
-// PublishRecordedNodeQuestion is called inside the transaction that parks the input.
 func (k *KernelStore) PublishRecordedNodeQuestion(executionID, recoveryReason string) {
 	row := kernelRow(k.Db, "SELECT * FROM node_questions WHERE execution_id=? AND state='recorded'", executionID)
 	if row == nil {

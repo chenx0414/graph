@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// SystemDiagnosticsInput is the scope the health view reports on.
 type SystemDiagnosticsInput struct {
 	Store          *TaskStore
 	Catalog        *Catalog
@@ -12,7 +11,6 @@ type SystemDiagnosticsInput struct {
 	ConversationId string
 }
 
-// SystemDiagnostics is the health of one conversation.
 func SystemDiagnostics(input SystemDiagnosticsInput) map[string]any {
 	taskIds := []string{}
 	for _, id := range input.TaskIds {
@@ -114,7 +112,6 @@ func SystemDiagnostics(input SystemDiagnosticsInput) map[string]any {
 	}
 }
 
-// parseJSONDocumentOrNil reads one JSON document, or nil when it is not one.
 func parseJSONDocumentOrNil(text string) any {
 	parsed, ok := parseJSONDocument(text)
 	if !ok {
@@ -123,13 +120,11 @@ func parseJSONDocumentOrNil(text string) any {
 	return parsed
 }
 
-// systemChangeString reads a string field, or an empty string.
 func systemChangeString(value any) string {
 	text, _ := value.(string)
 	return text
 }
 
-// systemChangeTitle names a proposal that did not name itself.
 func systemChangeTitle(value any) string {
 	text := strings.TrimSpace(systemChangeString(value))
 	if text == "" {
@@ -138,7 +133,6 @@ func systemChangeTitle(value any) string {
 	return text
 }
 
-// systemChangeProblem reads the problem statement of a proposal.
 func systemChangeProblem(value any) string {
 	text := systemChangeString(value)
 	if len([]rune(text)) > 1000 {
@@ -147,7 +141,6 @@ func systemChangeProblem(value any) string {
 	return text
 }
 
-// SystemChangeProposal is one change the main Agent asks a person for.
 type SystemChangeProposal struct {
 	Title   string
 	Problem string
@@ -156,13 +149,6 @@ type SystemChangeProposal struct {
 	Risk    *string
 }
 
-// ProposeSystemChange turns a proposal into a question the user answers.
-//
-// A host that lets the Agent change itself without asking is a host that
-// cannot be trusted to keep its promises, so the proposal is a question by
-// default. Only a policy that says the Agent may act on its own answers it
-// right away, and then the answer is on the record with the policy that made
-// it.
 func ProposeSystemChange(store *TaskStore, taskId, nodeId string, policy *ResolvedAccessPolicy, proposal SystemChangeProposal) map[string]any {
 	proposalId := graphUUID()
 	data := map[string]any{
@@ -198,11 +184,6 @@ func ProposeSystemChange(store *TaskStore, taskId, nodeId string, policy *Resolv
 	}
 }
 
-// ApplySystemChange applies one approved proposal.
-//
-// An approved proposal is applied once: the receipt is on the timeline, so a
-// second call with the same id reads the receipt back instead of installing
-// the same capability twice.
 func ApplySystemChange(store *TaskStore, catalog *Catalog, taskId, nodeId, proposalId string) map[string]any {
 	applied := kernelRow(store.Db, "SELECT data FROM events WHERE type='system.change_applied' AND json_extract(data,'$.proposalId')=? ORDER BY cursor DESC LIMIT 1", proposalId)
 	if applied != nil {
@@ -259,8 +240,6 @@ func ApplySystemChange(store *TaskStore, catalog *Catalog, taskId, nodeId, propo
 	return receipt
 }
 
-// systemChangeScope is the tasks the health view reports on: the anchor task of
-// the conversation and every task that belongs to it.
 func systemChangeScope(store *TaskStore, conversation *ConversationRow, taskId string) []string {
 	ids := []string{}
 	if conversation.AnchorTaskId != "" {

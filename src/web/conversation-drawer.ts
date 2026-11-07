@@ -1,32 +1,11 @@
-/**
- * Pure layout policy for the conversation's right-hand drawer. No React and no
- * IO: `Conversation.tsx` derives its page tabs, its chat-stream resident
- * entries, the drawer's default state and the prominent entry label from here,
- * so the view does not hardcode its own copy.
- *
- * The batch-C containment rule: the chat column only keeps the conversation
- * transcript, the pending questions and the composer. Every draft card and
- * every task / node overview moves into the right drawer, which starts
- * collapsed and is reached through a labelled, stateful entry in the header.
- * This module is the single source of truth for that split — the view must not
- * hardcode its own copy.
- */
 
-/**
- * Drawer pages. Exactly two of them: the task graph and the shared artifacts.
- * Acceptance items, node lists and decisions are deliberately not here.
- */
 export type ConversationDrawerPage = 'graph' | 'artifacts' | 'task';
 
-/** The drawer's two top-level sections: the draft details and the task list. */
 export type ConversationDrawerSection = 'draft' | 'task';
 
 export interface DrawerSectionInput {
-  /** The section the user is currently looking at. */
   current: ConversationDrawerSection;
-  /** The task the user (or a previous resolve) selected, if any. */
   selectedTaskId: string | null;
-  /** Every task id that currently exists, in display order. */
   taskIds: readonly string[];
 }
 
@@ -35,31 +14,16 @@ export interface DrawerSectionResolution {
   taskId: string | null;
 }
 
-/**
- * Sticky drawer-section resolution. The user's choice always wins: the draft
- * page is never yanked away, and the task navigation stays reachable even while
- * it is still empty — the "no tasks yet" note lives there, so falling back to
- * the draft page would make that note unreachable. The task section only
- * reconciles its selected task: it keeps it while the task still exists, and
- * otherwise adopts the first one, or none.
- */
 export function resolveDrawerSection(input: DrawerSectionInput): DrawerSectionResolution {
   const { current, selectedTaskId, taskIds } = input;
   if (current === 'draft') return { section: 'draft', taskId: selectedTaskId };
-  // Task navigation: keep the chosen task while it still exists, otherwise adopt the first one;
-  // with no tasks at all the section stays put and renders its empty note.
   const stillThere = selectedTaskId !== null && taskIds.includes(selectedTaskId);
   return { section: 'task', taskId: stillThere ? selectedTaskId : (taskIds[0] ?? null) };
 }
 
-/**
- * What the drawer offers as entries. The drawer shows no graph and no artifact list any more: it
- * names the two windows a draft or a task has, and each one opens as a tab of its own.
- */
 export interface DrawerEntryLink {
   id: 'graph' | 'artifacts';
   label: string;
-  /** Which window it opens, for tests and for the view to build the address. */
   target: 'draft-graph' | 'task-graph' | 'artifact-index';
 }
 
@@ -74,8 +38,6 @@ export interface ArtifactGraphGroup<T> {
   records: T[];
 }
 
-/** Shared artifacts grouped by the graph that produced them. Project-scoped
- * records stay separate because they deliberately belong to no single graph. */
 export function groupArtifactsByTask<T extends { scope: string; taskId: string }>(
   records: readonly T[],
   tasks: readonly { id: string; request: string }[],
@@ -102,10 +64,6 @@ export function groupArtifactsByTask<T extends { scope: string; taskId: string }
   };
 }
 
-/** Everything the drawer hosts: the draft versions, the draft pages, the task
- * navigation list with its empty state, one selected task's execution detail
- * and the project-binding initialization panel. Everything here is reached by
- * the drawer; none of it may be rendered unconditionally in the chat stream. */
 const DRAWER_PANEL_IDS = [
   'draft-versions',
   'graph',
@@ -116,29 +74,19 @@ const DRAWER_PANEL_IDS = [
   'bind-project',
 ] as const;
 
-/** Drawer panels that are neither a draft page nor a task detail but the
- * initialization state shown before anything exists. */
 const DRAWER_INIT_PANEL_IDS = [
   'task-empty',
   'bind-project',
 ] as const;
 
-/**
- * The only blocks allowed to stay in the chat stream even while the drawer is
- * collapsed: the transcript, the pending questions, and the input area.
- * `conversation-questions` is a prefix: per-task question lists use
- * `conversation-questions-<taskId>`.
- */
 const CHAT_RESIDENT_PANEL_IDS = [
   'conversation-messages',
   'conversation-questions',
   'conversation-composer',
 ] as const;
 
-/** How a draft reads in the header entry and the drawer. */
 export type DraftStatus = 'none' | 'pending' | 'accepted' | 'stale';
 
-/** The drawer starts collapsed; the user opens it on demand. */
 export function defaultDrawerOpen(): boolean {
   return false;
 }
@@ -147,13 +95,10 @@ export function drawerPanelIds(): readonly string[] {
   return DRAWER_PANEL_IDS;
 }
 
-/** The drawer's initialization panels: the task-list empty state and the
- * project-binding panel, both shown before a task exists. */
 export function drawerInitPanelIds(): readonly string[] {
   return DRAWER_INIT_PANEL_IDS;
 }
 
-/** Panel ids that stay in the chat column. */
 export function residentPanelIds(): readonly string[] {
   return CHAT_RESIDENT_PANEL_IDS;
 }
@@ -175,15 +120,9 @@ export interface DrawerEntryState {
   proposalVersion: number | null;
   draftStatus: DraftStatus;
   taskCount: number;
-  /** When false the entry also states that no project is bound yet. */
   projectBound: boolean;
 }
 
-/**
- * The header entry text. It always carries the draft version + status and the
- * task count — and, while no project is bound, that too — so the collapsed
- * drawer still tells the user what waits inside.
- */
 function drawerEntryLabel(state: DrawerEntryState): string {
   const draft = state.proposalVersion === null || state.draftStatus === 'none'
     ? '暂无草稿'

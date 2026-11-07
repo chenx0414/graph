@@ -4,22 +4,18 @@ import (
 	"encoding/json"
 )
 
-// SavedAgentCombination is a persisted recipe plus the compile result.
-// combination is always present. definition and compileError are mutually exclusive.
 type SavedAgentCombination struct {
 	Combination  AgentCombinationView `json:"combination"`
 	Definition   *CompiledDefinition  `json:"definition,omitempty"`
 	CompileError *string              `json:"compileError,omitempty"`
 }
 
-// PublishedDefinition is one immutable definition row.
 type PublishedDefinition struct {
 	Id      string
 	Version int64
 	Key     string
 }
 
-// CompiledDefinition is a recipe compilation that published or reused a definition.
 type CompiledDefinition struct {
 	Combination       AgentCombinationView `json:"combination"`
 	DefinitionId      string               `json:"definitionId"`
@@ -27,20 +23,17 @@ type CompiledDefinition struct {
 	Version           int64                `json:"version"`
 }
 
-// CatalogOptions are the filesystem locations Catalog reads.
 type CatalogOptions struct {
 	CapabilityRoot string
 	RecipesPath    string
 	Projects       func() []ProjectConfig
 }
 
-// Catalog is the versioned Agent definition store and the capability library.
 type Catalog struct {
 	store   *TaskStore
 	library *CapabilityLibrary
 }
 
-// NewCatalog opens the definition tables and the filesystem capability library.
 func NewCatalog(store *TaskStore, options CatalogOptions) *Catalog {
 	return &Catalog{
 		store: store,
@@ -81,7 +74,6 @@ func (catalog *Catalog) assertBinding(label string, binding *CapabilityBinding) 
 	}
 }
 
-// PublishDefinition appends an immutable definition version.
 func (catalog *Catalog) PublishDefinition(id string, spec DefinitionSpec) PublishedDefinition {
 	if trimSpace(id) == "" {
 		Raise("invalid_input", "A definition id is required")
@@ -103,7 +95,6 @@ func (catalog *Catalog) PublishDefinition(id string, spec DefinitionSpec) Publis
 	return PublishedDefinition{Id: id, Version: version, Key: id + "@" + itoa(int(version))}
 }
 
-// EnsureDefinition publishes spec unless it is already the latest version.
 func (catalog *Catalog) EnsureDefinition(id string, spec DefinitionSpec) PublishedDefinition {
 	if trimSpace(id) == "" {
 		Raise("invalid_input", "A definition id is required")
@@ -128,7 +119,6 @@ func (catalog *Catalog) HasDefinition(key string) bool {
 	return kernelRow(catalog.store.DB, "SELECT 1 FROM definitions WHERE id=? AND version=?", id, version) != nil
 }
 
-// CatalogDefinition is a published spec plus the row identity.
 type CatalogDefinition struct {
 	Id      string
 	Version int
@@ -160,8 +150,6 @@ func (catalog *Catalog) SearchAgentCombinations(input AgentCombinationSearchInpu
 	return catalog.library.SearchAgentCombinations(input)
 }
 
-// SaveAgentCombination persists the recipe and then compiles it.
-// A failed compile leaves the saved recipe and reports compileError.
 func (catalog *Catalog) SaveAgentCombination(combination AgentCombination) (saved SavedAgentCombination) {
 	view := catalog.library.SaveAgentCombination(combination)
 	saved.Combination = view
@@ -177,7 +165,6 @@ func (catalog *Catalog) SaveAgentCombination(combination AgentCombination) (save
 	return saved
 }
 
-// UpdatedAgentCombination is one recipe with its new description and the recompiled definition.
 type UpdatedAgentCombination struct {
 	Combination AgentCombinationView `json:"combination"`
 	Definition  CompiledDefinition   `json:"definition"`
@@ -236,7 +223,6 @@ func (catalog *Catalog) ListDefinitions() []struct {
 	return out
 }
 
-// AvailableAgentDefinitions are the latest published definitions whose recipes still compile.
 func (catalog *Catalog) AvailableAgentDefinitions() []struct {
 	Id      string
 	Version int64

@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 )
 
-// SlotRequest is one credential's concurrency ask.
 type SlotRequest struct {
 	CredentialId  string
 	ApiKey        string
@@ -17,13 +16,11 @@ type SlotRequest struct {
 	Refresh       func() SlotRequest
 }
 
-// ModelSchedulerSnapshot is the waiting-state display.
 type ModelSchedulerSnapshot struct {
 	Active map[string]int
 	Queued map[string]int
 }
 
-// ModelScheduler is the host-wide in-flight gate for model requests.
 type ModelScheduler struct {
 	mu                 sync.Mutex
 	waiters            []*modelWaiter
@@ -39,14 +36,12 @@ type modelWaiter struct {
 	errCh     chan error
 }
 
-// ModelSlotAbortError is the AbortError raised when a slot wait is cancelled.
 type ModelSlotAbortError struct{}
 
 func (ModelSlotAbortError) Error() string { return "Model slot wait aborted" }
 
 func modelSchedulerAborted() error { return ModelSlotAbortError{} }
 
-// CreateModelScheduler returns an empty host-wide scheduler.
 func CreateModelScheduler() *ModelScheduler {
 	return &ModelScheduler{
 		activeByCredential: map[string]int{},
@@ -145,7 +140,6 @@ func (s *ModelScheduler) drainLocked() {
 	}
 }
 
-// Acquire waits for a slot and returns its release function.
 func (s *ModelScheduler) Acquire(request SlotRequest, signal *AbortSignal) (func(), error) {
 	if signal != nil && signal.Aborted() {
 		return nil, modelSchedulerAborted()
@@ -189,14 +183,12 @@ func (s *ModelScheduler) Acquire(request SlotRequest, signal *AbortSignal) (func
 	}
 }
 
-// Wake re-evaluates queued waiters after configuration changed.
 func (s *ModelScheduler) Wake() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.drainLocked()
 }
 
-// Active is the in-flight count for one credential, or the total when id is empty.
 func (s *ModelScheduler) Active(credentialId string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -210,7 +202,6 @@ func (s *ModelScheduler) Active(credentialId string) int {
 	return total
 }
 
-// Queued is the number of waiters that have not been granted.
 func (s *ModelScheduler) Queued() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -223,7 +214,6 @@ func (s *ModelScheduler) Queued() int {
 	return count
 }
 
-// Snapshot is busy and waiting per credential identity.
 func (s *ModelScheduler) Snapshot() ModelSchedulerSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()

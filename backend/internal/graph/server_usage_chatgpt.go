@@ -10,7 +10,6 @@ import (
 	"strings"
 )
 
-// usageDecodeJwtPayload reads the payload of a JWT.
 func usageDecodeJwtPayload(token string) map[string]any {
 	parts := strings.Split(token, ".")
 	if len(parts) < 2 {
@@ -32,7 +31,6 @@ func usageDecodeJwtPayload(token string) map[string]any {
 	return usageRecord(parsed)
 }
 
-// usageJwtAccountId reads the account id a Codex token names.
 func usageJwtAccountId(token string) *string {
 	payload := usageDecodeJwtPayload(token)
 	auth := usageRecord(payload["https://api.openai.com/auth"])
@@ -54,7 +52,6 @@ func usageJwtAccountId(token string) *string {
 	return nil
 }
 
-// usageChatGptCredential resolves the ChatGPT credential.
 func usageChatGptCredential(home string, env map[string]string) (*usageCredential, error) {
 	envToken := usageSelectedCredential(env, UsageProviderChatGPT, []string{"GRAPH_CHATGPT_ACCESS_TOKEN", "CHATGPT_ACCESS_TOKEN"}, usageDefaultBaseURLs[UsageProviderChatGPT])
 	if envToken != nil {
@@ -89,7 +86,6 @@ func usageChatGptCredential(home string, env map[string]string) (*usageCredentia
 	}, nil
 }
 
-// usageChatGptLabel names a Codex quota window.
 func usageChatGptLabel(seconds *float64) string {
 	if seconds == nil {
 		return "用量窗口"
@@ -110,7 +106,6 @@ func usageChatGptLabel(seconds *float64) string {
 	return strconv.Itoa(days) + " 天"
 }
 
-// usageCodexWindows reads the quota windows of a Codex reply.
 func usageCodexWindows(body map[string]any) []UsageWindow {
 	windows := []UsageWindow{}
 	appendWindows := func(rateLimit any, prefix string) {
@@ -139,7 +134,6 @@ func usageCodexWindows(body map[string]any) []UsageWindow {
 	return windows
 }
 
-// usageFetchChatGpt reads the ChatGPT quota.
 func usageFetchChatGpt(credential *usageCredential, prices []ModelPrice) (UsagePlan, error) {
 	headers := map[string]string{
 		"authorization": "Bearer " + credential.Value, "accept": "application/json",

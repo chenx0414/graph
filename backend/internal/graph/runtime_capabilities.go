@@ -6,11 +6,8 @@ import (
 	"strings"
 )
 
-// CapabilitySecrets are the host values a capability manifest may reference.
 type CapabilitySecrets = map[string]string
 
-// CapabilityPermissionRequest is a remote MCP operation the task has not pre-authorized;
-// the user answers with this exact grant.
 type CapabilityPermissionRequest struct {
 	Grant        string `json:"grant"`
 	CapabilityId string `json:"capabilityId"`
@@ -18,24 +15,17 @@ type CapabilityPermissionRequest struct {
 	Description  string `json:"description"`
 }
 
-// CapabilityDeclaredTool is one tool a capability manifest declares.
 type CapabilityDeclaredTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
-// RuntimeCapabilityProvisioning is how one capability provisions its package.
 type RuntimeCapabilityProvisioning struct {
 	Manager string   `json:"manager"`
 	Domains []string `json:"domains"`
 	Path    string   `json:"path"`
 }
 
-// RuntimeCapabilityLoadFact is what one capability actually loaded.
-//
-// The core `CapabilityLoadFact` (src/core/node-run.ts) keeps the core field set; the runtime
-// one adds the fields only the loader knows. RULEBOOK §2 keeps the core name for the core
-// type, so the runtime type carries its own name.
 type RuntimeCapabilityLoadFact struct {
 	Id         string  `json:"id"`
 	Version    string  `json:"version"`
@@ -44,26 +34,21 @@ type RuntimeCapabilityLoadFact struct {
 	Executable bool    `json:"executable"`
 	Reason     *string `json:"reason"`
 	Name       *string `json:"name,omitempty"`
-	// Description is the capability's own description.
 	Description *string `json:"description,omitempty"`
 	Path        *string `json:"path,omitempty"`
-	// Source is the declared package source when the SDK resolved the extension instead of a vendored copy.
 	Source         *string                        `json:"source,omitempty"`
 	Tools          []string                       `json:"tools,omitempty"`
 	NetworkDomains []string                       `json:"networkDomains,omitempty"`
 	NetworkAccess  string                         `json:"networkAccess,omitempty"`
 	Provisioning   *RuntimeCapabilityProvisioning `json:"provisioning,omitempty"`
-	// Runtime is the runtime declaration one Pi extension resolved.
 	Runtime Json `json:"runtime,omitempty"`
 }
 
-// LoadedCapabilityPrompts are the prompt texts one loaded bundle carries.
 type LoadedCapabilityPrompts struct {
 	Agent *string `json:"agent"`
 	Tool  *string `json:"tool"`
 }
 
-// LoadedCapabilities is everything one operation bound.
 type LoadedCapabilities struct {
 	SkillPaths               []string
 	PiExtensionPaths         []string
@@ -82,7 +67,6 @@ type LoadedCapabilities struct {
 	Report                   []RuntimeCapabilityLoadFact
 }
 
-// ResolvedCapabilityFact is what one bound capability resolves to, before it is loaded.
 type ResolvedCapabilityFact struct {
 	Id             string                         `json:"id"`
 	Version        string                         `json:"version"`
@@ -100,13 +84,11 @@ type ResolvedCapabilityFact struct {
 	Provisioning   *RuntimeCapabilityProvisioning `json:"provisioning,omitempty"`
 }
 
-// CapabilityPromptsResult is the identity prompt and its digest.
 type CapabilityPromptsResult struct {
 	SystemPrompt string
 	Digest       string
 }
 
-// capabilityBindingRole is the role one bound capability plays.
 type capabilityBindingRole string
 
 const (
@@ -115,13 +97,11 @@ const (
 	capabilityRoleTool       capabilityBindingRole = "tool"
 )
 
-// capabilityBinding is one binding of a definition.
 type capabilityBinding struct {
 	bound CapabilityBinding
 	role  capabilityBindingRole
 }
 
-// UV_PROVISIONING_DOMAINS are the hosts a uv-provisioned capability may reach.
 var UV_PROVISIONING_DOMAINS = []string{
 	"github.com",
 	"objects.githubusercontent.com",
@@ -130,26 +110,20 @@ var UV_PROVISIONING_DOMAINS = []string{
 	"files.pythonhosted.org",
 }
 
-// NPM_PROVISIONING_DOMAINS are the hosts an npm-provisioned capability may reach.
 var NPM_PROVISIONING_DOMAINS = []string{
 	"registry.npmjs.org",
 }
 
-// capabilitySchemePattern matches a value that looks like it carries a URL scheme.
 var capabilitySchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 
-// capabilityEnvironmentPattern matches one environment reference in a manifest value.
 var capabilityEnvironmentPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
 
-// capabilityVariablePattern matches a valid environment variable name.
 var capabilityVariablePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// McpGrant is the grant string one MCP tool needs.
 func McpGrant(capabilityId string, tool string) string {
 	return "mcp:" + capabilityId + ":" + tool
 }
 
-// capabilityMcpToolName is the tool name one MCP tool is exposed under.
 func capabilityMcpToolName(capabilityId string, tool string) string {
 	clean := func(value string) string {
 		return capabilityReplaceInvalid(value, "A-Za-z0-9_", "_")
@@ -157,7 +131,6 @@ func capabilityMcpToolName(capabilityId string, tool string) string {
 	return "mcp_" + clean(capabilityId) + "_" + clean(tool)
 }
 
-// capabilitySafeToolName is the tool name one declared tool is exposed under.
 func capabilitySafeToolName(name string) string {
 	clean := capabilityReplaceInvalid(name, "A-Za-z0-9_-", "_")
 	clean = capabilityTrimLeadingNonAlpha(clean)
@@ -167,10 +140,6 @@ func capabilitySafeToolName(name string) string {
 	return clean
 }
 
-// capabilityReplaceInvalid replaces every character outside the allowed set.
-//
-// The allowed set is a character class, so "A-Za-z0-9_-" names ranges and not
-// literal characters.
 func capabilityReplaceInvalid(value string, allowed string, replacement string) string {
 	var b strings.Builder
 	for _, character := range value {
@@ -183,10 +152,6 @@ func capabilityReplaceInvalid(value string, allowed string, replacement string) 
 	return b.String()
 }
 
-// capabilityAllowedRune reports whether one character is inside the allowed set.
-//
-// A dash between two characters names the range between them; a dash at the end of
-// the set is a literal dash.
 func capabilityAllowedRune(allowed string, character rune) bool {
 	for index := 0; index < len(allowed); index++ {
 		if index+2 < len(allowed) && allowed[index+1] == '-' {
@@ -203,7 +168,6 @@ func capabilityAllowedRune(allowed string, character rune) bool {
 	return false
 }
 
-// capabilityTrimLeadingNonAlpha drops the leading characters that are not letters.
 func capabilityTrimLeadingNonAlpha(value string) string {
 	for index, character := range value {
 		if (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') {
@@ -213,7 +177,6 @@ func capabilityTrimLeadingNonAlpha(value string) string {
 	return ""
 }
 
-// capabilitySnapshotPath is the absolute snapshot path one catalog record carries.
 func capabilitySnapshotPath(record *CapabilityRecord) string {
 	if record == nil {
 		Raise("capability_unavailable", "Installed capability has no absolute snapshot path")
@@ -226,7 +189,6 @@ func capabilitySnapshotPath(record *CapabilityRecord) string {
 	return path
 }
 
-// capabilityDeclaredToolsFromManifest reads the tools one manifest declares.
 func capabilityDeclaredToolsFromManifest(manifest map[string]any) []CapabilityDeclaredTool {
 	raw, present := manifest["tools"]
 	if !present || raw == nil {
@@ -261,7 +223,6 @@ func capabilityDeclaredToolsFromManifest(manifest map[string]any) []CapabilityDe
 	return declared
 }
 
-// capabilityPiExtensionRuntime is the runtime declaration one manifest carries.
 type capabilityPiExtensionRuntime struct {
 	commands          []string
 	env               map[string]string

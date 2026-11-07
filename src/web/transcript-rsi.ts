@@ -1,7 +1,3 @@
-/** A self-improvement receipt as the transcript shows it: the durable record of
- * one change the Agent made to itself, with the checks it ran. Kept beside the
- * transcript model rather than inside it because the card is a whole record of
- * its own, and the model is already the longest file in the console. */
 import type { ConversationMessage } from '../core/conversation-projection.ts';
 
 export type TranscriptRsi = {
@@ -14,11 +10,8 @@ export type TranscriptRsi = {
   files: string[];
   validation: { command: string; status: string }[];
   restartRequired: boolean;
-  /** Whether this change replaced the packaged app, which only takes effect when
-   * the reader reopens it; null when the change did not touch the desktop half. */
   appInstall: { state: string; note: string } | null;
   activation: 'saved' | 'pending_reload' | 'active' | null;
-  /** How long the call itself took (write, gate, commit), as the daemon measured it. */
   elapsedMs: number | null;
   force: boolean;
   pendingFiles: string[];
@@ -27,11 +20,6 @@ export type TranscriptRsi = {
   report: string;
 };
 
-/** How long a change took, in the words a reader counts in.
- *
- * Seconds under a minute, then minutes-and-seconds, then hours-and-minutes: a
- * receipt that said "4187s" would be arithmetically right and useless.
- */
 export function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -44,7 +32,6 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-/** The receipt a durable `rsi` message carries, in the shape the card renders. */
 export function durableRsi(message: ConversationMessage): TranscriptRsi {
   const data = (message.data ?? {}) as Record<string, unknown>;
   const status = data.status === 'applied' || data.status === 'checks_failed'

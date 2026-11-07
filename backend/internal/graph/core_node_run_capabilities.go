@@ -9,9 +9,6 @@ import (
 	"encoding/json"
 )
 
-// nodeRunCapabilities reads the capability view: definition binding plus the
-// actual load fact recorded for this node. No record means "not recorded",
-// never a guessed true.
 func nodeRunCapabilities(store *TaskStore, taskId, nodeId string, spec nodeRunSpec, taskPhase string) ([]NodeCapabilityView, *string) {
 	empty := []NodeCapabilityView{}
 	if spec.DefinitionVersion == nil || *spec.DefinitionVersion == "" {
@@ -71,7 +68,6 @@ func nodeRunCapabilities(store *TaskStore, taskId, nodeId string, spec nodeRunSp
 	return views, capabilityDigest
 }
 
-// nodeRunCapabilityFact parses one stored load fact.
 func nodeRunCapabilityFact(item any) CapabilityLoadFact {
 	raw, err := json.Marshal(item)
 	if err != nil {
@@ -84,7 +80,6 @@ func nodeRunCapabilityFact(item any) CapabilityLoadFact {
 	return fact
 }
 
-// nodeRunCapabilityView is one bound capability of a node.
 func nodeRunCapabilityView(store *TaskStore, bound nodeRunBinding, facts map[string]CapabilityLoadFact, hasFactRow bool, spec nodeRunSpec, taskPhase string) NodeCapabilityView {
 	catalog := kernelRow(store.Db, "SELECT kind,source,snapshot FROM capabilities WHERE id=? AND version=?", bound.ID, bound.Version)
 	catalogName := bound.ID
@@ -98,9 +93,6 @@ func nodeRunCapabilityView(store *TaskStore, bound nodeRunBinding, facts map[str
 		}
 	}
 	fact, hasFact := facts[bound.ID+"@"+bound.Version]
-	// Authoritative current-state derivation for the one case the loading
-	// code skips by contract: a remote MCP is never loaded in read-only
-	// discussion. This is not a guess from catalog status.
 	remote := false
 	if catalog != nil && kernelString(catalog["kind"]) == "mcp" {
 		remote = nodeRunRemoteMCP(kernelString(catalog["source"]))
@@ -157,8 +149,6 @@ func nodeRunCapabilityView(store *TaskStore, bound nodeRunBinding, facts map[str
 	}
 }
 
-// nodeRunRemoteMCP reports whether a capability is a remote MCP server, which
-// is never loaded in a read-only discussion.
 func nodeRunRemoteMCP(source string) bool {
 	raw, err := os.ReadFile(filepath.Join(source, "capability.json"))
 	if err != nil {
@@ -172,7 +162,6 @@ func nodeRunRemoteMCP(source string) bool {
 	return !hasCommand
 }
 
-// nodeRunCapabilityUsage counts the tool calls each bound capability owns.
 func nodeRunCapabilityUsage(store *TaskStore, taskId, nodeId string, facts []NodeCapabilityView) []CapabilityUsageFact {
 	rows := kernelRows(store.Db, `SELECT kind,data,created_at FROM node_entries
     WHERE task_id=? AND node_id=? AND role='tool' AND kind IN ('call','result') ORDER BY seq`, taskId, nodeId)

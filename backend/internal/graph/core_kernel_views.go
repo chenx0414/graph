@@ -4,7 +4,6 @@ import (
 	"sort"
 )
 
-// NodeEntryQuery pages one node's transcript.
 func KernelHasActiveWork(kernel *KernelStore, graphID string) bool {
 	row := kernelRow(kernel.DB, `SELECT 1 WHERE
     EXISTS(SELECT 1 FROM kernel_executions WHERE task_id=? AND state='running') OR
@@ -12,7 +11,6 @@ func KernelHasActiveWork(kernel *KernelStore, graphID string) bool {
 	return row != nil
 }
 
-// KernelGraphView is the newest revision plus one-delivery edge and module cards.
 func KernelGraphView(kernel *KernelStore, graphID string) any {
 	revision := kernel.LatestRevision(graphID)
 	if revision == nil {
@@ -54,7 +52,6 @@ func sortedKeys[T any](values map[string]T) []string {
 	for key := range values {
 		keys = append(keys, key)
 	}
-	// TODO(port): TypeScript Object.keys keeps insertion order.
 	sort.Strings(keys)
 	return keys
 }

@@ -8,12 +8,10 @@ import (
 	"strings"
 )
 
-// serveTasks is the task list.
 func (app *GraphApp) serveTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.User().List())
 }
 
-// serveProjectEntries is the entry list of one project.
 func (app *GraphApp) serveProjectEntries(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 	query := r.URL.Query().Get("q")
@@ -24,12 +22,10 @@ func (app *GraphApp) serveProjectEntries(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"entries": app.runtime.ProjectEntries(projectID, query, limit)})
 }
 
-// serveConversations is the conversation list.
 func (app *GraphApp) serveConversations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().List(appQueryBool(r, "archived")))
 }
 
-// serveConversationCreate starts one conversation.
 func (app *GraphApp) serveConversationCreate(w http.ResponseWriter, r *http.Request) {
 	body := appJSONBody(w, r)
 	input := TaskRuntimeConversationInput{RequestId: appBodyString(body, "requestId")}
@@ -58,7 +54,6 @@ func (app *GraphApp) serveConversationCreate(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Create(input))
 }
 
-// appAttachments reads the attachment list of a request body.
 func appAttachments(raw []any) ([]AttachmentInput, error) {
 	attachments := []AttachmentInput{}
 	for _, item := range raw {
@@ -87,13 +82,11 @@ func appAttachments(raw []any) ([]AttachmentInput, error) {
 	return attachments, nil
 }
 
-// serveConversation is one conversation with its messages.
 func (app *GraphApp) serveConversation(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	writeJSON(w, http.StatusOK, app.appConversationView(conversationID, r))
 }
 
-// appConversationView reads one conversation.
 func (app *GraphApp) appConversationView(conversationID string, r *http.Request) any {
 	provider, ok := any(app.runtime.Conversations()).(interface {
 		View(conversationID string, query NodeEntryQuery) map[string]any
@@ -114,7 +107,6 @@ func (app *GraphApp) appConversationView(conversationID string, r *http.Request)
 	return provider.View(conversationID, query)
 }
 
-// serveAttachment serves one inline image attachment.
 func (app *GraphApp) serveAttachment(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageId")
 	index, err := strconv.Atoi(r.PathValue("index"))
@@ -131,8 +123,6 @@ func (app *GraphApp) serveAttachment(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
-// appAttachmentBytes reads the bytes of one inline attachment. The runtime
-// hands the base64 payload over; the wire format is the raw image.
 func appAttachmentBytes(value any) []byte {
 	switch typed := value.(type) {
 	case []byte:
@@ -156,7 +146,6 @@ func appAttachmentBytes(value any) []byte {
 	return nil
 }
 
-// serveConversationHistory is the message history of one conversation.
 func (app *GraphApp) serveConversationHistory(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	query := NodeEntryQuery{}
@@ -172,13 +161,11 @@ func (app *GraphApp) serveConversationHistory(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().History(conversationID, query))
 }
 
-// serveConversationArtifacts is the artifact list of one conversation.
 func (app *GraphApp) serveConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	writeJSON(w, http.StatusOK, app.runtime.ListConversationArtifacts(conversationID, appArtifactQuery(r)))
 }
 
-// appArtifactQuery reads the artifact query parameters.
 func appArtifactQuery(r *http.Request) ArtifactQuery {
 	query := ArtifactQuery{}
 	values := r.URL.Query()
@@ -200,14 +187,10 @@ func appArtifactQuery(r *http.Request) ArtifactQuery {
 	return query
 }
 
-// serveDraftGraph is the graph draft of one conversation.
 func (app *GraphApp) serveDraftGraph(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	view := app.appConversationView(conversationID, r)
 	record, _ := view.(map[string]any)
-	// The proposal holds its spec as the native proposal itself, not as a
-	// plain record: reading it as a record found nothing, and the draft was
-	// always drawn empty. A named version is the one the console opened.
 	proposal := record["proposal"]
 	if value, ok := appQueryInt(r, "version"); ok {
 		if value < 1 {
@@ -269,7 +252,6 @@ func (app *GraphApp) serveDraftGraph(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// serveProposal is one proposal version of a conversation.
 func (app *GraphApp) serveProposal(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	version, err := strconv.Atoi(r.PathValue("version"))
@@ -279,7 +261,6 @@ func (app *GraphApp) serveProposal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Proposal(conversationID, version))
 }
 
-// serveConversationMessage adds one user message.
 func (app *GraphApp) serveConversationMessage(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -297,7 +278,6 @@ func (app *GraphApp) serveConversationMessage(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Chat(conversationID, input))
 }
 
-// serveConversationMessageCancel drops one queued message.
 func (app *GraphApp) serveConversationMessageCancel(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -308,7 +288,6 @@ func (app *GraphApp) serveConversationMessageCancel(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().CancelMessage(conversationID, input))
 }
 
-// serveConversationModel selects the model of one conversation.
 func (app *GraphApp) serveConversationModel(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -316,28 +295,24 @@ func (app *GraphApp) serveConversationModel(w http.ResponseWriter, r *http.Reque
 		conversationID, appBodyString(body, "model"), appBodyString(body, "thinkingLevel"), appBodyString(body, "requestId")))
 }
 
-// serveConversationCompact compacts the history of one conversation.
 func (app *GraphApp) serveConversationCompact(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Compact(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationArchive archives one conversation.
 func (app *GraphApp) serveConversationArchive(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Archive(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationUnarchive restores one archived conversation.
 func (app *GraphApp) serveConversationUnarchive(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Unarchive(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationBind binds one conversation to a project.
 func (app *GraphApp) serveConversationBind(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -345,7 +320,6 @@ func (app *GraphApp) serveConversationBind(w http.ResponseWriter, r *http.Reques
 		conversationID, appBodyString(body, "projectId"), appBodyString(body, "requestId")))
 }
 
-// serveConversationConfirm confirms the proposal of one conversation.
 func (app *GraphApp) serveConversationConfirm(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -360,21 +334,18 @@ func (app *GraphApp) serveConversationConfirm(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Confirm(conversationID, input))
 }
 
-// serveConversationPause pauses one conversation.
 func (app *GraphApp) serveConversationPause(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Pause(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationResume resumes one conversation.
 func (app *GraphApp) serveConversationResume(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Resume(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationSteer steers one running conversation.
 func (app *GraphApp) serveConversationSteer(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -387,7 +358,6 @@ func (app *GraphApp) serveConversationSteer(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, provider.Steer(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationInterrupt interrupts one running conversation.
 func (app *GraphApp) serveConversationInterrupt(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
@@ -400,7 +370,6 @@ func (app *GraphApp) serveConversationInterrupt(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, provider.Interrupt(conversationID, appBodyString(body, "requestId")))
 }
 
-// serveConversationEvents is the event page of one conversation.
 func (app *GraphApp) serveConversationEvents(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	after := 0
@@ -414,7 +383,6 @@ func (app *GraphApp) serveConversationEvents(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Events(conversationID, after, limit))
 }
 
-// serveConversationStream is the event stream of one conversation.
 func (app *GraphApp) serveConversationStream(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	after := appEventCursor(r)

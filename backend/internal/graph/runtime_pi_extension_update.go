@@ -11,9 +11,6 @@ import (
 	"context"
 )
 
-// ResolvePiExtensionSourceStatus reports whether a source has a newer version than the one on
-// disk. The Pi SDK's own `checkForAvailableUpdates()` only inspects packages configured in its
-// settings, and a capability source is resolved in temporary scope, so Graph asks npm itself.
 func ResolvePiExtensionSourceStatus(input PiExtensionSourceInput) (PiExtensionSourceStatus, error) {
 	piExtensionStatusCacheMu.Lock()
 	cached, found := piExtensionStatusCache[input.Source]
@@ -39,8 +36,6 @@ func ResolvePiExtensionSourceStatus(input PiExtensionSourceInput) (PiExtensionSo
 	}
 	installGaps := []string{}
 	if root := piExtensionInstallRootFor(resolved.Entries[0]); root != "" {
-		// Best effort on purpose: a diagnostic that throws would turn "we could not look" into "the
-		// extension is broken".
 		if gaps, gapErr := InstallRootGaps(root); gapErr == nil {
 			installGaps = gaps
 		}
@@ -57,8 +52,6 @@ func ResolvePiExtensionSourceStatus(input PiExtensionSourceInput) (PiExtensionSo
 	return status, nil
 }
 
-// UpdatePiExtensionSource installs or upgrades a source the way `pi` itself does it: an explicit
-// version reinstalls that spec, an open range or a bare name moves to the newest one.
 func UpdatePiExtensionSource(input PiExtensionSourceInput) (PiExtensionUpdateResult, error) {
 	return withExtensionInstall(input.AgentDir, func() (PiExtensionUpdateResult, error) {
 		resolved, err := resolvePiExtensionSourceOnce(input)
@@ -93,12 +86,10 @@ func UpdatePiExtensionSource(input PiExtensionSourceInput) (PiExtensionUpdateRes
 	})
 }
 
-// piExtensionRunNpm runs npm with the Graph environment.
 func piExtensionRunNpm(name string, args ...string) (string, error) {
 	return piExtensionRunCommand("npm", args, "", piExtensionInstallTimeout)
 }
 
-// piExtensionRunCommand runs one helper command and returns its stdout.
 func piExtensionRunCommand(name string, args []string, cwd string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

@@ -5,7 +5,6 @@ import (
 	"slices"
 )
 
-// ReopenAfterPending clears the latch after any judgment already queued for this module.
 func (runtime *ModuleRuntime) ReopenAfterPending(moduleId string) ModuleEvaluation {
 	lock := moduleLock(runtime.kernel, runtime.taskId, moduleId)
 	lock.Lock()
@@ -13,7 +12,6 @@ func (runtime *ModuleRuntime) ReopenAfterPending(moduleId string) ModuleEvaluati
 	return runtime.kernel.ModuleTransaction(func() any { return runtime.Reopen(moduleId) }).(ModuleEvaluation)
 }
 
-// Reopen clears the latch and keeps the inputs.
 func (runtime *ModuleRuntime) Reopen(moduleId string) ModuleEvaluation {
 	compiled := runtime.compile(moduleId)
 	runtime.kernel.ResetModuleTrigger(runtime.taskId, moduleId)
@@ -25,7 +23,6 @@ func (runtime *ModuleRuntime) Reopen(moduleId string) ModuleEvaluation {
 	return ModuleEvaluation{Emitted: false, Waiting: false, Triggered: false, Outputs: map[string]any{}, Reasons: []string{}}
 }
 
-// DeliverCustom judges a command module in the isolated evaluator.
 func (runtime *ModuleRuntime) DeliverCustom(moduleId, inputName string, value any, evaluate moduleEvalFn, deliveryId string) ModuleEvaluation {
 	code := moduleRecord(runtime.module(moduleId))["code"]
 	codeMap, _ := code.(map[string]any)
@@ -40,7 +37,6 @@ func (runtime *ModuleRuntime) DeliverCustom(moduleId, inputName string, value an
 	}, version, deliveryId)
 }
 
-// DeliverOperation judges a host operation module.
 func (runtime *ModuleRuntime) DeliverOperation(moduleId, inputName string, value any, evaluate moduleEvalFn, deliveryId string) ModuleEvaluation {
 	operation := moduleRecord(runtime.module(moduleId))["operation"]
 	operationMap, _ := operation.(map[string]any)

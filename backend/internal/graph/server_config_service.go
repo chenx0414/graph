@@ -31,8 +31,6 @@ type ConfigApproval struct {
 type ConfigStore struct {
 	Path     string
 	revision int
-	// StateDir is the state directory of the daemon that opened this store. It
-	// is what identifies the installation owning the live configuration below.
 	StateDir string
 }
 
@@ -41,21 +39,11 @@ func OpenConfigStore(path string) *ConfigStore {
 	return &ConfigStore{Path: path, revision: current.revision}
 }
 
-// OwnStateDir records the state directory this store runs with.
-//
-// The application starts its daemon as `--config <app home>/graph.config.json
-// --state-dir <app home>/state`; anything else that opens a store - a test, a
-// check, a node that spawned a daemon - has its own state directory somewhere
-// else. That difference is the only ownership fact the configuration store can
-// observe without being told who is asking.
 func (store *ConfigStore) OwnStateDir(dir string) *ConfigStore {
 	store.StateDir = dir
 	return store
 }
 
-// liveApplicationConfigPath is the configuration the Graph app itself loads and
-// saves: `graph.config.json` in the per-user application directory the packaged
-// app keeps its user data in.
 func liveApplicationConfigPath() string {
 	home := strings.TrimSpace(os.Getenv("HOME"))
 	if home == "" {
@@ -78,17 +66,6 @@ func liveApplicationConfigPath() string {
 	}
 }
 
-// liveConfigRefusal is the reason this store may not write the live application
-// configuration, or "" when the target is not that file or this daemon is the
-// one that owns it.
-//
-// The live file belongs to one installation - the one whose state directory sits
-// beside it - and it is the file the user edits from the app's own settings page,
-// under the app's own backup and restart handling. A save aimed at it from a
-// daemon started for a test, a check or a node rewrites the user's configuration
-// behind their back: that is how the live file acquired its hand-made `.bak-*`
-// copies in the first place. The refusal names the reason and leaves the bytes on
-// disk exactly as they were.
 func (store *ConfigStore) liveConfigRefusal() string {
 	live := liveApplicationConfigPath()
 	if live == "" || !configSamePath(store.Path, live) {
@@ -103,13 +80,10 @@ func (store *ConfigStore) liveConfigRefusal() string {
 		"only the --config file it was given; change the live configuration from the app's settings page."
 }
 
-// configSamePath compares two paths as the filesystem spells them.
 func configSamePath(left, right string) bool {
 	return configResolvedPath(left) == configResolvedPath(right)
 }
 
-// configResolvedPath resolves the symbolic links of one path, keeping the last
-// component when the file itself does not exist yet.
 func configResolvedPath(path string) string {
 	cleaned := filepath.Clean(path)
 	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {

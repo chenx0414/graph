@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 )
 
-// PiPackageHit is one official Pi package from the npm keyword channel.
 type PiPackageHit struct {
 	Name            string   `json:"name"`
 	Version         string   `json:"version"`
@@ -33,7 +32,6 @@ var (
 	}{}
 )
 
-// ParseRegistrySearch keeps only packages that carry the official pi-package keyword.
 func ParseRegistrySearch(payload any) []PiPackageHit {
 	root, _ := payload.(map[string]any)
 	objects, _ := root["objects"].([]any)
@@ -100,7 +98,6 @@ func nested(root map[string]any, keys ...string) any {
 	return current
 }
 
-// SearchPiPackages reads the official npm channel. Repeated browsing reuses a five-minute cache.
 func SearchPiPackages(input struct {
 	Query string
 	Limit int

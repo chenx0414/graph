@@ -103,7 +103,6 @@ func (runtime *TaskRuntime) ConfirmWorkGraph(workID string, input WorkConfirmInp
 		return reservation
 	})
 	reservation := workGraphReceipt(result)
-	// Command replay contains the original reservation. Current state is read separately.
 	runtime.store.txMu.Lock()
 	current := runtime.store.workGraphInTransaction(workID, input.GraphKey)
 	runtime.store.txMu.Unlock()

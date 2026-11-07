@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 )
 
-// Restore rebuilds the integration worktree for a running task.
 func (integration *GitIntegration) Restore(taskId string) *GitDeliverResult {
 	task := integration.store.Task(taskId)
 	if task.TargetBranch == nil || (task.Phase != "running" && task.Phase != "queued") {
@@ -55,7 +54,6 @@ func (integration *GitIntegration) recheckAgainstTarget(taskId, integrationPath,
 	return GitDeliverResult{Status: "recheck"}
 }
 
-// ReleaseWorkcopies drops scratch checkouts. The integration branch stays.
 func (integration *GitIntegration) ReleaseWorkcopies(taskId string) int {
 	rows := graphDBAll(integration.store.Db, "SELECT instance_id,path,branch FROM worktrees WHERE task_id=?", taskId)
 	if len(rows) == 0 {
@@ -82,7 +80,6 @@ func (integration *GitIntegration) ReleaseWorkcopies(taskId string) int {
 	return len(rows)
 }
 
-// SweepTerminalWorkcopies releases copies for tasks that already ended.
 func (integration *GitIntegration) SweepTerminalWorkcopies() int {
 	rows := graphDBAll(integration.store.Db, `SELECT DISTINCT w.task_id FROM worktrees w JOIN tasks t ON t.id=w.task_id
       WHERE t.phase IN ('completed','abandoned')`)
@@ -111,15 +108,6 @@ func gitSubdir(repo, root string) string {
 	return filepath.ToSlash(rel)
 }
 
-// SyncIntegrationSha re-reads the integration worktree's HEAD and records it as
-// the task's integration commit.
-//
-// The delivery path refreshes that field when it runs (`Restore`), but a graph
-// whose work landed while that path was not reached kept a stale value, and its
-// own acceptance then read a passing check as evidence about another commit
-// (measured 2026-11-05, 288f801c: field 9fb2ba8a, branch head b46b309b). The
-// head is read from Git, never supplied by the caller, unless the graph has no
-// integration worktree at all: then it is the commit the graph's own deliveries name.
 func deliveredCommitOf(store *TaskStore, taskId string) *string {
 	row := kernelRow(store.Db, `SELECT value FROM kernel_deliveries WHERE task_id=? AND value LIKE '%"commit"%' ORDER BY created_at DESC, rowid DESC LIMIT 1`, taskId)
 	if row == nil {
@@ -142,10 +130,6 @@ func SyncIntegrationSha(kernel *KernelStore, taskId string) any {
 	var head *string
 	row, ok := graphDBRow(store.Db, "SELECT path FROM worktrees WHERE instance_id=?", "integration:"+taskId)
 	if !ok {
-		// A goal graph is delivered in the project's own checkout, so it never has an
-		// integration worktree: the commit the work was actually delivered at is the
-		// one its submissions name. Reading that is what makes such a graph completable
-		// instead of blocked on bookkeeping it cannot produce.
 		head = deliveredCommitOf(store, taskId)
 		if head == nil {
 			Raise("invalid_state", "The graph has no integration worktree to read a commit from, and no delivered commit to record; deliver through the integration branch first")

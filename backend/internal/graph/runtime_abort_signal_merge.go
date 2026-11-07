@@ -2,14 +2,6 @@ package graph
 
 import "sync"
 
-// MergeAbortSignals returns one signal that aborts when any of the sources
-// does, plus a release that forgets the merged listeners.
-//
-// One command can have more than one reason to stop: the operation is
-// interrupted, and the caller imposed a deadline of its own. The command has to
-// honour both, so the runner is given a signal that carries either. The single
-// reason case - every tool call in the daemon today - returns the source
-// itself, so nothing is allocated for it.
 func MergeAbortSignals(sources ...*AbortSignal) (*AbortSignal, func()) {
 	live := make([]*AbortSignal, 0, len(sources))
 	for _, source := range sources {
@@ -57,8 +49,6 @@ func MergeAbortSignals(sources ...*AbortSignal) (*AbortSignal, func()) {
 		mutex.Lock()
 		attached = append(attached, attachment{source: source, listener: listener})
 		mutex.Unlock()
-		// A source that aborted while its listener was being registered never
-		// fires it: the abort has to be carried over here instead of lost.
 		if source.Aborted() {
 			merged.Abort()
 			release()

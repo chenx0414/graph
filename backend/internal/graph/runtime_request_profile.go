@@ -10,7 +10,6 @@ import (
 
 var cacheControlPattern = regexp.MustCompile(`"cache_control"\s*:`)
 
-// ProviderRequestProfile is transport observation without request text or credentials.
 type ProviderRequestProfile struct {
 	Version               int                       `json:"version"`
 	RequestBytes          int                       `json:"requestBytes"`
@@ -20,13 +19,11 @@ type ProviderRequestProfile struct {
 	ExplicitCacheControls int                       `json:"explicitCacheControls"`
 }
 
-// ProfileSection is one request region's size.
 type ProfileSection struct {
 	Bytes           int `json:"bytes"`
 	EstimatedTokens int `json:"estimatedTokens"`
 }
 
-// ProfileToolResult groups tool-result bytes by declared tool name.
 type ProfileToolResult struct {
 	Tool            *string `json:"tool"`
 	ResultViews     int     `json:"resultViews"`
@@ -34,7 +31,6 @@ type ProfileToolResult struct {
 	EstimatedTokens int     `json:"estimatedTokens"`
 }
 
-// TODO(port): @earendil-works/pi-ai estimateTextTokens is not in this module. ceil(len/4) is the byte heuristic.
 func profileEstimateTokens(text string) int {
 	return (len(text) + 3) / 4
 }
@@ -54,7 +50,6 @@ func profileSize(value any) (int, int) {
 	return len(text), profileEstimateTokens(text)
 }
 
-// ProfileProviderRequest summarizes one provider request body. Non-strings return nil.
 func ProfileProviderRequest(body any) *ProviderRequestProfile {
 	text, ok := body.(string)
 	if !ok {
@@ -195,7 +190,6 @@ func ProfileProviderRequest(body any) *ProviderRequestProfile {
 	if systemPresent {
 		prefix["system"] = request["system"]
 	}
-	// TODO(port): fingerprint JSON key order follows encoding/json, not JavaScript insertion order.
 	raw, err := json.Marshal(prefix)
 	if err != nil {
 		panic(err)

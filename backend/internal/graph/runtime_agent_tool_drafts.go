@@ -1,7 +1,5 @@
 package graph
 
-// draftToolDeclarations are the tools that carry a draft, a problem or a human
-// check, and the ones that control a task.
 func draftToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	main := set.main
 	features := set.features

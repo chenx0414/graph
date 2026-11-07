@@ -51,7 +51,6 @@ type MentionEntry = { path: string; kind: 'file' | 'directory' };
 type Mention = { start: number; end: number; query: string };
 type Slash = { start: number; end: number; query: string };
 
-/** Read a dropped/pasted file as a local DataURL (image preview + base64). */
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -117,24 +116,13 @@ export function ChatComposer({
   projectId: string | null;
   placeholder: string;
   onSend: () => void;
-  /** Enter key action. Defaults to `onSend`; used to keep keyboard sending
-   * separate from the context-sensitive primary button. */
   onSubmit?: () => void;
   sendDisabled: boolean;
-  /** The master is producing output, so the primary button offers pause. */
   busy?: boolean;
-  /** The conversation is paused, so the primary button resumes or sends+resumes. */
   paused?: boolean;
-  /** A pause/resume request is in flight; the primary button waits. */
   pausePending?: boolean;
-  /** Queued messages, for the idle steering branch of the primary control. */
   queueLength?: number;
-  /** A suggested prompt is available, for the idle send branch. */
   hasSuggestion?: boolean;
-  /**
-   * The conversation's already-sent user prompts, oldest first. When omitted the
-   * composer recalls only the prompts it sent itself during this session.
-   */
   history?: string[];
   suggestion?: string | null;
   slashTools?: AgentToolView[];
@@ -169,8 +157,6 @@ export function ChatComposer({
   const { preferences } = usePreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
-  // An explicit snapshot stack: React writes the textarea value programmatically,
-  // so the browser's native undo has nothing to replay.
   const undoRef = useRef(createComposerUndoState());
   const selectionEpoch = useRef(0);
   const historyRef = useRef(createComposerHistoryState());
@@ -206,13 +192,11 @@ export function ChatComposer({
         ? '继续对话；输入内容时发送并继续'
         : '发送消息';
 
-  /** Record a user edit so ⌘Z / ⇧⌘Z can step over it. */
   function rememberEdit(previous: string, next: string) {
     if (previous === next) return;
     undoRef.current = recordComposerEdit(undoRef.current, previous, next, composerEditKind(previous, next));
   }
 
-  /** Prompts available to ↑/↓: the conversation's sent messages, else this session's. */
   function historyState(): ComposerHistoryState {
     return history === undefined ? historyRef.current : { ...historyRef.current, entries: history };
   }
@@ -222,7 +206,6 @@ export function ChatComposer({
     setHistoryBrowsing(false);
   }
 
-  /** Put a value in the box without treating it as a user edit (undo, recall). */
   function applyProgrammatic(next: string) {
     const epoch = ++selectionEpoch.current;
     onChange(next);
@@ -231,8 +214,6 @@ export function ChatComposer({
     setMentionOpen(false);
     setSlashOpen(false);
     requestAnimationFrame(() => {
-      // A later user action owns the selection. An older undo must not move
-      // the caret after the user has already selected text or typed again.
       if (selectionEpoch.current !== epoch) return;
       const target = textareaRef.current;
       target?.focus();
@@ -240,11 +221,6 @@ export function ChatComposer({
     });
   }
 
-  /**
-   * Submit = always leave the browsing position. Only when the composer owns the
-   * list does it also remember the prompt; a parent-owned list is updated from
-   * the conversation's transcript instead.
-   */
   function rememberPrompt() {
     historyRef.current = submitComposerPrompt(historyRef.current, value, history !== undefined);
     setHistoryBrowsing(false);
@@ -289,10 +265,6 @@ export function ChatComposer({
       const rect = composerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const gap = 12;
-      // The palette is clipped by the conversation body, not by the window: on a
-      // short window the space above the composer inside the body is smaller
-      // than the viewport suggests, and a taller palette would put its first
-      // entries behind the header where nothing can be clicked.
       const clip = composerRef.current?.closest('.conversation-body')?.getBoundingClientRect();
       const topLimit = clip ? clip.top : 0;
       const bottomLimit = clip ? clip.bottom : window.innerHeight;
@@ -330,12 +302,9 @@ export function ChatComposer({
       }
     }
     onAttachmentsChange(next);
-    // A visible, per-file reason for everything that was rejected. A later add
-    // with nothing rejected (or sending) clears the notices again.
     setAttachmentNotices(rejectionNotices(results));
   }
 
-  /** Attach pasted files (images) and keep the plain-text paste untouched. */
   function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!files.length) return;
@@ -365,8 +334,6 @@ export function ChatComposer({
         ? () => navigator.clipboard.readText()
         : undefined,
     );
-    // An empty clipboard stays silent (nothing to paste); a blocked read is a capability problem the
-    // user can act on, so it is reported instead of looking like a paste that did nothing.
     if (!read.text) {
       if (read.blocked) toast('读不到剪贴板：请在系统设置里允许剪贴板访问，或按 Cmd+V 粘贴', 'danger');
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -604,7 +571,6 @@ export function ChatComposer({
         onClick={event => setCursor(event.currentTarget.selectionStart ?? value.length)}
         onPaste={handlePaste}
         onContextMenu={event => {
-          // Paste the clipboard at the caret instead of opening any menu.
           event.preventDefault();
           void pasteClipboardAtCaret(event.currentTarget);
         }}
@@ -683,8 +649,6 @@ export function ChatComposer({
               return;
             }
           }
-          // Prompt history: only while neither the / nor @ menu is open, and
-          // only when the caret is on the edge line so multiline edits still work.
           if (!slashOpen && !mentionOpen && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
             const input = event.currentTarget;
             const collapsed = input.selectionStart === input.selectionEnd;

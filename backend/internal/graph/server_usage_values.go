@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// usageRecord returns the value as a plain object, or nil.
 func usageRecord(value any) map[string]any {
 	if value == nil {
 		return nil
@@ -20,7 +19,6 @@ func usageRecord(value any) map[string]any {
 	return record
 }
 
-// usageArray returns the value as a list, or an empty list.
 func usageArray(value any) []any {
 	if list, ok := value.([]any); ok {
 		return list
@@ -28,7 +26,6 @@ func usageArray(value any) []any {
 	return []any{}
 }
 
-// usageText returns a trimmed non-empty string, or nil.
 func usageText(value any) *string {
 	text, ok := value.(string)
 	if !ok {
@@ -41,7 +38,6 @@ func usageText(value any) *string {
 	return &trimmed
 }
 
-// number reads a finite number from a JSON value.
 func number(value any) *float64 {
 	switch typed := value.(type) {
 	case float64:
@@ -78,8 +74,6 @@ func number(value any) *float64 {
 	return nil
 }
 
-// usageNumberValue reads a number for an ordered detail table: a missing
-// value stays null.
 func usageNumberValue(value any) any {
 	parsed := number(value)
 	if parsed == nil {
@@ -88,7 +82,6 @@ func usageNumberValue(value any) any {
 	return *parsed
 }
 
-// boolean reads a boolean from a JSON value.
 func boolean(value any) *bool {
 	switch typed := value.(type) {
 	case bool:
@@ -106,7 +99,6 @@ func boolean(value any) *bool {
 	return nil
 }
 
-// clampPercent keeps a percentage inside 0..100.
 func clampPercent(value float64) float64 {
 	if value < 0 {
 		return 0
@@ -117,7 +109,6 @@ func clampPercent(value float64) float64 {
 	return value
 }
 
-// parseDate reads an epoch (seconds or milliseconds) or an ISO timestamp.
 func parseDate(value any) *int64 {
 	switch typed := value.(type) {
 	case float64:
@@ -150,7 +141,6 @@ func parseDate(value any) *int64 {
 	return nil
 }
 
-// parseEpoch turns a numeric epoch into milliseconds.
 func parseEpoch(value float64) *int64 {
 	if value <= 0 {
 		return nil

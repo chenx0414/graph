@@ -5,17 +5,8 @@ import (
 	"sort"
 )
 
-// ruleSeedId matches the rule ids the shipped seed declares ("- R15 ...").
 var ruleSeedId = regexp.MustCompile(`(?m)^-\s*(R\d+)\b`)
 
-// RuleSeedGaps names rule ids the shipped seed declares and the effective
-// library no longer carries.
-//
-// The rule layer is user-owned state under the prompt library, and a file there
-// replaces the shipped text whole. A rule can therefore leave the live prompt
-// without any commit, any failing test or any visible change - and is then
-// discovered months later from behaviour, which is exactly how the graph shape
-// rule went missing. The preview reports the gap so it surfaces instead.
 func (library *AgentContextLibrary) RuleSeedGaps() []string {
 	if library == nil {
 		return nil

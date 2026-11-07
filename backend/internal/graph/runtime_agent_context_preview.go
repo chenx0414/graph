@@ -7,7 +7,6 @@ import (
 	"os"
 )
 
-// agentContextBootstrapTool is the tool prompt of a bootstrap pair.
 func agentContextBootstrapTool(bootstrap *CapabilityBootstrap) string {
 	if bootstrap == nil {
 		return ""
@@ -15,7 +14,6 @@ func agentContextBootstrapTool(bootstrap *CapabilityBootstrap) string {
 	return mapString(asMap(bootstrap), "Tool", "tool")
 }
 
-// agentContextLibraryPrompt reads one prompt of the library and fails on a read error.
 func agentContextLibraryPrompt(library *AgentContextLibrary, key AgentPromptKey, variables ...map[string]string) string {
 	prompt, err := library.Prompt(key, variables...)
 	if err != nil {
@@ -24,7 +22,6 @@ func agentContextLibraryPrompt(library *AgentContextLibrary, key AgentPromptKey,
 	return prompt
 }
 
-// agentContextRole is the effective role of one operation.
 func agentContextRole(role, action string) string {
 	if role == "master" {
 		return "main"
@@ -35,7 +32,6 @@ func agentContextRole(role, action string) string {
 	return "worker"
 }
 
-// agentContextRoleRules is the built-in rule set of one role.
 func agentContextRoleRules(role string) string {
 	switch role {
 	case "main":
@@ -46,7 +42,6 @@ func agentContextRoleRules(role string) string {
 	return DEFAULT_WORKER_RULES
 }
 
-// agentContextToolGuidance is the built-in tool guidance of one role.
 func agentContextToolGuidance(role string) string {
 	switch role {
 	case "main":
@@ -57,7 +52,6 @@ func agentContextToolGuidance(role string) string {
 	return DEFAULT_WORKER_TOOL_GUIDANCE
 }
 
-// agentContextProjectInstructions reads the project instructions of a workspace.
 func agentContextProjectInstructions(workspace string) (string, string, bool) {
 	if workspace == "" {
 		return "", "", false

@@ -16,7 +16,6 @@ const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
   awaiting_user: 'warn',
 };
 
-/** One task navigation surface for the conversation and every other workspace tab. */
 export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, origin }: {
   tasks: DrawerTask[];
   selectedId: string | null;

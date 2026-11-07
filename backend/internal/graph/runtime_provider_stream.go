@@ -10,12 +10,6 @@ import (
 	"bufio"
 )
 
-// providerStreamIdleTimeout is how long a provider stream may say nothing.
-//
-// The upstream kernel ends such a stream after five minutes, and so does the
-// daemon. The environment variable narrows the bound for a provider that is
-// known to be slow, and lets the test that proves the bound fires run in
-// seconds instead of minutes.
 func providerStreamIdleTimeout() time.Duration {
 	const fallback = 5 * time.Minute
 	raw := strings.TrimSpace(os.Getenv("GRAPH_PROVIDER_STREAM_IDLE_TIMEOUT"))
@@ -29,27 +23,10 @@ func providerStreamIdleTimeout() time.Duration {
 	return parsed
 }
 
-// finishReasonReported reports whether the provider said how the turn ended.
-//
-// The OpenAI protocol ends a chunk with a finish reason, and a provider that
-// never sends the `[DONE]` marker still says so there. Anthropic says it in
-// `message_delta` and closes the message with `message_stop`.
 func (stream *controlledStream) finishReasonReported() bool {
 	return stream.finishReason != ""
 }
 
-// brokenToolCall reports the tool call whose arguments never became JSON.
-//
-// The arguments of a tool call arrive as a stream of text. A call whose text
-// is cut short used to be repaired into an empty object, so the tool ran with
-// no arguments at all and the turn was reported as a success.
-//
-// It is cut short for two different reasons, and they are not the same defect:
-// the transport died, or the answer ran out of output budget. A reader told
-// "the provider cut the arguments" goes looking at the network; a reader told
-// "the reply hit the output token limit" knows the call was too big and shrinks
-// it. The provider already said which one it was in its finish reason, so the
-// failure repeats it instead of guessing.
 func (stream *controlledStream) brokenToolCall() error {
 	for _, call := range stream.toolCalls {
 		text := strings.TrimSpace(call.arguments.String())
@@ -66,26 +43,17 @@ func (stream *controlledStream) brokenToolCall() error {
 	return nil
 }
 
-// providerLineReader reads one line of a provider stream at a time.
-//
-// The read happens in the background so that the caller can bound it: a
-// provider that stops answering has to fail the send rather than hold the
-// turn. The reader is closed with the body, which ends the background read.
 type providerLineReader struct {
 	body  io.ReadCloser
 	lines chan providerLine
-	// done ends the background read when the stream is over. Without it the
-	// reader waits for a line nobody will take.
 	done chan struct{}
 }
 
-// providerLine is one line of a provider stream.
 type providerLine struct {
 	text string
 	err  error
 }
 
-// newProviderLineReader starts reading the lines of a provider stream.
 func newProviderLineReader(body io.ReadCloser) *providerLineReader {
 	reader := &providerLineReader{
 		body:  body,
@@ -109,8 +77,6 @@ func newProviderLineReader(body io.ReadCloser) *providerLineReader {
 	return reader
 }
 
-// read returns the next line, or an error when the provider stayed quiet for
-// longer than the timeout allows.
 func (reader *providerLineReader) read(timeout time.Duration) (string, error) {
 	if timeout <= 0 {
 		return "", os.ErrDeadlineExceeded
@@ -125,7 +91,6 @@ func (reader *providerLineReader) read(timeout time.Duration) (string, error) {
 	}
 }
 
-// close ends the background read.
 func (reader *providerLineReader) close() {
 	close(reader.done)
 }

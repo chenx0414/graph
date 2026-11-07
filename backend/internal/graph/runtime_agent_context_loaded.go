@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// agentContextLoadedTools is the tool surface a running operation actually has.
 func agentContextLoadedTools(facts []RuntimeCapabilityLoadFact, tools []ToolDefinition, nativeTools []string) []AgentContextTool {
 	owners := map[string]RuntimeCapabilityLoadFact{}
 	for _, fact := range facts {
@@ -66,7 +65,6 @@ func agentContextLoadedTools(facts []RuntimeCapabilityLoadFact, tools []ToolDefi
 	return append(agentContextNativeTools(nativeTools), entries...)
 }
 
-// agentContextLoadedCapabilities is the capability list a running operation has.
 func agentContextLoadedCapabilities(report []RuntimeCapabilityLoadFact) []AgentCapabilityPromptEntry {
 	out := []AgentCapabilityPromptEntry{}
 	for _, fact := range report {
@@ -102,7 +100,6 @@ func agentContextLoadedCapabilities(report []RuntimeCapabilityLoadFact) []AgentC
 	return out
 }
 
-// agentContextSchemaParameters is the sorted parameter list of one tool schema.
 func agentContextSchemaParameters(schema any) []string {
 	out := []string{}
 	record := asMap(schema)
@@ -120,7 +117,6 @@ func agentContextSchemaParameters(schema any) []string {
 	return out
 }
 
-// agentContextToolPermission is the permission line the settings panel shows.
 func agentContextToolPermission(name string) string {
 	switch {
 	case name == "read" || name == "list_dir":
@@ -149,7 +145,6 @@ func agentContextToolPermission(name string) string {
 	return "Graph call gate and current access policy"
 }
 
-// agentContextBool is a pointer to one boolean value.
 func agentContextBool(value bool) *bool {
 	return &value
 }

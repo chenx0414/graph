@@ -1,6 +1,5 @@
 package graph
 
-// NodeEntry is one row of a node transcript.
 type NodeEntry struct {
 	Seq              int64   `json:"seq"`
 	ID               string  `json:"id"`
@@ -14,7 +13,6 @@ type NodeEntry struct {
 	ContentBytes     int64   `json:"contentBytes"`
 }
 
-// NodeEntryPage is one page of a node transcript.
 type NodeEntryPage struct {
 	Entries    []NodeEntry `json:"entries"`
 	EntryCount int         `json:"entryCount"`
@@ -23,8 +21,6 @@ type NodeEntryPage struct {
 	HasNewer   bool        `json:"hasNewer"`
 }
 
-// nodeEntryColumns is the shared projection of one transcript page. A full
-// entry keeps its whole body; a preview truncates it.
 func nodeEntryColumns(full bool) string {
 	flag := "0"
 	if full {
@@ -42,7 +38,6 @@ func nodeEntryColumns(full bool) string {
         'ordinal',json_extract(data,'$.ordinal')) END AS data`
 }
 
-// nodeEntryLimit is the page size of a transcript query.
 func nodeEntryLimit(query NodeEntryQuery) int {
 	if query.Limit != nil && isSafeInteger(*query.Limit) && *query.Limit > 0 {
 		limit := int(*query.Limit)
@@ -54,7 +49,6 @@ func nodeEntryLimit(query NodeEntryQuery) int {
 	return 100
 }
 
-// nodeEntryMap turns transcript rows into entries.
 func nodeEntryMap(rows []map[string]any, full bool) []NodeEntry {
 	entries := make([]NodeEntry, 0, len(rows))
 	for _, row := range rows {
@@ -80,8 +74,6 @@ func nodeEntryMap(rows []map[string]any, full bool) []NodeEntry {
 	return entries
 }
 
-// ListNodeEntries pages one node's transcript. Stable forward/backward
-// pagination; large records are fetched individually.
 func ListNodeEntries(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) NodeEntryPage {
 	limit := nodeEntryLimit(query)
 	countRow := kernelRow(store.Db, "SELECT COUNT(*) AS count FROM node_entries WHERE task_id=? AND node_id=?", taskId, nodeId)
@@ -97,14 +89,12 @@ func ListNodeEntries(store *TaskStore, taskId, nodeId string, query NodeEntryQue
 		return NodeEntryPage{Entries: nodeEntryMap(rows, full), EntryCount: entryCount, Limit: 1, HasOlder: false, HasNewer: false}
 	}
 	if query.Before != nil {
-		// Backward page: the entries directly before the cursor, oldest-first.
 		rows := kernelRows(store.Db, `SELECT `+columns+` FROM node_entries
       WHERE task_id=? AND node_id=? AND seq<? ORDER BY seq DESC LIMIT ?`, taskId, nodeId, *query.Before, limit)
 		reverseNodeEntries(rows)
 		return NodeEntryPage{Entries: nodeEntryMap(rows, full), EntryCount: entryCount, Limit: limit, HasOlder: true, HasNewer: false}
 	}
 	if query.After != nil {
-		// Forward page from a known cursor.
 		after := int64(0)
 		if isSafeInteger(*query.After) && *query.After >= 0 {
 			after = int64(*query.After)
@@ -119,8 +109,6 @@ func ListNodeEntries(store *TaskStore, taskId, nodeId string, query NodeEntryQue
 		}
 		return NodeEntryPage{Entries: nodeEntryMap(rows, full), EntryCount: entryCount, Limit: limit, HasOlder: true, HasNewer: hasNewer}
 	}
-	// No cursor: the newest page. The initial view must show the live tail; the
-	// UI then pages backward with `before` until it reaches the first entry.
 	rows := kernelRows(store.Db, `SELECT `+columns+` FROM node_entries
     WHERE task_id=? AND node_id=? ORDER BY seq DESC LIMIT ?`, taskId, nodeId, limit)
 	oldest := int64(0)
@@ -136,7 +124,6 @@ func ListNodeEntries(store *TaskStore, taskId, nodeId string, query NodeEntryQue
 	return NodeEntryPage{Entries: nodeEntryMap(rows, full), EntryCount: entryCount, Limit: limit, HasOlder: hasOlder, HasNewer: false}
 }
 
-// reverseNodeEntries flips a descending page into ascending order.
 func reverseNodeEntries(rows []map[string]any) {
 	for left, right := 0, len(rows)-1; left < right; left, right = left+1, right-1 {
 		rows[left], rows[right] = rows[right], rows[left]

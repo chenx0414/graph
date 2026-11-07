@@ -18,8 +18,6 @@ type GraphPayload = React.ComponentProps<typeof GraphCanvas>['graph'] & {
 export function GraphPanel({ id }: { id: string }) {
   const { data: graph, error, loading, reload } = useAsync(() => api<GraphPayload>(`/api/tasks/${id}/graph`), [id]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  // Clicking a node opens its chat tab: the node's own window is where its transcript and
-  // overview live, so the graph does not grow a second, thinner copy of them.
   const [selected, setSelected] = useState<string | null>(null);
   function openNode(nodeId: string) {
     if (graph?.nodes.find(node => node.id === nodeId)?.kind === 'module') { setSelected(nodeId); return; }
@@ -28,7 +26,6 @@ export function GraphPanel({ id }: { id: string }) {
   const { data: view, reload: reloadView } = useAsync(() => api<{ request: string }>(`/api/tasks/${id}`), [id]);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshAll = useCallback(() => {
-    // One task event usually means several records changed; coalesce them.
     clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => { reload(); reloadView(); }, 150);
   }, [reload, reloadView]);

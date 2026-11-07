@@ -1,6 +1,5 @@
 package graph
 
-// State reads phase, pause, and the latest revision.
 func (runtime *GraphRuntime) State() *GraphStateRow {
 	row := kernelRow(runtime.kernel.DB, "SELECT phase,paused FROM tasks WHERE id=?", runtime.graphId)
 	if row == nil {
@@ -31,7 +30,6 @@ func (runtime *GraphRuntime) completionRequested() bool {
 	return row != nil && kernelInt(row["requested"]) == 1
 }
 
-// Deliver accepts an external interface input.
 func (runtime *GraphRuntime) Deliver(nodeId, input string, value any) QueueRow {
 	latest := runtime.kernel.LatestRevision(runtime.graphId)
 	if latest == nil {
@@ -44,7 +42,6 @@ func (runtime *GraphRuntime) Deliver(nodeId, input string, value any) QueueRow {
 	return *delivered.Queue
 }
 
-// DeliverEndpoint refuses delivery once completion or stop has begun.
 func (runtime *GraphRuntime) DeliverEndpoint(endpoint string, value any) DirectDelivery {
 	requireProjectActive(runtime.kernel.Store, runtime.kernel.Store.Task(runtime.graphId).ProjectID)
 	phase := GraphPhase("running")
@@ -60,7 +57,6 @@ func (runtime *GraphRuntime) DeliverEndpoint(endpoint string, value any) DirectD
 	return runtime.kernel.DeliverDirect(runtime.graphId, endpoint, value)
 }
 
-// Chat queues a message. External chat closes during completion unless internal is set.
 func (runtime *GraphRuntime) Chat(nodeId, text string, internal bool) QueueRow {
 	requireProjectActive(runtime.kernel.Store, runtime.kernel.Store.Task(runtime.graphId).ProjectID)
 	phase := GraphPhase("running")
@@ -83,7 +79,6 @@ func (runtime *GraphRuntime) Chat(nodeId, text string, internal bool) QueueRow {
 	return NewNodeQueue(runtime.kernel, runtime.graphId).Enqueue(QueueInput{NodeId: nodeId, Kind: "chat", Text: &text})
 }
 
-// Complete requests completion and closes external input.
 func (runtime *GraphRuntime) Complete() GraphStateRow {
 	runtime.ensureTask()
 	phase := runtime.State().Phase
@@ -98,7 +93,6 @@ func (runtime *GraphRuntime) Complete() GraphStateRow {
 	return *runtime.State()
 }
 
-// WithdrawComplete restores external input.
 func (runtime *GraphRuntime) WithdrawComplete() GraphStateRow {
 	runtime.ensureTask()
 	phase := runtime.State().Phase

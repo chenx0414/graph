@@ -10,7 +10,6 @@ import (
 	"fmt"
 )
 
-// SKILL_TOKEN selects one skill bound to the Agent for this turn.
 var SKILL_TOKEN = regexp.MustCompile(`(?:^|\s)/skill:([A-Za-z0-9._-]+)`)
 
 const SKILL_BODY_LIMIT = 40000
@@ -34,7 +33,6 @@ type SkillInjection struct {
 	Rejected []SkillRejection `json:"rejected"`
 }
 
-// BoundSkills are the skills a resolved capability bundle actually bound.
 func BoundSkills(facts []struct {
 	Id      string
 	Version string
@@ -112,7 +110,6 @@ func trimEnd(value string) string {
 	return strings.TrimRightFunc(value, unicode.IsSpace)
 }
 
-// InjectRequestedSkills appends the bodies of the skills this turn asked for.
 func InjectRequestedSkills(text string, skills []BoundSkill, names []string) SkillInjection {
 	requested := names
 	if names == nil {

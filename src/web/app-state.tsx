@@ -135,8 +135,6 @@ export function App() {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedDrawerTaskId, setSelectedDrawerTaskId] = useState<string | null>(null);
-  // Which windows are open in the main area. The hash route stays the truth for what is on
-  // screen; navigating opens or refreshes the matching tab (`workspace-tabs.ts` owns the rules).
   const [tabs, setTabs] = useState<WorkspaceTabs>(() => openTab(EMPTY_TABS, tabForPath(route())));
   const { data: conversations, reload: reloadConversations } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);
 
@@ -177,9 +175,6 @@ export function App() {
     if (taskId) setSelectedDrawerTaskId(taskId);
   }, [path]);
 
-  // There is no "new conversation" page any more: a conversation comes from the global
-  // Agent or from a project's supervisor thread. Landing on the root opens the global
-  // one, so a fresh window still arrives somewhere that can talk.
   useEffect(() => {
     if (path !== '/' || !conversations) return;
     const global = conversations.find(item => 'role' in item && item.role === 'global');
@@ -195,16 +190,12 @@ export function App() {
     }).catch(() => undefined);
   }, [path, conversations]);
   const pathname = path.split('?')[0];
-  // Tabs are named from the data the shell already polls: a conversation by its own title, a
-  // task by its request. Until that arrives the tab keeps the generic name it opened with.
   const shownTabs = withTitles(tabs, tab => {
     if (tab.kind === 'context') {
       const title = conversations?.find(item => item.id === tab.key)?.title;
       return title ? `上下文 · ${title}` : null;
     }
     if (tab.kind === 'conversation') return conversations?.find(item => item.id === tab.key)?.title ?? null;
-    // A task's tabs stay distinguishable from each other: the kind names the window, the request
-    // names the task, so "任务图 · 外壳与标签栏" never looks like "节点 impl-shell".
     const prefix = tab.kind === 'graph' ? '任务图' : null;
     if (!prefix) return null;
     const request = tasks.find(item => item.id === tab.key)?.request;
@@ -222,8 +213,6 @@ export function App() {
     if (!tab) return;
     setTabs(current => activateTab(current, id));
     setPath(tab.hash.slice(1));
-    // A tab that points where we already are needs no navigation; anything else sets the hash,
-    // which the hash listener turns back into the same tab being in front.
     if (tab.hash !== `#${path}`) location.hash = tab.hash;
   }
   function closeWorkspaceTab(id: string) {
@@ -236,7 +225,6 @@ export function App() {
     setPath(hash.slice(1));
     location.hash = hash;
   }
-  // Tab content that only learns its own name after loading (a shared artifact) renames its tab.
   function retitleWorkspaceTab(kind: WorkspaceTabKind, key: string, title: string) {
     setTabs(current => retitleTab(current, tabId(kind, key), title));
   }

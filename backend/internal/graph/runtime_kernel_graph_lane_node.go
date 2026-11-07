@@ -32,7 +32,6 @@ func (state *kernelGraphLaneState) nodeDefinition(graphId, nodeId string, revisi
 	return &node
 }
 
-// Use the execution's frozen location, including publication during a concurrent patch.
 func (state *kernelGraphLaneState) nodeLocation(graphId, nodeId string, revisionVersion *int, prepare bool) (location *kernelGraphLaneNodeLocation) {
 	defer func() {
 		recovered := recover()
@@ -56,8 +55,6 @@ func (state *kernelGraphLaneState) nodeLocation(graphId, nodeId string, revision
 	instanceID, admitted := state.options.Kernel.NodeInstanceID(graphId, nodeId)
 	key := graphId + "/" + nodeId
 	execution := state.options.Kernel.RunningExecution(graphId, nodeId)
-	// Prepare each new review against the current integration. Retries, recovery
-	// after a provider call, and settlement retain the tree already observed.
 	reseed := false
 	if prepare && execution != nil && node != nil && node.Recipe != "" &&
 		state.options.Catalog.HasDefinition(node.Recipe) && state.options.Catalog.Definition(node.Recipe).Review &&
@@ -142,8 +139,6 @@ func (state *kernelGraphLaneState) nodeAccess(graphId, nodeId string, revisionVe
 	}
 	context := AccessPolicyContext{StateDir: state.options.StateDir, GraphHome: state.options.GraphHome}
 	ceiling := ResolveAccessPolicy(FullAccessPolicy(), context)
-	// The TypeScript read is `state.options.access?.() ?? resolveAccessPolicy(...)`, so a host
-	// that has no ceiling to give falls back to the standard policy.
 	if state.options.Access != nil {
 		if resolved := state.options.Access(); resolved != nil {
 			ceiling = resolved
@@ -152,13 +147,6 @@ func (state *kernelGraphLaneState) nodeAccess(graphId, nodeId string, revisionVe
 	return NodeAccessPolicy(requested, ceiling, context)
 }
 
-// kernelGraphLaneNodeChannel is one node's provider channel.
-//
-// It is the stream the kernel reads, with the cleanup the turn owes attached:
-// the store listener and the host's abort listener are released when the
-// answer is over. The refusal is the gate's own reason: a paused or
-// over-budget send is refused with the host's reason, so the answer carries
-// it instead of a bare transport error.
 type kernelGraphLaneNodeChannel struct {
 	inner   ModelEventStream
 	usage   TokenUsage
@@ -168,7 +156,6 @@ type kernelGraphLaneNodeChannel struct {
 	done    bool
 }
 
-// Next returns the next event of the answer.
 func (channel *kernelGraphLaneNodeChannel) Next() (map[string]any, bool) {
 	event, ok := channel.inner.Next()
 	if !ok {
@@ -177,25 +164,20 @@ func (channel *kernelGraphLaneNodeChannel) Next() (map[string]any, bool) {
 	return event, ok
 }
 
-// Result returns the settlement of the answer.
 func (channel *kernelGraphLaneNodeChannel) Result() map[string]any {
 	settlement := channel.inner.Result()
 	channel.finish()
 	return settlement
 }
 
-// settlement is the answer the caller reports.
 func (channel *kernelGraphLaneNodeChannel) settlement() map[string]any {
 	settlement := channel.Result()
-	// Provider SDKs wrap gate refusals as connection errors. Preserve the
-	// host's control reason so pause cannot consume automatic retries.
 	if channel.refusal != nil && settlement["stopReason"] == "error" {
 		settlement["errorMessage"] = channel.refusal.Message
 	}
 	return settlement
 }
 
-// finish releases the turn's listeners once the answer is over.
 func (channel *kernelGraphLaneNodeChannel) finish() {
 	if channel.done {
 		return

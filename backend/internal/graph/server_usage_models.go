@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// usageParseModelPrices reads the local price table.
 func usageParseModelPrices(raw any) []ModelPrice {
 	prices := []ModelPrice{}
 	for _, value := range usageArray(usageRecord(raw)["models"]) {
@@ -37,7 +36,6 @@ func usageParseModelPrices(raw any) []ModelPrice {
 	return prices
 }
 
-// usagePriceFor finds the archived price of a model.
 func usagePriceFor(modelID string, prices []ModelPrice) *ModelPrice {
 	normalized := strings.ToLower(modelID)
 	for index := range prices {
@@ -54,7 +52,6 @@ func usagePriceFor(modelID string, prices []ModelPrice) *ModelPrice {
 	return nil
 }
 
-// usageSubscriptionModelValues are the optional overrides of a model entry.
 type usageSubscriptionModelValues struct {
 	ContextWindow *int
 	MaxTokens     *int
@@ -62,17 +59,11 @@ type usageSubscriptionModelValues struct {
 	Headers       map[string]string
 }
 
-// usageSubscriptionModel builds one subscription model entry.
 func usageSubscriptionModel(id string, name string, provider UsageProviderId, api SubscriptionModelApi, baseURL string, prices []ModelPrice, values usageSubscriptionModelValues) SubscriptionModel {
 	model := SubscriptionModel{
 		ID: id, Name: name, API: api, BaseURL: baseURL,
 		ContextWindow: 131_072, MaxTokens: 8_192,
 		Reasoning: !usageNonReasoningPattern.MatchString(id),
-		// A model is usable when its platform is: the transport is not the
-		// question. The old verdict here (`api != responses`) marked every
-		// Responses model unsupported while the runtime sent that transport and
-		// the configuration accepted it, so the catalog said one thing and the
-		// session did another.
 		Supported: UnsupportedPlatformReason(string(provider)) == "",
 	}
 	if values.ContextWindow != nil {
@@ -100,7 +91,6 @@ func usageSubscriptionModel(id string, name string, provider UsageProviderId, ap
 	return model
 }
 
-// usageOpenAiModels reads the model list of an OpenAI-compatible endpoint.
 func usageOpenAiModels(body map[string]any, provider UsageProviderId, baseURL string, api SubscriptionModelApi, prices []ModelPrice) []SubscriptionModel {
 	rows := usageArray(body["data"])
 	if len(rows) == 0 {
@@ -176,7 +166,6 @@ func usageOpenAiModels(body map[string]any, provider UsageProviderId, baseURL st
 	return models
 }
 
-// usageFallbackModels builds the model list from known model ids.
 func usageFallbackModels(keys []string, provider UsageProviderId, baseURL string, prices []ModelPrice) []SubscriptionModel {
 	matches := keys
 	if len(matches) == 0 {
@@ -204,8 +193,6 @@ func usageFallbackModels(keys []string, provider UsageProviderId, baseURL string
 	return models
 }
 
-// usageOpenCodeConfiguredModelKeys reads the model ids the local OpenCode
-// configuration names.
 func usageOpenCodeConfiguredModelKeys(config any, ids []string) []string {
 	providers := usageRecord(usageRecord(config)["provider"])
 	if providers == nil {
@@ -231,8 +218,6 @@ func usageOpenCodeConfiguredModelKeys(config any, ids []string) []string {
 	return []string{}
 }
 
-// usageDiscoverOpenCodeModels reads the models an OpenCode Go subscription
-// exposes.
 func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPrice, openCodeConfig any) []SubscriptionModel {
 	baseURL := credential.BaseURL
 	if baseURL == "" {
@@ -283,9 +268,6 @@ func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPric
 		} else if hasPi {
 			name = pi.Name
 		}
-		// The kernel's catalog names the public inference host; the plan was
-		// configured against the endpoint that answers for it, so only a
-		// catalog that names an endpoint may move the request.
 		modelBaseURL := baseURL
 		if hasPi && pi.BaseURL != "" {
 			modelBaseURL = pi.BaseURL
@@ -316,8 +298,6 @@ func usageDiscoverOpenCodeModels(credential *usageCredential, prices []ModelPric
 	return result
 }
 
-// usageOpenCodeFallbackModels builds the OpenCode Go model list without the
-// models.dev catalogue.
 func usageOpenCodeFallbackModels(configuredKeys []string, baseURL string, prices []ModelPrice) []SubscriptionModel {
 	models := usageFallbackModels(configuredKeys, UsageProviderOpenCodeGo, baseURL, prices)
 	for index := range models {
@@ -326,8 +306,6 @@ func usageOpenCodeFallbackModels(configuredKeys []string, baseURL string, prices
 	return models
 }
 
-// usageDiscoverOpenAiCompatible reads the model list of an OpenAI-compatible
-// subscription endpoint.
 func usageDiscoverOpenAiCompatible(provider UsageProviderId, credential *usageCredential, prices []ModelPrice) []SubscriptionModel {
 	baseURL := credential.BaseURL
 	if baseURL == "" {
@@ -346,8 +324,6 @@ func usageDiscoverOpenAiCompatible(provider UsageProviderId, credential *usageCr
 	return usageOpenAiModels(body, provider, baseURL, SubscriptionModelApiOpenAICompletions, prices)
 }
 
-// usageDiscoverChatGptModels reads the model list a ChatGPT subscription
-// exposes.
 func usageDiscoverChatGptModels(credential *usageCredential, prices []ModelPrice) []SubscriptionModel {
 	headers := map[string]string{
 		"authorization": "Bearer " + credential.Value, "accept": "application/json",
@@ -367,8 +343,6 @@ func usageDiscoverChatGptModels(credential *usageCredential, prices []ModelPrice
 	return usageOpenAiModels(body, UsageProviderChatGPT, usageDefaultBaseURLs[UsageProviderChatGPT], SubscriptionModelApiResponses, prices)
 }
 
-// usageChatGptFallbackModels builds the ChatGPT model list from the archived
-// prices.
 func usageChatGptFallbackModels(prices []ModelPrice) []SubscriptionModel {
 	keys := []string{}
 	for _, price := range prices {

@@ -22,20 +22,16 @@ Options:
   --out <path>        Definition file to create (required; never overwritten)
   -h, --help          Print this help`
 
-// assembleTeamCatalog reads the capability library of a running console and
-// publishes the role recipes back into it.
 type assembleTeamCatalog struct {
 	base         string
 	cookie       string
 	capabilities []CapabilityRecord
 }
 
-// Capability is one capability of the running console's library.
 func (catalog *assembleTeamCatalog) Capability(id string, version string) *CapabilityRecord {
 	return SelectCapabilityRecord(catalog.capabilities, id, version)
 }
 
-// SaveAgentCombination publishes one role recipe and answers what it compiled to.
 func (catalog *assembleTeamCatalog) SaveAgentCombination(combination AgentCombination) SavedAgentCombination {
 	raw, err := catalog.post("/api/catalog/combinations", map[string]any{"combination": combination})
 	if err != nil {
@@ -48,7 +44,6 @@ func (catalog *assembleTeamCatalog) SaveAgentCombination(combination AgentCombin
 	return saved
 }
 
-// get reads one path of the console.
 func (catalog *assembleTeamCatalog) get(path string) ([]byte, error) {
 	request, err := http.NewRequest(http.MethodGet, catalog.base+path, nil)
 	if err != nil {
@@ -70,7 +65,6 @@ func (catalog *assembleTeamCatalog) get(path string) ([]byte, error) {
 	return body, nil
 }
 
-// post writes one path of the console.
 func (catalog *assembleTeamCatalog) post(path string, payload any) ([]byte, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -98,8 +92,6 @@ func (catalog *assembleTeamCatalog) post(path string, payload any) ([]byte, erro
 	return body, nil
 }
 
-// runAssembleTeam is the `graphd assemble-team` command. The team rules live
-// in catalog_matt_team.go; this is the entry point that can reach them.
 func runAssembleTeam(args []string, cwd string) int {
 	consoleURL := ""
 	configPath := ""
@@ -165,8 +157,6 @@ func runAssembleTeam(args []string, cwd string) int {
 	return 0
 }
 
-// assembleTeamBase checks that the console is a local one and answers its
-// address without a trailing slash.
 func assembleTeamBase(raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		Raise("usage", "The console URL is required")
@@ -182,8 +172,6 @@ func assembleTeamBase(raw string) string {
 	return strings.TrimRight(parsed.String(), "/")
 }
 
-// openAssembleTeamCatalog opens a session against the console and reads its
-// capability library.
 func openAssembleTeamCatalog(base string) (*assembleTeamCatalog, error) {
 	response, err := HTTPClient.Get(base)
 	if err != nil {

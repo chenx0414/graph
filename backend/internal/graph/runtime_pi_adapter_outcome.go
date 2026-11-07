@@ -8,12 +8,6 @@ import (
 	"fmt"
 )
 
-// piAdapterTurnOutcome is what a finished turn leaves behind: the composer
-// suggestion, the sedimentation, the reload handoff and the operation's own
-// output.
-//
-// It was the tail of one very long function, so the part of a turn that
-// happens after the model answered could not be read on its own.
 func piAdapterTurnOutcome(options PiAdapterOptions, input piAdapterRunInput, turn piAdapterTurnInput, entry ModelEntry, reply string, store *TaskStore, operation Operation, instanceId string) OperationResult {
 	var suggestedPrompt *string
 	var suggestionUsage *TokenUsage
@@ -53,8 +47,6 @@ func piAdapterTurnOutcome(options PiAdapterOptions, input piAdapterRunInput, tur
 		}
 		suggestionUsage = suggestionGate.Total()
 	}
-	// A failed call and a model that had nothing to suggest used to collapse into the same
-	// silent `undefined`. The decision now travels with the turn, with the call's own words.
 	if turn.Conversation != nil {
 		decision := map[string]any{
 			"operationId": operation.Id, "nodeId": operation.NodeId, "model": nil,
@@ -81,9 +73,6 @@ func piAdapterTurnOutcome(options PiAdapterOptions, input piAdapterRunInput, tur
 		}
 		store.Event(operation.TaskId, "prompt_suggestion.decided", decision)
 	}
-	// so it cannot escape the project's skill folder. Never allowed to break the turn.
-	// The reload handoff keeps its own output: the console shows the receipt, while the review
-	// above already read the change itself.
 	if turn.ReloadReceipt != nil && *turn.ReloadReceipt != nil {
 		output := map[string]any{"text": RSI_RELOAD_RECEIPT, "rsiRequestId": fmt.Sprintf("%v", (*turn.ReloadReceipt)["id"])}
 		if len(*turn.ToolActivity) > 0 {
@@ -94,7 +83,6 @@ func piAdapterTurnOutcome(options PiAdapterOptions, input piAdapterRunInput, tur
 		}
 		return OperationResult{Outcome: "completed", Output: output, Usage: turn.Gate.Total()}
 	}
-	// External main returns its visible reply and recorded conversation activity.
 	var output map[string]any
 	if turn.Conversation != nil {
 		output = map[string]any{"text": reply}

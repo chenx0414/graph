@@ -106,8 +106,6 @@ export function ModelsPage() {
 export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: { active: string; autoSyncSubscriptions: boolean; openGuide: boolean }) {
   const [draft, setDraft] = useState<RawConfig | null>(null);
   const [credentialState, setCredentialState] = useState<Record<string, boolean>>({});
-  // A credential the vendor refused to renew cannot be fixed by retrying: the card
-  // says so, and the reason travels with it, instead of looking ready.
   const [credentialRelogin, setCredentialRelogin] = useState<Record<string, string>>({});
   const [focusCredentialId, setFocusCredentialId] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(openGuide);
@@ -183,8 +181,6 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
         ...Object.fromEntries(Object.keys(detected).map(id => [id, true])),
       });
       setRevision(response.revision);
-      // The config response carries the saved/effective pair from one read.
-      // A delayed startup snapshot must not replace a newer known revision.
       setEffectiveRevision(current => response.effectiveRevision === undefined ? current
         : Math.max(current ?? response.effectiveRevision, response.effectiveRevision));
       setDirty(merged.changed || pricingChanged);
@@ -244,9 +240,6 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
     }
     const document = latestDraft.current;
     if (!document) return;
-    // The config parser requires positive contextWindow/maxTokens. A model whose
-    // snapshot hit did not cover them must be filled in first, so block the save
-    // with a named reason instead of sending a document the daemon will reject.
     const missing = missingRequiredModelFields(document.models?.entries ?? []);
     if (missing.length) {
       const names = missing.map(problem => problem.id).join('、');
@@ -294,9 +287,6 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
     }
   }
   const mutate = (change: (next: RawConfig) => void) => {
-    // Clone the newest draft rather than the render-scope value: two edits that
-    // land in the same render frame would otherwise make the second one discard
-    // the first, so a freshly added model silently vanishes from the document.
     const next = structuredClone(latestDraft.current ?? draft) as RawConfig;
     change(next);
     latestDraft.current = next;

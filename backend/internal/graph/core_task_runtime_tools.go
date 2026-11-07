@@ -1,8 +1,5 @@
 package graph
 
-// graphManagement binds the graph control surface to one owner task. The
-// TypeScript supervisor spread graphManagement() into itself, so the graph
-// tools of the main Agent read the same surface.
 func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentToolsGraphManagement {
 	service := runtime.graphService(taskId)
 	return AgentToolsGraphManagement{
@@ -54,8 +51,6 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 				Action:  agentToolsString(input["action"]),
 			}
 			request.Proof, _ = input["proof"].(string)
-			// A retried control action names its request so the kernel can recognise
-			// the replay instead of doing the same thing twice.
 			request.RequestID, _ = input["requestId"].(string)
 			if len(agent) > 0 && agent[0] {
 				request.AgentTaskID = taskId
@@ -78,9 +73,6 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 			if callID, ok := input["callId"].(string); ok {
 				request.CallId = &callID
 			}
-			// What complete_with_limitations closes on. The actor is not read from
-			// the payload: this door speaks as the Agent, so the service refuses a
-			// human acceptance item here whatever the arguments claim.
 			request.Limitations = graphAcceptanceLimitationsOfPayload(input)
 			if usage, ok := input["usage"].(map[string]any); ok {
 				parsed := &TokenUsage{}
@@ -138,9 +130,6 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 		},
 		HarnessExperience: func(input map[string]any) any {
 			domain, _ := input["domain"].(string)
-			// A scope names the one store to read. The recording path needs it:
-			// it appends to that store, and a read that answered with another
-			// scope would make it write over what is already there.
 			scope, _ := input["scope"].(string)
 			return service.HarnessExperience(HarnessExperienceInput{Domain: domain, Scope: scope})
 		},
@@ -151,9 +140,6 @@ func (runtime *TaskRuntime) graphManagement(taskId string, agent ...bool) AgentT
 	}
 }
 
-// graphService binds the management surface to one owner task. The Agent tools
-// and the user-only doors share it: they differ in who they say is acting, not in
-// what a graph control does.
 func (runtime *TaskRuntime) graphService(taskId string) GraphManagement {
 	return NewGraphManagement(runtime.kernel, taskId, func(graphId string, branch string) {
 		if runtime.git != nil {
@@ -162,7 +148,6 @@ func (runtime *TaskRuntime) graphService(taskId string) GraphManagement {
 	}, runtime.artifacts)
 }
 
-// graphManagementPatchChange reads the changes object of a graph patch.
 func graphManagementPatchChange(raw any) PatchChange {
 	change := PatchChange{}
 	record, ok := raw.(map[string]any)

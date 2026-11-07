@@ -35,7 +35,6 @@ func piAdapterAssistantText(message map[string]any) string {
 	return ""
 }
 
-// piAdapterUnique keeps the first occurrence of every path.
 func piAdapterUnique(paths []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -49,7 +48,6 @@ func piAdapterUnique(paths []string) []string {
 	return out
 }
 
-// truncateRunes keeps the first n runes of a string.
 func truncateRunes(text string, n int) string {
 	runes := []rune(text)
 	if len(runes) <= n {
@@ -58,7 +56,6 @@ func truncateRunes(text string, n int) string {
 	return string(runes[:n])
 }
 
-// asError turns a recovered panic value into an error.
 func asError(rec any) error {
 	if err, ok := rec.(error); ok {
 		return err
@@ -66,7 +63,6 @@ func asError(rec any) error {
 	return errors.New(fmt.Sprintf("%v", rec))
 }
 
-// asFloatValue reads a number out of a decoded JSON value.
 func asFloatValue(value any) float64 {
 	number, ok := asFloat(value)
 	if !ok {
@@ -75,7 +71,6 @@ func asFloatValue(value any) float64 {
 	return number
 }
 
-// piAdapterNullableString maps an empty string to a null JSON value.
 func piAdapterNullableString(value string) any {
 	if value == "" {
 		return nil
@@ -83,7 +78,6 @@ func piAdapterNullableString(value string) any {
 	return value
 }
 
-// agentContextRoot is the context root of the prompt library, when it has one.
 func agentContextRoot(library *AgentContextLibrary) string {
 	if library == nil {
 		return ""

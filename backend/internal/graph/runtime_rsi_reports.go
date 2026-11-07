@@ -7,7 +7,6 @@ import (
 	"bytes"
 )
 
-// rsiJSONString encodes one JSON string the way JSON.stringify does.
 func rsiJSONString(value string) string {
 	buffer := &bytes.Buffer{}
 	encoder := json.NewEncoder(buffer)
@@ -18,7 +17,6 @@ func rsiJSONString(value string) string {
 	return strings.TrimRight(buffer.String(), "\n")
 }
 
-// rsiJSONStringOrNull encodes a string that may be absent.
 func rsiJSONStringOrNull(value *string) string {
 	if value == nil {
 		return "null"
@@ -26,7 +24,6 @@ func rsiJSONStringOrNull(value *string) string {
 	return rsiJSONString(*value)
 }
 
-// rsiFailureReport is the report of a change that could not be applied.
 func rsiFailureReport(input RsiChangeInput, root *string, errorText string, validation []RsiValidationResult) string {
 	target := "不可用"
 	if root != nil {
@@ -49,7 +46,6 @@ func rsiFailureReport(input RsiChangeInput, root *string, errorText string, vali
 	return strings.Join(lines, "\n")
 }
 
-// rsiChecksFailedReport is the report of a change whose checks failed.
 func rsiChecksFailedReport(input RsiChangeInput, receipt RsiReceipt) string {
 	branch := "unknown"
 	if receipt.Branch != nil {
@@ -81,7 +77,6 @@ func rsiChecksFailedReport(input RsiChangeInput, receipt RsiReceipt) string {
 	return strings.Join(lines, "\n")
 }
 
-// rsiDryRunReport is the report of a rehearsal: the verdict, without the delivery.
 func rsiDryRunReport(input RsiChangeInput, receipt RsiReceipt, failed bool) string {
 	lines := []string{
 		"### RSI 演练：" + input.Title,
@@ -116,7 +111,6 @@ func rsiDryRunReport(input RsiChangeInput, receipt RsiReceipt, failed bool) stri
 	return strings.Join(lines, "\n")
 }
 
-// rsiUnavailableReport is the report of a change that could not run at all.
 func rsiUnavailableReport(input RsiChangeInput, root *string, reason string) string {
 	target := "未找到"
 	if root != nil {
@@ -131,7 +125,6 @@ func rsiUnavailableReport(input RsiChangeInput, root *string, reason string) str
 	}, "\n")
 }
 
-// rsiSuccessReport is the report of a change that was committed.
 func rsiSuccessReport(input RsiChangeInput, receipt RsiReceipt, activationNote string) string {
 	branch := "unknown"
 	if receipt.Branch != nil {

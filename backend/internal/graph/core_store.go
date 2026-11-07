@@ -5,20 +5,12 @@ import (
 	"sync"
 )
 
-// SCHEMA_VERSION is the newest tasks.sqlite this process writes, and the newest it
-// will open: a state directory that has run a newer build is refused rather than
-// corrupted. Every migration in core_store_migrate.go has to move it in the same
-// change - a migration that runs without it leaves a database the next start
-// rejects as "belonging to a newer runtime".
 const SCHEMA_VERSION = 57
 
-// SchemaVersion is the same constant. Call sites used both spellings.
 const SchemaVersion = SCHEMA_VERSION
 
-// ToolCallRetentionDays is how long a recorded tool call stays in the aggregate.
 const ToolCallRetentionDays = 90
 
-// TaskRow is one tasks table row. JSON names are the SQL columns so asMap can read them.
 type TaskRow struct {
 	ID                 string  `json:"id"`
 	ProjectID          string  `json:"project_id"`
@@ -38,8 +30,6 @@ type TaskRow struct {
 	DecisionDigest     *string `json:"decision_digest"`
 }
 
-// TaskStore is the durable task database. DB and Db name the same connection;
-// translators spelled the field both ways.
 type TaskStore struct {
 	DB        *sql.DB
 	Db        *sql.DB
@@ -48,10 +38,6 @@ type TaskStore struct {
 	listeners []func(string)
 	waiters   []chan struct{}
 	txDepth   int
-	// txMu serializes transactions. The TypeScript host runs one event loop
-	// with synchronous SQLite calls, so two transactions never interleave
-	// there. The Go host serves the Pi worker protocol on its own goroutine,
-	// so the same guarantee is made here: only one transaction is open.
 	txMu sync.Mutex
 }
 

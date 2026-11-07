@@ -63,11 +63,6 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	estimatedRequiresReconciliation := source == UsageEstimated && !options.Reconciled
 	fullAccess := IsFullAccess(operation.AccessPolicy)
 	if result.Outcome == "failed" {
-		// A rejected credential is renewed and the turn runs again. This sits before
-		// the open-question guard on purpose: that guard exists so a retry cannot
-		// race a decision already waiting for main, but a dead token is not a
-		// decision - it is a one-minute fix, and an old question must not park a
-		// turn the fresh token would finish.
 		if l.recoverCredential(operation, result) {
 			return
 		}
@@ -248,7 +243,6 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	l.store.SettleActivation(operation.ActivationId, operation.TaskId, operation.NodeId)
 }
 
-// bindWakes binds ready wakes to the turn that is about to act on them.
 func (l *OperationLifecycle) bindWakes(operation Operation) {
 	if len(operation.Context.Wakes) == 0 {
 		return
@@ -271,14 +265,6 @@ func (l *OperationLifecycle) bindWakes(operation Operation) {
 	})
 }
 
-// recoverCredential hands a credential-rejected turn to the renewer, and settles it
-// without a question.
-//
-// It reports whether the turn was handed over. The renewal cannot happen here: this
-// runs under the dispatcher's database lock, and writing a secret goes through the
-// configuration host, which takes the same lock, so waiting for the renewal inside
-// this call deadlocks the dispatch cycle. The request carries everything the renewer
-// needs to requeue the node once the credential is usable again.
 func (l *OperationLifecycle) recoverCredential(operation Operation, result OperationResult) bool {
 	if l.hooks.OnCredentialRejected == nil {
 		return false
@@ -294,8 +280,6 @@ func (l *OperationLifecycle) recoverCredential(operation Operation, result Opera
 	if int(attempt)+1 > MAX_TRANSIENT_RETRIES {
 		return false
 	}
-	// The model that was actually picked lives on the instance: the node spec names
-	// the definition's request (`main`), not the provider model the send used.
 	model := kernelString(kernelRow(l.store.Db, "SELECT model FROM instances WHERE task_id=? AND node_id=?",
 		operation.TaskId, operation.NodeId)["model"])
 	if model == "" {
@@ -309,9 +293,6 @@ func (l *OperationLifecycle) recoverCredential(operation Operation, result Opera
 	if !scheduled {
 		return false
 	}
-	// The operation is closed so the dispatch cycle can end, and nothing else: the node's
-	// state belongs to the renewal, which either requeues it or records the failure.
-	// Requeueing here as well counted one failure twice (stall_count went up by two).
 	l.store.MarkOperationSettled(operation.Id, CanonicalJSON(result))
 	l.store.Event(operation.TaskId, "node.credential_refresh_scheduled", map[string]any{
 		"nodeId": operation.NodeId, "operationId": operation.Id, "model": model,

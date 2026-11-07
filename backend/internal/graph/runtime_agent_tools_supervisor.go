@@ -6,7 +6,6 @@ import (
 	"errors"
 )
 
-// agentToolsSupervisorHandlers are the handlers of the Supervisor tools.
 func agentToolsSupervisorHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"delegate_work": func(id string, params map[string]any) any {
@@ -19,9 +18,6 @@ func agentToolsSupervisorHandlers(input AgentToolsInput, root string, readRoots 
 			return agentToolsText(stringifyJSON(input.Supervisor.DelegateWork(DelegateWorkInput{ProjectID: agentToolsString(params["projectId"]), SourceMessageID: agentToolsStringOrEmpty(params["sourceMessageId"]), Brief: agentToolsString(params["brief"]), Acceptance: acceptance, RequestID: agentToolsString(params["requestId"])})))
 		},
 		"validate_proposal": func(id string, params map[string]any) any {
-			// The master asks whether a proposal would be accepted. A refusal
-			// is the answer to that question, not a failed tool call: the
-			// model has to read which rule refused it and try again.
 			answer := any(nil)
 			refusal := func() (failure *RuntimeError) {
 				defer func() {

@@ -1,10 +1,7 @@
 package graph
 
-// mappedOnly are levels the SDK refuses to invent: it accepts xhigh/max only through an
-// explicit mapping, so a model that does not name them does not offer them.
 var mappedOnly = map[string]bool{"xhigh": true, "max": true}
 
-// ThinkingLevelMapView: a nil pointer denies a level, a string is the value the provider expects.
 type ThinkingLevelMapView map[string]*string
 
 func ModelMetadataFor(entry ModelEntry) *ModelMetadata {
@@ -29,8 +26,6 @@ func modelEntryIdentity(entry ModelEntry) (provider, id string) {
 	return provider, id
 }
 
-// ThinkingLevelMapFor builds Model.thinkingLevelMap. Pass no metadata to look it up.
-// Pass an explicit nil pointer to mean the snapshot had no metadata (null, not undefined).
 func ThinkingLevelMapFor(entry ModelEntry, metadata ...*ModelMetadata) ThinkingLevelMapView {
 	var meta *ModelMetadata
 	if len(metadata) == 0 {
@@ -40,8 +35,6 @@ func ThinkingLevelMapFor(entry ModelEntry, metadata ...*ModelMetadata) ThinkingL
 	}
 	options := thinkingOptionLabels(meta)
 	out := ThinkingLevelMapView{}
-	// off is denied outright: every model is treated as thinking-capable and a
-	// strength is always chosen. This only affects which levels the SDK reports.
 	out["off"] = nil
 	for _, level := range MODEL_THINKING_LEVELS {
 		name := string(level)
@@ -53,9 +46,6 @@ func ThinkingLevelMapFor(entry ModelEntry, metadata ...*ModelMetadata) ThinkingL
 			out[name] = &copy
 			continue
 		}
-		// The snapshot names no discrete effort for this model (only a toggle or a
-		// token budget): keep Pi's own default levels, and deny the two levels the
-		// SDK will not invent on its own.
 		if len(options) == 0 && !mappedOnly[name] {
 			copy := name
 			out[name] = &copy

@@ -9,14 +9,6 @@ import (
 	"encoding/json"
 )
 
-// harnessRecordingId names one recording intent.
-//
-// The id used to be built from the millisecond the record was created, so two
-// records written by one assistant message - the kernel runs a tool batch in
-// parallel - shared it whenever they landed in the same millisecond, and the
-// second was refused with "requestId was already used with different content":
-// a lost write dressed as a conflict. The id now names what is being recorded,
-// so the same intent replays and a different one always gets its own id.
 func harnessRecordingId(prefix string, parts ...string) string {
 	digest := sha256.New()
 	for _, part := range parts {
@@ -26,28 +18,17 @@ func harnessRecordingId(prefix string, parts ...string) string {
 	return prefix + "-" + hex.EncodeToString(digest.Sum(nil)[:8])
 }
 
-// HARNESS_KIND_FRICTION is the old name for the stage a record is at before
-// it was solved. It is read for the records written under the first shape.
 const HARNESS_KIND_FRICTION = "friction"
 
-// Where a piece of harness knowledge stands.
 const (
-	// HARNESS_STATUS_OPEN is friction that is still open.
 	HARNESS_STATUS_OPEN = "open"
-	// HARNESS_STATUS_ADOPTED is a lesson the project adopted.
 	HARNESS_STATUS_ADOPTED = "adopted"
-	// HARNESS_STATUS_FIXED is friction that was addressed.
 	HARNESS_STATUS_FIXED = "fixed"
-	// HARNESS_STATUS_REJECTED is friction that was judged not worth fixing.
 	HARNESS_STATUS_REJECTED = "rejected"
 )
 
-// HARNESS_DOMAIN_ARTIFACT is the artifact that holds the kind of work this
-// project does. Its lessons reach every task of the project.
 const HARNESS_DOMAIN_ARTIFACT = "harness-domain"
 
-// harnessDeclaredDomain is the kind of work this project does, as the project
-// declared it. An empty name means the project never said.
 func harnessDeclaredDomain(artifacts *ArtifactWorkspace, taskId string) string {
 	if artifacts == nil || taskId == "" {
 		return ""
@@ -76,9 +57,6 @@ func harnessDeclaredDomain(artifacts *ArtifactWorkspace, taskId string) string {
 	return strings.TrimSpace(string(body))
 }
 
-// harnessAdoptedOverlay is the prompt text the project last adopted in a scope.
-// The most recent adopted lesson wins: it is the harness the project runs under
-// now.
 func (service *graphManagementService) harnessAdoptedOverlay(taskId, domain string) map[string]string {
 	scope := harnessSlug(domain)
 	for _, entry := range harnessAdoptedLessons(harnessExperienceEntries(service.artifacts, taskId, scope)) {
@@ -89,9 +67,6 @@ func (service *graphManagementService) harnessAdoptedOverlay(taskId, domain stri
 	return nil
 }
 
-// harnessAdoptedLessons keeps the lessons a project adopted. A friction is a
-// suspicion and does not travel into a prompt, and a lesson without the
-// evidence that it worked is not a lesson yet.
 func harnessAdoptedLessons(entries []HarnessExperienceEntry) []HarnessExperienceEntry {
 	out := []HarnessExperienceEntry{}
 	for _, entry := range entries {
@@ -102,13 +77,10 @@ func harnessAdoptedLessons(entries []HarnessExperienceEntry) []HarnessExperience
 	return out
 }
 
-// HarnessDecisionInput records which candidate was adopted and why.
 type HarnessDecisionInput struct {
 	GraphId string
 	Domain  string
-	// Axis is general or specific. It decides the scope the lesson lands in.
 	Axis string
-	// Overlay is the prompt text the adopted candidate ran under.
 	Overlay   map[string]string
 	Chosen    string
 	Cue       string
@@ -128,8 +100,6 @@ type HarnessDecisionResult struct {
 	Version    int                      `json:"version"`
 }
 
-// HarnessDecision records which candidate was adopted and the lesson that came
-// with it.
 func (service *graphManagementService) HarnessDecision(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult {
 	input.Chosen = service.harnessResolveChosen(input.GraphId, input.Chosen)
 	input.Overlay = service.harnessCandidateOverlay(input.GraphId, input.Chosen)
@@ -181,10 +151,6 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 		GraphId:   input.GraphId,
 		CreatedAt: NowMillis(),
 	}
-	// The cue is the identity of the record. A lesson for a cue that already
-	// has a record completes it instead of standing next to it: the friction
-	// and the lesson are one piece of knowledge at two stages, and the note
-	// the friction carries stays where a reader can see the whole story.
 	merged := []HarnessExperienceEntry{}
 	completed := false
 	for _, existing := range entries {
@@ -231,9 +197,6 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	})
 	promoted := published
 	if store.promote != nil {
-		// A task that belongs to no project keeps the lesson in its own scope:
-		// there is no project scope to promote it to, and a lesson that was
-		// already written must not be lost to that.
 		if record, promoteErr := harnessPromote(store, published, requestId+"-promote"); promoteErr == nil {
 			promoted = record
 		}
@@ -249,13 +212,10 @@ func harnessRecordDecision(store *harnessArtifactStore, entries []HarnessExperie
 	}
 }
 
-// HarnessFriction records friction the project met but has not solved, in the
-// same store the adopted lessons live in.
 func (service *graphManagementService) HarnessFriction(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult {
 	return harnessRecordFriction(store, entries, input)
 }
 
-// harnessCandidateOverlay is the prompt text one candidate ran under.
 func (service *graphManagementService) harnessCandidateOverlay(graphId, nodeId string) map[string]string {
 	if graphId == "" || nodeId == "" {
 		return nil
@@ -275,7 +235,6 @@ func (service *graphManagementService) harnessCandidateOverlay(graphId, nodeId s
 	return overlay
 }
 
-// HarnessFrictionInput records friction the project met but has not solved.
 type HarnessFrictionInput struct {
 	Domain    string
 	Axis      string
@@ -286,7 +245,6 @@ type HarnessFrictionInput struct {
 	RequestId string
 }
 
-// HarnessFrictionResult is what a recorded friction returns.
 type HarnessFrictionResult struct {
 	Domain     string                   `json:"domain"`
 	Axis       string                   `json:"axis"`
@@ -296,9 +254,6 @@ type HarnessFrictionResult struct {
 	Version    int                      `json:"version"`
 }
 
-// harnessRecordFriction records a piece of friction in a scope, or moves the
-// one it already recorded there to a new status. The cue names the friction, so
-// the same friction is updated rather than duplicated.
 func harnessRecordFriction(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult {
 	if store == nil || !store.present || store.publish == nil {
 		Raise("invalid_input", "The artifact surface is unavailable, so friction cannot be stored")
@@ -342,10 +297,6 @@ func harnessRecordFriction(store *harnessArtifactStore, entries []HarnessExperie
 		Ref:       strings.TrimSpace(input.Ref),
 		CreatedAt: NowMillis(),
 	}
-	// The cue is the identity of the record: the same situation is one record
-	// whatever stage it is at. A lesson that already belonged to it stays in
-	// the record as the history of what was tried, and the status says where
-	// the situation stands now.
 	merged := []HarnessExperienceEntry{}
 	updated := false
 	for _, existing := range entries {

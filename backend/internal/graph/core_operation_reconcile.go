@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// CancelBeforeDispatch rolls back a pre-dispatch attempt while preserving the node identity.
 func (l *OperationLifecycle) CancelBeforeDispatch(operationId, reason string) {
 	if reason == "" {
 		reason = "Cancelled before dispatch"
@@ -17,7 +16,6 @@ func (l *OperationLifecycle) CancelBeforeDispatch(operationId, reason string) {
 	})
 }
 
-// MarkPreparationFailed records an adapter that could not even prepare.
 func (l *OperationLifecycle) MarkPreparationFailed(operationId, reason string) {
 	l.transaction(func() any {
 		row := l.operationRow(operationId)
@@ -29,7 +27,6 @@ func (l *OperationLifecycle) MarkPreparationFailed(operationId, reason string) {
 	})
 }
 
-// Dispatch commits the dispatch boundary immediately before the adapter may send.
 func (l *OperationLifecycle) Dispatch(operation Operation) {
 	l.transaction(func() any {
 		now := NowMillis()
@@ -47,7 +44,6 @@ func (l *OperationLifecycle) Dispatch(operation Operation) {
 	})
 }
 
-// Report settles one operation with the result the worker produced.
 func (l *OperationLifecycle) Report(id string, generation int, result OperationResult) string {
 	return l.transaction(func() any {
 		row := l.operationRow(id)
@@ -60,7 +56,6 @@ func (l *OperationLifecycle) Report(id string, generation int, result OperationR
 	}).(string)
 }
 
-// Steer hands a running turn an operator message.
 func (l *OperationLifecycle) Steer(operationId string, steer func(operation Operation) *int64) *int64 {
 	row := l.operationRow(operationId)
 	if kernelString(row["state"]) != "dispatched" || kernelInt(row["worker_active"]) == 0 {
@@ -69,7 +64,6 @@ func (l *OperationLifecycle) Steer(operationId string, steer func(operation Oper
 	return steer(operationFrom(row))
 }
 
-// Interrupt stops a running turn.
 func (l *OperationLifecycle) Interrupt(operationId string, interrupt func(operation Operation) *int64) *int64 {
 	row := l.operationRow(operationId)
 	if kernelString(row["state"]) != "dispatched" || kernelInt(row["worker_active"]) == 0 {
@@ -78,7 +72,6 @@ func (l *OperationLifecycle) Interrupt(operationId string, interrupt func(operat
 	return interrupt(operationFrom(row))
 }
 
-// Reconcile applies a verified transition to an unknown external outcome.
 func (l *OperationLifecycle) Reconcile(id string, reconcile func(operation Operation) Reconciliation, integrate func(operation Operation)) string {
 	row := l.operationRow(id)
 	if kernelString(row["state"]) != "unknown" {

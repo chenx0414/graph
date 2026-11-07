@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// recoverValue runs a call and reports whether it panicked.
 func (app *GraphApp) recoverValue(call func() any) (result any, ok bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -20,7 +19,6 @@ func (app *GraphApp) recoverValue(call func() any) (result any, ok bool) {
 	return call(), true
 }
 
-// appProbeHttp performs one probe round-trip. No secret ever reaches the reply.
 func appProbeHttp(spec HttpRequestSpec) (int, any) {
 	var body io.Reader
 	if spec.Body != nil {
@@ -55,7 +53,6 @@ func appProbeHttp(spec HttpRequestSpec) (int, any) {
 	return response.StatusCode, parsed
 }
 
-// appProbeVerification is the outcome of the minimal chat request.
 type appProbeVerification struct {
 	OK      bool    `json:"ok"`
 	Status  *int    `json:"status,omitempty"`
@@ -63,7 +60,6 @@ type appProbeVerification struct {
 	Skipped *bool   `json:"skipped,omitempty"`
 }
 
-// appProbeProvider is the provider a probe answered for.
 type appProbeProvider struct {
 	ID             string                 `json:"id"`
 	Label          string                 `json:"label"`
@@ -74,7 +70,6 @@ type appProbeProvider struct {
 	Custom         bool                   `json:"custom"`
 }
 
-// appProbeResult is the whole probe reply.
 type appProbeResult struct {
 	Provider             appProbeProvider       `json:"provider"`
 	CredentialConfigured bool                   `json:"credentialConfigured"`
@@ -83,12 +78,6 @@ type appProbeResult struct {
 	Verification         appProbeVerification   `json:"verification"`
 }
 
-// appRunProviderProbe probes an unsaved provider draft: always attempt the
-// vendor's `/models` list (unless the body says `probeModels:false`), then send
-// one minimal chat request. The `modelsListSupported` flag is copy-only - a
-// vendor that really answers `/models` is never skipped because of a local
-// guess, and a rejection keeps its own wording while manual model ids stay
-// allowed.
 func (app *GraphApp) appRunProviderProbe(body map[string]any) appProbeResult {
 	parsed := ValidateProbeRequest(body)
 	if !parsed.OK {
@@ -181,13 +170,6 @@ func (app *GraphApp) appRunProviderProbe(body map[string]any) appProbeResult {
 	}
 }
 
-// probeWithRefresh answers "does this credential work" instead of "did it work a
-// minute ago".
-//
-// The probe is where a person checks a credential, so a token the vendor just
-// rejected is renewed and the same request is sent once more. Only a credential that
-// carries a refresh bundle is renewed: a plain API key has nothing to renew, and its
-// rejection is the honest answer.
 func (app *GraphApp) probeWithRefresh(target *ProbeTarget, build func(ProbeTarget) HttpRequestSpec, rejected func(ProbeTarget, int, any) bool) (int, any) {
 	status, payload := appProbeHttp(build(*target))
 	if !rejected(*target, status, payload) {
@@ -209,8 +191,6 @@ func (app *GraphApp) probeWithRefresh(target *ProbeTarget, build func(ProbeTarge
 	return appProbeHttp(build(*target))
 }
 
-// xaiRefreshableRef names the credential a probe used, when that credential also has
-// a refresh bundle beside it.
 func (app *GraphApp) xaiRefreshableRef(target ProbeTarget) (string, bool) {
 	if target.APIKey == nil {
 		return "", false

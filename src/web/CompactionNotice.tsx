@@ -1,11 +1,6 @@
 import { Icon } from './ui.tsx';
 import type { TranscriptRow } from './transcript-model.ts';
 
-/** One muted line where the kernel replaced the earlier context with a summary.
- *
- * The transcript keeps every message; this row only says that the agent's context
- * shrank, and that the earlier conversation is still readable through history
- * search. It is a divider, not a message from either side of the chat. */
 function CompactionNotice({ row }: { row: Extract<TranscriptRow, { kind: 'compaction' }> }) {
   return (
     <div className="compaction-notice" data-testid="compaction-notice" data-role="system">

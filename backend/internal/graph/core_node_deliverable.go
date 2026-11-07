@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 )
 
-// SettleDeliverableInput settles one v2 node's declared file when its execution completes.
 type SettleDeliverableInput struct {
 	Kernel          *KernelStore
 	Artifacts       *ArtifactWorkspace
@@ -19,7 +18,6 @@ type SettleDeliverableInput struct {
 	Workspace       string
 }
 
-// SettleDeliverableOutcome is a kept promise or a failure reason.
 type SettleDeliverableOutcome struct {
 	Ok          bool
 	Published   bool
@@ -29,7 +27,6 @@ type SettleDeliverableOutcome struct {
 	HasArtifact bool
 }
 
-// SettleDeliverable publishes a declared file, or fails the node when the file is missing or empty.
 func SettleDeliverable(input SettleDeliverableInput) SettleDeliverableOutcome {
 	revision := input.Kernel.Revision(input.GraphId, input.RevisionVersion)
 	var deliverable *NodeDeliverable

@@ -19,11 +19,8 @@ interface UsageWindow {
 type UsageProviderId = 'opencode-go' | 'command-goat' | 'deepseek' | 'grok' | 'chatgpt';
 
 interface UsagePlan {
-  /** Unique per account: the platform id, or `<platform>#<credentialId>` for an extra account. */
   id: string;
-  /** The subscription platform this card reports on. */
   platform: UsageProviderId;
-  /** The extra account of that platform, or null for its primary credential. */
   account: { id: string; name: string } | null;
   name: string;
   subtitle: string;

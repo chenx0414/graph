@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// agentToolsSystemHandlers are the handlers of the System tools.
 func agentToolsSystemHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"read_system_capabilities": func(id string, params map[string]any) any {

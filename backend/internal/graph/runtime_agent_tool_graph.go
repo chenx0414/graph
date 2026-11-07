@@ -1,10 +1,5 @@
 package graph
 
-// graphAcceptanceLimitationSchema is one limitation entry of complete_with_limitations:
-// which unmet acceptance item this decision covers, why its evidence is missing,
-// and where that reason is recorded.
-// graphControlLimitationsField is the limitations parameter of graph_control: one
-// entry per unmet acceptance item a complete_with_limitations call rests on.
 func graphControlLimitationsField() any {
 	return tbOptional(tbArray(graphAcceptanceLimitationSchema()))
 }
@@ -15,8 +10,6 @@ func graphAcceptanceLimitationSchema() map[string]any {
 	}, []string{"acceptanceId", "reason", "evidence"})
 }
 
-// graphToolDeclarations are the tools that read a graph and drive it: the
-// definition, the queue behind it and the drafts it is made of.
 func graphToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	main := set.main
 	features := set.features

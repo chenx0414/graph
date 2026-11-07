@@ -9,7 +9,6 @@ import (
 	"sync"
 )
 
-// NewRsiService opens one self-improvement service.
 func NewRsiService(options RsiServiceOptions) *RsiService {
 	service := &RsiService{stateDir: deployResolve("", options.StateDir)}
 	if options.Root != nil && *options.Root != "" {
@@ -29,9 +28,6 @@ func NewRsiService(options RsiServiceOptions) *RsiService {
 		}
 	}
 	if service.Available {
-		// Opening the checkout is the moment the leftovers of an interrupted
-		// background confirmation can be recognised as debris: nothing else ever
-		// looks at them again.
 		rsiPruneStaleSnapshots(*service.Root)
 		service.runningCommit = RevParse(*service.Root, "HEAD")
 	}
@@ -42,7 +38,6 @@ var rsiServices = map[string]*RsiService{}
 
 var rsiServicesMu sync.Mutex
 
-// OpenRsiService returns the shared service for one root and state directory.
 func OpenRsiService(options RsiServiceOptions) *RsiService {
 	key := "unavailable"
 	if options.Root != nil {
@@ -59,7 +54,6 @@ func OpenRsiService(options RsiServiceOptions) *RsiService {
 	return service
 }
 
-// ResolveRsiRoot finds the Graph source checkout the daemon runs from.
 func ResolveRsiRoot(env map[string]string, cwd string) *string {
 	if env == nil {
 		env = environMap()
@@ -80,7 +74,6 @@ func ResolveRsiRoot(env map[string]string, cwd string) *string {
 	return nil
 }
 
-// rsiResolveRoot realpaths a candidate so symlinked checkouts compare equal to Git's top-level path.
 func rsiResolveRoot(path string) string {
 	absolute := deployResolve("", path)
 	if resolved, err := filepath.EvalSymlinks(absolute); err == nil {
@@ -89,7 +82,6 @@ func rsiResolveRoot(path string) string {
 	return absolute
 }
 
-// rsiWriteAtomic writes a file through a temporary name, the way the TypeScript service did.
 func rsiWriteAtomic(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -101,7 +93,6 @@ func rsiWriteAtomic(path, content string) error {
 	return os.Rename(pending, path)
 }
 
-// rsiCommandOutput is the stdout and stderr of one command, bounded to the last 40,000 characters.
 func rsiCommandOutput(stdout, stderr string) string {
 	parts := []string{}
 	if stdout != "" {
@@ -118,8 +109,6 @@ func rsiCommandOutput(stdout, stderr string) string {
 	return joined
 }
 
-// rsiAnsiPattern matches the colour codes a test runner prints.
 var rsiAnsiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
-// rsiFailureLine matches the lines a test runner prints for the case that failed.
 var rsiFailureLine = regexp.MustCompile(`(^|\s)FAIL |Failed Tests|AssertionError|Matcher did not succeed|Error: |❯ `)

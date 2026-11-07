@@ -9,17 +9,14 @@ import (
 	"crypto/sha256"
 )
 
-// contextDigestPattern is the exact artifact digest a handoff reference must carry.
 var contextDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-// ResolveAgentContextInput is the request the context resolver reads.
 type ResolveAgentContextInput struct {
 	TaskId string
 	NodeId string
 	Spec   NodeSpec
 }
 
-// FreezeContextHandoffInput is the request that freezes one handoff.
 type FreezeContextHandoffInput struct {
 	TaskId           string
 	OperationId      string
@@ -29,7 +26,6 @@ type FreezeContextHandoffInput struct {
 	CapabilityDigest *string
 }
 
-// ContextFacts is the resolved context facts of one node.
 type ContextFacts struct {
 	InitialMode         AgentContextMode `json:"initialMode"`
 	SelectedMode        AgentContextMode `json:"selectedMode"`
@@ -54,7 +50,6 @@ type ContextFacts struct {
 	BudgetScope         *BudgetScopeView `json:"budgetScope"`
 }
 
-// contextDigest is the sha256 of a string, or of the canonical JSON of any value.
 func contextDigest(value any) string {
 	text, ok := value.(string)
 	if !ok {
@@ -64,12 +59,7 @@ func contextDigest(value any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ResolveAgentContext resolves the main node's context. Only the external main
-// uses this operation ledger; native graph nodes retain their own resident
-// session and receive explicit interface deliveries.
 func ResolveAgentContext(store *TaskStore, input ResolveAgentContextInput) ResolvedAgentContext {
-	// The TypeScript guard also refused a spec carrying a legacy "context"
-	// property. NodeSpec declares no such property, so that half can never fire.
 	if input.Spec.Role == nil || *input.Spec.Role != "master" {
 		Raise("context_rejected", "Legacy graph context is retired; graph nodes receive explicit interface deliveries")
 	}
@@ -105,7 +95,6 @@ func ResolveAgentContext(store *TaskStore, input ResolveAgentContextInput) Resol
 	return context
 }
 
-// HandoffConstraintsDigest digests the frozen constraints of one handoff.
 func HandoffConstraintsDigest(handoff ContextHandoffPackage) string {
 	return contextDigest(map[string]any{
 		"acceptance":   handoff.Acceptance,
@@ -114,7 +103,6 @@ func HandoffConstraintsDigest(handoff ContextHandoffPackage) string {
 	})
 }
 
-// FreezeContextHandoff freezes one handoff package and its resolution.
 func FreezeContextHandoff(store *TaskStore, context ResolvedAgentContext, input FreezeContextHandoffInput) ResolvedAgentContext {
 	validateContextHandoffPackage(context, input.Package)
 	packageDigest := contextDigest(input.Package)
@@ -153,8 +141,6 @@ func FreezeContextHandoff(store *TaskStore, context ResolvedAgentContext, input 
 	return context
 }
 
-// RecordContextSession records the session a context bound to.
-// The input is PiAdapterContextSession, the session record the Pi adapter owns.
 func RecordContextSession(store *TaskStore, input PiAdapterContextSession) {
 	resolution := kernelRow(store.Db, "SELECT selected_mode FROM context_resolutions WHERE operation_id=?", input.OperationId)
 	kernelExec(store.Db, `UPDATE agent_context_bindings SET
@@ -185,7 +171,6 @@ func RecordContextSession(store *TaskStore, input PiAdapterContextSession) {
 	}
 }
 
-// ContextView reads the resolved context facts of one node.
 func ContextView(store *TaskStore, taskId, nodeId string) *ContextFacts {
 	row := kernelRow(store.Db, `SELECT b.mode,b.source_instance_id,b.source_session_id,b.source_session_file,b.source_leaf_id,
       b.source_context_digest,b.child_context_digest,b.capability_digest,b.model_policy_digest,b.tool_policy_digest,
@@ -245,7 +230,6 @@ func ContextView(store *TaskStore, taskId, nodeId string) *ContextFacts {
 	}
 }
 
-// contextInstance is the instance and resident session of one node.
 type contextInstance struct {
 	Id            string
 	BudgetScopeId *string
@@ -266,7 +250,6 @@ func contextInstanceRow(store *TaskStore, taskId, nodeId string) *contextInstanc
 	}
 }
 
-// contextBinding is the context binding of one instance.
 type contextBinding struct {
 	Id            string
 	BudgetScopeId string
@@ -287,8 +270,6 @@ func validateContextHandoffPackage(context ResolvedAgentContext, handoff Context
 	if strings.TrimSpace(handoff.Summary) == "" || strings.TrimSpace(handoff.Briefing) == "" {
 		Raise("context_rejected", "Context handoff requires a summary and briefing")
 	}
-	// TODO(port): TypeScript rejected a missing decisions array. Go cannot tell a
-	// nil slice from an empty one, so a nil slice reads as an empty array.
 	if context.Purpose != ContextPurposeDiscuss && len(handoff.Acceptance) == 0 {
 		Raise("context_rejected", "Context handoff requires the frozen acceptance contract")
 	}

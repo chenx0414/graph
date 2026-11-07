@@ -7,10 +7,8 @@ import (
 	"errors"
 )
 
-// orthogonalGRID is the grid every connector vertex sits on.
 const orthogonalGRID = 16
 
-// orthogonalSearch is one state of the route search.
 type orthogonalSearch struct {
 	x, y      float64
 	direction int
@@ -19,7 +17,6 @@ type orthogonalSearch struct {
 	previous  *orthogonalSearch
 }
 
-// orthogonalFrontier is the priority queue the route search walks.
 type orthogonalFrontier struct{ items []*orthogonalSearch }
 
 func (frontier *orthogonalFrontier) push(item *orthogonalSearch) {
@@ -69,11 +66,7 @@ func orthogonalSegmentKey(a, b LayoutPoint) string {
 	return fmt.Sprintf("%v,%v:%v,%v", b.X, b.Y, a.X, a.Y)
 }
 
-// OrthogonalRoutes routes the formal edges on the same grid as the boxes,
-// without changing graph semantics. The result maps an edge id to its
-// connector polyline.
 func OrthogonalRoutes(edges []LayoutEdge, positions map[string]LayoutPosition, nodeIds []string) map[string][]LayoutPoint {
-	// The caller supplies solid visible boxes. Expanded containers are transparent; folded groups are solid.
 	boxes := []LayoutPosition{}
 	for _, id := range nodeIds {
 		if box, ok := positions[id]; ok {
@@ -230,8 +223,6 @@ func OrthogonalRoutes(edges []LayoutEdge, positions map[string]LayoutPosition, n
 	for _, item := range items {
 		path := walk(item.leave, item.arrive)
 		remember(path)
-		// Keep the stem boundaries even when collinear so callers can distinguish
-		// shared connectors from lanes.
 		result[item.edge.ID] = append([]LayoutPoint{item.start}, append(simplify(path), item.end)...)
 	}
 	return result

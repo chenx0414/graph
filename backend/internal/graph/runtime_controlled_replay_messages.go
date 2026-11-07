@@ -1,10 +1,5 @@
 package graph
 
-// controlledOpenAIMessages turns a transcript into OpenAI messages.
-//
-// The system messages collapse into the one leading system message a chat completions
-// request carries the prompt in. The instruction role is the one the provider accepts:
-// a reasoning model on a standard provider gets `developer`, everything else `system`.
 func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 	out := []any{}
 	head := controlledCurrentSystemMessage(messages)
@@ -22,7 +17,6 @@ func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 		role, _ := message["role"].(string)
 		switch role {
 		case "toolResult":
-			// The result is rendered with the assistant turn that asked for it.
 			continue
 		case "system", "developer":
 			continue
@@ -42,17 +36,6 @@ func controlledOpenAIMessages(messages []any, instructionRole string) []any {
 	return out
 }
 
-// controlledOpenAIAssistant renders one assistant message the way the SDK does.
-//
-// The assistant keeps its own role: a model that reads its own tool call back as a
-// user turn does not recognize the call it made, and a tool result without the
-// assistant turn that asked for it is a request no provider accepts. The text is
-// the content, every tool call the message made is an OpenAI tool call, and the
-// reasoning the provider sent is sent back in the field the provider itself used.
-//
-// The reasoning is sent back because a model that cannot read its own reasoning
-// reconstructs its plan from the question again, and pays output tokens for it on
-// every turn of a long task.
 func controlledOpenAIAssistant(message map[string]any, results map[string]map[string]any) (map[string]any, []any) {
 	text := ""
 	reasoning := ""
@@ -85,16 +68,12 @@ func controlledOpenAIAssistant(message map[string]any, results map[string]map[st
 		}
 	}
 	if text == "" && len(calls) == 0 && reasoning == "" {
-		// The SDK skips an assistant message that carries neither text nor a tool
-		// call; an empty one is a request no provider accepts.
 		return nil, nil
 	}
 	assistant := map[string]any{"role": "assistant", "content": nil}
 	if text != "" {
 		assistant["content"] = text
 	} else if len(calls) == 0 {
-		// A turn that carries only reasoning still has to carry some content: a
-		// provider that requires either content or tool calls refuses a null.
 		assistant["content"] = ""
 	}
 	if reasoning != "" && controlledReasoningFields[reasoningField] {
@@ -111,7 +90,6 @@ func controlledOpenAIAssistant(message map[string]any, results map[string]map[st
 	return assistant, controlledOpenAIToolMessages(pending, results)
 }
 
-// controlledAnthropicMessages turns a transcript into Anthropic messages.
 func controlledAnthropicMessages(messages []any) []any {
 	out := []any{}
 	for index := 0; index < len(messages); index++ {
@@ -123,7 +101,6 @@ func controlledAnthropicMessages(messages []any) []any {
 		role, _ := message["role"].(string)
 		switch role {
 		case "toolResult":
-			// The result is rendered with the assistant turn that asked for it.
 			continue
 		case "assistant":
 			results, next := controlledToolResults(messages, index+1)
@@ -143,7 +120,6 @@ func controlledAnthropicMessages(messages []any) []any {
 	return out
 }
 
-// controlledContextMessages reads the messages one context carries.
 func controlledContextMessages(context map[string]any) []any {
 	if context == nil {
 		return nil
@@ -152,7 +128,6 @@ func controlledContextMessages(context map[string]any) []any {
 	return messages
 }
 
-// controlledOpenAITools turns the transcript tools into OpenAI tool declarations.
 func controlledOpenAITools(messages []any) []any {
 	out := []any{}
 	for _, tool := range controlledCurrentTools(messages) {
@@ -174,7 +149,6 @@ func controlledOpenAITools(messages []any) []any {
 	return out
 }
 
-// controlledAnthropicTools turns the transcript tools into Anthropic tool declarations.
 func controlledAnthropicTools(messages []any) []any {
 	out := []any{}
 	for _, tool := range controlledCurrentTools(messages) {
@@ -196,7 +170,6 @@ func controlledAnthropicTools(messages []any) []any {
 	return out
 }
 
-// controlledContextTools reads the tool declarations one context carries.
 func controlledContextTools(context map[string]any) []any {
 	if context == nil {
 		return nil

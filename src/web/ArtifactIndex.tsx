@@ -1,10 +1,3 @@
-/**
- * The shared-artifact index, as a window of its own.
- *
- * It answers one question: what has been published for this project, and what of that belongs to
- * the project itself rather than to one task. The drawer only links here; a single artifact opens in
- * its own tab.
- */
 import { useEffect, useRef, useState } from 'react';
 import type { ArtifactRecord } from './kernel-view-types.ts';
 import { api } from './api.ts';
@@ -42,7 +35,6 @@ export function ArtifactIndex({ projectId, projects, tasks, conversations }: {
     setError('');
     void (async () => {
       try {
-        // Show one current version per document; details expose paginated history.
         const page = await api<Page>(`/api/projects/${encodeURIComponent(chosen)}/artifacts?include=task&latestOnly=true&limit=200`);
         if (!cancelled) {
           loadedProject.current = chosen;

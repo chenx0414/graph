@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 )
 
-// NodeRun reads the read-only node detail: definition identity, session
-// reference, entries and per-operation timing where credential waiting is
-// separated from run time.
 func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) NodeRunView {
 	task := store.Task(taskId)
 	node := kernelRow(store.Db, "SELECT id,spec,instance_id,status,activation_id,output_version,stall_count FROM nodes WHERE task_id=? AND id=?", taskId, nodeId)
@@ -93,9 +90,6 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 			Data: parseJSON(kernelString(row["data"])),
 		})
 	}
-	// What the reader typed while this node was busy. The main conversation says so
-	// instead of swallowing the message, and a node that stays silent makes a second
-	// message look lost.
 	queued := []NodeRunQueued{}
 	for _, row := range kernelRows(store.Db, "SELECT seq,payload,created_at FROM kernel_queue WHERE task_id=? AND node_id=? AND state='queued' AND kind='chat' ORDER BY seq", taskId, nodeId) {
 		text := ""
@@ -115,9 +109,6 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 	}
 	page := ListNodeEntries(store, taskId, nodeId, query)
 	usageFacts := nodeRunCapabilityUsage(store, taskId, nodeId, capabilities)
-	// Time segments come from authoritative state timestamps, never from the
-	// message span. "Still running" is a property of the current lifecycle:
-	// a terminal node is never in progress because of a historical attempt.
 	nodeTerminal := map[string]bool{"succeeded": true, "skipped": true, "retired": true, "failed": true}[kernelString(node["status"])]
 	active := 0
 	for _, operation := range operations {
@@ -159,8 +150,6 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 	for _, operation := range operations {
 		timing.WaitingMs += operation.WaitingMs
 	}
-	// Recorded pause / user-wait segments; a historical node without ledger
-	// facts stays "未记录" instead of being inferred from message times.
 	timing.PauseMs = ledger.PauseMs
 	timing.UserWaitMs = ledger.UserWaitMs
 	nodeView := NodeRunNode{
@@ -190,12 +179,6 @@ func NodeRun(store *TaskStore, taskId, nodeId string, query NodeEntryQuery) Node
 	}
 }
 
-// nodeThroughput reads the newest settled request of one node.
-//
-// Two ledgers can hold it: a graph node's call is recorded by the kernel, while a
-// conversation's master node (and any node driven by the host adapter) records it as
-// an invocation. The invocation ledger is asked first because every call passes
-// through it, and the kernel's table answers for a node that has no invocation.
 func nodeThroughput(store *TaskStore, taskId, nodeId string) NodeThroughput {
 	row := kernelRow(store.Db, `SELECT i.usage AS usage, i.dispatched_at AS createdAt, i.settled_at AS settledAt
     FROM invocations i JOIN operations o ON o.id=i.operation_id

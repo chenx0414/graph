@@ -1,25 +1,12 @@
 package graph
 
-// controlledAnthropicCacheControl is the breakpoint Anthropic caches up to.
-//
-// Anthropic does not cache a prefix on its own: it caches what a breakpoint
-// marks, and bills everything else at the full input price on every turn. A
-// conversation that runs long enough reaches a prefix of hundreds of thousands
-// of tokens, so the three breakpoints below - the system prompt, the tool
-// declarations and the conversation so far - are the difference between paying
-// for that prefix once and paying for it on every turn of the task.
 
-// controlledAnthropicSystem renders the system prompt as the block Anthropic caches.
 func controlledAnthropicSystem(system string) []any {
 	return []any{map[string]any{
 		"type": "text", "text": system, "cache_control": controlledAnthropicCacheControl(),
 	}}
 }
 
-// controlledAnthropicCachedTools marks the last tool declaration as a breakpoint.
-//
-// The tool declarations are the same on every turn of a session, so the prefix
-// that ends at them is written once and read from then on.
 func controlledAnthropicCachedTools(tools []any) []any {
 	if len(tools) == 0 {
 		return tools
@@ -38,12 +25,6 @@ func controlledAnthropicCachedTools(tools []any) []any {
 	return append(out, marked)
 }
 
-// controlledAnthropicCachedMessages marks the last conversation message as a breakpoint.
-//
-// The conversation grows by one message per turn, so the prefix that ends at the
-// last message is written again each turn - but only the tokens that are new
-// since the last turn are written; the rest is read from the cache the previous
-// turn left behind.
 func controlledAnthropicCachedMessages(messages []any) []any {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message, ok := messages[index].(map[string]any)
@@ -62,11 +43,6 @@ func controlledAnthropicCachedMessages(messages []any) []any {
 	return messages
 }
 
-// controlledAnthropicMarkBreakpoint marks the last block of one message.
-//
-// Anthropic accepts the breakpoint on a text, image or tool result block. A
-// message that carries none of them cannot hold the breakpoint, and the search
-// for the last message that can goes on.
 func controlledAnthropicMarkBreakpoint(message map[string]any) bool {
 	switch content := message["content"].(type) {
 	case string:

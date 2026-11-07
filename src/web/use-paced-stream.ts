@@ -20,15 +20,9 @@ function reducedMotion() {
     && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 }
 
-/**
- * Provider adapters may deliver one large delta instead of token-sized
- * increments. Keep the canonical text authoritative, but reveal newly arrived
- * text at a stable pace so every stream remains visibly continuous.
- */
 export function usePacedStreamText(target: string, key: string, active: boolean, attached = false) {
   const keyRef = useRef(key);
   const targetRef = useRef(target);
-  // Attaching history starts fully revealed; only subsequent appends animate.
   const revealedRef = useRef(active && !attached ? 0 : target.length);
   const lastFrameRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);

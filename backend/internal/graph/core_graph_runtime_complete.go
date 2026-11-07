@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 )
 
-// SettleCompletion settles only when the queue, executions, and module transitions are drained.
 func (runtime *GraphRuntime) SettleCompletion() string {
 	runtime.ensureTask()
 	if runtime.State().Phase == "completed" {
@@ -40,8 +39,6 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 			if acceptanceId == "" {
 				continue
 			}
-			// TypeScript reads (data.commitSha ?? null) === currentCommit, so a
-			// missing key and an explicit null are the same value.
 			var previousCommit *string
 			if raw, ok := data["commitSha"]; ok && raw != nil {
 				text, _ := raw.(string)
@@ -70,15 +67,10 @@ func (runtime *GraphRuntime) SettleCompletion() string {
 	}
 	acceptance := GraphAcceptance(runtime.kernel, runtime.graphId, runtime.artifacts)
 	task = runtime.kernel.Store.Task(runtime.graphId)
-	// A waived item is not evidence: acceptance.Ready counts only passed items,
-	// so a graph with recorded limitations still reaches this hard gate and stays
-	// blocked until someone uses complete_with_limitations explicitly.
 	if !acceptance.Ready || !graphAcceptanceDeliveryMatches(task, acceptance) {
 		runtime.kernel.ModuleTransaction(func() any {
 			readyHuman := true
 			for _, item := range acceptance.Items {
-				// A waived item is settled for this commit: it is not a debt, and it
-				// does not ask the user anything again.
 				if item.Status == "passed" || item.Status == "waived" {
 					continue
 				}

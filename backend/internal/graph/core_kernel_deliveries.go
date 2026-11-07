@@ -68,30 +68,19 @@ func (k *KernelStore) deliveryFrom(row map[string]any) DeliveryRow {
 	}
 }
 
-// RecordCompletionDelivery records the commit a task's finished work was
-// delivered with. A task has one such commit; a later delivery replaces it.
 func (k *KernelStore) RecordCompletionDelivery(taskID, commitSHA string) {
 	g5Exec(k.Db, "INSERT INTO kernel_completion_delivery(task_id,commit_sha,created_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET commit_sha=excluded.commit_sha,created_at=excluded.created_at",
 		taskID, commitSHA, NowMillis())
 }
 
-// MarkDeliveryProcessed says one delivery has been handled, so the module
-// that was waiting for it does not wait any longer.
 func (k *KernelStore) MarkDeliveryProcessed(deliveryID string) {
 	g5Exec(k.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE delivery_id=?", deliveryID)
 }
 
-// MarkGraphDeliveriesProcessed says every delivery of a graph has been
-// handled. A graph that stops will not handle any of them.
 func (k *KernelStore) MarkGraphDeliveriesProcessed(taskID string) {
 	g5Exec(k.Db, "UPDATE kernel_module_inbox SET processed=1 WHERE task_id=?", taskID)
 }
 
-// DeliveryEdges are the endpoint pairs a task has received work over.
-//
-// Disabling an edge cannot erase the identity of work already received
-// over it, so the lane asks which pairs work has travelled over before
-// it decides what the graph is connected to.
 func (k *KernelStore) DeliveryEdges(taskID string) []DeliveryEdge {
 	rows := g5Query(k.Db, "SELECT from_endpoint,to_endpoint FROM kernel_deliveries WHERE task_id=?", taskID)
 	out := make([]DeliveryEdge, 0, len(rows))
@@ -101,7 +90,6 @@ func (k *KernelStore) DeliveryEdges(taskID string) []DeliveryEdge {
 	return out
 }
 
-// DeliveriesForEdge lists deliveries through one edge, newest first.
 func (k *KernelStore) DeliveriesForEdge(taskID, edgeID string) []DeliveryRow {
 	rows := g5Query(k.Db, "SELECT * FROM kernel_deliveries WHERE task_id=? AND edge_id=? ORDER BY seq DESC", taskID, edgeID)
 	out := make([]DeliveryRow, 0, len(rows))
@@ -111,7 +99,6 @@ func (k *KernelStore) DeliveriesForEdge(taskID, edgeID string) []DeliveryRow {
 	return out
 }
 
-// DeliveriesFor lists deliveries of one execution in acceptance order.
 func (k *KernelStore) DeliveriesFor(executionID string) []DeliveryRow {
 	rows := g5Query(k.Db, `SELECT d.* FROM kernel_deliveries d JOIN kernel_submissions s ON s.id = d.submission_id WHERE s.execution_id = ? ORDER BY d.seq`, executionID)
 	out := make([]DeliveryRow, 0, len(rows))
@@ -121,7 +108,6 @@ func (k *KernelStore) DeliveriesFor(executionID string) []DeliveryRow {
 	return out
 }
 
-// RecordModuleDelivery lands one module emit.
 func (k *KernelStore) RecordModuleDelivery(taskID, moduleID, edgeID, fromEndpoint, toEndpoint, protocol string, value any, revisionVersion int) DeliveryRow {
 	_ = moduleID
 	return k.Store.Transaction(func() any {
@@ -156,7 +142,6 @@ func (k *KernelStore) publishGraphOutputs(taskID, endpoint string, value any, so
 	}
 }
 
-// BroadcastModule validates and lands every enabled output of one module.
 func (k *KernelStore) BroadcastModule(taskID, moduleID string, outputs map[string]any, transitionID string) []DeliveryRow {
 	return k.Store.Transaction(func() any {
 		if transitionID != "" {

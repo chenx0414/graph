@@ -7,12 +7,10 @@ import (
 	"database/sql"
 )
 
-// ActiveOperation is the turn actually running on a node.
 type ActiveOperation struct {
 	Id string
 }
 
-// ActiveOperationForNode returns the dispatched operation a steering message must reach.
 func ActiveOperationForNode(store *TaskStore, taskID, nodeID string) *ActiveOperation {
 	row, ok := g5One(store.Db, `SELECT id FROM operations
     WHERE task_id=? AND node_id=? AND state='dispatched' AND worker_active=1

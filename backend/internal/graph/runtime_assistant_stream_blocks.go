@@ -4,7 +4,6 @@ import (
 	"fmt"
 )
 
-// startBlock records that a content block began.
 func (encoder *assistantMessageFrameEncoder) startBlock(contentIndex int, state *assistantFrameBlock) {
 	if contentIndex < 0 {
 		panic(fmt.Errorf("Invalid assistant message frame contentIndex: %d", contentIndex))
@@ -15,7 +14,6 @@ func (encoder *assistantMessageFrameEncoder) startBlock(contentIndex int, state 
 	encoder.blocks[contentIndex] = state
 }
 
-// block returns the bookkeeping of one open content block.
 func (encoder *assistantMessageFrameEncoder) block(contentIndex int, kind string) *assistantFrameBlock {
 	if contentIndex < 0 {
 		panic(fmt.Errorf("Invalid assistant message frame contentIndex: %d", contentIndex))
@@ -30,13 +28,11 @@ func (encoder *assistantMessageFrameEncoder) block(contentIndex int, kind string
 	return state
 }
 
-// endBlock closes one content block.
 func (encoder *assistantMessageFrameEncoder) endBlock(contentIndex int, kind string) {
 	encoder.block(contentIndex, kind)
 	delete(encoder.blocks, contentIndex)
 }
 
-// encodeTextDelta keeps only the bytes the live message does not show yet.
 func (encoder *assistantMessageFrameEncoder) encodeTextDelta(event AssistantMessageEvent, kind string) *AssistantMessageFrame {
 	state := encoder.block(eventIndex(event), kind)
 	delta := ""
@@ -64,7 +60,6 @@ func (encoder *assistantMessageFrameEncoder) encodeTextDelta(event AssistantMess
 	return &AssistantMessageFrame{Type: "thinking_delta", ContentIndex: event.ContentIndex, Delta: &uncovered}
 }
 
-// eventIndex reads the content index of one event.
 func eventIndex(event AssistantMessageEvent) int {
 	if event.ContentIndex == nil {
 		return 0
@@ -72,7 +67,6 @@ func eventIndex(event AssistantMessageEvent) int {
 	return *event.ContentIndex
 }
 
-// assistantEventBlock reads the live content block one event points at.
 func assistantEventBlock(event AssistantMessageEvent, frameType string) AssistantContentBlock {
 	if event.ContentIndex == nil || *event.ContentIndex < 0 {
 		panic(fmt.Errorf("Invalid assistant message frame contentIndex: %v", event.ContentIndex))
@@ -87,7 +81,6 @@ func assistantEventBlock(event AssistantMessageEvent, frameType string) Assistan
 	return event.Partial.Content[index]
 }
 
-// assistantEventText reads the authoritative text one end event carries.
 func assistantEventText(event AssistantMessageEvent) string {
 	if event.Content == nil {
 		return ""

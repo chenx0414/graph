@@ -9,8 +9,6 @@ type nodeBlocked struct{}
 
 func (nodeBlocked) Error() string { return "blocked" }
 
-// DeliverableSettlement is the executor's view of a settled deliverable: the
-// promise held, or the reason it failed.
 type DeliverableSettlement struct {
 	Ok     bool
 	Reason string
@@ -70,12 +68,6 @@ var tokenBudgetExhausted = regexp.MustCompile(`Token budget exhausted`)
 
 var pausedReport = regexp.MustCompile(`(?i)paused`)
 
-// terminalReport matches the failures a retry cannot fix.
-//
-// A budget, a permission, a paused run and a missing credential all need a
-// change the node cannot make itself. So does a bound Pi extension the kernel
-// cannot host: the extension is either loaded or it is not, and a second
-// attempt reads the same catalog and reaches the same refusal.
 var terminalReport = regexp.MustCompile(`(?i)budget|permission|paused|credential unavailable|cannot be hosted`)
 
 func nodeBudget(definition GraphDefinition, nodeId string) *NodeBudget {

@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// sandboxPolicy is the sandbox profile the host builds for one command.
 type sandboxPolicy struct {
 	denyRead            []string
 	allowRead           []string
@@ -18,15 +17,6 @@ type sandboxPolicy struct {
 	allowAppleEvents    bool
 }
 
-// sandboxBaseProfile is the deny-default seatbelt policy the host runs every
-// restricted command under.
-//
-// TODO(port): the TypeScript implementation delegates this part of the
-// profile to the third-party sandbox runtime, whose own permission list is
-// not reproduced here. The rules below are the equivalent the restricted
-// command needs: process, Mach and sysctl permissions a toolchain requires,
-// the filesystem grants the host asked for, and the network reach the host
-// granted.
 func sandboxBaseProfile(policy sandboxPolicy) string {
 	lines := []string{
 		"(version 1)",
@@ -99,8 +89,6 @@ func sandboxBaseProfile(policy sandboxPolicy) string {
 		lines = append(lines, "(allow file-read* (subpath "+jsonString(path)+"))")
 	}
 	if containsString(policy.denyRead, "/") {
-		// (subpath "/") denies the root inode itself; dyld aborts before exec
-		// when the root is not readable again.
 		lines = append(lines, "(allow file-read* (literal \"/\"))")
 	}
 	lines = append(lines, "(allow file-read-metadata (vnode-type DIRECTORY))")
@@ -114,8 +102,6 @@ func sandboxBaseProfile(policy sandboxPolicy) string {
 	return strings.Join(lines, "\n")
 }
 
-// pinnedFilesystemProfile is the bounded filesystem policy: a path is readable
-// only under a read grant and writable only under a write grant.
 func pinnedFilesystemProfile(readPaths, writePaths, gitPaths []string) string {
 	filters := func(paths []string) string {
 		parts := make([]string, 0, len(paths))
@@ -124,26 +110,16 @@ func pinnedFilesystemProfile(readPaths, writePaths, gitPaths []string) string {
 		}
 		return "(require-any " + strings.Join(parts, " ") + ")"
 	}
-	// Commands and MCP capabilities may inspect Git through the read-only
-	// subcommands, but refs, the index and worktree link files stay owned by
-	// the Git module. The literal filters below are built from existing
-	// directories and resolved vnode paths, so a relative path cannot spell
-	// around them.
 	gitFilters := []string{}
 	for _, path := range gitPaths {
 		gitFilters = append(gitFilters, "(literal "+jsonString(path)+")", "(subpath "+jsonString(path)+")")
 	}
-	// Intersect the sandbox with literal, already-approved paths. The sandbox
-	// normalizes paths again while building its profile; that must not turn a
-	// concurrent symlink replacement into a grant to a different directory.
 	return "(deny file-read* (require-not (require-any (literal \"/\") " + filters(readPaths) + ")))\n" +
 		"    (allow file-read-metadata (vnode-type DIRECTORY))\n" +
 		"    (deny file-write* (require-not " + filters(writePaths) + "))\n" +
 		"    " + strings.Join(gitFilters, " ")
 }
 
-// gitMetadataPaths returns every existing Git metadata entry under the write
-// grants, without following symlinks.
 func gitMetadataPaths(roots []string, scratchDir string, allowGitMetadataWrites []string) []string {
 	insideScratch := func(path string) bool {
 		return path == scratchDir || strings.HasPrefix(path, scratchDir+"/")
@@ -163,7 +139,6 @@ func gitMetadataPaths(roots []string, scratchDir string, allowGitMetadataWrites 
 		covered := false
 		for _, other := range roots {
 			if other != root && strings.HasPrefix(root, other+"/") {
-				// A parent grant covers this root.
 				covered = true
 				break
 			}
@@ -183,8 +158,6 @@ func gitMetadataPaths(roots []string, scratchDir string, allowGitMetadataWrites 
 			}
 			entries, err := readDirectoryEntries(dir)
 			if err != nil {
-				// File roots, device nodes and vanished directories have
-				// nothing to scan.
 				continue
 			}
 			entriesSeen += len(entries)
@@ -210,7 +183,6 @@ func gitMetadataPaths(roots []string, scratchDir string, allowGitMetadataWrites 
 	return found
 }
 
-// readDirectoryEntries lists one directory in its own order.
 func readDirectoryEntries(directory string) ([]os.FileInfo, error) {
 	handle, err := os.Open(directory)
 	if err != nil {

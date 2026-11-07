@@ -6,7 +6,6 @@ import (
 	"errors"
 )
 
-// agentToolsArtifactsHandlers are the handlers of the Artifacts tools.
 func agentToolsArtifactsHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"artifact_list": func(id string, params map[string]any) any {
@@ -108,9 +107,6 @@ func agentToolsArtifactsHandlers(input AgentToolsInput, root string, readRoots [
 				RequestId: agentToolsString(params["requestId"]), Tags: tags,
 				ExpectedVersion: expectedVersion, Metadata: metadata,
 			}
-			// TODO(port): the TypeScript publish input carries an optional graphId, so an
-			// artifact can be published into a graph the Agent owns. PublishArtifactInput
-			// has no such field yet, so the graph is validated but not forwarded.
 			if text, ok := params["sourcePath"].(string); ok && strings.TrimSpace(text) != "" {
 				publish.SourcePath = text
 			}

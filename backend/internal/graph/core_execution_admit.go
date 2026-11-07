@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 )
 
-// admit creates the durable intent of one execution.
 func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int64, workspace *string,
 	accessPolicy *ResolvedAccessPolicy, grants []string) (Operation, bool) {
 	var handoffPackage *ContextHandoffPackage
@@ -368,7 +367,6 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 	return operation, admitted
 }
 
-// stringField reads a string field of a JSON record.
 func stringField(record map[string]any, key string) string {
 	if value, ok := record[key].(string); ok {
 		return value
@@ -376,7 +374,6 @@ func stringField(record map[string]any, key string) string {
 	return ""
 }
 
-// optionalStringField reads an optional string field of a JSON record.
 func optionalStringField(record map[string]any, key string) *string {
 	if value, ok := record[key].(string); ok {
 		return &value
@@ -384,7 +381,6 @@ func optionalStringField(record map[string]any, key string) *string {
 	return nil
 }
 
-// numberField reads a number field of a JSON record.
 func numberField(record map[string]any, key string) float64 {
 	if value, ok := record[key].(float64); ok {
 		return value

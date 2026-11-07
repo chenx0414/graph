@@ -1,6 +1,5 @@
 package graph
 
-// Pinyin table from src/core/pinyin-table.ts. First reading wins.
 var pinyinTable = buildPinyinTable()
 
 func buildPinyinTable() map[string]string {
@@ -13,7 +12,6 @@ func buildPinyinTable() map[string]string {
 	return table
 }
 
-// PinyinFor returns the toneless reading, or nil when the character is not in the table.
 func PinyinFor(char string) *string {
 	if v, ok := pinyinTable[char]; ok {
 		out := v
@@ -22,5 +20,4 @@ func PinyinFor(char string) *string {
 	return nil
 }
 
-// PINYIN_TABLE_SIZE is the number of characters in the built-in table.
 const PINYIN_TABLE_SIZE = 2256

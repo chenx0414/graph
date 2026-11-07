@@ -6,18 +6,8 @@ import (
 	"errors"
 )
 
-// harnessRecordRetries bounds how often one read-merge-publish step re-reads
-// after another writer moved the artifact it publishes to.
-//
-// The agent runs a batch of tool calls in parallel, so two records in one
-// assistant message read the same head and the second publish loses the race:
-// "Artifact head changed: expected version 2, found 3". The refusal is right -
-// the step really is working from a stale read - so the answer is to read the
-// current head again and merge onto it, not to retry the same write.
 const harnessRecordRetries = 5
 
-// harnessRetryConflict runs one read-merge-publish step and repeats it after an
-// artifact conflict. Any other failure is passed through untouched.
 func harnessRetryConflict(run func()) {
 	for attempt := 1; ; attempt++ {
 		conflict := false
@@ -42,7 +32,6 @@ func harnessRetryConflict(run func()) {
 	}
 }
 
-// agentToolsHarnessHandlers are the handlers of the Harness tools.
 func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []string, hostRead bool, hostWrite bool, pathOptions BoundedPathOptions, artifacts agentToolsArtifacts, peers *agentToolsPeers) map[string]func(id string, params map[string]any) any {
 	return map[string]func(id string, params map[string]any) any{
 		"compare_harness_candidates": func(id string, params map[string]any) any {
@@ -85,10 +74,6 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 			}
 			domain := strings.TrimSpace(agentToolsString(params["domain"]))
 			axis := harnessAxis(agentToolsStringOrEmpty(params["axis"]))
-			// The lessons already adopted in the scope this lesson lands in
-			// are the ones it joins, so they are read before it is written - and
-			// read again when another writer in the same batch moved the head
-			// between the read and the publish.
 			result := HarnessDecisionResult{}
 			harnessRetryConflict(func() {
 				entries := []HarnessExperienceEntry{}
@@ -112,9 +97,6 @@ func agentToolsHarnessHandlers(input AgentToolsInput, root string, readRoots []s
 					RequestId: requestId,
 				})
 			})
-			// The record it wrote, not the whole scope: echoing every entry cost about
-			// 15 KB per call (measured 2026-11-02), which made "record a lesson" more
-			// expensive than the lesson itself.
 			return agentToolsText(stringifyJSON(map[string]any{
 				"domain": result.Domain, "axis": result.Axis, "scope": result.Scope, "chosen": result.Chosen,
 				"artifactId": result.ArtifactId, "version": result.Version, "total": len(result.Entries),

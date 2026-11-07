@@ -16,8 +16,6 @@ func layoutParentMap(input LayoutInput) map[string]string {
 	return parents
 }
 
-// serveLayoutRoutes runs the layout module's orthogonal router for one folded
-// picture. The caller supplies the visible boxes; this does not place nodes again.
 func (app *GraphApp) serveLayoutRoutes(w http.ResponseWriter, r *http.Request) {
 	raw, err := json.Marshal(appJSONBody(w, r))
 	if err != nil {
@@ -45,11 +43,6 @@ func (app *GraphApp) serveLayoutRoutes(w http.ResponseWriter, r *http.Request) {
 			Raise("invalid_input", "Missing layout endpoint for "+edge.ID)
 		}
 	}
-	// The router walks its own grid and panics when a connector cannot be routed.
-	// That is a fact about the geometry the caller sent, not a broken daemon:
-	// measured 2026-11-02, two boxes 200px apart answered 500 while the same
-	// boxes 192px apart answered 200, because 200 is not a multiple of the 16px
-	// layout grid.
 	routes := map[string][]LayoutPoint{}
 	func() {
 		defer func() {

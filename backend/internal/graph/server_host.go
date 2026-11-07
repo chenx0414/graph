@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 )
 
-// StartupInfo is the boot snapshot the console reads. Source is filled once, at startup.
 type StartupInfo struct {
 	Mode              string            `json:"mode"`
 	Configured        bool              `json:"configured"`
@@ -19,7 +18,6 @@ type StartupInfo struct {
 	Source            *SourceIdentity   `json:"source,omitempty"`
 }
 
-// AppServices is the host side of configuration, secrets and RSI.
 type AppServices struct {
 	ApplyConfig           func(document any, expectedRevision int) any
 	PushSecret            func(ref string, value *string, persisted *bool) any
@@ -34,14 +32,11 @@ type AppServices struct {
 	Rsi *AppRsiService
 }
 
-// AppRsiService is the app bridge's RSI surface: the desktop polls the status
-// and acknowledges a pending reload.
 type AppRsiService struct {
 	Status func(compare bool) any
 	Ack    func(id string) any
 }
 
-// AppOptions is the slice of host options CreateApp reads.
 type AppOptions struct {
 	Origin       string
 	WebDir       string
@@ -55,8 +50,6 @@ type AppOptions struct {
 	AgentContext *AgentContextLibrary
 }
 
-// GraphServerOptions is the daemon open request. Every field names the type it
-// carries, so the compiler checks the seam between the daemon and the runtime.
 type GraphServerOptions struct {
 	StateDir      string
 	Projects      []ProjectConfig
@@ -80,24 +73,14 @@ type GraphServerOptions struct {
 	Live          *TaskRuntimeLive
 	Rsi           *RsiService
 	Catalog       *TaskRuntimeCatalog
-	// Codemode offers the kernel's codemode tool to the Agent sessions. It
-	// is off by default.
 	Codemode GraphCodemode
-	// OnCredentialRejected renews an OAuth credential after the vendor rejected it.
-	// The app wires it, because the refresh token lives behind the host's secret
-	// store.
 	OnCredentialRejected func(request CredentialRecoveryRequest) bool
 }
 
-// How often the harness looks for problems nobody acted on. The sweep is one
-// indexed read, but it does not need to ride every drive tick.
 const problemSweepMs = 60 * 1000
 
-// unsettledSweepMs is how often an operation whose outcome was never settled is
-// handed to the main Agent.
 const unsettledSweepMs = 60 * 1000
 
-// GraphHost is the listening daemon and its drive loop.
 type GraphHost struct {
 	Runtime *TaskRuntime
 	Url     string
@@ -109,15 +92,10 @@ type GraphHost struct {
 	loopDone chan struct{}
 	app      *GraphApp
 	pump     func()
-	// lastProblemSweep is only touched by the drive loop.
 	lastProblemSweep int64
-	// lastUnsettledSweep is only touched by the drive loop.
 	lastUnsettledSweep int64
 }
 
-// OpenGraphServer binds 127.0.0.1 and drives the runtime.
-// The TypeScript module's launchGoFromHostOptions prefix is the test harness
-// starting this process; this function is the listen and drive loop that prefix replaced.
 func OpenGraphServer(options GraphServerOptions) *GraphHost {
 	agentContext := options.AgentContext
 	if agentContext == nil {
@@ -178,8 +156,6 @@ func (h *GraphHost) drive() {
 		if stopped {
 			return
 		}
-		// A problem nobody acted on still belongs to someone. Handing it over is
-		// not a retry: it only makes the decision visible (see SweepUnattendedProblems).
 		if now := NowMillis(); now-h.lastProblemSweep >= problemSweepMs {
 			h.lastProblemSweep = now
 			func() {
@@ -187,17 +163,10 @@ func (h *GraphHost) drive() {
 				h.Runtime.SweepUnattendedProblems(now)
 			}()
 		}
-		// A reload asked for during a turn waits for the first idle moment:
-		// closing the host while an extension is being called would kill work
-		// the person already paid for.
 		func() {
 			defer func() { _ = recover() }()
 			h.Runtime.ApplyDeferredExtensionReload()
 		}()
-		// An operation whose outcome was never settled is invisible otherwise: no
-		// result, no usage, no question. Hand it to main a few at a time, and close
-		// the ones whose problem is already answered - an answered problem that left
-		// its operation "unknown" for ever kept the task looking busy.
 		if now := NowMillis(); now-h.lastUnsettledSweep >= unsettledSweepMs {
 			h.lastUnsettledSweep = now
 			func() {

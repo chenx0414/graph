@@ -110,8 +110,6 @@ func interfaceSpecEndpointRef(definition map[string]any, endpoint, kind string) 
 }
 
 func interfaceSpecValidateSettings(scope string, settings map[string]any) {
-	// A field that is present must carry the type the rule names. An explicit
-	// null is a type error, not an absent field: only an absent key inherits.
 	if _, ok := settings["model"]; ok {
 		model, isString := settings["model"].(string)
 		if !isString || strings.TrimSpace(model) == "" {
@@ -139,8 +137,6 @@ func interfaceSpecValidateSettings(scope string, settings map[string]any) {
 				interfaceSpecInvalid(scope + " budget.tokens must be a non-negative integer or null")
 			}
 		}
-		// A budget that omits its quota does not ask for no quota: only an
-		// explicit null does.
 		tokens, present := budget["tokens"]
 		if !present {
 			interfaceSpecInvalid(scope + " budget.tokens must be a non-negative integer or null")

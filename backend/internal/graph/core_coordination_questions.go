@@ -59,9 +59,6 @@ func (runtime *TaskRuntime) receiveRoutedUserAnswer(taskID, questionID string, a
 	if row == nil {
 		return false
 	}
-	// A recovery card escalated to the person still offers retry and acknowledge,
-	// and those are settled here: requiring a free-text response made the buttons
-	// the card shows fail with "a response is required".
 	if answer.Type == "retry" || answer.Type == "acknowledge" {
 		if !containsString(questionPolicy(kernelString(row["kind"])).Answers, answer.Type) {
 			Raise("invalid_answer", "Answer type does not match the open question")

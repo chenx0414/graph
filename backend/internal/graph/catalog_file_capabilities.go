@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 )
 
-// CapabilityManifest is one capability.json document.
 type CapabilityManifest struct {
 	Id             string                  `json:"id"`
 	Kind           string                  `json:"kind"`
@@ -31,13 +30,9 @@ type CapabilityManifest struct {
 	Base           bool                    `json:"base,omitempty"`
 	Runtime        *CapabilityRuntimeDecl  `json:"runtime,omitempty"`
 	Tags           []string                `json:"tags,omitempty"`
-	// Extra keeps the keys the capability document carried beyond the known
-	// ones. The TypeScript manifest spreads them into the object itself.
 	Extra map[string]any `json:"-"`
 }
 
-// MarshalJSON writes the manifest the way the TypeScript manifest object
-// reads: the known fields, plus the raw keys the document carried.
 func (manifest CapabilityManifest) MarshalJSON() ([]byte, error) {
 	type alias CapabilityManifest
 	raw, err := json.Marshal(alias(manifest))
@@ -94,7 +89,6 @@ func fileCapabilitiesText(value any, label string) string {
 	return strings.TrimSpace(text)
 }
 
-// ParseCapabilityManifest validates one capability document.
 func ParseCapabilityManifest(value any, path string) CapabilityManifest {
 	raw, ok := value.(map[string]any)
 	if !ok {
@@ -326,7 +320,6 @@ func fileCapabilitiesDomains(value any, label string) []string {
 	return domains
 }
 
-// ReadCapabilityManifest reads capability.json from a directory.
 func ReadCapabilityManifest(directory string) CapabilityManifest {
 	path := filepath.Join(directory, "capability.json")
 	body, err := os.ReadFile(path)

@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 )
 
-// jsonScanState is what a JSON prefix scan learns about the text.
 type jsonScanState struct {
 	stack       []byte
 	inString    bool
 	stringStart int
 }
 
-// scanJSONPrefix walks the text and reports the open containers and the string state.
 func scanJSONPrefix(text string) jsonScanState {
 	state := jsonScanState{}
 	for index := 0; index < len(text); index++ {
@@ -45,7 +43,6 @@ func scanJSONPrefix(text string) jsonScanState {
 	return state
 }
 
-// partialJSONValue reads the value a partial JSON document already carries.
 func partialJSONValue(text string) (any, bool) {
 	base := strings.TrimRight(text, " \t\r\n")
 	for _, candidate := range partialJSONCandidates(base) {
@@ -62,7 +59,6 @@ func partialJSONValue(text string) (any, bool) {
 	return nil, false
 }
 
-// partialJSONCandidates are the prefixes that may still become valid JSON.
 func partialJSONCandidates(base string) []string {
 	candidates := []string{base}
 	state := scanJSONPrefix(base)
@@ -84,7 +80,6 @@ func partialJSONCandidates(base string) []string {
 	return candidates
 }
 
-// dropTrailingString removes the string that starts at the given index.
 func dropTrailingString(text string, start int) string {
 	trimmed := strings.TrimRight(text[:start], " \t\r\n")
 	if strings.HasSuffix(trimmed, ",") {
@@ -93,7 +88,6 @@ func dropTrailingString(text string, start int) string {
 	return trimmed
 }
 
-// lastStringStart finds where the last complete string of the text starts.
 func lastStringStart(text string) (int, bool) {
 	for index := len(text) - 1; index >= 0; index-- {
 		if text[index] != '"' {
@@ -126,7 +120,6 @@ func lastStringStart(text string) (int, bool) {
 	return 0, false
 }
 
-// closeJSONContainers closes the containers the text left open.
 func closeJSONContainers(text string) (string, bool) {
 	state := scanJSONPrefix(text)
 	closed := text

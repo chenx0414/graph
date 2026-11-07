@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 )
 
-// ControlledIsTerminalSseLine reports whether one SSE line ends the event stream.
 func ControlledIsTerminalSseLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasPrefix(trimmed, "data:") {
@@ -29,7 +28,6 @@ func ControlledIsTerminalSseLine(line string) bool {
 	return event["type"] == "message_stop"
 }
 
-// controlledTransportCode reads the transport failure one error carries.
 func controlledTransportCode(err error) string {
 	if err == nil {
 		return ""
@@ -55,14 +53,12 @@ func controlledTransportCode(err error) string {
 	return ""
 }
 
-// controlledReleaseBody is a response body that gives the concurrency slot back when it closes.
 type controlledReleaseBody struct {
 	io.ReadCloser
 	release func()
 	once    bool
 }
 
-// Close closes the body and releases the slot.
 func (body *controlledReleaseBody) Close() error {
 	if !body.once {
 		body.once = true

@@ -13,11 +13,8 @@ const MODELS_DEV_SOURCE_URL = "https://models.dev/api.json"
 
 const MODELS_DEV_ATTRIBUTION = "models.dev community catalog (MIT). Attribution: https://models.dev"
 
-// MODELS_DEV_LICENSE is kept for older callers.
 const MODELS_DEV_LICENSE = MODELS_DEV_ATTRIBUTION
 
-// ModelMetadata is what the snapshot says about one model. An absent field means
-// the snapshot does not say, never zero.
 type ModelMetadata struct {
 	ContextWindow        *int                  `json:"contextWindow,omitempty"`
 	MaxTokens            *int                  `json:"maxTokens,omitempty"`
@@ -206,7 +203,6 @@ func modelsDevInputModalities(model map[string]any) []ModelInput {
 	return []ModelInput{"text"}
 }
 
-// NormalizeModelsDevSnapshot accepts the refresh wrapper, the earlier envelope, and a bare provider map.
 func NormalizeModelsDevSnapshot(raw any) ModelsDevSnapshot {
 	root, ok := modelsDevRecord(raw)
 	if !ok {
@@ -353,7 +349,6 @@ func modelsDevResolveModel(provider ModelsDevProvider, modelId string) (map[stri
 	return nil, false
 }
 
-// LookupModelMetadata maps one provider/model pair. Null means the snapshot has no such model.
 func LookupModelMetadata(providerHint, modelId string, snapshot ...any) *ModelMetadata {
 	var source ModelsDevSnapshot
 	if len(snapshot) == 0 || snapshot[0] == nil {

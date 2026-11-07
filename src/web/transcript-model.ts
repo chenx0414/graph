@@ -13,29 +13,8 @@ import type {
 
 export type { TranscriptRsi } from './transcript-rsi.ts';
 
-/** The one fold policy for every chat window: the main conversation, a project
- * supervisor conversation and a node conversation all render through these rows,
- * so the default a reader meets is decided here and nowhere else.
- *
- * A turn is what the reader scans, so a turn block opens: the shape of the work
- * (how many steps, which tools, how long) is visible without a click. The tool
- * detail inside a turn stays folded — a running turn included — because an open
- * live turn is a wall of tool rows that pushes the answer off screen (reversed
- * 2026-11-04: the previous policy opened live work and every history group, and
- * a node conversation settled or running looked the same at both ends). */
 export const transcriptFoldPolicy = {
-  /**
-   * A settled turn folds its own thinking under one line; the answer stays.
-   *
-   * Measured 2026-11-05: with the block opening by default, every finished turn
-   * left a wall of narration and tool groups above its answer, and scrolling a
-   * conversation meant scrolling past rows the reader had already decided not to
-   * read. The block now folds once the answer lands, and one click opens it -
-   * the same click that opens a tool group inside it. A turn in flight is not
-   * wrapped at all, so live work stays visible while it happens.
-   */
   turnExpanded: false,
-  /** The tool groups inside a turn start folded; opening one is the reader's click. */
   toolGroupExpanded: false,
 } as const;
 
@@ -46,13 +25,10 @@ export type TranscriptTool = {
   summary: string;
   done: boolean;
   error: boolean;
-  /** Still running after its turn ended, the backend's deferred terminal state, and why it stopped. */
   background?: boolean; deferred?: boolean; state?: string; reason?: string;
   attachments?: ReturnType<typeof messageAttachments>;
 };
 
-/** One ordered step of a finished turn: the narration the Agent wrote between
- * tool calls, or a tool call itself. */
 export type TranscriptActivityItem =
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi; ordinal?: number }
   | { kind: 'narration'; id: string; text: string; ordinal?: number }
@@ -90,7 +66,6 @@ function durableTool(message: ConversationMessage): TranscriptTool {
   const display = toolCallDisplay({ messageState: message.state, data: message.data });
   const id = typeof message.data?.toolCallId === 'string' ? message.data.toolCallId : message.id;
   return { id, operationId: message.operationId ?? 'history', name: toolName(message), summary: message.text,
-    // A deferred call answers for itself: its own state decides, so the text heuristic cannot relabel a cancel.
     ...display, error: display.deferred ? display.error : display.error || toolError(message),
     attachments: messageAttachments(message) };
 }
@@ -110,7 +85,6 @@ function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptToo
   return { ...previous, ...incoming, done,
     summary: genericResult && previous.summary ? previous.summary : incoming.summary,
     error: previous.error || incoming.error,
-    // A call that finished is never background again, whatever the earlier record said.
     background: !done && (previous.background === true || incoming.background === true),
     ...(incoming.deferred || previous.deferred ? { deferred: true } : {}),
     ...(state ? { state } : {}), ...(reason ? { reason } : {}) };
@@ -128,28 +102,20 @@ function isActivityMessage(message: ConversationMessage) {
   return message.role === 'tool' || message.role === 'activity';
 }
 
-/** The ordinal the server assigned to a text part, a tool call, or a steering
- * message: the shared order of one turn. */
 function messageOrdinal(message: ConversationMessage): number | undefined {
   const value = message.data?.ordinal;
   return typeof value === 'number' ? value : undefined;
 }
 
-/** A steering message joined a turn that was already running. It carries the
- * ordinal of the place it interrupted, so it stays there instead of at the top. */
 function isSteeredMessage(message: ConversationMessage) {
   return message.role === 'user' && Boolean(message.operationId) && messageOrdinal(message) !== undefined;
 }
 
-/** A turn's own order is the ordinal the server assigned; records without one
- * keep the order they were written in. */
 function sortByOrdinal(items: TranscriptActivityItem[]) {
   if (items.length < 2 || items.some(item => item.ordinal === undefined)) return items;
   return [...items].sort((left, right) => (left.ordinal ?? 0) - (right.ordinal ?? 0));
 }
 
-/** Narration is its own record in the conversation ledger; anything else in the
- * activity stream is a tool call. */
 function activityItem(message: ConversationMessage): TranscriptActivityItem {
   const ordinal = messageOrdinal(message);
   if (message.kind === 'activity') return { kind: 'narration', id: message.id, text: message.text, ...(ordinal !== undefined ? { ordinal } : {}) };
@@ -157,9 +123,6 @@ function activityItem(message: ConversationMessage): TranscriptActivityItem {
   return { kind: 'tool', id: tool.id, tool, ...(ordinal !== undefined ? { ordinal } : {}) };
 }
 
-/** The rows of one turn's activity in the order it happened: a narration bubble,
- * then the tool calls that followed it, and so on. A contiguous run of tool calls
- * is one group, exactly as it renders while the turn is still running. */
 function activityRows(operationId: string, items: TranscriptActivityItem[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   let tools: TranscriptTool[] = [];
@@ -175,8 +138,6 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
       continue;
     }
     if (item.kind === 'steer') {
-      // The user's own message stays a visible bubble even when the work around
-      // it folds away.
       flush();
       rows.push({ kind: 'message', id: item.message.id, message: item.message });
       continue;
@@ -188,7 +149,6 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
 }
 
 export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[] {
-  // A reload is a transport boundary within the same user request.
   const parents = new Map((input.continuations ?? []).filter(item => item.resumedOperationId).map(item => [item.resumedOperationId!, item.operationId]));
   const roots = new Map<string, string>();
   const root = (id: string) => {
@@ -238,18 +198,12 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   const answered = new Set(input.messages
     .filter(message => message.role === 'assistant' && message.kind === 'chat' && message.operationId)
     .map(message => message.operationId as string));
-  // History is paged. A page may contain activity from an older operation but
-  // omit its answer; a later operation proves the older one has ended.
   const operationOrder = [...new Set(input.messages.map(message => message.operationId).filter((id): id is string => Boolean(id)))];
   const currentOperation = operationOrder.at(-1);
   for (const operationId of operationOrder) {
     if (operationId !== currentOperation) answered.add(operationId);
   }
 
-  // Durable activity is buffered per turn, so a finished turn becomes one
-  // block with its own toggle and a running one keeps its individual rows.
-  // History opens expanded: the reader asked to see earlier turns, not a
-  // folded summary of them (2006 feedback, 2026-11-04).
   let activityKey: string | null = null;
   let activityItems: TranscriptActivityItem[] = [];
   const activityToolIndex = new Map<string, number>();
@@ -258,9 +212,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     if (!items.length) return;
     const ordered = sortByOrdinal(items);
     if (key && answered.has(key)) {
-      // Keep steering messages visible in place, and keep every stretch of
-      // activity around them visible too once the operation is complete; the
-      // block still folds on demand through its own toggle.
       let folded: TranscriptActivityItem[] = [];
       let running: TranscriptActivityItem[] = [];
       const flushFolded = () => {
@@ -268,8 +219,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         rows.push({ kind: 'activity', id: `activity:${key}:${folded[0]!.id}`, operationId: key, items: folded, rows: activityRows(key, folded), collapsed: !transcriptFoldPolicy.turnExpanded });
         folded = [];
       };
-      // A deferred call outlives its turn and a failure has to be readable, so neither
-      // is history: folding them would hide the row the reader is waiting on.
       const flushRunning = () => {
         if (!running.length) return;
         rows.push(...activityRows(key, running));
@@ -284,9 +233,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       flushRunning();
       return;
     }
-    // A running turn is not wrapped: its narration bubbles and tool groups sit
-    // directly in the transcript while it runs, under the same policy — the
-    // groups stay folded, the reader opens the one whose detail they want.
     rows.push(...activityRows(key, ordered));
   };
 
@@ -313,7 +259,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       if (message.kind === 'rsi') { activityItems.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) }); continue; }
       const incoming = activityItem(message);
       if (incoming.kind === 'tool') {
-        // A tool call and its result are two records of the same call.
         const index = activityToolIndex.get(incoming.id);
         if (index !== undefined) {
           const previous = activityItems[index]!;
@@ -342,9 +287,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       rows.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) });
       continue;
     }
-    // A compaction is a fact about the turn's context, not a message from either
-    // side: it gets its own one-line row so the shrinking context has a visible
-    // cause instead of looking like the agent quietly forgot the earlier turns.
     if (message.role === 'system' && message.kind === 'compaction') {
       const data = message.data as { tokensAfter?: number; summary?: string } | null | undefined;
       rows.push({
@@ -356,23 +298,16 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     }
     rows.push({ kind: 'message', id: message.id, message });
   }
-  // A running turn keeps its rows in the buffer until the live tail is known, so
-  // the durable rows and the live ones can share one order.
   const pendingKey = activityKey;
   const pendingItems = activityKey === null ? [] : sortByOrdinal(activityItems);
   activityKey = null;
   activityItems = [];
   activityToolIndex.clear();
 
-  // The live tail is ordered by the same ordinal, so a text part emitted before
-  // a tool call stays above it while the turn is still running.
   const tail: { ordinal: number; item?: TranscriptActivityItem; tool?: TranscriptTool; stream?: LiveText }[] = [
     ...input.liveTools.map(tool => ({ ordinal: tool.ordinal, tool: liveTool(tool) })),
     ...input.streaming.map(stream => ({ ordinal: stream.ordinal, stream })),
   ].sort((left, right) => left.ordinal - right.ordinal);
-  // A turn that is still running shows its durable rows and the live tail in one
-  // order, so a steering message stays where it interrupted instead of above the
-  // output it interrupted. Without ordinals the old order is kept.
   const merged: { ordinal: number; item?: TranscriptActivityItem; tool?: TranscriptTool; stream?: LiveText }[] = tail.length && pendingItems.length && pendingItems.every(item => item.ordinal !== undefined)
     ? [...pendingItems.map(item => ({ ordinal: item.ordinal ?? 0, item })), ...tail].sort((left, right) => left.ordinal - right.ordinal)
     : tail;
@@ -382,8 +317,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     pushToolGroup(rows, liveTools);
     liveTools = [];
   };
-  // A narration becomes a chat bubble as soon as it stops being the newest thing
-  // in the turn, so a finished segment never waits for its tool call to end.
   for (const [index, item] of merged.entries()) {
     if (item.item) {
       if (item.item.kind === 'rsi') { flushLiveTools(); rows.push({ kind: 'rsi', id: item.item.id, rsi: item.item.rsi }); continue; }
@@ -417,9 +350,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         attached: item.stream.attached ?? false,
         narration: true,
         streaming: index === merged.length - 1,
-        // Live narration renders through the same copyable row as a final answer,
-        // so it carries a stamp too; with no recorded message yet, the segment's
-        // own last update is the honest time to show.
         createdAt: item.stream.updatedAt,
       });
       continue;

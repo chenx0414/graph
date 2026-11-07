@@ -37,21 +37,18 @@ var toolTruncation = regexp.MustCompile(`\n*(\[(?:Showing lines|[\d,]+ more line
 
 var toolTruncationBody = regexp.MustCompile(`\n*\[(?:Showing lines|[\d,]+ more lines in file|Output truncated|Line \d+ is)[^\]]*\]\s*$`)
 
-// ToolResultHookContext is the part of an agent-loop result this seam reads.
 type ToolResultHookContext struct {
 	ToolCall struct{ Name string }
 	Args     any
 	Result   struct{ Content []map[string]any }
 }
 
-// ToolResultTracker counts occurrences in recency order.
 type ToolResultTracker struct {
 	capacity int
 	order    []string
 	counts   map[string]int
 }
 
-// CreateToolResultTracker starts a bounded recency map.
 func CreateToolResultTracker(capacity int, initial map[string]int) *ToolResultTracker {
 	if capacity < 1 {
 		capacity = 1
@@ -62,7 +59,6 @@ func CreateToolResultTracker(capacity int, initial map[string]int) *ToolResultTr
 		for key := range initial {
 			keys = append(keys, key)
 		}
-		// TODO(port): Object key order is insertion order. A decoded JSON object is sorted.
 		sort.Strings(keys)
 		for _, key := range keys {
 			tracker.order = append(tracker.order, key)
@@ -145,12 +141,10 @@ func toolResultsDigest(text string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// ToolResultKey identifies one large result.
 func ToolResultKey(conversationID, tool string, params any, text string) string {
 	return toolResultsDigest(conversationID + "\x00" + tool + "\x00" + toolResultStable(params) + "\x00" + toolResultsDigest(text))
 }
 
-// HoistTruncationNotice moves a trailing truncation banner to the front.
 func HoistTruncationNotice(text string) string {
 	banner := TruncationBanner(text)
 	if banner == "" || strings.HasPrefix(text, banner) {
@@ -159,7 +153,6 @@ func HoistTruncationNotice(text string) string {
 	return banner + "\n" + toolTruncationBody.ReplaceAllString(text, "")
 }
 
-// TruncationBanner is the leading notice, or empty when nothing was truncated.
 func TruncationBanner(text string) string {
 	match := toolTruncation.FindStringSubmatch(text)
 	if match == nil {
@@ -168,7 +161,6 @@ func TruncationBanner(text string) string {
 	return "[truncated: " + match[1] + "]"
 }
 
-// SummarizeToolResult builds a deterministic head and tail.
 func SummarizeToolResult(text, handle string, limit int) string {
 	if limit == 0 {
 		limit = SUMMARY_LIMIT
@@ -177,8 +169,6 @@ func SummarizeToolResult(text, handle string, limit int) string {
 	if text == "" {
 		lineCount = 1
 	}
-	// The two "chars" numbers below are UTF-16 code units, never bytes:
-	// docs/agent/execution-model.md promises a non-ASCII result is longer on disk.
 	total := utf16Len(text)
 	header := "[large tool result: " + itoa(total) + " chars, " + itoa(lineCount) + " lines]"
 	trailer := "handle: " + handle + "\nRead the whole result with the read tool (offset/limit) on that path."
@@ -277,7 +267,6 @@ func pruneSpills(spillDir string, keep int) {
 	}
 }
 
-// RenderToolResult returns the original text or a spilled summary.
 func RenderToolResult(text, conversationID, tool string, params any, spillDir string, tracker *ToolResultTracker, limit *int, maxSpillFiles *int) string {
 	text = HoistTruncationNotice(text)
 	if limit == nil && len(text) <= TOOL_RESULT_LIMIT {
@@ -407,7 +396,6 @@ func toolPersistScope(scopeID string, tracker *ToolResultTracker) {
 	toolWriteCounts(entry.spillDir, saved)
 }
 
-// ToolResultHook rewrites a repeated large result. It returns nil when the tool result should pass through.
 func ToolResultHook(scopeID, spillDir string, maxSpillFiles *int, compactShell bool) func(map[string]any) any {
 	return func(context map[string]any) any {
 		result := asMap(context["result"])

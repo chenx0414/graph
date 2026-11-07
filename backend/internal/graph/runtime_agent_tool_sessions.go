@@ -4,8 +4,6 @@ import (
 	"os"
 )
 
-// sessionToolDeclarations are the tools that reach another conversation, the
-// capability library, the system inventory and the self-improvement surface.
 func sessionToolDeclarations(set agentToolContext) []AgentToolDeclaration {
 	main := set.main
 	features := set.features

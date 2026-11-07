@@ -4,7 +4,6 @@ import (
 	"sync"
 )
 
-// ProjectPreparation is the recorded Git readiness of one project.
 type ProjectPreparation struct {
 	ProjectId     string  `json:"projectId"`
 	State         string  `json:"state"`
@@ -25,26 +24,22 @@ type gitPreparationFields struct {
 	HasDetail     bool
 }
 
-// GitCommitView is the tip commit subject and parent list.
 type GitCommitView struct {
 	Subject string
 	Parents []string
 }
 
-// GitWorkspaceCommit is one published node commit.
 type GitWorkspaceCommit struct {
 	Repository string
 	Worktree   string
 	Commit     string
 }
 
-// GitDeliverResult is a target-branch delivery attempt.
 type GitDeliverResult struct {
 	Status string
 	Data   any
 }
 
-// GitCommitInput is one agent commit of named workspace paths.
 type GitCommitInput struct {
 	Id         string
 	TaskId     string
@@ -56,7 +51,6 @@ type GitCommitInput struct {
 	Message    string
 }
 
-// GitIntegrateInput is one work-copy merge into the integration branch.
 type GitIntegrateInput struct {
 	Id         string
 	TaskId     string
@@ -66,8 +60,6 @@ type GitIntegrateInput struct {
 	Recipe     string
 }
 
-// GitIntegration owns the task integration branch and per-instance work copies.
-// Git effects stay outside SQLite transactions.
 type GitIntegration struct {
 	store    *TaskStore
 	stateDir string

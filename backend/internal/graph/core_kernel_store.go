@@ -6,7 +6,6 @@ import (
 	"database/sql"
 )
 
-// TokenBudget is the frozen quota of one node execution.
 func NewKernelStore(store *TaskStore) *KernelStore {
 	db := store.Db
 	kernel := &KernelStore{Store: store, Db: db, DB: db, Content: NewKernelContent(db)}
@@ -15,9 +14,6 @@ func NewKernelStore(store *TaskStore) *KernelStore {
 	return kernel
 }
 
-// kernelExecScript runs one schema script. The script holds several statements
-// that are not separated by semicolons, so it is handed to the driver in one
-// call, the way the TypeScript store runs it with db.exec.
 func kernelExecScript(db *sql.DB, script string) {
 	g5Exec(db, script)
 }
@@ -112,7 +108,6 @@ func (k *KernelStore) tx(action func() any) any {
 	return k.Store.Transaction(action)
 }
 
-// PublishRevision parses and inserts one revision in its own transaction.
 func kernelOptInt(value any) *int {
 	if value == nil {
 		return nil
@@ -252,11 +247,6 @@ CREATE INDEX IF NOT EXISTS kernel_transitions_module ON kernel_module_transition
 CREATE UNIQUE INDEX IF NOT EXISTS kernel_acceptance_limitations_request ON kernel_acceptance_limitations(task_id,request_id,acceptance_id) WHERE request_id IS NOT NULL
 `
 
-// settleNodeAfterStop parks a node of a task that is stopping.
-//
-// The second answer says whether the task is stopping. A node that is parked
-// keeps no verdict of its own: the stop cancelled its work, and the step that
-// was cancelled must not write one.
 func (k *KernelStore) settleNodeAfterStop(taskID, nodeID string) bool {
 	row, found := g5One(k.Db, "SELECT phase FROM tasks WHERE id=?", taskID)
 	if !found {

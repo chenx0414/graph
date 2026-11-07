@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// capabilityLoadPiExtension loads one Pi extension capability.
 func capabilityLoadPiExtension(input CapabilityLoadInput, binding capabilityBinding, record *CapabilityRecord, snapshot string, state *capabilityLoadState) ([]RuntimeCapabilityLoadFact, any) {
 	if _, err := os.Stat(snapshot); err != nil {
 		Raise("capability_unavailable", "Pi extension "+binding.bound.Id+"@"+binding.bound.Version+" has no snapshot")
@@ -20,8 +19,6 @@ func capabilityLoadPiExtension(input CapabilityLoadInput, binding capabilityBind
 	}
 	loadedEntry := ""
 	if source != "" {
-		// A declared source is installed and resolved by the Pi SDK's own package manager, so
-		// version ranges, git refs and the package's own `pi.extensions` list stay native.
 		resolved, err := ResolvePiExtensionSource(PiExtensionSourceInput{
 			Source: source, Cwd: input.Workspace, AgentDir: PiExtensionCacheDir(input.Catalog),
 		})

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 )
 
-// Block parks a node behind a question.
 func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, operationId *string) string {
 	return l.transaction(func() any {
 		node := l.nodeRow(taskId, nodeId)
@@ -36,14 +35,10 @@ func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, opera
 			input.AutoAnswer = autoAnswer
 		}
 		question := InsertQuestion(l.store, input)
-		// The node was left dispatchable on purpose, but it is not woken here:
-		// the queued message or wake that brought it back is what runs it, and a
-		// turn nobody asked for would spend a model call per failure.
 		return question.Id
 	}).(string)
 }
 
-// Answer resolves a human answer and changes the formal state it implies.
 func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, models func() []ModelEntry) {
 	l.transaction(func() any {
 		question := kernelRow(l.store.Db, "SELECT * FROM questions WHERE id=? AND task_id=?", questionId, taskId)
@@ -53,9 +48,6 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 		kind := kernelString(question["kind"])
 		nodeId := kernelString(question["node_id"])
 		AssertQuestionAnswer(kind, answer)
-		// "wait" is not a decision: the problem stays open, the clock starts
-		// over, and nothing runs. Taking the decision away from the person would
-		// be worse than the nagging it replaces.
 		if answer.Type == "wait" {
 			l.rearmQuestion(taskId, questionId)
 			return nil
@@ -127,9 +119,6 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			return nil
 		}
 		if kernelRow(l.store.Db, "SELECT id FROM questions WHERE task_id=? AND node_id=? AND status='open'", taskId, nodeId) == nil {
-			// A question on a task that has no node has no node to re-pend: the
-			// task itself is what the answer was about, and it is already
-			// settled.
 			if kernelRow(l.store.Db, "SELECT id FROM nodes WHERE task_id=? AND id=?", taskId, nodeId) == nil {
 				return nil
 			}
@@ -167,13 +156,6 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 			}
 			l.store.SetNodeStatus(taskId, nodeId, next)
 		}
-		// "acknowledge" on a problem whose outcome was never settled says "stop
-		// asking me": the record is kept (the fact is not erased) and the node stays
-		// parked so closing the problem cannot start a turn nobody asked for. A new
-		// message or an explicit retry releases it. The operation itself is closed by
-		// AbandonClosedUnsettledOperations on the next pass: an answered problem whose
-		// operation stayed "unknown" for ever made the task look busy (measured
-		// 2026-11-02: 98 such rows, the oldest 45 days old).
 		if kind == "recovery" && answer.Type == "acknowledge" {
 			l.store.SetNodeBlocked(taskId, nodeId)
 		}
@@ -181,32 +163,16 @@ func (l *OperationLifecycle) Answer(taskId, questionId string, answer Answer, mo
 	})
 }
 
-// rearmQuestion restarts the wait on a problem the person asked to leave open.
-//
-// The card stops shouting for another deadline and keeps the decision, which is
-// the difference between "wait" and dismissing it: the question is still open,
-// still the person's, and the harness still knows it waited.
 func (l *OperationLifecycle) rearmQuestion(taskId, questionId string) {
 	l.store.RearmQuestion(taskId, questionId)
 	l.store.Event(taskId, "problem.kept_waiting", map[string]any{"questionId": questionId})
 }
 
-// releaseFailedTurnMessages puts the messages of a failed master turn back on
-// the queue, so answering retry answers the same request again.
-//
-// Measured 2026-11-01: the retry answer only flipped the node back to pending,
-// and the turn that then ran carried no user message at all - the person's
-// click started something, just not the turn that failed. Re-pending the
-// messages is deliberate: a retry re-runs that request, which is why the card
-// says it spends another model call and may repeat that turn's tool calls.
 func (l *OperationLifecycle) releaseFailedTurnMessages(question map[string]any) {
 	operationId := kernelString(question["operation_id"])
 	if operationId == "" || questionPolicy(kernelString(question["kind"])).Owner != QuestionOwnerMain {
 		return
 	}
-	// Only the turn that is still the latest one can be re-run: an older
-	// failure has already been superseded by a later turn, and re-pending its
-	// messages would replay a request the conversation has moved past.
 	latest := kernelRow(l.store.Db, "SELECT id FROM operations WHERE task_id=? AND node_id=? ORDER BY rowid DESC LIMIT 1",
 		kernelString(question["task_id"]), kernelString(question["node_id"]))
 	if latest == nil || kernelString(latest["id"]) != operationId {
@@ -229,8 +195,6 @@ func (l *OperationLifecycle) releaseFailedTurnMessages(question map[string]any) 
 	})
 }
 
-// Escalate hands a main-owned problem to the user with the main Agent's explanation,
-// and says which question now carries the decision.
 func (l *OperationLifecycle) Escalate(taskId, questionId, prompt string) string {
 	return l.transaction(func() any {
 		row := kernelRow(l.store.Db, `SELECT node_id,kind,data FROM questions

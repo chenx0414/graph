@@ -2,8 +2,6 @@ package graph
 
 import "strings"
 
-// requireArchiveResumeInstruction accepts only an instruction delivered to the
-// supervisor's current operation after the project was last archived.
 func requireArchiveResumeInstruction(store *TaskStore, callerTaskID, targetTaskID, sourceID, instruction string) {
 	if kernelRow(store.Db, "SELECT task_id FROM project_archive_pauses WHERE task_id=?", targetTaskID) == nil {
 		return

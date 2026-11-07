@@ -8,12 +8,6 @@ import (
 	"encoding/json"
 )
 
-// ParseStreamingJSON parses a possibly incomplete JSON document. It always returns a valid
-// object, even when the JSON is incomplete.
-//
-// TODO(port): the Pi SDK uses the `partial-json` package. This port repairs the text and
-// closes the open containers, which agrees with that package for the object and array
-// prefixes a tool-call argument stream produces.
 func ParseStreamingJSON(text string) any {
 	if strings.TrimSpace(text) == "" {
 		return map[string]any{}
@@ -31,7 +25,6 @@ func ParseStreamingJSON(text string) any {
 	return map[string]any{}
 }
 
-// decodeJSONValue reads one complete JSON document.
 func decodeJSONValue(text string) (any, bool) {
 	var value any
 	if err := json.Unmarshal([]byte(text), &value); err != nil {
@@ -40,16 +33,12 @@ func decodeJSONValue(text string) (any, bool) {
 	return value, true
 }
 
-// validJSONEscapes are the escape sequences a JSON string may carry.
 var validJSONEscapes = map[rune]bool{
 	'"': true, '\\': true, '/': true, 'b': true, 'f': true, 'n': true, 'r': true, 't': true, 'u': true,
 }
 
-// unicodeEscapePattern matches the four hex digits of a unicode escape.
 var unicodeEscapePattern = regexp.MustCompile(`^[0-9a-fA-F]{4}$`)
 
-// repairStreamingJSON repairs malformed JSON string literals by escaping raw control
-// characters inside strings and doubling backslashes before invalid escape characters.
 func repairStreamingJSON(text string) string {
 	var b strings.Builder
 	runes := []rune(text)
@@ -103,12 +92,10 @@ func repairStreamingJSON(text string) string {
 	return b.String()
 }
 
-// isControlCharacter reports whether the rune is a raw control character.
 func isControlCharacter(character rune) bool {
 	return character >= 0x00 && character <= 0x1f
 }
 
-// escapeControlCharacter writes the escape sequence of one control character.
 func escapeControlCharacter(character rune) string {
 	switch character {
 	case '\b':

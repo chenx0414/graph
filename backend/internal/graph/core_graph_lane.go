@@ -2,7 +2,6 @@ package graph
 
 import "database/sql"
 
-// GraphLaneOptions is the production hookup the host loop uses to drain v2 graphs.
 type GraphLaneOptions struct {
 	Kernel          *KernelStore
 	SettleWorkspace func(executionId string)
@@ -22,13 +21,11 @@ type GraphLaneOptions struct {
 	MaxStuckPasses  *int
 }
 
-// RunnableGraph is one graph the lane is willing to run.
 type RunnableGraph struct {
 	TaskId string
 	Run    func() RunResult
 }
 
-// GraphLane names v2 graphs that have queued work and builds the runner that drains one.
 type GraphLane struct {
 	options  GraphLaneOptions
 	shutdown *AbortSignal
@@ -38,7 +35,6 @@ func NewGraphLane(options GraphLaneOptions) *GraphLane {
 	return &GraphLane{options: options, shutdown: NewAbortSignal()}
 }
 
-// Close releases resident processes owned by this lane.
 func (lane *GraphLane) Close() {
 	lane.shutdown.Abort()
 	if lane.options.Close != nil {
@@ -46,7 +42,6 @@ func (lane *GraphLane) Close() {
 	}
 }
 
-// Runnable lists v2 graphs that currently have queued work.
 func (lane *GraphLane) Runnable() []RunnableGraph {
 	if lane.shutdown.Aborted() {
 		return nil
@@ -159,9 +154,6 @@ func (lane *GraphLane) runGraph(graphId string) RunResult {
 			lane.options.CloseGraph(graphId)
 		}
 	} else if !intent && result.Drained {
-		// A check that ran and failed leaves no failed row behind: the operation
-		// settled and its verdict is the value it produced. Only the acceptance
-		// knows the graph cannot close on its own, so it is what parks the graph.
 		if lane.options.Artifacts != nil && acceptanceFailed(graphId, lane) {
 			lane.options.Kernel.Store.BlockTaskPhase(graphId)
 			lane.options.Kernel.Store.Event(graphId, "graph.stalled", map[string]any{"reason": "An acceptance check failed; the graph cannot close on its own"})
@@ -176,9 +168,6 @@ func (lane *GraphLane) db() *sql.DB {
 	return lane.options.Kernel.Store.Db
 }
 
-// acceptanceFailed reports whether an acceptance check really ran and failed.
-// A missing item is a graph still on its way; a failed one is a graph that
-// cannot close without somebody deciding what to do about it.
 func acceptanceFailed(graphId string, lane *GraphLane) bool {
 	report := GraphAcceptance(lane.options.Kernel, graphId, lane.options.Artifacts(graphId))
 	for _, item := range report.Items {

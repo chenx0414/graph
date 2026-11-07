@@ -1,7 +1,6 @@
 export const TASK_LABEL: Record<string, string> = {
   discussing: '讨论中', chatting: '对话中', running: '执行中', queued: '排队中', paused: '已暂停', pausing: '暂停中',
   blocked: '等待处理', completed: '已完成', failed: '失败', skipped: '已跳过', executing: '执行中', abandoned: '已终止',
-  // Waiting for a person past the suspend deadline: not a runtime problem, and not progress.
   awaiting_user: '等你回答',
 };
 
@@ -27,10 +26,6 @@ function pad(value: number) {
   return String(value).padStart(2, '0');
 }
 
-/**
- * Wall-clock label for one message: time only for today, with a date further
- * back, so a bubble footer stays short while older history stays unambiguous.
- */
 export function clockLabel(timestamp: number | null | undefined, now: number = Date.now()) {
   if (!timestamp) return '—';
   const date = new Date(timestamp);
@@ -44,7 +39,6 @@ export function clockLabel(timestamp: number | null | undefined, now: number = D
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
 }
 
-/** How long a turn took, in the coarsest units that still read as a duration. */
 export function elapsedLabel(ms: number) {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds === 0) return '不到 1 秒';
@@ -60,11 +54,8 @@ export function elapsedLabel(ms: number) {
 }
 
 export function describeQuestion(kind: string, data?: Record<string, unknown>) {
-  // A master question asks for a decision, not for an external condition to clear.
   if (kind === 'waiting' && data?.requestType === 'user_decision') return '等待你的决定';
   const label = QUESTION_LABEL[kind] ?? kind;
-  // A problem the harness handed over after nobody acted on it is not a fresh
-  // failure: the card has to say why it is in front of the person now.
   if (typeof data?.escalatedAt === 'number') return `${label} · 无人处理`;
   return label;
 }

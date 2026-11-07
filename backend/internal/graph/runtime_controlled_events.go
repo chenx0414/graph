@@ -6,11 +6,6 @@ import (
 	"sort"
 )
 
-// controlledSystemPrompt reads the system prompt one context carries.
-//
-// The prompt is what every system message of the transcript replays to, never the plain
-// field: the provider receives the replayed prompt, so the console must show that same
-// text.
 func controlledSystemPrompt(context map[string]any) string {
 	head := controlledCurrentSystemMessage(controlledContextMessages(context))
 	if head == nil || !head.present() {
@@ -19,7 +14,6 @@ func controlledSystemPrompt(context map[string]any) string {
 	return head.text()
 }
 
-// controlledSystemPromptPointer reads the system prompt one context carries.
 func controlledSystemPromptPointer(context map[string]any) *string {
 	prompt := controlledSystemPrompt(context)
 	if prompt == "" {
@@ -28,12 +22,6 @@ func controlledSystemPromptPointer(context map[string]any) *string {
 	return &prompt
 }
 
-// controlledNormalizeContext folds the system prompt and the tool set into one leading
-// system message.
-//
-// The Pi SDK's normalizeContext is the only entry point that produces a transcript
-// context, and every provider-facing call expects the result. It is idempotent: a context
-// that already carries its prompt in the transcript is left alone.
 func controlledNormalizeContext(context map[string]any) map[string]any {
 	if context == nil {
 		return nil
@@ -51,8 +39,6 @@ func controlledNormalizeContext(context map[string]any) map[string]any {
 	return map[string]any{"messages": append([]any{initial}, messages...)}
 }
 
-// controlledSystemMessage is the leading system message of a transcript: the current
-// prompt, the prompt sections and the tools the model may call.
 type controlledSystemMessage struct {
 	content      string
 	sections     *controlledSectionList
@@ -61,13 +47,10 @@ type controlledSystemMessage struct {
 	hasTimestamp bool
 }
 
-// present reports whether the transcript carried a system message at all.
 func (head *controlledSystemMessage) present() bool {
 	return head.hasTimestamp || len(head.tools) > 0
 }
 
-// text renders the system message as a complete prompt: its content followed by its
-// sections.
 func (head *controlledSystemMessage) text() string {
 	parts := []string{head.content}
 	parts = append(parts, head.sections.texts()...)
@@ -80,11 +63,6 @@ func (head *controlledSystemMessage) text() string {
 	return strings.Join(kept, "\n\n")
 }
 
-// controlledCurrentSystemMessage replays every system message of a transcript into the one
-// leading system message that holds the current prompt and the current tools.
-//
-// Later content is appended to the base prompt, the sections are patched by name and the
-// tools are resolved by replaying every tool delta in order.
 func controlledCurrentSystemMessage(messages []any) *controlledSystemMessage {
 	head := &controlledSystemMessage{sections: &controlledSectionList{values: map[string]any{}}}
 	content := []string{}
@@ -113,7 +91,6 @@ func controlledCurrentSystemMessage(messages []any) *controlledSystemMessage {
 	return head
 }
 
-// controlledContentText joins the text blocks of one message content.
 func controlledContentText(content any) string {
 	switch typed := content.(type) {
 	case string:
@@ -136,8 +113,6 @@ func controlledContentText(content any) string {
 	return ""
 }
 
-// controlledCurrentTools resolves the tools available after applying every transcript
-// delta in order.
 func controlledCurrentTools(messages []any) []any {
 	names := []string{}
 	values := map[string]any{}
@@ -183,13 +158,11 @@ func controlledCurrentTools(messages []any) []any {
 	return out
 }
 
-// controlledMessageTools reads the tool list one transcript field carries.
 func controlledMessageTools(value any) []any {
 	tools, _ := value.([]any)
 	return tools
 }
 
-// controlledToolName reads the name of one tool declaration.
 func controlledToolName(tool any) string {
 	declaration, ok := tool.(map[string]any)
 	if !ok {
@@ -199,17 +172,11 @@ func controlledToolName(tool any) string {
 	return name
 }
 
-// controlledSectionList is one system message's prompt sections, in the order the
-// transcript declared them.
-//
-// The Pi SDK writes the sections in a fixed order and the rendered prompt keeps that
-// order, so the sections keep their own shape instead of a plain map.
 type controlledSectionList struct {
 	names  []string
 	values map[string]any
 }
 
-// merge applies one section patch. A null value removes the section, a text value sets it.
 func (list *controlledSectionList) merge(patch any) {
 	switch typed := patch.(type) {
 	case *controlledSectionList:
@@ -221,7 +188,6 @@ func (list *controlledSectionList) merge(patch any) {
 		for name := range typed {
 			names = append(names, name)
 		}
-		// TODO(port): a plain map has no insertion order, so the sections are read by name.
 		sort.Strings(names)
 		for _, name := range names {
 			list.set(name, typed[name])
@@ -229,7 +195,6 @@ func (list *controlledSectionList) merge(patch any) {
 	}
 }
 
-// set stores one section, keeping the position of a name that is already known.
 func (list *controlledSectionList) set(name string, value any) {
 	if value == nil {
 		list.remove(name)
@@ -244,7 +209,6 @@ func (list *controlledSectionList) set(name string, value any) {
 	list.values[name] = value
 }
 
-// remove drops one section.
 func (list *controlledSectionList) remove(name string) {
 	if _, present := list.values[name]; !present {
 		return
@@ -258,7 +222,6 @@ func (list *controlledSectionList) remove(name string) {
 	}
 }
 
-// texts returns the section values in transcript order.
 func (list *controlledSectionList) texts() []string {
 	out := []string{}
 	for _, name := range list.names {
@@ -275,11 +238,6 @@ func (list *controlledSectionList) texts() []string {
 	return out
 }
 
-// controlledInstructionRole is the role the provider's instruction message carries.
-//
-// A reasoning model on a provider that accepts the `developer` role gets it; every
-// other provider gets `system`. The SDK detects the provider's answer from its name
-// and its base URL, and so does this.
 func controlledInstructionRole(model map[string]any) string {
 	reasoning, _ := model["reasoning"].(bool)
 	if !reasoning {
@@ -291,8 +249,6 @@ func controlledInstructionRole(model map[string]any) string {
 	return "system"
 }
 
-// controlledSupportsDeveloperRole reports whether the provider accepts the `developer`
-// role instead of `system`.
 func controlledSupportsDeveloperRole(provider, baseURL, modelID string) bool {
 	lowered := strings.ToLower(baseURL)
 	isOpenRouter := provider == "openrouter" || strings.Contains(lowered, "openrouter.ai")

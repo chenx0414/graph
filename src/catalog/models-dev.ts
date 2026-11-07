@@ -1,21 +1,3 @@
-/**
- * models.dev metadata snapshot + pure mapping (B-1).
- *
- * `models-dev.snapshot.json` is a build-time vendored copy of the models.dev
- * community catalog (refresh with `node --run catalog:refresh`). This module
- * only maps that frozen data onto Graph's model fields; it performs no network
- * call and never inspects the provider endpoint.
- *
- * Guardrails:
- * - a missing snapshot, a provider that is not in the catalog, or a model id
- *   that is not listed all yield `null`, so the caller leaves the fields empty
- *   and marks the price unknown rather than inventing zeros;
- * - thinking levels are only reported when models.dev spells them out for the
- *   model and they map onto `MODEL_THINKING_LEVELS`; an unsupported vocabulary
- *   yields no levels instead of a guessed one;
- * - prices are models.dev's USD amounts per million tokens, carried with their
- *   source and revision so a later refresh cannot rewrite a frozen cost.
- */
 import { readFileSync } from 'node:fs';
 import { MODEL_THINKING_LEVELS, type ModelCost, type ModelInput, type ModelThinkingLevel, type ModelThinkingOption } from './models.ts';
 
@@ -43,15 +25,12 @@ export interface ModelsDevProvider {
 }
 
 export interface ModelsDevSnapshot {
-  /** Top-level `_meta` block written by `catalog:refresh`. */
   sourceUrl?: string;
   fetchedAt?: string;
   attribution?: string;
   providers: Record<string, ModelsDevProvider>;
 }
 
-/** Provenance the caller writes into `ModelPricing`; `unit` is always
- * `per_million_tokens` for models.dev amounts. */
 export interface CatalogProvenance {
   sourceUrl: string;
   retrievedAt: string | undefined;
@@ -59,15 +38,12 @@ export interface CatalogProvenance {
   attribution: string;
 }
 
-/** Mapped metadata for one model; every field is optional and an absent field
- * means "the snapshot does not say", never zero. */
 export interface ModelMetadata {
   contextWindow?: number;
   maxTokens?: number;
   input?: ModelInput[];
   reasoning?: boolean;
   thinkingLevels?: ModelThinkingLevel[];
-  /** The same levels, each with the name the provider uses for it. */
   thinkingOptions?: ModelThinkingOption[];
   defaultThinkingLevel?: ModelThinkingLevel;
   cost?: ModelCost;
@@ -76,12 +52,6 @@ export interface ModelMetadata {
   catalogRevision?: string;
 }
 
-/**
- * models.dev publishes some first-party platforms under a different provider
- * id than the console's platform id (for example the Grok console entry maps
- * to the `xai` catalog entry). The first candidate that exists in the snapshot
- * wins; an unknown platform still resolves to `null`.
- */
 const PROVIDER_ALIASES: Record<string, string[]> = {
   'opencode-go': ['opencode-go', 'opencode'],
   'command-goat': ['command-goat', 'commandcode'],
@@ -114,12 +84,6 @@ function positiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-/** models.dev amounts are USD per million tokens. The price is a set: input,
- * output, cache read and cache write must all be finite numbers before any of
- * them is exposed. If the snapshot only prices part of the model, the whole
- * cost is omitted (the caller marks the price unknown and the user can fill it
- * by hand) instead of treating a missing side as 0, which would make
- * `estimateCost` bill a free ride. */
 function optionalCost(cost: ModelsDevModel['cost']): ModelCost | undefined {
   if (!cost) return undefined;
   const input = finiteAmount(cost.input);
@@ -134,11 +98,6 @@ function finiteAmount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-/** Only effort vocabularies the repository already models are reported; other
- * option types (toggle, budget_tokens) carry no discrete level. The provider's
- * own spelling is kept beside the normalized level: models name their strengths
- * differently (xai calls its top level xhigh, deepseek calls it max), and the
- * console has to show the name that model actually uses. */
 function thinkingOptions(model: ModelsDevModel): ModelThinkingOption[] {
   const found = new Map<ModelThinkingLevel, string>();
   for (const option of Array.isArray(model.reasoning_options) ? model.reasoning_options : []) {
@@ -159,14 +118,9 @@ function thinkingLevels(model: ModelsDevModel): ModelThinkingLevel[] {
 function inputModalities(model: ModelsDevModel): ModelInput[] | undefined {
   const inputs = Array.isArray(model.modalities?.input) ? model.modalities.input.map(value => String(value)) : [];
   if (!inputs.length) return undefined;
-  // `pdf`/`video`/`audio` are not Graph input modalities; only image support
-  // is promoted onto the existing text/image pair.
   return inputs.includes('image') ? ['text', 'image'] : ['text'];
 }
 
-/** Normalize the vendored snapshot. Accepts the `{ _meta, providers }` wrapper
- * written by `catalog:refresh`, the earlier `{ fetchedAt, sourceUrl, license,
- * providers }` shape, and a bare provider map. */
 export function normalizeModelsDevSnapshot(raw: unknown): ModelsDevSnapshot {
   const root = record(raw);
   if (!root) return { providers: {} };
@@ -187,29 +141,20 @@ export function normalizeModelsDevSnapshot(raw: unknown): ModelsDevSnapshot {
   return { providers: root as Record<string, ModelsDevProvider> };
 }
 
-/** Resolved snapshot location. In Node (daemon, vitest) this is a `file:` URL
- * read from disk; the Vite browser build rewrites the literal to the emitted
- * JSON asset, so it is fetched once at module load instead. */
 const SNAPSHOT_URL = new URL('./models-dev.snapshot.json', import.meta.url);
 
 let cached: ModelsDevSnapshot | undefined;
 
-// Browser bundle: `node:fs` is unavailable, so preload the emitted asset here.
-// The lookup stays synchronous because a dynamic `import()` only resolves after
-// this top-level await finishes.
 if (SNAPSHOT_URL.protocol !== 'file:') {
   const response = await fetch(SNAPSHOT_URL);
   cached = normalizeModelsDevSnapshot(await response.json());
 }
 
-/** The vendored snapshot that ships with the build. Parsed once per process. */
 export function builtinModelsDevSnapshot(): ModelsDevSnapshot {
   if (!cached) cached = normalizeModelsDevSnapshot(JSON.parse(readFileSync(SNAPSHOT_URL, 'utf8')));
   return cached;
 }
 
-/** Where the snapshot came from, for `ModelPricing`. Pass a snapshot to read
- * another copy; the default is the vendored one. */
 export function catalogProvenance(snapshot?: unknown): CatalogProvenance {
   const source = snapshot === undefined ? builtinModelsDevSnapshot() : normalizeModelsDevSnapshot(snapshot);
   const retrievedAt = source.fetchedAt;
@@ -224,10 +169,6 @@ export function catalogProvenance(snapshot?: unknown): CatalogProvenance {
 function resolveProvider(snapshot: ModelsDevSnapshot, providerHint: string): ModelsDevProvider | undefined {
   const hint = providerHint.trim().toLowerCase();
   if (!hint) return undefined;
-  // Multiple credentials for one platform are stored as account ids such as
-  // opencode-go-3. Those ids route requests, but the catalog still names the
-  // platform opencode-go. Only strip a numeric account suffix when its base is
-  // a known platform alias; arbitrary custom provider ids remain exact.
   const accountBase = hint.replace(/-\d+$/, '');
   const platform = accountBase !== hint && PROVIDER_ALIASES[accountBase] ? accountBase : hint;
   const candidates = [...(PROVIDER_ALIASES[platform] ?? []), platform];
@@ -243,8 +184,6 @@ function resolveModel(provider: ModelsDevProvider, modelId: string): ModelsDevMo
   if (!id) return undefined;
   const models = provider.models;
   if (!models) return undefined;
-  // models.dev lists some models under a `vendor/model` key, and callers may
-  // pass either that spelling or the bare model segment.
   const segment = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
   const direct = models[id] ?? models[segment];
   if (direct) return direct;
@@ -256,11 +195,6 @@ function resolveModel(provider: ModelsDevProvider, modelId: string): ModelsDevMo
   return undefined;
 }
 
-/**
- * Map one provider/model pair from the models.dev snapshot onto Graph's model
- * metadata. Returns `null` when the snapshot or the provider/model is missing;
- * a matched model without a price simply omits `cost` (never a zero price).
- */
 export function lookupModelMetadata(providerHint: string, modelId: string, snapshot?: unknown): ModelMetadata | null {
   const source = snapshot === undefined ? builtinModelsDevSnapshot() : normalizeModelsDevSnapshot(snapshot);
   if (!source || !source.providers) return null;
@@ -285,9 +219,6 @@ export function lookupModelMetadata(providerHint: string, modelId: string, snaps
     ...(reasoning !== undefined ? { reasoning } : {}),
     ...(levels.length ? { thinkingLevels: levels } : {}),
     ...(options.length ? { thinkingOptions: options } : {}),
-    // models.dev records no explicit default thinking strength (reasoning_options
-    // only describe toggles/token budgets), so never invent one here - the user
-    // picks the default per model instead.
 
     ...(cost ? { cost } : {}),
     ...(cost ? { currency: typeof model.cost?.currency === 'string' && model.cost.currency ? model.cost.currency : 'USD' } : {}),

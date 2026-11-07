@@ -1,16 +1,12 @@
 import { QuestionReply } from './Questions.tsx';
 import { Button, Icon, Pill } from './ui.tsx';
 
-/** One question a node is waiting on, as the run view reports it. */
 export type NodeQuestion = {
   id: string;
   kind: string;
   data?: Record<string, unknown>;
 };
 
-/** The questions still waiting for an answer. A node run reports every question
- * it ever raised, answered ones included, and only the open ones are a thing the
- * reader can act on. */
 export function openNodeQuestions(questions: unknown[]): NodeQuestion[] {
   return questions.flatMap(item => {
     if (!item || typeof item !== 'object') return [];
@@ -24,14 +20,6 @@ export function openNodeQuestions(questions: unknown[]): NodeQuestion[] {
   });
 }
 
-/**
- * The questions a node is blocked on, answered in place.
- *
- * It is the same `QuestionReply` the main conversation uses, with the same
- * section classes: a node asking for a decision is the conversation asking for
- * one, and two different renderings of the same question is how a reader learns
- * to distrust one of them.
- */
 export function NodeChatQuestions({ taskId, questions, onDone }: {
   taskId: string;
   questions: unknown[];
@@ -50,11 +38,6 @@ export function NodeChatQuestions({ taskId, questions, onDone }: {
   );
 }
 
-/**
- * The messages the reader typed while this node was busy, in the order the node
- * will take them. The main conversation shows its queue the same way; without
- * it, a second message looks like it vanished.
- */
 export function NodeChatPending({ taskId, questions, queued, onDone }: {
   taskId: string;
   questions: unknown[];
@@ -78,10 +61,6 @@ export function NodeChatPending({ taskId, questions, queued, onDone }: {
   );
 }
 
-/**
- * The pause that stops this node's task, said the way the main conversation says
- * it: what happens to the turn in flight, and what happens to what was typed.
- */
 export function NodeChatPaused() {
   return (
     <section className="conversation-alert" data-testid="node-chat-paused">
@@ -93,11 +72,6 @@ export function NodeChatPaused() {
   );
 }
 
-/**
- * What the composer says under itself: what a stop is doing right now, how the
- * next message will be taken, and the two controls a running agent node offers.
- * The conversation window says the same things in the same place.
- */
 export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSteer, onSteer, onStop, throughput }: {
   stopPhase: 'idle' | 'stopping' | 'stopped';
   busy: boolean;
@@ -106,7 +80,6 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
   canSteer: boolean;
   onSteer: () => void;
   onStop: () => void;
-  /** The node's newest settled request, in the same words the conversation footer uses. */
   throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null } | undefined;
 }) {
   return (
@@ -134,11 +107,6 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
   );
 }
 
-/**
- * The window's own header: which node this is, what it is doing, and the close
- * control. It lives beside the rest of the node chat's chrome so the window file
- * stays about the transcript.
- */
 export function NodeChatHeader({ agentName, nodeId, status, statusLabel, model, connected, taskId, onClose }: {
   agentName: string;
   nodeId: string;

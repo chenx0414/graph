@@ -6,16 +6,12 @@ import (
 	"context"
 )
 
-// ChangeWait is the promise/cancel pair waitForChange returned.
 type ChangeWait struct {
 	Promise <-chan struct{}
 	Cancel  func()
 }
 
 func (s *TaskStore) WaitForChange(signal context.Context) ChangeWait {
-	// The channel carries a signal, it is never closed: a writer that emits
-	// while the reader is between iterations must not lose the notification,
-	// and a reader that cancels must not race the writer's send.
 	ch := make(chan struct{}, 1)
 	var once sync.Once
 	finish := func() {

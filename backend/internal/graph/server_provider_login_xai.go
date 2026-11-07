@@ -13,29 +13,15 @@ import (
 	"time"
 )
 
-// xAI authorizes a subscription account with the OAuth 2.0 Device
-// Authorization Grant: the host asks for a device code, the user approves it in
-// a browser, and the host polls the token endpoint. Endpoints come from xAI's
-// OpenID Connect discovery document, so a protocol change does not need a new
-// constant in this file.
-//
-// The client id is the public one xAI registers for its own CLI. It has no
-// secret: device-code clients cannot keep one. The scopes mirror what the CLI
-// asks for: an identity plus the Grok and API access the subscription grants.
 const (
 	xaiIssuer        = "https://auth.x.ai"
 	xaiClientID      = "b1a00492-073a-47ea-816f-4c329264a828"
 	xaiScope         = "openid profile email offline_access grok-cli:access api:access"
 	xaiUserAgent     = "graph-xai-oauth"
 	xaiRefreshSuffix = "_REFRESH"
-	// xaiRefreshLead refreshes the access token before it expires instead of
-	// waiting for the first request to fail.
 	xaiRefreshLead = 5 * time.Minute
 )
 
-// xaiDeviceLogin is the host-side state of one device-authorization flow. The
-// device code and every token stay here; the console only sees the user code
-// and the verification address.
 type xaiDeviceLogin struct {
 	userCode        string
 	verificationURI string
@@ -49,8 +35,6 @@ type xaiDeviceLogin struct {
 	accessExpiresAt time.Time
 }
 
-// xaiRefreshBundle is the companion secret that survives a daemon restart: it
-// carries the refresh token and when the access token runs out.
 type xaiRefreshBundle struct {
 	RefreshToken    string    `json:"refreshToken"`
 	TokenEndpoint   string    `json:"tokenEndpoint"`
@@ -77,8 +61,6 @@ type xaiTokens struct {
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
-// xaiOAuthError carries the machine code of a refused token request so the
-// poll loop can tell "still waiting" apart from "user said no".
 type xaiOAuthError struct {
 	code        string
 	description string
@@ -131,8 +113,6 @@ func xaiDiscovery(ctx context.Context) (xaiEndpoints, error) {
 	return xaiEndpoints{device: document.DeviceAuthorizationEndpoint, token: document.TokenEndpoint}, nil
 }
 
-// xaiPostForm is the one request shape both OAuth calls use. A non-2xx answer
-// becomes an xaiOAuthError carrying the vendor's own code.
 func xaiPostForm(ctx context.Context, endpoint string, form url.Values, target any) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -220,9 +200,6 @@ func xaiSecretApplied(result any) bool {
 	return applied.Applied
 }
 
-// startXai opens one device-authorization flow. The caller's credential ref
-// receives the access token; a companion `<ref>_REFRESH` secret keeps the
-// refresh token so the login outlives the one-hour access token.
 func (service *providerLogins) startXai(ref string) map[string]any {
 	if !providerSecretRef.MatchString(ref) {
 		Raise("invalid_input", "凭据引用无效")
@@ -371,8 +348,6 @@ func (service *providerLogins) completeXai(login *providerLogin, tokens xaiToken
 		return
 	}
 	if tokens.RefreshToken != "" {
-		// One login, one rotation, one writer: the daemon copy and the app store must
-		// agree, or a restart prefers a token the vendor has already resumed past.
 		bundle := xaiRefreshBundle{RefreshToken: tokens.RefreshToken, TokenEndpoint: tokenEndpoint, AccessExpiresAt: accessExpiresAt}
 		if persistErr := service.persistXaiBundle(refreshRef, bundle); persistErr == nil {
 			login.mutex.Lock()
@@ -401,9 +376,6 @@ func (service *providerLogins) failXai(login *providerLogin, message string) {
 	}
 }
 
-// watchXai keeps the access token fresh while the daemon runs. A refused
-// refresh ends the loop after a few attempts; the credential stays, and the
-// next login writes a new one.
 func (service *providerLogins) watchXai(login *providerLogin) {
 	failures := 0
 	for {
@@ -460,9 +432,6 @@ func (service *providerLogins) watchXai(login *providerLogin) {
 	}
 }
 
-// resumeXai re-arms the refresh loop for a login that happened before this
-// daemon started. The access token is in the keychain already; the companion
-// secret says when it runs out.
 func (service *providerLogins) resumeXai() {
 	if service.secrets == nil || service.background == nil {
 		return
@@ -473,8 +442,6 @@ func (service *providerLogins) resumeXai() {
 			refs[ref] = true
 		}
 	}
-	// The daemon's own copy can be the only one left: it is written first, so a crash
-	// after the rotation leaves the bundle here and nowhere else.
 	for _, ref := range xaiBundleRefs(service.stateDir) {
 		refs[ref] = true
 	}
@@ -501,7 +468,6 @@ func (service *providerLogins) resumeXai() {
 	}
 }
 
-// xaiBundleRefs names the refresh secrets the daemon has its own copy of.
 func xaiBundleRefs(stateDir string) []string {
 	if stateDir == "" {
 		return nil

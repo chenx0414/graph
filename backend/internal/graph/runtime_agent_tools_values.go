@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 )
 
-// agentToolsText is a text tool result.
 func agentToolsText(value string) map[string]any {
 	return map[string]any{
 		"content": []any{map[string]any{"type": "text", "text": value}},
@@ -18,7 +17,6 @@ func agentToolsText(value string) map[string]any {
 	}
 }
 
-// agentToolsImage is an image tool result.
 func agentToolsImage(data []byte, mimeType string) map[string]any {
 	return map[string]any{
 		"content": []any{map[string]any{
@@ -28,7 +26,6 @@ func agentToolsImage(data []byte, mimeType string) map[string]any {
 	}
 }
 
-// agentToolsParams is the argument object of one tool call.
 func agentToolsParams(raw any) map[string]any {
 	params, _ := raw.(map[string]any)
 	if params == nil {
@@ -37,12 +34,10 @@ func agentToolsParams(raw any) map[string]any {
 	return params
 }
 
-// agentToolsImageMimeType is the image type of one path, if it is an image.
 func agentToolsImageMimeType(path string) string {
 	return agentToolsImageMimeTypes[strings.ToLower(filepath.Ext(path))]
 }
 
-// agentToolsMount is the granted root one absolute path belongs to.
 func agentToolsMount(candidates []string, requested string) string {
 	for _, candidate := range candidates {
 		if requested == candidate || strings.HasPrefix(requested, candidate+string(os.PathSeparator)) {
@@ -52,7 +47,6 @@ func agentToolsMount(candidates []string, requested string) string {
 	return ""
 }
 
-// agentToolsCommandOutput is the text of one command result.
 func agentToolsCommandOutput(result CommandResult) string {
 	code := "signal"
 	if result.Code != nil {
@@ -61,7 +55,6 @@ func agentToolsCommandOutput(result CommandResult) string {
 	return "exit " + code + "\n" + result.Stdout + result.Stderr
 }
 
-// agentToolsGitText runs one read-only git command and returns its output.
 func agentToolsGitText(input AgentToolsInput, args []string, path string) string {
 	full := append([]string{}, args...)
 	if path != "" {
@@ -71,7 +64,6 @@ func agentToolsGitText(input AgentToolsInput, args []string, path string) string
 	return agentToolsCommandOutput(result)
 }
 
-// agentToolsNativeProposal is the native proposal of one tool call.
 func agentToolsNativeProposal(value any) NativeProposal {
 	record := asMap(value)
 	if record == nil {
@@ -91,7 +83,6 @@ func agentToolsNativeProposal(value any) NativeProposal {
 	return proposal
 }
 
-// agentToolsResourceReference is the id and version of one resource reference.
 func agentToolsResourceReference(rawID, explicitVersion any) (string, string) {
 	id := strings.TrimSpace(agentToolsStringOrEmpty(rawID))
 	version := ""
@@ -110,7 +101,6 @@ func agentToolsResourceReference(rawID, explicitVersion any) (string, string) {
 	return id, version
 }
 
-// agentToolsCapabilityView is the resource view the resource tools return.
 func agentToolsCapabilityView(record map[string]any) map[string]any {
 	if record == nil {
 		record = map[string]any{}
@@ -135,7 +125,6 @@ func agentToolsCapabilityView(record map[string]any) map[string]any {
 	return view
 }
 
-// agentToolsGraphSectionQuery is the frozen definition read of one tool call.
 func agentToolsGraphSectionQuery(params map[string]any) GraphSectionQuery {
 	query := GraphSectionQuery{Section: agentToolsString(params["section"])}
 	if raw, ok := params["id"].(string); ok {
@@ -153,7 +142,6 @@ func agentToolsGraphSectionQuery(params map[string]any) GraphSectionQuery {
 	return query
 }
 
-// agentToolsHarnessVariants reads the variant list of a harness probe.
 func agentToolsHarnessVariants(value any) ([]HarnessProbeVariant, error) {
 	items, ok := value.([]any)
 	if !ok {

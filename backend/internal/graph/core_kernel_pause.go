@@ -2,8 +2,6 @@ package graph
 
 import "fmt"
 
-// SetNativePause shares one elapsed interval for graph and node pause
-// controls. An empty nodeID means the whole graph. A zero now means now.
 func (k *KernelStore) SetNativePause(taskID string, paused bool, nodeID string, now int64) {
 	if _, ok := g5One(k.Db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kernel_nodes'"); !ok {
 		return
@@ -36,7 +34,6 @@ func (k *KernelStore) SetNativePause(taskID string, paused bool, nodeID string, 
     WHERE %s AND graph_paused=0 AND node_paused=0 AND pause_since IS NOT NULL`, target), append([]any{now}, args...)...)
 }
 
-// NativePauseMs is how long a node has been paused. Nil means never recorded.
 func (k *KernelStore) NativePauseMs(taskID, nodeID string, now ...int64) *int64 {
 	row, ok := g5One(k.Db, "SELECT pause_ms,pause_since FROM kernel_nodes WHERE task_id=? AND node_id=?", taskID, nodeID)
 	if !ok || (row["pause_ms"] == nil && row["pause_since"] == nil) {
@@ -55,8 +52,6 @@ func (k *KernelStore) NativePauseMs(taskID, nodeID string, now ...int64) *int64 
 	return &total
 }
 
-// FinishNativePauses ends the pause interval of the nodes it covers, whether
-// they are paused as a graph or as one node.
 func (k *KernelStore) FinishNativePauses(taskID string, nodeID *string, now ...int64) {
 	at := ledgerNow(now)
 	target := "task_id=?"

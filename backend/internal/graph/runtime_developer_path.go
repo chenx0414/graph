@@ -6,8 +6,6 @@ import (
 	"os"
 )
 
-// DEVELOPER_PATH_DIRECTORIES are locations a developer's shell puts on PATH
-// but a desktop launch does not.
 var DEVELOPER_PATH_DIRECTORIES = []string{"/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin", "/usr/local/sbin"}
 
 func developerPathExists(path string) bool {
@@ -15,7 +13,6 @@ func developerPathExists(path string) bool {
 	return err == nil
 }
 
-// DeveloperPath keeps the inherited order, then appends standard developer locations that exist.
 func DeveloperPath(inherited string, exists ...func(string) bool) string {
 	check := developerPathExists
 	if len(exists) > 0 && exists[0] != nil {
@@ -37,8 +34,6 @@ func DeveloperPath(inherited string, exists ...func(string) bool) string {
 	return joinPath(directories)
 }
 
-// WidenProcessPath widens one process environment's PATH in place.
-// A nil env updates the process environment, matching the no-argument TypeScript call.
 func WidenProcessPath(env map[string]string, exists ...func(string) bool) map[string]string {
 	process := env == nil
 	if process {

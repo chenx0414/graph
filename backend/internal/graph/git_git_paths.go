@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// GitPaths locates the git dir through Git, including linked worktrees.
 func GitPaths(repo string) gitPathPair {
 	dir := Git(repo, []string{"rev-parse", "--absolute-git-dir"}, nil, nil).Stdout
 	common := Git(repo, []string{"rev-parse", "--path-format=absolute", "--git-common-dir"}, nil, nil).Stdout
@@ -24,7 +23,6 @@ func GitPaths(repo string) gitPathPair {
 	return gitPathPair{GitDir: gitDir, CommonDir: commonDir}
 }
 
-// EnsureHostExcludes appends host exclude lines that are not already present.
 func EnsureHostExcludes(repo string, extra []string) {
 	paths := GitPaths(repo)
 	base := ""
@@ -76,7 +74,6 @@ func envLike(name string) bool {
 	return name == ".env" || strings.HasPrefix(name, ".env.")
 }
 
-// BaselineExcluded is a sensitive or host-managed path that must not enter a baseline.
 func BaselineExcluded(relPath string, stateRel *string) bool {
 	normalized := strings.ReplaceAll(relPath, "\\", "/")
 	if stateRel != nil && (normalized == *stateRel || strings.HasPrefix(normalized, *stateRel+"/")) {

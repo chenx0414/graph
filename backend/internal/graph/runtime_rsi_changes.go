@@ -7,11 +7,6 @@ import (
 	"unicode/utf8"
 )
 
-// RevisionRefusal says why a `from` value cannot be used as a revision, or the empty string when it can.
-//
-// One rule with two callers - the model-facing shape hint and the change parser - so the two cannot
-// drift: a path smuggled into the revision, whitespace, a leading dash (an option, not a revision) and
-// an empty value are refused in the same words, in the same place.
 func RevisionRefusal(from any) string {
 	rev := ""
 	if text, ok := from.(string); ok {
@@ -26,7 +21,6 @@ func RevisionRefusal(from any) string {
 	return ""
 }
 
-// rsiAssertText reads a bounded text field.
 func rsiAssertText(value any, name string, max int, required bool) string {
 	text := ""
 	if typed, ok := value.(string); ok {
@@ -41,8 +35,6 @@ func rsiAssertText(value any, name string, max int, required bool) string {
 	return text
 }
 
-// rsiChangePath is the one key a change cannot omit, spelled the way the batch is accepted;
-// `file`/`filePath` are accepted because a batch written without one had to be resent whole.
 func rsiChangePath(body map[string]any) any {
 	if value, ok := body["path"]; ok && value != nil {
 		return value
@@ -56,7 +48,6 @@ func rsiChangePath(body map[string]any) any {
 	return nil
 }
 
-// rsiChangePathText names the shape, not just the missing key: a resend must not need a second guess.
 func rsiChangePathText(body map[string]any, index int) string {
 	path := strings.TrimSpace(rsiText(rsiChangePath(body)))
 	if path == "" {
@@ -69,11 +60,6 @@ func rsiChangePathText(body map[string]any, index int) string {
 	return path
 }
 
-// rsiFromPath reads the optional workspace source of a change's new content.
-//
-// The Agent writes and runs a keeper file with its own tools; naming it here is
-// what lets that verified file be committed byte for byte instead of being
-// retyped into the call (a 110-line test pasted once is a 4k-token call).
 func rsiFromPath(value any, index int) (string, bool) {
 	if value == nil {
 		return "", false
@@ -95,7 +81,6 @@ func rsiFromPath(value any, index int) (string, bool) {
 	return text, true
 }
 
-// rsiNormalizeChange reads one file change.
 func rsiNormalizeChange(value any, index int) RsiFileChange {
 	body := rsiPlainObject(value)
 	if body == nil {
@@ -126,9 +111,6 @@ func rsiNormalizeChange(value any, index int) RsiFileChange {
 		}
 		return RsiFileChange{Path: path, Action: "write", Content: &content}
 	case "copy":
-		// A mirror is "this file exactly as that revision has it". Retyping the content instead is what
-		// silently drops a line, and the drop surfaces minutes later as an unrelated-looking check
-		// failure - so the revision is named and the content is read out of it, byte for byte.
 		if refusal := RevisionRefusal(body["from"]); refusal != "" {
 			Raise("invalid_input", fmt.Sprintf("changes[%d].from %s", index, refusal))
 		}
@@ -169,7 +151,6 @@ func rsiNormalizeChange(value any, index int) RsiFileChange {
 	return RsiFileChange{Path: path, Action: "replace", Edits: edits}
 }
 
-// rsiNormalizeChecks reads the custom checks of one change.
 func rsiNormalizeChecks(value any, present bool) []RsiCommand {
 	if !present {
 		return []RsiCommand{}
@@ -207,7 +188,6 @@ func rsiNormalizeChecks(value any, present bool) []RsiCommand {
 	return checks
 }
 
-// RsiChangeInputOf normalizes the raw tool arguments into one change request.
 func RsiChangeInputOf(value any) RsiChangeInput {
 	body := rsiPlainObject(value)
 	if body == nil {
@@ -258,8 +238,6 @@ func RsiChangeInputOf(value any) RsiChangeInput {
 	normalized.Activate = &activate
 	if flag, ok := body["dryRun"].(bool); ok && flag {
 		normalized.DryRun = true
-		// A rehearsal delivers nothing, so it cannot activate either: the default
-		// activate=true must not turn a dry run into a live reload.
 		disabled := false
 		normalized.Activate = &disabled
 	}
@@ -269,9 +247,6 @@ func RsiChangeInputOf(value any) RsiChangeInput {
 	return normalized
 }
 
-// RsiChangeMaterial is what a turn that changed the harness itself did, in the reviewer's terms.
-//
-// The receipt crosses the tool boundary as JSON, so every field is read defensively.
 func RsiChangeMaterial(receipt map[string]any, reply string) string {
 	files := []string{}
 	if rows, ok := rsiAsArrayOf(receipt["files"]); ok {
@@ -325,12 +300,6 @@ func RsiChangeMaterial(receipt map[string]any, reply string) string {
 	return strings.Join(kept, "\n\n")
 }
 
-// DescribeActivation says what this call actually did about the running daemon.
-//
-// HB-179: a call with no changes committed nothing yet was reported as `applied` with activation
-// `active` and the note "该提交已是运行中的版本，无需重载" — while the source checkout did not hold the
-// commit at all. `active` says "what you asked for is running", and a check-only call has no right to
-// say it. The rule here is that the state is derived from THIS call's commit, never from HEAD alone.
 func DescribeActivation(input RsiActivationInput) RsiActivation {
 	if !input.Activate {
 		if input.CommittedNow {
@@ -339,8 +308,6 @@ func DescribeActivation(input RsiActivationInput) RsiActivation {
 		return RsiActivation{State: "saved", Note: "未重载，且这次调用没有产生提交"}
 	}
 	if !input.CommittedNow || input.Commit == nil {
-		// The honest case the receipt used to hide: checks ran, nothing was delivered, so claiming a
-		// running version would be a statement about work that does not exist.
 		return RsiActivation{State: "checked_only", Note: "这次调用只跑了检查，没有产生提交：源码是否需要更新，请自己核对后再判断。"}
 	}
 	if input.Live {
@@ -349,15 +316,6 @@ func DescribeActivation(input RsiActivationInput) RsiActivation {
 	return RsiActivation{State: "pending_reload", Note: "已安排重载"}
 }
 
-// RsiDirtyMessage says why a dirty path outside the requested change stops an RSI write, and what to do
-// about it.
-//
-// It is the fail-closed answer, not the normal one: an isolated worktree is built
-// whenever the checkout carries paths this change does not own
-// (runtime_rsi_isolated.go), and this message appears only when that tree could
-// not be made. Then the checks would measure work the commit cannot contain, so
-// the message names both routes that keep the attribution honest: write the edits
-// through the tool, or commit the foreign work first.
 func RsiDirtyMessage(root string, blocked []string) string {
 	paths := strings.Join(blocked, " ")
 	return "Uncommitted changes outside this RSI change, and the change could not be built in an isolated worktree: " +
@@ -370,14 +328,6 @@ func RsiDirtyMessage(root string, blocked []string) string {
 		"Files left behind by an earlier failed RSI attempt on this branch are committed instead of reported."
 }
 
-// rsiReplacedContent is the new text of one `replace` change: the file's current
-// text with every anchor edited, or the whole file when a fromPath supplies it.
-//
-// A batch rolls back as a whole, so every anchor that does not match is named in
-// one answer: the caller corrects the whole batch in one resend instead of
-// discovering the mismatches one call at a time. `owned` says the file currently
-// holds a failed attempt's uncommitted content, which is why a stale anchor is
-// explained instead of reading like a typo.
 func rsiReplacedContent(root string, change RsiFileChange, index int, path string, existing *string, owned bool) string {
 	if existing == nil {
 		Raise("not_found", "Cannot replace missing RSI file "+path)

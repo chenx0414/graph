@@ -6,7 +6,6 @@ import { UsagePage } from './Usage.tsx';
 import type { ConversationSummary } from './conversation-types.tsx';
 import type { Settings_ } from './app-state.tsx';
 
-/** One billed model, as the record reports it. */
 type ModelRow = {
   model: string; provider: string; calls: number;
   input: number; output: number; cacheRead: number; cacheWrite: number;
@@ -43,7 +42,6 @@ function formatDuration(ms: number): string {
   return `${Math.round(ms)}ms`;
 }
 
-/** The recorded cost, in the currency the provider priced it in. */
 function formatCost(micros: number): string {
   if (micros <= 0) return '—';
   const amount = micros / 1e6;
@@ -52,7 +50,6 @@ function formatCost(micros: number): string {
   return `$${amount.toFixed(4)}`;
 }
 
-/** The role a tool call ran under; the same tool can appear once per role. */
 function roleLabel(role: string | null): string {
   if (!role || role === 'master') return '主 Agent';
   return role;
@@ -66,7 +63,6 @@ function percent(part: number, whole: number): string {
 
 type Slice = { key: string; label: string; value: number; color: string };
 
-/** A donut whose arcs are the slices themselves, so the picture cannot drift from the legend. */
 function Donut({ slices, total, testid }: { slices: Slice[]; total: number; testid?: string }) {
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
@@ -90,7 +86,6 @@ function Donut({ slices, total, testid }: { slices: Slice[]; total: number; test
   );
 }
 
-/** A horizontal share bar, one row per entry. */
 function ShareBars({ rows, testid }: { rows: { key: string; label: string; value: number; hint: string }[]; testid?: string }) {
   const peak = rows.reduce((max, row) => Math.max(max, row.value), 0);
   return (
@@ -108,12 +103,6 @@ function ShareBars({ rows, testid }: { rows: { key: string; label: string; value
   );
 }
 
-/** A section that stays closed until asked for.
- *
- * Closed has to mean *not rendered*, not merely hidden: the sections below fetch
- * their own data, and a page that quietly queries the subscription API and the
- * skill scan every time it opens is slower and noisier than the page it replaced.
- */
 function Fold({ id, title, hint, children }: { id: string; title: string; hint?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
@@ -129,12 +118,6 @@ function Fold({ id, title, hint, children }: { id: string; title: string; hint?:
   );
 }
 
-/**
- * 洞察 is one page for what the installation spent: billed tokens, the models
- * that billed them, the tools that ran beside them, and the two halves of the
- * time. The subscription quota and the tool/skill detail stay the components
- * they already were - the page composes them instead of copying them.
- */
 export function InsightsPage({ settings, conversations }: { settings: Settings_ | null; conversations: ConversationSummary[] }) {
   const [scopeKind, setScopeKind] = useState<'global' | 'project' | 'conversation'>('global');
   const [scopeId, setScopeId] = useState('');
@@ -165,8 +148,6 @@ export function InsightsPage({ settings, conversations }: { settings: Settings_ 
     } finally {
       setBusy(false);
     }
-    // The refresh control must re-read, so the request is made directly rather
-    // than through the coalescing read cache.
   }, [ready, scopedPath]);
 
   useEffect(() => { void load(); }, [load]);

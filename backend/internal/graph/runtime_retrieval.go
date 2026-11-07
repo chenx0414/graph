@@ -11,7 +11,6 @@ import (
 	"context"
 )
 
-// RetrievalResult is one granted textual fetch.
 type RetrievalResult struct {
 	Url         string `json:"url"`
 	Status      int    `json:"status"`
@@ -74,7 +73,6 @@ func retrievalReadBody(body io.ReadCloser, maxBytes int) (string, bool) {
 	return string(buf), truncated
 }
 
-// RetrievalBroker is the controlled read broker for granted domains.
 type RetrievalBroker struct {
 	Domains      []string
 	gate         SendGate
@@ -83,7 +81,6 @@ type RetrievalBroker struct {
 	maxBytes     int
 }
 
-// CreateRetrievalBroker validates protocol, credentials and the domain allowlist before one gated request.
 func CreateRetrievalBroker(domains []string, gate SendGate, unrestricted bool, timeoutMs, maxBytes int) *RetrievalBroker {
 	if timeoutMs <= 0 {
 		timeoutMs = 20000
@@ -96,7 +93,6 @@ func CreateRetrievalBroker(domains []string, gate SendGate, unrestricted bool, t
 	}
 }
 
-// Fetch performs one gated retrieval. Redirects are refused.
 func (broker *RetrievalBroker) Fetch(urlText string, signal *AbortSignal) (result RetrievalResult) {
 	target := retrievalCheckedURL(urlText, broker.Domains, broker.unrestricted)
 	invocationID := graphUUID()

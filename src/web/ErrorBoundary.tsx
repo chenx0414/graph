@@ -1,13 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import { Button, Card } from './ui.tsx';
 
-/** One page's crash stays that page's crash.
- *
- * Without a boundary a render error unmounts the whole root, and that is what a
- * blank console is: the sidebar, the open tabs and every panel go down with the
- * one page that failed. The boundary keeps the failure where it happened and
- * says what it was, so the next page still works.
- */
 export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
 
@@ -16,8 +9,6 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
   }
 
   componentDidUpdate(previous: { resetKey?: string }) {
-    // Navigating away from the failed page clears it: the next page gets a
-    // fresh boundary instead of the last page's error card.
     if (this.state.error && previous.resetKey !== this.props.resetKey) this.setState({ error: null });
   }
 

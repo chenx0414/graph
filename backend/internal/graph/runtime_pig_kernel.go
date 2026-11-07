@@ -17,7 +17,6 @@ import (
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
-// PigKernelConversation is one durable conversation the kernel found.
 type PigKernelConversation struct {
 	Id                int64 `json:"id"`
 	OwnerConversation int64 `json:"ownerConversation"`
@@ -25,7 +24,6 @@ type PigKernelConversation struct {
 	Entries           int   `json:"entries"`
 }
 
-// PigKernelReport is what the PiG kernel found in a Graph database.
 type PigKernelReport struct {
 	Database      string                  `json:"database"`
 	Prefix        string                  `json:"prefix"`
@@ -35,8 +33,6 @@ type PigKernelReport struct {
 	Tasks         int                     `json:"tasks"`
 }
 
-// InspectPigKernel opens the PiG durable kernel over one Graph database and
-// reports the durable records it finds there.
 func InspectPigKernel(database string) (PigKernelReport, error) {
 	ctx := context.Background()
 	registry := harness.CreateRegistry()
@@ -81,7 +77,6 @@ func InspectPigKernel(database string) (PigKernelReport, error) {
 	return report, nil
 }
 
-// PrintPigKernelReport writes the kernel report as one JSON line.
 func PrintPigKernelReport(database string) error {
 	report, err := InspectPigKernel(database)
 	if err != nil {
@@ -95,30 +90,16 @@ func PrintPigKernelReport(database string) error {
 	return nil
 }
 
-// PigKernelTurnOptions configure one kernel turn run from the command line.
 type PigKernelTurnOptions struct {
-	// Database is the formal Graph database the durable records live in.
 	Database string
-	// ModelId is the configured model the turn sends to.
 	ModelId string
-	// Prompt is the user input of the turn.
 	Prompt string
-	// Identity is the stable identity of the session.
 	Identity string
-	// Workspace is the directory the turn runs in.
 	Workspace string
-	// McpServers are the MCP servers the kernel connects natively.
 	McpServers []pigkernel.McpServerSpec
-	// Instructions are the system instructions of the session.
 	Instructions string
 }
 
-// RunPigKernelTurn runs one agent turn on the PiG kernel with the daemon's
-// own model and credential.
-//
-// The credential stays with the daemon: the configuration names an environment
-// variable, the daemon reads it, and only the resolved key reaches the kernel
-// for the provider call.
 func RunPigKernelTurn(config GraphConfig, options PigKernelTurnOptions) (pigkernel.TurnResult, error) {
 	entry, err := configuredModel(config, options.ModelId)
 	if err != nil {
@@ -166,7 +147,6 @@ func RunPigKernelTurn(config GraphConfig, options PigKernelTurnOptions) (pigkern
 	})
 }
 
-// configuredModel finds the configured model the turn sends to.
 func configuredModel(config GraphConfig, modelId string) (ConfiguredModel, error) {
 	if config.Models == nil {
 		return ConfiguredModel{}, fmt.Errorf("graph: no models are configured")
@@ -179,7 +159,6 @@ func configuredModel(config GraphConfig, modelId string) (ConfiguredModel, error
 	return ConfiguredModel{}, fmt.Errorf("graph: the model %s is not configured", modelId)
 }
 
-// modelCredential resolves the credential of a configured model.
 func modelCredential(config GraphConfig, entry ConfiguredModel) (string, error) {
 	if entry.CredentialId == "" {
 		return "", fmt.Errorf("graph: the model %s has no credential", entry.Id)
@@ -195,11 +174,6 @@ func modelCredential(config GraphConfig, entry ConfiguredModel) (string, error) 
 	return value, nil
 }
 
-// workspaceReadTool is the Graph's own read tool over one workspace.
-//
-// The daemon owns the tool: the kernel carries the model's call, the daemon
-// reads the file, and the result goes back to the model. The read is bounded
-// by the workspace, so the kernel cannot reach outside it.
 func workspaceReadTool(workspace string) pigkernel.ToolSpec {
 	root, err := filepath.Abs(workspace)
 	if err != nil {
@@ -240,11 +214,6 @@ func workspaceReadTool(workspace string) pigkernel.ToolSpec {
 	}
 }
 
-// PrintPigKernelTurn runs one agent turn on the PiG kernel and reports it.
-//
-// The model, the credential and the workspace are the daemon's own: the
-// configuration names the model and the credential, and the project root is
-// the work copy the turn runs in.
 func PrintPigKernelTurn(opts cliOptions, env map[string]string) error {
 	if opts.kernelModel == "" {
 		return fmt.Errorf("graph: --kernel-model is required for a kernel turn")
@@ -280,13 +249,6 @@ func PrintPigKernelTurn(opts cliOptions, env map[string]string) error {
 	return nil
 }
 
-// McpServerSpecFrom turns one Graph MCP server definition into the kernel's
-// own server specification.
-//
-// The definition is the one the Graph already builds for the adapter: the
-// command, the arguments, the environment, the url and the headers. Only the
-// transport changes: the kernel connects the server itself instead of handing
-// it to an extension.
 func McpServerSpecFrom(name string, definition *McpServerDefinition) pigkernel.McpServerSpec {
 	spec := pigkernel.McpServerSpec{Name: name}
 	if definition == nil {
@@ -300,9 +262,6 @@ func McpServerSpecFrom(name string, definition *McpServerDefinition) pigkernel.M
 	return spec
 }
 
-// kernelMcpFile is the JSON file that names the MCP servers a kernel turn
-// connects. It is the same shape a capability manifest declares, so the
-// declarations a node already binds can be replayed against the kernel.
 type kernelMcpFile struct {
 	Servers []struct {
 		Name    string            `json:"name"`
@@ -315,7 +274,6 @@ type kernelMcpFile struct {
 	} `json:"servers"`
 }
 
-// loadKernelMcpServers reads the MCP servers of a kernel turn.
 func loadKernelMcpServers(path string) ([]pigkernel.McpServerSpec, error) {
 	if path == "" {
 		return nil, nil

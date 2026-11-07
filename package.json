@@ -19,6 +19,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "node scripts/check-floating-promises.mjs",
+    "check:comments": "node scripts/check-comments.mjs",
+    "check:comments:changed": "node scripts/check-comments.mjs --changed",
     "skills:lint": "node scripts/skills-lint.mjs",
     "test": "python3 scripts/check-queue.py --continue -- node node_modules/vitest/vitest.mjs run",
     "test:design-examples": "vitest run tests/console/design-examples.test.ts",
@@ -45,7 +47,7 @@
     "test:report": "python3 scripts/check-queue.py --continue -- node node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=tests/.suite-report.json",
     "check:tests": "node scripts/check-tests.mjs",
     "check:affected": "node scripts/check-affected.mjs",
-    "check:full": "python3 scripts/check-queue.py --continue -- /bin/sh -c \"node --run check:backend && node --run typecheck && node --run lint && node --run check:ownership && node --run check:tokens:changed && node --run check:harness && node --run check:tests && node --run check:baseline && node --run check:evidence\"",
+    "check:full": "python3 scripts/check-queue.py --continue -- /bin/sh -c \"node --run check:backend && node --run typecheck && node --run lint && node --run check:comments && node --run check:ownership && node --run check:tokens:changed && node --run check:harness && node --run check:tests && node --run check:baseline && node --run check:evidence\"",
     "check:baseline": "node scripts/check-test-baseline.mjs",
     "check:tokens": "node scripts/check-file-tokens.mjs",
     "check:tokens:changed": "node scripts/check-file-tokens.mjs --changed",

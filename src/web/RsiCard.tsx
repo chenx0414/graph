@@ -3,17 +3,11 @@ import { formatElapsed } from './transcript-rsi.ts';
 import type { TranscriptRow } from './transcript-model.ts';
 import { Icon } from './ui.tsx';
 
-/** The card one applied self-change reports: what changed, what proved it, and
- * what still stands between the reader and the new behaviour - a pending reload,
- * or an app that has to be reopened before its own code is the code it runs. */
 export function RsiCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsi' }> }) {
   const [diffOpen, setDiffOpen] = useState(false);
   const { rsi } = row;
   const [expanded, setExpanded] = useState<boolean | null>(null);
   const open = expanded ?? false;
-  // The number the reader wants is the price of the call: writing the files,
-  // running the gate and committing. The reload is a separate wait with its own
-  // label, and a receipt that has not measured its call shows no number at all.
   const elapsedMs = rsi.elapsedMs;
   const dryRunFailed = rsi.status === 'dry_run' && rsi.validation.some(item => item.status === 'failed');
   const statusLabel = rsi.status === 'applied' ? (rsi.activation === 'active' ? '已生效' : rsi.activation === 'pending_reload' ? '等待重载' : '已提交')

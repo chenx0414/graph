@@ -11,7 +11,6 @@ import (
 	"sync"
 )
 
-// StartGraphDaemon serves the console on loopback. It does not start the TypeScript server.
 func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	WidenProcessPath(nil)
 	log := options.Log
@@ -104,8 +103,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	syncProviders := func() {
 		daemonSyncProviders(options, live, modelRuntime)
 	}
-	// The capability view reads the secret values the host knows about, minus
-	// the ones the user revoked.
 	capabilitySecretValues := func() map[string]string { return daemonCapabilitySecrets(options, live) }
 	syncProviders()
 	if err := os.MkdirAll(options.StateDir, 0o700); err != nil {
@@ -121,7 +118,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	}
 	rsiRoot := ResolveRsiRoot(options.Env, cliCwd())
 	rsi := OpenRsiService(RsiServiceOptions{Root: rsiRoot, StateDir: stateDir})
-	// Read once. A later read would describe a checkout this process is not running.
 	runningSource := ReadSourceIdentity(ApplicationRoot)
 	presetsRoot := options.PresetsDir
 	if presetsRoot == "" {
@@ -132,7 +128,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		userHome = GraphHome(options.Env)
 	}
 	bootstrap := LoadPresetBootstrap(presetsRoot, log)
-	// TODO(port): bootstrap identity and tool prompt belong on the library; OpenAgentContextLibrary takes the prompts directory.
 	agentContext := OpenAgentContextLibrary(filepath.Join(userHome, "prompts"))
 	ensureAgentContext(agentContext)
 	testConnection := func(modelID string) map[string]any {
@@ -142,8 +137,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	var configWatch *ConfigWatch
 	var secrets *SecretPersist
 	var configQueue sync.Mutex
-	// The bootstrap pack publishes its own definitions. Without one the daemon
-	// publishes the three built-in recipes once the configuration enables a model.
 	presetsAvailable := false
 	definitionsPublished := false
 	publishDefinitions := func() {
@@ -159,9 +152,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		catalog.PublishDefinition("coder", DefinitionSpec{})
 		catalog.PublishDefinition("reviewer", DefinitionSpec{Review: true})
 	}
-	// The master Agent runs the definition the catalog currently holds. The
-	// bootstrap pack ships a 'main' definition; without it the built-in
-	// master@1 recipe is used.
 	currentMasterDefinitionVersion := func() string {
 		return daemonMasterDefinitionVersion(server, bootstrap.Prompts["main"] != "")
 	}
@@ -250,9 +240,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 				}
 			}
 			var current *string
-			// A revoked ref still has a current value: the absence of it. Keeping
-			// that apart from "this ref holds nothing" is what stops a late
-			// acknowledgement from resurrecting a key the user logged out of.
 			hasCurrent := stringIn(live.Revoked(), ref)
 			if !hasCurrent {
 				if stored, ok := live.Secrets()[ref]; ok {
@@ -328,10 +315,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	secrets = CreateSecretPersist()
 	port := options.Port
 	autoDrive := options.Mode == "execute" || options.Dynamic
-	// The host inventory the main Agent may read. It is built when the tool is
-	// called, so it always describes the configuration as it is right now, and
-	// it never carries a secret value: a credential is reported as configured
-	// or not.
 	systemSummary := func() any {
 		return daemonSystemSummary(live, userHome, agentContext, server, usage)
 	}
@@ -356,9 +339,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			BootstrapPrompts: bootstrap.Prompts, BootstrapToolPrompt: bootstrap.ToolPrompt,
 		},
 		Access: live.Access, Usage: usage, Rsi: rsi, AgentContext: agentContext,
-		// SystemContext is deliberately left unset: the daemon has no host
-		// inventory to offer the main Agent yet, so the system tools stay
-		// unavailable rather than reporting an empty one.
 		StartupInfo: func() StartupInfo {
 			status := live.Status()
 			revision := live.Revision()
@@ -404,8 +384,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			Snapshot: func() any { return statusCounts() },
 		},
 	})
-	// A reload stops the work it would otherwise wait for, and the next daemon
-	// continues it. Wiring happens here because both halves need the runtime.
 	if rsi != nil && server.Runtime != nil {
 		rsi.reload = &RsiReloadHooks{
 			Pause: func(store *TaskStore, excludeTaskID string) []string {
@@ -414,9 +392,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			Resume: func(store *TaskStore, ids []string) []string { return server.Runtime.ResumeAfterReload(store, ids) },
 		}
 	}
-	// The catalog is ready once the runtime is open: the bootstrap pack
-	// publishes its definitions, and the built-in recipes follow when the
-	// configuration enables a model.
 	presetResult := PublishBootstrap(runtimeCatalog(server), bootstrap, log)
 	presetsAvailable = presetResult.Available
 	publishDefinitions()

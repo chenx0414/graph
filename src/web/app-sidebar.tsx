@@ -43,11 +43,7 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
   const [openingGlobal, setOpeningGlobal] = useState(false);
   const ordered = [...conversations].sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt));
   const global = ordered.find(conversation => 'role' in conversation && conversation.role === 'global');
-  // An archived project is put away: its rows leave the project list, and the
-  // settings page is where it comes back from.
   const projectRows = settings?.projects ?? [];
-  // The checkout project is run by the main Agent: its row would open the same
-  // conversation twice, and the way in is already the main row above.
   const listedProjects = projectRows.filter(project => !project.ownCheckout);
   const activeProjects = listedProjects.filter(project => project.archivedAt == null);
   async function openGlobalThread() {
@@ -119,8 +115,6 @@ export function Sidebar({ path, settings, conversations, onSettingsChanged }: {
         </div>
         <div className="sidebar-section" hidden={!sections.projects}>
           {activeProjects.map(project => {
-            // One project means one supervisor Agent, so the row itself is the
-            // way in: no second button to find and no list to open first.
             const supervisor = ordered.find(conversation => conversation.projectId === project.id && 'role' in conversation && conversation.role === 'project');
             const active = Boolean(supervisor && path === `/conversations/${supervisor.id}`);
             return (

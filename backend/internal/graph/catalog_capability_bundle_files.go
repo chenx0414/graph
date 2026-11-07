@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// capabilityBundleResolve is the absolute path of a capability source.
 func capabilityBundleResolve(path string) string {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -14,7 +13,6 @@ func capabilityBundleResolve(path string) string {
 	return absolute
 }
 
-// capabilityBundleSafePath rejects a bundle file path that leaves its directory.
 func capabilityBundleSafePath(path string) string {
 	if path == "" || filepath.IsAbs(path) || strings.ContainsRune(path, 0) {
 		Raise("invalid_capability", "Capability bundle file paths must be relative")
@@ -35,7 +33,6 @@ func capabilityBundleSafePath(path string) string {
 	return resolved
 }
 
-// capabilityBundleValidateFiles checks the bundle payload before anything is written.
 func capabilityBundleValidateFiles(manifest CapabilityManifest, files map[string]string) {
 	if len(files) > 64 {
 		Raise("invalid_capability", "A capability bundle may contain at most 64 files")
@@ -78,8 +75,6 @@ func capabilityBundleValidateFiles(manifest CapabilityManifest, files map[string
 	}
 }
 
-// capabilityBundleManifestJSON is the capability.json document the bundle installs. The
-// manifest keeps every key it was given and the normalized values the parser produced.
 func capabilityBundleManifestJSON(manifest CapabilityManifest) map[string]any {
 	out := map[string]any{}
 	for key, value := range manifest.Extra {

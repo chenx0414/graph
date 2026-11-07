@@ -6,7 +6,6 @@ import (
 	"errors"
 )
 
-// PigNativeToolNames are the native tools the daemon provides in Go.
 var PigNativeToolNames = []string{"read", "write", "edit", "ls", "find", "grep", "bash"}
 
 func PigNativeTools(input AgentToolsInput, granted []string) []ToolDefinition {
@@ -75,9 +74,6 @@ func writeExceptionsOf(root string, hostWrite bool) []string {
 	return []string{root}
 }
 
-// listNamesLimited lists one directory the native tools may reach, up to a
-// limit. The second answer says whether the directory holds more entries
-// than were returned.
 func (paths *pigNativePaths) listNamesLimited(requested string, limit int) ([]string, bool) {
 	if filepath.IsAbs(requested) {
 		if paths.hostRead {

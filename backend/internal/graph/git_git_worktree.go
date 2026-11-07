@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// DirtyEntries lists porcelain entries outside the ignored real paths.
 func DirtyEntries(cwd string, ignore []string, scope string) []string {
 	if scope == "" {
 		scope = "."
@@ -31,7 +30,6 @@ func DirtyEntries(cwd string, ignore []string, scope string) []string {
 	return out
 }
 
-// HostExcludePaths resolves host exclude patterns against a root.
 func HostExcludePaths(root string) []string {
 	out := []string{}
 	for _, line := range HOST_EXCLUDES {
@@ -43,7 +41,6 @@ func HostExcludePaths(root string) []string {
 	return out
 }
 
-// DetectRepo returns the repository top, or nil when path is not a repo.
 func DetectRepo(root string) *string {
 	top := Git(root, []string{"rev-parse", "--show-toplevel"}, nil, nil)
 	if top.Code != 0 || top.Stdout == "" {
@@ -53,7 +50,6 @@ func DetectRepo(root string) *string {
 	return &resolved
 }
 
-// RevParse returns the resolved ref, or nil when Git rejects it.
 func RevParse(cwd, ref string) *string {
 	result := Git(cwd, []string{"rev-parse", ref}, nil, nil)
 	if result.Code != 0 {
@@ -62,7 +58,6 @@ func RevParse(cwd, ref string) *string {
 	return &result.Stdout
 }
 
-// CheckedOutBranch is the branch name, or nil on a detached HEAD.
 func CheckedOutBranch(repo string) *string {
 	head := Git(repo, []string{"symbolic-ref", "--quiet", "HEAD"}, nil, nil)
 	if head.Code != 0 {
@@ -72,11 +67,6 @@ func CheckedOutBranch(repo string) *string {
 	return &name
 }
 
-// IsClean is true when every porcelain line sits under an ignored prefix.
-//
-// The status is read with `-z` for the same reason rsiDirtyPaths does: the
-// default output C-quotes a non-ASCII path, and a quoted path never matches the
-// prefix it belongs to.
 func IsClean(cwd string, ignore []string) bool {
 	prefixes := []string{}
 	for _, item := range ignore {
@@ -98,7 +88,6 @@ func IsClean(cwd string, ignore []string) bool {
 	return true
 }
 
-// PathInside reports whether path is root or a descendant, after realpath.
 func PathInside(root, path string) bool {
 	a := gitReal(root)
 	b := gitReal(path)

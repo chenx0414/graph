@@ -96,7 +96,6 @@ func graphPresentationTextWidth(value string) int {
 	return sum
 }
 
-// GraphNodeSize is the concrete box ELK needs. The browser renders the same width.
 func GraphNodeSize(node GraphNodeLike) GraphNodeBox {
 	estimated := graphPresentationTextWidth(GraphNodeLabel(node)) + 74
 	width := int(math.Min(384, math.Max(160, math.Ceil(float64(estimated)/32)*32)))

@@ -11,7 +11,6 @@ const MODULE_TIMEOUT_MS = 5000
 
 const MODULE_MAX_BYTES = 1048576
 
-// MISSING_INPUT marks an input that never received a delivery, distinct from false or null.
 var MISSING_INPUT = map[string]any{"__missing__": true}
 
 type ModuleEvaluationInput struct {
@@ -36,7 +35,6 @@ type ModuleEvaluationResult struct {
 	Measurement ModuleMeasurement `json:"measurement"`
 }
 
-// EvaluateModule runs one evaluation in a restricted child process.
 func EvaluateModule(input ModuleEvaluationInput, memoryCapMb *int) ModuleEvaluationResult {
 	limits := resolvedModuleLimits(input.Limits)
 	payload := stringifyJSON(moduleEvalPayload{ID: "eval-1", Inputs: input.Inputs, State: input.State, Trigger: input.Trigger})
@@ -79,7 +77,6 @@ func EvaluateModule(input ModuleEvaluationInput, memoryCapMb *int) ModuleEvaluat
 	})
 	ms := NowMillis() - started
 	code, codeMissing := moduleRunCode(run)
-	// TS `run.code !== 0` is true for null as well as a nonzero exit.
 	if codeMissing || code != 0 {
 		stderr := strings.TrimSpace(moduleRunText(run, "stderr", "Stderr"))
 		if stderr == "" {
@@ -172,7 +169,6 @@ func resolvedModuleLimits(in *ModuleLimits) resolvedLimits {
 }
 
 func moduleWorkerPath() string {
-	// The worker stays the Node entry next to the TypeScript module.
 	root := GraphApplicationRoot()
 	return filepath.Join(root, "src", "runtime", "module-worker.mjs")
 }
@@ -220,7 +216,6 @@ func stringSlice(v any) ([]string, bool) {
 	return out, true
 }
 
-// WriteModuleEntry writes module code to a scratch entry file for a test or a main-agent-authored extension.
 func WriteModuleEntry(dir, name, source string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err

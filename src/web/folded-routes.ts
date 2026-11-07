@@ -10,7 +10,6 @@ type FoldRequest = {
   nodeIds: string[];
 };
 
-/** Points for edges whose ends moved onto a folded subgraph container. Absent until the layout module answers. */
 export function useFoldedRoutes(request: FoldRequest | null): Map<string, FoldPoint[]> | null {
   const key = request === null ? '' : JSON.stringify(request);
   const [routes, setRoutes] = useState<Map<string, FoldPoint[]> | null>(null);

@@ -11,7 +11,6 @@ type gitWorktree struct {
 	Branch string
 }
 
-// WorktreeList reads porcelain worktree records.
 func WorktreeList(repo string) []gitWorktree {
 	result := Git(repo, []string{"worktree", "list", "--porcelain"}, nil, nil)
 	trees := []gitWorktree{}
@@ -32,7 +31,6 @@ func WorktreeList(repo string) []gitWorktree {
 	return trees
 }
 
-// EnsureBranch creates a branch when the name does not already resolve.
 func EnsureBranch(repo, name, startPoint string) {
 	if RevParse(repo, name) != nil {
 		return
@@ -47,7 +45,6 @@ func EnsureBranch(repo, name, startPoint string) {
 	}
 }
 
-// EnsureWorktree adds a linked worktree and states host excludes.
 func EnsureWorktree(repo, path, branch, startPoint string) {
 	resolved := filepath.Clean(path)
 	for _, tree := range WorktreeList(repo) {
@@ -74,7 +71,6 @@ func EnsureWorktree(repo, path, branch, startPoint string) {
 	EnsureHostExcludes(resolved, nil)
 }
 
-// CommitAll stages everything and commits when the tree is dirty.
 func CommitAll(cwd, message string, identity *GitIdentity) *string {
 	Git(cwd, []string{"add", "-A"}, nil, identity)
 	if IsClean(cwd, nil) {

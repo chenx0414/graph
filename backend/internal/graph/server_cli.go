@@ -16,8 +16,6 @@ import (
 	"bytes"
 )
 
-// RunCLI is the process the APP spawns (`dist/graphd`). It serves HTTP itself.
-// It does not proxy to the TypeScript Fastify server.
 func RunCLI(args []string) {
 	os.Exit(runCLI(args))
 }
@@ -33,10 +31,6 @@ func runCLI(args []string) (code int) {
 		panic(err)
 	}
 	env := osEnviron()
-	// The commands that are not the console: `graphd reclaim` reclaims a state
-	// directory without serving anything, `graphd review-module` turns a review
-	// policy into a command module, and `graphd assemble-team` builds a team
-	// from a running console's capability library.
 	switch {
 	case len(args) > 0 && args[0] == "reclaim":
 		return runReclaim(args[1:], cwd)
@@ -51,9 +45,6 @@ func runCLI(args []string) (code int) {
 		return 0
 	}
 	if opts.kernelDatabase != "" {
-		// The kernel surfaces work on the durable namespace of a real Graph
-		// database through the PiG kernel. They start no console and dispatch
-		// nothing.
 		if opts.kernelMode == "turn" {
 			if err := PrintPigKernelTurn(opts, env); err != nil {
 				return cliFail(err)
@@ -119,16 +110,11 @@ type cliOptions struct {
 	dynamic         bool
 	help            bool
 	applicationRoot string
-	// kernelDatabase asks the PiG kernel to report the durable namespace of a
-	// real Graph database instead of starting the console.
 	kernelDatabase string
-	// kernelMode is "inspect" or "turn": what the kernel does with the database.
 	kernelMode string
-	// kernelModel, kernelPrompt and kernelIdentity configure a kernel turn.
 	kernelModel    string
 	kernelPrompt   string
 	kernelIdentity string
-	// kernelMcp is a JSON file with the MCP servers a kernel turn connects.
 	kernelMcp string
 }
 
@@ -250,9 +236,6 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	if execute {
 		mode = "execute"
 	}
-	// The PiG kernel is the only kernel. The TypeScript durable sidecar is
-	// retired with the protocol layer that carried it, so the flag stays only
-	// to tell an operator who still asks for the old kernel why it is gone.
 	switch agentKernelFlag {
 	case "", AgentKernelPig:
 	case "node":
@@ -282,7 +265,6 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 func parsePort(raw string) int {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		// Number('') is 0 in the TypeScript CLI.
 		return 0
 	}
 	n, err := strconv.ParseInt(trimmed, 10, 64)
@@ -340,8 +322,6 @@ func osEnviron() map[string]string {
 	return out
 }
 
-// daemonGraphHome is the capability/recipe directory from --graph-home.
-// Catalog loading reads it when that port attaches.
 var daemonGraphHome string
 
 type errorJSON struct {
@@ -350,9 +330,6 @@ type errorJSON struct {
 	Field   string `json:"field,omitempty"`
 }
 
-// serveDaemon starts the console with the full route table and waits for a stop
-// signal. The TypeScript cli.ts starts the same daemon through startGraphDaemon;
-// this is the Go equivalent, so the served surface is the complete app.
 func serveDaemon(opts cliOptions, env map[string]string) int {
 	ApplicationRoot = opts.applicationRoot
 	daemonGraphHome = opts.graphHome
@@ -372,9 +349,6 @@ func serveDaemon(opts cliOptions, env map[string]string) int {
 	}
 	printBanner(daemon.Mode, configLine, daemon.StateDir, daemon.WebDir, daemon.ModelCount, daemon.EnabledModelCount, daemon.URL)
 	_ = os.Stdout.Sync()
-	// Publish the bound address: with `--port 0` (what the desktop app passes) this is the only
-	// place the console URL exists, and it is also how the next start returns to the same port.
-	// A stop deliberately leaves it in place.
 	WriteConsoleAddress(daemon.StateDir, ConsoleAddress{
 		URL: daemon.URL, PID: os.Getpid(), Mode: daemon.Mode, StartedAt: NowMillis(),
 	})

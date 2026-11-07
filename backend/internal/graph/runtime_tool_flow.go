@@ -2,20 +2,10 @@ package graph
 
 const controlledMissingToolResult = "No result provided"
 
-// controlledAnthropicCacheControl is the breakpoint the Anthropic prompt
-// cache is written at.
-//
-// The daemon builds the provider request itself, so the breakpoints that
-// make the provider's prompt caching work have to be placed here. Pi places
-// three: on the system prompt, on the last tool declaration and on the last
-// block of the last message. Without them the provider is never told what to
-// keep, and every session pays for its whole prefix again.
 func controlledAnthropicCacheControl() map[string]any {
 	return map[string]any{"type": "ephemeral"}
 }
 
-// controlledAnthropicCacheBreakpoint marks the last block of the last message
-// the model reads, so the prefix in front of it is kept.
 func controlledAnthropicCacheBreakpoint(messages []any) {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message, ok := messages[index].(map[string]any)
@@ -42,17 +32,11 @@ func controlledAnthropicCacheBreakpoint(messages []any) {
 	}
 }
 
-// controlledFlowCall is one tool call an assistant turn made.
 type controlledFlowCall struct {
 	ID   string
 	Name string
 }
 
-// controlledToolResults reads the tool results that follow one assistant turn.
-//
-// A result that answers no call of the turn is an orphan. A provider rejects
-// a result whose call it never saw, so the orphan is dropped and the call
-// that never got its result is closed with the placeholder.
 func controlledToolResults(messages []any, from int) (map[string]map[string]any, int) {
 	results := map[string]map[string]any{}
 	index := from
@@ -75,7 +59,6 @@ func controlledToolResults(messages []any, from int) (map[string]map[string]any,
 	return results, index
 }
 
-// controlledOpenAIToolMessages renders the tool messages one assistant turn answers with.
 func controlledOpenAIToolMessages(calls []controlledFlowCall, results map[string]map[string]any) []any {
 	out := []any{}
 	for _, call := range calls {
@@ -93,12 +76,6 @@ func controlledOpenAIToolMessages(calls []controlledFlowCall, results map[string
 	return out
 }
 
-// controlledAnthropicAssistant renders one assistant turn and the results that answer it.
-//
-// Anthropic takes the tool calls as `tool_use` blocks of the assistant turn,
-// and every result of that turn as one user turn of `tool_result` blocks. A
-// turn that carried a tool call and lost its result is closed with the
-// placeholder, so the request the provider sees is a flow it accepts.
 func controlledAnthropicAssistant(message map[string]any, results map[string]map[string]any) (map[string]any, []any) {
 	blocks := []any{}
 	text := ""
@@ -116,9 +93,6 @@ func controlledAnthropicAssistant(message map[string]any, results map[string]map
 				blocks = append(blocks, map[string]any{"type": "text", "text": value})
 			}
 		case "thinking":
-			// A signed reasoning block is replayed as itself. An unsigned one
-			// is plain text: a provider refuses a reasoning block it cannot
-			// verify, and the reasoning is still worth sending.
 			value, _ := block["thinking"].(string)
 			signature, _ := block["thinkingSignature"].(string)
 			if signature != "" {

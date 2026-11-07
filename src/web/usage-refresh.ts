@@ -10,7 +10,6 @@ function refreshUsage() {
   return inFlight;
 }
 
-/** The app shell owns one timer, including when the usage page is closed. */
 export function useUsageRefresh() {
   useEffect(() => {
     const controller = new AbortController();

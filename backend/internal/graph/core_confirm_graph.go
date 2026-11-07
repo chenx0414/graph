@@ -4,7 +4,6 @@ import (
 	"fmt"
 )
 
-// MaterializedGraph is the v2 graph created from a confirmed draft.
 type MaterializedGraph struct {
 	Revision   struct{ Version int }
 	Definition GraphDefinition
@@ -12,8 +11,6 @@ type MaterializedGraph struct {
 	ModuleIDs  []string
 }
 
-// MaterializeGraph admits revision 1 of a v2 graph inside the caller's transaction.
-// A second call panics with a plain error, matching the TypeScript refusal.
 func MaterializeGraph(kernel *KernelStore, taskID string, definition GraphDefinition, reason string) MaterializedGraph {
 	if kernel.LatestRevision(taskID) != nil {
 		panic(fmt.Errorf("task %s already has a v2 graph; materialising it again would duplicate its rows", taskID))

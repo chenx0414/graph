@@ -126,7 +126,6 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
     }
     setBusy(true);
     try {
-      // Keychain first, so the key never enters the config file.
       if (bridge && key.trim()) {
         const stored = await bridge.saveSecret(secretRef, key.trim());
         if (!stored.stored) {
@@ -188,7 +187,6 @@ export function Setup({ onSaved }: { onSaved?: (() => void) | undefined } = {}) 
     }
   }
 
-  // The directory order decides; the review model is the same first model.
   const reviewModel = chosenModels[0];
   return (
     <div className="stagger" data-testid="setup">

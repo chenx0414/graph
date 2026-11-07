@@ -6,35 +6,25 @@ import (
 	"encoding/json"
 )
 
-// HARNESS_EVIDENCE_MAX_STEPS bounds the trajectory one node contributes.
 const HARNESS_EVIDENCE_MAX_STEPS = 60
 
-// HARNESS_EVIDENCE_MAX_ERRORS bounds the failed tool calls one node lists.
 const HARNESS_EVIDENCE_MAX_ERRORS = 12
 
-// HARNESS_EVIDENCE_MAX_TEXT bounds one transcript entry.
 const HARNESS_EVIDENCE_MAX_TEXT = 600
 
-// HarnessEvidenceInput asks for the evidence of one run.
 type HarnessEvidenceInput struct {
-	// GraphId names the graph to read. Absent means the caller's own task.
 	GraphId string
-	// NodeId narrows the reading to one node.
 	NodeId string
-	// Kind is "summary" (the digest) or "trajectory" (the ordered steps).
 	Kind string
-	// Limit bounds the trajectory steps per node.
 	Limit int
 }
 
-// HarnessEvidenceToolError is one tool that failed, with the reason.
 type HarnessEvidenceToolError struct {
 	Tool   string `json:"tool"`
 	Count  int    `json:"count"`
 	Reason string `json:"reason"`
 }
 
-// HarnessEvidenceStep is one entry of a transcript.
 type HarnessEvidenceStep struct {
 	Seq     int    `json:"seq"`
 	Kind    string `json:"kind"`
@@ -44,7 +34,6 @@ type HarnessEvidenceStep struct {
 	Text    string `json:"text,omitempty"`
 }
 
-// HarnessEvidenceNode is what one node did.
 type HarnessEvidenceNode struct {
 	NodeId       string                     `json:"nodeId"`
 	Role         string                     `json:"role"`
@@ -56,7 +45,6 @@ type HarnessEvidenceNode struct {
 	Trajectory   []HarnessEvidenceStep      `json:"trajectory,omitempty"`
 }
 
-// HarnessEvidenceProblem is one open internal problem.
 type HarnessEvidenceProblem struct {
 	Id     string `json:"id"`
 	Kind   string `json:"kind"`
@@ -64,20 +52,17 @@ type HarnessEvidenceProblem struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// HarnessEvidenceFailure is one node that could not finish.
 type HarnessEvidenceFailure struct {
 	NodeId string `json:"nodeId"`
 	Reason string `json:"reason"`
 }
 
-// HarnessEvidenceCheck is one applied change and how its checks went.
 type HarnessEvidenceCheck struct {
 	Title    string   `json:"title"`
 	Status   string   `json:"status"`
 	Commands []string `json:"commands,omitempty"`
 }
 
-// HarnessEvidenceUsage is what a run cost.
 type HarnessEvidenceUsage struct {
 	Requests int     `json:"requests"`
 	Input    int64   `json:"input"`
@@ -85,7 +70,6 @@ type HarnessEvidenceUsage struct {
 	Cost     float64 `json:"cost,omitempty"`
 }
 
-// HarnessEvidenceResult is the evidence of one run.
 type HarnessEvidenceResult struct {
 	TaskId      string                   `json:"taskId"`
 	Nodes       []HarnessEvidenceNode    `json:"nodes"`
@@ -96,8 +80,6 @@ type HarnessEvidenceResult struct {
 	Truncated   bool                     `json:"truncated,omitempty"`
 }
 
-// HarnessEvidence reads the evidence of the caller's own run, or of one of its
-// graphs.
 func (service *graphManagementService) HarnessEvidence(input HarnessEvidenceInput) HarnessEvidenceResult {
 	taskId := service.ownerTaskId
 	if graphId := strings.TrimSpace(input.GraphId); graphId != "" {
@@ -126,7 +108,6 @@ func (service *graphManagementService) HarnessEvidence(input HarnessEvidenceInpu
 	return result
 }
 
-// ownedGraph resolves a graph the owner task may read, and refuses the rest.
 func (service *graphManagementService) ownedGraph(graphId string) string {
 	if graphId == service.ownerTaskId {
 		return graphId
@@ -141,14 +122,12 @@ func (service *graphManagementService) ownedGraph(graphId string) string {
 	return graphId
 }
 
-// harnessEvidenceNodeView is one node of the run.
 type harnessEvidenceNodeView struct {
 	NodeId string
 	Role   string
 	Status string
 }
 
-// harnessEvidenceNodes lists the nodes of a run.
 func (service *graphManagementService) harnessEvidenceNodes(taskId, nodeId string) []harnessEvidenceNodeView {
 	views := []harnessEvidenceNodeView{}
 	for _, node := range service.kernel.ListNodes(taskId) {
@@ -174,7 +153,6 @@ func (service *graphManagementService) harnessEvidenceNodes(taskId, nodeId strin
 	return nil
 }
 
-// harnessEvidenceRole is the role a node ran under. The node spec carries it.
 func (service *graphManagementService) harnessEvidenceRole(taskId, nodeId string) string {
 	row := kernelRow(service.kernel.Db, "SELECT spec FROM kernel_nodes WHERE task_id=? AND node_id=?", taskId, nodeId)
 	if row == nil {
@@ -186,7 +164,6 @@ func (service *graphManagementService) harnessEvidenceRole(taskId, nodeId string
 	return harnessEvidenceSpecRole(kernelString(row["spec"]))
 }
 
-// harnessEvidenceSpecRole reads the role out of a node spec.
 func harnessEvidenceSpecRole(spec string) string {
 	record := map[string]any{}
 	if err := json.Unmarshal([]byte(spec), &record); err != nil {
@@ -196,14 +173,6 @@ func harnessEvidenceSpecRole(spec string) string {
 	return role
 }
 
-// harnessEvidenceNode collects what one node did.
-//
-// Two record shapes carry a node's tool calls. A node that runs inside a graph
-// writes transcript entries with the tool name, the result and the reason a
-// call failed. The Agent of this conversation writes no transcript entries; its
-// tool calls are in the event stream, with the tool name and the error flag.
-// Both are read, so the reading does not depend on which kind of run it looks
-// at.
 func (service *graphManagementService) harnessEvidenceNode(taskId, nodeId, role, status, kind string, limit int) HarnessEvidenceNode {
 	evidence := HarnessEvidenceNode{NodeId: nodeId, Role: role, Status: status}
 	errors := map[string]*HarnessEvidenceToolError{}
@@ -241,8 +210,6 @@ func (service *graphManagementService) harnessEvidenceNode(taskId, nodeId, role,
 	}
 	evidence.Steps = len(rows)
 	if len(rows) == 0 {
-		// No transcript: the tool events of this node's operations are what
-		// the run left behind.
 		for _, call := range service.harnessEvidenceToolCalls(taskId, nodeId) {
 			evidence.ToolCalls++
 			if call.IsError {
@@ -275,14 +242,12 @@ func (service *graphManagementService) harnessEvidenceNode(taskId, nodeId, role,
 	return evidence
 }
 
-// harnessEvidenceToolCall is one completed tool call of a node.
 type harnessEvidenceToolCall struct {
 	Tool    string
 	Detail  string
 	IsError bool
 }
 
-// harnessEvidenceToolCalls reads the tool calls of one node from the events.
 func (service *graphManagementService) harnessEvidenceToolCalls(taskId, nodeId string) []harnessEvidenceToolCall {
 	operations := []string{}
 	for _, row := range kernelRows(service.kernel.Db, "SELECT id FROM operations WHERE task_id=? AND node_id=?", taskId, nodeId) {
@@ -314,7 +279,6 @@ func (service *graphManagementService) harnessEvidenceToolCalls(taskId, nodeId s
 	return calls
 }
 
-// harnessEvidenceAddError records one failed tool call under its tool.
 func harnessEvidenceAddError(errors map[string]*HarnessEvidenceToolError, order *[]string, tool, reason string) {
 	entry, ok := errors[tool]
 	if !ok {
@@ -328,7 +292,6 @@ func harnessEvidenceAddError(errors map[string]*HarnessEvidenceToolError, order 
 	}
 }
 
-// harnessEvidenceData decodes the payload of one transcript entry.
 func harnessEvidenceData(raw string) map[string]any {
 	if strings.TrimSpace(raw) == "" {
 		return map[string]any{}
@@ -340,7 +303,6 @@ func harnessEvidenceData(raw string) map[string]any {
 	return record
 }
 
-// harnessEvidenceProblems lists the open internal problems of a run.
 func (service *graphManagementService) harnessEvidenceProblems(taskId string) []HarnessEvidenceProblem {
 	problems := []HarnessEvidenceProblem{}
 	for _, row := range kernelRows(service.kernel.Db, "SELECT id,node_id,kind,data FROM questions WHERE task_id=? AND status='open' AND owner='main' ORDER BY rowid", taskId) {
@@ -361,7 +323,6 @@ func (service *graphManagementService) harnessEvidenceProblems(taskId string) []
 	return problems
 }
 
-// harnessEvidenceFailures lists the nodes that could not finish.
 func (service *graphManagementService) harnessEvidenceFailures(taskId string) []HarnessEvidenceFailure {
 	failures := []HarnessEvidenceFailure{}
 	seen := map[string]bool{}
@@ -387,7 +348,6 @@ func (service *graphManagementService) harnessEvidenceFailures(taskId string) []
 	return failures
 }
 
-// harnessEvidenceChecks lists the applied changes and how their checks went.
 func (service *graphManagementService) harnessEvidenceChecks(taskId string) []HarnessEvidenceCheck {
 	checks := []HarnessEvidenceCheck{}
 	rows := kernelRows(service.kernel.Db, "SELECT data FROM events WHERE task_id=? AND type='rsi.change' ORDER BY rowid DESC LIMIT 10", taskId)
@@ -414,7 +374,6 @@ func (service *graphManagementService) harnessEvidenceChecks(taskId string) []Ha
 	return checks
 }
 
-// harnessEvidenceUsage totals what a run cost.
 func (service *graphManagementService) harnessEvidenceUsage(taskId string) HarnessEvidenceUsage {
 	usage := HarnessEvidenceUsage{}
 	for _, row := range kernelRows(service.kernel.Db, "SELECT usage,cost FROM invocations WHERE operation_id IN (SELECT id FROM operations WHERE task_id=?)", taskId) {
@@ -434,7 +393,6 @@ func (service *graphManagementService) harnessEvidenceUsage(taskId string) Harne
 	return usage
 }
 
-// harnessEvidenceBound keeps one piece of evidence short enough to travel.
 func harnessEvidenceBound(text string, limit int) string {
 	trimmed := strings.TrimSpace(text)
 	if len(trimmed) <= limit {

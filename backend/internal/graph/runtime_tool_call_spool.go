@@ -10,16 +10,12 @@ import (
 	"encoding/json"
 )
 
-// TOOL_CALL_SPOOL_DIR is the directory a worker instance spools its calls into.
 const TOOL_CALL_SPOOL_DIR = "tool-calls"
 
-// INSTANCES_DIR is the directory one instance directory lives in.
 const INSTANCES_DIR = "instances"
 
-// TOOL_CALL_SPOOL_RETAIN_DAYS is how long a fully consumed spool is kept on disk.
 const TOOL_CALL_SPOOL_RETAIN_DAYS = 90
 
-// ToolCallSpoolCall is one tool call the worker reports.
 type ToolCallSpoolCall struct {
 	Tool    string
 	Ms      float64
@@ -27,7 +23,6 @@ type ToolCallSpoolCall struct {
 	Target  *string
 }
 
-// toolCallSpoolLine is one spooled record, in the order the worker writes it.
 type toolCallSpoolLine struct {
 	InstanceId string  `json:"instanceId"`
 	Tool       string  `json:"tool"`
@@ -37,13 +32,10 @@ type toolCallSpoolLine struct {
 	Target     *string `json:"target,omitempty"`
 }
 
-// ToolCallSpoolPath is where one worker instance spools its calls.
 func ToolCallSpoolPath(stateDir string, instanceId string) string {
-	// An instance id is a uuid today; a file name is not the place to rely on that.
 	return filepath.Join(stateDir, TOOL_CALL_SPOOL_DIR, toolCallSpoolFileName(instanceId)+".jsonl")
 }
 
-// toolCallSpoolFileName replaces every character a file name cannot carry.
 func toolCallSpoolFileName(instanceId string) string {
 	var b strings.Builder
 	for _, character := range instanceId {
@@ -60,10 +52,8 @@ func toolCallSpoolFileName(instanceId string) string {
 	return b.String()
 }
 
-// SpoolToolCall is called from the worker's tool-call seam. It never fails a turn.
 func SpoolToolCall(stateDir string, instanceId string, call ToolCallSpoolCall) {
 	defer func() {
-		// An unwritable spool is a missing sample, never a failed tool call.
 		_ = recover()
 	}()
 	directory := filepath.Join(stateDir, TOOL_CALL_SPOOL_DIR)
@@ -91,7 +81,6 @@ func SpoolToolCall(stateDir string, instanceId string, call ToolCallSpoolCall) {
 	_, _ = file.Write(append(encoded, '\n'))
 }
 
-// parseSpooledLine reads one spooled record.
 func parseSpooledLine(line string) *toolCallSpoolLine {
 	var value map[string]any
 	if err := json.Unmarshal([]byte(line), &value); err != nil {
@@ -121,23 +110,16 @@ func parseSpooledLine(line string) *toolCallSpoolLine {
 	return parsed
 }
 
-// toolCallSpoolPass is one in-flight ingest for a state directory.
 type toolCallSpoolPass struct {
 	done   chan struct{}
 	result int
 }
 
-// toolCallSpoolIngests keeps one pass per state directory at a time; a caller arriving during a
-// pass joins it.
 var toolCallSpoolIngests = struct {
 	sync.Mutex
 	passes map[string]*toolCallSpoolPass
 }{passes: map[string]*toolCallSpoolPass{}}
 
-// IngestToolCallSpools folds spooled worker calls into the store, continuing from the byte
-// offset recorded per file. That offset is what makes an ingest idempotent, and it also means a
-// partially written last line is simply read again next time. A file that shrank was rewritten by
-// someone else, so the read starts over rather than trusting a stale offset.
 func IngestToolCallSpools(store *TaskStore, stateDir string, keepDays ...int) int {
 	days := TOOL_CALL_SPOOL_RETAIN_DAYS
 	if len(keepDays) > 0 {
@@ -160,8 +142,6 @@ func IngestToolCallSpools(store *TaskStore, stateDir string, keepDays ...int) in
 	return pass.result
 }
 
-// toolCallSpoolDirs is every directory a lane's spool can be in, seen from the daemon: its own
-// root and one per instance.
 func toolCallSpoolDirs(stateDir string) []string {
 	dirs := []string{filepath.Join(stateDir, TOOL_CALL_SPOOL_DIR)}
 	entries, err := os.ReadDir(filepath.Join(stateDir, INSTANCES_DIR))
@@ -174,7 +154,6 @@ func toolCallSpoolDirs(stateDir string) []string {
 	return dirs
 }
 
-// ingestToolCallSpoolsOnce reads every spool file once.
 func ingestToolCallSpoolsOnce(store *TaskStore, stateDir string, keepDays int) int {
 	ingested := 0
 	for _, dir := range toolCallSpoolDirs(stateDir) {
@@ -199,8 +178,6 @@ func ingestToolCallSpoolsOnce(store *TaskStore, stateDir string, keepDays int) i
 				from = 0
 			}
 			if size > from {
-				// BUG(port): TypeScript slices the decoded text with a byte offset. The port
-				// reads the same bytes the offset counts, which agrees for ASCII samples.
 				content, err := os.ReadFile(file)
 				if err != nil {
 					continue
@@ -227,8 +204,6 @@ func ingestToolCallSpoolsOnce(store *TaskStore, stateDir string, keepDays int) i
 					store.SetToolCallSpoolOffset(file, from+int64(len(consumed)))
 				}
 			}
-			// A fully consumed spool past the retention window is done with: the rows it
-			// produced are pruned by the store on the same schedule.
 			if store.ToolCallSpoolOffset(file) >= size && info.ModTime().Before(time.Now().Add(-time.Duration(keepDays)*24*time.Hour)) {
 				_ = os.Remove(file)
 				store.ForgetToolCallSpool(file)
@@ -238,7 +213,6 @@ func ingestToolCallSpoolsOnce(store *TaskStore, stateDir string, keepDays int) i
 	return ingested
 }
 
-// ClearToolCallSpools removes every spool file: a cleared sample must not be re-ingested from disk.
 func ClearToolCallSpools(stateDir string) {
 	for _, dir := range toolCallSpoolDirs(stateDir) {
 		_ = os.RemoveAll(dir)

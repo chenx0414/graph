@@ -15,7 +15,6 @@ type NodePromptView struct {
 	Notes             []string           `json:"notes"`
 }
 
-// KernelHasActiveWork is true while an agent turn or module worker is still running.
 func KernelNodePrompt(kernel *KernelStore, graphID, nodeID string) NodePromptView {
 	row, definition := historicalNode(kernel, graphID, nodeID)
 	if row == nil || definition == nil {
@@ -82,7 +81,6 @@ func KernelNodePrompt(kernel *KernelStore, graphID, nodeID string) NodePromptVie
 	}
 }
 
-// KernelModelsInUse is the set of model ids unfinished work still depends on.
 func KernelModelsInUse(kernel *KernelStore) []string {
 	used := []string{}
 	seen := map[string]bool{}

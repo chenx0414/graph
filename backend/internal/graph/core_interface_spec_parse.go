@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 )
 
-// ParseGraphDefinition accepts one whole v2 definition. Any defect refuses the whole definition.
-// TODO(port): Go map iteration is not JSON insertion order, so the first reported defect can differ when several keys are wrong.
 func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 	level := 0
 	if len(depth) > 0 {
@@ -125,10 +123,6 @@ func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 				if nodes[name] != nil || modules[name] != nil {
 					interfaceSpecInvalid("Duplicate expanded node " + name)
 				}
-				// The expanded members are held the way the rest of the
-				// definition is held: as plain records, so every reader of the
-				// definition - the acceptance criteria, the edge endpoints, the
-				// node validation - reads a member the way it reads a node.
 				nodes[name] = interfaceSpecAsMap(node)
 			}
 			for name, module := range expanded.Modules {
@@ -199,9 +193,6 @@ func ParseGraphDefinition(input any, depth ...int) GraphDefinition {
 				text, _ := mapped[field].(string)
 				return text
 			}
-			// The expanded binding keeps its ports typed, so read them the way
-			// they are held: an instance input names the node it feeds, an
-			// instance output names the node it comes from.
 			switch typed := instance[side].(type) {
 			case map[string]GraphIo:
 				if port, ok := typed[port]; ok {

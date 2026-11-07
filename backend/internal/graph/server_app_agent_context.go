@@ -4,7 +4,6 @@ import (
 	"net/http"
 )
 
-// appAgentContextPreview is the prompt library preview of one conversation.
 func (app *GraphApp) appAgentContextPreview(conversationID string) any {
 	var id *string
 	if conversationID != "" {
@@ -14,13 +13,11 @@ func (app *GraphApp) appAgentContextPreview(conversationID string) any {
 	return app.runtime.AgentContextPreview(id)
 }
 
-// serveAgentContext is the prompt library preview.
 func (app *GraphApp) serveAgentContext(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.URL.Query().Get("conversationId")
 	writeJSON(w, http.StatusOK, app.appAgentContextPreview(conversationID))
 }
 
-// serveAgentContextPrompt saves one prompt override.
 func (app *GraphApp) serveAgentContextPrompt(w http.ResponseWriter, r *http.Request) {
 	library := app.appAgentContextLibrary()
 	if library == nil {
@@ -36,7 +33,6 @@ func (app *GraphApp) serveAgentContextPrompt(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, library.View(nil))
 }
 
-// serveAgentContextDefault saves one built-in default.
 func (app *GraphApp) serveAgentContextDefault(w http.ResponseWriter, r *http.Request) {
 	library := app.appAgentContextLibrary()
 	if library == nil {
@@ -52,7 +48,6 @@ func (app *GraphApp) serveAgentContextDefault(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, library.View(nil))
 }
 
-// serveAgentContextDefaultReset clears one built-in default.
 func (app *GraphApp) serveAgentContextDefaultReset(w http.ResponseWriter, r *http.Request) {
 	library := app.appAgentContextLibrary()
 	if library == nil {
@@ -67,7 +62,6 @@ func (app *GraphApp) serveAgentContextDefaultReset(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, library.View(nil))
 }
 
-// serveAgentContextPromptReset drops one prompt override.
 func (app *GraphApp) serveAgentContextPromptReset(w http.ResponseWriter, r *http.Request) {
 	library := app.appAgentContextLibrary()
 	if library == nil {
@@ -82,7 +76,6 @@ func (app *GraphApp) serveAgentContextPromptReset(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, library.View(nil))
 }
 
-// serveAgentContextTools replaces the disabled-tool list.
 func (app *GraphApp) serveAgentContextTools(w http.ResponseWriter, r *http.Request) {
 	library := app.appAgentContextLibrary()
 	if library == nil {

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 )
 
-// ScanCapabilities walks a capability root up to four directories deep.
 func ScanCapabilities(root string) []CapabilityRecord {
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {

@@ -4,12 +4,10 @@ import (
 	"path/filepath"
 )
 
-// agentContextLibrary is the prompt library of this runtime, when it has one.
 func (runtime *TaskRuntime) agentContextLibrary() *AgentContextLibrary {
 	return runtime.agentCtx
 }
 
-// graphHome is the root the capability library lives under.
 func (runtime *TaskRuntime) graphHome() string {
 	if runtime.catalogOpt != nil && runtime.catalogOpt.CapabilityRoot != "" {
 		return filepath.Dir(runtime.catalogOpt.CapabilityRoot)
@@ -17,7 +15,6 @@ func (runtime *TaskRuntime) graphHome() string {
 	return filepath.Join(taskRuntimeHome(), ".graph")
 }
 
-// fallbackAdapter builds the adapter that serves the built-in agent action.
 func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 	options := PiAdapterOptions{
 		Store:        runtime.store,
@@ -33,8 +30,6 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		Channels:     runtime.piChannels(),
 		TaskSetups:   runtime.taskSetups,
 	}
-	// The PiG kernel keeps the durable conversations in this process, and the
-	// daemon's own tools are the ones the kernel offers.
 	options.Transport = CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
 	options.DaemonNativeTools = true
 	return options
@@ -45,7 +40,6 @@ func (runtime *TaskRuntime) fallbackAdapter() *ActionAdapter {
 	return &adapter
 }
 
-// apiKey is the legacy single key every entry shares when no binding exists.
 func (runtime *TaskRuntime) apiKey() *string {
 	if runtime.models == nil || runtime.models.APIKey == "" {
 		return nil
@@ -54,7 +48,6 @@ func (runtime *TaskRuntime) apiKey() *string {
 	return &key
 }
 
-// apiKeyFor is the key of one model, when it has its own credential.
 func (runtime *TaskRuntime) apiKeyFor(entry ModelEntry) *string {
 	binding := runtime.liveCredentialFor(entry)
 	if binding == nil || binding.ApiKey == "" {
@@ -64,7 +57,6 @@ func (runtime *TaskRuntime) apiKeyFor(entry ModelEntry) *string {
 	return &key
 }
 
-// configuredById indexes the configured entries by model id.
 func (runtime *TaskRuntime) configuredById() map[string]ConfiguredModel {
 	out := map[string]ConfiguredModel{}
 	for _, entry := range runtime.liveConfiguredEntries() {
@@ -73,7 +65,6 @@ func (runtime *TaskRuntime) configuredById() map[string]ConfiguredModel {
 	return out
 }
 
-// liveCredentialFor is the credential binding of one model.
 func (runtime *TaskRuntime) liveCredentialFor(entry ModelEntry) *PiAdapterBinding {
 	configured, ok := runtime.configuredById()[entry.Id]
 	if !ok {
@@ -104,7 +95,6 @@ func (runtime *TaskRuntime) liveCredentialFor(entry ModelEntry) *PiAdapterBindin
 	return binding
 }
 
-// modelRuntime is the provider registry of the runtime.
 func (runtime *TaskRuntime) modelRuntime() *ModelRuntime {
 	if runtime.models == nil {
 		return nil
@@ -112,12 +102,8 @@ func (runtime *TaskRuntime) modelRuntime() *ModelRuntime {
 	return runtime.models.ModelRuntime
 }
 
-// piChannels are the host channels the Agent session may use.
 func (runtime *TaskRuntime) piChannels() *PiAdapterChannels {
 	channels := &PiAdapterChannels{
-		// Tools over other conversations were declared and never wired: a master
-		// session could not read or write a different conversation at all, so the
-		// only way to reach a running peer was to interrupt it from outside.
 		Supervisor: func(taskId string) PiAdapterSupervisor {
 			supervisor := runtime.Supervisor(taskId)
 			channel := PiAdapterSupervisor{

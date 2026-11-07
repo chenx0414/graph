@@ -1,6 +1,5 @@
 export type TableAlignment = 'left' | 'center' | 'right' | null;
 
-/** Split a GFM table row while preserving escaped pipes inside cells. */
 export function markdownTableRow(line: string): string[] | null {
   if (!line.includes('|')) return null;
   let value = line.trim();

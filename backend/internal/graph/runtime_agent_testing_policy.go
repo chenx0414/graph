@@ -2,7 +2,6 @@ package graph
 
 import "strings"
 
-// Host-owned policy: editable identities and role rules cannot relax it.
 const AGENT_TESTING_POLICY = "Testing policy (all Graph Agents, including main, workers, reviewers and auxiliary Agents):\n" +
 	"Unit, integration and end-to-end tests are all allowed. One condition applies to every one of them: write the test before the code.\n" +
 	"For a regression, demonstrate the failure at the intended behavior before the fix and the success afterward, and leave a reproducible artifact (command, report file, rerunnable script or screenshot) from the run.\n" +

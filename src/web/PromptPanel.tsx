@@ -1,17 +1,8 @@
 import { useMemo } from 'react';
 import { Button, toast } from './ui.tsx';
 
-/**
- * The prompt one real send carried, rendered wherever it is shown.
- *
- * The master's turn and a subagent's round are read from the same ledger columns, so the
- * panel is shared instead of copied: the node view cannot quietly diverge from the master
- * view about what "the prompt really sent" looks like. Everything here is read out of the
- * record; nothing is recomposed from settings at render time.
- */
 export function RecordedPromptPanel(input: {
   testId: string; text: string | null; tools: string | null; emptyText: string;
-  /** Which half to render. The console gives each half its own tab; the node view shows both. */
   part?: 'both' | 'prompt' | 'tools';
 }) {
   const { testId, text, tools, emptyText, part = 'both' } = input;
@@ -22,7 +13,6 @@ export function RecordedPromptPanel(input: {
       return Array.isArray(parsed) ? parsed.length : 0;
     } catch { return 0; }
   }, [tools]);
-  // The recorded payload is the SDK's declarations; pretty-print only for reading.
   const declarationText = useMemo(() => {
     if (!tools) return '';
     try { return JSON.stringify(JSON.parse(tools), null, 2); } catch { return tools; }

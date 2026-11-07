@@ -8,8 +8,6 @@ import (
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
-// host opens the resident process of one node and keeps it for the life
-// of the graph's turns.
 func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revisionVersion int) ExecutorHost {
 	key := graphId + "/" + nodeId
 	cached, hasCached := state.hosts.Lookup(key)
@@ -44,9 +42,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 	purpose := "completion"
 	nativeGate := KernelToolGate(state.options.Kernel, graphId, nodeId, "tool", func() bool { return state.closing.Load() })
 	nativeCalls := map[string]string{}
-	// The node's usage is the usage the daemon accounted for: the
-	// provider receipts of this execution. The kernel's own report has
-	// no evidence grade, so it never releases a reservation.
 	nodeUsage := func() *PiTurnUsage {
 		calls := state.options.Kernel.ProviderCalls(graphId, nodeId)
 		usage := PiTurnUsage{}
@@ -72,8 +67,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		usage.Accounted = &accounted
 		return &usage
 	}
-	// The node's admission identity carries the attempt, so a retry is
-	// a new admission and an interrupted turn keeps the one it had.
 	nodeInput := func() string {
 		row := state.options.Kernel.Execution(workerConfig.ExecutionId)
 		if row == nil {
@@ -88,10 +81,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		}
 		return fmt.Sprintf("%s:attempt:%d%s", row.Id, row.Attempt, suffix)
 	}
-	// The node's model channel: the controlled provider stream with the
-	// node's own gate in front of it. The daemon admits every send,
-	// spends the credential and records the usage; the kernel never
-	// opens a provider channel of its own.
 	nodeChannel := func(raw any, hostSignal *AbortSignal, streamOptions WorkerModelOptions) (*kernelGraphLaneNodeChannel, error) {
 		return state.modelChannel(graphId, nodeId, session, model, purpose, raw, hostSignal, streamOptions)
 	}
@@ -100,8 +89,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			defer func() { _ = recover() }()
 			state.options.Kernel.Store.RecordToolCall(ToolCallInput{InstanceID: session.Binding.InstanceId, Tool: call.Tool, Ms: call.Ms, IsError: call.IsError, Target: call.Target})
 		},
-		// The node's `submit` runs in the host, over the real execution (HB-262): the lane
-		// wires that through `onToolCall` when it builds the runner.
 		OnEvent: func(event any) {
 			data, _ := event.(map[string]any)
 			if data == nil {
@@ -266,8 +253,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			}
 			failed := false
 			if record, ok := result.(map[string]any); ok {
-				// The TypeScript test is `'isError' in result && result.isError`, so a
-				// present but false flag is not a failure.
 				if value, isError := record["isError"]; isError && kernelGraphLaneTruthy(value) {
 					failed = true
 				}
@@ -276,9 +261,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		},
 	}
 	{
-		// The node's own tools: the Graph's, the native ones the daemon
-		// provides in Go, and the `submit` the host executes against the
-		// real execution.
 		nodeTools := []ToolDefinition{}
 		nativeTools := []string{}
 		readRoots := []string{}
@@ -299,9 +281,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		toolPolicyDigest := session.ToolPolicyDigest
 		runtimePolicyDigest := session.RuntimePolicyDigest
 		if frozen := state.restoring.Get(graphId + "/" + nodeId); frozen != nil {
-			// The tools it was given are the ones the capability declared
-			// then. A capability that declares a different tool since must
-			// not change what this turn may call.
 			allowedToolNames = append([]string{}, frozen.Record.Policy.AllowedToolNames...)
 			bundleDigest = frozen.Record.Policy.BundleDigest
 			toolPolicyDigest = frozen.Record.Policy.ToolPolicyDigest
@@ -313,8 +292,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			Label:       submit.Label,
 			Description: submit.Description,
 			Parameters:  asMap(submit.Parameters),
-			// The `submit` runs in the host, over the real execution
-			// (HB-262): the lane wires that through `onToolCall`.
 			Execute: func(_ string, params any) (any, error) {
 				answer, _ := residentOptions.OnToolCall("submit", params)
 				if !answer.Ok {
@@ -337,9 +314,6 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			Model:       workerConfig.Model,
 			Tools:       nodeTools,
 			NativeTools: nativeTools,
-			// Every tool call this node makes is reported, the way the main
-			// session reports its own. The write is guarded here: a
-			// statistics table must never be able to break a turn.
 			OnToolCall: func(call PiAdapterToolCall) {
 				defer func() { _ = recover() }()
 				target := any(nil)
@@ -350,15 +324,8 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 					InstanceID: session.Binding.InstanceId, Tool: call.Tool, Ms: call.Ms, IsError: call.IsError, Target: target,
 				})
 			},
-			// The skills the node may load: its own folder, the bound
-			// snapshots and the native folders. The kernel has no
-			// environment of its own, so the daemon puts them in the
-			// prompt.
 			SkillPaths:  append([]string{}, workerConfig.SkillPaths...),
 			SkillFolder: stringPointerValue(workerConfig.SkillFolder),
-			// The Pi extensions the node would load. The kernel state.hosts
-			// them in a process of their own, so a node may only bind
-			// one when its own policy is as wide as the daemon's reach.
 			PiExtensionPaths:        append([]string{}, workerConfig.PiExtensionPaths...),
 			PiExtensionTools:        append([]string{}, workerConfig.PiExtensionTools...),
 			ExtensionProcessAllowed: pigExtensionProcessAllowed(nodeAccessPolicy(session)),
@@ -376,12 +343,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			Request:  nodeRequest,
 			Gate:     nativeGate,
 			Codemode: codemodeSettings(state.options.Codemode, state.options.StateDir),
-			// The `submit` is the host's own tool: the host executes it
-			// against the real execution, so the node's tool gate does
-			// not stand in front of it.
 			Ungated: []string{"submit"},
-			// The kernel asks the daemon for the answer; the daemon's own
-			// controlled stream produces it.
 			Stream: func(_ any, context map[string]any, _ map[string]any) (ModelEventStream, error) {
 				channel, err := nodeChannel(context, nil, WorkerModelOptions{})
 				if err != nil {

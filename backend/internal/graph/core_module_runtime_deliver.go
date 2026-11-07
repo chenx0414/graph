@@ -5,7 +5,6 @@ import (
 	"slices"
 )
 
-// Deliver stores one input and judges it.
 func (runtime *ModuleRuntime) Deliver(moduleId, inputName string, value any) ModuleEvaluation {
 	record := moduleRecord(runtime.module(moduleId))
 	if !slices.Contains(anySortedKeys(record["inputs"]), inputName) {
@@ -26,7 +25,6 @@ func (runtime *ModuleRuntime) Deliver(moduleId, inputName string, value any) Mod
 	return evaluation
 }
 
-// ConsumeDelivery judges one inbox row and marks it processed.
 func (runtime *ModuleRuntime) ConsumeDelivery(moduleId, inputName string, value any, deliveryId string) ModuleEvaluation {
 	var evaluation ModuleEvaluation
 	if err := portRecover(func() {
@@ -52,7 +50,6 @@ func (runtime *ModuleRuntime) ConsumeDelivery(moduleId, inputName string, value 
 	return evaluation
 }
 
-// Evaluate judges the inputs currently held.
 func (runtime *ModuleRuntime) Evaluate(moduleId string) ModuleEvaluation {
 	compiled := runtime.compile(moduleId)
 	inputs, state := runtime.environment(moduleId, compiled)

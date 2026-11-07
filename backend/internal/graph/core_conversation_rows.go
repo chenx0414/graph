@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 )
 
-// ConversationRowOf reads one conversation. The type name ConversationRow belongs to
-// the row type, so the lookup carries the Of suffix the package uses elsewhere.
 func ConversationRowOf(store *TaskStore, conversationId string) ConversationRow {
 	row := kernelRow(store.Db, "SELECT * FROM conversations WHERE id=?", conversationId)
 	if row == nil {
@@ -26,7 +24,6 @@ func ConversationRowOf(store *TaskStore, conversationId string) ConversationRow 
 	}
 }
 
-// ConversationForTask reads the conversation one task belongs to, or nil when it has none.
 func ConversationForTask(store *TaskStore, taskId string) *ConversationRow {
 	row := kernelRow(store.Db, "SELECT c.* FROM conversations c JOIN tasks t ON t.conversation_id=c.id WHERE t.id=?", taskId)
 	if row == nil {
@@ -47,7 +44,6 @@ func ConversationForTask(store *TaskStore, taskId string) *ConversationRow {
 	}
 }
 
-// SupervisorConversationForTask follows the current owner while retaining the source conversation on the task.
 func SupervisorConversationForTask(store *TaskStore, taskID string) *ConversationRow {
 	anchor, ok := questionConversationAnchor(store, taskID)
 	if !ok {
@@ -56,9 +52,6 @@ func SupervisorConversationForTask(store *TaskStore, taskID string) *Conversatio
 	return ConversationForTask(store, anchor)
 }
 
-// PublicMessage is the client projection of one message row. The ledger keeps the full
-// attachment payload, but the client projection never carries image base64: only
-// name/type/size leave the process.
 func PublicMessage(row MessageRow) ConversationMessage {
 	message := ConversationMessage{
 		Id:          row.Id,

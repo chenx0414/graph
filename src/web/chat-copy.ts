@@ -6,22 +6,12 @@ export type ClipboardWriter = {
 
 export type CopyNotice = (message: string, tone: 'success' | 'danger') => void;
 
-/**
- * Original text of a transcript row, or an empty string when the row has no
- * copyable source. Agent rows copy the Markdown source carried by the transcript
- * row (not the rendered DOM); user rows copy the original input text. Rows that
- * are still streaming have no stable source yet.
- */
 export function copyText(row: TranscriptRow): string {
   if (row.kind === 'assistant') return row.streaming ? '' : row.text;
   if (row.kind === 'message' && row.message.role === 'user') return row.message.text;
   return '';
 }
 
-/**
- * Write one message's original text to the clipboard. Every outcome is reported
- * through the existing toast channel; empty text is a silent no-op.
- */
 export async function writeClipboardText(
   text: string,
   clipboard: ClipboardWriter,

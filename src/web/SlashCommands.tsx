@@ -60,8 +60,6 @@ function toolEntry(tool: AgentToolView): SlashEntry {
 function capabilityEntry(capability: AgentCapabilityView): SlashEntry {
   const version = capability.version;
   const label = `${capability.name || capability.id}@${version}`;
-  // A skill is knowledge, not a tool the model can call: selecting one injects its body into the
-  // turn, so it is offered under its own group and token instead of the generic capability one.
   if (capability.kind === 'skill') {
     const description = capability.description ?? 'skill';
     return {
@@ -219,8 +217,6 @@ export function extractSlashTargets(
 }
 
 export function composeSlashDirective(text: string, targets: readonly SlashTarget[]) {
-  // A skill is injected by the host when it reads the `/skill:<name>` token, so it needs no
-  // sentence here: this hint is about tools and capabilities the turn should actually use.
   const unique = [...new Map(targets.filter(target => target.kind !== 'skill').map(target => [target.id, target])).values()];
   if (!unique.length) return text.trim();
   const requested = unique.map(target => {

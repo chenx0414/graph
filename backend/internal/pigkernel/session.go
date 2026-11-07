@@ -11,108 +11,55 @@ import (
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
 
-// One resident session on the PiG kernel.
-//
-// The kernel is resident: it stays open for the life of the daemon and holds
-// the durable conversations of every identity it has seen. A session is one
-// identity's view of that kernel: its model, its tools, its instructions and
-// its events.
-//
-// The division of labour between the daemon and the kernel is documented in
-// docs/architecture.md, section daemon 与内核的分工.
 
-// SessionOptions configure one resident session.
 type SessionOptions struct {
-	// Database is the formal Graph database the durable records live in.
 	Database string
-	// Identity is the stable identity of the session: the Graph instance.
 	Identity string
-	// Model is the model the session sends to.
 	Model ModelSpec
-	// Provider is the daemon's model channel.
 	Provider ProviderBridge
-	// Tools are the Graph tools the session may call.
 	Tools []ToolSpec
-	// Codemode enables the kernel's own code mode. Nil leaves it out.
 	Codemode *CodemodeOptions
-	// McpServers are the MCP servers the kernel connects natively. Their
-	// tools reach the model under PiG's own `mcp__<server>__<tool>` names.
 	McpServers []McpServerSpec
-	// Instructions are the system instructions of the session.
 	Instructions string
-	// ThinkingLevel is the requested reasoning level.
 	ThinkingLevel string
-	// RequestId is the admission identity of the next input. The same id is
-	// the same input, so a retried admission is never sent twice.
 	RequestId string
-	// Compaction are the compaction thresholds the daemon decided for this
-	// model. The kernel derives the summary's own output budget from the
-	// reserve, so thresholds the kernel never heard of are a summary that is
-	// cut short and a conversation that keeps far less than it should.
 	Compaction *CompactionThresholds
-	// OnEvent receives the kernel's events.
 	OnEvent func(event map[string]any)
-	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
-	// ToolResults rewrites a tool result before the model reads it.
 	ToolResults ToolResultRenderer
 }
 
-// CompactionThresholds are the compaction thresholds of one model.
 type CompactionThresholds struct {
-	// ReserveTokens is the room the summary is written in.
 	ReserveTokens int
-	// KeepRecentTokens is the part of the conversation that survives.
 	KeepRecentTokens int
 }
 
-// ToolCallRecord is one executed tool call.
 type ToolCallRecord struct {
-	// Name is the tool the model called.
 	Name string
-	// Arguments are the arguments the model sent.
 	Arguments map[string]any
-	// Result is the text the tool returned.
 	Result string
-	// IsError reports whether the tool failed.
 	IsError bool
 }
 
-// SessionInspect is the session's own view of itself.
 type SessionInspect struct {
-	// SessionId is the durable conversation the session runs in.
 	SessionId string
-	// SessionFile names the durable record the transcript lives in.
 	SessionFile string
-	// Model is the model the session sends to.
 	Model string
-	// Messages are the transcript messages the session holds.
 	Messages []any
-	// ActiveTools are the tools the session may call.
 	ActiveTools []string
-	// RegisteredTools are the tools the session registered.
 	RegisteredTools []string
-	// LoadedExtensions are the extensions the session loaded.
 	LoadedExtensions []string
-	// ToolCalls are the tool calls the session made.
 	ToolCalls []string
 }
 
-// SessionTurn is what one prompt produced.
 type SessionTurn struct {
-	// Text is the assistant answer.
 	Text string
-	// StopReason is the reason the answer ended.
 	StopReason string
-	// ErrorMessage is the failure, when the turn failed.
 	ErrorMessage string
-	// Usage is the token usage the answer reported.
 	Usage *Usage
-	// Inspect is the session's own view after the turn.
 	Inspect SessionInspect
 }
 
-// Usage is the token usage one assistant message reported.
 type Usage struct {
 	Input      int `json:"input"`
 	Output     int `json:"output"`
@@ -126,7 +73,6 @@ type sessionContinuation struct {
 	err        error
 }
 
-// Session is one resident session on the kernel.
 type Session struct {
 	kernel       *Kernel
 	conversation harness.Conversation
@@ -140,9 +86,7 @@ type Session struct {
 	toolNames    []string
 	loaded       []string
 	requestId    string
-	// OnEvent receives the kernel's events.
 	OnEvent func(event map[string]any)
-	// OnToolCall receives every executed tool call.
 	OnToolCall func(call ToolCallRecord)
 
 	mutex          sync.Mutex
@@ -151,15 +95,9 @@ type Session struct {
 	acceptingInput bool
 	interrupted    bool
 	continuation   chan sessionContinuation
-	// compactions are the compaction tasks whose end Compact reports itself,
-	// so the event stream does not report the same compaction twice.
 	compactions map[durable.TaskId]bool
 }
 
-// OpenSession opens one resident session on the kernel.
-//
-// The kernel of the database is opened once and kept: every session of that
-// database shares it, and so do the durable conversations they address.
 func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
 	resident, err := openResident(ctx, options.Database)
 	if err != nil {
@@ -172,18 +110,12 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 		return nil, err
 	}
 	registrations = append(registrations, mcpTools...)
-	// The durable transcript is the session's own memory: it outlives compaction
-	// and a reset, and the model reads it on demand instead of trusting the
-	// daemon to keep everything that matters.
 	history := &historyTool{}
 	if !toolRegistered(options.Tools, historyToolName) {
 		registrations = append(registrations, toolRegistrations([]ToolSpec{history.spec()}, recorder, options.ToolResults)...)
 	}
 	extension := &durable.Extension{Name: extensionName(options.Identity), Tools: registrations}
 	extensions := []*durable.Extension{extension}
-	// Code mode is the kernel's own extension: its tool joins the session's
-	// registrations and its prompt section lists what a script can call, so the
-	// daemon neither writes a script host nor describes one.
 	if options.Codemode != nil {
 		codemodeExtension, err := CodemodeExtension(*options.Codemode)
 		if err != nil {
@@ -200,12 +132,7 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 			return nil, fmt.Errorf("pig kernel: the session extension is refused: %w", err)
 		}
 	}
-	// The model is the daemon's: the kernel asks the daemon's own stream for
-	// the answer, and the daemon admits the send.
 	providerID := providerName(options.Identity)
-	// The daemon owns the compaction thresholds of the model this session
-	// runs on. The kernel resolves the policy by the model reference the
-	// agent holds, which is the registered provider and the model id.
 	if options.Compaction != nil {
 		RegisterCompactionPolicy(providerID+"/"+options.Model.Id,
 			options.Compaction.ReserveTokens, options.Compaction.KeepRecentTokens)
@@ -249,15 +176,10 @@ func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) 
 	return session, nil
 }
 
-// Prompt sends one input and returns the turn it produced.
 func (session *Session) Prompt(ctx context.Context, text string) (SessionTurn, error) {
 	return session.PromptContent(ctx, ai.UserText(text))
 }
 
-// PromptContent sends one input that may carry text and images and returns the
-// turn it produced. The content union is the provider-facing shape: a caller
-// with images passes ai.UserContentBlocks, so an image the reader attached
-// travels to the model instead of being dropped on the way in.
 func (session *Session) PromptContent(ctx context.Context, content ai.UserContent) (SessionTurn, error) {
 	session.mutex.Lock()
 	if session.closed {
@@ -285,8 +207,6 @@ func (session *Session) PromptContent(ctx context.Context, content ai.UserConten
 	})
 	defer func() { _, _ = events.Stop() }()
 
-	// The same admission is the same input: an input the kernel already
-	// accepted is never sent twice.
 	existing, err := session.conversation.Commit(ctx, func(tx durable.Tx) (any, error) {
 		record, err := tx.SubmissionByRequest(session.conversation.Id(), session.admissionId())
 		if err != nil {
@@ -363,9 +283,6 @@ func (session *Session) PromptContent(ctx context.Context, content ai.UserConten
 	}
 	if settled.Status != durable.SubmissionDone {
 		turn.ErrorMessage = fmt.Sprintf("The durable input was not answered: %s", settled.Status)
-		// The reason the turn could not be answered is what the user needs to
-		// see: "unanswered" on its own says that the turn ended without an
-		// answer, not that the provider stopped sending halfway through it.
 		if detail, ok := settled.Detail.(string); ok && strings.TrimSpace(detail) != "" {
 			turn.ErrorMessage += ": " + detail
 		}
@@ -381,12 +298,10 @@ func (session *Session) PromptContent(ctx context.Context, content ai.UserConten
 	return turn, nil
 }
 
-// Steer injects a message into the running turn.
 func (session *Session) Steer(ctx context.Context, text string) error {
 	return session.SteerWithRequestID(ctx, text, newRequestId())
 }
 
-// SteerWithRequestID preserves the caller's retry identity for this admission.
 func (session *Session) SteerWithRequestID(ctx context.Context, text, id string) error {
 	session.mutex.Lock()
 	accepting := session.acceptingInput
@@ -408,12 +323,10 @@ func (session *Session) SteerWithRequestID(ctx context.Context, text, id string)
 	return err
 }
 
-// Interrupt aborts the running turn. Replacement input stays in this operation.
 func (session *Session) Interrupt(ctx context.Context, text *string) error {
 	return session.InterruptWithRequestID(ctx, text, newRequestId())
 }
 
-// InterruptWithRequestID gives a replacement input a stable retry identity.
 func (session *Session) InterruptWithRequestID(ctx context.Context, text *string, id string) error {
 	session.mutex.Lock()
 	if session.closed || !session.acceptingInput {
@@ -432,20 +345,7 @@ func (session *Session) InterruptWithRequestID(ctx context.Context, text *string
 		session.continuation = next
 	}
 	session.mutex.Unlock()
-	// A plain interruption is a signal, not a join. The kernel commits the abort
-	// mark and then waits for the conversation to go idle again, and a turn only
-	// leaves the kernel after the tool it was running has returned; waiting here
-	// handed the caller the whole remaining runtime of that tool. Measured
-	// 2026-11-04: a `sleep 300` under an interrupted turn held the interrupt
-	// request open for its full length. The request answers at once and the turn
-	// winds down behind it - which is the contract PauseForReload already states
-	// where it calls this ("Signal, do not wait").
-	//
-	// A replacement input is different: the caller's next turn is the
-	// continuation submission, so it is awaited below.
 	if !replacement {
-		// The abort outlives the caller: a request that has already answered must
-		// not cancel the abort it asked for.
 		abortContext := context.Background()
 		if ctx != nil {
 			abortContext = context.WithoutCancel(ctx)
@@ -469,7 +369,6 @@ func (session *Session) InterruptWithRequestID(ctx context.Context, text *string
 	return err
 }
 
-// Stop soft-stops the running turn. The session and its transcript are kept.
 func (session *Session) Stop(ctx context.Context) error {
 	session.mutex.Lock()
 	session.interrupted = true
@@ -477,7 +376,6 @@ func (session *Session) Stop(ctx context.Context) error {
 	return session.conversation.Abort(ctx, &durable.ConversationAbortOptions{})
 }
 
-// Inspect is the session's own view of itself.
 func (session *Session) Inspect() SessionInspect {
 	names := []string{}
 	for _, name := range session.toolNames {
@@ -495,8 +393,6 @@ func (session *Session) Inspect() SessionInspect {
 	}
 }
 
-// Close ends the session. The kernel stays open: it holds the durable
-// conversations of every identity.
 func (session *Session) Close() error {
 	session.mutex.Lock()
 	if session.closed {
@@ -509,7 +405,6 @@ func (session *Session) Close() error {
 	return nil
 }
 
-// admissionId is the identity of the session's next input.
 func (session *Session) admissionId() string {
 	if session.requestId != "" {
 		return session.requestId
@@ -517,14 +412,10 @@ func (session *Session) admissionId() string {
 	return session.identity
 }
 
-// emit reports one kernel event to the daemon.
 func (session *Session) emit(event harness.AgentEvent) {
 	if session.OnEvent == nil {
 		return
 	}
-	// A compaction the kernel started by itself (the threshold compaction) is
-	// reported here. The daemon's own Compact reports its compaction, and the
-	// same task must not be announced twice.
 	if end, ok := event.(harness.CompactionEndEvent); ok {
 		if !session.compactionReported(end.TaskId) {
 			session.reportThresholdCompaction(end)
@@ -536,9 +427,3 @@ func (session *Session) emit(event harness.AgentEvent) {
 	}
 }
 
-// translateEvent turns one kernel event into the events the daemon reads.
-//
-// The daemon's own event names are the SDK's: a message starts, updates and
-// ends, a tool call starts and ends. The kernel's events carry the same
-// information under its own names, so they are translated here rather than
-// leaking a second vocabulary into the daemon.

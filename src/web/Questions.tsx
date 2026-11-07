@@ -6,11 +6,8 @@ import { Button, Pill, toast } from './ui.tsx';
 
 function questionPrompt(kind: string, data: Record<string, unknown>) {
   const text = (key: string) => typeof data[key] === 'string' && String(data[key]).trim() ? String(data[key]).trim() : undefined;
-  // A problem the harness handed over after nobody acted on it: say that first,
-  // so the card reads as "this waited for you", not as a fresh incident.
   const escalated = text('escalationPrompt');
   if (escalated) return escalated;
-  // The agent's own question: what it asks, and what its answer changes.
   if (kind === 'waiting' && data.requestType === 'user_decision') {
     const prompt = text('prompt');
     const why = text('why');
@@ -19,7 +16,6 @@ function questionPrompt(kind: string, data: Record<string, unknown>) {
     return '主 Agent 需要你的一个决定。';
   }
   if (kind === 'credential') {
-    // A dead login is the one problem the person must fix outside Graph: say what to do.
     return text('ask') ?? '有一个凭据已失效，无法自动刷新，需要你在设置里重新登录。';
   }
   if (kind === 'permission') {
@@ -40,20 +36,10 @@ const MASTER_RETRY_KINDS = ['adapter_error', 'execution_failed', 'model_unavaila
 
 const MINUTE = 60_000;
 
-/**
- * How long the user has been sitting on this question, in words.
- *
- * An unanswered question used to look exactly like work in progress: the card
- * said what was asked and nothing else. The wait is the one fact that tells
- * the person "this is still on you, and for how long" - and past the published
- * deadline it stops being a note and becomes a warning.
- */
 function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean }) {
   if (typeof question.waitedMs !== 'number') return null;
   const minutes = Math.floor(question.waitedMs / MINUTE);
   const waited = minutes < 1 ? '不到 1 分钟' : `${minutes} 分钟`;
-  // Nothing answers a question on the person's behalf: every question below is a
-  // wait that only the person (or their escalation) ends.
   if (question.suspended) {
     const limit = Math.round((question.suspendedAfterMs ?? 0) / MINUTE);
     return limit > 0
@@ -67,7 +53,6 @@ function questionWaitText(question: { waitedMs?: number | null; overdueAfterMs?:
   return `已等待 ${waited}`;
 }
 
-/** One open question answered through the authenticated task command path. */
 export function QuestionReply({ taskId, question, onDone }: {
   taskId: string;
   question: { id: string; kind: string; data: { prompt?: string; grant?: string; reason?: string; output?: unknown } & Record<string, unknown>; waitedMs?: number | null; overdueAfterMs?: number; overdue?: boolean; suspendedAfterMs?: number; suspended?: boolean; autoAnswerChoice?: string; autoAnswerRemainingMs?: number | null };

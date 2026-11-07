@@ -20,7 +20,3 @@ export interface AccessPolicyContext {
   graphHome: string;
 }
 
-/**
- * Graph has one permission posture, so these are the wire types of that posture
- * alone: the backend decides (and always allows), the console only reads it.
- */

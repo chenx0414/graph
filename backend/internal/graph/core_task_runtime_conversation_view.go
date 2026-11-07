@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 )
 
-// messageQueryOf narrows a node-entry query down to the message window the
-// conversation transcript understands. The entry selector has no meaning for
-// messages, so it is dropped, exactly like the TypeScript source did.
 func messageQueryOf(query NodeEntryQuery) MessageQuery {
 	converted := MessageQuery{}
 	if query.After != nil {
@@ -24,7 +21,6 @@ func messageQueryOf(query NodeEntryQuery) MessageQuery {
 	return converted
 }
 
-// View reads the full projection of one conversation.
 func (conversations *TaskRuntimeConversations) View(conversationId string, query NodeEntryQuery) map[string]any {
 	runtime := conversations.runtime
 	runtime.ensureOpen()
@@ -235,9 +231,6 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 			"resumedOperationId": row["resumedOperationId"],
 		})
 	}
-	// Unknown usage can be pending reconciliation before any priced invocation
-	// exists (scripted adapters, recovery before settle); an open unknown_usage
-	// question is authoritative that the cost is not known.
 	masterUnknown := false
 	masterQuestions := []map[string]any{}
 	for _, question := range anchorQuestions {
@@ -283,10 +276,6 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 	if model, ok := masterModel.(string); ok && model != "" {
 		for _, entry := range runtime.liveEntries() {
 			if entry.Id == model {
-				// The catalog holds the window as an int, so the percentage is computed
-				// from that number rather than from a type assertion on the view value:
-				// the assertion never matched, and the footer printed a limit with no
-				// percentage beside it.
 				contextWindow = entry.ContextWindow
 				if contextWindow > 0 {
 					contextLimit = contextWindow
@@ -318,7 +307,6 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		"contextTokens":   knownMasterUsage.ContextTokens,
 		"contextLimit":    contextLimit,
 		"contextPercent":  contextPercent,
-		// The newest request that wrote tokens: how many, how long, and the rate.
 		"outputTokens":    knownMasterUsage.OutputTokens,
 		"latencyMs":       knownMasterUsage.LatencyMs,
 		"tokensPerSecond": knownMasterUsage.TokensPerSecond,

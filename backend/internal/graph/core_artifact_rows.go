@@ -1,6 +1,5 @@
 package graph
 
-// ArtifactRow is one row of the artifacts table.
 type ArtifactRow struct {
 	ArtifactId            string
 	Version               int
@@ -35,7 +34,6 @@ type ArtifactRow struct {
 	RetiredAt             any
 }
 
-// RecordArtifact writes one artifact row.
 func RecordArtifact(store *TaskStore, row ArtifactRow) {
 	kernelExec(store.Db, `INSERT INTO artifacts(
         artifact_id,version,scope,owner_id,task_id,project_id,namespace,name,logical_key,digest,object_path,size,
@@ -50,13 +48,10 @@ func RecordArtifact(store *TaskStore, row ArtifactRow) {
 		row.SupersedesArtifactId, row.SupersedesVersion, CanonicalJSON(row.Metadata), row.CreatedAt, row.RetiredAt)
 }
 
-// RetireArtifact says an artifact version was retired.
 func RetireArtifact(store *TaskStore, artifactID string, version int, retiredAt int64) {
 	kernelExec(store.Db, "UPDATE artifacts SET state='retired',retired_at=? WHERE artifact_id=? AND version=?", retiredAt, artifactID, version)
 }
 
-// LinkArtifact records what an artifact is related to. The link is kept if
-// it is already there.
 func LinkArtifact(store *TaskStore, artifactID string, version int, subjectKind, subjectID, relation string, at int64) {
 	kernelExec(store.Db, `INSERT OR IGNORE INTO artifact_links(id,artifact_id,version,subject_kind,subject_id,relation,created_at)
         VALUES(?,?,?,?,?,?,?)`, newUUID(), artifactID, version, subjectKind, subjectID, relation, at)

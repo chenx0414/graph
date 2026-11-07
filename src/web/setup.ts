@@ -21,7 +21,6 @@ export interface TemplateSetupInput {
   baseUrl: string;
   credentialId: string;
   secretRef: string;
-  /** Template-provided model ids and/or explicitly typed custom models. */
   models: TemplateSetupModel[];
 }
 
@@ -35,8 +34,6 @@ function uniqueModelId(entries: Record<string, unknown>[], base: string, provide
   }
 }
 
-/** One-action provider connection: merge the chosen transport, credential and
- * models into the current document without dropping other platforms. */
 export function buildTemplateConfigDocument(existing: unknown, input: TemplateSetupInput, templateModels: TemplateSetupModel[] = []): Record<string, unknown> {
   const base = existing && typeof existing === 'object' ? { ...(existing as Record<string, unknown>) } : {};
   const document: Record<string, unknown> = { ...base, version: 1 };
@@ -45,9 +42,6 @@ export function buildTemplateConfigDocument(existing: unknown, input: TemplateSe
   for (const model of input.models) {
     const preset = templateModels.find(item => item.id === model.id);
     const merged = preset ? { ...preset, ...model } : model;
-    // The upstream model id is the provider identity; the config id is the
-    // connection identity. A second platform exposing the same upstream id
-    // must get its own entry instead of overwriting the first connection.
     const index = entries.findIndex(item => (item as { id?: unknown }).id === merged.id);
     const existing = index >= 0 ? entries[index] as Record<string, unknown> : undefined;
     const sameConnection = existing

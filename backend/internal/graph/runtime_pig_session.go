@@ -13,17 +13,10 @@ import (
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
-// The Agent kernel the daemon runs on.
-//
-// The PiG kernel carries the Agent sessions, the crash recovery and the graph
-// node lane inside this process. The TypeScript durable sidecar is retired
-// with the protocol layer that carried it, so there is one kernel.
 const (
-	// AgentKernelPig runs the Agent sessions in the Go PiG kernel.
 	AgentKernelPig = "pig"
 )
 
-// CreatePigAgentSessionTransport opens Agent sessions on the PiG kernel.
 func CreatePigAgentSessionTransport(store *TaskStore, codemode CodemodeSettings) AgentSessionTransport {
 	return &pigAgentTransport{store: store, codemode: codemode}
 }
@@ -33,7 +26,6 @@ type pigAgentTransport struct {
 	codemode CodemodeSettings
 }
 
-// Open opens one session on the PiG kernel.
 func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSession, error) {
 	tools := pigToolSpecs(transport.store, request)
 	extensions, err := pigExtensionSpecs(context.Background(), request, request.Broker, func(tool string, ms float64, isError bool) {
@@ -54,30 +46,14 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		return effective
 	}), tools, request.OnEvent, nil)
 	if err != nil {
-		// The refusal a session gets when a bound Pi extension cannot be
-		// hosted for it is returned, not raised: the caller turns it into a
-		// failed turn the user can read, rather than a crash the runtime
-		// silently recovers from.
 		return nil, err
 	}
-	// A message sent while the kernel still runs the turn a restart recovered
-	// belongs behind that turn. Submitting into the busy conversation would be
-	// refused with `Conversation ... is busy`, and freezing this execution
-	// would overwrite the record of the turn that is still running. The open
-	// therefore waits for the conversation to become idle first; the session is
-	// already open here so the recovered turn has the model and tools it needs
-	// to finish.
 	if !request.Recovering {
 		if err := pigkernel.WaitConversationIdle(context.Background(), transport.store.Path, pigSessionIdentity(request)); err != nil {
 			_ = session.Close()
 			return nil, err
 		}
 	}
-	// The execution is frozen before the turn starts. The record is what the
-	// recovery reads when the daemon dies mid-turn: which execution the
-	// kernel was running, the model it was admitted with and the input it was
-	// waiting for. The durable conversation exists by now, so the record has
-	// a place to live.
 	if err := transport.freeze(request); err != nil {
 		_ = session.Close()
 		return nil, err
@@ -85,11 +61,6 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 	return &pigAgentSession{session: session, request: request}, nil
 }
 
-// freeze stores the frozen record of one execution.
-//
-// The invocations that existed before the execution are named in the record:
-// an invocation beyond them is a provider call this execution made, and the
-// turn must not be replayed.
 func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 	if request.ExecutionId == "" || request.Binding.InstanceId == "" {
 		return nil
@@ -102,11 +73,6 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 	return pigkernel.FreezeExecution(context.Background(), transport.store.Path, request.Binding.InstanceId, record)
 }
 
-// openPigSession admits one PiG session.
-//
-// The main agent and a graph node open the same session: identity, model,
-// tools, MCP, instructions, and the daemon's model channel. The caller
-// supplies the tools and the channel. The credential stays in that channel.
 func openPigSession(ctx context.Context, database string, request AgentSessionRequest, codemode CodemodeSettings, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
 	tools, provider, err := pigDeferredToolSurface(request, tools, provider)
 	if err != nil {
@@ -114,11 +80,6 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 	}
 	options := pigkernel.SessionOptions{
 		Database: database,
-		// The identity names the session's durable conversation and its tool
-		// registration. It is never empty: an empty identity would give every
-		// instance-less session the same conversation and the same registration
-		// name, so the last one to open would replace the tool bodies the
-		// earlier ones still point at.
 		Identity:     pigSessionIdentity(request),
 		Model:        pigModelSpec(request.Model),
 		Provider:     provider,
@@ -146,17 +107,6 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 	return pigkernel.OpenSession(ctx, options)
 }
 
-// pigProviderBridge is the daemon's model channel, seen from the kernel.
-//
-// The kernel asks for the answer; the daemon's own stream produces it. The
-// daemon's stream is the one that admits the send, spends the credential,
-// records the usage and refuses a request the budget does not allow, so the
-// kernel never opens a provider channel of its own.
-//
-// options decides which provider options the turn runs with. Nil means the
-// kernel's own per-call options; a function means the caller replaces them.
-// The node lane replaces them - it runs the turn with the options it was
-// admitted with.
 func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[string]any) map[string]any) pigkernel.ProviderBridge {
 	return pigkernel.ProviderBridge{
 		Stream: func(_ context.Context, transcript []map[string]any, kernelOptions map[string]any) (pigkernel.EventStream, error) {
@@ -174,10 +124,6 @@ func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[stri
 	}
 }
 
-// pigToolSpecs are the Graph tools one session may call.
-//
-// The tool bodies are the daemon's, and so is the admission gate: every call
-// passes the same gate a model send passes.
 func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.ToolSpec {
 	specs := []pigkernel.ToolSpec{}
 	for _, tool := range request.Tools {
@@ -188,12 +134,6 @@ func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.Too
 			Description: definition.Description,
 			Parameters:  asMap(definition.Parameters),
 			Result: func(ctx context.Context, args map[string]any) (result any, err error) {
-				// A refusal is not a dead turn.
-				//
-				// Preparing the arguments happens outside the tool's own
-				// handler, so its refusal would otherwise escape the tool and
-				// take the turn with it. The node lane turns it into the
-				// tool error the model reads; the main session does the same.
 				defer func() {
 					recovered := recover()
 					if recovered == nil {
@@ -217,9 +157,6 @@ func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.Too
 					params = map[string]any{}
 				}
 				started := time.Now()
-				// A call that opted into the background is admitted here and
-				// answered with a receipt: the turn does not wait for it, which is
-				// what frees the node while the work runs.
 				if deferredToolWantsBackground(definition, params) {
 					receipt, failure := admitDeferredCall(store, request, definition, params)
 					if failure != nil {
@@ -242,8 +179,6 @@ func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.Too
 	return specs
 }
 
-// pigCodemodeOptions is the kernel's code mode setting, or nil when the
-// configuration turned code mode off.
 func pigCodemodeOptions(codemode CodemodeSettings) *pigkernel.CodemodeOptions {
 	if !codemode.Enabled {
 		return nil
@@ -251,11 +186,6 @@ func pigCodemodeOptions(codemode CodemodeSettings) *pigkernel.CodemodeOptions {
 	return &pigkernel.CodemodeOptions{CacheDir: codemode.CacheDir, TimeoutMs: float64(codemode.TimeoutMs)}
 }
 
-// pigProviderOptions are the provider options one session's channel carries.
-//
-// The thinking level belongs to the session: without it the channel would ask
-// the provider for no effort at all, and the strength the user chose would
-// never leave the process.
 func pigProviderOptions(request AgentSessionRequest) map[string]any {
 	if request.ThinkingLevel == nil || *request.ThinkingLevel == "" {
 		return nil
@@ -263,7 +193,6 @@ func pigProviderOptions(request AgentSessionRequest) map[string]any {
 	return map[string]any{"reasoning": *request.ThinkingLevel}
 }
 
-// recordPigToolCall reports one tool call to the daemon's telemetry.
 func recordPigToolCall(request AgentSessionRequest, tool string, started time.Time, failed bool) {
 	if request.OnToolCall == nil {
 		return
@@ -272,11 +201,6 @@ func recordPigToolCall(request AgentSessionRequest, tool string, started time.Ti
 	request.OnToolCall(PiAdapterToolCall{Tool: tool, Ms: float64(time.Since(started).Milliseconds()), IsError: failed})
 }
 
-// pigMcpServers are the MCP servers the kernel connects natively.
-//
-// The declaration is the one the Graph already builds: which servers a
-// session may use and which secrets they get does not change. Only the
-// transport does: the kernel connects the server itself.
 func pigMcpServers(request AgentSessionRequest) []pigkernel.McpServerSpec {
 	servers := []pigkernel.McpServerSpec{}
 	for _, server := range request.McpServers {
@@ -286,11 +210,6 @@ func pigMcpServers(request AgentSessionRequest) []pigkernel.McpServerSpec {
 	return servers
 }
 
-// pigModelSpec is the model one session sends to.
-//
-// The model is the daemon's: its identity, its protocol and its window come
-// from the Graph configuration. The credential never reaches the kernel - the
-// daemon's own stream spends it.
 func pigModelSpec(model any) pigkernel.ModelSpec {
 	spec := pigkernel.ModelSpec{}
 	if view, ok := model.(piModelView); ok {
@@ -305,7 +224,6 @@ func pigModelSpec(model any) pigkernel.ModelSpec {
 		spec.Input = modelInputNames(view.Input)
 		return spec
 	}
-	// A restored session carries the frozen model as a record, not as a view.
 	record := asMap(model)
 	if record == nil {
 		return spec
@@ -321,7 +239,6 @@ func pigModelSpec(model any) pigkernel.ModelSpec {
 	return spec
 }
 
-// pigAgentSession is one live session on the PiG kernel.
 type pigAgentSession struct {
 	session *pigkernel.Session
 	request AgentSessionRequest
@@ -329,10 +246,6 @@ type pigAgentSession struct {
 	inspect AgentSessionInspect
 }
 
-// pigUserContent is the provider-facing user content of one prompt: the image
-// attachments the turn carried, in front of the text, or plain text when it
-// carried none. The kernel's content union is what makes the image reach the
-// model; without it the attachment was read, counted and then dropped.
 func pigUserContent(text string, images []ImageContent) ai.UserContent {
 	if len(images) == 0 {
 		return ai.UserText(text)
@@ -347,13 +260,7 @@ func pigUserContent(text string, images []ImageContent) ai.UserContent {
 	return blocks
 }
 
-// Prompt sends one prompt and returns the turn it produced.
 func (session *pigAgentSession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
-	// The kernel owns the two boundaries of a request: at 70% of the window it
-	// compacts the context into a summary, and only a context that no longer
-	// fits at all is replaced - with a pointer to the durable transcript the
-	// next turn can search. The ceiling, when the daemon names one, moves the
-	// compaction earlier without moving the reset.
 	budget := pigSessionContextBudget(session.request)
 	compactAt := pigSessionCompactionTrigger(session.request)
 	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, pigCompactionInstructions(), ""); err != nil {
@@ -385,8 +292,6 @@ func (session *pigAgentSession) Prompt(text string, images []ImageContent) (Agen
 	return result, nil
 }
 
-// pigSessionCompactionTrigger is the token count at which a compaction starts:
-// 70% of the window, or the ceiling when the daemon named a smaller one.
 func pigSessionCompactionTrigger(request AgentSessionRequest) int {
 	window := pigModelSpec(request.Model).ContextWindow
 	if window <= 0 {
@@ -402,8 +307,6 @@ func pigSessionCompactionTrigger(request AgentSessionRequest) int {
 	return trigger
 }
 
-// pigSessionContextBudget is the model window minus what the request adds
-// beside the transcript: the system prompt and the tool declarations.
 func pigSessionContextBudget(request AgentSessionRequest) int {
 	window := pigModelSpec(request.Model).ContextWindow
 	if window <= 0 {
@@ -421,8 +324,6 @@ func pigSessionContextBudget(request AgentSessionRequest) int {
 	return budget
 }
 
-// emitContextReset reports the replacement as a session event, so the turn's
-// timeline says why the agent no longer has the earlier context.
 func (session *pigAgentSession) emitContextReset(estimated, budget int) {
 	if session.request.OnEvent == nil {
 		return
@@ -430,27 +331,22 @@ func (session *pigAgentSession) emitContextReset(estimated, budget int) {
 	session.request.OnEvent(map[string]any{"type": "context_reset", "estimatedTokens": estimated, "contextWindow": budget})
 }
 
-// Compact prepares the next operation's prompt.
 func (session *pigAgentSession) Compact(instructions string) error {
 	return session.session.Compact(context.Background(), instructions)
 }
 
-// Steer injects a message into the running turn.
 func (session *pigAgentSession) Steer(text string) error {
 	return session.session.Steer(context.Background(), text)
 }
 
-// Interrupt aborts the running turn.
 func (session *pigAgentSession) Interrupt(text *string) error {
 	return session.session.Interrupt(context.Background(), text)
 }
 
-// Stop soft-stops the running turn.
 func (session *pigAgentSession) Stop() error {
 	return session.session.Stop(context.Background())
 }
 
-// Inspect is the session's own view of itself.
 func (session *pigAgentSession) Inspect() AgentSessionInspect {
 	view := session.session.Inspect()
 	session.mutex.Lock()
@@ -480,13 +376,10 @@ func (session *pigAgentSession) Inspect() AgentSessionInspect {
 	return session.inspect
 }
 
-// Close ends the session. The kernel stays open: it holds the durable
-// conversations of every identity.
 func (session *pigAgentSession) Close() error {
 	return session.session.Close()
 }
 
-// pigSessionIdentity is the identity one session is known by.
 func pigSessionIdentity(request AgentSessionRequest) string {
 	identity := ""
 	if request.Binding.InstanceId != "" {
@@ -494,17 +387,12 @@ func pigSessionIdentity(request AgentSessionRequest) string {
 	} else {
 		identity = fmt.Sprintf("execution-%s", request.ExecutionId)
 	}
-	// The identity is what the kernel keys its durable conversation by, so a turn
-	// that must not inherit the transcript needs an identity of its own. A review
-	// shares one identity across rounds on purpose: it remembers its own earlier
-	// verdicts, and none of the work that produced them.
 	if request.IsolatedContext {
 		return identity + ":review"
 	}
 	return identity
 }
 
-// pigSessionJson reads one session's own view as JSON.
 func pigSessionJson(session AgentSession) ([]byte, error) {
 	return json.Marshal(session.Inspect())
 }

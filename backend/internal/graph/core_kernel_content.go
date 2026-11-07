@@ -10,23 +10,19 @@ import (
 	"context"
 )
 
-// kernelContentPrefix is deliberately not JSON: a user value can never impersonate a reference.
 const kernelContentPrefix = "graph-content:sha256:"
 
 const jsMaxSafeInteger = 9007199254740991
 
-// ContentDigest is the sha256 hex of a stored body.
 func ContentDigest(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
 }
 
-// KernelContent stores immutable JSON bodies in the kernel database.
 type KernelContent struct {
 	db sqlDB
 }
 
-// NewKernelContent creates the content table on an existing database connection.
 func NewKernelContent(db sqlDB) *KernelContent {
 	kernelExec(db, `CREATE TABLE IF NOT EXISTS kernel_content(
       digest TEXT PRIMARY KEY, body TEXT NOT NULL, bytes INTEGER NOT NULL, preview TEXT NOT NULL);
@@ -35,7 +31,6 @@ func NewKernelContent(db sqlDB) *KernelContent {
 	return &KernelContent{db: db}
 }
 
-// Encode stores a canonical JSON body inline when it fits, otherwise by digest.
 func (content *KernelContent) Encode(value any) string {
 	body := CanonicalJSON(value)
 	bytes := len(body)
@@ -51,7 +46,6 @@ func (content *KernelContent) Encode(value any) string {
 	return kernelContentPrefix + digest
 }
 
-// Decode returns the JSON value stored inline or by digest.
 func (content *KernelContent) Decode(stored string) any {
 	if len(stored) < len(kernelContentPrefix) || stored[:len(kernelContentPrefix)] != kernelContentPrefix {
 		var value any
@@ -72,7 +66,6 @@ func (content *KernelContent) Decode(stored string) any {
 	return value
 }
 
-// ContentColumn is the SQL expression that reads a content column without always fetching a large body.
 func ContentColumn(column string, part ...string) string {
 	which := "body"
 	if len(part) > 0 && part[0] != "" {
