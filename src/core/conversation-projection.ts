@@ -145,7 +145,7 @@ export interface ConversationProjectionSnapshot {
 
 function systemAuthored(message: ConversationMessage): boolean {
   const source = (message.data as { source?: { kind?: string } } | null)?.source;
-  return source?.kind === 'tool_settled' || source?.kind === 'rsi_async_full';
+  return source?.kind === 'rsi_async_full';
 }
 
 function bySequence(left: ConversationMessage, right: ConversationMessage) {

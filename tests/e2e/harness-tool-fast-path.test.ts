@@ -109,8 +109,6 @@ test('A6: 快速 bash 在同一轮返回，provider 恰好两次请求，第二�
   expect(toolRows.length, '快速工具的会话行数不对').toBe(1);
   expect((toolRows[0]!.data ?? {})['error'] ?? false, '快速工具被记成了失败').toBe(false);
 
-  // 同步工具没有 deferred 记录：后台调用视图是空的。
   const calls = await request(`/api/conversations/${conversationId}/tool-calls`);
-  expect(calls.status, `GET tool-calls answered ${calls.status}`).toBe(200);
-  expect((calls.body as { toolCalls?: unknown[] }).toolCalls ?? []).toEqual([]);
+  expect(calls.status, '后台工具调用接口应当已经不存在').toBe(404);
 }, 180_000);

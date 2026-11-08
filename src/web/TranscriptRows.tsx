@@ -11,7 +11,7 @@ import { Markdown } from './Markdown.tsx';
 import { RsiCard } from './RsiCard.tsx';
 import { CompactionNotice } from './CompactionNotice.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
-import { toolSettledRowOf, transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
+import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
 import { ToolActivityRow } from './ToolActivityRow.tsx';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
@@ -138,7 +138,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
       className="tool-activity-group"
       data-testid="tool-activity-group"
       data-tool-calls={row.tools.map(tool => tool.id).join(' ')}
-      data-active={row.active} data-background={row.background}
+      data-active={row.active}
       data-open={open}
       data-error={row.tools.some(tool => tool.error)}
     >
@@ -154,7 +154,7 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
         </span>
         <span className="tool-group-copy">
           <strong>{row.summary}</strong>
-          <span data-testid="tool-group-state">{row.active ? (row.background ? '后台执行中' : '进行中') : `${row.tools.length} 项活动`}</span>
+          <span data-testid="tool-group-state">{row.active ? '进行中' : `${row.tools.length} 项活动`}</span>
         </span>
         <Icon name="chevron" size={14} className="tool-group-chevron" />
       </button>
@@ -340,8 +340,6 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   markdown?: boolean;
 }) {
   if (row.kind === 'message') {
-    const settled = toolSettledRowOf(row.message);
-    if (settled) return <ToolSettledCard row={settled} />;
     return userAuthor
       ? <MessageRow message={row.message} userAuthor={userAuthor} copyable={copyText(row)} markdown={markdown} />
       : <MessageRow message={row.message} copyable={copyText(row)} markdown={markdown} />;
@@ -356,29 +354,11 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
   if (row.kind === 'rsi') return <RsiCard row={row} />;
   if (row.kind === 'rsiFull') return <RsiFullCard row={row} />;
-  if (row.kind === 'toolSettled') return <ToolSettledCard row={row} />;
   if (row.kind === 'compaction') return <CompactionNotice row={row} />;
   if (row.kind === 'thinking') {
     return <ThinkingStatus />;
   }
   return null;
-}
-
-function ToolSettledCard({ row }: { row: Extract<TranscriptRow, { kind: 'toolSettled' }> }) {
-  const failed = row.state !== '' && row.state !== 'settled';
-  return (
-    <div className="compaction-notice" data-testid="tool-settled-notice" data-role="system" data-delivered={row.delivered ? 'steer' : 'turn'}>
-      <div className="compaction-notice-head" title={row.text}>
-        <span className="compaction-notice-rule" aria-hidden="true" />
-        <span className="compaction-notice-text">
-          <Icon name={failed ? 'alert' : 'tool'} size={13} />
-          {row.tool} {failed ? '已结束 · ' + row.state : '已完成'}
-          {row.delivered ? ' · 已插入当前回合' : ' · 结果已回到会话'}
-        </span>
-        <span className="compaction-notice-rule" aria-hidden="true" />
-      </div>
-    </div>
-  );
 }
 
 function RsiFullCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsiFull' }> }) {

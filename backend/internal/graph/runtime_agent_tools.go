@@ -8,31 +8,29 @@ import (
 )
 
 type ToolDefinition struct {
-	Name string
-	Label string
-	Description string
-	PromptSnippet *string
+	Name             string
+	Label            string
+	Description      string
+	PromptSnippet    *string
 	PromptGuidelines []string
-	Parameters Json
+	Parameters       Json
 	PrepareArguments func(args any) any
-	Execute func(toolCallId string, params any) (any, error)
-	ExternallyGated bool
-	Async bool
-	Deferred func(toolCallId string, params any, signal *AbortSignal) (any, error)
+	Execute          func(toolCallId string, params any) (any, error)
+	ExternallyGated  bool
 }
 
 type AgentToolsGraphManagement struct {
-	GraphCreate  func(input map[string]any) any
-	GraphPatch   func(input map[string]any) any
-	GraphInspect func(input map[string]any) any
-	GraphControl func(input map[string]any) any
-	GraphSend    func(input map[string]any) any
-	HarnessCompare func(input map[string]any) any
+	GraphCreate       func(input map[string]any) any
+	GraphPatch        func(input map[string]any) any
+	GraphInspect      func(input map[string]any) any
+	GraphControl      func(input map[string]any) any
+	GraphSend         func(input map[string]any) any
+	HarnessCompare    func(input map[string]any) any
 	HarnessExperience func(input map[string]any) any
-	HarnessProbe func(input HarnessProbeInput) HarnessProbeResult
-	HarnessEvidence func(input HarnessEvidenceInput) HarnessEvidenceResult
-	HarnessDecision func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
-	HarnessFriction func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
+	HarnessProbe      func(input HarnessProbeInput) HarnessProbeResult
+	HarnessEvidence   func(input HarnessEvidenceInput) HarnessEvidenceResult
+	HarnessDecision   func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessDecisionInput) HarnessDecisionResult
+	HarnessFriction   func(store *harnessArtifactStore, entries []HarnessExperienceEntry, input HarnessFrictionInput) HarnessFrictionResult
 }
 
 type AgentToolsSystemChange struct {
@@ -84,38 +82,38 @@ type AgentToolsWriteLedger struct {
 
 type AgentToolsArtifactService struct {
 	AllowedNamespaces []string
-	CanPromote bool
-	List       func(query ArtifactQuery) ArtifactPage
-	Get        func(artifactId string, version *int) ArtifactRecord
-	Read       func(artifactId string, version int, maxBytes int) ArtifactRead
-	Publish    func(input PublishArtifactInput) ArtifactRecord
-	Retire     func(artifactId string, version int, reason string, requestId string) ArtifactRecord
-	Promote    func(input ArtifactPromoteInput) ArtifactRecord
+	CanPromote        bool
+	List              func(query ArtifactQuery) ArtifactPage
+	Get               func(artifactId string, version *int) ArtifactRecord
+	Read              func(artifactId string, version int, maxBytes int) ArtifactRead
+	Publish           func(input PublishArtifactInput) ArtifactRecord
+	Retire            func(artifactId string, version int, reason string, requestId string) ArtifactRecord
+	Promote           func(input ArtifactPromoteInput) ArtifactRecord
 }
 
 type AgentToolsInput struct {
-	Workspace string
-	Role string
-	ReadRoots []string
-	Catalog *Catalog
-	ReadOnly bool
-	Run func(command string, args []string, signal *AbortSignal) CommandResult
-	RunWithTimeout func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult
-	CommitWorkspace func(paths []string, message string) any
-	Fetch func(url string, signal *AbortSignal) RetrievalResult
-	ReadGraph func(input GraphSectionQuery) any
-	OnAskSupervisor func(request PiAdapterAskedQuestion)
+	Workspace          string
+	Role               string
+	ReadRoots          []string
+	Catalog            *Catalog
+	ReadOnly           bool
+	Run                func(command string, args []string, signal *AbortSignal) CommandResult
+	RunWithTimeout     func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult
+	CommitWorkspace    func(paths []string, message string) any
+	Fetch              func(url string, signal *AbortSignal) RetrievalResult
+	ReadGraph          func(input GraphSectionQuery) any
+	OnAskSupervisor    func(request PiAdapterAskedQuestion)
 	OnNotifySupervisor func(notice PiAdapterSupervisorNotice) any
-	Peers any
-	Artifacts any
-	Supervisor PiAdapterSupervisor
-	GraphManagement AgentToolsGraphManagement
-	SystemContext *AgentToolsSystemContext
-	Rsi *AgentToolsRsi
-	RsiContext PiAdapterRsiContext
-	ControlTask func(input AgentToolsControlTask) any
-	Desktop *AgentToolsDesktop
-	WriteLedger *AgentToolsWriteLedger
+	Peers              any
+	Artifacts          any
+	Supervisor         PiAdapterSupervisor
+	GraphManagement    AgentToolsGraphManagement
+	SystemContext      *AgentToolsSystemContext
+	Rsi                *AgentToolsRsi
+	RsiContext         PiAdapterRsiContext
+	ControlTask        func(input AgentToolsControlTask) any
+	Desktop            *AgentToolsDesktop
+	WriteLedger        *AgentToolsWriteLedger
 }
 
 var agentToolsImageMimeTypes = map[string]string{
@@ -208,19 +206,19 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 	}
 	if agentToolsSupervisorPresent(input.Supervisor) {
 		features.Supervisor = &AgentSupervisorFeatures{
-			ResumeWork:         input.Supervisor.ResumeWork != nil,
-			DelegateWork:       input.Supervisor.DelegateWork != nil,
-			ProposeWorkGraph:   input.Supervisor.ProposeWorkGraph != nil,
-			ReadWorkDraft:      input.Supervisor.ReadWorkDraft != nil,
-			ValidateProposal:   input.Supervisor.ValidateProposal != nil,
-			GraphState:         input.Supervisor.GraphState != nil,
-			TaskStatus:         input.Supervisor.TaskStatus != nil,
-			ListProjects:       input.Supervisor.ListProjects != nil,
-			ListProblems:       input.Supervisor.ListProblems != nil,
-			ResolveProblem:     input.Supervisor.ResolveProblem != nil,
-			WithdrawDraft:      input.Supervisor.WithdrawDraft != nil,
-			ConfirmDraft:       input.Supervisor.ConfirmDraft != nil,
-			ControlTask:        input.ControlTask != nil,
+			ResumeWork:       input.Supervisor.ResumeWork != nil,
+			DelegateWork:     input.Supervisor.DelegateWork != nil,
+			ProposeWorkGraph: input.Supervisor.ProposeWorkGraph != nil,
+			ReadWorkDraft:    input.Supervisor.ReadWorkDraft != nil,
+			ValidateProposal: input.Supervisor.ValidateProposal != nil,
+			GraphState:       input.Supervisor.GraphState != nil,
+			TaskStatus:       input.Supervisor.TaskStatus != nil,
+			ListProjects:     input.Supervisor.ListProjects != nil,
+			ListProblems:     input.Supervisor.ListProblems != nil,
+			ResolveProblem:   input.Supervisor.ResolveProblem != nil,
+			WithdrawDraft:    input.Supervisor.WithdrawDraft != nil,
+			ConfirmDraft:     input.Supervisor.ConfirmDraft != nil,
+			ControlTask:      input.ControlTask != nil,
 		}
 	}
 	if peers != nil {

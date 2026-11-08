@@ -175,7 +175,7 @@ export async function waitFor(read: () => Promise<string> | string, timeout: num
  * allows it; where it does not, it says so and skips instead of pretending.
  */
 export function nestedSandboxAllowed(): boolean {
-  return spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/bin/true'], { stdio: 'ignore' }).status === 0;
+  return spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { stdio: 'ignore' }).status === 0;
 }
 
 /** One spelling for a path, whichever side of /private it was written on. */

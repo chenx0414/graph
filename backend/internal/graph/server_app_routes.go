@@ -78,8 +78,6 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/conversations/{conversationId}/proposals/{version}", app.serveProposal)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/messages", app.serveConversationMessage)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/messages/{messageId}/cancel", app.serveConversationMessageCancel)
-	mux.HandleFunc("GET /api/conversations/{conversationId}/tool-calls", app.serveConversationToolCalls)
-	mux.HandleFunc("POST /api/conversations/{conversationId}/tool-calls/{toolCallId}/cancel", app.serveConversationToolCallCancel)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/model", app.serveConversationModel)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/compact", app.serveConversationCompact)
 	mux.HandleFunc("POST /api/conversations/{conversationId}/archive", app.serveConversationArchive)

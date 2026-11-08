@@ -15,7 +15,7 @@ function toolIcon(name: string): 'file' | 'folder' | 'search' | 'bolt' | 'refres
 const STOPPED_TOOL_LABELS: Record<string, string> = { cancelled: '已取消', timed_out: '已超时', interrupted: '已中断' };
 
 function toolStateLabel(tool: TranscriptTool) {
-  if (!tool.done) return tool.background ? '进行中（后台）' : '进行中';
+  if (!tool.done) return '进行中';
   return STOPPED_TOOL_LABELS[tool.state ?? ''] ?? (tool.error ? '失败' : '完成');
 }
 
@@ -25,7 +25,6 @@ export function ToolActivityRow({ tool }: { tool: TranscriptTool }) {
     data-tool-call={tool.id}
     data-error={tool.error}
     data-done={tool.done}
-    data-background={tool.background === true}
     data-state={tool.state}
   >
     <span className="tool-activity-icon"><Icon name={toolIcon(tool.name)} size={14} /></span>
