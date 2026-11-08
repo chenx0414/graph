@@ -134,6 +134,8 @@ test('the node chat footer prints the same rate for the node’s own call', asyn
   await expect.poll(async () => await footer.innerText(), { timeout: 20_000 }).toMatch(/TPS \d+/);
   const title = await footer.getAttribute('title');
   expect(title).toContain('240 tokens');
+  const nodeFooter = await page.locator('.composer-footer').innerText();
+  expect(nodeFooter, 'the node composer no longer advertises the keyboard hint').not.toContain('Shift + Enter');
   await page.screenshot({ path: join(evidenceDir(root, 'console-tps'), 'node.png'), fullPage: false });
 }, 240_000);
 

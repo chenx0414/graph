@@ -89,7 +89,6 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
           {stopPhase === 'stopped' ? '已停止。' : '停止中…'}
         </span>
       )}
-      <span className="muted">{busy ? 'Enter 排队发送 · Shift + Enter 换行' : '发送后沿用当前会话 · Shift + Enter 换行'}</span>
       {/* The node's own speed, from its newest settled provider call. */}
       <span
         className="muted"
