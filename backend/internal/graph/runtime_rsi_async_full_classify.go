@@ -26,6 +26,7 @@ type AsyncFullFailure struct {
 
 type AsyncFullVerdict struct {
 	Environment bool
+	Reason      string
 	Unmatched   []string
 	Flaky       []string
 }
@@ -150,6 +151,11 @@ func AsyncFullReruns(output string) []string {
 
 func ClassifyAsyncFull(output string, known []EnvKnownRed) AsyncFullVerdict {
 	verdict := AsyncFullVerdict{Environment: true, Unmatched: []string{}, Flaky: []string{}}
+	if reason := MachineExhaustionReason(output); reason != "" {
+		verdict.Reason = reason
+		verdict.Flaky = AsyncFullReruns(output)
+		return verdict
+	}
 	flaky := map[string]bool{}
 	for _, file := range AsyncFullReruns(output) {
 		flaky[file] = true

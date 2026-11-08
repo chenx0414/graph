@@ -178,3 +178,20 @@ func TestAsyncFullFlakyFileIsStillReportedEvenWithNoOtherFailure(t *testing.T) {
 		t.Fatalf("a lone re-run file was called a regression: %v", verdict.Unmatched)
 	}
 }
+
+func TestADiskFullRunIsAnEnvironmentFailureEvenWhenFilesDoNotMatchTheKnownRedList(t *testing.T) {
+	output := strings.Join([]string{
+		" FAIL  tests/e2e/go-acceptance-binding.test.ts > an acceptance item binds",
+		"Error: expected 'operations=[]' to be '' // Object.is equality",
+		" FAIL  tests/e2e/go-operation-verdict.test.ts > never settled",
+		"Error: ENOSPC: no space left on device, mkdtemp '/tmp/graph-e2e-x'",
+	}, "\n")
+
+	verdict := ClassifyAsyncFull(output, nil)
+	if !verdict.Environment {
+		t.Fatalf("a run that could not write its fixtures is an environment failure, not a regression: %+v", verdict)
+	}
+	if !strings.Contains(verdict.Reason, "磁盘") {
+		t.Fatalf("the verdict must name the machine condition it saw: %q", verdict.Reason)
+	}
+}

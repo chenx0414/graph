@@ -109,7 +109,9 @@ func (service *RsiService) rsiRunAsyncFull(store *TaskStore, job rsiAsyncFullJob
 	classified := ClassifyAsyncFull(result.Output, known)
 	environment := classified.Environment
 	verdict := "回归"
-	if environment {
+	if classified.Reason != "" {
+		verdict = "环境故障（" + classified.Reason + "），先别当回归追"
+	} else if environment {
 		verdict = "环境故障（失败项都命中 tests/env-known-reds.json 的已知环境问题），先别当回归追"
 	}
 	if len(classified.Unmatched) > 0 {

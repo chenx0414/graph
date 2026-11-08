@@ -20,6 +20,15 @@ func IsDisconnectBeforeReply(output string) bool {
 	return len(strings.TrimSpace(output)) > 0 && DISCONNECT_BEFORE_REPLY.MatchString(output)
 }
 
+var MACHINE_EXHAUSTION = regexp.MustCompile(`(?i)no space left on device|ENOSPC|disk quota exceeded`)
+
+func MachineExhaustionReason(output string) string {
+	if MACHINE_EXHAUSTION.MatchString(output) {
+		return "机器资源耗尽（磁盘已满：no space left on device）"
+	}
+	return ""
+}
+
 func IsEnvironmentFailure(output string) bool {
 	trimmed := strings.TrimSpace(output)
 	return len(trimmed) > 0 && (ENVIRONMENT_FAILURE.MatchString(trimmed) || DISCONNECT_BEFORE_REPLY.MatchString(trimmed))
