@@ -50,14 +50,13 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 ## 网络和运行边界
 
-- 标准模式下，本地 MCP 的 provisioning 网络与 runtime 网络分离，runtime 网络由 capability manifest 声明，extension 没有自动网络权限，命令、MCP 和工具仍在 OS sandbox 内运行。
 - 完全访问模式下，网络、MCP、extension 和宿主文件系统限制不阻止调用；能力清单仍用于发现、版本与审计。
 - Native bash/powershell 直接在宿主上运行，没有 workspace 或路径边界。
 - `networkDomains`、工具自报 annotation 或 MCP 描述都不是权限本身。
 
 ### 检查命令的运行边界
 
-`graph.command` 程序节点在 OS sandbox 内执行：不能嵌套 `sandbox-exec`，也看不到窗口服务，所以 Electron、真实浏览器自动化、宿主剪贴板在这里跑不起来（`sandbox_apply: Operation not permitted` 是嵌套被拒）。通过 RSI 传的 `checks` 在 checkout 里不受沙箱限制运行，适合需要真实浏览器或宿主能力的诊断；正式验收仍应落在 `graph.command` 节点上，因为验收证据必须来自受控检查。
+`graph.command` 程序节点与其他命令一样直接在宿主上执行，因此可以看到窗口服务、真实浏览器与宿主剪贴板。验收证据仍应落在 `graph.command` 节点上。
 
 ### 沙箱内的权限读数不可作宿主授权证据
 
@@ -65,11 +64,10 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 因此这条读数的落点是**执行上下文**，不是布尔值：
 
-- 拒绝信封的 `error.details.executionContext` 带 `{sandbox, accessMode, role, policyDigest, probe, evidence}`：`evidence` 只有 `host` 与 `sandbox` 两种；`policyDigest` 是本次 session 冻结的访问策略摘要，两次读数是否来自同一上下文可以据此区分。
-- 沙箱上下文（`evidence: "sandbox"`）额外带 `details.notice`，明写这次读数不构成宿主授权缺失的证据，`message` 说「读不到」而不是「没有授权」，`suggestion` 指向到宿主上重跑该命令。
+- 拒绝信封的 `error.details.executionContext` 带 `{sandbox, accessMode, role, policyDigest, probe, evidence}`：`evidence` 恒为 `host`。
 - `graph.command` 节点的读数就是宿主读数。
 
-取舍写在这里：**保留探测并标注上下文**，而不是「探测只在宿主上下文执行」。理由是后者会让 standard 模式的会话彻底失去这条信号（连「读不到」都不再说明），而宿主上的真实拒绝又会被它藏起来——两种情形给出同一个答案，正是这次要修的病。真正的修复动作仍然是到宿主上重跑这条命令，而不是重新授权——沙箱里的读数不支持「该重新授权」这个结论。
+取舍写在这里：**保留探测并标注上下文**。宿主上的真实拒绝必须原样传出，不能因为读不到就建议用户重新授权——读不到不等于没有授权。
 
 ## 浏览器验证与恢复
 
