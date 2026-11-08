@@ -66,14 +66,13 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		Raise("invalid_workspace", fmt.Sprintf("graph %s node %s has no workspace", graphId, nodeId))
 	}
 	workspace := location.Workspace
-	access := state.nodeAccess(graphId, nodeId, revisionVersion)
 	conversation := SupervisorConversationForTask(state.options.Kernel.Store, graphId)
 	owner := ""
 	if conversation != nil {
 		owner = conversation.AnchorTaskId
 	}
 	configuration := CanonicalJSON(map[string]any{
-		"recipe": recipe, "prompts": prompts, "workspace": workspace, "access": access, "network": state.options.Network, "supervisor": owner,
+		"recipe": recipe, "prompts": prompts, "workspace": workspace, "network": state.options.Network, "supervisor": owner,
 	})
 	if hasCached && state.sessionRevisions.Get(key) == configuration {
 		return cached
@@ -91,7 +90,7 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 	if state.options.Network != nil {
 		domains = state.options.Network.RetrievalDomains
 	}
-	unrestricted := access.Network == "unrestricted"
+	unrestricted := true
 	var retrieval *RetrievalBroker
 	if len(domains) > 0 || unrestricted {
 		retrieval = CreateRetrievalBroker(domains, KernelToolGate(state.options.Kernel, graphId, nodeId, "retrieval", func() bool { return state.closing.Load() }), unrestricted, 0, 0)
@@ -223,7 +222,6 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		Frozen:             state.restoring.Get(key),
 		RetainCapabilities: true,
 		Gate:               gate,
-		Access:             access,
 		Kernel:             state.options.Kernel,
 		Catalog:            state.options.Catalog,
 		GraphId:            graphId,
@@ -247,25 +245,19 @@ func (state *kernelGraphLaneState) sessionFor(graphId, nodeId string, revisionVe
 		}
 		panic(errorString("Graph runtime is state.closing.Load()"))
 	}
-	session.Environment = &NodeSessionEnvironment{Revision: revisionVersion, Workspace: workspace, Base: location.Base, Access: access}
+	session.Environment = &NodeSessionEnvironment{Revision: revisionVersion, Workspace: workspace, Base: location.Base}
 	session.SystemPrompt += "\n\nNODE WORKING ENVIRONMENT\n" + kernelGraphLaneJSON(kernelGraphLaneWorkingEnvironment{
-		Workspace: workspace, Base: session.Environment.Base, Access: access,
+		Workspace: workspace, Base: session.Environment.Base,
 	})
 	if hasCached {
 		previousWorkspace := (*string)(nil)
 		if cached.Environment != nil {
 			previousWorkspace = &cached.Environment.Workspace
 		}
-		previousDigest := (*string)(nil)
-		if cached.Environment != nil && cached.Environment.Access != nil {
-			previousDigest = &cached.Environment.Access.Digest
-		}
-		accessDigest := access.Digest
 		state.options.Kernel.Store.Event(graphId, "graph.node.rebound", map[string]any{
 			"nodeId": nodeId, "revision": revisionVersion,
 			"previousRecipe": cached.Binding.DefinitionVersion, "recipe": session.Binding.DefinitionVersion,
 			"previousWorkspace": previousWorkspace, "workspace": workspace,
-			"previousAccessDigest": previousDigest, "accessDigest": accessDigest,
 		})
 	}
 	state.sessions.Store(key, session)

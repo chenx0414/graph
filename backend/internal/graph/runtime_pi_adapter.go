@@ -305,18 +305,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 		if definitionVersion != nil && *definitionVersion != "" {
 			definitionVersionValue = *definitionVersion
 		}
-		accessPolicy := operation.AccessPolicy
-		if options.RecoverySnapshot != nil {
-			configuration := options.RecoverySnapshot.Record.Configuration
-			body, _ := json.Marshal(asMap(configuration.ExecutionConfiguration)["accessPolicy"])
-			if string(body) != "null" {
-				var original ResolvedAccessPolicy
-				if err := json.Unmarshal(body, &original); err != nil {
-					panic(err)
-				}
-				accessPolicy = &original
-			}
-		}
 		fullAccess := true
 		return func() OperationResult {
 			interruptSignal := signalFor(operation.Id)
@@ -333,7 +321,6 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 				Task:              task,
 				ProjectRoot:       projectRoot,
 				DefinitionVersion: definitionVersionValue,
-				AccessPolicy:      accessPolicy,
 				FullAccess:        fullAccess,
 				ActiveInstances:   &activeInstances,
 				ActiveMu:          &activeInstancesMu,

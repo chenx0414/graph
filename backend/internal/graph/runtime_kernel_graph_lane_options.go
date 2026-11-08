@@ -120,9 +120,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 						return admitted.InstanceId != ""
 					},
 				}
-				if state.options.Access != nil {
-					input.Access = state.options.Access()
-				}
 				return ExecuteModuleOperation(input)
 			}
 			if state.options.Git != nil {
@@ -242,7 +239,6 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 			if session.Environment != nil {
 				environment.Workspace = session.Environment.Workspace
 				environment.Base = session.Environment.Base
-				environment.Access = session.Environment.Access
 			}
 			state.options.Kernel.RecordNodeBinding(graphId, nodeId, model.Id, session.SystemPrompt, kernelGraphLaneJSON(session.AllowedToolNames), session.StateDir, session.Role, kernelGraphLaneJSON(environment))
 			compaction := CompactionSettingsFor(struct {
@@ -276,7 +272,7 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				Raise("invalid_execution", "Node host has no admitted execution")
 			}
 			workerConfig.ExecutionId = execution.Id
-			workerConfig.NodeExecutionConfiguration = map[string]any{"model": *model, "role": session.Role, "revision": revisionVersion, "base": environment.Base, "access": environment.Access}
+			workerConfig.NodeExecutionConfiguration = map[string]any{"model": *model, "role": session.Role, "revision": revisionVersion, "base": environment.Base}
 			workerConfig.CredentialReference = map[string]any{"modelId": model.Id, "provider": model.Provider, "credentialId": model.CredentialId}
 			workerConfig.CapabilityDescriptor = session.Operation.Descriptor
 			if frozen := state.restoring.Get(graphId + "/" + nodeId); frozen != nil {

@@ -18,12 +18,10 @@ func (l *OperationLifecycle) Block(taskId, nodeId, kind string, data Json, opera
 					grant = value
 				}
 			}
-			if operation != nil && operation.Operation.AccessPolicy != nil &&
-				operation.Operation.AccessPolicy.AutoApprove.Permission && grant != "" {
+			if operation != nil && grant != "" {
 				autoAnswer = &QuestionAutoAnswer{
-					Answer:       Answer{Type: "grant", Grant: grant},
-					PolicyDigest: operation.Operation.AccessPolicy.Digest,
-					Resume:       boolPtr(true),
+					Answer: Answer{Type: "grant", Grant: grant},
+					Resume: boolPtr(true),
 				}
 			}
 		}

@@ -120,9 +120,4 @@ func capabilityCopyEnv(env map[string]string) map[string]string {
 	return out
 }
 
-func capabilityAccessDigest(access *ResolvedAccessPolicy) any {
-	if access == nil {
-		return nil
-	}
-	return access.Digest
-}
+

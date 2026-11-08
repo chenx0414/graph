@@ -217,23 +217,14 @@ func KernelGraphLane(options KernelGraphLaneOptions) *GraphLane {
 }
 
 type kernelGraphLaneWorkingEnvironment struct {
-	Workspace string                `json:"workspace"`
-	Base      string                `json:"base"`
-	Access    *ResolvedAccessPolicy `json:"access"`
+	Workspace string `json:"workspace"`
+	Base      string `json:"base"`
 }
 
 type kernelGraphLaneBindingEnvironment struct {
-	Revision  int                   `json:"revision"`
-	Workspace string                `json:"workspace"`
-	Base      string                `json:"base"`
-	Access    *ResolvedAccessPolicy `json:"access"`
-}
-
-func kernelGraphLaneAccess(environment *NodeSessionEnvironment) *ResolvedAccessPolicy {
-	if environment == nil {
-		return nil
-	}
-	return environment.Access
+	Revision  int    `json:"revision"`
+	Workspace string `json:"workspace"`
+	Base      string `json:"base"`
 }
 
 func kernelGraphLaneTruthy(value any) bool {

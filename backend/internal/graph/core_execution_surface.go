@@ -14,7 +14,6 @@ func NewExecution(store *TaskStore, actions map[string]ActionAdapter, extras Exe
 		models:          extras.Models,
 		git:             extras.Git,
 		systemContext:   extras.SystemContext,
-		access:          extras.Access,
 		dispatchAllowed: extras.DispatchAllowed,
 		graphs:          extras.Graphs,
 		autoWake:        extras.AutoWake,

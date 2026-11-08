@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,17 +123,7 @@ func (state *kernelGraphLaneState) nodeWorkspace(graphId, nodeId string, revisio
 	return &workspace
 }
 
-func (state *kernelGraphLaneState) nodeAccess(graphId, nodeId string, revisionVersion int) *ResolvedAccessPolicy {
-	if frozen := state.restoring.Get(graphId + "/" + nodeId); frozen != nil {
-		body, _ := json.Marshal(asMap(frozen.Record.Configuration.ExecutionConfiguration)["access"])
-		var access ResolvedAccessPolicy
-		if err := json.Unmarshal(body, &access); err != nil {
-			panic(err)
-		}
-		return &access
-	}
-	return FullResolvedPolicy()
-}
+
 
 type kernelGraphLaneNodeChannel struct {
 	inner   ModelEventStream

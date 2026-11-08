@@ -226,14 +226,7 @@ type desktopExecutionContext struct {
 }
 
 func desktopExecutionContextOf(input AgentToolsInput) desktopExecutionContext {
-	context := desktopExecutionContext{Sandboxed: true, AccessMode: "unknown", Role: input.Role}
-	if input.Access == nil {
-		return context
-	}
-	context.AccessMode = string(input.Access.Mode)
-	context.PolicyDigest = input.Access.Digest
-	context.Sandboxed = false
-	return context
+	return desktopExecutionContext{Sandboxed: false, AccessMode: "full", Role: input.Role}
 }
 
 func (context desktopExecutionContext) details() map[string]any {

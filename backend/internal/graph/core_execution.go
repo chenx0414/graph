@@ -39,7 +39,6 @@ type ExecutionExtras struct {
 	DispatchAllowed func() bool
 	Graphs          func() []ExecutionGraph
 	SystemContext   *ExecutionSystemContext
-	Access          func() *ResolvedAccessPolicy
 	Artifacts       *ArtifactWorkspace
 	CredentialRecovery func(CredentialRecoveryRequest) bool
 }
@@ -57,7 +56,6 @@ type Execution struct {
 	models          func() []ModelEntry
 	git             *GitIntegration
 	systemContext   *ExecutionSystemContext
-	access          func() *ResolvedAccessPolicy
 	dispatchAllowed func() bool
 	graphs          func() []ExecutionGraph
 	autoWake        bool

@@ -6,8 +6,7 @@ import (
 	"encoding/json"
 )
 
-func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int64, workspace *string,
-	accessPolicy *ResolvedAccessPolicy, grants []string) (Operation, bool) {
+func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int64, workspace *string, grants []string) (Operation, bool) {
 	var handoffPackage *ContextHandoffPackage
 	operation, admitted, failure := func() (operation Operation, admitted bool, failure any) {
 		defer func() {
@@ -146,7 +145,6 @@ func (e *Execution) admit(node ExecutionNodeRow, spec NodeSpec, reservation int6
 				Messages:        messages,
 			},
 			Grants:            grants,
-			AccessPolicy:      accessPolicy,
 			ActivationId:      node.ActivationId,
 			GraphVersion:      int(task.GraphVersion),
 			DependencySources: map[string][]DependencySource{},

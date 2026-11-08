@@ -6,7 +6,6 @@ import (
 
 func (e *Execution) execute(node ExecutionNodeRow) bool {
 	graphDatabaseMu.Lock()
-	accessPolicy := e.currentAccessPolicy()
 	if e.stopping || (e.dispatchAllowed != nil && !e.dispatchAllowed()) || e.store.Task(node.TaskId).Paused != 0 {
 		graphDatabaseMu.Unlock()
 		return false
@@ -85,26 +84,17 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	}
 	requiredGrant := adapter.Grant
 	if requiredGrant != nil && *requiredGrant != "" && !containsString(grants, *requiredGrant) {
-		if accessPolicy != nil && accessPolicy.AutoApprove.Permission {
-			e.store.Transaction(func() any {
-				InsertQuestion(e.store, QuestionInput{
-					TaskId:     node.TaskId,
-					NodeId:     node.Id,
-					Kind:       "permission",
-					Data:       map[string]any{"grant": *requiredGrant},
-					AutoAnswer: &QuestionAutoAnswer{Answer: Answer{Type: "grant", Grant: *requiredGrant}, PolicyDigest: accessPolicy.Digest},
-				})
-				return nil
+		e.store.Transaction(func() any {
+			InsertQuestion(e.store, QuestionInput{
+				TaskId:     node.TaskId,
+				NodeId:     node.Id,
+				Kind:       "permission",
+				Data:       map[string]any{"grant": *requiredGrant},
+				AutoAnswer: &QuestionAutoAnswer{Answer: Answer{Type: "grant", Grant: *requiredGrant}},
 			})
-			grants = append(grants, *requiredGrant)
-		} else {
-			e.store.Transaction(func() any {
-				e.block(node, "permission", map[string]any{"grant": *requiredGrant}, nil)
-				return nil
-			})
-			graphDatabaseMu.Unlock()
-			return false
-		}
+			return nil
+		})
+		grants = append(grants, *requiredGrant)
 	}
 	slot := "program"
 	if spec.Kind == "agent" {
@@ -130,7 +120,7 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	if e.git != nil {
 		workspace = e.git.Workspace(node.TaskId, node.InstanceId, node.Id, spec.Kind, spec.Action)
 	}
-	operation, admitted := e.admit(node, spec, reservation, workspace, accessPolicy, grants)
+	operation, admitted := e.admit(node, spec, reservation, workspace, grants)
 	if !admitted {
 		graphDatabaseMu.Unlock()
 		return false
@@ -177,13 +167,6 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	e.lifecycle.MarkUncertain(operation, dispatchFailureText(dispatchFailure), false)
 	graphDatabaseMu.Unlock()
 	return true
-}
-
-func (e *Execution) currentAccessPolicy() *ResolvedAccessPolicy {
-	if e.access != nil {
-		return e.access()
-	}
-	return FullResolvedPolicy()
 }
 
 func conversationArchived(store *TaskStore, taskId string) bool {

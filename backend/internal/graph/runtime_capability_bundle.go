@@ -337,7 +337,6 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	})
 	runtimePolicyDigest := capabilityBundleDigest(map[string]any{
 		"bundleRuntimePolicyDigest": version.RuntimePolicyDigest,
-		"accessPolicyDigest":        capabilityAccessDigest(options.Access),
 		"readOnly":                  options.ReadOnly,
 		"piExtensionRuntime": map[string]any{
 			"env": loaded.Env, "readRoots": readRoots, "writeRoots": loaded.WriteRoots, "networkDomains": loaded.NetworkDomains,

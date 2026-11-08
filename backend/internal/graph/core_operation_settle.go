@@ -173,8 +173,7 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 	}
 	l.store.ResolveOperationQuestions(operation.Id, map[string]any{"result": result})
 	CloseUserWaitForOperation(l.store, operation.Id)
-	autoApprovedPermission := result.Outcome == "waiting" && result.Question != nil && result.Question.Grant != nil &&
-		operation.AccessPolicy != nil && operation.AccessPolicy.AutoApprove.Permission
+	autoApprovedPermission := result.Outcome == "waiting" && result.Question != nil && result.Question.Grant != nil
 	if result.Outcome == "waiting" {
 		if result.Question == nil || strings.TrimSpace(result.Question.Prompt) == "" {
 			Raise("invalid_result", "Waiting requires a question")

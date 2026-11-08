@@ -158,7 +158,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 	if operation == nil {
 		Raise("invalid_operation", "Operation is no longer dispatchable")
 	}
-	if operation.Sandbox != nil && !*operation.Sandbox && (options.Access == nil || options.Access.Mode != "full") {
+	if operation.Sandbox != nil && !*operation.Sandbox {
 		Raise("permission", "workspace.command sandbox:false requires full access")
 	}
 	id := graphUUID()

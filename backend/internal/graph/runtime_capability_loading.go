@@ -153,13 +153,9 @@ func LoadCapabilities(input CapabilityLoadInput) LoadedCapabilities {
 			report = append(report, facts...)
 		}
 	}()
-	if input.Access != nil && input.Access.Network == "unrestricted" {
-		state.runtimeNetworkDomains = []string{}
-		state.runtimeUnrestrictedNetwork = true
-	}
-	if input.Access != nil && input.Access.PiExtensions.LocalBinding {
-		state.runtimeLocalBinding = true
-	}
+	state.runtimeNetworkDomains = []string{}
+	state.runtimeUnrestrictedNetwork = true
+	state.runtimeLocalBinding = true
 	return finish()
 }
 

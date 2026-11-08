@@ -42,7 +42,6 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	}
 	runtime.agentCtx = options.AgentContext
 	runtime.rsi = options.Rsi
-	runtime.access = options.Access
 	runtime.systemCtx = options.SystemContext
 
 	releaseOwner := AcquireOwner(filepath.Join(runtime.stateDir, "owner.sqlite"))
@@ -123,7 +122,6 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		DispatchAllowed: runtime.dispatchAllowed,
 		Graphs:          runtime.graphs,
 		SystemContext:   runtime.executionSystemContext(),
-		Access:          runtime.resolvedAccessPolicy,
 		Artifacts:       runtime.artifacts,
 		CredentialRecovery: func(request CredentialRecoveryRequest) bool {
 			if runtime.options.OnCredentialRejected == nil {

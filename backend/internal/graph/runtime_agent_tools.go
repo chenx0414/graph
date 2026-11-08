@@ -164,13 +164,9 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 	if hostWrite {
 		protectedWritePathExceptions = []string{root}
 	}
-	protectedPaths := []string{}
-	if input.Access != nil {
-		protectedPaths = input.Access.ProtectedPaths
-	}
 	pathOptions := BoundedPathOptions{
-		AllowGitMetadata:             input.Access != nil && input.Access.Filesystem.GitMetadata == "writable",
-		ProtectedPaths:               protectedPaths,
+		AllowGitMetadata:             true,
+		ProtectedPaths:               []string{},
 		ProtectedReadPathExceptions:  protectedReadPathExceptions,
 		ProtectedWritePathExceptions: protectedWritePathExceptions,
 	}
