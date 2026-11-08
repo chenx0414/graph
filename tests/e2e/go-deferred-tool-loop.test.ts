@@ -87,8 +87,7 @@ test.skipIf(!nestedSandboxAllowed())('A7 后台结果把模型重新拉进同一
   const service_ = await service(root, project, [
     { tool: { id: 'call-a', name: 'bash', input: { command: `while [ ! -f ${gate} ]; do sleep 0.2; done; echo marker-a`, async: true } } },
     { text: '后台命令已受理。' },
-    { text: '第一条结果到达后，我又跑了一次命令。' },
-    { tool: { id: 'call-follow', name: 'bash', input: { command: 'echo follow-up-marker' } } },
+    { text: '第一条结果到达后，我又跑了一次命令。', tool: { id: 'call-follow', name: 'bash', input: { command: 'echo follow-up-marker' } } },
     { text: '跟进命令也跑完了。' },
   ])
   const created = await service_.request('/api/conversations', {
@@ -103,7 +102,7 @@ test.skipIf(!nestedSandboxAllowed())('A7 后台结果把模型重新拉进同一
   await writeFile(gate, 'go')
 
   await expect.poll(async () => (await service_.messages(conversationId))
-    .filter(message => message.role === 'assistant' && message.text.includes('第一条结果到达后')).length, {
+    .filter(message => message.text.includes('第一条结果到达后')).length, {
     timeout: 90_000, interval: 250,
   }).toBe(1)
 
@@ -116,7 +115,7 @@ test.skipIf(!nestedSandboxAllowed())('A7 后台结果把模型重新拉进同一
   expect(calls.find(call => call.toolCallId === 'call-a')?.result ?? '', '第一条结果里没有命令输出').toContain('marker-a')
 
   const history = await service_.messages(conversationId)
-  expect(assistantText(history).match(/marker-a/g) ?? [], '同一条结果被播报超过一次').toHaveLength(1)
+  expect(history.filter(message => message.text.includes('marker-a')), '同一条结果被播报超过一次').toHaveLength(1)
   const resumes = history.filter(message => (message.data as { source?: { kind?: string } } | null)?.source?.kind === 'tool_settled')
   expect(resumes.length, '结算应该拉起一次，实际 ' + String(resumes.length)).toBe(1)
 }, 240_000)
