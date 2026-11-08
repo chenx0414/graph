@@ -285,8 +285,12 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		}
 	}
 	var cacheHitRate any
+	if knownMasterUsage.RequestCacheHitRate != nil {
+		cacheHitRate = *knownMasterUsage.RequestCacheHitRate
+	}
+	var cacheHitRateTotal any
 	if knownMasterUsage.CacheInput > 0 {
-		cacheHitRate = float64(knownMasterUsage.CachedInput) / float64(knownMasterUsage.CacheInput)
+		cacheHitRateTotal = float64(knownMasterUsage.CachedInput) / float64(knownMasterUsage.CacheInput)
 	}
 	var contextPercent any
 	if knownMasterUsage.ContextTokens != nil && contextWindow > 0 {
@@ -300,6 +304,7 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		"model":           masterModel,
 		"thinkingLevel":   conversation.ThinkingLevel,
 		"cacheHitRate":    cacheHitRate,
+		"cacheHitRateTotal": cacheHitRateTotal,
 		"cachedInput":     knownMasterUsage.CachedInput,
 		"cacheInput":      knownMasterUsage.CacheInput,
 		"cacheReadTokens": knownMasterUsage.CacheReadTokens,

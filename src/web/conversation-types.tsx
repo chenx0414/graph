@@ -148,6 +148,7 @@ export type ConversationView = {
     model: string | null;
     thinkingLevel: string;
     cacheHitRate: number | null;
+    cacheHitRateTotal?: number | null;
     cachedInput: number;
     cacheInput: number;
     cacheReadTokens?: number | null;

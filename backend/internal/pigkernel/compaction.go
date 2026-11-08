@@ -142,6 +142,14 @@ func (session *Session) compactionReported(task durable.TaskId) bool {
 	return reported
 }
 
+func (session *Session) ContextEstimate(ctx context.Context) (int, error) {
+	view, err := session.conversation.Context(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	return estimateContextTokens(view.Messages), nil
+}
+
 func (session *Session) PrepareContext(ctx context.Context, budget int, compactAt int, pending string, instructions string, handoff string) (reset bool, compacted bool, estimated int, err error) {
 	if budget <= 0 {
 		return false, false, 0, nil

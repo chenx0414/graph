@@ -155,6 +155,7 @@ type ConversationMasterUsageView struct {
 	CacheInput      int64  `json:"cacheInput"`
 	ContextTokens   *int64 `json:"contextTokens"`
 	CacheReadTokens *int64 `json:"cacheReadTokens"`
+	RequestCacheHitRate *float64 `json:"requestCacheHitRate"`
 	CacheUsedAt     *int64 `json:"cacheUsedAt"`
 	OutputTokens    *int64   `json:"outputTokens"`
 	LatencyMs       *int64   `json:"latencyMs"`

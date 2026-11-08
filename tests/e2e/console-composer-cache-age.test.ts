@@ -34,6 +34,7 @@ interface ConversationView {
   messages: { role: string; text?: string }[];
   telemetry: {
     cacheHitRate: number | null;
+    cacheHitRateTotal: number | null;
     cachedInput: number;
     cacheInput: number;
     cacheReadTokens: number | null;
@@ -112,7 +113,10 @@ test('the composer footer reports the cached prefix and how long ago it was read
   // from the cache, and when that request settled.
   const view = await conversationView(daemon, conversationId);
   expect(view.telemetry.cacheReadTokens).toBe(900);
-  expect(view.telemetry.cacheHitRate).toBeCloseTo(900 / 2_100, 6);
+  // The rate and the token count describe the same request: 900 cached of that
+  // request's 1_100 input tokens. The session-wide rate is a separate number.
+  expect(view.telemetry.cacheHitRate).toBeCloseTo(900 / 1_100, 6);
+  expect(view.telemetry.cacheHitRateTotal).toBeCloseTo(900 / 2_100, 6);
   expect(view.telemetry.cacheUsedAt).not.toBeNull();
   const settledAt = view.telemetry.cacheUsedAt as number;
   expect(Math.abs(Date.now() - settledAt)).toBeLessThan(5 * 60_000);
@@ -124,9 +128,9 @@ test('the composer footer reports the cached prefix and how long ago it was read
   await page.getByTestId('conversation').waitFor();
   const cache = cacheText(page);
   await cache.waitFor();
-  // The footer reads 43% (900 of 2100 input tokens), the 900 tokens the last
-  // request really read, and how fresh that is.
-  await expect.poll(async () => await cache.innerText(), { timeout: 15_000 }).toMatch(/缓存 43%.*900.*刚刚/);
+  // The footer reads 82% (900 of that request's 1_100 input tokens), the 900
+  // tokens the last request really read, and how fresh that is.
+  await expect.poll(async () => await cache.innerText(), { timeout: 15_000 }).toMatch(/缓存 82%.*900.*刚刚/);
   expect(Number(await cache.getAttribute('data-cache-used-at'))).toBe(settledAt);
   // The tooltip says where the number comes from, and that no provider reports
   // an expiry instant - the word "过期" is not claimed as a known deadline.
@@ -146,7 +150,7 @@ test('the composer footer reports the cached prefix and how long ago it was read
   }, { timeout: 10_000 }).toBe(settledAt - 240_000);
   await page.reload();
   await page.getByTestId('conversation').waitFor();
-  await expect.poll(async () => await cacheText(page).innerText(), { timeout: 15_000 }).toMatch(/缓存 43%.*900.*4 分钟前/);
+  await expect.poll(async () => await cacheText(page).innerText(), { timeout: 15_000 }).toMatch(/缓存 82%.*900.*4 分钟前/);
   await page.screenshot({ path: join(evidenceDir(root, 'composer-cache-age'), 'aged.png'), fullPage: false });
 
   // A turn that is still running records its own provider call before its operation

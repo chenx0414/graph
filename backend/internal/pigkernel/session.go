@@ -61,11 +61,13 @@ type SessionTurn struct {
 }
 
 type Usage struct {
-	Input      int `json:"input"`
-	Output     int `json:"output"`
-	CacheRead  int `json:"cacheRead"`
-	CacheWrite int `json:"cacheWrite"`
-	Total      int `json:"total"`
+	Input         int    `json:"input"`
+	Output        int    `json:"output"`
+	CacheRead     int    `json:"cacheRead"`
+	CacheWrite    int    `json:"cacheWrite"`
+	Total         int    `json:"total"`
+	ContextTokens *int64 `json:"contextTokens,omitempty"`
+	DurationMs    *int64 `json:"durationMs,omitempty"`
 }
 
 type sessionContinuation struct {
@@ -293,6 +295,12 @@ func (session *Session) PromptContent(ctx context.Context, content ai.UserConten
 	if interrupted {
 		turn.StopReason = "aborted"
 		turn.ErrorMessage = ""
+	}
+	if turn.Usage != nil {
+		if estimate, err := session.ContextEstimate(ctx); err == nil && estimate > 0 {
+			value := int64(estimate)
+			turn.Usage.ContextTokens = &value
+		}
 	}
 	turn.Inspect = session.Inspect()
 	return turn, nil

@@ -21,6 +21,7 @@ export type ComposerTelemetryView = {
   model: string | null;
   thinkingLevel: string;
   cacheHitRate: number | null;
+  cacheHitRateTotal?: number | null;
   cachedInput: number;
   cacheInput: number;
   cacheReadTokens?: number | null;
@@ -113,9 +114,11 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   const draft = view.options.find(option => option.level === draftLevel);
   const cacheReadTokens = telemetry?.cacheReadTokens ?? null;
   const cacheUsedAt = telemetry?.cacheUsedAt ?? null;
+  const cacheTotal = telemetry?.cacheHitRateTotal ?? null;
   const cacheTitle = [
-    '缓存输入占全部输入 token 的比例。',
-    cacheReadTokens !== null && cacheReadTokens > 0 ? `上次请求有 ${formatTokens(cacheReadTokens)} tokens 命中缓存。` : '',
+    '最近一次已结算请求的缓存命中率：该请求命中缓存的输入 ÷ 该请求全部输入。',
+    cacheReadTokens !== null && cacheReadTokens > 0 ? `该请求有 ${formatTokens(cacheReadTokens)} tokens 命中缓存。` : '',
+    cacheTotal === null ? '' : `本会话累计命中 ${(cacheTotal * 100).toFixed(1)}%。`,
     cacheUsedAt === null ? '' : '服务商不报告缓存过期时刻：缓存由服务端保留并按负载驱逐，空闲越久越可能失效，这里显示的是距上次请求的时间。',
   ].join('');
   return (
@@ -138,7 +141,7 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
         <Icon name="bolt" size={13} />
         TPS {telemetryValue(telemetry?.tokensPerSecond, value => (value >= 10 ? value.toFixed(0) : value.toFixed(1)))}
       </span>
-      <span title="最近一次完成请求使用的输入 token 与模型上下文窗口" data-testid="telemetry-context">
+      <span title="上一轮结束后的上下文估算（PiG 内核计算，与压缩判定同源）与模型上下文窗口" data-testid="telemetry-context">
         <Icon name="graph" size={13} />
         上下文 {telemetryValue(telemetry?.contextTokens, formatTokens)}
         {telemetry?.contextLimit ? ` / ${formatTokens(telemetry.contextLimit)}` : ''}

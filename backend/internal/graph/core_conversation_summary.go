@@ -23,15 +23,17 @@ func ConversationMasterUsage(store *TaskStore, conversationId string) Conversati
 	var contextTokens *int64
 	var cacheReadTokens *int64
 	var cacheUsedAt *int64
+	var requestCacheHitRate *float64
 	for _, row := range rows {
 		text := kernelString(row["usage"])
 		if text == "" {
 			continue
 		}
 		usage := struct {
-			Input      *int64 `json:"input"`
-			CacheRead  *int64 `json:"cacheRead"`
-			CacheWrite *int64 `json:"cacheWrite"`
+			Input         *int64 `json:"input"`
+			CacheRead     *int64 `json:"cacheRead"`
+			CacheWrite    *int64 `json:"cacheWrite"`
+			ContextTokens *int64 `json:"contextTokens"`
 		}{}
 		if err := json.Unmarshal([]byte(text), &usage); err != nil {
 			panic(err)
@@ -53,18 +55,28 @@ func ConversationMasterUsage(store *TaskStore, conversationId string) Conversati
 		cachedInput += cacheRead
 		if kernelString(row["purpose"]) == "completion" && total > 0 {
 			value := total
+			if usage.ContextTokens != nil && *usage.ContextTokens > 0 {
+				value = *usage.ContextTokens
+			}
 			contextTokens = &value
+			requestRate := 0.0
+			if total > 0 {
+				requestRate = float64(cacheRead) / float64(total)
+			}
+			requestRateCopy := requestRate
 			if settled := kernelInt(row["settledAt"]); settled > 0 {
 				read := cacheRead
 				cacheReadTokens = &read
 				usedAt := settled
 				cacheUsedAt = &usedAt
+				requestCacheHitRate = &requestRateCopy
 			}
 		}
 	}
 	outputTokens, latencyMs, tokensPerSecond := masterThroughput(store, conversationId)
 	return ConversationMasterUsageView{
 		CachedInput: cachedInput, CacheInput: cacheInput, ContextTokens: contextTokens,
+		RequestCacheHitRate: requestCacheHitRate,
 		CacheReadTokens: cacheReadTokens, CacheUsedAt: cacheUsedAt,
 		OutputTokens: outputTokens, LatencyMs: latencyMs, TokensPerSecond: tokensPerSecond,
 	}
@@ -93,12 +105,16 @@ func throughputOf(row map[string]any) (*int64, *int64, *float64) {
 		return nil, nil, nil
 	}
 	usage := struct {
-		Output *int64 `json:"output"`
+		Output     *int64 `json:"output"`
+		DurationMs *int64 `json:"durationMs"`
 	}{}
 	if err := json.Unmarshal([]byte(kernelString(row["usage"])), &usage); err != nil {
 		return nil, nil, nil
 	}
 	latency := kernelInt(row["settledAt"]) - kernelInt(row["createdAt"])
+	if usage.DurationMs != nil && *usage.DurationMs > 0 {
+		latency = *usage.DurationMs
+	}
 	if usage.Output == nil || *usage.Output <= 0 || latency <= 0 {
 		return nil, nil, nil
 	}

@@ -16,6 +16,7 @@ type TokenUsage struct {
 	Output      int64   `json:"output"`
 	CacheRead   int64   `json:"cacheRead"`
 	CacheWrite  int64   `json:"cacheWrite"`
+	ContextTokens *int64 `json:"contextTokens,omitempty"`
 	UsageSource *string `json:"usageSource,omitempty"`
 }
 

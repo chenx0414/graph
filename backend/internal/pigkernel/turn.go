@@ -227,7 +227,7 @@ func answerText(ctx context.Context, conversation harness.Conversation, answer d
 				usage = &Usage{
 					Input: reported.Input, Output: reported.Output,
 					CacheRead: reported.CacheRead, CacheWrite: reported.CacheWrite,
-					Total: reported.TotalTokens,
+					Total: reported.TotalTokens, DurationMs: assistant.DurationMs,
 				}
 			}
 			parts := []string{}
