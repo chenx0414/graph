@@ -364,7 +364,9 @@ func (user *TaskRuntimeUser) List() []map[string]any {
     (SELECT MAX(timestamp) FROM events WHERE task_id=t.id) AS updatedAt,
     (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user') AS openQuestions,
     (SELECT COUNT(*) FROM questions WHERE task_id=t.id AND status='open' AND owner='user' AND asked_at IS NOT NULL AND asked_at<=?) AS suspendedQuestions
-    FROM tasks t WHERE t.phase!='chatting' ORDER BY t.created_seq`, NowMillis()-QuestionSuspendedMs)
+    FROM tasks t WHERE t.phase!='chatting'
+    AND (t.conversation_id IS NULL OR t.conversation_id NOT IN (SELECT id FROM conversations WHERE archived_at IS NOT NULL))
+    ORDER BY t.created_seq`, NowMillis()-QuestionSuspendedMs)
 	out := []map[string]any{}
 	for _, row := range rows {
 		status := kernelString(row["phase"])
