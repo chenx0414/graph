@@ -79,7 +79,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			workspace = piAdapterRealpath(root)
 		}
 	}
-	retrieval := piAdapterRetrievalReach(options.Network, input.AccessPolicy, role, observedGate)
+	retrieval := piAdapterRetrievalReach(options.Network, role, observedGate)
 	artifactService := piAdapterArtifactService(options, input, spec, workspace, role)
 
 	var capabilityOperation CapabilityOperation
@@ -190,7 +190,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			commandReadPaths,
 			nil,
 			false,
-			input.AccessPolicy,
 			false,
 			0,
 		)
@@ -314,7 +313,7 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 						})
 					},
 					ProposeSystemChange: func(change AgentToolsSystemChange) map[string]any {
-						return ProposeSystemChange(store, operation.TaskId, operation.NodeId, input.AccessPolicy, SystemChangeProposal{
+						return ProposeSystemChange(store, operation.TaskId, operation.NodeId, SystemChangeProposal{
 							Title: change.Title, Problem: change.Problem, Change: change.Change,
 							Impact: change.Impact, Risk: change.Risk,
 						})

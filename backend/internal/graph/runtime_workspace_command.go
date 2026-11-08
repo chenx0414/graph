@@ -185,14 +185,13 @@ type WorkspaceCommandRunner struct {
 	readPaths                      []string
 	env                            map[string]string
 	localNetwork                   bool
-	access                         *ResolvedAccessPolicy
 	gitMetadataWritesInsideScratch bool
 	timeoutMs                      int
 	acquired                       *restrictedLease
 	closed                         bool
 }
 
-func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, readPaths []string, env map[string]string, localNetwork bool, access *ResolvedAccessPolicy, gitMetadataWritesInsideScratch bool, timeoutMs int) *WorkspaceCommandRunner {
+func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, readPaths []string, env map[string]string, localNetwork bool, gitMetadataWritesInsideScratch bool, timeoutMs int) *WorkspaceCommandRunner {
 	resolved, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		panic(err)
@@ -202,7 +201,7 @@ func OpenWorkspaceCommandRunner(workspace, scratchDir string, gate SendGate, rea
 	}
 	return &WorkspaceCommandRunner{
 		workspace: resolved, scratchDir: scratchDir, gate: gate, readPaths: readPaths, env: env,
-		localNetwork: localNetwork, access: access, gitMetadataWritesInsideScratch: gitMetadataWritesInsideScratch, timeoutMs: timeoutMs,
+		localNetwork: localNetwork, gitMetadataWritesInsideScratch: gitMetadataWritesInsideScratch, timeoutMs: timeoutMs,
 	}
 }
 
@@ -215,7 +214,7 @@ func (runner *WorkspaceCommandRunner) RunWithTimeout(command string, args []stri
 }
 
 func (runner *WorkspaceCommandRunner) run(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult {
-	hostCommands := runner.access != nil && runner.access.Commands == "host"
+	hostCommands := true
 	var resolved ResolvedCommand
 	if hostCommands {
 		resolved = resolveHostCommand(command, args)

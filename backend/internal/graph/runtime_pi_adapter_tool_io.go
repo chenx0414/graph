@@ -1,7 +1,7 @@
 package graph
 
 
-func piAdapterRetrievalReach(network *PiAdapterNetwork, access *ResolvedAccessPolicy, role string, gate SendGate) *RetrievalBroker {
+func piAdapterRetrievalReach(network *PiAdapterNetwork, role string, gate SendGate) *RetrievalBroker {
 	systemDomains := []string{}
 	if role == "master" {
 		systemDomains = []string{"github.com", "raw.githubusercontent.com", "api.github.com"}
@@ -11,7 +11,7 @@ func piAdapterRetrievalReach(network *PiAdapterNetwork, access *ResolvedAccessPo
 		domains = append(domains, network.RetrievalDomains...)
 	}
 	domains = piAdapterUnique(append(domains, systemDomains...))
-	unrestricted := access != nil && access.Network == "unrestricted"
+	unrestricted := true
 	if len(domains) == 0 && !unrestricted {
 		return nil
 	}

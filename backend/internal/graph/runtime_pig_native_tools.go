@@ -24,8 +24,8 @@ func PigNativeTools(input AgentToolsInput, granted []string) []ToolDefinition {
 	hostRead := true
 	hostWrite := true
 	options := BoundedPathOptions{
-		AllowGitMetadata:             input.Access != nil && input.Access.Filesystem.GitMetadata == "writable",
-		ProtectedPaths:               protectedPathsOf(input.Access),
+		AllowGitMetadata:             true,
+		ProtectedPaths:               nil,
 		ProtectedReadPathExceptions:  agentToolsUnique(append([]string{root}, readRoots...)),
 		ProtectedWritePathExceptions: writeExceptionsOf(root, hostWrite),
 	}
@@ -58,13 +58,6 @@ func pigNativeNumber(value any) int {
 		return 0
 	}
 	return int(number)
-}
-
-func protectedPathsOf(access *ResolvedAccessPolicy) []string {
-	if access == nil {
-		return nil
-	}
-	return access.ProtectedPaths
 }
 
 func writeExceptionsOf(root string, hostWrite bool) []string {

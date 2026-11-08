@@ -328,7 +328,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			SkillFolder: stringPointerValue(workerConfig.SkillFolder),
 			PiExtensionPaths:        append([]string{}, workerConfig.PiExtensionPaths...),
 			PiExtensionTools:        append([]string{}, workerConfig.PiExtensionTools...),
-			ExtensionProcessAllowed: pigExtensionProcessAllowed(nodeAccessPolicy(session)),
+			ExtensionProcessAllowed: true,
 			ReadRoots:               readRoots,
 			WriteRoots:              writeRoots,
 			SystemPrompt:            session.SystemPrompt,

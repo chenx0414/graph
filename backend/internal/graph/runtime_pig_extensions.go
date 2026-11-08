@@ -266,17 +266,6 @@ func pigExtensionFailure(text string) ai.ToolResultMessage {
 	}
 }
 
-func pigExtensionProcessAllowed(policy *ResolvedAccessPolicy) bool {
-	return policy == nil || policy.Network == "unrestricted"
-}
-
-func nodeAccessPolicy(session NodeSession) *ResolvedAccessPolicy {
-	if session.Environment == nil {
-		return nil
-	}
-	return session.Environment.Access
-}
-
 var errPiExtensionNotHosted = errors.New("a bound Pi extension could not be hosted")
 
 type piExtensionRefusal struct {

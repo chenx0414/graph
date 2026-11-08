@@ -132,7 +132,7 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 	if options.Gate != nil {
 		gate = *options.Gate
 	}
-	commands := OpenWorkspaceCommandRunner(options.Workspace, filepath.Join(scratchDir, "commands"), gate, nil, nil, false, options.Access, false, 0)
+	commands := OpenWorkspaceCommandRunner(options.Workspace, filepath.Join(scratchDir, "commands"), gate, nil, nil, false, false, 0)
 	operationGate := kernelPassthroughGate()
 	if options.Gate != nil {
 		operationGate = *options.Gate

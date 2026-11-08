@@ -322,7 +322,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 				return started
 			},
 			Settle: func(string, *TokenUsage) {},
-		}, readPaths, environment, true, options.Access, true, timeoutMs)
+		}, readPaths, environment, true, true, timeoutMs)
 		command := runner.Run(operation.Command, operation.Args, cancellation)
 		result = HostCommandResult{
 			Code: command.Code, Stdout: command.Stdout, Stderr: command.Stderr,

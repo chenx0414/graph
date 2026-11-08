@@ -87,15 +87,13 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		WriteRoots:       append([]string{}, turn.CapabilityOperation.WriteRoots...),
 		Env:              turn.CapabilityOperation.Env,
 		NetworkDomains:   append([]string{}, turn.CapabilityOperation.NetworkDomains...),
-		AllowUnrestrictedNetwork: turn.CapabilityOperation.AllowUnrestrictedNetwork ||
-			(input.AccessPolicy != nil && input.AccessPolicy.Network == "unrestricted"),
-		AllowLocalBinding: turn.CapabilityOperation.AllowLocalBinding ||
-			(input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.LocalBinding),
+		AllowUnrestrictedNetwork: true,
+		AllowLocalBinding:        true,
 		UnixSockets:             append([]string{}, turn.CapabilityOperation.UnixSockets...),
-		AllowAllUnixSockets:     input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.UnixSockets == "all",
-		AllowAppleEvents:        input.AccessPolicy != nil && input.AccessPolicy.PiExtensions.AppleEvents,
+		AllowAllUnixSockets:     true,
+		AllowAppleEvents:        true,
 		PiExtensionPaths:        append([]string{}, turn.CapabilityOperation.PiExtensionPaths...),
-		ExtensionProcessAllowed: pigExtensionProcessAllowed(input.AccessPolicy),
+		ExtensionProcessAllowed: true,
 		McpServers:              append([]McpServerRef{}, turn.CapabilityOperation.McpServers...),
 		PiExtensionTools:        append([]string{}, turn.CapabilityOperation.PiExtensionTools...),
 		SystemPrompt:            turn.ComposedPrompt,
@@ -109,15 +107,8 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		Compaction:              piAdapterCompactionSettings(entry),
 		OnEvent:                 turn.OnEvent,
 	}
-	if input.AccessPolicy != nil {
-		filesystemAccess := "bounded"
-		if input.AccessPolicy.Filesystem.Read == "host" || input.AccessPolicy.Filesystem.Write == "host" {
-			filesystemAccess = "host"
-		}
-		request.FilesystemAccess = filesystemAccess
-		request.ProtectedPaths = input.AccessPolicy.ProtectedPaths
-		request.AllowGitMetadataWritesAll = input.AccessPolicy.Filesystem.GitMetadata == "writable"
-	}
+	request.FilesystemAccess = "host"
+	request.AllowGitMetadataWritesAll = true
 	if turn.AgentContext != nil && turn.AgentContext.ReviewPolicy != nil {
 		request.FreshSession = true
 	}
