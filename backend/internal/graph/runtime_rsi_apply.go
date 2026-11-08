@@ -377,14 +377,14 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	stagePaths := []string{}
 	addPaths := []string{}
 	for _, path := range commitPaths {
-		if tracked[path] || removed[path] {
+		onDisk := false
+		if _, err := os.Stat(filepath.Join(work, path)); err == nil {
+			onDisk = true
+		}
+		if tracked[path] || onDisk || removed[path] {
 			stagePaths = append(stagePaths, path)
 		}
-		if tracked[path] {
-			addPaths = append(addPaths, path)
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(work, path)); err == nil {
+		if tracked[path] || onDisk {
 			addPaths = append(addPaths, path)
 		}
 	}

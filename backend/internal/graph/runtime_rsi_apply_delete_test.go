@@ -129,3 +129,32 @@ func TestADeletionAlreadyStagedByHandStillReachesTheCommit(t *testing.T) {
 		t.Fatalf("the commit dropped the hand-staged deletion:\n%s", output)
 	}
 }
+
+func TestAnUntrackedFileOnDiskIsCommittedNotLeftStaged(t *testing.T) {
+	root := rsiApplyRepo(t, map[string]string{"note.txt": "keep me\n"})
+	if err := os.WriteFile(filepath.Join(root, "keeper.txt"), []byte("keeper content\n"), 0o600); err != nil {
+		t.Fatalf("write keeper.txt: %v", err)
+	}
+	receipt := rsiApplyReceipt(t, root, []any{
+		map[string]any{"path": "note.txt", "action": "write", "content": "changed\n"},
+		map[string]any{"path": "keeper.txt", "action": "write", "fromPath": "keeper.txt"},
+	})
+	if receipt.Status != "applied" || receipt.Commit == nil {
+		t.Fatalf("the change produced no commit: status=%q commit=%v", receipt.Status, receipt.Commit)
+	}
+	output, err := exec.Command("git", "-C", root, "show", "--pretty=format:", "--name-only", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v\n%s", err, output)
+	}
+	names := strings.Fields(string(output))
+	if len(names) != 2 || names[0] != "keeper.txt" && names[1] != "keeper.txt" {
+		t.Fatalf("the commit does not carry the untracked file: %v", names)
+	}
+	status, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, status)
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		t.Fatalf("the change left work staged or dirty:\n%s", status)
+	}
+}
