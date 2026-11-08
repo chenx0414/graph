@@ -182,6 +182,9 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 55 {
 		execMigration(db, schemaV55)
 	}
+	if version < 56 {
+		execMigration(db, schemaV56)
+	}
 	if version < 57 {
 		execMigration(db, schemaV57)
 	}

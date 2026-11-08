@@ -62,7 +62,7 @@ func ConversationActivityRecords(activity any, reply string) []ConversationActiv
 }
 
 func PersistConversationActivity(store *TaskStore, conversationId, operationId string, turn int,
-	records []ConversationActivityRecord, activeToolIds map[string]bool) {
+	records []ConversationActivityRecord, activeToolIds map[string]bool, runningToolIds map[string]bool) {
 	type activityRow struct {
 		id    string
 		data  string
@@ -91,6 +91,10 @@ func PersistConversationActivity(store *TaskStore, conversationId, operationId s
 	}
 	for index, record := range records {
 		key := conversationActivityKey(record, index)
+		deferred := conversationDeferredToolCall(store, conversationId, record)
+		if deferred != nil {
+			record = conversationDeferredToolRecord(record, *deferred)
+		}
 		previous, hasPrevious := byKey[key]
 		previousData := map[string]any{}
 		if hasPrevious && previous.data != "" {
@@ -115,9 +119,18 @@ func PersistConversationActivity(store *TaskStore, conversationId, operationId s
 			}
 		}
 		state := string(MessageStateDone)
-		if record.Kind == ConversationActivityTool {
+		if deferred != nil {
+			switch {
+			case DeferredToolCallActive(deferred.State):
+				state = string(MessageStateRunning)
+			case deferred.State != DeferredToolSettled:
+				state = string(MessageStateFailed)
+			}
+		} else if record.Kind == ConversationActivityTool {
 			toolCallId, _ := record.Data["toolCallId"].(string)
-			if activeToolIds[toolCallId] {
+			if runningToolIds[toolCallId] {
+				state = string(MessageStateRunning)
+			} else if activeToolIds[toolCallId] {
 				state = string(MessageStatePending)
 			}
 		}
@@ -148,4 +161,21 @@ func PersistConversationActivity(store *TaskStore, conversationId, operationId s
 			MessageID:      messageId,
 		})
 	}
+}
+
+func conversationDeferredToolCall(store *TaskStore, conversationId string, record ConversationActivityRecord) *DeferredToolCall {
+	if record.Kind != ConversationActivityTool {
+		return nil
+	}
+	toolCallId, _ := record.Data["toolCallId"].(string)
+	if toolCallId == "" {
+		return nil
+	}
+	return DeferredToolCallByModelCall(store, conversationId, toolCallId)
+}
+
+func conversationDeferredToolRecord(record ConversationActivityRecord, call DeferredToolCall) ConversationActivityRecord {
+	record.Data = deferredToolRowData(record.Data, call)
+	record.Text = deferredToolObservationText(call)
+	return record
 }

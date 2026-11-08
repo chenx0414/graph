@@ -17,6 +17,8 @@ type ToolDefinition struct {
 	PrepareArguments func(args any) any
 	Execute          func(toolCallId string, params any) (any, error)
 	ExternallyGated  bool
+	Async            bool
+	Deferred         func(toolCallId string, params any, signal *AbortSignal) (any, error)
 }
 
 type AgentToolsGraphManagement struct {

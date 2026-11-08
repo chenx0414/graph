@@ -101,7 +101,8 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 			activity = output["toolActivity"]
 		}
 		records := ConversationActivityRecords(activity, reply)
-		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil)
+		PersistConversationActivity(store, conversation.Id, operation.Id, operation.Attempt, records, nil,
+			LiveDeferredToolCallIds(store, conversation.Id))
 		if reply != "" && !alreadyReplied {
 			AppendMessage(store, MessageInput{
 				ConversationID: conversation.Id,

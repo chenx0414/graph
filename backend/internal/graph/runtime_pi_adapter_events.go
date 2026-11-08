@@ -154,6 +154,7 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if live.conversation == nil {
 			return
 		}
+		deferred := live.bindDeferredStart(toolName, toolCallId, event["args"])
 		summary := summarizeToolCall(toolName, event["args"])
 		live.toolSummaries[toolCallId] = summary
 		callOrdinal := live.nextOrdinal()
@@ -164,7 +165,10 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		live.flushDeltas(true)
 		live.activeConversationTools[toolCallId] = true
 		PersistConversationActivity(live.store, live.conversation.Id, live.operation.Id, live.operation.Attempt,
-			ConversationActivityRecords(live.activity, ""), live.activeConversationTools)
+			ConversationActivityRecords(live.activity, ""), live.activeConversationTools, deferredRunningIds(deferred))
+		if deferred != nil && !DeferredToolCallActive(deferred.State) {
+			SettleConversationToolCall(live.store, *deferred)
+		}
 		live.store.Event(live.operation.TaskId, "message.tool", map[string]any{
 			"operationId": live.operation.Id, "phase": "start", "toolCallId": toolCallId, "toolName": toolName,
 			"summary": summary, "ordinal": callOrdinal,
@@ -199,9 +203,13 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if summary == "" {
 			summary = toolName
 		}
+		deferred := live.bindDeferredEnd(toolCallId, event["result"])
 		state := "done"
 		if isError {
 			state = "error"
+		}
+		if deferred != nil && DeferredToolCallActive(deferred.State) {
+			state = "running"
 		}
 		live.toolActivity = append(live.toolActivity, PiAdapterToolActivity{
 			ToolCallId: toolCallId, Name: toolName, Summary: summary, State: state,
@@ -216,7 +224,10 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		}
 		delete(live.activeConversationTools, toolCallId)
 		PersistConversationActivity(live.store, live.conversation.Id, live.operation.Id, live.operation.Attempt,
-			ConversationActivityRecords(live.activity, ""), live.activeConversationTools)
+			ConversationActivityRecords(live.activity, ""), live.activeConversationTools, deferredRunningIds(deferred))
+		if deferred != nil {
+			SettleConversationToolCall(live.store, *deferred)
+		}
 		live.store.Event(live.operation.TaskId, "message.tool", map[string]any{
 			"operationId": live.operation.Id, "phase": "end", "toolCallId": toolCallId, "toolName": toolName,
 			"summary": summary, "isError": isError, "ordinal": live.toolOrdinals[toolCallId],
@@ -287,9 +298,36 @@ func compactionNotice(data map[string]any) string {
 	return notice
 }
 
+func (live *piAdapterLiveTurn) bindDeferredStart(toolName, toolCallId string, args any) *DeferredToolCall {
+	id, ok := claimDeferredToolStart(live.operation.Id, toolName, args)
+	if !ok {
+		return nil
+	}
+	return BindDeferredToolCallModelCall(live.store, id, toolCallId)
+}
+
+func (live *piAdapterLiveTurn) bindDeferredEnd(toolCallId string, result any) *DeferredToolCall {
+	text := ToolResultText(result, 2_000)
+	id, ok := deferredToolReceiptOf(text)
+	if !ok {
+		return DeferredToolCallByModelCall(live.store, live.conversationId(), toolCallId)
+	}
+	return BindDeferredToolCallModelCall(live.store, id, toolCallId)
+}
+
 func (live *piAdapterLiveTurn) conversationId() string {
 	if live.conversation == nil {
 		return ""
 	}
 	return live.conversation.Id
+}
+
+func deferredRunningIds(call *DeferredToolCall) map[string]bool {
+	if call == nil || !DeferredToolCallActive(call.State) {
+		return nil
+	}
+	if len(call.ToolCallId) >= len(deferredToolCallPlaceholderPrefix) && call.ToolCallId[:len(deferredToolCallPlaceholderPrefix)] == deferredToolCallPlaceholderPrefix {
+		return nil
+	}
+	return map[string]bool{call.ToolCallId: true}
 }

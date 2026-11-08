@@ -157,6 +157,15 @@ func pigToolSpecs(store *TaskStore, request AgentSessionRequest) []pigkernel.Too
 					params = map[string]any{}
 				}
 				started := time.Now()
+				if deferredToolWantsBackground(definition, params) {
+					receipt, failure := admitDeferredCall(store, request, definition, params)
+					if failure != nil {
+						recordPigToolCall(request, definition.Name, started, true)
+						return nil, failure
+					}
+					recordPigToolCall(request, definition.Name, started, false)
+					return receipt, nil
+				}
 				value := gated(graphUUID(), params, ctx)
 				if failure, ok := value.(error); ok {
 					recordPigToolCall(request, definition.Name, started, true)

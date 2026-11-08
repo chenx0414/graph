@@ -90,3 +90,41 @@ test('an ordinary user message keeps its bubble even when it quotes a notice', (
 
   expect(rows.map(row => row.kind)).toEqual(['message']);
 });
+
+test('a finished background command is a system row, not a queued user message', () => {
+  const rows = buildTranscriptRows({
+    messages: [{
+      ...message({ id: 'settled', seq: 1, role: 'user', text: 'bash 已经结束（settled），结果在会话的工具调用里；请读它继续。' }),
+      state: 'done',
+      data: { source: { kind: 'tool_settled', toolName: 'bash', toolCallId: 'call-1', state: 'settled' } },
+    }],
+    streaming: [], liveTools: [], busy: false,
+  });
+
+  expect(rows.map(row => row.kind)).toEqual(['toolSettled']);
+  expect(rows[0]).toMatchObject({ tool: 'bash', state: 'settled' });
+});
+
+test('a background tool result never shows up as a message waiting in the queue', () => {
+  const record = {
+    ...message({ id: 'settled', seq: 1, role: 'user', text: 'bash 已经结束（settled）' }),
+    state: 'queued' as const,
+    data: { source: { kind: 'tool_settled', toolName: 'bash' } },
+  };
+  const typed = { ...message({ id: 'typed', seq: 2, role: 'user', text: '再跑一条' }), state: 'queued' as const };
+  const snapshot = conversationProjectionSnapshot({
+    records: { settled: record, typed }, liveText: {}, liveTools: {}, streamNeedsResync: false,
+  } as unknown as ConversationProjectionState, { busy: true });
+
+  expect(snapshot.queuedMessages.map(entry => entry.id)).toEqual(['typed']);
+});
+
+test('a background result steered into the running turn is a system row too', () => {
+  const settle = {
+    ...message({ id: 'settled', seq: 2, role: 'user', text: 'bash 已经结束（settled）' }),
+    state: 'delivered' as const,
+    data: { source: { kind: 'tool_settled', toolName: 'bash', state: 'settled' } },
+  };
+  const rows = buildTranscriptRows({ messages: [settle], streaming: [], liveTools: [], busy: true });
+  expect(rows[0]?.kind).toBe('toolSettled');
+});

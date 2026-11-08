@@ -73,6 +73,7 @@ func (runtime *TaskRuntime) SyncProjects() {
 
 func (runtime *TaskRuntime) RecoverMasters() int {
 	runtime.ensureOpen()
+	RecoverDeferredToolCalls(runtime.store)
 	if runtime.master == nil || runtime.masterModel() == nil || runtime.masterDefinitionVersion() == nil {
 		return 0
 	}

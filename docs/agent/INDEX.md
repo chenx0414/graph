@@ -30,6 +30,7 @@
 | `provider-authorization.md` | 需要接通 OpenRouter 浏览器授权或 Grok / xAI 设备码登录，或排查授权状态机、令牌刷新、断开凭据 |
 | `agent-recipes.md` | 需要新建/改描述/删除子 Agent 配方，或核对配方编译结果 |
 | `troubleshooting.md` | 任务卡住、工具失败、模型不可用、恢复不确定或用户报告异常 |
+| `async-tool-execution.md` | 需要理解或修改长工具如何挂起/恢复：异步工具的范围、取消与超时、requestId 幂等、延迟结果如何回到模型与会话 |
 
 ## 事实优先级
 
