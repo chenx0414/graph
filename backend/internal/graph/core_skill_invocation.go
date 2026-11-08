@@ -17,9 +17,8 @@ const SKILL_BODY_LIMIT = 40000
 const SKILL_TOTAL_LIMIT = 120000
 
 type BoundSkill struct {
-	Name    string  `json:"name"`
-	Path    string  `json:"path"`
-	Version *string `json:"version,omitempty"`
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 type SkillRejection struct {
@@ -50,8 +49,7 @@ func BoundSkills(facts []struct {
 		if record := catalog.Capability(fact.Id, fact.Version); record != nil && record.Name != "" {
 			name = record.Name
 		}
-		version := fact.Version
-		out = append(out, BoundSkill{Name: name, Path: fact.Path, Version: &version})
+		out = append(out, BoundSkill{Name: name, Path: fact.Path})
 	}
 	return out
 }
@@ -74,6 +72,13 @@ func RequestedSkillNames(text string) []string {
 		}
 	}
 	return names
+}
+
+func skillBaseDir(path string) string {
+	if strings.HasSuffix(path, ".md") {
+		return filepath.Dir(path)
+	}
+	return path
 }
 
 func skillBodyPath(path string) string {
@@ -139,13 +144,9 @@ func InjectRequestedSkills(text string, skills []BoundSkill, names []string) Ski
 		}
 		budget -= utf16Len(*body)
 		injected = append(injected, name)
-		version := ""
-		if skill.Version != nil && *skill.Version != "" {
-			version = fmt.Sprintf(` version="%s"`, *skill.Version)
-		}
 		blocks = append(blocks, strings.Join([]string{
-			fmt.Sprintf(`<skill name="%s"%s location="%s">`, name, version, skillBodyPath(skill.Path)),
-			"References are relative to " + skill.Path + ".",
+			fmt.Sprintf(`<skill name="%s" location="%s">`, name, skillBodyPath(skill.Path)),
+			"References are relative to " + skillBaseDir(skill.Path) + ".",
 			"",
 			trimEnd(*body),
 			"</skill>",

@@ -4,9 +4,20 @@ package graph
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+var pigSkillBlockRe = regexp.MustCompile(`^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n</skill>(?:\n\n([\s\S]+))?$`)
+
+func pigSkillBlock(text string) []string {
+	start := strings.Index(text, "<skill ")
+	if start < 0 {
+		return nil
+	}
+	return pigSkillBlockRe.FindStringSubmatch(strings.TrimRight(text[start:], "\n"))
+}
 
 func skillFixture(t *testing.T, name, body string) BoundSkill {
 	t.Helper()
@@ -18,8 +29,7 @@ func skillFixture(t *testing.T, name, body string) BoundSkill {
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	version := "v1"
-	return BoundSkill{Name: name, Path: dir, Version: &version}
+	return BoundSkill{Name: name, Path: dir}
 }
 
 func TestSlashSkillInjectsTheBoundSkillBodyForTheTurn(t *testing.T) {
@@ -41,8 +51,8 @@ func TestSlashSkillInjectsTheBoundSkillBodyForTheTurn(t *testing.T) {
 	if strings.Contains(result.Text, "---\nname: architect") {
 		t.Fatalf("the front matter was injected with the body")
 	}
-	if !strings.Contains(result.Text, `<skill name="architect" version="v1" location="`+skillBodyPath(skill.Path)+`">`) {
-		t.Fatalf("the injected block does not name the skill, its version and its file")
+	if !strings.Contains(result.Text, `<skill name="architect" location="`+skillBodyPath(skill.Path)+`">`) {
+		t.Fatalf("the injected block does not name the skill and its file")
 	}
 	if !strings.HasPrefix(result.Text, "plan the change /skill:architect please") {
 		t.Fatalf("the user text was rewritten instead of extended: %q", result.Text)
@@ -114,7 +124,37 @@ func TestSlashSkillNamesItsFileAndTheDirectoryRelativeReferencesResolveAgainst(t
 	if !strings.Contains(result.Text, `location="`+location+`"`) {
 		t.Fatalf("the block must name the file it was read from (%s):\n%s", location, result.Text)
 	}
-	if !strings.Contains(result.Text, "References are relative to "+skill.Path+".") {
+	if !strings.Contains(result.Text, "References are relative to "+skill.Path+".\n") {
 		t.Fatalf("the block must say what directory relative paths resolve against (%s):\n%s", skill.Path, result.Text)
+	}
+}
+
+func TestTheInjectedSkillBlockUsesThePiGShape(t *testing.T) {
+	skill := skillFixture(t, "architect", "# Architect\n\nRun scripts/build.sh before you draw anything.")
+	result := InjectRequestedSkills("/skill:architect", []BoundSkill{skill}, nil)
+	block := pigSkillBlock(result.Text)
+	if block == nil {
+		t.Fatalf("the injected block does not parse as a PiG skill block: %q", result.Text)
+	}
+	if block[1] != "architect" {
+		t.Fatalf("block names %q", block[1])
+	}
+	if block[2] != filepath.Join(skill.Path, "SKILL.md") {
+		t.Fatalf("location is %q instead of the skill file", block[2])
+	}
+	if !strings.HasPrefix(block[3], "References are relative to "+skill.Path+".\n") {
+		t.Fatalf("base directory hint missing or wrong: %q", block[3])
+	}
+	if !strings.Contains(block[3], "Run scripts/build.sh before you draw anything.") {
+		t.Fatalf("body missing from the block: %q", block[3])
+	}
+}
+
+func TestASkillPathPointingAtTheFileStillNamesItsDirectory(t *testing.T) {
+	skill := skillFixture(t, "architect", "body")
+	file := BoundSkill{Name: "architect", Path: filepath.Join(skill.Path, "SKILL.md")}
+	result := InjectRequestedSkills("/skill:architect", []BoundSkill{file}, nil)
+	if !strings.Contains(result.Text, "References are relative to "+skill.Path+".\n") {
+		t.Fatalf("base directory was the file itself: %q", result.Text)
 	}
 }
