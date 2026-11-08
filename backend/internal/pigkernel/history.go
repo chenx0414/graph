@@ -4,106 +4,54 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
-	"unicode/utf16"
 
+	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable"
 )
 
 
-const (
-	estimateCharsPerToken = 3.5
-	estimateImageChars = 4800
-)
-
 func estimateContextTokens(messages []ai.Message) int {
-	anchor := 0.0
-	start := 0
-	for index := len(messages) - 1; index >= 0; index-- {
-		assistant, ok := messages[index].(ai.AssistantMessage)
-		if !ok {
-			continue
-		}
-		measured := assistant.Usage.TotalTokens
-		if measured <= 0 {
-			measured = assistant.Usage.Input + assistant.Usage.Output + assistant.Usage.CacheRead + assistant.Usage.CacheWrite
-		}
-		if measured <= 0 {
-			continue
-		}
-		anchor = float64(measured)
-		start = index + 1
-		break
-	}
-	total := anchor
-	for _, message := range messages[start:] {
-		total += estimateMessageTokens(message)
-	}
-	return int(math.Ceil(total))
+	return agent.EstimateContextTokens(agentMessages(messages)).Tokens
 }
 
 func estimateTextTokens(text string) float64 {
 	if text == "" {
 		return 0
 	}
-	return math.Ceil(float64(utf16Units(text)) / estimateCharsPerToken)
+	user := agent.UserMessage{Role: "user", Content: ai.UserText(text)}
+	return float64(agent.EstimateTokens(agent.AgentMessage{User: &user}))
 }
 
-func estimateMessageTokens(message ai.Message) float64 {
-	chars := 0
-	switch value := message.(type) {
-	case ai.UserMessage:
-		chars += userContentChars(value.Content)
-	case ai.AssistantMessage:
-		for _, block := range value.Content {
-			switch content := block.(type) {
-			case ai.TextContent:
-				chars += utf16Units(content.Text)
-			case ai.ThinkingContent:
-				chars += utf16Units(content.Thinking)
-			case ai.ToolCall:
-				chars += utf16Units(content.Name)
-				if encoded, err := json.Marshal(content.Arguments); err == nil {
-					chars += utf16Units(string(encoded))
-				}
+func agentMessages(messages []ai.Message) []agent.AgentMessage {
+	out := make([]agent.AgentMessage, 0, len(messages))
+	for _, message := range messages {
+		switch value := message.(type) {
+		case ai.UserMessage:
+			user := agent.UserMessage{Role: "user", Content: value.Content, Timestamp: value.Timestamp}
+			out = append(out, agent.AgentMessage{User: &user})
+		case ai.AssistantMessage:
+			usage := value.Usage
+			assistant := agent.AssistantMessage{
+				Role: "assistant", Content: value.Content, Usage: &usage,
+				StopReason: value.StopReason, Timestamp: value.Timestamp,
 			}
-		}
-	case ai.ToolResultMessage:
-		for _, block := range value.Content {
-			switch content := block.(type) {
-			case ai.TextContent:
-				chars += utf16Units(content.Text)
-			case ai.ImageContent:
-				chars += estimateImageChars
+			out = append(out, agent.AgentMessage{Assistant: &assistant})
+		case ai.ToolResultMessage:
+			usage := value.Usage
+			result := agent.ToolResultMessage{
+				Role: "toolResult", ToolCallID: value.ToolCallID, ToolName: value.ToolName,
+				Content: value.Content, IsError: value.IsError, Timestamp: value.Timestamp,
 			}
+			if usage != nil {
+				copied := *usage
+				result.Usage = &copied
+			}
+			out = append(out, agent.AgentMessage{ToolResult: &result})
 		}
 	}
-	return math.Ceil(float64(chars) / estimateCharsPerToken)
-}
-
-func userContentChars(content ai.UserContent) int {
-	switch value := content.(type) {
-	case ai.UserText:
-		return utf16Units(string(value))
-	case ai.UserContentBlocks:
-		chars := 0
-		for _, block := range value {
-			switch content := block.(type) {
-			case ai.TextContent:
-				chars += utf16Units(content.Text)
-			case ai.ImageContent:
-				chars += estimateImageChars
-			}
-		}
-		return chars
-	}
-	return 0
-}
-
-func utf16Units(value string) int {
-	return len(utf16.Encode([]rune(value)))
+	return out
 }
 
 const historyToolName = "history_search"
