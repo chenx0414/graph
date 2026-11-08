@@ -41,8 +41,8 @@ func TestSlashSkillInjectsTheBoundSkillBodyForTheTurn(t *testing.T) {
 	if strings.Contains(result.Text, "---\nname: architect") {
 		t.Fatalf("the front matter was injected with the body")
 	}
-	if !strings.Contains(result.Text, `<skill name="architect" version="v1">`) {
-		t.Fatalf("the injected block does not name the skill and its version")
+	if !strings.Contains(result.Text, `<skill name="architect" version="v1" location="`+skillBodyPath(skill.Path)+`">`) {
+		t.Fatalf("the injected block does not name the skill, its version and its file")
 	}
 	if !strings.HasPrefix(result.Text, "plan the change /skill:architect please") {
 		t.Fatalf("the user text was rewritten instead of extended: %q", result.Text)
@@ -104,5 +104,17 @@ func TestSlashSkillClipsABodyThatWouldFloodTheTurn(t *testing.T) {
 	}
 	if len([]rune(result.Text)) > SKILL_BODY_LIMIT+4000 {
 		t.Fatalf("the turn text grew to %d characters", len([]rune(result.Text)))
+	}
+}
+
+func TestSlashSkillNamesItsFileAndTheDirectoryRelativeReferencesResolveAgainst(t *testing.T) {
+	skill := skillFixture(t, "scripts", "# Scripts\n\nRun `scripts/collect.sh` before reporting.")
+	result := InjectRequestedSkills("/skill:scripts", []BoundSkill{skill}, nil)
+	location := skillBodyPath(skill.Path)
+	if !strings.Contains(result.Text, `location="`+location+`"`) {
+		t.Fatalf("the block must name the file it was read from (%s):\n%s", location, result.Text)
+	}
+	if !strings.Contains(result.Text, "References are relative to "+skill.Path+".") {
+		t.Fatalf("the block must say what directory relative paths resolve against (%s):\n%s", skill.Path, result.Text)
 	}
 }

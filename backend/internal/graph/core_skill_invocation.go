@@ -144,7 +144,9 @@ func InjectRequestedSkills(text string, skills []BoundSkill, names []string) Ski
 			version = fmt.Sprintf(` version="%s"`, *skill.Version)
 		}
 		blocks = append(blocks, strings.Join([]string{
-			fmt.Sprintf(`<skill name="%s"%s>`, name, version),
+			fmt.Sprintf(`<skill name="%s"%s location="%s">`, name, version, skillBodyPath(skill.Path)),
+			"References are relative to " + skill.Path + ".",
+			"",
 			trimEnd(*body),
 			"</skill>",
 		}, "\n"))
