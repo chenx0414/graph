@@ -37,7 +37,7 @@ interface ChatBody {
 
 /** The inventory sections the host reports. */
 const SECTIONS = [
-  'configuredModels', 'access', 'agentCombinations', 'agentDefinitions', 'architectures',
+  'configuredModels', 'agentCombinations', 'agentDefinitions', 'architectures',
   'subscriptionPlans', 'summary', 'capabilities', 'agentContext', 'application',
 ];
 
