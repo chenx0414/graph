@@ -368,22 +368,34 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			tracked[path] = true
 		}
 	}
+	removed := map[string]bool{}
+	for index, change := range input.Changes {
+		if index < len(paths) && paths[index] != nil && change.Action == "delete" {
+			removed[*paths[index]] = true
+		}
+	}
 	stagePaths := []string{}
+	addPaths := []string{}
 	for _, path := range commitPaths {
-		if tracked[path] {
+		if tracked[path] || removed[path] {
 			stagePaths = append(stagePaths, path)
+		}
+		if tracked[path] {
+			addPaths = append(addPaths, path)
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(work, path)); err == nil {
-			stagePaths = append(stagePaths, path)
+			addPaths = append(addPaths, path)
 		}
 	}
 	commit := RevParse(work, "HEAD")
 	committedNow := false
 	if len(stagePaths) > 0 {
-		staged := Git(work, append([]string{"add", "-A", "--"}, stagePaths...), nil, nil)
-		if staged.Code != 0 {
-			Raise("rsi_git", rsiFirstText(staged.Stderr, "Failed to stage RSI changes"))
+		if len(addPaths) > 0 {
+			staged := Git(work, append([]string{"add", "-A", "--"}, addPaths...), nil, nil)
+			if staged.Code != 0 {
+				Raise("rsi_git", rsiFirstText(staged.Stderr, "Failed to stage RSI changes"))
+			}
 		}
 		committed := Git(work, append([]string{"commit", "--no-verify", "-m", "rsi: " + title, "--"}, stagePaths...), nil, nil)
 		if committed.Code != 0 {
