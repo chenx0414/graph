@@ -14,22 +14,13 @@
 - 回合结束会把该回合**所有工具行刷成 done**：`RecordConversationOutput` 传 `activeToolIds=nil`（`core_conversation_usage.go:134`），跨回合工具在回合结束瞬间就显示"完成"。
 - `messages.state='pending'` 会被队列读走：`PendingMessages` 选 `pending`/`queued` 且不过滤角色（`core_conversation_failures.go:47`），`core_execution_nodes.go:154` 用它判滞留。**"工具在跑"不能复用 `pending`。**
 
-## 2. 判定一：哪些工具异步 —— 显式 opt-in + 超阈值自动交接
+## 2. 判定一：哪些工具异步 —— 显式 opt-in
 
-**两个入口，都不看模型的预估能力。**
+**唯一的入口，不看模型的预估能力。**
 
-1. **显式 opt-in**（`ToolDefinition.Async` 或 `async: true` 实参）：模型知道自己要跑长活时直接交出去，一次调用就挂起。本轮只落 `bash`（`runtime_pig_native_handlers.go` 的 `pigBashTool`）。
-2. **超阈值自动交接**（`runtime_deferred_tool_threshold.go`）：模型忘了写 `async` 也不会被长命令卡住。命令先按原样在本轮里跑，**超过阈值仍没结束**才交接给后台作业，模型当场收到回执，结果作为后续消息回来。默认阈值 30s，`GRAPH_DEFER_THRESHOLD_MS` 可覆盖（E2E 用 1000ms）。
+- **显式 opt-in**（`ToolDefinition.Async` 或 `async: true` 实参）：模型知道自己要跑长活时直接交出去，一次调用就挂起。本轮只落 `bash`（`runtime_pig_native_handlers.go` 的 `pigBashTool`）。
 
-自动交接的三条边界：
-
-- **阈值内完成 = 今天的行为，一个字节都没变**：作业在内存里跑，不写 `deferred_tool_calls` 行、不占每会话名额、不发唤醒。只有真正越过阈值的那次调用才会留下记录。
-- **`timeout` 不超过阈值的调用保持同步**：模型已经把这条命令声明成"必在本轮结束"，就不夺权（`deferredToolAutoHandsOff` 判 `deferredToolBudgetMs(params) > threshold`）。
-- **准入仍在活着的 execution 内完成**：交接发生时回合还卡在这条工具调用上，工具门禁、预算预留、名额都在这一刻取（`bindAutoToolRow` → `recordDeferredToolCall`），不是回合结束之后补办。
-
-为什么当初否决、后来又要做：阈值把一个"多久算慢"的常数引进来，它随机器负载漂移，也确实让同一条命令在不同负载下走不同路径。代价可以用**测试写法**付掉，而不必让用户继续等：E2E 用 1000ms 阈值配 `sleep 5`，断言的是"拿到回执 / 结果回投 / 没有后台记录"，不断言耗时；阈值内的用例断言"结果内联且 `tool-calls` 为空"，快慢无关。真正解决的痛点是：模型估不准时长，而午休级的命令此前会整轮占着回合。
-
-**为什么快速工具不写行**：同步语义原样保留——工具返回即回到同一轮 ReAct 循环，provider 请求数不变（A6：一次 `bash` + 一次最终答复 = 两次请求）。自动交接是"超时之后的第二条路"，不是把每次调用都变成异步。
+**为什么快速工具不写行**：同步语义原样保留——工具返回即回到同一轮 ReAct 循环，provider 请求数不变（A6：一次 `bash` + 一次最终答复 = 两次请求）。异步是模型主动选的一条路，不是把每次调用都变成异步。
 
 ## 3. 判定二：挂起 / 恢复契约
 
