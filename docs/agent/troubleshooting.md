@@ -122,6 +122,26 @@
 - 测试断言不得依赖调度/入队顺序，只断言不变量。
 - 2026-09-25 两次事故同源：把静态推断升级成破坏性动作（整根 rm + 并发安装）导致共享安装根损坏、Main 在调用模型前就被挡。修法与上面的原则同一：先串行化、再动手。
 
+## 直接查运行数据与调用 API
+
+不要猜路径，也不要先翻 `graph.db`：
+
+- 运行库是 `<stateDir>/tasks.sqlite`（macOS：`~/Library/Application Support/Graph/state/tasks.sqlite`）。tasks、conversations、events、proposals、operations 都在里面；`conversations/` 与 `instances/` 是消息与工具结果的落盘目录。
+- `state/graph.db`、`state/graph.sqlite` 是旧版本遗留的空文件，没有任何代码读写；2026-11-08 已删除，不要再作为数据源。
+- `/api/*` 用会话 cookie `graph_session`，值来自 `<stateDir>/session-token`；非 GET 请求还必须带本机 `Origin`。
+- 只有 `/api/app/*` 用 `x-graph-app-token`，值来自 `<stateDir>/app-token`。拿它请求 `/api/tasks` 会得到 401。
+
+自查命令（每条都能当场判定真假）：
+
+```sh
+S="$HOME/Library/Application Support/Graph/state"
+U=$(python3 -c "import json;print(json.load(open('$S/console.json'))['url'])")
+sqlite3 "$S/tasks.sqlite" "select phase, count(*) from tasks group by phase;"
+curl -s -H "Cookie: graph_session=$(cat "$S/session-token")" -H "Origin: $U" "$U/api/tasks" | head -c 200
+```
+
+退休（软退休）已经可用：归档一个会话会把它的任务从 `GET /api/tasks` 隐藏（过滤依据是 `conversations.archived_at`）。`POST /api/conversations/{id}/archive` 需要体 `{"requestId":"..."}`；`role` 是 project/global 的主管线程不允许归档，返回 `A supervisor thread cannot be archived as a conversation`。
+
 ## 汇报格式
 
 对用户汇报时包含：
