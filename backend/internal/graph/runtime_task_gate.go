@@ -3,9 +3,9 @@ package graph
 type InvocationPurpose string
 
 const (
-	InvocationCompletion       InvocationPurpose = "completion"
-	InvocationCompaction       InvocationPurpose = "compaction"
-	InvocationBranchSummary    InvocationPurpose = "branch_summary"
+	InvocationCompletion    InvocationPurpose = "completion"
+	InvocationCompaction    InvocationPurpose = "compaction"
+	InvocationBranchSummary InvocationPurpose = "branch_summary"
 )
 
 var INVOCATION_PURPOSES = []InvocationPurpose{
@@ -18,11 +18,11 @@ type TaskGateOperation struct {
 	Id         string
 	TaskId     string
 	InstanceId string
-	NodeId *string
+	NodeId     *string
 }
 
 type TaskGateOptions struct {
-	Optional bool
+	Optional     bool
 	Unrestricted bool
 }
 
@@ -115,6 +115,10 @@ func (gate *TaskSendGate) settle(id string, usage *TokenUsage) {
 		var normalized *TokenUsage
 		if usage != nil {
 			value := NormalizeTokenUsage(*usage)
+			if value.ContextTokens == nil {
+				prompt := PromptTokens(value)
+				value.ContextTokens = &prompt
+			}
 			normalized = &value
 		}
 		source := UsageSourceOf(normalized)

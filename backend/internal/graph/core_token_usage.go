@@ -12,12 +12,12 @@ const (
 var USAGE_SOURCES = []UsageSource{UsageAuthoritative, UsageAccountDelta, UsageEstimated, UsageUnknown}
 
 type TokenUsage struct {
-	Input       int64   `json:"input"`
-	Output      int64   `json:"output"`
-	CacheRead   int64   `json:"cacheRead"`
-	CacheWrite  int64   `json:"cacheWrite"`
-	ContextTokens *int64 `json:"contextTokens,omitempty"`
-	UsageSource *string `json:"usageSource,omitempty"`
+	Input         int64   `json:"input"`
+	Output        int64   `json:"output"`
+	CacheRead     int64   `json:"cacheRead"`
+	CacheWrite    int64   `json:"cacheWrite"`
+	ContextTokens *int64  `json:"contextTokens,omitempty"`
+	UsageSource   *string `json:"usageSource,omitempty"`
 }
 
 func isUsageSource(value string) bool {
@@ -59,6 +59,10 @@ func MergeUsageSource(current, next UsageSource) UsageSource {
 		return UsageAccountDelta
 	}
 	return UsageAuthoritative
+}
+
+func PromptTokens(usage TokenUsage) int64 {
+	return usage.Input + usage.CacheRead + usage.CacheWrite
 }
 
 func TokenUsageTotal(usage TokenUsage) int64 {

@@ -54,10 +54,14 @@ test.each(['complete', 'updated-input', 'truncated', 'invalid-delta', 'missing-o
         body: JSON.stringify({ projectId: 'p', model: 'local', text: 'Reply Usage proof.', requestId: 'usage-proof' }) });
       expect(response.status).toBe(200);
       const { taskId } = await response.json() as { taskId: string };
+      let recorded: { usage?: { contextTokens?: number } } | undefined;
       await expect.poll(async () => {
         const view = await (await fetch(`${daemon!.url}/api/tasks/${taskId}/nodes/master/run`, { headers })).json();
+        recorded = view.invocations[0];
         return view.operations.some((item: { workerActive: boolean }) => !item.workerActive) && view.invocations.length > 0 && view.invocations.every((item: { cost: unknown }) => item.cost !== null);
       }, { timeout: 20000 }).toBe(true);
+      if (variant === 'complete') expect(recorded?.usage?.contextTokens).toBe(45);
+      if (variant === 'updated-input') expect(recorded?.usage?.contextTokens).toBe(57);
       await daemon.close(); daemon = undefined;
       const report = JSON.parse((await execute(process.execPath, ['scripts/harness-cost.mjs', join(root, 'state', 'tasks.sqlite')])).stdout);
       const task = report.tasks.find((item: { id: string }) => item.id === taskId);
