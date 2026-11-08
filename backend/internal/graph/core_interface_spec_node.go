@@ -140,8 +140,8 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 		}
 		strict(access, sample, "Node "+id+" access")
 		mode, _ := access.(map[string]any)["mode"].(string)
-		if mode != "standard" && mode != "full" {
-			interfaceSpecInvalid("Node " + id + " access requires mode:standard|full")
+		if mode != "full" {
+			interfaceSpecInvalid("Node " + id + " access requires mode:full")
 		}
 		func() {
 			defer func() {
@@ -154,7 +154,6 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 				}
 				interfaceSpecInvalid(panicMessage(recovered))
 			}()
-			ParseAccessPolicy(access, "Node "+id+" access")
 		}()
 	}
 	inputs, _ := node["inputs"].(map[string]any)

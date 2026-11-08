@@ -34,7 +34,7 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 2. role 对应的 Graph host tools；
 3. definition 绑定的 capability tools；
 4. Pi extension 注册且允许的 tools；
-5. 当前 operation 的 pause、access policy 和 disabled-tool policy。
+5. 当前 operation 的 pause 和 disabled-tool policy。
 
 模型可见的 `<tools>` 文本和 provider 的可执行 tool schema 必须来自同一个实际启用集合。关闭工具时，两者都应移除。
 
@@ -42,7 +42,7 @@ Prompt capability 可以充当 identity 或 tool guidance。用户可编辑版�
 
 Main Agent 在完全访问模式下额外获得 `inspect_rsi_status` 与 `apply_rsi_change`，用于直接修改 Graph Harness——修缺陷、重构、新增功能、改进命令或文档都可以。它们只注册给 `master` 角色，不进入 worker 或 reviewer 的 tool surface。见 [self-configuration.md](self-configuration.md) 的“Harness 自我改进（RSI）”。
 
-Pi 原生工具在 Pi 子进程内执行。默认 full 模式放开宿主文件系统、命令、网络和能力运行时；standard 模式才启用 Graph send gate 与 workspace sandbox。full 模式下 Agent 进程也不再套 seatbelt（`sandbox-exec`）profile，因此窗口服务、剪贴板（pasteboard）、Electron 与嵌套 `sandbox-exec` 都可用；standard 模式仍在 OS sandbox 内。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
+Pi 原生工具在 Pi 子进程内执行。Graph 只有完全访问一种模式：宿主文件系统、命令、网络与能力运行时全部放开，Agent 进程不套 seatbelt（`sandbox-exec`）profile，因此窗口服务、剪贴板（pasteboard）、Electron 与嵌套 `sandbox-exec` 都可用。Graph 的旧 `read`、`write_file`、`list_dir`、`run_command` 与原生工具同名或职责重复时，启用原生工具会让它们退出实际 session，避免 custom tool 覆盖 Pi 原生实现。
 
 ## Capability binding
 
@@ -52,7 +52,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 - 标准模式下，本地 MCP 的 provisioning 网络与 runtime 网络分离，runtime 网络由 capability manifest 声明，extension 没有自动网络权限，命令、MCP 和工具仍在 OS sandbox 内运行。
 - 完全访问模式下，网络、MCP、extension 和宿主文件系统限制不阻止调用；能力清单仍用于发现、版本与审计。
-- Native bash/powershell 在 standard 模式下不能越过 workspace、受保护路径和宿主访问策略。
+- Native bash/powershell 直接在宿主上运行，没有 workspace 或路径边界。
 - `networkDomains`、工具自报 annotation 或 MCP 描述都不是权限本身。
 
 ### 检查命令的运行边界
@@ -67,7 +67,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 - 拒绝信封的 `error.details.executionContext` 带 `{sandbox, accessMode, role, policyDigest, probe, evidence}`：`evidence` 只有 `host` 与 `sandbox` 两种；`policyDigest` 是本次 session 冻结的访问策略摘要，两次读数是否来自同一上下文可以据此区分。
 - 沙箱上下文（`evidence: "sandbox"`）额外带 `details.notice`，明写这次读数不构成宿主授权缺失的证据，`message` 说「读不到」而不是「没有授权」，`suggestion` 指向到宿主上重跑该命令。
-- standard 模式的 `graph.command` 节点、以及任何在 seatbelt 里执行的会话，其读数一律是沙箱读数。
+- `graph.command` 节点的读数就是宿主读数。
 
 取舍写在这里：**保留探测并标注上下文**，而不是「探测只在宿主上下文执行」。理由是后者会让 standard 模式的会话彻底失去这条信号（连「读不到」都不再说明），而宿主上的真实拒绝又会被它藏起来——两种情形给出同一个答案，正是这次要修的病。真正的修复动作仍然是到宿主上重跑这条命令，而不是重新授权——沙箱里的读数不支持「该重新授权」这个结论。
 

@@ -19,7 +19,7 @@ import { desktopProvider, envelopeOf, textOf } from '../helpers/desktop-graph.ts
  * that the two contexts are told apart in the answer the model reads: the same
  * binary, the same `denied` envelope, two sessions - one whose commands run on
  * the host (`access.mode: full`) and one whose commands run confined
- * (`access.mode: standard`) - and the confined one says its reading is not
+ * - and a confined process says its reading is not
  * evidence of the host grant.
  *
  * The CLI here is a controlled external program, not a stub of Graph: it prints

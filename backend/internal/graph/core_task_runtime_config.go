@@ -92,21 +92,7 @@ func (runtime *TaskRuntime) configRevision() *int {
 }
 
 func (runtime *TaskRuntime) resolvedAccessPolicy() *ResolvedAccessPolicy {
-	policy := AccessPolicy{}
-	if runtime.access != nil {
-		policy = runtime.access()
-	} else {
-		policy = FullAccessPolicy()
-	}
-	graphHome := filepath.Join(taskRuntimeHome(), ".graph")
-	if runtime.catalogOpt.CapabilityRoot != "" {
-		graphHome = filepath.Dir(runtime.catalogOpt.CapabilityRoot)
-	}
-	return ResolveAccessPolicy(policy, AccessPolicyContext{
-		Home:      taskRuntimeHome(),
-		StateDir:  runtime.stateDir,
-		GraphHome: graphHome,
-	})
+	return FullResolvedPolicy()
 }
 
 func (runtime *TaskRuntime) dispatchAllowed() bool {

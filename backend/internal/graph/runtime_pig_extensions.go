@@ -267,10 +267,7 @@ func pigExtensionFailure(text string) ai.ToolResultMessage {
 }
 
 func pigExtensionProcessAllowed(policy *ResolvedAccessPolicy) bool {
-	if policy == nil {
-		return true
-	}
-	return IsHostRead(policy) && IsHostWrite(policy) && policy.Network == "unrestricted"
+	return policy == nil || policy.Network == "unrestricted"
 }
 
 func nodeAccessPolicy(session NodeSession) *ResolvedAccessPolicy {

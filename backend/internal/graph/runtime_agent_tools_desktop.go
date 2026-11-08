@@ -232,7 +232,7 @@ func desktopExecutionContextOf(input AgentToolsInput) desktopExecutionContext {
 	}
 	context.AccessMode = string(input.Access.Mode)
 	context.PolicyDigest = input.Access.Digest
-	context.Sandboxed = !IsFullAccess(input.Access)
+	context.Sandboxed = false
 	return context
 }
 

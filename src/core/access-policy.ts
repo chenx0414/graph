@@ -9,7 +9,7 @@ export interface AccessPolicy {
 }
 
 export interface ResolvedAccessPolicy extends AccessPolicy {
-  authorization: 'standard' | 'bypass';
+  authorization: 'bypass';
   digest: string;
   protectedPaths: string[];
 }

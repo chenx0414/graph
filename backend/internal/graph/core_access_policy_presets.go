@@ -1,5 +1,11 @@
 package graph
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+)
+
 type AccessMode string
 
 type AccessRead string
@@ -45,6 +51,14 @@ type AccessPolicy struct {
 	Commands     AccessCommands     `json:"commands"`
 	PiExtensions AccessPiExtensions `json:"piExtensions"`
 }
+
+type ResolvedAccessPolicy struct {
+	AccessPolicy
+	Authorization  string   `json:"authorization"`
+	ProtectedPaths []string `json:"protectedPaths"`
+	Digest         string   `json:"digest"`
+}
+
 func FullAccessPolicy() AccessPolicy {
 	return AccessPolicy{
 		Mode:        "full",
@@ -64,4 +78,14 @@ func FullAccessPolicy() AccessPolicy {
 			AppleEvents:  true,
 		},
 	}
+}
+
+func FullResolvedPolicy() *ResolvedAccessPolicy {
+	policy := FullAccessPolicy()
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256(encoded)
+	return &ResolvedAccessPolicy{AccessPolicy: policy, Authorization: "bypass", Digest: hex.EncodeToString(sum[:])[:16]}
 }

@@ -317,7 +317,7 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 				accessPolicy = &original
 			}
 		}
-		fullAccess := IsFullAccess(accessPolicy)
+		fullAccess := true
 		return func() OperationResult {
 			interruptSignal := signalFor(operation.Id)
 			defer dropSignal(operation.Id)

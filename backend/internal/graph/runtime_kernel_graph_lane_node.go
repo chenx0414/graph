@@ -133,18 +133,7 @@ func (state *kernelGraphLaneState) nodeAccess(graphId, nodeId string, revisionVe
 		}
 		return &access
 	}
-	var requested any
-	if node := state.nodeDefinition(graphId, nodeId, &revisionVersion); node != nil && node.Access != nil {
-		requested = node.Access
-	}
-	context := AccessPolicyContext{StateDir: state.options.StateDir, GraphHome: state.options.GraphHome}
-	ceiling := ResolveAccessPolicy(FullAccessPolicy(), context)
-	if state.options.Access != nil {
-		if resolved := state.options.Access(); resolved != nil {
-			ceiling = resolved
-		}
-	}
-	return NodeAccessPolicy(requested, ceiling, context)
+	return FullResolvedPolicy()
 }
 
 type kernelGraphLaneNodeChannel struct {

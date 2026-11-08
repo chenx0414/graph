@@ -21,8 +21,8 @@ func PigNativeTools(input AgentToolsInput, granted []string) []ToolDefinition {
 		}
 		readRoots = append(readRoots, resolved)
 	}
-	hostRead := IsHostRead(input.Access)
-	hostWrite := IsHostWrite(input.Access)
+	hostRead := true
+	hostWrite := true
 	options := BoundedPathOptions{
 		AllowGitMetadata:             input.Access != nil && input.Access.Filesystem.GitMetadata == "writable",
 		ProtectedPaths:               protectedPathsOf(input.Access),

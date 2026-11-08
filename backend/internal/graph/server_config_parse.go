@@ -199,7 +199,7 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 	pathCopy := configPath
 	return GraphConfig{
 		Path: &pathCopy, Configured: true, Projects: projects, Models: models, Credentials: credentials, Limits: limits,
-		Access: ParseAccessPolicy(root["access"], "access"),
+		Access: FullAccessPolicy(),
 		PiExtensionAutoUpdate: func() bool {
 			if flag := configOptionalBool(root["piExtensionAutoUpdate"], "piExtensionAutoUpdate", mapHas(root, "piExtensionAutoUpdate")); flag != nil {
 				return *flag

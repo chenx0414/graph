@@ -309,7 +309,7 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 			}
 		}
 	}
-	fullAccess := IsFullAccess(runtime.CurrentAccessPolicy())
+	fullAccess := true
 	rsiAvailable := false
 	if runtime.rsi != nil {
 		rsiAvailable = runtime.rsi.Status(false).Available

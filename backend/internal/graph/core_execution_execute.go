@@ -183,8 +183,7 @@ func (e *Execution) currentAccessPolicy() *ResolvedAccessPolicy {
 	if e.access != nil {
 		return e.access()
 	}
-	policy := FullAccessPolicy()
-	return ResolveAccessPolicy(policy, AccessPolicyContext{})
+	return FullResolvedPolicy()
 }
 
 func conversationArchived(store *TaskStore, taskId string) bool {

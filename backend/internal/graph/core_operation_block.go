@@ -26,7 +26,7 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			}
 		})
 	}
-	if IsFullAccess(operation.AccessPolicy) && refusal.Code != "interrupted" && refusal.Code != "budget" {
+	if refusal.Code != "interrupted" && refusal.Code != "budget" {
 		return l.transaction(func() any {
 			row := l.operationRow(operation.Id)
 			state := kernelString(row["state"])
