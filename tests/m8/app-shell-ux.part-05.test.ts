@@ -220,6 +220,7 @@ test('live Markdown edits one source, reveals syntax at the caret and preserves 
   const page=await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
   const input=page.getByTestId('chat-input');
+  expect(await page.locator('.composer-footer').innerText(), 'the composer no longer advertises the keyboard hint').not.toContain('Enter 发送');
   await input.fill('# 标题\n\n**粗体**与 `代码`\n\n最后一行');
   await input.press('End');
   await page.locator('.md-heading').waitFor();
