@@ -58,6 +58,31 @@ func residentSettings() *harness.HarnessSettings {
 	return &harness.HarnessSettings{Retry: &retry, Compaction: &compaction}
 }
 
+func CompactionPolicyFor(contextWindow int) (int, int) {
+	if contextWindow < 1 {
+		contextWindow = 1
+	}
+	reserve := contextWindow * 30 / 100
+	if reserve < 1024 {
+		reserve = 1024
+	}
+	half := contextWindow / 2
+	if half < 1 {
+		half = 1
+	}
+	if reserve > half {
+		reserve = half
+	}
+	keep := contextWindow / 4
+	if keep < 1024 {
+		keep = 1024
+	}
+	if keep > 20000 {
+		keep = 20000
+	}
+	return reserve, keep
+}
+
 var compactionPolicies = struct {
 	sync.Mutex
 	values map[string]durable.CompactionPolicyOverride

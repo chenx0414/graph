@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
 type CompactionSettings struct {
@@ -13,37 +15,15 @@ type CompactionSettings struct {
 	KeepRecentTokens int  `json:"keepRecentTokens"`
 }
 
-func CompactionSettingsFor(entry struct {
+func compactionSettingsFor(entry struct {
 	ContextWindow int
 	MaxTokens     int
 }) CompactionSettings {
-	contextWindow := entry.ContextWindow
-	if contextWindow < 1 {
-		contextWindow = 1
-	}
-	reserve := contextWindow * 30 / 100
-	if reserve < 1024 {
-		reserve = 1024
-	}
-	half := contextWindow / 2
-	if half < 1 {
-		half = 1
-	}
-	if reserve > half {
-		reserve = half
-	}
-	quarter := contextWindow / 4
-	if quarter < 1024 {
-		quarter = 1024
-	}
-	keep := quarter
-	if keep > 20000 {
-		keep = 20000
-	}
+	reserve, keep := pigkernel.CompactionPolicyFor(entry.ContextWindow)
 	return CompactionSettings{Enabled: true, ReserveTokens: reserve, KeepRecentTokens: keep}
 }
 
-const COMPACTION_INSTRUCTIONS = "This summary is a working handoff for the next turn, not a transcript. Keep the entire summary under roughly 1500 tokens. Write only the handoff. Do not include <analysis>, <summary>, reasoning, or a chronology of the conversation. Drop resolved detail, superseded attempts and stale plans instead of preserving them. Keep only what is needed to continue: the goal, the current state, open blockers, key decisions, exact file paths and the next steps."
+const COMPACTION_INSTRUCTIONS = "This summary is a working handoff for the next turn, not a transcript. Keep the entire summary under roughly 1500 tokens. Write only the handoff. Do not include <analysis>, <summary>, reasoning, or a chronology of the conversation. Drop resolved detail, superseded attempts and stale plans instead of preserving them. Keep only what is needed to continue: the goal, the current state, open blockers, key decisions, exact file paths and the next steps. End with one sentence saying the earlier conversation stays in the durable transcript and can be searched with the history_search tool, by keyword or as one entry by id."
 
 var (
 	compactionAnalysis = regexp.MustCompile(`(?i)(?:^|\n)\s*<analysis>\s*(?:\n|$)`)
@@ -89,4 +69,10 @@ func compactionContextCeiling() int {
 		return 0
 	}
 	return value
+}
+
+const historyToolNameGraph = "history_search"
+
+func compactionPointer(conversationId string) string {
+	return "你正在继续会话 " + conversationId + "。一边进行一边从中检索关键上下文。"
 }

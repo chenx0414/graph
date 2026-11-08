@@ -241,7 +241,7 @@ func (state *kernelGraphLaneState) laneOptions() GraphLaneOptions {
 				environment.Base = session.Environment.Base
 			}
 			state.options.Kernel.RecordNodeBinding(graphId, nodeId, model.Id, session.SystemPrompt, kernelGraphLaneJSON(session.AllowedToolNames), session.StateDir, session.Role, kernelGraphLaneJSON(environment))
-			compaction := CompactionSettingsFor(struct {
+			compaction := compactionSettingsFor(struct {
 				ContextWindow int
 				MaxTokens     int
 			}{ContextWindow: model.ContextWindow, MaxTokens: model.MaxTokens})

@@ -64,7 +64,7 @@ func piAdapterCompletionSequence(store *TaskStore, instanceId string) int64 {
 }
 
 func piAdapterCompactionSettings(entry ModelEntry) *CompactionSettings {
-	settings := CompactionSettingsFor(struct {
+	settings := compactionSettingsFor(struct {
 		ContextWindow int
 		MaxTokens     int
 	}{ContextWindow: entry.ContextWindow, MaxTokens: entry.MaxTokens})

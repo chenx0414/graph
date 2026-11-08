@@ -275,7 +275,7 @@ func pigUserContent(text string, images []ImageContent) ai.UserContent {
 func (session *pigAgentSession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
 	budget := pigSessionContextBudget(session.request)
 	compactAt := pigSessionCompactionTrigger(session.request)
-	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, pigCompactionInstructions(), ""); err != nil {
+	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, COMPACTION_INSTRUCTIONS, ""); err != nil {
 		return AgentSessionTurn{}, err
 	} else if reset {
 		session.emitContextReset(estimated, budget)
