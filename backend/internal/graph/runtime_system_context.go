@@ -8,7 +8,6 @@ type SystemDefinition struct {
 type SystemInventoryInput struct {
 	Models               []ConfiguredModel
 	CredentialConfigured func(ConfiguredModel) bool
-	Access               AccessPolicy
 	Combinations         []AgentCombinationView
 	Definitions          []SystemDefinition
 	Architectures        []GraphArchitecture
@@ -69,7 +68,6 @@ func SystemInventory(input SystemInventoryInput) map[string]any {
 	}
 	return map[string]any{
 		"configuredModels":  models,
-		"access":            input.Access,
 		"agentCombinations": combinations,
 		"agentDefinitions":  definitions,
 		"architectures":     architectures,

@@ -108,7 +108,6 @@ func daemonSystemSummary(live *LiveConfig, userHome string, agentContext *AgentC
 		CredentialConfigured: func(entry ConfiguredModel) bool {
 			return live.CredentialFor(entry) != nil
 		},
-		Access:          live.Access(),
 		Architectures:   GRAPH_ARCHITECTURES,
 		CapabilityRoot:  filepath.Join(userHome, "capabilities"),
 		ApplicationRoot: ApplicationRoot,

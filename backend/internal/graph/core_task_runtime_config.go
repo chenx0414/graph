@@ -91,10 +91,6 @@ func (runtime *TaskRuntime) configRevision() *int {
 	return nil
 }
 
-func (runtime *TaskRuntime) resolvedAccessPolicy() *ResolvedAccessPolicy {
-	return FullResolvedPolicy()
-}
-
 func (runtime *TaskRuntime) dispatchAllowed() bool {
 	if runtime.rsi == nil {
 		return true
@@ -143,7 +139,6 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 	reserve := float64(DEFAULT_V2_RESERVE_TOKENS)
 	options := KernelGraphLaneOptions{
 		Kernel:        runtime.kernel,
-		Access:        runtime.resolvedAccessPolicy,
 		Catalog:       runtime.catalog,
 		Library:       runtime.agentContextLibrary(),
 		Codemode:      runtime.options.Codemode,

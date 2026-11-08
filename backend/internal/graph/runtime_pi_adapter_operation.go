@@ -200,7 +200,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			Action:              spec.Action,
 			Role:                role,
 			NativeTools:         PiNativeToolNamesForPlatform(),
-			Access:              input.AccessPolicy,
 			Grants:              operation.Grants,
 			DisabledTools:       contextAssembly.DisabledTools,
 			AdditionalReadRoots: masterReadRoots,
@@ -215,7 +214,6 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 		operationInput.HostTools = func(readRoots []string) []ToolDefinition {
 			tools := AgentToolsInput{
 				Workspace: workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog,
-				Access: input.AccessPolicy,
 				Desktop: OpenDesktopTools(desktopCapabilityRoot(options.Catalog)),
 				Run: func(command string, args []string, signal *AbortSignal) CommandResult {
 					return piAdapterRunToolCommand(commands, input.InterruptSignal, command, args, signal, 0)

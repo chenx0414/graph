@@ -98,7 +98,6 @@ type AgentToolsInput struct {
 	Role string
 	ReadRoots []string
 	Catalog *Catalog
-	Access *ResolvedAccessPolicy
 	ReadOnly bool
 	Run func(command string, args []string, signal *AbortSignal) CommandResult
 	RunWithTimeout func(command string, args []string, signal *AbortSignal, timeoutMs int) CommandResult

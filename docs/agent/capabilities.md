@@ -1,6 +1,6 @@
 # Graph Capabilities
 
-> **2026-11-08: Graph 不再有权限分级。** 标准/完全访问这一对已被删除：后端只有一种姿态（host 读、host 写、不受限网络、host 命令、apple events 开启），`access` 配置字段不再读取，控制台也不再提供切换。本文其余内容描述的是删除前存在的标准模式，仅作历史记录保留。
+> **2026-11-08: Graph 不再有权限分级。** 标准/完全访问这一对已被删除：后端只有一种姿态（host 读、host 写、不受限网络、host 命令、apple events 开启），`access` 配置字段、`Operation.accessPolicy` 与节点 `access` 声明都已从代码、接口与控制台类型中删除。本文其余内容描述的是删除前存在的标准模式，仅作历史记录保留。
 
 Graph 的“能力”是版本化、可绑定的外部工具或指令资源。能力安装不等于扩权；Agent definition 绑定能力后，其已发现工具默认可在现有沙箱和任务边界内调用。
 
@@ -64,7 +64,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 因此这条读数的落点是**执行上下文**，不是布尔值：
 
-- 拒绝信封的 `error.details.executionContext` 带 `{sandbox, accessMode, role, policyDigest, probe, evidence}`：`evidence` 恒为 `host`。
+- 拒绝信封的 `error.details.executionContext` 带 `{role, probe, evidence}`：`evidence` 恒为 `host`，没有第二个执行上下文可对比。
 - `graph.command` 节点的读数就是宿主读数。
 
 取舍写在这里：**保留探测并标注上下文**。宿主上的真实拒绝必须原样传出，不能因为读不到就建议用户重新授权——读不到不等于没有授权。

@@ -65,7 +65,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 ### 配置文件
 
 - 位置：应用根目录下的 `graph.config.json`（桌面 App 为 `~/Library/Application Support/Graph/graph.config.json`）。
-- 顶层：`version: 1`、`revision`（每次保存 +1）、`projects`、`models`、`credentials`、`limits`、`access`。
+- 顶层：`version: 1`、`revision`（每次保存 +1）、`projects`、`models`、`credentials`、`limits`。
 - **密钥永不出现在这个文件里**：只存 `secretRef`（一个环境变量名）。
 
 ### 选模（没有分层）

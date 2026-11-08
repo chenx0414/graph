@@ -126,7 +126,6 @@ type TaskRuntime struct {
 	master     *TaskRuntimeMaster
 	catalogOpt *TaskRuntimeCatalog
 	limits     *TaskRuntimeLimits
-	access     func() AccessPolicy
 	agentCtx   *AgentContextLibrary
 	systemCtx  *TaskRuntimeSystemContext
 	rsi        *RsiService

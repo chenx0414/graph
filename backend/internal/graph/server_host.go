@@ -69,7 +69,6 @@ type GraphServerOptions struct {
 	Models        *TaskRuntimeModels
 	Master        *TaskRuntimeMaster
 	Limits        *TaskRuntimeLimits
-	Access        func() AccessPolicy
 	Live          *TaskRuntimeLive
 	Rsi           *RsiService
 	Catalog       *TaskRuntimeCatalog

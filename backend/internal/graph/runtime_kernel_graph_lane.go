@@ -30,7 +30,6 @@ type KernelGraphLaneCredential struct {
 
 type KernelGraphLaneOptions struct {
 	Kernel  *KernelStore
-	Access  func() *ResolvedAccessPolicy
 	Network *KernelGraphLaneNetwork
 	Program *KernelGraphLaneProgram
 	Catalog *Catalog

@@ -1,4 +1,3 @@
-import type { AccessPolicy } from './access-policy.ts';
 import type { Json } from './types.ts';
 
 
@@ -26,17 +25,11 @@ export interface ExecutionSettings {
   budget?: { tokens: number | null };
 }
 
-export type NodeAccessPolicy = Partial<Omit<AccessPolicy, 'autoApprove' | 'filesystem' | 'piExtensions'>> & {
-  mode: AccessPolicy['mode']; autoApprove?: Partial<AccessPolicy['autoApprove']>;
-  filesystem?: Partial<AccessPolicy['filesystem']>; piExtensions?: Partial<AccessPolicy['piExtensions']>;
-};
-
 export interface NodeDefinition extends NodeInterface, ExecutionSettings {
   recipe: string;
   task: string;
   instructions?: string;
   workspace?: { base: 'auto' | 'project' | 'worktree'; path?: string };
-  access?: NodeAccessPolicy;
   acceptance?: string[];
   submission: { required?: string[]; requiredAnyOf?: string[] };
   deliverable?: {

@@ -21,8 +21,7 @@ interface NodePromptView {
   notes: string[];
 }
 
-type NodeEnvironment = { revision: number; workspace: string; base: string;
-  access: { mode: string; network: string; filesystem: { read: string; write: string } } };
+type NodeEnvironment = { revision: number; workspace: string; base: string };
 
 interface NodeOverview {
   toolCallCount?: number;
@@ -134,9 +133,7 @@ export function NodeChatTab({ taskId, nodeId, agentName }: {
             {overview.node.action && <p className="node-action" data-testid="node-action">{overview.node.action}</p>}
             {overview.environment && <div className="stack" data-testid="node-environment">
               <span>工作目录：<span className="mono">{overview.environment.workspace}</span></span>
-              {/* Graph has one permission posture, so the node names the paths it may
-                  touch instead of grading them. */}
-              <span className="muted">实际权限：完全访问 · 读取 {overview.environment.access.filesystem.read} · 写入 {overview.environment.access.filesystem.write} · 网络 {overview.environment.access.network} · 配置 v{overview.environment.revision}</span>
+              <span className="muted">实际权限：完全访问 · 配置 v{overview.environment.revision}</span>
             </div>}
             <div className="stat-grid">
               <Stat label="运行" value={duration(overview.timing?.runMs ?? null)} hint="执行时段之和（不含名额等待）" />

@@ -38,9 +38,9 @@
 
 ## 节点工作目录与权限
 
-节点可选声明 `workspace:{base:"auto"|"project"|"worktree",path?:"相对目录"}` 与 `access:{mode:"standard"|"full",...}`。省略时沿用宿主权限，工作目录在已准备 Git 的 graph 中使用节点自己的 worktree，否则使用项目目录。`project` 明确选择项目；`worktree` 要求创建 graph 时已指定 targetBranch。path 必须是所选根下已存在的目录，禁止绝对路径、父目录越界与指向根外的符号链接。
+节点可选声明 `workspace:{base:"auto"|"project"|"worktree",path?:"相对目录"}`。省略时使用项目目录；工作目录在已准备 Git 的 graph 中使用节点自己的 worktree，否则使用项目目录。`project` 明确选择项目；`worktree` 要求创建 graph 时已指定 targetBranch。path 必须是所选根下已存在的目录，禁止绝对路径、父目录越界与指向根外的符号链接。
 
-例如 `workspace:{base:"worktree",path:"packages/api"},access:{mode:"standard",network:"declared"}`。access 复用现有 AccessPolicy 的字段与默认值，不允许超过宿主已经授权的范围；protectedPaths 继续保留。受理定义不等于权限已经获准：启动时校验实际宿主授权，拒绝时保留输入、暂停节点并通知 main，不消耗自动重试次数。
+例如 `workspace:{base:"worktree",path:"packages/api"}`。节点不再声明权限：Graph 只有一种执行姿态，节点的工作目录由 `workspace` 决定。受理定义不等于命令一定成功：宿主拒绝时保留输入、暂停节点并通知 main，不消耗自动重试次数。
 
 执行及缺项补交使用启动时冻结的环境。main 修改 workspace/access 后，下一次执行才重绑，保留实例身份、聊天历史和累计用量；成功重绑记录 graph.node.rebound。节点的 system prompt、node_run 与独立聊天窗口显示实际规范工作目录、实际 project/worktree 基础及已解析权限快照，不把下一版本配置当作当前执行环境。选择项目目录的节点不获得只适用于私有 worktree 的 workspace_commit 工具。
 

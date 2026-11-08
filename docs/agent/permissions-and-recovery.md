@@ -1,6 +1,6 @@
 # Permissions and Recovery
 
-> **2026-11-08: Graph 不再有权限分级。** 标准/完全访问这一对已被删除：后端只有一种姿态（host 读、host 写、不受限网络、host 命令、apple events 开启），`access` 配置字段不再读取，控制台也不再提供切换。本文其余内容描述的是删除前存在的标准模式，仅作历史记录保留。
+> **2026-11-08: Graph 不再有权限分级。** 标准/完全访问这一对已被删除：后端只有一种姿态（host 读、host 写、不受限网络、host 命令、apple events 开启），`access` 配置字段、`Operation.accessPolicy` 与节点 `access` 声明都已从代码、接口与控制台类型中删除。本文其余内容描述的是删除前存在的标准模式，仅作历史记录保留。
 
 ## 权限不是 prompt
 

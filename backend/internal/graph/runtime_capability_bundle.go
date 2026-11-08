@@ -42,7 +42,6 @@ type CapabilityOperationOptions struct {
 	ReadOnly             bool
 	Grants               []string
 	AdditionalReadRoots  []string
-	Access               *ResolvedAccessPolicy
 	DisabledTools        []string
 	NativeTools          []string
 	OnPermissionRequired func(CapabilityPermissionRequest)
@@ -212,7 +211,7 @@ func (version *CapabilityBundleVersion) OpenOperation(options CapabilityOperatio
 	}()
 	input := CapabilityLoadInput{
 		Catalog: version.input.Catalog, Workspace: options.Workspace, ScratchDir: options.ScratchDir, Gate: options.Gate,
-		ReadOnly: options.ReadOnly, Access: options.Access,
+		ReadOnly: options.ReadOnly,
 	}
 	if version.input.DefinitionVersion != "" {
 		input.DefinitionVersion = version.input.DefinitionVersion
@@ -392,7 +391,6 @@ type CapabilityLoadInput struct {
 	ReadOnly             bool
 	Secrets              map[string]string
 	OnPermissionRequired func(CapabilityPermissionRequest)
-	Access               *ResolvedAccessPolicy
 }
 
 type CapabilityPromptsInput struct {

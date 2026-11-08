@@ -30,7 +30,6 @@ type ModuleOperationInput struct {
 	IntegratesSource func(executionId string) bool
 	State            any
 	Inputs           map[string]any
-	Access           *ResolvedAccessPolicy
 	Signal           *AbortSignal
 	Program          *ModuleOperationProgram
 }

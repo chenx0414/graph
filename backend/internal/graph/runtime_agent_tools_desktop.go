@@ -219,25 +219,17 @@ func desktopPermissionProblem(desktop *AgentToolsDesktop, command string, contex
 }
 
 type desktopExecutionContext struct {
-	Sandboxed bool
-	AccessMode string
 	Role string
-	PolicyDigest string
 }
 
 func desktopExecutionContextOf(input AgentToolsInput) desktopExecutionContext {
-	return desktopExecutionContext{Sandboxed: false, AccessMode: "full", Role: input.Role}
+	return desktopExecutionContext{Role: input.Role}
 }
 
 func (context desktopExecutionContext) details() map[string]any {
-	evidence := "host"
-	if context.Sandboxed {
-		evidence = "sandbox"
-	}
 	return map[string]any{
-		"sandbox": context.Sandboxed, "accessMode": context.AccessMode,
-		"role": context.Role, "policyDigest": context.PolicyDigest,
-		"probe": "agent-desktop permissions", "evidence": evidence,
+		"role": context.Role,
+		"probe": "agent-desktop permissions", "evidence": "host",
 	}
 }
 

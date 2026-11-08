@@ -338,7 +338,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 			CapabilityRoot: filepath.Join(userHome, "capabilities"), RecipesPath: filepath.Join(userHome, "agent-combinations.json"),
 			BootstrapPrompts: bootstrap.Prompts, BootstrapToolPrompt: bootstrap.ToolPrompt,
 		},
-		Access: live.Access, Usage: usage, Rsi: rsi, AgentContext: agentContext,
+		Usage: usage, Rsi: rsi, AgentContext: agentContext,
 		StartupInfo: func() StartupInfo {
 			status := live.Status()
 			revision := live.Revision()

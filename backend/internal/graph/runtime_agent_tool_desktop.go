@@ -57,13 +57,6 @@ func desktopPermissionRefusal(command, state, version string, context desktopExe
 		"source": "graph-desktop-tool", "accessibility": state, "checked": "agent-desktop permissions",
 		"executionContext": context.details(),
 	}
-	if context.Sandboxed {
-		message = "Accessibility could not be read from inside the sandbox (" + state + "), so " + command + " has no target it could resolve"
-		suggestion = "Ask for this command where the user's own session owns the accessibility tree, then run it there: " +
-			"a permission reading taken inside the sandbox is not evidence about the host grant. " + suggestion
-		details["notice"] = "This reading was taken in the sandbox (access.mode " + context.AccessMode + ") and is not evidence " +
-			"that Accessibility is missing on the host: the same binary reads the user's real grant only outside the sandbox."
-	}
 	envelope := map[string]any{
 		"ok": false, "command": command,
 		"error": map[string]any{

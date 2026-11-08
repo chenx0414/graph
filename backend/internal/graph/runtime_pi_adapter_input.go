@@ -27,7 +27,6 @@ type piAdapterRunInput struct {
 	Task              TaskRow
 	ProjectRoot       string
 	DefinitionVersion string
-	AccessPolicy      *ResolvedAccessPolicy
 	FullAccess        bool
 	ActiveInstances   *map[string]AgentSession
 	ActiveMu          *sync.Mutex

@@ -27,11 +27,6 @@ func (runtime *TaskRuntime) DefaultModel() *string {
 	return runtime.masterModel()
 }
 
-func (runtime *TaskRuntime) CurrentAccessPolicy() *ResolvedAccessPolicy {
-	runtime.ensureOpen()
-	return runtime.resolvedAccessPolicy()
-}
-
 func (runtime *TaskRuntime) ModelLimits() ModelSchedulerSnapshot {
 	runtime.ensureOpen()
 	return runtime.scheduler.Snapshot()

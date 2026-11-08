@@ -25,7 +25,6 @@ type OperationIntent struct {
 	RequirementVersion int
 	Context            OperationContext
 	Grants             []string
-	AccessPolicy       *ResolvedAccessPolicy
 	ActivationId       string
 	GraphVersion       int
 	DependencySources  map[string][]DependencySource
@@ -65,7 +64,6 @@ func (intent OperationIntent) operation(id string, generation, attempt int) Oper
 		RequirementVersion: intent.RequirementVersion,
 		Context:            intent.Context,
 		Grants:             grants,
-		AccessPolicy:       intent.AccessPolicy,
 		ActivationId:       intent.ActivationId,
 		GraphVersion:       intent.GraphVersion,
 		DependencySources:  dependencySources,

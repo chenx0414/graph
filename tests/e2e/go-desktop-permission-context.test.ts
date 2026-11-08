@@ -11,16 +11,12 @@ import { desktopProvider, envelopeOf, textOf } from '../helpers/desktop-graph.ts
  *
  * The tool asks `agent-desktop permissions` before a command that reads the
  * accessibility tree, and that probe answers with the TCC state of the process
- * that runs it. Inside the OS sandbox the same binary reads `denied` while the
- * host reads `granted`, so a refusal that says only "permission is not granted"
- * reports the *environment the reading was taken in* as the *user's setting*.
+ * that runs it. A refusal that says only "permission is not granted" would
+ * report the *environment the reading was taken in* as the *user's setting*.
  *
  * This file proves, through the real daemon and a controlled agent-desktop CLI,
- * that the two contexts are told apart in the answer the model reads: the same
- * binary, the same `denied` envelope, two sessions - one whose commands run on
- * the host (`access.mode: full`) and one whose commands run confined
- * - and a confined process says its reading is not
- * evidence of the host grant.
+ * that the answer the model reads names that context: the reading is evidence
+ * from the host, and the refusal still tells the model which grant is missing.
  *
  * The CLI here is a controlled external program, not a stub of Graph: it prints
  * the envelope `agent-desktop permissions` really prints, so the product's own
@@ -61,10 +57,10 @@ afterAll(async () => { for (const close of cleanups.reverse()) await close(); })
 
 /**
  * One daemon whose master turn calls `desktop snapshot` on a machine whose
- * grant probe answers `denied`, under one access mode.
+ * grant probe answers `denied`.
  */
-async function session(mode: 'full' | 'standard'): Promise<Refusal> {
-  const root = await mkdtemp(join(tmpdir(), `graph-e2e-permission-${mode}-`));
+async function session(): Promise<Refusal> {
+  const root = await mkdtemp(join(tmpdir(), 'graph-e2e-permission-'));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });
   await mkdir(join(root, 'web'), { recursive: true });
@@ -86,9 +82,6 @@ async function session(mode: 'full' | 'standard'): Promise<Refusal> {
   await writeFile(configPath, JSON.stringify({
     version: 1,
     projects: [{ id: 'p', root: project }],
-    // The policy a session's commands run under: `full` runs them on the host,
-    // `standard` confines them - and the permission probe inherits that context.
-    access: { mode },
     credentials: { desktop: { secretRef: 'GRAPH_DESKTOP_KEY' } },
     models: { entries: [{ id: 'main', provider: 'graph-master', modelId: 'main-model', grade: 'high', api: 'openai-completions',
       baseUrl: provider.baseUrl, contextWindow: 32000, maxTokens: 512, credentialId: 'desktop' }] },
@@ -104,7 +97,7 @@ async function session(mode: 'full' | 'standard'): Promise<Refusal> {
   cleanups.push(async () => { await daemon.close(); await provider.close(); await rm(root, { recursive: true, force: true }); });
   const opened = await daemon.request('/api/conversations', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ projectId: 'p', model: 'main', text: `${SENTINEL}: take a snapshot`, requestId: `open-${mode}` }),
+    body: JSON.stringify({ projectId: 'p', model: 'main', text: `${SENTINEL}: take a snapshot`, requestId: 'open' }),
   });
   const body = await opened.text();
   if (opened.status !== 200) throw new Error(`the conversation did not open (${opened.status}): ${body}`);
@@ -124,15 +117,14 @@ async function session(mode: 'full' | 'standard'): Promise<Refusal> {
  * session. The probe, the envelope and the suggestion are what still matter.
  */
 test('the host session reports its own reading as evidence', async () => {
-  const host = await session('full');
+  const host = await session();
 
   expect(host.argv.split('\n')[0], 'the host session did not probe the CLI').toBe('permissions');
   expect(host.refused.error?.code).toBe('PERM_DENIED');
 
   const hostContext = host.refused.error?.details?.executionContext;
   expect(hostContext, `expected error.details.executionContext on the host refusal; got ${JSON.stringify(host.refused.error?.details)}`)
-    .toMatchObject({ sandbox: false, accessMode: 'full', evidence: 'host', probe: 'agent-desktop permissions' });
+    .toMatchObject({ evidence: 'host', probe: 'agent-desktop permissions' });
   expect(host.refused.error?.details?.accessibility).toBe('denied');
   expect(String(host.refused.error?.message), 'the host refusal must name the grant it read').toContain('not granted');
-  expect(String(hostContext.policyDigest), 'the context must name the policy it was read under').not.toBe('');
 });

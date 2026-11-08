@@ -17,7 +17,6 @@ type NodeSessionEnvironment struct {
 	Revision  int                   `json:"revision"`
 	Workspace string                `json:"workspace"`
 	Base      string                `json:"base"`
-	Access    *ResolvedAccessPolicy `json:"access"`
 }
 
 type NodeSession struct {
@@ -37,7 +36,6 @@ type NodeSession struct {
 type NodeSessionOptions struct {
 	Frozen             *FrozenExecutionRecovery
 	RetainCapabilities bool
-	Access             *ResolvedAccessPolicy
 	Bindings           *NodeSessionBindings
 	Kernel             *KernelStore
 	Catalog            *Catalog
@@ -140,14 +138,14 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 	var nativeToolInput *AgentToolsInput
 	operationInput := CapabilityOperationOptions{
 		Workspace: options.Workspace, ScratchDir: scratchDir, Action: action, NativeTools: []string{"bash"},
-		DisabledTools: assembly.DisabledTools, Gate: operationGate, Access: options.Access,
+		DisabledTools: assembly.DisabledTools, Gate: operationGate,
 		HostTools: func(readRoots []string) []ToolDefinition {
 			role := "worker"
 			if action == "review" {
 				role = "reviewer"
 			}
 			tools := AgentToolsInput{
-				Workspace: options.Workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog, Access: options.Access,
+				Workspace: options.Workspace, Role: role, ReadRoots: append([]string{}, readRoots...), Catalog: options.Catalog,
 				Desktop: OpenDesktopTools(desktopCapabilityRoot(options.Catalog)),
 				ReadGraph: func(input GraphSectionQuery) any {
 					execution := options.Kernel.RunningExecution(options.GraphId, options.NodeId)

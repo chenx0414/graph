@@ -47,7 +47,6 @@ type GraphConfig struct {
 	Models                *GraphModels                `json:"models"`
 	Credentials           map[string]CredentialConfig `json:"credentials"`
 	Limits                LimitsConfig                `json:"limits"`
-	Access                AccessPolicy                `json:"access"`
 	PiExtensionAutoUpdate bool                        `json:"piExtensionAutoUpdate"`
 	Codemode              GraphCodemode               `json:"codemode"`
 }
@@ -77,7 +76,6 @@ func EmptyGraphConfig() GraphConfig {
 		Path: nil, Configured: false, Projects: []ProjectConfig{}, Models: nil,
 		Credentials:           map[string]CredentialConfig{},
 		Limits:                LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}},
-		Access:                FullAccessPolicy(),
 		PiExtensionAutoUpdate: true,
 	}
 }

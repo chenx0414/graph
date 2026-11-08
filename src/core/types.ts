@@ -58,7 +58,6 @@ export interface Receipt { taskId: string; cursor: number }
 export interface TaskUpdate { cursor: number; taskId: string; type: string; data: Json; timestamp: number }
 export type { TokenUsage } from './token-usage.ts';
 import type { TokenUsage } from './token-usage.ts';
-import type { ResolvedAccessPolicy } from './access-policy.ts';
 export interface ArtifactReference {
   path: string;
   digest: string;
@@ -98,7 +97,6 @@ export interface Operation {
     outputSchema?: { kind: 'agent_result'; version: number };
   };
   grants: string[];
-  accessPolicy?: ResolvedAccessPolicy;
   activationId: string; graphVersion: number;
   dependencySources: Record<string, DependencySource[]>;
   inputVersions: Record<string, { activationId: string; outputVersion: number }[]>;

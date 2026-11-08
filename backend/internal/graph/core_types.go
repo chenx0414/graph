@@ -260,7 +260,6 @@ type Operation struct {
 	RequirementVersion int                           `json:"requirementVersion"`
 	Context            OperationContext              `json:"context"`
 	Grants             []string                      `json:"grants"`
-	AccessPolicy       *ResolvedAccessPolicy         `json:"accessPolicy,omitempty"`
 	ActivationId       string                        `json:"activationId"`
 	GraphVersion       int                           `json:"graphVersion"`
 	DependencySources  map[string][]DependencySource `json:"dependencySources"`

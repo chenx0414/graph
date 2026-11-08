@@ -18,7 +18,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	skillReadPaths := piAdapterUnique(append(append([]string{}, turn.CapabilityOperation.SkillPaths...),
 		NativeSkillDirs([]string{turn.Workspace, input.ProjectRoot}, "", "")...))
 	request := AgentSessionRequest{
-		ExecutionConfiguration: map[string]any{"model": entry, "spec": turn.Spec, "accessPolicy": input.AccessPolicy},
+		ExecutionConfiguration: map[string]any{"model": entry, "spec": turn.Spec},
 		CapabilityDescriptor:   turn.CapabilityOperation.Descriptor,
 		CredentialReference:    map[string]any{"modelId": entry.Id, "provider": entry.Provider, "credentialId": entry.CredentialId},
 		ExecutionId:            operation.Id, InputRequestId: fmt.Sprintf("%s:attempt:%d", operation.Id, operation.Attempt),

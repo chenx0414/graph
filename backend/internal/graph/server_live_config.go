@@ -3,7 +3,6 @@ package graph
 import (
 	"sync"
 
-	"encoding/json"
 )
 
 type ResolvedCredential struct {
@@ -131,21 +130,6 @@ func (live *LiveConfig) MasterModel() string {
 	return live.state.MasterModel
 }
 
-
-func (live *LiveConfig) Access() AccessPolicy {
-	live.mu.Lock()
-	config := live.state.Config.Access
-	live.mu.Unlock()
-	raw, err := json.Marshal(config)
-	if err != nil {
-		panic(err)
-	}
-	var copy AccessPolicy
-	if err := json.Unmarshal(raw, &copy); err != nil {
-		panic(err)
-	}
-	return copy
-}
 
 func (live *LiveConfig) Enabled() bool {
 	live.mu.Lock()

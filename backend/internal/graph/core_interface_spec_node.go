@@ -3,8 +3,6 @@ package graph
 import (
 	"regexp"
 	"strings"
-
-	"encoding/json"
 )
 
 var interfaceSpecDeliverableSlug = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$`)
@@ -113,50 +111,7 @@ func interfaceSpecValidateNode(definition map[string]any, id string, node map[st
 			}
 		}
 	}
-	if access, ok := node["access"]; ok && access != nil {
-		shape, err := json.Marshal(FullAccessPolicy())
-		if err != nil {
-			panic(err)
-		}
-		var sample map[string]any
-		if err := json.Unmarshal(shape, &sample); err != nil {
-			panic(err)
-		}
-		var strict func(value any, shape map[string]any, path string)
-		strict = func(value any, shape map[string]any, path string) {
-			record, ok := value.(map[string]any)
-			if !ok {
-				interfaceSpecInvalid(path + " must be an object")
-			}
-			for key, child := range record {
-				sampleChild, known := shape[key]
-				if !known {
-					interfaceSpecInvalid(path + " has unsupported field " + key)
-				}
-				if nested, ok := sampleChild.(map[string]any); ok {
-					strict(child, nested, path+"."+key)
-				}
-			}
-		}
-		strict(access, sample, "Node "+id+" access")
-		mode, _ := access.(map[string]any)["mode"].(string)
-		if mode != "full" {
-			interfaceSpecInvalid("Node " + id + " access requires mode:full")
-		}
-		func() {
-			defer func() {
-				recovered := recover()
-				if recovered == nil {
-					return
-				}
-				if re, ok := recovered.(*RuntimeError); ok {
-					interfaceSpecInvalid(re.Message)
-				}
-				interfaceSpecInvalid(panicMessage(recovered))
-			}()
-		}()
-	}
-	inputs, _ := node["inputs"].(map[string]any)
+		inputs, _ := node["inputs"].(map[string]any)
 	for port, ref := range inputs {
 		record, _ := ref.(map[string]any)
 		interfaceSpecAssertDeclared(definition, record, "Node "+id+" input "+port)
