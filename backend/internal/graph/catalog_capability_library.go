@@ -10,7 +10,6 @@ type CapabilityKind = string
 const (
 	CapabilityKindSkill       CapabilityKind = "skill"
 	CapabilityKindMCP         CapabilityKind = "mcp"
-	CapabilityKindExtension   CapabilityKind = "extension"
 	CapabilityKindPiExtension CapabilityKind = "pi-extension"
 	CapabilityKindPrompt      CapabilityKind = "prompt"
 )
@@ -112,7 +111,6 @@ type DeletedAgentCombination struct {
 var capabilityBundleDirectories = map[CapabilityKind]string{
 	CapabilityKindSkill:       "skills",
 	CapabilityKindMCP:         "mcp",
-	CapabilityKindExtension:   "graph-extensions",
 	CapabilityKindPiExtension: "pi-extensions",
 	CapabilityKindPrompt:      "agent-md",
 }

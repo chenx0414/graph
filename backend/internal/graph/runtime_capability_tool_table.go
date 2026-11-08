@@ -1,69 +1,11 @@
 package graph
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
-
-func capabilityTools(connection McpExchange, tools []McpTool, capabilityId string, capabilityVersion string, authorization *capabilityAuthorization) []ToolDefinition {
-	out := []ToolDefinition{}
-	for _, tool := range tools {
-		description := ""
-		if tool.Description != nil {
-			description = *tool.Description
-		}
-		if description == "" {
-			description = "MCP tool " + tool.Name + " from " + capabilityId + "@" + capabilityVersion
-		}
-		parameters := tool.InputSchema
-		if parameters == nil {
-			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
-		}
-		toolName := tool.Name
-		definition := ToolDefinition{
-			Name:        capabilityMcpToolName(capabilityId, toolName),
-			Label:       toolName + " (" + capabilityId + ")",
-			Description: description,
-			Parameters:  parameters,
-			ExternallyGated: true,
-		}
-		definition.Execute = func(toolCallId string, raw any) (any, error) {
-			if authorization != nil {
-				grant := McpGrant(capabilityId, toolName)
-				if !capabilityStringListHas(authorization.grants, grant) {
-					if authorization.onPermissionRequired != nil {
-						authorization.onPermissionRequired(CapabilityPermissionRequest{
-							Grant: grant, CapabilityId: capabilityId, Tool: toolName, Description: description,
-						})
-					}
-					return nil, fmt.Errorf("Permission required: MCP tool %s needs the task grant %s", toolName, grant)
-				}
-			}
-			result := CallMcpTool(connection, toolName, raw)
-			content := []any{}
-			for _, part := range result.Content {
-				content = append(content, map[string]any{"type": part.Type, "text": part.Text})
-			}
-			if len(content) == 0 {
-				content = append(content, map[string]any{"type": "text", "text": "MCP tool returned no content"})
-			}
-			if result.IsError {
-				texts := []string{}
-				for _, part := range result.Content {
-					texts = append(texts, part.Text)
-				}
-				return nil, errors.New(strings.Join(texts, "\n"))
-			}
-			return map[string]any{"content": content, "details": map[string]any{}}, nil
-		}
-		out = append(out, definition)
-	}
-	return out
-}
 
 func capabilityStringListHas(values []string, value string) bool {
 	for _, candidate := range values {
@@ -207,23 +149,6 @@ func ResolveCapabilityFacts(catalog *Catalog, definitionVersion string) []Resolv
 			if entry != "" {
 				value := entry
 				fact.Entry = &value
-			}
-			facts = append(facts, fact)
-			continue
-		}
-		if record.Kind == CapabilityKindExtension {
-			entry := capabilityExtensionEntry(manifest, snapshot)
-			if _, err := os.Stat(entry); err != nil {
-				Raise("capability_unavailable", "Graph extension "+binding.bound.Id+"@"+binding.bound.Version+" entry does not exist")
-			}
-			fact := ResolvedCapabilityFact{
-				Id: binding.bound.Id, Version: binding.bound.Version, Kind: record.Kind,
-				Source: record.Source, Path: snapshot,
-				Digest: capabilityTextDigest(CanonicalJSON(map[string]any{
-					"manifest": manifest,
-					"entry":    capabilityFileDigest(entry),
-				})),
-				Entry: &entry,
 			}
 			facts = append(facts, fact)
 			continue

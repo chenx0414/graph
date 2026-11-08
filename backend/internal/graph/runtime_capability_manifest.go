@@ -404,3 +404,25 @@ func capabilityFrontmatter(text string) string {
 	}
 	return strings.TrimSuffix(rest[:end], "\r")
 }
+
+func capabilityLocalCommandSearchDirectories(command string) []string {
+	configured := []string{}
+	for _, entry := range strings.Split(os.Getenv("PATH"), ":") {
+		if entry != "" {
+			configured = append(configured, entry)
+		}
+	}
+	common := []string{
+		filepath.Join(capabilityHomeDir(), ".local", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+	}
+	preferred := common
+	switch command {
+	case "uvx":
+		preferred = append([]string{filepath.Join(capabilityHomeDir(), ".local", "bin")}, common...)
+	case "npx":
+		preferred = append([]string{"/opt/homebrew/bin", "/usr/local/bin"}, common...)
+	}
+	return capabilityUniqueStrings(append(configured, preferred...))
+}

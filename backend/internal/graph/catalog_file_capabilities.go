@@ -75,7 +75,7 @@ type CapabilityRuntimeDecl struct {
 const fileCapabilitiesMaxScanDepth = 4
 
 var (
-	fileCapabilitiesKinds = map[string]bool{"skill": true, "mcp": true, "extension": true, "pi-extension": true, "prompt": true}
+	fileCapabilitiesKinds = map[string]bool{"skill": true, "mcp": true, "pi-extension": true, "prompt": true}
 	fileCapabilitiesID    = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	fileCapabilitiesSkip  = map[string]bool{"node_modules": true, ".git": true, ".worker-home": true, ".worker-tmp": true}
 	fileCapabilitiesEnv   = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)

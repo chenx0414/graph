@@ -70,7 +70,7 @@ func capabilityBundleValidateFiles(manifest CapabilityManifest, files map[string
 		entry = "./index.mjs"
 	}
 	entry = capabilityBundlePrefix.ReplaceAllString(entry, "")
-	if (manifest.Kind == CapabilityKindExtension || manifest.Kind == CapabilityKindPiExtension) && strings.TrimSpace(files[entry]) == "" {
+	if manifest.Kind == CapabilityKindPiExtension && strings.TrimSpace(files[entry]) == "" {
 		Raise("invalid_capability", "An extension bundle requires "+entry)
 	}
 }

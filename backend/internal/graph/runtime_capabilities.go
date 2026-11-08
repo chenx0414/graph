@@ -120,17 +120,6 @@ var capabilityEnvironmentPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_
 
 var capabilityVariablePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func McpGrant(capabilityId string, tool string) string {
-	return "mcp:" + capabilityId + ":" + tool
-}
-
-func capabilityMcpToolName(capabilityId string, tool string) string {
-	clean := func(value string) string {
-		return capabilityReplaceInvalid(value, "A-Za-z0-9_", "_")
-	}
-	return "mcp_" + clean(capabilityId) + "_" + clean(tool)
-}
-
 func capabilitySafeToolName(name string) string {
 	clean := capabilityReplaceInvalid(name, "A-Za-z0-9_-", "_")
 	clean = capabilityTrimLeadingNonAlpha(clean)

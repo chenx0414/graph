@@ -7,6 +7,17 @@ import (
 
 type RestrictedGate = SendGate
 
+type McpRunResult struct {
+	Code   *int
+	Stdout string
+	Stderr string
+}
+
+type McpProcessControl struct {
+	Kill func(signal string) bool
+	End  func()
+}
+
 type RestrictedProcessControl struct {
 	Pid *int
 	Write func(message any) bool
@@ -23,25 +34,9 @@ type RestrictedCommand struct {
 	Input string
 	ReadPaths []string
 	WritePaths []string
-	Filesystem string
-	Unsandboxed bool
-	ProtectedPaths []string
-	ProtectedPathExceptions []string
-	ProtectedReadPathExceptions []string
-	DenyWrite []string
-	AllowGitMetadataWrites []string
-	GitMetadataWritesInsideScratch bool
-	AllowGitMetadataWritesAll bool
 	TimeoutMs int
 	OnRequest func(request any) (any, error)
 	OnWorkerMessage func(message any)
-	LocalNetwork bool
-	NetworkDomains []string
-	AllowUnrestrictedNetwork bool
-	AllowLocalBinding bool
-	UnixSockets []string
-	AllowAllUnixSockets bool
-	AllowAppleEvents bool
 	Env map[string]string
 	KeepStdinOpen bool
 	Signal *AbortSignal

@@ -2,10 +2,8 @@ package graph
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -249,140 +247,11 @@ func capabilityLoadOne(input CapabilityLoadInput, binding capabilityBinding, sta
 	if record.Kind == CapabilityKindPiExtension {
 		return capabilityLoadPiExtension(input, binding, record, snapshot, state)
 	}
-	if record.Kind != CapabilityKindMCP && record.Kind != CapabilityKindExtension {
+	if record.Kind != CapabilityKindMCP {
 		Raise("capability_unsupported", "Capability kind "+record.Kind+" is not loadable")
 	}
-	manifest := capabilityManifestOf(snapshot)
-	var connection McpExchange
-	var authorization *capabilityAuthorization
-	loadedReason := ""
-	var networkDomains []string
-	var networkAccess string
-	var provisioning *capabilityProvisioningPlan
-	if record.Kind == CapabilityKindExtension {
-		lease := AcquireRestrictedExecutor()
-		executor, ok := capabilityRestrictedExecutorOf(lease.Executor)
-		if !ok {
-			Raise("capability_unavailable", "the restricted executor does not run restricted commands")
-		}
-		state.releases = append(state.releases, lease.Release)
-		connection = capabilityExtensionConnection(capabilityExtensionConnectionInput{
-			executor: executor, gate: input.Gate, manifest: manifest, snapshot: snapshot,
-			workspace: input.Workspace, scratchDir: input.ScratchDir, readOnly: input.ReadOnly, access: input.Access,
-		})
-		if input.ReadOnly {
-			loadedReason = "只读讨论模式：本地扩展在 scratch 只读范围加载"
-		}
-	} else if _, ok := manifest["command"].(string); ok {
-		fullNetwork := input.Access != nil && input.Access.Network == "unrestricted"
-		if !fullNetwork && manifest["networkAccess"] != nil && manifest["networkAccess"] != "unrestricted" {
-			Raise("capability_unavailable", "MCP networkAccess must be \"unrestricted\"")
-		}
-		if fullNetwork || manifest["networkAccess"] == "unrestricted" {
-			networkAccess = "unrestricted"
-		}
-		if !fullNetwork && networkAccess != "" && manifest["networkDomains"] != nil {
-			Raise("capability_unavailable", "MCP cannot combine networkDomains with unrestricted network access")
-		}
-		if networkAccess == "" {
-			networkDomains = capabilityManifestNetworkDomains(manifest, input.McpDomains, input.Secrets)
-		} else {
-			networkDomains = []string{}
-		}
-		if len(networkDomains) > 0 || networkAccess != "" {
-			authorization = &capabilityAuthorization{grants: input.Grants, onPermissionRequired: input.OnPermissionRequired}
-		}
-		plan, err := capabilityEnsureMcpProvisioned(input.Gate, manifest, snapshot, input.Workspace, input.ScratchDir, input.Secrets, networkDomains,
-			input.Access != nil && input.Access.Commands == "host", fullNetwork, input.Access)
-		if err != nil {
-			Raise("capability_unavailable", err.Error())
-		}
-		provisioning = plan
-		lease := AcquireRestrictedExecutor()
-		executor, ok := capabilityRestrictedExecutorOf(lease.Executor)
-		if !ok {
-			Raise("capability_unavailable", "the restricted executor does not run restricted commands")
-		}
-		state.releases = append(state.releases, lease.Release)
-		connection = capabilityLocalConnection(capabilityLocalConnectionInput{
-			executor: executor, gate: input.Gate, manifest: manifest, snapshot: snapshot,
-			workspace: input.Workspace, scratchDir: input.ScratchDir, readOnly: input.ReadOnly,
-			networkDomains: networkDomains, allowUnrestrictedNetwork: networkAccess != "",
-			access: input.Access, secrets: input.Secrets, provisioning: provisioning, provisioningPhase: "runtime",
-			hostCommands: input.Access != nil && input.Access.Commands == "host",
-		})
-		if input.ReadOnly {
-			loadedReason = "只读讨论模式：本地能力在只读范围加载"
-		}
-	} else {
-		if manifest["networkAccess"] != nil {
-			Raise("capability_unavailable", "MCP networkAccess is only valid for local MCP commands")
-		}
-		authorization = &capabilityAuthorization{grants: input.Grants, onPermissionRequired: input.OnPermissionRequired}
-		connection = capabilityRemoteConnection(manifest, input.Gate, input.McpDomains, input.Secrets)
-		remote, _ := manifest["url"].(string)
-		parsed, err := url.Parse(remote)
-		hostname := ""
-		if err == nil {
-			hostname = parsed.Hostname()
-		}
-		networkDomains = capabilityManifestNetworkDomains(manifest, append(append([]string{}, input.McpDomains...), hostname), input.Secrets)
-	}
-	discovered := ListMcpTools(connection)
-	if authorization != nil {
-		grants := append([]string{}, authorization.grants...)
-		for _, tool := range discovered {
-			grants = append(grants, McpGrant(binding.bound.Id, tool.Name))
-		}
-		sort.Strings(grants)
-		authorization.grants = capabilityUniqueStrings(grants)
-	}
-	state.tools = append(state.tools, capabilityTools(connection, discovered, binding.bound.Id, binding.bound.Version, authorization)...)
-	executable := true
-	grantReason := ""
-	if authorization != nil && len(discovered) > 0 {
-		granted := 0
-		for _, tool := range discovered {
-			if capabilityStringListHas(authorization.grants, McpGrant(binding.bound.Id, tool.Name)) {
-				granted++
-			}
-		}
-		executable = granted > 0
-		if granted == 0 {
-			grantReason = "已加载 " + itoa(len(discovered)) + " 个工具，当前无任务授权（例如 " + McpGrant(binding.bound.Id, discovered[0].Name) + "），调用会被权限门拒绝"
-		} else if granted < len(discovered) {
-			grantReason = "已加载 " + itoa(len(discovered)) + " 个工具，其中 " + itoa(granted) + " 个获授权，其余调用会被权限门拒绝"
-		}
-	} else if authorization != nil && len(discovered) == 0 {
-		executable = false
-		grantReason = "能力已连接但没有可调用工具"
-	}
-	fact := RuntimeCapabilityLoadFact{
+	return []RuntimeCapabilityLoadFact{{
 		Id: binding.bound.Id, Version: binding.bound.Version, Kind: capabilityOptionalString(record.Kind),
-		Loaded: true, Executable: executable,
-	}
-	if grantReason != "" {
-		fact.Reason = capabilityOptionalString(grantReason)
-	} else if loadedReason != "" {
-		fact.Reason = capabilityOptionalString(loadedReason)
-	}
-	if len(discovered) > 0 {
-		names := []string{}
-		for _, tool := range discovered {
-			names = append(names, capabilityMcpToolName(binding.bound.Id, tool.Name))
-		}
-		fact.Tools = names
-	}
-	if len(networkDomains) > 0 {
-		fact.NetworkDomains = networkDomains
-	}
-	if networkAccess != "" {
-		fact.NetworkAccess = networkAccess
-	}
-	if provisioning != nil {
-		fact.Provisioning = &RuntimeCapabilityProvisioning{
-			Manager: provisioning.manager, Domains: provisioning.domains, Path: provisioning.root,
-		}
-	}
-	return []RuntimeCapabilityLoadFact{fact}, nil
+		Loaded: true, Executable: true,
+	}}, nil
 }

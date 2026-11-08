@@ -173,34 +173,6 @@ func capabilityProvisioningEnvironment(plan *capabilityProvisioningPlan, phase s
 	return env
 }
 
-func capabilityRemoteConnection(manifest map[string]any, gate SendGate, mcpDomains []string, secrets CapabilitySecrets) McpExchange {
-	declared, ok := manifest["url"].(string)
-	if !ok || strings.TrimSpace(declared) == "" {
-		Raise("capability_unavailable", "An MCP capability requires capability.json with an absolute command or a remote url")
-	}
-	parsed, err := url.Parse(declared)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		Raise("capability_unavailable", "Remote MCP url is invalid: "+declared)
-	}
-	if parsed.Scheme != "https" && parsed.Scheme != "http" {
-		Raise("capability_unavailable", "Remote MCP supports http and https, not "+parsed.Scheme+":")
-	}
-	if parsed.User != nil {
-		Raise("capability_unavailable", "Remote MCP urls cannot embed credentials")
-	}
-	domains := capabilityManifestNetworkDomains(manifest, append(append([]string{}, mcpDomains...), parsed.Hostname()), secrets)
-	if !AllowedDomain(domains, parsed.Hostname()) {
-		Raise("capability_unavailable", "Remote MCP host "+parsed.Hostname()+" is not in the granted MCP domains")
-	}
-	timeout := 30000
-	return HttpExchange(HttpEndpoint{
-		Gate:      gate,
-		Url:       parsed.String(),
-		Headers:   HeaderValues(manifest["headers"], manifest["headersEnv"], secrets),
-		TimeoutMs: &timeout,
-	})
-}
-
 func NodeReadPaths(execPath string, electron string) []string {
 	macos := filepath.Dir(execPath)
 	if electron != "" {

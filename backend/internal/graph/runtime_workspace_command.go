@@ -255,23 +255,8 @@ func (runner *WorkspaceCommandRunner) run(command string, args []string, signal 
 		TimeoutMs:  limit,
 		Signal:     signal,
 	}
-	if hostCommands {
-		cmd.Filesystem = "host"
-		cmd.ProtectedPaths = runner.access.ProtectedPaths
-		cmd.AllowUnrestrictedNetwork = runner.access.Network == "unrestricted"
-		cmd.AllowLocalBinding = runner.access.PiExtensions.LocalBinding
-		cmd.AllowAllUnixSockets = runner.access.PiExtensions.UnixSockets == "all"
-		cmd.AllowAppleEvents = runner.access.PiExtensions.AppleEvents
-		cmd.AllowGitMetadataWritesAll = runner.access.Filesystem.GitMetadata == "writable"
-		if runner.gitMetadataWritesInsideScratch {
-			cmd.GitMetadataWritesInsideScratch = true
-		}
-	}
 	if len(environment) > 0 {
 		cmd.Env = environment
-	}
-	if runner.localNetwork {
-		cmd.LocalNetwork = true
 	}
 	return runner.acquired.Executor.Run(cmd)
 }
