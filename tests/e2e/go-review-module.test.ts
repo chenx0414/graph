@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { ensureBackendBinary } from '../helpers/backend-binary.ts';
+import { moduleSandboxAllowed, moduleSandboxReason } from './go-module-operation.fixture.ts';
 
 /**
  * A review policy becomes a module the graph really runs.
@@ -106,7 +107,10 @@ const multiview = {
   dimensions: [{ id: 'correctness', required: true, report: 'review' }],
 };
 
-test('a generated review module is declared by the command and really judged by the graph', async () => {
+const moduleSandbox = moduleSandboxAllowed();
+if (!moduleSandbox) console.log('go-review-module: skipped, a command module needs a Docker daemon - ' + String(moduleSandboxReason()));
+
+test.skipIf(!moduleSandbox)('a generated review module is declared by the command and really judged by the graph', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-e2e-go-review-module-'));
   const project = join(root, 'project');
   await mkdir(project, { recursive: true });

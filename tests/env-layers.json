@@ -39,6 +39,14 @@
         "tests/e2e/harness-tool-fast-path.test.ts",
         "tests/e2e/pig-mcp-session.test.ts"
       ]
+    },
+    {
+      "capability": "docker-module-sandbox",
+      "probe": "docker-daemon",
+      "files": [
+        "tests/e2e/go-review-module.test.ts"
+      ],
+      "reason": "command 模块在 Docker 里跑；没有可达的 daemon 时模块必然失败（节点被暂停、投递停滞），不是产品行为"
     }
   ]
 }

@@ -63,7 +63,13 @@ const forced = process.env.GRAPH_BROWSER_LAYER;
  * a browser could not start, until nobody trusted the red.
  */
 const layers = JSON.parse(readFileSync(join(root, 'tests/env-layers.json'), 'utf8')).layers;
-const probes = { chromium: browserLaunches, 'nested-sandbox': sandboxNests };
+function dockerDaemon() {
+  const probe = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8', timeout: 20_000 });
+  if (probe.status === 0) return undefined;
+  return (probe.stderr || probe.stdout || 'docker refused').trim().split('\n')[0];
+}
+
+const probes = { chromium: browserLaunches, 'nested-sandbox': sandboxNests, 'docker-daemon': dockerDaemon };
 const skippedLayers = [];
 const layerExcludes = [];
 for (const layer of layers) {

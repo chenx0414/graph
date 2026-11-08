@@ -178,6 +178,23 @@ export function nestedSandboxAllowed(): boolean {
   return spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { stdio: 'ignore' }).status === 0;
 }
 
+/**
+ * Whether this host can run a command module, which executes inside Docker.
+ *
+ * A graph module of type `command` runs `node` in a container; without a
+ * reachable daemon the module fails, its node is paused and the delivery stays
+ * unprocessed. The probe asks the daemon, so the skip is a fact and not a guess.
+ */
+export function moduleSandboxAllowed(): boolean {
+  return moduleSandboxReason() === undefined;
+}
+
+export function moduleSandboxReason(): string | undefined {
+  const probe = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8', timeout: 20_000 });
+  if (probe.status === 0) return undefined;
+  return (probe.stderr || probe.stdout || 'docker refused').trim().split('\n')[0];
+}
+
 /** One spelling for a path, whichever side of /private it was written on. */
 export function canonical(path: string): string {
   return path.replace(/^\/private/, '');
