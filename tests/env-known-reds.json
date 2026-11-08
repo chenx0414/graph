@@ -15,6 +15,16 @@
       "file": "tests/e2e/provider-independent-reviews.test.ts",
       "pattern": "the Grok CLI login expired",
       "why": "Grok CLI 登录过期，刷新也被 400 拒绝；需要用户重新登录，凭据问题不是代码问题"
+    },
+    {
+      "file": "tests/e2e/desktop-shell.test.ts",
+      "pattern": "locator.click: Timeout 30000ms exceeded",
+      "why": "同一钥匙串环境问题的另一个表现：全量并行负载下第一次 setup 点击时页面还没就绪。同一提交单跑该文件，失败点会回到计数断言 `expected 0 to be greater than 0`（钥匙串未授权导致模型调用数为 0）"
+    },
+    {
+      "file": "tests/e2e/provider-independent-reviews.test.ts",
+      "pattern": "fetch failed",
+      "why": "外部 auth.x.ai 连接被重置（ECONNRESET，host auth.x.ai:443）；失败后同一端点直连返回 HTTP 200，属本机到外网的瞬时故障。若同一提交下反复出现而探针健康，要按真回归重查"
     }
   ]
 }

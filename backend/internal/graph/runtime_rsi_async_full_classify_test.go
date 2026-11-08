@@ -195,3 +195,25 @@ func TestADiskFullRunIsAnEnvironmentFailureEvenWhenFilesDoNotMatchTheKnownRedLis
 		t.Fatalf("the verdict must name the machine condition it saw: %q", verdict.Reason)
 	}
 }
+
+const asyncFullLoadVariantOutput = "\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests/e2e/desktop-shell.test.ts\x1b[2m > \x1b[22mOpenRouter browser authorization persists through the real desktop keychain, calls a model after restart and disconnects\n" +
+	"\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests/e2e/provider-independent-reviews.test.ts\x1b[2m > \x1b[22mthe review node runs on an independent provider, the concluded ChatGPT platform is reported instead of called, and a broken transport falls back to Grok\n" +
+	"\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests/e2e/go-review-module.test.ts\x1b[2m > \x1b[22ma generated review module is declared by the command and really judged by the graph\n" +
+	"      \x1b[33m×\x1b[39m OpenRouter browser authorization persists through the real desktop keychain, calls a model after restart and disconnects \x1b[2m—\x1b[22m locator.click: Timeout 30000ms exceeded. Call log: - waiting for getByTestId('setup-provider-openrouter') at /private/var/folders/dk/tj7mg4qn2xz3zm_z_0lxnp4r0000gn/T/graph-async-full-1471441488/tests/e2e/desktop-shell.test.ts:135:55\n" +
+	"      \x1b[33m×\x1b[39m the review node runs on an independent provider, the concluded ChatGPT platform is reported instead of called, and a broken transport falls back to Grok \x1b[2m—\x1b[22m TypeError: fetch failed\n" +
+	"      \x1b[33m×\x1b[39m a generated review module is declared by the command and really judged by the graph \x1b[2m—\x1b[22m Error: expected false to be truthy at Proxy.__VITEST_POLL_CHAIN__\n" +
+	"Test Files  3 failed | 248 passed | 1 skipped (252)\n"
+
+func TestAsyncFullShippedListMatchesTheLoadVariantAndStillNamesTheProductRed(t *testing.T) {
+	reds, err := LoadEnvKnownReds(filepath.Join("..", "..", "..", "tests", "env-known-reds.json"))
+	if err != nil {
+		t.Fatalf("the shipped known-red list does not load: %v", err)
+	}
+	verdict := ClassifyAsyncFull(asyncFullLoadVariantOutput, reds)
+	if len(verdict.Unmatched) != 1 || !strings.Contains(verdict.Unmatched[0], "go-review-module.test.ts") {
+		t.Fatalf("the shipped list must excuse the two environment reds and name only the product bug, got %v", verdict.Unmatched)
+	}
+	if verdict.Environment {
+		t.Fatalf("a run that still carries the product bug was excused as environmental: %+v", verdict)
+	}
+}
