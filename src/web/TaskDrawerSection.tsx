@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { TASK_LABEL } from './labels.ts';
-import { Icon, Pill } from './ui.tsx';
+import { Pill } from './ui.tsx';
 
 export interface DrawerTask {
   id: string;
@@ -16,11 +16,10 @@ const TASK_TONE: Record<string, 'neutral' | 'accent' | 'success' | 'warn' | 'dan
   awaiting_user: 'warn',
 };
 
-export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, origin }: {
+export function TaskDrawerSection({ tasks, selectedId, onSelect, origin }: {
   tasks: DrawerTask[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  projectId: string | null;
   origin: 'conversation' | 'workspace';
 }) {
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
@@ -35,7 +34,6 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
       const byTime = (right.task.createdAt ?? right.index) - (left.task.createdAt ?? left.index) || right.index - left.index;
       return sort === 'newest' ? byTime : -byTime;
     });
-  const artifactsHref = `#/artifacts${projectId ? `?project=${encodeURIComponent(projectId)}` : ''}`;
   return (
     <section className="drawer-all-tasks" data-testid={origin === 'conversation' ? 'conversation-tasks' : 'drawer-workspace-tasks'}>
       <div className="drawer-section-head"><h3>任务导航</h3><span>{tasks.length} 个任务</span></div>
@@ -62,7 +60,7 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
             <button key={task.id} type="button" className="drawer-task-nav-item"
               data-testid={origin === 'conversation' ? `conversation-task-${task.id}` : `drawer-workspace-task-${task.id}`}
               data-active={task.id === selected?.id} aria-pressed={task.id === selected?.id}
-              onClick={() => onSelect(task.id)}>
+              onClick={() => { onSelect(task.id); location.hash = `#/tasks/${encodeURIComponent(task.id)}/graph`; }}>
               <span className="grow truncate" title={task.request}>{task.request}</span>
               <Pill tone={TASK_TONE[task.status] ?? 'neutral'}>{TASK_LABEL[task.status] ?? task.status}</Pill>
             </button>
@@ -71,21 +69,7 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, projectId, orig
       )}
       {tasks.length > 0 && visible.length === 0 && <p className="muted">没有符合筛选条件的任务。</p>}
       <div className="drawer-task-detail" data-testid="drawer-task-detail">
-        {selected ? (
-          <>
-            <div className="drawer-entry-links" data-testid="drawer-task-links">
-              <a className="btn btn-sm" data-testid={`task-graph-tab-${selected.id}`} href={`#/tasks/${selected.id}/graph`}><Icon name="graph" size={14} /><span>任务图</span></a>
-              <a className="btn btn-sm" data-testid="drawer-task-artifacts" href={artifactsHref}><Icon name="box" size={14} /><span>共享产物</span></a>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="muted" data-testid="no-task-graph">还没有任务；确认草稿后这里会显示它的窗口。</p>
-            <div className="drawer-entry-links" data-testid="drawer-task-links-empty">
-              <a className="btn btn-sm" data-testid="drawer-task-artifacts" href={artifactsHref}><Icon name="box" size={14} /><span>共享产物</span></a>
-            </div>
-          </>
-        )}
+        {!selected && <p className="muted" data-testid="no-task-graph">还没有任务；确认草稿后这里会显示它的窗口。</p>}
       </div>
     </section>
   );

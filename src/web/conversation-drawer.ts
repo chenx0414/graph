@@ -22,14 +22,13 @@ export function resolveDrawerSection(input: DrawerSectionInput): DrawerSectionRe
 }
 
 export interface DrawerEntryLink {
-  id: 'graph' | 'artifacts';
+  id: 'graph';
   label: string;
-  target: 'draft-graph' | 'task-graph' | 'artifact-index';
+  target: 'draft-graph';
 }
 
 export const DRAWER_ENTRY_LINKS: readonly DrawerEntryLink[] = [
-  { id: 'graph', label: '任务图', target: 'task-graph' },
-  { id: 'artifacts', label: '共享产物', target: 'artifact-index' },
+  { id: 'graph', label: '草稿图', target: 'draft-graph' },
 ];
 
 export interface ArtifactGraphGroup<T> {

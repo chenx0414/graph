@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api.ts';
 import { GraphCanvas } from './GraphCanvas.tsx';
+import { ArtifactList } from './ArtifactViews.tsx';
+import type { ArtifactRecord } from './kernel-view-types.ts';
 import { ErrorBox, useAsync, useTaskStream } from './shared.tsx';
 import { Button, Card, Empty, Spinner, toast } from './ui.tsx';
 
@@ -22,11 +24,12 @@ export function GraphPanel({ id }: { id: string }) {
     location.hash = `#/tasks/${id}/nodes/${encodeURIComponent(nodeId)}`;
   }
   const { data: view, reload: reloadView } = useAsync(() => api<{ request: string }>(`/api/tasks/${id}`), [id]);
+  const { data: artifacts, error: artifactsError, loading: artifactsLoading, reload: reloadArtifacts } = useAsync(() => api<{ artifacts: ArtifactRecord[] }>(`/api/tasks/${id}/artifacts?latestOnly=true&limit=200`), [id]);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const refreshAll = useCallback(() => {
     clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => { reload(); reloadView(); }, 150);
-  }, [reload, reloadView]);
+    refreshTimer.current = setTimeout(() => { reload(); reloadView(); reloadArtifacts(); }, 150);
+  }, [reload, reloadView, reloadArtifacts]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
   useTaskStream(id, refreshAll);
   if (loading && !graph) return <Card><Spinner /></Card>;
@@ -57,7 +60,15 @@ export function GraphPanel({ id }: { id: string }) {
         }} />
       </Card>
 
-
+      <Card title="共享产物" icon="box" testid="task-artifacts">
+        {artifactsError && <ErrorBox message={`读取共享产物失败：${artifactsError}`} onRetry={reloadArtifacts} />}
+        <ArtifactList
+          records={artifacts?.artifacts ?? []}
+          loading={artifactsLoading && !artifacts}
+          tasks={view?.request ? [{ id, request: view.request }] : []}
+          onOpenDetail={record => { location.hash = `#/tasks/${id}/artifacts/${record.artifactId}?v=${record.version}`; }}
+        />
+      </Card>
     </div>
   );
 }

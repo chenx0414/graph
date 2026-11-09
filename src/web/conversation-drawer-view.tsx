@@ -77,9 +77,7 @@ return <aside
                       key={entry.id}
                       className="btn btn-sm"
                       data-testid={`drawer-entry-${entry.id}`}
-                      href={entry.id === 'graph'
-                        ? `#/conversations/${id}/graph?v=${selectedProposalVersion ?? activeProposal.version}`
-                        : `#/artifacts${view.projectId ? `?project=${encodeURIComponent(view.projectId)}` : ''}`}
+                      href={`#/conversations/${id}/graph?v=${selectedProposalVersion ?? activeProposal.version}`}
                     >
                       <Icon name={entry.id === 'graph' ? 'graph' : 'box'} size={14} />
                       <span style={{ marginLeft: 6 }}>{entry.label}</span>
@@ -111,7 +109,7 @@ return <aside
               <div className="drawer-loading"><Spinner label="正在加载草稿…" /></div>
             )}
 
-            {drawerOpen && <TaskDrawerSection tasks={tasks} selectedId={selectedTaskId} onSelect={setSelectedTaskId} projectId={view.projectId} origin="conversation" />}
+            {drawerOpen && <TaskDrawerSection tasks={tasks} selectedId={selectedTaskId} onSelect={setSelectedTaskId} origin="conversation" />}
 
             {drawerOpen && !hasDrawerContent && !drawerLoading && (
               <div className="drawer-empty" data-testid="detail-empty">

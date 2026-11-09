@@ -141,9 +141,11 @@ test('a conversation with no task and no draft opens on the task section, where 
   await expect.poll(() => section(page)).toBe('task');
   await page.getByTestId('no-conversation-tasks').waitFor();
   expect(await page.getByTestId('no-conversation-tasks').innerText()).toContain('尚无功能任务');
-  // The section that has nothing yet still offers the shared artifacts.
+  // The section that has nothing yet offers no entry of its own: a task's graph is
+  // reached by clicking the task, and its artifacts live at the bottom of that page.
   await page.getByTestId('no-task-graph').waitFor();
-  expect(await page.getByTestId('drawer-task-artifacts').count()).toBe(1);
+  expect(await page.getByTestId('drawer-task-artifacts').count(), 'the shared-artifacts entry is back').toBe(0);
+  expect(await page.getByTestId('drawer-entry-artifacts').count(), 'the global artifacts entry is back').toBe(0);
 
   // The drawer body owns its own scrollbar, so the content never shifts the chat column.
   const scroll = await page.locator('.drawer-inner').evaluate(node => {
@@ -169,7 +171,7 @@ test('a live draft opens on the draft page, and it is not yanked away by the tas
 }, 90_000);
 
 test('the chosen task sticks, and the task section is never yanked back to the draft page', async () => {
-  const { page, view, propose, confirm } = await consoleWith('tasks');
+  const { page, server, conversationId, view, propose, confirm } = await consoleWith('tasks');
   await propose(workerCheckProposal('第一个功能'), 'draft-1');
   await confirm();
   await propose(workerCheckProposal('第二个功能', 2), 'draft-2');
@@ -190,16 +192,22 @@ test('the chosen task sticks, and the task section is never yanked back to the d
   await expect.poll(() => page.locator('[data-testid^="conversation-task-"][data-active="true"]').count()).toBe(1);
   expect(await page.getByTestId(`conversation-task-${listed[0]}`).getAttribute('data-active')).toBe('true');
 
-  // Choosing the other one moves the selection, and the section does not move with it.
+  // Clicking a task opens its graph straight away: there is no separate entry to
+  // click first, and no artifact index of its own.
   const other = page.locator('[data-testid^="conversation-task-"][data-active="false"]').first();
-  const otherId = await other.getAttribute('data-testid');
+  const otherTaskId = (await other.getAttribute('data-testid'))!.replace('conversation-task-', '');
+  const otherRequest = (await other.locator('span[title]').getAttribute('title'))!;
   await other.click();
-  await expect.poll(() => page.getByTestId(otherId!).getAttribute('data-active')).toBe('true');
-  expect(await page.getByTestId(`conversation-task-${listed[0]}`).getAttribute('data-active')).toBe('false');
-  expect(await section(page)).toBe('task');
-  // The chosen task names its own windows.
-  await page.getByTestId('drawer-task-detail').waitFor();
-  expect(await page.getByTestId('drawer-task-artifacts').count()).toBe(1);
+  await expect.poll(() => new URL(page.url()).hash).toBe(`#/tasks/${otherTaskId}/graph`);
+  await page.getByTestId('graph').waitFor();
+  expect(await page.getByTestId('task-graph-title').innerText()).toBe(otherRequest);
+
+  // Coming back, the drawer is still on the task section instead of falling back to
+  // the draft page, and both tasks are still listed.
+  await page.goto(`${server.url}/#/conversations/${conversationId}`);
+  await page.getByTestId('drawer-entry').click();
+  await expect.poll(() => section(page)).toBe('task');
+  await expect.poll(() => page.locator('[data-testid^="conversation-task-"]').count()).toBe(2);
 }, 90_000);
 
 test('opening the drawer slides it over the conversation instead of squeezing it', async () => {
@@ -268,4 +276,12 @@ test('the task graph page shows the graph itself, not the cost, revision and con
   for (const chip of ['cost', 'revisions', 'connection']) {
     expect(await page.getByTestId(chip).count(), `${chip} chip`).toBe(0);
   }
+
+  // This graph's shared artifacts live at the bottom of this page, and the global
+  // artifact index that used to hold them has no page of its own any more.
+  const artifacts = page.getByTestId('task-artifacts');
+  await artifacts.waitFor();
+  expect(await artifacts.innerText()).toContain('共享产物');
+  await page.goto(`${server.url}/#/artifacts`);
+  expect(await page.getByTestId('artifact-index').count(), 'the global artifact index is back').toBe(0);
 }, 120_000);

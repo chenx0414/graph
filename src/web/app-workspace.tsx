@@ -1,6 +1,5 @@
 import { ArtifactDetail } from './ArtifactViews.tsx';
 
-import { ArtifactIndex } from './ArtifactIndex.tsx';
 
 import { DraftGraphTab } from './DraftGraphTab.tsx';
 
@@ -73,14 +72,6 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
                 key={draftGraphMatch[1]}
                 conversationId={draftGraphMatch[1]!}
                 {...(queryParams.get('v') ? { version: Number(queryParams.get('v')) } : {})}
-              />
-            )}
-            {pathname === '/artifacts' && (
-              <ArtifactIndex
-                projectId={queryParams.get('project') ?? settings?.projects[0]?.id ?? ''}
-                projects={settings?.projects ?? []}
-                tasks={tasks}
-                conversations={conversations}
               />
             )}
             {conversationMatch && (

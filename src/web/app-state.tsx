@@ -359,8 +359,7 @@ export function App() {
         <WindowDrawer open={detailOpen}>
           <aside className="detail-drawer" data-testid="detail-drawer" data-section="task" data-open="true" role="complementary">
             <div className="drawer-inner">
-              <TaskDrawerSection tasks={tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId}
-                projectId={currentProjectId} origin="workspace" />
+              <TaskDrawerSection tasks={tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId} origin="workspace" />
             </div>
           </aside>
         </WindowDrawer>
