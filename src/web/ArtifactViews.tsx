@@ -4,7 +4,7 @@ import { api } from './api.ts';
 import { groupArtifactsByTask } from './conversation-drawer.ts';
 import { ErrorBox } from './shared.tsx';
 import { Markdown } from './Markdown.tsx';
-import { Icon, Pill, Spinner, toast } from './ui.tsx';
+import { Icon, Spinner } from './ui.tsx';
 
 function ArtifactRow({ record, onOpenDetail }: { record: ArtifactRecord; onOpenDetail: (record: ArtifactRecord) => void }) {
   return (
@@ -116,8 +116,6 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
   }
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [error, setError] = useState('');
-  const [promoting, setPromoting] = useState(false);
-  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,25 +134,7 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       });
     return () => { cancelled = true; };
-  }, [taskId, artifactId, version, reloadToken]);
-
-  async function promote() {
-    const record = content?.artifact;
-    if (!record || promoting || record.scope === 'project') return;
-    setPromoting(true);
-    try {
-      await api(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(record.artifactId)}/${record.version}/promote`, {
-        method: 'POST',
-        body: JSON.stringify({ requestId: `promote-${crypto.randomUUID()}` }),
-      });
-      toast('已提升到项目共享', 'success');
-      setReloadToken(value => value + 1);
-    } catch (reason) {
-      toast(`提升失败：${reason instanceof Error ? reason.message : String(reason)}`, 'danger');
-    } finally {
-      setPromoting(false);
-    }
-  }
+  }, [taskId, artifactId, version]);
 
   const record = content?.artifact ?? null;
   return (
@@ -177,15 +157,6 @@ export function ArtifactDetail({ taskId, artifactId, version, onTitle }: {
       </details>}
       {content && (
         <>
-          {record?.scope === 'task' && (
-            <div className="artifact-promote-bar">
-              <span>该版本只对当前任务可见。</span>
-              <button type="button" className="btn btn-sm" data-testid="artifact-promote" disabled={promoting} onClick={() => void promote()}>
-                <Icon name="box" size={13} />
-                {promoting ? '提升中…' : '提升到项目共享'}
-              </button>
-            </div>
-          )}
           <ArtifactPreview content={content} />
         </>
       )}
@@ -229,23 +200,7 @@ export function ArtifactPreview({ content }: { content: ArtifactContent | null }
           <div className="artifact-kicker">{artifact.namespace} / {artifact.name} · v{artifact.version}</div>
           <h2>{artifact.title ?? artifact.name}</h2>
         </div>
-        <div className="artifact-detail-actions">
-          <a
-            className="btn btn-sm"
-            href={`/api/tasks/${encodeURIComponent(artifact.taskId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/${artifact.version}/content?download=true`}
-            download
-          >
-            <Icon name="box" size={13} />
-            下载
-          </a>
-        </div>
       </header>
-      <div className="artifact-detail-badges">
-        <Pill tone={artifact.scope === 'project' ? 'info' : 'neutral'}>{artifact.scope === 'project' ? '项目共享' : '任务共享'}</Pill>
-        <Pill tone={artifact.state === 'published' ? 'success' : 'warn'}>{artifact.state === 'published' ? '已发布' : '已撤回'}</Pill>
-        <Pill tone={artifact.trust === 'accepted' ? 'success' : artifact.trust === 'reviewed' ? 'info' : 'warn'}>{artifact.trust}</Pill>
-        {artifact.schemaKind && <Pill tone="neutral">{artifact.schemaKind}@{artifact.schemaVersion}</Pill>}
-      </div>
       {artifact.summary && <p className="artifact-summary">{artifact.summary}</p>}
       <dl className="artifact-metadata">
         <div><dt>URI</dt><dd className="mono">{artifact.uri}</dd></div>

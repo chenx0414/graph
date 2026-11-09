@@ -173,7 +173,11 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
       rows.push({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
       continue;
     }
-    if (item.kind === 'steer') { notice({ kind: 'message', id: item.message.id, message: item.message }); continue; }
+    if (item.kind === 'steer') {
+      flush();
+      rows.push({ kind: 'message', id: item.message.id, message: item.message });
+      continue;
+    }
     entries.push({ tool: item.tool });
   }
   flush();
@@ -391,7 +395,8 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         continue;
       }
       if (item.item.kind === 'steer') {
-        liveNotice({ kind: 'message', id: item.item.message.id, message: item.item.message });
+        flushLiveTools();
+        rows.push({ kind: 'message', id: item.item.message.id, message: item.item.message });
         continue;
       }
       liveTools.push({ tool: item.item.tool });

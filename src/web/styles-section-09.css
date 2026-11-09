@@ -30,7 +30,6 @@
   .artifact-main { padding: 14px 12px 28px; }
   .artifact-metadata { grid-template-columns: minmax(0, 1fr); }
   .artifact-detail-head { align-items: stretch; flex-direction: column; }
-  .artifact-detail-actions .btn { width: 100%; justify-content: center; }
   .graph-state-summary { top: 8px; right: 8px; left: 8px; max-width: none; }
   .graph-node-inspector { inset: 8px; width: auto; }
   .agent-chat-layer { padding: 0; }
