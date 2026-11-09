@@ -109,7 +109,7 @@ func openPigSession(ctx context.Context, database string, request AgentSessionRe
 
 func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[string]any) map[string]any) pigkernel.ProviderBridge {
 	return pigkernel.ProviderBridge{
-		Stream: func(_ context.Context, transcript []map[string]any, kernelOptions map[string]any) (pigkernel.EventStream, error) {
+		Stream: func(ctx context.Context, transcript []map[string]any, kernelOptions map[string]any) (pigkernel.EventStream, error) {
 			messages := make([]any, 0, len(transcript))
 			for _, message := range transcript {
 				messages = append(messages, message)
@@ -118,6 +118,12 @@ func pigProviderBridge(stream PromptStreamFunc, model any, options func(map[stri
 			effective := kernelOptions
 			if options != nil {
 				effective = options(kernelOptions)
+			}
+			if ctx != nil {
+				if effective == nil {
+					effective = map[string]any{}
+				}
+				effective["abort"] = ctx.Done()
 			}
 			return stream(model, context, effective)
 		},

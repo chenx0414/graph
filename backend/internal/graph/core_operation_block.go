@@ -108,7 +108,7 @@ func (l *OperationLifecycle) HandleDispatchRefusal(operation Operation, refusal 
 			l.store.Event(operation.TaskId, "context.rejected", map[string]any{"nodeId": operation.NodeId, "operationId": operation.Id, "data": data})
 			l.Block(operation.TaskId, operation.NodeId, "context_rejected", data, operationLifecycleStringPtr(operation.Id))
 		case "interrupted":
-			l.store.SetNodePending(operation.TaskId, operation.NodeId)
+			l.store.SetNodeStatus(operation.TaskId, operation.NodeId, "idle")
 			RecordConversationInterruption(l.store, operation, refusal.Message)
 		default:
 			if unknown || refusal.Code == "unknown_usage" {

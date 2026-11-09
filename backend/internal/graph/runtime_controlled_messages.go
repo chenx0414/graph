@@ -38,6 +38,7 @@ type controlledStream struct {
 	invocation     string
 	finishReason   string
 	transport bool
+	abortRequested bool
 	cancelRequest func()
 }
 
@@ -104,6 +105,10 @@ func (stream *controlledStream) run() {
 		if failure == nil {
 			return
 		}
+		if stream.abortRequested {
+			stream.fail(errors.New("The turn was interrupted"))
+			return
+		}
 		delay := transportRetryBackoffMs(attempt)
 		stream.observeReconnect(attempt, delay, failure)
 		stream.discardAttempt()
@@ -115,6 +120,16 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 	ctx, cancelRequest := context.WithCancel(request.Context())
 	stream.cancelRequest = cancelRequest
 	request = request.WithContext(ctx)
+	if abort, ok := stream.options["abort"].(<-chan struct{}); ok && abort != nil {
+		go func() {
+			select {
+			case <-abort:
+				stream.abortRequested = true
+				cancelRequest()
+			case <-ctx.Done():
+			}
+		}()
+	}
 	transport, err := ControlledGatedProviderFetch(stream.broker, request, GatedProviderFetchOptions{
 		Reservation:     reservation,
 		RequestIDHeader: controlledRequestIDHeader(stream.candidate),
