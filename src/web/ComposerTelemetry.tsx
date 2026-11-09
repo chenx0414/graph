@@ -29,6 +29,7 @@ export type ComposerTelemetryView = {
   outputTokens?: number | null;
   latencyMs?: number | null;
   tokensPerSecond?: number | null;
+  firstTokenMs?: number | null;
   contextTokens: number | null;
   contextLimit: number | null;
   contextPercent: number | null;
@@ -143,6 +144,17 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
         data-tps={telemetry?.tokensPerSecond ?? undefined}
       >
         TPS {telemetryValue(telemetry?.tokensPerSecond, value => (value >= 10 ? value.toFixed(0) : value.toFixed(1)))}
+      </span>
+      {/* The wait before the first token is its own number: it is where a slow
+          footer usually hides its time, and it has nothing to do with the rate. */}
+      <span
+        title={telemetry?.firstTokenMs === null || telemetry?.firstTokenMs === undefined
+          ? '还没有完成的请求，暂时没有首字时间'
+          : `最近一次完成的请求：从发出到收到第一个 token 等了 ${(telemetry.firstTokenMs / 1000).toFixed(1)} 秒`}
+        data-testid="telemetry-ttft"
+        data-ttft-ms={telemetry?.firstTokenMs ?? undefined}
+      >
+        首字 {telemetryValue(telemetry?.firstTokenMs, value => (value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`))}
       </span>
       <span
         title={`上一轮结束后的上下文估算（PiG 内核计算，与压缩判定同源）与模型上下文窗口${telemetry?.contextTokens ? `：${formatTokens(telemetry.contextTokens)} / ${formatTokens(telemetry.contextLimit)} tokens` : ''}`}

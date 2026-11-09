@@ -41,6 +41,7 @@ type controlledStream struct {
 	abortRequested bool
 	cancelRequest func()
 	now            func() int64
+	startedAt      int64
 	firstDeltaAt   int64
 	lastDeltaAt    int64
 }
@@ -139,6 +140,9 @@ func (stream *controlledStream) run() {
 }
 
 func (stream *controlledStream) attempt(request *http.Request, reservation float64, remaining int) error {
+	if stream.startedAt == 0 {
+		stream.startedAt = stream.clock()
+	}
 	ctx, cancelRequest := context.WithCancel(request.Context())
 	stream.cancelRequest = cancelRequest
 	request = request.WithContext(ctx)

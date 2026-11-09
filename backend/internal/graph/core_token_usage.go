@@ -19,6 +19,7 @@ type TokenUsage struct {
 	ContextTokens *int64  `json:"contextTokens,omitempty"`
 	UsageSource   *string `json:"usageSource,omitempty"`
 	DurationMs    *int64  `json:"durationMs,omitempty"`
+	FirstTokenMs  *int64  `json:"firstTokenMs,omitempty"`
 }
 
 func isUsageSource(value string) bool {

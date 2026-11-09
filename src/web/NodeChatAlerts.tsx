@@ -80,7 +80,7 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
   canSteer: boolean;
   onSteer: () => void;
   onStop: () => void;
-  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null } | undefined;
+  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null } | undefined;
 }) {
   return (
     <div className="composer-footer">
@@ -98,6 +98,14 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
         data-testid="node-telemetry-tps"
         data-tps={throughput?.tokensPerSecond ?? undefined}
       >TPS {typeof throughput?.tokensPerSecond === 'number' ? (throughput.tokensPerSecond >= 10 ? throughput.tokensPerSecond.toFixed(0) : throughput.tokensPerSecond.toFixed(1)) : '—'}</span>
+      <span
+        className="muted"
+        title={throughput?.firstTokenMs == null
+          ? '这个节点还没有完成的请求'
+          : `从发出到收到第一个 token 等了 ${(throughput.firstTokenMs / 1000).toFixed(1)} 秒`}
+        data-testid="node-telemetry-ttft"
+        data-ttft-ms={throughput?.firstTokenMs ?? undefined}
+      >首字 {typeof throughput?.firstTokenMs === 'number' ? (throughput.firstTokenMs < 1000 ? `${Math.round(throughput.firstTokenMs)}ms` : `${(throughput.firstTokenMs / 1000).toFixed(1)}s`) : '—'}</span>
       {busy && agentNode && <span className="row">
         <Button size="sm" disabled={sending || !canSteer} onClick={onSteer}>立即引导</Button>
         <Button size="sm" disabled={sending} onClick={onStop}>停止节点</Button>

@@ -192,6 +192,6 @@ func nodeThroughput(store *TaskStore, taskId, nodeId string) NodeThroughput {
         AND json_extract(usage,'$.output') > 0
       ORDER BY settled_at DESC LIMIT 1`, taskId, nodeId)
 	}
-	output, latency, rate := throughputOf(row)
-	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate}
+	output, latency, rate, firstToken := throughputOf(row)
+	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate, FirstTokenMs: firstToken}
 }

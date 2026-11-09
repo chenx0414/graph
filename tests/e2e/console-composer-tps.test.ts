@@ -71,13 +71,15 @@ test('the conversation footer prints tokens per second from the provider’s own
   }, { timeout: 40_000, interval: 250 }).not.toBeNull();
 
   const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as {
-    telemetry?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null };
+    telemetry?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null };
   };
-  // The two facts the rate is made of, and the rate itself: 240 tokens over ~2s.
+  // The facts the two numbers are made of: 240 tokens over ~2s, and the wait the
+  // scripted provider imposes before its first byte.
   expect(view.telemetry?.outputTokens).toBe(240);
   expect(view.telemetry?.latencyMs).toBeGreaterThan(1_000);
   expect(view.telemetry?.tokensPerSecond).toBeGreaterThan(20);
   expect(view.telemetry?.tokensPerSecond).toBeLessThan(1_000);
+  expect(view.telemetry?.firstTokenMs, 'the wait before the first token is its own fact').toBeGreaterThan(1_800);
 
   const { browser } = await launchBrowser();
   cleanup.push(() => browser.close());
@@ -88,13 +90,19 @@ test('the conversation footer prints tokens per second from the provider’s own
   const tps = page.getByTestId('telemetry-tps');
   await tps.waitFor();
   await expect.poll(async () => await tps.innerText(), { timeout: 15_000 }).toMatch(/TPS \d+/);
+  const ttft = page.getByTestId('telemetry-ttft');
+  await ttft.waitFor();
+  const ttftText = await ttft.innerText();
+  expect(ttftText, 'the first-token wait is printed on its own').toMatch(/^首字 \d+(\.\d)?s$/);
+  expect(Number(await ttft.getAttribute('data-ttft-ms')), 'the pill prints the measured wait').toBeGreaterThan(1_800);
+  expect(await tps.innerText(), 'the rate never absorbs the wait').not.toContain('首字');
   const cacheText = await page.getByTestId('telemetry-cache').innerText();
   expect(cacheText, 'the cache pill no longer abbreviates its label').toMatch(/^CH [\d.]+%/);
   expect(cacheText, 'the cache pill must keep the freshness and drop the token count').toMatch(/^CH [\d.]+% · (刚刚|\d+ (分钟前|小时前|天前))$/);
   const contextText = await page.getByTestId('telemetry-context').innerText();
   expect(contextText, 'the context pill must lead with the percentage').toMatch(/^CONTEXT [\d.]+%/);
   expect(contextText, 'the context pill must shorten the window to K or M').toMatch(/^CONTEXT [\d.]+% \/ [\d.]+[KM]$/);
-  for (const id of ['telemetry-cache', 'telemetry-tps', 'telemetry-context', 'telemetry-model']) {
+  for (const id of ['telemetry-cache', 'telemetry-tps', 'telemetry-ttft', 'telemetry-context', 'telemetry-model']) {
     expect(await page.getByTestId(id).locator('svg').count(), `${id} still carries an icon`).toBe(0);
   }
   // The tooltip says what the number is made of, so nobody has to guess.
@@ -143,6 +151,12 @@ test('the node chat footer prints the same rate for the node’s own call', asyn
   await expect.poll(async () => await footer.innerText(), { timeout: 20_000 }).toMatch(/TPS \d+/);
   const title = await footer.getAttribute('title');
   expect(title).toContain('240 tokens');
+  // The wait before the first token is its own pill here too: the node footer must
+  // not fold it into the rate.
+  const nodeTtft = page.getByTestId('node-telemetry-ttft');
+  await nodeTtft.waitFor({ timeout: 30_000 });
+  expect(await nodeTtft.innerText()).toMatch(/^首字 \d+(\.\d)?s$/);
+  expect(Number(await nodeTtft.getAttribute('data-ttft-ms'))).toBeGreaterThan(1_800);
   const nodeFooter = await page.locator('.composer-footer').innerText();
   expect(nodeFooter, 'the node composer no longer advertises the keyboard hint').not.toContain('Shift + Enter');
   await page.screenshot({ path: join(evidenceDir(root, 'console-tps'), 'node.png'), fullPage: false });

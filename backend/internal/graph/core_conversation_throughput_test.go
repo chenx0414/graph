@@ -12,7 +12,7 @@ func TestThroughputMeasuresDecodeAndNotTheContextPrefill(t *testing.T) {
 	seedMasterCompletion(t, store, "conv", "op-turn",
 		`{"input":200,"output":500,"cacheRead":320000,"cacheWrite":0,"durationMs":250}`, 120000)
 
-	output, latency, rate := masterThroughput(store, "conv")
+	output, latency, rate, _ := masterThroughput(store, "conv")
 	if output == nil || *output != 500 {
 		t.Fatalf("the view lost the output token count: %v", output)
 	}
@@ -32,11 +32,26 @@ func TestThroughputWithoutADecodeMeasurementFallsBackToTheWallClock(t *testing.T
 	kernelExec(store.DB, "INSERT INTO projects(id,root,grants) VALUES('p','/tmp/graph-throughput-fixture','[]')")
 	seedMasterCompletion(t, store, "conv", "op-turn", `{"input":200,"output":500,"cacheRead":0,"cacheWrite":0}`, 120000)
 
-	_, latency, rate := masterThroughput(store, "conv")
+	_, latency, rate, _ := masterThroughput(store, "conv")
 	if latency == nil || *latency != 1000 {
 		t.Fatalf("latency must stay the wall clock of the request: got %v", latency)
 	}
 	if rate == nil || *rate != 500 {
 		t.Fatalf("without a decode measurement the rate falls back to the wall clock: got %v", rate)
+	}
+}
+
+func TestThroughputReportsTheWaitBeforeTheFirstTokenOnItsOwn(t *testing.T) {
+	store := openTaskStore(t, filepath.Join(t.TempDir(), "tasks.sqlite"))
+	kernelExec(store.DB, "INSERT INTO projects(id,root,grants) VALUES('p','/tmp/graph-throughput-fixture','[]')")
+	seedMasterCompletion(t, store, "conv", "op-turn",
+		`{"input":200,"output":500,"cacheRead":320000,"cacheWrite":0,"durationMs":250,"firstTokenMs":42000}`, 120000)
+
+	_, _, rate, firstToken := masterThroughput(store, "conv")
+	if rate == nil || *rate != 2000 {
+		t.Fatalf("the rate must stay the decode speed: %v", rate)
+	}
+	if firstToken == nil || *firstToken != 42000 {
+		t.Fatalf("the wait before the first token must be reported as its own number: %v", firstToken)
 	}
 }

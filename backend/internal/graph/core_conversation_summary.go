@@ -73,12 +73,12 @@ func ConversationMasterUsage(store *TaskStore, conversationId string) Conversati
 			}
 		}
 	}
-	outputTokens, latencyMs, tokensPerSecond := masterThroughput(store, conversationId)
+	outputTokens, latencyMs, tokensPerSecond, firstTokenMs := masterThroughput(store, conversationId)
 	return ConversationMasterUsageView{
 		CachedInput: cachedInput, CacheInput: cacheInput, ContextTokens: contextTokens,
 		RequestCacheHitRate: requestCacheHitRate,
 		CacheReadTokens: cacheReadTokens, CacheUsedAt: cacheUsedAt,
-		OutputTokens: outputTokens, LatencyMs: latencyMs, TokensPerSecond: tokensPerSecond,
+		OutputTokens: outputTokens, LatencyMs: latencyMs, TokensPerSecond: tokensPerSecond, FirstTokenMs: firstTokenMs,
 	}
 }
 
@@ -88,7 +88,7 @@ var (
 	conversationUnknownUsagePattern = regexp.MustCompile(`(?i)unknown usage`)
 )
 
-func masterThroughput(store *TaskStore, conversationId string) (*int64, *int64, *float64) {
+func masterThroughput(store *TaskStore, conversationId string) (*int64, *int64, *float64, *int64) {
 	row := kernelRow(store.Db, `SELECT i.usage AS usage, i.dispatched_at AS createdAt, i.settled_at AS settledAt
     FROM invocations i
     JOIN operations o ON o.id=i.operation_id
@@ -100,16 +100,17 @@ func masterThroughput(store *TaskStore, conversationId string) (*int64, *int64, 
 	return throughputOf(row)
 }
 
-func throughputOf(row map[string]any) (*int64, *int64, *float64) {
+func throughputOf(row map[string]any) (*int64, *int64, *float64, *int64) {
 	if row == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	usage := struct {
-		Output     *int64 `json:"output"`
-		DurationMs *int64 `json:"durationMs"`
+		Output       *int64 `json:"output"`
+		DurationMs   *int64 `json:"durationMs"`
+		FirstTokenMs *int64 `json:"firstTokenMs"`
 	}{}
 	if err := json.Unmarshal([]byte(kernelString(row["usage"])), &usage); err != nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	latency := kernelInt(row["settledAt"]) - kernelInt(row["createdAt"])
 	decode := latency
@@ -117,9 +118,9 @@ func throughputOf(row map[string]any) (*int64, *int64, *float64) {
 		decode = *usage.DurationMs
 	}
 	if usage.Output == nil || *usage.Output <= 0 || decode <= 0 {
-		return nil, nil, nil
+		return nil, nil, nil, usage.FirstTokenMs
 	}
 	output := *usage.Output
 	rate := float64(output) / (float64(decode) / 1000)
-	return &output, &latency, &rate
+	return &output, &latency, &rate, usage.FirstTokenMs
 }

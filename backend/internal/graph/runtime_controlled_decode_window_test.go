@@ -89,3 +89,38 @@ func TestSettledUsageWithoutTokensCarriesNoDecodeWindow(t *testing.T) {
 		t.Fatalf("a request without output tokens must not claim a decode window: %v", settled)
 	}
 }
+
+func TestTheSettledUsageCarriesTheFirstTokenWaitSeparately(t *testing.T) {
+	clock := int64(1_000)
+	var settled *TokenUsage
+	stream := &controlledStream{
+		message:    &AssistantMessage{Role: "assistant"},
+		finished:   true,
+		invocation: "inv-3",
+		startedAt:  1_000,
+		now:        func() int64 { return clock },
+		broker: SendGate{Settle: func(_ string, usage *TokenUsage) {
+			settled = usage
+		}},
+	}
+	clock = 41_000
+	stream.handleEvent(map[string]any{"choices": []any{map[string]any{
+		"delta": map[string]any{"content": "晚到的第一个字"},
+	}}})
+	clock = 41_900
+	stream.handleEvent(map[string]any{"choices": []any{map[string]any{
+		"delta": map[string]any{"content": "，然后是第二个"},
+	}}})
+	_ = stream.Result()
+	stream.settle(&TokenUsage{Input: 10, Output: 2})
+
+	if settled == nil {
+		t.Fatalf("the invocation was never settled")
+	}
+	if settled.FirstTokenMs == nil || *settled.FirstTokenMs != 40_000 {
+		t.Fatalf("the wait before the first token must be recorded on its own: %v", settled.FirstTokenMs)
+	}
+	if settled.DurationMs == nil || *settled.DurationMs != 900 {
+		t.Fatalf("the decode window must stay the time between deltas: %v", settled.DurationMs)
+	}
+}
