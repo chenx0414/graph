@@ -63,7 +63,7 @@ export function GraphPanel({ id }: { id: string }) {
       <Card title="共享产物" icon="box" testid="task-artifacts">
         {artifactsError && <ErrorBox message={`读取共享产物失败：${artifactsError}`} onRetry={reloadArtifacts} />}
         <ArtifactList
-          records={artifacts?.artifacts ?? []}
+          records={(artifacts?.artifacts ?? []).filter(record => record.taskId === id)}
           loading={artifactsLoading && !artifacts}
           tasks={view?.request ? [{ id, request: view.request }] : []}
           onOpenDetail={record => { location.hash = `#/tasks/${id}/artifacts/${record.artifactId}?v=${record.version}`; }}
