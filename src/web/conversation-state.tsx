@@ -59,12 +59,13 @@ import type { ConversationView,DraftGraph,ProposalDetail,Settings } from "./conv
 import { composerStorage,sentUserPrompts } from "./conversation-types.tsx";
 import { useTranscriptFollow } from './use-transcript-follow.ts';
 
-export function useConversationPanelState({ id, settings, onChanged, drawerOpen = defaultDrawerOpen(), onDrawerOpenChange }: {
+export function useConversationPanelState({ id, settings, onChanged, drawerOpen = defaultDrawerOpen(), onDrawerOpenChange, graphTasks }: {
   id: string;
   settings: Settings | null;
   onChanged?: () => void;
   drawerOpen?: boolean;
   onDrawerOpenChange: (open: boolean) => void;
+  graphTasks?: readonly { id: string; request: string; status: string; projectId?: string; createdAt?: number }[];
 }) {
   const { data: view, error, loading, reload } = useAsync(() => api<ConversationView>(`/api/conversations/${id}`), [id]);
   const { data: agentContext } = useAsync(
@@ -326,5 +327,5 @@ export function useConversationPanelState({ id, settings, onChanged, drawerOpen 
     projectBound: Boolean(view.projectId),
   };
   const deferredInitPanelIds = drawerInitPanelIds();
-  return { fallback: null, sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
+  return { fallback: null, sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, graphTasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent };
 }

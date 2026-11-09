@@ -141,6 +141,9 @@ export function App() {
   const refreshTasks = useCallback(async () => {
     setTasks(await api<TaskSummary[]>('/api/tasks'));
   }, []);
+  useEffect(() => {
+    if (detailOpen) void refreshTasks().catch(() => undefined);
+  }, [detailOpen, refreshTasks]);
   const reloadSettings = useCallback(async () => {
     setSettings(await api<Settings_>('/api/settings'));
   }, []);
@@ -204,10 +207,12 @@ export function App() {
   const catalogMatch = /^\/catalog(?:\/([^/]+))?$/.exec(pathname ?? '/');
   const taskMatch = /^\/tasks\/([^/]+)(?:\/graph)?$/.exec(pathname ?? '/');
   const conversationMatch = /^\/conversations\/([^/]+)$/.exec(pathname ?? '/');
-  const currentProjectId = tasks.find(task => task.id === selectedDrawerTaskId)?.projectId
+  const currentProjectId = (taskMatch ? tasks.find(task => task.id === taskMatch[1])?.projectId : undefined)
+    ?? tasks.find(task => task.id === selectedDrawerTaskId)?.projectId
     ?? (conversationMatch ? conversations?.find(item => item.id === conversationMatch[1])?.projectId : null)
     ?? settings?.projects[0]?.id
     ?? null;
+  const projectTasks = tasks.filter(task => task.projectId === currentProjectId);
   function openWorkspaceTab(id: string) {
     const tab = tabs.tabs.find(item => item.id === id);
     if (!tab) return;
@@ -359,7 +364,7 @@ export function App() {
         <WindowDrawer open={detailOpen}>
           <aside className="detail-drawer" data-testid="detail-drawer" data-section="task" data-open="true" role="complementary">
             <div className="drawer-inner">
-              <TaskDrawerSection tasks={tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId} origin="workspace" />
+              <TaskDrawerSection tasks={projectTasks.length ? projectTasks : tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId} origin="workspace" />
             </div>
           </aside>
         </WindowDrawer>

@@ -11,7 +11,10 @@ import { formatTokens } from './insights.ts';
 import { TaskDrawerSection } from './TaskDrawerSection.tsx';
 import { Button,Icon,Pill,Spinner } from './ui.tsx';
 
-export function ConversationDrawerView({ drawerOpen, drawerSection, proposal, view, deferredInitPanelIds, bindId, setBindId, settings, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, tasks, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Pick<Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>, "drawerOpen" | "drawerSection" | "proposal" | "view" | "deferredInitPanelIds" | "bindId" | "setBindId" | "settings" | "act" | "id" | "activeProposal" | "activeStale" | "activeAccepted" | "confirmableForActive" | "branch" | "setBranch" | "setSelectedProposalVersion" | "selectedProposalVersion" | "proposalHistory" | "managementCards" | "drawerLoading" | "tasks" | "selectedTaskId" | "setSelectedTaskId" | "hasDrawerContent">) {
+export function ConversationDrawerView({ drawerOpen, drawerSection, proposal, view, deferredInitPanelIds, bindId, setBindId, settings, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, tasks, graphTasks, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Pick<Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>, "drawerOpen" | "drawerSection" | "proposal" | "view" | "deferredInitPanelIds" | "bindId" | "setBindId" | "settings" | "act" | "id" | "activeProposal" | "activeStale" | "activeAccepted" | "confirmableForActive" | "branch" | "setBranch" | "setSelectedProposalVersion" | "selectedProposalVersion" | "proposalHistory" | "managementCards" | "drawerLoading" | "tasks" | "graphTasks" | "selectedTaskId" | "setSelectedTaskId" | "hasDrawerContent">) {
+const projectScope = view.projectId ? [view.projectId, `conversation:${id}`] : [];
+const scopedGraphs = (graphTasks ?? []).filter((task: { projectId?: string }) => projectScope.includes(String(task.projectId)));
+const drawerTasks = scopedGraphs.length ? scopedGraphs : tasks;
 return <aside
           id="conversation-detail-drawer"
           className="detail-drawer"
@@ -109,7 +112,7 @@ return <aside
               <div className="drawer-loading"><Spinner label="正在加载草稿…" /></div>
             )}
 
-            {drawerOpen && <TaskDrawerSection tasks={tasks} selectedId={selectedTaskId} onSelect={setSelectedTaskId} origin="conversation" />}
+            {drawerOpen && <TaskDrawerSection tasks={drawerTasks} selectedId={selectedTaskId} onSelect={setSelectedTaskId} origin="conversation" />}
 
             {drawerOpen && !hasDrawerContent && !drawerLoading && (
               <div className="drawer-empty" data-testid="detail-empty">

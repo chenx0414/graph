@@ -35,6 +35,7 @@ export function ConversationPanel(props: {
   onChanged?: () => void;
   drawerOpen?: boolean;
   onDrawerOpenChange: (open: boolean) => void;
+  graphTasks?: readonly { id: string; request: string; status: string; projectId?: string; createdAt?: number }[];
 }) {
 const state = useConversationPanelState(props);
 if (state.fallback !== null) return state.fallback;

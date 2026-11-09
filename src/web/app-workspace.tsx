@@ -82,6 +82,7 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
                 onChanged={reloadConversations}
                 drawerOpen={active && detailOpen}
                 onDrawerOpenChange={setDetailOpen}
+                graphTasks={tasks}
               />
             )}
             {artifactMatch && (

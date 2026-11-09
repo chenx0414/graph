@@ -36,7 +36,7 @@ export function TaskDrawerSection({ tasks, selectedId, onSelect, origin }: {
     });
   return (
     <section className="drawer-all-tasks" data-testid={origin === 'conversation' ? 'conversation-tasks' : 'drawer-workspace-tasks'}>
-      <div className="drawer-section-head"><h3>任务导航</h3><span>{tasks.length} 个任务</span></div>
+      <div className="drawer-section-head"><h3>当前项目的图</h3><span>{tasks.length} 张</span></div>
       {tasks.length > 0 && <div className="drawer-task-controls">
         <select aria-label="任务排序" data-testid="task-sort" value={sort} onChange={event => setSort(event.target.value as typeof sort)}>
           <option value="newest">创建时间：新到旧</option><option value="oldest">创建时间：旧到新</option>

@@ -210,6 +210,32 @@ test('the chosen task sticks, and the task section is never yanked back to the d
   await expect.poll(() => page.locator('[data-testid^="conversation-task-"]').count()).toBe(2);
 }, 90_000);
 
+test('the right drawer shows the same project graphs in a conversation and on a task graph page', async () => {
+  const { page, server, propose, confirm } = await consoleWith('drawer-parity');
+  await propose(workerCheckProposal('第一个功能'), 'draft-1');
+  await confirm();
+  await propose(workerCheckProposal('第二个功能', 2), 'draft-2');
+  await confirm();
+
+  const ids = async (prefix: string) => page.locator(`[data-testid^="${prefix}"]`)
+    .evaluateAll((nodes, marker) => nodes.map(node => node.getAttribute('data-testid')!.slice(marker.length)).sort(), prefix);
+
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor();
+  await expect.poll(() => section(page)).toBe('task');
+  await expect.poll(async () => (await ids('conversation-task-')).length).toBe(2);
+  expect(await page.getByTestId('detail-drawer').innerText()).toContain('当前项目的图');
+  const inConversation = await ids('conversation-task-');
+
+  // The same drawer, reached from a task graph page, lists the same graphs.
+  await page.goto(`${server.url}/#/tasks/${inConversation[0]!}/graph`);
+  await page.getByTestId('graph').waitFor();
+  if (await page.getByTestId('drawer-workspace-tasks').count() === 0) await page.getByTestId('workspace-drawer-toggle').click();
+  await page.getByTestId('drawer-workspace-tasks').waitFor();
+  expect(await page.getByTestId('drawer-workspace-tasks').innerText()).toContain('当前项目的图');
+  expect(await ids('drawer-workspace-task-')).toEqual(inConversation);
+}, 120_000);
+
 test('opening the drawer slides it over the conversation instead of squeezing it', async () => {
   const { page } = await consoleWith('empty');
   const threadWidth = async () => (await page.locator('.conversation-main').boundingBox())!.width;

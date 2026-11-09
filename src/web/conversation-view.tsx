@@ -54,7 +54,7 @@ import { Icon } from './ui.tsx';
 import { useConversationPanelState } from "./conversation-state.tsx";
 import { residentFlag } from "./conversation-types.tsx";
 
-export function ConversationPanelView({ sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
+export function ConversationPanelView({ sending, steering, interruptStatus, view, busy, paused, connected, drawerOpen, draftStatus, tasks, graphTasks, onDrawerOpenChange, openDrawerRoot, entryState, proposal, acceptedVersions, transcriptFollow, loadOlder, transcript, loadingOlder, preferences, actionError, queuedMessages, cancelQueued, masterQuestions, taskQuestions, reload, onChanged, text, setText, attachments, setAttachments, agentContext, settings, selectMasterModel, compactConversation, submitPrimary, submitEnter, composerHistory, Boolean, pauseAction, hasComposerInput, drawerSection, deferredInitPanelIds, bindId, setBindId, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, selectedTaskId, setSelectedTaskId, hasDrawerContent }: Extract<ReturnType<typeof useConversationPanelState>, { fallback: null }>) {
 return (
     <section className="conversation-page" data-testid="conversation">
       {document.getElementById('conversation-toolbar') && createPortal(<div className="conversation-toolbar-content" data-drawer={drawerOpen}>
@@ -247,7 +247,7 @@ return (
         </div>
 
         <WindowDrawer open={drawerOpen}>
-        <ConversationDrawerView {...{ drawerOpen, drawerSection, proposal, view, deferredInitPanelIds, bindId, setBindId, settings, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, tasks, selectedTaskId, setSelectedTaskId, hasDrawerContent }} />
+        <ConversationDrawerView {...{ drawerOpen, drawerSection, proposal, view, deferredInitPanelIds, bindId, setBindId, settings, act, id, activeProposal, activeStale, activeAccepted, confirmableForActive, branch, setBranch, setSelectedProposalVersion, selectedProposalVersion, proposalHistory, managementCards, drawerLoading, tasks, graphTasks, selectedTaskId, setSelectedTaskId, hasDrawerContent }} />
         </WindowDrawer>
       </div>
     </section>
