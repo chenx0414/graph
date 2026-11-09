@@ -162,7 +162,6 @@
 .window-drawer-layer {
   flex: 0 0 auto; min-width: 0; height: 100%; overflow: hidden; visibility: hidden;
   background: var(--panel, #fff); border-left: 0; width: 0;
-  transition: width 160ms ease-out;
 }
 .window-drawer-layer[data-open="true"] { width: min(440px, 46vw); border-left: 1px solid var(--border); visibility: visible; }
 .window-drawer-layer[data-wide="true"][data-open="true"] { width: min(760px, 62vw); }
@@ -191,7 +190,6 @@
 .architecture-stage footer { min-height:44px; padding:14px 0; color:var(--muted); font-size:12px; }
 .brand-mark { background: center / contain no-repeat url('./assets/graph-icon.png'); box-shadow:none; border-radius:0; }
 @media(max-width:760px) { .architecture-board { grid-template-columns:1fr; } .architecture-picker { flex-direction:row; overflow:auto; } .architecture-picker button { white-space:nowrap; } }
-@media(prefers-reduced-motion:reduce) { .window-drawer-layer { transition:none; } }
 
 /* Workspace hierarchy: quiet navigation, one dominant conversation surface. */
 .sidebar { background:#f7f7f8; border-right:1px solid #e9e9ec; }

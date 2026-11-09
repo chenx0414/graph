@@ -239,6 +239,14 @@ test('the drawer widens the desktop window instead of covering it, and overlays 
   const calls = await page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean; width: number }[] }).__drawerCalls);
   expect(calls, 'the renderer must ask the desktop window to grow').toContainEqual({ open: true, width: 440 });
 
+  // A section that needs more room (task graph, shared artifacts) resizes the panel
+  // at once: no width animation may stretch or squeeze it while the window grows.
+  const motion = await page.locator('.window-drawer-layer').evaluate(node => {
+    const style = getComputedStyle(node);
+    return { property: style.transitionProperty, duration: style.transitionDuration };
+  });
+  expect(motion.property.split(',').map(name => name.trim()), JSON.stringify(motion)).not.toContain('width');
+
   await page.getByTestId('drawer-entry').click();
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean }[] }).__drawerCalls.some(call => !call.open)), { timeout: 10_000 }).toBe(true);
 
