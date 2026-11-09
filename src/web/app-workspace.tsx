@@ -100,7 +100,7 @@ export function WorkspacePage({ path, active, settings, startup, tasks, conversa
                 nodeId={decodeURIComponent(nodeMatch[2]!)}
               />
             )}
-            {taskMatch && <GraphPanel id={taskMatch[1]!} />}
+            {taskMatch && <GraphPanel key={taskMatch[1]} id={taskMatch[1]!} />}
             </ErrorBoundary>
     </div>
   </div>;
