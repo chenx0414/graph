@@ -48,6 +48,12 @@ function cacheAge(usedAt: number, now: number): string {
   return `${Math.round(hours / 24)} 天前`;
 }
 
+function compactWindow(value: number): string {
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
+  if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`;
+  return String(value);
+}
+
 export function ComposerTelemetry({ telemetry, models, onSelect, disabled = false }: {
   telemetry?: ComposerTelemetryView | undefined;
   models: ComposerModel[];
@@ -138,10 +144,12 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
       >
         TPS {telemetryValue(telemetry?.tokensPerSecond, value => (value >= 10 ? value.toFixed(0) : value.toFixed(1)))}
       </span>
-      <span title="上一轮结束后的上下文估算（PiG 内核计算，与压缩判定同源）与模型上下文窗口" data-testid="telemetry-context">
-        上下文 {telemetryValue(telemetry?.contextTokens, formatTokens)}
-        {telemetry?.contextLimit ? ` / ${formatTokens(telemetry.contextLimit)}` : ''}
-        {telemetry?.contextPercent !== null && telemetry?.contextPercent !== undefined ? ` · ${telemetry.contextPercent.toFixed(telemetry.contextPercent >= 10 ? 0 : 1)}%` : ''}
+      <span
+        title={`上一轮结束后的上下文估算（PiG 内核计算，与压缩判定同源）与模型上下文窗口${telemetry?.contextTokens ? `：${formatTokens(telemetry.contextTokens)} / ${formatTokens(telemetry.contextLimit)} tokens` : ''}`}
+        data-testid="telemetry-context"
+      >
+        上下文 {telemetry?.contextPercent !== null && telemetry?.contextPercent !== undefined ? `${telemetry.contextPercent.toFixed(telemetry.contextPercent >= 10 ? 0 : 1)}%` : '—'}
+        {telemetry?.contextLimit ? ` / ${compactWindow(telemetry.contextLimit)}` : ''}
       </span>
       <div className="composer-model-control" ref={rootRef}>
         <button
