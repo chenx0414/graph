@@ -119,7 +119,7 @@ test('agent markdown renders and tool activity appears before the final answer',
   await expect.poll(() => folded.getAttribute('data-open')).toBe('false');
   expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
-  expect(await page.getByTestId('telemetry-context').innerText()).toContain('8,000 / 32,000');
+  expect(await page.getByTestId('telemetry-context').innerText()).toMatch(/^CONTEXT 25% \/ 32K$/);
   await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
   // The footer prints the model's own label for the level, so the contract is the
   // level attribute, not one translated word.

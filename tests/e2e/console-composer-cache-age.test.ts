@@ -130,7 +130,7 @@ test('the composer footer reports the cached prefix and how long ago it was read
   await cache.waitFor();
   // The footer reads 82% (900 of that request's 1_100 input tokens), the 900
   // tokens the last request really read, and how fresh that is.
-  await expect.poll(async () => await cache.innerText(), { timeout: 15_000 }).toMatch(/缓存 82%.*900.*刚刚/);
+  await expect.poll(async () => await cache.innerText(), { timeout: 15_000 }).toMatch(/^CH 82% · 刚刚$/);
   expect(Number(await cache.getAttribute('data-cache-used-at'))).toBe(settledAt);
   // The tooltip says where the number comes from, and that no provider reports
   // an expiry instant - the word "过期" is not claimed as a known deadline.
@@ -150,7 +150,7 @@ test('the composer footer reports the cached prefix and how long ago it was read
   }, { timeout: 10_000 }).toBe(settledAt - 240_000);
   await page.reload();
   await page.getByTestId('conversation').waitFor();
-  await expect.poll(async () => await cacheText(page).innerText(), { timeout: 15_000 }).toMatch(/缓存 82%.*900.*4 分钟前/);
+  await expect.poll(async () => await cacheText(page).innerText(), { timeout: 15_000 }).toMatch(/^CH 82% · 4 分钟前$/);
   await page.screenshot({ path: join(evidenceDir(root, 'composer-cache-age'), 'aged.png'), fullPage: false });
 
   // A turn that is still running records its own provider call before its operation
