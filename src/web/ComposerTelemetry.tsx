@@ -38,16 +38,6 @@ function telemetryValue(value: number | null | undefined, render: (value: number
   return value === null || value === undefined ? '—' : render(value);
 }
 
-function cacheAge(usedAt: number, now: number): string {
-  const seconds = Math.max(0, Math.round((now - usedAt) / 1000));
-  if (seconds < 60) return '刚刚';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return `${Math.round(hours / 24)} 天前`;
-}
-
 export function ComposerTelemetry({ telemetry, models, onSelect, disabled = false }: {
   telemetry?: ComposerTelemetryView | undefined;
   models: ComposerModel[];
@@ -57,13 +47,6 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftLevel, setDraftLevel] = useState('off');
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (telemetry?.cacheUsedAt === null || telemetry?.cacheUsedAt === undefined) return;
-    setNow(Date.now());
-    const tick = setInterval(() => setNow(Date.now()), 20_000);
-    return () => clearInterval(tick);
-  }, [telemetry?.cacheUsedAt]);
   const rootRef = useRef<HTMLDivElement>(null);
   const model = models.find(item => item.id === telemetry?.model);
   const view = thinkingView(model, telemetry?.thinkingLevel);
@@ -119,14 +102,12 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
     '最近一次已结算请求的缓存命中率：该请求命中缓存的输入 ÷ 该请求全部输入。',
     cacheReadTokens !== null && cacheReadTokens > 0 ? `该请求有 ${formatTokens(cacheReadTokens)} tokens 命中缓存。` : '',
     cacheTotal === null ? '' : `本会话累计命中 ${(cacheTotal * 100).toFixed(1)}%。`,
-    cacheUsedAt === null ? '' : '服务商不报告缓存过期时刻：缓存由服务端保留并按负载驱逐，空闲越久越可能失效，这里显示的是距上次请求的时间。',
+    cacheUsedAt === null ? '' : '服务商不报告缓存过期时刻：缓存由服务端保留并按负载驱逐，空闲越久越可能失效。',
   ].join('');
   return (
     <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
       <span title={cacheTitle} data-testid="telemetry-cache" data-cache-used-at={cacheUsedAt ?? undefined}>
         缓存 {telemetryValue(telemetry?.cacheHitRate, value => `${(value * 100).toFixed(value >= 0.1 ? 0 : 1)}%`)}
-        {cacheReadTokens !== null && cacheReadTokens > 0 ? ` · ${formatTokens(cacheReadTokens)}` : ''}
-        {cacheUsedAt === null ? '' : ` · ${cacheAge(cacheUsedAt, now)}`}
       </span>
       {/* Tokens per second of the newest request that wrote tokens: output divided by
           the provider's own latency. A dash when nothing settled yet. */}
