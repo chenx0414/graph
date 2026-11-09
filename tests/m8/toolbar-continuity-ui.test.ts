@@ -51,6 +51,11 @@ test('a receipt and a phase line do not split the toolbar around tool calls', as
     'done', operationId, 0, stamp + 2, stamp + 2,
   );
   tool('call-second', 3, 'bash');
+  insert.run(
+    randomUUID(), created.conversationId, 'activity', 'activity', '先看看契约，再跑一遍检查。',
+    JSON.stringify({ ordinal: 4 }), 'done', operationId, 0, stamp + 4, stamp + 4,
+  );
+  tool('call-third', 5, 'bash');
   db.close();
 
   const browser = await chromium.launch({ headless: true });
@@ -65,10 +70,14 @@ test('a receipt and a phase line do not split the toolbar around tool calls', as
 
   const groups = page.getByTestId('tool-activity-group');
   await groups.first().waitFor({ timeout: 30_000 });
-  expect(await groups.count(), 'one toolbar carries the whole stretch of work').toBe(1);
-  const calls = (await groups.first().getAttribute('data-tool-calls'))!.split(' ');
-  expect(calls).toContain('call-first');
-  expect(calls).toContain('call-second');
-  // The receipt stays readable, inside that one toolbar.
-  expect(await groups.first().getByTestId('tool-group-notices').innerText()).toContain('A change that is live');
+  // Only a phase line separates toolbars: the receipt does not, so the two calls
+  // around it share one toolbar, and the call after the phase line gets its own.
+  expect(await groups.count(), 'one toolbar per stretch, split only by a phase line').toBe(2);
+  const first = (await groups.nth(0).getAttribute('data-tool-calls'))!.split(' ');
+  expect(first).toContain('call-first');
+  expect(first).toContain('call-second');
+  expect(first).not.toContain('call-third');
+  expect((await groups.nth(1).getAttribute('data-tool-calls'))!.split(' ')).toEqual(['call-third']);
+  // The receipt stays readable, inside the toolbar it interrupted before.
+  expect(await groups.nth(0).getByTestId('tool-group-notices').innerText()).toContain('A change that is live');
 }, 120_000);
