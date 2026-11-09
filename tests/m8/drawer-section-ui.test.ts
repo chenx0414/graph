@@ -282,9 +282,13 @@ test('the task graph page shows the graph itself, not the cost, revision and con
   const artifacts = page.getByTestId('task-artifacts');
   await artifacts.waitFor();
   expect(await artifacts.innerText()).toContain('共享产物');
+  // The cards of the page that used to hold every project's artifacts live here now:
+  // one grid of artifact cards for this graph, and no project-wide group.
+  expect(await artifacts.getByTestId('artifact-cards').count()).toBe(1);
+  expect(await artifacts.innerText()).toContain('还没有任务图发布过产物');
+  expect(await artifacts.innerText()).not.toContain('项目共享');
   // Only this graph's own documents belong here: a fresh task has published none, so
   // the conversation's own artifacts must not stand in for them.
-  expect(await artifacts.innerText()).toContain('还没有任务图发布过产物');
   expect(await artifacts.innerText()).not.toContain('979e670b');
   await page.goto(`${server.url}/#/artifacts`);
   expect(await page.getByTestId('artifact-index').count(), 'the global artifact index is back').toBe(0);

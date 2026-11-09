@@ -47,13 +47,24 @@ function Group({ title, hint, records, onOpenDetail, testid, action }: {
   );
 }
 
-export function ArtifactList({ records, loading, onOpenDetail, tasks }: {
+export function ArtifactList({ records, loading, onOpenDetail, tasks, variant = 'rows' }: {
   records: readonly ArtifactRecord[];
   loading?: boolean;
   onOpenDetail: (record: ArtifactRecord) => void;
   tasks?: readonly { id: string; request: string }[];
+  variant?: 'rows' | 'cards';
 }) {
   const groups = groupArtifactsByTask(records, tasks ?? []);
+  if (variant === 'cards') {
+    return (
+      <div className="drawer-artifacts artifact-cards" data-testid="artifact-cards">
+        {loading && <Spinner label="加载共享产物…" />}
+        {records.length
+          ? <ul className="list">{records.map(record => <ArtifactRow key={`${record.artifactId}:${record.version}`} record={record} onOpenDetail={onOpenDetail} />)}</ul>
+          : <p className="muted" data-testid="artifact-cards-empty">还没有任务图发布过产物。</p>}
+      </div>
+    );
+  }
   return (
     <div className="drawer-artifacts" data-testid="drawer-artifacts">
       {loading && <Spinner label="加载共享产物…" />}

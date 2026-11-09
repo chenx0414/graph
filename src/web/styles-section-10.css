@@ -1,9 +1,5 @@
 
-.artifact-index .drawer-artifact-open > svg { flex: 0 0 auto; color: var(--muted); }
-.artifact-index .drawer-artifact-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-.artifact-index-filters .select { width: 150px; }
-.artifact-index-heading > label { display: flex; align-items: center; flex-direction: row; white-space: nowrap; }
-.artifact-index-heading .select { width: 160px; }
+.artifact-cards .drawer-artifact-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .sidebar-section[hidden] { display: none; }
 .sidebar-section-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 3px 0; }
 .sidebar-section-toggle svg { transform: rotate(90deg); transition: transform 120ms; }
