@@ -124,7 +124,6 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
   return (
     <div className="composer-telemetry" data-testid="composer-telemetry" aria-label="当前模型运行指标">
       <span title={cacheTitle} data-testid="telemetry-cache" data-cache-used-at={cacheUsedAt ?? undefined}>
-        <Icon name="spark" size={13} />
         缓存 {telemetryValue(telemetry?.cacheHitRate, value => `${(value * 100).toFixed(value >= 0.1 ? 0 : 1)}%`)}
         {cacheReadTokens !== null && cacheReadTokens > 0 ? ` · ${formatTokens(cacheReadTokens)}` : ''}
         {cacheUsedAt === null ? '' : ` · ${cacheAge(cacheUsedAt, now)}`}
@@ -138,11 +137,9 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
         data-testid="telemetry-tps"
         data-tps={telemetry?.tokensPerSecond ?? undefined}
       >
-        <Icon name="bolt" size={13} />
         TPS {telemetryValue(telemetry?.tokensPerSecond, value => (value >= 10 ? value.toFixed(0) : value.toFixed(1)))}
       </span>
       <span title="上一轮结束后的上下文估算（PiG 内核计算，与压缩判定同源）与模型上下文窗口" data-testid="telemetry-context">
-        <Icon name="graph" size={13} />
         上下文 {telemetryValue(telemetry?.contextTokens, formatTokens)}
         {telemetry?.contextLimit ? ` / ${formatTokens(telemetry.contextLimit)}` : ''}
         {telemetry?.contextPercent !== null && telemetry?.contextPercent !== undefined ? ` · ${telemetry.contextPercent.toFixed(telemetry.contextPercent >= 10 ? 0 : 1)}%` : ''}
@@ -158,7 +155,7 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
           aria-haspopup="dialog"
           aria-expanded={open}
         >
-          <span title="当前主管使用的模型" data-testid="telemetry-model"><Icon name="bolt" size={13} />{telemetry?.model ?? '未选择模型'}</span>
+          <span title="当前主管使用的模型" data-testid="telemetry-model">{telemetry?.model ?? '未选择模型'}</span>
           <span
             title={view.fallbackFrom
               ? `当前 Agent 内核的思考强度：已保存的 ${view.fallbackFrom} 不在该模型档位内，按 ${view.level} 执行`
