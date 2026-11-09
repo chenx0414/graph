@@ -201,3 +201,21 @@ test('the chosen task sticks, and the task section is never yanked back to the d
   await page.getByTestId('drawer-task-detail').waitFor();
   expect(await page.getByTestId('drawer-task-artifacts').count()).toBe(1);
 }, 90_000);
+
+test('opening the drawer slides it over the conversation instead of squeezing it', async () => {
+  const { page } = await consoleWith('empty');
+  const threadWidth = async () => (await page.locator('.conversation-main').boundingBox())!.width;
+  const closed = await threadWidth();
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').waitFor();
+  await expect.poll(async () => await threadWidth(), { timeout: 10_000 })
+    .toBe(closed);
+  const edges = () => page.locator('.window-drawer-layer').evaluate((element: HTMLElement) => {
+    const layer = element.getBoundingClientRect();
+    const host = element.parentElement!.getBoundingClientRect();
+    return { offset: Math.round(layer.right - host.right), width: Math.round(layer.width) };
+  });
+  await expect.poll(async () => (await edges()).offset, { timeout: 10_000 })
+    .toBe(0);
+  expect((await edges()).width).toBeGreaterThan(300);
+}, 240_000);

@@ -155,12 +155,17 @@
 .markdown-input .md-strike { text-decoration: line-through; }
 .markdown-input .md-link { color: #356bad; text-decoration: underline; }
 .markdown-input .md-quote { color: var(--muted); border-left: 2px solid var(--border-strong); padding-left: 8px; }
-/* The right drawer is a column of the page, not a layer over it: it takes its
- * width from the content beside it, so the toolbar stays inside the content
- * column and the window never grows to make room. */
-.window-drawer-layer { flex: 0 0 auto; width: 0; min-width: 0; height: 100%; overflow: hidden; visibility: hidden; background: var(--panel, #fff); border-left: 0; transition: width 160ms ease-out; }
-.window-drawer-layer[data-open="true"] { width: min(440px, 46vw); border-left: 1px solid var(--border); visibility: visible; }
-.window-drawer-layer[data-wide="true"][data-open="true"] { width: min(760px, 62vw); }
+/* The right drawer opens outward: it is a layer over the page, sliding in from
+ * the right edge, so the content beside it keeps its width. */
+.window-drawer-layer {
+  position: absolute; inset: 0 0 0 auto; z-index: 30;
+  display: flex; width: min(440px, 46vw); height: 100%; min-width: 0;
+  overflow: hidden; visibility: hidden; background: var(--panel, #fff); border-left: 0;
+  transform: translateX(100%); opacity: 0; pointer-events: none;
+  transition: transform 160ms ease-out, opacity 120ms linear;
+}
+.window-drawer-layer[data-open="true"] { transform: translateX(0); opacity: 1; border-left: 1px solid var(--border); visibility: visible; pointer-events: auto; box-shadow: -24px 0 48px rgba(15, 23, 42, 0.14); }
+.window-drawer-layer[data-wide="true"] { width: min(760px, 62vw); }
 .window-drawer-layer .detail-drawer, .window-drawer-layer .detail-drawer[data-open="true"], .window-drawer-layer .detail-drawer[data-page="graph"][data-open="true"] { position:static; width:100%; height:100%; flex:none; background:var(--panel,#fff); box-shadow:none; }
 .window-drawer-layer .detail-drawer .drawer-inner, .window-drawer-layer .detail-drawer[data-page="graph"] .drawer-inner { width:100%; min-width:0; padding-top:24px; }
 .architecture-board { display:grid; grid-template-columns:180px minmax(0,1fr); min-height:510px; gap:20px; }
