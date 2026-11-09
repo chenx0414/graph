@@ -79,10 +79,12 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
     return (
       <div className="message-row" data-role="user" data-testid="message-user" data-state={message.state}>
         <div className="message-stack">
-          <div className="message-author">
-            {peerFrom ? `${peerFrom} · Agent 消息` : userAuthor ?? (message.kind === 'briefing' ? '任务说明' : '我')}
-            {message.state === 'pending' && <span className="message-state"> · 等待处理</span>}
-          </div>
+          {(peerFrom || userAuthor || message.kind === 'briefing' || message.state === 'pending') && (
+            <div className="message-author">
+              {peerFrom ? `${peerFrom} · Agent 消息` : userAuthor ?? (message.kind === 'briefing' ? '任务说明' : '')}
+              {message.state === 'pending' && <span className="message-state"> · 等待处理</span>}
+            </div>
+          )}
           <div className="message-content">
             {message.text && (markdown ? <Markdown text={message.text} /> : <p>{message.text}</p>)}
             {attachments.length > 0 && (
@@ -109,7 +111,6 @@ function MessageRow({ message, userAuthor, copyable = '', markdown = true }: { m
     return (
       <div className="message-row answer-row" data-role="assistant" data-answer="true" data-testid="message-assistant">
         <div className="message-stack">
-          <div className="message-author">主 Agent · 最终回答</div>
           <div className="message-content answer-card">
             {markdown ? <Markdown text={message.text} /> : <p className="message-plain">{message.text}</p>}
           </div>
@@ -278,10 +279,12 @@ function AssistantResponse({ row, author, copyable = '', markdown = true }: {
       data-testid={testId}
     >
       <div className="message-stack">
-        <div className={`message-author ${visualStreaming ? 'process-author' : ''}`}>
-          {visualStreaming && <Icon name="spark" size={12} />}
-          {authorLabel}
-        </div>
+        {(visualStreaming || row.narration || author) && (
+          <div className={`message-author ${visualStreaming ? 'process-author' : ''}`}>
+            {visualStreaming && <Icon name="spark" size={12} />}
+            {authorLabel}
+          </div>
+        )}
         <div className={`message-content ${visualStreaming ? 'streaming-card' : 'answer-card'}`}>
           {markdown ? (
             <div className="streaming-markdown">

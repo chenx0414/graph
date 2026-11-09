@@ -12,6 +12,8 @@ test('an active composer stays a pause action with typed and queued input, and a
   const { conversationId: id } = await f.post('/api/conversations', { text: 'A genuinely active turn' });
   await entered; await f.open(id);
   const conversation = f.page.locator('[data-testid="conversation"]:visible');
+  await expect.poll(() => conversation.getByTestId('message-user').count()).toBeGreaterThan(0);
+  expect(await conversation.locator('.message-author').allInnerTexts(), 'a user message carries no author label').not.toContain('我');
   const send = conversation.getByTestId('chat-send');
   const input = conversation.getByTestId('chat-input');
   await expect.poll(() => send.getAttribute('data-mode')).toBe('pause');

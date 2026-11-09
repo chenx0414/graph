@@ -81,7 +81,8 @@ test('agent markdown renders and tool activity appears before the final answer',
   await page.goto(`${server.url}/#/conversations/synthetic`);
   await page.getByTestId('conversation').waitFor();
   await page.locator('.markdown-body h2').waitFor();
-  expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
+  expect(await page.getByTestId('message-assistant').innerText()).toContain('结果');
+  expect(await page.locator('.message-author').allInnerTexts(), 'the answer carries no author label').not.toContain('主 Agent · 最终回答');
   expect(await page.locator('.markdown-body strong').innerText()).toBe('完成');
   expect(await page.locator('.markdown-body code').innerText()).toBe('code');
   expect(await page.locator('.markdown-body table').count()).toBe(1);
@@ -89,7 +90,7 @@ test('agent markdown renders and tool activity appears before the final answer',
   expect(await page.locator('.markdown-body th').nth(1).getAttribute('data-align')).toBe('right');
   expect(await page.locator('.markdown-body td').nth(2).innerText()).toBe('reviewer');
   const order = await page.locator('.conversation-thread').innerText();
-  expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('主 Agent'));
+  expect(order.indexOf('读取 1 项')).toBeLessThan(order.indexOf('结果'));
   // The answer folded the turn: its thinking and tool rows sit behind one muted
   // line, and the line is one click away from the rows it counts.
   const folded = page.getByTestId('collapsed-turn');
@@ -117,7 +118,8 @@ test('agent markdown renders and tool activity appears before the final answer',
   // The block still folds on demand, so a long history stays readable.
   await folded.locator('.collapsed-turn-toggle').click();
   await expect.poll(() => folded.getAttribute('data-open')).toBe('false');
-  expect(await page.getByTestId('message-assistant').innerText()).toContain('最终回答');
+  expect(await page.getByTestId('message-assistant').innerText()).toContain('结果');
+  expect(await page.locator('.message-author').allInnerTexts(), 'the answer carries no author label').not.toContain('主 Agent · 最终回答');
   expect(await page.getByTestId('telemetry-cache').innerText()).toContain('75%');
   expect(await page.getByTestId('telemetry-context').innerText()).toMatch(/^CONTEXT 25% \/ 32K$/);
   await expect.poll(() => page.getByTestId('telemetry-model').innerText()).toContain('local');
