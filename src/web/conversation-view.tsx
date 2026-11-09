@@ -234,8 +234,8 @@ return (
               {interruptStatus && <span className="composer-note" data-testid="interrupt-status" data-phase={interruptStatus === '已打断' ? 'interrupted' : 'interrupting'}>
                 {interruptStatus === '已打断' ? '已打断。' : '打断中…'}
               </span>}
-              {busy && <span className="composer-note">
-                <span data-testid="queued-hint">{queuedMessages.length ? `${queuedMessages.length} 条消息等待处理` : '可继续输入'}</span>
+              {busy && queuedMessages.length > 0 && <span className="composer-note">
+                <span data-testid="queued-hint">{`${queuedMessages.length} 条消息等待处理`}</span>
               </span>}
               <ComposerTelemetry
                 telemetry={view.telemetry}

@@ -12,29 +12,7 @@ import { expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
-/**
- * ESC stops a turn that is in the middle of a tool call.
- *
- * Measured 2026-11-04 against a real daemon and a real `sleep 300`: the console's
- * interrupt request did not return for 90 seconds, the operation was still
- * `dispatched`, the tool message was still `pending`, and the command ran to its
- * own end. Three causes, pinned down here:
- *
- *   1. `pigkernel.Session.Interrupt` committed the kernel abort and then waited
- *      for the conversation to go idle; a turn only leaves the kernel after its
- *      running tool returned, so the request could not answer before that tool
- *      (`PauseForReload` states the opposite contract at the same call site).
- *   2. Nothing killed the child: the kernel can only mark the tool task aborted,
- *      the process belongs to the daemon's command runner, and the `bash` tool
- *      handed that runner a nil abort signal.
- *   3. Because the tool never returned the turn never ended, so the operation
- *      never settled: `dispatched` + `worker_active=1` were the durable state of
- *      an accepted interrupt.
- */
-
 const INTERRUPT_BUDGET_MS = 1_000;
-// Give up long before a blocked tool could finish, so a daemon that waits for
-// the tool fails here instead of minutes from now.
 const REQUEST_CAP_MS = 5_000;
 
 async function projectFixture(root: string): Promise<{ root: string; project: string }> {
@@ -49,13 +27,11 @@ async function projectFixture(root: string): Promise<{ root: string; project: st
   return { root, project };
 }
 
-/** The pid the command recorded, or 0 before it started. */
 async function recordedPid(pidFile: string): Promise<number> {
   const pid = Number.parseInt((await readFile(pidFile, 'utf8').catch(() => '')).trim(), 10);
   return Number.isFinite(pid) ? pid : 0;
 }
 
-/** Whether the OS still has this process. */
 function processExists(pid: number): boolean {
   if (pid <= 0) return false;
   try {
@@ -70,7 +46,6 @@ async function fileBytes(path: string): Promise<number> {
   return (await stat(path).catch(() => ({ size: 0 }))).size;
 }
 
-/** One table read from the daemon's own database. */
 function query<T>(database: string, sql: string, ...params: (string | number)[]): T[] {
   const db = new DatabaseSync(database, { readOnly: true });
   try {
@@ -86,7 +61,6 @@ interface OperationRow {
   worker_active: number;
 }
 
-/** The newest master operation of one task. */
 function masterOperation(database: string, taskId: string): OperationRow | undefined {
   return query<OperationRow>(
     database,
@@ -95,7 +69,6 @@ function masterOperation(database: string, taskId: string): OperationRow | undef
   )[0];
 }
 
-/** One operation row by id: the turn that was interrupted, not the one after it. */
 function operationById(database: string, operationId: string): OperationRow | undefined {
   return query<OperationRow>(database, 'SELECT id,state,worker_active FROM operations WHERE id=?', operationId)[0];
 }
@@ -110,7 +83,6 @@ function pendingTools(view: ConversationView) {
   return (view.messages ?? []).filter(message => message.role === 'tool' && message.state === 'pending');
 }
 
-/** Starts the daemon a test drives, with one scripted provider as its model. */
 async function startDaemon(root: string, fixture: { project: string }, baseUrl: string, requestId: string) {
   // A test that built the real console keeps it; the stub is only for daemons
   // no browser opens.
@@ -139,7 +111,6 @@ async function startDaemon(root: string, fixture: { project: string }, baseUrl: 
   return { daemon, conversationId, taskId: conversation.anchorTaskId ?? '' };
 }
 
-/** Sends the console's own interrupt request against a real daemon. */
 async function interrupt(daemon: { url: string }, conversationId: string) {
   const cookie = (await fetch(daemon.url)).headers.get('set-cookie') ?? '';
   const startedAt = Date.now();
@@ -157,11 +128,6 @@ async function interrupt(daemon: { url: string }, conversationId: string) {
   return { elapsed: Date.now() - startedAt, reply };
 }
 
-/**
- * Why this host cannot run a sandboxed command, or null when it can. The daemon
- * wraps every tool command in a macOS seatbelt and a seatbelt cannot be nested,
- * so a sandboxed test process (an Agent session) cannot reach that behaviour.
- */
 function sandboxBlocker(): string | null {
   if (process.platform !== 'darwin') return `tool commands need the macOS seatbelt, and this host is ${process.platform}`;
   const probe = spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { encoding: 'utf8' });
@@ -172,7 +138,6 @@ function sandboxBlocker(): string | null {
 
 const SANDBOX_BLOCKER = sandboxBlocker();
 
-/** A server that accepts the request and never answers it. */
 async function neverAnsweringServer(): Promise<{ url: string; close: () => Promise<void> }> {
   const server: Server = createServer(() => {
     // Held open on purpose: the fetch tool stays in flight.
@@ -337,6 +302,8 @@ test('the console says 打断中 first and 已打断 when the turn is gone', asy
       record();
       new MutationObserver(record).observe(document.body, { subtree: true, childList: true, characterData: true });
     });
+
+    expect(await page.locator('.composer-footer').innerText(), 'the composer advertises a hint nobody asked for').not.toContain('可继续输入');
 
     await page.keyboard.press('Escape');
 
