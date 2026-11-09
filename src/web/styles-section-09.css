@@ -233,5 +233,6 @@
 .artifact-cards .drawer-artifact-open > .grow { flex: 1; }
 .artifact-cards .drawer-artifact-open > svg { flex: 0 0 auto; color: var(--muted); }
 .artifact-cards .drawer-artifact-open > span:last-child { display: none; }
-.artifact-cards .drawer-artifact-open strong { display: block; margin-bottom: 6px; font-size: 13px; }
+.artifact-cards .drawer-artifact-open .truncate { white-space: normal; overflow: visible; text-overflow: clip; }
+.artifact-cards .drawer-artifact-open strong { display: block; margin-bottom: 6px; font-size: 13px; overflow-wrap: anywhere; }
 .artifact-cards .drawer-artifact-open .faint { display: block; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
