@@ -385,8 +385,11 @@
 .conversation-thread-inner { min-height: 100%; }
 .jump-to-latest {
   position: absolute;
-  right: 24px;
+  left: 0;
+  right: 0;
   bottom: 14px;
+  width: fit-content;
+  margin-inline: auto;
   z-index: 6;
   display: inline-flex;
   align-items: center;

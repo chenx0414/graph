@@ -229,6 +229,21 @@ test('live tool activity groups and streamed markdown follow the transcript tail
   });
   await page.getByTestId('jump-to-latest').waitFor();
   expect(await page.getByTestId('message-list').getAttribute('data-pinned')).toBe('false');
+  // The way back to the newest message sits in the middle of the column it belongs
+  // to, and moving it there must not change its size.
+  const geometry = await page.evaluate(() => {
+    const button = document.querySelector('[data-testid=jump-to-latest]') as HTMLElement;
+    const shell = button.parentElement as HTMLElement;
+    const box = button.getBoundingClientRect();
+    const column = shell.getBoundingClientRect();
+    return {
+      buttonCenter: Math.round(box.left + box.width / 2),
+      columnCenter: Math.round(column.left + column.width / 2),
+      height: Math.round(box.height),
+    };
+  });
+  expect(Math.abs(geometry.buttonCenter - geometry.columnCenter), JSON.stringify(geometry)).toBeLessThanOrEqual(1);
+  expect(geometry.height, JSON.stringify(geometry)).toBe(34);
   await page.getByTestId('jump-to-latest').click();
   await expect.poll(() => page.getByTestId('message-list').getAttribute('data-pinned')).toBe('true');
 });

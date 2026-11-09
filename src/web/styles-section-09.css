@@ -17,7 +17,7 @@
   .conversation-tabs { padding: 6px 12px 0; overflow-x: auto; }
   .conversation-tab { flex: 0 0 auto; }
   .conversation-thread { padding: 20px 14px 28px; }
-  .jump-to-latest { right: 14px; bottom: 12px; }
+  .jump-to-latest { bottom: 12px; }
   .tool-group-toggle { padding-inline: 9px; }
   .tool-group-copy strong { white-space: normal; }
   .tool-activity-list { padding-left: 34px; }
