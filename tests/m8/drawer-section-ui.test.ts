@@ -254,40 +254,45 @@ test('opening the drawer slides it over the conversation instead of squeezing it
   expect((await edges()).width).toBeGreaterThan(300);
 }, 240_000);
 
-test('the drawer widens the desktop window instead of covering it, and overlays only when it cannot', async () => {
+test('the drawer opens inside the window, sliding inward from the right edge', async () => {
   const { page } = await consoleWith('empty');
   await page.evaluate(() => {
-    const host = window as unknown as { __drawerCalls: unknown[]; __drawerExpanded: boolean; graph?: unknown };
+    const host = window as unknown as { __drawerCalls: unknown[]; graph?: unknown };
     host.__drawerCalls = [];
-    host.__drawerExpanded = true;
     host.graph = {
       setDrawer: async (input: { open: boolean; width: number }) => {
         host.__drawerCalls.push(input);
-        return { expanded: host.__drawerExpanded };
+        return { expanded: true };
       },
     };
   });
-  const overlay = () => page.locator('.window-drawer-layer').getAttribute('data-overlay');
-  await page.getByTestId('drawer-entry').click();
-  await expect.poll(overlay, { timeout: 10_000 }).toBe('false');
-  const calls = await page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean; width: number }[] }).__drawerCalls);
-  expect(calls, 'the renderer must ask the desktop window to grow').toContainEqual({ open: true, width: 440 });
-
-  // A section that needs more room (task graph, shared artifacts) resizes the panel
-  // at once: no width animation may stretch or squeeze it while the window grows.
-  const motion = await page.locator('.window-drawer-layer').evaluate(node => {
-    const style = getComputedStyle(node);
-    return { property: style.transitionProperty, duration: style.transitionDuration };
+  const layer = page.locator('.window-drawer-layer');
+  const corner = () => page.getByTestId('drawer-entry').evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return { fromRight: Math.round(window.innerWidth - box.right), top: Math.round(box.top) };
   });
-  expect(motion.property.split(',').map(name => name.trim()), JSON.stringify(motion)).not.toContain('width');
+  const resting = await corner();
 
   await page.getByTestId('drawer-entry').click();
-  await expect.poll(async () => page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean }[] }).__drawerCalls.some(call => !call.open)), { timeout: 10_000 }).toBe(true);
+  await expect.poll(async () => await layer.getAttribute('data-open'), { timeout: 10_000 }).toBe('true');
 
-  await page.evaluate(() => { (window as unknown as { __drawerExpanded: boolean }).__drawerExpanded = false; });
+  // Inward: the panel travels on the transform, from the right edge of the window.
+  const motion = await layer.evaluate((node: HTMLElement) => {
+    const style = getComputedStyle(node);
+    return { property: style.transitionProperty.split(',').map(name => name.trim()) };
+  });
+  expect(motion.property, JSON.stringify(motion)).toContain('transform');
+  expect(motion.property, 'the panel must not be laid out by animating its width').not.toContain('width');
+  expect(await page.evaluate(() => (window as unknown as { __drawerCalls: unknown[] }).__drawerCalls),
+    'the drawer must not resize the window').toEqual([]);
+
+  // The toggle keeps its place in the window's top-right corner while the panel is out.
+  expect(await corner(), 'the toggle moved when the drawer opened').toEqual(resting);
+
   await page.getByTestId('drawer-entry').click();
-  await expect.poll(overlay, { timeout: 10_000 }).toBe('true');
-});
+  await expect.poll(async () => await layer.getAttribute('data-open'), { timeout: 10_000 }).toBe('false');
+  expect(await corner()).toEqual(resting);
+}, 240_000);
 
 test('the task graph page shows the graph itself, not the cost, revision and connection chips', async () => {
   const { page, server, view, propose, confirm } = await consoleWith('graph-header');

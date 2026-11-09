@@ -151,27 +151,21 @@
 .markdown-input .md-strike { text-decoration: line-through; }
 .markdown-input .md-link { color: #356bad; text-decoration: underline; }
 .markdown-input .md-quote { color: var(--muted); border-left: 2px solid var(--border-strong); padding-left: 8px; }
-/* The drawer opens outward: the desktop window grows by the panel width and the
- * drawer fills that new space, so the page keeps its width. When the display
- * cannot hold it (browser, fullscreen, maximised) the same layer becomes an
- * overlay sliding in from the right edge instead. */
+/* The drawer opens inward: the window keeps its size and the panel slides in from
+ * the right edge over the page, so the control in the top-right corner never moves. */
 .window-drawer-layer {
-  flex: 0 0 auto; min-width: 0; height: 100%; overflow: hidden; visibility: hidden;
-  background: var(--panel, #fff); border-left: 0; width: 0;
-}
-.window-drawer-layer[data-open="true"] { width: min(440px, 46vw); border-left: 1px solid var(--border); visibility: visible; }
-.window-drawer-layer[data-wide="true"][data-open="true"] { width: min(760px, 62vw); }
-.window-drawer-layer[data-overlay="true"] {
   position: absolute; inset: 0 0 0 auto; z-index: 30;
-  display: flex; width: min(440px, 46vw);
+  display: flex; width: min(440px, 46vw); min-width: 0; height: 100%; overflow: hidden;
+  background: var(--panel, #fff); border-left: 0;
   transform: translateX(100%); opacity: 0; pointer-events: none;
   transition: transform 160ms ease-out, opacity 120ms linear;
 }
-.window-drawer-layer[data-overlay="true"][data-open="true"] {
+.window-drawer-layer[data-wide="true"] { width: min(760px, 62vw); }
+.window-drawer-layer[data-open="true"] {
   transform: translateX(0); opacity: 1; pointer-events: auto;
+  border-left: 1px solid var(--border);
   box-shadow: -24px 0 48px rgba(15, 23, 42, 0.14);
 }
-.window-drawer-layer[data-overlay="true"][data-wide="true"][data-open="true"] { width: min(760px, 62vw); }
 .window-drawer-layer .detail-drawer, .window-drawer-layer .detail-drawer[data-open="true"], .window-drawer-layer .detail-drawer[data-page="graph"][data-open="true"] { position:static; width:100%; height:100%; flex:none; background:var(--panel,#fff); box-shadow:none; }
 .window-drawer-layer .detail-drawer .drawer-inner, .window-drawer-layer .detail-drawer[data-page="graph"] .drawer-inner { width:100%; min-width:0; padding-top:24px; }
 .architecture-board { display:grid; grid-template-columns:180px minmax(0,1fr); min-height:510px; gap:20px; }
@@ -215,7 +209,6 @@
  * by itself: without this the drawer button stays at the window's right edge and
  * ends up over the drawer instead of over the conversation it belongs to. */
 .conversation-toolbar-content { display: flex; align-items: center; gap: 8px; min-width: 0; transition: padding-right 160ms ease-out; }
-.conversation-toolbar-content[data-drawer="true"] { padding-right: min(440px, 46vw); }
 .conversation-toolbar-content .conversation-heading { display: none; }
 .conversation-toolbar-content .conversation-actions { gap: 0; }
 .conversation-toolbar-content .drawer-entry { padding: 5px 8px; }

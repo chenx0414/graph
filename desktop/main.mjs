@@ -1,5 +1,4 @@
 // graph:allow-large-file: the Electron entry point owns the window, the daemon lifecycle, the tray, notifications and the keychain bridge in one process; splitting it is a real refactor that needs an Electron-capable host to re-verify, and this host cannot launch Electron at all.
-import { drawerWindowBounds } from './drawer-window.ts';
 import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
 import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runtime-files.mjs';
 import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
@@ -18,7 +17,7 @@ import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
  * deep (electron-builder leaves the nested frameworks unsealed) and the copy has
  * to keep the framework symlinks (ditto, not a recursive copy).
  */
-import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell, screen } from 'electron';
+import { app, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +62,6 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let window = null;
-  let drawerBase = null;
   let quitting = false;
   let restarting = false;
   let readyUrl = null;
@@ -107,7 +105,7 @@ if (!app.requestSingleInstanceLock()) {
         try { writeFileSync(routePath, JSON.stringify(route)); } catch { /* optional UI state */ }
         run.rememberConversation(conversationIdFromRoute(route));
       },
-      onClosed: () => { window = null; drawerBase = null; },
+      onClosed: () => { window = null; },
     });
   }
 
@@ -247,23 +245,6 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function registerBridge() {
-    ipcMain.handle('graph:drawer', (event, input) => {
-      if (!window || event.sender !== window.webContents || typeof input?.open !== 'boolean') return { expanded: false };
-      if (!input.open) {
-        if (drawerBase && !window.isFullScreen() && !window.isMaximized()) {
-          const now = window.getBounds();
-          window.setBounds({ ...drawerBase, y: now.y, height: now.height }, false);
-        }
-        drawerBase = null;
-        return { expanded: false };
-      }
-      const width = input.width === 760 ? 760 : 440;
-      const base = drawerBase ?? window.getBounds();
-      const result = drawerWindowBounds(base, screen.getDisplayMatching(base).workArea, width, window.isFullScreen() || window.isMaximized());
-      if (result.expanded) { drawerBase = base; window.setBounds(result.bounds, false); }
-      else if (drawerBase) { window.setBounds(drawerBase, false); drawerBase = null; }
-      return { expanded: result.expanded };
-    });
     ipcMain.handle('graph:pick-directory', async () => {
       if (background) return null;
       const result = await dialog.showOpenDialog(window ?? undefined, { properties: ['openDirectory', 'createDirectory'] });

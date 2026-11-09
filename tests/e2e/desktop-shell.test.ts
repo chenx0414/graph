@@ -21,16 +21,6 @@ test('the default desktop window serves the global supervisor entry', async () =
   expect(settings).toMatchObject({ projects: [] });
 }, 90000);
 
-test.skipIf(process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1')('a maximized native desktop uses a drawer overlay without changing its bounds', async () => {
-  const { app, page } = await launchShell(cleanup);
-  const bounds = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.maximize());
-  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isMaximized())).toBe(true);
-  const maximized = await bounds();
-  expect(await page.evaluate(() => window.graph!.setDrawer!({ open: true, width: 440 }))).toEqual({ expanded: false });
-  expect(await bounds()).toEqual(maximized);
-}, 90000);
-
 test('desktop relaunch stops only its owned daemon and the replacement survives the old stop deadline', async () => {
   const fixture = await launchShell(cleanup);
   const config = JSON.parse(await readFile(join(fixture.userData, 'graph.config.json'), 'utf8'));
