@@ -53,18 +53,16 @@ test('the daemon reclaims the state of the runs before it', async () => {
       api: 'openai-completions', baseUrl: provider.model.baseUrl, contextWindow: 32000, maxTokens: 512,
       credentialId: 'local' }] },
   }));
-  // The rules are narrowed so that the sweep is visible in one run: keep five
-  // events of every task, and reclaim a task's history as soon as it is not
-  // moving.
   const env = {
     GRAPH_RETENTION_KEY: 'synthetic-retention-key',
-    GRAPH_STATE_SWEEP_INTERVAL_MS: '500',
     GRAPH_STATE_RETENTION_MIN_AGE_MS: '0',
     GRAPH_STATE_RETENTION_KEEP_EVENTS: '5',
   };
+  const writing = { ...env, GRAPH_STATE_SWEEP_INTERVAL_MS: '600000' };
+  const reclaiming = { ...env, GRAPH_STATE_SWEEP_INTERVAL_MS: '500' };
   let daemon: Awaited<ReturnType<typeof launchCli>> | undefined;
   try {
-    daemon = await launchCli(root, { configPath, env, extraArgs: ['--execute'] });
+    daemon = await launchCli(root, { configPath, env: writing, extraArgs: ['--execute'] });
     const request = async (path: string, method = 'GET', data?: unknown) => {
       const reply = await daemon!.request(path, { method, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       return { status: reply.status, body: await reply.json().catch(() => ({})) };
@@ -89,7 +87,7 @@ test('the daemon reclaims the state of the runs before it', async () => {
     // The next run reclaims what this one left behind.
     daemon.child.kill('SIGKILL');
     await daemon.close();
-    daemon = await launchCli(root, { configPath, env, extraArgs: ['--execute'] });
+    daemon = await launchCli(root, { configPath, env: reclaiming, extraArgs: ['--execute'] });
     await expect.poll(() => taskEvents(database, taskId).keepable, { timeout: 30000, interval: 250 }).toBeLessThanOrEqual(5);
     const reclaimed = taskEvents(database, taskId);
     expect(reclaimed.keepable, 'the daemon kept more events than the rules allow').toBeLessThanOrEqual(5);
