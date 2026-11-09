@@ -383,6 +383,11 @@ function ToolSettledCard({ row }: { row: Extract<TranscriptRow, { kind: 'toolSet
 
 function RsiFullCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsiFull' }> }) {
   const failed = row.files.length;
+  const summary = [
+    `${failed > 0 ? `${failed} 个文件失败` : '没有解析出失败文件'}${row.commit ? ` · 提交 ${row.commit.slice(0, 8)}` : ''}`,
+    ...row.files,
+    ...(row.logPath ? [row.logPath] : []),
+  ].join('\n');
   return (
     <div className="compaction-notice" data-testid="rsi-full-notice" data-role="system" data-verdict={row.environment ? 'environment' : 'regression'}>
       <div className="compaction-notice-head" title={row.text}>
@@ -393,25 +398,7 @@ function RsiFullCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsiFull' }>
         </span>
         <span className="compaction-notice-rule" aria-hidden="true" />
       </div>
-      {row.verdictDetails.length > 0 && (
-        <ul className="compaction-notice-details" data-testid="rsi-full-details">
-          {row.verdictDetails.map(detail => <li key={detail}>{detail}</li>)}
-        </ul>
-      )}
-      <div className="compaction-summary" data-testid="rsi-full-summary">
-        {failed > 0 ? `${failed} 个文件失败` : '没有解析出失败文件'}
-        {row.commit ? ` · 提交 ${row.commit.slice(0, 8)}` : ''}
-      </div>
-      {failed > 0 && (
-        <ul className="compaction-summary" data-testid="rsi-full-files">
-          {row.files.map(file => <li key={file}><code>{file}</code></li>)}
-        </ul>
-      )}
-      {row.logPath && (
-        <div className="compaction-summary">
-          <code>{row.logPath}</code>
-        </div>
-      )}
+      <div className="compaction-summary" data-testid="rsi-full-summary">{summary}</div>
     </div>
   );
 }
