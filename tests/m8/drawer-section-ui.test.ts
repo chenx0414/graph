@@ -219,3 +219,30 @@ test('opening the drawer slides it over the conversation instead of squeezing it
     .toBe(0);
   expect((await edges()).width).toBeGreaterThan(300);
 }, 240_000);
+
+test('the drawer widens the desktop window instead of covering it, and overlays only when it cannot', async () => {
+  const { page } = await consoleWith('empty');
+  await page.evaluate(() => {
+    const host = window as unknown as { __drawerCalls: unknown[]; __drawerExpanded: boolean; graph?: unknown };
+    host.__drawerCalls = [];
+    host.__drawerExpanded = true;
+    host.graph = {
+      setDrawer: async (input: { open: boolean; width: number }) => {
+        host.__drawerCalls.push(input);
+        return { expanded: host.__drawerExpanded };
+      },
+    };
+  });
+  const overlay = () => page.locator('.window-drawer-layer').getAttribute('data-overlay');
+  await page.getByTestId('drawer-entry').click();
+  await expect.poll(overlay, { timeout: 10_000 }).toBe('false');
+  const calls = await page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean; width: number }[] }).__drawerCalls);
+  expect(calls, 'the renderer must ask the desktop window to grow').toContainEqual({ open: true, width: 440 });
+
+  await page.getByTestId('drawer-entry').click();
+  await expect.poll(async () => page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean }[] }).__drawerCalls.some(call => !call.open)), { timeout: 10_000 }).toBe(true);
+
+  await page.evaluate(() => { (window as unknown as { __drawerExpanded: boolean }).__drawerExpanded = false; });
+  await page.getByTestId('drawer-entry').click();
+  await expect.poll(overlay, { timeout: 10_000 }).toBe('true');
+});
