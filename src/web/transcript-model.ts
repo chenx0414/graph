@@ -40,7 +40,7 @@ export type TranscriptRow =
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
-  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string }
+  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string; notices?: TranscriptRow[] }
   | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
   | { kind: 'compaction'; id: string; text: string; tokensAfter?: number; summary?: string }
   | { kind: 'rsiFull'; id: string; text: string; verdict: string; verdictDetails: string[]; commit: string; environment: boolean; files: string[]; logPath: string }
@@ -92,12 +92,17 @@ function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptToo
     ...(state ? { state } : {}), ...(reason ? { reason } : {}) };
 }
 
-function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
-  if (!tools.length) return;
+type ToolGroupEntry = { tool: TranscriptTool } | { notice: TranscriptRow };
+
+function pushToolGroup(rows: TranscriptRow[], entries: ToolGroupEntry[]) {
+  const tools = entries.flatMap(entry => 'tool' in entry ? [entry.tool] : []);
+  const notices = entries.flatMap(entry => 'notice' in entry ? [entry.notice] : []);
+  if (!tools.length) { rows.push(...notices); return; }
   const active = tools.some(tool => !tool.done);
   const background = active && tools.every(tool => tool.done || tool.background === true);
   rows.push({ kind: 'tools', id: `tools:${tools[0]!.id}`, tools, active, background,
-    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools) });
+    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools),
+    ...(notices.length ? { notices } : {}) });
 }
 
 function isActivityMessage(message: ConversationMessage) {
@@ -127,24 +132,23 @@ function activityItem(message: ConversationMessage): TranscriptActivityItem {
 
 function activityRows(operationId: string, items: TranscriptActivityItem[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
-  let tools: TranscriptTool[] = [];
+  let entries: ToolGroupEntry[] = [];
   const flush = () => {
-    pushToolGroup(rows, tools);
-    tools = [];
+    pushToolGroup(rows, entries);
+    entries = [];
+  };
+  const notice = (row: TranscriptRow) => {
+    if (!entries.length) rows.push(row);
+    else entries.push({ notice: row });
   };
   for (const item of items) {
-    if (item.kind === 'rsi') { flush(); rows.push({ kind: 'rsi', id: item.id, rsi: item.rsi }); continue; }
+    if (item.kind === 'rsi') { notice({ kind: 'rsi', id: item.id, rsi: item.rsi }); continue; }
     if (item.kind === 'narration') {
-      flush();
-      rows.push({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
+      notice({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
       continue;
     }
-    if (item.kind === 'steer') {
-      flush();
-      rows.push({ kind: 'message', id: item.message.id, message: item.message });
-      continue;
-    }
-    tools.push(item.tool);
+    if (item.kind === 'steer') { notice({ kind: 'message', id: item.message.id, message: item.message }); continue; }
+    entries.push({ tool: item.tool });
   }
   flush();
   return rows;
@@ -336,17 +340,20 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     ? [...pendingItems.map(item => ({ ordinal: item.ordinal ?? 0, item })), ...tail].sort((left, right) => left.ordinal - right.ordinal)
     : tail;
   if (!tail.length || merged === tail) emitActivity(pendingKey ?? '', pendingItems);
-  let liveTools: TranscriptTool[] = [];
+  let liveTools: ToolGroupEntry[] = [];
   const flushLiveTools = () => {
     pushToolGroup(rows, liveTools);
     liveTools = [];
   };
+  const liveNotice = (row: TranscriptRow) => {
+    if (!liveTools.length) rows.push(row);
+    else liveTools.push({ notice: row });
+  };
   for (const [index, item] of merged.entries()) {
     if (item.item) {
-      if (item.item.kind === 'rsi') { flushLiveTools(); rows.push({ kind: 'rsi', id: item.item.id, rsi: item.item.rsi }); continue; }
+      if (item.item.kind === 'rsi') { liveNotice({ kind: 'rsi', id: item.item.id, rsi: item.item.rsi }); continue; }
       if (item.item.kind === 'narration') {
-        flushLiveTools();
-        rows.push({
+        liveNotice({
           kind: 'assistant',
           id: `assistant:${item.item.id}`,
           operationId: pendingKey ?? '',
@@ -357,11 +364,10 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         continue;
       }
       if (item.item.kind === 'steer') {
-        flushLiveTools();
-        rows.push({ kind: 'message', id: item.item.message.id, message: item.item.message });
+        liveNotice({ kind: 'message', id: item.item.message.id, message: item.item.message });
         continue;
       }
-      liveTools.push(item.item.tool);
+      liveTools.push({ tool: item.item.tool });
       continue;
     }
     if (item.stream) {
@@ -378,7 +384,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       });
       continue;
     }
-    if (item.tool) liveTools.push(item.tool);
+    if (item.tool) liveTools.push({ tool: item.tool });
   }
   flushLiveTools();
 

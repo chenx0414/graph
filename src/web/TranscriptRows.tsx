@@ -178,8 +178,21 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
           </ol>
         </div>
       </div>
+      {row.notices?.length ? <div className="tool-group-notices" data-testid="tool-group-notices">
+        {row.notices.map(notice => <GroupNotice key={notice.id} row={notice} />)}
+      </div> : null}
     </section>
   );
+}
+
+function GroupNotice({ row }: { row: TranscriptRow }) {
+  if (row.kind === 'rsi') return <RsiCard row={row} />;
+  if (row.kind === 'rsiFull') return <RsiFullCard row={row} />;
+  if (row.kind === 'compaction') return <CompactionNotice row={row} />;
+  if (row.kind === 'toolSettled') return <ToolSettledCard row={row} />;
+  if (row.kind === 'narration') return <NarrationRow row={row} />;
+  if (row.kind === 'assistant') return <NarrationRow row={{ kind: 'narration', id: row.id, operationId: row.operationId, text: row.text }} />;
+  return null;
 }
 
 function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration' }> }) {
