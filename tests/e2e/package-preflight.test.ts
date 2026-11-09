@@ -25,6 +25,10 @@ test.skipIf(process.platform !== 'darwin').each([
     await mkdir(join(volume, 'scripts'));
     await mkdir(join(volume, 'dist/web'), { recursive: true });
     await copyFile(join(process.cwd(), 'scripts/package-app.mjs'), join(volume, 'scripts/package-app.mjs'));
+    await copyFile(join(process.cwd(), 'scripts/app-build-source.mjs'), join(volume, 'scripts/app-build-source.mjs'));
+    // Packaging refuses to run outside a main checkout, so the fixture is one.
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: volume });
+    await run('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local', 'commit', '-q', '--allow-empty', '-m', 'baseline'], { cwd: volume });
     await copyFile(join(process.cwd(), 'package.json'), join(volume, 'package.json'));
     await writeFile(join(volume, 'dist/web/index.html'), '<!doctype html><title>Packaging input</title>');
     // Missing shipped resources are an external input failure. Reaching that
