@@ -85,7 +85,7 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 
 - 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `copy` / `delete`）；`write` 的正文可以内联，也可以用 `fromPath` 取自 checkout 里你已经写好、跑过的那个文件（不再重贴一遍）。`.git` 与路径逃逸被拒绝；不属于这次改动的未提交文件仍然阻塞（见下）；
 - 运行检查（自定义 `node` 检查、`node --run check`，`activate` 时再加 `node --run app:build`）；
-- 提交到专用 `rsi/*` 分支；
+- 直接提交到 `main`：App 永远从 `main` 打包，`scripts/package-app.mjs` 会拒绝从别的分支或 `main` 不含的提交构建；
 - `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在 operation 停稳后重启 daemon 让改动生效；`force` 为真时跳过等待、立即重载，可能中断在途 operation。
 
 调用形状是固定的（写错会白跑一个来回，报错会点名缺哪个字段）：`title`、`problem`、`changes`、`checks` 都是**顶层**字段；`changes[]` 的每个条目必须带 `path`（仓储相对路径）与 `action`（`write` / `replace` / `delete`），`write` 配 `content` 或 `fromPath`、`replace` 配 `edits` 或 `fromPath`；`checks` 里每项是 `{ command, args }`，也放顶层，不要塞进单个 change 里。SDK 的校验**一次列全部问题**（每行一条，并回显收到的参数），所以两处错误会同时出现，不必改一条试一次。改动里的多个 `edits` 也一样：所有匹配不上的锚点（`found 0` / `found 2`）在同一条报错里列出，改一次就能重发，而不是一次只发现一个。嵌套写错的那种会另行点名（`changes[0] is one file change… "checks" belongs at the top level of the call - it is nested one level too deep.`），因为 schema 只能描述结果、说不出原因。

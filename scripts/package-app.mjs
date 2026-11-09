@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { statfsSync } from 'node:fs';
+import { assertMainBuildSource } from './app-build-source.mjs';
 
 /**
  * Room packaging needs before it starts, measured rather than guessed: one build leaves 778 MiB of
@@ -22,6 +23,8 @@ import { statfsSync } from 'node:fs';
  * wolf costs the user a clean-up it did not need.
  */
 const MIN_FREE_BYTES = 2 * 1024 ** 3;
+
+assertMainBuildSource(dirname(dirname(fileURLToPath(import.meta.url))));
 
 /** Sizes the way a person reads them back off `df -h`. */
 function formatBytes(bytes) {
