@@ -43,6 +43,12 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
   expect(await page.getByTestId('theme-placeholder').count(), 'the removed appearance placeholder is back').toBe(0);
   expect(await page.locator('body').innerText()).not.toContain('当前使用浅色主题');
+  // 常规页不再解释「保存后立即生效」与「守护进程启动时载入的那份源码」：它们描述的是
+  // 内部机制，不是用户要做的判断。
+  const overview = await page.locator('body').innerText();
+  expect(overview, 'the header sentence about applying on save is back').not.toContain('配置会在保存后立即应用到当前守护进程');
+  expect(overview, 'the running-source subtitle is back').not.toContain('守护进程启动时载入的那份源码');
+  expect(await page.getByTestId('source-root').count(), 'the source chips must stay').toBe(1);
   const openPage = async (label: '模型' | '常规') => {
     await page.evaluate(hash => { location.hash = hash; }, label === '模型' ? '#/models' : '#/settings');
     await page.getByTestId(label === '模型' ? 'models-page' : 'settings-shell').waitFor();
@@ -103,8 +109,9 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(stub.requests.find(request => request.path === '/v1/chat/completions')).toMatchObject({ model: 'local', authorization: `Bearer ${SECRET}` });
   expect(await page.getByTestId('provider-verification').innerText()).toContain('验证成功');
   await expect.poll(async () => (await (await api.get('/api/config')).json() as { revision: number }).revision, { timeout: 10_000 }).toBe(1);
-  await page.getByTestId('config-status').waitFor();
-  expect(await page.getByTestId('config-status').innerText()).toContain('已自动保存 revision 1');
+  await expect.poll(async () => page.getByTestId('config-revisions').getAttribute('data-revision'), { timeout: 10_000 }).toBe('1');
+  expect(await page.getByTestId('config-status').count(), 'the redundant autosave receipt is back').toBe(0);
+  expect(await page.locator('body').innerText()).not.toContain('已自动保存 revision');
   // ② 选择模型 offers only configured vendors: the custom vendor just saved
   // (credential `local`) is present, an unconfigured preset is not.
   const vendorOptions = await page.getByTestId('model-vendor-select').innerText();
@@ -151,7 +158,8 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   // list to one row is gone with the tiers themselves.
   expect(await page.locator('[data-testid^="configured-model-"]').count()).toBe(2);
   expect(await page.getByTestId(`configured-model-${manualLocalId}`).innerText()).not.toContain('frontier');
-  await expect.poll(() => page.getByTestId('config-status').innerText()).toContain('已自动保存 revision');
+  const revisionNow = (await (await api.get('/api/config')).json() as { revision: number }).revision;
+  await expect.poll(async () => page.getByTestId('config-revisions').getAttribute('data-revision'), { timeout: 10_000 }).toBe(String(revisionNow));
   // Advance the real browser's debounce timers after the save receipt, with no new edit.
   await page.clock.fastForward(1_000);
   await api.get('/api/config');

@@ -78,7 +78,6 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <header className="settings-main-header">
           <div>
             <h1>{sections.find(section => section.id === active)?.label ?? '设置'}</h1>
-            <p>配置会在保存后立即应用到当前守护进程。</p>
           </div>
         </header>
         <div className="settings-content">
@@ -264,7 +263,8 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
       const appliedRevision = response.effectiveRevision ?? response.revision;
       setEffectiveRevision(current => Math.max(current ?? appliedRevision, appliedRevision));
       const pending = response.applied === false;
-      setStatus(`已自动保存 revision ${response.revision}${pending ? `，等待生效：${response.reason ?? '需要重启守护进程'}` : '，已应用到当前守护进程'}${response.configured === false ? '（尚未配置可用凭据，仅查看模式）' : ''}`);
+      const notice = pending ? `等待生效：${response.reason ?? '需要重启守护进程'}` : '';
+      setStatus(response.configured === false ? `${notice}（尚未配置可用凭据，仅查看模式）` : notice);
       if (!pending) window.dispatchEvent(new Event('graph:settings-changed'));
       if (editVersion.current === version) {
         editVersion.current = 0;

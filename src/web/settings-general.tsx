@@ -162,7 +162,6 @@ export function RunningSourceCard({ source }: { source?: { root: string; commit:
     <Card
       title="运行中的代码"
       icon="box"
-      subtitle="守护进程启动时载入的那份源码；改动源码后必须重载才会生效"
       testid="running-source"
     >
       <div className="chip-row">
