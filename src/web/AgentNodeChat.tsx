@@ -199,6 +199,17 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setSending(false); }
   }
+  const controlRef = useRef<(action: 'steer_node' | 'stop_node') => Promise<void>>(async () => {});
+  useEffect(() => {
+    if (!busy) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      void controlRef.current('stop_node');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy]);
   async function controlNode(action: 'steer_node' | 'stop_node') {
     if (!taskId || sending || !busy || (action === 'steer_node' && !text.trim())) return;
     const message = action === 'steer_node' ? text.trim() : '';
@@ -218,6 +229,7 @@ export function AgentNodeChat({ taskId, nodeId, agentName, onClose, onRunUpdate,
     }
     finally { setSending(false); }
   }
+  controlRef.current = controlNode;
   const composer = <div className="conversation-composer-wrap node-chat-composer">
     {error && <ErrorBox message={error} />}
     <ChatComposer value={text} onChange={setText} attachments={attachments} onAttachmentsChange={setAttachments}

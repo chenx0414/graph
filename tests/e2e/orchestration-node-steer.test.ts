@@ -20,7 +20,7 @@ function text(value: unknown, key: string): string {
   return v;
 }
 
-test.each(['steer', 'stop', 'stop-restart', 'user-steer', 'user-stop', 'browser-steer', 'browser-stop', 'crash-usage'])('a supervisor or user can %s one running graph node', async mode => {
+test.each(['steer', 'stop', 'stop-restart', 'user-steer', 'user-stop', 'browser-steer', 'browser-stop', 'browser-stop-escape', 'crash-usage'])('a supervisor or user can %s one running graph node', async mode => {
   const browserControl = mode.startsWith('browser-');
   const userControl = mode.startsWith('user-') || browserControl;
   const stopping = mode.includes('stop');
@@ -124,7 +124,11 @@ test.each(['steer', 'stop', 'stop-restart', 'user-steer', 'user-stop', 'browser-
         await page.goto(`${daemon.url}/#/tasks/${graph}/nodes/a`);
         await expect.poll(() => page.getByTestId('node-chat-input').isVisible(), { timeout: 20_000 }).toBe(true);
         if (!stopping) await page.getByTestId('node-chat-input').fill(directive);
-        await page.getByRole('button', { name: stopping ? '停止节点' : '立即引导' }).click();
+        if (mode === 'browser-stop-escape') {
+          await page.getByRole('button', { name: '停止节点' }).waitFor({ timeout: 20_000 });
+          await page.keyboard.press('Escape');
+        }
+        else await page.getByRole('button', { name: stopping ? '停止节点' : '立即引导' }).click();
         if (!stopping) await expect.poll(() => page.getByTestId('node-message-list').innerText(), { timeout: 20_000 }).toContain(directive);
       } else {
         const command = { action: stopping ? 'stop_node' : 'steer_node', nodeId: 'a', text: directive, requestId: 'user-control' };
