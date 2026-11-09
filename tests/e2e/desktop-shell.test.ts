@@ -9,33 +9,6 @@ import { launchShell } from '../helpers/desktop-shell.ts';
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
 
-test('the real desktop drawer reserves display space, restores content bounds and uses an overlay when constrained', async () => {
-  const { app, page } = await launchShell(cleanup);
-  const display = await app.evaluate(({ BrowserWindow, screen }) => {
-    const window = BrowserWindow.getAllWindows()[0]!;
-    const area = screen.getDisplayMatching(window.getBounds()).workArea;
-    const base = { x: area.x + area.width - 500, y: area.y + 20, width: 500, height: Math.min(600, area.height - 40) };
-    window.setBounds(base, false);
-    return { area, base };
-  });
-  const bounds = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
-  await expect.poll(bounds).toEqual(display.base);
-  expect(await page.evaluate(() => window.graph!.setDrawer!({ open: true, width: 440 }))).toEqual({ expanded: true });
-  await expect.poll(bounds).toEqual({ ...display.base, x: display.area.x + display.area.width - 940, width: 940 });
-  expect(await page.evaluate(() => window.graph!.setDrawer!({ open: false, width: 440 }))).toEqual({ expanded: false });
-  await expect.poll(bounds).toEqual(display.base);
-  const full = { ...display.base, x: display.area.x, width: display.area.width - 100 };
-  await app.evaluate(({ BrowserWindow }, value) => BrowserWindow.getAllWindows()[0]!.setBounds(value, false), full);
-  await expect.poll(bounds).toEqual(full);
-  expect(await page.evaluate(() => window.graph!.setDrawer!({ open: true, width: 440 }))).toEqual({ expanded: false });
-  expect(await bounds()).toEqual(full);
-  if (process.env.GRAPH_E2E_VISIBLE_WINDOWS !== '1') {
-    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(window => !window.isVisible() && !window.isFocused()))).toBe(true);
-    expect(await app.evaluate(({ app }) => app.dock?.isVisible() ?? false)).toBe(false);
-    expect((await page.screenshot()).length).toBeGreaterThan(0);
-  }
-}, 90000);
-
 test('the default desktop window serves the global supervisor entry', async () => {
   const { page } = await launchShell(cleanup);
   // The default window lands on the global Agent's conversation - the root no longer

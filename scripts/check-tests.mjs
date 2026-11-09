@@ -232,6 +232,19 @@ if (refused.length) {
   }
   console.error('check:tests: they are not called passing; the host gate runs them where the capability exists');
 }
+// The full run already excuses a failure that matches tests/env-known-reds.json;
+// the fast gate has to use the same rule, otherwise a known environment problem
+// blocks every commit that touches its file.
+const knownReds = (() => {
+  try { return JSON.parse(readFileSync(join(root, 'tests/env-known-reds.json'), 'utf8')).reds; } catch { return []; }
+})();
+function knownEnvironment(file, result) {
+  const patterns = knownReds.filter(red => red.file === file);
+  if (!patterns.length || !result) return undefined;
+  const messages = firstFailures(result).map(item => `${item.name} — ${item.message}`).join('\n');
+  return patterns.find(red => messages.includes(red.pattern));
+}
+
 if (blockingReal.length) {
   const details = report.testResults.filter(result => blockingReal.includes(relative(result.name)));
   console.error(`\ncheck:tests: ${blockingReal.length} failure(s) outside the quarantine:`);
@@ -248,15 +261,29 @@ if (blockingReal.length) {
     console.log(`check:tests: ${retry.recovered.length} file(s) failed once and passed on a re-run: ${retry.recovered.join(', ')}`);
   }
   if (retry.stillFailing.length) {
-    console.error(`\ncheck:tests: ${retry.stillFailing.length} file(s) failed twice, so the gate stops here:`);
-    for (const file of retry.stillFailing) console.error(`  - ${file}`);
-    const second = retry.results.find(result => retry.stillFailing.includes(relative(result.name)));
-    if (second) {
-      for (const item of firstFailures(second).slice(0, 3)) {
-        console.error(`      × [${failureKind(second)}] ${item.name.slice(0, 160)} — ${item.message.slice(0, 240)}`);
-      }
+    const environment = [];
+    const regressions = [];
+    for (const file of retry.stillFailing) {
+      const result = retry.results.find(entry => relative(entry.name) === file);
+      const red = knownEnvironment(file, result);
+      if (red) environment.push({ file, red });
+      else regressions.push(file);
     }
-    process.exit(1);
+    if (environment.length) {
+      console.log(`\ncheck:tests: ${environment.length} failure(s) match tests/env-known-reds.json, so they are environment and do not block:`);
+      for (const { file, red } of environment) console.log(`  - ${file} — ${red.pattern}: ${red.why}`);
+    }
+    if (regressions.length) {
+      console.error(`\ncheck:tests: ${regressions.length} file(s) failed twice, so the gate stops here:`);
+      for (const file of regressions) console.error(`  - ${file}`);
+      const second = retry.results.find(result => regressions.includes(relative(result.name)));
+      if (second) {
+        for (const item of firstFailures(second).slice(0, 3)) {
+          console.error(`      × [${failureKind(second)}] ${item.name.slice(0, 160)} — ${item.message.slice(0, 240)}`);
+        }
+      }
+      process.exit(1);
+    }
   }
 }
 if (process.env.GRAPH_STRICT_SUITE === '1' && failed.length) {
