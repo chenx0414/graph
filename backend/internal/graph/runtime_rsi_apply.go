@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const RSI_TARGET_BRANCH = "main"
+
 func (service *RsiService) Apply(input any, context RsiApplyContext) RsiReceipt {
 	service.mu.Lock()
 	if service.changing {
@@ -85,10 +87,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		Raise("rsi_unavailable", "Graph source checkout has no Git HEAD")
 	}
 	originalBranch := CheckedOutBranch(*root)
-	branch := "rsi/" + rsiSlug(title) + "-" + id[:8]
-	if originalBranch != nil && strings.HasPrefix(*originalBranch, "rsi/") {
-		branch = *originalBranch
-	}
+	branch := RSI_TARGET_BRANCH
 
 	working := service.rsiReadWorking()
 	owned := map[string]bool{}
@@ -123,13 +122,13 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	service.rsiBeginAttempt(id, title, *root, branch, *originalHead, uniquePaths)
 	defer service.rsiClearAttempt()
 
-	createdBranch := false
+	switchedToTarget := false
 	if originalBranch == nil || branch != *originalBranch {
-		switched := Git(*root, []string{"switch", "-c", branch}, nil, nil)
+		switched := Git(*root, []string{"switch", branch}, nil, nil)
 		if switched.Code != 0 {
-			Raise("rsi_git", rsiFirstText(switched.Stderr, "Failed to create "+branch))
+			Raise("rsi_git", rsiFirstText(switched.Stderr, "RSI commits only to "+branch+"; switch that branch in the source checkout first"))
 		}
-		createdBranch = true
+		switchedToTarget = true
 	}
 
 	claimedPaths := append(append([]string{}, uniquePaths...), ownedOrder...)
@@ -181,7 +180,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 		} else {
 			_ = os.Remove(service.rsiWorkingPath())
 		}
-		if createdBranch && originalBranch != nil && len(owned) == 0 {
+		if switchedToTarget && originalBranch != nil && len(owned) == 0 {
 			Git(*root, []string{"switch", *originalBranch}, nil, nil)
 			Git(*root, []string{"branch", "-D", branch}, nil, nil)
 		}
@@ -303,7 +302,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 			_ = os.MkdirAll(filepath.Dir(absolute), 0o700)
 			_ = os.WriteFile(absolute, []byte(*content), 0o644)
 		}
-		if createdBranch && originalBranch != nil && len(owned) == 0 {
+		if switchedToTarget && originalBranch != nil && len(owned) == 0 {
 			Git(*root, []string{"switch", *originalBranch}, nil, nil)
 			Git(*root, []string{"branch", "-D", branch}, nil, nil)
 		}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -230,27 +229,6 @@ func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {
 	return true
 }
 
-func rsiSlug(value string) string {
-	lowered := strings.ToLower(value)
-	built := strings.Builder{}
-	for _, symbol := range lowered {
-		if (symbol >= 'a' && symbol <= 'z') || (symbol >= '0' && symbol <= '9') {
-			built.WriteRune(symbol)
-		} else {
-			built.WriteRune('-')
-		}
-	}
-	collapsed := regexp.MustCompile(`-+`).ReplaceAllString(built.String(), "-")
-	trimmed := strings.Trim(collapsed, "-")
-	runes := []rune(trimmed)
-	if len(runes) > 40 {
-		trimmed = string(runes[:40])
-	}
-	if trimmed == "" {
-		return "change"
-	}
-	return trimmed
-}
 
 func rsiInside(root, path string) (string, bool) {
 	base := deployResolve("", root)

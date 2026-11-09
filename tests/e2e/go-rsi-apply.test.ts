@@ -327,8 +327,9 @@ test('a right self-improvement call commits the real checkout', async () => {
   expect(f.git(['log', '--format=%s', '-1'])).toBe('rsi: Correct native RSI call');
   expect(f.git(['rev-list', '--count', 'HEAD'])).toBe('2');
   expect(f.git(['status', '--porcelain'])).toBe('');
-  // The change lives on its own branch, not on the line the daemon runs.
-  expect(f.git(['branch', '--list', 'rsi/*'])).not.toBe('');
+  // The commit lands on main: the line the App is built from, no side branch.
+  expect(f.git(['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main');
+  expect(f.git(['branch', '--list', 'rsi/*'])).toBe('');
 
   // A call that changes nothing says so instead of claiming a commit.
   await expect.poll(() => observed.has('check-only'), { timeout: 90_000, interval: 250 }).toBe(true);
@@ -368,7 +369,7 @@ test('a self-improvement call that asks for a reload leaves a real reload reques
     } catch {
       return undefined;
     }
-  }, { timeout: 60_000, interval: 250 }).toMatchObject({ commit: expect.any(String), branch: expect.stringContaining('rsi/') });
+  }, { timeout: 60_000, interval: 250 }).toMatchObject({ commit: expect.any(String), branch: 'main' });
 }, 240_000);
 
 test('a file already written in the workspace is committed without retyping it', async () => {
