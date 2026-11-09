@@ -1,6 +1,6 @@
 export interface DesktopBridge {
   isDesktop: boolean;
-  setDrawer?(input: { open: boolean; width: number; route?: string }): Promise<{ detached?: boolean; expanded?: boolean }>;
+  setDrawer?(input: { open: boolean; width: number }): Promise<{ expanded: boolean }>;
   pickDirectory(): Promise<string | null>;
   openResource(kind: 'skills' | 'mcp' | 'pi-extensions' | 'agent-md' | 'prompts'): Promise<{ opened: boolean; path?: string; message?: string }>;
   saveSecret(ref: string, value: string | null): Promise<{ stored: boolean; applied?: boolean; message?: string }>;

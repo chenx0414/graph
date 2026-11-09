@@ -88,8 +88,7 @@ const CHAT_RESIDENT_PANEL_IDS = [
 export type DraftStatus = 'none' | 'pending' | 'accepted' | 'stale';
 
 export function defaultDrawerOpen(): boolean {
-  if (typeof document === 'undefined') return false;
-  return document.documentElement.dataset.window === 'drawer';
+  return false;
 }
 
 export function drawerPanelIds(): readonly string[] {

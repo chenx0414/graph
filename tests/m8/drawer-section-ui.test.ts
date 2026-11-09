@@ -202,7 +202,7 @@ test('the chosen task sticks, and the task section is never yanked back to the d
   expect(await page.getByTestId('drawer-task-artifacts').count()).toBe(1);
 }, 90_000);
 
-test('without a drawer window the layer falls back to an overlay and never squeezes the conversation', async () => {
+test('opening the drawer slides it over the conversation instead of squeezing it', async () => {
   const { page } = await consoleWith('empty');
   const threadWidth = async () => (await page.locator('.conversation-main').boundingBox())!.width;
   const closed = await threadWidth();
@@ -220,35 +220,29 @@ test('without a drawer window the layer falls back to an overlay and never squee
   expect((await edges()).width).toBeGreaterThan(300);
 }, 240_000);
 
-test('the drawer asks for its own window, and the page keeps its width either way', async () => {
+test('the drawer widens the desktop window instead of covering it, and overlays only when it cannot', async () => {
   const { page } = await consoleWith('empty');
   await page.evaluate(() => {
-    const host = window as unknown as { __drawerCalls: unknown[]; __drawerMode: string; graph?: unknown };
+    const host = window as unknown as { __drawerCalls: unknown[]; __drawerExpanded: boolean; graph?: unknown };
     host.__drawerCalls = [];
-    host.__drawerMode = 'detached';
+    host.__drawerExpanded = true;
     host.graph = {
-      setDrawer: async (input: { open: boolean; width: number; route?: string }) => {
+      setDrawer: async (input: { open: boolean; width: number }) => {
         host.__drawerCalls.push(input);
-        if (!input.open) return { detached: true };
-        return host.__drawerMode === 'detached' ? { detached: true } : { detached: false, expanded: false };
+        return { expanded: host.__drawerExpanded };
       },
     };
   });
-  const layer = () => page.locator('.window-drawer-layer');
+  const overlay = () => page.locator('.window-drawer-layer').getAttribute('data-overlay');
   await page.getByTestId('drawer-entry').click();
-  await expect.poll(async () => layer().getAttribute('data-detached'), { timeout: 10_000 }).toBe('true');
-  await expect.poll(async () => layer().isVisible(), { timeout: 10_000 }).toBe(false);
-  const calls = await page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean; width: number; route?: string }[] }).__drawerCalls);
-  expect(calls[0], 'the renderer must name the route the drawer window has to load').toMatchObject({ open: true, width: 440 });
-  expect(calls[0]!.route, 'the drawer window opens on the page the user is looking at').toContain('#/');
+  await expect.poll(overlay, { timeout: 10_000 }).toBe('false');
+  const calls = await page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean; width: number }[] }).__drawerCalls);
+  expect(calls, 'the renderer must ask the desktop window to grow').toContainEqual({ open: true, width: 440 });
 
   await page.getByTestId('drawer-entry').click();
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __drawerCalls: { open: boolean }[] }).__drawerCalls.some(call => !call.open)), { timeout: 10_000 }).toBe(true);
 
-  // Without a detached window (browser, or the desktop refused) the same layer
-  // falls back to an overlay that leaves the page width alone.
-  await page.evaluate(() => { (window as unknown as { __drawerMode: string }).__drawerMode = 'overlay'; });
+  await page.evaluate(() => { (window as unknown as { __drawerExpanded: boolean }).__drawerExpanded = false; });
   await page.getByTestId('drawer-entry').click();
-  await expect.poll(async () => layer().getAttribute('data-overlay'), { timeout: 10_000 }).toBe('true');
-  await expect.poll(async () => layer().isVisible(), { timeout: 10_000 }).toBe(true);
+  await expect.poll(overlay, { timeout: 10_000 }).toBe('true');
 });
