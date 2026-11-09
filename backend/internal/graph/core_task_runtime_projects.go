@@ -348,7 +348,7 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 		Supervisor: &AgentSupervisorFeatures{
 			ValidateProposal: true, GraphState: true, TaskStatus: true, ListProjects: true,
 			BindProject: true, ListProblems: true, ResolveProblem: true, WithdrawDraft: true,
-			ConfirmDraft: true,
+			ConfirmDraft:       true,
 			PendingHumanChecks: true, ReviewHumanCheck: true, ControlTask: true,
 		},
 	}
@@ -385,7 +385,6 @@ func (runtime *TaskRuntime) AgentContextPreview(conversationId *string) any {
 	})
 	answer := map[string]any{
 		"root": libraryView.Root, "prompts": libraryView.Prompts,
-		"ruleSeedGaps":      library.RuleSeedGaps(),
 		"disabledTools":     assembly.DisabledTools,
 		"definitionVersion": definitionVersion, "latestDefinitionVersion": latestDefinitionVersion,
 		"tools": preview.Tools, "capabilities": preview.Capabilities,

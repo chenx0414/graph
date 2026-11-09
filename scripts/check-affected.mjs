@@ -50,33 +50,13 @@ function changedPaths(base) {
   return [...paths];
 }
 
-const WEB = ['src/web/', 'src/core/', 'desktop/'];
-// A schema migration is proved by the old databases it upgrades, and by nothing
-// else: no in-process layer opens a v13 file. Mapping the store to that keeper is
-// what would have caught "duplicate column name" before the commit instead of in
-// the async full run after it.
-const STORE = /^backend\/internal\/graph\/core_store/;
-const STORE_KEEPER = 'tests/e2e/go-schema-upgrade.test.ts';
-// Layers that run in-process: no daemon, no window, no vendor. Seconds, not minutes.
-const IN_PROCESS = ['tests/console', 'tests/app', 'tests/m7', 'tests/m8'];
-const LEAF = /^tests\/[^/]+\/[^/]+\.test\.ts$/;
+const { selectCheckPlan } = await import('./check-affected-plan.mjs');
 
 const base = resolveBase();
 const changed = changedPaths(base);
-const forced = process.env.GRAPH_CHECK_FULL === '1';
-const leafTests = changed.filter(path => LEAF.test(path));
-const sharedTests = changed.filter(path => path.startsWith('tests/') && !LEAF.test(path));
-const web = changed.some(path => WEB.some(prefix => path.startsWith(prefix)));
-const store = changed.some(path => STORE.test(path));
-// A change that names no path at all (a detached checkout, an empty diff) runs
-// the in-process layers: bounded, and still every layer that can answer offline.
-const selection = forced
-  ? { label: 'forced full (CI)', files: [] }
-  : store
-    ? { label: leafTests.length ? `schema keeper + ${leafTests.length} changed leaf test(s)` : 'schema upgrade keeper', files: [...new Set([STORE_KEEPER, ...leafTests])] }
-    : leafTests.length
-      ? { label: `${leafTests.length} changed leaf test(s)`, files: leafTests }
-      : { label: web ? 'in-process layers' : 'pure layers', files: web ? IN_PROCESS : ['tests/console', 'tests/app', 'tests/m7'] };
+const leafTests = changed.filter(path => /^tests\/[^/]+\/[^/]+\.test\.ts$/.test(path));
+const sharedTests = changed.filter(path => path.startsWith('tests/') && !leafTests.includes(path));
+const selection = selectCheckPlan({ changed, forced: process.env.GRAPH_CHECK_FULL === '1' });
 
 console.log(`check:affected: base ${base ?? '(none)'}, ${changed.length} changed path(s)`);
 for (const path of changed.slice(0, 20)) console.log(`  - ${path}`);
