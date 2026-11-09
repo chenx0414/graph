@@ -215,7 +215,7 @@ test('settings opens as a second page with its own navigation and return control
   expect(await nav.innerText()).not.toContain('模型偏好');
   expect(await page.locator('.app-shell').count()).toBe(0);
 
-  expect(await page.getByTestId('settings-preferences').isVisible()).toBe(true);
+  expect(await page.getByTestId('settings-preferences').count(), 'the removed preferences card is back').toBe(0);
   expect(await page.locator('.settings-project-status').count()).toBe(1);
   await page.locator('.settings-back').click();
   await page.getByTestId('app-rail').waitFor();

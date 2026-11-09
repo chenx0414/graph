@@ -155,31 +155,6 @@ export function ArchivedConversations() {
   );
 }
 
-export function PreferencesPage() {
-  const { preferences, update } = usePreferences();
-  return (
-    <section className="settings-section" data-testid="settings-preferences">
-      <Card title="偏好" icon="settings" subtitle="保存在本机浏览器，修改后立即生效">
-        <div className="preference-list">
-          <label className="preference-item">
-            <span className="preference-copy">
-              <strong>Markdown 渲染</strong>
-              <span className="muted">开启后显示输入草稿的实时 Markdown 预览，并渲染你与主 Agent 的消息；关闭后显示原文。</span>
-            </span>
-            <input
-              type="checkbox"
-              className="preference-toggle"
-              data-testid="pref-markdown"
-              checked={preferences.markdownRendering}
-              onChange={event => update('markdownRendering', event.target.checked)}
-            />
-          </label>
-        </div>
-      </Card>
-    </section>
-  );
-}
-
 export function RunningSourceCard({ source }: { source?: { root: string; commit: string | null; branch: string | null; dirty: boolean | null } | undefined }) {
   if (!source) return null;
   const commit = source.commit ? source.commit.slice(0, 12) : '未知';
@@ -206,14 +181,5 @@ export function RunningSourceCard({ source }: { source?: { root: string; commit:
         </p>
       )}
     </Card>
-  );
-}
-
-export function ThemePlaceholder() {
-  return (
-    <section className="settings-feature" data-testid="theme-placeholder">
-      <h2>外观</h2>
-      <p className="muted">当前使用浅色主题。深色与跟随系统主题尚未提供。</p>
-    </section>
   );
 }

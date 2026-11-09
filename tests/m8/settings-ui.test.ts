@@ -38,11 +38,11 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   });
   await page.goto(`${daemon.url}/#/settings`);
   await page.getByTestId('settings-page').waitFor();
-  expect(await page.getByTestId('config-revision').innerText()).toBe('0');
+  expect(await page.getByTestId('config-revision').count(), 'the removed revision card is back').toBe(0);
+  expect(await page.getByTestId('config-revisions').getAttribute('data-revision')).toBe('0');
   expect(await page.locator('body').innerText()).not.toContain(SECRET);
-  expect(await page.getByTestId('theme-placeholder').isVisible()).toBe(true);
-  expect(await page.getByTestId('theme-placeholder').innerText()).toContain('当前使用浅色主题');
-  expect(await page.getByTestId('theme-placeholder').getByRole('button').count()).toBe(0);
+  expect(await page.getByTestId('theme-placeholder').count(), 'the removed appearance placeholder is back').toBe(0);
+  expect(await page.locator('body').innerText()).not.toContain('当前使用浅色主题');
   const openPage = async (label: '模型' | '常规') => {
     await page.evaluate(hash => { location.hash = hash; }, label === '模型' ? '#/models' : '#/settings');
     await page.getByTestId(label === '模型' ? 'models-page' : 'settings-shell').waitFor();
@@ -181,7 +181,7 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   const savedRevision = hotSaveBody.revision;
   expect(savedRevision).toBeGreaterThan(beforeRace);
   releaseConfig();
-  await expect.poll(async () => Number(await page.getByTestId('config-revision').innerText())).toBeGreaterThanOrEqual(savedRevision);
+  await expect.poll(async () => Number(await page.getByTestId('config-revisions').getAttribute('data-revision'))).toBeGreaterThanOrEqual(savedRevision);
   releaseStartup();
   // The source card is rendered by the same handler as the delayed startup
   // revision, so waiting for it observes that response rather than a timer.
@@ -191,11 +191,9 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   // read once raced with the page's own auto-save (and a substring check could pass
   // on a later revision), so the invariant is compared instead.
   await expect.poll(async () => {
-    const shown = Number((await page.getByTestId('effective-revision').innerText()).trim());
+    const shown = Number((await page.getByTestId('config-revisions').getAttribute('data-effective-revision'))?.trim());
     return Number.isFinite(shown) && shown >= savedRevision;
   }, { timeout: 15_000 }).toBe(true);
-  const revisionPill = page.getByTestId('effective-revision').locator('xpath=..');
-  await expect.poll(async () => (await revisionPill.innerText()).includes('正在同步'), { timeout: 15_000 }).toBe(false);
   expect(await page.getByTestId('restart-required').count()).toBe(0);
 
   // Persistence across a browser reload: the inline caps and the unknown price
@@ -277,5 +275,5 @@ test('settings auto-save models, credentials and limits without leaking secrets'
   expect(refused.status).toBe(400);
   expect(await (await restartedApi.get('/api/config')).text()).toBe(saved);
   await openPage('常规');
-  expect(await page.getByTestId('config-revision').innerText()).toBe(String(revision));
+  expect(await page.getByTestId('config-revisions').getAttribute('data-revision')).toBe(String(revision));
 }, 120_000);

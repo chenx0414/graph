@@ -7,7 +7,7 @@ import { api } from './api.ts';
 
 
 
-import { Card,Icon,Pill,Spinner,toast } from './ui.tsx';
+import { Card,Icon,Spinner,toast } from './ui.tsx';
 
 
 
@@ -21,7 +21,7 @@ thinkingOptionsFromMetadata
 
 import type { ApiError,ConfigResponse,RawConfig,Startup } from "./settings-config.tsx";
 import { ccSwitchCost,findCcSwitchPrice,loadCcSwitchPricing,mergeSubscriptionCredentials,toDocument,toDraft } from "./settings-config.tsx";
-import { ArchivedConversations,PreferencesPage,ProjectGitCard,RunningSourceCard,ThemePlaceholder } from "./settings-general.tsx";
+import { ArchivedConversations,ProjectGitCard,RunningSourceCard } from "./settings-general.tsx";
 import { ConfiguredModelsPanel,ConfiguredProvidersPanel,SETTINGS_SECTIONS,lookupSnapshot } from "./settings-models.tsx";
 import { loadCredentialRelogin } from './settings-credential-state.ts';
 import { useProviderWorkbenchState } from "./settings-provider-state.tsx";
@@ -85,7 +85,6 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
           <div className="settings-root">
             <SettingsAdvanced active={active} autoSyncSubscriptions={!openGuide} openGuide={openGuide} />
             {active === 'settings-overview' && <>
-              <PreferencesPage />
               <details className="settings-project-status">
                 <summary>项目状态与本地基线</summary>
                 <ProjectGitCard />
@@ -298,6 +297,7 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
   };
   const invalid = (field: string) => error?.field === field ? 'true' : undefined;
   const configurationMessages = <>
+    <span hidden data-testid="config-revisions" data-revision={revision} data-effective-revision={effectiveRevision ?? undefined} />
     {error && <p data-testid="config-error" style={{ color: 'var(--danger)', margin: 0 }}>{error.message}{error.code ? `（${error.code}）` : ''}</p>}
     {status && <p data-testid="config-status" className="muted" style={{ margin: 0 }}>{status}</p>}
     {status.includes('等待生效') && <div data-testid="restart-required" className="hint-card">待生效：当前守护进程仍使用上一份有效绑定；修正配置后可再次保存。</div>}
@@ -307,21 +307,11 @@ export function SettingsAdvanced({ active, autoSyncSubscriptions, openGuide }: {
     <div className="stagger" data-testid="settings-page" data-page={active}>
       {active === 'settings-overview' && (
         <section id="settings-overview" className="settings-section">
-          <Card title="设置" icon="settings" subtitle="所有配置都会自动保存并立即生效">
-            <div className="chip-row">
-              <Pill>已保存 revision <span data-testid="config-revision">{revision}</span></Pill>
-              {effectiveRevision !== null && <Pill tone="info">当前运行版本 <span data-testid="effective-revision">{effectiveRevision}</span>{effectiveRevision !== revision ? '（正在同步）' : ''}</Pill>}
-              {saving && <Pill tone="info">正在保存…</Pill>}
-              {dirty && !saving && <Pill tone="warn">等待自动保存</Pill>}
-            </div>
-            <div className="settings-config-messages">{configurationMessages}</div>
-          </Card>
           <RunningSourceCard source={runningSource} />
-          <ThemePlaceholder />
         </section>
       )}
 
-      {active !== 'settings-overview' && <div className="settings-inline-messages">{configurationMessages}</div>}
+      <div className="settings-inline-messages">{configurationMessages}</div>
 
       {active === 'settings-models' && <section className="settings-feature">
       <h2>模型</h2>
