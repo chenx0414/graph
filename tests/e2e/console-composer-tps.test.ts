@@ -88,7 +88,9 @@ test('the conversation footer prints tokens per second from the provider’s own
   const tps = page.getByTestId('telemetry-tps');
   await tps.waitFor();
   await expect.poll(async () => await tps.innerText(), { timeout: 15_000 }).toMatch(/TPS \d+/);
-  expect(await page.getByTestId('telemetry-cache').innerText(), 'the cache pill still appends its detail').toMatch(/^缓存 \S+$/);
+  const cacheText = await page.getByTestId('telemetry-cache').innerText();
+  expect(cacheText, 'the cache pill no longer abbreviates its label').toMatch(/^CH [\d.]+%/);
+  expect(cacheText, 'the cache pill must keep the freshness and drop the token count').toMatch(/^CH [\d.]+% · (刚刚|\d+ (分钟前|小时前|天前))$/);
   for (const id of ['telemetry-cache', 'telemetry-tps', 'telemetry-context', 'telemetry-model']) {
     expect(await page.getByTestId(id).locator('svg').count(), `${id} still carries an icon`).toBe(0);
   }
