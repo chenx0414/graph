@@ -91,6 +91,10 @@ func (stream *controlledStream) settle(usage *TokenUsage) {
 	if stream.invocation == "" {
 		return
 	}
+	if usage != nil && usage.Output > 0 && stream.firstDeltaAt > 0 && stream.lastDeltaAt >= stream.firstDeltaAt {
+		decode := stream.lastDeltaAt - stream.firstDeltaAt
+		usage.DurationMs = &decode
+	}
 	stream.broker.Settle(stream.invocation, usage)
 }
 

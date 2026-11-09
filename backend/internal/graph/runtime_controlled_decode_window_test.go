@@ -40,3 +40,52 @@ func TestAStreamWithoutDeltasReportsNoDecodeWindow(t *testing.T) {
 		t.Fatalf("a stream that produced no tokens must not claim a decode duration: %v", reported)
 	}
 }
+
+func TestTheSettledUsageCarriesTheSameDecodeWindow(t *testing.T) {
+	clock := int64(9_000)
+	var settled *TokenUsage
+	stream := &controlledStream{
+		message:    &AssistantMessage{Role: "assistant"},
+		finished:   true,
+		invocation: "inv-1",
+		now:        func() int64 { return clock },
+		broker: SendGate{Settle: func(_ string, usage *TokenUsage) {
+			settled = usage
+		}},
+	}
+	stream.handleEvent(map[string]any{"choices": []any{map[string]any{
+		"delta": map[string]any{"content": "One"},
+	}}})
+	clock = 9_400
+	stream.handleEvent(map[string]any{"choices": []any{map[string]any{
+		"delta": map[string]any{"content": " two"},
+	}}})
+	_ = stream.Result()
+
+	usage := &TokenUsage{Input: 10, Output: 2, CacheRead: 320_000}
+	stream.settle(usage)
+	if settled == nil {
+		t.Fatalf("the invocation was never settled")
+	}
+	if settled.DurationMs == nil || *settled.DurationMs != 400 {
+		t.Fatalf("the settled usage lost the decode window: %v", settled.DurationMs)
+	}
+}
+
+func TestSettledUsageWithoutTokensCarriesNoDecodeWindow(t *testing.T) {
+	var settled *TokenUsage
+	stream := &controlledStream{
+		message:    &AssistantMessage{Role: "assistant"},
+		finished:   true,
+		invocation: "inv-2",
+		now:        func() int64 { return 1_000 },
+		broker: SendGate{Settle: func(_ string, usage *TokenUsage) {
+			settled = usage
+		}},
+	}
+	_ = stream.Result()
+	stream.settle(&TokenUsage{Input: 10})
+	if settled == nil || settled.DurationMs != nil {
+		t.Fatalf("a request without output tokens must not claim a decode window: %v", settled)
+	}
+}

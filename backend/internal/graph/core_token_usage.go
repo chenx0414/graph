@@ -18,6 +18,7 @@ type TokenUsage struct {
 	CacheWrite    int64   `json:"cacheWrite"`
 	ContextTokens *int64  `json:"contextTokens,omitempty"`
 	UsageSource   *string `json:"usageSource,omitempty"`
+	DurationMs    *int64  `json:"durationMs,omitempty"`
 }
 
 func isUsageSource(value string) bool {
