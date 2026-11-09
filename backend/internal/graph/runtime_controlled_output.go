@@ -230,6 +230,7 @@ func (stream *controlledStream) appendTextAt(index int, text string) {
 	if index < 0 || index >= len(stream.message.Content) {
 		return
 	}
+	stream.markDelta()
 	block := &stream.message.Content[index]
 	block.Text += text
 	stream.events = append(stream.events, map[string]any{
@@ -260,6 +261,7 @@ func (stream *controlledStream) appendThinkingAt(index int, text string) {
 	if index < 0 || index >= len(stream.message.Content) {
 		return
 	}
+	stream.markDelta()
 	block := &stream.message.Content[index]
 	block.Thinking += text
 	stream.events = append(stream.events, map[string]any{
@@ -309,6 +311,7 @@ func (stream *controlledStream) appendToolCall(index int, entry map[string]any) 
 }
 
 func (stream *controlledStream) appendToolArguments(index int, text string) {
+	stream.markDelta()
 	call, ok := stream.toolCalls[index]
 	if !ok {
 		stream.startToolCall(index, "", "")

@@ -112,13 +112,14 @@ func throughputOf(row map[string]any) (*int64, *int64, *float64) {
 		return nil, nil, nil
 	}
 	latency := kernelInt(row["settledAt"]) - kernelInt(row["createdAt"])
+	decode := latency
 	if usage.DurationMs != nil && *usage.DurationMs > 0 {
-		latency = *usage.DurationMs
+		decode = *usage.DurationMs
 	}
-	if usage.Output == nil || *usage.Output <= 0 || latency <= 0 {
+	if usage.Output == nil || *usage.Output <= 0 || decode <= 0 {
 		return nil, nil, nil
 	}
 	output := *usage.Output
-	rate := float64(output) / (float64(latency) / 1000)
+	rate := float64(output) / (float64(decode) / 1000)
 	return &output, &latency, &rate
 }

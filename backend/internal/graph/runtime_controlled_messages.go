@@ -40,6 +40,24 @@ type controlledStream struct {
 	transport bool
 	abortRequested bool
 	cancelRequest func()
+	now            func() int64
+	firstDeltaAt   int64
+	lastDeltaAt    int64
+}
+
+func (stream *controlledStream) clock() int64 {
+	if stream.now != nil {
+		return stream.now()
+	}
+	return NowMillis()
+}
+
+func (stream *controlledStream) markDelta() {
+	now := stream.clock()
+	if stream.firstDeltaAt == 0 {
+		stream.firstDeltaAt = now
+	}
+	stream.lastDeltaAt = now
 }
 
 func (stream *controlledStream) Next() (map[string]any, bool) {
@@ -69,6 +87,10 @@ func (stream *controlledStream) Result() map[string]any {
 	}
 	if stream.message == nil {
 		return map[string]any{}
+	}
+	if stream.firstDeltaAt > 0 && stream.lastDeltaAt >= stream.firstDeltaAt {
+		decode := stream.lastDeltaAt - stream.firstDeltaAt
+		stream.message.DurationMs = &decode
 	}
 	return asMap(stream.message)
 }

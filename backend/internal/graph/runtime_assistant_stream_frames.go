@@ -74,6 +74,7 @@ type AssistantMessage struct {
 	RawStopReason         *string                 `json:"rawStopReason,omitempty"`
 	EndTurn               *bool                   `json:"endTurn,omitempty"`
 	Timestamp             int64                   `json:"timestamp"`
+	DurationMs            *int64                  `json:"durationMs,omitempty"`
 }
 
 type AssistantMessageEvent struct {
