@@ -223,7 +223,7 @@ export function ArtifactPreview({ content }: { content: ArtifactContent | null }
         {content.text === null ? (
           <div className="artifact-binary">
             <Icon name="file" size={18} />
-            <span>二进制内容不直接注入上下文，请使用下载按钮查看。</span>
+            <span>二进制内容不注入上下文，此处不展开预览。</span>
           </div>
         ) : artifact.mediaType.includes('markdown') ? (
           <div className="artifact-markdown"><Markdown text={content.text} /></div>
