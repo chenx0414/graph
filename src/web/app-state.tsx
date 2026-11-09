@@ -133,7 +133,7 @@ export function App() {
   const [settings, setSettings] = useState<Settings_ | null>(null);
   const [startup, setStartup] = useState<Startup | null>(null);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(() => document.documentElement.dataset.window === 'drawer');
   const [selectedDrawerTaskId, setSelectedDrawerTaskId] = useState<string | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTabs>(() => openTab(EMPTY_TABS, tabForPath(route())));
   const { data: conversations, reload: reloadConversations } = useAsync(() => api<ConversationSummary[]>('/api/conversations'), []);

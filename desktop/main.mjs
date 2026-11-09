@@ -1,5 +1,4 @@
 // graph:allow-large-file: the Electron entry point owns the window, the daemon lifecycle, the tray, notifications and the keychain bridge in one process; splitting it is a real refactor that needs an Electron-capable host to re-verify, and this host cannot launch Electron at all.
-import { drawerWindowBounds } from './drawer-window.ts';
 import { createConsoleWindow, reportDaemonError } from './console-window.mjs';
 import { currentAppPaths, findPackagedDaemon, secretsFromKeychain } from './runtime-files.mjs';
 import { fileSecretsCodec, secretsKeyPath } from './secrets-codec.mjs';
@@ -64,6 +63,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   let window = null;
   let drawerBase = null;
+  let drawerWindow = null;
   let quitting = false;
   let restarting = false;
   let readyUrl = null;
@@ -107,8 +107,12 @@ if (!app.requestSingleInstanceLock()) {
         try { writeFileSync(routePath, JSON.stringify(route)); } catch { /* optional UI state */ }
         run.rememberConversation(conversationIdFromRoute(route));
       },
-      onClosed: () => { window = null; drawerBase = null; },
+      onClosed: () => { window = null; drawerBase = null; closeDrawerWindow(); },
     });
+    window.on('move', syncDrawerWindow);
+    window.on('resize', syncDrawerWindow);
+    window.on('minimize', syncDrawerWindow);
+    window.on('restore', syncDrawerWindow);
   }
 
   const currentPaths = () => currentAppPaths(devRoot);
@@ -246,23 +250,55 @@ if (!app.requestSingleInstanceLock()) {
     });
   }
 
+  function drawerBounds(width) {
+    const main = window.getBounds();
+    const area = screen.getDisplayMatching(main).workArea;
+    const x = Math.min(main.x + main.width, Math.max(area.x, area.x + area.width - width));
+    return { x, y: main.y, width, height: main.height };
+  }
+
+  function drawerUrl(source, route) {
+    const [beforeHash, current = ''] = String(source).split('#');
+    const base = beforeHash.split('?')[0];
+    const hash = String(route ?? current).replace(/^#/, '');
+    return `${base}?drawerWindow=1${hash ? '#' + hash : ''}`;
+  }
+
+  function closeDrawerWindow() {
+    if (!drawerWindow) return;
+    const closing = drawerWindow;
+    drawerWindow = null;
+    if (!closing.isDestroyed()) closing.destroy();
+  }
+
+  function syncDrawerWindow() {
+    if (!drawerWindow || drawerWindow.isDestroyed() || !window) return;
+    if (window.isMinimized()) { drawerWindow.minimize(); return; }
+    drawerWindow.setBounds(drawerBounds(drawerWindow.getBounds().width));
+  }
+
   function registerBridge() {
     ipcMain.handle('graph:drawer', (event, input) => {
-      if (!window || event.sender !== window.webContents || typeof input?.open !== 'boolean') return { expanded: false };
+      if (!window || event.sender !== window.webContents || typeof input?.open !== 'boolean') return { detached: false };
       if (!input.open) {
-        if (drawerBase && !window.isFullScreen() && !window.isMaximized()) {
-          const now = window.getBounds();
-          window.setBounds({ ...drawerBase, y: now.y, height: now.height }, true);
-        }
-        drawerBase = null;
-        return { expanded: false };
+        closeDrawerWindow();
+        return { detached: true };
       }
       const width = input.width === 760 ? 760 : 440;
-      const base = drawerBase ?? window.getBounds();
-      const result = drawerWindowBounds(base, screen.getDisplayMatching(base).workArea, width, window.isFullScreen() || window.isMaximized());
-      if (result.expanded) { drawerBase = base; window.setBounds(result.bounds, true); }
-      else if (drawerBase) { window.setBounds(drawerBase, true); drawerBase = null; }
-      return { expanded: result.expanded };
+      const target = drawerUrl(window.webContents.getURL(), input.route);
+      const bounds = drawerBounds(width);
+      if (!drawerWindow || drawerWindow.isDestroyed()) {
+        drawerWindow = createConsoleWindow({
+          url: target, devRoot, withDevTools, verbose, smoke: false, background,
+          onRoute: () => {},
+          onClosed: () => { drawerWindow = null; },
+        });
+        drawerWindow.setBounds(bounds);
+      } else {
+        drawerWindow.setBounds(bounds);
+        if (drawerWindow.webContents.getURL() !== target) void drawerWindow.loadURL(target);
+      }
+      return { detached: true };
     });
     ipcMain.handle('graph:pick-directory', async () => {
       if (background) return null;
