@@ -254,3 +254,18 @@ test('the drawer widens the desktop window instead of covering it, and overlays 
   await page.getByTestId('drawer-entry').click();
   await expect.poll(overlay, { timeout: 10_000 }).toBe('true');
 });
+
+test('the task graph page shows the graph itself, not the cost, revision and connection chips', async () => {
+  const { page, server, view, propose, confirm } = await consoleWith('graph-header');
+  await propose(workerCheckProposal('只有一个任务图'), 'draft');
+  await confirm();
+  await expect.poll(async () => (await view()).tasks.length, { timeout: 30_000 }).toBe(1);
+  const taskId = (await view()).tasks[0]!.id;
+
+  await page.goto(`${server.url}/#/tasks/${taskId}/graph`);
+  await page.getByTestId('graph').waitFor();
+  expect(await page.getByTestId('task-graph-title').innerText()).toContain('只有一个任务图');
+  for (const chip of ['cost', 'revisions', 'connection']) {
+    expect(await page.getByTestId(chip).count(), `${chip} chip`).toBe(0);
+  }
+}, 120_000);
