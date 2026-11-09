@@ -105,7 +105,7 @@ test('a fold opens in place and its content stays inside the column', async () =
   await assertNoHorizontalScroll(page);
 });
 
-test('the drawer opens outward over the page instead of taking a column', async () => {
+test('the drawer takes a column and squeezes the page instead of covering it', async () => {
   const { daemon, page } = await open();
   await page.goto(`${daemon.url}/#/insights`);
   await page.getByTestId('rail-insights').waitFor();
@@ -113,15 +113,15 @@ test('the drawer opens outward over the page instead of taking a column', async 
   const closed = await box(page, '.content');
   await page.getByTestId('workspace-drawer-toggle').click();
   await expect.poll(async () => page.getByTestId('workspace-drawer-toggle').getAttribute('data-open')).toBe('true');
+  await expect.poll(async () => Math.round((await box(page, '.window-drawer-layer')).width), { timeout: 10_000 }).toBeGreaterThan(300);
+  const narrow = await box(page, '.content');
+  const panel = await box(page, '.window-drawer-layer');
 
-  // The drawer opens outward: it slides in from the right edge over the page, so
-  // the page keeps its width and the drawer's right edge sits on the container's.
-  const content = await box(page, '.content');
-  expect(content.width, 'the drawer must not squeeze the page').toBe(closed.width);
-  expect(content.width).toBeGreaterThan(400);
-  const drawer = await box(page, '.window-drawer-layer');
-  expect(drawer.width).toBeGreaterThan(300);
-  expect(drawer.x, 'the drawer covers the page instead of following it').toBeLessThan(content.x + content.width - 1);
-  expect(Math.round(drawer.x + drawer.width)).toBe(Math.round(content.x + content.width));
+  // Split pane: the page gives the panel its room, so the panel never sits on top of it.
+  expect(Math.round(closed.width - narrow.width), 'the page did not give up the panel width').toBeGreaterThanOrEqual(Math.round(panel.width) - 1);
+  expect(Math.round(panel.x), 'the drawer covers the page instead of following it').toBeGreaterThanOrEqual(Math.round(narrow.x + narrow.width) - 1);
+  expect(Math.round(panel.x + panel.width)).toBe(Math.round(closed.x + closed.width));
   await assertNoHorizontalScroll(page);
 });
+
+

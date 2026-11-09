@@ -56,9 +56,8 @@
 .node-prompt-popover .stack { padding: 0; }
 .node-prompt-popover[open] .node-prompt-summary > svg:last-child { transform: none; }
 
-/* The one toolbar control remains reachable when the native drawer widens the window. */
+/* The one toolbar control stays reachable: the drawer never covers the top bar. */
 .workspace-bar { position: relative; z-index: 112; }
-.window-drawer-layer { padding-top: 44px; }
 .window-drawer-layer .detail-drawer .drawer-inner { padding-top: 0; }
 .node-chat-composer { flex: 0 0 auto; }
 

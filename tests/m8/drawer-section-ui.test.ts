@@ -236,25 +236,24 @@ test('the right drawer shows the same project graphs in a conversation and on a 
   expect(await ids('drawer-workspace-task-')).toEqual(inConversation);
 }, 120_000);
 
-test('opening the drawer slides it over the conversation instead of squeezing it', async () => {
+test('opening the drawer squeezes the conversation instead of covering it', async () => {
   const { page } = await consoleWith('empty');
-  const threadWidth = async () => (await page.locator('.conversation-main').boundingBox())!.width;
-  const closed = await threadWidth();
-  await page.getByTestId('drawer-entry').click();
-  await page.getByTestId('detail-drawer').waitFor();
-  await expect.poll(async () => await threadWidth(), { timeout: 10_000 })
-    .toBe(closed);
-  const edges = () => page.locator('.window-drawer-layer').evaluate((element: HTMLElement) => {
-    const layer = element.getBoundingClientRect();
-    const host = element.parentElement!.getBoundingClientRect();
-    return { offset: Math.round(layer.right - host.right), width: Math.round(layer.width) };
+  const boxes = () => page.evaluate(() => {
+    const layer = document.querySelector('.window-drawer-layer')!.getBoundingClientRect();
+    const main = document.querySelector('.conversation-main')!.getBoundingClientRect();
+    return { layerLeft: Math.round(layer.left), mainRight: Math.round(main.right), layerWidth: Math.round(layer.width), mainWidth: Math.round(main.width) };
   });
-  await expect.poll(async () => (await edges()).offset, { timeout: 10_000 })
-    .toBe(0);
-  expect((await edges()).width).toBeGreaterThan(300);
+  const closed = await boxes();
+  await page.getByTestId('drawer-entry').click();
+  await page.getByTestId('detail-drawer').first().waitFor();
+  // The panel takes its room from the conversation: it never sits on top of it.
+  await expect.poll(async () => (await boxes()).layerWidth, { timeout: 10_000 }).toBeGreaterThan(300);
+  const open = await boxes();
+  expect(open.layerLeft, 'the panel overlaps the conversation').toBeGreaterThanOrEqual(open.mainRight - 1);
+  expect(closed.mainWidth - open.mainWidth, 'the conversation did not give up the panel width').toBeCloseTo(open.layerWidth, -1);
 }, 240_000);
 
-test('the drawer opens inside the window, sliding inward from the right edge', async () => {
+test('the drawer opens inside the window by taking its width from the page', async () => {
   const { page } = await consoleWith('empty');
   await page.evaluate(() => {
     const host = window as unknown as { __drawerCalls: unknown[]; graph?: unknown };
@@ -276,13 +275,13 @@ test('the drawer opens inside the window, sliding inward from the right edge', a
   await page.getByTestId('drawer-entry').click();
   await expect.poll(async () => await layer.getAttribute('data-open'), { timeout: 10_000 }).toBe('true');
 
-  // Inward: the panel travels on the transform, from the right edge of the window.
+  // Inward split pane: the panel grows on its own width and the page gives that room up.
   const motion = await layer.evaluate((node: HTMLElement) => {
     const style = getComputedStyle(node);
-    return { property: style.transitionProperty.split(',').map(name => name.trim()) };
+    return { property: style.transitionProperty.split(',').map(name => name.trim()), position: style.position };
   });
-  expect(motion.property, JSON.stringify(motion)).toContain('transform');
-  expect(motion.property, 'the panel must not be laid out by animating its width').not.toContain('width');
+  expect(motion.position, 'the panel must be laid out inside the window, not floated over it').toBe('static');
+  expect(motion.property, JSON.stringify(motion)).toContain('width');
   expect(await page.evaluate(() => (window as unknown as { __drawerCalls: unknown[] }).__drawerCalls),
     'the drawer must not resize the window').toEqual([]);
 

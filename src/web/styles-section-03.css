@@ -362,6 +362,15 @@
   overflow: hidden;
   position: relative;
 }
+
+.main-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.main-body > * { min-width: 0; min-height: 0; flex: 1 1 auto; }
+.main-body > .window-drawer-layer { flex: 0 0 auto; }
 .conversation-main {
   flex: 1 1 auto;
   min-width: 0;

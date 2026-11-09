@@ -346,6 +346,7 @@ export function App() {
             仅查看模式：可浏览与配置，不派发模型请求。使用 --execute 启动以启用调度。
           </div>
         )}
+        <div className="main-body">
         {/* Activity retains local state and DOM, disconnecting effects while a tab is hidden. */}
         {tabs.tabs.map(tab => (
           <Activity key={tab.id} mode={tab.id === visibleTabId ? 'visible' : 'hidden'}>
@@ -358,17 +359,17 @@ export function App() {
         {pathname === '/' && <WorkspacePage path={path} active settings={settings} startup={startup} tasks={tasks} conversations={conversations ?? []}
           reloadConversations={reloadConversations} refreshTasks={refreshTasks} detailOpen={detailOpen} setDetailOpen={setDetailOpen}
           retitleWorkspaceTab={retitleWorkspaceTab} />}
-
+        {!conversationMatch && (
+          <WindowDrawer open={detailOpen}>
+            <aside className="detail-drawer" data-testid="detail-drawer" data-section="task" data-open="true" role="complementary">
+              <div className="drawer-inner">
+                <TaskDrawerSection tasks={projectTasks.length ? projectTasks : tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId} origin="workspace" />
+              </div>
+            </aside>
+          </WindowDrawer>
+        )}
+        </div>
       </main>
-      {!conversationMatch && detailOpen && (
-        <WindowDrawer open={detailOpen}>
-          <aside className="detail-drawer" data-testid="detail-drawer" data-section="task" data-open="true" role="complementary">
-            <div className="drawer-inner">
-              <TaskDrawerSection tasks={projectTasks.length ? projectTasks : tasks} selectedId={selectedDrawerTaskId} onSelect={setSelectedDrawerTaskId} origin="workspace" />
-            </div>
-          </aside>
-        </WindowDrawer>
-      )}
       <Toaster />
     </div>
   );

@@ -151,21 +151,17 @@
 .markdown-input .md-strike { text-decoration: line-through; }
 .markdown-input .md-link { color: #356bad; text-decoration: underline; }
 .markdown-input .md-quote { color: var(--muted); border-left: 2px solid var(--border-strong); padding-left: 8px; }
-/* The drawer opens inward: the window keeps its size and the panel slides in from
- * the right edge over the page, so the control in the top-right corner never moves. */
+/* The drawer opens inward and takes its room from the page, like a split pane: the
+ * window keeps its size, the content gives up the panel width, and the control in
+ * the top-right corner never moves. */
 .window-drawer-layer {
-  position: absolute; inset: 0 0 0 auto; z-index: 30;
-  display: flex; width: min(440px, 46vw); min-width: 0; height: 100%; overflow: hidden;
+  flex: 0 0 auto;
+  width: 0; min-width: 0; height: 100%; overflow: hidden;
   background: var(--panel, #fff); border-left: 0;
-  transform: translateX(100%); opacity: 0; pointer-events: none;
-  transition: transform 160ms ease-out, opacity 120ms linear;
+  transition: width 160ms ease-out;
 }
-.window-drawer-layer[data-wide="true"] { width: min(760px, 62vw); }
-.window-drawer-layer[data-open="true"] {
-  transform: translateX(0); opacity: 1; pointer-events: auto;
-  border-left: 1px solid var(--border);
-  box-shadow: -24px 0 48px rgba(15, 23, 42, 0.14);
-}
+.window-drawer-layer[data-open="true"] { width: min(440px, 46vw); border-left: 1px solid var(--border); }
+.window-drawer-layer[data-wide="true"][data-open="true"] { width: min(760px, 62vw); }
 .window-drawer-layer .detail-drawer, .window-drawer-layer .detail-drawer[data-open="true"], .window-drawer-layer .detail-drawer[data-page="graph"][data-open="true"] { position:static; width:100%; height:100%; flex:none; background:var(--panel,#fff); box-shadow:none; }
 .window-drawer-layer .detail-drawer .drawer-inner, .window-drawer-layer .detail-drawer[data-page="graph"] .drawer-inner { width:100%; min-width:0; padding-top:24px; }
 .architecture-board { display:grid; grid-template-columns:180px minmax(0,1fr); min-height:510px; gap:20px; }
