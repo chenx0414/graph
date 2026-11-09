@@ -4,14 +4,11 @@ import { toolGroupSummary } from './tool-activity.ts';
 import { assistantVisibleText } from '../core/assistant-visible-text.ts';
 import { withoutUnexecutedToolCall } from './unexecuted-tool-call.ts';
 import { messageAttachments, toolCallDisplay } from '../core/conversation-projection.ts';
-import { durableRsi, type TranscriptRsi } from './transcript-rsi.ts';
 import type {
   ConversationMessage,
   LiveText,
   LiveTool,
 } from '../core/conversation-projection.ts';
-
-export type { TranscriptRsi } from './transcript-rsi.ts';
 
 export const transcriptFoldPolicy = {
   turnExpanded: false,
@@ -30,7 +27,6 @@ export type TranscriptTool = {
 };
 
 export type TranscriptActivityItem =
-  | { kind: 'rsi'; id: string; rsi: TranscriptRsi; ordinal?: number }
   | { kind: 'narration'; id: string; text: string; ordinal?: number }
   | { kind: 'tool'; id: string; tool: TranscriptTool; ordinal?: number }
   | { kind: 'steer'; id: string; message: ConversationMessage; ordinal?: number };
@@ -40,11 +36,7 @@ export type TranscriptRow =
   | { kind: 'assistant'; id: string; operationId: string; text: string; streaming: boolean; attached?: boolean; /** When the row's message was recorded; live rows have no stamp yet. */ createdAt?: number; /** How long the whole turn took, from its earliest record to this answer. */ elapsedMs?: number | null; /** Interim narration of a turn, not the final answer. */ narration?: boolean }
   | { kind: 'narration'; id: string; operationId: string; text: string }
   | { kind: 'activity'; id: string; operationId: string; items: TranscriptActivityItem[]; /** The turn's activity as ordinary rows: narration bubbles with the tool calls interleaved. */ rows: TranscriptRow[]; collapsed: boolean }
-  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string; notices?: TranscriptRow[] }
-  | { kind: 'rsi'; id: string; rsi: TranscriptRsi }
-  | { kind: 'compaction'; id: string; text: string; tokensAfter?: number; summary?: string }
-  | { kind: 'rsiFull'; id: string; text: string; verdict: string; verdictDetails: string[]; commit: string; environment: boolean; files: string[]; logPath: string }
-  | { kind: 'toolSettled'; id: string; text: string; tool: string; state: string; delivered: boolean }
+  | { kind: 'tools'; id: string; tools: TranscriptTool[]; active: boolean; background: boolean; summary: string }
   | { kind: 'thinking'; id: 'thinking' };
 
 export type TranscriptModelInput = {
@@ -92,17 +84,12 @@ function mergeTool(previous: TranscriptTool | undefined, incoming: TranscriptToo
     ...(state ? { state } : {}), ...(reason ? { reason } : {}) };
 }
 
-type ToolGroupEntry = { tool: TranscriptTool } | { notice: TranscriptRow };
-
-function pushToolGroup(rows: TranscriptRow[], entries: ToolGroupEntry[]) {
-  const tools = entries.flatMap(entry => 'tool' in entry ? [entry.tool] : []);
-  const notices = entries.flatMap(entry => 'notice' in entry ? [entry.notice] : []);
-  if (!tools.length) { rows.push(...notices); return; }
+function pushToolGroup(rows: TranscriptRow[], tools: TranscriptTool[]) {
+  if (!tools.length) return;
   const active = tools.some(tool => !tool.done);
   const background = active && tools.every(tool => tool.done || tool.background === true);
   rows.push({ kind: 'tools', id: `tools:${tools[0]!.id}`, tools, active, background,
-    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools),
-    ...(notices.length ? { notices } : {}) });
+    summary: active ? activeToolStatus(tools) : toolGroupSummary(tools) });
 }
 
 function mergeToolRows(rows: TranscriptRow[]): TranscriptRow[] {
@@ -116,12 +103,6 @@ function mergeToolRows(rows: TranscriptRow[]): TranscriptRow[] {
       open.active = open.tools.some(tool => !tool.done);
       open.background = open.active && open.tools.every(tool => tool.done || tool.background === true);
       open.summary = open.active ? activeToolStatus(open.tools) : toolGroupSummary(open.tools);
-      if (row.notices?.length) open.notices = [...(open.notices ?? []), ...row.notices];
-      continue;
-    }
-    if (row.kind === 'rsi' || row.kind === 'rsiFull' || row.kind === 'compaction' || row.kind === 'toolSettled') {
-      if (open) { open.notices = [...(open.notices ?? []), row]; continue; }
-      merged.push(row);
       continue;
     }
     open = null;
@@ -157,17 +138,12 @@ function activityItem(message: ConversationMessage): TranscriptActivityItem {
 
 function activityRows(operationId: string, items: TranscriptActivityItem[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
-  let entries: ToolGroupEntry[] = [];
+  let entries: TranscriptTool[] = [];
   const flush = () => {
     pushToolGroup(rows, entries);
     entries = [];
   };
-  const notice = (row: TranscriptRow) => {
-    if (!entries.length) rows.push(row);
-    else entries.push({ notice: row });
-  };
   for (const item of items) {
-    if (item.kind === 'rsi') { notice({ kind: 'rsi', id: item.id, rsi: item.rsi }); continue; }
     if (item.kind === 'narration') {
       flush();
       rows.push({ kind: 'narration', id: `narration:${item.id}`, operationId, text: item.text });
@@ -175,10 +151,10 @@ function activityRows(operationId: string, items: TranscriptActivityItem[]): Tra
     }
     if (item.kind === 'steer') {
       flush();
-      rows.push({ kind: 'message', id: item.message.id, message: item.message });
+      if (!toolSettledSource(item.message)) rows.push({ kind: 'message', id: item.message.id, message: item.message });
       continue;
     }
-    entries.push({ tool: item.tool });
+    entries.push(item.tool);
   }
   flush();
   return rows;
@@ -264,13 +240,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         if (item.kind === 'steer') {
           flushFolded();
           flushRunning();
-          const steered = toolSettledSource(item.message);
-          rows.push(steered
-            ? {
-              kind: 'toolSettled', id: `toolSettled:${item.message.id}`, text: item.message.text,
-              tool: steered.tool, state: steered.state, delivered: steered.delivered,
-            }
-            : { kind: 'message', id: item.message.id, message: item.message });
+          if (!toolSettledSource(item.message)) rows.push({ kind: 'message', id: item.message.id, message: item.message });
         }
         else if (item.kind === 'tool' && (item.tool.deferred || item.tool.reason)) running.push(item);
         else folded.push(item);
@@ -293,7 +263,8 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
   };
 
   for (const message of input.messages) {
-    if (isActivityMessage(message) || isSteeredMessage(message) || (message.kind === 'rsi' && message.operationId)) {
+    if (message.kind === 'rsi' || (message.role === 'system' && message.kind === 'compaction')) continue;
+    if (isActivityMessage(message) || isSteeredMessage(message)) {
       const key = message.operationId ?? '';
       if (activityKey !== null && activityKey !== key) flushActivity();
       activityKey = key;
@@ -302,7 +273,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         activityItems.push({ kind: 'steer', id: message.id, message, ...(ordinal !== undefined ? { ordinal } : {}) });
         continue;
       }
-      if (message.kind === 'rsi') { activityItems.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) }); continue; }
       const incoming = activityItem(message);
       if (incoming.kind === 'tool') {
         const index = activityToolIndex.get(incoming.id);
@@ -329,31 +299,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       });
       continue;
     }
-    if (message.role === 'system' && message.kind === 'rsi') {
-      rows.push({ kind: 'rsi', id: `rsi:${message.id}`, rsi: durableRsi(message) });
-      continue;
-    }
-    if (message.role === 'system' && message.kind === 'compaction') {
-      const data = message.data as { tokensAfter?: number; summary?: string } | null | undefined;
-      rows.push({
-        kind: 'compaction', id: `compaction:${message.id}`, text: message.text,
-        ...(typeof data?.tokensAfter === 'number' ? { tokensAfter: data.tokensAfter } : {}),
-        ...(typeof data?.summary === 'string' && data.summary.trim() ? { summary: data.summary } : {}),
-      });
-      continue;
-    }
-    if (message.role === 'user' && rsiFullSource(message)) {
-      rows.push(rsiFullRow(message));
-      continue;
-    }
-    const settled = toolSettledSource(message);
-    if (message.role === 'user' && settled) {
-      rows.push({
-        kind: 'toolSettled', id: `toolSettled:${message.id}`, text: message.text,
-        tool: settled.tool, state: settled.state, delivered: settled.delivered,
-      });
-      continue;
-    }
+    if (message.role === 'user' && (rsiFullSource(message) || toolSettledSource(message))) continue;
     rows.push({ kind: 'message', id: message.id, message });
   }
   const pendingKey = activityKey;
@@ -370,18 +316,13 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
     ? [...pendingItems.map(item => ({ ordinal: item.ordinal ?? 0, item })), ...tail].sort((left, right) => left.ordinal - right.ordinal)
     : tail;
   if (!tail.length || merged === tail) emitActivity(pendingKey ?? '', pendingItems);
-  let liveTools: ToolGroupEntry[] = [];
+  let liveTools: TranscriptTool[] = [];
   const flushLiveTools = () => {
     pushToolGroup(rows, liveTools);
     liveTools = [];
   };
-  const liveNotice = (row: TranscriptRow) => {
-    if (!liveTools.length) rows.push(row);
-    else liveTools.push({ notice: row });
-  };
   for (const [index, item] of merged.entries()) {
     if (item.item) {
-      if (item.item.kind === 'rsi') { liveNotice({ kind: 'rsi', id: item.item.id, rsi: item.item.rsi }); continue; }
       if (item.item.kind === 'narration') {
         flushLiveTools();
         rows.push({
@@ -399,7 +340,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
         rows.push({ kind: 'message', id: item.item.message.id, message: item.item.message });
         continue;
       }
-      liveTools.push({ tool: item.item.tool });
+      liveTools.push(item.item.tool);
       continue;
     }
     if (item.stream) {
@@ -416,7 +357,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       });
       continue;
     }
-    if (item.tool) liveTools.push({ tool: item.tool });
+    if (item.tool) liveTools.push(item.tool);
   }
   flushLiveTools();
 
@@ -435,15 +376,6 @@ export function activeToolStatus(tools: TranscriptTool[]) {
   return `正在${action}${active.summary ? ` ${active.summary}` : ''}`;
 }
 
-export function toolSettledRowOf(message: ConversationMessage): Extract<TranscriptRow, { kind: 'toolSettled' }> | null {
-  const settled = toolSettledSource(message);
-  if (!settled) return null;
-  return {
-    kind: 'toolSettled', id: `toolSettled:${message.id}`, text: message.text,
-    tool: settled.tool, state: settled.state, delivered: settled.delivered,
-  };
-}
-
 function toolSettledSource(message: ConversationMessage): { tool: string; state: string; delivered: boolean } | null {
   const data = (message.data ?? {}) as { source?: { kind?: string; toolName?: string; state?: string; delivered?: string } };
   if (data.source?.kind !== 'tool_settled') return null;
@@ -459,22 +391,3 @@ function rsiFullSource(message: ConversationMessage): boolean {
   return data.source?.kind === 'rsi_async_full';
 }
 
-function rsiFullRow(message: ConversationMessage): TranscriptRow {
-  const lines = message.text.split('\n').map(line => line.trim()).filter(Boolean);
-  const field = (label: string) => lines.find(line => line.startsWith(label))?.slice(label.length).trim() ?? '';
-  const data = (message.data ?? {}) as { environment?: unknown };
-  const clauses = field('判定:').split('；').map(clause => clause.trim()).filter(Boolean);
-  return {
-    kind: 'rsiFull',
-    id: `rsiFull:${message.id}`,
-    text: message.text,
-    verdict: clauses[0] ?? '',
-    verdictDetails: clauses.slice(1),
-    commit: field('提交:'),
-    environment: data.environment === true,
-    files: [...new Set(lines
-      .map(line => line.match(/([\w./@-]+\.test\.ts)/)?.[1] ?? '')
-      .filter(Boolean))],
-    logPath: field('完整日志:'),
-  };
-}

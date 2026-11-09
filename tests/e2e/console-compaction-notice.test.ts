@@ -7,12 +7,11 @@ import { launchCli } from '../helpers/cli-daemon.ts';
 import { launchBrowser } from '../helpers/host-browser.ts';
 import { openaiServer } from '../fixtures/openai-server.ts';
 
-// The kernel compacts a long context into a summary before the next request. That
-// summary replaced the earlier turns and nothing in the chat said so: the user saw
-// the agent forget with no explanation. Two things are proved here - the summary
-// now tells the model where the earlier conversation went (the durable transcript,
-// searchable with history_search), and the compaction leaves one visible line in
-// the transcript that history was kept, not lost.
+// The kernel compacts a long context into a summary before the next request. Two
+// things are proved here - the summary tells the model where the earlier
+// conversation went (the durable transcript, searchable with history_search), and
+// the compaction itself stays out of the chat: the reader sees the conversation,
+// not a machine card about it.
 //
 // The ceiling is small on purpose (GRAPH_COMPACTION_CONTEXT_CEILING), so the
 // second turn crosses it with one long answer instead of a 70%-of-window setup.
@@ -27,7 +26,7 @@ interface ConversationView {
   messages: { role: string; kind: string; text: string; data?: { tokensAfter?: number } | null }[];
 }
 
-test('a compaction leaves its own line in the chat and its summary names the durable transcript', async () => {
+test('a compaction stays out of the chat while its summary names the durable transcript', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-compaction-visible-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
@@ -81,8 +80,8 @@ test('a compaction leaves its own line in the chat and its summary names the dur
   expect(summarizer).toContain('history_search');
   expect(summarizer).toContain('durable transcript');
 
-  // The transcript records the compaction as its own line, with the size the
-  // context was left at, and the earlier turns are still in the conversation.
+  // The compaction is still recorded as a system message with the size the context
+  // was left at, and the earlier turns are still in the conversation.
   const compacted = (await view(conversationId)).messages.filter(message => message.kind === 'compaction');
   expect(compacted).toHaveLength(1);
   expect(compacted[0]!.role).toBe('system');
@@ -91,21 +90,18 @@ test('a compaction leaves its own line in the chat and its summary names the dur
   expect(typeof compacted[0]!.data?.tokensAfter).toBe('number');
   expect((await view(conversationId)).messages.some(message => (message.text ?? '').includes('LONG-ANSWER-MARKER'))).toBe(true);
 
-  // And the reader sees it: one muted line in the chat, in place, without opening
-  // anything.
+  // And the reader does not see it: the chat renders the messages, with no card and
+  // no summary block for the compaction that happened.
   const { browser } = await launchBrowser();
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(daemon.url);
   await page.goto(`${daemon.url}/#/conversations/${conversationId}`);
   await page.getByTestId('conversation').waitFor();
-  const notice = page.getByTestId('compaction-notice');
-  await notice.waitFor();
-  expect(await notice.innerText()).toContain('上下文已压缩');
-  expect(await notice.count()).toBe(1);
-  // The summary itself is readable in the chat, in small type under the line.
-  const summary = page.getByTestId('compaction-summary');
-  expect(await summary.innerText()).toContain('Summary of the earlier work.');
-  expect(await summary.evaluate(node => getComputedStyle(node).fontSize)).toBe('12px');
-  await page.screenshot({ path: join(root, 'test-evidence/compaction-notice.png') });
+  const thread = page.getByTestId('message-list');
+  await expect.poll(async () => thread.innerText(), { timeout: 30_000 }).toContain('Second answer.');
+  expect(await page.locator('.compaction-notice').count()).toBe(0);
+  expect(await page.locator('.compaction-summary').count()).toBe(0);
+  expect(await thread.innerText()).not.toContain('上下文已压缩');
+  await page.screenshot({ path: join(root, 'test-evidence/compaction-hidden.png') });
 });

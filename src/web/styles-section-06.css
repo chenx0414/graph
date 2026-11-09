@@ -535,29 +535,3 @@
 .recipe-form label { display: flex; flex-direction: column; gap: 6px; }
 /* A compaction is a boundary in the agent's context, not a chat message: it reads
    as a divider so the shrinking context has a visible cause. */
-.compaction-notice {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 12px 0 14px;
-  color: var(--muted);
-  font-size: .8125rem;
-}
-.compaction-notice-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.compaction-notice-rule { flex: 1; height: 1px; background: var(--border); }
-.compaction-notice-text { display: inline-flex; align-items: center; gap: 6px; text-align: center; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-.compaction-summary {
-  margin: 0 0 0 22px;
-  padding: 8px 12px;
-  max-height: 240px;
-  overflow: auto;
-  background: var(--panel-soft);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}

@@ -8,10 +8,8 @@ import {
 import { attachmentImageSource } from './attachments.ts';
 import { copyText, writeClipboardText } from './chat-copy.ts';
 import { Markdown } from './Markdown.tsx';
-import { RsiCard } from './RsiCard.tsx';
-import { CompactionNotice } from './CompactionNotice.tsx';
 import { mendStreamingMarkdown, splitMarkdownBlocks, type MarkdownVeil } from './markdown-blocks.ts';
-import { toolSettledRowOf, transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
+import { transcriptFoldPolicy, type TranscriptRow } from './transcript-model.ts';
 import { ToolActivityRow } from './ToolActivityRow.tsx';
 import { clockLabel, elapsedLabel } from './labels.ts';
 import { Icon, toast } from './ui.tsx';
@@ -178,21 +176,8 @@ function ToolActivityGroup({ row }: { row: Extract<TranscriptRow, { kind: 'tools
           </ol>
         </div>
       </div>
-      {row.notices?.length ? <div className="tool-group-notices" data-testid="tool-group-notices">
-        {row.notices.map(notice => <GroupNotice key={notice.id} row={notice} />)}
-      </div> : null}
     </section>
   );
-}
-
-function GroupNotice({ row }: { row: TranscriptRow }) {
-  if (row.kind === 'rsi') return <RsiCard row={row} />;
-  if (row.kind === 'rsiFull') return <RsiFullCard row={row} />;
-  if (row.kind === 'compaction') return <CompactionNotice row={row} />;
-  if (row.kind === 'toolSettled') return <ToolSettledCard row={row} />;
-  if (row.kind === 'narration') return <NarrationRow row={row} />;
-  if (row.kind === 'assistant') return <NarrationRow row={{ kind: 'narration', id: row.id, operationId: row.operationId, text: row.text }} />;
-  return null;
 }
 
 function NarrationRow({ row }: { row: Extract<TranscriptRow, { kind: 'narration' }> }) {
@@ -353,8 +338,6 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   markdown?: boolean;
 }) {
   if (row.kind === 'message') {
-    const settled = toolSettledRowOf(row.message);
-    if (settled) return <ToolSettledCard row={settled} />;
     return userAuthor
       ? <MessageRow message={row.message} userAuthor={userAuthor} copyable={copyText(row)} markdown={markdown} />
       : <MessageRow message={row.message} copyable={copyText(row)} markdown={markdown} />;
@@ -367,51 +350,8 @@ export function TranscriptRowView({ row, assistantAuthor, userAuthor, markdown =
   if (row.kind === 'tools') return <ToolActivityGroup row={row} />;
   if (row.kind === 'narration') return <NarrationRow row={row} />;
   if (row.kind === 'activity') return <CollapsedTurn row={row} markdown={markdown} />;
-  if (row.kind === 'rsi') return <RsiCard row={row} />;
-  if (row.kind === 'rsiFull') return <RsiFullCard row={row} />;
-  if (row.kind === 'toolSettled') return <ToolSettledCard row={row} />;
-  if (row.kind === 'compaction') return <CompactionNotice row={row} />;
   if (row.kind === 'thinking') {
     return <ThinkingStatus />;
   }
   return null;
-}
-
-function ToolSettledCard({ row }: { row: Extract<TranscriptRow, { kind: 'toolSettled' }> }) {
-  const failed = row.state !== '' && row.state !== 'settled';
-  return (
-    <div className="compaction-notice" data-testid="tool-settled-notice" data-role="system" data-delivered={row.delivered ? 'steer' : 'turn'}>
-      <div className="compaction-notice-head" title={row.text}>
-        <span className="compaction-notice-rule" aria-hidden="true" />
-        <span className="compaction-notice-text">
-          <Icon name={failed ? 'alert' : 'tool'} size={13} />
-          {row.tool} {failed ? '已结束 · ' + row.state : '已完成'}
-          {row.delivered ? ' · 已插入当前回合' : ' · 结果已回到会话'}
-        </span>
-        <span className="compaction-notice-rule" aria-hidden="true" />
-      </div>
-    </div>
-  );
-}
-
-function RsiFullCard({ row }: { row: Extract<TranscriptRow, { kind: 'rsiFull' }> }) {
-  const failed = row.files.length;
-  const summary = [
-    `${failed > 0 ? `${failed} 个文件失败` : '没有解析出失败文件'}${row.commit ? ` · 提交 ${row.commit.slice(0, 8)}` : ''}`,
-    ...row.files,
-    ...(row.logPath ? [row.logPath] : []),
-  ].join('\n');
-  return (
-    <div className="compaction-notice" data-testid="rsi-full-notice" data-role="system" data-verdict={row.environment ? 'environment' : 'regression'}>
-      <div className="compaction-notice-head" title={row.text}>
-        <span className="compaction-notice-rule" aria-hidden="true" />
-        <span className="compaction-notice-text">
-          <Icon name="archive" size={13} />
-          后台全量确认 · {row.verdict || '失败'}
-        </span>
-        <span className="compaction-notice-rule" aria-hidden="true" />
-      </div>
-      <div className="compaction-summary" data-testid="rsi-full-summary">{summary}</div>
-    </div>
-  );
 }

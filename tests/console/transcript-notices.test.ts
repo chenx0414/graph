@@ -30,13 +30,11 @@ function message(input: {
   };
 }
 
-test('a background full-suite notice is its own row, never a user message', () => {
+test('a background full-suite report never reaches the transcript', () => {
   const text = [
     '[后台全量确认失败]',
     '提交: 6549520f0e',
     '判定: 回归',
-    'FAIL tests/e2e/desktop-shell.test.ts > OpenRouter authorization',
-    '  - tests/e2e/desktop-crash-recovery.test.ts [assertion]',
     'FAIL tests/e2e/desktop-shell.test.ts > OpenRouter authorization',
     '完整日志: /tmp/async-full.log',
   ].join('\n');
@@ -48,38 +46,33 @@ test('a background full-suite notice is its own row, never a user message', () =
     streaming: [], liveTools: [], busy: false,
   });
 
-  expect(rows.map(row => row.kind)).toEqual(['rsiFull']);
-  expect(rows[0]).toMatchObject({
-    verdict: '回归',
-    commit: '6549520f0e',
-    environment: false,
-    files: ['tests/e2e/desktop-shell.test.ts', 'tests/e2e/desktop-crash-recovery.test.ts'],
-    logPath: '/tmp/async-full.log',
-  });
+  expect(rows).toEqual([]);
 });
 
-test('a long verdict is split so the card headline stays one short line', () => {
-  const text = [
-    '[后台全量确认失败]',
-    '提交: 11138f1c4392',
-    '判定: 回归；未匹配: tests/e2e/desktop-shell.test.ts: locator.click: Timeout 30000ms exceeded；合并了 3 次确认请求，只跑一次全量',
-    '完整日志: /tmp/async-full.log',
-  ].join('\n');
+test('a compaction leaves no line in the transcript', () => {
   const rows = buildTranscriptRows({
     messages: [{
-      ...message({ id: 'long', seq: 1, role: 'user', text }),
-      data: { source: { kind: 'rsi_async_full', commit: '11138f1c4392' }, environment: false },
+      ...message({ id: 'compaction', seq: 1, role: 'system', text: '上下文已压缩' }),
+      kind: 'compaction',
+      data: { tokensAfter: 1200, summary: '前文摘要' },
     }],
     streaming: [], liveTools: [], busy: false,
   });
-  expect(rows.map(row => row.kind)).toEqual(['rsiFull']);
-  expect(rows[0]).toMatchObject({
-    verdict: '回归',
-    verdictDetails: [
-      '未匹配: tests/e2e/desktop-shell.test.ts: locator.click: Timeout 30000ms exceeded',
-      '合并了 3 次确认请求，只跑一次全量',
+
+  expect(rows).toEqual([]);
+});
+
+test('a self-improvement report leaves no row but its turn keeps the tool calls', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      { ...message({ id: 'call', seq: 1, role: 'tool', operationId: 'a', text: 'node --run check' }), data: { toolName: 'bash' } },
+      { ...message({ id: 'rsi', seq: 2, role: 'system', operationId: 'a', text: '### RSI 已应用：修复超时' }), kind: 'rsi', data: { status: 'applied', title: '修复超时' } },
     ],
+    streaming: [], liveTools: [], busy: false,
   });
+
+  expect(rows.map(row => row.kind)).toEqual(['tools']);
+  expect(JSON.stringify(rows)).not.toContain('修复超时');
 });
 
 test('an ordinary user message keeps its bubble even when it quotes a notice', () => {
@@ -91,7 +84,7 @@ test('an ordinary user message keeps its bubble even when it quotes a notice', (
   expect(rows.map(row => row.kind)).toEqual(['message']);
 });
 
-test('a finished background command is a system row, not a queued user message', () => {
+test('a finished background command leaves no row and is not a queued message', () => {
   const rows = buildTranscriptRows({
     messages: [{
       ...message({ id: 'settled', seq: 1, role: 'user', text: 'bash 已经结束（settled），结果在会话的工具调用里；请读它继续。' }),
@@ -101,8 +94,7 @@ test('a finished background command is a system row, not a queued user message',
     streaming: [], liveTools: [], busy: false,
   });
 
-  expect(rows.map(row => row.kind)).toEqual(['toolSettled']);
-  expect(rows[0]).toMatchObject({ tool: 'bash', state: 'settled' });
+  expect(rows).toEqual([]);
 });
 
 test('a background tool result never shows up as a message waiting in the queue', () => {
@@ -119,12 +111,13 @@ test('a background tool result never shows up as a message waiting in the queue'
   expect(snapshot.queuedMessages.map(entry => entry.id)).toEqual(['typed']);
 });
 
-test('a background result steered into the running turn is a system row too', () => {
+test('a background result steered into the running turn leaves no row', () => {
   const settle = {
     ...message({ id: 'settled', seq: 2, role: 'user', text: 'bash 已经结束（settled）' }),
     state: 'delivered' as const,
     data: { source: { kind: 'tool_settled', toolName: 'bash', state: 'settled' } },
   };
   const rows = buildTranscriptRows({ messages: [settle], streaming: [], liveTools: [], busy: true });
-  expect(rows[0]?.kind).toBe('toolSettled');
+  expect(rows.filter(row => row.kind === 'message'), 'a raw tool result must never read as something the user typed').toEqual([]);
+  expect(rows.map(row => row.kind)).toEqual(['thinking']);
 });

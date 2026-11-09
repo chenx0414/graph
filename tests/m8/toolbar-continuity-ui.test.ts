@@ -2,10 +2,9 @@
 /**
  * One toolbar per stretch of work.
  *
- * A self-improvement receipt, a compaction notice or a phase line is something
- * that happens *inside* a run of tool calls, not the end of it. When they split
- * the toolbar, the reader sees two counters ("26 项活动", then "2 项活动") for one
- * continuous piece of work, and the second one looks like the agent restarted.
+ * A self-improvement receipt happens *inside* a run of tool calls, not the end of
+ * it: it now leaves no row at all, so the calls around it share one toolbar. Only a
+ * phase line separates one stretch of work from the next.
  *
  * The rows are seeded where the runtime writes them; the projection and Chromium
  * above that are real.
@@ -78,6 +77,8 @@ test('a receipt and a phase line do not split the toolbar around tool calls', as
   expect(first).toContain('call-second');
   expect(first).not.toContain('call-third');
   expect((await groups.nth(1).getAttribute('data-tool-calls'))!.split(' ')).toEqual(['call-third']);
-  // The receipt stays readable, inside the toolbar it interrupted before.
-  expect(await groups.nth(0).getByTestId('tool-group-notices').innerText()).toContain('A change that is live');
+  // The receipt is gone from the transcript, not hidden inside the toolbar.
+  expect(await page.getByTestId('tool-group-notices').count()).toBe(0);
+  expect(await page.getByTestId('rsi-report').count()).toBe(0);
+  expect(await page.getByTestId('message-list').innerText()).not.toContain('A change that is live');
 }, 120_000);

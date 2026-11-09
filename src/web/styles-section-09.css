@@ -116,7 +116,6 @@
 .master-work-status .spinner { width: 12px; height: 12px; margin-right: 5px; }
 /* Offscreen history retains geometry without laying out every Markdown block. */
 .conversation-thread[data-testid="message-list"] > .conversation-thread-inner > .message-row,
-.conversation-thread[data-testid="message-list"] > .conversation-thread-inner > .rsi-report,
 .conversation-thread[data-testid="message-list"] > .conversation-thread-inner > .collapsed-turn {
   content-visibility: auto;
   contain-intrinsic-size: auto 100px;

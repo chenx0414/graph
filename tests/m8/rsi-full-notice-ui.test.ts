@@ -1,14 +1,13 @@
-// graph:table-writes-exempt: this test seeds the async-full report the runtime writes, so the console has one to render
+// graph:table-writes-exempt: this test seeds the async-full report and the compaction the runtime writes, so the console has both to keep out of the transcript
 /**
- * A background full-suite report is a transcript boundary, not a chat message.
+ * Machine notices stay out of the chat.
  *
- * It sits in the same place as a compaction notice and must read the same way:
- * one rule-framed line naming what happened, and one small summary block with
- * the facts. Dumping every unmatched assertion into the transcript and boxing
- * the file list and the log path separately turns a boundary into a wall of
- * text the reader scrolls past.
+ * A background full-suite report, a compaction and a self-improvement report are
+ * all system events: they used to be drawn as ruled cards between the messages and
+ * turned a conversation into a wall of boxes. They now leave no visible row, and
+ * the conversation itself still reads normally.
  *
- * The report is seeded where the runtime writes it (the message table); above
+ * The events are seeded where the runtime writes them (the message table); above
  * that everything is real - the daemon's own projection and Chromium.
  */
 import { randomUUID } from 'node:crypto';
@@ -22,14 +21,14 @@ import { cleanup, temp, gitProject, consoleServer, scriptedProvider, createConve
 const REPORT = [
   '[后台全量确认失败]',
   '提交: 0a6b15ce690933caa853db9090454bfe30315b87',
-  '判定: 回归；未匹配: tests/m8/app-shell-ux.part-02.test.ts / tests/e2e/harness-eval-lifecycle.test.ts',
+  '判定: 回归；未匹配: tests/m8/app-shell-ux.part-02.test.ts',
   '摘要:',
   'FAIL  tests/m8/app-shell-ux.part-02.test.ts > the context chip shows a share',
   'AssertionError: expected 1 to be 2',
   '完整日志: /tmp/state/rsi/reports/async-full-49201d4-6fb4-4769-aa19-5b71fa38aa8b.log',
 ].join('\n');
 
-test('an async-full report reads as one boundary line and one summary block, like a compaction', async () => {
+test('a machine notice leaves no card in the transcript', async () => {
   const root = await temp('rsi-full-notice');
   const project = join(root, 'alpha');
   await mkdir(project, { recursive: true });
@@ -42,13 +41,24 @@ test('an async-full report reads as one boundary line and one summary block, lik
   const db = new DatabaseSync(join(root, 'state/tasks.sqlite'));
   db.exec('PRAGMA busy_timeout=5000');
   const stamp = Date.now();
-  db.prepare(
+  const insert = db.prepare(
     `INSERT INTO messages(id,conversation_id,role,kind,text,data,state,operation_id,turn,created_at,updated_at)
-     VALUES(?,?,'user','chat',?,?,'done',NULL,0,?,?)`,
-  ).run(
-    randomUUID(), created.conversationId, REPORT,
+     VALUES(?,?,?,?,?,?,'done',NULL,0,?,?)`,
+  );
+  insert.run(
+    randomUUID(), created.conversationId, 'user', 'chat', REPORT,
     JSON.stringify({ source: { kind: 'rsi_async_full', activationId: 'activation-1', commit: '0a6b15ce690933caa853db9090454bfe30315b87' }, environment: false }),
     stamp, stamp,
+  );
+  insert.run(
+    randomUUID(), created.conversationId, 'system', 'compaction', '上下文已压缩',
+    JSON.stringify({ tokensAfter: 1200, summary: '前文摘要：PROMPT-SUMMARY-MARKER' }),
+    stamp + 1, stamp + 1,
+  );
+  insert.run(
+    randomUUID(), created.conversationId, 'system', 'rsi', '### RSI 已应用：修复超时',
+    JSON.stringify({ status: 'applied', title: 'RSI-TITLE-MARKER' }),
+    stamp + 2, stamp + 2,
   );
   db.close();
 
@@ -57,28 +67,17 @@ test('an async-full report reads as one boundary line and one summary block, lik
   const page = await browser.newPage();
   await page.goto(`${server.url}/#/conversations/${created.conversationId}`);
 
-  const notice = page.getByTestId('rsi-full-notice');
-  await notice.waitFor({ timeout: 60_000 });
-  expect(await notice.getAttribute('data-role')).toBe('system');
-  expect(await notice.getAttribute('data-verdict')).toBe('regression');
+  const thread = page.getByTestId('message-list');
+  await expect.poll(async () => thread.innerText(), { timeout: 60_000 }).toContain('跑一次全量确认。');
 
-  // The head line names the event; the raw report lives in its tooltip, not in the transcript.
-  expect(await notice.innerText()).toContain('后台全量确认 · 回归');
+  expect(await page.getByTestId('rsi-full-notice').count()).toBe(0);
+  expect(await page.getByTestId('rsi-report').count()).toBe(0);
+  expect(await page.locator('.compaction-notice').count()).toBe(0);
+  expect(await page.locator('.compaction-summary').count()).toBe(0);
 
-  // Exactly one summary block, styled as a compaction summary - not one box per fact.
-  expect(await notice.getByTestId('rsi-full-summary').count()).toBe(1);
-  expect(await notice.getByTestId('rsi-full-files').count(), 'the file list must not be its own box').toBe(0);
-  expect(await notice.locator('.compaction-notice-details').count(), 'the raw failure dump must not be rendered').toBe(0);
-  const summary = notice.getByTestId('rsi-full-summary');
-  const style = await summary.evaluate(node => {
-    const computed = getComputedStyle(node);
-    return { fontSize: computed.fontSize, whiteSpace: computed.whiteSpace, border: computed.borderLeftWidth };
-  });
-  expect(style).toEqual({ fontSize: '12px', whiteSpace: 'pre-wrap', border: '2px' });
-  expect(await summary.innerText()).not.toContain('AssertionError');
-
-  // The facts a reader needs stay in that one block.
-  const text = await summary.innerText();
-  expect(text).toContain('tests/m8/app-shell-ux.part-02.test.ts');
-  expect(text).toContain('/tmp/state/rsi/reports/async-full-49201d4-6fb4-4769-aa19-5b71fa38aa8b.log');
+  const text = await thread.innerText();
+  expect(text).not.toContain('完整日志');
+  expect(text).not.toContain('AssertionError');
+  expect(text).not.toContain('PROMPT-SUMMARY-MARKER');
+  expect(text).not.toContain('RSI-TITLE-MARKER');
 }, 120_000);
