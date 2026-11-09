@@ -92,8 +92,8 @@ test('the conversation footer prints tokens per second from the provider’s own
   expect(cacheText, 'the cache pill no longer abbreviates its label').toMatch(/^CH [\d.]+%/);
   expect(cacheText, 'the cache pill must keep the freshness and drop the token count').toMatch(/^CH [\d.]+% · (刚刚|\d+ (分钟前|小时前|天前))$/);
   const contextText = await page.getByTestId('telemetry-context').innerText();
-  expect(contextText, 'the context pill must lead with the percentage').toMatch(/^上下文 [\d.]+%/);
-  expect(contextText, 'the context pill must shorten the window to K or M').toMatch(/^上下文 [\d.]+% \/ [\d.]+[KM]$/);
+  expect(contextText, 'the context pill must lead with the percentage').toMatch(/^CONTEXT [\d.]+%/);
+  expect(contextText, 'the context pill must shorten the window to K or M').toMatch(/^CONTEXT [\d.]+% \/ [\d.]+[KM]$/);
   for (const id of ['telemetry-cache', 'telemetry-tps', 'telemetry-context', 'telemetry-model']) {
     expect(await page.getByTestId(id).locator('svg').count(), `${id} still carries an icon`).toBe(0);
   }
