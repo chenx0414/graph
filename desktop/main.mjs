@@ -252,7 +252,7 @@ if (!app.requestSingleInstanceLock()) {
       if (!input.open) {
         if (drawerBase && !window.isFullScreen() && !window.isMaximized()) {
           const now = window.getBounds();
-          window.setBounds({ ...drawerBase, y: now.y, height: now.height }, true);
+          window.setBounds({ ...drawerBase, y: now.y, height: now.height }, false);
         }
         drawerBase = null;
         return { expanded: false };
@@ -260,8 +260,8 @@ if (!app.requestSingleInstanceLock()) {
       const width = input.width === 760 ? 760 : 440;
       const base = drawerBase ?? window.getBounds();
       const result = drawerWindowBounds(base, screen.getDisplayMatching(base).workArea, width, window.isFullScreen() || window.isMaximized());
-      if (result.expanded) { drawerBase = base; window.setBounds(result.bounds, true); }
-      else if (drawerBase) { window.setBounds(drawerBase, true); drawerBase = null; }
+      if (result.expanded) { drawerBase = base; window.setBounds(result.bounds, false); }
+      else if (drawerBase) { window.setBounds(drawerBase, false); drawerBase = null; }
       return { expanded: result.expanded };
     });
     ipcMain.handle('graph:pick-directory', async () => {
