@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -232,21 +233,45 @@ func rsiAsyncFullSummary(output string) string {
 
 const rsiSnapshotMaxAge = 2 * time.Hour
 
+var rsiSnapshotLockHolder = regexp.MustCompile(`\(pid ([0-9]+)\)`)
+
+func rsiSnapshotHolderGone(reason string) bool {
+	match := rsiSnapshotLockHolder.FindStringSubmatch(reason)
+	if match == nil {
+		return false
+	}
+	pid, err := strconv.Atoi(match[1])
+	if err != nil || pid <= 0 {
+		return false
+	}
+	return !rsiProcessAlive(pid)
+}
+
 func rsiPruneStaleSnapshots(root string) int {
 	output, err := exec.Command("git", "-C", root, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return 0
 	}
 	removed := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		if !strings.HasPrefix(line, "worktree ") {
+	for _, block := range strings.Split(string(output), "\n\n") {
+		path, lockReason := "", ""
+		for _, line := range strings.Split(block, "\n") {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				path = strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+			case strings.HasPrefix(line, "locked"):
+				lockReason = strings.TrimSpace(strings.TrimPrefix(line, "locked"))
+			}
+		}
+		if path == "" || !strings.HasPrefix(filepath.Base(path), "graph-async-full-") {
 			continue
 		}
-		path := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
-		if !strings.HasPrefix(filepath.Base(path), "graph-async-full-") {
-			continue
-		}
-		if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < rsiSnapshotMaxAge {
+		if lockReason != "" {
+			if !rsiSnapshotHolderGone(lockReason) {
+				continue
+			}
+			_ = exec.Command("git", "-C", root, "worktree", "unlock", path).Run()
+		} else if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < rsiSnapshotMaxAge {
 			continue
 		}
 		if err := exec.Command("git", "-C", root, "worktree", "remove", "--force", path).Run(); err != nil {
@@ -256,6 +281,29 @@ func rsiPruneStaleSnapshots(root string) int {
 	}
 	if removed > 0 {
 		_ = exec.Command("git", "-C", root, "worktree", "prune").Run()
+	}
+	return removed
+}
+
+const rsiScratchMaxAge = 6 * time.Hour
+
+func rsiPruneStaleScratchDirs(now time.Time) int {
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "graph-") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) < rsiScratchMaxAge {
+			continue
+		}
+		if os.RemoveAll(filepath.Join(os.TempDir(), entry.Name())) == nil {
+			removed++
+		}
 	}
 	return removed
 }

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 func NewRsiService(options RsiServiceOptions) *RsiService {
@@ -29,6 +30,7 @@ func NewRsiService(options RsiServiceOptions) *RsiService {
 	}
 	if service.Available {
 		rsiPruneStaleSnapshots(*service.Root)
+		rsiPruneStaleScratchDirs(time.Now())
 		service.runningCommit = RevParse(*service.Root, "HEAD")
 	}
 	return service

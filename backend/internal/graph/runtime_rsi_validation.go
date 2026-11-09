@@ -106,6 +106,9 @@ func rsiRunCommand(root string, command RsiCommand, timeoutMs int) RsiValidation
 	process := exec.CommandContext(ctx, executable, args...)
 	process.Dir = root
 	process.Env = rsiEnvList(resolved.Env)
+	rsiPrepareProcessGroup(process)
+	process.Cancel = func() error { return rsiKillProcessGroup(process) }
+	process.WaitDelay = 5 * time.Second
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	process.Stdout = stdout
