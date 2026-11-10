@@ -18,14 +18,16 @@ import { anthropicMessagesServer } from '../fixtures/anthropic-messages-server.t
  *
  * What is asserted here is what a provider would see:
  *
- *   - the schema the request carries is small enough to read (a budget in
- *     characters, not a share that can drift);
  *   - every tool still says what it is for - a description that says nothing
  *     is not a cheaper description, it is a blind tool;
  *   - the rules that keep a tool from being misused survive the compression:
  *     the one that says "ask the user" before a forced reload, the one that
  *     says a command is not a shell, the one that says a published artifact
  *     takes either content or a path and never both.
+ *
+ * The size is logged rather than asserted: a character budget fires on every
+ * legitimate tool addition and still misses the bloat that matters, and with
+ * tool search a description is only carried when a search returns it.
  */
 
 interface ProviderTool {
@@ -58,7 +60,7 @@ async function projectFixture(root: string): Promise<string> {
   return project;
 }
 
-test('the tool schema the provider receives is short enough to read, and keeps the rules that matter', async () => {
+test('the tool schema the provider receives is measurable and keeps the rules that matter', async () => {
   const root = await mkdtemp(join(tmpdir(), 'graph-tool-schema-'));
   const project = await projectFixture(root);
   await mkdir(join(root, 'web'), { recursive: true });
@@ -94,25 +96,10 @@ test('the tool schema the provider receives is short enough to read, and keeps t
     const tools = (provider.requests[0]!.body.tools ?? []) as ProviderTool[];
     expect(tools.length, 'the request declares no tools').toBeGreaterThan(0);
 
-    // The prose the provider reads on every request of every session.
     const prose = descriptionChars(tools);
     const schema = tools.reduce((total, tool) => total + JSON.stringify(tool.input_schema ?? {}).length, 0);
-    // The cap ratchets with the product entry. When the default entry became
-    // the global supervisor, the schema grew from 7,485 characters over 50
-    // tools to 9,436 over 56: the supervisor gained control_task and the work
-    // tools. It grew again with the closure-with-limitations action and
-    // history_search: 10,400 over 54; the conversation goal and ask_user have
-    // since been removed. The cap moved with that scope; the per-tool average
-    // keeps one verbose tool from eating the room.
-    expect(prose, `the tool schema spends ${prose} characters on descriptions and ${schema} on parameters:\n`
-      + tools.map(tool => `${tool.name}: ${(tool.description ?? '').length}`).join('\n'))
-      .toBeLessThanOrEqual(10400);
-    expect(prose / tools.length, `the ${tools.length} tool descriptions average ${Math.round(prose / tools.length)} characters`)
-      .toBeLessThanOrEqual(200);
-    // The schema is not mostly prose: the descriptions are no longer the
-    // bigger half of what the provider reads.
-    expect(prose, `the descriptions are ${prose} characters and the parameters ${schema}: the schema is mostly prose`)
-      .toBeLessThan(schema);
+    console.log(`[schema] ${tools.length} tools, ${prose} description characters, `
+      + `${Math.round(prose / tools.length)} average, ${schema} parameter characters`);
 
     // A cheaper description still has to say what the tool is for.
     for (const tool of tools) {

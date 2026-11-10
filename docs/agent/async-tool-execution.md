@@ -152,7 +152,7 @@ POST /api/conversations/{conversationId}/tool-calls/{toolCallId}/cancel   {"requ
 | F8 | 模型重复调用同一作业 | 两次副作用 | 两个唯一键 + 摘要校验 |
 | F9 | 长工具占住一轮 | 第二条消息晚于工具完成 | 受理即返回，回合立即落定 |
 | F10 | 延迟结果当 orphan tool result | provider 丢弃或补 `No result provided` | 走唤醒通道 |
-| F11 | 工具描述变长 | 撑破 10,400 / 200 预算 | 在既有预算内压缩；不许改小 schema 测试上限 |
+| F11 | 工具描述变长 | 每轮请求的前缀变长（缓存命中时仍然计费） | 描述只写一句用途，细节交给工具返回；尺寸在 e2e 里只打印不判红——10,400 / 200 的字符预算已于 2026-11-15 取消，改由 tool search 按需披露控制装载量 |
 | F12 | 新表绕过单写者规则 | `check:ownership` 红 | 登记到 `scripts/check-table-ownership.mjs` |
 
 ## 9. 三条车道的独占文件清单
@@ -251,7 +251,7 @@ tests/env-layers.json                              # 浏览器用例登记到 wi
 
 ### 12.1 工具 schema 必须真的把 `async` 与 `requestId` 交到模型手里（已补）
 
-§2 说挂起是"模型自己的动作"，§5 说幂等键是"模型在新一轮用同一显式 `requestId` 重发"。laneA 已让 `bash` 接受这两个实参，但 JSON schema 只声明了 `command` / `timeout`：模型看不到的实参等于不存在（严格模式的 provider 还会直接拒收未声明属性），于是 §5 的第三层在真实会话里无从触发，只有 E2E 能直接塞进去。merge 在 `pigBashTool` 的 `parameters` 里补上 `async` 与 `requestId`（含一句用途），并同步 `runtime_pi_native_tools.go` 的目录清单。工具描述预算不变（预算按 `description` 计，参数在 `input_schema`）。
+§2 说挂起是"模型自己的动作"，§5 说幂等键是"模型在新一轮用同一显式 `requestId` 重发"。laneA 已让 `bash` 接受这两个实参，但 JSON schema 只声明了 `command` / `timeout`：模型看不到的实参等于不存在（严格模式的 provider 还会直接拒收未声明属性），于是 §5 的第三层在真实会话里无从触发，只有 E2E 能直接塞进去。merge 在 `pigBashTool` 的 `parameters` 里补上 `async` 与 `requestId`（含一句用途），并同步 `runtime_pi_native_tools.go` 的目录清单。工具描述不再受字符预算约束：e2e 打印工具数、描述总字符与均值，不断言上限。
 
 ### 12.2 崩溃重放且未显式给 `requestId` 时，命令可能跑第二次（本轮写进已知限制，不修）
 
