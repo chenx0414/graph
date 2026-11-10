@@ -96,12 +96,12 @@ test('the conversation footer prints tokens per second from the provider’s own
   const ttft = page.getByTestId('telemetry-ttft');
   await ttft.waitFor();
   const ttftText = await ttft.innerText();
-  expect(ttftText, 'the first-token wait is printed on its own').toMatch(/^首字 \d+(\.\d)?s$/);
+  expect(ttftText, 'the first-token wait is printed under its own name').toMatch(/^TTFT \d+(\.\d)?s$/);
   expect(Number(await ttft.getAttribute('data-ttft-ms')), 'the pill prints the measured wait').toBeGreaterThan(1_800);
   const ttftTitle = await ttft.getAttribute('title');
   expect(ttftTitle, 'the tooltip separates the uplink from the server wait').toMatch(/上传 \d+\.\d 秒/);
   expect(ttftTitle, 'the tooltip names the server share').toMatch(/服务端等待 \d+\.\d 秒/);
-  expect(await tps.innerText(), 'the rate never absorbs the wait').not.toContain('首字');
+  expect(await tps.innerText(), 'the rate never absorbs the wait').not.toContain('TTFT');
   const cacheText = await page.getByTestId('telemetry-cache').innerText();
   expect(cacheText, 'the cache pill no longer abbreviates its label').toMatch(/^CH [\d.]+%/);
   expect(cacheText, 'the cache pill must keep the freshness and drop the token count').toMatch(/^CH [\d.]+% · (刚刚|\d+ (分钟前|小时前|天前))$/);
@@ -161,7 +161,7 @@ test('the node chat footer prints the same rate for the node’s own call', asyn
   // not fold it into the rate.
   const nodeTtft = page.getByTestId('node-telemetry-ttft');
   await nodeTtft.waitFor({ timeout: 30_000 });
-  expect(await nodeTtft.innerText()).toMatch(/^首字 \d+(\.\d)?s$/);
+  expect(await nodeTtft.innerText()).toMatch(/^TTFT \d+(\.\d)?s$/);
   expect(Number(await nodeTtft.getAttribute('data-ttft-ms'))).toBeGreaterThan(1_800);
   const nodeFooter = await page.locator('.composer-footer').innerText();
   expect(nodeFooter, 'the node composer no longer advertises the keyboard hint').not.toContain('Shift + Enter');

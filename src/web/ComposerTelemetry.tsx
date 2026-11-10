@@ -42,7 +42,7 @@ function telemetryValue(value: number | null | undefined, render: (value: number
 }
 
 function firstTokenWaitTitle(telemetry: ComposerTelemetryView | undefined): string {
-  if (telemetry?.firstTokenMs === null || telemetry?.firstTokenMs === undefined) return '还没有完成的请求，暂时没有首字时间';
+  if (telemetry?.firstTokenMs === null || telemetry?.firstTokenMs === undefined) return '还没有完成的请求，暂时没有首字时间（TTFT）';
   const whole = `最近一次完成的请求：从发出到收到第一个 token 等了 ${(telemetry.firstTokenMs / 1000).toFixed(1)} 秒`;
   if (typeof telemetry.uploadMs !== 'number' || typeof telemetry.serverWaitMs !== 'number') return whole;
   return `${whole}（上传 ${(telemetry.uploadMs / 1000).toFixed(1)} 秒、服务端等待 ${(telemetry.serverWaitMs / 1000).toFixed(1)} 秒）`;
@@ -161,7 +161,7 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
         data-testid="telemetry-ttft"
         data-ttft-ms={telemetry?.firstTokenMs ?? undefined}
       >
-        首字 {telemetryValue(telemetry?.firstTokenMs, value => (value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`))}
+        TTFT {telemetryValue(telemetry?.firstTokenMs, value => (value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`))}
       </span>
       <span
         title={`上一轮结束后的上下文估算（PiG 内核计算，与压缩判定同源）与模型上下文窗口${telemetry?.contextTokens ? `：${formatTokens(telemetry.contextTokens)} / ${formatTokens(telemetry.contextLimit)} tokens` : ''}`}

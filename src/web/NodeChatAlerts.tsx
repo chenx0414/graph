@@ -109,7 +109,7 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
         title={firstTokenTitle}
         data-testid="node-telemetry-ttft"
         data-ttft-ms={throughput?.firstTokenMs ?? undefined}
-      >首字 {typeof throughput?.firstTokenMs === 'number' ? (throughput.firstTokenMs < 1000 ? `${Math.round(throughput.firstTokenMs)}ms` : `${(throughput.firstTokenMs / 1000).toFixed(1)}s`) : '—'}</span>
+      >TTFT {typeof throughput?.firstTokenMs === 'number' ? (throughput.firstTokenMs < 1000 ? `${Math.round(throughput.firstTokenMs)}ms` : `${(throughput.firstTokenMs / 1000).toFixed(1)}s`) : '—'}</span>
       {busy && agentNode && <span className="row">
         <Button size="sm" disabled={sending || !canSteer} onClick={onSteer}>立即引导</Button>
         <Button size="sm" disabled={sending} onClick={onStop}>停止节点</Button>
