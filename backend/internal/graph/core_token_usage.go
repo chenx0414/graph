@@ -20,6 +20,8 @@ type TokenUsage struct {
 	UsageSource   *string `json:"usageSource,omitempty"`
 	DurationMs    *int64  `json:"durationMs,omitempty"`
 	FirstTokenMs  *int64  `json:"firstTokenMs,omitempty"`
+	UploadMs      *int64  `json:"uploadMs,omitempty"`
+	ServerWaitMs  *int64  `json:"serverWaitMs,omitempty"`
 }
 
 func isUsageSource(value string) bool {

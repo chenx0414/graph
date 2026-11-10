@@ -316,6 +316,8 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 		"latencyMs":       knownMasterUsage.LatencyMs,
 		"tokensPerSecond": knownMasterUsage.TokensPerSecond,
 		"firstTokenMs":    knownMasterUsage.FirstTokenMs,
+		"uploadMs":        knownMasterUsage.UploadMs,
+		"serverWaitMs":    knownMasterUsage.ServerWaitMs,
 	}
 	var masterView any
 	if master != nil {

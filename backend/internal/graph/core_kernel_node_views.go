@@ -141,8 +141,11 @@ func kernelNodeThroughput(kernel *KernelStore, graphID, nodeID string) NodeThrou
     WHERE task_id=? AND node_id=? AND settled_at > created_at
       AND json_extract(usage,'$.output') > 0
     ORDER BY settled_at DESC LIMIT 1`, graphID, nodeID)
-	output, latency, rate, firstToken := throughputOf(row)
-	return NodeThroughput{OutputTokens: output, LatencyMs: latency, TokensPerSecond: rate, FirstTokenMs: firstToken}
+	facts := throughputFactsOf(row)
+	return NodeThroughput{
+		OutputTokens: facts.OutputTokens, LatencyMs: facts.LatencyMs, TokensPerSecond: facts.TokensPerSecond,
+		FirstTokenMs: facts.FirstTokenMs, UploadMs: facts.UploadMs, ServerWaitMs: facts.ServerWaitMs,
+	}
 }
 
 func KernelNodeRun(kernel *KernelStore, graphID, nodeID string, query NodeEntryQuery) any {

@@ -30,6 +30,8 @@ export type ComposerTelemetryView = {
   latencyMs?: number | null;
   tokensPerSecond?: number | null;
   firstTokenMs?: number | null;
+  uploadMs?: number | null;
+  serverWaitMs?: number | null;
   contextTokens: number | null;
   contextLimit: number | null;
   contextPercent: number | null;
@@ -37,6 +39,13 @@ export type ComposerTelemetryView = {
 
 function telemetryValue(value: number | null | undefined, render: (value: number) => string) {
   return value === null || value === undefined ? '—' : render(value);
+}
+
+function firstTokenWaitTitle(telemetry: ComposerTelemetryView | undefined): string {
+  if (telemetry?.firstTokenMs === null || telemetry?.firstTokenMs === undefined) return '还没有完成的请求，暂时没有首字时间';
+  const whole = `最近一次完成的请求：从发出到收到第一个 token 等了 ${(telemetry.firstTokenMs / 1000).toFixed(1)} 秒`;
+  if (typeof telemetry.uploadMs !== 'number' || typeof telemetry.serverWaitMs !== 'number') return whole;
+  return `${whole}（上传 ${(telemetry.uploadMs / 1000).toFixed(1)} 秒、服务端等待 ${(telemetry.serverWaitMs / 1000).toFixed(1)} 秒）`;
 }
 
 function cacheAge(usedAt: number, now: number): string {
@@ -148,9 +157,7 @@ export function ComposerTelemetry({ telemetry, models, onSelect, disabled = fals
       {/* The wait before the first token is its own number: it is where a slow
           footer usually hides its time, and it has nothing to do with the rate. */}
       <span
-        title={telemetry?.firstTokenMs === null || telemetry?.firstTokenMs === undefined
-          ? '还没有完成的请求，暂时没有首字时间'
-          : `最近一次完成的请求：从发出到收到第一个 token 等了 ${(telemetry.firstTokenMs / 1000).toFixed(1)} 秒`}
+        title={firstTokenWaitTitle(telemetry)}
         data-testid="telemetry-ttft"
         data-ttft-ms={telemetry?.firstTokenMs ?? undefined}
       >

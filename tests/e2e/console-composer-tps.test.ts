@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'vitest';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { evidenceDir } from '../helpers/evidence.ts';
 import { launchBrowser } from '../helpers/host-browser.ts';
-import { openaiServer } from '../fixtures/openai-server.ts';
+import { openaiServer, type ResponsePlan } from '../fixtures/openai-server.ts';
 
 // The footer answers "how fast is this model right now": tokens per second of the
 // newest request that wrote tokens, from the provider's own numbers - the output
@@ -25,7 +25,7 @@ afterEach(async () => {
   cleanup.length = 0;
 });
 
-async function consoleWithReply(prefix: string) {
+async function consoleWithReply(prefix: string, plans?: ResponsePlan[]) {
   const root = await mkdtemp(join(tmpdir(), `graph-console-tps-${prefix}-`));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const project = join(root, 'project');
@@ -34,7 +34,7 @@ async function consoleWithReply(prefix: string) {
   await build({ configFile: join(process.cwd(), 'vite.config.ts'), logLevel: 'error', build: { outDir: webDir, emptyOutDir: true } });
   // 240 output tokens after a ~2s pause: the provider decides both numbers, and the
   // pause is what makes the rate a fact instead of a coincidence of a fast machine.
-  const provider = await openaiServer([{
+  const provider = await openaiServer(plans ?? [{
     text: '这一轮写满两百多个 token 用来测速。'.repeat(8),
     usage: { prompt_tokens: 900, completion_tokens: 240 },
     beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, 2_000)),
@@ -71,7 +71,7 @@ test('the conversation footer prints tokens per second from the provider’s own
   }, { timeout: 40_000, interval: 250 }).not.toBeNull();
 
   const view = await (await daemon.request(`/api/conversations/${conversationId}`)).json() as {
-    telemetry?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null };
+    telemetry?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null; uploadMs?: number | null; serverWaitMs?: number | null };
   };
   // The facts the two numbers are made of: 240 tokens over ~2s, and the wait the
   // scripted provider imposes before its first byte.
@@ -80,6 +80,9 @@ test('the conversation footer prints tokens per second from the provider’s own
   expect(view.telemetry?.tokensPerSecond).toBeGreaterThan(20);
   expect(view.telemetry?.tokensPerSecond).toBeLessThan(1_000);
   expect(view.telemetry?.firstTokenMs, 'the wait before the first token is its own fact').toBeGreaterThan(1_800);
+  expect(view.telemetry?.uploadMs, 'the footer can tell the uplink share apart').not.toBeNull();
+  expect(view.telemetry?.serverWaitMs, 'the footer can tell the server share apart').not.toBeNull();
+  expect((view.telemetry?.uploadMs ?? 0) + (view.telemetry?.serverWaitMs ?? 0), 'the two shares add up to the whole wait').toBe(view.telemetry?.firstTokenMs);
 
   const { browser } = await launchBrowser();
   cleanup.push(() => browser.close());
@@ -95,6 +98,9 @@ test('the conversation footer prints tokens per second from the provider’s own
   const ttftText = await ttft.innerText();
   expect(ttftText, 'the first-token wait is printed on its own').toMatch(/^首字 \d+(\.\d)?s$/);
   expect(Number(await ttft.getAttribute('data-ttft-ms')), 'the pill prints the measured wait').toBeGreaterThan(1_800);
+  const ttftTitle = await ttft.getAttribute('title');
+  expect(ttftTitle, 'the tooltip separates the uplink from the server wait').toMatch(/上传 \d+\.\d 秒/);
+  expect(ttftTitle, 'the tooltip names the server share').toMatch(/服务端等待 \d+\.\d 秒/);
   expect(await tps.innerText(), 'the rate never absorbs the wait').not.toContain('首字');
   const cacheText = await page.getByTestId('telemetry-cache').innerText();
   expect(cacheText, 'the cache pill no longer abbreviates its label').toMatch(/^CH [\d.]+%/);
@@ -161,6 +167,28 @@ test('the node chat footer prints the same rate for the node’s own call', asyn
   expect(nodeFooter, 'the node composer no longer advertises the keyboard hint').not.toContain('Shift + Enter');
   await page.screenshot({ path: join(evidenceDir(root, 'console-tps'), 'node.png'), fullPage: false });
 }, 240_000);
+
+test('the first-token wait starts at the send that answered', async () => {
+  // The provider refuses the first send with a capacity answer that asks for a 2s pause,
+  // then answers after its own 2s pause. The wait the footer reports must describe the
+  // second send only: folding the refused attempt in would roughly double it.
+  const { daemon, conversationId } = await consoleWithReply('retry', [{
+    status: 429,
+    headers: { 'retry-after': '2' },
+  }, {
+    text: '重试之后才回答。',
+    usage: { prompt_tokens: 900, completion_tokens: 12 },
+    beforeReply: () => new Promise<void>(resolve => setTimeout(resolve, 2_000)),
+  }]);
+  const telemetry = async () => (await (await daemon.request(`/api/conversations/${conversationId}`)).json() as {
+    telemetry?: { outputTokens?: number | null; firstTokenMs?: number | null; uploadMs?: number | null; serverWaitMs?: number | null };
+  }).telemetry;
+  await expect.poll(async () => (await telemetry())?.firstTokenMs ?? null, { timeout: 60_000, interval: 250 }).not.toBeNull();
+  const view = await telemetry();
+  expect(view?.outputTokens).toBe(12);
+  expect(view?.firstTokenMs, 'the wait must not include the refused attempt and its pause').toBeLessThan(3_500);
+  expect(view?.firstTokenMs).toBeGreaterThan(1_800);
+});
 
 const SKILLS = [
   'skill-codebase-design',

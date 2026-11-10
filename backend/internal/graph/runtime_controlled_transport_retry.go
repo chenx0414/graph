@@ -85,4 +85,8 @@ func (stream *controlledStream) discardAttempt() {
 	stream.invocation = ""
 	stream.finishReason = ""
 	stream.transport = false
+	stream.startedAt = 0
+	stream.requestWrittenAt = 0
+	stream.firstDeltaAt = 0
+	stream.lastDeltaAt = 0
 }

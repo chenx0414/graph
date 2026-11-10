@@ -157,6 +157,8 @@ export type ConversationView = {
     latencyMs?: number | null;
     tokensPerSecond?: number | null;
     firstTokenMs?: number | null;
+    uploadMs?: number | null;
+    serverWaitMs?: number | null;
     contextTokens: number | null;
     contextLimit: number | null;
     contextPercent: number | null;

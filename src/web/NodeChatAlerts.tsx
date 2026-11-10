@@ -80,8 +80,14 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
   canSteer: boolean;
   onSteer: () => void;
   onStop: () => void;
-  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null } | undefined;
+  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null; uploadMs?: number | null; serverWaitMs?: number | null } | undefined;
 }) {
+  const firstTokenTitle = (() => {
+    if (throughput?.firstTokenMs == null) return '这个节点还没有完成的请求';
+    const whole = `从发出到收到第一个 token 等了 ${(throughput.firstTokenMs / 1000).toFixed(1)} 秒`;
+    if (typeof throughput.uploadMs !== 'number' || typeof throughput.serverWaitMs !== 'number') return whole;
+    return `${whole}（上传 ${(throughput.uploadMs / 1000).toFixed(1)} 秒、服务端等待 ${(throughput.serverWaitMs / 1000).toFixed(1)} 秒）`;
+  })();
   return (
     <div className="composer-footer">
       {stopPhase !== 'idle' && (
@@ -100,9 +106,7 @@ export function NodeComposerFooter({ stopPhase, busy, agentNode, sending, canSte
       >TPS {typeof throughput?.tokensPerSecond === 'number' ? (throughput.tokensPerSecond >= 10 ? throughput.tokensPerSecond.toFixed(0) : throughput.tokensPerSecond.toFixed(1)) : '—'}</span>
       <span
         className="muted"
-        title={throughput?.firstTokenMs == null
-          ? '这个节点还没有完成的请求'
-          : `从发出到收到第一个 token 等了 ${(throughput.firstTokenMs / 1000).toFixed(1)} 秒`}
+        title={firstTokenTitle}
         data-testid="node-telemetry-ttft"
         data-ttft-ms={throughput?.firstTokenMs ?? undefined}
       >首字 {typeof throughput?.firstTokenMs === 'number' ? (throughput.firstTokenMs < 1000 ? `${Math.round(throughput.firstTokenMs)}ms` : `${(throughput.firstTokenMs / 1000).toFixed(1)}s`) : '—'}</span>

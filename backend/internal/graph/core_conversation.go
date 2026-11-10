@@ -161,6 +161,8 @@ type ConversationMasterUsageView struct {
 	LatencyMs       *int64   `json:"latencyMs"`
 	TokensPerSecond *float64 `json:"tokensPerSecond"`
 	FirstTokenMs    *int64   `json:"firstTokenMs"`
+	UploadMs        *int64   `json:"uploadMs"`
+	ServerWaitMs    *int64   `json:"serverWaitMs"`
 }
 
 const RSI_RELOAD_RECEIPT = "RSI 改动已提交，等待重载。当前回合已结束；重载确认后会自动继续，并将报告更新为“已生效”。"

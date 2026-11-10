@@ -55,6 +55,20 @@ async function assertNoHorizontalScroll(page: Page) {
   expect(overflow.scroll, 'the page grew wider than the window').toBeLessThanOrEqual(overflow.viewport + 1);
 }
 
+test('the sidebar carries no brand block and still clears the window controls', async () => {
+  const { daemon, page } = await open();
+  await page.goto(`${daemon.url}/#/insights`);
+  await page.getByTestId('insights-page').waitFor();
+
+  expect(await page.locator('.brand').count(), 'the sidebar brand block is back').toBe(0);
+  expect(await page.locator('.brand-mark').count(), 'the sidebar logo is back').toBe(0);
+  expect(await page.locator('.brand-name').count(), 'the sidebar wordmark is back').toBe(0);
+  // The traffic lights sit at the top-left of the window: the first rail control has
+  // to stay below them even with nothing to show above it.
+  const first = await box(page, '[data-testid=rail-catalog]');
+  expect(Math.round(first.y), 'the rail moved up into the window controls').toBeGreaterThanOrEqual(44);
+});
+
 test('the rail and the page never overlap, and the page keeps its width', async () => {
   const { daemon, page } = await open();
   await page.goto(`${daemon.url}/#/insights`);

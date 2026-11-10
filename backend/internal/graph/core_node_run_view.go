@@ -80,6 +80,8 @@ type NodeThroughput struct {
 	LatencyMs       *int64   `json:"latencyMs"`
 	TokensPerSecond *float64 `json:"tokensPerSecond"`
 	FirstTokenMs    *int64   `json:"firstTokenMs"`
+	UploadMs        *int64   `json:"uploadMs"`
+	ServerWaitMs    *int64   `json:"serverWaitMs"`
 }
 
 type NodeRunTiming struct {

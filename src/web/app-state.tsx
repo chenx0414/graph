@@ -273,9 +273,7 @@ export function App() {
       <StaleBuildBanner />
       <button type="button" className="skip-link" onClick={() => document.getElementById('workspace-main')?.focus()}>跳到主内容</button>
       <aside className="sidebar">
-        <div className="sidebar-heading">
-          <a className="brand" href="#/" aria-label="Graph 首页"><div className="brand-mark" /><span className="brand-name">Graph</span></a>
-        </div>
+        <div className="sidebar-heading" aria-hidden="true" />
         <nav className="rail" data-testid="app-rail" aria-label="主入口">
           <a className="rail-button" href="#/catalog" data-testid="rail-catalog" title="资源库" aria-label="资源库" data-active={Boolean(catalogMatch)}>
             <Icon name="catalog" size={17} /><span className="rail-label">资源库</span>

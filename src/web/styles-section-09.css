@@ -1,8 +1,6 @@
 @media (max-width: 860px) {
   .app-shell { flex-direction: column; }
   .sidebar { width: 100%; flex: none; height: auto; min-height: 56px; position: static; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; }
-  .sidebar .brand { padding: 0 6px 0 0; }
-  .brand-sub { display: none; }
   .nav { flex-direction: row; overflow-x: auto; }
   .nav a { white-space: nowrap; padding: 7px 10px; }
   .sidebar-scroll { display: none; }
@@ -174,12 +172,10 @@
 .architecture-stage p { color:var(--muted); margin:0 0 18px; }
 .architecture-canvas { height:390px; border:1px solid var(--border); border-radius:14px; overflow:hidden; background:#fafbfc; }
 .architecture-stage footer { min-height:44px; padding:14px 0; color:var(--muted); font-size:12px; }
-.brand-mark { background: center / contain no-repeat url('./assets/graph-icon.png'); box-shadow:none; border-radius:0; }
 @media(max-width:760px) { .architecture-board { grid-template-columns:1fr; } .architecture-picker { flex-direction:row; overflow:auto; } .architecture-picker button { white-space:nowrap; } }
 
 /* Workspace hierarchy: quiet navigation, one dominant conversation surface. */
 .sidebar { background:#f7f7f8; border-right:1px solid #e9e9ec; }
-.brand-name { font-size:16px; letter-spacing:-.4px; }
 .conversation-topbar { box-shadow:none; }
 .conversation-heading h1 { font-size:15px; font-weight:600; }
 .conversation-meta { font-size:11px; color:var(--faint); }

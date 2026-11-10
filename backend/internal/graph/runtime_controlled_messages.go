@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"time"
 
@@ -19,31 +20,32 @@ type controlledToolCall struct {
 }
 
 type controlledStream struct {
-	broker         SendGate
-	candidate      ModelEntry
-	resolveKey     func(candidate ModelEntry) string
-	slot           func(candidate ModelEntry) *piAdapterSlot
-	api            ModelApi
-	usageOptions   PiAdapterStreamOptions
-	model          map[string]any
-	context        map[string]any
-	options        map[string]any
-	toolCalls      map[int]*controlledToolCall
-	toolCallBlocks map[int]int
-	message        *AssistantMessage
-	events         []map[string]any
-	index          int
-	finished       bool
-	settled        bool
-	invocation     string
-	finishReason   string
-	transport bool
-	abortRequested bool
-	cancelRequest func()
-	now            func() int64
-	startedAt      int64
-	firstDeltaAt   int64
-	lastDeltaAt    int64
+	broker           SendGate
+	candidate        ModelEntry
+	resolveKey       func(candidate ModelEntry) string
+	slot             func(candidate ModelEntry) *piAdapterSlot
+	api              ModelApi
+	usageOptions     PiAdapterStreamOptions
+	model            map[string]any
+	context          map[string]any
+	options          map[string]any
+	toolCalls        map[int]*controlledToolCall
+	toolCallBlocks   map[int]int
+	message          *AssistantMessage
+	events           []map[string]any
+	index            int
+	finished         bool
+	settled          bool
+	invocation       string
+	finishReason     string
+	transport        bool
+	abortRequested   bool
+	cancelRequest    func()
+	now              func() int64
+	startedAt        int64
+	requestWrittenAt int64
+	firstDeltaAt     int64
+	lastDeltaAt      int64
 }
 
 func (stream *controlledStream) clock() int64 {
@@ -59,6 +61,22 @@ func (stream *controlledStream) markDelta() {
 		stream.firstDeltaAt = now
 	}
 	stream.lastDeltaAt = now
+}
+
+func (stream *controlledStream) beginInvocation() {
+	stream.startedAt = stream.clock()
+	stream.requestWrittenAt = 0
+	stream.firstDeltaAt = 0
+	stream.lastDeltaAt = 0
+}
+
+func (stream *controlledStream) onRequestWritten(info httptrace.WroteRequestInfo) {
+	if info.Err != nil {
+		return
+	}
+	if stream.requestWrittenAt == 0 {
+		stream.requestWrittenAt = stream.clock()
+	}
 }
 
 func (stream *controlledStream) Next() (map[string]any, bool) {
@@ -140,10 +158,8 @@ func (stream *controlledStream) run() {
 }
 
 func (stream *controlledStream) attempt(request *http.Request, reservation float64, remaining int) error {
-	if stream.startedAt == 0 {
-		stream.startedAt = stream.clock()
-	}
 	ctx, cancelRequest := context.WithCancel(request.Context())
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{WroteRequest: stream.onRequestWritten})
 	stream.cancelRequest = cancelRequest
 	request = request.WithContext(ctx)
 	if abort, ok := stream.options["abort"].(<-chan struct{}); ok && abort != nil {
@@ -157,8 +173,8 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 		}()
 	}
 	transport, err := ControlledGatedProviderFetch(stream.broker, request, GatedProviderFetchOptions{
-		Reservation:     reservation,
-		RequestIDHeader: controlledRequestIDHeader(stream.candidate),
+		Reservation:       reservation,
+		RequestIDHeader:   controlledRequestIDHeader(stream.candidate),
 		ReclaimUnanswered: stream.usageOptions.HasFallback,
 		OnTransport:       stream.usageOptions.OnTransport,
 		FetchImpl: func(request *http.Request) (*http.Response, error) {
@@ -192,6 +208,7 @@ func (stream *controlledStream) attempt(request *http.Request, reservation float
 		},
 		OnRequest: func(id string) {
 			stream.invocation = id
+			stream.beginInvocation()
 			if stream.usageOptions.OnRequest == nil {
 				return
 			}

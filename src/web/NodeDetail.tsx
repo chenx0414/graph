@@ -43,7 +43,7 @@ export interface NodeRun {
   session: { sessionId: string; sessionFile: string | null } | null;
   operations: unknown[]; invocations: unknown[]; questions: unknown[]; evidence: unknown[];
   queued?: { seq: number; text: string; createdAt?: number }[];
-  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null } | undefined;
+  throughput?: { outputTokens?: number | null; latencyMs?: number | null; tokensPerSecond?: number | null; firstTokenMs?: number | null; uploadMs?: number | null; serverWaitMs?: number | null } | undefined;
   entries: Entry[]; entryCount: number; hasOlder: boolean; hasNewer: boolean; phase: string;
 }
 

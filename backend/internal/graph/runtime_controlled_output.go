@@ -91,9 +91,15 @@ func (stream *controlledStream) settle(usage *TokenUsage) {
 	if stream.invocation == "" {
 		return
 	}
-	if stream.firstDeltaAt > 0 && stream.startedAt > 0 && stream.firstDeltaAt >= stream.startedAt {
+	if usage != nil && stream.startedAt > 0 && stream.firstDeltaAt >= stream.startedAt {
 		wait := stream.firstDeltaAt - stream.startedAt
 		usage.FirstTokenMs = &wait
+		if stream.requestWrittenAt >= stream.startedAt && stream.requestWrittenAt <= stream.firstDeltaAt {
+			upload := stream.requestWrittenAt - stream.startedAt
+			server := stream.firstDeltaAt - stream.requestWrittenAt
+			usage.UploadMs = &upload
+			usage.ServerWaitMs = &server
+		}
 	}
 	if usage != nil && usage.Output > 0 && stream.firstDeltaAt > 0 && stream.lastDeltaAt >= stream.firstDeltaAt {
 		decode := stream.lastDeltaAt - stream.firstDeltaAt
