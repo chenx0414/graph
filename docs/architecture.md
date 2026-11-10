@@ -90,10 +90,10 @@ ELK 负责原生对象位置，持久布局快照与局部修订保持已有锚�
 - durable 内核：[kernel.go](../backend/internal/pigkernel/kernel.go)、[session.go](../backend/internal/pigkernel/session.go)、[turn.go](../backend/internal/pigkernel/turn.go)。
 - 模块：[module-runtime.go](../backend/internal/graph/core_module_runtime.go)、[module-router.go](../backend/internal/graph/core_module_router.go)、[module-evaluator.go](../backend/internal/graph/runtime_module_evaluator.go)、[kernel-operation-broker.go](../backend/internal/graph/runtime_kernel_operation_broker.go)。
 - 产物与 Git：[artifact-workspace.go](../backend/internal/graph/core_artifact_workspace.go)、[graph-acceptance.go](../backend/internal/graph/core_graph_acceptance.go)、[Git 模块](../backend/internal/graph/git_git.go)。
-- 投影与界面：[kernel-views.go](../backend/internal/graph/core_kernel_views.go)、[kernel-explain.go](../backend/internal/graph/core_kernel_explain.go)、[node-run.go](../backend/internal/graph/core_node_run.go)、[layout.go](../backend/internal/graph/server_layout.go)、[GraphCanvas.tsx](../src/web/GraphCanvas.tsx)、[AgentNodeChat.tsx](../src/web/AgentNodeChat.tsx)。
+- 投影与界面：[kernel-views.go](../backend/internal/graph/core_kernel_views.go)、[kernel-explain.go](../backend/internal/graph/core_kernel_explain.go)、[node-run.go](../backend/internal/graph/core_node_run.go)、[layout.go](../backend/internal/graph/server_layout.go)、[graph.go](../app/graph.go)、[transcript.go](../app/transcript.go)。
 
 ## 切换与验证边界
 
 ADR 0030 要求所有 graph 入口统一走新内核，旧 graph 及其历史丢弃，旧 DAG、特殊 loop、转换器和旧历史 reader 退役；不删除能力库、模型配置、外部 main 会话或整个数据库。ADR 0011 的每 operation Pi 生命周期及 ADR 0030 的每节点常驻进程实现均已被 ADR 0031/0032 的共享 durable 宿主替代；旧 Fresh/Fork/依赖 handoff 图模型不再适用。历史报告保留证据，不重新授权旧行为。
 
-库级与集成门禁证明其覆盖的行为，不能单独证明默认用户应用已经切换。最终交付还需重建当前包、验证实际 Electron 窗口与默认运行来源，并按完整规格逐项核对。执行说明见 [实施计划](implementation-plan.md)；尚未完成项必须明确保留。
+库级与集成门禁证明其覆盖的行为，不能单独证明默认用户应用已经切换。最终交付还需重建当前包、验证实际原生窗口（Go + MyGo）与默认运行来源，并按完整规格逐项核对。执行说明见 [实施计划](implementation-plan.md)；尚未完成项必须明确保留。

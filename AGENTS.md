@@ -17,7 +17,7 @@
 
 ## 门禁分层
 
-`node --run check` 是**激活门禁**（快层）：静态检查加 `check:affected`，后者按改动区域选层——纯后端改动不跑浏览器层 `tests/m8`，`src/web`/`src/core`/`desktop` 改动才跑它，改 `scripts`/`tests`/`presets`/`docs`/`package.json`/vitest 配置则跑全套。用 `GRAPH_CHECK_PLAN_ONLY=1 node --run check:affected` 可以只读“这次会跑哪一层、因为哪些文件”。
+`node --run check` 是**激活门禁**（快层）：静态检查加 `check:affected`，后者按改动区域选层——纯后端改动只跑后端与 `check:affected` 选中的层，`src/core` 改动才带上在进程内跑的 vitest 层（`tests/app`、`tests/m7`），改 `scripts`/`tests`/`presets`/`docs`/`package.json`/vitest 配置则跑全套。用 `GRAPH_CHECK_PLAN_ONLY=1 node --run check:affected` 可以只读“这次会跑哪一层、因为哪些文件”。
 
 快层里只有跑测试的那一半排队：`check:backend`/`typecheck`/`lint`/`check:harness` 只写本工作区，两个会话可以同时跑；`check:affected`/`check:evidence` 会起守护进程、用共享暂存目录，仍走 `check-queue.py` 的机器级 slot。以前整个快层都在那把锁里，所以别人一在检查，你的激活就得等——等的还不是共享资源。
 

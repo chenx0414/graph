@@ -84,9 +84,9 @@ curl -s -c /tmp/graph-cookie.txt "$base/" > /dev/null
 curl -s -b /tmp/graph-cookie.txt -H "origin: $base" "$base/api/health"
 ```
 
-**要写任何东西就另起一个 throwaway daemon**（`--execute|--state-dir <tmp> --graph-home <tmp> --web-dir <checkout>/dist/web --port 0 --config <tmp>/graph.config.json`），绝不把自验指向生产 state：生产库里有真实任务与凭据引用。只读的现场断言（页面、DOM）用浏览器即可。
+**要写任何东西就另起一个 throwaway daemon**（`--execute|--state-dir <tmp> --graph-home <tmp> --port 0 --config <tmp>/graph.config.json`），绝不把自验指向生产 state：生产库里有真实任务与凭据引用。
 
-**一个真实的坑**：运行中的 daemon 服务的是它**自己那个 checkout** 的 `dist/web`（桌面 App 启动时写死的 `--web-dir`）。所以在本仓库改完前端、跑 `app:build` 之后，**现场看到的仍是旧包**——浏览器里量到的旧样式或不存在的元素不是「没生效」，而是看错了目录（实测：应用线重建后服务端给的 CSS 里仍没有新规则；在运行中 checkout 里跑 `node --run build:web` 之后立刻生效）。要先确认 `ps -o command= -p $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["pid"])' "<stateDir>/console.json")` 里的 `--web-dir` 是哪个 checkout。
+界面是原生窗口，daemon 没有可控的页面；所以自验分两半：接口用上面的 curl 或 HTTP 断言（机器可验），界面行为只能靠 `ui.Tester` 无头断言加窗口存活，其余由用户目视确认。
 
 - `agent_browser click <selector>` 对 React 组件可能报 `Clicked: …` 却**不触发** onClick。对 React 一律用 `eval` + `document.querySelector(...).click()`（或用角色/文本定位的动作），并**另起一次** DOM 读回确认；`click` 返回的「Action dispatched; application change unverified」不是证据。
 - `open` 之后先断言 `location.href` 再点（点击可能落在旧标签页上）；DOM 状态要在另一次 eval 里读，因为 React 异步 flush。带 hash 的同 URL `open` 不会重载，需要 `location.reload()`。

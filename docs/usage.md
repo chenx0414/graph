@@ -1,6 +1,6 @@
 # Graph 使用文档
 
-面向使用者：如何启动、配置、观察与排障本机 Graph 控制台。产品范围见 [首版设计](graph-mvp.md)，模块与恢复机制见 [架构](architecture.md)，逐项交付报告见 [产品化交付报告](planning/productization-reports.md)。
+面向使用者：如何启动、配置、观察与排障本机 Graph。产品范围见 [首版设计](graph-mvp.md)，模块与恢复机制见 [架构](architecture.md)，逐项交付报告见 [产品化交付报告](planning/productization-reports.md)。
 
 Graph 是任务编排控制台；它交付过的 MediaBookmarks B站 Web 应用是另一个被编排的项目，不属于 Graph 本体。
 
@@ -10,32 +10,29 @@ Graph 是任务编排控制台；它交付过的 MediaBookmarks B站 Web 应用�
 
 ```sh
 cd "$REPO"            # 仓库根目录
-node --run build:web  # 首次或前端改动后；有 pnpm 时 pnpm build:web
-node --run start      # 自动构建 Go 后端并启动仅查看模式；有 pnpm 时 pnpm start
+node --run app:build  # 构建 Go 后端与壳，并装到 /Applications/Graph.app
+node --run start      # 只启守护进程（仅查看模式）；有 pnpm 时 pnpm start
 ```
 
-首次运行没有 `graph.config.json` 也能启动：页面显示首次运行横幅，只读浏览历史，不派发模型请求。启动输出包含配置文件、状态目录与访问地址：
+界面是原生 macOS 窗口（Go + MyGo），不是浏览器页面：用 `node --run app:build` 装好包后退出并重新打开 Graph.app 才会跑新代码。首次运行没有 `graph.config.json` 也能启动：窗口显示首次运行提示，只读浏览历史，不派发模型请求。守护进程启动输出包含配置文件、状态目录与访问地址：
 
 ```
 Graph console
   mode:      view-only (history, settings and graph; no model dispatch)
   config:    none — first run; add graph.config.json to enable projects and models
   state:     /…/.local/state/graph
-  web:       /…/dist/web
   address:   http://127.0.0.1:4173
 ```
 
-在浏览器打开该地址。浏览器只是客户端：关闭页面不会停止守护进程；重开页面会重新连接并从事件游标续传。
+守护进程只提供 HTTP/SSE 接口，没有要打开的页面；界面由 Graph.app 自己绘制并通过同一个地址访问这些接口。关闭窗口不会停止守护进程；重开窗口会重新连接并从事件游标续传。
 
 执行模式（会实际请求模型）：
 
 ```sh
-node --run build:web
 node --run start:execute    # 或 node --run build:backend && node backend/internal/graph/server_cli.go --execute
 ```
 
-执行模式要求配置中至少一个模型且其凭据引用的环境变量已设置；否则启动失败并明确报错。前端开发模式使用 `node --run dev`（Vite，默认 5173，`/api` 代理到 `GRAPH_DEV_API` 或 `http://127.0.0.1:4173`）。
-
+执行模式要求配置中至少一个模型且其凭据引用的环境变量已设置；否则启动失败并明确报错。
 
 ## 与主 Agent 对话（推荐入口）
 
@@ -163,7 +160,6 @@ A3 起控制台内置：任务页运行时间线与用量面板、图页 MiniMap
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| `web_build_missing` | 未构建前端：`node --run build:web` |
 | `invalid_config` | 配置文件缺失或字段错误；消息带字段路径（如 `models.entries[0].grade`） |
 | `models_missing` | 执行模式没有配置模型 |
 | `credentials_missing` | 执行模式有模型但其 `secretRef` 环境变量未设置 |
