@@ -73,7 +73,6 @@ export function ProjectGitCard() {
             : <Pill tone={prep?.state === 'ready' ? 'success' : prep?.state === 'failed' ? 'danger' : prep?.state === 'detected' ? 'warn' : 'neutral'}>{label(prep?.state)}</Pill>}
           <span className="grow">{project.id} <span className="muted">{project.root}</span></span>
           {!archived && prep?.projectSubdir && <span className="muted">子目录 {prep.projectSubdir}</span>}
-          {!archived && prep?.baselineSha && <code className="faint">{prep.baselineSha.slice(0, 10)}</code>}
         </div>
         {!archived && prep?.state === 'detected' && <span className="muted">{dirty ? `${dirty} 项未提交修改；创建基线将把这些改动纳入本地快照` : prep.detail?.reason === 'not_a_repository' ? '尚未初始化 Git' : '需要准备'}</span>}
         {!archived && prep?.state === 'failed' && <span className="muted">{prep.detail?.reason ?? '准备失败'}</span>}
@@ -93,7 +92,7 @@ export function ProjectGitCard() {
   const active = (projects ?? []).filter(project => project.archivedAt == null);
   const archived = (projects ?? []).filter(project => project.archivedAt != null);
   return (
-    <Card title="项目与本地基线" icon="box">
+    <Card>
       {projects === null && <Spinner />}
       {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
       {active.map(project => row(project, false))}

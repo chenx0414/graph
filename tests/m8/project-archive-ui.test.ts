@@ -33,6 +33,11 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   expect(await page.locator('.settings-project-status .card-sub').count(), '项目卡不该再有副标题说明').toBe(0);
   expect(await row.innerText(), '准备完毕的项目应显示已准备').toContain('已准备');
   expect(await page.getByTestId('git-prepare-sample').count(), '已准备好的项目不该再显示准备 Git 按钮').toBe(0);
+  expect(await page.locator('.settings-project-status .card-head').count(), '项目卡不该再有标题行').toBe(0);
+  const settings = await (await api.get('/api/settings')).json() as { projects: { id: string; preparation?: { baselineSha?: string } }[] };
+  const baselineSha = settings.projects.find(project => project.id === 'sample')?.preparation?.baselineSha ?? '';
+  expect(baselineSha.length).toBeGreaterThan(0);
+  expect(await row.innerText(), '已准备行不该再显示基线 sha').not.toContain(baselineSha.slice(0, 10));
   expect((await lifecycle()).archived).toBe(false);
   // 归档拒新委派要在一个真实的主管线程上验：同一个请求在归档期间报
   // project_archived，恢复后换成“缺少用户消息”，证明拦住它的是归档本身。
