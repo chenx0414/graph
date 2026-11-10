@@ -65,17 +65,18 @@ type chatTab struct {
 }
 
 type shellState struct {
-	address  string
-	token    string
-	status   string
-	section  string
-	activeID string
-	settings *settingsState
-	usage    *usageState
-	rows     []sidebarRow
-	tabs     []*chatTab
-	window   *mygo.Window
-	list     ui.ListState
+	address   string
+	token     string
+	status    string
+	section   string
+	activeID  string
+	settings  *settingsState
+	usage     *usageState
+	resources *resourceState
+	rows      []sidebarRow
+	tabs      []*chatTab
+	window    *mygo.Window
+	list      ui.ListState
 }
 
 func newShellState(address, token string) *shellState {
@@ -133,6 +134,16 @@ func (s *shellState) openUsage() {
 		go s.usage.load()
 	}
 	s.section = "usage"
+	s.frame()
+}
+
+func (s *shellState) openResources() {
+	if s.resources == nil {
+		s.resources = newResourceState(s.address, s.token)
+		s.resources.window = s.window
+		go s.resources.load()
+	}
+	s.section = "resources"
 	s.frame()
 }
 
@@ -200,6 +211,9 @@ func (s *shellState) view(ctx *ui.Context) {
 				if ui.Button(ctx, "用量").Clicked() {
 					go s.openUsage()
 				}
+				if ui.Button(ctx, "资源").Clicked() {
+					go s.openResources()
+				}
 			})
 			if s.status != "" {
 				ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
@@ -222,6 +236,14 @@ func (s *shellState) view(ctx *ui.Context) {
 			}).Grow(1)
 		})
 		ui.Column(ctx).Fill().Children(func() {
+			if s.section == "resources" {
+				if s.resources == nil {
+					ui.Text(ctx, "正在读取能力库…").Padding(16).TextColor(t.TextMuted)
+					return
+				}
+				s.resources.view(ctx)
+				return
+			}
 			if s.section == "usage" {
 				if s.usage == nil {
 					ui.Text(ctx, "正在汇总用量…").Padding(16).TextColor(t.TextMuted)
