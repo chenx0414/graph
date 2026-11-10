@@ -101,6 +101,10 @@ func toolLine(message transcriptMessage) string {
 
 type chatState struct {
 	nodeTitle     string
+	nodeTaskID    string
+	nodeID        string
+	nodeRole      string
+	nodeDraft     string
 	nodeLines     []string
 	tasks         []taskRow
 	artifacts     []artifactRow

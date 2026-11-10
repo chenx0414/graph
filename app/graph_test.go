@@ -117,3 +117,57 @@ func TestGraphSectionOpensANode(t *testing.T) {
 		t.Fatalf("the node panel must show the entries, texts %q", tester.Texts())
 	}
 }
+
+func TestNodeChatSendsAndReloads(t *testing.T) {
+	posted := ""
+	sent := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/tasks/t1/nodes/current-model/messages":
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			sent = true
+			w.Write([]byte(`{}`))
+		case r.URL.Path == "/api/tasks/t1/nodes/current-model/run":
+			if sent {
+				w.Write([]byte(`{"entries":[{"kind":"message","role":"user","text":"再确认一次"},{"kind":"message","role":"assistant","text":"确认完了"}]}`))
+				return
+			}
+			w.Write([]byte(nodeRunFixture))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.showNode("t1", nodeRow{id: "current-model", role: "worker"})
+	if len(state.nodeLines) != 3 {
+		t.Fatalf("node lines %+v", state.nodeLines)
+	}
+	tester := ui.NewTester(state.view, 820, 700)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("发给节点") {
+		t.Fatalf("a selected node must offer a composer, texts %q", tester.Texts())
+	}
+	state.nodeDraft = "再确认一次"
+	state.sendNodeMessage()
+	if !contains(posted, "再确认一次") || !contains(posted, "requestId") {
+		t.Fatalf("the node message body was %q", posted)
+	}
+	if len(state.nodeLines) != 2 || state.nodeLines[1] != "agent · 确认完了" {
+		t.Fatalf("the node transcript must reload after sending, lines %+v", state.nodeLines)
+	}
+	if state.nodeDraft != "" {
+		t.Fatalf("the draft must clear after sending, got %q", state.nodeDraft)
+	}
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("agent · 确认完了") {
+		t.Fatalf("the reloaded transcript must render, texts %q", tester.Texts())
+	}
+}

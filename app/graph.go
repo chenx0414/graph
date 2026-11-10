@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -151,6 +154,43 @@ func nodeEntryLine(entry nodeEntry) string {
 	return author + " · " + firstLine(entry.text, 160)
 }
 
+func (c *chatState) sendNodeMessage() {
+	text := strings.TrimSpace(c.nodeDraft)
+	if text == "" || c.nodeTaskID == "" || c.nodeID == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{
+		"text":      text,
+		"requestId": "native-node-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+	})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/tasks/"+c.nodeTaskID+"/nodes/"+c.nodeID+"/messages", bytes.NewReader(body))
+	if err != nil {
+		c.status = "发送失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "发送失败：" + err.Error()
+		c.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "发送被拒绝：" + response.Status
+		c.frame()
+		return
+	}
+	c.nodeDraft = ""
+	c.status = "已发给节点，等它回话…"
+	c.showNode(c.nodeTaskID, nodeRow{id: c.nodeID, role: c.nodeRole})
+}
+
 func (c *chatState) showNode(taskID string, node nodeRow) {
 	payload, err := daemonGet(c.address, c.token, "/api/tasks/"+taskID+"/nodes/"+node.id+"/run")
 	if err != nil {
@@ -168,6 +208,9 @@ func (c *chatState) showNode(taskID string, node nodeRow) {
 	for _, entry := range run.entries {
 		lines = append(lines, nodeEntryLine(entry))
 	}
+	c.nodeTaskID = taskID
+	c.nodeID = node.id
+	c.nodeRole = node.role
 	c.nodeTitle = node.id + " · " + node.role + " · " + strconv.Itoa(len(run.entries)) + " 条记录"
 	if len(lines) > nodeLineLimit {
 		lines = lines[len(lines)-nodeLineLimit:]
@@ -179,10 +222,7 @@ func (c *chatState) showNode(taskID string, node nodeRow) {
 
 func (c *chatState) graphSection(ctx *ui.Context) {
 	t := ctx.Theme()
-	if len(c.tasks) == 0 {
-		return
-	}
-	if ui.Button(ctx, "图 · "+strconv.Itoa(len(c.tasks))+" 个任务").Clicked() {
+	if len(c.tasks) > 0 && ui.Button(ctx, "图 · "+strconv.Itoa(len(c.tasks))+" 个任务").Clicked() {
 		c.graphOpen = !c.graphOpen
 	}
 	if c.graphOpen {
@@ -202,5 +242,11 @@ func (c *chatState) graphSection(ctx *ui.Context) {
 		for _, line := range c.nodeLines {
 			ui.Text(ctx, line).FontSize(12)
 		}
+		ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
+			ui.TextInput(ctx, &c.nodeDraft).Placeholder("给这个节点发消息…").Label("节点消息").Grow(1)
+			if ui.PrimaryButton(ctx, "发给节点").Clicked() {
+				go c.sendNodeMessage()
+			}
+		})
 	}
 }
