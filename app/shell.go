@@ -71,6 +71,7 @@ type shellState struct {
 	section  string
 	activeID string
 	settings *settingsState
+	usage    *usageState
 	rows     []sidebarRow
 	tabs     []*chatTab
 	window   *mygo.Window
@@ -122,6 +123,16 @@ func (s *shellState) openSettings() {
 		go s.settings.load()
 	}
 	s.section = "settings"
+	s.frame()
+}
+
+func (s *shellState) openUsage() {
+	if s.usage == nil {
+		s.usage = newUsageState(s.address, s.token)
+		s.usage.window = s.window
+		go s.usage.load()
+	}
+	s.section = "usage"
 	s.frame()
 }
 
@@ -186,6 +197,9 @@ func (s *shellState) view(ctx *ui.Context) {
 				if ui.Button(ctx, "设置").Clicked() {
 					go s.openSettings()
 				}
+				if ui.Button(ctx, "用量").Clicked() {
+					go s.openUsage()
+				}
 			})
 			if s.status != "" {
 				ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
@@ -208,6 +222,14 @@ func (s *shellState) view(ctx *ui.Context) {
 			}).Grow(1)
 		})
 		ui.Column(ctx).Fill().Children(func() {
+			if s.section == "usage" {
+				if s.usage == nil {
+					ui.Text(ctx, "正在汇总用量…").Padding(16).TextColor(t.TextMuted)
+					return
+				}
+				s.usage.view(ctx)
+				return
+			}
 			if s.section == "settings" {
 				if s.settings == nil {
 					ui.Text(ctx, "正在读取设置…").Padding(16).TextColor(t.TextMuted)
