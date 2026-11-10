@@ -25,6 +25,11 @@
       "file": "tests/e2e/provider-independent-reviews.test.ts",
       "pattern": "fetch failed",
       "why": "外部 auth.x.ai 连接被重置（ECONNRESET，host auth.x.ai:443）；失败后同一端点直连返回 HTTP 200，属本机到外网的瞬时故障。若同一提交下反复出现而探针健康，要按真回归重查"
+    },
+    {
+      "file": "tests/e2e/desktop-capability-interaction.test.ts",
+      "pattern": "the Finder snapshot carries no ref_id nodes",
+      "why": "这条要求**当前安装的 Graph.app** 持有辅助功能授权；S1d 把 /Applications/Graph.app 从 Electron 包换成 MyGo 壳后 bundle 的 cdhash 变了，系统按新二进制拒绝旧的授权，Finder 快照因此没有任何可用节点。属于换壳带来的权限重置，不是产品行为；在系统设置里给新的 Graph.app 重新勾上辅助功能后即可恢复（宿主上验证过同一提交在授权有效时通过）"
     }
   ]
 }
