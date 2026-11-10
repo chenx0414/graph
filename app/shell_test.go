@@ -52,8 +52,8 @@ func TestShellSidebarSwitchesConversation(t *testing.T) {
 
 	state := newShellState(server.URL, "tok")
 	state.load()
-	if state.chat.active != "c1" {
-		t.Fatalf("the newest conversation opens first, active %q", state.chat.active)
+	if active := state.active(); active == nil || active.active != "c1" {
+		t.Fatalf("the newest conversation opens first, active %q", state.activeID)
 	}
 	tester := ui.NewTester(state.view, 1000, 640)
 	for frame := 0; frame < 3; frame++ {
@@ -69,14 +69,14 @@ func TestShellSidebarSwitchesConversation(t *testing.T) {
 		t.Fatalf("click 会话二: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for state.chat.active != "c2" && time.Now().Before(deadline) {
+	for state.activeID != "c2" && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if state.chat.active != "c2" || !tester.HasText("来自会话二") {
-		t.Fatalf("clicking a row must switch the pane, active %q texts %q", state.chat.active, tester.Texts())
+	if state.activeID != "c2" || !tester.HasText("来自会话二") {
+		t.Fatalf("clicking a row must switch the pane, active %q texts %q", state.activeID, tester.Texts())
 	}
 }
 
@@ -94,5 +94,53 @@ func TestShellReportsAnEmptyConversationList(t *testing.T) {
 	state.load()
 	if state.status != "还没有会话。" {
 		t.Fatalf("status %q", state.status)
+	}
+}
+
+func TestTabsKeepBothConversationsOpen(t *testing.T) {
+	reloads := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations":
+			w.Write([]byte(`[
+				{"id":"c1","title":"甲","projectId":"13-Graph","archivedAt":null},
+				{"id":"c2","title":"乙","projectId":"13-Graph","archivedAt":null}
+			]`))
+		case "/api/conversations/c1":
+			reloads["c1"]++
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"甲的内容"}]}`))
+		case "/api/conversations/c2":
+			reloads["c2"]++
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"乙的内容"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newShellState(server.URL, "tok")
+	state.load()
+	state.selectConversation("c2")
+	if len(state.tabs) != 2 || state.activeID != "c2" {
+		t.Fatalf("both conversations must stay open, tabs %d active %q", len(state.tabs), state.activeID)
+	}
+	tester := ui.NewTester(state.view, 1000, 640)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("› 乙") || !tester.HasText("甲") {
+		t.Fatalf("the tab bar must show both tabs, texts %q", tester.Texts())
+	}
+	state.selectConversation("c1")
+	if reloads["c1"] != 1 {
+		t.Fatalf("a tab that is already open must not reload, loads %v", reloads)
+	}
+	state.closeTab("c2")
+	if len(state.tabs) != 1 || state.activeID != "c1" {
+		t.Fatalf("closing a tab must keep the other one, tabs %d active %q", len(state.tabs), state.activeID)
+	}
+	state.closeTab("c1")
+	if len(state.tabs) != 0 || state.activeID != "" {
+		t.Fatalf("closing the last tab leaves no active conversation, tabs %d active %q", len(state.tabs), state.activeID)
 	}
 }

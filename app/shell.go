@@ -58,18 +58,34 @@ func sidebarRows(groups []conversationGroup) []sidebarRow {
 	return rows
 }
 
+type chatTab struct {
+	title string
+	id    string
+	state *chatState
+}
+
 type shellState struct {
-	chat    *chatState
-	address string
-	token   string
-	status  string
-	rows    []sidebarRow
-	window  *mygo.Window
-	list    ui.ListState
+	address  string
+	token    string
+	status   string
+	activeID string
+	rows     []sidebarRow
+	tabs     []*chatTab
+	window   *mygo.Window
+	list     ui.ListState
 }
 
 func newShellState(address, token string) *shellState {
-	return &shellState{address: address, token: token, chat: newChatState(address, token), status: "正在读取会话…"}
+	return &shellState{address: address, token: token, status: "正在读取会话…"}
+}
+
+func (s *shellState) active() *chatState {
+	for _, tab := range s.tabs {
+		if tab.id == s.activeID {
+			return tab.state
+		}
+	}
+	return nil
 }
 
 func (s *shellState) load() {
@@ -97,8 +113,45 @@ func (s *shellState) load() {
 	}
 }
 
+func (s *shellState) titleOf(id string) string {
+	for _, row := range s.rows {
+		if row.id == id {
+			return row.label
+		}
+	}
+	return "（无标题）"
+}
+
 func (s *shellState) selectConversation(id string) {
-	s.chat.open(id)
+	for _, tab := range s.tabs {
+		if tab.id == id {
+			s.activeID = id
+			s.frame()
+			return
+		}
+	}
+	state := newChatState(s.address, s.token)
+	state.window = s.window
+	state.open(id)
+	s.tabs = append(s.tabs, &chatTab{id: id, title: s.titleOf(id), state: state})
+	s.activeID = id
+	s.frame()
+}
+
+func (s *shellState) closeTab(id string) {
+	kept := make([]*chatTab, 0, len(s.tabs))
+	for _, tab := range s.tabs {
+		if tab.id != id {
+			kept = append(kept, tab)
+		}
+	}
+	s.tabs = kept
+	if s.activeID == id {
+		s.activeID = ""
+		if len(s.tabs) > 0 {
+			s.activeID = s.tabs[len(s.tabs)-1].id
+		}
+	}
 	s.frame()
 }
 
@@ -124,7 +177,7 @@ func (s *shellState) view(ctx *ui.Context) {
 					return
 				}
 				label := row.label
-				if row.id == s.chat.active {
+				if row.id == s.activeID {
 					label = "• " + label
 				}
 				if ui.Button(ctx, label).Clicked() {
@@ -134,7 +187,28 @@ func (s *shellState) view(ctx *ui.Context) {
 			}).Grow(1)
 		})
 		ui.Column(ctx).Fill().Children(func() {
-			s.chat.view(ctx)
+			if len(s.tabs) > 0 {
+				ui.Row(ctx).Gap(4).Padding(8, 8, 0, 8).Children(func() {
+					for _, tab := range s.tabs {
+						label := tab.title
+						if tab.id == s.activeID {
+							label = "› " + label
+						}
+						if ui.Button(ctx, label).Clicked() {
+							s.activeID = tab.id
+						}
+						if ui.Button(ctx, "关闭 "+tab.title).Clicked() {
+							s.closeTab(tab.id)
+						}
+					}
+				})
+			}
+			active := s.active()
+			if active == nil {
+				ui.Text(ctx, "从左侧选择一个会话").Padding(16).TextColor(t.TextMuted)
+				return
+			}
+			active.view(ctx)
 		})
 	})
 }
