@@ -83,12 +83,9 @@ export function Settings({ openGuide = false }: { openGuide?: boolean } = {}) {
         <div className="settings-content">
           <div className="settings-root">
             <SettingsAdvanced active={active} autoSyncSubscriptions={!openGuide} openGuide={openGuide} />
-            {active === 'settings-overview' && <>
-              <details className="settings-project-status">
-                <summary>项目状态与本地基线</summary>
-                <ProjectGitCard />
-              </details>
-            </>}
+            {active === 'settings-overview' && (
+              <section className="settings-project-status" data-testid="settings-project-status"><ProjectGitCard /></section>
+            )}
             {active === 'settings-archived' && <section id="settings-archived" className="settings-section"><ArchivedConversations /></section>}
           </div>
         </div>

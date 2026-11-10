@@ -17,9 +17,7 @@
 .model-editor-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 8px 2px; border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
 .model-editor-toggle:hover { color: var(--text); }
 .model-editor-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
-.settings-project-status { margin: 18px 0; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
-.settings-project-status > summary { cursor: pointer; font-weight: 600; }
-.settings-project-status > .card { margin-top: 12px; }
+.settings-project-status { margin: 18px 0; }
 .settings-advanced-list { display: flex; flex-direction: column; gap: 10px; }
 .settings-advanced-list .advanced-setting { margin: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-soft); padding: 8px 12px; }
 .advanced-setting-toggle { display: flex; align-items: center; gap: 6px; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--muted); text-align: left; cursor: pointer; }

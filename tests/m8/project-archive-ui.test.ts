@@ -16,18 +16,16 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   const browser = await chromium.launch({ headless: true });
   cleanup.push(() => browser.close());
   const page = await browser.newPage();
-  const openProjectStatus = async () => {
-    await page.getByTestId('settings-page').waitFor();
-    await page.locator('details.settings-project-status').evaluate(element => { (element as HTMLDetailsElement).open = true; });
-  };
   const openSettings = async () => {
     await page.goto(`${daemon.url}/#/settings`);
-    await openProjectStatus();
+    await page.getByTestId('settings-page').waitFor();
   };
 
   await openSettings();
+  // 项目状态是常驻内容，不该藏进折叠区：不点任何折叠控件就必须可见。
   const row = page.getByTestId('git-project-sample');
-  await row.waitFor();
+  await row.waitFor({ state: 'attached' });
+  expect(await row.isVisible(), '项目状态被折叠进 details，不展开就看不见').toBe(true);
   expect(await row.getAttribute('data-archived')).toBe('false');
   expect((await lifecycle()).archived).toBe(false);
   // 归档拒新委派要在一个真实的主管线程上验：同一个请求在归档期间报
