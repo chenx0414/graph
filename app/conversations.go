@@ -44,7 +44,7 @@ func groupRuns(messages []transcriptMessage) []transcriptRun {
 	runs := []transcriptRun{}
 	for _, message := range messages {
 		isTool := message.Role == "tool"
-		if len(runs) > 0 && runs[len(runs)-1].tools == isTool {
+		if isTool && len(runs) > 0 && runs[len(runs)-1].tools {
 			runs[len(runs)-1].messages = append(runs[len(runs)-1].messages, message)
 			continue
 		}
@@ -312,20 +312,18 @@ func (c *chatState) view(ctx *ui.Context) {
 			ui.Text(ctx, c.status).TextColor(t.TextMuted)
 			return
 		}
-		ui.List(ctx, &c.list, len(c.messages), func(index int) {
-			message := c.messages[index]
-			if message.Role == "tool" {
-				name := message.Data.Tool
-				if name == "" {
-					name = "tool"
-				}
-				state := "已完成"
-				if message.State != "done" {
-					state = "进行中"
-				}
-				ui.Text(ctx, "工具 · "+name+" · "+state).FontSize(12).TextColor(t.TextMuted)
+		runs := groupRuns(c.messages)
+		ui.List(ctx, &c.list, len(runs), func(index int) {
+			run := runs[index]
+			if run.tools {
+				ui.Row(ctx).Gap(6).Children(func() {
+					ui.Text(ctx, "工具").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(ctx, runSummary(run)).FontSize(12).TextColor(t.TextMuted)
+					ui.Text(ctx, countLabel(len(run.messages))).FontSize(12).TextColor(t.TextMuted)
+				})
 				return
 			}
+			message := run.messages[0]
 			ui.Column(ctx).Gap(4).Children(func() {
 				author := "agent"
 				if message.Role == "user" {

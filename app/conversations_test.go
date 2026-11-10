@@ -293,3 +293,23 @@ func TestToolMessagesSurviveParsingSoTheViewCanGroupThem(t *testing.T) {
 		t.Fatalf("summary %q", summary)
 	}
 }
+
+func TestSpokenMessagesNeverMergeIntoOneRun(t *testing.T) {
+	messages := []transcriptMessage{
+		{Role: "user", Text: "第一句"},
+		{Role: "assistant", Kind: "chat", Text: "答复"},
+		{Role: "user", Text: "第二句"},
+	}
+	runs := groupRuns(messages)
+	if len(runs) != 3 {
+		t.Fatalf("spoken messages must stay separate rows, got %d runs: %+v", len(runs), runs)
+	}
+	for index, run := range runs {
+		if run.tools || len(run.messages) != 1 || run.messages[0].Text != messages[index].Text {
+			t.Fatalf("run %d = %+v", index, run)
+		}
+	}
+	if len(groupRuns([]transcriptMessage{{Role: "assistant", Text: "只有一条"}})) != 1 {
+		t.Fatal("a single message is one run")
+	}
+}
