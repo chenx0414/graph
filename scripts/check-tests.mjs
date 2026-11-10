@@ -13,28 +13,6 @@ const reportPath = join(root, 'tests/.suite-report.json');
 const historyPath = join(root, 'tests/.quarantine-history.json');
 
 /**
- * Can this machine launch the browser the m8 layer needs?
- *
- * The layer drives a real Chromium, so an environment without window services
- * fails every one of its files with "Process failed to launch!". That is an
- * unavailable environment, not a regression, and a gate that calls it a
- * regression teaches people to ignore the gate. The probe is the same call the
- * tests make, so a skip is based on the real capability and not on a guess
- * about which machine we are on.
- */
-function browserLaunches() {
-  const probe = spawnSync(process.execPath, [
-    '-e', `
-      const { chromium } = require('playwright');
-      chromium.launch({ headless: true })
-        .then(async browser => { await browser.close(); process.stdout.write('ok'); })
-        .catch(error => { process.stdout.write(String(error).split('\\n')[0]); process.exitCode = 1; });
-    `,
-  ], { cwd: root, encoding: 'utf8', timeout: 120_000 });
-  return probe.status === 0 ? undefined : (probe.stdout || probe.stderr || 'launch failed').trim();
-}
-
-/**
  * Can this executor nest the seatbelt profile Graph's own bash tool applies?
  *
  * The deferred-tool cases run real commands through the daemon's bash tool, and
@@ -69,7 +47,7 @@ function dockerDaemon() {
   return (probe.stderr || probe.stdout || 'docker refused').trim().split('\n')[0];
 }
 
-const probes = { chromium: browserLaunches, 'nested-sandbox': sandboxNests, 'docker-daemon': dockerDaemon };
+const probes = { 'nested-sandbox': sandboxNests, 'docker-daemon': dockerDaemon };
 const skippedLayers = [];
 const layerExcludes = [];
 for (const layer of layers) {

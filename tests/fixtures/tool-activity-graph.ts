@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
-import type { Page } from 'playwright';
 import { launchCli } from '../helpers/cli-daemon.ts';
 import { desktopBinary } from '../helpers/agent-desktop.ts';
 import { openaiServer, type ResponsePlan } from './openai-server.ts';
@@ -161,27 +160,4 @@ export async function launchToolActivityGraph() {
       await rm(root, { recursive: true, force: true });
     },
   };
-}
-
-/**
- * Open the built console on one conversation and unfold the turn until its tool
- * rows are on screen. The page is the product's own route, not a harness shim.
- */
-export async function openConsole(page: Page, url: string, conversationId: string): Promise<void> {
-  await page.goto(`${url}/#/conversations/${conversationId}`);
-  await page.waitForURL(`${url}/#/conversations/${conversationId}`);
-  const conversation = page.locator('[data-testid="conversation"]:visible');
-  await conversation.getByTestId('chat-input').waitFor();
-  const turn = conversation.getByTestId('collapsed-turn').first();
-  await turn.waitFor();
-  if (await turn.getAttribute('data-open') !== 'true') {
-    await turn.getByRole('button', { name: '展开这一轮的思考与工具调用' }).click();
-    await expect.poll(() => turn.getAttribute('data-open')).toBe('true');
-  }
-  const group = conversation.getByTestId('tool-activity-group').first();
-  await group.waitFor();
-  if (await group.getAttribute('data-open') !== 'true') {
-    await group.getByRole('button', { name: '展开工具活动' }).click();
-    await expect.poll(() => group.getAttribute('data-open')).toBe('true');
-  }
 }

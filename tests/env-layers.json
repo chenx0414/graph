@@ -2,14 +2,6 @@
   "schemaVersion": 1,
   "layers": [
     {
-      "capability": "window-services",
-      "probe": "chromium",
-      "files": [
-        "tests/e2e/composer-interaction.test.ts",
-        "tests/e2e/composer-queue.test.ts"
-      ]
-    },
-    {
       "capability": "nested-sandbox",
       "probe": "nested-sandbox",
       "files": [
