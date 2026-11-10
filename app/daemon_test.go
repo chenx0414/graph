@@ -1,9 +1,7 @@
 package main
 
 import (
-	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -31,41 +29,6 @@ func TestDaemonRestartRefusesADaemonItDoesNotOwn(t *testing.T) {
 	}
 	if message == "" {
 		t.Fatal("the caller needs a reason to show")
-	}
-}
-
-func TestBridgeReportsWhetherTheKeyReachedTheDaemon(t *testing.T) {
-	stateDir := t.TempDir()
-	calls := 0
-	api := &shellAPI{
-		secrets: secretsPath(stateDir),
-		apply:   func() (bool, string) { calls++; return true, "" },
-	}
-	server := httptest.NewServer(api.handler("token"))
-	defer server.Close()
-
-	status, saved := call(t, server, "token", "/save-secret", `{"ref":"GRAPH_KEY","value":"sk-1"}`)
-	if status != 200 || saved["stored"] != true || saved["applied"] != true {
-		t.Fatalf("save answered %d %v", status, saved)
-	}
-	if calls != 1 {
-		t.Fatalf("the apply hook ran %d times", calls)
-	}
-	if values := secretValues(filepath.Join(stateDir, "secrets.json")); values["GRAPH_KEY"] != "sk-1" {
-		t.Fatalf("value %q", values["GRAPH_KEY"])
-	}
-}
-
-func TestBridgeSaysWhyAKeyIsNotAppliedYet(t *testing.T) {
-	api := &shellAPI{
-		secrets: secretsPath(t.TempDir()),
-		apply:   func() (bool, string) { return false, "restart Graph" },
-	}
-	server := httptest.NewServer(api.handler("token"))
-	defer server.Close()
-	_, saved := call(t, server, "token", "/save-secret", `{"ref":"GRAPH_KEY","value":"sk-1"}`)
-	if saved["stored"] != true || saved["applied"] != false || saved["message"] != "restart Graph" {
-		t.Fatalf("save answered %v", saved)
 	}
 }
 

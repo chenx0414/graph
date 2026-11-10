@@ -2,7 +2,6 @@ package main
 
 import (
 	_ "embed"
-	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,9 +11,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
-
-//go:embed preload.js
-var preloadSource string
 
 type daemonController interface {
 	start() error
@@ -26,10 +22,7 @@ type shell struct {
 	chat       *shellState
 	native     *mygo.Window
 	paths      Paths
-	window     *mygo.Window
-	bridge     *bridge
 	daemon     daemonController
-	pending    string
 	console    string
 	rsiTried   string
 	restarting atomic.Bool
@@ -50,80 +43,6 @@ func (s *shell) watchTasks() {
 			notify(decided.Title, decided.Body)
 		}
 	}
-}
-
-func resourceDirectory(graphHome, kind string) (string, error) {
-	switch kind {
-	case "skills", "mcp", "pi-extensions", "agent-md":
-		return filepath.Join(graphHome, "capabilities", kind), nil
-	case "prompts":
-		return filepath.Join(graphHome, "prompts"), nil
-	}
-	return "", errors.New("unknown resource library")
-}
-
-func (s *shell) api() *shellAPI {
-	return &shellAPI{
-		secrets: secretsPath(s.paths.StateDir),
-		pick: func() (string, error) {
-			chosen, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: "选择项目目录", Directory: true, CreateDirectories: true})
-			if err != nil || len(chosen) == 0 {
-				return "", err
-			}
-			return chosen[0], nil
-		},
-		open: func(kind string) (string, error) {
-			directory, err := resourceDirectory(s.paths.GraphHome, kind)
-			if err != nil {
-				return "", err
-			}
-			if err := os.MkdirAll(directory, 0o755); err != nil {
-				return directory, err
-			}
-			return directory, mygo.Shell.OpenPath(directory)
-		},
-		relaunch: func() string {
-			mygo.App.Relaunch()
-			return s.console
-		},
-		apply: func() (bool, string) {
-			return s.daemon.restart()
-		},
-	}
-}
-
-func (s *shell) open(route string) {
-	if s.console == "" {
-		s.pending = route
-		return
-	}
-	s.openConsole(route)
-}
-
-func (s *shell) preloadScript() string {
-	if s.bridge == nil {
-		return ""
-	}
-	return preloadScript(preloadSource, s.bridge.token, s.bridge.address)
-}
-
-func (s *shell) openConsole(route string) {
-	if s.window == nil {
-		s.window = mygo.NewWindow(mygo.WindowOptions{
-			Title:     "Graph · 控制台",
-			Width:     1200,
-			Height:    820,
-			MinWidth:  860,
-			MinHeight: 600,
-			StateKey:  "console",
-			URL:       s.console + route,
-			Page:      mygo.PageOptions{PreloadScript: s.preloadScript(), PreloadAllFrames: true},
-		})
-		return
-	}
-	s.window.Page().LoadURL(s.console + route)
-	s.window.Show()
-	s.window.Focus()
 }
 
 func (s *shell) ensureDaemon() string {
@@ -170,13 +89,7 @@ func (s *shell) openNative() {
 
 func (s *shell) createTray() {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
-		{ID: "native", Label: "打开 Graph（原生）", Click: func(*mygo.MenuItem, *mygo.Window) { s.openNative() }},
-		{ID: "outside", Label: "在浏览器中打开", Click: func(*mygo.MenuItem, *mygo.Window) {
-			if s.console != "" {
-				_ = mygo.Shell.OpenExternal(s.console)
-			}
-		}},
-		{ID: "console-window", Label: "打开控制台（web）", Click: func(*mygo.MenuItem, *mygo.Window) { s.open("") }},
+		{ID: "native", Label: "打开 Graph", Click: func(*mygo.MenuItem, *mygo.Window) { s.openNative() }},
 		mygo.Separator(),
 		{ID: "quit", Label: "退出 Graph", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 	})
@@ -199,26 +112,12 @@ func main() {
 	}
 	paths := DefaultPaths()
 	s := &shell{paths: paths, daemon: newDaemon(paths)}
-	mygo.App.OnOpenURL(func(raw string) {
-		if route, ok := RouteOf(raw); ok {
-			s.open(route)
-		}
-	})
 	mygo.App.WhenReady(func() {
 		s.console = s.ensureDaemon()
 		if s.console == "" {
 			log.Fatal("[app] the daemon did not come up")
 		}
-		started, err := startBridge(s.api(), newBridgeToken())
-		if err != nil {
-			log.Printf("[app] bridge: %v", err)
-		}
-		s.bridge = started
 		s.openNative()
-		if s.pending != "" {
-			s.openConsole(s.pending)
-			s.pending = ""
-		}
 		s.createTray()
 		go s.watchTasks()
 		go s.watchRsi()

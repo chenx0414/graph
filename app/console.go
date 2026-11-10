@@ -112,23 +112,3 @@ func (paths Paths) DaemonArgs() []string {
 	args = append(args, "--execute", "--dynamic", "--application-root", paths.SourceRoot)
 	return args
 }
-
-func RouteOf(raw string) (string, bool) {
-	const scheme = "graph://"
-	if !strings.HasPrefix(raw, scheme) {
-		return "", false
-	}
-	rest := strings.TrimPrefix(raw, scheme)
-	rest = strings.TrimSuffix(rest, "/")
-	if rest == "" || rest == "open" {
-		return "#/", true
-	}
-	if strings.HasPrefix(rest, "conversations/") {
-		id := strings.TrimPrefix(rest, "conversations/")
-		if id == "" {
-			return "", false
-		}
-		return "#/conversations/" + id, true
-	}
-	return "", false
-}

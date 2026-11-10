@@ -121,7 +121,10 @@ func (s *shell) pollRsi() {
 	if !confirmed {
 		notify("RSI 重载未能确认", "新的代码已在跑，但握手没有回执，宿主不会自动唤醒主控。")
 	}
-	if s.window != nil {
-		_ = s.window.Page().LoadURL(s.console)
+	if s.chat != nil {
+		for _, tab := range s.chat.tabs {
+			tab.state.refresh()
+		}
+		s.chat.frame()
 	}
 }

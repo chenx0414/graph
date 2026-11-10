@@ -90,22 +90,3 @@ func TestDaemonArgsCarryThePathsTheConsoleNeeds(t *testing.T) {
 		t.Fatal("an existing config file must be passed to the daemon")
 	}
 }
-
-func TestRouteOfTurnsDeepLinksIntoConsoleRoutes(t *testing.T) {
-	cases := map[string]string{
-		"graph://conversations/abc-123":  "#/conversations/abc-123",
-		"graph://conversations/abc-123/": "#/conversations/abc-123",
-		"graph://open":                   "#/",
-		"graph://":                       "#/",
-	}
-	for raw, want := range cases {
-		if got, ok := RouteOf(raw); !ok || got != want {
-			t.Fatalf("%q -> %q (ok=%v), want %q", raw, got, ok, want)
-		}
-	}
-	for _, raw := range []string{"graph://conversations/", "graph://settings", "https://example.com", ""} {
-		if route, ok := RouteOf(raw); ok {
-			t.Fatalf("%q must not map to a route, got %q", raw, route)
-		}
-	}
-}
