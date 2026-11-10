@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -14,10 +18,14 @@ type conversationGroup struct {
 }
 
 func groupByProject(list []conversationSummary) []conversationGroup {
+	return groupByProjectIncludingArchived(list, false)
+}
+
+func groupByProjectIncludingArchived(list []conversationSummary, includeArchived bool) []conversationGroup {
 	groups := []conversationGroup{}
 	at := map[string]int{}
 	for _, conversation := range list {
-		if conversation.ArchivedAtPresent() {
+		if conversation.ArchivedAtPresent() && !includeArchived {
 			continue
 		}
 		project := strings.TrimSpace(conversation.ProjectID)
@@ -35,9 +43,10 @@ func groupByProject(list []conversationSummary) []conversationGroup {
 }
 
 type sidebarRow struct {
-	project string
-	label   string
-	id      string
+	project  string
+	label    string
+	id       string
+	archived bool
 }
 
 func sidebarRows(groups []conversationGroup) []sidebarRow {
@@ -45,6 +54,7 @@ func sidebarRows(groups []conversationGroup) []sidebarRow {
 	for _, group := range groups {
 		rows = append(rows, sidebarRow{project: group.project})
 		for _, conversation := range group.items {
+			archived := conversation.ArchivedAtPresent()
 			label := strings.TrimSpace(conversation.Title)
 			if label == "" {
 				label = "（无标题）"
@@ -52,7 +62,10 @@ func sidebarRows(groups []conversationGroup) []sidebarRow {
 			if conversation.OpenQuestions > 0 {
 				label += " · " + strconv.Itoa(conversation.OpenQuestions) + " 待答"
 			}
-			rows = append(rows, sidebarRow{label: label, id: conversation.ID})
+			if archived {
+				label += "（已归档）"
+			}
+			rows = append(rows, sidebarRow{label: label, id: conversation.ID, archived: archived})
 		}
 	}
 	return rows
@@ -65,18 +78,22 @@ type chatTab struct {
 }
 
 type shellState struct {
-	address   string
-	token     string
-	status    string
-	section   string
-	activeID  string
-	settings  *settingsState
-	usage     *usageState
-	resources *resourceState
-	rows      []sidebarRow
-	tabs      []*chatTab
-	window    *mygo.Window
-	list      ui.ListState
+	address      string
+	token        string
+	status       string
+	section      string
+	newText      string
+	newProject   string
+	creating     bool
+	showArchived bool
+	activeID     string
+	settings     *settingsState
+	usage        *usageState
+	resources    *resourceState
+	rows         []sidebarRow
+	tabs         []*chatTab
+	window       *mygo.Window
+	list         ui.ListState
 }
 
 func newShellState(address, token string) *shellState {
@@ -92,6 +109,81 @@ func (s *shellState) active() *chatState {
 	return nil
 }
 
+func (s *shellState) postJSON(path string, body any) error {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+path, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	if token := strings.TrimSpace(s.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return errStatus(response.Status)
+	}
+	return nil
+}
+
+type errStatus string
+
+func (e errStatus) Error() string { return "服务端拒绝：" + string(e) }
+
+func requestID(prefix string) string {
+	return prefix + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+func (s *shellState) createConversation() {
+	body := map[string]any{"requestId": requestID("native-new")}
+	if text := strings.TrimSpace(s.newText); text != "" {
+		body["text"] = text
+	}
+	if project := strings.TrimSpace(s.newProject); project != "" {
+		body["projectId"] = project
+	}
+	if err := s.postJSON("/api/conversations", body); err != nil {
+		s.status = "新建会话失败：" + err.Error()
+		s.frame()
+		return
+	}
+	s.creating = false
+	s.newText = ""
+	s.newProject = ""
+	s.status = ""
+	s.load()
+	s.frame()
+}
+
+func (s *shellState) archiveConversation(id string) {
+	if err := s.postJSON("/api/conversations/"+id+"/archive", map[string]any{"requestId": requestID("native-archive")}); err != nil {
+		s.status = "归档失败：" + err.Error()
+		s.frame()
+		return
+	}
+	s.closeTab(id)
+	s.load()
+	s.frame()
+}
+
+func (s *shellState) unarchiveConversation(id string) {
+	if err := s.postJSON("/api/conversations/"+id+"/unarchive", map[string]any{"requestId": requestID("native-unarchive")}); err != nil {
+		s.status = "取消归档失败：" + err.Error()
+		s.frame()
+		return
+	}
+	s.load()
+	s.frame()
+}
+
 func (s *shellState) load() {
 	payload, err := daemonGet(s.address, s.token, "/api/conversations")
 	if err != nil {
@@ -103,7 +195,7 @@ func (s *shellState) load() {
 		s.status = "会话列表不是预期的 JSON：" + err.Error()
 		return
 	}
-	s.rows = sidebarRows(groupByProject(list))
+	s.rows = sidebarRows(groupByProjectIncludingArchived(list, s.showArchived))
 	if len(s.rows) == 0 {
 		s.status = "还没有会话。"
 		return
@@ -115,6 +207,19 @@ func (s *shellState) load() {
 			return
 		}
 	}
+}
+
+func (s *shellState) projectNames() []string {
+	names := []string{}
+	seen := map[string]bool{}
+	for _, row := range s.rows {
+		if row.id != "" || row.project == "" || row.project == "未分组" || seen[row.project] {
+			continue
+		}
+		seen[row.project] = true
+		names = append(names, row.project)
+	}
+	return names
 }
 
 func (s *shellState) openSettings() {
@@ -215,6 +320,50 @@ func (s *shellState) view(ctx *ui.Context) {
 					go s.openResources()
 				}
 			})
+			ui.Row(ctx).Gap(4).Children(func() {
+				if ui.Button(ctx, "新建会话").Clicked() {
+					s.creating = true
+					s.section = "chat"
+				}
+				label := "显示已归档"
+				if s.showArchived {
+					label = "隐藏已归档"
+				}
+				if ui.Button(ctx, label).Clicked() {
+					s.showArchived = !s.showArchived
+					s.load()
+				}
+			})
+			if s.creating {
+				ui.Column(ctx).Gap(4).Children(func() {
+					ui.Row(ctx).Gap(4).Children(func() {
+						projects := s.projectNames()
+						for _, project := range projects {
+							label := project
+							if s.newProject == project {
+								label = "• " + label
+							}
+							if ui.Button(ctx, label).Clicked() {
+								if s.newProject == project {
+									s.newProject = ""
+								} else {
+									s.newProject = project
+								}
+							}
+						}
+					})
+					ui.TextInput(ctx, &s.newText).Placeholder("第一条消息（可留空）").Label("新会话内容")
+					ui.Row(ctx).Gap(4).Children(func() {
+						if ui.PrimaryButton(ctx, "创建").Clicked() {
+							go s.createConversation()
+						}
+						if ui.Button(ctx, "取消创建").Clicked() {
+							s.creating = false
+							s.newText = ""
+						}
+					})
+				})
+			}
 			if s.status != "" {
 				ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
 				return
@@ -231,6 +380,10 @@ func (s *shellState) view(ctx *ui.Context) {
 				}
 				if ui.Button(ctx, label).Clicked() {
 					target := row.id
+					if row.archived {
+						go s.unarchiveConversation(target)
+						return
+					}
 					go s.selectConversation(target)
 				}
 			}).Grow(1)
@@ -272,6 +425,9 @@ func (s *shellState) view(ctx *ui.Context) {
 						}
 						if ui.Button(ctx, "关闭 "+tab.title).Clicked() {
 							s.closeTab(tab.id)
+						}
+						if tab.id == s.activeID && ui.Button(ctx, "归档 "+tab.title).Clicked() {
+							go s.archiveConversation(tab.id)
 						}
 					}
 				})

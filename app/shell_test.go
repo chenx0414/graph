@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,5 +143,114 @@ func TestTabsKeepBothConversationsOpen(t *testing.T) {
 	state.closeTab("c1")
 	if len(state.tabs) != 0 || state.activeID != "" {
 		t.Fatalf("closing the last tab leaves no active conversation, tabs %d active %q", len(state.tabs), state.activeID)
+	}
+}
+
+func shellServer(t *testing.T, posts map[string]string) *httptest.Server {
+	t.Helper()
+	archived := map[string]bool{"c2": true}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			payload := make([]byte, 4096)
+			read, _ := r.Body.Read(payload)
+			posts[r.URL.Path] = string(payload[:read])
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/archive"):
+				archived[strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/conversations/"), "/archive")] = true
+			case strings.HasSuffix(r.URL.Path, "/unarchive"):
+				delete(archived, strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/conversations/"), "/unarchive"))
+			}
+			w.Write([]byte(`{}`))
+			return
+		}
+		if r.URL.Path == "/api/conversations" {
+			rows := []string{`{"id":"c1","title":"甲","projectId":"13-Graph","archivedAt":null}`}
+			if archived["c1"] {
+				rows[0] = `{"id":"c1","title":"甲","projectId":"13-Graph","archivedAt":1793178492000}`
+			}
+			if archived["c2"] {
+				rows = append(rows, `{"id":"c2","title":"旧会话","projectId":"13-Graph","archivedAt":1793178492555}`)
+			}
+			w.Write([]byte("[" + strings.Join(rows, ",") + "]"))
+			return
+		}
+		if r.URL.Path == "/api/conversations/c1" {
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"甲的回复"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+}
+
+func TestShellCreatesAConversationInAChosenProject(t *testing.T) {
+	posts := map[string]string{}
+	server := shellServer(t, posts)
+	defer server.Close()
+
+	state := newShellState(server.URL, "tok")
+	state.load()
+	tester := ui.NewTester(state.view, 1000, 700)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if tester.HasText("第一条消息（可留空）") {
+		t.Fatalf("the create form must stay closed until asked, texts %q", tester.Texts())
+	}
+	if err := tester.Click("新建会话"); err != nil {
+		t.Fatalf("click 新建会话: %v", err)
+	}
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("创建") || !tester.HasText("13-Graph") {
+		t.Fatalf("the create form must offer the project and a create button, texts %q", tester.Texts())
+	}
+	if err := tester.Click("13-Graph"); err != nil {
+		t.Fatalf("click the project: %v", err)
+	}
+	state.newText = "帮我看看这个仓库"
+	state.createConversation()
+	posted := posts["/api/conversations"]
+	for _, wanted := range []string{`"projectId":"13-Graph"`, `"text":"帮我看看这个仓库"`, `"requestId"`} {
+		if !contains(posted, wanted) {
+			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
+		}
+	}
+	if state.creating || state.newText != "" {
+		t.Fatalf("creating must reset after the call, creating %v text %q", state.creating, state.newText)
+	}
+}
+
+func TestShellArchivesAndRestoresConversations(t *testing.T) {
+	posts := map[string]string{}
+	server := shellServer(t, posts)
+	defer server.Close()
+
+	state := newShellState(server.URL, "tok")
+	state.load()
+	if len(state.tabs) != 1 || state.activeID != "c1" {
+		t.Fatalf("tabs %d active %q", len(state.tabs), state.activeID)
+	}
+	state.archiveConversation("c1")
+	if _, ok := posts["/api/conversations/c1/archive"]; !ok {
+		t.Fatalf("归档必须打 archive 路由，posts %v", posts)
+	}
+	if len(state.tabs) != 0 || state.activeID != "" {
+		t.Fatalf("归档后必须关掉那个标签，tabs %d active %q", len(state.tabs), state.activeID)
+	}
+	state.showArchived = true
+	state.load()
+	archived := ""
+	for _, row := range state.rows {
+		if row.id == "c2" {
+			archived = row.label
+		}
+	}
+	if archived != "旧会话（已归档）" {
+		t.Fatalf("已归档的会话必须标出来，label %q", archived)
+	}
+	state.unarchiveConversation("c2")
+	if _, ok := posts["/api/conversations/c2/unarchive"]; !ok {
+		t.Fatalf("取消归档必须打 unarchive 路由，posts %v", posts)
 	}
 }
