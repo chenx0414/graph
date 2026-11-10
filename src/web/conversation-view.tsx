@@ -61,7 +61,9 @@ return (
         <div className="conversation-heading">
           <h1 data-testid="conversation-title">{view.title}</h1>
           <div className="conversation-meta" title={`已计量 ${formatTokens(view.usage.used)} tokens · ${costText(view.cost)}`}>
-            {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span> : <span data-testid="conversation-project">未绑定项目</span>}
+            {view.projectId ? <span data-testid="conversation-project">项目 {view.projectId}</span>
+              : view.role === 'global' ? <span data-testid="conversation-project">APP 源码</span>
+                : <span data-testid="conversation-project">未绑定项目</span>}
             <span>·</span>
             <span data-testid="master-status" className="master-work-status">{busy && !paused && <span className="spinner" aria-hidden="true" />}{paused ? '已暂停' : busy ? '正在处理…' : view.master ? NODE_LABEL[view.master.status] ?? view.master.status : '未配置'}</span>
             <span>·</span>

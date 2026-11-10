@@ -29,7 +29,7 @@ return <aside
           <div className="drawer-inner">
             {drawerSection === 'draft' && <div className="drawer-head"><div className="grow"><h2>{`草稿 v${proposal?.version ?? ""}`}</h2></div></div>}
 
-            {drawerOpen && !view.projectId && deferredInitPanelIds.includes('bind-project') && (
+            {drawerOpen && !view.projectId && view.role !== 'global' && deferredInitPanelIds.includes('bind-project') && (
               <section className="drawer-section drawer-bind-card" data-testid="bind-project" data-panel="bind-project">
                 <div className="drawer-section-head">
                   <h3>绑定项目</h3>
@@ -42,6 +42,16 @@ return <aside
                   </select>
                   <Button size="sm" data-testid="bind-submit" disabled={!bindId} onClick={() => void act(() => api(`/api/conversations/${id}/bind`, { method: 'POST', body: JSON.stringify({ projectId: bindId, requestId: crypto.randomUUID() }) }))}>绑定</Button>
                 </div>
+              </section>
+            )}
+
+            {drawerOpen && view.role === 'global' && (
+              <section className="drawer-section drawer-bind-card" data-testid="bound-source">
+                <div className="drawer-section-head">
+                  <h3>固定绑定</h3>
+                </div>
+                <p className="muted">主 Agent 的读写范围固定在这个仓库，不能改绑其他项目。</p>
+                <code className="mono" data-testid="bound-source-root">{view.sourceRoot ?? '未知'}</code>
               </section>
             )}
 

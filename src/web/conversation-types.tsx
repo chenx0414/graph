@@ -128,6 +128,7 @@ export type AnchorQuestion = { id: string; nodeId: string; operationId: string |
 
 export type ConversationView = {
   role?: 'global' | 'project' | 'history' | 'legacy';
+  sourceRoot?: string | null;
   eventCursor?: number;
   continuations?: { operationId: string; resumedOperationId: string | null }[];
   id: string; title: string; projectId: string | null; projectRoot: string | null; workspaceProjectId: string; anchorTaskId: string;

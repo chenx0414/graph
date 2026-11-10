@@ -293,6 +293,7 @@ test('the drawer opens inside the window by taking its width from the page', asy
   expect(await corner()).toEqual(resting);
 }, 240_000);
 
+
 test('the task graph page shows the graph itself, not the cost, revision and connection chips', async () => {
   const { page, server, view, propose, confirm } = await consoleWith('graph-header');
   await propose(workerCheckProposal('只有一个任务图'), 'draft');
