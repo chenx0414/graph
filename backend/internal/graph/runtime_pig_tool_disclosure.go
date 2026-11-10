@@ -29,7 +29,7 @@ type toolDisclosureOptions struct {
 }
 
 var toolDisclosureOnDemandDefaults = []string{
-	"get_agent_combination", "get_resource", "list_agent_combinations", "read_system_capabilities", "search_resources", "inspect_graph_system",
+	"get_agent_combination", "get_resource", "list_agent_combinations", "search_resources", "inspect_graph_system",
 	"agent_browser", "agent_browser_web_search",
 }
 
@@ -245,7 +245,7 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 	sort.Strings(names)
 	return pigkernel.ToolSpec{
 		Name: "tool_search",
-		Description: fmt.Sprintf("Discover the %d on-demand tools that are bound but not listed in your tools. Search by keyword `query` (BM25 over name, description and parameters; Chinese supported) and/or `regex`; the result carries each hit's full parameter schema. Then call `tool_invoke` with the exact `name` and `arguments` to use one. Direct tools cover the common work; search only when you need an integration tool you cannot see.", len(names)),
+		Description: fmt.Sprintf("Discover the %d bound tools that are not listed in your tools: search by keyword (Chinese supported) or `regex`; each hit carries its full parameter schema. Run one with `tool_invoke`.", len(names)),
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -279,7 +279,7 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 func toolInvokeSpec(deferred map[string]pigkernel.ToolSpec) pigkernel.ToolSpec {
 	return pigkernel.ToolSpec{
 		Name:        "tool_invoke",
-		Description: "Run one on-demand tool returned by `tool_search` without loading its schema: pass the exact `name` and an `arguments` object that follows the schema the search returned.",
+		Description: "Run one tool that `tool_search` returned, without loading its schema: pass the exact `name` and its `arguments` object.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
