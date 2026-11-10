@@ -119,6 +119,7 @@ type chatState struct {
 	questions      []openQuestion
 	artifactsOpen  bool
 	graphOpen      bool
+	paused         bool
 	visible        int
 	loadedOlderFor int
 	expanded       map[string]bool

@@ -45,6 +45,7 @@ func (q openQuestion) open() bool {
 type conversationBody struct {
 	Messages  []transcriptMessage `json:"messages"`
 	Questions []openQuestion      `json:"questions"`
+	Paused    bool                `json:"paused"`
 }
 
 func (c conversationSummary) ArchivedAtPresent() bool { return c.ArchivedAt != nil }
@@ -206,6 +207,47 @@ func (c *chatState) cancelQueued(messageID string) {
 	c.status = "已撤销排队消息"
 }
 
+func (c *chatState) setPaused(paused bool) {
+	if c.active == "" {
+		return
+	}
+	action := "pause"
+	if !paused {
+		action = "resume"
+	}
+	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-" + action)})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/"+action, bytes.NewReader(body))
+	if err != nil {
+		c.status = "操作失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "操作失败：" + err.Error()
+		c.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "操作被拒绝：" + response.Status
+		c.frame()
+		return
+	}
+	c.paused = paused
+	if paused {
+		c.status = "已暂停：这一轮与队列都会停下，点「继续」接着跑"
+	} else {
+		c.status = "已继续"
+	}
+	c.frame()
+}
+
 func (c *chatState) busy() bool {
 	for _, message := range c.messages {
 		if messageStreaming(message) {
@@ -293,6 +335,7 @@ func (c *chatState) open(id string) {
 	c.active = id
 	c.questions = nil
 	if body, err := parseConversationBody(payload); err == nil {
+		c.paused = body.Paused
 		for _, question := range body.Questions {
 			if question.open() {
 				c.questions = append(c.questions, question)
@@ -447,6 +490,15 @@ func (c *chatState) view(ctx *ui.Context) {
 			}
 			if c.busy() && ui.Button(ctx, "打断这一轮").Clicked() {
 				go c.interrupt()
+			}
+			if c.paused {
+				if ui.Button(ctx, "继续").Clicked() {
+					go c.setPaused(false)
+				}
+				return
+			}
+			if ui.Button(ctx, "暂停").Clicked() {
+				go c.setPaused(true)
 			}
 		})
 	})
