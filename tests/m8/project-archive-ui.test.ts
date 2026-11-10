@@ -33,7 +33,9 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   expect(await page.locator('.settings-project-status .card-sub').count(), '项目卡不该再有副标题说明').toBe(0);
   expect(await row.innerText(), '准备完毕的项目应显示已准备').toContain('已准备');
   expect(await page.getByTestId('git-prepare-sample').count(), '已准备好的项目不该再显示准备 Git 按钮').toBe(0);
-  expect(await page.locator('.settings-project-status .card-head').count(), '项目卡不该再有标题行').toBe(0);
+  const cardHead = page.locator('.settings-project-status .card-head');
+  expect(await cardHead.count(), '项目区需要一个标题行').toBe(1);
+  expect((await cardHead.innerText()).trim(), '标题只留“项目”两个字').toBe('项目');
   const settings = await (await api.get('/api/settings')).json() as { projects: { id: string; preparation?: { baselineSha?: string } }[] };
   const baselineSha = settings.projects.find(project => project.id === 'sample')?.preparation?.baselineSha ?? '';
   expect(baselineSha.length).toBeGreaterThan(0);

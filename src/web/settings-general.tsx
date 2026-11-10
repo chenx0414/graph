@@ -92,7 +92,7 @@ export function ProjectGitCard() {
   const active = (projects ?? []).filter(project => project.archivedAt == null);
   const archived = (projects ?? []).filter(project => project.archivedAt != null);
   return (
-    <Card>
+    <Card title="项目">
       {projects === null && <Spinner />}
       {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
       {active.map(project => row(project, false))}
