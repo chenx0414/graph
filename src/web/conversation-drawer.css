@@ -82,10 +82,6 @@
 
 /* Narrow layouts turn the drawer into a full-height overlay (see styles.css);
  * the graph page must not keep the desktop width there. */
-@media (max-width: 860px) {
-  .graph-board-legend { left: 8px; right: 8px; transform: none; max-width: none; border-radius: 12px; }
-}
-
 /* --- Batch C containment: the prominent drawer entry, the drawer's draft
  * card / mode switch / task navigation, and the standalone question block that
  * is the only non-transcript element left in the chat column. --- */

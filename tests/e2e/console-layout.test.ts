@@ -69,6 +69,31 @@ test('the sidebar carries no brand block and still clears the window controls', 
   expect(Math.round(first.y), 'the rail moved up into the window controls').toBeGreaterThanOrEqual(44);
 });
 
+test('a narrow window keeps the desktop layout instead of switching to a phone one', async () => {
+  const { daemon, page } = await open();
+  await page.setViewportSize({ width: 430, height: 800 });
+  await page.goto(`${daemon.url}/#/insights`);
+  await page.getByTestId('insights-page').waitFor();
+
+  // The console is a desktop app: no responsive layer may reflow it into a phone.
+  const sheetRules = await page.evaluate(() => {
+    const seen: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules ?? [])) {
+        const media = rule as CSSMediaRule;
+        if (media.conditionText) seen.push(media.conditionText);
+      }
+    }
+    return seen;
+  });
+  expect(sheetRules.filter(text => /max-width/i.test(text)), 'a mobile breakpoint came back').toEqual([]);
+
+  const sidebar = await box(page, '.sidebar');
+  const content = await box(page, '.content');
+  expect(sidebar.width, 'the sidebar collapsed into a phone header').toBeGreaterThan(200);
+  expect(Math.round(content.x), 'the page stopped being a column beside the sidebar').toBeGreaterThanOrEqual(Math.round(sidebar.x + sidebar.width) - 1);
+});
+
 test('the rail and the page never overlap, and the page keeps its width', async () => {
   const { daemon, page } = await open();
   await page.goto(`${daemon.url}/#/insights`);
