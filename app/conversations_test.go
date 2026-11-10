@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -400,5 +401,95 @@ func TestNativeWindowShowsTheQuestionAndAnswersIt(t *testing.T) {
 	state.answer(state.questions[0], "B 路线")
 	if !contains(answered, "q1") || !contains(answered, "B 路线") || !contains(answered, "requestId") {
 		t.Fatalf("answer body %q", answered)
+	}
+}
+
+func TestArtifactsListAndPreview(t *testing.T) {
+	listed := `{"artifacts":[
+		{"artifactId":"a1","taskId":"t1","namespace":"plans","name":"shape","version":46,"size":36804,"mediaType":"application/json"},
+		{"artifactId":"a2","taskId":"t1","namespace":"reviews","name":"pass","version":2,"size":900,"mediaType":"text/markdown"}
+	]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations/c1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"做完了"}]}`))
+		case "/api/conversations/c1/artifacts":
+			w.Write([]byte(listed))
+		case "/api/tasks/t1/artifacts/a1/46/content":
+			w.Write([]byte(`{"shape":"parallel"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if len(state.artifacts) != 2 {
+		t.Fatalf("artifacts %+v", state.artifacts)
+	}
+	if artifactLabel(state.artifacts[0]) != "plans/shape · v46 · 35.9 KB" {
+		t.Fatalf("label %q", artifactLabel(state.artifacts[0]))
+	}
+	tester := ui.NewTester(state.view, 760, 620)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("产物 · 2 件") {
+		t.Fatalf("the artifacts toggle must show the count, texts %q", tester.Texts())
+	}
+	if tester.HasText("plans/shape · v46 · 35.9 KB") {
+		t.Fatalf("the list must stay collapsed until asked, texts %q", tester.Texts())
+	}
+	if err := tester.Click("产物 · 2 件"); err != nil {
+		t.Fatalf("click the artifacts toggle: %v", err)
+	}
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("plans/shape · v46 · 35.9 KB") || !tester.HasText("reviews/pass · v2 · 900 B") {
+		t.Fatalf("the expanded list must show both artifacts, texts %q", tester.Texts())
+	}
+	if err := tester.Click("plans/shape · v46 · 35.9 KB"); err != nil {
+		t.Fatalf("click an artifact: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for state.preview == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("产物预览 · plans/shape · v46 · 35.9 KB") || !tester.HasText(`{"shape":"parallel"}`) {
+		t.Fatalf("the preview must show the content, texts %q", tester.Texts())
+	}
+}
+
+func TestArtifactListStopsAtTheLimit(t *testing.T) {
+	listed := `{"artifacts":[`
+	for index := 0; index < 12; index++ {
+		if index > 0 {
+			listed += ","
+		}
+		listed += `{"artifactId":"a` + strconv.Itoa(index) + `","taskId":"t1","namespace":"plans","name":"p` + strconv.Itoa(index) + `","version":1,"size":100}`
+	}
+	listed += `]}`
+	rows, err := parseArtifacts([]byte(listed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	state.artifacts = rows
+	state.artifactsOpen = true
+	tester := ui.NewTester(state.view, 760, 900)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("还有 4 件未列出") {
+		t.Fatalf("the list must stop at %d and count the rest, texts %q", artifactListLimit, tester.Texts())
+	}
+	if tester.HasText("plans/p11 · v1 · 100 B") {
+		t.Fatalf("the ninth artifact must stay out of the list, texts %q", tester.Texts())
 	}
 }

@@ -101,6 +101,69 @@ func (q openQuestion) open() bool {
 	return q.Status != "resolved" && (q.Suspended || q.Status == "open" || q.Status == "waiting")
 }
 
+type artifactRow struct {
+	artifactID string
+	taskID     string
+	namespace  string
+	name       string
+	title      string
+	mediaType  string
+	version    int
+	size       int64
+}
+
+type artifactListPayload struct {
+	Artifacts []struct {
+		ArtifactID string `json:"artifactId"`
+		TaskID     string `json:"taskId"`
+		Namespace  string `json:"namespace"`
+		Name       string `json:"name"`
+		Title      string `json:"title"`
+		MediaType  string `json:"mediaType"`
+		Version    int    `json:"version"`
+		Size       int64  `json:"size"`
+	} `json:"artifacts"`
+}
+
+func parseArtifacts(payload []byte) ([]artifactRow, error) {
+	var listed artifactListPayload
+	if err := json.Unmarshal(payload, &listed); err != nil {
+		return nil, err
+	}
+	rows := make([]artifactRow, 0, len(listed.Artifacts))
+	for _, artifact := range listed.Artifacts {
+		rows = append(rows, artifactRow{
+			artifactID: artifact.ArtifactID,
+			taskID:     artifact.TaskID,
+			namespace:  artifact.Namespace,
+			name:       artifact.Name,
+			title:      artifact.Title,
+			mediaType:  artifact.MediaType,
+			version:    artifact.Version,
+			size:       artifact.Size,
+		})
+	}
+	return rows, nil
+}
+
+func formatSize(size int64) string {
+	switch {
+	case size >= 1024*1024:
+		return strconv.FormatFloat(float64(size)/(1024*1024), 'f', 1, 64) + " MB"
+	case size >= 1024:
+		return strconv.FormatFloat(float64(size)/1024, 'f', 1, 64) + " KB"
+	}
+	return strconv.FormatInt(size, 10) + " B"
+}
+
+func artifactLabel(row artifactRow) string {
+	label := row.namespace
+	if row.name != "" {
+		label += "/" + row.name
+	}
+	return label + " · v" + strconv.Itoa(row.version) + " · " + formatSize(row.size)
+}
+
 type conversationBody struct {
 	Messages  []transcriptMessage `json:"messages"`
 	Questions []openQuestion      `json:"questions"`
@@ -237,7 +300,11 @@ func toolLine(message transcriptMessage) string {
 	return name + " · " + state + " · " + text
 }
 
-const transcriptWindow = 40
+const (
+	transcriptWindow     = 40
+	artifactListLimit    = 8
+	artifactPreviewLimit = 4000
+)
 
 func windowStart(total, visible int) int {
 	if visible <= 0 {
@@ -250,18 +317,22 @@ func windowStart(total, visible int) int {
 }
 
 type chatState struct {
-	questions []openQuestion
-	visible   int
-	expanded  map[string]bool
-	window    *mygo.Window
-	address   string
-	token     string
-	draft     string
-	active    string
-	status    string
-	messages  []transcriptMessage
-	list      ui.ListState
-	md        markdown.Options
+	artifacts     []artifactRow
+	previewTitle  string
+	preview       string
+	questions     []openQuestion
+	artifactsOpen bool
+	visible       int
+	expanded      map[string]bool
+	window        *mygo.Window
+	address       string
+	token         string
+	draft         string
+	active        string
+	status        string
+	messages      []transcriptMessage
+	list          ui.ListState
+	md            markdown.Options
 }
 
 func newChatState(address, token string) *chatState {
@@ -355,6 +426,15 @@ func (c *chatState) open(id string) {
 			}
 		}
 	}
+	c.artifacts = nil
+	c.artifactsOpen = false
+	c.preview = ""
+	c.previewTitle = ""
+	if listed, err := daemonGet(c.address, c.token, "/api/conversations/"+id+"/artifacts"); err == nil {
+		if rows, err := parseArtifacts(listed); err == nil {
+			c.artifacts = rows
+		}
+	}
 	c.visible = transcriptWindow
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
@@ -365,6 +445,23 @@ func (c *chatState) open(id string) {
 
 func countLabel(count int) string {
 	return strconv.Itoa(count) + " 次"
+}
+
+func (c *chatState) showArtifact(row artifactRow) {
+	payload, err := daemonGet(c.address, c.token, "/api/tasks/"+row.taskID+"/artifacts/"+row.artifactID+"/"+strconv.Itoa(row.version)+"/content")
+	if err != nil {
+		c.status = "读不到产物：" + err.Error()
+		c.frame()
+		return
+	}
+	text := string(payload)
+	if len(text) > artifactPreviewLimit {
+		text = text[:artifactPreviewLimit] + "…"
+	}
+	c.previewTitle = artifactLabel(row)
+	c.preview = text
+	c.status = ""
+	c.frame()
 }
 
 func (c *chatState) frame() {
@@ -392,6 +489,33 @@ func (c *chatState) view(ctx *ui.Context) {
 					}
 				}
 			})
+		}
+		if len(c.artifacts) > 0 {
+			label := "产物 · " + strconv.Itoa(len(c.artifacts)) + " 件"
+			if ui.Button(ctx, label).Clicked() {
+				c.artifactsOpen = !c.artifactsOpen
+			}
+			if c.artifactsOpen {
+				shown := c.artifacts
+				hidden := 0
+				if len(shown) > artifactListLimit {
+					hidden = len(shown) - artifactListLimit
+					shown = shown[:artifactListLimit]
+				}
+				for _, artifact := range shown {
+					row := artifact
+					if ui.Button(ctx, artifactLabel(row)).Clicked() {
+						go c.showArtifact(row)
+					}
+				}
+				if hidden > 0 {
+					ui.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 件未列出").FontSize(12).TextColor(t.TextMuted)
+				}
+			}
+		}
+		if c.preview != "" {
+			ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(ctx, c.preview).FontSize(12)
 		}
 		runs := groupRuns(c.messages)
 		start := windowStart(len(runs), c.visible)
