@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -96,6 +97,7 @@ func daemonGet(address, token, path string) ([]byte, error) {
 }
 
 type chatState struct {
+	window   *mygo.Window
 	address  string
 	token    string
 	draft    string
@@ -226,11 +228,35 @@ func (c *chatState) open(id string) {
 	c.status = ""
 }
 
+func (c *chatState) frame() {
+	if c.window != nil {
+		c.window.Update(func() {})
+	}
+}
+
 func (c *chatState) view(ctx *ui.Context) {
 	t := ctx.Theme()
 	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
 		ui.Text(ctx, "Graph · 原生会话（S2 预览）").FontSize(13).TextColor(t.TextMuted)
-		if c.status != "" {
+		if len(c.ids) > 0 {
+			ui.Row(ctx).Gap(2).Children(func() {
+				for index, title := range c.titles {
+					id := c.ids[index]
+					label := title
+					if label == "" {
+						label = "（无标题）"
+					}
+					if id == c.active {
+						label = "• " + label
+					}
+					if ui.Button(ctx, label).Clicked() {
+						target := id
+						go func() { c.open(target); c.frame() }()
+					}
+				}
+			})
+		}
+		if c.status != "" && len(c.messages) == 0 {
 			ui.Text(ctx, c.status).TextColor(t.TextMuted)
 			return
 		}
@@ -249,6 +275,9 @@ func (c *chatState) view(ctx *ui.Context) {
 				}
 			})
 		}).Grow(1)
+		if c.status != "" && len(c.messages) > 0 {
+			ui.Text(ctx, c.status).FontSize(12).TextColor(t.TextMuted)
+		}
 		ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
 			ui.TextInput(ctx, &c.draft).Placeholder("给 Graph 发消息…").Label("消息").Grow(1)
 			if ui.PrimaryButton(ctx, "发送").Clicked() {

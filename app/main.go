@@ -127,9 +127,10 @@ func (s *shell) openNativeChat() {
 		MinHeight: 360,
 		Content:   ui.View(state.view),
 	})
+	state.window = window
 	go func() {
 		state.load()
-		window.Update(func() {})
+		state.frame()
 	}()
 }
 
