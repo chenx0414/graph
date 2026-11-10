@@ -22,34 +22,31 @@ const (
 
 type toolDisclosureOptions struct {
 	Enabled     bool
-	MinTools    int
 	TopKDefault int
 	TopKMax     int
 	MaxSchema   int
-	Core        []string
+	OnDemand    []string
 }
 
-var toolDisclosureCoreDefaults = []string{
-	"bash", "read", "write", "edit", "find", "grep", "fffind", "ffgrep", "codemode",
-	"apply_rsi_change", "apply_system_change", "get_task_status", "ask_supervisor", "control_task",
+var toolDisclosureOnDemandDefaults = []string{
+	"get_agent_combination", "get_resource", "list_agent_combinations", "read_system_capabilities", "search_resources", "inspect_graph_system",
+	"agent_browser", "agent_browser_web_search",
 }
+
+var toolDisclosureOnDemandPrefixes = []string{"mcp__", "mcp_"}
 
 func defaultToolDisclosureOptions() toolDisclosureOptions {
 	options := toolDisclosureOptions{
 		Enabled:     os.Getenv("GRAPH_TOOL_SEARCH") != "0",
-		MinTools:    24,
 		TopKDefault: 5,
 		TopKMax:     20,
 		MaxSchema:   4000,
-		Core:        append([]string{}, toolDisclosureCoreDefaults...),
-	}
-	if value, error := strconv.Atoi(strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_MIN_TOOLS"))); error == nil && value > 0 {
-		options.MinTools = value
+		OnDemand:    append([]string{}, toolDisclosureOnDemandDefaults...),
 	}
 	if value, error := strconv.Atoi(strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_TOP_K"))); error == nil && value > 0 {
 		options.TopKDefault = value
 	}
-	if value := strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_CORE")); value != "" {
+	if value := strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_ON_DEMAND")); value != "" {
 		names := []string{}
 		for _, name := range strings.Split(value, ",") {
 			if trimmed := strings.TrimSpace(name); trimmed != "" {
@@ -57,7 +54,7 @@ func defaultToolDisclosureOptions() toolDisclosureOptions {
 			}
 		}
 		if len(names) > 0 {
-			options.Core = names
+			options.OnDemand = names
 		}
 	}
 	return options
@@ -204,17 +201,27 @@ func (index *toolDisclosureIndex) search(query, expression string, topK int) []m
 	return hits
 }
 
-func toolDisclosurePlanOf(tools []pigkernel.ToolSpec, options toolDisclosureOptions) (map[string]pigkernel.ToolSpec, *toolDisclosureIndex) {
-	if !options.Enabled || len(tools) <= options.MinTools {
-		return nil, nil
+func toolDisclosureOnDemand(name string, options toolDisclosureOptions) bool {
+	for _, candidate := range options.OnDemand {
+		if candidate == name {
+			return true
+		}
 	}
-	core := map[string]bool{}
-	for _, name := range options.Core {
-		core[name] = true
+	for _, prefix := range toolDisclosureOnDemandPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolDisclosurePlanOf(tools []pigkernel.ToolSpec, options toolDisclosureOptions) (map[string]pigkernel.ToolSpec, *toolDisclosureIndex) {
+	if !options.Enabled {
+		return nil, nil
 	}
 	deferred := map[string]pigkernel.ToolSpec{}
 	for _, spec := range tools {
-		if core[spec.Name] {
+		if !toolDisclosureOnDemand(spec.Name, options) {
 			continue
 		}
 		deferred[spec.Name] = spec

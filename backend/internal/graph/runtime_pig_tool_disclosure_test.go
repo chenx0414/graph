@@ -32,7 +32,7 @@ func toolSearchFixture() []pigkernel.ToolSpec {
 }
 
 func toolSearchOptions() toolDisclosureOptions {
-	return toolDisclosureOptions{Enabled: true, MinTools: 2, TopKDefault: 5, TopKMax: 20, MaxSchema: 4000, Core: []string{"bash"}}
+	return toolDisclosureOptions{Enabled: true, TopKDefault: 5, TopKMax: 20, MaxSchema: 4000, OnDemand: []string{"git_history", "agent_browser"}}
 }
 
 func toolSearchFind(t *testing.T, tools []pigkernel.ToolSpec, name string) pigkernel.ToolSpec {
@@ -98,7 +98,23 @@ func TestToolSearchClampsTopKAndRejectsEmptyQuery(t *testing.T) {
 	}
 }
 
-func TestDisclosureKeepsCoreInlineAndDefersTheLongTail(t *testing.T) {
+func TestDisclosureLeavesUnlistedToolsInline(t *testing.T) {
+	guarded, _, error := pigToolSearchSurface(toolSearchFixture(), pigkernel.ProviderBridge{}, toolSearchOptions())
+	if error != nil {
+		t.Fatalf("surface failed: %v", error)
+	}
+	inline := toolSearchFind(t, guarded, "artifact_publish")
+	if inline.Result != nil {
+		t.Fatal("a tool that is not on demand must keep its real implementation")
+	}
+	for _, tool := range guarded {
+		if tool.Name == "bash" && tool.Result != nil {
+			t.Fatal("bash must stay directly callable")
+		}
+	}
+}
+
+func TestDisclosureAlwaysAddsTheGateways(t *testing.T) {
 	tools := toolSearchFixture()
 	guarded, _, error := pigToolSearchSurface(tools, pigkernel.ProviderBridge{}, toolSearchOptions())
 	if error != nil {
@@ -113,9 +129,9 @@ func TestDisclosureKeepsCoreInlineAndDefersTheLongTail(t *testing.T) {
 	}
 }
 
-func TestDisclosureStaysInlineBelowTheThreshold(t *testing.T) {
+func TestDisclosureWithoutOnDemandToolsStaysInline(t *testing.T) {
 	options := toolSearchOptions()
-	options.MinTools = 100
+	options.OnDemand = nil
 	guarded, _, error := pigToolSearchSurface(toolSearchFixture(), pigkernel.ProviderBridge{}, options)
 	if error != nil {
 		t.Fatalf("surface failed: %v", error)
