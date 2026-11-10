@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -458,5 +459,104 @@ func TestOneScrollLoadsOneWindowAndNoMore(t *testing.T) {
 	}
 	if fresh.loadOlderAtTop() {
 		t.Fatal("the same window must not load a second time")
+	}
+}
+
+func TestInterruptAppearsOnlyWhileARoundIsRunning(t *testing.T) {
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/interrupt":
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			w.Write([]byte(`{"interrupted":true}`))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(`{"messages":[{"role":"user","text":"跑一下"},{"role":"assistant","state":"streaming","text":"正在写"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if !state.busy() {
+		t.Fatal("a streaming reply means the round is running")
+	}
+	tester := ui.NewTester(state.view, 760, 620)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("打断这一轮") {
+		t.Fatalf("a running round must offer the interrupt, texts %q", tester.Texts())
+	}
+	if err := tester.Click("打断这一轮"); err != nil {
+		t.Fatalf("click 打断这一轮: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for posted == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !contains(posted, "requestId") {
+		t.Fatalf("打断必须带 requestId，提交体 %q", posted)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for state.status == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if state.status != "已请求打断这一轮" {
+		t.Fatalf("status %q", state.status)
+	}
+}
+
+func TestQueuedMessagesCanBeCancelled(t *testing.T) {
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/messages/m9/cancel":
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			w.Write([]byte(`{"cancelled":true}`))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(`{"messages":[{"id":"m9","role":"user","state":"queued","text":"等下一轮再说"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if state.busy() {
+		t.Fatal("a queued message is not a running round")
+	}
+	tester := ui.NewTester(state.view, 760, 620)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("撤销这条排队消息") {
+		t.Fatalf("a queued message must offer the cancel, texts %q", tester.Texts())
+	}
+	if tester.HasText("打断这一轮") {
+		t.Fatalf("an idle round must not offer the interrupt, texts %q", tester.Texts())
+	}
+	if err := tester.Click("撤销这条排队消息"); err != nil {
+		t.Fatalf("click 撤销这条排队消息: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for posted == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !contains(posted, "requestId") {
+		t.Fatalf("撤销必须带 requestId，提交体 %q", posted)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for state.status == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if state.status != "已撤销排队消息" {
+		t.Fatalf("status %q", state.status)
 	}
 }

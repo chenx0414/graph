@@ -9,6 +9,7 @@ import (
 )
 
 type transcriptMessage struct {
+	ID    string `json:"id"`
 	Role  string `json:"role"`
 	Kind  string `json:"kind"`
 	Text  string `json:"text"`
@@ -97,6 +98,10 @@ func toolLine(message transcriptMessage) string {
 		return name + " · " + state
 	}
 	return name + " · " + state + " · " + text
+}
+
+func messageQueued(message transcriptMessage) bool {
+	return message.State == "queued"
 }
 
 type chatState struct {

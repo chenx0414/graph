@@ -145,6 +145,76 @@ func daemonGet(address, token, path string) ([]byte, error) {
 	return payload, nil
 }
 
+func (c *chatState) interrupt() {
+	if c.active == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-interrupt")})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/interrupt", bytes.NewReader(body))
+	if err != nil {
+		c.status = "打断失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "打断失败：" + err.Error()
+		c.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "打断被拒绝：" + response.Status
+		c.frame()
+		return
+	}
+	c.refresh()
+	c.status = "已请求打断这一轮"
+}
+
+func (c *chatState) cancelQueued(messageID string) {
+	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-cancel")})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/messages/"+messageID+"/cancel", bytes.NewReader(body))
+	if err != nil {
+		c.status = "撤销失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "撤销失败：" + err.Error()
+		c.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "撤销被拒绝：" + response.Status
+		c.frame()
+		return
+	}
+	c.refresh()
+	c.status = "已撤销排队消息"
+}
+
+func (c *chatState) busy() bool {
+	for _, message := range c.messages {
+		if messageStreaming(message) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *chatState) send() {
 	text := strings.TrimSpace(c.draft)
 	if text == "" || c.active == "" {
@@ -355,6 +425,11 @@ func (c *chatState) view(ctx *ui.Context) {
 					author = "你"
 				}
 				ui.Text(ctx, author).FontSize(12).TextColor(t.TextMuted)
+				if messageQueued(message) {
+					if ui.Button(ctx, "撤销这条排队消息").Clicked() {
+						go c.cancelQueued(message.ID)
+					}
+				}
 				if messageStreaming(message) {
 					markdown.Stream(ctx, message.Text, &c.md)
 				} else {
@@ -369,6 +444,9 @@ func (c *chatState) view(ctx *ui.Context) {
 			ui.TextInput(ctx, &c.draft).Placeholder("给 Graph 发消息…").Label("消息").Grow(1)
 			if ui.PrimaryButton(ctx, "发送").Clicked() {
 				go c.send()
+			}
+			if c.busy() && ui.Button(ctx, "打断这一轮").Clicked() {
+				go c.interrupt()
 			}
 		})
 	})
