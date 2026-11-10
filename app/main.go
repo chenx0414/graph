@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -15,12 +16,13 @@ import (
 var preloadSource string
 
 type shell struct {
-	paths   Paths
-	window  *mygo.Window
-	bridge  *bridge
-	daemon  *daemon
-	pending string
-	console string
+	paths      Paths
+	window     *mygo.Window
+	bridge     *bridge
+	daemon     *daemon
+	pending    string
+	console    string
+	restarting atomic.Bool
 }
 
 func (s *shell) watchTasks() {
@@ -166,6 +168,7 @@ func main() {
 		})
 		s.createTray()
 		go s.watchTasks()
+		go s.watchRsi()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
