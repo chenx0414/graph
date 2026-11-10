@@ -403,3 +403,55 @@ func TestLongTranscriptsOfferOlderRunsOnDemand(t *testing.T) {
 		t.Fatalf("loading more must reach the first run, got start %d", start)
 	}
 }
+
+func TestOnlyUnresolvedQuestionsAreShown(t *testing.T) {
+	payload := []byte(`{"messages":[],"questions":[
+		{"id":"q1","kind":"recovery","status":"open","suspended":true,"taskId":"t1","data":{"prompt":"**选一条**","options":["A 路线","B 路线"]}},
+		{"id":"q2","kind":"recovery","status":"resolved","suspended":true,"taskId":"t1","data":{"prompt":"已答复"}}
+	]}`)
+	body, err := parseConversationBody(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Questions) != 2 || !body.Questions[0].open() || body.Questions[1].open() {
+		t.Fatalf("questions %+v", body.Questions)
+	}
+	if body.Questions[0].Data.Options[1] != "B 路线" {
+		t.Fatalf("options %v", body.Questions[0].Data.Options)
+	}
+}
+
+func TestNativeWindowShowsTheQuestionAndAnswersIt(t *testing.T) {
+	answered := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/tasks/t1/answer":
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			answered = string(payload[:read])
+			w.Write([]byte(`{}`))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"等我问一句"}],"questions":[{"id":"q1","kind":"recovery","status":"open","suspended":true,"taskId":"t1","data":{"prompt":"**选一条**","options":["A 路线","B 路线"]}}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if len(state.questions) != 1 {
+		t.Fatalf("questions %+v", state.questions)
+	}
+	tester := ui.NewTester(state.view, 760, 620)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("需要你决定 · recovery") || !tester.HasText("A 路线") {
+		t.Fatalf("the question card must render, texts %q", tester.Texts())
+	}
+	state.answer(state.questions[0], "B 路线")
+	if !contains(answered, "q1") || !contains(answered, "B 路线") || !contains(answered, "requestId") {
+		t.Fatalf("answer body %q", answered)
+	}
+}

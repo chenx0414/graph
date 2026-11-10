@@ -81,8 +81,29 @@ func messageStreaming(message transcriptMessage) bool {
 	return message.Role == "assistant" && message.State == "streaming"
 }
 
+type questionOptions struct {
+	Prompt   string   `json:"prompt"`
+	Options  []string `json:"options"`
+	Multiple bool     `json:"multiple"`
+}
+
+type openQuestion struct {
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	Status    string          `json:"status"`
+	Suspended bool            `json:"suspended"`
+	TaskID    string          `json:"taskId"`
+	Owner     string          `json:"owner"`
+	Data      questionOptions `json:"data"`
+}
+
+func (q openQuestion) open() bool {
+	return q.Status != "resolved" && (q.Suspended || q.Status == "open" || q.Status == "waiting")
+}
+
 type conversationBody struct {
-	Messages []transcriptMessage `json:"messages"`
+	Messages  []transcriptMessage `json:"messages"`
+	Questions []openQuestion      `json:"questions"`
 }
 
 func (c conversationSummary) ArchivedAtPresent() bool { return c.ArchivedAt != nil }
@@ -114,6 +135,45 @@ func parseConversationMessages(payload []byte) ([]transcriptMessage, error) {
 		spoken = append(spoken, message)
 	}
 	return spoken, nil
+}
+
+func parseConversationBody(payload []byte) (conversationBody, error) {
+	var body conversationBody
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return body, err
+	}
+	return body, nil
+}
+
+func (c *chatState) answer(question openQuestion, value string) {
+	body, _ := json.Marshal(map[string]any{
+		"questionId": question.ID,
+		"answer":     map[string]string{"type": "respond", "value": value},
+		"requestId":  "native-" + question.ID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+	})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/tasks/"+question.TaskID+"/answer", bytes.NewReader(body))
+	if err != nil {
+		c.status = "回答失败：" + err.Error()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "回答失败：" + err.Error()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "回答被拒绝：" + response.Status
+		return
+	}
+	c.status = ""
+	c.refresh()
+	c.frame()
 }
 
 func daemonGet(address, token, path string) ([]byte, error) {
@@ -190,19 +250,20 @@ func windowStart(total, visible int) int {
 }
 
 type chatState struct {
-	visible  int
-	expanded map[string]bool
-	window   *mygo.Window
-	address  string
-	token    string
-	draft    string
-	active   string
-	status   string
-	titles   []string
-	ids      []string
-	messages []transcriptMessage
-	list     ui.ListState
-	md       markdown.Options
+	questions []openQuestion
+	visible   int
+	expanded  map[string]bool
+	window    *mygo.Window
+	address   string
+	token     string
+	draft     string
+	active    string
+	status    string
+	titles    []string
+	ids       []string
+	messages  []transcriptMessage
+	list      ui.ListState
+	md        markdown.Options
 }
 
 func newChatState(address, token string) *chatState {
@@ -316,6 +377,14 @@ func (c *chatState) open(id string) {
 	}
 	c.messages = messages
 	c.active = id
+	c.questions = nil
+	if body, err := parseConversationBody(payload); err == nil {
+		for _, question := range body.Questions {
+			if question.open() {
+				c.questions = append(c.questions, question)
+			}
+		}
+	}
 	c.visible = transcriptWindow
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
@@ -359,6 +428,19 @@ func (c *chatState) view(ctx *ui.Context) {
 		if c.status != "" && len(c.messages) == 0 {
 			ui.Text(ctx, c.status).TextColor(t.TextMuted)
 			return
+		}
+		for _, question := range c.questions {
+			card := question
+			ui.Column(ctx).Gap(4).Children(func() {
+				ui.Text(ctx, "需要你决定 · "+card.Kind).FontSize(12).TextColor(t.TextMuted)
+				markdown.View(ctx, card.Data.Prompt, &c.md)
+				for _, option := range card.Data.Options {
+					value := option
+					if ui.Button(ctx, value).Clicked() {
+						go c.answer(card, value)
+					}
+				}
+			})
 		}
 		runs := groupRuns(c.messages)
 		start := windowStart(len(runs), c.visible)
