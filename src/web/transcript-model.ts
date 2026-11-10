@@ -242,7 +242,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
           flushRunning();
           if (!toolSettledSource(item.message)) rows.push({ kind: 'message', id: item.message.id, message: item.message });
         }
-        else if (item.kind === 'tool' && (item.tool.deferred || item.tool.reason)) running.push(item);
+        else if (item.kind === 'tool' && !item.tool.done) running.push(item);
         else folded.push(item);
       }
       flushFolded();
@@ -286,6 +286,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       activityItems.push(incoming);
       continue;
     }
+    if (message.role === 'user' && (rsiFullSource(message) || toolSettledSource(message))) continue;
     flushActivity();
     if (message.role === 'assistant') {
       rows.push({
@@ -299,7 +300,6 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
       });
       continue;
     }
-    if (message.role === 'user' && (rsiFullSource(message) || toolSettledSource(message))) continue;
     rows.push({ kind: 'message', id: message.id, message });
   }
   const pendingKey = activityKey;

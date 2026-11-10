@@ -340,3 +340,35 @@ test('older activity without ordinals is retained alongside a new live tail', ()
   expect(rows).toContainEqual(expect.objectContaining({ text: 'retained' }));
 });
 
+
+test('a finished turn keeps one toolbar even when a tool failed', () => {
+  const toolRow = (id: string, seq: number, ordinal: number, data: Record<string, unknown>) =>
+    message({ id, seq, role: 'tool', operationId: 'op', data: { toolName: 'fetch', toolCallId: id, ordinal, ...data } });
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'u1', seq: 1, role: 'user', text: '查一下缓存预热' }),
+      toolRow('t1', 2, 1, {}),
+      toolRow('t2', 3, 2, { message: 'Retrieval failed: HTTP 403' }),
+      message({ id: 'answer', seq: 4, role: 'assistant', operationId: 'op', text: '结论' }),
+    ],
+    liveTools: [], streaming: [], busy: false,
+  });
+  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
+  const activity = rows[1];
+  if (activity?.kind !== 'activity') throw new Error('expected one activity row');
+  expect(activity.items.filter(item => item.kind === 'tool')).toHaveLength(2);
+});
+
+test('an async full notice between tool calls does not split the turn toolbar', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'u1', seq: 1, role: 'user', text: '调研缓存预热' }),
+      message({ id: 't1', seq: 2, role: 'tool', operationId: 'op', data: { toolName: 'bash', toolCallId: 't1', ordinal: 1 } }),
+      { ...message({ id: 'full', seq: 3, role: 'user', text: '[后台全量确认失败]' }), data: { source: { kind: 'rsi_async_full' }, environment: false } },
+      message({ id: 't2', seq: 4, role: 'tool', operationId: 'op', data: { toolName: 'bash', toolCallId: 't2', ordinal: 2 } }),
+      message({ id: 'answer', seq: 5, role: 'assistant', operationId: 'op', text: '结论' }),
+    ],
+    liveTools: [], streaming: [], busy: false,
+  });
+  expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
+});
