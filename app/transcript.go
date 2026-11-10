@@ -120,6 +120,9 @@ type chatState struct {
 	artifactsOpen  bool
 	graphOpen      bool
 	paused         bool
+	binding        bool
+	projects       []string
+	project        string
 	visible        int
 	loadedOlderFor int
 	expanded       map[string]bool

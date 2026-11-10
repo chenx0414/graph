@@ -248,6 +248,70 @@ func (c *chatState) setPaused(paused bool) {
 	c.frame()
 }
 
+type projectListPayload struct {
+	Projects []struct {
+		ID       string `json:"id"`
+		Archived bool   `json:"archived"`
+	} `json:"projects"`
+}
+
+func (c *chatState) projectChoices() []string {
+	if len(c.projects) > 0 {
+		return c.projects
+	}
+	payload, err := daemonGet(c.address, c.token, "/api/settings")
+	if err != nil {
+		c.status = "读不到项目列表：" + err.Error()
+		return nil
+	}
+	var listed projectListPayload
+	if err := json.Unmarshal(payload, &listed); err != nil {
+		c.status = "项目列表不是预期的 JSON：" + err.Error()
+		return nil
+	}
+	for _, project := range listed.Projects {
+		if project.ID == "" {
+			continue
+		}
+		c.projects = append(c.projects, project.ID)
+	}
+	return c.projects
+}
+
+func (c *chatState) bindProject(projectID string) {
+	if c.active == "" || strings.TrimSpace(projectID) == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"projectId": projectID, "requestId": requestID("native-bind")})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/bind", bytes.NewReader(body))
+	if err != nil {
+		c.status = "绑定失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "绑定失败：" + err.Error()
+		c.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "绑定被拒绝：" + response.Status
+		c.frame()
+		return
+	}
+	c.project = projectID
+	c.binding = false
+	c.status = "已绑定到 " + projectID
+	c.frame()
+}
+
 func (c *chatState) busy() bool {
 	for _, message := range c.messages {
 		if messageStreaming(message) {
@@ -429,6 +493,24 @@ func (c *chatState) view(ctx *ui.Context) {
 			})
 			ui.Text(ctx, c.preview).FontSize(12)
 		}
+		ui.Row(ctx).Gap(4).Children(func() {
+			label := "绑定项目"
+			if c.project != "" {
+				label = "项目：" + c.project
+			}
+			if ui.Button(ctx, label).Clicked() {
+				c.binding = !c.binding
+			}
+			if !c.binding {
+				return
+			}
+			for _, project := range c.projectChoices() {
+				target := project
+				if ui.Button(ctx, "绑定 "+target).Clicked() {
+					go c.bindProject(target)
+				}
+			}
+		})
 		c.graphSection(ctx)
 		runs := groupRuns(c.messages)
 		start := windowStart(len(runs), c.visible)

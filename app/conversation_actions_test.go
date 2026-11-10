@@ -200,3 +200,75 @@ func TestPausedStateComesFromTheConversation(t *testing.T) {
 		t.Fatalf("a paused conversation must offer 继续 only, texts %q", tester.Texts())
 	}
 }
+
+func TestBindingAConversationToAProject(t *testing.T) {
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/bind":
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			w.Write([]byte(`{"projectId":"mygo"}`))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"还没绑定项目"}]}`))
+		case r.URL.Path == "/api/settings":
+			w.Write([]byte(`{"projects":[{"id":"13-Graph"},{"id":"mygo"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	tester := ui.NewTester(state.view, 760, 700)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("绑定项目") {
+		t.Fatalf("a conversation must offer the bind control, texts %q", tester.Texts())
+	}
+	if err := tester.Click("绑定项目"); err != nil {
+		t.Fatalf("click 绑定项目: %v", err)
+	}
+	for frame := 0; frame < 5; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("绑定 mygo") {
+		t.Fatalf("the choices must come from /api/settings, texts %q", tester.Texts())
+	}
+	if err := tester.Click("绑定 mygo"); err != nil {
+		t.Fatalf("click 绑定 mygo: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for state.status == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	for _, wanted := range []string{`"projectId":"mygo"`, `"requestId"`} {
+		if !contains(posted, wanted) {
+			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
+		}
+	}
+	if state.project != "mygo" || state.binding || state.status != "已绑定到 mygo" {
+		t.Fatalf("绑定后状态：project %q binding %v status %q", state.project, state.binding, state.status)
+	}
+}
+
+func TestBindingRefusesAnEmptyProject(t *testing.T) {
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			posts++
+		}
+		w.Write([]byte(`{"messages":[]}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.active = "c1"
+	state.bindProject("  ")
+	if posts != 0 {
+		t.Fatalf("an empty project must not be sent, posts %d", posts)
+	}
+}
