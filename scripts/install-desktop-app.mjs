@@ -12,7 +12,7 @@
  * Exit: 0 installed, 2 usage, 3 package does not match the checkout, 4 signing failed.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdir, readdir, readFile, rm, rename } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,33 +27,36 @@ const bundle = resolve(flag('bundle') || join(root, 'dist/app/mac-arm64/Graph.ap
 const dest = resolve(flag('dest') || '/Applications/Graph.app');
 const dryRun = process.argv.includes('--dry-run');
 
-/** Every file the package carries from `source`, relative to it. */
-async function filesUnder(source, prefix = '') {
-  const names = [];
+/** The newest modification time of the shell sources this checkout builds from. */
+async function newestSource(source, prefix = '') {
+  let newest = { at: 0, name: '' };
   for (const entry of await readdir(source, { withFileTypes: true })) {
     const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) names.push(...await filesUnder(join(source, entry.name), relative));
-    else names.push(relative);
+    const path = join(source, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await newestSource(path, relative);
+      if (nested.at > newest.at) newest = nested;
+      continue;
+    }
+    const { mtimeMs } = await stat(path);
+    if (mtimeMs > newest.at) newest = { at: mtimeMs, name: relative };
   }
-  return names;
+  return newest;
 }
 
 /**
- * The package has to carry the desktop code of THIS checkout. A stale bundle
+ * The package has to be built from the sources of THIS checkout. A stale bundle
  * installs a version of the app that silently disagrees with the commit the
- * receipt names, which is the exact failure this script exists to stop.
+ * receipt names, which is the exact failure this script exists to stop: a
+ * source file newer than the packaged binary means the package predates it.
  */
-async function staleCheckoutFile() {
-  const source = join(root, 'desktop');
-  const packaged = join(bundle, 'Contents/Resources/app/desktop');
-  if (!existsSync(source) || !existsSync(packaged)) return null;
-  for (const relative of await filesUnder(source)) {
-    const expected = join(source, relative);
-    const actual = join(packaged, relative);
-    if (!existsSync(actual)) return { relative, reason: 'missing from the package' };
-    const [left, right] = await Promise.all([readFile(expected), readFile(actual)]);
-    if (!left.equals(right)) return { relative, reason: 'differs from this checkout' };
-  }
+async function stalePackage() {
+  const source = join(root, 'app');
+  const binary = join(bundle, 'Contents/MacOS/Graph');
+  if (!existsSync(source) || !existsSync(binary)) return null;
+  const newest = await newestSource(source);
+  const { mtimeMs } = await stat(binary);
+  if (newest.at > mtimeMs) return { relative: newest.name, reason: 'is newer than the packaged binary' };
   return null;
 }
 
@@ -87,10 +90,10 @@ if (mismatch) {
   );
   process.exit(3);
 }
-const stale = await staleCheckoutFile();
+const stale = await stalePackage();
 if (stale) {
   console.error(
-    `${bundle} does not match ${root}/desktop (${stale.relative}: ${stale.reason}). ` +
+    `${bundle} does not match ${root}/app (${stale.relative}: ${stale.reason}). ` +
     'Installing it would run code the commit does not contain; run: node --run app:build',
   );
   process.exit(3);

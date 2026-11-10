@@ -80,6 +80,10 @@ func TestAsyncFullQuarantineTimingLineIsStillMatched(t *testing.T) {
 	}
 }
 
+const asyncFullProviderOnlyOutput = "\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests/e2e/provider-independent-reviews.test.ts\x1b[2m > \x1b[22mthe review node runs on an independent provider, the concluded ChatGPT platform is reported instead of called, and a broken transport falls back to Grok\n" +
+	"      \x1b[33m×\x1b[39m the review node runs on an independent provider, the concluded ChatGPT platform is reported instead of called, and a broken transport falls back to Grok \x1b[2m—\x1b[22m Error: the Grok CLI login expired at 2026-11-05T13:07:20.000000Z and its refresh answered 400\n" +
+	"Test Files  1 failed | 251 passed | 1 skipped (253)\n"
+
 func TestAsyncFullShippingKnownRedListCoversEveryRedWeShipWith(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "tests", "env-known-reds.json")
 	reds, err := LoadEnvKnownReds(path)
@@ -89,14 +93,28 @@ func TestAsyncFullShippingKnownRedListCoversEveryRedWeShipWith(t *testing.T) {
 	if len(reds) == 0 {
 		t.Fatalf("the shipped known-red list is empty")
 	}
-	verdict := ClassifyAsyncFull(asyncFullKnownRedOutput, reds)
+	verdict := ClassifyAsyncFull(asyncFullProviderOnlyOutput, reds)
 	if !verdict.Environment || len(verdict.Unmatched) != 0 {
-		t.Fatalf("the shipped list does not cover the three reds it is meant to: %+v", verdict)
+		t.Fatalf("the shipped list does not cover the reds it is meant to: %+v", verdict)
 	}
 	for _, red := range reds {
 		if !strings.HasPrefix(red.File, "tests/") || red.Pattern == "" || red.Why == "" {
 			t.Fatalf("a known red entry lacks a test path, a pattern or a reason: %+v", red)
 		}
+	}
+}
+
+func TestAsyncFullDeletedDesktopTestsAreNotExcusedAnymore(t *testing.T) {
+	reds, err := LoadEnvKnownReds(filepath.Join("..", "..", "..", "tests", "env-known-reds.json"))
+	if err != nil {
+		t.Fatalf("the shipped known-red list does not load: %v", err)
+	}
+	verdict := ClassifyAsyncFull(asyncFullKnownRedOutput, reds)
+	if verdict.Environment {
+		t.Fatalf("a run that fails the removed Electron tests must be a regression: %+v", verdict)
+	}
+	if len(verdict.Unmatched) != 2 || !strings.Contains(verdict.Unmatched[0]+verdict.Unmatched[1], "desktop-") {
+		t.Fatalf("the removed desktop tests must be named as unmatched, got %v", verdict.Unmatched)
 	}
 }
 
@@ -210,8 +228,12 @@ func TestAsyncFullShippedListMatchesTheLoadVariantAndStillNamesTheProductRed(t *
 		t.Fatalf("the shipped known-red list does not load: %v", err)
 	}
 	verdict := ClassifyAsyncFull(asyncFullLoadVariantOutput, reds)
-	if len(verdict.Unmatched) != 1 || !strings.Contains(verdict.Unmatched[0], "go-review-module.test.ts") {
-		t.Fatalf("the shipped list must excuse the two environment reds and name only the product bug, got %v", verdict.Unmatched)
+	if len(verdict.Unmatched) != 2 {
+		t.Fatalf("the shipped list must name the removed desktop test and the product bug, got %v", verdict.Unmatched)
+	}
+	joined := strings.Join(verdict.Unmatched, " ")
+	if !strings.Contains(joined, "go-review-module.test.ts") || !strings.Contains(joined, "desktop-shell.test.ts") {
+		t.Fatalf("the shipped list must name both the removed desktop test and the product bug, got %v", verdict.Unmatched)
 	}
 	if verdict.Environment {
 		t.Fatalf("a run that still carries the product bug was excused as environmental: %+v", verdict)

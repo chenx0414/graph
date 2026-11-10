@@ -2,24 +2,9 @@
   "version": 1,
   "reds": [
     {
-      "file": "tests/e2e/desktop-crash-recovery.test.ts",
-      "pattern": "waiting for the master to create the graph",
-      "why": "本机跑真机桌面崩溃恢复时，主控 120s 内没建出图；宿主里同一提交通过。属于本机窗口服务/负载限制，不是产品行为"
-    },
-    {
-      "file": "tests/e2e/desktop-shell.test.ts",
-      "pattern": "expected 0 to be greater than 0",
-      "why": "系统钥匙串授权弹窗阻塞了自动化授权，本机没人点按；换成密钥文件后这条会走另一条路径"
-    },
-    {
       "file": "tests/e2e/provider-independent-reviews.test.ts",
       "pattern": "the Grok CLI login expired",
       "why": "Grok CLI 登录过期，刷新也被 400 拒绝；需要用户重新登录，凭据问题不是代码问题"
-    },
-    {
-      "file": "tests/e2e/desktop-shell.test.ts",
-      "pattern": "locator.click: Timeout 30000ms exceeded",
-      "why": "同一钥匙串环境问题的另一个表现：全量并行负载下第一次 setup 点击时页面还没就绪。同一提交单跑该文件，失败点会回到计数断言 `expected 0 to be greater than 0`（钥匙串未授权导致模型调用数为 0）"
     },
     {
       "file": "tests/e2e/provider-independent-reviews.test.ts",

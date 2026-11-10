@@ -141,8 +141,8 @@ func rsiNeedsWebBuild(paths []string) bool {
 
 func rsiNeedsAppBuild(paths []string) bool {
 	for _, path := range paths {
-		if strings.HasPrefix(path, "desktop/") || strings.HasPrefix(path, "app/") || path == "package.json" ||
-			path == "scripts/package-app.mjs" || path == "scripts/package-app-mygo.mjs" ||
+		if strings.HasPrefix(path, "app/") || path == "package.json" ||
+			path == "scripts/package-app-mygo.mjs" ||
 			path == "scripts/install-desktop-app.mjs" || strings.HasPrefix(path, "build/") {
 			return true
 		}
