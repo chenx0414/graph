@@ -242,7 +242,7 @@ export function buildTranscriptRows(input: TranscriptModelInput): TranscriptRow[
           flushRunning();
           if (!toolSettledSource(item.message)) rows.push({ kind: 'message', id: item.message.id, message: item.message });
         }
-        else if (item.kind === 'tool' && !item.tool.done) running.push(item);
+        else if (item.kind === 'tool' && (item.tool.deferred || !item.tool.done)) running.push(item);
         else folded.push(item);
       }
       flushFolded();

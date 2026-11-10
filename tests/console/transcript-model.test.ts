@@ -372,3 +372,18 @@ test('an async full notice between tool calls does not split the turn toolbar', 
   });
   expect(rows.map(row => row.kind)).toEqual(['message', 'activity', 'assistant']);
 });
+
+test('a background tool that finished keeps a visible toolbar after its turn was answered', () => {
+  const rows = buildTranscriptRows({
+    messages: [
+      message({ id: 'u1', seq: 1, role: 'user', text: '把这条慢命令放到后台跑。' }),
+      message({ id: 't1', seq: 2, role: 'tool', operationId: 'op', data: { toolName: 'bash', toolCallId: 'console-slow', ordinal: 1, deferred: true, background: true, state: 'done' } }),
+      message({ id: 'answer', seq: 3, role: 'assistant', operationId: 'op', text: '后台命令已被受理。' }),
+      message({ id: 'u2', seq: 4, role: 'user', text: '再问一句。' }),
+      message({ id: 'answer2', seq: 5, role: 'assistant', operationId: 'op2', text: '第二条消息的答复。' }),
+    ],
+    liveTools: [], streaming: [], busy: false,
+  });
+  const toolbar = rows.find(row => row.kind === 'tools');
+  expect(toolbar, 'the finished background tool was folded away with the answered turn').toBeTruthy();
+});
