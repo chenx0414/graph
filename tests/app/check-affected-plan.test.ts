@@ -19,7 +19,7 @@ describe('check:affected plan', () => {
 
   test('a backend change with a deleted leaf test still covers the in-process layers', () => {
     const plan = selectCheckPlan({ changed: ['src/web/app.tsx', 'tests/e2e/gone.test.ts'], exists: path => path !== 'tests/e2e/gone.test.ts' });
-    expect(plan.files).toEqual(['tests/console', 'tests/app', 'tests/m7', 'tests/m8']);
+    expect(plan.files).toEqual(['tests/console', 'tests/app', 'tests/m7']);
   });
 
   test('a store change keeps the schema keeper and adds a surviving leaf test', () => {

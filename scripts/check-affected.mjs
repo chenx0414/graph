@@ -10,8 +10,8 @@
 //
 // What the blocking run does cover, in order of preference:
 //   - the leaf tests the change itself touched (tests/<layer>/<file>.test.ts);
-//   - the in-process layers that need no daemon or window (console, app, m7, m8)
-//     whenever src/web, src/core or desktop moved;
+//   - the in-process layers that need no daemon or window (console, app, m7)
+//     whenever src/core moved;
 //   - the pure layers only, for anything else.
 // A change to shared test infrastructure (helpers, fixtures, env-layers,
 // quarantine) deliberately does NOT pull the suite in: that is exactly the case

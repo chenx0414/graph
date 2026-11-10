@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
 
-export const WEB = ['src/web/', 'src/core/', 'desktop/'];
+export const WEB = ['src/core/'];
 export const STORE = /^backend\/internal\/graph\/core_store/;
 export const STORE_KEEPER = 'tests/e2e/go-schema-upgrade.test.ts';
-const IN_PROCESS = ['tests/console', 'tests/app', 'tests/m7', 'tests/m8'];
-const IN_PROCESS_OFFLINE = ['tests/console', 'tests/app', 'tests/m7'];
+const IN_PROCESS = ['tests/console', 'tests/app', 'tests/m7'];
+const IN_PROCESS_OFFLINE = IN_PROCESS;
 const LEAF = /^tests\/[^/]+\/[^/]+\.test\.ts$/;
 
 export function selectCheckPlan({ changed, exists = existsSync, forced = false, storeKeeper = STORE_KEEPER }) {

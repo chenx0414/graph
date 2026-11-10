@@ -5,48 +5,16 @@
       "capability": "window-services",
       "probe": "chromium",
       "files": [
-        "tests/console/setup-wizard.test.ts",
         "tests/e2e/composer-interaction.test.ts",
-        "tests/e2e/composer-queue.test.ts",
-        "tests/e2e/console-fresh-shell-browser.test.ts",
-        "tests/e2e/console-layout.test.ts",
-        "tests/e2e/conversation-graph-drawer.test.ts",
-        "tests/e2e/desktop-shell.test.ts",
-        "tests/e2e/go-deferred-tool-console.test.ts",
-        "tests/e2e/go-insights.test.ts",
-        "tests/e2e/go-project-branches-ui.test.ts",
-        "tests/e2e/orchestration-browser.test.ts",
-        "tests/e2e/orchestration-node-steer.test.ts",
-        "tests/e2e/orchestration-work-ui.test.ts",
-        "tests/e2e/provider-metadata.part-02.test.ts",
-        "tests/e2e/provider-metadata.test.ts",
-        "tests/e2e/resource-library.test.ts",
-        "tests/e2e/xai-oauth.test.ts",
-        "tests/m8/**"
+        "tests/e2e/composer-queue.test.ts"
       ]
     },
     {
       "capability": "nested-sandbox",
       "probe": "nested-sandbox",
       "files": [
-        "tests/e2e/go-deferred-tool-cancel-timeout.test.ts",
-        "tests/e2e/go-deferred-tool-idempotent.test.ts",
-        "tests/e2e/go-deferred-tool-loop.test.ts",
-        "tests/e2e/go-deferred-tool-ordering.test.ts",
-        "tests/e2e/go-native-shell-output.test.ts",
-        "tests/e2e/harness-cost.test.ts",
-        "tests/e2e/harness-eval-lifecycle.test.ts",
-        "tests/e2e/harness-tool-fast-path.test.ts",
-        "tests/e2e/pig-mcp-session.test.ts"
+        "tests/e2e/harness-eval-lifecycle.test.ts"
       ]
-    },
-    {
-      "capability": "docker-module-sandbox",
-      "probe": "docker-daemon",
-      "files": [
-        "tests/e2e/go-review-module.test.ts"
-      ],
-      "reason": "command 模块在 Docker 里跑；没有可达的 daemon 时模块必然失败（节点被暂停、投递停滞），不是产品行为"
     }
   ]
 }
