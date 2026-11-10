@@ -185,7 +185,6 @@ type RsiValidateInput struct {
 	Checks        []RsiCommand
 	Activate      bool
 	NeedsAppBuild bool
-	NeedsWebBuild bool
 }
 
 type RsiValidateFunc func(input RsiValidateInput) []RsiValidationResult

@@ -23,7 +23,7 @@ func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
 	if !rsiNeedsDefaultGate([]RsiCommand{{Command: "node", Args: []string{"--run", "check:backend"}}}, true) {
 		t.Fatal("a narrower check is not the default gate")
 	}
-	if !rsiNeedsDefaultGate([]RsiCommand{{Command: "node", Args: []string{"--run", "build:web"}}}, true) {
+	if !rsiNeedsDefaultGate([]RsiCommand{{Command: "node", Args: []string{"--run", "app:build"}}}, true) {
 		t.Fatal("a build is not the default gate")
 	}
 	// A rehearsal without activation returns after the caller's checks, so the

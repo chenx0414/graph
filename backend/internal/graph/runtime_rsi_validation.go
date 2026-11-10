@@ -130,15 +130,6 @@ func rsiSummarizeValidation(result RsiValidationResult) RsiValidationResult {
 	return result
 }
 
-func rsiNeedsWebBuild(paths []string) bool {
-	for _, path := range paths {
-		if strings.HasPrefix(path, "src/web/") || path == "index.html" || strings.HasPrefix(path, "vite.config") {
-			return true
-		}
-	}
-	return false
-}
-
 func rsiNeedsAppBuild(paths []string) bool {
 	for _, path := range paths {
 		if strings.HasPrefix(path, "app/") || path == "package.json" ||
@@ -213,10 +204,6 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 	if input.NeedsAppBuild {
 		build := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}, RSI_BUILD_TIMEOUT_MS)
 		return append(results, build)
-	}
-	if input.NeedsWebBuild {
-		web := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "build:web"}}, RSI_BUILD_TIMEOUT_MS)
-		return append(results, web)
 	}
 	return results
 }

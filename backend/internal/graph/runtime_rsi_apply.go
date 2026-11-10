@@ -277,8 +277,7 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	relevant = append(relevant, ownedOrder...)
 	relevant = append(relevant, changedPaths...)
 	needsAppBuild := changedPaths == nil || rsiNeedsAppBuild(relevant)
-	needsWebBuild := changedPaths == nil || rsiNeedsWebBuild(relevant)
-	raw := service.validate(RsiValidateInput{Root: work, Checks: checks, Activate: activate, NeedsAppBuild: needsAppBuild, NeedsWebBuild: needsWebBuild})
+	raw := service.validate(RsiValidateInput{Root: work, Checks: checks, Activate: activate, NeedsAppBuild: needsAppBuild})
 	outputPath := service.rsiWriteReportFile(id, raw)
 	validation := []RsiValidationResult{}
 	for _, item := range raw {
@@ -408,9 +407,6 @@ func (service *RsiService) rsiApplyChange(input RsiChangeInput, context RsiApply
 	}
 	if isolated && committedNow && commit != nil {
 		rsiLandIsolatedCommit(*root, work, *commit, claimedPaths)
-	}
-	if isolated && committedNow && needsWebBuild {
-		_ = rsiRunCheckWithEnvironmentRetry(*root, RsiCommand{Command: "node", Args: []string{"--run", "build:web"}}, RSI_BUILD_TIMEOUT_MS)
 	}
 	var appInstall *RsiAppInstall
 	if activate && committedNow && needsAppBuild {
