@@ -68,6 +68,9 @@ func TestChatStateReadsTheDaemonAndRenders(t *testing.T) {
 		t.Fatalf("messages %+v", state.messages)
 	}
 	tester := ui.NewTester(state.view, 720, 620)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
 	if !tester.HasText("你好") {
 		t.Fatalf("the user message is missing, texts %q", tester.Texts())
 	}
@@ -225,6 +228,9 @@ func TestSwitchingConversationsOpensTheClickedOne(t *testing.T) {
 		t.Fatalf("active %q messages %+v", state.active, state.messages)
 	}
 	tester := ui.NewTester(state.view, 900, 620)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
 	if !tester.HasText("会话一") || !tester.HasText("会话二") {
 		t.Fatalf("both conversations must be offered, texts %q", tester.Texts())
 	}
