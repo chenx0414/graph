@@ -13,7 +13,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { mkdir, readdir, readFile, rm, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,7 +46,7 @@ async function filesUnder(source, prefix = '') {
 async function staleCheckoutFile() {
   const source = join(root, 'desktop');
   const packaged = join(bundle, 'Contents/Resources/app/desktop');
-  if (!existsSync(source)) return null;
+  if (!existsSync(source) || !existsSync(packaged)) return null;
   for (const relative of await filesUnder(source)) {
     const expected = join(source, relative);
     const actual = join(packaged, relative);
@@ -65,8 +65,26 @@ async function sign(target) {
   execFileSync('codesign', ['--verify', '--strict', target], { stdio: 'pipe' });
 }
 
+function identifierMismatch() {
+  const config = join(root, 'app', 'mygo.json');
+  const info = join(bundle, 'Contents/Info.plist');
+  if (!existsSync(config) || !existsSync(info)) return null;
+  const expected = JSON.parse(readFileSync(config, 'utf8')).identifier;
+  if (!expected) return null;
+  const actual = execFileSync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', info], { encoding: 'utf8' }).trim();
+  return actual === expected ? null : { expected, actual };
+}
+
 if (!existsSync(bundle)) {
   console.error(`no packaged app at ${bundle}; run: node --run app:build`);
+  process.exit(3);
+}
+const mismatch = identifierMismatch();
+if (mismatch) {
+  console.error(
+    `${bundle} is ${mismatch.actual} and app/mygo.json says ${mismatch.expected}; ` +
+    'installing it would key permissions to another app; run: node --run app:build',
+  );
   process.exit(3);
 }
 const stale = await staleCheckoutFile();

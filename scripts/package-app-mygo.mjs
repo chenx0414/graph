@@ -1,9 +1,8 @@
 /**
- * Builds the MyGo shell bundle that replaces the Electron one. It writes to
- * dist/app-mygo so an RSI activation that only touched the shell cannot swap
- * the app in /Applications before the migration reaches S1d.
+ * Builds the MyGo shell bundle at the path scripts/install-desktop-app.mjs
+ * installs from.
  *
- * Run: node --run app:build:mygo
+ * Run: node --run app:build
  */
 import { execFileSync } from 'node:child_process';
 import { cp, mkdir, rm, stat } from 'node:fs/promises';
@@ -11,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const output = join(root, 'dist', 'app-mygo', 'mac-arm64');
+const output = join(root, 'dist', 'app', 'mac-arm64');
 const bundle = join(output, 'Graph.app');
 
 await rm(output, { recursive: true, force: true });
