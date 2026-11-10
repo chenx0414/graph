@@ -196,7 +196,9 @@ function orderMessages(messages: ConversationMessage[]) {
     }
     const answers: ConversationMessage[] = [];
     const tools: ConversationMessage[] = [];
-    while (index < messages.length && (messages[index]!.role === 'assistant' || messages[index]!.role === 'tool')) {
+    const operation = messages[index]!.operationId;
+    while (index < messages.length && (messages[index]!.role === 'assistant' || messages[index]!.role === 'tool')
+      && messages[index]!.operationId === operation) {
       if (messages[index]!.role === 'assistant') answers.push(messages[index]!);
       else tools.push(messages[index]!);
       index += 1;

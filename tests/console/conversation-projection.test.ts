@@ -353,3 +353,18 @@ test('message image attachments retain their payload for rendering after reload'
   const image = { name: 'photo.png', type: 'image/png', size: 3, text: '', data: 'YWJj' };
   expect(messageAttachments(message({ id: 'image', seq: 1, data: { attachments: [image] } }))).toEqual([{ ...image, imageUrl: '/api/messages/image/attachments/0' }]);
 });
+
+test('a turn answer stays ahead of the next turn that starts in the same record run', () => {
+  let state = createConversationProjection();
+  state = observeConversationView(state, {
+    messageCount: 4,
+    messages: [
+      message({ id: 'u1', seq: 1, role: 'user', text: '第一轮' }),
+      message({ id: 't1', seq: 2, role: 'tool', operationId: 'op-a', data: { toolName: 'bash', toolCallId: 't1', ordinal: 1 } }),
+      message({ id: 'a1', seq: 3, role: 'assistant', operationId: 'op-a', text: '第一轮答案' }),
+      message({ id: 't2', seq: 4, role: 'tool', operationId: 'op-b', data: { toolName: 'bash', toolCallId: 't2', ordinal: 1 } }),
+    ],
+  } as never);
+  const snapshot = conversationProjectionSnapshot(state, { busy: true });
+  expect(snapshot.messages.map(entry => entry.id)).toEqual(['u1', 't1', 'a1', 't2']);
+});
