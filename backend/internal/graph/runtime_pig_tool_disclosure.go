@@ -21,11 +21,16 @@ const (
 )
 
 type toolDisclosureOptions struct {
-	Enabled     bool
-	TopKDefault int
-	TopKMax     int
-	MaxSchema   int
-	OnDemand    []string
+	Enabled           bool
+	TopKDefault       int
+	TopKMax           int
+	MaxSchema         int
+	OnDemand          []string
+	FloatEnabled      bool
+	FloatK            int
+	FloatMinExposures int
+	Pinned            []string
+	Usage             *toolUsage
 }
 
 var toolDisclosureOnDemandDefaults = []string{
@@ -37,11 +42,28 @@ var toolDisclosureOnDemandPrefixes = []string{"mcp__", "mcp_"}
 
 func defaultToolDisclosureOptions() toolDisclosureOptions {
 	options := toolDisclosureOptions{
-		Enabled:     os.Getenv("GRAPH_TOOL_SEARCH") != "0",
-		TopKDefault: 5,
-		TopKMax:     20,
-		MaxSchema:   4000,
-		OnDemand:    append([]string{}, toolDisclosureOnDemandDefaults...),
+		Enabled:           os.Getenv("GRAPH_TOOL_SEARCH") != "0",
+		TopKDefault:       5,
+		TopKMax:           20,
+		MaxSchema:         4000,
+		OnDemand:          append([]string{}, toolDisclosureOnDemandDefaults...),
+		FloatEnabled:      os.Getenv("GRAPH_TOOL_SEARCH_FLOAT") != "0",
+		FloatK:            15,
+		FloatMinExposures: 30,
+		Pinned:            append([]string{}, toolFloatPinnedDefaults...),
+	}
+	if value, error := strconv.Atoi(strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_FLOAT_K"))); error == nil && value > 0 {
+		options.FloatK = value
+	}
+	if value, error := strconv.Atoi(strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_FLOAT_MIN_EXPOSURES"))); error == nil && value >= 0 {
+		options.FloatMinExposures = value
+	}
+	if value := strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_PIN")); value != "" {
+		for _, name := range strings.Split(value, ",") {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				options.Pinned = append(options.Pinned, trimmed)
+			}
+		}
 	}
 	if value, error := strconv.Atoi(strings.TrimSpace(os.Getenv("GRAPH_TOOL_SEARCH_TOP_K"))); error == nil && value > 0 {
 		options.TopKDefault = value
@@ -108,9 +130,9 @@ type toolDisclosureEntry struct {
 }
 
 type toolDisclosureIndex struct {
-	entries []*toolDisclosureEntry
+	entries   []*toolDisclosureEntry
 	documents map[string]int
-	average float64
+	average   float64
 }
 
 func newToolDisclosureIndex(tools []pigkernel.ToolSpec, maxSchema int) *toolDisclosureIndex {
@@ -220,11 +242,18 @@ func toolDisclosurePlanOf(tools []pigkernel.ToolSpec, options toolDisclosureOpti
 		return nil, nil
 	}
 	deferred := map[string]pigkernel.ToolSpec{}
+	inline := []string{}
+	byName := map[string]pigkernel.ToolSpec{}
 	for _, spec := range tools {
-		if !toolDisclosureOnDemand(spec.Name, options) {
+		byName[spec.Name] = spec
+		if toolDisclosureOnDemand(spec.Name, options) {
+			deferred[spec.Name] = spec
 			continue
 		}
-		deferred[spec.Name] = spec
+		inline = append(inline, spec.Name)
+	}
+	for name := range toolFloatSinkable(inline, options.Usage, options) {
+		deferred[name] = byName[name]
 	}
 	if len(deferred) == 0 {
 		return nil, nil
@@ -244,7 +273,7 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 	}
 	sort.Strings(names)
 	return pigkernel.ToolSpec{
-		Name: "tool_search",
+		Name:        "tool_search",
 		Description: fmt.Sprintf("Discover the %d bound tools that are not listed in your tools: search by keyword (Chinese supported) or `regex`; each hit carries its full parameter schema. Run one with `tool_invoke`.", len(names)),
 		Parameters: map[string]any{
 			"type": "object",
@@ -267,7 +296,7 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 			if topK > options.TopKMax {
 				topK = options.TopKMax
 			}
-			payload, error := json.Marshal(map[string]any{"hits": index.search(query, expression, topK), "total": len(deferred)})
+			payload, error := json.Marshal(map[string]any{"hits": index.markSearched(query, expression, topK, options.Usage), "total": len(deferred)})
 			if error != nil {
 				return "", error
 			}
@@ -276,7 +305,7 @@ func toolSearchSpec(deferred map[string]pigkernel.ToolSpec, index *toolDisclosur
 	}
 }
 
-func toolInvokeSpec(deferred map[string]pigkernel.ToolSpec) pigkernel.ToolSpec {
+func toolInvokeSpec(deferred map[string]pigkernel.ToolSpec, options toolDisclosureOptions) pigkernel.ToolSpec {
 	return pigkernel.ToolSpec{
 		Name:        "tool_invoke",
 		Description: "Run one tool that `tool_search` returned, without loading its schema: pass the exact `name` and its `arguments` object.",
@@ -294,6 +323,8 @@ func toolInvokeSpec(deferred map[string]pigkernel.ToolSpec) pigkernel.ToolSpec {
 			if !ok {
 				return "", fmt.Errorf("Unknown on-demand tool %q: run tool_search first", name)
 			}
+			options.Usage.mark(toolUsageCall, name)
+			_ = options.Usage.flush()
 			parameters, _ := args["arguments"].(map[string]any)
 			if parameters == nil {
 				parameters = map[string]any{}
@@ -325,7 +356,7 @@ func pigToolSearchSurface(tools []pigkernel.ToolSpec, provider pigkernel.Provide
 	guarded := make([]pigkernel.ToolSpec, 0, len(tools)+2)
 	for _, spec := range tools {
 		if _, hidden := deferred[spec.Name]; !hidden {
-			guarded = append(guarded, spec)
+			guarded = append(guarded, toolUsageWrapped(spec, options.Usage))
 			continue
 		}
 		name := spec.Name
@@ -335,9 +366,9 @@ func pigToolSearchSurface(tools []pigkernel.ToolSpec, provider pigkernel.Provide
 		spec.Execute = nil
 		guarded = append(guarded, spec)
 	}
-	guarded = append(guarded, toolSearchSpec(deferred, index, options), toolInvokeSpec(deferred))
+	guarded = append(guarded, toolSearchSpec(deferred, index, options), toolInvokeSpec(deferred, options))
 	stream := provider.Stream
-	provider.Stream = func(ctx context.Context, transcript []map[string]any, options map[string]any) (pigkernel.EventStream, error) {
+	provider.Stream = func(ctx context.Context, transcript []map[string]any, streamOptions map[string]any) (pigkernel.EventStream, error) {
 		filtered := make([]map[string]any, 0, len(transcript))
 		for _, message := range transcript {
 			added, present := message["toolsAdded"].([]any)
@@ -359,7 +390,24 @@ func pigToolSearchSurface(tools []pigkernel.ToolSpec, provider pigkernel.Provide
 			copy["toolsAdded"] = visible
 			filtered = append(filtered, copy)
 		}
-		return stream(ctx, filtered, options)
+		if options.Usage != nil {
+			exposed := []string{}
+			for _, message := range filtered {
+				added, present := message["toolsAdded"].([]any)
+				if !present {
+					continue
+				}
+				exposed = exposed[:0]
+				for _, tool := range added {
+					exposed = append(exposed, controlledToolName(tool))
+				}
+			}
+			for _, name := range exposed {
+				options.Usage.mark(toolUsageExposure, name)
+			}
+			_ = options.Usage.flush()
+		}
+		return stream(ctx, filtered, streamOptions)
 	}
 	return guarded, provider, nil
 }

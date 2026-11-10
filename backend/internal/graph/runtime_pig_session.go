@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -74,7 +75,11 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 }
 
 func openPigSession(ctx context.Context, database string, request AgentSessionRequest, codemode CodemodeSettings, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
-	tools, provider, err := pigToolSearchSurface(tools, provider, defaultToolDisclosureOptions())
+	disclosure := defaultToolDisclosureOptions()
+	if request.StateDir != "" {
+		disclosure.Usage = toolUsageAt(filepath.Join(request.StateDir, "tool-usage.json"))
+	}
+	tools, provider, err := pigToolSearchSurface(tools, provider, disclosure)
 	if err != nil {
 		return nil, err
 	}
