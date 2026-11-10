@@ -4,6 +4,25 @@ import { join, resolve } from 'node:path';
 import { findGraphd, graphdSearchStarts } from '../../src/server/go-launch.ts';
 import { ensureBackendBinary } from './backend-binary.ts';
 
+export async function unansweredRequestReport(
+  baseUrl: string,
+  path: string,
+  headers: Record<string, string>,
+  options: { timeoutMs: number; probeMs: number } = { timeoutMs: 60_000, probeMs: 2_000 },
+) {
+  const timeoutSeconds = Math.round(options.timeoutMs / 1000);
+  const started = Date.now();
+  try {
+    const response = await fetch(`${baseUrl}/api/build`, { headers, signal: AbortSignal.timeout(options.probeMs) });
+    return `The daemon did not answer ${path} within ${timeoutSeconds}s; /api/build answered ${response.status} after ${Date.now() - started}ms, so the process is alive and that route or a lock it takes stalled`;
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    const silent = name === 'TimeoutError' || name === 'AbortError';
+    const reason = silent ? `no answer within ${options.probeMs}ms` : `${name || 'error'}: ${error instanceof Error ? error.message : String(error)}`;
+    return `The daemon did not answer ${path} within ${timeoutSeconds}s and /api/build gave ${reason}, so the process is wedged or gone`;
+  }
+}
+
 /** Real executable, real loopback HTTP and an isolated caller-owned state directory. */
 export async function launchCli(root: string, options: {
   sourceRoot?: string;
@@ -80,9 +99,9 @@ export async function launchCli(root: string, options: {
       // whether the product stalled or the test waited forever. Bound every call
       // and name the path that did not answer.
       return fetch(`${url}${path}`, { signal: init.signal ?? AbortSignal.timeout(60_000), ...init, headers: { ...headers, ...init.headers } })
-        .catch(error => {
+        .catch(async error => {
           if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
-            throw new Error(`The daemon did not answer ${path} within 60s`, { cause: error });
+            throw new Error(await unansweredRequestReport(url, path, headers), { cause: error });
           }
           throw error;
         });
