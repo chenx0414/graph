@@ -164,3 +164,38 @@ func contains(haystack, needle string) bool {
 	}
 	return false
 }
+
+func TestMessageStreamingFollowsTheStateField(t *testing.T) {
+	if !messageStreaming(transcriptMessage{Role: "assistant", State: "streaming"}) {
+		t.Fatal("a streaming assistant message must render with Stream")
+	}
+	if messageStreaming(transcriptMessage{Role: "assistant", State: "done"}) {
+		t.Fatal("a finished reply must render with View")
+	}
+	if messageStreaming(transcriptMessage{Role: "user", State: "streaming"}) {
+		t.Fatal("only assistant messages stream")
+	}
+}
+
+func TestFollowStopsWhenTheReplyLands(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls < 3 {
+			w.Write([]byte(`{"messages":[{"role":"user","text":"问"},{"role":"assistant","state":"streaming","text":"半句"}]}`))
+			return
+		}
+		w.Write([]byte(`{"messages":[{"role":"user","text":"问"},{"role":"assistant","state":"done","text":"完整答复"}]}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.active = "c1"
+	state.follow()
+	if calls < 3 {
+		t.Fatalf("the follower stopped too early (%d polls)", calls)
+	}
+	if len(state.messages) != 2 || state.messages[1].Text != "完整答复" {
+		t.Fatalf("messages %+v", state.messages)
+	}
+}

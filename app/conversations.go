@@ -22,9 +22,14 @@ type conversationSummary struct {
 }
 
 type transcriptMessage struct {
-	Role string `json:"role"`
-	Kind string `json:"kind"`
-	Text string `json:"text"`
+	Role  string `json:"role"`
+	Kind  string `json:"kind"`
+	Text  string `json:"text"`
+	State string `json:"state"`
+}
+
+func messageStreaming(message transcriptMessage) bool {
+	return message.Role == "assistant" && message.State == "streaming"
 }
 
 type conversationBody struct {
@@ -167,6 +172,21 @@ func (c *chatState) send() {
 	c.draft = ""
 	c.status = "已发出，等待回复…"
 	c.refresh()
+	go c.follow()
+}
+
+func (c *chatState) follow() {
+	for attempt := 0; attempt < 450; attempt++ {
+		time.Sleep(400 * time.Millisecond)
+		c.refresh()
+		if len(c.messages) == 0 {
+			continue
+		}
+		last := c.messages[len(c.messages)-1]
+		if last.Role == "assistant" && !messageStreaming(last) {
+			return
+		}
+	}
 }
 
 func (c *chatState) refresh() {
@@ -222,7 +242,11 @@ func (c *chatState) view(ctx *ui.Context) {
 					author = "你"
 				}
 				ui.Text(ctx, author).FontSize(12).TextColor(t.TextMuted)
-				markdown.View(ctx, message.Text, &c.md)
+				if messageStreaming(message) {
+					markdown.Stream(ctx, message.Text, &c.md)
+				} else {
+					markdown.View(ctx, message.Text, &c.md)
+				}
 			})
 		}).Grow(1)
 		ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
