@@ -80,14 +80,12 @@ export function toolActivityPlans(): ResponsePlan[] {
   ];
 }
 
-export async function launchToolActivityGraph(options: { webDir?: string } = {}) {
+export async function launchToolActivityGraph() {
   const root = await mkdtemp(join(tmpdir(), 'graph-tool-activity-'));
   const project = join(root, 'project');
   const graphHome = join(root, 'graph-home');
   await mkdir(project, { recursive: true });
   await mkdir(graphHome, { recursive: true });
-  await mkdir(join(root, 'web'), { recursive: true });
-  await writeFile(join(root, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
   await writeFile(join(project, 'README.md'), '# Tool activity project\n');
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: project });
   execFileSync('git', ['config', 'user.email', 'graph@example.invalid'], { cwd: project });
@@ -128,7 +126,6 @@ export async function launchToolActivityGraph(options: { webDir?: string } = {})
   const daemon = await launchCli(root, {
     configPath,
     graphHome,
-    ...(options.webDir ? { webDir: options.webDir } : {}),
     env: {
       GRAPH_TOOL_ACTIVITY_KEY: 'synthetic-only',
       GRAPH_DESKTOP_BIN: desktopBinary(),

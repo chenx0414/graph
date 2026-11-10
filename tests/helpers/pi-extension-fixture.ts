@@ -37,9 +37,7 @@ export async function withExtension(
   const project = join(root, 'project');
   const home = join(root, 'graph-home');
   await mkdir(project);
-  await mkdir(join(root, 'web'));
   await mkdir(home);
-  await writeFile(join(root, 'web/index.html'), '<!doctype html><div>Graph</div>');
 
   const capabilityDirectory = join(home, 'capabilities', 'pi-extension', 'proof-1.0.0');
   await mkdir(capabilityDirectory, { recursive: true });

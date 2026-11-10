@@ -3,8 +3,6 @@ package graph
 import (
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 )
 
 func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
@@ -124,7 +122,6 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{taskId}/artifacts/{artifactId}/{version}/retire", app.serveArtifactRetire)
 	mux.HandleFunc("POST /api/tasks/{taskId}/artifacts/{artifactId}/{version}/promote", app.serveArtifactPromote)
 	mux.HandleFunc("GET /api/catalog", app.serveCatalog)
-	mux.HandleFunc("GET /api/build", app.serveBuild)
 	mux.HandleFunc("POST /api/catalog/refresh", app.serveCatalogRefresh)
 	mux.HandleFunc("POST /api/extensions/reload", app.serveExtensionsReload)
 	mux.HandleFunc("GET /api/extensions/status", app.serveExtensionsStatus)
@@ -136,22 +133,29 @@ func (app *GraphApp) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/catalog/combinations/{id}", app.serveCombinationDelete)
 	mux.HandleFunc("POST /api/catalog/combinations/{id}/compile", app.serveCombinationCompile)
 	mux.HandleFunc("GET /api/catalog/definitions/{definitionId}", app.serveDefinition)
-	if app.options.WebDir != "" {
-		mux.HandleFunc("GET /assets/{path...}", app.serveAssets)
-	}
 }
 
 func (app *GraphApp) serveHome(w http.ResponseWriter, r *http.Request) {
 	SetSessionCookie(w.Header(), app.session)
-	body := appDefaultPage()
-	if app.options.WebDir != "" {
-		raw, err := os.ReadFile(filepath.Join(app.options.WebDir, "index.html"))
-		if err == nil {
-			body = string(raw)
-		}
-	}
+	body := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Graph</title></head><body><div id=\"root\">Graph</div></body></html>"
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, body)
+}
+
+func (app *GraphApp) serveHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, appHealth{OK: true})
+}
+
+func (app *GraphApp) serveStartup(w http.ResponseWriter, r *http.Request) {
+	if app.options.StartupInfo != nil {
+		writeJSON(w, http.StatusOK, app.options.StartupInfo())
+		return
+	}
+	if app.options.Startup != nil {
+		writeJSON(w, http.StatusOK, *app.options.Startup)
+		return
+	}
+	writeJSON(w, http.StatusOK, StartupInfo{Mode: "view", Configured: false, ModelCount: 0, EnabledModelCount: 0})
 }

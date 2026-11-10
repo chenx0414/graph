@@ -163,8 +163,6 @@ export async function launchDesktopGraph(input: {
   const work = await mkdtemp(join(tmpdir(), 'graph-e2e-desktop-'));
   const project = join(work, 'project');
   await mkdir(project, { recursive: true });
-  await mkdir(join(work, 'web'), { recursive: true });
-  await writeFile(join(work, 'web', 'index.html'), '<!doctype html><div id="root">Graph</div>');
   await writeFile(join(project, 'README.md'), '# Desktop capability project\n');
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: project });
   execFileSync('git', ['config', 'user.email', 'graph@example.invalid'], { cwd: project });

@@ -39,7 +39,6 @@ type AppRsiService struct {
 
 type AppOptions struct {
 	Origin       string
-	WebDir       string
 	Startup      *StartupInfo
 	StartupInfo  func() StartupInfo
 	ConfigStore  *ConfigStore
@@ -53,7 +52,6 @@ type AppOptions struct {
 type GraphServerOptions struct {
 	StateDir      string
 	Projects      []ProjectConfig
-	WebDir        string
 	Port          *int
 	AutoDrive     *bool
 	Origin        string
@@ -110,7 +108,7 @@ func OpenGraphServer(options GraphServerOptions) *GraphHost {
 		origin = "http://127.0.0.1"
 	}
 	app := CreateApp(runtime, AppOptions{
-		Origin: origin, WebDir: options.WebDir, Startup: options.Startup, StartupInfo: options.StartupInfo,
+		Origin: origin, Startup: options.Startup, StartupInfo: options.StartupInfo,
 		ConfigStore: options.ConfigStore, ConfigEnv: options.ConfigEnv, ConfigTest: options.ConfigTest,
 		AppServices: options.AppServices, Usage: options.Usage, AgentContext: agentContext,
 	})

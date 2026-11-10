@@ -13,13 +13,13 @@ export async function unansweredRequestReport(
   const timeoutSeconds = Math.round(options.timeoutMs / 1000);
   const started = Date.now();
   try {
-    const response = await fetch(`${baseUrl}/api/build`, { headers, signal: AbortSignal.timeout(options.probeMs) });
-    return `The daemon did not answer ${path} within ${timeoutSeconds}s; /api/build answered ${response.status} after ${Date.now() - started}ms, so the process is alive and that route or a lock it takes stalled`;
+    const response = await fetch(`${baseUrl}/api/conversations`, { headers, signal: AbortSignal.timeout(options.probeMs) });
+    return `The daemon did not answer ${path} within ${timeoutSeconds}s; /api/conversations answered ${response.status} after ${Date.now() - started}ms, so the process is alive and that route or a lock it takes stalled`;
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
     const silent = name === 'TimeoutError' || name === 'AbortError';
     const reason = silent ? `no answer within ${options.probeMs}ms` : `${name || 'error'}: ${error instanceof Error ? error.message : String(error)}`;
-    return `The daemon did not answer ${path} within ${timeoutSeconds}s and /api/build gave ${reason}, so the process is wedged or gone`;
+    return `The daemon did not answer ${path} within ${timeoutSeconds}s and /api/conversations gave ${reason}, so the process is wedged or gone`;
   }
 }
 
@@ -32,7 +32,6 @@ export async function launchCli(root: string, options: {
   /** Own directories when the caller already has them (a built console, a kept state dir). */
   stateDir?: string;
   graphHome?: string;
-  webDir?: string;
   /** Pin the port. Zero asks the operating system for a free one. */
   port?: number;
 } = {}) {
@@ -44,7 +43,6 @@ export async function launchCli(root: string, options: {
   const args = [
     '--state-dir', options.stateDir ?? join(root, 'state'),
     '--graph-home', options.graphHome ?? join(root, 'graph-home'),
-    '--web-dir', options.webDir ?? join(root, 'web'),
     '--port', String(options.port ?? 0),
     '--application-root', resolve(sourceRoot),
     ...(options.configPath ? ['--config', options.configPath] : []),

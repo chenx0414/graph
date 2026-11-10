@@ -17,10 +17,6 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	if log == nil {
 		log = func(string) {}
 	}
-	index := filepath.Join(options.WebDir, "index.html")
-	if _, err := os.Stat(index); err != nil {
-		Raise("web_build_missing", fmt.Sprintf("Web build not found at %s. Build the console first: pnpm build:web (without pnpm: node --run build:web)", index))
-	}
 	config := EmptyGraphConfig()
 	if options.ConfigPath != nil {
 		config = LoadGraphConfig(*options.ConfigPath)
@@ -319,7 +315,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		return daemonSystemSummary(live, userHome, agentContext, server, usage)
 	}
 	server = OpenGraphServer(GraphServerOptions{
-		StateDir: stateDir, Projects: config.Projects, WebDir: options.WebDir, Port: &port, AutoDrive: &autoDrive,
+		StateDir: stateDir, Projects: config.Projects, Port: &port, AutoDrive: &autoDrive,
 		Codemode:      config.Codemode,
 		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},
 		Models: &TaskRuntimeModels{
@@ -445,7 +441,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 	}
 	status := live.Status()
 	daemon := &GraphDaemon{
-		URL: server.Url, StateDir: stateDir, WebDir: options.WebDir, ConfigPath: config.Path, Mode: options.Mode,
+		URL: server.Url, StateDir: stateDir, ConfigPath: config.Path, Mode: options.Mode,
 		Configured: live.Enabled(), ModelCount: len(live.Entries()), EnabledModelCount: status.EnabledModelCount,
 		AppToken: appToken, server: server, watch: configWatch,
 	}

@@ -119,9 +119,6 @@ async function run(variant, index) {
   await mkdir(project);
   await writeFile(join(project, 'package.json'), '{"type":"module"}');
   for (const [path, content] of Object.entries(scenario.files ?? {})) await writeFile(join(project, path), content);
-  const webDir = join(root, 'web');
-  await mkdir(webDir);
-  await writeFile(join(webDir, 'index.html'), '<!doctype html><div>AB</div>');
   const evaluationConfig = { ...source, projects: [{ id: 'p', root: project }] };
   const runConfig = join(root, 'config.json');
   await writeFile(runConfig, JSON.stringify(evaluationConfig), { mode: 0o600 });

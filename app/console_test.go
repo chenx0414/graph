@@ -75,9 +75,9 @@ func TestReachableChecksTheConsoleApiWithTheSessionCookie(t *testing.T) {
 
 func TestDaemonArgsCarryThePathsTheConsoleNeeds(t *testing.T) {
 	dir := t.TempDir()
-	paths := Paths{StateDir: dir, GraphHome: "/tmp/home", WebDir: "/tmp/web", SourceRoot: "/tmp/root", ConfigPath: filepath.Join(dir, "graph.config.json")}
+	paths := Paths{StateDir: dir, GraphHome: "/tmp/home", SourceRoot: "/tmp/root", ConfigPath: filepath.Join(dir, "graph.config.json")}
 	joined := strings.Join(paths.DaemonArgs(), " ")
-	for _, wanted := range []string{"--state-dir " + dir, "--graph-home /tmp/home", "--web-dir /tmp/web", "--port 0", "--execute", "--dynamic", "--application-root /tmp/root"} {
+	for _, wanted := range []string{"--state-dir " + dir, "--graph-home /tmp/home", "--port 0", "--execute", "--dynamic", "--application-root /tmp/root"} {
 		if !strings.Contains(joined, wanted) {
 			t.Fatalf("args %q miss %q", joined, wanted)
 		}

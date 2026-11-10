@@ -19,7 +19,6 @@ type Console struct {
 type Paths struct {
 	StateDir   string
 	GraphHome  string
-	WebDir     string
 	ConfigPath string
 	SourceRoot string
 	DaemonBin  string
@@ -36,7 +35,6 @@ func DefaultPaths() Paths {
 	paths := Paths{
 		StateDir:   envOr("GRAPH_STATE_DIR", filepath.Join(appSupport, "state")),
 		GraphHome:  graphHome,
-		WebDir:     envOr("GRAPH_WEB_DIR", filepath.Join(root, "dist", "web")),
 		ConfigPath: envOr("GRAPH_CONFIG", filepath.Join(appSupport, "graph.config.json")),
 		SourceRoot: root,
 		DaemonBin:  envOr("GRAPH_DAEMON", filepath.Join(root, "dist", "graphd")),
@@ -103,7 +101,6 @@ func (paths Paths) DaemonArgs() []string {
 	args := []string{
 		"--state-dir", paths.StateDir,
 		"--graph-home", paths.GraphHome,
-		"--web-dir", paths.WebDir,
 		"--port", "0",
 	}
 	if _, err := os.Stat(paths.ConfigPath); err == nil {

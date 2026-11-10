@@ -33,7 +33,6 @@ const worker=workerId ? configuredModel(workerId) : model;
 const reviewer=reviewerId ? configuredModel(reviewerId) : undefined;
 if(reviewer && !workerId)throw new Error('Reviewer selection requires an explicit worker model');
 const entries=contextSnapshot ? source.models.entries : [...new Map([model,worker,...(reviewer?[reviewer]:[])].map(entry=>[entry.id,entry])).values()];
-const webDir=join(root,'web');await mkdir(webDir);await writeFile(join(webDir,'index.html'),'<!doctype html><div>Eval</div>');
 const configPath=join(root,'config.json');
 const evaluationConfig={...source,projects:[{id:'p',root:project}],models:contextSnapshot?source.models:{entries}};
 await writeFile(configPath,JSON.stringify(evaluationConfig),{mode:0o600});
@@ -68,7 +67,7 @@ let toolTelemetry={collected:false,reason:'daemon_unavailable'};
 const resourceFacts=list=>(list??[]).map(item=>({resourceId:item.resourceId,version:item.version??'',role:item.role,required:Boolean(item.required)}))
  .sort((left,right)=>left.resourceId.localeCompare(right.resourceId));
 try {
- daemon=await startGoDaemon({root,configPath,stateDir:join(root,'state'),graphHome,webDir,mode:'execute'});
+ daemon=await startGoDaemon({root,configPath,stateDir:join(root,'state'),graphHome,mode:'execute'});
  console_=await openConsole(daemon.url);
  if(evaluationContext){
   const catalog=await console_.json('/api/catalog');

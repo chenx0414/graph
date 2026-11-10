@@ -88,7 +88,6 @@ Options:
   --config <path>     Config file (default: ./graph.config.json when present)
   --state-dir <path>  State directory (default: $XDG_STATE_HOME/graph or ~/.local/state/graph)
   --graph-home <path> User capability/recipe home (default: ~/.graph)
-  --web-dir <path>    Built web console (default: ./dist/web)
   --port <number>     Loopback port, 0 prefers the port this state directory last served on (default: 4173)
   --execute           Enable task dispatch; requires configured models and credentials
   --dynamic           With --execute: start before credentials resolve and activate them live
@@ -104,7 +103,6 @@ type cliOptions struct {
 	configPath      string
 	stateDir        string
 	graphHome       string
-	webDir          string
 	port            int
 	mode            string
 	dynamic         bool
@@ -119,10 +117,10 @@ type cliOptions struct {
 }
 
 func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
-	var configFlag, stateFlag, homeFlag, webFlag, portFlag, rootFlag, kernelFlag, kernelModelFlag, kernelPromptFlag, kernelIdentityFlag, kernelMcpFlag string
+	var configFlag, stateFlag, homeFlag, portFlag, rootFlag, kernelFlag, kernelModelFlag, kernelPromptFlag, kernelIdentityFlag, kernelMcpFlag string
 	agentKernelFlag := ""
 	kernelMode := ""
-	configSet, stateSet, homeSet, webSet, portSet, rootSet := false, false, false, false, false, false
+	configSet, stateSet, homeSet, portSet, rootSet := false, false, false, false, false
 	execute, dynamic, viewOnly, help := false, false, false, false
 	for index := 0; index < len(argv); index++ {
 		arg := argv[index]
@@ -140,8 +138,6 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 			stateFlag, stateSet = value(), true
 		case "--graph-home":
 			homeFlag, homeSet = value(), true
-		case "--web-dir":
-			webFlag, webSet = value(), true
 		case "--port":
 			portFlag, portSet = value(), true
 		case "--application-root":
@@ -210,12 +206,6 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 	} else if raw, ok := env["GRAPH_HOME"]; ok {
 		homePick = raw
 	}
-	webPick := "dist/web"
-	if webSet {
-		webPick = webFlag
-	} else if raw, ok := env["GRAPH_WEB_DIR"]; ok {
-		webPick = raw
-	}
 	root := cwd
 	if rootSet {
 		root = resolvePath(cwd, rootFlag)
@@ -247,7 +237,6 @@ func parseCLI(argv []string, env map[string]string, cwd string) cliOptions {
 		configPath:      configPath,
 		stateDir:        resolvePath(cwd, statePick),
 		graphHome:       resolvePath(cwd, homePick),
-		webDir:          resolvePath(cwd, webPick),
 		port:            port,
 		mode:            mode,
 		dynamic:         dynamic,
@@ -340,14 +329,14 @@ func serveDaemon(opts cliOptions, env map[string]string) int {
 		configPath = &value
 	}
 	daemon := StartGraphDaemon(DaemonOptions{
-		ConfigPath: configPath, StateDir: opts.stateDir, WebDir: opts.webDir, GraphHome: opts.graphHome,
+		ConfigPath: configPath, StateDir: opts.stateDir, GraphHome: opts.graphHome,
 		Port: opts.port, Mode: opts.mode, Env: env, Log: log, Dynamic: opts.dynamic,
 	})
 	configLine := firstRunConfigLine
 	if daemon.ConfigPath != nil {
 		configLine = *daemon.ConfigPath
 	}
-	printBanner(daemon.Mode, configLine, daemon.StateDir, daemon.WebDir, daemon.ModelCount, daemon.EnabledModelCount, daemon.URL)
+	printBanner(daemon.Mode, configLine, daemon.StateDir, daemon.ModelCount, daemon.EnabledModelCount, daemon.URL)
 	_ = os.Stdout.Sync()
 	WriteConsoleAddress(daemon.StateDir, ConsoleAddress{
 		URL: daemon.URL, PID: os.Getpid(), Mode: daemon.Mode, StartedAt: NowMillis(),
@@ -358,7 +347,7 @@ func serveDaemon(opts cliOptions, env map[string]string) int {
 	return stopGraphDaemon(daemon, signals, <-signals)
 }
 
-func printBanner(mode, configLine, stateDir, webDir string, modelCount, enabled int, url string) {
+func printBanner(mode, configLine, stateDir string, modelCount, enabled int, url string) {
 	modeLine := "view-only (history, settings and graph; no model dispatch)"
 	if mode == "execute" {
 		modeLine = "execute (task dispatch enabled)"
@@ -368,7 +357,6 @@ func printBanner(mode, configLine, stateDir, webDir string, modelCount, enabled 
 		"  mode:      " + modeLine,
 		"  config:    " + configLine,
 		"  state:     " + stateDir,
-		"  web:       " + webDir,
 		fmt.Sprintf("  models:    %d configured, %d enabled", modelCount, enabled),
 		"  address:   " + url,
 		"  stop:      Ctrl-C / SIGTERM (bounded 5s stop)",

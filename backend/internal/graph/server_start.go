@@ -13,7 +13,6 @@ import (
 type DaemonOptions struct {
 	ConfigPath  *string
 	StateDir    string
-	WebDir      string
 	GraphHome   string
 	Port        int
 	Mode        string
@@ -38,7 +37,6 @@ type ApplyConfigResult struct {
 type GraphDaemon struct {
 	URL               string
 	StateDir          string
-	WebDir            string
 	ConfigPath        *string
 	Mode              string
 	Configured        bool

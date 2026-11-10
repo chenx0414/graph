@@ -14,7 +14,7 @@ test('an unanswered request is reported as a stalled route while the daemon stil
   try {
     const report = await unansweredRequestReport(live.baseUrl, '/api/tasks/t/graph/control', {}, { timeoutMs: 60_000, probeMs: 2_000 });
     expect(report).toContain('/api/tasks/t/graph/control');
-    expect(report).toContain('/api/build answered 200');
+    expect(report).toContain('/api/conversations answered 200');
     expect(report).toContain('alive');
   } finally { await live.close(); }
 });
