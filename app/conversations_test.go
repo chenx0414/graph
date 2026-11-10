@@ -92,3 +92,75 @@ func TestChatStateReportsAnEmptyConversation(t *testing.T) {
 		t.Fatalf("status %q", state.status)
 	}
 }
+
+func TestChatStateSendsAndReadsTheAnswerBack(t *testing.T) {
+	posted := ""
+	sent := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/messages":
+			payload := make([]byte, 1024)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			sent = true
+			w.Write([]byte(`{"accepted":true}`))
+		case r.URL.Path == "/api/conversations/c1":
+			if sent {
+				w.Write([]byte(`{"messages":[{"role":"user","text":"再来一句"},{"role":"assistant","text":"答复到了"}]}`))
+				return
+			}
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"旧的"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if state.active != "c1" || state.status != "" {
+		t.Fatalf("active %q status %q", state.active, state.status)
+	}
+	state.draft = "再来一句"
+	state.send()
+	if posted == "" || !contains(posted, "再来一句") || !contains(posted, "requestId") {
+		t.Fatalf("posted body %q", posted)
+	}
+	if state.draft != "" {
+		t.Fatal("the composer must clear after a send")
+	}
+	if len(state.messages) != 2 || state.messages[1].Text != "答复到了" {
+		t.Fatalf("messages %+v", state.messages)
+	}
+	if state.status != "" {
+		t.Fatalf("status %q after the answer arrived", state.status)
+	}
+}
+
+func TestChatStateKeepsAStatusWhileTheAnswerIsPending(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			w.Write([]byte(`{}`))
+			return
+		}
+		w.Write([]byte(`{"messages":[{"role":"user","text":"发出去的"}]}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	state.draft = "发出去的"
+	state.send()
+	if state.status != "已发出，等待回复…" {
+		t.Fatalf("status %q", state.status)
+	}
+}
+
+func contains(haystack, needle string) bool {
+	for index := 0; index+len(needle) <= len(haystack); index++ {
+		if haystack[index:index+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}

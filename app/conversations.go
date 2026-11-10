@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -92,6 +93,8 @@ func daemonGet(address, token, path string) ([]byte, error) {
 type chatState struct {
 	address  string
 	token    string
+	draft    string
+	active   string
 	status   string
 	titles   []string
 	ids      []string
@@ -135,6 +138,54 @@ func (c *chatState) load() {
 	c.open(c.ids[0])
 }
 
+func (c *chatState) send() {
+	text := strings.TrimSpace(c.draft)
+	if text == "" || c.active == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/messages", bytes.NewReader(body))
+	if err != nil {
+		c.status = "发送失败：" + err.Error()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "发送失败：" + err.Error()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "发送被拒绝：" + response.Status
+		return
+	}
+	c.draft = ""
+	c.status = "已发出，等待回复…"
+	c.refresh()
+}
+
+func (c *chatState) refresh() {
+	payload, err := daemonGet(c.address, c.token, "/api/conversations/"+c.active)
+	if err != nil {
+		c.status = "读不到这个会话：" + err.Error()
+		return
+	}
+	messages, err := parseConversationMessages(payload)
+	if err != nil {
+		c.status = "会话内容不是预期的 JSON：" + err.Error()
+		return
+	}
+	c.messages = messages
+	if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
+		c.status = ""
+	}
+}
+
 func (c *chatState) open(id string) {
 	payload, err := daemonGet(c.address, c.token, "/api/conversations/"+id)
 	if err != nil {
@@ -147,6 +198,7 @@ func (c *chatState) open(id string) {
 		return
 	}
 	c.messages = messages
+	c.active = id
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
 		return
@@ -173,5 +225,11 @@ func (c *chatState) view(ctx *ui.Context) {
 				markdown.View(ctx, message.Text, &c.md)
 			})
 		}).Grow(1)
+		ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
+			ui.TextInput(ctx, &c.draft).Placeholder("给 Graph 发消息…").Label("消息").Grow(1)
+			if ui.PrimaryButton(ctx, "发送").Clicked() {
+				go c.send()
+			}
+		})
 	})
 }
