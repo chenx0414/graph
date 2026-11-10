@@ -390,6 +390,10 @@ func TestConfirmingADraftSendsBothRevisions(t *testing.T) {
 			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
 		}
 	}
+	deadline = time.Now().Add(2 * time.Second)
+	for state.status == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if state.proposal.Version != 0 || state.status != "已确认草案，开始执行（目标分支 main）" {
 		t.Fatalf("确认后状态：proposal %+v status %q", state.proposal, state.status)
 	}

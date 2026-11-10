@@ -139,13 +139,15 @@ type settingsState struct {
 	status      string
 	editing     string
 	secretDraft string
+	login       providerLogin
+	openURL     func(string) error
 	window      *mygo.Window
 	rows        settingsSnapshot
 	list        ui.ListState
 }
 
 func newSettingsState(address, token string) *settingsState {
-	return &settingsState{address: address, token: token, status: "正在读取设置…"}
+	return &settingsState{address: address, token: token, status: "正在读取设置…", openURL: mygo.Shell.OpenExternal}
 }
 
 func (s *settingsState) load() {
@@ -257,6 +259,8 @@ func (s *settingsState) view(ctx *ui.Context) {
 		ui.Text(ctx, "设置").FontSize(18)
 		if s.status != "" {
 			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
+		}
+		if s.rows.mode == "" && len(s.rows.credentials) == 0 && len(s.rows.projects) == 0 {
 			return
 		}
 		ui.Text(ctx, "运行 · "+s.rows.mode+" · 配置版本 "+strconv.Itoa(s.rows.revision)).FontSize(12).TextColor(t.TextMuted)
@@ -278,6 +282,9 @@ func (s *settingsState) view(ctx *ui.Context) {
 					s.secretDraft = ""
 					s.status = ""
 				}
+				if ui.Button(ctx, "登录 "+row.id).Clicked() {
+					go s.startLogin(row)
+				}
 			})
 			if s.editing != row.id {
 				continue
@@ -293,6 +300,7 @@ func (s *settingsState) view(ctx *ui.Context) {
 				}
 			})
 		}
+		s.loginSection(ctx)
 		ui.Text(ctx, "项目").FontSize(13)
 		ui.List(ctx, &s.list, len(s.rows.projects), func(index int) {
 			row := s.rows.projects[index]
