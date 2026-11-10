@@ -23,6 +23,23 @@ type shell struct {
 	console string
 }
 
+func (s *shell) watchTasks() {
+	state := newNotificationState()
+	for range time.Tick(15 * time.Second) {
+		if s.console == "" {
+			continue
+		}
+		tasks, err := fetchTasks(s.console, s.paths.SessionToken())
+		if err != nil {
+			continue
+		}
+		decisions, _ := taskDecisions(state, tasks)
+		for _, decided := range decisions {
+			notify(decided.Title, decided.Body)
+		}
+	}
+}
+
 func resourceDirectory(graphHome, kind string) (string, error) {
 	switch kind {
 	case "skills", "mcp", "pi-extensions", "agent-md":
@@ -148,6 +165,7 @@ func main() {
 			},
 		})
 		s.createTray()
+		go s.watchTasks()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
