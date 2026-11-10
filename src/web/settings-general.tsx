@@ -78,7 +78,7 @@ export function ProjectGitCard() {
         {!archived && prep?.state === 'detected' && <span className="muted">{dirty ? `${dirty} 项未提交修改；创建基线将把这些改动纳入本地快照` : prep.detail?.reason === 'not_a_repository' ? '尚未初始化 Git' : '需要准备'}</span>}
         {!archived && prep?.state === 'failed' && <span className="muted">{prep.detail?.reason ?? '准备失败'}</span>}
         <div className="row" style={{ gap: 8 }}>
-          {!archived && (
+          {!archived && prep?.state !== 'ready' && (
             <Button size="sm" data-testid={`git-prepare-${project.id}`} disabled={busy === project.id} onClick={() => void prepare(project, prep?.state === 'detected' && dirty > 0)}>
               {prep?.state === 'detected' && dirty > 0 ? '创建本地基线提交' : '准备 Git'}
             </Button>
