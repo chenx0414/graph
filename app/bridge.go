@@ -14,6 +14,7 @@ type shellAPI struct {
 	pick     func() (string, error)
 	open     func(kind string) (string, error)
 	relaunch func() string
+	apply    func() (bool, string)
 }
 
 type bridge struct {
@@ -88,7 +89,11 @@ func (api *shellAPI) handler(token string) http.Handler {
 		if err := saveSecret(api.secrets, ref, value); err != nil {
 			return map[string]any{"stored": false, "message": err.Error()}, http.StatusOK, ""
 		}
-		return map[string]any{"stored": true, "applied": false}, http.StatusOK, ""
+		if api.apply == nil {
+			return map[string]any{"stored": true, "applied": false}, http.StatusOK, ""
+		}
+		applied, message := api.apply()
+		return map[string]any{"stored": true, "applied": applied, "message": message}, http.StatusOK, ""
 	}))
 	mux.HandleFunc("/secret-status", api.guard(token, func(body map[string]any) (any, int, string) {
 		refs := []string{}

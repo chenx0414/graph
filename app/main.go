@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -19,6 +18,7 @@ type shell struct {
 	paths   Paths
 	window  *mygo.Window
 	bridge  *bridge
+	daemon  *daemon
 	pending string
 	console string
 }
@@ -57,6 +57,9 @@ func (s *shell) api() *shellAPI {
 			mygo.App.Relaunch()
 			return s.console
 		},
+		apply: func() (bool, string) {
+			return s.daemon.restart()
+		},
 	}
 }
 
@@ -74,7 +77,9 @@ func (s *shell) ensureDaemon() string {
 	if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {
 		return info.URL
 	}
-	s.spawnDaemon()
+	if err := s.daemon.start(); err != nil {
+		log.Printf("[app] cannot start %s: %v", s.paths.DaemonBin, err)
+	}
 	for attempt := 0; attempt < 160; attempt++ {
 		if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {
 			return info.URL
@@ -82,27 +87,6 @@ func (s *shell) ensureDaemon() string {
 		time.Sleep(250 * time.Millisecond)
 	}
 	return ""
-}
-
-func (s *shell) spawnDaemon() {
-	logPath := filepath.Join(s.paths.StateDir, "daemon-shell.log")
-	file, err := os.Create(logPath)
-	if err != nil {
-		log.Printf("[app] cannot open %s: %v", logPath, err)
-		return
-	}
-	command := exec.Command(s.paths.DaemonBin, s.paths.DaemonArgs()...)
-	command.Stdout = file
-	command.Stderr = file
-	if err := command.Start(); err != nil {
-		log.Printf("[app] cannot start %s: %v", s.paths.DaemonBin, err)
-		file.Close()
-		return
-	}
-	go func() {
-		_ = command.Wait()
-		file.Close()
-	}()
 }
 
 func (s *shell) createTray() {
@@ -133,7 +117,8 @@ func main() {
 		mygo.App.Quit()
 		return
 	}
-	s := &shell{paths: DefaultPaths()}
+	paths := DefaultPaths()
+	s := &shell{paths: paths, daemon: newDaemon(paths)}
 	mygo.App.OnOpenURL(func(raw string) {
 		if route, ok := RouteOf(raw); ok {
 			s.open(route)
