@@ -1,6 +1,8 @@
 package main
 
 import (
+	_ "embed"
+	"errors"
 	"log"
 	"os"
 	"os/exec"
@@ -10,11 +12,52 @@ import (
 	"github.com/egoist/mygo"
 )
 
+//go:embed preload.js
+var preloadSource string
+
 type shell struct {
 	paths   Paths
 	window  *mygo.Window
+	bridge  *bridge
 	pending string
 	console string
+}
+
+func resourceDirectory(graphHome, kind string) (string, error) {
+	switch kind {
+	case "skills", "mcp", "pi-extensions", "agent-md":
+		return filepath.Join(graphHome, "capabilities", kind), nil
+	case "prompts":
+		return filepath.Join(graphHome, "prompts"), nil
+	}
+	return "", errors.New("unknown resource library")
+}
+
+func (s *shell) api() *shellAPI {
+	return &shellAPI{
+		secrets: secretsPath(s.paths.StateDir),
+		pick: func() (string, error) {
+			chosen, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: "选择项目目录", Directory: true, CreateDirectories: true})
+			if err != nil || len(chosen) == 0 {
+				return "", err
+			}
+			return chosen[0], nil
+		},
+		open: func(kind string) (string, error) {
+			directory, err := resourceDirectory(s.paths.GraphHome, kind)
+			if err != nil {
+				return "", err
+			}
+			if err := os.MkdirAll(directory, 0o755); err != nil {
+				return directory, err
+			}
+			return directory, mygo.Shell.OpenPath(directory)
+		},
+		relaunch: func() string {
+			mygo.App.Relaunch()
+			return s.console
+		},
+	}
 }
 
 func (s *shell) open(route string) {
@@ -101,6 +144,11 @@ func main() {
 		if s.console == "" {
 			log.Fatal("[app] the daemon did not come up")
 		}
+		started, err := startBridge(s.api(), newBridgeToken())
+		if err != nil {
+			log.Printf("[app] bridge: %v", err)
+		}
+		s.bridge = started
 		s.window = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Graph",
 			Width:     1200,
@@ -109,6 +157,10 @@ func main() {
 			MinHeight: 600,
 			StateKey:  "console",
 			URL:       s.console + s.pending,
+			Page: mygo.PageOptions{
+				PreloadScript:    preloadScript(preloadSource, s.bridge.token, s.bridge.address),
+				PreloadAllFrames: true,
+			},
 		})
 		s.createTray()
 	})
