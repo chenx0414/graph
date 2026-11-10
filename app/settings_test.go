@@ -16,8 +16,8 @@ var settingsFixtures = map[string]string{
 		{"id":"00-项目模板","archivedAt":1793178492561,"preparation":null}
 	]}`,
 	"/api/config": `{"revision":428,"config":{"credentials":{
-		"grok":{"displayName":"grok 订阅","configured":true},
-		"chatgpt":{"displayName":"chatgpt 订阅","configured":false}
+		"grok":{"displayName":"grok 订阅","secretRef":"GRAPH_SUBSCRIPTION_GROK_ACCESS_TOKEN","configured":true},
+		"chatgpt":{"displayName":"chatgpt 订阅","secretRef":"GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN","configured":false}
 	}}}`,
 }
 
@@ -51,6 +51,9 @@ func TestSettingsSnapshotReadsRunStateCredentialsAndProjects(t *testing.T) {
 	}
 	if len(snapshot.credentials) != 2 || snapshot.credentials[0].id != "chatgpt" || snapshot.credentials[1].name != "grok 订阅" {
 		t.Fatalf("credentials %+v", snapshot.credentials)
+	}
+	if snapshot.credentials[0].secretRef != "GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN" {
+		t.Fatalf("the secret ref must survive parsing, got %q", snapshot.credentials[0].secretRef)
 	}
 	if credentialLabel(snapshot.credentials[0]) != "○ chatgpt 订阅" || credentialLabel(snapshot.credentials[1]) != "● grok 订阅" {
 		t.Fatalf("labels %q %q", credentialLabel(snapshot.credentials[0]), credentialLabel(snapshot.credentials[1]))
@@ -126,5 +129,82 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	}
 	if state.section != "chat" || tester.HasText("订阅凭据") {
 		t.Fatalf("the chat pane must come back, section %q texts %q", state.section, tester.Texts())
+	}
+}
+
+func TestSettingsWritesACredential(t *testing.T) {
+	posted := ""
+	actions := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/api/app/secret" {
+			payload := make([]byte, 4096)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			actions["secret"]++
+			w.Write([]byte(`{"persisted":true}`))
+			return
+		}
+		body, ok := settingsFixtures[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	state := newSettingsState(server.URL, "tok")
+	state.load()
+	tester := ui.NewTester(state.view, 860, 640)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("填写 chatgpt") || !tester.HasText("更换 grok") {
+		t.Fatalf("每一行凭据都要能被填写或更换，texts %q", tester.Texts())
+	}
+	if tester.HasText("保存凭据") {
+		t.Fatalf("输入框必须点开才出现，texts %q", tester.Texts())
+	}
+	if err := tester.Click("填写 chatgpt"); err != nil {
+		t.Fatalf("click 填写 chatgpt: %v", err)
+	}
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("保存凭据") || !tester.HasText("取消填写") {
+		t.Fatalf("点开后必须有输入与保存，texts %q", tester.Texts())
+	}
+	state.secretDraft = "sk-live-token"
+	state.saveSecret(state.rows.credentials[0])
+	if actions["secret"] != 1 {
+		t.Fatalf("保存必须打到 /api/app/secret，actions %v", actions)
+	}
+	for _, wanted := range []string{"GRAPH_SUBSCRIPTION_CHATGPT_ACCESS_TOKEN", "sk-live-token", `"persisted":true`} {
+		if !contains(posted, wanted) {
+			t.Fatalf("提交体里缺 %q，实际 %q", wanted, posted)
+		}
+	}
+	if state.editing != "" || state.secretDraft != "" {
+		t.Fatalf("保存成功后必须清掉草稿，editing %q draft %q", state.editing, state.secretDraft)
+	}
+	if state.status != "已保存 chatgpt 订阅" {
+		t.Fatalf("status %q", state.status)
+	}
+}
+
+func TestSettingsRefusesAnEmptySecret(t *testing.T) {
+	actions := map[string]int{}
+	server := settingsServer(t, actions)
+	defer server.Close()
+
+	state := newSettingsState(server.URL, "tok")
+	state.load()
+	state.secretDraft = "   "
+	state.saveSecret(state.rows.credentials[1])
+	if actions["/api/app/secret"] != 0 {
+		t.Fatalf("an empty value must not be sent, actions %v", actions)
+	}
+	if state.status == "" {
+		t.Fatal("an empty value must be reported, not silently ignored")
 	}
 }

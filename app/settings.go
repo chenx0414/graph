@@ -16,6 +16,7 @@ import (
 type credentialRow struct {
 	id         string
 	name       string
+	secretRef  string
 	configured bool
 }
 
@@ -62,6 +63,7 @@ type configPayload struct {
 	Config   struct {
 		Credentials map[string]struct {
 			DisplayName string `json:"displayName"`
+			SecretRef   string `json:"secretRef"`
 			Configured  bool   `json:"configured"`
 		} `json:"credentials"`
 	} `json:"config"`
@@ -102,7 +104,7 @@ func parseSettings(startup, settings, config []byte) (settingsSnapshot, error) {
 		if name == "" {
 			name = id
 		}
-		snapshot.credentials = append(snapshot.credentials, credentialRow{id: id, name: name, configured: credential.Configured})
+		snapshot.credentials = append(snapshot.credentials, credentialRow{id: id, name: name, secretRef: credential.SecretRef, configured: credential.Configured})
 	}
 	sort.Slice(snapshot.credentials, func(a, b int) bool { return snapshot.credentials[a].name < snapshot.credentials[b].name })
 	return snapshot, nil
@@ -132,12 +134,14 @@ func projectLabel(row projectRow) string {
 }
 
 type settingsState struct {
-	address string
-	token   string
-	status  string
-	window  *mygo.Window
-	rows    settingsSnapshot
-	list    ui.ListState
+	address     string
+	token       string
+	status      string
+	editing     string
+	secretDraft string
+	window      *mygo.Window
+	rows        settingsSnapshot
+	list        ui.ListState
 }
 
 func newSettingsState(address, token string) *settingsState {
@@ -195,6 +199,44 @@ func (s *settingsState) post(path string) {
 	s.load()
 }
 
+func (s *settingsState) saveSecret(row credentialRow) {
+	value := strings.TrimSpace(s.secretDraft)
+	if value == "" || row.secretRef == "" {
+		s.status = "凭据要填一个值，而且这条凭据得先声明 secretRef"
+		s.frame()
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"ref": row.secretRef, "value": value, "persisted": true})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+"/api/app/secret", bytes.NewReader(body))
+	if err != nil {
+		s.status = "保存失败：" + err.Error()
+		s.frame()
+		return
+	}
+	if token := strings.TrimSpace(s.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		s.status = "保存失败：" + err.Error()
+		s.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		s.status = "保存被拒绝：" + response.Status
+		s.frame()
+		return
+	}
+	s.editing = ""
+	s.secretDraft = ""
+	s.load()
+	s.status = "已保存 " + row.name
+	s.frame()
+}
+
 func (s *settingsState) toggleProject(row projectRow) {
 	action := "archive"
 	if row.archived {
@@ -224,7 +266,32 @@ func (s *settingsState) view(ctx *ui.Context) {
 		}
 		ui.Text(ctx, "订阅凭据").FontSize(13)
 		for _, credential := range s.rows.credentials {
-			ui.Text(ctx, credentialLabel(credential)).FontSize(12)
+			row := credential
+			ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(ctx, credentialLabel(row)).FontSize(12).Grow(1)
+				action := "填写 " + row.id
+				if row.configured {
+					action = "更换 " + row.id
+				}
+				if ui.Button(ctx, action).Clicked() {
+					s.editing = row.id
+					s.secretDraft = ""
+					s.status = ""
+				}
+			})
+			if s.editing != row.id {
+				continue
+			}
+			ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
+				ui.TextInput(ctx, &s.secretDraft).Placeholder("粘贴 " + row.secretRef + " 的值…").Label("凭据 " + row.id).Grow(1)
+				if ui.PrimaryButton(ctx, "保存凭据").Clicked() {
+					go s.saveSecret(row)
+				}
+				if ui.Button(ctx, "取消填写").Clicked() {
+					s.editing = ""
+					s.secretDraft = ""
+				}
+			})
 		}
 		ui.Text(ctx, "项目").FontSize(13)
 		ui.List(ctx, &s.list, len(s.rows.projects), func(index int) {
