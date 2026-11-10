@@ -2,7 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+
+	"github.com/egoist/mygo"
 )
 
 const (
@@ -74,6 +79,68 @@ func artifactLabel(row artifactRow) string {
 	return label + " · v" + strconv.Itoa(row.version) + " · " + formatSize(row.size)
 }
 
+func artifactExtension(mediaType string) string {
+	switch {
+	case strings.Contains(mediaType, "json"):
+		return ".json"
+	case strings.Contains(mediaType, "markdown"):
+		return ".md"
+	case strings.Contains(mediaType, "image/png"):
+		return ".png"
+	case strings.Contains(mediaType, "image/"):
+		return ".img"
+	case strings.Contains(mediaType, "html"):
+		return ".html"
+	case strings.Contains(mediaType, "text/"):
+		return ".txt"
+	}
+	return ".bin"
+}
+
+func artifactFileName(row artifactRow) string {
+	name := row.namespace
+	if row.name != "" {
+		name += "-" + row.name
+	}
+	name += "-v" + strconv.Itoa(row.version)
+	return strings.NewReplacer("/", "-", " ", "-").Replace(name) + artifactExtension(row.mediaType)
+}
+
+func (c *chatState) artifactContent(row artifactRow) ([]byte, error) {
+	return daemonGet(c.address, c.token, "/api/tasks/"+row.taskID+"/artifacts/"+row.artifactID+"/"+strconv.Itoa(row.version)+"/content")
+}
+
+func exportArtifact(path string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o644)
+}
+
+func (c *chatState) exportArtifactTo(row artifactRow, path string) {
+	content, err := c.artifactContent(row)
+	if err != nil {
+		c.status = "导出失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if err := exportArtifact(path, content); err != nil {
+		c.status = "导出失败：" + err.Error()
+		c.frame()
+		return
+	}
+	c.status = "已导出到 " + path
+	c.frame()
+}
+
+func (c *chatState) exportArtifactNow(row artifactRow) {
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: "导出产物", DefaultPath: artifactFileName(row)})
+	if err != nil || path == "" {
+		return
+	}
+	c.exportArtifactTo(row, path)
+}
+
 func (c *chatState) showArtifact(row artifactRow) {
 	payload, err := daemonGet(c.address, c.token, "/api/tasks/"+row.taskID+"/artifacts/"+row.artifactID+"/"+strconv.Itoa(row.version)+"/content")
 	if err != nil {
@@ -87,6 +154,7 @@ func (c *chatState) showArtifact(row artifactRow) {
 	}
 	c.previewTitle = artifactLabel(row)
 	c.preview = text
+	c.previewRow = row
 	c.status = ""
 	c.frame()
 }

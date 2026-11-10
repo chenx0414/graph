@@ -109,6 +109,7 @@ type chatState struct {
 	tasks          []taskRow
 	artifacts      []artifactRow
 	previewTitle   string
+	previewRow     artifactRow
 	preview        string
 	questions      []openQuestion
 	artifactsOpen  bool

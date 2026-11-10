@@ -307,7 +307,13 @@ func (c *chatState) view(ctx *ui.Context) {
 			}
 		}
 		if c.preview != "" {
-			ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted)
+			ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted).Grow(1)
+				row := c.previewRow
+				if ui.Button(ctx, "导出 "+artifactFileName(row)).Clicked() {
+					go c.exportArtifactNow(row)
+				}
+			})
 			ui.Text(ctx, c.preview).FontSize(12)
 		}
 		c.graphSection(ctx)
