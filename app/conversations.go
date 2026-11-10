@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -21,64 +20,6 @@ type conversationSummary struct {
 	Status        string `json:"status"`
 	OpenQuestions int    `json:"openQuestions"`
 	UpdatedAt     int64  `json:"updatedAt"`
-}
-
-type transcriptMessage struct {
-	Role  string `json:"role"`
-	Kind  string `json:"kind"`
-	Text  string `json:"text"`
-	State string `json:"state"`
-	Data  struct {
-		Tool       string `json:"tool"`
-		ToolCallID string `json:"toolCallId"`
-		Ordinal    int    `json:"ordinal"`
-	} `json:"data"`
-}
-
-type transcriptRun struct {
-	tools    bool
-	messages []transcriptMessage
-}
-
-func groupRuns(messages []transcriptMessage) []transcriptRun {
-	runs := []transcriptRun{}
-	for _, message := range messages {
-		isTool := message.Role == "tool"
-		if isTool && len(runs) > 0 && runs[len(runs)-1].tools {
-			runs[len(runs)-1].messages = append(runs[len(runs)-1].messages, message)
-			continue
-		}
-		runs = append(runs, transcriptRun{tools: isTool, messages: []transcriptMessage{message}})
-	}
-	return runs
-}
-
-func runSummary(run transcriptRun) string {
-	names := []string{}
-	seen := map[string]bool{}
-	running := false
-	for _, message := range run.messages {
-		name := message.Data.Tool
-		if name == "" {
-			name = "tool"
-		}
-		if !seen[name] {
-			seen[name] = true
-			names = append(names, name)
-		}
-		if message.State != "done" {
-			running = true
-		}
-	}
-	head := strings.Join(names, ", ")
-	if running {
-		return head + " · 进行中"
-	}
-	return head
-}
-
-func messageStreaming(message transcriptMessage) bool {
-	return message.Role == "assistant" && message.State == "streaming"
 }
 
 type questionOptions struct {
@@ -99,69 +40,6 @@ type openQuestion struct {
 
 func (q openQuestion) open() bool {
 	return q.Status != "resolved" && (q.Suspended || q.Status == "open" || q.Status == "waiting")
-}
-
-type artifactRow struct {
-	artifactID string
-	taskID     string
-	namespace  string
-	name       string
-	title      string
-	mediaType  string
-	version    int
-	size       int64
-}
-
-type artifactListPayload struct {
-	Artifacts []struct {
-		ArtifactID string `json:"artifactId"`
-		TaskID     string `json:"taskId"`
-		Namespace  string `json:"namespace"`
-		Name       string `json:"name"`
-		Title      string `json:"title"`
-		MediaType  string `json:"mediaType"`
-		Version    int    `json:"version"`
-		Size       int64  `json:"size"`
-	} `json:"artifacts"`
-}
-
-func parseArtifacts(payload []byte) ([]artifactRow, error) {
-	var listed artifactListPayload
-	if err := json.Unmarshal(payload, &listed); err != nil {
-		return nil, err
-	}
-	rows := make([]artifactRow, 0, len(listed.Artifacts))
-	for _, artifact := range listed.Artifacts {
-		rows = append(rows, artifactRow{
-			artifactID: artifact.ArtifactID,
-			taskID:     artifact.TaskID,
-			namespace:  artifact.Namespace,
-			name:       artifact.Name,
-			title:      artifact.Title,
-			mediaType:  artifact.MediaType,
-			version:    artifact.Version,
-			size:       artifact.Size,
-		})
-	}
-	return rows, nil
-}
-
-func formatSize(size int64) string {
-	switch {
-	case size >= 1024*1024:
-		return strconv.FormatFloat(float64(size)/(1024*1024), 'f', 1, 64) + " MB"
-	case size >= 1024:
-		return strconv.FormatFloat(float64(size)/1024, 'f', 1, 64) + " KB"
-	}
-	return strconv.FormatInt(size, 10) + " B"
-}
-
-func artifactLabel(row artifactRow) string {
-	label := row.namespace
-	if row.name != "" {
-		label += "/" + row.name
-	}
-	return label + " · v" + strconv.Itoa(row.version) + " · " + formatSize(row.size)
 }
 
 type conversationBody struct {
@@ -267,81 +145,6 @@ func daemonGet(address, token, path string) ([]byte, error) {
 	return payload, nil
 }
 
-func runKey(run transcriptRun) string {
-	if len(run.messages) == 0 {
-		return ""
-	}
-	return run.messages[0].Data.ToolCallID
-}
-
-func toolLine(message transcriptMessage) string {
-	name := message.Data.Tool
-	if name == "" {
-		name = "tool"
-	}
-	state := "完成"
-	if message.State != "done" {
-		state = "进行中"
-	}
-	text := strings.TrimSpace(message.Text)
-	if index := strings.Index(text, ": "); index >= 0 && index < 40 {
-		text = text[index+2:]
-	}
-	if newline := strings.Index(text, "\n"); newline >= 0 {
-		text = text[:newline]
-	}
-	runes := []rune(text)
-	if len(runes) > 80 {
-		text = string(runes[:80]) + "…"
-	}
-	if text == "" {
-		return name + " · " + state
-	}
-	return name + " · " + state + " · " + text
-}
-
-const (
-	transcriptWindow     = 40
-	artifactListLimit    = 8
-	artifactPreviewLimit = 4000
-)
-
-func windowStart(total, visible int) int {
-	if visible <= 0 {
-		visible = transcriptWindow
-	}
-	if total <= visible {
-		return 0
-	}
-	return total - visible
-}
-
-type chatState struct {
-	artifacts     []artifactRow
-	previewTitle  string
-	preview       string
-	questions     []openQuestion
-	artifactsOpen bool
-	visible       int
-	expanded      map[string]bool
-	window        *mygo.Window
-	address       string
-	token         string
-	draft         string
-	active        string
-	status        string
-	messages      []transcriptMessage
-	list          ui.ListState
-	md            markdown.Options
-}
-
-func newChatState(address, token string) *chatState {
-	state := &chatState{address: address, token: token, status: "正在读取会话…", expanded: map[string]bool{}, visible: transcriptWindow}
-	state.list.FollowEnd = true
-	state.list.FollowAnimation = &ui.Smooth
-	return state
-}
-
 func (c *chatState) send() {
 	text := strings.TrimSpace(c.draft)
 	if text == "" || c.active == "" {
@@ -435,6 +238,13 @@ func (c *chatState) open(id string) {
 			c.artifacts = rows
 		}
 	}
+	c.tasks = nil
+	if rows, err := parseGraphTasks(payload); err == nil {
+		c.tasks = rows
+	}
+	c.graphOpen = false
+	c.nodeLines = nil
+	c.nodeTitle = ""
 	c.visible = transcriptWindow
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
@@ -445,23 +255,6 @@ func (c *chatState) open(id string) {
 
 func countLabel(count int) string {
 	return strconv.Itoa(count) + " 次"
-}
-
-func (c *chatState) showArtifact(row artifactRow) {
-	payload, err := daemonGet(c.address, c.token, "/api/tasks/"+row.taskID+"/artifacts/"+row.artifactID+"/"+strconv.Itoa(row.version)+"/content")
-	if err != nil {
-		c.status = "读不到产物：" + err.Error()
-		c.frame()
-		return
-	}
-	text := string(payload)
-	if len(text) > artifactPreviewLimit {
-		text = text[:artifactPreviewLimit] + "…"
-	}
-	c.previewTitle = artifactLabel(row)
-	c.preview = text
-	c.status = ""
-	c.frame()
 }
 
 func (c *chatState) frame() {
@@ -517,6 +310,7 @@ func (c *chatState) view(ctx *ui.Context) {
 			ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted)
 			ui.Text(ctx, c.preview).FontSize(12)
 		}
+		c.graphSection(ctx)
 		runs := groupRuns(c.messages)
 		start := windowStart(len(runs), c.visible)
 		if start > 0 {
