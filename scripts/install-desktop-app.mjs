@@ -27,19 +27,17 @@ const bundle = resolve(flag('bundle') || join(root, 'dist/app/mac-arm64/Graph.ap
 const dest = resolve(flag('dest') || '/Applications/Graph.app');
 const dryRun = process.argv.includes('--dry-run');
 
-/** The newest modification time of the shell sources this checkout builds from. */
-async function newestSource(source, prefix = '') {
+/** The newest modification time of the shell sources this checkout builds from.
+ * Only the files directly in `app/`: `go tool mygo build` writes throwaway
+ * staging trees under `app/build/`, and a build artefact newer than the binary
+ * it just produced is not a stale package. */
+async function newestSource(source) {
   let newest = { at: 0, name: '' };
   for (const entry of await readdir(source, { withFileTypes: true })) {
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) continue;
     const path = join(source, entry.name);
-    if (entry.isDirectory()) {
-      const nested = await newestSource(path, relative);
-      if (nested.at > newest.at) newest = nested;
-      continue;
-    }
     const { mtimeMs } = await stat(path);
-    if (mtimeMs > newest.at) newest = { at: mtimeMs, name: relative };
+    if (mtimeMs > newest.at) newest = { at: mtimeMs, name: entry.name };
   }
   return newest;
 }

@@ -91,6 +91,17 @@ test('refuses a package older than the sources it claims to contain', async () =
   expect(existsSync(dest)).toBe(false);
 });
 
+test('a build staging tree inside app/ does not make the package look stale', async () => {
+  const { root, bundle, dest } = await fixture();
+  await mkdir(join(root, 'app/build/.staging-darwin-arm64/Applications'), { recursive: true });
+  await writeFile(join(root, 'app/build/.staging-darwin-arm64/Applications/Graph.app'), 'staged\n');
+  const { mtimeMs } = await stat(join(bundle, 'Contents/MacOS/Graph'));
+  expect(mtimeMs).toBeLessThan(Date.now());
+  const run = install(root, bundle, dest);
+  expect(run.stderr).toBe('');
+  expect(run.status).toBe(0);
+});
+
 test('refuses a bundle whose identifier keys permissions to another app', async () => {
   const { root, bundle, dest } = await fixture();
   await writeFile(join(root, 'app/mygo.json'), JSON.stringify({ identifier: 'dev.graph.previous' }));
