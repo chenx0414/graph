@@ -225,6 +225,10 @@ test('the right drawer shows the same project graphs in a conversation and on a 
   await expect.poll(() => section(page)).toBe('task');
   await expect.poll(async () => (await ids('conversation-task-')).length).toBe(2);
   expect(await page.getByTestId('detail-drawer').innerText()).toContain('当前项目的图');
+  // No sorting or filtering controls above the list: it shows the project's graphs, newest first.
+  for (const control of ['task-sort', 'task-status-filter', 'task-project-filter']) {
+    expect(await page.getByTestId(control).count(), `${control} came back`).toBe(0);
+  }
   const inConversation = await ids('conversation-task-');
 
   // The same drawer, reached from a task graph page, lists the same graphs.

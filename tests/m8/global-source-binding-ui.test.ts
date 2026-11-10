@@ -2,8 +2,7 @@
  * The main Agent is bound to the source tree it runs from, not to a project.
  *
  * A global supervisor coordinates every project, so the store forbids a project
- * binding on it (the conversations trigger aborts). What the user sees instead is
- * the fixed source root, read-only: no project picker, nothing to change.
+ * binding on it (the conversations trigger aborts). The drawer must not offer one.
  */
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -34,9 +33,9 @@ test('the global conversation is fixed to the app source root and offers no proj
   await page.locator('[data-testid="conversation"]:visible').waitFor({ timeout: 60_000 });
 
   await page.locator('[data-testid=drawer-entry]:visible').first().click();
-  const fixed = page.locator('[data-testid=bound-source]:visible');
-  await fixed.waitFor({ timeout: 20_000 });
-  expect(await fixed.innerText(), 'the drawer names the fixed source root').toContain(process.cwd());
+  await page.locator('[data-testid=detail-drawer]:visible').waitFor({ timeout: 20_000 });
+  // The main Agent coordinates every project, so the store forbids binding it to one.
+  // The drawer must not offer a picker that could never be applied.
   expect(await page.locator('[data-testid=bind-project]').count(), 'the project picker came back').toBe(0);
   expect(await page.locator('[data-testid=bind-select]').count(), 'the project picker came back').toBe(0);
 }, 240_000);

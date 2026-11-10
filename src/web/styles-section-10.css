@@ -8,8 +8,6 @@
 .sidebar-label:hover .sidebar-add, .sidebar-label:focus-within .sidebar-add { opacity: 1; }
 @media (hover: none) { .sidebar-label .sidebar-add { opacity: 1; } }
 .drawer-all-tasks { display: flex; flex-direction: column; min-width: 0; }
-.drawer-task-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
-.drawer-task-controls select { min-width: 0; flex: 1 1 130px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; }
 .drawer-all-tasks .drawer-task-detail { display: flex; flex-direction: column; }
 .drawer-task-detail > .drawer-entry-links { order: -1; }
 .drawer-entry-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }

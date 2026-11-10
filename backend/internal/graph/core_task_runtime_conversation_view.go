@@ -333,14 +333,9 @@ func (conversations *TaskRuntimeConversations) View(conversationId string, query
 			"questions":         masterQuestions,
 		}
 	}
-	sourceRoot := any(nil)
-	if conversation.Role == ConversationGlobal {
-		sourceRoot = GraphApplicationRoot()
-	}
 	view := map[string]any{
 		"id":                 conversation.Id,
 		"role":               conversation.Role,
-		"sourceRoot":         sourceRoot,
 		"title":              conversation.Title,
 		"projectId":          conversation.ProjectId,
 		"projectRoot":        projectRoot,

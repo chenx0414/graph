@@ -45,16 +45,6 @@ return <aside
               </section>
             )}
 
-            {drawerOpen && view.role === 'global' && (
-              <section className="drawer-section drawer-bind-card" data-testid="bound-source">
-                <div className="drawer-section-head">
-                  <h3>固定绑定</h3>
-                </div>
-                <p className="muted">主 Agent 的读写范围固定在这个仓库，不能改绑其他项目。</p>
-                <code className="mono" data-testid="bound-source-root">{view.sourceRoot ?? '未知'}</code>
-              </section>
-            )}
-
             {drawerOpen && drawerSection === 'draft' && activeProposal && (
               <section className="drawer-section drawer-draft-card" data-testid="proposal-draft" data-resident={residentFlag('proposal-draft')}>
                 <div className="drawer-draft-head">
