@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,53 @@ type transcriptMessage struct {
 	Kind  string `json:"kind"`
 	Text  string `json:"text"`
 	State string `json:"state"`
+	Data  struct {
+		Tool       string `json:"tool"`
+		ToolCallID string `json:"toolCallId"`
+		Ordinal    int    `json:"ordinal"`
+	} `json:"data"`
+}
+
+type transcriptRun struct {
+	tools    bool
+	messages []transcriptMessage
+}
+
+func groupRuns(messages []transcriptMessage) []transcriptRun {
+	runs := []transcriptRun{}
+	for _, message := range messages {
+		isTool := message.Role == "tool"
+		if len(runs) > 0 && runs[len(runs)-1].tools == isTool {
+			runs[len(runs)-1].messages = append(runs[len(runs)-1].messages, message)
+			continue
+		}
+		runs = append(runs, transcriptRun{tools: isTool, messages: []transcriptMessage{message}})
+	}
+	return runs
+}
+
+func runSummary(run transcriptRun) string {
+	names := []string{}
+	seen := map[string]bool{}
+	running := false
+	for _, message := range run.messages {
+		name := message.Data.Tool
+		if name == "" {
+			name = "tool"
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+		if message.State != "done" {
+			running = true
+		}
+	}
+	head := strings.Join(names, ", ")
+	if running {
+		return head + " · 进行中"
+	}
+	return head
 }
 
 func messageStreaming(message transcriptMessage) bool {
@@ -60,7 +108,7 @@ func parseConversationMessages(payload []byte) ([]transcriptMessage, error) {
 		if strings.TrimSpace(message.Text) == "" {
 			continue
 		}
-		if message.Role != "user" && message.Role != "assistant" {
+		if message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
 			continue
 		}
 		spoken = append(spoken, message)
@@ -228,6 +276,10 @@ func (c *chatState) open(id string) {
 	c.status = ""
 }
 
+func countLabel(count int) string {
+	return strconv.Itoa(count) + " 次"
+}
+
 func (c *chatState) frame() {
 	if c.window != nil {
 		c.window.Update(func() {})
@@ -262,6 +314,18 @@ func (c *chatState) view(ctx *ui.Context) {
 		}
 		ui.List(ctx, &c.list, len(c.messages), func(index int) {
 			message := c.messages[index]
+			if message.Role == "tool" {
+				name := message.Data.Tool
+				if name == "" {
+					name = "tool"
+				}
+				state := "已完成"
+				if message.State != "done" {
+					state = "进行中"
+				}
+				ui.Text(ctx, "工具 · "+name+" · "+state).FontSize(12).TextColor(t.TextMuted)
+				return
+			}
 			ui.Column(ctx).Gap(4).Children(func() {
 				author := "agent"
 				if message.Role == "user" {

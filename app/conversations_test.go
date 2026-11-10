@@ -37,8 +37,8 @@ func TestParseConversationMessagesKeepsSpokenRolesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 2 || messages[0].Text != "你好" || messages[1].Role != "assistant" {
-		t.Fatalf("messages %+v", messages)
+	if len(messages) != 3 || messages[0].Text != "你好" || messages[1].Role != "tool" || messages[2].Role != "assistant" {
+		t.Fatalf("tool messages must survive parsing so the view can show them: %+v", messages)
 	}
 }
 
@@ -230,5 +230,60 @@ func TestSwitchingConversationsOpensTheClickedOne(t *testing.T) {
 	}
 	if !tester.HasText("来自会话二") {
 		t.Fatalf("the transcript must follow the switched conversation, texts %q", tester.Texts())
+	}
+}
+
+func TestToolCallsGroupIntoOneRowPerRun(t *testing.T) {
+	messages := []transcriptMessage{
+		{Role: "user", Text: "跑一下"},
+		{Role: "tool", State: "done", Data: struct {
+			Tool       string `json:"tool"`
+			ToolCallID string `json:"toolCallId"`
+			Ordinal    int    `json:"ordinal"`
+		}{Tool: "bash"}},
+		{Role: "tool", State: "done", Data: struct {
+			Tool       string `json:"tool"`
+			ToolCallID string `json:"toolCallId"`
+			Ordinal    int    `json:"ordinal"`
+		}{Tool: "bash"}},
+		{Role: "tool", State: "running", Data: struct {
+			Tool       string `json:"tool"`
+			ToolCallID string `json:"toolCallId"`
+			Ordinal    int    `json:"ordinal"`
+		}{Tool: "edit"}},
+		{Role: "assistant", Kind: "chat", Text: "好了"},
+	}
+	runs := groupRuns(messages)
+	if len(runs) != 3 {
+		t.Fatalf("runs %d: %+v", len(runs), runs)
+	}
+	if runs[0].tools || !runs[1].tools || runs[2].tools {
+		t.Fatalf("alternation broken: %+v", runs)
+	}
+	if len(runs[1].messages) != 3 {
+		t.Fatalf("consecutive tool calls must share one run, got %d", len(runs[1].messages))
+	}
+	if summary := runSummary(runs[1]); summary != "bash, edit · 进行中" {
+		t.Fatalf("summary %q", summary)
+	}
+	finished := transcriptRun{tools: true, messages: messages[1:2]}
+	if summary := runSummary(finished); summary != "bash" {
+		t.Fatalf("a finished run must not say 进行中: %q", summary)
+	}
+}
+
+func TestToolMessagesSurviveParsingSoTheViewCanGroupThem(t *testing.T) {
+	messages, err := parseConversationMessages([]byte(`{"messages":[
+		{"role":"tool","kind":"tool","state":"done","text":"bash: ls","data":{"tool":"bash","toolCallId":"t1","ordinal":1}},
+		{"role":"assistant","text":"看完了"}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].Role != "tool" || messages[0].Data.Tool != "bash" {
+		t.Fatalf("messages %+v", messages)
+	}
+	if summary := runSummary(transcriptRun{tools: true, messages: messages[:1]}); summary != "bash" {
+		t.Fatalf("summary %q", summary)
 	}
 }
