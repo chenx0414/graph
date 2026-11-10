@@ -23,6 +23,8 @@ type daemonController interface {
 }
 
 type shell struct {
+	chat       *shellState
+	native     *mygo.Window
 	paths      Paths
 	window     *mygo.Window
 	bridge     *bridge
@@ -91,8 +93,32 @@ func (s *shell) api() *shellAPI {
 }
 
 func (s *shell) open(route string) {
-	if s.window == nil {
+	if s.console == "" {
 		s.pending = route
+		return
+	}
+	s.openConsole(route)
+}
+
+func (s *shell) preloadScript() string {
+	if s.bridge == nil {
+		return ""
+	}
+	return preloadScript(preloadSource, s.bridge.token, s.bridge.address)
+}
+
+func (s *shell) openConsole(route string) {
+	if s.window == nil {
+		s.window = mygo.NewWindow(mygo.WindowOptions{
+			Title:     "Graph · 控制台",
+			Width:     1200,
+			Height:    820,
+			MinWidth:  860,
+			MinHeight: 600,
+			StateKey:  "console",
+			URL:       s.console + route,
+			Page:      mygo.PageOptions{PreloadScript: s.preloadScript(), PreloadAllFrames: true},
+		})
 		return
 	}
 	s.window.Page().LoadURL(s.console + route)
@@ -117,17 +143,25 @@ func (s *shell) ensureDaemon() string {
 	return ""
 }
 
-func (s *shell) openNativeChat() {
-	state := newChatState(s.console, s.paths.SessionToken())
+func (s *shell) openNative() {
+	if s.native != nil {
+		s.native.Show()
+		s.native.Focus()
+		return
+	}
+	state := newShellState(s.console, s.paths.SessionToken())
 	window := mygo.NewWindow(mygo.WindowOptions{
-		Title:     "Graph · 会话（原生预览）",
-		Width:     820,
-		Height:    720,
-		MinWidth:  480,
-		MinHeight: 360,
+		Title:     "Graph",
+		Width:     1080,
+		Height:    760,
+		MinWidth:  720,
+		MinHeight: 480,
+		StateKey:  "native",
 		Content:   ui.View(state.view),
 	})
 	state.window = window
+	s.native = window
+	s.chat = state
 	go func() {
 		state.load()
 		state.frame()
@@ -136,13 +170,13 @@ func (s *shell) openNativeChat() {
 
 func (s *shell) createTray() {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
-		{ID: "console", Label: "打开控制台", Click: func(*mygo.MenuItem, *mygo.Window) { s.open("") }},
+		{ID: "native", Label: "打开 Graph（原生）", Click: func(*mygo.MenuItem, *mygo.Window) { s.openNative() }},
 		{ID: "outside", Label: "在浏览器中打开", Click: func(*mygo.MenuItem, *mygo.Window) {
 			if s.console != "" {
 				_ = mygo.Shell.OpenExternal(s.console)
 			}
 		}},
-		{ID: "native-chat", Label: "打开原生会话（预览）", Click: func(*mygo.MenuItem, *mygo.Window) { s.openNativeChat() }},
+		{ID: "console-window", Label: "打开控制台（web）", Click: func(*mygo.MenuItem, *mygo.Window) { s.open("") }},
 		mygo.Separator(),
 		{ID: "quit", Label: "退出 Graph", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 	})
@@ -180,19 +214,11 @@ func main() {
 			log.Printf("[app] bridge: %v", err)
 		}
 		s.bridge = started
-		s.window = mygo.NewWindow(mygo.WindowOptions{
-			Title:     "Graph",
-			Width:     1200,
-			Height:    820,
-			MinWidth:  860,
-			MinHeight: 600,
-			StateKey:  "console",
-			URL:       s.console + s.pending,
-			Page: mygo.PageOptions{
-				PreloadScript:    preloadScript(preloadSource, s.bridge.token, s.bridge.address),
-				PreloadAllFrames: true,
-			},
-		})
+		s.openNative()
+		if s.pending != "" {
+			s.openConsole(s.pending)
+			s.pending = ""
+		}
 		s.createTray()
 		go s.watchTasks()
 		go s.watchRsi()

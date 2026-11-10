@@ -259,8 +259,6 @@ type chatState struct {
 	draft     string
 	active    string
 	status    string
-	titles    []string
-	ids       []string
 	messages  []transcriptMessage
 	list      ui.ListState
 	md        markdown.Options
@@ -271,34 +269,6 @@ func newChatState(address, token string) *chatState {
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state
-}
-
-func (c *chatState) load() {
-	payload, err := daemonGet(c.address, c.token, "/api/conversations")
-	if err != nil {
-		c.status = "读不到会话列表：" + err.Error()
-		return
-	}
-	list, err := parseConversations(payload)
-	if err != nil {
-		c.status = "会话列表不是预期的 JSON：" + err.Error()
-		return
-	}
-	c.titles = make([]string, 0, len(list))
-	c.ids = make([]string, 0, len(list))
-	for _, conversation := range list {
-		if conversation.ArchivedAtPresent() {
-			continue
-		}
-		c.titles = append(c.titles, conversation.Title)
-		c.ids = append(c.ids, conversation.ID)
-	}
-	c.status = ""
-	if len(c.ids) == 0 {
-		c.status = "还没有会话。"
-		return
-	}
-	c.open(c.ids[0])
 }
 
 func (c *chatState) send() {
@@ -406,25 +376,6 @@ func (c *chatState) frame() {
 func (c *chatState) view(ctx *ui.Context) {
 	t := ctx.Theme()
 	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
-		ui.Text(ctx, "Graph · 原生会话（S2 预览）").FontSize(13).TextColor(t.TextMuted)
-		if len(c.ids) > 0 {
-			ui.Row(ctx).Gap(2).Children(func() {
-				for index, title := range c.titles {
-					id := c.ids[index]
-					label := title
-					if label == "" {
-						label = "（无标题）"
-					}
-					if id == c.active {
-						label = "• " + label
-					}
-					if ui.Button(ctx, label).Clicked() {
-						target := id
-						go func() { c.open(target); c.frame() }()
-					}
-				}
-			})
-		}
 		if c.status != "" && len(c.messages) == 0 {
 			ui.Text(ctx, c.status).TextColor(t.TextMuted)
 			return

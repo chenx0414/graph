@@ -61,7 +61,7 @@ func TestChatStateReadsTheDaemonAndRenders(t *testing.T) {
 	defer server.Close()
 
 	state := newChatState(server.URL, "tok\n")
-	state.load()
+	state.open("c1")
 	if state.status != "" {
 		t.Fatalf("status %q", state.status)
 	}
@@ -77,23 +77,6 @@ func TestChatStateReadsTheDaemonAndRenders(t *testing.T) {
 	}
 	if !tester.HasText("结论。后文") {
 		t.Fatalf("the markdown reply did not render, texts %q", tester.Texts())
-	}
-}
-
-func TestChatStateReportsAnEmptyConversation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/conversations" {
-			w.Write([]byte(`[]`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	state := newChatState(server.URL, "")
-	state.load()
-	if state.status != "还没有会话。" {
-		t.Fatalf("status %q", state.status)
 	}
 }
 
@@ -201,42 +184,6 @@ func TestFollowStopsWhenTheReplyLands(t *testing.T) {
 	}
 	if len(state.messages) != 2 || state.messages[1].Text != "完整答复" {
 		t.Fatalf("messages %+v", state.messages)
-	}
-}
-
-func TestSwitchingConversationsOpensTheClickedOne(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/conversations":
-			w.Write([]byte(`[{"id":"c1","title":"会话一","archivedAt":null},{"id":"c2","title":"会话二","archivedAt":null}]`))
-		case "/api/conversations/c1":
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话一"}]}`))
-		case "/api/conversations/c2":
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话二"}]}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	state := newChatState(server.URL, "tok")
-	state.load()
-	if state.active != "c1" || len(state.ids) != 2 {
-		t.Fatalf("active %q ids %v", state.active, state.ids)
-	}
-	state.open("c2")
-	if state.active != "c2" || len(state.messages) != 1 || state.messages[0].Text != "来自会话二" {
-		t.Fatalf("active %q messages %+v", state.active, state.messages)
-	}
-	tester := ui.NewTester(state.view, 900, 620)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("会话一") || !tester.HasText("会话二") {
-		t.Fatalf("both conversations must be offered, texts %q", tester.Texts())
-	}
-	if !tester.HasText("来自会话二") {
-		t.Fatalf("the transcript must follow the switched conversation, texts %q", tester.Texts())
 	}
 }
 
