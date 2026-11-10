@@ -16,13 +16,20 @@ import (
 //go:embed preload.js
 var preloadSource string
 
+type daemonController interface {
+	start() error
+	adopt(pid int)
+	restart() (bool, string)
+}
+
 type shell struct {
 	paths      Paths
 	window     *mygo.Window
 	bridge     *bridge
-	daemon     *daemon
+	daemon     daemonController
 	pending    string
 	console    string
+	rsiTried   string
 	restarting atomic.Bool
 }
 
@@ -95,6 +102,7 @@ func (s *shell) open(route string) {
 
 func (s *shell) ensureDaemon() string {
 	if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {
+		s.daemon.adopt(info.PID)
 		return info.URL
 	}
 	if err := s.daemon.start(); err != nil {

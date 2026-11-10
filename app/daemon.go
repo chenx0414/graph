@@ -6,17 +6,19 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/egoist/mygo"
 )
 
 type daemon struct {
-	mu      sync.Mutex
-	paths   Paths
-	command *exec.Cmd
-	owned   bool
-	stopped bool
+	mu         sync.Mutex
+	paths      Paths
+	command    *exec.Cmd
+	adoptedPid int
+	owned      bool
+	stopped    bool
 }
 
 func newDaemon(paths Paths) *daemon { return &daemon{paths: paths} }
@@ -40,6 +42,7 @@ func (d *daemon) start() error {
 	if d.command != nil {
 		return nil
 	}
+	d.adoptedPid = 0
 	logPath := filepath.Join(d.paths.StateDir, "daemon-shell.log")
 	file, err := os.Create(logPath)
 	if err != nil {
@@ -72,21 +75,61 @@ func (d *daemon) start() error {
 	return nil
 }
 
+func (d *daemon) adopt(pid int) {
+	if pid <= 0 {
+		return
+	}
+	d.mu.Lock()
+	if d.command == nil {
+		d.adoptedPid = pid
+	}
+	d.mu.Unlock()
+}
+
 func (d *daemon) stop() {
 	d.mu.Lock()
 	command := d.command
 	d.command = nil
+	adopted := d.adoptedPid
+	d.adoptedPid = 0
 	d.mu.Unlock()
 	if command != nil && command.Process != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
+		return
+	}
+	if adopted != 0 {
+		stopAdoptedProcess(adopted)
 	}
 }
 
 func (d *daemon) running() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.command != nil
+	if d.command != nil {
+		return true
+	}
+	return d.adoptedPid != 0 && processAlive(d.adoptedPid)
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}
+
+func stopAdoptedProcess(pid int) {
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func (d *daemon) restart() (bool, string) {

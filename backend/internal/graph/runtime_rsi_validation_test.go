@@ -88,6 +88,29 @@ func TestBundledNodeMustExistBeforeItIsUsed(t *testing.T) {
 	}
 }
 
+func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
+	for _, path := range []string{
+		"app/rsi.go",
+		"app/mygo.json",
+		"scripts/package-app-mygo.mjs",
+		"scripts/install-desktop-app.mjs",
+		"desktop/main.mjs",
+	} {
+		if !rsiNeedsAppBuild([]string{path}) {
+			t.Fatalf("%s must rebuild the desktop app", path)
+		}
+	}
+	for _, path := range []string{
+		"backend/internal/graph/server.go",
+		"src/web/main.tsx",
+		"README.md",
+	} {
+		if rsiNeedsAppBuild([]string{path}) {
+			t.Fatalf("%s must not rebuild the desktop app", path)
+		}
+	}
+}
+
 func TestExistingNodeRejectsADirectory(t *testing.T) {
 	directory := t.TempDir()
 	if node := existingNode(directory); node != "" {

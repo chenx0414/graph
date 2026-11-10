@@ -2,8 +2,10 @@ package main
 
 import (
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDaemonEnvironmentCarriesTheStoredSecrets(t *testing.T) {
@@ -64,5 +66,30 @@ func TestBridgeSaysWhyAKeyIsNotAppliedYet(t *testing.T) {
 	_, saved := call(t, server, "token", "/save-secret", `{"ref":"GRAPH_KEY","value":"sk-1"}`)
 	if saved["stored"] != true || saved["applied"] != false || saved["message"] != "restart Graph" {
 		t.Fatalf("save answered %v", saved)
+	}
+}
+
+func TestDaemonRestartCanStopADaemonItAdopted(t *testing.T) {
+	command := exec.Command("sleep", "30")
+	if err := command.Start(); err != nil {
+		t.Skip("cannot start a probe process: ", err)
+	}
+	pid := command.Process.Pid
+	reaped := make(chan struct{})
+	go func() {
+		_, _ = command.Process.Wait()
+		close(reaped)
+	}()
+	d := newDaemon(Paths{StateDir: t.TempDir()})
+	d.adopt(pid)
+	if !d.running() {
+		t.Fatal("an adopted daemon that is alive must count as running")
+	}
+	d.stop()
+	select {
+	case <-reaped:
+	case <-time.After(8 * time.Second):
+		_ = command.Process.Kill()
+		t.Fatal("stop left the adopted daemon running")
 	}
 }

@@ -81,3 +81,63 @@ func TestRsiStatusAndAckSpeakTheDaemonProtocol(t *testing.T) {
 		t.Fatal("a wrong app token must not read the status")
 	}
 }
+
+type restartDaemon struct {
+	restarts int
+	apply    func()
+}
+
+func (d *restartDaemon) start() error { return nil }
+
+func (d *restartDaemon) adopt(int) {}
+
+func (d *restartDaemon) restart() (bool, string) {
+	d.restarts++
+	if d.apply != nil {
+		d.apply()
+	}
+	return true, ""
+}
+
+func TestPollRsiAcksWithTheAddressAndTokenTheRestartedDaemonWrote(t *testing.T) {
+	stateDir := t.TempDir()
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/app/rsi/status" || r.Header.Get("x-graph-app-token") != "old-token" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Write([]byte(`{"canRestart":true,"pendingRestart":{"id":"act-1"}}`))
+	}))
+	defer old.Close()
+	fresh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/app/rsi/restart-ack" || r.Method != http.MethodPost || r.Header.Get("x-graph-app-token") != "fresh-token" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Write([]byte(`{"cleared":true}`))
+	}))
+	defer fresh.Close()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(stateDir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("console.json", `{"url":"`+old.URL+`","pid":1}`)
+	write("app-token", "old-token\n")
+	daemon := &restartDaemon{apply: func() {
+		write("console.json", `{"url":"`+fresh.URL+`","pid":2}`)
+		write("app-token", "fresh-token\n")
+	}}
+	s := &shell{paths: Paths{StateDir: stateDir}, daemon: daemon, console: old.URL}
+	s.pollRsi()
+	if daemon.restarts != 1 {
+		t.Fatalf("the pending reload ran %d restarts", daemon.restarts)
+	}
+	if s.console != fresh.URL {
+		t.Fatalf("the shell kept talking to %q", s.console)
+	}
+	s.pollRsi()
+	if daemon.restarts != 1 {
+		t.Fatalf("a request that was already handled was restarted again (%d)", daemon.restarts)
+	}
+}

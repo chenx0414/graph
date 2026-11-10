@@ -90,31 +90,38 @@ func ackRestart(address, token, id string) bool {
 }
 
 func (s *shell) watchRsi() {
-	token := appToken(s.paths.StateDir)
 	for range time.Tick(3 * time.Second) {
-		if s.console == "" || s.restarting.Load() {
-			continue
-		}
-		status, ok := fetchRsiStatus(s.console, token)
-		if !ok {
-			continue
-		}
-		id, pending := pendingRestart(status)
-		if !pending {
-			continue
-		}
-		s.restarting.Store(true)
-		if applied, _ := s.daemon.restart(); applied {
-			if !ackRestart(s.console, token, id) {
-				notify("RSI 重载未能确认", "新的代码已在跑，但握手没有回执，宿主不会自动唤醒主控。")
-			}
-			if info, ok := s.paths.ReadConsole(); ok {
-				s.console = info.URL
-				if s.window != nil {
-					_ = s.window.Page().LoadURL(s.console)
-				}
-			}
-		}
+		s.pollRsi()
+	}
+}
+
+func (s *shell) pollRsi() {
+	if s.console == "" || s.restarting.Load() {
+		return
+	}
+	status, ok := fetchRsiStatus(s.console, appToken(s.paths.StateDir))
+	if !ok {
+		return
+	}
+	id, pending := pendingRestart(status)
+	if !pending || id == s.rsiTried {
+		return
+	}
+	s.restarting.Store(true)
+	if applied, _ := s.daemon.restart(); !applied {
 		s.restarting.Store(false)
+		return
+	}
+	s.rsiTried = id
+	if info, ok := s.paths.ReadConsole(); ok {
+		s.console = info.URL
+	}
+	confirmed := ackRestart(s.console, appToken(s.paths.StateDir), id)
+	s.restarting.Store(false)
+	if !confirmed {
+		notify("RSI 重载未能确认", "新的代码已在跑，但握手没有回执，宿主不会自动唤醒主控。")
+	}
+	if s.window != nil {
+		_ = s.window.Page().LoadURL(s.console)
 	}
 }
