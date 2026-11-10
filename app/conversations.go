@@ -144,7 +144,41 @@ func daemonGet(address, token, path string) ([]byte, error) {
 	return payload, nil
 }
 
+func runKey(run transcriptRun) string {
+	if len(run.messages) == 0 {
+		return ""
+	}
+	return run.messages[0].Data.ToolCallID
+}
+
+func toolLine(message transcriptMessage) string {
+	name := message.Data.Tool
+	if name == "" {
+		name = "tool"
+	}
+	state := "完成"
+	if message.State != "done" {
+		state = "进行中"
+	}
+	text := strings.TrimSpace(message.Text)
+	if index := strings.Index(text, ": "); index >= 0 && index < 40 {
+		text = text[index+2:]
+	}
+	if newline := strings.Index(text, "\n"); newline >= 0 {
+		text = text[:newline]
+	}
+	runes := []rune(text)
+	if len(runes) > 80 {
+		text = string(runes[:80]) + "…"
+	}
+	if text == "" {
+		return name + " · " + state
+	}
+	return name + " · " + state + " · " + text
+}
+
 type chatState struct {
+	expanded map[string]bool
 	window   *mygo.Window
 	address  string
 	token    string
@@ -159,7 +193,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{address: address, token: token, status: "正在读取会话…"}
+	state := &chatState{address: address, token: token, status: "正在读取会话…", expanded: map[string]bool{}}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state
@@ -316,10 +350,18 @@ func (c *chatState) view(ctx *ui.Context) {
 		ui.List(ctx, &c.list, len(runs), func(index int) {
 			run := runs[index]
 			if run.tools {
-				ui.Row(ctx).Gap(6).Children(func() {
-					ui.Text(ctx, "工具").FontSize(12).TextColor(t.TextMuted)
-					ui.Text(ctx, runSummary(run)).FontSize(12).TextColor(t.TextMuted)
-					ui.Text(ctx, countLabel(len(run.messages))).FontSize(12).TextColor(t.TextMuted)
+				key := runKey(run)
+				ui.Column(ctx).Gap(2).Children(func() {
+					label := "工具 · " + runSummary(run) + " · " + countLabel(len(run.messages))
+					if ui.Button(ctx, label).Clicked() {
+						c.expanded[key] = !c.expanded[key]
+					}
+					if !c.expanded[key] {
+						return
+					}
+					for _, message := range run.messages {
+						ui.Text(ctx, toolLine(message)).FontSize(12).TextColor(t.TextMuted)
+					}
 				})
 				return
 			}

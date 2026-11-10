@@ -313,3 +313,52 @@ func TestSpokenMessagesNeverMergeIntoOneRun(t *testing.T) {
 		t.Fatal("a single message is one run")
 	}
 }
+
+func TestToolLineShowsNameStateAndATrimmedCommand(t *testing.T) {
+	line := toolLine(transcriptMessage{Role: "tool", State: "done", Text: "bash: cd /repo\ngit status", Data: struct {
+		Tool       string `json:"tool"`
+		ToolCallID string `json:"toolCallId"`
+		Ordinal    int    `json:"ordinal"`
+	}{Tool: "bash"}})
+	if line != "bash · 完成 · cd /repo" {
+		t.Fatalf("line %q", line)
+	}
+	long := ""
+	for index := 0; index < 200; index++ {
+		long += "字"
+	}
+	clipped := toolLine(transcriptMessage{Role: "tool", State: "running", Text: long})
+	if len([]rune(clipped)) > 110 || !contains(clipped, "进行中") {
+		t.Fatalf("clipped %q", clipped)
+	}
+	if toolLine(transcriptMessage{Role: "tool", State: "done"}) != "tool · 完成" {
+		t.Fatalf("an empty text keeps name and state only: %q", toolLine(transcriptMessage{Role: "tool", State: "done"}))
+	}
+}
+
+func TestToolRunsExpandAndCollapse(t *testing.T) {
+	messages := []transcriptMessage{
+		{Role: "tool", State: "done", Text: "bash: ls", Data: struct {
+			Tool       string `json:"tool"`
+			ToolCallID string `json:"toolCallId"`
+			Ordinal    int    `json:"ordinal"`
+		}{Tool: "bash", ToolCallID: "call-1"}},
+	}
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.messages = messages
+	state.status = ""
+	tester := ui.NewTester(state.view, 700, 500)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if tester.HasText("bash · 完成 · ls") {
+		t.Fatal("a collapsed run must not show its commands")
+	}
+	state.expanded[runKey(groupRuns(messages)[0])] = true
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("bash · 完成 · ls") {
+		t.Fatalf("an expanded run must show its commands, texts %q", tester.Texts())
+	}
+}
