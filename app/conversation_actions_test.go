@@ -272,3 +272,76 @@ func TestBindingRefusesAnEmptyProject(t *testing.T) {
 		t.Fatalf("an empty project must not be sent, posts %d", posts)
 	}
 }
+
+func TestConversationSwitchesModel(t *testing.T) {
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/model":
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			w.Write([]byte(`{"model":"opencode-go:deepseek"}`))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"用哪个模型？"}]}`))
+		case r.URL.Path == "/api/settings":
+			w.Write([]byte(`{"models":[
+				{"id":"command-goat:deepseek/deepseek-v4.1-flash","defaultThinkingLevel":"high","thinkingOptions":[{"level":"high"},{"level":"low"}]},
+				{"id":"opencode-go:deepseek","defaultThinkingLevel":"medium","thinkingOptions":[{"level":"medium"}]}
+			]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	tester := ui.NewTester(state.view, 900, 760)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("换模型") {
+		t.Fatalf("a conversation must offer the model switch, texts %q", tester.Texts())
+	}
+	if err := tester.Click("换模型"); err != nil {
+		t.Fatalf("click 换模型: %v", err)
+	}
+	for frame := 0; frame < 5; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("deepseek · medium") {
+		t.Fatalf("the choices must show the short model and its thinking level, texts %q", tester.Texts())
+	}
+	if err := tester.Click("deepseek · medium"); err != nil {
+		t.Fatalf("click a model: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for state.status == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	for _, wanted := range []string{`"model":"opencode-go:deepseek"`, `"thinkingLevel":"medium"`, `"requestId"`} {
+		if !contains(posted, wanted) {
+			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
+		}
+	}
+	if state.currentModel != "opencode-go:deepseek" || state.currentThinking != "medium" || state.modelMenu {
+		t.Fatalf("切模型后状态：model %q thinking %q menu %v", state.currentModel, state.currentThinking, state.modelMenu)
+	}
+	if state.status != "已切到 deepseek · 思考 medium" {
+		t.Fatalf("status %q", state.status)
+	}
+}
+
+func TestShortModelName(t *testing.T) {
+	cases := map[string]string{
+		"command-goat:deepseek/deepseek-v4.1-flash": "deepseek-v4.1-flash",
+		"opencode-go:deepseek":                      "deepseek",
+		"plain-model":                               "plain-model",
+	}
+	for id, want := range cases {
+		if got := shortModel(id); got != want {
+			t.Fatalf("shortModel(%q) = %q, want %q", id, got, want)
+		}
+	}
+}

@@ -105,36 +105,40 @@ func messageQueued(message transcriptMessage) bool {
 }
 
 type chatState struct {
-	nodeTitle      string
-	nodeTaskID     string
-	nodeID         string
-	nodeRole       string
-	nodeDraft      string
-	nodeLines      []string
-	tasks          []taskRow
-	artifacts      []artifactRow
-	previewTitle   string
-	previewRow     artifactRow
-	preview        string
-	questions      []openQuestion
-	artifactsOpen  bool
-	graphOpen      bool
-	paused         bool
-	binding        bool
-	projects       []string
-	project        string
-	visible        int
-	loadedOlderFor int
-	expanded       map[string]bool
-	window         *mygo.Window
-	address        string
-	token          string
-	draft          string
-	active         string
-	status         string
-	messages       []transcriptMessage
-	list           ui.ListState
-	md             markdown.Options
+	nodeTitle       string
+	nodeTaskID      string
+	nodeID          string
+	nodeRole        string
+	nodeDraft       string
+	nodeLines       []string
+	tasks           []taskRow
+	artifacts       []artifactRow
+	previewTitle    string
+	previewRow      artifactRow
+	preview         string
+	questions       []openQuestion
+	artifactsOpen   bool
+	graphOpen       bool
+	paused          bool
+	binding         bool
+	modelMenu       bool
+	models          []modelChoice
+	currentModel    string
+	currentThinking string
+	projects        []string
+	project         string
+	visible         int
+	loadedOlderFor  int
+	expanded        map[string]bool
+	window          *mygo.Window
+	address         string
+	token           string
+	draft           string
+	active          string
+	status          string
+	messages        []transcriptMessage
+	list            ui.ListState
+	md              markdown.Options
 }
 
 func newChatState(address, token string) *chatState {
