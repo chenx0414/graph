@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 //go:embed preload.js
@@ -108,6 +109,22 @@ func (s *shell) ensureDaemon() string {
 	return ""
 }
 
+func (s *shell) openNativeChat() {
+	state := newChatState(s.console, s.paths.SessionToken())
+	window := mygo.NewWindow(mygo.WindowOptions{
+		Title:     "Graph · 会话（原生预览）",
+		Width:     820,
+		Height:    720,
+		MinWidth:  480,
+		MinHeight: 360,
+		Content:   ui.View(state.view),
+	})
+	go func() {
+		state.load()
+		window.Update(func() {})
+	}()
+}
+
 func (s *shell) createTray() {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{ID: "console", Label: "打开控制台", Click: func(*mygo.MenuItem, *mygo.Window) { s.open("") }},
@@ -116,6 +133,7 @@ func (s *shell) createTray() {
 				_ = mygo.Shell.OpenExternal(s.console)
 			}
 		}},
+		{ID: "native-chat", Label: "打开原生会话（预览）", Click: func(*mygo.MenuItem, *mygo.Window) { s.openNativeChat() }},
 		mygo.Separator(),
 		{ID: "quit", Label: "退出 Graph", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 	})
