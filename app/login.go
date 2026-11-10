@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -128,7 +127,7 @@ func (s *settingsState) postLogin(path string, body []byte) (providerLogin, erro
 	if body == nil {
 		body = []byte("{}")
 	}
-	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+path, bytes.NewReader(body))
+	request, err := daemonPostRequest(s.address, s.token, path, body)
 	if err != nil {
 		return login, err
 	}

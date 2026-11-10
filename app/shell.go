@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -114,7 +113,7 @@ func (s *shellState) postJSON(path string, body any) error {
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+path, bytes.NewReader(encoded))
+	request, err := daemonPostRequest(s.address, s.token, path, encoded)
 	if err != nil {
 		return err
 	}

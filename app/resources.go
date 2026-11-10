@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -179,7 +178,7 @@ func (s *resourceState) toggleAutoUpdate() {
 	}
 	shaped["piExtensionAutoUpdate"] = !s.autoUpdate
 	body, _ := json.Marshal(map[string]any{"expectedRevision": s.revision, "document": shaped})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+"/api/config", bytes.NewReader(body))
+	request, err := daemonPostRequest(s.address, s.token, "/api/config", body)
 	if err != nil {
 		s.status = "写入失败：" + err.Error()
 		s.frame()

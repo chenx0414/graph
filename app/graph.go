@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -163,7 +162,7 @@ func (c *chatState) sendNodeMessage() {
 		"text":      text,
 		"requestId": "native-node-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 	})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/tasks/"+c.nodeTaskID+"/nodes/"+c.nodeID+"/messages", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/tasks/"+c.nodeTaskID+"/nodes/"+c.nodeID+"/messages", body)
 	if err != nil {
 		c.status = "发送失败：" + err.Error()
 		c.frame()

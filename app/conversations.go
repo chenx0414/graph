@@ -99,7 +99,7 @@ func (c *chatState) answer(question openQuestion, value string) {
 		"answer":     map[string]string{"type": "respond", "value": value},
 		"requestId":  "native-" + question.ID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 	})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/tasks/"+question.TaskID+"/answer", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/tasks/"+question.TaskID+"/answer", body)
 	if err != nil {
 		c.status = "回答失败：" + err.Error()
 		return
@@ -152,6 +152,19 @@ func daemonGet(address, token, path string) ([]byte, error) {
 	return payload, nil
 }
 
+func daemonPostRequest(address, token, path string, body []byte) (*http.Request, error) {
+	request, err := http.NewRequest("POST", strings.TrimSuffix(address, "/")+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if token = strings.TrimSpace(token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("Origin", strings.TrimSuffix(address, "/"))
+	request.Header.Set("content-type", "application/json")
+	return request, nil
+}
+
 func (c *chatState) busy() bool {
 	for _, message := range c.messages {
 		if messageStreaming(message) {
@@ -167,7 +180,7 @@ func (c *chatState) send() {
 		return
 	}
 	body, _ := json.Marshal(map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/messages", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/messages", body)
 	if err != nil {
 		c.status = "发送失败：" + err.Error()
 		return

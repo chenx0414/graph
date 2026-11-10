@@ -15,6 +15,10 @@ func TestInterruptAppearsOnlyWhileARoundIsRunning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/interrupt":
+			if r.Header.Get("Origin") != "http://"+r.Host {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
 			posted = string(payload[:read])

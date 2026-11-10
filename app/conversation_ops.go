@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -13,7 +12,7 @@ func (c *chatState) interrupt() {
 		return
 	}
 	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-interrupt")})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/interrupt", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/interrupt", body)
 	if err != nil {
 		c.status = "打断失败：" + err.Error()
 		c.frame()
@@ -42,7 +41,7 @@ func (c *chatState) interrupt() {
 
 func (c *chatState) cancelQueued(messageID string) {
 	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-cancel")})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/messages/"+messageID+"/cancel", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/messages/"+messageID+"/cancel", body)
 	if err != nil {
 		c.status = "撤销失败：" + err.Error()
 		c.frame()
@@ -78,7 +77,7 @@ func (c *chatState) setPaused(paused bool) {
 		action = "resume"
 	}
 	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-" + action)})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/"+action, bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/"+action, body)
 	if err != nil {
 		c.status = "操作失败：" + err.Error()
 		c.frame()
@@ -204,7 +203,7 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 		"thinkingLevel": thinking,
 		"requestId":     requestID("native-model"),
 	})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/model", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/model", body)
 	if err != nil {
 		c.status = "换模型失败：" + err.Error()
 		c.frame()
@@ -250,7 +249,7 @@ func (c *chatState) confirmDraft() {
 		"targetBranch":    branch,
 		"requestId":       requestID("native-confirm"),
 	})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/confirm", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/confirm", body)
 	if err != nil {
 		c.status = "确认失败：" + err.Error()
 		c.frame()
@@ -283,7 +282,7 @@ func (c *chatState) bindProject(projectID string) {
 		return
 	}
 	body, _ := json.Marshal(map[string]string{"projectId": projectID, "requestId": requestID("native-bind")})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/bind", bytes.NewReader(body))
+	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/bind", body)
 	if err != nil {
 		c.status = "绑定失败：" + err.Error()
 		c.frame()

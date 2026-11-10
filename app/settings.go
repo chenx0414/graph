@@ -177,7 +177,7 @@ func (s *settingsState) load() {
 }
 
 func (s *settingsState) post(path string) {
-	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+path, bytes.NewReader([]byte("{}")))
+	request, err := daemonPostRequest(s.address, s.token, path, []byte("{}"))
 	if err != nil {
 		s.status = "操作失败：" + err.Error()
 		return
