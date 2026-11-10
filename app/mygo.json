@@ -1,0 +1,9 @@
+{
+  "name": "Graph",
+  "slug": "graph",
+  "identifier": "dev.graph.console",
+  "version": "0.1.0",
+  "icon": "../build/icon.png",
+  "urlSchemes": ["graph"],
+  "out": "build"
+}

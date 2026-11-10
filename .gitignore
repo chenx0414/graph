@@ -75,3 +75,6 @@ tests/.quarantine-history.json
 tests/.suite-layers.json
 # The re-run of failed files, written by scripts/check-tests.mjs when a file fails once.
 tests/.suite-retry-report.json
+
+app/build/
+dist/app-mygo/

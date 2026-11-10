@@ -65,7 +65,8 @@
     "pig:kernel": "node scripts/pig-kernel-update.mjs",
     "pig:update": "node scripts/pig-kernel-update.mjs --set latest",
     "pig:check": "node scripts/pig-kernel-update.mjs --check",
-    "check:app": "go -C app vet ./... && go -C app test ./..."
+    "check:app": "go -C app vet ./... && go -C app test ./...",
+    "app:build:mygo": "node scripts/package-app-mygo.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.75",
