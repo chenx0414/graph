@@ -493,3 +493,61 @@ func TestArtifactListStopsAtTheLimit(t *testing.T) {
 		t.Fatalf("the ninth artifact must stay out of the list, texts %q", tester.Texts())
 	}
 }
+
+func TestScrollingToTheTopLoadsOlderRuns(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	for index := 0; index < 120; index++ {
+		state.messages = append(state.messages, transcriptMessage{Role: "user", Text: "第" + strconv.Itoa(index) + "句"})
+	}
+	tester := ui.NewTester(state.view, 700, 500)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if state.visible != transcriptWindow {
+		t.Fatalf("a fresh transcript keeps one window, visible %d", state.visible)
+	}
+	state.list.ScrollTo(0, ui.Start)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if state.visible != 2*transcriptWindow {
+		t.Fatalf("reaching the top must load one more window, visible %d", state.visible)
+	}
+	loaded := state.visible
+	for frame := 0; frame < 5; frame++ {
+		tester.Frame()
+	}
+	if state.visible != loaded {
+		t.Fatalf("a frame that stays at the top must not load again, visible %d after %d", state.visible, loaded)
+	}
+}
+
+func TestOneScrollLoadsOneWindowAndNoMore(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	state.visible = transcriptWindow
+	state.loadedOlderFor = transcriptWindow
+	if state.loadOlderAtTop() {
+		t.Fatal("a list that was never laid out must not load")
+	}
+	fresh := newChatState("http://127.0.0.1:1", "tok")
+	fresh.status = ""
+	for index := 0; index < 120; index++ {
+		fresh.messages = append(fresh.messages, transcriptMessage{Role: "user", Text: "x"})
+	}
+	tester := ui.NewTester(fresh.view, 700, 500)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	fresh.list.ScrollTo(0, ui.Start)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if fresh.visible != 2*transcriptWindow || fresh.loadedOlderFor != transcriptWindow {
+		t.Fatalf("one reach of the top loads one window, visible %d mark %d", fresh.visible, fresh.loadedOlderFor)
+	}
+	if fresh.loadOlderAtTop() {
+		t.Fatal("the same window must not load a second time")
+	}
+}

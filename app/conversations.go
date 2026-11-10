@@ -313,6 +313,9 @@ func (c *chatState) view(ctx *ui.Context) {
 		c.graphSection(ctx)
 		runs := groupRuns(c.messages)
 		start := windowStart(len(runs), c.visible)
+		if start > 0 && c.loadOlderAtTop() {
+			start = windowStart(len(runs), c.visible)
+		}
 		if start > 0 {
 			label := "加载更早的 " + strconv.Itoa(start) + " 段（往上翻）"
 			if ui.Button(ctx, label).Clicked() {
@@ -320,6 +323,7 @@ func (c *chatState) view(ctx *ui.Context) {
 			}
 		}
 		shown := runs[start:]
+		c.list.Key = func(row int) any { return start + row }
 		ui.List(ctx, &c.list, len(shown), func(index int) {
 			run := shown[index]
 			if run.tools {

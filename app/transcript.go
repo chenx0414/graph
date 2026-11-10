@@ -100,30 +100,31 @@ func toolLine(message transcriptMessage) string {
 }
 
 type chatState struct {
-	nodeTitle     string
-	nodeTaskID    string
-	nodeID        string
-	nodeRole      string
-	nodeDraft     string
-	nodeLines     []string
-	tasks         []taskRow
-	artifacts     []artifactRow
-	previewTitle  string
-	preview       string
-	questions     []openQuestion
-	artifactsOpen bool
-	graphOpen     bool
-	visible       int
-	expanded      map[string]bool
-	window        *mygo.Window
-	address       string
-	token         string
-	draft         string
-	active        string
-	status        string
-	messages      []transcriptMessage
-	list          ui.ListState
-	md            markdown.Options
+	nodeTitle      string
+	nodeTaskID     string
+	nodeID         string
+	nodeRole       string
+	nodeDraft      string
+	nodeLines      []string
+	tasks          []taskRow
+	artifacts      []artifactRow
+	previewTitle   string
+	preview        string
+	questions      []openQuestion
+	artifactsOpen  bool
+	graphOpen      bool
+	visible        int
+	loadedOlderFor int
+	expanded       map[string]bool
+	window         *mygo.Window
+	address        string
+	token          string
+	draft          string
+	active         string
+	status         string
+	messages       []transcriptMessage
+	list           ui.ListState
+	md             markdown.Options
 }
 
 func newChatState(address, token string) *chatState {
@@ -131,6 +132,19 @@ func newChatState(address, token string) *chatState {
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state
+}
+
+func (c *chatState) loadOlderAtTop() bool {
+	first, last := c.list.Visible()
+	if last < 0 || first > 0 {
+		return false
+	}
+	if c.loadedOlderFor == c.visible {
+		return false
+	}
+	c.loadedOlderFor = c.visible
+	c.visible += transcriptWindow
+	return true
 }
 
 func windowStart(total, visible int) int {
