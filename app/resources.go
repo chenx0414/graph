@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -94,17 +97,31 @@ func resourceSummary(rows []resourceRow) string {
 	return strconv.Itoa(ready) + " / " + strconv.Itoa(len(rows)) + " 就绪"
 }
 
+type configDocument struct {
+	Revision int             `json:"revision"`
+	Config   json.RawMessage `json:"config"`
+}
+
+type catalogRoot struct {
+	CapabilityRoot string `json:"capabilityRoot"`
+}
+
 type resourceState struct {
-	address string
-	token   string
-	status  string
-	window  *mygo.Window
-	rows    []resourceRow
-	list    ui.ListState
+	address    string
+	token      string
+	status     string
+	root       string
+	document   json.RawMessage
+	revision   int
+	autoUpdate bool
+	openPath   func(string) error
+	window     *mygo.Window
+	rows       []resourceRow
+	list       ui.ListState
 }
 
 func newResourceState(address, token string) *resourceState {
-	return &resourceState{address: address, token: token, status: "正在读取能力库…"}
+	return &resourceState{address: address, token: token, status: "正在读取能力库…", openPath: mygo.Shell.OpenPath}
 }
 
 func (s *resourceState) load() {
@@ -119,6 +136,87 @@ func (s *resourceState) load() {
 		return
 	}
 	s.rows = rows
+	s.reloadConfig()
+	s.status = ""
+	s.frame()
+}
+
+func (s *resourceState) reloadConfig() {
+	if payload, err := daemonGet(s.address, s.token, "/api/settings"); err == nil {
+		var named catalogRoot
+		if json.Unmarshal(payload, &named) == nil {
+			s.root = strings.TrimSpace(named.CapabilityRoot)
+		}
+	}
+	payload, err := daemonGet(s.address, s.token, "/api/config")
+	if err != nil {
+		return
+	}
+	var document configDocument
+	if json.Unmarshal(payload, &document) != nil || len(document.Config) == 0 {
+		return
+	}
+	var shaped map[string]any
+	if json.Unmarshal(document.Config, &shaped) != nil {
+		return
+	}
+	s.document = document.Config
+	s.revision = document.Revision
+	s.autoUpdate, _ = shaped["piExtensionAutoUpdate"].(bool)
+}
+
+func (s *resourceState) toggleAutoUpdate() {
+	if len(s.document) == 0 {
+		s.status = "读不到配置，暂时改不了这个开关"
+		s.frame()
+		return
+	}
+	var shaped map[string]any
+	if err := json.Unmarshal(s.document, &shaped); err != nil {
+		s.status = "配置不是预期结构：" + err.Error()
+		s.frame()
+		return
+	}
+	shaped["piExtensionAutoUpdate"] = !s.autoUpdate
+	body, _ := json.Marshal(map[string]any{"expectedRevision": s.revision, "document": shaped})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+"/api/config", bytes.NewReader(body))
+	if err != nil {
+		s.status = "写入失败：" + err.Error()
+		s.frame()
+		return
+	}
+	if token := strings.TrimSpace(s.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		s.status = "写入失败：" + err.Error()
+		s.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		s.status = "写入被拒绝：" + response.Status + "（配置可能已被别处改过，重进资源页会重读）"
+		s.frame()
+		return
+	}
+	s.status = ""
+	s.load()
+}
+
+func (s *resourceState) openDirectory() {
+	if s.root == "" || s.openPath == nil {
+		s.status = "还不知道能力目录在哪"
+		s.frame()
+		return
+	}
+	if err := s.openPath(s.root); err != nil {
+		s.status = "打不开能力目录：" + err.Error()
+		s.frame()
+		return
+	}
 	s.status = ""
 	s.frame()
 }
@@ -138,6 +236,21 @@ func (s *resourceState) view(ctx *ui.Context) {
 			return
 		}
 		ui.Text(ctx, "能力库 · "+resourceSummary(s.rows)).FontSize(12).TextColor(t.TextMuted)
+		ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
+			if ui.Button(ctx, "打开能力目录").Clicked() {
+				go s.openDirectory()
+			}
+			label := "扩展自动更新：关"
+			if s.autoUpdate {
+				label = "扩展自动更新：开"
+			}
+			if ui.Button(ctx, label).Clicked() {
+				go s.toggleAutoUpdate()
+			}
+			if s.root != "" {
+				ui.Text(ctx, s.root).FontSize(11).TextColor(t.TextMuted).Grow(1)
+			}
+		})
 		lines := resourceRows(s.rows)
 		ui.List(ctx, &s.list, len(lines), func(index int) {
 			line := lines[index]
