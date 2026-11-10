@@ -74,7 +74,7 @@ func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
 }
 
 func openPigSession(ctx context.Context, database string, request AgentSessionRequest, codemode CodemodeSettings, provider pigkernel.ProviderBridge, tools []pigkernel.ToolSpec, onEvent func(map[string]any), onToolCall func(pigkernel.ToolCallRecord)) (*pigkernel.Session, error) {
-	tools, provider, err := pigDeferredToolSurface(request, tools, provider)
+	tools, provider, err := pigToolSearchSurface(tools, provider, defaultToolDisclosureOptions())
 	if err != nil {
 		return nil, err
 	}
