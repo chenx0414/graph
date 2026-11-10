@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -58,5 +60,40 @@ func TestAsyncFullSummaryKeepsTheCommandlineWhenNothingMatches(t *testing.T) {
 func TestAsyncFullSummaryStaysReadableWithoutOutput(t *testing.T) {
 	if got := rsiAsyncFullSummary("   \n\n  "); !strings.Contains(got, "没有任何输出") {
 		t.Fatalf("an empty log says so, got %q", got)
+	}
+}
+
+func TestBundledNodeMustExistBeforeItIsUsed(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "runtime", "node")
+	env := map[string]string{RUNTIME_NODE_ENV: missing, "PATH": "/usr/bin:/bin"}
+
+	if runtime, _ := GraphNodeRuntime(env); runtime == missing {
+		t.Fatalf("a path that does not exist was handed out as the node runtime: %q", runtime)
+	}
+	plan := ValidationCommand(RsiCommand{Args: []string{"--version"}}, env)
+	if plan.Executable == missing {
+		t.Fatalf("validation would exec a missing binary: %q", plan.Executable)
+	}
+
+	present := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(present, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]string{RUNTIME_NODE_ENV: present, "PATH": "/usr/bin:/bin"}
+	if runtime, _ := GraphNodeRuntime(kept); runtime != present {
+		t.Fatalf("an existing bundled node was ignored: %q", runtime)
+	}
+	if plan := ValidationCommand(RsiCommand{Args: []string{"--version"}}, kept); plan.Executable != present {
+		t.Fatalf("validation ignored an existing bundled node: %q", plan.Executable)
+	}
+}
+
+func TestExistingNodeRejectsADirectory(t *testing.T) {
+	directory := t.TempDir()
+	if node := existingNode(directory); node != "" {
+		t.Fatalf("a directory was accepted as the node runtime: %q", node)
+	}
+	if node := existingNode(""); node != "" {
+		t.Fatalf("an empty path was accepted: %q", node)
 	}
 }

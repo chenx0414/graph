@@ -30,8 +30,7 @@ func GraphNodeRuntime(env map[string]string) (execPath string, electron string) 
 	if env == nil {
 		env = environMap()
 	}
-	bundled := strings.TrimSpace(env[RUNTIME_NODE_ENV])
-	if bundled != "" {
+	if bundled := existingNode(strings.TrimSpace(env[RUNTIME_NODE_ENV])); bundled != "" {
 		return bundled, ""
 	}
 	if found := lookupNodeOnPath(env); found != "" {
@@ -42,6 +41,17 @@ func GraphNodeRuntime(env map[string]string) (execPath string, electron string) 
 		return "", ""
 	}
 	return path, ""
+}
+
+func existingNode(path string) string {
+	if path == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		return ""
+	}
+	return path
 }
 
 func lookupNodeOnPath(env map[string]string) string {

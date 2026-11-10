@@ -58,7 +58,7 @@ func ValidationCommand(command RsiCommand, env map[string]string) ValidationComm
 	if env == nil {
 		env = environMap()
 	}
-	executable := strings.TrimSpace(env[RUNTIME_NODE_ENV])
+	executable := existingNode(strings.TrimSpace(env[RUNTIME_NODE_ENV]))
 	if executable == "" {
 		executable = "node"
 	}
@@ -231,7 +231,6 @@ func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {
 	}
 	return true
 }
-
 
 func rsiInside(root, path string) (string, bool) {
 	base := deployResolve("", root)
