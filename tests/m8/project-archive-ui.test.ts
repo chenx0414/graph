@@ -27,6 +27,7 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   await row.waitFor({ state: 'attached' });
   expect(await row.isVisible(), '项目状态被折叠进 details，不展开就看不见').toBe(true);
   expect(await row.getAttribute('data-archived')).toBe('false');
+  expect(await page.locator('.settings-project-status .card-sub').count(), '项目卡不该再有副标题说明').toBe(0);
   expect((await lifecycle()).archived).toBe(false);
   // 归档拒新委派要在一个真实的主管线程上验：同一个请求在归档期间报
   // project_archived，恢复后换成“缺少用户消息”，证明拦住它的是归档本身。
@@ -41,6 +42,7 @@ test('项目归档与恢复在设置里完成，并从侧栏收起', async () =>
   expect(await page.getByTestId('git-project-sample').getAttribute('data-archived')).toBe('true');
   expect(await page.getByTestId('archived-projects-label').innerText()).toContain('已归档项目（1）');
   expect(await page.getByTestId('git-prepare-sample').count()).toBe(0);
+  expect(await page.getByTestId('git-project-sample').innerText(), '归档行不该再带归档日期与“不再接受新的委派”').not.toMatch(/归档于|不再接受新的委派/);
   expect((await lifecycle()).archived).toBe(true);
   // 归档拒新委派：守护进程不再受理这个项目的新工作。
   const refused = await createWork();

@@ -77,7 +77,6 @@ export function ProjectGitCard() {
         </div>
         {!archived && prep?.state === 'detected' && <span className="muted">{dirty ? `${dirty} 项未提交修改；创建基线将把这些改动纳入本地快照` : prep.detail?.reason === 'not_a_repository' ? '尚未初始化 Git' : '需要准备'}</span>}
         {!archived && prep?.state === 'failed' && <span className="muted">{prep.detail?.reason ?? '准备失败'}</span>}
-        {archived && <span className="muted">{project.archivedAt ? `归档于 ${new Date(project.archivedAt).toLocaleString()}；` : ''}不再接受新的委派</span>}
         <div className="row" style={{ gap: 8 }}>
           {!archived && (
             <Button size="sm" data-testid={`git-prepare-${project.id}`} disabled={busy === project.id} onClick={() => void prepare(project, prep?.state === 'detected' && dirty > 0)}>
@@ -94,7 +93,7 @@ export function ProjectGitCard() {
   const active = (projects ?? []).filter(project => project.archivedAt == null);
   const archived = (projects ?? []).filter(project => project.archivedAt != null);
   return (
-    <Card title="项目与本地基线" icon="box" subtitle="正式派发前必须准备好 Git 与本地基线；归档的项目不再接受新的委派，恢复后也不会自动继续归档时暂停的工作">
+    <Card title="项目与本地基线" icon="box">
       {projects === null && <Spinner />}
       {projects?.length === 0 && <p className="muted">尚未配置项目。</p>}
       {active.map(project => row(project, false))}
