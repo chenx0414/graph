@@ -126,6 +126,8 @@ type chatState struct {
 	currentModel    string
 	currentThinking string
 	projects        []string
+	proposal        draftProposal
+	branch          string
 	project         string
 	visible         int
 	loadedOlderFor  int

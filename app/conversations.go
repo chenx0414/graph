@@ -42,9 +42,15 @@ func (q openQuestion) open() bool {
 	return q.Status != "resolved" && (q.Suspended || q.Status == "open" || q.Status == "waiting")
 }
 
+type draftProposal struct {
+	Version       int `json:"version"`
+	DraftRevision int `json:"draftRevision"`
+}
+
 type conversationBody struct {
 	Messages  []transcriptMessage `json:"messages"`
 	Questions []openQuestion      `json:"questions"`
+	Proposal  *draftProposal      `json:"proposal"`
 	Paused    bool                `json:"paused"`
 }
 
@@ -232,8 +238,13 @@ func (c *chatState) open(id string) {
 	c.messages = messages
 	c.active = id
 	c.questions = nil
+	c.proposal = draftProposal{}
+	c.branch = "main"
 	if body, err := parseConversationBody(payload); err == nil {
 		c.paused = body.Paused
+		if body.Proposal != nil && body.Proposal.Version > 0 {
+			c.proposal = *body.Proposal
+		}
 		for _, question := range body.Questions {
 			if question.open() {
 				c.questions = append(c.questions, question)
@@ -345,6 +356,17 @@ func (c *chatState) view(ctx *ui.Context) {
 				}
 			}
 		})
+		if c.proposal.Version > 0 {
+			ui.Column(ctx).Gap(4).Children(func() {
+				ui.Text(ctx, "草案 v"+strconv.Itoa(c.proposal.Version)+" · 修订 "+strconv.Itoa(c.proposal.DraftRevision)+" 待确认").FontSize(12).TextColor(t.TextMuted)
+				ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
+					ui.TextInput(ctx, &c.branch).Placeholder("目标分支").Label("目标分支").Width(160)
+					if ui.PrimaryButton(ctx, "确认草图并开始执行").Clicked() {
+						go c.confirmDraft()
+					}
+				})
+			})
+		}
 		ui.Row(ctx).Gap(4).Children(func() {
 			label := "绑定项目"
 			if c.project != "" {

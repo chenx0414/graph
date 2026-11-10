@@ -345,3 +345,72 @@ func TestShortModelName(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmingADraftSendsBothRevisions(t *testing.T) {
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/confirm":
+			payload := make([]byte, 4096)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			w.Write([]byte(`{"accepted":true}`))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(`{"proposal":{"version":3,"draftRevision":7},"messages":[{"role":"assistant","text":"草案好了"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if state.proposal.Version != 3 || state.proposal.DraftRevision != 7 {
+		t.Fatalf("proposal %+v", state.proposal)
+	}
+	tester := ui.NewTester(state.view, 900, 760)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if !tester.HasText("草案 v3 · 修订 7 待确认") {
+		t.Fatalf("a waiting draft must be announced, texts %q", tester.Texts())
+	}
+	if state.branch != "main" {
+		t.Fatalf("the target branch must default to main, got %q", state.branch)
+	}
+	if err := tester.Click("确认草图并开始执行"); err != nil {
+		t.Fatalf("click 确认草图并开始执行: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for posted == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	for _, wanted := range []string{`"proposalVersion":3`, `"draftRevision":7`, `"targetBranch":"main"`, `"requestId"`} {
+		if !contains(posted, wanted) {
+			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
+		}
+	}
+	if state.proposal.Version != 0 || state.status != "已确认草案，开始执行（目标分支 main）" {
+		t.Fatalf("确认后状态：proposal %+v status %q", state.proposal, state.status)
+	}
+}
+
+func TestConfirmRefusesAnEmptyBranch(t *testing.T) {
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			posts++
+		}
+		w.Write([]byte(`{"messages":[]}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.active = "c1"
+	state.proposal = draftProposal{Version: 1, DraftRevision: 2}
+	state.branch = "   "
+	state.confirmDraft()
+	if posts != 0 || state.status != "目标分支不能为空" {
+		t.Fatalf("an empty branch must stop before the request, posts %d status %q", posts, state.status)
+	}
+}

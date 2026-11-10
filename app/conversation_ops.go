@@ -234,6 +234,50 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 	c.frame()
 }
 
+func (c *chatState) confirmDraft() {
+	if c.active == "" || c.proposal.Version < 1 {
+		return
+	}
+	branch := strings.TrimSpace(c.branch)
+	if branch == "" {
+		c.status = "目标分支不能为空"
+		c.frame()
+		return
+	}
+	body, _ := json.Marshal(map[string]any{
+		"proposalVersion": c.proposal.Version,
+		"draftRevision":   c.proposal.DraftRevision,
+		"targetBranch":    branch,
+		"requestId":       requestID("native-confirm"),
+	})
+	request, err := http.NewRequest("POST", strings.TrimSuffix(c.address, "/")+"/api/conversations/"+c.active+"/confirm", bytes.NewReader(body))
+	if err != nil {
+		c.status = "确认失败：" + err.Error()
+		c.frame()
+		return
+	}
+	if token := strings.TrimSpace(c.token); token != "" {
+		request.Header.Set("Cookie", "graph_session="+token)
+	}
+	request.Header.Set("content-type", "application/json")
+	client := &http.Client{Timeout: 60 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		c.status = "确认失败：" + err.Error()
+		c.frame()
+		return
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		c.status = "确认被拒绝：" + response.Status
+		c.frame()
+		return
+	}
+	c.proposal = draftProposal{}
+	c.status = "已确认草案，开始执行（目标分支 " + branch + "）"
+	c.frame()
+}
+
 func (c *chatState) bindProject(projectID string) {
 	if c.active == "" || strings.TrimSpace(projectID) == "" {
 		return
