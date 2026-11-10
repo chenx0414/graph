@@ -68,7 +68,9 @@ type shellState struct {
 	address  string
 	token    string
 	status   string
+	section  string
 	activeID string
+	settings *settingsState
 	rows     []sidebarRow
 	tabs     []*chatTab
 	window   *mygo.Window
@@ -113,6 +115,16 @@ func (s *shellState) load() {
 	}
 }
 
+func (s *shellState) openSettings() {
+	if s.settings == nil {
+		s.settings = newSettingsState(s.address, s.token)
+		s.settings.window = s.window
+		go s.settings.load()
+	}
+	s.section = "settings"
+	s.frame()
+}
+
 func (s *shellState) titleOf(id string) string {
 	for _, row := range s.rows {
 		if row.id == id {
@@ -123,6 +135,7 @@ func (s *shellState) titleOf(id string) string {
 }
 
 func (s *shellState) selectConversation(id string) {
+	s.section = "chat"
 	for _, tab := range s.tabs {
 		if tab.id == id {
 			s.activeID = id
@@ -166,6 +179,14 @@ func (s *shellState) view(ctx *ui.Context) {
 	ui.Row(ctx).Fill().Children(func() {
 		ui.Column(ctx).Width(240).Fill().Padding(12).Gap(6).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
 			ui.Text(ctx, "Graph").FontSize(14)
+			ui.Row(ctx).Gap(4).Children(func() {
+				if ui.Button(ctx, "会话").Clicked() {
+					s.section = "chat"
+				}
+				if ui.Button(ctx, "设置").Clicked() {
+					go s.openSettings()
+				}
+			})
 			if s.status != "" {
 				ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
 				return
@@ -187,6 +208,14 @@ func (s *shellState) view(ctx *ui.Context) {
 			}).Grow(1)
 		})
 		ui.Column(ctx).Fill().Children(func() {
+			if s.section == "settings" {
+				if s.settings == nil {
+					ui.Text(ctx, "正在读取设置…").Padding(16).TextColor(t.TextMuted)
+					return
+				}
+				s.settings.view(ctx)
+				return
+			}
 			if len(s.tabs) > 0 {
 				ui.Row(ctx).Gap(4).Padding(8, 8, 0, 8).Children(func() {
 					for _, tab := range s.tabs {
