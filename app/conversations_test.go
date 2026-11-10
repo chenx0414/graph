@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -360,5 +361,45 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 	}
 	if !tester.HasText("bash · 完成 · ls") {
 		t.Fatalf("an expanded run must show its commands, texts %q", tester.Texts())
+	}
+}
+
+func TestWindowStartKeepsTheTailVisible(t *testing.T) {
+	if start := windowStart(10, 40); start != 0 {
+		t.Fatalf("a short transcript starts at 0, got %d", start)
+	}
+	if start := windowStart(100, 40); start != 60 {
+		t.Fatalf("the window shows the last 40, got start %d", start)
+	}
+	if start := windowStart(0, 0); start != 0 {
+		t.Fatalf("an empty transcript starts at 0, got %d", start)
+	}
+	if start := windowStart(5, 0); start != 0 {
+		t.Fatalf("an unset window falls back to the default, got %d", start)
+	}
+}
+
+func TestLongTranscriptsOfferOlderRunsOnDemand(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	for index := 0; index < 45; index++ {
+		state.messages = append(state.messages, transcriptMessage{Role: "user", Text: "第" + strconv.Itoa(index) + "句"})
+	}
+	tester := ui.NewTester(state.view, 700, 500)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	joined := ""
+	for _, text := range tester.Texts() {
+		joined += text
+	}
+	if !contains(joined, "加载更早的 5 段") {
+		t.Fatalf("the window must offer the older runs, texts %q", tester.Texts())
+	}
+	if !tester.HasText("第44句") {
+		t.Fatalf("the newest message must show, texts %q", tester.Texts())
+	}
+	if start := windowStart(45, 45+transcriptWindow); start != 0 {
+		t.Fatalf("loading more must reach the first run, got start %d", start)
 	}
 }

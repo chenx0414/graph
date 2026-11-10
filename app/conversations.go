@@ -177,7 +177,20 @@ func toolLine(message transcriptMessage) string {
 	return name + " · " + state + " · " + text
 }
 
+const transcriptWindow = 40
+
+func windowStart(total, visible int) int {
+	if visible <= 0 {
+		visible = transcriptWindow
+	}
+	if total <= visible {
+		return 0
+	}
+	return total - visible
+}
+
 type chatState struct {
+	visible  int
 	expanded map[string]bool
 	window   *mygo.Window
 	address  string
@@ -193,7 +206,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{address: address, token: token, status: "正在读取会话…", expanded: map[string]bool{}}
+	state := &chatState{address: address, token: token, status: "正在读取会话…", expanded: map[string]bool{}, visible: transcriptWindow}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state
@@ -303,6 +316,7 @@ func (c *chatState) open(id string) {
 	}
 	c.messages = messages
 	c.active = id
+	c.visible = transcriptWindow
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
 		return
@@ -347,8 +361,16 @@ func (c *chatState) view(ctx *ui.Context) {
 			return
 		}
 		runs := groupRuns(c.messages)
-		ui.List(ctx, &c.list, len(runs), func(index int) {
-			run := runs[index]
+		start := windowStart(len(runs), c.visible)
+		if start > 0 {
+			label := "加载更早的 " + strconv.Itoa(start) + " 段（往上翻）"
+			if ui.Button(ctx, label).Clicked() {
+				c.visible += transcriptWindow
+			}
+		}
+		shown := runs[start:]
+		ui.List(ctx, &c.list, len(shown), func(index int) {
+			run := shown[index]
 			if run.tools {
 				key := runKey(run)
 				ui.Column(ctx).Gap(2).Children(func() {
