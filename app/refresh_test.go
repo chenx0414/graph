@@ -3,6 +3,9 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -79,6 +82,24 @@ func TestExecutableReplaced(t *testing.T) {
 	} {
 		if !executableReplaced(base, changed) {
 			t.Fatalf("a replaced binary must trigger a relaunch: %+v", changed)
+		}
+	}
+}
+
+func TestRecordRelaunchWritesWhereItCanBeRead(t *testing.T) {
+	dir := t.TempDir()
+	s := &shell{paths: Paths{StateDir: dir}}
+	before := fileStamp{Size: 10, Mod: time.Unix(1_700_000_000, 0), Inode: 7}
+	after := fileStamp{Size: 11, Mod: time.Unix(1_700_000_100, 0), Inode: 8}
+	s.recordRelaunch("/Applications/Graph.app/Contents/MacOS/Graph", before, after)
+	payload, err := os.ReadFile(filepath.Join(dir, "app-relaunch.log"))
+	if err != nil {
+		t.Fatalf("the relaunch must leave a record: %v", err)
+	}
+	text := string(payload)
+	for _, want := range []string{"/Applications/Graph.app/Contents/MacOS/Graph", "size=10", "size=11", "inode=7"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the record is missing %q: %s", want, text)
 		}
 	}
 }
