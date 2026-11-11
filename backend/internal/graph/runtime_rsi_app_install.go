@@ -26,7 +26,7 @@ func rsiInstallDesktopApp(root, bundleRoot string) RsiAppInstall {
 // one? Measured 2026-11-11: a receipt claimed the app was not updated while the
 // bundle had in fact been replaced.
 func rsiAppInstallVerdict(bundle, dest, message string, installErr error) RsiAppInstall {
-	installed := filepath.Join(dest, "Graph.app", "Contents", "MacOS", "Graph")
+	installed := filepath.Join(dest, "Contents", "MacOS", "Graph")
 	built := filepath.Join(bundle, "Contents", "MacOS", "Graph")
 	builtDigest, builtErr := digestOfFile(built)
 	installedDigest, installedErr := digestOfFile(installed)

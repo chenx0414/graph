@@ -21,9 +21,19 @@ func bundleWithExecutable(t *testing.T, root string, content string) string {
 	return bundle
 }
 
+// The destination is the app bundle itself, as appinstall.DefaultDest reports it.
+func appDestination(t *testing.T, root string) string {
+	t.Helper()
+	dest := filepath.Join(root, "Applications", "Graph.app")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("mkdir dest: %v", err)
+	}
+	return dest
+}
+
 func installInto(t *testing.T, dest string, content string) {
 	t.Helper()
-	executable := filepath.Join(dest, "Graph.app", "Contents", "MacOS", "Graph")
+	executable := filepath.Join(dest, "Contents", "MacOS", "Graph")
 	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -34,7 +44,7 @@ func installInto(t *testing.T, dest string, content string) {
 
 func TestInstallVerdictTrustsTheInstalledBinaryOverTheInstaller(t *testing.T) {
 	root := t.TempDir()
-	dest := filepath.Join(root, "Applications")
+	dest := appDestination(t, root)
 	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
 	installInto(t, dest, "shell+daemon v2")
 	verdict := rsiAppInstallVerdict(bundle, dest, "installed", nil)
@@ -45,7 +55,7 @@ func TestInstallVerdictTrustsTheInstalledBinaryOverTheInstaller(t *testing.T) {
 
 func TestInstallVerdictReportsAFailureThatActuallyInstalled(t *testing.T) {
 	root := t.TempDir()
-	dest := filepath.Join(root, "Applications")
+	dest := appDestination(t, root)
 	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
 	installInto(t, dest, "shell+daemon v2")
 	verdict := rsiAppInstallVerdict(bundle, dest, "", errors.New("codesign: something"))
@@ -56,7 +66,7 @@ func TestInstallVerdictReportsAFailureThatActuallyInstalled(t *testing.T) {
 
 func TestInstallVerdictRefusesAStaleInstalledBinary(t *testing.T) {
 	root := t.TempDir()
-	dest := filepath.Join(root, "Applications")
+	dest := appDestination(t, root)
 	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
 	installInto(t, dest, "shell+daemon v1")
 	verdict := rsiAppInstallVerdict(bundle, dest, "installed", nil)
@@ -67,7 +77,7 @@ func TestInstallVerdictRefusesAStaleInstalledBinary(t *testing.T) {
 
 func TestInstallVerdictNamesBothPathsWhenNothingLanded(t *testing.T) {
 	root := t.TempDir()
-	dest := filepath.Join(root, "Applications")
+	dest := appDestination(t, root)
 	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
 	verdict := rsiAppInstallVerdict(bundle, dest, "no packaged app", errors.New("no packaged app at "+bundle))
 	if verdict.State != "failed" || !strings.Contains(verdict.Note, "installed") || !strings.Contains(verdict.Note, bundle) {
