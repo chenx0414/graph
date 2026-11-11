@@ -1,10 +1,8 @@
 {
   "name": "graph",
   "private": true,
-  "description": "Launcher only: the RSI check and app-build steps are invoked as `node --run <script>`, so these forward to the Go gate and the Go packager.",
+  "description": "Launcher only: the RSI check command is invoked as `node --run check`, so it forwards to the Go gate. Every other RSI step runs a Go command directly.",
   "scripts": {
-    "check": "python3 scripts/check-queue.py",
-    "check:full": "python3 scripts/check-queue.py --continue -- go -C backend run ./cmd/graphcheck all",
-    "app:build": "go -C backend run ./cmd/graphbuild app"
+    "check": "python3 scripts/check-queue.py"
   }
 }

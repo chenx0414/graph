@@ -34,11 +34,11 @@ Go 化分两段走完：先是界面（`app/`，Go + MyGo）接替 Electron 外�
   `check-resolver.cjs`）：PiG 内核在 Node 里跑用户扩展与模块的地方，Go 侧只负责起进程与读结果。
 - `.agents/skills/**`：第三方技能脚本，随版本锁定，不由我们改写。
 
-`package.json` 留成三条转发脚本：`check` → `python3 scripts/check-queue.py`、`check:full` →
-`graphcheck all`、`app:build` → `graphbuild app`。原因是宿主的 RSI 流程把这两步写成
-`node --run <script>`（校验命令与激活前的 App 重建），脚本名是宿主的约定，不是我们的工具。
-它不再有任何依赖，`node_modules` 不存在。实测过：删掉 `app:build` 那条之后，激活卡在
-「门禁过了、App 重建 404」，而修宿主的调用点要先重载——先有鸡还是先有蛋。
+`package.json` 只剩一条转发脚本：`check` → `python3 scripts/check-queue.py`。原因是宿主工具的
+校验命令固定写成 `node --run check`，脚本名是宿主的约定，不是我们的工具；它不再有任何依赖，
+`node_modules` 不存在。**其余 RSI 步骤（激活前的 App 重建、激活后的全量确认）现在都是 Go 命令**：
+`ValidationCommand` 保留调用方点的程序，只有 `node` 才走打包版 node 解析（`656af19d`）。
+在那之前宿主把所有命令都交给 node，`go …` 会被当成 `node -C backend …` 跑，脚本名转发只是绕路。
 
 ## 后果
 
