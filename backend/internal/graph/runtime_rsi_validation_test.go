@@ -35,10 +35,14 @@ func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
 
 // The confirmation runs at a lower priority, so a change made right after a
 // reload does not queue behind the whole suite.
+//
+// The host spawns every RSI command through node (ValidationCommand), so the
+// confirmation has to name a script the Node runner accepts; a `go ...` form
+// reaches node as `node -C backend run ...` and dies on MODULE_NOT_FOUND.
 func TestAsyncFullRunsNice(t *testing.T) {
 	command := rsiAsyncFullCommand()
-	if command.Command != "go" || strings.Join(command.Args, " ") != "-C backend run ./cmd/graphcheck all" {
-		t.Fatalf("the confirmation is still the full suite, got %v %v", command.Command, command.Args)
+	if command.Command != "node" || strings.Join(command.Args, " ") != "--run check:full" {
+		t.Fatalf("the confirmation must be a node script, got %v %v", command.Command, command.Args)
 	}
 	if command.Nice != 10 {
 		t.Fatalf("the confirmation has to ask for a lower priority, got %d", command.Nice)
