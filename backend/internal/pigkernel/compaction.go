@@ -7,9 +7,7 @@ import (
 
 	"github.com/MichaelKinsy/PiG/ai"
 	"github.com/MichaelKinsy/PiG/durable"
-	"github.com/MichaelKinsy/PiG/durable/harness"
 )
-
 
 func (session *Session) Compact(ctx context.Context, instructions string) error {
 	return session.CompactWithReason(ctx, instructions, "manual")
@@ -180,11 +178,11 @@ func (session *Session) PrepareContext(ctx context.Context, budget int, compactA
 	return false, true, estimated, nil
 }
 
-func (session *Session) reportThresholdCompaction(event harness.CompactionEndEvent) {
-	report := map[string]any{"type": "compaction_end", "reason": string(event.Reason)}
-	if event.Error != nil {
+func (session *Session) reportCompactionEnd(reason string, failure string) {
+	report := map[string]any{"type": "compaction_end", "reason": reason}
+	if failure != "" {
 		report["aborted"] = true
-		report["errorMessage"] = *event.Error
+		report["errorMessage"] = failure
 		session.OnEvent(report)
 		return
 	}

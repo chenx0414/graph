@@ -11,53 +11,52 @@ import (
 	"github.com/MichaelKinsy/PiG/durable/harness"
 )
 
-
 type SessionOptions struct {
-	Database string
-	Identity string
-	Model ModelSpec
-	Provider ProviderBridge
-	Tools []ToolSpec
-	Codemode *CodemodeOptions
-	McpServers []McpServerSpec
-	Instructions string
+	Database      string
+	Identity      string
+	Model         ModelSpec
+	Provider      ProviderBridge
+	Tools         []ToolSpec
+	Codemode      *CodemodeOptions
+	McpServers    []McpServerSpec
+	Instructions  string
 	ThinkingLevel string
-	RequestId string
-	Compaction *CompactionThresholds
-	OnEvent func(event map[string]any)
-	OnToolCall func(call ToolCallRecord)
-	ToolResults ToolResultRenderer
+	RequestId     string
+	Compaction    *CompactionThresholds
+	OnEvent       func(event map[string]any)
+	OnToolCall    func(call ToolCallRecord)
+	ToolResults   ToolResultRenderer
 }
 
 type CompactionThresholds struct {
-	ReserveTokens int
+	ReserveTokens    int
 	KeepRecentTokens int
 }
 
 type ToolCallRecord struct {
-	Name string
+	Name      string
 	Arguments map[string]any
-	Result string
-	IsError bool
+	Result    string
+	IsError   bool
 }
 
 type SessionInspect struct {
-	SessionId string
-	SessionFile string
-	Model string
-	Messages []any
-	ActiveTools []string
-	RegisteredTools []string
+	SessionId        string
+	SessionFile      string
+	Model            string
+	Messages         []any
+	ActiveTools      []string
+	RegisteredTools  []string
 	LoadedExtensions []string
-	ToolCalls []string
+	ToolCalls        []string
 }
 
 type SessionTurn struct {
-	Text string
-	StopReason string
+	Text         string
+	StopReason   string
 	ErrorMessage string
-	Usage *Usage
-	Inspect SessionInspect
+	Usage        *Usage
+	Inspect      SessionInspect
 }
 
 type Usage struct {
@@ -88,8 +87,8 @@ type Session struct {
 	toolNames    []string
 	loaded       []string
 	requestId    string
-	OnEvent func(event map[string]any)
-	OnToolCall func(call ToolCallRecord)
+	OnEvent      func(event map[string]any)
+	OnToolCall   func(call ToolCallRecord)
 
 	mutex          sync.Mutex
 	closed         bool
@@ -97,7 +96,7 @@ type Session struct {
 	acceptingInput bool
 	interrupted    bool
 	continuation   chan sessionContinuation
-	compactions map[durable.TaskId]bool
+	compactions    map[durable.TaskId]bool
 }
 
 func OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
@@ -197,17 +196,8 @@ func (session *Session) PromptContent(ctx context.Context, content ai.UserConten
 		session.mutex.Unlock()
 	}()
 
-	events, err := harness.WatchEvents(ctx, session.kernel.Harness(), session.conversation.Id())
-	if err != nil {
-		return SessionTurn{}, err
-	}
-	events.Start(func(_ context.Context, batch []harness.AgentEvent) error {
-		for _, event := range batch {
-			session.emit(event)
-		}
-		return nil
-	})
-	defer func() { _, _ = events.Stop() }()
+	stopLive := session.watchLive(ctx)
+	defer stopLive()
 
 	existing, err := session.conversation.Commit(ctx, func(tx durable.Tx) (any, error) {
 		record, err := tx.SubmissionByRequest(session.conversation.Id(), session.admissionId())
@@ -228,12 +218,12 @@ func (session *Session) PromptContent(ctx context.Context, content ai.UserConten
 		submission = admitted
 	} else {
 		requestId := session.admissionId()
-			submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
-				Type:      durable.SubmissionTypeInput,
-				Content:   content,
-				RequestId: &requestId,
-				WhenBusy:  durable.WhenBusyReject,
-			})
+		submitted, err := session.conversation.Submit(ctx, durable.SubmissionDraft{
+			Type:      durable.SubmissionTypeInput,
+			Content:   content,
+			RequestId: &requestId,
+			WhenBusy:  durable.WhenBusyReject,
+		})
 		if err != nil {
 			return SessionTurn{}, err
 		}
@@ -419,19 +409,3 @@ func (session *Session) admissionId() string {
 	}
 	return session.identity
 }
-
-func (session *Session) emit(event harness.AgentEvent) {
-	if session.OnEvent == nil {
-		return
-	}
-	if end, ok := event.(harness.CompactionEndEvent); ok {
-		if !session.compactionReported(end.TaskId) {
-			session.reportThresholdCompaction(end)
-		}
-		return
-	}
-	for _, report := range translateEvent(event) {
-		session.OnEvent(report)
-	}
-}
-

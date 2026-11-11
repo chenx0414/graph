@@ -7,14 +7,9 @@ tool github.com/egoist/mygo/cmd/mygo
 require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
-	github.com/MichaelKinsy/PiG v0.5.3 // indirect
-	github.com/MichaelKinsy/PiG/extensions/sdk v0.5.3 // indirect
-	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.47.1 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.16 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.23 // indirect
-	github.com/aws/smithy-go v1.28.1 // indirect
+	github.com/MichaelKinsy/PiG v0.7.0 // indirect
+	github.com/MichaelKinsy/PiG/extensions/sdk v0.7.0 // indirect
+	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
@@ -35,10 +30,10 @@ require (
 	github.com/tetratelabs/wazero v1.12.0 // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

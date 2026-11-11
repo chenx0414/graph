@@ -18,9 +18,8 @@ func reportStorageError(operation string, err error) {
 	_, _ = os.Stderr.WriteString("pig kernel: durable storage " + operation + " failed: " + err.Error() + "\n")
 }
 
-
 type sqliteDatabase struct {
-	db *sql.DB
+	db           *sql.DB
 	transactions sync.Mutex
 }
 
@@ -62,6 +61,19 @@ func (database *sqliteDatabase) Run(sql string, params ...chordsqlite.SqliteValu
 	_, err := database.db.Exec(sql, params...)
 	reportStorageError("run", err)
 	return err
+}
+
+func (database *sqliteDatabase) RunCounted(sql string, params ...chordsqlite.SqliteValue) (int64, error) {
+	result, err := database.db.Exec(sql, params...)
+	reportStorageError("run_counted", err)
+	if err != nil {
+		return 0, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return changed, nil
 }
 
 func (database *sqliteDatabase) Get(sql string, params ...chordsqlite.SqliteValue) (chordsqlite.SqliteRow, error) {
@@ -142,6 +154,18 @@ func (transaction *sqliteTransaction) Exec(sql string) error {
 func (transaction *sqliteTransaction) Run(sql string, params ...chordsqlite.SqliteValue) error {
 	_, err := transaction.tx.Exec(sql, params...)
 	return err
+}
+
+func (transaction *sqliteTransaction) RunCounted(sql string, params ...chordsqlite.SqliteValue) (int64, error) {
+	result, err := transaction.tx.Exec(sql, params...)
+	if err != nil {
+		return 0, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return changed, nil
 }
 
 func (transaction *sqliteTransaction) Get(sql string, params ...chordsqlite.SqliteValue) (chordsqlite.SqliteRow, error) {

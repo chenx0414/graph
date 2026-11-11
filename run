@@ -1,1 +1,0 @@
-require('node:child_process').spawnSync('go', ['-C', 'backend', 'run', './cmd/graphbuild', 'app'], { stdio: 'inherit' });
