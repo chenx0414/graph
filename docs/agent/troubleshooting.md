@@ -47,6 +47,8 @@
 - `pendingRestart` 与 `canRestart`：有在途 operation 时普通请求不会重载；`pendingRestart.force` 为真时会跳过该条件；
 - `apply_rsi_change` 返回的 `status`：`checks_failed` 表示检查未通过但改动仍保留在工作区（继续修复或传 `changes: []` 重跑检查），`rolled_back` 表示意外错误并已恢复文件，`unavailable` 表示没有可用 checkout；
 - 桌面进程是否在轮询 `/api/app/rsi/status`，以及 `/api/app/rsi/restart-ack` 是否成功；
+- 守护进程重启后 launchd 报 `EX_CONFIG 78` 并反复退出：说明 job 定义变了却只做了 `kickstart -k`，它拿内存里的旧定义去启动已被删除的路径。修法是 `bootout` + `bootstrap` + `kickstart`（`launchAgentPlan(reload=true)`）；
+- 想手动验证「重启后授权还在」：不要在守护进程里的 bash 里 `launchctl kickstart`——那会杀掉本会话所在的进程，命令随之中断。把重启交给用户终端，或者干脆换二进制后让 App 自己重启守护进程；
 - `activation.state=pending_reload` 表示已提交但尚未确认生效；成功请求激活后当前回合会结束，待重载期间新消息保持排队。确认后会自动续跑原请求；`rsi.continuation_ready` 与 `rsi.continuation_dispatched` 可核对是否已领取。只有 `activation.state=active` / `lastActivation` 才是后台重载确认（窗口恢复还需单独检查）；请求消失或工具返回 `applied` 都不能单独证明已生效；
 - conversation 中的 `kind=rsi` 报告：它记录了分支、提交、验证结果与重载状态。
 

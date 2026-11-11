@@ -16,8 +16,8 @@ import (
 type daemonController interface {
 	start() error
 	adopt(pid int)
-	refresh() bool
-	restart() (bool, string)
+	refresh() daemonRefresh
+	restart(reload bool) (bool, string)
 }
 
 type shell struct {
@@ -49,8 +49,8 @@ func (s *shell) watchTasks() {
 
 func (s *shell) ensureDaemon() string {
 	if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {
-		if s.daemon.refresh() {
-			if restarted, _ := s.daemon.restart(); restarted {
+		if result := s.daemon.refresh(); result.restart {
+			if restarted, _ := s.daemon.restart(result.reload); restarted {
 				if fresh, ok := s.paths.ReadConsole(); ok {
 					return fresh.URL
 				}
@@ -77,6 +77,7 @@ func (s *shell) watchConversation() {
 		if state == nil {
 			continue
 		}
+		state.adoptConsole(s.paths)
 		if state.refresh() {
 			state.frame()
 		}

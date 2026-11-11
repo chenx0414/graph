@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,7 +95,7 @@ func TestRefreshInstallsTheBinaryLaunchdWillRunBeforeItRestartsTheAgent(t *testi
 		DaemonBin:       source,
 		LaunchAgentFile: filepath.Join(dir, "dev.graph.daemon.plist"),
 	}
-	if !newDaemon(paths).refresh() {
+	if result := newDaemon(paths).refresh(); !result.restart {
 		t.Fatal("a running daemon whose binary and agent changed must be reported as needing a restart")
 	}
 	installed, err := os.ReadFile(stableDaemonPath(paths))
@@ -171,4 +172,57 @@ func TestTheBundleLauncherRemovesTheLeftoverCopy(t *testing.T) {
 		t.Fatalf("a copy outside the bundle is dead weight and a second accessibility client, so it must go: %v", err)
 	}
 	paths.dropStableDaemon()
+}
+
+func TestLaunchAgentReloadsTheJobWhenItsDefinitionChanged(t *testing.T) {
+	paths := Paths{StateDir: "/state", GraphHome: "/home", SourceRoot: "/src", DaemonBin: "/Applications/Graph.app/Contents/MacOS/Graph"}
+	reload := launchAgentPlan(paths, true)
+	if len(reload) != 3 {
+		t.Fatalf("a changed job definition must be booted out and bootstrapped again, otherwise kickstart restarts the old definition and launchd reports EX_CONFIG 78: %v", reload)
+	}
+	if strings.Join(reload[0], " ") != "bootout "+launchAgentService() {
+		t.Fatalf("the first step must unload the old definition, got %v", reload[0])
+	}
+	if strings.Join(reload[1], " ") != "bootstrap "+launchAgentDomain()+" "+paths.agentFile() {
+		t.Fatalf("the second step must load the plist that is now on disk, got %v", reload[1])
+	}
+	if strings.Join(reload[2], " ") != "kickstart -k "+launchAgentService() {
+		t.Fatalf("the last step must start the job, got %v", reload[2])
+	}
+	plain := launchAgentPlan(paths, false)
+	if len(plain) != 1 || strings.Join(plain[0], " ") != "kickstart -k "+launchAgentService() {
+		t.Fatalf("an unchanged definition only needs a restart, got %v", plain)
+	}
+}
+
+func TestRefreshAsksForAReloadOnlyWhenTheAgentDefinitionChanged(t *testing.T) {
+	supervisedPid, ok := launchdChildPid()
+	if !ok {
+		t.Skip("this machine has no process whose parent is launchd")
+	}
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeConsoleForTest(t, stateDir, supervisedPid)
+	console := fmt.Sprintf(`{"url":"http://127.0.0.1:1","pid":%d,"mode":"execute","startedAt":%d}`, supervisedPid, time.Now().Add(time.Hour).UnixMilli())
+	if err := os.WriteFile(filepath.Join(stateDir, "console.json"), []byte(console), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := Paths{
+		StateDir:        stateDir,
+		GraphHome:       filepath.Join(dir, "graph-home"),
+		SourceRoot:      dir,
+		DaemonBin:       "/Applications/Graph.app/Contents/MacOS/Graph",
+		LaunchAgentFile: filepath.Join(dir, "dev.graph.daemon.plist"),
+	}
+	first := newDaemon(paths).refresh()
+	if !first.restart || !first.reload {
+		t.Fatalf("a job that does not exist yet must be written and booted: %+v", first)
+	}
+	second := newDaemon(paths).refresh()
+	if second.restart || second.reload {
+		t.Fatalf("a daemon that runs the current definition needs no restart: %+v", second)
+	}
 }

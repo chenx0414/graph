@@ -91,6 +91,7 @@ type shellState struct {
 	usage        *usageState
 	resources    *resourceState
 	rows         []sidebarRow
+	broken       bool
 	tabs         []*chatTab
 	tabsMu       sync.Mutex
 	window       *mygo.Window
@@ -217,23 +218,44 @@ func (s *shellState) unarchiveConversation(id string) {
 	s.frame()
 }
 
-func (s *shellState) load() {
+func (s *shellState) adoptConsole(paths Paths) bool {
+	info, ok := paths.ReadConsole()
+	if !ok || info.URL == "" || info.URL == s.address {
+		return false
+	}
+	s.address = info.URL
+	s.token = paths.SessionToken()
+	s.broken = true
+	return true
+}
+
+func (s *shellState) loadRows() bool {
 	payload, err := daemonGet(s.address, s.token, "/api/conversations")
 	if err != nil {
 		s.status = "读不到会话列表：" + err.Error()
-		return
+		s.broken = true
+		return false
 	}
 	list, err := parseConversations(payload)
 	if err != nil {
 		s.status = "会话列表不是预期的 JSON：" + err.Error()
-		return
+		s.broken = true
+		return false
 	}
 	s.rows = sidebarRows(groupByProjectIncludingArchived(list, s.showArchived))
+	s.broken = false
 	if len(s.rows) == 0 {
 		s.status = "还没有会话。"
-		return
+		return true
 	}
 	s.status = ""
+	return true
+}
+
+func (s *shellState) load() {
+	if !s.loadRows() {
+		return
+	}
 	for _, row := range s.rows {
 		if row.id != "" {
 			s.selectConversation(row.id)
@@ -354,11 +376,14 @@ func (s *shellState) closeTab(id string) {
 }
 
 func (s *shellState) refresh() bool {
-	active := s.active()
-	if active == nil {
-		return false
+	changed := false
+	if active := s.active(); active != nil {
+		changed = active.poll()
 	}
-	return active.poll()
+	if (s.broken || len(s.rows) == 0) && s.loadRows() {
+		changed = true
+	}
+	return changed
 }
 
 func (s *shellState) frame() {

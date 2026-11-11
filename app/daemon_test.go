@@ -28,7 +28,7 @@ func TestDaemonEnvironmentCarriesTheStoredSecrets(t *testing.T) {
 }
 
 func TestDaemonRestartRefusesADaemonItDoesNotOwn(t *testing.T) {
-	applied, message := newDaemon(Paths{StateDir: t.TempDir()}).restart()
+	applied, message := newDaemon(Paths{StateDir: t.TempDir()}).restart(false)
 	if applied {
 		t.Fatal("a daemon this window did not start cannot be restarted for it")
 	}

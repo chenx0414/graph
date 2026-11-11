@@ -84,6 +84,7 @@ func TestRsiStatusAndAckSpeakTheDaemonProtocol(t *testing.T) {
 
 type restartDaemon struct {
 	restarts int
+	reloads  []bool
 	apply    func()
 }
 
@@ -91,9 +92,10 @@ func (d *restartDaemon) start() error { return nil }
 
 func (d *restartDaemon) adopt(int) {}
 
-func (d *restartDaemon) refresh() bool { return false }
+func (d *restartDaemon) refresh() daemonRefresh { return daemonRefresh{} }
 
-func (d *restartDaemon) restart() (bool, string) {
+func (d *restartDaemon) restart(reload bool) (bool, string) {
+	d.reloads = append(d.reloads, reload)
 	d.restarts++
 	if d.apply != nil {
 		d.apply()

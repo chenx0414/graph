@@ -69,29 +69,35 @@ func (d *daemon) startThroughLaunchAgent() error {
 	return launchAgentBoot(d.paths)
 }
 
-func (d *daemon) refresh() bool {
-	binaryChanged := false
+type daemonRefresh struct {
+	restart bool
+	reload  bool
+}
+
+func (d *daemon) refresh() daemonRefresh {
+	definitionChanged := false
 	if insideAppBundle(d.paths.DaemonBin) {
 		d.paths.dropStableDaemon()
 	} else {
 		changed, err := installStableDaemon(d.paths.DaemonBin, stableDaemonPath(d.paths))
 		if err != nil {
-			return false
+			return daemonRefresh{}
 		}
-		binaryChanged = changed
+		definitionChanged = changed
 	}
 	agentChanged, err := installLaunchAgent(d.paths)
 	if err != nil {
-		return false
+		return daemonRefresh{}
 	}
+	definitionChanged = definitionChanged || agentChanged
 	info, ok := d.paths.ReadConsole()
 	if !ok {
-		return false
+		return daemonRefresh{}
 	}
 	if !daemonSupervised(info.PID) {
-		return true
+		return daemonRefresh{restart: true, reload: true}
 	}
-	return binaryChanged || agentChanged || d.paths.daemonStale(info)
+	return daemonRefresh{restart: definitionChanged || d.paths.daemonStale(info), reload: definitionChanged}
 }
 
 func (d *daemon) stopStaleDaemon() {
@@ -207,13 +213,13 @@ func (d *daemon) supervised() bool {
 	return daemonSupervised(info.PID)
 }
 
-func (d *daemon) restart() (bool, string) {
+func (d *daemon) restart(reload bool) (bool, string) {
 	d.mu.Lock()
 	launched := d.launched
 	d.mu.Unlock()
 	if launched || d.supervised() {
 		d.stopStaleDaemon()
-		if err := launchAgentRestart(); err != nil {
+		if err := runLaunchAgentPlan(launchAgentPlan(d.paths, reload)); err != nil {
 			return false, err.Error()
 		}
 	} else {

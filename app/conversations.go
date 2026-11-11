@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -148,6 +149,9 @@ func daemonGet(address, token, path string) ([]byte, error) {
 		if err != nil {
 			break
 		}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return payload, fmt.Errorf("%s 返回 %d", path, response.StatusCode)
 	}
 	return payload, nil
 }
@@ -304,156 +308,156 @@ func (c *chatState) view(ctx *ui.Context) {
 	ui.Column(ctx).Grow(1).Shrink(1).Children(func() {
 		ui.Column(ctx).Grow(1).Shrink(1).Padding(16).Gap(10).Children(func() {
 			if c.status != "" && len(c.messages) == 0 {
-			ui.Text(ctx, c.status).TextColor(t.TextMuted)
-			return
-		}
-		for _, question := range c.questions {
-			card := question
-			ui.Column(ctx).Gap(4).Children(func() {
-				ui.Text(ctx, "需要你决定 · "+card.Kind).FontSize(12).TextColor(t.TextMuted)
-				markdown.View(ctx, card.Data.Prompt, &c.md)
-				for _, option := range card.Data.Options {
-					value := option
-					if ui.Button(ctx, value).Clicked() {
-						go c.answer(card, value)
-					}
-				}
-			})
-		}
-		if len(c.artifacts) > 0 {
-			label := "产物 · " + strconv.Itoa(len(c.artifacts)) + " 件"
-			if ui.Button(ctx, label).Clicked() {
-				c.artifactsOpen = !c.artifactsOpen
-			}
-			if c.artifactsOpen {
-				shown := c.artifacts
-				hidden := 0
-				if len(shown) > artifactListLimit {
-					hidden = len(shown) - artifactListLimit
-					shown = shown[:artifactListLimit]
-				}
-				for _, artifact := range shown {
-					row := artifact
-					if ui.Button(ctx, artifactLabel(row)).Clicked() {
-						go c.showArtifact(row)
-					}
-				}
-				if hidden > 0 {
-					ui.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 件未列出").FontSize(12).TextColor(t.TextMuted)
-				}
-			}
-		}
-		if c.preview != "" {
-			ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted).Grow(1)
-				row := c.previewRow
-				if ui.Button(ctx, "导出 "+artifactFileName(row)).Clicked() {
-					go c.exportArtifactNow(row)
-				}
-			})
-			ui.Text(ctx, c.preview).FontSize(12)
-		}
-		ui.Row(ctx).Gap(4).Children(func() {
-			label := "换模型"
-			if c.currentModel != "" {
-				label = "模型：" + shortModel(c.currentModel) + " · " + c.currentThinking
-			}
-			if ui.Button(ctx, label).Clicked() {
-				c.modelMenu = !c.modelMenu
-			}
-			if !c.modelMenu {
+				ui.Text(ctx, c.status).TextColor(t.TextMuted)
 				return
 			}
-			for _, choice := range c.modelChoices() {
-				model := choice
-				if ui.Button(ctx, shortModel(model.id)+" · "+model.thinking).Clicked() {
-					go c.selectModel(model, model.thinking)
-				}
-			}
-		})
-		if c.proposal.Version > 0 {
-			ui.Column(ctx).Gap(4).Children(func() {
-				ui.Text(ctx, "草案 v"+strconv.Itoa(c.proposal.Version)+" · 修订 "+strconv.Itoa(c.proposal.DraftRevision)+" 待确认").FontSize(12).TextColor(t.TextMuted)
-				ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
-					ui.TextInput(ctx, &c.branch).Placeholder("目标分支").Label("目标分支").Width(160)
-					if ui.PrimaryButton(ctx, "确认草图并开始执行").Clicked() {
-						go c.confirmDraft()
+			for _, question := range c.questions {
+				card := question
+				ui.Column(ctx).Gap(4).Children(func() {
+					ui.Text(ctx, "需要你决定 · "+card.Kind).FontSize(12).TextColor(t.TextMuted)
+					markdown.View(ctx, card.Data.Prompt, &c.md)
+					for _, option := range card.Data.Options {
+						value := option
+						if ui.Button(ctx, value).Clicked() {
+							go c.answer(card, value)
+						}
 					}
 				})
-			})
-		}
-		ui.Row(ctx).Gap(4).Children(func() {
-			label := "绑定项目"
-			if c.project != "" {
-				label = "项目：" + c.project
 			}
-			if ui.Button(ctx, label).Clicked() {
-				c.binding = !c.binding
-			}
-			if !c.binding {
-				return
-			}
-			for _, project := range c.projectChoices() {
-				target := project
-				if ui.Button(ctx, "绑定 "+target).Clicked() {
-					go c.bindProject(target)
+			if len(c.artifacts) > 0 {
+				label := "产物 · " + strconv.Itoa(len(c.artifacts)) + " 件"
+				if ui.Button(ctx, label).Clicked() {
+					c.artifactsOpen = !c.artifactsOpen
+				}
+				if c.artifactsOpen {
+					shown := c.artifacts
+					hidden := 0
+					if len(shown) > artifactListLimit {
+						hidden = len(shown) - artifactListLimit
+						shown = shown[:artifactListLimit]
+					}
+					for _, artifact := range shown {
+						row := artifact
+						if ui.Button(ctx, artifactLabel(row)).Clicked() {
+							go c.showArtifact(row)
+						}
+					}
+					if hidden > 0 {
+						ui.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 件未列出").FontSize(12).TextColor(t.TextMuted)
+					}
 				}
 			}
-		})
-		c.graphSection(ctx)
-		runs := groupRuns(c.messages)
-		start := windowStart(len(runs), c.visible)
-		if start > 0 && c.loadOlderAtTop() {
-			start = windowStart(len(runs), c.visible)
-		}
-		if start > 0 {
-			label := "加载更早的 " + strconv.Itoa(start) + " 段（往上翻）"
-			if ui.Button(ctx, label).Clicked() {
-				c.visible += transcriptWindow
-			}
-		}
-		shown := runs[start:]
-		c.list.Key = func(row int) any { return start + row }
-		ui.List(ctx, &c.list, len(shown), func(index int) {
-			run := shown[index]
-			if run.tools {
-				key := runKey(run)
-				ui.Column(ctx).Gap(2).Children(func() {
-					label := "工具 · " + runSummary(run) + " · " + countLabel(len(run.messages))
-					if ui.Button(ctx, label).Clicked() {
-						c.expanded[key] = !c.expanded[key]
-					}
-					if !c.expanded[key] {
-						return
-					}
-					for _, message := range run.messages {
-						ui.Text(ctx, toolLine(message)).FontSize(12).TextColor(t.TextMuted)
+			if c.preview != "" {
+				ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted).Grow(1)
+					row := c.previewRow
+					if ui.Button(ctx, "导出 "+artifactFileName(row)).Clicked() {
+						go c.exportArtifactNow(row)
 					}
 				})
-				return
+				ui.Text(ctx, c.preview).FontSize(12)
 			}
-			message := run.messages[0]
-			ui.Column(ctx).Gap(4).Children(func() {
-				author := "agent"
-				if message.Role == "user" {
-					author = "你"
+			ui.Row(ctx).Gap(4).Children(func() {
+				label := "换模型"
+				if c.currentModel != "" {
+					label = "模型：" + shortModel(c.currentModel) + " · " + c.currentThinking
 				}
-				ui.Text(ctx, author).FontSize(12).TextColor(t.TextMuted)
-				if messageQueued(message) {
-					if ui.Button(ctx, "撤销这条排队消息").Clicked() {
-						go c.cancelQueued(message.ID)
+				if ui.Button(ctx, label).Clicked() {
+					c.modelMenu = !c.modelMenu
+				}
+				if !c.modelMenu {
+					return
+				}
+				for _, choice := range c.modelChoices() {
+					model := choice
+					if ui.Button(ctx, shortModel(model.id)+" · "+model.thinking).Clicked() {
+						go c.selectModel(model, model.thinking)
 					}
 				}
-				if messageStreaming(message) {
-					markdown.Stream(ctx, message.Text, &c.md)
-				} else {
-					markdown.View(ctx, message.Text, &c.md)
+			})
+			if c.proposal.Version > 0 {
+				ui.Column(ctx).Gap(4).Children(func() {
+					ui.Text(ctx, "草案 v"+strconv.Itoa(c.proposal.Version)+" · 修订 "+strconv.Itoa(c.proposal.DraftRevision)+" 待确认").FontSize(12).TextColor(t.TextMuted)
+					ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
+						ui.TextInput(ctx, &c.branch).Placeholder("目标分支").Label("目标分支").Width(160)
+						if ui.PrimaryButton(ctx, "确认草图并开始执行").Clicked() {
+							go c.confirmDraft()
+						}
+					})
+				})
+			}
+			ui.Row(ctx).Gap(4).Children(func() {
+				label := "绑定项目"
+				if c.project != "" {
+					label = "项目：" + c.project
+				}
+				if ui.Button(ctx, label).Clicked() {
+					c.binding = !c.binding
+				}
+				if !c.binding {
+					return
+				}
+				for _, project := range c.projectChoices() {
+					target := project
+					if ui.Button(ctx, "绑定 "+target).Clicked() {
+						go c.bindProject(target)
+					}
 				}
 			})
-		}).Grow(1)
-		if c.status != "" && len(c.messages) > 0 {
-			ui.Text(ctx, c.status).FontSize(12).TextColor(t.TextMuted)
-		}
+			c.graphSection(ctx)
+			runs := groupRuns(c.messages)
+			start := windowStart(len(runs), c.visible)
+			if start > 0 && c.loadOlderAtTop() {
+				start = windowStart(len(runs), c.visible)
+			}
+			if start > 0 {
+				label := "加载更早的 " + strconv.Itoa(start) + " 段（往上翻）"
+				if ui.Button(ctx, label).Clicked() {
+					c.visible += transcriptWindow
+				}
+			}
+			shown := runs[start:]
+			c.list.Key = func(row int) any { return start + row }
+			ui.List(ctx, &c.list, len(shown), func(index int) {
+				run := shown[index]
+				if run.tools {
+					key := runKey(run)
+					ui.Column(ctx).Gap(2).Children(func() {
+						label := "工具 · " + runSummary(run) + " · " + countLabel(len(run.messages))
+						if ui.Button(ctx, label).Clicked() {
+							c.expanded[key] = !c.expanded[key]
+						}
+						if !c.expanded[key] {
+							return
+						}
+						for _, message := range run.messages {
+							ui.Text(ctx, toolLine(message)).FontSize(12).TextColor(t.TextMuted)
+						}
+					})
+					return
+				}
+				message := run.messages[0]
+				ui.Column(ctx).Gap(4).Children(func() {
+					author := "agent"
+					if message.Role == "user" {
+						author = "你"
+					}
+					ui.Text(ctx, author).FontSize(12).TextColor(t.TextMuted)
+					if messageQueued(message) {
+						if ui.Button(ctx, "撤销这条排队消息").Clicked() {
+							go c.cancelQueued(message.ID)
+						}
+					}
+					if messageStreaming(message) {
+						markdown.Stream(ctx, message.Text, &c.md)
+					} else {
+						markdown.View(ctx, message.Text, &c.md)
+					}
+				})
+			}).Grow(1)
+			if c.status != "" && len(c.messages) > 0 {
+				ui.Text(ctx, c.status).FontSize(12).TextColor(t.TextMuted)
+			}
 		})
 		ui.Row(ctx).Gap(8).Padding(0, 16, 16, 16).AlignItems(ui.End).Children(func() {
 			ui.TextInput(ctx, &c.draft).Placeholder("给 Graph 发消息…").Label("消息").Grow(1)

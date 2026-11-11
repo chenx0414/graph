@@ -29,7 +29,10 @@ TCC 授权绑定的稳定身份」——那句话是错的：副本本身才是�
    时顺手删掉遗留的副本（`dropStableDaemon`）：它既是 60 MB 死重量，也是第二个授权客户端。
 3. 包内启动路径在重装后不变，所以「新构建是否已经在跑」不再靠内容比较：`daemonStale` 比较守护
    进程的 `startedAt` 与启动二进制的 mtime，二进制比进程新就重启。`refresh()` 把这三种变化
-   （plist、副本、进程落后于二进制）统一成「要不要重启」。
+   （plist、副本、进程落后于二进制）统一成「要不要重启」，并且区分出「任务定义变了」：只有
+   kickstart 的话，launchd 会拿**内存里那份旧定义**再启一次，指向已删除的
+   `~/…/bin/graphd`，直接 `EX_CONFIG 78`；定义变了必须 `bootout` + `bootstrap` + `kickstart`
+   （`launchAgentPlan`，有测试钉住三条命令的顺序）。
 
 ## 后果
 
@@ -38,6 +41,8 @@ TCC 授权绑定的稳定身份」——那句话是错的：副本本身才是�
 - `~/Library/Application Support/Graph/bin/graphd` 在装好的机器上不再存在；只有包外启动才会生成。
   磁盘少一份 60 MB 重复。
 - 重装 App 后守护进程会被自动重启（二进制 mtime 新于进程启动时间），不再是「跑旧代码直到退出」。
+- 窗口在守护进程换端口或中途退出后自愈：轮询每次先 `adoptConsole` 读 `console.json` 换地址，列表
+  读取失败记 `broken`，一旦恢复就自己重新加载侧边栏，不需要用户点一下。
 - 代价：包外启动（裸二进制、临时构建目录）仍然沿用稳定副本，这条分支保留并有测试
   （`TestLaunchAgentFallsBackToTheStableCopyOutsideABundle` 覆盖不到时至少
   `TestLaunchAgentRunsTheBinaryInsideTheBundleSoTheGrantApplies` 与 `TestTheBundleLauncherRemovesTheLeftoverCopy`

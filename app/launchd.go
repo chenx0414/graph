@@ -213,15 +213,27 @@ func launchAgentLoaded() bool {
 	return exec.Command("launchctl", "print", launchAgentService()).Run() == nil
 }
 
-func launchAgentBoot(paths Paths) error {
-	domain := launchAgentDomain()
-	_ = exec.Command("launchctl", "bootout", launchAgentService()).Run()
-	if err := exec.Command("launchctl", "bootstrap", domain, paths.agentFile()).Run(); err != nil {
-		return err
+func launchAgentPlan(paths Paths, reload bool) [][]string {
+	if reload {
+		return [][]string{
+			{"bootout", launchAgentService()},
+			{"bootstrap", launchAgentDomain(), paths.agentFile()},
+			{"kickstart", "-k", launchAgentService()},
+		}
 	}
-	return exec.Command("launchctl", "kickstart", "-k", launchAgentService()).Run()
+	return [][]string{{"kickstart", "-k", launchAgentService()}}
 }
 
-func launchAgentRestart() error {
-	return exec.Command("launchctl", "kickstart", "-k", launchAgentService()).Run()
+func runLaunchAgentPlan(plan [][]string) error {
+	var failure error
+	for _, args := range plan {
+		if err := exec.Command("launchctl", args...).Run(); err != nil && len(args) > 0 && args[0] != "bootout" {
+			failure = err
+		}
+	}
+	return failure
+}
+
+func launchAgentBoot(paths Paths) error {
+	return runLaunchAgentPlan(launchAgentPlan(paths, true))
 }

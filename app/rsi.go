@@ -108,7 +108,7 @@ func (s *shell) pollRsi() {
 		return
 	}
 	s.restarting.Store(true)
-	if applied, _ := s.daemon.restart(); !applied {
+	if applied, _ := s.daemon.restart(true); !applied {
 		s.restarting.Store(false)
 		return
 	}

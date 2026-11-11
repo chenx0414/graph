@@ -3,8 +3,11 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -276,5 +279,55 @@ func TestSelectingTheSameConversationTwiceKeepsOneTab(t *testing.T) {
 	}
 	if s.activeID != "c1" {
 		t.Fatalf("the conversation that was clicked must end up active, got %q", s.activeID)
+	}
+}
+
+func TestTheSidebarReloadsWhenTheDaemonComesBack(t *testing.T) {
+	var up atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":"c1","title":"Main"}]`))
+	}))
+	defer server.Close()
+	s := newShellState(server.URL, "tok")
+	if s.refresh() {
+		t.Fatal("a failed list read must not report a change")
+	}
+	if !strings.Contains(s.status, "读不到会话列表") {
+		t.Fatalf("the shell must say why the sidebar is empty, got %q", s.status)
+	}
+	up.Store(true)
+	if !s.refresh() {
+		t.Fatal("the sidebar must reload by itself once the daemon answers again, instead of waiting for a click")
+	}
+	if len(s.rows) == 0 || s.status != "" {
+		t.Fatalf("the sidebar did not come back: rows %d status %q", len(s.rows), s.status)
+	}
+}
+
+func TestAdoptingANewConsoleAddressWhenTheDaemonMoved(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "console.json"), []byte(`{"url":"http://127.0.0.1:60001","pid":1,"mode":"execute","startedAt":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "session-token"), []byte("fresh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newShellState("http://127.0.0.1:50000", "stale")
+	if !s.adoptConsole(Paths{StateDir: stateDir}) {
+		t.Fatal("a daemon that moved to another port must be adopted, otherwise the window keeps talking to a closed socket")
+	}
+	if s.address != "http://127.0.0.1:60001" || s.token != "fresh" {
+		t.Fatalf("adopted %q with token %q", s.address, s.token)
+	}
+	if s.adoptConsole(Paths{StateDir: stateDir}) {
+		t.Fatal("the same address is not a change")
 	}
 }
