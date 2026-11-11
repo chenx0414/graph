@@ -18,7 +18,7 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 	case "tasks":
 		s.panelTasks(ctx)
 	case "graph":
-		s.panelGraph(ctx)
+		s.panelGraph(ctx, panel.Expanded)
 	case "artifacts":
 		s.panelArtifacts(ctx)
 	case "models":
@@ -154,7 +154,7 @@ func (s *shellState) ensureGraph() {
 	go active.loadGraph(taskID)
 }
 
-func (s *shellState) panelGraph(ctx *ui.Context) {
+func (s *shellState) panelGraph(ctx *ui.Context, expanded bool) {
 	t := ctx.Theme()
 	active := s.active()
 	if active == nil || len(active.tasks) == 0 {
@@ -172,7 +172,11 @@ func (s *shellState) panelGraph(ctx *ui.Context) {
 	}
 	caption := strconv.Itoa(len(active.graph.nodes)) + " 个节点 · " + strconv.Itoa(len(active.graph.edges)) + " 条连接"
 	ui.Text(ctx, caption).FontSize(11).TextColor(t.TextMuted)
-	ui.Box(ctx).FillWidth().Height(220).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
+	height := float32(220)
+	if expanded {
+		height = 590
+	}
+	ui.Box(ctx).FillWidth().Height(height).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
 		drawBoardGraph(p, r, active.graph)
 	})
 }
