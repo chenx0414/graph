@@ -317,6 +317,9 @@ func (s *shellState) titleOf(id string) string {
 }
 
 func (s *shellState) selectConversation(id string) {
+	if strings.TrimSpace(id) == "" {
+		return
+	}
 	s.setSection("chat")
 	if s.activateTab(id) {
 		s.frame()

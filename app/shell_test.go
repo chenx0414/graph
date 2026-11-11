@@ -331,3 +331,14 @@ func TestAdoptingANewConsoleAddressWhenTheDaemonMoved(t *testing.T) {
 		t.Fatal("the same address is not a change")
 	}
 }
+
+func TestSelectingAnEmptyConversationOpensNothing(t *testing.T) {
+	s := newShellState("http://127.0.0.1:1", "tok")
+	s.selectConversation("")
+	if len(s.tabs) != 0 {
+		t.Fatalf("a row without an id cannot be opened: the window would keep a tab that answers 404, tabs %d", len(s.tabs))
+	}
+	if s.activeID != "" {
+		t.Fatalf("nothing should become active, got %q", s.activeID)
+	}
+}
