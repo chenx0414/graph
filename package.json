@@ -50,7 +50,7 @@
     "check:ownership": "node scripts/check-table-ownership.mjs",
     "check": "python3 scripts/check-queue.py",
     "check:run": "python3 scripts/check-queue.py --continue",
-    "app:build": "node --run build:backend && node scripts/package-app-mygo.mjs",
+    "app:build": "node scripts/package-app-mygo.mjs",
     "build:backend": "node scripts/build-backend.mjs",
     "check:backend": "node --run build:backend && go -C backend vet ./... && go -C backend test ./... && node --run check:app",
     "pig:kernel": "node scripts/pig-kernel-update.mjs",

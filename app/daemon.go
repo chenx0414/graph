@@ -60,11 +60,15 @@ func (d *daemon) startThroughLaunchAgent() error {
 	if _, err := installLaunchAgent(d.paths); err != nil {
 		return err
 	}
-	return launchAgentBoot()
+	return launchAgentBoot(d.paths)
 }
 
 func (d *daemon) refresh() bool {
-	changed, err := installLaunchAgent(d.paths)
+	binaryChanged, err := installStableDaemon(d.paths.DaemonBin, stableDaemonPath(d.paths))
+	if err != nil {
+		return false
+	}
+	agentChanged, err := installLaunchAgent(d.paths)
 	if err != nil {
 		return false
 	}
@@ -75,7 +79,7 @@ func (d *daemon) refresh() bool {
 	if !daemonSupervised(info.PID) {
 		return true
 	}
-	return changed
+	return binaryChanged || agentChanged
 }
 
 func (d *daemon) stopStaleDaemon() {
@@ -94,7 +98,7 @@ func (d *daemon) startDirectly() error {
 	if err != nil {
 		return err
 	}
-	command := exec.Command(d.paths.DaemonBin, d.paths.DaemonArgs()...)
+	command := exec.Command(d.paths.DaemonBin, d.paths.DaemonCommand()...)
 	command.Stdout = file
 	command.Stderr = file
 	command.Env = d.environment()
@@ -183,11 +187,19 @@ func stopAdoptedProcess(pid int) {
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
+func (d *daemon) supervised() bool {
+	info, ok := d.paths.ReadConsole()
+	if !ok {
+		return false
+	}
+	return daemonSupervised(info.PID)
+}
+
 func (d *daemon) restart() (bool, string) {
 	d.mu.Lock()
 	launched := d.launched
 	d.mu.Unlock()
-	if launched {
+	if launched || d.supervised() {
 		d.stopStaleDaemon()
 		if err := launchAgentRestart(); err != nil {
 			return false, err.Error()

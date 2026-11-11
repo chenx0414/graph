@@ -1,7 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,5 +59,49 @@ func TestDaemonRestartCanStopADaemonItAdopted(t *testing.T) {
 	case <-time.After(8 * time.Second):
 		_ = command.Process.Kill()
 		t.Fatal("stop left the adopted daemon running")
+	}
+}
+
+func TestRestartFollowsTheLaunchAgentThatOwnsTheDaemon(t *testing.T) {
+	supervisedPid, ok := launchdChildPid()
+	if !ok {
+		t.Skip("this machine has no process whose parent is launchd")
+	}
+	dir := t.TempDir()
+	writeConsoleForTest(t, dir, supervisedPid)
+	if !newDaemon(Paths{StateDir: dir}).supervised() {
+		t.Fatalf("pid %d is launchd's child, so the agent that owns it can restart it even though this window did not start it", supervisedPid)
+	}
+	writeConsoleForTest(t, dir, os.Getpid())
+	if newDaemon(Paths{StateDir: dir}).supervised() {
+		t.Fatal("a daemon started by this window is not launchd's, and restarting the agent would not reach it")
+	}
+}
+
+func launchdChildPid() (int, bool) {
+	output, err := exec.Command("ps", "-eo", "pid=,ppid=").Output()
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		pid, pidErr := strconv.Atoi(fields[0])
+		parent, parentErr := strconv.Atoi(fields[1])
+		if pidErr != nil || parentErr != nil || parent != 1 {
+			continue
+		}
+		return pid, true
+	}
+	return 0, false
+}
+
+func writeConsoleForTest(t *testing.T, stateDir string, pid int) {
+	t.Helper()
+	payload := fmt.Sprintf(`{"url":"http://127.0.0.1:1","pid":%d,"mode":"execute","startedAt":1}`, pid)
+	if err := os.WriteFile(filepath.Join(stateDir, "console.json"), []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

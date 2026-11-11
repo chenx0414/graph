@@ -34,20 +34,19 @@
 
 任务平台使用 GitHub Issues；目前仅有本地 Git，尚未指定 GitHub 仓库，工作包保存在实施计划中。
 
-## 启动 Graph 控制台
+## 启动 Graph
+
+界面只有原生窗口（Go + MyGo）：一个可执行文件，平时开窗口，带 `daemon` 参数时作为守护进程运行。没有网页控制台，也不需要 Electron 或 Chromium。
 
 ```sh
-pnpm build:backend  # Go 1.27.1；生成 dist/graphd
-pnpm build:web      # 首次启动或前端改动后；无 pnpm 时用 node --run build:web
-pnpm start          # 仅查看：浏览项目、任务与图，不派发模型请求
-pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭据
+node --run app:build                    # 打包 dist/app/mac-arm64/Graph.app
+node scripts/install-desktop-app.mjs    # 装到 /Applications，退出重开才生效
 ```
 
-- 默认配置为当前目录的 `graph.config.json`；可用 `--config`、`--state-dir`、`--port`、`--web-dir` 覆盖，或设置 `GRAPH_CONFIG`、`GRAPH_STATE_DIR`、`GRAPH_WEB_DIR`、`GRAPH_PORT`。`node --run start` 会自动构建 Go 后端；直接运行 `node backend/internal/graph/server_cli.go` 前先运行 `node --run build:backend`。
-- 数据目录默认 `$XDG_STATE_HOME/graph` 或 `~/.local/state/graph`，与启动目录解耦；配置中的相对项目根路径按配置文件所在目录解析。同一数据目录只允许一个守护进程，第二次启动会被 owner 锁拒绝。
-- 只绑定 `127.0.0.1`。浏览器只是客户端：关闭浏览器不停止守护进程；`Ctrl-C`/SIGTERM 有界停止（5 秒），在途调用不会被记作成功。
-- 缺少 Web 构建时启动失败并给出 `pnpm build:web` 指令；端口占用、显式配置不存在、执行模式缺少模型或凭据分别以明确错误退出。
-- `pnpm dev` 启动 Vite 前端（默认 5173），将 `/api` 代理到守护进程；`GRAPH_DEV_API` 可改代理目标。
+- 守护进程由 launchd（`dev.graph.daemon`）托管，跑的是 App 自己那份二进制在 `~/Library/Application Support/Graph/bin/graphd` 的稳定副本：路径与内容都不随重装漂移，辅助功能授权才留得住。
+- 状态目录 `~/Library/Application Support/Graph/state`，配置默认 `~/Library/Application Support/Graph/graph.config.json`；可用 `--config`、`--state-dir`、`--port` 覆盖，或设置 `GRAPH_CONFIG`、`GRAPH_STATE_DIR`、`GRAPH_PORT`。源码 checkout 位置来自 `~/.graph/app-root` 或 `GRAPH_RSI_ROOT`。
+- 只想在终端里跑无窗口守护进程：`node --run build:backend && node --run start`（构建并运行 `dist/graphd`，与 App 里的守护进程是同一份 `backend/` 代码）。
+- 只绑定 `127.0.0.1`。同一状态目录只允许一个守护进程；`Ctrl-C`/SIGTERM 有界停止（5 秒），在途调用不会被记作成功。
 
 最小 `graph.config.json`：
 
@@ -76,17 +75,13 @@ pnpm start:execute  # 执行模式：需要 graph.config.json 中可解析的凭
 }
 ```
 
-## 桌面 APP（开发预览）
+## 桌面 APP
 
-桌面 APP 以子进程方式托管 Go 守护进程、加载同一个控制台，窗口关闭不停止守护进程，退出时有界停止。方案见 [APP 版本方案](app-version-plan-2026-09-13.md)，阶段报告见 [APP 交付报告](app-reports.md)。
+窗口由 `app/` 绘制，通过守护进程的 HTTP/SSE 接口读写数据；关闭窗口不停止守护进程，退出 APP 有界停止它。托盘菜单提供「打开 Graph」与「退出 Graph」，新增待处理问题或任务完成/失败时发系统通知。首次运行没有 `graph.config.json` 也能打开：窗口显示首次运行提示，只读浏览历史，不派发模型请求。
 
-```sh
-export PATH="$PWD/node_modules/.bin:$PATH"
-npx --yes electron@44.3.0 .        # 或安装 devDependencies 后：node --run app:dev
-node --run app:build               # 打包：dist/app/mac-arm64/Graph.app 与 Graph-<版本>-arm64.dmg
-```
-
-桌面功能包含向导、可视化、打包和界面重塑：控制台采用设计系统与明暗主题，可产出本机 `.app`/`.dmg`，托盘常驻；对外分发所需的签名与公证待 Apple Developer ID（A6 提供操作手册）。
+- 打包 `node --run app:build`，安装 `node scripts/install-desktop-app.mjs`。产物未签名；对外分发需要 Apple Developer ID 与公证。
+- 数据与密钥全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、600 权限的本地密钥文件）。卸载应用不会删除该目录，彻底清理时手动删除。
+- 方案与阶段报告：[APP 版本方案](app-version-plan-2026-09-13.md)、[APP 交付报告](app-reports.md)。
 
 ## 计算机使用能力（agent-desktop）
 

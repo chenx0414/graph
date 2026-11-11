@@ -44,7 +44,7 @@ func installStableDaemon(source, target string) (bool, error) {
 }
 
 func launchAgentPlist(paths Paths, environment []string) []byte {
-	arguments := append([]string{stableDaemonPath(paths)}, paths.DaemonArgs()...)
+	arguments := append([]string{stableDaemonPath(paths)}, paths.DaemonCommand()...)
 	var document strings.Builder
 	document.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	document.WriteString("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")
@@ -172,8 +172,15 @@ func writeLaunchAgent(path string, paths Paths) (bool, error) {
 	return true, nil
 }
 
+func (paths Paths) agentFile() string {
+	if strings.TrimSpace(paths.LaunchAgentFile) != "" {
+		return paths.LaunchAgentFile
+	}
+	return launchAgentPath()
+}
+
 func installLaunchAgent(paths Paths) (bool, error) {
-	return writeLaunchAgent(launchAgentPath(), paths)
+	return writeLaunchAgent(paths.agentFile(), paths)
 }
 
 func launchAgentDomain() string {
@@ -188,10 +195,10 @@ func launchAgentLoaded() bool {
 	return exec.Command("launchctl", "print", launchAgentService()).Run() == nil
 }
 
-func launchAgentBoot() error {
+func launchAgentBoot(paths Paths) error {
 	domain := launchAgentDomain()
 	_ = exec.Command("launchctl", "bootout", launchAgentService()).Run()
-	if err := exec.Command("launchctl", "bootstrap", domain, launchAgentPath()).Run(); err != nil {
+	if err := exec.Command("launchctl", "bootstrap", domain, paths.agentFile()).Run(); err != nil {
 		return err
 	}
 	return exec.Command("launchctl", "kickstart", "-k", launchAgentService()).Run()

@@ -10,11 +10,11 @@ Graph 是任务编排控制台；它交付过的 MediaBookmarks B站 Web 应用�
 
 ```sh
 cd "$REPO"            # 仓库根目录
-node --run app:build  # 构建 Go 后端与壳，并装到 /Applications/Graph.app
+node --run app:build  # 打包壳与守护进程（同一个二进制）
 node --run start      # 只启守护进程（仅查看模式）；有 pnpm 时 pnpm start
 ```
 
-界面是原生 macOS 窗口（Go + MyGo），不是浏览器页面：用 `node --run app:build` 装好包后退出并重新打开 Graph.app 才会跑新代码。首次运行没有 `graph.config.json` 也能启动：窗口显示首次运行提示，只读浏览历史，不派发模型请求。守护进程启动输出包含配置文件、状态目录与访问地址：
+界面是原生 macOS 窗口（Go + MyGo），不是浏览器页面：用 `node scripts/install-desktop-app.mjs` 装好包后退出并重新打开 Graph.app 才会跑新代码。首次运行没有 `graph.config.json` 也能启动：窗口显示首次运行提示，只读浏览历史，不派发模型请求。守护进程启动输出包含配置文件、状态目录与访问地址：
 
 ```
 Graph console
@@ -75,25 +75,19 @@ Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内�
 
 三个 runtime prompt 的注入时机不同：`runtime/worker.md` 会在每个非 Main Agent 的 system prompt `<rules>` 中作为 runtime rules 注入；`runtime/main-conversation.md` 与 `runtime/main-graph.md` 是早期 Main Agent 工作流文本，当前版本不再注入任何 system prompt，只保留可编辑与迁移用途。
 
-## 桌面 APP（开发预览）
+## 桌面 APP
 
-A1–A2 提供 Electron 桌面壳与首次运行向导：APP 负责启动守护进程（`--port 0` 自动选端口、显式状态目录）并在窗口中加载控制台；关闭窗口不停止守护进程，再次启动 APP 会聚焦或重开窗口，退出 APP 触发与 CLI 相同的 5 秒有界停止。密钥边界不变：配置文件只保存 `secretRef`，APP 只把解密后的值放进子进程环境变量。
+窗口与守护进程是同一个二进制：正常启动开窗口，带 `daemon` 参数时作为守护进程运行。壳只负责绘制与调用 HTTP/SSE 接口，没有内嵌浏览器。
 
-```sh
-export PATH="$PWD/node_modules/.bin:$PATH"
-npx --yes electron@44.3.0 .        # 开发预览；已安装 devDependencies 时 node --run app:dev
-```
-
-A3 起控制台内置：任务页运行时间线与用量面板、图页 MiniMap 与状态色、`#/inbox` 问题收件箱（导航显示待处理数）；A5 起提供统一设计系统、明暗主题（默认跟随系统，可在侧边栏切换并记忆）、动效与更清晰的导航/统计/状态表达；桌面 APP 在新增待处理问题或任务完成/失败时发系统通知，Dock 角标显示开放问题总数，点击通知跳到对应任务。
-
-首次打开且未配置时，从横幅或导航进入 `#/setup` 向导：选择项目目录（原生对话框）、选模型模板、填密钥。桌面 APP 会把密钥写入系统钥匙串（不进入配置文件），保存后自动重启守护进程；未填密钥则保持仅查看模式。数据目录与配置默认在系统用户数据目录下（macOS 为 `~/Library/Application Support/Graph`），与 CLI 版的状态目录相互独立。
+密钥保存在 600 权限的本地密钥文件里（不进入配置文件）；没配置时窗口仍能打开，只读浏览历史，不派发模型请求。数据目录与配置在 `~/Library/Application Support/Graph`。
 
 ### 安装、卸载与打包
 
-- 打包：`export PATH="$PWD/node_modules/.bin:$PATH"; node --run app:build`。产物为 `dist/app/mac-arm64/Graph.app` 与 `dist/app/Graph-<版本>-arm64.dmg`；把 `.app` 拖入“应用程序”即可安装，删除应用即卸载。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证，本机首次打开无需处理 Gatekeeper 提示。
-- 数据与密钥：全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、`secrets.json` 密文）。卸载应用不会删除该目录；彻底清理时手动删除。
-- 托盘：菜单栏图标提供“打开控制台 / 待处理问题 N / 退出 Graph”；关闭窗口仅关闭窗口，守护进程继续运行，从托盘或 Dock 可重新打开。
-- 打包版本用系统浏览器组件（Electron 44.3.0，内置 Node 24.20.0），运行不依赖系统 Node 或终端环境。
+- 打包：`node --run app:build`，产物为 `dist/app/mac-arm64/Graph.app`；安装：`node scripts/install-desktop-app.mjs`（旧包存为 `Graph.app.previous`）。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证。
+- 守护进程：launchd 标签 `dev.graph.daemon`，跑 `~/Library/Application Support/Graph/bin/graphd`——App 二进制的一份稳定副本，内容相同就不重写。
+- 数据与密钥：全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、`secrets.json`）。卸载应用不会删除该目录；彻底清理时手动删除。
+- 托盘：菜单栏图标提供“打开 Graph / 退出 Graph”；关闭窗口仅关闭窗口，守护进程继续运行。
+- 运行不依赖系统 Node 或终端环境。
 
 ## 配置
 

@@ -80,7 +80,7 @@ func cliFail(recovered any) int {
 	}
 }
 
-const cliUsage = `Usage: node src/server/cli.ts [options] (pnpm start [-- options])
+const cliUsage = `Usage: graphd [options] (or: Graph daemon [options])
 
 Starts the Graph console on http://127.0.0.1 (loopback only).
 

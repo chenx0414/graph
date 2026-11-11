@@ -1,0 +1,113 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestDaemonCommandRunsTheShellBinaryInDaemonMode(t *testing.T) {
+	paths := Paths{
+		StateDir:   "/state",
+		GraphHome:  "/home",
+		SourceRoot: "/src",
+		DaemonBin:  "/Applications/Graph.app/Contents/MacOS/Graph",
+	}
+	command := paths.DaemonCommand()
+	if daemonModeArg != "daemon" {
+		t.Fatalf("the daemon mode argument is the contract between the shell and the daemon it starts, got %q", daemonModeArg)
+	}
+	if len(command) == 0 || command[0] != daemonModeArg {
+		t.Fatalf("the daemon must be started in daemon mode, got %v", command)
+	}
+	joined := strings.Join(command, " ")
+	for _, want := range []string{"--state-dir /state", "--graph-home /home", "--execute", "--application-root /src"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("the daemon command is missing %q: %v", want, command)
+		}
+	}
+	if !inDaemonMode(command) {
+		t.Fatalf("a daemon command must switch the binary into the daemon, got %v", command)
+	}
+	if inDaemonMode([]string{"--state-dir", "/state"}) {
+		t.Fatal("a plain launch must open the window, not become the daemon")
+	}
+	if inDaemonMode(nil) || inDaemonMode([]string{"-psn_0_12345"}) {
+		t.Fatal("a launch by the Finder passes system arguments and must still open the window")
+	}
+}
+
+func TestLaunchAgentRunsTheStableCopyInDaemonMode(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{
+		StateDir:   filepath.Join(dir, "state"),
+		GraphHome:  filepath.Join(dir, "graph-home"),
+		SourceRoot: dir,
+		DaemonBin:  filepath.Join(dir, "Graph"),
+	}
+	plist := string(launchAgentPlist(paths, nil))
+	stable := stableDaemonPath(paths)
+	want := "<string>" + stable + "</string>\n\t\t<string>" + daemonModeArg + "</string>\n\t\t<string>--state-dir</string>"
+	if !strings.Contains(plist, want) {
+		t.Fatalf("launchd must start the stable copy of the same binary in daemon mode, got:\n%s", plist)
+	}
+}
+
+func TestTheShellHandsItsOwnBinaryToTheDaemon(t *testing.T) {
+	t.Setenv("GRAPH_DAEMON", "")
+	paths := DefaultPaths()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Skip("no executable path in this environment: ", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	if paths.DaemonBin != executable {
+		t.Fatalf("the shell must run its own binary as the daemon, so the installed app carries the daemon it runs; got %q for %q", paths.DaemonBin, executable)
+	}
+	if strings.Contains(paths.DaemonBin, filepath.Join("dist", "graphd")) {
+		t.Fatal("the installed app must not read the daemon out of a build directory")
+	}
+}
+
+func TestRefreshInstallsTheBinaryLaunchdWillRunBeforeItRestartsTheAgent(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "Graph")
+	if err := os.WriteFile(source, []byte("merged binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	console := `{"url":"http://127.0.0.1:1","pid":1,"mode":"execute","startedAt":1}`
+	if err := os.WriteFile(filepath.Join(stateDir, "console.json"), []byte(console), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := Paths{
+		StateDir:        stateDir,
+		GraphHome:       filepath.Join(dir, "graph-home"),
+		SourceRoot:      dir,
+		DaemonBin:       source,
+		LaunchAgentFile: filepath.Join(dir, "dev.graph.daemon.plist"),
+	}
+	if !newDaemon(paths).refresh() {
+		t.Fatal("a running daemon whose binary and agent changed must be reported as needing a restart")
+	}
+	installed, err := os.ReadFile(stableDaemonPath(paths))
+	if err != nil {
+		t.Fatalf("the agent restarts the stable copy, so refresh must write it first: %v", err)
+	}
+	if string(installed) != "merged binary" {
+		t.Fatalf("the stable copy holds %q, so launchd would restart into a daemon that cannot read the new arguments", installed)
+	}
+	agent, err := os.ReadFile(paths.LaunchAgentFile)
+	if err != nil {
+		t.Fatalf("the agent must be written: %v", err)
+	}
+	if !strings.Contains(string(agent), "<string>"+stableDaemonPath(paths)+"</string>\n\t\t<string>"+daemonModeArg+"</string>") {
+		t.Fatalf("the agent does not restart the stable copy in daemon mode:\n%s", agent)
+	}
+}

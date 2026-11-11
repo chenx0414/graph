@@ -24,8 +24,9 @@ Graph 原本有两套界面：一套是跑在浏览器里的 React 控制台（`
    「必须有 `dist/web/index.html`」闸门。`GET /` 只保留一个用途——下发会话 cookie。
 3. RSI 激活门禁不再有 `build:web` 这一步：改动 `src/web` 不再需要重建前端，因为它不再存在。
    改 `app/` 仍然触发 `app:build`：壳的代码要重新装包并由用户退出重开才生效。
-4. 应用图标的素材从 `src/web/assets/graph-icon.png` 迁到 `build/graph-icon.png`，`app:icons`
-   继续可用。
+4. 应用图标的素材从 `src/web/assets/graph-icon.png` 迁到 `build/graph-icon.png`。用 Chromium
+   截图生成图标的 `scripts/make-icons.mjs` 随后随 Chromium 依赖一起删除（ADR 0038），图标成为
+   提交产物。
 
 ## 后果
 
@@ -36,8 +37,8 @@ Graph 原本有两套界面：一套是跑在浏览器里的 React 控制台（`
   `check:harness`。界面行为的机器可验部分靠 `ui.Tester` 无头断言与窗口存活，其余只能由用户
   目视确认——这条边界写在 `docs/agent/capabilities.md`。
 - `scripts/interface-e2e.ts`、`scripts/measure-fold-policy.mjs` 这类在 `dist/web` 上测量的
-  工具随功能删除；`scripts/perf/**` 与 `playwright-launch-report.mjs` 是为浏览器测服务的，
-  等 Chromium 依赖一起清掉时再删。
+  工具随功能删除；为浏览器测服务的 `scripts/perf/**`、`playwright-launch-report.mjs` 与
+  `make-icons.mjs` 在 ADR 0038 里同 Chromium 依赖一起清掉。
 - 破坏性变更：仍在传 `--web-dir` 的外部脚本会被当作未知参数拒绝。
 
 ## 相关

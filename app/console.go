@@ -17,11 +17,29 @@ type Console struct {
 }
 
 type Paths struct {
-	StateDir   string
-	GraphHome  string
-	ConfigPath string
-	SourceRoot string
-	DaemonBin  string
+	StateDir        string
+	GraphHome       string
+	ConfigPath      string
+	SourceRoot      string
+	DaemonBin       string
+	LaunchAgentFile string
+}
+
+const daemonModeArg = "daemon"
+
+func inDaemonMode(args []string) bool {
+	return len(args) > 0 && args[0] == daemonModeArg
+}
+
+func selfExecutable() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 func DefaultPaths() Paths {
@@ -33,11 +51,12 @@ func DefaultPaths() Paths {
 		root, _ = os.Getwd()
 	}
 	paths := Paths{
-		StateDir:   envOr("GRAPH_STATE_DIR", filepath.Join(appSupport, "state")),
-		GraphHome:  graphHome,
-		ConfigPath: envOr("GRAPH_CONFIG", filepath.Join(appSupport, "graph.config.json")),
-		SourceRoot: root,
-		DaemonBin:  envOr("GRAPH_DAEMON", filepath.Join(root, "dist", "graphd")),
+		StateDir:        envOr("GRAPH_STATE_DIR", filepath.Join(appSupport, "state")),
+		GraphHome:       graphHome,
+		ConfigPath:      envOr("GRAPH_CONFIG", filepath.Join(appSupport, "graph.config.json")),
+		SourceRoot:      root,
+		DaemonBin:       envOr("GRAPH_DAEMON", selfExecutable()),
+		LaunchAgentFile: launchAgentPath(),
 	}
 	return paths
 }
@@ -95,6 +114,10 @@ func (paths Paths) Reachable(address string) bool {
 	}
 	defer response.Body.Close()
 	return response.StatusCode == http.StatusOK
+}
+
+func (paths Paths) DaemonCommand() []string {
+	return append([]string{daemonModeArg}, paths.DaemonArgs()...)
 }
 
 func (paths Paths) DaemonArgs() []string {

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	graphdaemon "github.com/chenx0414/graph/backend/daemon"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -126,6 +127,10 @@ func (s *shell) createTray() {
 }
 
 func main() {
+	if inDaemonMode(os.Args[1:]) {
+		graphdaemon.Run(os.Args[2:])
+		return
+	}
 	if !mygo.App.RequestSingleInstanceLock() {
 		mygo.App.Quit()
 		return
