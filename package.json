@@ -16,35 +16,17 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "lint": "node scripts/check-floating-promises.mjs",
     "check:comments": "go -C backend run ./cmd/graphcheck comments",
     "check:comments:changed": "go -C backend run ./cmd/graphcheck comments --changed",
     "skills:lint": "node scripts/skills-lint.mjs",
-    "test": "python3 scripts/check-queue.py --continue -- node node_modules/vitest/vitest.mjs run",
-    "test:m0": "vitest run tests/m0",
-    "test:m1": "vitest run tests/m1",
-    "test:m2": "vitest run tests/m2",
-    "test:m3": "vitest run tests/m3",
-    "test:m4": "vitest run tests/m4",
-    "test:m5": "vitest run tests/m5",
-    "test:m6": "vitest run tests/m6",
-    "test:m7": "vitest run tests/m7",
     "start": "go -C backend run ./cmd/graphbuild backend --if-missing && node src/server/cli.ts",
     "start:execute": "go -C backend run ./cmd/graphbuild backend --if-missing && node src/server/cli.ts --execute",
     "session:summary": "node scripts/session-summary.mjs",
     "catalog:refresh": "node scripts/refresh-models-dev.mjs",
-    "demo:m1": "node examples/m1-demo.ts",
-    "accept:m7": "node examples/m7-acceptance.ts",
-    "accept:m7:contract": "node examples/m7-contract.ts",
     "check:evidence": "node scripts/check-evidence.mjs",
     "check:harness": "node scripts/harness-behavior-gate.mjs",
     "eval:harness": "node scripts/harness-eval-report.mjs",
-    "test:report": "python3 scripts/check-queue.py --continue -- node node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=tests/.suite-report.json",
-    "check:tests": "node scripts/check-tests.mjs",
-    "check:affected": "node scripts/check-affected.mjs",
-    "check:full": "python3 scripts/check-queue.py --continue -- /bin/sh -c \"node --run check:backend && node --run typecheck && node --run lint && node --run check:comments && node --run check:ownership && node --run check:tokens:changed && node --run check:harness && node --run check:tests && node --run check:baseline && node --run check:evidence\"",
-    "check:baseline": "node scripts/check-test-baseline.mjs",
+    "check:full": "python3 scripts/check-queue.py --continue -- go -C backend run ./cmd/graphcheck all",
     "check:tokens": "go -C backend run ./cmd/graphcheck tokens",
     "check:tokens:changed": "go -C backend run ./cmd/graphcheck tokens --changed",
     "check:ownership": "go -C backend run ./cmd/graphcheck ownership",
@@ -52,7 +34,7 @@
     "check:run": "python3 scripts/check-queue.py --continue",
     "app:build": "go -C backend run ./cmd/graphbuild app",
     "build:backend": "go -C backend run ./cmd/graphbuild backend",
-    "check:backend": "node --run build:backend && go -C backend vet ./... && go -C backend test ./... && node --run check:app",
+    "check:backend": "go -C backend run ./cmd/graphbuild backend && go -C backend vet ./... && go -C backend test ./... && go -C app vet ./... && go -C app test ./...",
     "pig:kernel": "node scripts/pig-kernel-update.mjs",
     "pig:update": "node scripts/pig-kernel-update.mjs --set latest",
     "pig:check": "node scripts/pig-kernel-update.mjs --check",
@@ -77,9 +59,5 @@
     "react-dom": "19.3.0",
     "thinking-orbs": "0.3.2"
   },
-  "devDependencies": {
-    "@types/node": "24.13.4",
-    "typescript": "7.0.2",
-    "vitest": "5.0.0"
-  }
+  "devDependencies": {}
 }

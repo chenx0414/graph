@@ -36,6 +36,9 @@ var (
 	asyncFullTestLine   = regexp.MustCompile(`^\s*×\s*(.+?)\s+—\s*(.*)$`)
 	asyncFullRunnerFile = regexp.MustCompile(`^\s*-\s+(tests/\S+\.test\.ts)\s*$`)
 	asyncFullRerunFile  = regexp.MustCompile(`failed once and passed on a re-run:\s*(tests/\S+\.test\.ts)`)
+	asyncFullGoFailTest = regexp.MustCompile(`^--- FAIL: (\S+)`)
+	asyncFullGoMessage  = regexp.MustCompile(`^\s+(\S+_test\.go:\d+: .*)$`)
+	asyncFullGoPackage  = regexp.MustCompile(`^FAIL\s+(\S+)\s+[0-9.]+s`)
 )
 
 func LoadEnvKnownReds(path string) ([]EnvKnownRed, error) {
@@ -67,6 +70,7 @@ func AsyncFullFailures(output string) []AsyncFullFailure {
 	headers := map[string]string{}
 	messages := map[string]string{}
 	order := []string{}
+	goPackages := []string{}
 	for _, line := range strings.Split(clean, "\n") {
 		if match := asyncFullFailLine.FindStringSubmatch(line); match != nil {
 			headers[strings.TrimSpace(match[2])] = strings.TrimSpace(match[1])
@@ -80,12 +84,44 @@ func AsyncFullFailures(output string) []AsyncFullFailure {
 			}
 			continue
 		}
+		if match := asyncFullGoFailTest.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
+			test := strings.TrimSpace(match[1])
+			if _, found := headers[test]; !found {
+				headers[test] = ""
+			}
+			if _, found := messages[test]; !found {
+				order = append(order, test)
+			}
+			continue
+		}
+		if match := asyncFullGoMessage.FindStringSubmatch(line); match != nil {
+			message := strings.TrimSpace(match[1])
+			file := strings.SplitN(message, ":", 2)[0]
+			for index := len(order) - 1; index >= 0; index-- {
+				if messages[order[index]] == "" {
+					messages[order[index]] = message
+					headers[order[index]] = file
+					break
+				}
+			}
+			continue
+		}
+		if match := asyncFullGoPackage.FindStringSubmatch(line); match != nil {
+			pkg := strings.TrimSpace(match[1])
+			goPackages = append(goPackages, pkg)
+			continue
+		}
 		if match := asyncFullTestLine.FindStringSubmatch(line); match != nil {
 			test := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(match[1]), "[timing] "))
 			if _, found := messages[test]; !found {
 				messages[test] = strings.TrimSpace(match[2])
 				order = append(order, test)
 			}
+		}
+	}
+	for _, test := range order {
+		if headers[test] == "" && len(goPackages) > 0 {
+			headers[test] = goPackages[0]
 		}
 	}
 	failures := []AsyncFullFailure{}
@@ -100,6 +136,11 @@ func AsyncFullFailures(output string) []AsyncFullFailure {
 			attributed[file] = true
 		}
 		failures = append(failures, AsyncFullFailure{File: file, Test: test, Message: message})
+	}
+	if len(order) == 0 {
+		for _, pkg := range goPackages {
+			failures = append(failures, AsyncFullFailure{File: pkg})
+		}
 	}
 	for _, file := range files {
 		if attributed[file] {

@@ -37,7 +37,7 @@ func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
 // reload does not queue behind the whole suite.
 func TestAsyncFullRunsNice(t *testing.T) {
 	command := rsiAsyncFullCommand()
-	if command.Command != "node" || strings.Join(command.Args, " ") != "--run check:full" {
+	if command.Command != "go" || strings.Join(command.Args, " ") != "-C backend run ./cmd/graphcheck all" {
 		t.Fatalf("the confirmation is still the full suite, got %v %v", command.Command, command.Args)
 	}
 	if command.Nice != 10 {

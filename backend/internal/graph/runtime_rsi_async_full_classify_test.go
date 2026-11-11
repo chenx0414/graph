@@ -84,28 +84,39 @@ const asyncFullProviderOnlyOutput = "\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests
 	"      \x1b[33m×\x1b[39m the review node runs on an independent provider, the concluded ChatGPT platform is reported instead of called, and a broken transport falls back to Grok \x1b[2m—\x1b[22m Error: the Grok CLI login expired at 2026-11-05T13:07:20.000000Z and its refresh answered 400\n" +
 	"Test Files  1 failed | 251 passed | 1 skipped (253)\n"
 
-func TestAsyncFullShippingKnownRedListCoversEveryRedWeShipWith(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "tests", "env-known-reds.json")
+func TestAsyncFullAKnownRedListCoversTheRedsItNames(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reds.json")
+	body := `{"version":1,"reds":[{"file":"tests/e2e/provider-independent-reviews.test.ts","pattern":"fetch failed","why":"external reset"},{"file":"tests/e2e/provider-independent-reviews.test.ts","pattern":"login expired","why":"credential"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	reds, err := LoadEnvKnownReds(path)
 	if err != nil {
-		t.Fatalf("the shipped known-red list does not load: %v", err)
-	}
-	if len(reds) == 0 {
-		t.Fatalf("the shipped known-red list is empty")
+		t.Fatalf("the known-red list does not load: %v", err)
 	}
 	verdict := ClassifyAsyncFull(asyncFullProviderOnlyOutput, reds)
 	if !verdict.Environment || len(verdict.Unmatched) != 0 {
-		t.Fatalf("the shipped list does not cover the reds it is meant to: %+v", verdict)
+		t.Fatalf("a list that covers every failure must pass the run as environmental: %+v", verdict)
 	}
 	for _, red := range reds {
-		if !strings.HasPrefix(red.File, "tests/") || red.Pattern == "" || red.Why == "" {
+		if red.File == "" || red.Pattern == "" || red.Why == "" {
 			t.Fatalf("a known red entry lacks a test path, a pattern or a reason: %+v", red)
+		}
+	}
+	shipped, err := LoadEnvKnownReds(filepath.Join("testdata", "env-known-reds.json"))
+	if err != nil {
+		t.Fatalf("the shipped list must still load: %v", err)
+	}
+	for _, red := range shipped {
+		if red.File == "" || red.Pattern == "" || red.Why == "" {
+			t.Fatalf("a shipped known red lacks a test path, a pattern or a reason: %+v", red)
 		}
 	}
 }
 
 func TestAsyncFullDeletedDesktopTestsAreNotExcusedAnymore(t *testing.T) {
-	reds, err := LoadEnvKnownReds(filepath.Join("..", "..", "..", "tests", "env-known-reds.json"))
+	reds, err := LoadEnvKnownReds(filepath.Join("testdata", "env-known-reds.json"))
 	if err != nil {
 		t.Fatalf("the shipped known-red list does not load: %v", err)
 	}
@@ -113,8 +124,8 @@ func TestAsyncFullDeletedDesktopTestsAreNotExcusedAnymore(t *testing.T) {
 	if verdict.Environment {
 		t.Fatalf("a run that fails the removed Electron tests must be a regression: %+v", verdict)
 	}
-	if len(verdict.Unmatched) != 2 || !strings.Contains(verdict.Unmatched[0]+verdict.Unmatched[1], "desktop-") {
-		t.Fatalf("the removed desktop tests must be named as unmatched, got %v", verdict.Unmatched)
+	if len(verdict.Unmatched) != 3 || !strings.Contains(strings.Join(verdict.Unmatched, " "), "desktop-") {
+		t.Fatalf("every failure without a shipped known red must be named as unmatched, got %v", verdict.Unmatched)
 	}
 }
 
@@ -223,19 +234,56 @@ const asyncFullLoadVariantOutput = "\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests/
 	"Test Files  3 failed | 248 passed | 1 skipped (252)\n"
 
 func TestAsyncFullShippedListMatchesTheLoadVariantAndStillNamesTheProductRed(t *testing.T) {
-	reds, err := LoadEnvKnownReds(filepath.Join("..", "..", "..", "tests", "env-known-reds.json"))
+	reds, err := LoadEnvKnownReds(filepath.Join("testdata", "env-known-reds.json"))
 	if err != nil {
 		t.Fatalf("the shipped known-red list does not load: %v", err)
 	}
-	verdict := ClassifyAsyncFull(asyncFullLoadVariantOutput, reds)
-	if len(verdict.Unmatched) != 2 {
-		t.Fatalf("the shipped list must name the removed desktop test and the product bug, got %v", verdict.Unmatched)
+	if len(reds) != 0 {
+		t.Fatalf("the vitest suite is gone, so the shipped known-red list is empty; got %+v", reds)
 	}
+	verdict := ClassifyAsyncFull(asyncFullLoadVariantOutput, reds)
 	joined := strings.Join(verdict.Unmatched, " ")
 	if !strings.Contains(joined, "go-review-module.test.ts") || !strings.Contains(joined, "desktop-shell.test.ts") {
-		t.Fatalf("the shipped list must name both the removed desktop test and the product bug, got %v", verdict.Unmatched)
+		t.Fatalf("a failure without a known red must stay unmatched, got %v", verdict.Unmatched)
 	}
 	if verdict.Environment {
 		t.Fatalf("a run that still carries the product bug was excused as environmental: %+v", verdict)
+	}
+}
+
+func TestAsyncFullReadsGoTestFailures(t *testing.T) {
+	output := `--- FAIL: TestDrainKeepsTheSlot (0.02s)
+--- FAIL: TestGateReportsTheFirstFailure (0.00s)
+    runtime_rsi_async_full_test.go:41: the confirmation is still the full suite
+FAIL	github.com/chenx0414/graph/backend/internal/graph	0.512s
+FAIL
+`
+	failures := AsyncFullFailures(output)
+	if len(failures) != 2 {
+		t.Fatalf("both failing tests must be reported, got %+v", failures)
+	}
+	if failures[0].Test != "TestDrainKeepsTheSlot" || failures[1].Test != "TestGateReportsTheFirstFailure" {
+		t.Fatalf("the test names must survive the parse, got %+v", failures)
+	}
+	if failures[1].File != "runtime_rsi_async_full_test.go" {
+		t.Fatalf("the message line names the file to fix, got %q", failures[1].File)
+	}
+	if !strings.Contains(failures[1].Message, "the confirmation is still the full suite") {
+		t.Fatalf("the message must survive the parse, got %q", failures[1].Message)
+	}
+	verdict := ClassifyAsyncFull(output, nil)
+	if verdict.Environment {
+		t.Fatalf("a go test failure without a known red is a regression, got %+v", verdict)
+	}
+}
+
+func TestAsyncFullAttributesAnUnnamedGoFailureToItsPackage(t *testing.T) {
+	output := "--- FAIL: TestSomething (0.00s)\nFAIL\tgithub.com/chenx0414/graph/backend/internal/gate\t0.101s\n"
+	failures := AsyncFullFailures(output)
+	if len(failures) != 1 {
+		t.Fatalf("a test with no file line is attributed to its package, not counted twice, got %+v", failures)
+	}
+	if failures[0].File != "github.com/chenx0414/graph/backend/internal/gate" {
+		t.Fatalf("the package names where to look when the test line carries no file, got %q", failures[0].File)
 	}
 }

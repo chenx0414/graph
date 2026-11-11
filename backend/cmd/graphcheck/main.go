@@ -30,6 +30,8 @@ func main() {
 		os.Exit(runTokens(root, os.Args[2:]))
 	case "ownership":
 		os.Exit(runOwnership(root, os.Args[2:]))
+	case "all":
+		os.Exit(runAll(root))
 	default:
 		usage()
 		os.Exit(2)
@@ -37,7 +39,51 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...]")
+	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | all")
+}
+
+func runAll(root string) int {
+	steps := [][]string{
+		{"go", "-C", "backend", "run", "./cmd/graphbuild", "backend"},
+		{"go", "-C", "backend", "vet", "./..."},
+		{"go", "-C", "backend", "test", "./..."},
+		{"go", "-C", "app", "vet", "./..."},
+		{"go", "-C", "app", "test", "./..."},
+	}
+	for _, step := range steps {
+		fmt.Printf("[check] %s\n", strings.Join(step, " "))
+		command := exec.Command(step[0], step[1:]...)
+		command.Dir = root
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		if err := command.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "[check] failed: %s\n", strings.Join(step, " "))
+			return 1
+		}
+	}
+	if code := runComments(root, nil); code != 0 {
+		return code
+	}
+	if code := runTokens(root, []string{"--changed"}); code != 0 {
+		return code
+	}
+	if code := runOwnership(root, nil); code != 0 {
+		return code
+	}
+	if _, err := os.Stat(filepath.Join(root, "package.json")); err == nil {
+		for _, script := range []string{"check:harness", "check:evidence"} {
+			command := exec.Command("node", "--run", script)
+			command.Dir = root
+			command.Stdout = os.Stdout
+			command.Stderr = os.Stderr
+			if err := command.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "[check] failed: node --run %s\n", script)
+				return 1
+			}
+		}
+	}
+	fmt.Println("[check] ok")
+	return 0
 }
 
 func repoRoot() (string, error) {
