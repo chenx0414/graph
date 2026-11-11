@@ -72,7 +72,8 @@ func (service *graphManagementService) HarnessExperience(input HarnessExperience
 	scope := strings.TrimSpace(input.Scope)
 	domain := strings.TrimSpace(input.Domain)
 	if scope == "" && domain == "" {
-		return HarnessExperienceResult{Scopes: harnessExperienceScopes(service.artifacts, service.ownerTaskId)}
+		scopes, entries := harnessExperienceAll(service.artifacts, service.ownerTaskId)
+		return HarnessExperienceResult{Scopes: scopes, Entries: entries}
 	}
 	result := HarnessExperienceResult{Domain: domain}
 	if scope != "" {
@@ -198,6 +199,19 @@ func harnessSlug(domain string) string {
 		slug = slug[:80]
 	}
 	return slug
+}
+
+// A read that names no scope still has to answer: returning only the scope list
+// made a status filter look at an empty set, so "no open entries" was reported
+// while the ledger held more than a hundred.
+func harnessExperienceAll(reader harnessExperienceReader, taskId string) ([]string, []HarnessExperienceEntry) {
+	scopes := harnessExperienceScopes(reader, taskId)
+	entries := []HarnessExperienceEntry{}
+	for _, scope := range scopes {
+		entries = append(entries, harnessExperienceEntries(reader, taskId, scope)...)
+	}
+	entries = append(entries, harnessBacklogEntries(reader, taskId)...)
+	return scopes, entries
 }
 
 func harnessExperienceEntries(reader harnessExperienceReader, taskId, scope string) []HarnessExperienceEntry {
