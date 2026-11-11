@@ -69,6 +69,12 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 取舍写在这里：**保留探测并标注上下文**。宿主上的真实拒绝必须原样传出，不能因为读不到就建议用户重新授权——读不到不等于没有授权。
 
+### 授权的落点是代码签名要求，不是路径
+
+TCC 把授权记在被授予代码的「指定要求」上。ad-hoc 签名没有可锚定的身份，DR 就是 `cdhash H"…"`（`codesign -dr- <二进制>` 可读），任何一次重建都会换掉它，已授予的辅助功能立刻失效——S8 激活后 `desktop` 工具第一次调用就 `PERM_DENIED`，就是这条机制。
+
+现在装包用本机自签身份签名（ADR 0039），DR 变成 `identifier "dev.graph.console" and certificate root = H"…"`，与内容无关；launchd 跑的稳定副本是同一份字节拷贝，因此重建不再改变 DR，授权只需勾一次。排查顺序：先 `codesign -dr- /Applications/Graph.app` 与 `codesign -dr- ~/Library/Application Support/Graph/bin/graphd`，两者应一致且不含 `cdhash`；含 `cdhash` 说明这次装的是回退签名（安装输出里会有告警），授权重建后必丢。
+
 ## 浏览器验证与恢复
 
 控制台地址随时可从 `<stateDir>/console.json` 读（含 `url`/`pid`/`mode`）：App 启动的 daemon 用 `--port 0`，地址不写日志也不写其他地方。**停下的 daemon 不删这份记录**（删了下次启动就不知道回哪个端口），所以它可能是一个已停进程的地址——`pid` 告诉你它是谁的。`--port 0` 会**优先复用本状态目录上次的端口**，所以重载通常不换地址、旧标签页仍指向同一个控制台；但过时标签页仍可能默默回答旧端口，用 `tab list` → `tab t<N>` 或直接 `open` 新地址纠正，并在点击前先断言 `location.href`。

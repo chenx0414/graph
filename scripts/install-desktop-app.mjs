@@ -13,9 +13,10 @@
  */
 import { execFileSync } from 'node:child_process';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installBundleSigning, signingIdentity } from './signing-identity.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const flag = name => {
@@ -58,11 +59,27 @@ async function stalePackage() {
   return null;
 }
 
-async function sign(target) {
-  // `--deep` is not decoration: electron-builder leaves the nested frameworks
-  // without a usable signature, and a shallow sign then fails on the first
-  // subcomponent (measured 2026-11-05: "In subcomponent: Mantle.framework").
-  execFileSync('codesign', ['--force', '--deep', '--sign', '-', target], { stdio: 'pipe' });
+function executableIn(target) {
+  const directory = join(target, 'Contents', 'MacOS');
+  const binaries = readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isFile()).map(entry => entry.name);
+  if (binaries.length !== 1) {
+    throw new Error(`${target} carries ${binaries.length} files in Contents/MacOS, so the shell binary is ambiguous`);
+  }
+  return join(directory, binaries[0]);
+}
+
+function sign(target) {
+  try {
+    const requirement = installBundleSigning(target, executableIn(target));
+    console.log(`[graph] signed with ${signingIdentity}: ${requirement}`);
+    return;
+  } catch (error) {
+    console.warn(
+      `[graph] the local signing identity is unavailable (${error instanceof Error ? error.message : String(error)}); ` +
+      'falling back to an ad-hoc signature, so macOS will drop the accessibility grant on the next rebuild',
+    );
+  }
+  execFileSync('codesign', ['--force', '--sign', '-', target], { stdio: 'pipe' });
   execFileSync('codesign', ['--verify', '--strict', target], { stdio: 'pipe' });
 }
 
@@ -117,7 +134,7 @@ try {
   // the binary alias) and a copy that dereferences them leaves a file in the
   // framework root, which codesign then refuses to seal (measured 2026-11-05).
   execFileSync('ditto', [bundle, dest], { stdio: 'pipe' });
-  await sign(dest);
+  sign(dest);
 } catch (error) {
   await rm(dest, { recursive: true, force: true });
   if (hadPrevious) await rename(previous, dest);
