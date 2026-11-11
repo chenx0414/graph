@@ -131,6 +131,7 @@ type chatState struct {
 	project         string
 	visible         int
 	loadedOlderFor  int
+	fingerprint     string
 	expanded        map[string]bool
 	window          *mygo.Window
 	address         string

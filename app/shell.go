@@ -294,6 +294,14 @@ func (s *shellState) closeTab(id string) {
 	s.frame()
 }
 
+func (s *shellState) refresh() bool {
+	active := s.active()
+	if active == nil {
+		return false
+	}
+	return active.poll()
+}
+
 func (s *shellState) frame() {
 	if s.window != nil {
 		s.window.Update(func() {})

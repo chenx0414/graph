@@ -249,6 +249,7 @@ func (c *chatState) open(id string) {
 		return
 	}
 	c.messages = messages
+	c.fingerprint = transcriptFingerprint(messages)
 	c.active = id
 	c.questions = nil
 	c.proposal = draftProposal{}

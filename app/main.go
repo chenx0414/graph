@@ -70,6 +70,18 @@ func (s *shell) ensureDaemon() string {
 	return ""
 }
 
+func (s *shell) watchConversation() {
+	for range time.Tick(3 * time.Second) {
+		state := s.chat
+		if state == nil {
+			continue
+		}
+		if state.refresh() {
+			state.frame()
+		}
+	}
+}
+
 func (s *shell) openNative() {
 	if s.native != nil {
 		s.native.Show()
@@ -129,6 +141,10 @@ func main() {
 		s.createTray()
 		go s.watchTasks()
 		go s.watchRsi()
+		go s.watchConversation()
+		if executable, err := os.Executable(); err == nil {
+			go s.watchBuild(executable)
+		}
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
