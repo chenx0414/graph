@@ -110,6 +110,17 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 	}
 }
 
+func TestAppBuildRunsTheGoBuilder(t *testing.T) {
+	command := rsiAppBuildCommand()
+	if command.Command != "go" {
+		t.Fatalf("the app is built with %q, want the Go builder", command.Command)
+	}
+	want := []string{"-C", "backend", "run", "./cmd/graphbuild", "app"}
+	if strings.Join(command.Args, " ") != strings.Join(want, " ") {
+		t.Fatalf("the app build runs %v, want %v", command.Args, want)
+	}
+}
+
 func TestExistingNodeRejectsADirectory(t *testing.T) {
 	directory := t.TempDir()
 	if node := existingNode(directory); node != "" {

@@ -202,10 +202,14 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 		return results
 	}
 	if input.NeedsAppBuild {
-		build := rsiRunCheckWithEnvironmentRetry(input.Root, RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}, RSI_BUILD_TIMEOUT_MS)
+		build := rsiRunCheckWithEnvironmentRetry(input.Root, rsiAppBuildCommand(), RSI_BUILD_TIMEOUT_MS)
 		return append(results, build)
 	}
 	return results
+}
+
+func rsiAppBuildCommand() RsiCommand {
+	return RsiCommand{Command: "go", Args: []string{"-C", "backend", "run", "./cmd/graphbuild", "app"}}
 }
 
 func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {
