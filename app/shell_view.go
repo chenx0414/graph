@@ -1,12 +1,16 @@
 package main
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo/ui"
+	"graph/app/gwui/kit"
+	gwtheme "graph/app/gwui/theme"
+)
 
 func (s *shellState) view(ctx *ui.Context) {
-	ctx.SetTheme(graphTheme)
-	t := ctx.Theme()
+	applyTheme(ctx)
+	t := gwtheme.Of(ctx)
 	if s.board.focus {
-		ui.Row(ctx).Fill().Background(t.Background).Children(func() {
+		ui.Row(ctx).Fill().Background(t.Window).Children(func() {
 			s.rail(ctx)
 			ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Children(func() {
 				s.whiteboard(ctx)
@@ -14,7 +18,7 @@ func (s *shellState) view(ctx *ui.Context) {
 		})
 		return
 	}
-	ui.Row(ctx).Fill().Background(t.Background).Children(func() {
+	ui.Row(ctx).Fill().Background(t.Window).Children(func() {
 		s.rail(ctx)
 		ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Gap(cardGap).Children(func() {
 			s.conversationPane(ctx)
@@ -25,95 +29,98 @@ func (s *shellState) view(ctx *ui.Context) {
 }
 
 func (s *shellState) rail(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Column(ctx).Width(railWidth).FillHeight().Padding(14, 8).Gap(6).AlignItems(ui.Center).Children(func() {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Column(ctx).Width(railWidth).FillHeight().Padding(th.Space(2), th.Space(1)).Gap(th.Space(0.5)).
+		AlignItems(ui.Center).Children(func() {
 		for _, item := range railItems {
 			spec := item
 			selected := s.board.lastKind == spec.kind
-			color := t.TextMuted
-			if selected {
-				color = t.Accent
-			}
-			button := ui.Box(ctx).Size(42, 42).Radius(13).Center().Label(spec.label).Tooltip(spec.label).Focusable()
+			color := t.Muted
+			button := ui.Box(ctx).Size(th.Space(10), th.Space(10)).Radius(t.Radius.Lg).Center().
+				Label(spec.label).Tooltip(spec.label).Focusable()
 			button.OnClick(func() { s.openModule(spec.kind) })
-			if selected {
-				button.Background(t.Accent.Alpha(0.13))
-			} else {
-				button.Background(ui.Transparent)
+			switch {
+			case selected:
+				button.Background(t.SidebarSelected)
+				color = t.Foreground
+			case button.Hovered():
+				button.Background(t.HoverTint)
+				color = t.Foreground
 			}
 			button.Children(func() {
-				ui.Icon(ctx, spec.icon).FontSize(20).TextColor(color)
+				ui.Icon(ctx, spec.icon).Size(th.Space(5), th.Space(5)).TextColor(color)
 			})
 		}
 	})
 }
 
 func (s *shellState) conversationPane(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Surface).Radius(cardRadius).Border(1, t.Border).
-		Shadow(0, 10, 28, 0, cardShadow).Clip().Padding(10).Gap(8).Children(func() {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	pane := ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Sidebar).Radius(t.Radius.Xl).
+		Border(gwtheme.Hairline, t.Border).Clip().Padding(th.Space(2)).Gap(th.Space(0.5))
+	kit.Elevate(ctx, pane, gwtheme.ShadowXs)
+	pane.Children(func() {
 		s.mainAgentCard(ctx)
 		if s.status != "" && len(s.conversations) == 0 {
-			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted).Padding(6, 4)
+			kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
 		}
 		s.conversationList(ctx)
 	})
 }
 
 func (s *shellState) mainAgentCard(ctx *ui.Context) {
-	t := ctx.Theme()
-	card := ui.Box(ctx).FillWidth().Height(56).Radius(14).Center().Label("main agent").Focusable()
-	card.Gradient(t.Accent.Alpha(0.14), t.Accent.Alpha(0.02), 135)
-	card.Border(1.5, t.Accent.Alpha(0.55))
-	card.OnClick(func() {
-		if s.supervisorID != "" {
-			s.selectConversation(s.supervisorID)
-		}
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	selected := s.supervisorID != "" && s.activeID == s.supervisorID
+	row := kit.SidebarItem(ctx, kit.SidebarItemOpts{
+		Selected: selected,
+		OnClick: func() {
+			if s.supervisorID != "" {
+				s.selectConversation(s.supervisorID)
+			}
+		},
 	})
-	card.Children(func() {
-		ui.Text(ctx, "main agent").FontSize(16).FontWeight(600).TextColor(t.Text)
+	row.Label("main agent")
+	row.Children(func() {
+		ui.Icon(ctx, iconBird).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Foreground)
+		kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground).Grow(1).SingleLine()
+		ui.Spacer(ctx)
+		kit.StatusDot(ctx, kit.OK)
 	})
+	row.Margin(0, 0, th.Space(1.5), 0)
 }
 
 func (s *shellState) conversationList(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	s.list.Key = func(index int) any { return s.conversations[index].ID }
 	ui.List(ctx, &s.list, len(s.conversations), func(index int) {
 		conversation := s.conversations[index]
-		s.conversationCard(ctx, conversation)
+		label := s.titleOf(conversation.ID)
+		selected := conversation.ID == s.activeID
+		opts := kit.SidebarItemOpts{Selected: selected}
+		if !selected {
+			id := conversation.ID
+			opts.OnClick = func() { go s.selectConversation(id) }
+		}
+		row := kit.SidebarItem(ctx, opts)
+		row.Label(label)
+		row.Children(func() {
+			ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
+			kit.Text(ctx, label, t.Text.Base).FontWeight(500).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
+			if conversation.ArchivedAtPresent() {
+				kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
+			}
+		})
+		row.Margin(0, 0, th.Space(0.5), 0)
 	}).Grow(1)
 }
 
-func (s *shellState) conversationCard(ctx *ui.Context, conversation conversationSummary) {
-	t := ctx.Theme()
-	selected := conversation.ID == s.activeID
-	label := s.titleOf(conversation.ID)
-	card := ui.Box(ctx).FillWidth().Height(44).Radius(12).Center().Label(label).Focusable()
-	card.Background(t.Surface)
-	card.Border(1, t.Border)
-	if selected {
-		card.Gradient(t.Accent.Alpha(0.16), t.Accent.Alpha(0.03), 135)
-		card.Border(1.5, t.Accent)
-	}
-	if conversation.ArchivedAtPresent() {
-		card.Opacity(0.65)
-	}
-	card.OnClick(func() { go s.selectConversation(conversation.ID) })
-	card.Children(func() {
-		color := t.Text
-		if selected {
-			color = t.Accent
-		}
-		ui.Text(ctx, label).FontSize(13).TextColor(color).SingleLine().Ellipsis("…")
-	})
-}
-
 func (s *shellState) chatPane(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Column(ctx).Grow(1).MinWidth(300).FillHeight().Background(t.Surface).Radius(cardRadius).Border(1, t.Border).
-		Shadow(0, 10, 28, 0, cardShadow).Clip().Children(func() {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	pane := kit.Panel(ctx, t.Radius.Xl).Grow(1).MinWidth(300).FillHeight()
+	pane.Children(func() {
 		active := s.active()
 		if active == nil {
-			ui.Text(ctx, "从左侧选择一个项目").Padding(20).TextColor(t.TextMuted)
+			kit.Text(ctx, "从左侧选择一个项目", t.Text.Base).TextColor(t.Muted).Padding(th.Space(5))
 			return
 		}
 		active.view(ctx)

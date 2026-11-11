@@ -5,17 +5,7 @@ import (
 	"math"
 
 	"github.com/egoist/mygo/ui"
-)
-
-var (
-	graphNodeLabelColor  = ui.Hex("#1C2436")
-	graphStatusRunning   = ui.Hex("#2F5BFF")
-	graphStatusSucceeded = ui.Hex("#22A06B")
-	graphStatusFailed    = ui.Hex("#D64545")
-	graphStatusIdle      = ui.Hex("#9AA3B5")
-	graphNodeSurface     = ui.Hex("#FFFFFF")
-	graphNodeBorder      = ui.Hex("#E3E7F1")
-	graphEdgeColor       = ui.Hex("#C6CEE2")
+	gwtheme "graph/app/gwui/theme"
 )
 
 type taskGraph struct {
@@ -101,16 +91,16 @@ func parseTaskGraph(payload []byte) (taskGraph, error) {
 	return graph, nil
 }
 
-func graphStatusColor(status string) ui.Color {
+func graphStatusColor(status string, t gwtheme.Tokens) ui.Color {
 	switch status {
 	case "running", "executing", "active":
-		return graphStatusRunning
+		return t.Unread
 	case "succeeded", "completed", "done":
-		return graphStatusSucceeded
+		return t.Success
 	case "failed", "error":
-		return graphStatusFailed
+		return t.Danger
 	}
-	return graphStatusIdle
+	return t.Idle
 }
 
 func (c *chatState) loadGraph(taskID string) {
@@ -135,16 +125,16 @@ func (c *chatState) loadGraph(taskID string) {
 	c.frame()
 }
 
-func drawBoardGraph(p *ui.Painter, area ui.Rect, graph taskGraph) {
+func drawBoardGraph(p *ui.Painter, area ui.Rect, graph taskGraph, t gwtheme.Tokens) {
 	if len(graph.nodes) == 0 {
 		return
 	}
 	p.Clip(area, 0, func() {
-		drawBoardGraphIn(p, area, graph)
+		drawBoardGraphIn(p, area, graph, t)
 	})
 }
 
-func drawBoardGraphIn(p *ui.Painter, area ui.Rect, graph taskGraph) {
+func drawBoardGraphIn(p *ui.Painter, area ui.Rect, graph taskGraph, t gwtheme.Tokens) {
 	minX, minY := float32(math.MaxFloat32), float32(math.MaxFloat32)
 	maxX, maxY := float32(-math.MaxFloat32), float32(-math.MaxFloat32)
 	for _, node := range graph.nodes {
@@ -170,17 +160,17 @@ func drawBoardGraphIn(p *ui.Painter, area ui.Rect, graph taskGraph) {
 			points = append(points, [2]float32{x, y})
 		}
 		if len(points) >= 2 {
-			p.StrokePolyline(points, 1.5, graphEdgeColor)
+			p.StrokePolyline(points, 1.5, t.Border)
 		}
 	}
 	for _, node := range graph.nodes {
 		x, y := at(node.x, node.y)
 		rect := ui.Rect{X: x, Y: y, W: node.w * scale, H: node.h * scale}
 		radius := 9 * scale
-		p.Fill(rect, graphNodeSurface, radius)
-		p.Stroke(rect, graphNodeBorder, radius, 1)
+		p.Fill(rect, t.Background, radius)
+		p.Stroke(rect, t.Border, radius, 1)
 		dot := 8 * scale
-		p.Fill(ui.Rect{X: x + 10*scale, Y: y + 10*scale, W: dot, H: dot}, graphStatusColor(node.status), dot/2)
-		p.Text(x+24*scale, y+9*scale, node.label, 12*scale, ui.Hex("#1C2436"))
+		p.Fill(ui.Rect{X: x + 10*scale, Y: y + 10*scale, W: dot, H: dot}, graphStatusColor(node.status, t), dot/2)
+		p.Text(x+24*scale, y+9*scale, node.label, 12*scale, t.Foreground)
 	}
 }

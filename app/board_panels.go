@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"graph/app/gwui/kit"
+	gwtheme "graph/app/gwui/theme"
 )
 
 func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
@@ -33,7 +35,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 }
 
 func (s *shellState) boardNote(ctx *ui.Context, text string) {
-	ui.Text(ctx, text).FontSize(12).TextColor(ctx.Theme().TextMuted)
+	t := gwtheme.Of(ctx)
+	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
 }
 
 func (s *shellState) boardMatches(text string) bool {
@@ -45,11 +48,12 @@ func (s *shellState) boardMatches(text string) bool {
 }
 
 func (s *shellState) statCard(ctx *ui.Context, label, value string) {
-	t := ctx.Theme()
-	ui.Column(ctx).Width(118).Height(54).Radius(11).Border(1, t.Border).Background(t.Surface).Padding(8).
-		Justify(ui.SpaceBetween).Children(func() {
-		ui.Text(ctx, value).FontSize(15).FontWeight(600).TextColor(t.Text)
-		ui.Text(ctx, label).FontSize(10).TextColor(t.TextMuted)
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	card := ui.Column(ctx).Width(th.Space(29)).Height(th.Space(15)).Radius(t.Radius.Lg).Background(t.Card).
+		Border(gwtheme.Hairline, t.Border).Padding(th.Space(2)).Justify(ui.SpaceBetween)
+	card.Children(func() {
+		kit.Text(ctx, value, t.Text.Xl).FontWeight(600).TextColor(t.Foreground)
+		kit.Text(ctx, label, t.Text.Xs).TextColor(t.Muted)
 	})
 }
 
@@ -61,11 +65,11 @@ func cacheLabel(usage *usageState) string {
 }
 
 func (s *shellState) panelOverview(ctx *ui.Context) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	if s.usage == nil {
 		s.ensureUsage()
 	}
-	ui.Row(ctx).Wrap().Gap(8).Children(func() {
+	ui.Row(ctx).Wrap().Gap(th.Space(2)).Children(func() {
 		s.statCard(ctx, "会话", strconv.Itoa(len(s.conversations)))
 		s.statCard(ctx, "项目", strconv.Itoa(len(s.projectNames())))
 		cost, tokens := "—", "—"
@@ -85,27 +89,27 @@ func (s *shellState) panelOverview(ctx *ui.Context) {
 		s.statCard(ctx, "tokens", tokens)
 	})
 	if active := s.active(); active != nil {
-		ui.Text(ctx, "当前会话 · "+s.titleOf(s.activeID) + " · " + active.status).FontSize(12).TextColor(t.TextMuted)
+		kit.Text(ctx, "当前会话 · "+s.titleOf(s.activeID)+" · "+active.status, t.Text.Xs).TextColor(t.Muted)
 	}
 }
 
 func (s *shellState) panelConversation(ctx *ui.Context) {
-	t := ctx.Theme()
+	t := gwtheme.Of(ctx)
 	active := s.active()
 	if active == nil {
 		s.boardNote(ctx, "还没有选中的会话。")
 		return
 	}
-	ui.Text(ctx, s.titleOf(s.activeID)).FontSize(14).TextColor(t.Text)
-	ui.Text(ctx, "状态 · "+active.status).FontSize(12).TextColor(t.TextMuted)
+	kit.Text(ctx, s.titleOf(s.activeID), t.Text.Base).FontWeight(600).TextColor(t.Foreground)
+	kit.Text(ctx, "状态 · "+active.status, t.Text.Sm).TextColor(t.Muted)
 	if active.currentModel != "" {
-		ui.Text(ctx, "模型 · "+shortModel(active.currentModel)+" · "+active.currentThinking).FontSize(12).TextColor(t.TextMuted)
+		kit.Text(ctx, "模型 · "+shortModel(active.currentModel)+" · "+active.currentThinking, t.Text.Sm).TextColor(t.Muted)
 	}
-	ui.Text(ctx, "轮次 · 消息 "+strconv.Itoa(len(active.messages))).FontSize(12).TextColor(t.TextMuted)
+	kit.Text(ctx, "消息 "+strconv.Itoa(len(active.messages))+" 条", t.Text.Sm).TextColor(t.Muted)
 }
 
 func (s *shellState) panelHistory(ctx *ui.Context) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	shown := 0
 	for _, conversation := range s.conversations {
 		if !s.boardMatches(conversation.Title + " " + conversation.ProjectID) {
@@ -115,9 +119,9 @@ func (s *shellState) panelHistory(ctx *ui.Context) {
 		if label == "" {
 			label = "（无标题）"
 		}
-		ui.Row(ctx).FillWidth().Gap(8).Children(func() {
-			ui.Text(ctx, label).FontSize(12).TextColor(t.Text).Grow(1).SingleLine().Ellipsis("…")
-			ui.Text(ctx, conversation.Status).FontSize(11).TextColor(t.TextMuted)
+		ui.Row(ctx).FillWidth().Gap(th.Space(2)).Children(func() {
+			kit.Text(ctx, label, t.Text.Sm).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
+			kit.Text(ctx, conversation.Status, t.Text.Xs).TextColor(t.Muted)
 		})
 		shown++
 	}
@@ -127,16 +131,16 @@ func (s *shellState) panelHistory(ctx *ui.Context) {
 }
 
 func (s *shellState) panelTasks(ctx *ui.Context) {
-	t := ctx.Theme()
+	t := gwtheme.Of(ctx)
 	active := s.active()
 	if active == nil || len(active.tasks) == 0 {
 		s.boardNote(ctx, "当前会话还没有任务。任务启动后会在这里列出。")
 		return
 	}
 	for _, task := range active.tasks {
-		ui.Text(ctx, taskLabel(task)).FontSize(12).TextColor(t.Text)
+		kit.Text(ctx, taskLabel(task), t.Text.Sm).TextColor(t.Foreground)
 		for _, node := range task.nodes {
-			ui.Text(ctx, "  "+nodeLabel(node)).FontSize(11).TextColor(t.TextMuted)
+			kit.Text(ctx, "  "+nodeLabel(node), t.Text.Xs).TextColor(t.Muted)
 		}
 	}
 }
@@ -155,7 +159,7 @@ func (s *shellState) ensureGraph() {
 }
 
 func (s *shellState) panelGraph(ctx *ui.Context, expanded bool) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	active := s.active()
 	if active == nil || len(active.tasks) == 0 {
 		s.boardNote(ctx, "图谱会在任务启动后出现：节点是 Agent，连线是接口投递。")
@@ -171,18 +175,18 @@ func (s *shellState) panelGraph(ctx *ui.Context, expanded bool) {
 		return
 	}
 	caption := strconv.Itoa(len(active.graph.nodes)) + " 个节点 · " + strconv.Itoa(len(active.graph.edges)) + " 条连接"
-	ui.Text(ctx, caption).FontSize(11).TextColor(t.TextMuted)
-	height := float32(220)
+	kit.Text(ctx, caption, t.Text.Xs).TextColor(t.Muted)
+	height := th.Space(55)
 	if expanded {
-		height = 590
+		height = th.Space(150)
 	}
 	ui.Box(ctx).FillWidth().Height(height).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
-		drawBoardGraph(p, r, active.graph)
+		drawBoardGraph(p, r, active.graph, t)
 	})
 }
 
 func (s *shellState) panelArtifacts(ctx *ui.Context) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	active := s.active()
 	if active == nil {
 		s.boardNote(ctx, "还没有选中的会话。")
@@ -192,16 +196,16 @@ func (s *shellState) panelArtifacts(ctx *ui.Context) {
 		s.boardNote(ctx, "这个会话还没有共享产物。")
 		return
 	}
-	ui.Text(ctx, "共 "+strconv.Itoa(len(active.artifacts))+" 件").FontSize(11).TextColor(t.TextMuted)
+	kit.Text(ctx, "共 "+strconv.Itoa(len(active.artifacts))+" 件", t.Text.Xs).TextColor(t.Muted)
 	if active.preview != "" {
-		ui.Row(ctx).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Text(ctx, "预览 · "+active.previewTitle).FontSize(11).TextColor(t.TextMuted).Grow(1).SingleLine()
+		ui.Row(ctx).Gap(th.Space(1.5)).AlignItems(ui.Center).Children(func() {
+			kit.Text(ctx, "预览 · "+active.previewTitle, t.Text.Xs).TextColor(t.Muted).Grow(1).SingleLine()
 			row := active.previewRow
-			if ui.Button(ctx, "导出").Clicked() {
+			if kit.Button(ctx, "导出", kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).Clicked() {
 				go active.exportArtifactNow(row)
 			}
 		})
-		ui.Text(ctx, active.preview).FontSize(11)
+		kit.Text(ctx, active.preview, t.Text.Xs)
 	}
 	shown := active.artifacts
 	hidden := 0
@@ -214,17 +218,19 @@ func (s *shellState) panelArtifacts(ctx *ui.Context) {
 		if !s.boardMatches(artifactLabel(row)) {
 			continue
 		}
-		if ui.Button(ctx, artifactLabel(row)).AlignSelf(ui.Start).Clicked() {
+		button := kit.Button(ctx, artifactLabel(row), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm})
+		button.Justify(ui.Start).FillWidth()
+		if button.Clicked() {
 			go active.showArtifact(row)
 		}
 	}
 	if hidden > 0 {
-		ui.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 件未列出").FontSize(11).TextColor(t.TextMuted)
+		kit.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 件未列出", t.Text.Xs).TextColor(t.Muted)
 	}
 }
 
 func (s *shellState) panelModels(ctx *ui.Context) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	active := s.active()
 	if active == nil {
 		s.boardNote(ctx, "还没有选中的会话。")
@@ -236,15 +242,15 @@ func (s *shellState) panelModels(ctx *ui.Context) {
 		return
 	}
 	if active.currentModel != "" {
-		ui.Text(ctx, "当前 · "+shortModel(active.currentModel)+" · "+active.currentThinking).FontSize(12).TextColor(t.TextMuted)
+		kit.Text(ctx, "当前 · "+shortModel(active.currentModel)+" · "+active.currentThinking, t.Text.Xs).TextColor(t.Muted)
 	}
 	for _, choice := range active.models {
 		model := choice
-		ui.Row(ctx).FillWidth().Gap(6).Children(func() {
-			ui.Text(ctx, shortModel(model.id)).FontSize(12).TextColor(t.Text).Grow(1).SingleLine().Ellipsis("…")
+		ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).Children(func() {
+			kit.Text(ctx, shortModel(model.id), t.Text.Sm).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
 			for _, level := range thinkingLevels(model) {
 				levelValue := level
-				if ui.Button(ctx, levelValue).Clicked() {
+				if kit.Button(ctx, levelValue, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 					go active.selectModel(model, levelValue)
 				}
 			}
@@ -260,7 +266,7 @@ func thinkingLevels(model modelChoice) []string {
 }
 
 func (s *shellState) panelQuestions(ctx *ui.Context) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	active := s.active()
 	if active == nil || len(active.questions) == 0 {
 		s.boardNote(ctx, "没有待你决定的问题。")
@@ -268,13 +274,13 @@ func (s *shellState) panelQuestions(ctx *ui.Context) {
 	}
 	for _, question := range active.questions {
 		card := question
-		ui.Column(ctx).Gap(4).Children(func() {
-			ui.Text(ctx, "需要你决定 · "+card.Kind).FontSize(11).TextColor(t.TextMuted)
-			ui.Text(ctx, card.Data.Prompt).FontSize(12)
-			ui.Row(ctx).Gap(4).Wrap().Children(func() {
+		ui.Column(ctx).Gap(th.Space(1)).Children(func() {
+			kit.Text(ctx, "需要你决定 · "+card.Kind, t.Text.Xs).TextColor(t.Muted)
+			kit.Text(ctx, card.Data.Prompt, t.Text.Sm)
+			ui.Row(ctx).Gap(th.Space(1)).Wrap().Children(func() {
 				for _, option := range card.Data.Options {
 					value := option
-					if ui.Button(ctx, value).Clicked() {
+					if kit.Button(ctx, value, kit.ButtonOpts{Variant: kit.Outline, Size: kit.SizeSm}).Clicked() {
 						go active.answer(card, value)
 					}
 				}

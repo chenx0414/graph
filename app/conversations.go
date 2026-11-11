@@ -10,6 +10,8 @@ import (
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
+	"graph/app/gwui/kit"
+	gwtheme "graph/app/gwui/theme"
 )
 
 type conversationSummary struct {
@@ -224,11 +226,11 @@ func (c *chatState) view(ctx *ui.Context) {
 }
 
 func (c *chatState) transcript(ctx *ui.Context) {
-	t := ctx.Theme()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	if len(c.messages) == 0 {
 		ui.Column(ctx).Grow(1).Center().Children(func() {
-			ui.Text(ctx, "还没有对话").FontSize(14).TextColor(t.TextMuted)
-			ui.Text(ctx, "在下面输入第一条消息").FontSize(12).TextColor(t.TextMuted)
+			kit.Text(ctx, "还没有对话", t.Text.Base).TextColor(t.Muted)
+			kit.Text(ctx, "在下面输入第一条消息", t.Text.Sm).TextColor(t.Muted)
 		})
 		return
 	}
@@ -239,7 +241,7 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	}
 	if start > 0 {
 		label := "加载更早的 " + strconv.Itoa(start) + " 段（往上翻）"
-		ui.Button(ctx, label).FontSize(12)
+		kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm})
 	}
 	shown := runs[start:]
 	c.list.Key = func(row int) any { return start + row }
@@ -250,22 +252,22 @@ func (c *chatState) transcript(ctx *ui.Context) {
 			return
 		}
 		c.messageRow(ctx, run.messages[0])
-	}).Grow(1).Padding(16).Gap(14)
+	}).Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
 }
 
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
-	t := ctx.Theme()
+	t := gwtheme.Of(ctx)
 	key := runKey(run)
 	ui.Column(ctx).Gap(2).Children(func() {
 		label := "工具 · " + runSummary(run) + " · " + countLabel(len(run.messages))
-		if ui.Button(ctx, label).Clicked() {
+		if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 			c.expanded[key] = !c.expanded[key]
 		}
 		if !c.expanded[key] {
 			return
 		}
 		for _, message := range run.messages {
-			ui.Text(ctx, toolLine(message)).FontSize(12).TextColor(t.TextMuted)
+			kit.Text(ctx, toolLine(message), t.Text.Xs).TextColor(t.Muted)
 		}
 	})
 }
@@ -276,8 +278,8 @@ func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 		if mine {
 			ui.Spacer(ctx)
 		}
-		ui.Column(ctx).MaxWidthPercent(84).Gap(4).Children(func() {
-			c.bubble(ctx, message)
+		ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
+			c.bubble(ctx, message, mine)
 			c.messageMeta(ctx, message, mine)
 		})
 		if !mine {
@@ -286,15 +288,19 @@ func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 	})
 }
 
-func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
-	t := ctx.Theme()
-	bubble := ui.Column(ctx).Padding(10, 14).Radius(16).Gap(4).Clip()
-	bubble.Background(t.Surface)
-	bubble.Border(1, t.Border)
-	bubble.Shadow(0, 4, 14, 0, cardShadow)
+func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage, mine bool) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	bubble := ui.Column(ctx).Padding(th.Space(2.5), th.Space(3.5)).Radius(t.Radius.Xl).Gap(th.Space(1)).Clip().
+		Border(gwtheme.Hairline, t.Border)
+	if mine {
+		bubble.Background(t.Hover)
+	} else {
+		bubble.Background(t.Background)
+		kit.Elevate(ctx, bubble, gwtheme.ShadowXs)
+	}
 	bubble.Children(func() {
 		if messageQueued(message) {
-			if ui.Button(ctx, "撤销这条排队消息").Clicked() {
+			if kit.Button(ctx, "撤销这条排队消息", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 				go c.cancelQueued(message.ID)
 			}
 		}
@@ -307,8 +313,8 @@ func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
 }
 
 func (c *chatState) messageMeta(ctx *ui.Context, message transcriptMessage, mine bool) {
-	t := ctx.Theme()
-	row := ui.Row(ctx).Gap(6).AlignItems(ui.Center)
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	row := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
 	if mine {
 		row.Justify(ui.End)
 	} else {
@@ -316,15 +322,11 @@ func (c *chatState) messageMeta(ctx *ui.Context, message transcriptMessage, mine
 	}
 	row.Children(func() {
 		if message.CreatedAt > 0 {
-			ui.Text(ctx, messageClock(message.CreatedAt)).FontSize(11).TextColor(t.TextMuted)
+			kit.Text(ctx, messageClock(message.CreatedAt), t.Text.Xs).TextColor(t.Muted)
 		}
 		text := message.Text
-		button := ui.Box(ctx).Size(20, 20).Radius(6).Center().Label("复制").Tooltip("复制这条消息").Focusable()
-		button.Background(ui.Transparent)
-		button.OnClick(func() { copyMessage(text) })
-		button.Children(func() {
-			ui.Icon(ctx, iconCopy).FontSize(12).TextColor(t.TextMuted)
-		})
+		if iconAction(ctx, iconCopy, "复制", false, 5, func() { copyMessage(text) }).Clicked() {
+		}
 	})
 }
 
@@ -337,24 +339,32 @@ func copyMessage(text string) {
 }
 
 func (c *chatState) composer(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Row(ctx).Gap(8).Padding(12, 16, 14, 16).AlignItems(ui.End).Children(func() {
-		input := ui.TextInput(ctx, &c.draft).Placeholder("输入消息…").Label("消息").Grow(1)
-		input.Background(t.Background).Border(1, t.Border).Radius(14).Padding(10, 14).FontSize(13)
-		button := ui.PrimaryButton(ctx, "发送").Radius(14).Padding(10, 18)
-		if button.Clicked() {
-			go c.send()
-		}
-		if c.busy() && ui.Button(ctx, "打断这一轮").Clicked() {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Row(ctx).Gap(th.Space(2)).Padding(th.Space(3), th.Space(4), th.Space(3.5), th.Space(4)).
+		AlignItems(ui.Center).Children(func() {
+		group := kit.InputGroup(ctx, kit.InputOpts{})
+		group.Height(th.Space(11)).Radius(t.Radius.Xl).Padding(0).Grow(1)
+		group.Children(func() {
+			field := kit.Input(ctx, &c.draft, kit.InputOpts{Placeholder: "输入消息…", Bare: true})
+			field.Label("消息").Grow(1).PaddingX(th.Space(3))
+			send := ui.Box(ctx).Size(th.Space(9), th.Space(9)).Radius(t.Radius.Full).Background(t.Primary).Center().
+				Label("发送").Tooltip("发送").Focusable()
+			send.Margin(0, th.Space(1), th.Space(1), 0)
+			send.OnClick(func() { go c.send() })
+			send.Children(func() {
+				ui.Icon(ctx, iconSend).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.PrimaryText)
+			})
+		})
+		if c.busy() && kit.Button(ctx, "打断这一轮", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 			go c.interrupt()
 		}
 		if c.paused {
-			if ui.Button(ctx, "继续").Clicked() {
+			if kit.Button(ctx, "继续", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 				go c.setPaused(false)
 			}
 			return
 		}
-		if ui.Button(ctx, "暂停").Clicked() {
+		if kit.Button(ctx, "暂停", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
 			go c.setPaused(true)
 		}
 	})

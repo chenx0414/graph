@@ -1,6 +1,10 @@
 package main
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo/ui"
+	"graph/app/gwui/kit"
+	gwtheme "graph/app/gwui/theme"
+)
 
 type railItem struct {
 	kind  string
@@ -32,15 +36,15 @@ type boardState struct {
 }
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
-	t := ctx.Theme()
-	card := ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Background(t.Surface).
-		Radius(cardRadius).Border(1, t.Border).Shadow(0, 10, 28, 0, cardShadow).Clip()
+	t := gwtheme.Of(ctx)
+	card := ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Background(t.Window).
+		Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		if !s.board.grid {
 			return
 		}
-		p.Clip(r, cardRadius, func() {
-			drawBoardGrid(p, r)
+		p.Clip(r, t.Radius.Xl, func() {
+			drawBoardGrid(p, r, t.Grid)
 		})
 	})
 	card.Children(func() {
@@ -60,20 +64,21 @@ func (s *shellState) whiteboard(ctx *ui.Context) {
 	})
 }
 
-func drawBoardGrid(p *ui.Painter, r ui.Rect) {
+func drawBoardGrid(p *ui.Painter, r ui.Rect, color ui.Color) {
 	const step, size = float32(26), float32(2)
 	for x := r.X + 13; x < r.X+r.W; x += step {
 		for y := r.Y + 13; y < r.Y+r.H; y += step {
-			p.Fill(ui.Rect{X: x - size/2, Y: y - size/2, W: size, H: size}, boardDot, 0)
+			p.Fill(ui.Rect{X: x - size/2, Y: y - size/2, W: size, H: size}, color, 0)
 		}
 	}
 }
 
 func (s *shellState) boardToolbar(ctx *ui.Context) {
-	t := ctx.Theme()
-	bar := ui.Row(ctx).Attach(ui.AnchorTopRight, ui.AnchorTopRight).Top(12).Right(12).Padding(4).Gap(2).
-		Radius(14).Background(ui.RGBA(255, 255, 255, 0.92)).Border(1, t.Border).
-		Shadow(0, 8, 24, 0, cardShadow)
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	bar := ui.Row(ctx).Attach(ui.AnchorTopRight, ui.AnchorTopRight).Top(th.Space(3)).Right(th.Space(3)).
+		Padding(th.Space(0.5)).Gap(th.Space(0.5)).Radius(t.Radius.Lg).
+		Background(t.GlassBg).Border(gwtheme.Hairline, t.GlassBorder)
+	kit.Elevate(ctx, bar, gwtheme.ShadowMd)
 	bar.Children(func() {
 		s.toolButton(ctx, iconPlus, "添加", s.board.adding, func() {
 			s.board.adding = !s.board.adding
@@ -92,47 +97,57 @@ func (s *shellState) boardToolbar(ctx *ui.Context) {
 		})
 	})
 	if s.board.adding {
-		menu := ui.Column(ctx).Attach(ui.AnchorTopRight, ui.AnchorTopRight).Top(54).Right(12).Padding(6).Gap(2).
-			Radius(12).Background(t.Surface).Border(1, t.Border).Shadow(0, 10, 28, 0, cardShadow)
+		menu := ui.Column(ctx).Attach(ui.AnchorTopRight, ui.AnchorTopRight).Top(th.Space(12)).Right(th.Space(3)).
+			Padding(th.Space(1)).Gap(th.Space(0.25)).Width(th.Space(48)).Radius(t.Radius.Lg).
+			Background(t.Background).Border(gwtheme.Hairline, t.Border)
+		kit.Elevate(ctx, menu, gwtheme.ShadowMd)
 		menu.Children(func() {
 			for _, kind := range boardModules {
 				target := kind
-				if ui.Button(ctx, boardPanelTitle(target)).Clicked() {
+				button := kit.Button(ctx, boardPanelTitle(target), kit.ButtonOpts{Variant: kit.Ghost})
+				button.Justify(ui.Start).FillWidth()
+				if button.Clicked() {
 					s.openModule(target)
 				}
 			}
 		})
 	}
 	if s.board.search {
-		ui.Row(ctx).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft).Top(12).Left(12).Width(220).Children(func() {
-			field := ui.SearchField(ctx, &s.board.query).Placeholder("搜索白板内容").Label("白板搜索")
-			field.Background(ui.RGBA(255, 255, 255, 0.92)).Border(1, t.Border).Radius(12).Padding(6, 10)
+		ui.Row(ctx).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft).Top(th.Space(3)).Left(th.Space(3)).Width(th.Space(56)).Children(func() {
+			kit.Input(ctx, &s.board.query, kit.InputOpts{Placeholder: "搜索白板内容", Glass: true})
 		})
 	}
 }
 
 func (s *shellState) toolButton(ctx *ui.Context, icon *ui.SVG, label string, on bool, action func()) {
-	t := ctx.Theme()
-	button := ui.Box(ctx).Size(30, 30).Radius(9).Center().Label(label).Tooltip(label).Focusable()
-	button.OnClick(action)
-	if on {
-		button.Background(t.Accent.Alpha(0.14))
-	} else {
-		button.Background(ui.Transparent)
+	iconAction(ctx, icon, label, on, 8, action)
+}
+
+func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size float32, action func()) ui.Element {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	button := ui.Box(ctx).Size(th.Space(size), th.Space(size)).Radius(t.Radius.Md).Center().
+		Label(label).Tooltip(label).Focusable()
+	if action != nil {
+		button.OnClick(action)
+	}
+	color := t.Muted
+	switch {
+	case selected:
+		button.Background(t.SidebarSelected)
+		color = t.Foreground
+	case button.Hovered():
+		button.Background(t.HoverTint)
+		color = t.Foreground
 	}
 	button.Children(func() {
-		color := t.TextMuted
-		if on {
-			color = t.Accent
-		}
-		ui.Icon(ctx, icon).FontSize(16).TextColor(color)
+		ui.Icon(ctx, icon).Size(gwtheme.Icon, gwtheme.Icon).TextColor(color)
 	})
+	return button
 }
 
 func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, expanded bool) {
-	t := ctx.Theme()
-	card := ui.Column(ctx).Background(t.Surface).Radius(14).Border(1, t.Border).
-		Shadow(0, 8, 22, 0, cardShadow).Clip()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	card := kit.Panel(ctx, t.Radius.Xl)
 	if expanded {
 		card.Fill()
 	} else {
@@ -140,8 +155,8 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, expanded
 	}
 	card.Children(func() {
 		s.boardPanelHeader(ctx, panel, expanded)
-		ui.Scroll(ctx).Grow(1).Padding(12).Children(func() {
-			ui.Column(ctx).Gap(8).Children(func() {
+		ui.Scroll(ctx).Grow(1).Padding(th.Space(3)).Children(func() {
+			ui.Column(ctx).Gap(th.Space(2)).Children(func() {
 				s.boardPanelBody(ctx, panel)
 			})
 		})
@@ -149,11 +164,11 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, expanded
 }
 
 func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, expanded bool) {
-	t := ctx.Theme()
-	header := ui.Row(ctx).FillWidth().Height(32).Padding(10, 4).Gap(2).AlignItems(ui.Center).
-		Label(boardPanelTitle(panel.Kind) + "窗口").Focusable()
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	header := ui.Row(ctx).FillWidth().Height(th.Space(9)).Padding(th.Space(2), th.Space(1)).
+		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口").Focusable()
 	if expanded {
-		header.Padding(10, 200, 4, 10)
+		header.Padding(th.Space(2), th.Space(12), th.Space(1), th.Space(2))
 	}
 	if !expanded {
 		if dx, dy, ok := header.Dragged(); ok {
@@ -167,20 +182,24 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, expand
 		}
 	}
 	header.Children(func() {
-		ui.Text(ctx, boardPanelTitle(panel.Kind)).FontSize(12).TextColor(t.TextMuted).Grow(1).SingleLine()
+		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine()
+		expandIcon := iconFit
 		expandLabel := "展开"
 		if expanded {
+			expandIcon = iconClose
 			expandLabel = "收起"
 		}
-		if ui.Button(ctx, expandLabel).Clicked() {
+		if iconAction(ctx, expandIcon, expandLabel, false, 6, func() {
 			for index := range s.board.panels {
 				s.board.panels[index].Expanded = s.board.panels[index].ID == panel.ID && !expanded
 			}
 			s.board.lastKind = panel.Kind
 			s.saveBoard()
+		}).Clicked() {
 		}
-		if ui.Button(ctx, "移除").Clicked() {
+		if iconAction(ctx, iconClose, "移除", false, 6, func() {
 			s.closeModule(panel.ID)
+		}).Clicked() {
 		}
 	})
 }
