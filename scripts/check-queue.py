@@ -387,13 +387,17 @@ def main():
         # it, and the suite it used to wait for is the one that no longer decides
         # whether a commit lands.
         static = ("check:backend", "check:comments", "check:ownership", "check:tokens:changed", "check:harness")
-        tests = ("check:evidence",)
+        tests = (("go", "-C", "backend", "run", "./cmd/graphcheck", "evidence"),)
         with protect_worktree(common):
             for step in static:
                 code = run(["node", "--run", step])
                 if code:
                     return code
-            return run(["/bin/sh", "-c", " && ".join(f"node --run {step}" for step in tests)])
+            for step in tests:
+                code = run(list(step))
+                if code:
+                    return code
+            return 0
     with protect_worktree(common):
         return run_queued(common, command, continuation)
 

@@ -18,11 +18,11 @@
   "scripts": {
     "check:comments": "go -C backend run ./cmd/graphcheck comments",
     "check:comments:changed": "go -C backend run ./cmd/graphcheck comments --changed",
-    "skills:lint": "node scripts/skills-lint.mjs",
+    "skills:lint": "go -C backend run ./cmd/graphcheck skills",
     "start": "go -C backend run ./cmd/graphbuild backend --if-missing && dist/graphd --application-root \"$PWD\"",
     "start:execute": "go -C backend run ./cmd/graphbuild backend --if-missing && dist/graphd --application-root \"$PWD\" --execute",
     "session:summary": "node scripts/session-summary.mjs",
-    "check:evidence": "node scripts/check-evidence.mjs",
+    "check:evidence": "go -C backend run ./cmd/graphcheck evidence",
     "check:harness": "node scripts/harness-behavior-gate.mjs",
     "eval:harness": "node scripts/harness-eval-report.mjs",
     "check:full": "python3 scripts/check-queue.py --continue -- go -C backend run ./cmd/graphcheck all",
