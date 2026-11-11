@@ -49,7 +49,16 @@ func rsiAppInstallVerdict(bundle, dest, message string, installErr error) RsiApp
 		}
 		return RsiAppInstall{State: "failed", Note: reason + "; built " + built + ", installed " + installed}
 	}
-	return RsiAppInstall{State: "installed", Note: message + " (" + installed + ")"}
+	return RsiAppInstall{State: "installed", Note: message + " (" + installed + ", sha256 " + shortDigest(installedDigest) + ")"}
+}
+
+// The digest prefix is what a reader can compare against the build they meant
+// to ship; the full path alone cannot tell two installs apart.
+func shortDigest(digest string) string {
+	if len(digest) <= 12 {
+		return digest
+	}
+	return digest[:12]
 }
 
 func digestOfFile(path string) (string, error) {

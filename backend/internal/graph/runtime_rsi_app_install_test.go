@@ -48,7 +48,7 @@ func TestInstallVerdictTrustsTheInstalledBinaryOverTheInstaller(t *testing.T) {
 	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
 	installInto(t, dest, "shell+daemon v2")
 	verdict := rsiAppInstallVerdict(bundle, dest, "installed", nil)
-	if verdict.State != "installed" || !strings.Contains(verdict.Note, "Graph.app") {
+	if verdict.State != "installed" || !strings.Contains(verdict.Note, "Graph.app") || !strings.Contains(verdict.Note, "sha256 ") {
 		t.Fatalf("verdict = %+v", verdict)
 	}
 }
