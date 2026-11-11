@@ -101,7 +101,7 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	defer server.Close()
 
 	state := newShellState(server.URL, "tok")
-	tester := ui.NewTester(state.view, 1000, 640)
+	tester := ui.NewTester(state.view, 1280, 800)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -111,24 +111,24 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for state.settings == nil || state.settings.status != "" {
 		if !time.Now().Before(deadline) {
-			t.Fatalf("settings did not load, status %q", state.section)
+			t.Fatalf("settings did not load")
 		}
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if state.section != "settings" || !tester.HasText("订阅凭据") {
-		t.Fatalf("the settings pane must render, section %q texts %q", state.section, tester.Texts())
+	if state.board.mode != boardSettings || !tester.HasText("订阅凭据") {
+		t.Fatalf("the settings panel must render, mode %v texts %q", state.board.mode, tester.Texts())
 	}
-	if err := tester.Click("会话"); err != nil {
-		t.Fatalf("click 会话: %v", err)
+	if err := tester.Click("概览"); err != nil {
+		t.Fatalf("click 概览: %v", err)
 	}
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if state.section != "chat" || tester.HasText("订阅凭据") {
-		t.Fatalf("the chat pane must come back, section %q texts %q", state.section, tester.Texts())
+	if state.board.mode != boardHome || tester.HasText("订阅凭据") {
+		t.Fatalf("the overview must come back, mode %v texts %q", state.board.mode, tester.Texts())
 	}
 }
 

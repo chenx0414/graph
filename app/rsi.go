@@ -122,8 +122,8 @@ func (s *shell) pollRsi() {
 		notify("RSI 重载未能确认", "新的代码已在跑，但握手没有回执，宿主不会自动唤醒主控。")
 	}
 	if s.chat != nil {
-		for _, tab := range s.chat.tabs {
-			tab.state.refresh()
+		if active := s.chat.active(); active != nil {
+			active.refresh()
 		}
 		s.chat.frame()
 	}

@@ -66,3 +66,6 @@ hb-backlog-*.md
 
 app/build/
 dist/app-mygo/
+
+# Go build artifact of the native app module
+/app/app

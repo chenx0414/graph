@@ -74,7 +74,7 @@ func TestShellSidebarSwitchesConversation(t *testing.T) {
 		t.Fatalf("click 会话二: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for state.activeID != "c2" && time.Now().Before(deadline) {
+	for (state.activeID != "c2" || state.active() == nil) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	for frame := 0; frame < 3; frame++ {
@@ -99,54 +99,6 @@ func TestShellReportsAnEmptyConversationList(t *testing.T) {
 	state.load()
 	if state.status != "还没有会话。" {
 		t.Fatalf("status %q", state.status)
-	}
-}
-
-func TestTabsKeepBothConversationsOpen(t *testing.T) {
-	reloads := map[string]int{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/conversations":
-			w.Write([]byte(`[
-				{"id":"c1","title":"甲","projectId":"13-Graph","archivedAt":null},
-				{"id":"c2","title":"乙","projectId":"13-Graph","archivedAt":null}
-			]`))
-		case "/api/conversations/c1":
-			reloads["c1"]++
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"甲的内容"}]}`))
-		case "/api/conversations/c2":
-			reloads["c2"]++
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"乙的内容"}]}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	state := newShellState(server.URL, "tok")
-	state.load()
-	state.selectConversation("c2")
-	if len(state.tabs) != 2 || state.activeID != "c2" {
-		t.Fatalf("both conversations must stay open, tabs %d active %q", len(state.tabs), state.activeID)
-	}
-	tester := ui.NewTester(state.view, 1000, 640)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("› 乙") || !tester.HasText("甲") {
-		t.Fatalf("the tab bar must show both tabs, texts %q", tester.Texts())
-	}
-	state.selectConversation("c1")
-	if reloads["c1"] != 1 {
-		t.Fatalf("a tab that is already open must not reload, loads %v", reloads)
-	}
-	state.closeTab("c2")
-	if len(state.tabs) != 1 || state.activeID != "c1" {
-		t.Fatalf("closing a tab must keep the other one, tabs %d active %q", len(state.tabs), state.activeID)
-	}
-	state.closeTab("c1")
-	if len(state.tabs) != 0 || state.activeID != "" {
-		t.Fatalf("closing the last tab leaves no active conversation, tabs %d active %q", len(state.tabs), state.activeID)
 	}
 }
 
@@ -232,15 +184,15 @@ func TestShellArchivesAndRestoresConversations(t *testing.T) {
 
 	state := newShellState(server.URL, "tok")
 	state.load()
-	if len(state.tabs) != 1 || state.activeID != "c1" {
-		t.Fatalf("tabs %d active %q", len(state.tabs), state.activeID)
+	if state.activeID != "c1" || state.active() == nil {
+		t.Fatalf("the first conversation must be open, active %q", state.activeID)
 	}
 	state.archiveConversation("c1")
 	if _, ok := posts["/api/conversations/c1/archive"]; !ok {
 		t.Fatalf("归档必须打 archive 路由，posts %v", posts)
 	}
-	if len(state.tabs) != 0 || state.activeID != "" {
-		t.Fatalf("归档后必须关掉那个标签，tabs %d active %q", len(state.tabs), state.activeID)
+	if state.activeID != "" || state.active() != nil {
+		t.Fatalf("归档后必须关掉那个会话，active %q", state.activeID)
 	}
 	state.showArchived = true
 	state.load()
@@ -259,8 +211,12 @@ func TestShellArchivesAndRestoresConversations(t *testing.T) {
 	}
 }
 
-func TestSelectingTheSameConversationTwiceKeepsOneTab(t *testing.T) {
+func TestSelectingTheSameConversationTwiceKeepsOneChat(t *testing.T) {
+	loads := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/conversations/c1" {
+			loads++
+		}
 		_, _ = w.Write([]byte(`{"messages":[{"role":"user","text":"开始"}]}`))
 	}))
 	defer server.Close()
@@ -274,11 +230,18 @@ func TestSelectingTheSameConversationTwiceKeepsOneTab(t *testing.T) {
 		}()
 	}
 	waiting.Wait()
-	if len(s.tabs) != 1 {
-		t.Fatalf("八次点同一个会话留下了 %d 个标签，界面上就是同一个标题重复出现", len(s.tabs))
+	deadline := time.Now().Add(2 * time.Second)
+	for s.active() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if s.active() == nil {
+		t.Fatal("the conversation that was clicked must end up open")
 	}
 	if s.activeID != "c1" {
 		t.Fatalf("the conversation that was clicked must end up active, got %q", s.activeID)
+	}
+	if loads > 1 {
+		t.Fatalf("八次点同一个会话只该读一次，读到了 %d 次", loads)
 	}
 }
 
@@ -335,8 +298,8 @@ func TestAdoptingANewConsoleAddressWhenTheDaemonMoved(t *testing.T) {
 func TestSelectingAnEmptyConversationOpensNothing(t *testing.T) {
 	s := newShellState("http://127.0.0.1:1", "tok")
 	s.selectConversation("")
-	if len(s.tabs) != 0 {
-		t.Fatalf("a row without an id cannot be opened: the window would keep a tab that answers 404, tabs %d", len(s.tabs))
+	if s.active() != nil {
+		t.Fatal("a row without an id cannot be opened: the window would keep talking to a session that answers 404")
 	}
 	if s.activeID != "" {
 		t.Fatalf("nothing should become active, got %q", s.activeID)

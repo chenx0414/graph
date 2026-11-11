@@ -93,10 +93,10 @@ func (s *shell) openNative() {
 	state := newShellState(s.console, s.paths.SessionToken())
 	window := mygo.NewWindow(mygo.WindowOptions{
 		Title:     "Graph",
-		Width:     1080,
-		Height:    760,
-		MinWidth:  720,
-		MinHeight: 480,
+		Width:     1440,
+		Height:    900,
+		MinWidth:  1024,
+		MinHeight: 640,
 		StateKey:  "native",
 		Content:   ui.View(state.view),
 	})

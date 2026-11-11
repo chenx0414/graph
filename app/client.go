@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+type errStatus string
+
+func (e errStatus) Error() string { return "服务端拒绝：" + string(e) }
+
 type apiClient struct {
 	address string
 	token   string

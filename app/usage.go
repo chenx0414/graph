@@ -199,25 +199,3 @@ func (s *usageState) frame() {
 		s.window.Update(func() {})
 	}
 }
-
-func (s *usageState) view(ctx *ui.Context) {
-	t := ctx.Theme()
-	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
-		ui.Text(ctx, "用量").FontSize(18)
-		if s.status != "" {
-			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
-			return
-		}
-		ui.Text(ctx, "累计 · "+formatCost(s.rows.costMicros)+" · "+formatTokens(s.rows.tokens)+" tokens · 缓存命中 "+formatPercent(s.rows.cacheHit)).FontSize(12).TextColor(t.TextMuted)
-		ui.Text(ctx, "轮次 "+strconv.Itoa(s.rows.turns)+" · 工具调用 "+strconv.Itoa(s.rows.toolCalls)+" · 失败率 "+errorRate(s.rows)).FontSize(12).TextColor(t.TextMuted)
-		ui.Text(ctx, "能力库 · 就绪 "+strconv.Itoa(s.rows.capabilities.ready)+" · 缺配置 "+strconv.Itoa(s.rows.capabilities.missing)).FontSize(12).TextColor(t.TextMuted)
-		ui.Text(ctx, "模型（按调用次数）").FontSize(13)
-		ui.List(ctx, &s.list, len(s.rows.models), func(index int) {
-			ui.Text(ctx, modelLabel(s.rows.models[index])).FontSize(12)
-		}).Grow(1)
-		ui.Text(ctx, "订阅额度").FontSize(13)
-		for _, plan := range s.rows.plans {
-			ui.Text(ctx, planLabel(plan)).FontSize(12).TextColor(t.TextMuted)
-		}
-	})
-}

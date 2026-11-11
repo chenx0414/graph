@@ -66,41 +66,14 @@ func TestUsageSnapshotCountsAndFormats(t *testing.T) {
 	}
 }
 
-func TestUsagePaneRendersTheSummary(t *testing.T) {
-	server := usageServer(t)
-	defer server.Close()
-
-	state := newUsageState(server.URL, "tok")
-	state.load()
-	if state.status != "" {
-		t.Fatalf("status %q", state.status)
-	}
-	tester := ui.NewTester(state.view, 820, 620)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	for _, wanted := range []string{
-		"用量",
-		"累计 · $119.23 · 1.29B tokens · 缓存命中 96.0%",
-		"轮次 2633 · 工具调用 1000 · 失败率 6.1%",
-		"能力库 · 就绪 1 · 缺配置 2",
-		"opencode-go · deepseek-v4.1-flash · 563 次 · $4.82",
-		"OpenCode Go · ok · 2 个模型",
-	} {
-		if !tester.HasText(wanted) {
-			t.Fatalf("missing %q in texts %q", wanted, tester.Texts())
-		}
-	}
-}
-
 func TestShellOpensTheUsagePane(t *testing.T) {
 	server := usageServer(t)
 	defer server.Close()
 
 	state := newShellState(server.URL, "tok")
-	state.openUsage()
-	if state.section != "usage" || state.usage == nil {
-		t.Fatalf("section %q", state.section)
+	state.chooseBoard(boardHome)
+	if state.board.mode != boardHome || state.usage == nil {
+		t.Fatalf("mode %v", state.board.mode)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for state.usage.status != "" && time.Now().Before(deadline) {
@@ -113,7 +86,7 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("用量") || !tester.HasText("订阅额度") {
-		t.Fatalf("the usage pane must render, texts %q", tester.Texts())
+	if !tester.HasText("用量 · $119.23 · 1.29B tokens · 缓存命中 96.0%") {
+		t.Fatalf("the overview must present the usage, texts %q", tester.Texts())
 	}
 }
