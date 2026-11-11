@@ -80,7 +80,7 @@ func TestSettingsPaneRendersAndArchivesAProject(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	for _, wanted := range []string{"设置", "运行 · execute · 配置版本 428", "源码 · main@79a38ef0 · 模型 7 个可用", "● grok 订阅", "○ chatgpt 订阅", "13-Graph · ready"} {
+	for _, wanted := range []string{"运行 · execute · 配置版本 428", "源码 · main@79a38ef0 · 模型 7 个可用", "● grok 订阅", "○ chatgpt 订阅", "13-Graph · ready"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("missing %q in texts %q", wanted, tester.Texts())
 		}

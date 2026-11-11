@@ -74,7 +74,7 @@ func TestResourcePaneRendersEveryCapability(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	for _, wanted := range []string{"资源", "能力库 · 1 / 3 就绪", "mcp", "skill", "Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY", "agent-browser-native · v0.6.17 · 就绪"} {
+	for _, wanted := range []string{"能力库 · 1 / 3 就绪", "mcp", "skill", "Browser Use · v2026.9.17 · 缺 BROWSER_USE_API_KEY", "agent-browser-native · v0.6.17 · 就绪"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("missing %q in texts %q", wanted, tester.Texts())
 		}

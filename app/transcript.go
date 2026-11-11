@@ -125,6 +125,10 @@ type chatState struct {
 	models          []modelChoice
 	currentModel    string
 	currentThinking string
+	graph           taskGraph
+	graphTaskID     string
+	graphLoading    bool
+	graphError      string
 	projects        []string
 	proposal        draftProposal
 	branch          string

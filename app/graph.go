@@ -202,7 +202,7 @@ func (c *chatState) showNode(taskID string, node nodeRow) {
 
 func (c *chatState) graphSection(ctx *ui.Context) {
 	t := ctx.Theme()
-	if len(c.tasks) > 0 && ui.Button(ctx, "图 · "+strconv.Itoa(len(c.tasks))+" 个任务").Clicked() {
+	if len(c.tasks) > 0 && ui.Button(ctx, "图 · "+strconv.Itoa(len(c.tasks))+" 个任务").AlignSelf(ui.Start).Clicked() {
 		c.graphOpen = !c.graphOpen
 	}
 	if c.graphOpen {

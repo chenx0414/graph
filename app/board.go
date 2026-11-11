@@ -73,7 +73,22 @@ func (s *shellState) chooseBoard(mode boardMode) {
 		s.ensureResources()
 	case boardSettings:
 		s.ensureSettings()
+	case boardGraph:
+		s.ensureGraph()
 	}
+}
+
+func (s *shellState) ensureGraph() {
+	active := s.active()
+	if active == nil || len(active.tasks) == 0 || active.graphLoading {
+		return
+	}
+	taskID := active.tasks[0].id
+	if active.graphTaskID == taskID && len(active.graph.nodes) > 0 {
+		return
+	}
+	active.graphLoading = true
+	go active.loadGraph(taskID)
 }
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
@@ -217,15 +232,47 @@ func (s *shellState) boardNote(ctx *ui.Context, text string) {
 func (s *shellState) boardOverview(ctx *ui.Context) {
 	t := ctx.Theme()
 	s.boardNote(ctx, "这台机器上的项目、会话与运行信息都呈现在这块白板上。")
-	ui.Text(ctx, "会话 "+strconv.Itoa(len(s.conversations))+" 个 · 项目 "+strconv.Itoa(len(s.projectNames()))+" 个").FontSize(14).TextColor(t.Text)
+	ui.Row(ctx).Wrap().Gap(10).Children(func() {
+		s.statCard(ctx, "会话", strconv.Itoa(len(s.conversations)))
+		s.statCard(ctx, "项目", strconv.Itoa(len(s.projectNames())))
+		cost, tokens := "—", "—"
+		if s.usage != nil {
+			cost = formatCost(s.usage.rows.costMicros)
+			tokens = formatTokens(s.usage.rows.tokens)
+		}
+		s.statCard(ctx, "用量", cost)
+		s.statCard(ctx, "缓存命中", cacheLabel(s.usage))
+		capabilityValue := "—"
+		if s.usage != nil {
+			ready := s.usage.rows.capabilities.ready
+			missing := s.usage.rows.capabilities.missing
+			capabilityValue = strconv.Itoa(ready) + "/" + strconv.Itoa(ready+missing)
+		}
+		s.statCard(ctx, "能力库", capabilityValue)
+		s.statCard(ctx, "tokens", tokens)
+	})
 	if active := s.active(); active != nil {
 		ui.Text(ctx, "当前会话 · "+s.titleOf(s.activeID)+" · "+active.status).FontSize(13).TextColor(t.TextMuted)
 	}
 	if s.usage != nil {
-		ui.Text(ctx, "用量 · "+formatCost(s.usage.rows.costMicros)+" · "+formatTokens(s.usage.rows.tokens)+" tokens · 缓存命中 "+formatPercent(s.usage.rows.cacheHit)).FontSize(13).TextColor(t.TextMuted)
-		ui.Text(ctx, "轮次 "+strconv.Itoa(s.usage.rows.turns)+" · 工具调用 "+strconv.Itoa(s.usage.rows.toolCalls)+" · 失败率 "+errorRate(s.usage.rows)).FontSize(13).TextColor(t.TextMuted)
-		ui.Text(ctx, "能力库 · 就绪 "+strconv.Itoa(s.usage.rows.capabilities.ready)+" · 缺配置 "+strconv.Itoa(s.usage.rows.capabilities.missing)).FontSize(13).TextColor(t.TextMuted)
+		ui.Text(ctx, "轮次 "+strconv.Itoa(s.usage.rows.turns)+" · 工具调用 "+strconv.Itoa(s.usage.rows.toolCalls)+" · 失败率 "+errorRate(s.usage.rows)).FontSize(12).TextColor(t.TextMuted)
 	}
+}
+
+func cacheLabel(usage *usageState) string {
+	if usage == nil {
+		return "—"
+	}
+	return formatPercent(usage.rows.cacheHit)
+}
+
+func (s *shellState) statCard(ctx *ui.Context, label, value string) {
+	t := ctx.Theme()
+	ui.Column(ctx).Width(150).Height(76).Radius(14).Border(1, t.Border).Background(t.Surface).Padding(12).
+		Justify(ui.SpaceBetween).Children(func() {
+		ui.Text(ctx, value).FontSize(20).FontWeight(600).TextColor(t.Text)
+		ui.Text(ctx, label).FontSize(12).TextColor(t.TextMuted)
+	})
 }
 
 func (s *shellState) boardConversation(ctx *ui.Context) {
@@ -300,12 +347,19 @@ func (s *shellState) boardGraphPanel(ctx *ui.Context) {
 		s.boardNote(ctx, "图谱会在任务启动后出现：节点是 Agent，连线是接口投递。")
 		return
 	}
-	for _, task := range active.tasks {
-		ui.Text(ctx, taskLabel(task)).FontSize(13).TextColor(t.Text)
-		if len(task.nodes) > 0 {
-			ui.Text(ctx, "  "+strconv.Itoa(len(task.nodes))+" 个节点").FontSize(12).TextColor(t.TextMuted)
-		}
+	if active.graphError != "" {
+		s.boardNote(ctx, active.graphError)
+		return
 	}
+	if len(active.graph.nodes) == 0 {
+		s.boardNote(ctx, "正在读取图谱…")
+		return
+	}
+	caption := strconv.Itoa(len(active.graph.nodes)) + " 个节点 · " + strconv.Itoa(len(active.graph.edges)) + " 条连接"
+	ui.Text(ctx, active.graphTaskID+" · "+caption).FontSize(12).TextColor(t.TextMuted)
+	ui.Box(ctx).FillWidth().Height(520).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
+		drawBoardGraph(p, r, active.graph)
+	})
 }
 
 func (s *shellState) boardCapabilities(ctx *ui.Context) {

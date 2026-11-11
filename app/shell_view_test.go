@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -20,7 +21,9 @@ func fourPaneShell(t *testing.T) *shellState {
 				{"id":"c2","title":"会话二","projectId":"mygo","role":"legacy","archivedAt":null}
 			]`))
 		case "/api/conversations/c1":
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话一"}]}`))
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话一"}],"tasks":[{"id":"t1","request":"实现四栏页面","status":"running","phase":"executing","nodes":[{"id":"planner","role":"worker","kind":"agent","status":"succeeded"},{"id":"worker","role":"worker","kind":"agent","status":"running"}]}]}`))
+		case "/api/tasks/t1/graph":
+			w.Write([]byte(`{"nodes":[{"id":"planner","kind":"agent","label":"planner","status":"succeeded"},{"id":"worker","kind":"agent","label":"worker","status":"running"}],"layout":{"positions":{"planner":{"x":40,"y":40,"width":160,"height":56},"worker":{"x":280,"y":170,"width":160,"height":56}},"edges":[{"id":"e1","source":"planner","target":"worker","points":[{"x":120,"y":96},{"x":120,"y":198},{"x":280,"y":198}]}]}}`))
 		case "/api/conversations/c2":
 			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话二"}]}`))
 		default:
@@ -129,6 +132,44 @@ func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 		if rect.X < 0 || rect.Y < 0 || rect.X+rect.W > 1024 || rect.Y+rect.H > 640 {
 			t.Fatalf("%s sits outside the window: %+v", label, rect)
 		}
+	}
+}
+
+func TestTheOverviewPresentsStats(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	for _, label := range []string{"会话", "项目", "用量", "能力库"} {
+		if !tester.HasText(label) {
+			t.Fatalf("the overview must present %q, texts %q", label, tester.Texts())
+		}
+	}
+}
+
+func TestTheGraphPanelDrawsTheTaskGraph(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if err := tester.Click("图谱"); err != nil {
+		t.Fatalf("click 图谱: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for state.active() == nil || len(state.active().graph.nodes) == 0 {
+		if !time.Now().Before(deadline) {
+			t.Fatalf("the graph did not load, texts %q", tester.Texts())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	tester = frames(tester)
+	if graph := state.active().graph; len(graph.nodes) != 2 || len(graph.edges) != 1 {
+		t.Fatalf("graph %+v", graph)
+	}
+	if !tester.HasText("2 个节点 · 1 条连接") {
+		t.Fatalf("the graph panel must caption the graph, texts %q", tester.Texts())
+	}
+	if countColor(tester.Image(), graphStatusSucceeded) == 0 {
+		t.Fatal("the succeeded node must paint its status color")
+	}
+	if countColor(tester.Image(), graphStatusRunning) == 0 {
+		t.Fatal("the running node must paint its status color")
 	}
 }
 

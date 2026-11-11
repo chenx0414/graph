@@ -105,6 +105,7 @@ func (s *shell) openNative() {
 	s.chat = state
 	go func() {
 		state.load()
+		state.ensureUsage()
 		state.frame()
 	}()
 }

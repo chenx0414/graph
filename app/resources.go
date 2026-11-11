@@ -214,7 +214,6 @@ func (s *resourceState) frame() {
 func (s *resourceState) view(ctx *ui.Context) {
 	t := ctx.Theme()
 	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
-		ui.Text(ctx, "资源").FontSize(18)
 		if s.status != "" {
 			ui.Text(ctx, s.status).FontSize(12).TextColor(t.TextMuted)
 			return

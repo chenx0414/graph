@@ -86,7 +86,9 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("用量 · $119.23 · 1.29B tokens · 缓存命中 96.0%") {
-		t.Fatalf("the overview must present the usage, texts %q", tester.Texts())
+	for _, wanted := range []string{"用量", "$119.23", "缓存命中", "96.0%", "能力库", "1/3", "tokens", "1.29B"} {
+		if !tester.HasText(wanted) {
+			t.Fatalf("the overview must present %q, texts %q", wanted, tester.Texts())
+		}
 	}
 }
