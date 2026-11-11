@@ -189,7 +189,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 ### ChatGPT 平台：已移除（unsupported）
 
-Codex 后端与 Responses 契约握手后直接 EOF，本仓解析器不接受它的 `response.*` 事件流，跑不完任何一轮，因此 `chatgpt` 不再提供：`GET /api/providers` 仍列出这条记录但标 `unsupported: true` 并带 `unsupportedReason`（含替代品 `grok:grok-4.5`）；交付记录 `docs/evidence/independent-model-entries.json` 里该条目标 `status: "unsupported"` 并保留 `fallbackModelId` 与同一理由，**不要再把它当主选**。`provider` 只是分组名，解析器不设白名单——结论落在目录与交付记录上。
+Codex 后端与 Responses 契约握手后直接 EOF，本仓解析器不接受它的 `response.*` 事件流，跑不完任何一轮，因此 `chatgpt` 不再提供：`GET /api/providers` 仍列出这条记录但标 `unsupported: true` 并带 `unsupportedReason`（含替代品 `grok:grok-4.5`）；目录里该条目标 `status: "unsupported"` 并保留 `fallbackModelId` 与同一理由，**不要再把它当主选**。`provider` 只是分组名，解析器不设白名单——结论落在目录与交付记录上。
 
 ---
 

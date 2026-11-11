@@ -1,8 +1,0 @@
- [32m✓[39m tests/e2e/provider-independent-reviews.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 49968[2mms[22m[39m
-   [33m[2m✓[22m[39m Grok and ChatGPT are independent model entries, each completes for real, and the review node runs on the independent provider[33m 49968[2mms[22m[39m
-
-[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
-[2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
-[2m   Start at [22m 22:23:10
-[2m   Duration [22m 50.11s[2m (tests 100%)[22m
-

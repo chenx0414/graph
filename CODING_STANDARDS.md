@@ -8,7 +8,7 @@
 
 ## 实施
 
-实施功能前读取 [产品与执行规则](docs/graph-mvp.md)、[实现架构](docs/architecture.md)和 [实施计划](docs/implementation-plan.md)。修改按已确认的产品契约验收，阶段进度不能代替完整交付条件。
+实施功能前读取 [重构规格](docs/specs/graph-rebuild-v2.md) 与 [原生图指南](docs/agent/graph-v2.md)。修改按已确认的产品契约验收，阶段进度不能代替完整交付条件。
 
 ## 验证与交付
 
