@@ -153,6 +153,9 @@ func Install(options InstallOptions) (string, error) {
 	}
 	installErr := copyTree(bundle, dest)
 	if installErr == nil {
+		installErr = verifyInstalled(dest)
+	}
+	if installErr == nil {
 		installErr = signInstalled(dest)
 	}
 	if installErr != nil {
@@ -167,6 +170,24 @@ func Install(options InstallOptions) (string, error) {
 		message += fmt.Sprintf("; the replaced copy is at %s", previous)
 	}
 	return message, nil
+}
+
+// A copy that produced no executable is not an install: the caller would
+// otherwise report an app that cannot start. Checked before signing, so the
+// failure names the copy instead of a codesign error on an empty bundle.
+func verifyInstalled(dest string) error {
+	executable, err := bundleExecutable(dest)
+	if err != nil {
+		return fmt.Errorf("the installed app has no executable: %v", err)
+	}
+	info, statErr := os.Stat(executable)
+	if statErr != nil {
+		return fmt.Errorf("the installed app has no executable at %s: %v", executable, statErr)
+	}
+	if info.Mode()&0o111 == 0 {
+		return fmt.Errorf("the installed executable is not executable: %s", executable)
+	}
+	return nil
 }
 
 func signInstalled(dest string) error {

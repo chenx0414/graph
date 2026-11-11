@@ -145,3 +145,28 @@ func TestSignatureIsStableReadsTheRequirement(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyInstalledRefusesACopyWithoutAnExecutable(t *testing.T) {
+	dest := t.TempDir()
+	if err := verifyInstalled(dest); err == nil {
+		t.Fatal("a destination with no executable was accepted")
+	} else if !strings.Contains(strings.ToLower(err.Error()), "executable") {
+		t.Fatalf("the error must name the missing executable: %v", err)
+	}
+	executable := filepath.Join(dest, "Contents", "MacOS", "Graph")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := verifyInstalled(dest); err == nil {
+		t.Fatal("an executable without the execute bit was accepted")
+	}
+	if err := os.Chmod(executable, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := verifyInstalled(dest); err != nil {
+		t.Fatalf("a real executable was refused: %v", err)
+	}
+}
