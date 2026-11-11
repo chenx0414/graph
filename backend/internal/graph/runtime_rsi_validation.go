@@ -209,7 +209,7 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 }
 
 func rsiAppBuildCommand() RsiCommand {
-	return RsiCommand{Command: "go", Args: []string{"-C", "backend", "run", "./cmd/graphbuild", "app"}}
+	return RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}
 }
 
 func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {

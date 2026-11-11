@@ -110,14 +110,10 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 	}
 }
 
-func TestAppBuildRunsTheGoBuilder(t *testing.T) {
+func TestAppBuildGoesThroughTheScriptedEntryPoint(t *testing.T) {
 	command := rsiAppBuildCommand()
-	if command.Command != "go" {
-		t.Fatalf("the app is built with %q, want the Go builder", command.Command)
-	}
-	want := []string{"-C", "backend", "run", "./cmd/graphbuild", "app"}
-	if strings.Join(command.Args, " ") != strings.Join(want, " ") {
-		t.Fatalf("the app build runs %v, want %v", command.Args, want)
+	if command.Command != "node" || strings.Join(command.Args, " ") != "--run app:build" {
+		t.Fatalf("the app build runs %s %v; the activation host invokes the build as a node script", command.Command, command.Args)
 	}
 }
 
