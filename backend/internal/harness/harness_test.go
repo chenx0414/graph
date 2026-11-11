@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,5 +94,25 @@ func TestEveryFrozenCaseCarriesItsOwnSolutionAndCheck(t *testing.T) {
 		if len(caseScript.Steps) != len(caseScript.Expected) {
 			t.Fatalf("%s carries %d steps but expects %d tools", caseID, len(caseScript.Steps), len(caseScript.Expected))
 		}
+	}
+}
+
+func TestGreenRunsDoNotLeaveTheirRootBehind(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "state")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	failed := filepath.Join(t.TempDir(), "failed-run")
+	if err := os.MkdirAll(failed, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	releaseRoot(root, true)
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("a green run left %s behind", root)
+	}
+	releaseRoot(failed, false)
+	if _, err := os.Stat(failed); err != nil {
+		t.Fatalf("a failed run must keep its root for inspection: %v", err)
 	}
 }

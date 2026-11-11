@@ -58,9 +58,18 @@ func ValidationCommand(command RsiCommand, env map[string]string) ValidationComm
 	if env == nil {
 		env = environMap()
 	}
-	executable := existingNode(strings.TrimSpace(env[RUNTIME_NODE_ENV]))
-	if executable == "" {
-		executable = "node"
+	executable := ""
+	switch command.Command {
+	case "", "node":
+		executable = existingNode(strings.TrimSpace(env[RUNTIME_NODE_ENV]))
+		if executable == "" {
+			executable = "node"
+		}
+	default:
+		executable = command.Command
+		if resolved, err := exec.LookPath(command.Command); err == nil {
+			executable = resolved
+		}
 	}
 	filtered := map[string]string{}
 	for key, value := range env {
@@ -133,8 +142,7 @@ func rsiSummarizeValidation(result RsiValidationResult) RsiValidationResult {
 func rsiNeedsAppBuild(paths []string) bool {
 	for _, path := range paths {
 		if strings.HasPrefix(path, "app/") || path == "package.json" ||
-			strings.HasPrefix(path, "backend/internal/appinstall/") ||
-			strings.HasPrefix(path, "backend/cmd/graphbuild/") || strings.HasPrefix(path, "build/") {
+			strings.HasPrefix(path, "backend/") || strings.HasPrefix(path, "build/") {
 			return true
 		}
 	}
@@ -209,7 +217,7 @@ func rsiDefaultValidate(input RsiValidateInput) []RsiValidationResult {
 }
 
 func rsiAppBuildCommand() RsiCommand {
-	return RsiCommand{Command: "node", Args: []string{"--run", "app:build"}}
+	return RsiCommand{Command: "go", Args: []string{"-C", "backend", "run", "./cmd/graphbuild", "app"}}
 }
 
 func rsiNeedsDefaultGate(checks []RsiCommand, activate bool) bool {

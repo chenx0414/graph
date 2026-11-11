@@ -15,7 +15,7 @@ import (
 var rsiEscapeCode = regexp.MustCompile("\\x1b\\[[0-9;]*[A-Za-z]")
 
 func rsiAsyncFullCommand() RsiCommand {
-	return RsiCommand{Command: "node", Args: []string{"--run", "check:full"}, Nice: 10}
+	return RsiCommand{Command: "go", Args: []string{"-C", "backend", "run", "./cmd/graphcheck", "all"}, Nice: 10}
 }
 
 type rsiAsyncFullJob struct {

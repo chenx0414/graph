@@ -36,13 +36,12 @@ func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {
 // The confirmation runs at a lower priority, so a change made right after a
 // reload does not queue behind the whole suite.
 //
-// The host spawns every RSI command through node (ValidationCommand), so the
-// confirmation has to name a script the Node runner accepts; a `go ...` form
-// reaches node as `node -C backend run ...` and dies on MODULE_NOT_FOUND.
+// The confirmation is a Go command: ValidationCommand keeps the executable the
+// caller named, so the suite no longer has to disguise itself as a node script.
 func TestAsyncFullRunsNice(t *testing.T) {
 	command := rsiAsyncFullCommand()
-	if command.Command != "node" || strings.Join(command.Args, " ") != "--run check:full" {
-		t.Fatalf("the confirmation must be a node script, got %v %v", command.Command, command.Args)
+	if command.Command != "go" || strings.Join(command.Args, " ") != "-C backend run ./cmd/graphcheck all" {
+		t.Fatalf("the confirmation is still the full Go suite, got %v %v", command.Command, command.Args)
 	}
 	if command.Nice != 10 {
 		t.Fatalf("the confirmation has to ask for a lower priority, got %d", command.Nice)
@@ -103,9 +102,21 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 			t.Fatalf("%s must rebuild the desktop app", path)
 		}
 	}
+	// The window and the daemon are one binary built from backend/ and app/, and
+	// the daemon runs out of the installed bundle: a backend change that does not
+	// reinstall leaves the running process on the previous code, which reads as
+	// "activated" while the fix is not live.
 	for _, path := range []string{
 		"backend/internal/graph/server.go",
-		"src/web/main.tsx",
+		"backend/internal/pigkernel/session.go",
+		"backend/go.mod",
+	} {
+		if !rsiNeedsAppBuild([]string{path}) {
+			t.Fatalf("%s must reinstall the app that carries it", path)
+		}
+	}
+	for _, path := range []string{
+		"docs/adr/0042-kernel-0.7-state-presentation.md",
 		"README.md",
 	} {
 		if rsiNeedsAppBuild([]string{path}) {
@@ -114,10 +125,27 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 	}
 }
 
-func TestAppBuildGoesThroughTheScriptedEntryPoint(t *testing.T) {
+func TestAppBuildRunsTheGoBuilder(t *testing.T) {
 	command := rsiAppBuildCommand()
-	if command.Command != "node" || strings.Join(command.Args, " ") != "--run app:build" {
-		t.Fatalf("the app build runs %s %v; the activation host invokes the build as a node script", command.Command, command.Args)
+	if command.Command != "go" || strings.Join(command.Args, " ") != "-C backend run ./cmd/graphbuild app" {
+		t.Fatalf("the app build runs %s %v, want the Go packager", command.Command, command.Args)
+	}
+}
+
+// A check names the program it wants to run. The host used to hand every check
+// to node, so a `go ...` check reached node as `node -C backend ...` and died on
+// MODULE_NOT_FOUND before it ran anything.
+func TestValidationCommandRunsTheNamedProgram(t *testing.T) {
+	plan := ValidationCommand(RsiCommand{Command: "go", Args: []string{"-C", "backend", "test", "./..."}}, map[string]string{"PATH": os.Getenv("PATH")})
+	if !strings.HasSuffix(plan.Executable, "go") || strings.Contains(plan.Executable, "node") {
+		t.Fatalf("a go check resolved to %q", plan.Executable)
+	}
+	if strings.Join(plan.Args, " ") != "-C backend test ./..." {
+		t.Fatalf("the arguments changed: %v", plan.Args)
+	}
+	nodePlan := ValidationCommand(RsiCommand{Command: "node", Args: []string{"--run", "check"}}, map[string]string{"PATH": os.Getenv("PATH")})
+	if !strings.Contains(filepath.Base(nodePlan.Executable), "node") {
+		t.Fatalf("a node check resolved to %q", nodePlan.Executable)
 	}
 }
 

@@ -59,6 +59,7 @@ func Run(options Options) Report {
 		return report
 	}
 	report.Root = root
+	defer func() { releaseRoot(root, report.TaskSuccess) }()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		report.Error = err.Error()
@@ -132,6 +133,18 @@ func Run(options Options) Report {
 	}
 	report.TaskSuccess = report.Success && report.Completed && report.Settled == "succeeded"
 	return report
+}
+
+// A finished run keeps its root only when it failed, so a red case can be
+// inspected; a green one is deleted, because every gate run leaves one behind
+// and they are tens of megabytes each.
+func releaseRoot(root string, success bool) {
+	if root == "" || os.Getenv("GRAPH_HARNESS_KEEP_ROOTS") == "1" {
+		return
+	}
+	if success {
+		_ = os.RemoveAll(root)
+	}
 }
 
 func firstModelID(configPath string) string {
