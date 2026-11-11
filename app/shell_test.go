@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -252,5 +253,28 @@ func TestShellArchivesAndRestoresConversations(t *testing.T) {
 	state.unarchiveConversation("c2")
 	if _, ok := posts["/api/conversations/c2/unarchive"]; !ok {
 		t.Fatalf("取消归档必须打 unarchive 路由，posts %v", posts)
+	}
+}
+
+func TestSelectingTheSameConversationTwiceKeepsOneTab(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"messages":[{"role":"user","text":"开始"}]}`))
+	}))
+	defer server.Close()
+	s := newShellState(server.URL, "tok")
+	var waiting sync.WaitGroup
+	for click := 0; click < 8; click++ {
+		waiting.Add(1)
+		go func() {
+			defer waiting.Done()
+			s.selectConversation("c1")
+		}()
+	}
+	waiting.Wait()
+	if len(s.tabs) != 1 {
+		t.Fatalf("八次点同一个会话留下了 %d 个标签，界面上就是同一个标题重复出现", len(s.tabs))
+	}
+	if s.activeID != "c1" {
+		t.Fatalf("the conversation that was clicked must end up active, got %q", s.activeID)
 	}
 }

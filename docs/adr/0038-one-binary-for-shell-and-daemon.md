@@ -24,9 +24,10 @@
 1. 一个可执行文件，两种模式：正常启动开窗口；第一个参数是 `daemon` 时调用
    `backend/daemon.Run`，把后续参数交给既有的 `graph.RunCLI`。`dist/graphd` 仍为
    `node --run start` 与 E2E 保留，但不再是 App 的来源。
-2. launchd 的固定路径 `~/Library/Application Support/Graph/bin/graphd` 留着——它承载的是
-   TCC 授权（辅助功能）绑定的稳定身份，不是构建产物的临时位置。内容相同就不重写，以免无谓地
-   改变 cdhash。
+2. launchd 走固定路径 `~/Library/Application Support/Graph/bin/graphd`（`dist/` 那样的构建
+   目录不行：重建就换路径或换 cdhash）。**这一条后来被 ADR 0040 推翻**：副本在任何 bundle 之外，
+   macOS 因此把它当成独立的授权客户端，App 上的勾落不到守护进程头上。现在 launchd 直接跑
+   `/Applications/Graph.app/Contents/MacOS/Graph daemon …`，副本只在包外启动时保留。
 3. 刷新顺序固定：先原子替换稳定副本，再写 plist，最后重启 launchd。反过来的话，launchd 会用
    新参数（`daemon`）拉起旧二进制，守护进程起不来，窗口在 40 秒里等一个不会出现的地址。
    `Paths.LaunchAgentFile` 让这条顺序能被测试端到端地跑一遍。

@@ -53,8 +53,14 @@ func (d *daemon) start() error {
 
 func (d *daemon) startThroughLaunchAgent() error {
 	d.stopStaleDaemon()
-	stable := stableDaemonPath(d.paths)
-	if _, err := installStableDaemon(d.paths.DaemonBin, stable); err != nil {
+	if insideAppBundle(d.paths.DaemonBin) {
+		d.paths.dropStableDaemon()
+		if _, err := installLaunchAgent(d.paths); err != nil {
+			return err
+		}
+		return launchAgentBoot(d.paths)
+	}
+	if _, err := installStableDaemon(d.paths.DaemonBin, stableDaemonPath(d.paths)); err != nil {
 		return err
 	}
 	if _, err := installLaunchAgent(d.paths); err != nil {
@@ -64,9 +70,15 @@ func (d *daemon) startThroughLaunchAgent() error {
 }
 
 func (d *daemon) refresh() bool {
-	binaryChanged, err := installStableDaemon(d.paths.DaemonBin, stableDaemonPath(d.paths))
-	if err != nil {
-		return false
+	binaryChanged := false
+	if insideAppBundle(d.paths.DaemonBin) {
+		d.paths.dropStableDaemon()
+	} else {
+		changed, err := installStableDaemon(d.paths.DaemonBin, stableDaemonPath(d.paths))
+		if err != nil {
+			return false
+		}
+		binaryChanged = changed
 	}
 	agentChanged, err := installLaunchAgent(d.paths)
 	if err != nil {
@@ -79,7 +91,7 @@ func (d *daemon) refresh() bool {
 	if !daemonSupervised(info.PID) {
 		return true
 	}
-	return binaryChanged || agentChanged
+	return binaryChanged || agentChanged || d.paths.daemonStale(info)
 }
 
 func (d *daemon) stopStaleDaemon() {

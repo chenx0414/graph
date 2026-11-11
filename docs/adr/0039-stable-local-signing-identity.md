@@ -27,8 +27,8 @@ macOS 的 TCC 把授权记在被授予代码的「指定要求」（designated r
    整包，最后以 `codesign --verify --strict --deep` 作为门禁。身份不可用时回退 ad-hoc，并在
    安装输出里明确告警「下次重建后授权会丢」，安装本身不失败。
 3. 目标是让 DR 变成与内容无关的形式：
-   `identifier "dev.graph.console" and certificate root = H"…"`。launchd 跑的稳定副本是同一份
-   字节拷贝，签名随字节一起过去，因此继承同一个 DR；重建只改 cdhash，不改 DR。
+   `identifier "dev.graph.console" and certificate root = H"…"`。重建只改 cdhash，不改 DR——但
+   签名只是两个条件之一：授权还要求进程从 app 包里运行（ADR 0040），否则同样的签名照样被拒。
 
 ## 后果
 

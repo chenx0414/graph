@@ -17,6 +17,24 @@ func stableDaemonPath(paths Paths) string {
 	return filepath.Join(filepath.Dir(paths.StateDir), "bin", "graphd")
 }
 
+func insideAppBundle(path string) bool {
+	return strings.Contains(path, ".app/Contents/MacOS/")
+}
+
+func (paths Paths) daemonLauncher() string {
+	if insideAppBundle(paths.DaemonBin) {
+		return paths.DaemonBin
+	}
+	return stableDaemonPath(paths)
+}
+
+func (paths Paths) dropStableDaemon() {
+	if !insideAppBundle(paths.DaemonBin) {
+		return
+	}
+	_ = os.Remove(stableDaemonPath(paths))
+}
+
 func launchAgentPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
@@ -44,7 +62,7 @@ func installStableDaemon(source, target string) (bool, error) {
 }
 
 func launchAgentPlist(paths Paths, environment []string) []byte {
-	arguments := append([]string{stableDaemonPath(paths)}, paths.DaemonCommand()...)
+	arguments := append([]string{paths.daemonLauncher()}, paths.DaemonCommand()...)
 	var document strings.Builder
 	document.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	document.WriteString("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")

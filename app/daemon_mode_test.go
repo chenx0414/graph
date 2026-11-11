@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDaemonCommandRunsTheShellBinaryInDaemonMode(t *testing.T) {
@@ -110,4 +111,64 @@ func TestRefreshInstallsTheBinaryLaunchdWillRunBeforeItRestartsTheAgent(t *testi
 	if !strings.Contains(string(agent), "<string>"+stableDaemonPath(paths)+"</string>\n\t\t<string>"+daemonModeArg+"</string>") {
 		t.Fatalf("the agent does not restart the stable copy in daemon mode:\n%s", agent)
 	}
+}
+
+func TestLaunchAgentRunsTheBinaryInsideTheBundleSoTheGrantApplies(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{
+		StateDir:   filepath.Join(dir, "state"),
+		GraphHome:  filepath.Join(dir, "graph-home"),
+		SourceRoot: dir,
+		DaemonBin:  "/Applications/Graph.app/Contents/MacOS/Graph",
+	}
+	plist := string(launchAgentPlist(paths, nil))
+	want := "<string>" + paths.DaemonBin + "</string>\n\t\t<string>" + daemonModeArg + "</string>"
+	if !strings.Contains(plist, want) {
+		t.Fatalf("launchd must run the binary inside the bundle in daemon mode, or macOS reads the daemon as its own client and refuses the accessibility grant:\n%s", plist)
+	}
+	if strings.Contains(plist, stableDaemonPath(paths)) {
+		t.Fatal("a copy outside the bundle is a separate accessibility client, so the app's grant never reaches the daemon")
+	}
+}
+
+func TestDaemonOlderThanItsBinaryIsReportedStale(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "Graph.app", "Contents", "MacOS", "Graph")
+	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(binary, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	paths := Paths{StateDir: filepath.Join(dir, "state"), DaemonBin: binary}
+	if paths.daemonStale(Console{StartedAt: stamp.Add(time.Minute).UnixMilli()}) {
+		t.Fatal("a daemon that started after its binary was written is running the current code")
+	}
+	if !paths.daemonStale(Console{StartedAt: stamp.Add(-time.Minute).UnixMilli()}) {
+		t.Fatal("a daemon that started before its binary was written is running older code and must be restarted")
+	}
+	if paths.daemonStale(Console{}) {
+		t.Fatal("a console record without a start time says nothing about staleness")
+	}
+}
+
+func TestTheBundleLauncherRemovesTheLeftoverCopy(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{StateDir: filepath.Join(dir, "state"), DaemonBin: "/Applications/Graph.app/Contents/MacOS/Graph"}
+	stable := stableDaemonPath(paths)
+	if err := os.MkdirAll(filepath.Dir(stable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stable, []byte("older copy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths.dropStableDaemon()
+	if _, err := os.Stat(stable); !os.IsNotExist(err) {
+		t.Fatalf("a copy outside the bundle is dead weight and a second accessibility client, so it must go: %v", err)
+	}
+	paths.dropStableDaemon()
 }

@@ -73,7 +73,7 @@ Agent definition 引用精确 `id@version`。恢复 session 时核对 capability
 
 TCC 把授权记在被授予代码的「指定要求」上。ad-hoc 签名没有可锚定的身份，DR 就是 `cdhash H"…"`（`codesign -dr- <二进制>` 可读），任何一次重建都会换掉它，已授予的辅助功能立刻失效——S8 激活后 `desktop` 工具第一次调用就 `PERM_DENIED`，就是这条机制。
 
-现在装包用本机自签身份签名（ADR 0039），DR 变成 `identifier "dev.graph.console" and certificate root = H"…"`，与内容无关；launchd 跑的稳定副本是同一份字节拷贝，因此重建不再改变 DR，授权只需勾一次。排查顺序：先 `codesign -dr- /Applications/Graph.app` 与 `codesign -dr- ~/Library/Application Support/Graph/bin/graphd`，两者应一致且不含 `cdhash`；含 `cdhash` 说明这次装的是回退签名（安装输出里会有告警），授权重建后必丢。
+两件事一起才成立。一是签名：装包用本机自签身份（ADR 0039），DR 变成 `identifier "dev.graph.console" and certificate root = H"…"`，与内容无关，重建不再改变 DR。二是落点：macOS 按「二进制所在的 bundle」决定授权是否适用于某个进程，所以守护进程必须从 `/Applications/Graph.app/Contents/MacOS/Graph` 运行（ADR 0040）。实测同一个二进制：从包内以 `daemon` 参数运行 → `snapshot` 返回窗口树；从 `~/Library/Application Support/Graph/bin/graphd` 运行 → `PERM_DENIED`。排查顺序：`codesign -dr- /Applications/Graph.app` 不含 `cdhash`，且 `ps -o command -p $(python3 -c "import json;print(json.load(open('$HOME/Library/Application Support/Graph/state/console.json'))['pid'])")` 显示守护进程的路径在 `/Applications/Graph.app/` 里。
 
 ## 浏览器验证与恢复
 

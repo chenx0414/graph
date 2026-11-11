@@ -84,7 +84,7 @@ Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内�
 ### 安装、卸载与打包
 
 - 打包：`node --run app:build`，产物为 `dist/app/mac-arm64/Graph.app`；安装：`node scripts/install-desktop-app.mjs`（旧包存为 `Graph.app.previous`）。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证。
-- 守护进程：launchd 标签 `dev.graph.daemon`，跑 `~/Library/Application Support/Graph/bin/graphd`——App 二进制的一份稳定副本，内容相同就不重写。
+- 守护进程：launchd 标签 `dev.graph.daemon`，跑 `/Applications/Graph.app/Contents/MacOS/Graph daemon …`——与窗口同一个二进制，也从同一个包里运行，授权才落在 Graph 上。
 - 数据与密钥：全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、`secrets.json`）。卸载应用不会删除该目录；彻底清理时手动删除。
 - 托盘：菜单栏图标提供“打开 Graph / 退出 Graph”；关闭窗口仅关闭窗口，守护进程继续运行。
 - 运行不依赖系统 Node 或终端环境。

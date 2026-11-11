@@ -43,7 +43,7 @@ node --run app:build                    # 打包 dist/app/mac-arm64/Graph.app
 node scripts/install-desktop-app.mjs    # 装到 /Applications，退出重开才生效
 ```
 
-- 守护进程由 launchd（`dev.graph.daemon`）托管，跑的是 App 自己那份二进制在 `~/Library/Application Support/Graph/bin/graphd` 的稳定副本：路径与内容都不随重装漂移，辅助功能授权才留得住。
+- 守护进程由 launchd（`dev.graph.daemon`）托管，跑的就是 App 包内那份二进制（`/Applications/Graph.app/Contents/MacOS/Graph daemon …`）：macOS 按“二进制所在的 bundle”记账，只有从包里运行，辅助功能授权才会认到 Graph 上。
 - 状态目录 `~/Library/Application Support/Graph/state`，配置默认 `~/Library/Application Support/Graph/graph.config.json`；可用 `--config`、`--state-dir`、`--port` 覆盖，或设置 `GRAPH_CONFIG`、`GRAPH_STATE_DIR`、`GRAPH_PORT`。源码 checkout 位置来自 `~/.graph/app-root` 或 `GRAPH_RSI_ROOT`。
 - 只想在终端里跑无窗口守护进程：`node --run build:backend && node --run start`（构建并运行 `dist/graphd`，与 App 里的守护进程是同一份 `backend/` 代码）。
 - 只绑定 `127.0.0.1`。同一状态目录只允许一个守护进程；`Ctrl-C`/SIGTERM 有界停止（5 秒），在途调用不会被记作成功。

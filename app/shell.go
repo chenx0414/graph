@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -91,6 +92,7 @@ type shellState struct {
 	resources    *resourceState
 	rows         []sidebarRow
 	tabs         []*chatTab
+	tabsMu       sync.Mutex
 	window       *mygo.Window
 	list         ui.ListState
 }
@@ -99,13 +101,45 @@ func newShellState(address, token string) *shellState {
 	return &shellState{address: address, token: token, status: "正在读取会话…"}
 }
 
+func (s *shellState) setSection(name string) {
+	s.tabsMu.Lock()
+	s.section = name
+	s.tabsMu.Unlock()
+}
+
+func (s *shellState) currentSection() string {
+	s.tabsMu.Lock()
+	defer s.tabsMu.Unlock()
+	return s.section
+}
+
 func (s *shellState) active() *chatState {
+	s.tabsMu.Lock()
+	defer s.tabsMu.Unlock()
 	for _, tab := range s.tabs {
 		if tab.id == s.activeID {
 			return tab.state
 		}
 	}
 	return nil
+}
+
+func (s *shellState) activeTabID() string {
+	s.tabsMu.Lock()
+	defer s.tabsMu.Unlock()
+	return s.activeID
+}
+
+func (s *shellState) setActiveTab(id string) {
+	s.tabsMu.Lock()
+	s.activeID = id
+	s.tabsMu.Unlock()
+}
+
+func (s *shellState) tabSnapshot() ([]*chatTab, string) {
+	s.tabsMu.Lock()
+	defer s.tabsMu.Unlock()
+	return append([]*chatTab(nil), s.tabs...), s.activeID
 }
 
 func (s *shellState) postJSON(path string, body any) error {
@@ -227,7 +261,7 @@ func (s *shellState) openSettings() {
 		s.settings.window = s.window
 		go s.settings.load()
 	}
-	s.section = "settings"
+	s.setSection("settings")
 	s.frame()
 }
 
@@ -237,7 +271,7 @@ func (s *shellState) openUsage() {
 		s.usage.window = s.window
 		go s.usage.load()
 	}
-	s.section = "usage"
+	s.setSection("usage")
 	s.frame()
 }
 
@@ -247,7 +281,7 @@ func (s *shellState) openResources() {
 		s.resources.window = s.window
 		go s.resources.load()
 	}
-	s.section = "resources"
+	s.setSection("resources")
 	s.frame()
 }
 
@@ -261,23 +295,47 @@ func (s *shellState) titleOf(id string) string {
 }
 
 func (s *shellState) selectConversation(id string) {
-	s.section = "chat"
-	for _, tab := range s.tabs {
-		if tab.id == id {
-			s.activeID = id
-			s.frame()
-			return
-		}
+	s.setSection("chat")
+	if s.activateTab(id) {
+		s.frame()
+		return
 	}
 	state := newChatState(s.address, s.token)
 	state.window = s.window
 	state.open(id)
-	s.tabs = append(s.tabs, &chatTab{id: id, title: s.titleOf(id), state: state})
-	s.activeID = id
+	s.attachTab(id, state)
 	s.frame()
 }
 
+func (s *shellState) activateTab(id string) bool {
+	s.tabsMu.Lock()
+	defer s.tabsMu.Unlock()
+	for _, tab := range s.tabs {
+		if tab.id == id {
+			s.activeID = id
+			return true
+		}
+	}
+	return false
+}
+
+func (s *shellState) attachTab(id string, state *chatState) bool {
+	title := s.titleOf(id)
+	s.tabsMu.Lock()
+	defer s.tabsMu.Unlock()
+	for _, tab := range s.tabs {
+		if tab.id == id {
+			s.activeID = id
+			return false
+		}
+	}
+	s.tabs = append(s.tabs, &chatTab{id: id, title: title, state: state})
+	s.activeID = id
+	return true
+}
+
 func (s *shellState) closeTab(id string) {
+	s.tabsMu.Lock()
 	kept := make([]*chatTab, 0, len(s.tabs))
 	for _, tab := range s.tabs {
 		if tab.id != id {
@@ -291,6 +349,7 @@ func (s *shellState) closeTab(id string) {
 			s.activeID = s.tabs[len(s.tabs)-1].id
 		}
 	}
+	s.tabsMu.Unlock()
 	s.frame()
 }
 
@@ -315,7 +374,7 @@ func (s *shellState) view(ctx *ui.Context) {
 			ui.Text(ctx, "Graph").FontSize(14)
 			ui.Row(ctx).Gap(4).Children(func() {
 				if ui.Button(ctx, "会话").Clicked() {
-					s.section = "chat"
+					s.setSection("chat")
 				}
 				if ui.Button(ctx, "设置").Clicked() {
 					go s.openSettings()
@@ -330,7 +389,7 @@ func (s *shellState) view(ctx *ui.Context) {
 			ui.Row(ctx).Gap(4).Children(func() {
 				if ui.Button(ctx, "新建会话").Clicked() {
 					s.creating = true
-					s.section = "chat"
+					s.setSection("chat")
 				}
 				label := "显示已归档"
 				if s.showArchived {
@@ -382,7 +441,7 @@ func (s *shellState) view(ctx *ui.Context) {
 					return
 				}
 				label := row.label
-				if row.id == s.activeID {
+				if row.id == s.activeTabID() {
 					label = "• " + label
 				}
 				if ui.Button(ctx, label).Clicked() {
@@ -395,8 +454,9 @@ func (s *shellState) view(ctx *ui.Context) {
 				}
 			}).Grow(1)
 		})
+		section := s.currentSection()
 		ui.Column(ctx).Fill().Children(func() {
-			if s.section == "resources" {
+			if section == "resources" {
 				if s.resources == nil {
 					ui.Text(ctx, "正在读取能力库…").Padding(16).TextColor(t.TextMuted)
 					return
@@ -404,7 +464,7 @@ func (s *shellState) view(ctx *ui.Context) {
 				s.resources.view(ctx)
 				return
 			}
-			if s.section == "usage" {
+			if section == "usage" {
 				if s.usage == nil {
 					ui.Text(ctx, "正在汇总用量…").Padding(16).TextColor(t.TextMuted)
 					return
@@ -412,7 +472,7 @@ func (s *shellState) view(ctx *ui.Context) {
 				s.usage.view(ctx)
 				return
 			}
-			if s.section == "settings" {
+			if section == "settings" {
 				if s.settings == nil {
 					ui.Text(ctx, "正在读取设置…").Padding(16).TextColor(t.TextMuted)
 					return
@@ -420,20 +480,21 @@ func (s *shellState) view(ctx *ui.Context) {
 				s.settings.view(ctx)
 				return
 			}
-			if len(s.tabs) > 0 {
+			tabs, activeTab := s.tabSnapshot()
+			if len(tabs) > 0 {
 				ui.Row(ctx).Gap(4).Padding(8, 8, 0, 8).Children(func() {
-					for _, tab := range s.tabs {
+					for _, tab := range tabs {
 						label := tab.title
-						if tab.id == s.activeID {
+						if tab.id == activeTab {
 							label = "› " + label
 						}
 						if ui.Button(ctx, label).Clicked() {
-							s.activeID = tab.id
+							s.setActiveTab(tab.id)
 						}
 						if ui.Button(ctx, "关闭 "+tab.title).Clicked() {
 							s.closeTab(tab.id)
 						}
-						if tab.id == s.activeID && ui.Button(ctx, "归档 "+tab.title).Clicked() {
+						if tab.id == activeTab && ui.Button(ctx, "归档 "+tab.title).Clicked() {
 							go s.archiveConversation(tab.id)
 						}
 					}

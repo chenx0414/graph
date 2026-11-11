@@ -120,6 +120,17 @@ func (paths Paths) DaemonCommand() []string {
 	return append([]string{daemonModeArg}, paths.DaemonArgs()...)
 }
 
+func (paths Paths) daemonStale(info Console) bool {
+	if info.StartedAt <= 0 {
+		return false
+	}
+	stamp, ok := executableStamp(paths.daemonLauncher())
+	if !ok {
+		return false
+	}
+	return stamp.Mod.UnixMilli() > info.StartedAt
+}
+
 func (paths Paths) DaemonArgs() []string {
 	args := []string{
 		"--state-dir", paths.StateDir,
