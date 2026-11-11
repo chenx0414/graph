@@ -77,7 +77,7 @@ func TestFetchTasksReadsTheDaemonWithTheSessionCookie(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tasks, err := fetchTasks(server.URL, "tok\n")
+	tasks, err := fetchTasks(newAPIClient(server.URL, "tok\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

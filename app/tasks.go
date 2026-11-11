@@ -2,9 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"strings"
-	"time"
 )
 
 type taskSummary struct {
@@ -81,30 +79,10 @@ func clipRequest(request string) string {
 	return string(runes[:80])
 }
 
-func fetchTasks(address, token string) ([]taskSummary, error) {
-	request, err := http.NewRequest("GET", strings.TrimSuffix(address, "/")+"/api/tasks", nil)
+func fetchTasks(api apiClient) ([]taskSummary, error) {
+	payload, err := api.get("/api/tasks")
 	if err != nil {
 		return nil, err
-	}
-	if token = strings.TrimSpace(token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	payload := make([]byte, 0, 64*1024)
-	buffer := make([]byte, 32*1024)
-	for {
-		read, err := response.Body.Read(buffer)
-		if read > 0 {
-			payload = append(payload, buffer[:read]...)
-		}
-		if err != nil {
-			break
-		}
 	}
 	return parseTasks(payload)
 }

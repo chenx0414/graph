@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -134,8 +131,7 @@ func projectLabel(row projectRow) string {
 }
 
 type settingsState struct {
-	address     string
-	token       string
+	api         apiClient
 	status      string
 	editing     string
 	secretDraft string
@@ -147,21 +143,21 @@ type settingsState struct {
 }
 
 func newSettingsState(address, token string) *settingsState {
-	return &settingsState{address: address, token: token, status: "正在读取设置…", openURL: mygo.Shell.OpenExternal}
+	return &settingsState{api: newAPIClient(address, token), status: "正在读取设置…", openURL: mygo.Shell.OpenExternal}
 }
 
 func (s *settingsState) load() {
-	startup, err := daemonGet(s.address, s.token, "/api/startup")
+	startup, err := s.api.get("/api/startup")
 	if err != nil {
 		s.status = "读不到运行信息：" + err.Error()
 		return
 	}
-	settings, err := daemonGet(s.address, s.token, "/api/settings")
+	settings, err := s.api.get("/api/settings")
 	if err != nil {
 		s.status = "读不到设置：" + err.Error()
 		return
 	}
-	config, err := daemonGet(s.address, s.token, "/api/config")
+	config, err := s.api.get("/api/config")
 	if err != nil {
 		s.status = "读不到配置：" + err.Error()
 		return
@@ -177,24 +173,8 @@ func (s *settingsState) load() {
 }
 
 func (s *settingsState) post(path string) {
-	request, err := daemonPostRequest(s.address, s.token, path, []byte("{}"))
-	if err != nil {
+	if _, err := s.api.post(path, nil); err != nil {
 		s.status = "操作失败：" + err.Error()
-		return
-	}
-	if token := strings.TrimSpace(s.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		s.status = "操作失败：" + err.Error()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		s.status = "操作被拒绝：" + response.Status
 		return
 	}
 	s.status = ""
@@ -208,27 +188,9 @@ func (s *settingsState) saveSecret(row credentialRow) {
 		s.frame()
 		return
 	}
-	body, _ := json.Marshal(map[string]any{"ref": row.secretRef, "value": value, "persisted": true})
-	request, err := http.NewRequest("POST", strings.TrimSuffix(s.address, "/")+"/api/app/secret", bytes.NewReader(body))
-	if err != nil {
+	body := map[string]any{"ref": row.secretRef, "value": value, "persisted": true}
+	if _, err := s.api.post("/api/app/secret", body); err != nil {
 		s.status = "保存失败：" + err.Error()
-		s.frame()
-		return
-	}
-	if token := strings.TrimSpace(s.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		s.status = "保存失败：" + err.Error()
-		s.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		s.status = "保存被拒绝：" + response.Status
 		s.frame()
 		return
 	}

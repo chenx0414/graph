@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -45,8 +43,7 @@ func loginLabel(login providerLogin) string {
 }
 
 func (s *settingsState) startLogin(row credentialRow) {
-	body, _ := json.Marshal(map[string]string{"providerId": row.id, "credentialRef": row.secretRef})
-	payload, err := s.postLogin("/api/providers/login", body)
+	payload, err := s.postLogin("/api/providers/login", map[string]string{"providerId": row.id, "credentialRef": row.secretRef})
 	if err != nil {
 		s.status = "开始登录失败：" + err.Error()
 		s.frame()
@@ -83,7 +80,7 @@ func (s *settingsState) pollLogin() {
 
 func (s *settingsState) refreshLogin() (providerLogin, error) {
 	var login providerLogin
-	payload, err := daemonGet(s.address, s.token, "/api/providers/login/"+s.login.ID)
+	payload, err := s.api.get("/api/providers/login/" + s.login.ID)
 	if err != nil {
 		return login, err
 	}
@@ -122,29 +119,13 @@ func (s *settingsState) openLoginURL() {
 	s.frame()
 }
 
-func (s *settingsState) postLogin(path string, body []byte) (providerLogin, error) {
+func (s *settingsState) postLogin(path string, body any) (providerLogin, error) {
 	var login providerLogin
-	if body == nil {
-		body = []byte("{}")
-	}
-	request, err := daemonPostRequest(s.address, s.token, path, body)
+	payload, err := s.api.post(path, body)
 	if err != nil {
 		return login, err
 	}
-	if token := strings.TrimSpace(s.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		return login, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return login, errStatus(response.Status)
-	}
-	if err := json.NewDecoder(response.Body).Decode(&login); err != nil {
+	if err := json.Unmarshal(payload, &login); err != nil {
 		return login, err
 	}
 	return login, nil

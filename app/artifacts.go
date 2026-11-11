@@ -107,7 +107,7 @@ func artifactFileName(row artifactRow) string {
 }
 
 func (c *chatState) artifactContent(row artifactRow) ([]byte, error) {
-	return daemonGet(c.address, c.token, "/api/tasks/"+row.taskID+"/artifacts/"+row.artifactID+"/"+strconv.Itoa(row.version)+"/content")
+	return c.api.get("/api/tasks/" + row.taskID + "/artifacts/" + row.artifactID + "/" + strconv.Itoa(row.version) + "/content")
 }
 
 func exportArtifact(path string, content []byte) error {
@@ -142,7 +142,7 @@ func (c *chatState) exportArtifactNow(row artifactRow) {
 }
 
 func (c *chatState) showArtifact(row artifactRow) {
-	payload, err := daemonGet(c.address, c.token, "/api/tasks/"+row.taskID+"/artifacts/"+row.artifactID+"/"+strconv.Itoa(row.version)+"/content")
+	payload, err := c.api.get("/api/tasks/" + row.taskID + "/artifacts/" + row.artifactID + "/" + strconv.Itoa(row.version) + "/content")
 	if err != nil {
 		c.status = "读不到产物：" + err.Error()
 		c.frame()

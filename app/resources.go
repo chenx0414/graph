@@ -2,11 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -106,8 +105,7 @@ type catalogRoot struct {
 }
 
 type resourceState struct {
-	address    string
-	token      string
+	api        apiClient
 	status     string
 	root       string
 	document   json.RawMessage
@@ -120,11 +118,11 @@ type resourceState struct {
 }
 
 func newResourceState(address, token string) *resourceState {
-	return &resourceState{address: address, token: token, status: "正在读取能力库…", openPath: mygo.Shell.OpenPath}
+	return &resourceState{api: newAPIClient(address, token), status: "正在读取能力库…", openPath: mygo.Shell.OpenPath}
 }
 
 func (s *resourceState) load() {
-	payload, err := daemonGet(s.address, s.token, "/api/capabilities/config")
+	payload, err := s.api.get("/api/capabilities/config")
 	if err != nil {
 		s.status = "读不到能力库：" + err.Error()
 		return
@@ -141,13 +139,13 @@ func (s *resourceState) load() {
 }
 
 func (s *resourceState) reloadConfig() {
-	if payload, err := daemonGet(s.address, s.token, "/api/settings"); err == nil {
+	if payload, err := s.api.get("/api/settings"); err == nil {
 		var named catalogRoot
 		if json.Unmarshal(payload, &named) == nil {
 			s.root = strings.TrimSpace(named.CapabilityRoot)
 		}
 	}
-	payload, err := daemonGet(s.address, s.token, "/api/config")
+	payload, err := s.api.get("/api/config")
 	if err != nil {
 		return
 	}
@@ -177,27 +175,14 @@ func (s *resourceState) toggleAutoUpdate() {
 		return
 	}
 	shaped["piExtensionAutoUpdate"] = !s.autoUpdate
-	body, _ := json.Marshal(map[string]any{"expectedRevision": s.revision, "document": shaped})
-	request, err := daemonPostRequest(s.address, s.token, "/api/config", body)
-	if err != nil {
-		s.status = "写入失败：" + err.Error()
-		s.frame()
-		return
-	}
-	if token := strings.TrimSpace(s.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		s.status = "写入失败：" + err.Error()
-		s.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		s.status = "写入被拒绝：" + response.Status + "（配置可能已被别处改过，重进资源页会重读）"
+	body := map[string]any{"expectedRevision": s.revision, "document": shaped}
+	if _, err := s.api.post("/api/config", body); err != nil {
+		var rejected errStatus
+		if errors.As(err, &rejected) {
+			s.status = "写入被拒绝：" + err.Error() + "（配置可能已被别处改过，重进资源页会重读）"
+		} else {
+			s.status = "写入失败：" + err.Error()
+		}
 		s.frame()
 		return
 	}

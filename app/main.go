@@ -36,7 +36,7 @@ func (s *shell) watchTasks() {
 		if s.console == "" {
 			continue
 		}
-		tasks, err := fetchTasks(s.console, s.paths.SessionToken())
+		tasks, err := fetchTasks(newAPIClient(s.console, s.paths.SessionToken()))
 		if err != nil {
 			continue
 		}

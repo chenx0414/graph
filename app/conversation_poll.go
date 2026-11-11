@@ -19,10 +19,10 @@ func transcriptFingerprint(messages []transcriptMessage) string {
 }
 
 func (c *chatState) poll() bool {
-	if c.active == "" || c.address == "" {
+	if c.active == "" || c.api.address == "" {
 		return false
 	}
-	payload, err := daemonGet(c.address, c.token, "/api/conversations/"+c.active)
+	payload, err := c.api.get("/api/conversations/" + c.active)
 	if err != nil {
 		return false
 	}

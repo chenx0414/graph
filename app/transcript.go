@@ -134,8 +134,7 @@ type chatState struct {
 	fingerprint     string
 	expanded        map[string]bool
 	window          *mygo.Window
-	address         string
-	token           string
+	api             apiClient
 	draft           string
 	active          string
 	status          string
@@ -145,7 +144,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{address: address, token: token, status: "正在读取会话…", expanded: map[string]bool{}, visible: transcriptWindow}
+	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, visible: transcriptWindow}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state

@@ -157,8 +157,7 @@ func planLabel(plan planRow) string {
 }
 
 type usageState struct {
-	address string
-	token   string
+	api     apiClient
 	status  string
 	window  *mygo.Window
 	rows    usageSnapshot
@@ -166,21 +165,21 @@ type usageState struct {
 }
 
 func newUsageState(address, token string) *usageState {
-	return &usageState{address: address, token: token, status: "正在汇总用量…"}
+	return &usageState{api: newAPIClient(address, token), status: "正在汇总用量…"}
 }
 
 func (s *usageState) load() {
-	insights, err := daemonGet(s.address, s.token, "/api/insights")
+	insights, err := s.api.get("/api/insights")
 	if err != nil {
 		s.status = "读不到用量：" + err.Error()
 		return
 	}
-	usage, err := daemonGet(s.address, s.token, "/api/usage")
+	usage, err := s.api.get("/api/usage")
 	if err != nil {
 		s.status = "读不到订阅额度：" + err.Error()
 		return
 	}
-	capabilities, err := daemonGet(s.address, s.token, "/api/capabilities/config")
+	capabilities, err := s.api.get("/api/capabilities/config")
 	if err != nil {
 		s.status = "读不到能力库：" + err.Error()
 		return

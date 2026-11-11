@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -158,30 +157,12 @@ func (c *chatState) sendNodeMessage() {
 	if text == "" || c.nodeTaskID == "" || c.nodeID == "" {
 		return
 	}
-	body, _ := json.Marshal(map[string]string{
+	body := map[string]string{
 		"text":      text,
 		"requestId": "native-node-" + strconv.FormatInt(time.Now().UnixNano(), 36),
-	})
-	request, err := daemonPostRequest(c.address, c.token, "/api/tasks/"+c.nodeTaskID+"/nodes/"+c.nodeID+"/messages", body)
-	if err != nil {
+	}
+	if _, err := c.api.post("/api/tasks/"+c.nodeTaskID+"/nodes/"+c.nodeID+"/messages", body); err != nil {
 		c.status = "发送失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "发送失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "发送被拒绝：" + response.Status
 		c.frame()
 		return
 	}
@@ -191,7 +172,7 @@ func (c *chatState) sendNodeMessage() {
 }
 
 func (c *chatState) showNode(taskID string, node nodeRow) {
-	payload, err := daemonGet(c.address, c.token, "/api/tasks/"+taskID+"/nodes/"+node.id+"/run")
+	payload, err := c.api.get("/api/tasks/" + taskID + "/nodes/" + node.id + "/run")
 	if err != nil {
 		c.status = "读不到节点：" + err.Error()
 		c.frame()

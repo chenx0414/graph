@@ -324,8 +324,8 @@ func TestAdoptingANewConsoleAddressWhenTheDaemonMoved(t *testing.T) {
 	if !s.adoptConsole(Paths{StateDir: stateDir}) {
 		t.Fatal("a daemon that moved to another port must be adopted, otherwise the window keeps talking to a closed socket")
 	}
-	if s.address != "http://127.0.0.1:60001" || s.token != "fresh" {
-		t.Fatalf("adopted %q with token %q", s.address, s.token)
+	if s.api.address != "http://127.0.0.1:60001" || s.api.token != "fresh" {
+		t.Fatalf("adopted %q with token %q", s.api.address, s.api.token)
 	}
 	if s.adoptConsole(Paths{StateDir: stateDir}) {
 		t.Fatal("the same address is not a change")

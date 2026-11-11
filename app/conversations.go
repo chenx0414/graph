@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -95,78 +92,18 @@ func parseConversationBody(payload []byte) (conversationBody, error) {
 }
 
 func (c *chatState) answer(question openQuestion, value string) {
-	body, _ := json.Marshal(map[string]any{
+	body := map[string]any{
 		"questionId": question.ID,
 		"answer":     map[string]string{"type": "respond", "value": value},
 		"requestId":  "native-" + question.ID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
-	})
-	request, err := daemonPostRequest(c.address, c.token, "/api/tasks/"+question.TaskID+"/answer", body)
-	if err != nil {
+	}
+	if _, err := c.api.post("/api/tasks/"+question.TaskID+"/answer", body); err != nil {
 		c.status = "回答失败：" + err.Error()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "回答失败：" + err.Error()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "回答被拒绝：" + response.Status
 		return
 	}
 	c.status = ""
 	c.refresh()
 	c.frame()
-}
-
-func daemonGet(address, token, path string) ([]byte, error) {
-	request, err := http.NewRequest("GET", strings.TrimSuffix(address, "/")+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if token = strings.TrimSpace(token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	payload := make([]byte, 0, 64*1024)
-	buffer := make([]byte, 64*1024)
-	for {
-		read, err := response.Body.Read(buffer)
-		if read > 0 {
-			payload = append(payload, buffer[:read]...)
-		}
-		if err != nil {
-			break
-		}
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return payload, fmt.Errorf("%s 返回 %d", path, response.StatusCode)
-	}
-	return payload, nil
-}
-
-func daemonPostRequest(address, token, path string, body []byte) (*http.Request, error) {
-	request, err := http.NewRequest("POST", strings.TrimSuffix(address, "/")+path, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	if token = strings.TrimSpace(token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("Origin", strings.TrimSuffix(address, "/"))
-	request.Header.Set("content-type", "application/json")
-	return request, nil
 }
 
 func (c *chatState) busy() bool {
@@ -183,25 +120,9 @@ func (c *chatState) send() {
 	if text == "" || c.active == "" {
 		return
 	}
-	body, _ := json.Marshal(map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/messages", body)
-	if err != nil {
+	body := map[string]string{"text": text, "requestId": "native-" + time.Now().Format("150405.000000")}
+	if _, err := c.api.post("/api/conversations/"+c.active+"/messages", body); err != nil {
 		c.status = "发送失败：" + err.Error()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "发送失败：" + err.Error()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "发送被拒绝：" + response.Status
 		return
 	}
 	c.draft = ""
@@ -225,7 +146,7 @@ func (c *chatState) follow() {
 }
 
 func (c *chatState) refresh() {
-	payload, err := daemonGet(c.address, c.token, "/api/conversations/"+c.active)
+	payload, err := c.api.get("/api/conversations/" + c.active)
 	if err != nil {
 		c.status = "读不到这个会话：" + err.Error()
 		return
@@ -242,7 +163,7 @@ func (c *chatState) refresh() {
 }
 
 func (c *chatState) open(id string) {
-	payload, err := daemonGet(c.address, c.token, "/api/conversations/"+id)
+	payload, err := c.api.get("/api/conversations/" + id)
 	if err != nil {
 		c.status = "读不到这个会话：" + err.Error()
 		return
@@ -273,7 +194,7 @@ func (c *chatState) open(id string) {
 	c.artifactsOpen = false
 	c.preview = ""
 	c.previewTitle = ""
-	if listed, err := daemonGet(c.address, c.token, "/api/conversations/"+id+"/artifacts"); err == nil {
+	if listed, err := c.api.get("/api/conversations/" + id + "/artifacts"); err == nil {
 		if rows, err := parseArtifacts(listed); err == nil {
 			c.artifacts = rows
 		}

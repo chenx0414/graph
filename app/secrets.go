@@ -9,7 +9,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 type secretsFile struct {
@@ -194,5 +193,3 @@ func secretValues(path string) map[string]string {
 func secretsPath(stateDir string) string {
 	return filepath.Join(stateDir, "secrets.json")
 }
-
-func normalizeSecretRef(ref string) string { return strings.TrimSpace(ref) }

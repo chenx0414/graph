@@ -209,10 +209,6 @@ func launchAgentService() string {
 	return launchAgentDomain() + "/" + launchAgentLabel
 }
 
-func launchAgentLoaded() bool {
-	return exec.Command("launchctl", "print", launchAgentService()).Run() == nil
-}
-
 func launchAgentPlan(paths Paths, reload bool) [][]string {
 	if reload {
 		return [][]string{

@@ -2,36 +2,15 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"strings"
-	"time"
 )
 
 func (c *chatState) interrupt() {
 	if c.active == "" {
 		return
 	}
-	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-interrupt")})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/interrupt", body)
-	if err != nil {
+	if _, err := c.api.post("/api/conversations/"+c.active+"/interrupt", map[string]string{"requestId": requestID("native-interrupt")}); err != nil {
 		c.status = "打断失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "打断失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "打断被拒绝：" + response.Status
 		c.frame()
 		return
 	}
@@ -40,27 +19,8 @@ func (c *chatState) interrupt() {
 }
 
 func (c *chatState) cancelQueued(messageID string) {
-	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-cancel")})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/messages/"+messageID+"/cancel", body)
-	if err != nil {
+	if _, err := c.api.post("/api/conversations/"+c.active+"/messages/"+messageID+"/cancel", map[string]string{"requestId": requestID("native-cancel")}); err != nil {
 		c.status = "撤销失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "撤销失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "撤销被拒绝：" + response.Status
 		c.frame()
 		return
 	}
@@ -76,27 +36,8 @@ func (c *chatState) setPaused(paused bool) {
 	if !paused {
 		action = "resume"
 	}
-	body, _ := json.Marshal(map[string]string{"requestId": requestID("native-" + action)})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/"+action, body)
-	if err != nil {
+	if _, err := c.api.post("/api/conversations/"+c.active+"/"+action, map[string]string{"requestId": requestID("native-" + action)}); err != nil {
 		c.status = "操作失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "操作失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "操作被拒绝：" + response.Status
 		c.frame()
 		return
 	}
@@ -120,7 +61,7 @@ func (c *chatState) projectChoices() []string {
 	if len(c.projects) > 0 {
 		return c.projects
 	}
-	payload, err := daemonGet(c.address, c.token, "/api/settings")
+	payload, err := c.api.get("/api/settings")
 	if err != nil {
 		c.status = "读不到项目列表：" + err.Error()
 		return nil
@@ -159,7 +100,7 @@ func (c *chatState) modelChoices() []modelChoice {
 	if len(c.models) > 0 {
 		return c.models
 	}
-	payload, err := daemonGet(c.address, c.token, "/api/settings")
+	payload, err := c.api.get("/api/settings")
 	if err != nil {
 		c.status = "读不到模型列表：" + err.Error()
 		return nil
@@ -198,31 +139,13 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 	if c.active == "" {
 		return
 	}
-	body, _ := json.Marshal(map[string]string{
+	body := map[string]string{
 		"model":         model.id,
 		"thinkingLevel": thinking,
 		"requestId":     requestID("native-model"),
-	})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/model", body)
-	if err != nil {
+	}
+	if _, err := c.api.post("/api/conversations/"+c.active+"/model", body); err != nil {
 		c.status = "换模型失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "换模型失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "换模型被拒绝：" + response.Status
 		c.frame()
 		return
 	}
@@ -243,32 +166,14 @@ func (c *chatState) confirmDraft() {
 		c.frame()
 		return
 	}
-	body, _ := json.Marshal(map[string]any{
+	body := map[string]any{
 		"proposalVersion": c.proposal.Version,
 		"draftRevision":   c.proposal.DraftRevision,
 		"targetBranch":    branch,
 		"requestId":       requestID("native-confirm"),
-	})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/confirm", body)
-	if err != nil {
+	}
+	if _, err := c.api.post("/api/conversations/"+c.active+"/confirm", body); err != nil {
 		c.status = "确认失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 60 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "确认失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "确认被拒绝：" + response.Status
 		c.frame()
 		return
 	}
@@ -281,27 +186,8 @@ func (c *chatState) bindProject(projectID string) {
 	if c.active == "" || strings.TrimSpace(projectID) == "" {
 		return
 	}
-	body, _ := json.Marshal(map[string]string{"projectId": projectID, "requestId": requestID("native-bind")})
-	request, err := daemonPostRequest(c.address, c.token, "/api/conversations/"+c.active+"/bind", body)
-	if err != nil {
+	if _, err := c.api.post("/api/conversations/"+c.active+"/bind", map[string]string{"projectId": projectID, "requestId": requestID("native-bind")}); err != nil {
 		c.status = "绑定失败：" + err.Error()
-		c.frame()
-		return
-	}
-	if token := strings.TrimSpace(c.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		c.status = "绑定失败：" + err.Error()
-		c.frame()
-		return
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		c.status = "绑定被拒绝：" + response.Status
 		c.frame()
 		return
 	}

@@ -240,27 +240,12 @@ func (d *daemon) restart(reload bool) (bool, string) {
 	return false, "后台重启后没有在 40 秒内就绪"
 }
 
-func (d *daemon) shutdown() {
-	d.mu.Lock()
-	d.stopped = true
-	d.mu.Unlock()
-	d.stop()
-}
-
 func notify(title, body string) {
 	if !mygo.NotificationsSupported() {
 		return
 	}
 	note := mygo.NewNotification(mygo.NotificationOptions{ID: "graph-shell", Title: title, Body: body})
 	_ = note.Show()
-}
-
-func secretNames(stateDir string) []string {
-	names := []string{}
-	for ref := range secretValues(secretsPath(stateDir)) {
-		names = append(names, ref)
-	}
-	return names
 }
 
 func envHas(env []string, name, value string) bool {

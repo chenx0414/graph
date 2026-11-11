@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,8 +76,7 @@ type chatTab struct {
 }
 
 type shellState struct {
-	address      string
-	token        string
+	api          apiClient
 	status       string
 	section      string
 	newText      string
@@ -99,7 +96,7 @@ type shellState struct {
 }
 
 func newShellState(address, token string) *shellState {
-	return &shellState{address: address, token: token, status: "正在读取会话…"}
+	return &shellState{api: newAPIClient(address, token), status: "正在读取会话…"}
 }
 
 func (s *shellState) setSection(name string) {
@@ -144,28 +141,8 @@ func (s *shellState) tabSnapshot() ([]*chatTab, string) {
 }
 
 func (s *shellState) postJSON(path string, body any) error {
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	request, err := daemonPostRequest(s.address, s.token, path, encoded)
-	if err != nil {
-		return err
-	}
-	if token := strings.TrimSpace(s.token); token != "" {
-		request.Header.Set("Cookie", "graph_session="+token)
-	}
-	request.Header.Set("content-type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return errStatus(response.Status)
-	}
-	return nil
+	_, err := s.api.post(path, body)
+	return err
 }
 
 type errStatus string
@@ -220,17 +197,16 @@ func (s *shellState) unarchiveConversation(id string) {
 
 func (s *shellState) adoptConsole(paths Paths) bool {
 	info, ok := paths.ReadConsole()
-	if !ok || info.URL == "" || info.URL == s.address {
+	if !ok || info.URL == "" || info.URL == s.api.address {
 		return false
 	}
-	s.address = info.URL
-	s.token = paths.SessionToken()
+	s.api = newAPIClient(info.URL, paths.SessionToken())
 	s.broken = true
 	return true
 }
 
 func (s *shellState) loadRows() bool {
-	payload, err := daemonGet(s.address, s.token, "/api/conversations")
+	payload, err := s.api.get("/api/conversations")
 	if err != nil {
 		s.status = "读不到会话列表：" + err.Error()
 		s.broken = true
@@ -279,7 +255,7 @@ func (s *shellState) projectNames() []string {
 
 func (s *shellState) openSettings() {
 	if s.settings == nil {
-		s.settings = newSettingsState(s.address, s.token)
+		s.settings = newSettingsState(s.api.address, s.api.token)
 		s.settings.window = s.window
 		go s.settings.load()
 	}
@@ -289,7 +265,7 @@ func (s *shellState) openSettings() {
 
 func (s *shellState) openUsage() {
 	if s.usage == nil {
-		s.usage = newUsageState(s.address, s.token)
+		s.usage = newUsageState(s.api.address, s.api.token)
 		s.usage.window = s.window
 		go s.usage.load()
 	}
@@ -299,7 +275,7 @@ func (s *shellState) openUsage() {
 
 func (s *shellState) openResources() {
 	if s.resources == nil {
-		s.resources = newResourceState(s.address, s.token)
+		s.resources = newResourceState(s.api.address, s.api.token)
 		s.resources.window = s.window
 		go s.resources.load()
 	}
@@ -325,7 +301,7 @@ func (s *shellState) selectConversation(id string) {
 		s.frame()
 		return
 	}
-	state := newChatState(s.address, s.token)
+	state := newChatState(s.api.address, s.api.token)
 	state.window = s.window
 	state.open(id)
 	s.attachTab(id, state)
