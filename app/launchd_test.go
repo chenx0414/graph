@@ -129,3 +129,32 @@ func launchAgentPathForTest(t *testing.T, dir string) string {
 	t.Helper()
 	return filepath.Join(dir, "dev.graph.daemon.plist")
 }
+
+func TestLaunchAgentPinsTheNativeDesktopBinary(t *testing.T) {
+	dir := t.TempDir()
+	graphHome := filepath.Join(dir, "graph-home")
+	native := filepath.Join(graphHome, "capabilities", "agent-desktop", "node_modules", "agent-desktop", "bin", desktopBinaryName())
+	if err := os.MkdirAll(filepath.Dir(native), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(native, []byte("native"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := Paths{StateDir: filepath.Join(dir, "state"), GraphHome: graphHome, SourceRoot: dir, DaemonBin: filepath.Join(dir, "dist", "graphd")}
+	if err := os.MkdirAll(paths.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	environment := launchAgentEnvironment(paths)
+	pinned := ""
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "GRAPH_DESKTOP_BIN=") {
+			pinned = strings.TrimPrefix(entry, "GRAPH_DESKTOP_BIN=")
+		}
+	}
+	if pinned != native {
+		t.Fatalf("the daemon environment must pin GRAPH_DESKTOP_BIN to the native binary %q, got %q (environment %+v)", native, pinned, environment)
+	}
+	if strings.HasSuffix(pinned, ".bin/agent-desktop") {
+		t.Fatal("the Node launcher is not the binary macOS authorises: it runs node, and TCC reads the grant against node")
+	}
+}

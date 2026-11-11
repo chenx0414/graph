@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -76,6 +77,26 @@ func plistEscape(value string) string {
 	return replacer.Replace(value)
 }
 
+func desktopBinaryName() string {
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "x64"
+	}
+	return "agent-desktop-" + runtime.GOOS + "-" + arch
+}
+
+func nativeDesktopBinary(graphHome string) string {
+	if strings.TrimSpace(graphHome) == "" {
+		return ""
+	}
+	path := filepath.Join(graphHome, "capabilities", "agent-desktop", "node_modules", "agent-desktop", "bin", desktopBinaryName())
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		return ""
+	}
+	return path
+}
+
 func launchAgentEnvironment(paths Paths) []string {
 	environment := []string{}
 	for _, name := range []string{"HOME", "PATH", "TMPDIR", "LANG", "LC_ALL"} {
@@ -85,6 +106,9 @@ func launchAgentEnvironment(paths Paths) []string {
 	}
 	if len(environment) == 0 || !hasEnvironment(environment, "PATH") {
 		environment = append(environment, "PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+	}
+	if native := nativeDesktopBinary(paths.GraphHome); native != "" {
+		environment = append(environment, "GRAPH_DESKTOP_BIN="+native)
 	}
 	secrets := secretValues(secretsPath(paths.StateDir))
 	names := make([]string, 0, len(secrets))
