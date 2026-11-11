@@ -15,6 +15,7 @@ import (
 type daemonController interface {
 	start() error
 	adopt(pid int)
+	refresh() bool
 	restart() (bool, string)
 }
 
@@ -47,11 +48,18 @@ func (s *shell) watchTasks() {
 
 func (s *shell) ensureDaemon() string {
 	if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {
+		if s.daemon.refresh() {
+			if restarted, _ := s.daemon.restart(); restarted {
+				if fresh, ok := s.paths.ReadConsole(); ok {
+					return fresh.URL
+				}
+			}
+		}
 		s.daemon.adopt(info.PID)
 		return info.URL
 	}
 	if err := s.daemon.start(); err != nil {
-		log.Printf("[app] cannot start %s: %v", s.paths.DaemonBin, err)
+		log.Printf("[app] cannot start %s: %v", stableDaemonPath(s.paths), err)
 	}
 	for attempt := 0; attempt < 160; attempt++ {
 		if info, ok := s.paths.ReadConsole(); ok && s.paths.Reachable(info.URL) {

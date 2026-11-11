@@ -91,6 +91,8 @@ func (d *restartDaemon) start() error { return nil }
 
 func (d *restartDaemon) adopt(int) {}
 
+func (d *restartDaemon) refresh() bool { return false }
+
 func (d *restartDaemon) restart() (bool, string) {
 	d.restarts++
 	if d.apply != nil {

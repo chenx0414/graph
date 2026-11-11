@@ -18,6 +18,7 @@ type daemon struct {
 	command    *exec.Cmd
 	adoptedPid int
 	owned      bool
+	launched   bool
 	stopped    bool
 }
 
@@ -39,10 +40,55 @@ func (d *daemon) environment() []string {
 func (d *daemon) start() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.command != nil {
+	if d.command != nil || d.launched {
 		return nil
 	}
 	d.adoptedPid = 0
+	d.launched = d.startThroughLaunchAgent() == nil
+	if d.launched {
+		return nil
+	}
+	return d.startDirectly()
+}
+
+func (d *daemon) startThroughLaunchAgent() error {
+	d.stopStaleDaemon()
+	stable := stableDaemonPath(d.paths)
+	if _, err := installStableDaemon(d.paths.DaemonBin, stable); err != nil {
+		return err
+	}
+	if _, err := installLaunchAgent(d.paths); err != nil {
+		return err
+	}
+	return launchAgentBoot()
+}
+
+func (d *daemon) refresh() bool {
+	changed, err := installLaunchAgent(d.paths)
+	if err != nil {
+		return false
+	}
+	info, ok := d.paths.ReadConsole()
+	if !ok {
+		return false
+	}
+	if !daemonSupervised(info.PID) {
+		return true
+	}
+	return changed
+}
+
+func (d *daemon) stopStaleDaemon() {
+	info, ok := d.paths.ReadConsole()
+	if !ok || info.PID <= 0 || info.PID == os.Getpid() {
+		return
+	}
+	if processAlive(info.PID) {
+		stopAdoptedProcess(info.PID)
+	}
+}
+
+func (d *daemon) startDirectly() error {
 	logPath := filepath.Join(d.paths.StateDir, "daemon-shell.log")
 	file, err := os.Create(logPath)
 	if err != nil {
@@ -90,9 +136,14 @@ func (d *daemon) stop() {
 	d.mu.Lock()
 	command := d.command
 	d.command = nil
+	launched := d.launched
+	d.launched = false
 	adopted := d.adoptedPid
 	d.adoptedPid = 0
 	d.mu.Unlock()
+	if launched {
+		return
+	}
 	if command != nil && command.Process != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
@@ -133,12 +184,22 @@ func stopAdoptedProcess(pid int) {
 }
 
 func (d *daemon) restart() (bool, string) {
-	if !d.running() {
-		return false, "Graph 的后台不是这个窗口拉起的，重启 Graph 后新密钥才会生效"
-	}
-	d.stop()
-	if err := d.start(); err != nil {
-		return false, err.Error()
+	d.mu.Lock()
+	launched := d.launched
+	d.mu.Unlock()
+	if launched {
+		d.stopStaleDaemon()
+		if err := launchAgentRestart(); err != nil {
+			return false, err.Error()
+		}
+	} else {
+		if !d.running() {
+			return false, "Graph 的后台不是这个窗口拉起的，重启 Graph 后新密钥才会生效"
+		}
+		d.stop()
+		if err := d.start(); err != nil {
+			return false, err.Error()
+		}
 	}
 	for attempt := 0; attempt < 160; attempt++ {
 		if info, ok := d.paths.ReadConsole(); ok && d.paths.Reachable(info.URL) {
