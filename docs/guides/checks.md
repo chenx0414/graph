@@ -86,7 +86,7 @@ GRAPH_E2E_VISIBLE_WINDOWS=1 node --run check
 
 ```sh
 node --run check:tokens              # 暂存区
-node scripts/check-file-tokens.mjs src/core/task-runtime.ts
+go -C backend run ./cmd/graphcheck tokens src/core/task-runtime.ts
 ```
 
 这个检查不进 `node --run check`：仓库里已存在历史大文件，而它要拦的是**本次改动**新写大
@@ -106,7 +106,7 @@ node scripts/check-file-tokens.mjs src/core/task-runtime.ts
 
 ```sh
 node --run check:ownership                  # 整个 backend/internal/graph 包
-node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime_stop.go
+go -C backend run ./cmd/graphcheck ownership backend/internal/graph/core_graph_runtime_stop.go
 ```
 
 读不算第二个主人：读不改表的形状，所以 store 之外仍可以有读。
@@ -133,7 +133,7 @@ node scripts/check-table-ownership.mjs backend/internal/graph/core_graph_runtime
 
 ```sh
 node --run check:ownership                  # 整棵树：谁在写谁的表
-node scripts/check-table-ownership.mjs --staged   # 只看这次改动新增了什么
+go -C backend run ./cmd/graphcheck ownership --staged   # 只看这次改动新增了什么
 ```
 
 **`--staged` 才是能进 Pre-commit Hook 的那一种**：它**只拦新增的写者**——一张已经有主人的表，
@@ -144,7 +144,7 @@ node scripts/check-table-ownership.mjs --staged   # 只看这次改动新增了�
 因此 Hook 里接的是 `--staged`：
 
 ```sh
-node "$hook_dir/../scripts/check-table-ownership.mjs" --staged
+go -C "$root/backend" run ./cmd/graphcheck ownership --staged
 ```
 
 **仓库里没有这个脚本时，Hook 跳过它**——所以不认识「表的主人」这件事的分支不会被它拦住。

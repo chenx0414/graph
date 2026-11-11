@@ -1,18 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Resolve the guard from this hook's own location, so the check runs against
-# the repository that owns the hook no matter which directory git starts in.
 hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-node "$hook_dir/../scripts/check-file-tokens.mjs"
+root=$(CDPATH= cd -- "$hook_dir/.." && pwd)
 
-# A table with an owner is written by that owner alone. The check refuses a
-# change that adds a writer for a table that already has one, and leaves the
-# tables whose owner this branch has not reached yet alone - so it can run in
-# every worktree's hook.
-#
-# The check is skipped when the repository does not have it, so a branch that
-# does not know about table ownership is not stopped by it.
-if [ -f "$hook_dir/../scripts/check-table-ownership.mjs" ]; then
-  node "$hook_dir/../scripts/check-table-ownership.mjs" --staged
-fi
+go -C "$root/backend" run ./cmd/graphcheck tokens
+go -C "$root/backend" run ./cmd/graphcheck ownership --staged

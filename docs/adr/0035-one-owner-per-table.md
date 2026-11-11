@@ -48,7 +48,7 @@ Graph 的 Go daemon 有两份 store：`TaskStore`（任务、会话与 v1 的图
 - **读不算第二个主人**：读不改表的形状，所以一张表可以被许多地方读。
 - **schema 里的每张表都要有主人**。守卫自己读 schema，因此**一张还没有主人的表，第一次被写就会
   被拒**——新表要先被点名，写它的人才知道它的形状只有一处知道。
-- **守卫生效**：`scripts/check-table-ownership.mjs` 查这件事，两种看法：
+- **守卫生效**：`backend/internal/gate/ownership.go`（`go -C backend run ./cmd/graphcheck ownership`）查这件事，两种看法：
   - 整棵树（`node --run check:ownership`）：谁在写谁的表。
   - **只看这次改动新增了什么**（`--staged`）：**一张已经有主人的表，这次改动又添一个写者，
     就拒绝**；这个决定还没走到的表**一个也不碰**。

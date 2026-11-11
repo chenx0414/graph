@@ -153,7 +153,7 @@ POST /api/conversations/{conversationId}/tool-calls/{toolCallId}/cancel   {"requ
 | F9 | 长工具占住一轮 | 第二条消息晚于工具完成 | 受理即返回，回合立即落定 |
 | F10 | 延迟结果当 orphan tool result | provider 丢弃或补 `No result provided` | 走唤醒通道 |
 | F11 | 工具描述变长 | 每轮请求的前缀变长（缓存命中时仍然计费） | 描述只写一句用途，细节交给工具返回；尺寸在 e2e 里只打印不判红——10,400 / 200 的字符预算已于 2026-11-15 取消，改由 tool search 按需披露控制装载量 |
-| F12 | 新表绕过单写者规则 | `check:ownership` 红 | 登记到 `scripts/check-table-ownership.mjs` |
+| F12 | 新表绕过单写者规则 | `check:ownership` 红 | 登记到 `backend/internal/gate/ownership.go` |
 
 ## 9. 三条车道的独占文件清单
 
@@ -192,7 +192,7 @@ backend/internal/graph/runtime_pig_native_handlers.go       # bash 的 async 实
 backend/internal/graph/core_wake_ledger.go                  # tool_settled 种类 + 渲染
 backend/internal/graph/core_task_runtime_dispatch.go        # 启动对账入口
 backend/internal/graph/server_app_routes.go                 # 两条路由
-scripts/check-table-ownership.mjs                           # 登记 deferred_tool_calls
+backend/internal/gate/ownership.go                          # 登记 deferred_tool_calls
 ```
 
 ### laneB — 控制台（TypeScript）
@@ -225,7 +225,7 @@ tests/env-layers.json                              # 浏览器用例登记到 wi
 | --- | --- | --- |
 | `backend/internal/graph/runtime_kernel_operation_broker.go` | **本次不动** | 冲突点：`ExecuteModuleOperation` 的 `dispatched`/`uncertain` 拒绝重放语义（`runtime_kernel_operation_broker.go:181-182`）与 `rsiAdmitSource` 的集成判定，是模块投递"这次副作用算不算发生"的判定。一旦把 `workspace.command` 也做成可挂起，deferred 行就得替代 `kernel_module_operations` 承载终态，两者会抢同一个判定。本轮只做 `bash`，不碰。 |
 | `backend/internal/graph/core_store.go` + `core_store_migrate.go` | laneA | 版本号只能被取一次：若合流时上游已占用 55，在 merge 节点一起抬到 56，不并存两套。 |
-| `scripts/check-table-ownership.mjs` | laneA | 新表必须登记唯一写者，否则 `check:ownership` 红。laneC 不得为了让测试过而改它。 |
+| `backend/internal/gate/ownership.go` | laneA | 新表必须登记唯一写者，否则 `check:ownership` 红。laneC 不得为了让测试过而改它。 |
 | `tests/harness-surface.json` | laneA（显式刷新） | laneA 改 `runtime_agent_tools.go`/`runtime_pig_native_tools.go`/`runtime_pig_native_handlers.go` 会让 harness surface 变化；`check:harness` 不会因此失败，但记录会过期，刷新是显式动作（`GRAPH_HARNESS_GATE_RECORD=1 node --run check:harness`），归 laneA。laneC 不得顺手改。 |
 | `tests/e2e/harness-tool-schema.test.ts` | 只读、不放宽 | 它守着 10,400 / 200 的工具预算。laneA 必须塞进预算；塞不下由 merge 裁决，车道不许自己抬上限。 |
 | `docs/agent/async-tool-execution.md`、`docs/agent/INDEX.md` | design（本节点） | 契约冻结。车道认为契约不可实现，写进 `result` 让 merge 改文档，**不要自己改**。 |
