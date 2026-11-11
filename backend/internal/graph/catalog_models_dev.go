@@ -1,13 +1,16 @@
 package graph
 
 import (
+	_ "embed"
 	"math"
-	"os"
 	"regexp"
 	"strings"
 
 	"encoding/json"
 )
+
+//go:embed assets/models-dev.snapshot.json
+var modelsDevSnapshotBody []byte
 
 const MODELS_DEV_SOURCE_URL = "https://models.dev/api.json"
 
@@ -255,12 +258,8 @@ func modelsDevProviders(raw map[string]any) map[string]ModelsDevProvider {
 
 func BuiltinModelsDevSnapshot() ModelsDevSnapshot {
 	if modelsDevCached == nil {
-		body, err := os.ReadFile(ApplicationRoot + "/src/catalog/models-dev.snapshot.json")
-		if err != nil {
-			panic(err)
-		}
 		var raw any
-		if err := json.Unmarshal(body, &raw); err != nil {
+		if err := json.Unmarshal(modelsDevSnapshotBody, &raw); err != nil {
 			panic(err)
 		}
 		snapshot := NormalizeModelsDevSnapshot(raw)

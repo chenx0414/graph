@@ -31,10 +31,6 @@ var ignoredTrees = []string{
 	"target/",
 }
 
-var ignoredFiles = map[string]bool{
-	"src/catalog/models-dev.snapshot.json": true,
-}
-
 var ignoredNamePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(^|/)pnpm-lock\.yaml$`),
 	regexp.MustCompile(`(^|/)package-lock\.json$`),
@@ -111,9 +107,6 @@ func extensionOf(target string) string {
 }
 
 func IgnoredByPath(target string) string {
-	if ignoredFiles[target] {
-		return "generated data file"
-	}
 	for _, tree := range ignoredTrees {
 		if strings.HasPrefix(target, tree) {
 			return "vendored or built tree"

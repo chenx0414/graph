@@ -40,7 +40,7 @@ func TestIgnoredByPathNamesWhyAFileIsNotAgentWritten(t *testing.T) {
 		{"docs/run.output.txt", "tool-owned file name"},
 		{"build/graph-icon.png", "vendored or built tree"},
 		{"tests/fixtures/logo.png", "binary asset"},
-		{"src/catalog/models-dev.snapshot.json", "generated data file"},
+		{"backend/internal/graph/assets/models-dev.snapshot.json", "tool-owned file name"},
 		{"backend/internal/graph/a.go", ""},
 	} {
 		if got := IgnoredByPath(test.path); got != test.want {

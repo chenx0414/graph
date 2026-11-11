@@ -9,8 +9,9 @@
  * console's own state through an internal API would bind the script to an
  * implementation that no longer exists; the public routes are the contract.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dirname, '..');
@@ -30,8 +31,14 @@ export async function startGoDaemon({
   env = {},
   extraArgs = [],
 }) {
+  const binary = join(repo, 'dist/graphd');
+  if (!existsSync(binary)) {
+    const build = spawnSync('go', ['-C', join(repo, 'backend'), 'run', './cmd/graphbuild', 'backend'], { stdio: 'inherit' });
+    if (build.status !== 0) throw new Error('the daemon binary is missing and could not be built');
+  }
   const args = [
-    join(repo, 'src/server/cli.ts'),
+    binary,
+    '--application-root', repo,
     '--state-dir', stateDir,
     '--graph-home', graphHome,
     '--port', '0',
@@ -39,7 +46,7 @@ export async function startGoDaemon({
     ...(configPath ? ['--config', configPath] : []),
     ...extraArgs,
   ];
-  const child = spawn(process.execPath, args, {
+  const child = spawn(binary, args.slice(1), {
     cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';

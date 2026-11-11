@@ -29,7 +29,7 @@ const repo = resolve(fileURLToPath(import.meta.url), '../..');
 // it never dirties the working tree.
 const statePath = process.env.GRAPH_HARNESS_GATE_STATE
   ? resolve(process.env.GRAPH_HARNESS_GATE_STATE)
-  : join(repo, 'tests/harness-surface.json');
+  : join(repo, 'backend/internal/graph/testdata/harness-surface.json');
 // The record is written only when someone asks for it. The gate runs inside
 // every gate run, and a check that rewrites a tracked file makes the working
 // tree dirty as a side effect of checking it - which the RSI guard rightly

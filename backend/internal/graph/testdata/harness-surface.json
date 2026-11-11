@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "parser": "pass",
+    "cli": "pass",
+    "persistence": "pass",
+    "command": "pass"
+  },
+  "surface": {
+    "backend/internal/graph/runtime_agent_context.go": "b9e2cc8c39ff67326495f144ff123a61b09715c1eeb1761400a01420438ebd80",
+    "backend/internal/graph/runtime_agent_tool_definitions.go": "5bd5130514f7a4cb153a3df72d135b38a79f606bf956ce6f97beed415181152f",
+    "backend/internal/graph/runtime_agent_tools.go": "d23badeef399ed4c66f37e33326de62781a64fd1ed7e4ffdc90d7e0a2d98a0b9",
+    "backend/internal/graph/runtime_pi_native_tools.go": "dc2e6afc230da7b142706cbf298cfbad4def273392318c3cd1bfae07a7e3f1db",
+    "backend/internal/graph/runtime_pig_native_tools.go": "25f0d7e7b84575663de9dbecdfb39b91b76b94ad57eb02e8303f1dbbd806b2a5",
+    "scripts/harness-eval-cases.mjs": "31e8dd009090a25ab67ca263b554ecbf4b4af3c3cc8ce58879d083672be4dd1f",
+    "scripts/harness-real-eval.mjs": "c69072feb007743de33b73ca0312312f5385860197151ce53b1761eaef18316a",
+    "scripts/harness-behavior-cases.mjs": "68a62f9a1f172e40125279bcc71d300e98f2c322ec47cb9c21aff83e5ad37c0c",
+    "scripts/harness-behavior-model.mjs": "5c6f473426e6b799e7cae5a345b1217d0509fb5e7a55d7a4379d90bd477e4c2d",
+    "scripts/harness-behavior-gate.mjs": "71c30f67ba1f62b702189efbb7e5a33979a62280bfd9ef6e8a7409b7d4bda2ac"
+  },
+  "updatedAt": "2026-11-11T06:39:58.131Z"
+}
