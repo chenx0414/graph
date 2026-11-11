@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -41,16 +43,10 @@ func (q openQuestion) open() bool {
 	return q.Status != "resolved" && (q.Suspended || q.Status == "open" || q.Status == "waiting")
 }
 
-type draftProposal struct {
-	Version       int `json:"version"`
-	DraftRevision int `json:"draftRevision"`
-}
-
 type conversationBody struct {
 	Messages  []transcriptMessage `json:"messages"`
-	Questions []openQuestion      `json:"questions"`
-	Proposal  *draftProposal      `json:"proposal"`
-	Paused    bool                `json:"paused"`
+	Questions []openQuestion `json:"questions"`
+	Paused    bool           `json:"paused"`
 }
 
 func (c conversationSummary) ArchivedAtPresent() bool { return c.ArchivedAt != nil }
@@ -178,13 +174,8 @@ func (c *chatState) open(id string) {
 	c.fingerprint = transcriptFingerprint(messages)
 	c.active = id
 	c.questions = nil
-	c.proposal = draftProposal{}
-	c.branch = "main"
 	if body, err := parseConversationBody(payload); err == nil {
 		c.paused = body.Paused
-		if body.Proposal != nil && body.Proposal.Version > 0 {
-			c.proposal = *body.Proposal
-		}
 		for _, question := range body.Questions {
 			if question.open() {
 				c.questions = append(c.questions, question)
@@ -192,7 +183,6 @@ func (c *chatState) open(id string) {
 		}
 	}
 	c.artifacts = nil
-	c.artifactsOpen = false
 	c.preview = ""
 	c.previewTitle = ""
 	if listed, err := c.api.get("/api/conversations/" + id + "/artifacts"); err == nil {
@@ -204,9 +194,6 @@ func (c *chatState) open(id string) {
 	if rows, err := parseGraphTasks(payload); err == nil {
 		c.tasks = rows
 	}
-	c.graphOpen = false
-	c.nodeLines = nil
-	c.nodeTitle = ""
 	c.visible = transcriptWindow
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
@@ -230,9 +217,8 @@ func (c *chatState) view(ctx *ui.Context) {
 	ui.Column(ctx).Fill().Children(func() {
 		c.transcript(ctx)
 		if c.status != "" {
-			ui.Text(ctx, c.status).FontSize(12).TextColor(t.TextMuted).Padding(16, 6, 0, 6)
+			ui.Text(ctx, c.status).FontSize(12).TextColor(t.TextMuted).Padding(16, 4, 16, 0)
 		}
-		c.controls(ctx)
 		c.composer(ctx)
 	})
 }
@@ -264,7 +250,7 @@ func (c *chatState) transcript(ctx *ui.Context) {
 			return
 		}
 		c.messageRow(ctx, run.messages[0])
-	}).Grow(1).Padding(16).Gap(12)
+	}).Grow(1).Padding(16).Gap(14)
 }
 
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
@@ -286,38 +272,26 @@ func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
 
 func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 	mine := message.Role == "user"
-	ui.Row(ctx).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
-		if !mine {
-			c.avatar(ctx, false)
-		}
+	ui.Row(ctx).FillWidth().Children(func() {
 		if mine {
 			ui.Spacer(ctx)
 		}
-		c.bubble(ctx, message, mine)
+		ui.Column(ctx).MaxWidthPercent(84).Gap(4).Children(func() {
+			c.bubble(ctx, message)
+			c.messageMeta(ctx, message, mine)
+		})
 		if !mine {
 			ui.Spacer(ctx)
-		}
-		if mine {
-			c.avatar(ctx, true)
 		}
 	})
 }
 
-func (c *chatState) avatar(ctx *ui.Context, mine bool) {
-	fill := ui.Hex("#EDE2FF")
-	if mine {
-		fill = ui.Hex("#D8EAFF")
-	}
-	ui.Box(ctx).Size(26, 26).Radius(13).Background(fill).Margin(4, 0, 0, 0)
-}
-
-func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage, mine bool) {
-	bubble := ui.Column(ctx).MaxWidthPercent(86).Padding(10, 14).Radius(16).Gap(4).Clip()
-	if mine {
-		bubble.Gradient(ui.Hex("#CFE4FF"), ui.Hex("#E9F2FF"), 135)
-	} else {
-		bubble.Gradient(ui.Hex("#EBE1FF"), ui.Hex("#F8F2FF"), 135)
-	}
+func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
+	t := ctx.Theme()
+	bubble := ui.Column(ctx).Padding(10, 14).Radius(16).Gap(4).Clip()
+	bubble.Background(t.Surface)
+	bubble.Border(1, t.Border)
+	bubble.Shadow(0, 4, 14, 0, cardShadow)
 	bubble.Children(func() {
 		if messageQueued(message) {
 			if ui.Button(ctx, "撤销这条排队消息").Clicked() {
@@ -332,106 +306,34 @@ func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage, mine bool
 	})
 }
 
-func (c *chatState) controls(ctx *ui.Context) {
+func (c *chatState) messageMeta(ctx *ui.Context, message transcriptMessage, mine bool) {
 	t := ctx.Theme()
-	if len(c.questions) > 0 || c.proposal.Version > 0 || len(c.artifacts) > 0 || c.preview != "" || len(c.tasks) > 0 || len(c.nodeLines) > 0 {
-		ui.Scroll(ctx).MaxHeight(240).Children(func() {
-			ui.Column(ctx).Padding(16, 6).Gap(8).Children(func() {
-				for _, question := range c.questions {
-					card := question
-					ui.Column(ctx).Gap(4).Children(func() {
-						ui.Text(ctx, "需要你决定 · "+card.Kind).FontSize(12).TextColor(t.TextMuted)
-						markdown.View(ctx, card.Data.Prompt, &c.md)
-						ui.Row(ctx).Gap(6).Wrap().Children(func() {
-							for _, option := range card.Data.Options {
-								value := option
-								if ui.Button(ctx, value).Clicked() {
-									go c.answer(card, value)
-								}
-							}
-						})
-					})
-				}
-				if len(c.artifacts) > 0 {
-					label := "产物 · " + strconv.Itoa(len(c.artifacts)) + " 件"
-					if ui.Button(ctx, label).AlignSelf(ui.Start).Clicked() {
-						c.artifactsOpen = !c.artifactsOpen
-					}
-					if c.artifactsOpen {
-						shown := c.artifacts
-						hidden := 0
-						if len(shown) > artifactListLimit {
-							hidden = len(shown) - artifactListLimit
-							shown = shown[:artifactListLimit]
-						}
-						for _, artifact := range shown {
-							row := artifact
-							if ui.Button(ctx, artifactLabel(row)).Clicked() {
-								go c.showArtifact(row)
-							}
-						}
-						if hidden > 0 {
-							ui.Text(ctx, "还有 "+strconv.Itoa(hidden)+" 件未列出").FontSize(12).TextColor(t.TextMuted)
-						}
-					}
-				}
-				if c.preview != "" {
-					ui.Row(ctx).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(ctx, "产物预览 · "+c.previewTitle).FontSize(12).TextColor(t.TextMuted).Grow(1)
-						row := c.previewRow
-						if ui.Button(ctx, "导出 "+artifactFileName(row)).Clicked() {
-							go c.exportArtifactNow(row)
-						}
-					})
-					ui.Text(ctx, c.preview).FontSize(12)
-				}
-				if c.proposal.Version > 0 {
-					ui.Column(ctx).Gap(4).Children(func() {
-						ui.Text(ctx, "草案 v"+strconv.Itoa(c.proposal.Version)+" · 修订 "+strconv.Itoa(c.proposal.DraftRevision)+" 待确认").FontSize(12).TextColor(t.TextMuted)
-						ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
-							ui.TextInput(ctx, &c.branch).Placeholder("目标分支").Label("目标分支").Width(160)
-							if ui.PrimaryButton(ctx, "确认草图并开始执行").Clicked() {
-								go c.confirmDraft()
-							}
-						})
-					})
-				}
-				c.graphSection(ctx)
-			})
-		})
+	row := ui.Row(ctx).Gap(6).AlignItems(ui.Center)
+	if mine {
+		row.Justify(ui.End)
+	} else {
+		row.Justify(ui.Start)
 	}
-	ui.Row(ctx).Gap(4).Wrap().Padding(16, 2, 10, 2).Children(func() {
-		label := "换模型"
-		if c.currentModel != "" {
-			label = "模型：" + shortModel(c.currentModel) + " · " + c.currentThinking
+	row.Children(func() {
+		if message.CreatedAt > 0 {
+			ui.Text(ctx, messageClock(message.CreatedAt)).FontSize(11).TextColor(t.TextMuted)
 		}
-		if ui.Button(ctx, label).Clicked() {
-			c.modelMenu = !c.modelMenu
-		}
-		if c.modelMenu {
-			for _, choice := range c.modelChoices() {
-				model := choice
-				if ui.Button(ctx, shortModel(model.id)+" · "+model.thinking).Clicked() {
-					go c.selectModel(model, model.thinking)
-				}
-			}
-		}
-		bindLabel := "绑定项目"
-		if c.project != "" {
-			bindLabel = "项目：" + c.project
-		}
-		if ui.Button(ctx, bindLabel).Clicked() {
-			c.binding = !c.binding
-		}
-		if c.binding {
-			for _, project := range c.projectChoices() {
-				target := project
-				if ui.Button(ctx, "绑定 "+target).Clicked() {
-					go c.bindProject(target)
-				}
-			}
-		}
+		text := message.Text
+		button := ui.Box(ctx).Size(20, 20).Radius(6).Center().Label("复制").Tooltip("复制这条消息").Focusable()
+		button.Background(ui.Transparent)
+		button.OnClick(func() { copyMessage(text) })
+		button.Children(func() {
+			ui.Icon(ctx, iconCopy).FontSize(12).TextColor(t.TextMuted)
+		})
 	})
+}
+
+func messageClock(millis int64) string {
+	return time.UnixMilli(millis).Format("15:04")
+}
+
+func copyMessage(text string) {
+	_ = mygo.Clipboard.Write(transfer.TextData(text))
 }
 
 func (c *chatState) composer(ctx *ui.Context) {

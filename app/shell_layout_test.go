@@ -14,7 +14,7 @@ func chatForLayoutTest(t *testing.T, messages int, questions int) *shellState {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/conversations":
-			w.Write([]byte(`[{"id":"c1","title":"会话一","projectId":"13-Graph","archivedAt":null}]`))
+			w.Write([]byte(`[{"id":"c1","title":"13-Graph","projectId":"13-Graph","role":"project","archivedAt":null}]`))
 		case "/api/conversations/c1":
 			w.Write([]byte(`{"messages":[{"role":"user","text":"开始"}]}`))
 		default:

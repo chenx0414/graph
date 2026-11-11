@@ -47,7 +47,7 @@ func TestChatStatePollPicksUpAReplyThatArrivedLater(t *testing.T) {
 	}
 }
 
-func TestChatStatePollReportsChangesInPausedAndProposal(t *testing.T) {
+func TestChatStatePollReportsChangesInPausedAndQuestions(t *testing.T) {
 	var body atomic.Value
 	body.Store(`{"messages":[{"role":"user","text":"开始"}],"paused":false}`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,9 +64,9 @@ func TestChatStatePollReportsChangesInPausedAndProposal(t *testing.T) {
 	if !state.poll() || !state.paused {
 		t.Fatalf("a pause must be reported and applied: changed=%v paused=%v", state.poll(), state.paused)
 	}
-	body.Store(`{"messages":[{"role":"user","text":"开始"}],"paused":true,"proposal":{"version":3,"draftRevision":7}}`)
-	if !state.poll() || state.proposal.Version != 3 {
-		t.Fatalf("a new draft must be reported and applied: %+v", state.proposal)
+	body.Store(`{"messages":[{"role":"user","text":"开始"}],"paused":true,"questions":[{"id":"q1","kind":"decision","status":"open","data":{"prompt":"选 A 还是 B","options":["A","B"]}}]}`)
+	if !state.poll() || len(state.questions) != 1 {
+		t.Fatalf("a new question must be reported and applied: %+v", state.questions)
 	}
 }
 

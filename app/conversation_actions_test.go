@@ -205,123 +205,40 @@ func TestPausedStateComesFromTheConversation(t *testing.T) {
 	}
 }
 
-func TestBindingAConversationToAProject(t *testing.T) {
+func TestTheModelModuleSwitchesTheConversationModel(t *testing.T) {
 	posted := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/bind":
-			payload := make([]byte, 2048)
-			read, _ := r.Body.Read(payload)
-			posted = string(payload[:read])
-			w.Write([]byte(`{"projectId":"mygo"}`))
-		case r.URL.Path == "/api/conversations/c1":
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"还没绑定项目"}]}`))
-		case r.URL.Path == "/api/settings":
-			w.Write([]byte(`{"projects":[{"id":"13-Graph"},{"id":"mygo"}]}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	state := newChatState(server.URL, "tok")
-	state.open("c1")
-	tester := ui.NewTester(state.view, 760, 700)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("绑定项目") {
-		t.Fatalf("a conversation must offer the bind control, texts %q", tester.Texts())
-	}
-	if err := tester.Click("绑定项目"); err != nil {
-		t.Fatalf("click 绑定项目: %v", err)
-	}
-	for frame := 0; frame < 5; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("绑定 mygo") {
-		t.Fatalf("the choices must come from /api/settings, texts %q", tester.Texts())
-	}
-	if err := tester.Click("绑定 mygo"); err != nil {
-		t.Fatalf("click 绑定 mygo: %v", err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for state.status == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	for _, wanted := range []string{`"projectId":"mygo"`, `"requestId"`} {
-		if !contains(posted, wanted) {
-			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
-		}
-	}
-	if state.project != "mygo" || state.binding || state.status != "已绑定到 mygo" {
-		t.Fatalf("绑定后状态：project %q binding %v status %q", state.project, state.binding, state.status)
-	}
-}
-
-func TestBindingRefusesAnEmptyProject(t *testing.T) {
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			posts++
-		}
-		w.Write([]byte(`{"messages":[]}`))
-	}))
-	defer server.Close()
-
-	state := newChatState(server.URL, "tok")
-	state.active = "c1"
-	state.bindProject("  ")
-	if posts != 0 {
-		t.Fatalf("an empty project must not be sent, posts %d", posts)
-	}
-}
-
-func TestConversationSwitchesModel(t *testing.T) {
-	posted := ""
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/model":
+		if r.Method == "POST" && r.URL.Path == "/api/conversations/c1/model" {
 			payload := make([]byte, 2048)
 			read, _ := r.Body.Read(payload)
 			posted = string(payload[:read])
 			w.Write([]byte(`{"model":"opencode-go:deepseek"}`))
-		case r.URL.Path == "/api/conversations/c1":
-			w.Write([]byte(`{"messages":[{"role":"assistant","text":"用哪个模型？"}]}`))
-		case r.URL.Path == "/api/settings":
-			w.Write([]byte(`{"models":[
-				{"id":"command-goat:deepseek/deepseek-v4.1-flash","defaultThinkingLevel":"high","thinkingOptions":[{"level":"high"},{"level":"low"}]},
-				{"id":"opencode-go:deepseek","defaultThinkingLevel":"medium","thinkingOptions":[{"level":"medium"}]}
-			]}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
 
-	state := newChatState(server.URL, "tok")
-	state.open("c1")
-	tester := ui.NewTester(state.view, 900, 760)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
+	chat := newChatState(server.URL, "tok")
+	chat.active = "c1"
+	chat.models = []modelChoice{
+		{id: "command-goat:deepseek/deepseek-v4.1-flash", thinking: "high", available: []string{"high", "low"}},
+		{id: "opencode-go:deepseek", thinking: "medium", available: []string{"medium"}},
 	}
-	if !tester.HasText("换模型") {
-		t.Fatalf("a conversation must offer the model switch, texts %q", tester.Texts())
+	state := newShellState(server.URL, "tok")
+	state.chat = chat
+	state.activeID = "c1"
+	state.board.panels = []boardPanel{{ID: "models", Kind: "models", X: 20, Y: 20, W: 460, H: 320}}
+	tester := ui.NewTester(state.view, 1100, 760)
+	frames(tester)
+	if !tester.HasText("模型配置") || !tester.HasText("deepseek-v4.1-flash") || !tester.HasText("deepseek") {
+		t.Fatalf("the model module must list the choices, texts %q", tester.Texts())
 	}
-	if err := tester.Click("换模型"); err != nil {
-		t.Fatalf("click 换模型: %v", err)
-	}
-	for frame := 0; frame < 5; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("deepseek · medium") {
-		t.Fatalf("the choices must show the short model and its thinking level, texts %q", tester.Texts())
-	}
-	if err := tester.Click("deepseek · medium"); err != nil {
-		t.Fatalf("click a model: %v", err)
+	if err := tester.Click("medium"); err != nil {
+		t.Fatalf("click a thinking level: %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for state.status == "" && time.Now().Before(deadline) {
+	for posted == "" && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	for _, wanted := range []string{`"model":"opencode-go:deepseek"`, `"thinkingLevel":"medium"`, `"requestId"`} {
@@ -329,11 +246,8 @@ func TestConversationSwitchesModel(t *testing.T) {
 			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
 		}
 	}
-	if state.currentModel != "opencode-go:deepseek" || state.currentThinking != "medium" || state.modelMenu {
-		t.Fatalf("切模型后状态：model %q thinking %q menu %v", state.currentModel, state.currentThinking, state.modelMenu)
-	}
-	if state.status != "已切到 deepseek · 思考 medium" {
-		t.Fatalf("status %q", state.status)
+	if chat.currentModel != "opencode-go:deepseek" || chat.currentThinking != "medium" {
+		t.Fatalf("切模型后状态：model %q thinking %q", chat.currentModel, chat.currentThinking)
 	}
 }
 
@@ -347,78 +261,5 @@ func TestShortModelName(t *testing.T) {
 		if got := shortModel(id); got != want {
 			t.Fatalf("shortModel(%q) = %q, want %q", id, got, want)
 		}
-	}
-}
-
-func TestConfirmingADraftSendsBothRevisions(t *testing.T) {
-	posted := ""
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "POST" && r.URL.Path == "/api/conversations/c1/confirm":
-			payload := make([]byte, 4096)
-			read, _ := r.Body.Read(payload)
-			posted = string(payload[:read])
-			w.Write([]byte(`{"accepted":true}`))
-		case r.URL.Path == "/api/conversations/c1":
-			w.Write([]byte(`{"proposal":{"version":3,"draftRevision":7},"messages":[{"role":"assistant","text":"草案好了"}]}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	state := newChatState(server.URL, "tok")
-	state.open("c1")
-	if state.proposal.Version != 3 || state.proposal.DraftRevision != 7 {
-		t.Fatalf("proposal %+v", state.proposal)
-	}
-	tester := ui.NewTester(state.view, 900, 760)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("草案 v3 · 修订 7 待确认") {
-		t.Fatalf("a waiting draft must be announced, texts %q", tester.Texts())
-	}
-	if state.branch != "main" {
-		t.Fatalf("the target branch must default to main, got %q", state.branch)
-	}
-	if err := tester.Click("确认草图并开始执行"); err != nil {
-		t.Fatalf("click 确认草图并开始执行: %v", err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for posted == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	for _, wanted := range []string{`"proposalVersion":3`, `"draftRevision":7`, `"targetBranch":"main"`, `"requestId"`} {
-		if !contains(posted, wanted) {
-			t.Fatalf("提交体缺 %q，实际 %q", wanted, posted)
-		}
-	}
-	deadline = time.Now().Add(2 * time.Second)
-	for state.status == "" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if state.proposal.Version != 0 || state.status != "已确认草案，开始执行（目标分支 main）" {
-		t.Fatalf("确认后状态：proposal %+v status %q", state.proposal, state.status)
-	}
-}
-
-func TestConfirmRefusesAnEmptyBranch(t *testing.T) {
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			posts++
-		}
-		w.Write([]byte(`{"messages":[]}`))
-	}))
-	defer server.Close()
-
-	state := newChatState(server.URL, "tok")
-	state.active = "c1"
-	state.proposal = draftProposal{Version: 1, DraftRevision: 2}
-	state.branch = "   "
-	state.confirmDraft()
-	if posts != 0 || state.status != "目标分支不能为空" {
-		t.Fatalf("an empty branch must stop before the request, posts %d status %q", posts, state.status)
 	}
 }

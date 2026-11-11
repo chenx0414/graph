@@ -139,6 +139,12 @@ func drawBoardGraph(p *ui.Painter, area ui.Rect, graph taskGraph) {
 	if len(graph.nodes) == 0 {
 		return
 	}
+	p.Clip(area, 0, func() {
+		drawBoardGraphIn(p, area, graph)
+	})
+}
+
+func drawBoardGraphIn(p *ui.Painter, area ui.Rect, graph taskGraph) {
 	minX, minY := float32(math.MaxFloat32), float32(math.MaxFloat32)
 	maxX, maxY := float32(-math.MaxFloat32), float32(-math.MaxFloat32)
 	for _, node := range graph.nodes {

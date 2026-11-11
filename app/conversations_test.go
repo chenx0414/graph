@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -372,7 +373,7 @@ func TestOnlyUnresolvedQuestionsAreShown(t *testing.T) {
 	}
 }
 
-func TestNativeWindowShowsTheQuestionAndAnswersIt(t *testing.T) {
+func TestTheQuestionModuleShowsTheQuestionAndAnswersIt(t *testing.T) {
 	answered := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -389,21 +390,56 @@ func TestNativeWindowShowsTheQuestionAndAnswersIt(t *testing.T) {
 	}))
 	defer server.Close()
 
-	state := newChatState(server.URL, "tok")
-	state.open("c1")
-	if len(state.questions) != 1 {
-		t.Fatalf("questions %+v", state.questions)
+	chat := newChatState(server.URL, "tok")
+	chat.open("c1")
+	if len(chat.questions) != 1 {
+		t.Fatalf("questions %+v", chat.questions)
 	}
-	tester := ui.NewTester(state.view, 760, 620)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
+	state := newShellState(server.URL, "tok")
+	state.chat = chat
+	state.activeID = "c1"
+	state.board.panels = []boardPanel{{ID: "questions", Kind: "questions", X: 20, Y: 20, W: 460, H: 320}}
+	tester := ui.NewTester(state.view, 1100, 760)
+	frames(tester)
 	if !tester.HasText("需要你决定 · recovery") || !tester.HasText("A 路线") {
-		t.Fatalf("the question card must render, texts %q", tester.Texts())
+		t.Fatalf("the question module must render, texts %q", tester.Texts())
 	}
-	state.answer(state.questions[0], "B 路线")
+	if err := tester.Click("B 路线"); err != nil {
+		t.Fatalf("click an answer: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for answered == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if !contains(answered, "q1") || !contains(answered, "B 路线") || !contains(answered, "requestId") {
 		t.Fatalf("answer body %q", answered)
+	}
+}
+
+func TestChatBubblesCarryATimeAndACopyButton(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	stamp := time.Date(2026, 11, 11, 9, 5, 0, 0, time.Local).UnixMilli()
+	state.messages = []transcriptMessage{
+		{Role: "assistant", Text: "一句回答", CreatedAt: stamp},
+		{Role: "user", Text: "一句提问", CreatedAt: stamp},
+	}
+	tester := ui.NewTester(state.view, 760, 620)
+	frames(tester)
+	if !tester.HasText("09:05") {
+		t.Fatalf("a bubble must show the time it was sent, texts %q", tester.Texts())
+	}
+	copies := 0
+	for _, text := range tester.Texts() {
+		if text == "复制" {
+			copies++
+		}
+	}
+	if copies != 2 {
+		t.Fatalf("every bubble must offer its copy button, got %d, texts %q", copies, tester.Texts())
+	}
+	if tester.HasText("agent") || tester.HasText("你") {
+		t.Fatalf("bubbles carry no author line, texts %q", tester.Texts())
 	}
 }
 

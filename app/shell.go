@@ -10,85 +10,15 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-type conversationGroup struct {
-	project string
-	items   []conversationSummary
-}
-
-func groupByProject(list []conversationSummary) []conversationGroup {
-	return groupByProjectIncludingArchived(list, false)
-}
-
-func groupByProjectIncludingArchived(list []conversationSummary, includeArchived bool) []conversationGroup {
-	groups := []conversationGroup{}
-	at := map[string]int{}
-	for _, conversation := range list {
-		if conversation.Role == "global" {
-			continue
-		}
-		if conversation.ArchivedAtPresent() && !includeArchived {
-			continue
-		}
-		project := strings.TrimSpace(conversation.ProjectID)
-		if project == "" {
-			project = "未分组"
-		}
-		if index, ok := at[project]; ok {
-			groups[index].items = append(groups[index].items, conversation)
-			continue
-		}
-		at[project] = len(groups)
-		groups = append(groups, conversationGroup{project: project, items: []conversationSummary{conversation}})
-	}
-	return groups
-}
-
-type sidebarRow struct {
-	project string
-	label   string
-	id      string
-	archived bool
-}
-
-func sidebarRows(groups []conversationGroup) []sidebarRow {
-	rows := []sidebarRow{}
-	for _, group := range groups {
-		rows = append(rows, sidebarRow{project: group.project})
-		for _, conversation := range group.items {
-			archived := conversation.ArchivedAtPresent()
-			label := strings.TrimSpace(conversation.Title)
-			if label == "" {
-				label = "（无标题）"
-			}
-			if conversation.Role == "project" {
-				label = "项目主管 · " + label
-			}
-			if conversation.OpenQuestions > 0 {
-				label += " · " + strconv.Itoa(conversation.OpenQuestions) + " 待答"
-			}
-			if archived {
-				label += "（已归档）"
-			}
-			rows = append(rows, sidebarRow{label: label, id: conversation.ID, archived: archived})
-		}
-	}
-	return rows
-}
-
 type shellState struct {
 	api           apiClient
 	status        string
-	newText       string
-	newProject    string
-	creating      bool
-	showArchived  bool
 	activeID      string
 	chatMu        sync.Mutex
 	chat          *chatState
 	settings      *settingsState
 	usage         *usageState
 	resources     *resourceState
-	rows          []sidebarRow
 	conversations []conversationSummary
 	supervisorID  string
 	broken        bool
@@ -101,7 +31,7 @@ func newShellState(address, token string) *shellState {
 	return &shellState{
 		api:    newAPIClient(address, token),
 		status: "正在读取会话…",
-		board:  boardState{mode: boardHome, grid: true},
+		board:  boardState{grid: true, panels: defaultBoardPanels()},
 	}
 }
 
@@ -111,60 +41,8 @@ func (s *shellState) active() *chatState {
 	return s.chat
 }
 
-func (s *shellState) postJSON(path string, body any) error {
-	_, err := s.api.post(path, body)
-	return err
-}
-
 func requestID(prefix string) string {
 	return prefix + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-}
-
-func (s *shellState) createConversation() {
-	body := map[string]any{"requestId": requestID("native-new")}
-	if text := strings.TrimSpace(s.newText); text != "" {
-		body["text"] = text
-	}
-	if project := strings.TrimSpace(s.newProject); project != "" {
-		body["projectId"] = project
-	}
-	if err := s.postJSON("/api/conversations", body); err != nil {
-		s.status = "新建会话失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.creating = false
-	s.newText = ""
-	s.newProject = ""
-	s.status = ""
-	s.load()
-	s.frame()
-}
-
-func (s *shellState) archiveConversation(id string) {
-	if err := s.postJSON("/api/conversations/"+id+"/archive", map[string]any{"requestId": requestID("native-archive")}); err != nil {
-		s.status = "归档失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.chatMu.Lock()
-	if s.activeID == id {
-		s.activeID = ""
-		s.chat = nil
-	}
-	s.chatMu.Unlock()
-	s.load()
-	s.frame()
-}
-
-func (s *shellState) unarchiveConversation(id string) {
-	if err := s.postJSON("/api/conversations/"+id+"/unarchive", map[string]any{"requestId": requestID("native-unarchive")}); err != nil {
-		s.status = "取消归档失败：" + err.Error()
-		s.frame()
-		return
-	}
-	s.load()
-	s.frame()
 }
 
 func (s *shellState) adoptConsole(paths Paths) bool {
@@ -190,17 +68,21 @@ func (s *shellState) loadRows() bool {
 		s.broken = true
 		return false
 	}
-	s.conversations = list
 	s.supervisorID = ""
+	s.conversations = nil
 	for _, conversation := range list {
-		if conversation.Role == "global" && s.supervisorID == "" {
-			s.supervisorID = conversation.ID
+		switch conversation.Role {
+		case "global":
+			if s.supervisorID == "" {
+				s.supervisorID = conversation.ID
+			}
+		case "project":
+			s.conversations = append(s.conversations, conversation)
 		}
 	}
-	s.rows = sidebarRows(groupByProjectIncludingArchived(list, s.showArchived))
 	s.broken = false
-	if len(s.rows) == 0 {
-		s.status = "还没有会话。"
+	if len(s.conversations) == 0 {
+		s.status = "还没有项目会话。"
 		return true
 	}
 	s.status = ""
@@ -211,23 +93,24 @@ func (s *shellState) load() {
 	if !s.loadRows() {
 		return
 	}
-	for _, row := range s.rows {
-		if row.id != "" {
-			s.selectConversation(row.id)
-			return
-		}
+	if len(s.conversations) > 0 {
+		s.selectConversation(s.conversations[0].ID)
 	}
 }
 
 func (s *shellState) projectNames() []string {
 	names := []string{}
 	seen := map[string]bool{}
-	for _, row := range s.rows {
-		if row.id != "" || row.project == "" || row.project == "未分组" || seen[row.project] {
+	for _, conversation := range s.conversations {
+		project := strings.TrimSpace(conversation.ProjectID)
+		if project == "" {
+			project = conversation.Title
+		}
+		if project == "" || seen[project] {
 			continue
 		}
-		seen[row.project] = true
-		names = append(names, row.project)
+		seen[project] = true
+		names = append(names, project)
 	}
 	return names
 }
@@ -257,9 +140,12 @@ func (s *shellState) ensureResources() {
 }
 
 func (s *shellState) titleOf(id string) string {
-	for _, row := range s.rows {
-		if row.id == id {
-			return row.label
+	for _, conversation := range s.conversations {
+		if conversation.ID == id {
+			if project := strings.TrimSpace(conversation.ProjectID); project != "" {
+				return project
+			}
+			return conversation.Title
 		}
 	}
 	return "（无标题）"
@@ -293,7 +179,7 @@ func (s *shellState) refresh() bool {
 	if active := s.active(); active != nil {
 		changed = active.poll()
 	}
-	if (s.broken || len(s.rows) == 0) && s.loadRows() {
+	if (s.broken || len(s.conversations) == 0) && s.loadRows() {
 		changed = true
 	}
 	return changed

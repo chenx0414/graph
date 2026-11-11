@@ -13,7 +13,16 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestArtifactsListAndPreview(t *testing.T) {
+func artifactsShell(t *testing.T, state *chatState) *shellState {
+	t.Helper()
+	shell := newShellState("http://127.0.0.1:1", "tok")
+	shell.chat = state
+	shell.activeID = "c1"
+	shell.board.panels = []boardPanel{{ID: "artifacts", Kind: "artifacts", X: 20, Y: 20, W: 480, H: 420}}
+	return shell
+}
+
+func TestArtifactsModuleListsAndPreviews(t *testing.T) {
 	listed := `{"artifacts":[
 		{"artifactId":"a1","taskId":"t1","namespace":"plans","name":"shape","version":46,"size":36804,"mediaType":"application/json"},
 		{"artifactId":"a2","taskId":"t1","namespace":"reviews","name":"pass","version":2,"size":900,"mediaType":"text/markdown"}
@@ -40,24 +49,15 @@ func TestArtifactsListAndPreview(t *testing.T) {
 	if artifactLabel(state.artifacts[0]) != "plans/shape · v46 · 35.9 KB" {
 		t.Fatalf("label %q", artifactLabel(state.artifacts[0]))
 	}
-	tester := ui.NewTester(state.view, 760, 620)
+	shell := artifactsShell(t, state)
+	tester := ui.NewTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("产物 · 2 件") {
-		t.Fatalf("the artifacts toggle must show the count, texts %q", tester.Texts())
-	}
-	if tester.HasText("plans/shape · v46 · 35.9 KB") {
-		t.Fatalf("the list must stay collapsed until asked, texts %q", tester.Texts())
-	}
-	if err := tester.Click("产物 · 2 件"); err != nil {
-		t.Fatalf("click the artifacts toggle: %v", err)
-	}
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if !tester.HasText("plans/shape · v46 · 35.9 KB") || !tester.HasText("reviews/pass · v2 · 900 B") {
-		t.Fatalf("the expanded list must show both artifacts, texts %q", tester.Texts())
+	for _, wanted := range []string{"共享产物", "plans/shape · v46 · 35.9 KB", "reviews/pass · v2 · 900 B"} {
+		if !tester.HasText(wanted) {
+			t.Fatalf("the artifacts module must show %q, texts %q", wanted, tester.Texts())
+		}
 	}
 	if err := tester.Click("plans/shape · v46 · 35.9 KB"); err != nil {
 		t.Fatalf("click an artifact: %v", err)
@@ -69,7 +69,7 @@ func TestArtifactsListAndPreview(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("产物预览 · plans/shape · v46 · 35.9 KB") || !tester.HasText(`{"shape":"parallel"}`) {
+	if !tester.HasText("预览 · plans/shape · v46 · 35.9 KB") || !tester.HasText(`{"shape":"parallel"}`) {
 		t.Fatalf("the preview must show the content, texts %q", tester.Texts())
 	}
 }
@@ -90,8 +90,8 @@ func TestArtifactListStopsAtTheLimit(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.status = ""
 	state.artifacts = rows
-	state.artifactsOpen = true
-	tester := ui.NewTester(state.view, 760, 900)
+	shell := artifactsShell(t, state)
+	tester := ui.NewTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
@@ -155,11 +155,12 @@ func TestExportWritesTheWholeArtifactNotThePreview(t *testing.T) {
 	if state.status != "已导出到 "+target {
 		t.Fatalf("status %q", state.status)
 	}
-	tester := ui.NewTester(state.view, 820, 640)
+	shell := artifactsShell(t, state)
+	tester := ui.NewTester(shell.view, 1100, 760)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if !tester.HasText("导出 plans-shape-v46.json") {
+	if !tester.HasText("导出") || !tester.HasText("预览 · plans/shape · v46 · 4.5 KB") {
 		t.Fatalf("the preview must offer the export button, texts %q", tester.Texts())
 	}
 }

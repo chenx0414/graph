@@ -9,11 +9,12 @@ import (
 )
 
 type transcriptMessage struct {
-	ID    string `json:"id"`
-	Role  string `json:"role"`
-	Kind  string `json:"kind"`
-	Text  string `json:"text"`
-	State string `json:"state"`
+	ID        string `json:"id"`
+	Role      string `json:"role"`
+	Kind      string `json:"kind"`
+	Text      string `json:"text"`
+	State     string `json:"state"`
+	CreatedAt int64  `json:"createdAt"`
 	Data  struct {
 		Tool       string `json:"tool"`
 		ToolCallID string `json:"toolCallId"`
@@ -105,34 +106,21 @@ func messageQueued(message transcriptMessage) bool {
 }
 
 type chatState struct {
-	nodeTitle       string
-	nodeTaskID      string
-	nodeID          string
-	nodeRole        string
-	nodeDraft       string
-	nodeLines       []string
 	tasks           []taskRow
 	artifacts       []artifactRow
 	previewTitle    string
 	previewRow      artifactRow
 	preview         string
 	questions       []openQuestion
-	artifactsOpen   bool
-	graphOpen       bool
 	paused          bool
-	binding         bool
-	modelMenu       bool
 	models          []modelChoice
+	modelsLoading   bool
 	currentModel    string
 	currentThinking string
 	graph           taskGraph
 	graphTaskID     string
 	graphLoading    bool
 	graphError      string
-	projects        []string
-	proposal        draftProposal
-	branch          string
-	project         string
 	visible         int
 	loadedOlderFor  int
 	fingerprint     string

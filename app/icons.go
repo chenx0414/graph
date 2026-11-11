@@ -22,5 +22,6 @@ var (
 	iconSend    = svgIcon(`<path d="M4 12h15"/><path d="m13 6 6 6-6 6"/>`)
 	iconPlus    = svgIcon(`<path d="M12 5v14"/><path d="M5 12h14"/>`)
 	iconGraph   = svgIcon(`<path d="M5 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/><path d="M19 13.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/><path d="M19 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/><path d="m7.2 9.4 9.6 5.2"/><path d="M7.5 8h9"/>`)
+	iconCopy    = svgIcon(`<path d="M9 9h11v11H9Z"/><path d="M5 15H4V4h11v1"/>`)
 	iconArchive = svgIcon(`<path d="M4 7h16v13H4Z"/><path d="M2 3h20v4H2Z"/><path d="M10 12h4"/>`)
 )

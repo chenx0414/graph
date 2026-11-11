@@ -34,10 +34,7 @@ func (c *chatState) poll() bool {
 	body, bodyErr := parseConversationBody(payload)
 	changed := fingerprint != c.fingerprint
 	if bodyErr == nil {
-		if body.Paused != c.paused || body.Proposal != nil && *body.Proposal != c.proposal {
-			changed = true
-		}
-		if len(body.Questions) != len(c.questions) {
+		if body.Paused != c.paused || len(body.Questions) != len(c.questions) {
 			changed = true
 		}
 	}
@@ -49,9 +46,6 @@ func (c *chatState) poll() bool {
 	if bodyErr == nil {
 		c.paused = body.Paused
 		c.questions = nil
-		if body.Proposal != nil && body.Proposal.Version > 0 {
-			c.proposal = *body.Proposal
-		}
 		for _, question := range body.Questions {
 			if question.open() {
 				c.questions = append(c.questions, question)

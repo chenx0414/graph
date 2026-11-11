@@ -57,29 +57,6 @@ type projectListPayload struct {
 	} `json:"projects"`
 }
 
-func (c *chatState) projectChoices() []string {
-	if len(c.projects) > 0 {
-		return c.projects
-	}
-	payload, err := c.api.get("/api/settings")
-	if err != nil {
-		c.status = "读不到项目列表：" + err.Error()
-		return nil
-	}
-	var listed projectListPayload
-	if err := json.Unmarshal(payload, &listed); err != nil {
-		c.status = "项目列表不是预期的 JSON：" + err.Error()
-		return nil
-	}
-	for _, project := range listed.Projects {
-		if project.ID == "" {
-			continue
-		}
-		c.projects = append(c.projects, project.ID)
-	}
-	return c.projects
-}
-
 type modelChoice struct {
 	id        string
 	thinking  string
@@ -94,6 +71,16 @@ type modelListPayload struct {
 			Level string `json:"level"`
 		} `json:"thinkingOptions"`
 	} `json:"models"`
+}
+
+func (c *chatState) loadModels() {
+	if c.modelsLoading || len(c.models) > 0 {
+		return
+	}
+	c.modelsLoading = true
+	c.modelChoices()
+	c.modelsLoading = false
+	c.frame()
 }
 
 func (c *chatState) modelChoices() []modelChoice {
@@ -151,48 +138,6 @@ func (c *chatState) selectModel(model modelChoice, thinking string) {
 	}
 	c.currentModel = model.id
 	c.currentThinking = thinking
-	c.modelMenu = false
 	c.status = "已切到 " + shortModel(model.id) + " · 思考 " + thinking
-	c.frame()
-}
-
-func (c *chatState) confirmDraft() {
-	if c.active == "" || c.proposal.Version < 1 {
-		return
-	}
-	branch := strings.TrimSpace(c.branch)
-	if branch == "" {
-		c.status = "目标分支不能为空"
-		c.frame()
-		return
-	}
-	body := map[string]any{
-		"proposalVersion": c.proposal.Version,
-		"draftRevision":   c.proposal.DraftRevision,
-		"targetBranch":    branch,
-		"requestId":       requestID("native-confirm"),
-	}
-	if _, err := c.api.post("/api/conversations/"+c.active+"/confirm", body); err != nil {
-		c.status = "确认失败：" + err.Error()
-		c.frame()
-		return
-	}
-	c.proposal = draftProposal{}
-	c.status = "已确认草案，开始执行（目标分支 " + branch + "）"
-	c.frame()
-}
-
-func (c *chatState) bindProject(projectID string) {
-	if c.active == "" || strings.TrimSpace(projectID) == "" {
-		return
-	}
-	if _, err := c.api.post("/api/conversations/"+c.active+"/bind", map[string]string{"projectId": projectID, "requestId": requestID("native-bind")}); err != nil {
-		c.status = "绑定失败：" + err.Error()
-		c.frame()
-		return
-	}
-	c.project = projectID
-	c.binding = false
-	c.status = "已绑定到 " + projectID
 	c.frame()
 }
