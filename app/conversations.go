@@ -300,8 +300,9 @@ func (c *chatState) frame() {
 
 func (c *chatState) view(ctx *ui.Context) {
 	t := ctx.Theme()
-	ui.Column(ctx).Fill().Padding(16).Gap(10).Children(func() {
-		if c.status != "" && len(c.messages) == 0 {
+	ui.Column(ctx).Grow(1).Shrink(1).Children(func() {
+		ui.Column(ctx).Grow(1).Shrink(1).Padding(16).Gap(10).Children(func() {
+			if c.status != "" && len(c.messages) == 0 {
 			ui.Text(ctx, c.status).TextColor(t.TextMuted)
 			return
 		}
@@ -452,7 +453,8 @@ func (c *chatState) view(ctx *ui.Context) {
 		if c.status != "" && len(c.messages) > 0 {
 			ui.Text(ctx, c.status).FontSize(12).TextColor(t.TextMuted)
 		}
-		ui.Row(ctx).Gap(8).AlignItems(ui.End).Children(func() {
+		})
+		ui.Row(ctx).Gap(8).Padding(0, 16, 16, 16).AlignItems(ui.End).Children(func() {
 			ui.TextInput(ctx, &c.draft).Placeholder("给 Graph 发消息…").Label("消息").Grow(1)
 			if ui.PrimaryButton(ctx, "发送").Clicked() {
 				go c.send()
