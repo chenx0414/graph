@@ -313,27 +313,6 @@ func (app *GraphApp) serveConversationUnarchive(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, app.runtime.Conversations().Unarchive(conversationID, appBodyString(body, "requestId")))
 }
 
-func (app *GraphApp) serveConversationBind(w http.ResponseWriter, r *http.Request) {
-	conversationID := r.PathValue("conversationId")
-	body := appJSONBody(w, r)
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().Bind(
-		conversationID, appBodyString(body, "projectId"), appBodyString(body, "requestId")))
-}
-
-func (app *GraphApp) serveConversationConfirm(w http.ResponseWriter, r *http.Request) {
-	conversationID := r.PathValue("conversationId")
-	body := appJSONBody(w, r)
-	proposalVersion, _ := appBodyInt(body, "proposalVersion")
-	draftRevision, _ := appBodyInt(body, "draftRevision")
-	input := TaskRuntimeConfirmInput{
-		ProposalVersion: proposalVersion,
-		DraftRevision:   draftRevision,
-		TargetBranch:    appBodyString(body, "targetBranch"),
-		RequestId:       appBodyString(body, "requestId"),
-	}
-	writeJSON(w, http.StatusOK, app.runtime.Conversations().Confirm(conversationID, input))
-}
-
 func (app *GraphApp) serveConversationPause(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	body := appJSONBody(w, r)
