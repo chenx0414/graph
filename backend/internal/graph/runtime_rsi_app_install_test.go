@@ -8,79 +8,80 @@ import (
 	"testing"
 )
 
-func bundleWithExecutable(t *testing.T, root string, content string) string {
+func writeBundle(t *testing.T, bundle, identifier, version string) {
 	t.Helper()
-	bundle := filepath.Join(root, "dist", "app", "mac-arm64", "Graph.app")
-	executable := filepath.Join(bundle, "Contents", "MacOS", "Graph")
-	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(bundle, "Contents", "MacOS"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(executable, []byte(content), 0o755); err != nil {
-		t.Fatalf("write built binary: %v", err)
+	executable := filepath.Join(bundle, "Contents", "MacOS", "Graph")
+	if err := os.WriteFile(executable, []byte("shell+daemon"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
 	}
+	plist := "" +
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+		"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+		"<plist version=\"1.0\"><dict>" +
+		"<key>CFBundleIdentifier</key><string>" + identifier + "</string>" +
+		"<key>CFBundleShortVersionString</key><string>" + version + "</string>" +
+		"</dict></plist>\n"
+	if err := os.WriteFile(filepath.Join(bundle, "Contents", "Info.plist"), []byte(plist), 0o644); err != nil {
+		t.Fatalf("write plist: %v", err)
+	}
+}
+
+func builtBundle(t *testing.T) string {
+	t.Helper()
+	bundle := filepath.Join(t.TempDir(), "dist", "app", "mac-arm64", "Graph.app")
+	writeBundle(t, bundle, "dev.graph.console", "0.2.0")
 	return bundle
 }
 
-// The destination is the app bundle itself, as appinstall.DefaultDest reports it.
-func appDestination(t *testing.T, root string) string {
+func destination(t *testing.T) string {
 	t.Helper()
-	dest := filepath.Join(root, "Applications", "Graph.app")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		t.Fatalf("mkdir dest: %v", err)
-	}
-	return dest
+	return filepath.Join(t.TempDir(), "Applications", "Graph.app")
 }
 
-func installInto(t *testing.T, dest string, content string) {
-	t.Helper()
-	executable := filepath.Join(dest, "Contents", "MacOS", "Graph")
-	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(executable, []byte(content), 0o755); err != nil {
-		t.Fatalf("write installed binary: %v", err)
-	}
-}
-
-func TestInstallVerdictTrustsTheInstalledBinaryOverTheInstaller(t *testing.T) {
-	root := t.TempDir()
-	dest := appDestination(t, root)
-	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
-	installInto(t, dest, "shell+daemon v2")
+func TestInstallVerdictAcceptsTheSameIdentityEvenThoughSigningChangesBytes(t *testing.T) {
+	bundle := builtBundle(t)
+	dest := destination(t)
+	writeBundle(t, dest, "dev.graph.console", "0.2.0")
 	verdict := rsiAppInstallVerdict(bundle, dest, "installed", nil)
-	if verdict.State != "installed" || !strings.Contains(verdict.Note, "Graph.app") || !strings.Contains(verdict.Note, "sha256 ") {
+	if verdict.State != "installed" || !strings.Contains(verdict.Note, "dev.graph.console@0.2.0") {
 		t.Fatalf("verdict = %+v", verdict)
 	}
+	if !strings.Contains(verdict.Note, "signature") {
+		t.Fatalf("the note must say whether the signature verified: %+v", verdict)
+	}
 }
 
-func TestInstallVerdictReportsAFailureThatActuallyInstalled(t *testing.T) {
-	root := t.TempDir()
-	dest := appDestination(t, root)
-	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
-	installInto(t, dest, "shell+daemon v2")
+func TestInstallVerdictRefusesAnotherBuildAtTheDestination(t *testing.T) {
+	bundle := builtBundle(t)
+	dest := destination(t)
+	writeBundle(t, dest, "dev.graph.console", "0.1.0")
+	verdict := rsiAppInstallVerdict(bundle, dest, "installed", nil)
+	if verdict.State != "failed" || !strings.Contains(verdict.Note, "not the build that was made") {
+		t.Fatalf("verdict = %+v", verdict)
+	}
+	if !strings.Contains(verdict.Note, "0.2.0") || !strings.Contains(verdict.Note, "0.1.0") {
+		t.Fatalf("the note must name both identities: %+v", verdict)
+	}
+}
+
+func TestInstallVerdictReportsAnInstallThatFailedAndLanded(t *testing.T) {
+	bundle := builtBundle(t)
+	dest := destination(t)
+	writeBundle(t, dest, "dev.graph.console", "0.2.0")
 	verdict := rsiAppInstallVerdict(bundle, dest, "", errors.New("codesign: something"))
 	if verdict.State != "installed" || !strings.Contains(verdict.Note, "although the installer reported an error") {
 		t.Fatalf("verdict = %+v", verdict)
 	}
 }
 
-func TestInstallVerdictRefusesAStaleInstalledBinary(t *testing.T) {
-	root := t.TempDir()
-	dest := appDestination(t, root)
-	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
-	installInto(t, dest, "shell+daemon v1")
-	verdict := rsiAppInstallVerdict(bundle, dest, "installed", nil)
-	if verdict.State != "failed" || !strings.Contains(verdict.Note, "does not match the built one") {
-		t.Fatalf("verdict = %+v", verdict)
-	}
-}
-
-func TestInstallVerdictNamesBothPathsWhenNothingLanded(t *testing.T) {
-	root := t.TempDir()
-	dest := appDestination(t, root)
-	bundle := bundleWithExecutable(t, root, "shell+daemon v2")
+func TestInstallVerdictNamesBothBundlesWhenNothingLanded(t *testing.T) {
+	bundle := builtBundle(t)
+	dest := destination(t)
 	verdict := rsiAppInstallVerdict(bundle, dest, "no packaged app", errors.New("no packaged app at "+bundle))
-	if verdict.State != "failed" || !strings.Contains(verdict.Note, "installed") || !strings.Contains(verdict.Note, bundle) {
+	if verdict.State != "failed" || !strings.Contains(verdict.Note, bundle) || !strings.Contains(verdict.Note, dest) {
 		t.Fatalf("verdict = %+v", verdict)
 	}
 }
