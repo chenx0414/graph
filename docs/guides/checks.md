@@ -72,7 +72,7 @@ GRAPH_E2E_VISIBLE_WINDOWS=1 node --run check
 | --- | --- |
 | 依赖锁文件 | `pnpm-lock.yaml`、`yarn.lock`、`go.sum`、`*-lock.json` |
 | 生成代码 | 带 `DO NOT EDIT` / `@generated` 头的文件 |
-| 生成数据 | `src/catalog/models-dev.snapshot.json`、`*.snapshot.json`、`scripts/perf/bench/*.json` 测量输出、`*.output.txt` |
+| 生成数据 | `src/catalog/models-dev.snapshot.json`、`*.snapshot.json`、`*.output.txt` |
 | 内置第三方 | `.agents/skills/`、`vendor/`、`node_modules/`、`dist/`、`build/` |
 | 二进制资源 | 图片、字体、压缩包、`*.sqlite` |
 

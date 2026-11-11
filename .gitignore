@@ -31,7 +31,6 @@ __pycache__/
 .pytest_cache/
 .coverage
 *.egg-info/
-.playwright-mcp/
 skills-lock.json
 .worktrees/
 .agents/*

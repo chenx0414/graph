@@ -154,11 +154,6 @@ function optOutReason(head) {
   return match ? match[1].trim() : undefined;
 }
 
-/** Measurement output written by scripts/perf/bench/measure.ts. */
-function isMeasuredOutput(path, head) {
-  return path.startsWith('scripts/perf/bench/') && head.subarray(0, HEAD_BYTES).toString('utf8').includes('"measuredAt"');
-}
-
 /**
  * The staged paths that can hold content, as index entries.
  *
@@ -293,10 +288,6 @@ function check(records, limit) {
     }
     if (hasGeneratedMarker(head)) {
       skipped.push([record.path, 'generated code']);
-      continue;
-    }
-    if (isMeasuredOutput(record.path, head)) {
-      skipped.push([record.path, 'measurement output']);
       continue;
     }
     violations.push(record);
