@@ -88,7 +88,7 @@ module 判断历史按发生顺序分页，默认20条，上限200；下一页�
 
 ## 按需生成审查模块
 
-需要多视角、对抗式或评委式判断时，main 可在 Graph 源码目录运行 `dist/graphd review-module --policy <policy.json> --entry <新的-entry.mjs> [--version <n>] [--protocol <name>]`（`dist/graphd` 是 Go 后端的二进制，可用 `node scripts/build-backend.mjs --if-missing` 构建）。这不是常驻工具或另一种 graph 格式：命令生成纯判断代码，并把普通 command 模块 JSON 写到 stdout；将该对象放入 definition.modules，连接显式输入即可。代码文件不能覆盖，修订用新路径和版本。默认 version=1、各接口 protocol=data；graph 必须声明该协议。连接到已有不同协议的端点时，按端点的协议 ID/版本调整生成对象中的接口声明，或显式映射；不绕过连接校验。
+需要多视角、对抗式或评委式判断时，main 可在 Graph 源码目录运行 `dist/graphd review-module --policy <policy.json> --entry <新的-entry.mjs> [--version <n>] [--protocol <name>]`（`dist/graphd` 是 Go 后端的二进制，可用 `go -C backend run ./cmd/graphbuild backend --if-missing` 构建）。这不是常驻工具或另一种 graph 格式：命令生成纯判断代码，并把普通 command 模块 JSON 写到 stdout；将该对象放入 definition.modules，连接显式输入即可。代码文件不能覆盖，修订用新路径和版本。默认 version=1、各接口 protocol=data；graph 必须声明该协议。连接到已有不同协议的端点时，按端点的协议 ID/版本调整生成对象中的接口声明，或显式映射；不绕过连接校验。
 
 例如 policy.json：
 

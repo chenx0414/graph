@@ -92,8 +92,8 @@ func TestAppChangesRebuildTheShellThatCarriesThem(t *testing.T) {
 	for _, path := range []string{
 		"app/rsi.go",
 		"app/mygo.json",
-		"scripts/package-app-mygo.mjs",
-		"scripts/install-desktop-app.mjs",
+		"backend/internal/appinstall/sign.go",
+		"backend/cmd/graphbuild/main.go",
 	} {
 		if !rsiNeedsAppBuild([]string{path}) {
 			t.Fatalf("%s must rebuild the desktop app", path)

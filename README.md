@@ -39,13 +39,13 @@
 界面只有原生窗口（Go + MyGo）：一个可执行文件，平时开窗口，带 `daemon` 参数时作为守护进程运行。没有网页控制台，也不需要 Electron 或 Chromium。
 
 ```sh
-node --run app:build                    # 打包 dist/app/mac-arm64/Graph.app
-node scripts/install-desktop-app.mjs    # 装到 /Applications，退出重开才生效
+go -C backend run ./cmd/graphbuild app   # 打包 dist/app/mac-arm64/Graph.app
+go -C backend run ./cmd/graphbuild install   # 装到 /Applications，退出重开才生效
 ```
 
 - 守护进程由 launchd（`dev.graph.daemon`）托管，跑的就是 App 包内那份二进制（`/Applications/Graph.app/Contents/MacOS/Graph daemon …`）：macOS 按“二进制所在的 bundle”记账，只有从包里运行，辅助功能授权才会认到 Graph 上。
 - 状态目录 `~/Library/Application Support/Graph/state`，配置默认 `~/Library/Application Support/Graph/graph.config.json`；可用 `--config`、`--state-dir`、`--port` 覆盖，或设置 `GRAPH_CONFIG`、`GRAPH_STATE_DIR`、`GRAPH_PORT`。源码 checkout 位置来自 `~/.graph/app-root` 或 `GRAPH_RSI_ROOT`。
-- 只想在终端里跑无窗口守护进程：`node --run build:backend && node --run start`（构建并运行 `dist/graphd`，与 App 里的守护进程是同一份 `backend/` 代码）。
+- 只想在终端里跑无窗口守护进程：`go -C backend run ./cmd/graphbuild backend && node --run start`（构建并运行 `dist/graphd`，与 App 里的守护进程是同一份 `backend/` 代码）。
 - 只绑定 `127.0.0.1`。同一状态目录只允许一个守护进程；`Ctrl-C`/SIGTERM 有界停止（5 秒），在途调用不会被记作成功。
 
 最小 `graph.config.json`：
@@ -79,7 +79,7 @@ node scripts/install-desktop-app.mjs    # 装到 /Applications，退出重开才
 
 窗口由 `app/` 绘制，通过守护进程的 HTTP/SSE 接口读写数据；关闭窗口不停止守护进程，退出 APP 有界停止它。托盘菜单提供「打开 Graph」与「退出 Graph」，新增待处理问题或任务完成/失败时发系统通知。首次运行没有 `graph.config.json` 也能打开：窗口显示首次运行提示，只读浏览历史，不派发模型请求。
 
-- 打包 `node --run app:build`，安装 `node scripts/install-desktop-app.mjs`。产物未签名；对外分发需要 Apple Developer ID 与公证。
+- 打包 `go -C backend run ./cmd/graphbuild app`，安装 `go -C backend run ./cmd/graphbuild install`。产物未签名；对外分发需要 Apple Developer ID 与公证。
 - 数据与密钥全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、600 权限的本地密钥文件）。卸载应用不会删除该目录，彻底清理时手动删除。
 - 方案与阶段报告：[APP 版本方案](app-version-plan-2026-09-13.md)、[APP 交付报告](app-reports.md)。
 

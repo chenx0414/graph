@@ -10,11 +10,11 @@ Graph 是任务编排控制台；它交付过的 MediaBookmarks B站 Web 应用�
 
 ```sh
 cd "$REPO"            # 仓库根目录
-node --run app:build  # 打包壳与守护进程（同一个二进制）
+go -C backend run ./cmd/graphbuild app   # 打包壳与守护进程（同一个二进制）
 node --run start      # 只启守护进程（仅查看模式）；有 pnpm 时 pnpm start
 ```
 
-界面是原生 macOS 窗口（Go + MyGo），不是浏览器页面：用 `node scripts/install-desktop-app.mjs` 装好包后退出并重新打开 Graph.app 才会跑新代码。首次运行没有 `graph.config.json` 也能启动：窗口显示首次运行提示，只读浏览历史，不派发模型请求。守护进程启动输出包含配置文件、状态目录与访问地址：
+界面是原生 macOS 窗口（Go + MyGo），不是浏览器页面：用 `go -C backend run ./cmd/graphbuild install` 装好包后退出并重新打开 Graph.app 才会跑新代码。首次运行没有 `graph.config.json` 也能启动：窗口显示首次运行提示，只读浏览历史，不派发模型请求。守护进程启动输出包含配置文件、状态目录与访问地址：
 
 ```
 Graph console
@@ -83,7 +83,7 @@ Graph 自身的 Agent docs 不再复制到 `~/.graph/prompts/docs`。源码内�
 
 ### 安装、卸载与打包
 
-- 打包：`node --run app:build`，产物为 `dist/app/mac-arm64/Graph.app`；安装：`node scripts/install-desktop-app.mjs`（旧包存为 `Graph.app.previous`）。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证。
+- 打包：`go -C backend run ./cmd/graphbuild app`，产物为 `dist/app/mac-arm64/Graph.app`；安装：`go -C backend run ./cmd/graphbuild install`（旧包存为 `Graph.app.previous`）。当前产物为本地构建、未签名；对外分发需要 Apple Developer ID 与公证。
 - 守护进程：launchd 标签 `dev.graph.daemon`，跑 `/Applications/Graph.app/Contents/MacOS/Graph daemon …`——与窗口同一个二进制，也从同一个包里运行，授权才落在 Graph 上。
 - 数据与密钥：全部位于 `~/Library/Application Support/Graph/`（`graph.config.json`、`state/`、`secrets.json`）。卸载应用不会删除该目录；彻底清理时手动删除。
 - 托盘：菜单栏图标提供“打开 Graph / 退出 Graph”；关闭窗口仅关闭窗口，守护进程继续运行。
