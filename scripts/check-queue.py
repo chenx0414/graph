@@ -386,14 +386,20 @@ def main():
         # of the same checkout. So it runs beside the full suite instead of behind
         # it, and the suite it used to wait for is the one that no longer decides
         # whether a commit lands.
-        static = ("check:backend", "check:comments", "check:ownership", "check:tokens:changed", "check:harness")
-        tests = (("go", "-C", "backend", "run", "./cmd/graphcheck", "evidence"),)
+        static = (
+            ("go", "-C", "backend", "run", "./cmd/graphbuild", "backend"),
+            ("go", "-C", "backend", "vet", "./..."),
+            ("go", "-C", "backend", "test", "./..."),
+            ("go", "-C", "app", "vet", "./..."),
+            ("go", "-C", "app", "test", "./..."),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "comments"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "ownership"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "tokens", "--changed"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "harness"),
+            ("go", "-C", "backend", "run", "./cmd/graphcheck", "evidence"),
+        )
         with protect_worktree(common):
             for step in static:
-                code = run(["node", "--run", step])
-                if code:
-                    return code
-            for step in tests:
                 code = run(list(step))
                 if code:
                     return code

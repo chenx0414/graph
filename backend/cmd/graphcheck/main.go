@@ -38,6 +38,10 @@ func main() {
 		os.Exit(runPig(root, os.Args[2:]))
 	case "summary":
 		os.Exit(runSummary(os.Args[2:]))
+	case "harness":
+		os.Exit(runHarness(root, os.Args[2:]))
+	case "eval":
+		os.Exit(runEval(root, os.Args[2:]))
 	case "all":
 		os.Exit(runAll(root))
 	default:
@@ -47,7 +51,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | evidence | skills [flags] | pig [flags] | summary [path] | all")
+	fmt.Fprintln(os.Stderr, "usage: graphcheck comments [--changed] | tokens [--changed] [paths...] | ownership [--staged] [paths...] | evidence | skills [flags] | pig [flags] | summary [path] | harness [--record] | eval [flags] | all")
 }
 
 func repoRoot() (string, error) {

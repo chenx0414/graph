@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -36,17 +35,8 @@ func runAll(root string) int {
 	if code := runOwnership(root, nil); code != 0 {
 		return code
 	}
-	if _, err := os.Stat(filepath.Join(root, "package.json")); err == nil {
-		for _, script := range []string{"check:harness"} {
-			command := exec.Command("node", "--run", script)
-			command.Dir = root
-			command.Stdout = os.Stdout
-			command.Stderr = os.Stderr
-			if err := command.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "[check] failed: node --run %s\n", script)
-				return 1
-			}
-		}
+	if code := runHarness(root, nil); code != 0 {
+		return code
 	}
 	if code := runEvidence(root); code != 0 {
 		return code

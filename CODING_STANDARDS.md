@@ -12,7 +12,7 @@
 
 ## 验证与交付
 
-提交或推送前运行 `node --run check`，检查全部通过后继续。
+提交或推送前运行 `python3 scripts/check-queue.py`，检查全部通过后继续。
 
 普通测试的截图写入临时目录，保持 [验收证据](acceptance-evidence/) 不变。明确要更新交付证据时，按 [检查操作指南](docs/guides/checks.md#验收证据)执行并审阅证据差异。
 
@@ -28,4 +28,4 @@
 
 ## 注释
 
-禁止解释性注释：代码通过命名、类型与测试说明自己做了什么。只保留机器读取的指令行——`// graph:table-writes-exempt:`、`// graph:allow-large-file:`、`//go:build`、`//go:embed`、`//go:generate`、`// @ts-expect-error`、`/// <reference />`。门禁 `node --run check:comments` 要求每个源文件解释性注释 ≤ 8 行、全仓 ≤ 40 行；`node --run check:comments:changed` 要求本次改动只能减少不能增加。说明书留在 docs/，不留在大括号里。
+禁止解释性注释：代码通过命名、类型与测试说明自己做了什么。只保留机器读取的指令行——`// graph:table-writes-exempt:`、`// graph:allow-large-file:`、`//go:build`、`//go:embed`、`//go:generate`、`// @ts-expect-error`、`/// <reference />`。门禁 `go -C backend run ./cmd/graphcheck comments` 要求每个源文件解释性注释 ≤ 8 行、全仓 ≤ 40 行；`go -C backend run ./cmd/graphcheck comments --changed` 要求本次改动只能减少不能增加。说明书留在 docs/，不留在大括号里。

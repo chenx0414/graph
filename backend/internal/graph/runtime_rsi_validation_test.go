@@ -9,7 +9,7 @@ import (
 
 // The default gate runs once.
 //
-// A caller that lists `node --run check` as its own check has already asked for
+// A caller that lists `go -C backend run ./cmd/graphcheck all` as its own check has already asked for
 // the whole gate; running it again before activation doubled every commit - the
 // measured cost of one apply was two full gates plus the build.
 func TestDefaultGateIsNotRepeatedWhenTheChecksAlreadyNameIt(t *testing.T) {

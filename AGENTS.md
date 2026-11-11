@@ -9,7 +9,7 @@
 
 - 可验证性第一：每段代码都要有一条命令能判定它对不对，没有断言路径的代码不提交。见 [可验证性](CODING_STANDARDS.md#可验证性)。
 
-- 禁止解释性注释，只保留机器指令行（`// graph:`、`//go:`、`// @ts-`、`/// <reference`）。`node --run check:comments` 是门禁，改动只能删不能加，见 [注释](CODING_STANDARDS.md#注释)。
+- 禁止解释性注释，只保留机器指令行（`// graph:`、`//go:`、`// @ts-`、`/// <reference`）。`go -C backend run ./cmd/graphcheck comments` 是门禁，改动只能删不能加，见 [注释](CODING_STANDARDS.md#注释)。
 
 - Keep every source file at or below 500 LOC. Tests, docs and CSS are exempt. Markdown is documentation, not source. Split a source file before completion if your change takes it over the limit.
 
@@ -17,9 +17,13 @@
 
 ## 门禁分层
 
-`node --run check` 是**激活门禁**（快层）：静态检查加 `check:affected`，后者按改动区域选层——纯后端改动只跑后端与 `check:affected` 选中的层，`src/core` 改动才带上在进程内跑的 vitest 层（`tests/app`、`tests/m7`），改 `scripts`/`tests`/`presets`/`docs`/`package.json`/vitest 配置则跑全套。用 `GRAPH_CHECK_PLAN_ONLY=1 node --run check:affected` 可以只读“这次会跑哪一层、因为哪些文件”。
+`python3 scripts/check-queue.py` 是**激活门禁**（快层）：`go -C backend run ./cmd/graphbuild backend` 起后端起二进制，`go vet` 与 `go test` 各跑两遍（`backend/`、`app/` 是两个 module），再加静态门禁（评论预算、表归属、源文件体量、证据未变）与行为门禁 `go -C backend run ./cmd/graphcheck harness`。
 
-快层里只有跑测试的那一半排队：`check:backend`/`typecheck`/`lint`/`check:harness` 只写本工作区，两个会话可以同时跑；`check:affected`/`check:evidence` 会起守护进程、用共享暂存目录，仍走 `check-queue.py` 的机器级 slot。以前整个快层都在那把锁里，所以别人一在检查，你的激活就得等——等的还不是共享资源。
+跑测试的那一半会起守护进程、用共享暂存目录，仍走 `check-queue.py` 的机器级 slot；其余只写本工作区，两个会话可以同时跑。以前整个快层都在那把锁里，所以别人一在检查，你的激活就得等——等的还不是共享资源。
+
+`go -C backend run ./cmd/graphcheck all` 是**全量确认**（慢层）：同一批步骤再走一遍。**重载确认后它会自己跑**：`AckRestart` 确认提交生效时启动后台会全量，日志落在 `state/rsi/reports/async-full-<activationId>.log`；失败会往本会话追一条带来源标记的消息、标出「回归」还是「环境故障」，并唤醒主控——所以不再需要人记得手动跑。（守护进程在跑之前重启会丢掉这次后台确认，那就靠下一次激活补上。）判定不靠「整份日志里有没有环境故障字样」：它按 `backend/internal/graph/testdata/env-known-reds.json` 逐条匹配失败包与错误摘要，只有所有失败都命中才判「环境故障」，任何未命中的失败都算回归并在卡片里点名（包 + 错误摘要）；新增已知环境项必须写进这个文件并写清理由，不能靠口头约定。
+
+仓库里没有自有的 TypeScript/JavaScript：界面、daemon、构建与门禁工具链都是 Go。例外只有两处——`src/runtime/` 的四个 Node 执行面 worker，以及 `.agents/skills/` 的第三方技能脚本。
 
 ## 测试只许断言确定的事实
 
@@ -29,7 +33,3 @@
 - 不比耗时、不比重试次数（`retries_used`）、不比 `workerActive` 这类随调度变化的字段，也不比整行记录。要比就比合同：同一个执行 id、同一个 submission、同一份产物的摘要。
 - “没有重跑”用产物摘要与执行 id 证明，不用计数器证明。
 - 拿不准就问：这条断言在慢机或高负载下会不会翻转？会翻转就换成确定的等价断言，而不是把它放进隔离名单。
-
-`node --run check:full` 是**全量确认**（慢层，约 5–12 分钟）：包含 `check:tests` 与 `check:baseline`。**重载确认后它会自己跑**：`AckRestart` 确认提交生效时启动后台会全量，日志落在 `state/rsi/reports/async-full-<activationId>.log`；失败会往本会话追一条带来源标记的消息、标出“回归”还是“环境故障”，并唤醒主控——所以不再需要人记得手动跑。（守护进程在跑之前重启会丢掉这次后台确认，那就靠下一次激活补上。）判定不靠“整份日志里有没有环境故障字样”：它按 `tests/env-known-reds.json` 逐条匹配失败文件与错误摘要，只有所有失败都命中才判“环境故障”，任何未命中的失败都算回归并在卡片里点名（文件 + 错误摘要）；新增已知环境项必须写进这个文件并写清理由，不能靠口头约定。`tests/quarantine.json` 里的时序敏感用例每次仍会跑并逐条打印，只是不阻塞门禁；`GRAPH_STRICT_SUITE=1` 时恢复严格，隔离项连续全绿后就把它移出名单。
-
-这一次全量以前靠人肉跑，结果就是“忘了就等于没跑”；现在由重载确认自动触发，宿主侧拥有窗口服务，能看到浏览器层的真结果。如果还是本机手工跑，浏览器层会报 `Process failed to launch!`——实测同一次里 38 个文件 / 123 条用例因这个原因变红，而非浏览器层的用例照旧全绿，所以本机兜底跑出来的全量不能当回归判定。`tests/env-layers.json` 就是为这件事存在的：声明哪些文件需要窗口服务，能力不可用时如实跳过并打印。

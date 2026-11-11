@@ -52,7 +52,7 @@ func rsiApplyReceipt(t *testing.T, root string, changes []any) RsiReceipt {
 		Root:     &root,
 		StateDir: stateDir,
 		Validate: func(RsiValidateInput) []RsiValidationResult {
-			return []RsiValidationResult{{Command: "node --run check", Status: "passed"}}
+			return []RsiValidationResult{{Command: "go -C backend run ./cmd/graphcheck all", Status: "passed"}}
 		},
 	})
 	if !service.Available {

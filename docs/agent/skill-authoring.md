@@ -36,8 +36,8 @@ description: Verify a service is still answering before blaming the code. Use wh
 ## 谁会被检查（技能 lint）
 
 ```bash
-node --run skills:lint                       # 只查自著技能（推荐日常用）
-node scripts/skills-lint.mjs --skills tests/fixtures/skills/good --strict   # 直接指定技能容器（fixture 用）
+go -C backend run ./cmd/graphcheck skills                       # 只查自著技能（推荐日常用）
+go -C backend run ./cmd/graphcheck skills --skills path/to/skills --strict   # 直接指定技能容器
 node scripts/skills-lint.mjs --all           # 连同别人写的技能一起过一遍硬规则
 node scripts/skills-lint.mjs --json --strict # 机器可读 / 有警告就退出 1
 ```
@@ -60,7 +60,7 @@ lint **只警告不阻断**：`--strict` 才会因警告退出 1（供 fixture �
 ## 怎么验收一个技能
 
 1. **它真的被注入了**：在控制台「Agent 上下文」里确认 `<available_skills>` 里出现它——那个面板与实际注入同源（同一组装路径、同一技能目录）。项目技能免绑定，新建后新会话即可见。
-2. **路由对**：自著技能带 `created-by: graph-agent`，且 `node --run skills:lint` 对它零警告。
+2. **路由对**：自著技能带 `created-by: graph-agent`，且 `go -C backend run ./cmd/graphcheck skills` 对它零警告。
 3. **真的有用**：写下它的**触发场景**（在什么任务、什么信号下会读到它），并在下一次遇到该场景时确认它被读到——`GET /api/skill-stats` 按技能给出「被读次数 / 最近一次 / 从未被读」。
 
 ## 写技能的边界

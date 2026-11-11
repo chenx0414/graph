@@ -43,7 +43,7 @@
 
 检查：
 
-- `inspect_rsi_status` 的 `available`、`root` 与 `reason`：打包应用跑的是 `/Applications/Graph.app` 里的副本，不是 Git 仓库，所以默认不可用；把 `GRAPH_RSI_ROOT` 指向一个 checkout（含 `backend/internal/graph/server_cli.go` 与 `app/main.go`）后，launchd 启动的 daemon 以该目录为 `--application-root`。窗口与 daemon 是同一个二进制：launchd 跑的是 App 自身在 `~/Library/Application Support/Graph/bin/graphd` 的副本，带 `daemon` 参数。改 `app/` 必须 `node --run app:build` 重新装包，**并由用户退出重开**才生效；daemon 侧改动会在下一次 App 启动时换上同一份新二进制并重启 launchd。
+- `inspect_rsi_status` 的 `available`、`root` 与 `reason`：打包应用跑的是 `/Applications/Graph.app` 里的副本，不是 Git 仓库，所以默认不可用；把 `GRAPH_RSI_ROOT` 指向一个 checkout（含 `backend/internal/graph/server_cli.go` 与 `app/main.go`）后，launchd 启动的 daemon 以该目录为 `--application-root`。窗口与 daemon 是同一个二进制：launchd 跑的是 App 自身在 `~/Library/Application Support/Graph/bin/graphd` 的副本，带 `daemon` 参数。改 `app/` 必须 `go -C backend run ./cmd/graphbuild app` 重新装包，**并由用户退出重开**才生效；daemon 侧改动会在下一次 App 启动时换上同一份新二进制并重启 launchd。
 - `pendingRestart` 与 `canRestart`：有在途 operation 时普通请求不会重载；`pendingRestart.force` 为真时会跳过该条件；
 - `apply_rsi_change` 返回的 `status`：`checks_failed` 表示检查未通过但改动仍保留在工作区（继续修复或传 `changes: []` 重跑检查），`rolled_back` 表示意外错误并已恢复文件，`unavailable` 表示没有可用 checkout；
 - 桌面进程是否在轮询 `/api/app/rsi/status`，以及 `/api/app/rsi/restart-ack` 是否成功；

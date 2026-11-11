@@ -67,7 +67,7 @@ func runPig(repoRoot string, arguments []string) int {
 		if current == latest {
 			return 0
 		}
-		fmt.Fprintf(os.Stderr, "the pinned kernel %s is behind the published %s; run: node --run pig:update\n", pinLabel(current), latest)
+		fmt.Fprintf(os.Stderr, "the pinned kernel %s is behind the published %s; run: go -C backend run ./cmd/graphcheck pig --set latest\n", pinLabel(current), latest)
 		return 1
 	}
 	return applyPin(options, moduleDir, goModPath, goSumPath, goMod, current, latest)

@@ -1,62 +1,9 @@
 {
   "name": "graph",
-  "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "packageManager": "pnpm@11.19.0",
-  "engines": {
-    "node": ">=24.20.0",
-    "pnpm": ">=11.19.0"
-  },
-  "devEngines": {
-    "runtime": {
-      "name": "node",
-      "version": "24.20.0",
-      "onFail": "download"
-    }
-  },
+  "description": "Launcher only: the RSI check command is fixed to `node --run check`, which forwards to the Go gate.",
   "scripts": {
-    "check:comments": "go -C backend run ./cmd/graphcheck comments",
-    "check:comments:changed": "go -C backend run ./cmd/graphcheck comments --changed",
-    "skills:lint": "go -C backend run ./cmd/graphcheck skills",
-    "start": "go -C backend run ./cmd/graphbuild backend --if-missing && dist/graphd --application-root \"$PWD\"",
-    "start:execute": "go -C backend run ./cmd/graphbuild backend --if-missing && dist/graphd --application-root \"$PWD\" --execute",
-    "session:summary": "go -C backend run ./cmd/graphcheck summary",
-    "check:evidence": "go -C backend run ./cmd/graphcheck evidence",
-    "check:harness": "node scripts/harness-behavior-gate.mjs",
-    "eval:harness": "node scripts/harness-eval-report.mjs",
-    "check:full": "python3 scripts/check-queue.py --continue -- go -C backend run ./cmd/graphcheck all",
-    "check:tokens": "go -C backend run ./cmd/graphcheck tokens",
-    "check:tokens:changed": "go -C backend run ./cmd/graphcheck tokens --changed",
-    "check:ownership": "go -C backend run ./cmd/graphcheck ownership",
     "check": "python3 scripts/check-queue.py",
-    "check:run": "python3 scripts/check-queue.py --continue",
-    "app:build": "go -C backend run ./cmd/graphbuild app",
-    "build:backend": "go -C backend run ./cmd/graphbuild backend",
-    "check:backend": "go -C backend run ./cmd/graphbuild backend && go -C backend vet ./... && go -C backend test ./... && go -C app vet ./... && go -C app test ./...",
-    "pig:kernel": "go -C backend run ./cmd/graphcheck pig",
-    "pig:update": "go -C backend run ./cmd/graphcheck pig --set latest",
-    "pig:check": "go -C backend run ./cmd/graphcheck pig --check",
-    "check:app": "go -C app vet ./... && go -C app test ./..."
-  },
-  "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.75",
-    "@codemirror/commands": "6.11.1",
-    "@codemirror/lang-markdown": "6.5.2",
-    "@codemirror/language": "6.12.4",
-    "@codemirror/state": "6.7.6",
-    "@codemirror/view": "6.43.13",
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-coding-agent": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0",
-    "@xyflow/react": "12.11.6",
-    "ajv": "8.20.0",
-    "elkjs": "0.12.0",
-    "fastify": "5.12.4",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "thinking-orbs": "0.3.2"
-  },
-  "devDependencies": {}
+    "check:full": "python3 scripts/check-queue.py --continue -- go -C backend run ./cmd/graphcheck all"
+  }
 }

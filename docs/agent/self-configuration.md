@@ -84,19 +84,19 @@ Pi 原生工具 `read/bash/edit/write/ls/find/grep` 以及 Windows 上的 `power
 在完全访问模式下，Main Agent 同时是 Graph Harness 的改进者。RSI 不限于修 bug：只要它能给出理由，修缺陷、重构、新增功能、改进命令或文档都可以改。它用 `inspect_rsi_status` 读取源码 checkout、当前分支、待重载请求、仍在运行的 operation 及其身份（task/node/request/archived），再用 `apply_rsi_change` 提交一次结构化改动：
 
 - 修改 Graph 源码 checkout 内的文件（`write` / `replace` / `copy` / `delete`）；`write` 的正文可以内联，也可以用 `fromPath` 取自 checkout 里你已经写好、跑过的那个文件（不再重贴一遍）。`.git` 与路径逃逸被拒绝；不属于这次改动的未提交文件仍然阻塞（见下）；
-- 运行检查（自定义 `node` 检查、`node --run check`，`activate` 时再加 `node --run app:build`）；
-- 直接提交到 `main`：App 永远从 `main` 打包，`scripts/package-app.mjs` 会拒绝从别的分支或 `main` 不含的提交构建；
+- 运行检查（`python3 scripts/check-queue.py`；`activate` 时它还会把 App 装到 `/Applications`）；
+- 直接提交到 `main`：App 永远从 `main` 打包（`go -C backend run ./cmd/graphbuild app`），装好的副本只在重载确认后重装；
 - `activate` 为真时写出 `<stateDir>/rsi/restart.json`，由桌面进程在 operation 停稳后重启 daemon 让改动生效；`force` 为真时跳过等待、立即重载，可能中断在途 operation。
 
 调用形状是固定的（写错会白跑一个来回，报错会点名缺哪个字段）：`title`、`problem`、`changes`、`checks` 都是**顶层**字段；`changes[]` 的每个条目必须带 `path`（仓储相对路径）与 `action`（`write` / `replace` / `delete`），`write` 配 `content` 或 `fromPath`、`replace` 配 `edits` 或 `fromPath`；`checks` 里每项是 `{ command, args }`，也放顶层，不要塞进单个 change 里。SDK 的校验**一次列全部问题**（每行一条，并回显收到的参数），所以两处错误会同时出现，不必改一条试一次。改动里的多个 `edits` 也一样：所有匹配不上的锚点（`found 0` / `found 2`）在同一条报错里列出，改一次就能重发，而不是一次只发现一个。嵌套写错的那种会另行点名（`changes[0] is one file change… "checks" belongs at the top level of the call - it is nested one level too deep.`），因为 schema 只能描述结果、说不出原因。
 
 **别人未提交的改动不会挡住你的提交，也不会被吞进去**：共用 checkout 里另有一路未提交的文件时，`apply_rsi_change` 在 HEAD 上开一个只带本次声明路径的临时 worktree，把改动写进去、在那里跑检查、在那里提交；随后只把当前分支移到那个提交（并刷新索引），**其余文件一个字节都不动、依旧未提交**。所以检查证明的仍然是提交里的东西，而你不必为别人的工作等它先提交。这条路径不可用时（比如未能在 HEAD 上建 worktree）才回落成拒绝，消息依旧是 `Uncommitted changes outside this RSI change`。**这次改动自己要写的路径**：你用自己的工具把文件落盘、跑通，再用 `{path, action: "write", fromPath: "<同一个文件>"}` 命名它，提交的就是磁盘上的那些字节，收据会在「其中提交前已在工作区」里点名。
 
-检查必须能证明它声称的东西：`node --run check` 同时跑 typecheck 与全部测试，是「快检」的下限。只拿单文件 vitest 当检查会漏掉类型错误（实际漏过两次：一次 TDZ、一次忘了提拔 `SCHEMA_VERSION`），所以快检至少写成 `node --run typecheck && node node_modules/vitest/vitest.mjs run <files>`，或者直接用 `node --run check`。
+检查必须能证明它声称的东西：`python3 scripts/check-queue.py` 同时跑 `go vet` 与后端、App 两套测试，是「快检」的下限。只拿一个包的 `go test` 当检查会漏掉另一个模块（后端 `backend/`、窗口 `app/` 是两个 module），所以快检至少写成 `go -C backend vet ./... && go -C backend test ./... && go -C app test ./...`，或者直接用 `python3 scripts/check-queue.py`。
 
 检查失败不会丢弃改动：文件保留在工作区、不提交、不重载，receipt 状态为 `checks_failed`。Main Agent 继续修复同一批文件，或传 `changes: []` 只重跑检查，直到通过；只有意外错误才恢复快照，且回滚会**连索引一起复位**（否则一次混合 `git add -A` 留下的已暂存条目会被下一次尝试当成别人的未提交改动而拒绝运行）。每次 RSI 操作都会写 `rsi.change` 事件，并在 conversation 中追加 `kind=rsi` 的可见报告，包含问题、证据、诊断、影响、风险、文件、验证、提交和重载状态。
 
-**演练（`dryRun`）**：`dryRun: true` 把改动写进工作区、跑同一套检查，然后把工作区恢复到调用前——不提交、不建分支、不重载，收据状态是 `dry_run`，控制台显示「演练通过 / 演练未通过」并写明「没有提交，也不会重载」。它用同一套校验（给了 `checks` 就只跑它，没给就是 `node --run check`），回答的是「这次改动过不过得了门禁」；`dryRun` 隐含 `activate: false`，把 `activate` 写成真也不会生效。要真正交付就去掉 `dryRun` 再来一次（配合 `fromPath` 不必重贴正文）。
+**演练（`dryRun`）**：`dryRun: true` 把改动写进工作区、跑同一套检查，然后把工作区恢复到调用前——不提交、不建分支、不重载，收据状态是 `dry_run`，控制台显示「演练通过 / 演练未通过」并写明「没有提交，也不会重载」。它用同一套校验（给了 `checks` 就只跑它，没给就是 `python3 scripts/check-queue.py`），回答的是「这次改动过不过得了门禁」；`dryRun` 隐含 `activate: false`，把 `activate` 写成真也不会生效。要真正交付就去掉 `dryRun` 再来一次（配合 `fromPath` 不必重贴正文）。
 
 `status=applied` 表示提交完成。`activate=true` 成功后，工具会结束当前回合，`activation.state=pending_reload` 表示等待重载；不要继续调用工具、追加 RSI 改动或报告“已生效”。已有 operation 结束前，新消息保持排队。宿主确认新 daemon 的提交与请求匹配后，报告更新为 `activation.state=active`，`inspect_rsi_status.lastActivation` 返回该次确认，主管会自动恢复原请求，无需用户发送 continue 或“已重载”；排队的新消息在同一轮优先处理。暂停时延后续跑，归档或终止时不自动唤醒。需要先做多个中间提交时使用 `activate=false`（状态 `saved`），最后再请求激活。
 
@@ -135,12 +135,12 @@ RSI 只改"正在运行的这份代码"，所以：
 
 ### 真实模型评测
 
-改了 harness 之后，除了门禁（`node --run check` 里的 `check:harness`），
+改了 harness 之后，除了门禁（`python3 scripts/check-queue.py` 里的 `check:harness`），
 还可以让**真模型**把冻结用例重跑一遍：
 
 ```sh
-node --run eval:harness                        # 用 ~/.graph 那套真在跑的面
-node --run eval:harness -- --cases parser,cli  # 只跑其中几个用例
+go -C backend run ./cmd/graphcheck eval                        # 用 ~/.graph 那套真在跑的面
+go -C backend run ./cmd/graphcheck eval -- --cases parser,cli  # 只跑其中几个用例
 ```
 
 它会冻结你现在的 harness 面（提示、配方、能力），用 config 里的模型把冻结用例跑完，
@@ -152,7 +152,7 @@ lesson 写"这次改动该怎么做"，evidence 写报告里的那句判决）�
 下一个探针就能从这条教训起跑。
 
 真模型要凭据（config 里 `secretRef` 指的环境变量得在你的环境里），所以它不在
-`node --run check` 里：门禁那一层用替身模型，判"活儿还能不能干完"；
+`python3 scripts/check-queue.py` 里：门禁那一层用替身模型，判"活儿还能不能干完"；
 这一层用真模型，判"提示还管不管用"。两层的分工是这样。
 
 ### 领域与接续
@@ -182,7 +182,7 @@ lesson 写"这次改动该怎么做"，evidence 写报告里的那句判决）�
 
 ### harness 改动的行为门禁
 
-改了提示、工具或装配，`node --run check` 会自动把四个冻结用例重跑一遍：
+改了提示、工具或装配，`python3 scripts/check-queue.py` 会自动把四个冻结用例重跑一遍：
 `parser`、`cli`、`persistence`、`command`——每个都有独立的 verify 脚本，只看结果、不看 Agent 说了什么。
 跑用例的是一个**只按 harness 行事**的替身模型：它做每一步之前先看 harness 还给不给这个工具、
 还告诉不告诉它该怎么用；不给就停下来说明原因。
@@ -199,16 +199,12 @@ the agent said: I cannot continue: the harness no longer says "Use edit for prec
 这份记录**不会在检查时被自动重写**：门禁每次都会跑，而一个检查顺手改动被跟踪的文件，会让“检查”本身弄脏工作区——RSI 提交会因为工作区不干净而拒收，人就卡在这里。所以记录是一件刻意的事：面变了就自己刷一次，然后当普通提交入库。
 
 ```sh
-GRAPH_HARNESS_GATE_RECORD=1 node --run check:harness
+GRAPH_HARNESS_GATE_RECORD=1 go -C backend run ./cmd/graphcheck harness
 ```
 
-门禁判的是仓库里的出厂面——你自己的 `~/.graph/prompts` 不在仓库里，所以门禁只报告它。
-要判自己那一套，先冻结一份上下文再指给门禁：
-
-```sh
-node scripts/harness-eval-context.mjs ~/.graph /tmp/my-harness-context
-GRAPH_HARNESS_GATE_SNAPSHOT=/tmp/my-harness-context node --run check:harness
-```
+门禁判的是仓库里的出厂面——你自己的 `~/.graph/prompts` 不在仓库里，所以门禁只报告它
+（读到自己那一套有几个文件，但不据此判分）。要让改过的面成为被判的面，先
+`go -C backend run ./cmd/graphcheck harness --record` 记下新的面与判决，再提交这个文件。
 
 ### 读自己的证据
 
