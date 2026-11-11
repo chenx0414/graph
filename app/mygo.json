@@ -2,8 +2,10 @@
   "name": "Graph",
   "slug": "graph",
   "identifier": "dev.graph.console",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "../build/icon.png",
-  "urlSchemes": ["graph"],
+  "urlSchemes": [
+    "graph"
+  ],
   "out": "build"
 }
