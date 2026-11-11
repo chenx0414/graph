@@ -66,8 +66,8 @@ func ResolveDesktopBinary(capabilityRoot string) string {
 func desktopCapabilityBinaries(root string) []string {
 	packageDir := filepath.Join(root, "agent-desktop", "node_modules", "agent-desktop")
 	return []string{
-		filepath.Join(root, "agent-desktop", "node_modules", ".bin", "agent-desktop"),
 		filepath.Join(packageDir, "bin", "agent-desktop-"+desktopPlatformSuffix()),
+		filepath.Join(root, "agent-desktop", "node_modules", ".bin", "agent-desktop"),
 	}
 }
 

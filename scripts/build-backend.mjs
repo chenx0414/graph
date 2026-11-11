@@ -44,7 +44,7 @@ if (onlyIfStale && existsSync(output) && !isStale()) {
 
 // `dist/` is ignored, so a clean checkout has no output directory at all.
 mkdirSync(join(root, 'dist'), { recursive: true });
-const build = spawnSync('go', ['build', '-trimpath', '-o', output, commandPackage], {
+const build = spawnSync('go', ['build', '-trimpath', '-buildvcs=false', '-o', output, commandPackage], {
   cwd: moduleDir,
   stdio: 'inherit',
 });
