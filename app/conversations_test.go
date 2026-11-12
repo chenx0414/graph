@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	gwtheme "graph/app/gwui/theme"
 )
 
 func TestParseConversationsSkipsArchived(t *testing.T) {
@@ -400,6 +401,25 @@ func TestChatBubblesCarryATimeAndACopyButton(t *testing.T) {
 	}
 	if tester.HasText("agent") || tester.HasText("你") {
 		t.Fatalf("bubbles carry no author line, texts %q", tester.Texts())
+	}
+}
+
+func TestTheUserBubbleIsLightBlue(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	state.messages = []transcriptMessage{
+		{Role: "assistant", Text: "一句回答", CreatedAt: time.Now().UnixMilli()},
+		{Role: "user", Text: "一句提问", CreatedAt: time.Now().UnixMilli()},
+	}
+	light := frames(ui.NewTester(state.view, 760, 620))
+	if got := countColor(light.Image(), userBubble(gwtheme.Light())); got < 300 {
+		t.Fatalf("the user bubble takes the reference blue, %d pixels", got)
+	}
+	dark := ui.NewTester(state.view, 760, 620)
+	dark.SetDark(true)
+	frames(dark)
+	if got := countColor(dark.Image(), userBubble(gwtheme.Dark())); got < 300 {
+		t.Fatalf("the user bubble keeps a blue tint in the dark, %d pixels", got)
 	}
 }
 

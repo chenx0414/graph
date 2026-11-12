@@ -345,7 +345,7 @@ func (c *chatState) markdownMessage(ctx *ui.Context, message transcriptMessage) 
 func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	bubble := ui.Column(ctx).Padding(th.Space(2.5), th.Space(3.5)).Radius(t.Radius.Xl).Gap(th.Space(1)).Clip().
-		Border(gwtheme.Hairline, t.Border).Background(t.Hover)
+		Border(gwtheme.Hairline, t.Border).Background(userBubble(t))
 	bubble.Children(func() {
 		if messageQueued(message) {
 			if kit.Button(ctx, "撤销这条排队消息", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
