@@ -437,7 +437,7 @@ func trajectoryContextEvents(store *TaskStore, taskId string) []TrajectoryEvent 
 }
 
 func trajectoryCommands(store *TaskStore, conversationId string) []TrajectoryCommand {
-	rows := kernelRows(store.Db, `SELECT text FROM messages WHERE conversation_id=? AND role='tool' AND kind='call' ORDER BY seq`, conversationId)
+	rows := kernelRows(store.Db, `SELECT text FROM messages WHERE conversation_id=? AND role='tool' AND text LIKE 'bash:%' ORDER BY seq`, conversationId)
 	counts := map[string]int{}
 	order := []string{}
 	for _, row := range rows {
