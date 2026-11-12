@@ -13,8 +13,8 @@ func (s *shellState) view(ctx *ui.Context) {
 	shell.Children(func() {
 		s.rail(ctx)
 		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
-			ui.Row(ctx).Grow(1).FillWidth().Padding(0, cardGap, cardGap, cardGap).Children(func() {
-				card := ui.Row(ctx).Grow(1).FillHeight().Padding(titleBandHeight(ctx), 0, 0, 0).Background(t.Background).
+			ui.Row(ctx).Grow(1).FillWidth().Padding(1, cardGap, cardGap, cardGap).Children(func() {
+				card := ui.Row(ctx).Grow(1).FillHeight().Padding(titleBandHeight(ctx)-1, 0, 0, 0).Background(t.Background).
 					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip().Label("主区域卡片")
 				kit.Elevate(ctx, card, shellShadow)
 				card.Children(func() {
