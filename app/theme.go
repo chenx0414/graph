@@ -26,16 +26,6 @@ var composerShadow = gwtheme.Elevation{
 	{Y: 2, Blur: 5, Spread: 0, Alpha: 0x0d / 255.0},
 }
 
-var browserShadow = gwtheme.Elevation{
-	{Y: 0, Blur: 0, Spread: 1, Alpha: 0x11 / 255.0},
-	{Y: 6, Blur: 20, Spread: -2, Alpha: 0x14 / 255.0},
-	{Y: 1, Blur: 2, Spread: -1, Alpha: 0x14 / 255.0},
-}
-
-var chipShadow = gwtheme.Elevation{
-	{Y: 1, Blur: 2, Spread: -1, Alpha: 0x14 / 255.0},
-}
-
 func pageBackdrop(t gwtheme.Tokens) ui.Color {
 	if t.Dark {
 		return palette.Neutral950.Color()
@@ -44,7 +34,10 @@ func pageBackdrop(t gwtheme.Tokens) ui.Color {
 }
 
 func columnLine(t gwtheme.Tokens) ui.Color {
-	return t.Ring
+	if t.Dark {
+		return palette.White.Color().Alpha(0.08)
+	}
+	return palette.Black.Color().Alpha(0.06)
 }
 
 func userBubble(t gwtheme.Tokens) ui.Color {

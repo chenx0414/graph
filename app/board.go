@@ -46,31 +46,44 @@ type boardDrag struct {
 
 func (s *shellState) boardTabBar(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	bar := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, th.Space(1)).
-		Gap(th.Space(1)).AlignItems(ui.Center).Label("白板标题")
-	bar.Children(func() {
-		for index := range s.board.pages {
-			pageIndex := index
-			page := s.board.pages[index]
-			active := pageIndex == s.board.active
-			tab := ui.Row(ctx).Height(th.Space(8)).PaddingX(th.Space(2.5)).Gap(th.Space(1.5)).
-				Radius(t.Radius.Md).AlignItems(ui.Center).Focusable().Label("标签页 " + page.Title)
-			switch {
-			case active:
-				tab.Background(t.Background).Border(gwtheme.Hairline, t.Border)
-				kit.Elevate(ctx, tab, chipShadow)
-			case tab.Hovered():
-				tab.Background(t.HoverTint)
-			}
-			tab.OnClick(func() { s.selectBoardPage(pageIndex) })
-			tab.Children(func() {
-				kit.Text(ctx, page.Title, t.Text.Sm).TextColor(t.Muted).SingleLine()
-				if len(s.board.pages) > 1 && (active || tab.Hovered()) {
-					iconAction(ctx, iconClose, "关闭 "+page.Title, false, 5, func() { s.closeBoardPage(pageIndex) })
+	column := ui.Column(ctx).Grow(1).FillWidth().Height(bandHeight).Label("白板标题")
+	column.Children(func() {
+		strip := ui.Row(ctx).FillWidth().Height(bandHeight-gwtheme.Stroke).Padding(0, th.Space(2)).
+			Gap(0).AlignItems(ui.Center)
+		strip.Children(func() {
+			previousActive, previousHovered := false, false
+			for index := range s.board.pages {
+				pageIndex := index
+				page := s.board.pages[index]
+				active := pageIndex == s.board.active
+				tab := ui.Row(ctx).Height(th.Space(7.5)).PaddingX(th.Space(2.5)).Gap(th.Space(1)).
+					Radius(t.Radius.Md).AlignItems(ui.Center).Focusable().Label("标签页 " + page.Title)
+				hovered := tab.Hovered()
+				if !previousActive && !previousHovered && !active && !hovered && index > 0 {
+					ui.Box(ctx).Width(gwtheme.Stroke).Height(th.Space(3.5)).Background(columnLine(t))
 				}
-			})
-		}
-		iconAction(ctx, iconPlus, "新建标签页", false, 7, func() { s.addBoardPage() })
+				switch {
+				case active:
+					tab.Background(t.Background).Border(gwtheme.Stroke, t.Border)
+				case hovered:
+					tab.Background(t.HoverTint)
+				}
+				tab.OnClick(func() { s.selectBoardPage(pageIndex) })
+				tab.Children(func() {
+					color := t.Muted
+					if active {
+						color = t.Foreground
+					}
+					kit.Text(ctx, page.Title, t.Text.Sm).TextColor(color).SingleLine()
+					if len(s.board.pages) > 1 && (active || hovered) {
+						iconAction(ctx, iconClose, "关闭 "+page.Title, false, 4.5, func() { s.closeBoardPage(pageIndex) })
+					}
+				})
+				previousActive, previousHovered = active, hovered
+			}
+			iconAction(ctx, iconPlus, "新建标签页", false, 7, func() { s.addBoardPage() })
+		})
+		ui.Box(ctx).FillWidth().Height(gwtheme.Stroke).Background(columnLine(t))
 	})
 }
 

@@ -6,12 +6,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
-	gwtheme "graph/app/gwui/theme"
 	"graph/app/gwui/palette"
+	gwtheme "graph/app/gwui/theme"
 )
 
 func fourPaneShell(t *testing.T) *shellState {
@@ -167,6 +168,17 @@ func TestTheShellFloatsOnAShadow(t *testing.T) {
 	composerShadow := luminance(int(send.X+send.W/2), composerBottom)
 	if composerShadow >= 250 {
 		t.Fatalf("the composer sits above the chat with its own shadow, %d at y %d", composerShadow, composerBottom)
+	}
+}
+
+func TestTheConversationHeaderStaysQuiet(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	countHeader := regexp.MustCompile(`^[0-9]+ 个会话$`)
+	for _, text := range tester.Texts() {
+		if countHeader.MatchString(text) {
+			t.Fatalf("the conversation list header carries no count, texts %q", tester.Texts())
+		}
 	}
 }
 

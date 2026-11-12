@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strconv"
-
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
 	gwtheme "graph/app/gwui/theme"
@@ -40,8 +38,7 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 		listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
 			AlignItems(ui.Center).Label("会话列表标题").DragWindow()
 		listTitle.Children(func() {
-			kit.Text(ctx, "Graph", gwtheme.Of(ctx).Text.Lg).FontWeight(600).Grow(1).SingleLine()
-			kit.Text(ctx, strconv.Itoa(len(s.conversations))+" 个会话", gwtheme.Of(ctx).Text.Xs).TextColor(muted)
+			ui.Spacer(ctx).Grow(1)
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
 		chatTitle := ui.Row(ctx).Grow(1).FillHeight().Padding(0, th.Space(4), 0, th.Space(4)).
@@ -51,6 +48,7 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			if active := s.active(); active != nil && active.active != "" {
 				title = s.titleOf(active.active)
 			}
+			ui.Icon(ctx, iconChat).Size(gwtheme.Icon, gwtheme.Icon).TextColor(muted)
 			kit.Text(ctx, title, gwtheme.Of(ctx).Text.Base).FontWeight(600).SingleLine().Ellipsis("…").Grow(1)
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
@@ -132,6 +130,7 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 			kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
 		})
 	})
+	kit.Elevate(ctx, row, gwtheme.ShadowSm)
 	row.Margin(0, 0, th.Space(1), 0)
 	kit.Separator(ctx, false).Margin(0, 0, th.Space(1.5), 0)
 }
@@ -175,15 +174,9 @@ func (s *shellState) chatPane(ctx *ui.Context) {
 }
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	column := ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Background(t.Sidebar).
-		Padding(th.Space(1.5), th.Space(1.5), th.Space(1.5), th.Space(1.5))
+	t := gwtheme.Of(ctx)
+	column := ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Background(t.Background)
 	column.Children(func() {
-		browser := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background).
-			Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
-		kit.Elevate(ctx, browser, browserShadow)
-		browser.Children(func() {
-			s.boardPageView(ctx)
-		})
+		s.boardPageView(ctx)
 	})
 }
