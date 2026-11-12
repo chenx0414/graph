@@ -43,23 +43,22 @@ func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 	mine := message.Role == "user"
 	if !mine {
 		th := ctx.Theme()
-		fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
-		fade.Children(func() {
-			ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
+		ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
+			if markdownHasTable(message.Text) {
+				fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
+				fade.Children(func() { c.markdownMessage(ctx, message) })
+			} else {
 				c.markdownMessage(ctx, message)
-				c.messageMeta(ctx, message, false)
-			})
+			}
+			c.messageMeta(ctx, message, false)
 		})
 		return
 	}
-	fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
-	fade.Children(func() {
-		ui.Row(ctx).FillWidth().Children(func() {
-			ui.Spacer(ctx)
-			ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
-				c.bubble(ctx, message)
-				c.messageMeta(ctx, message, true)
-			})
+	ui.Row(ctx).FillWidth().Children(func() {
+		ui.Spacer(ctx)
+		ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
+			c.bubble(ctx, message)
+			c.messageMeta(ctx, message, true)
 		})
 	})
 }
@@ -158,4 +157,14 @@ func workedFor(elapsed time.Duration) string {
 		return strconv.FormatInt(minutes, 10) + " 分 " + strconv.FormatInt(rest, 10) + " 秒"
 	}
 	return strconv.FormatInt(rest, 10) + " 秒"
+}
+
+func markdownHasTable(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if len(trimmed) >= 3 && strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") {
+			return true
+		}
+	}
+	return false
 }

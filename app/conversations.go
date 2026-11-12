@@ -301,7 +301,7 @@ func (c *chatState) transcript(ctx *ui.Context) {
 			}
 			c.messageRow(ctx, run.messages[0])
 		})
-		list.Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
+		list.Grow(1).Padding(0, th.Space(4), th.Space(4), th.Space(4)).Gap(th.Space(3))
 		list.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
 			{Color: ui.Transparent, At: 0},
 			{Color: ui.RGB(0, 0, 0), At: 0.06},

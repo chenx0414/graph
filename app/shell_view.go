@@ -162,7 +162,7 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 			row := kit.SidebarItem(ctx, opts)
 			row.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
 				{Color: ui.RGB(0, 0, 0), At: 0},
-				{Color: ui.RGB(0, 0, 0), At: 0.9},
+				{Color: ui.RGB(0, 0, 0), At: 0.84},
 				{Color: ui.Transparent, At: 1},
 			}}).Clip()
 			row.Label(label)

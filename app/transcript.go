@@ -170,5 +170,9 @@ func newChatState(address, token string) *chatState {
 	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, runBoundaries: map[string]bool{}}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
+	state.md.CodeBlock = func(ctx *ui.Context, block *markdown.CodeBlockView) {
+		fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
+		fade.Children(func() { markdown.DefaultCodeBlock(ctx, block) })
+	}
 	return state
 }
