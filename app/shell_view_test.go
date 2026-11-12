@@ -323,3 +323,21 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 		}
 	}
 }
+
+func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	previousBottom := float32(-1)
+	for _, label := range []string{"轨迹", "洞察", "图谱", "能力", "设置"} {
+		rect, ok := tester.Find(label)
+		if !ok {
+			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
+		}
+		if previousBottom >= 0 {
+			if gap := rect.Y - previousBottom; gap < 6 {
+				t.Fatalf("rail icons sit %.1f apart, want at least 6", gap)
+			}
+		}
+		previousBottom = rect.Y + rect.H
+	}
+}
