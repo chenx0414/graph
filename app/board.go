@@ -47,9 +47,9 @@ type boardDrag struct {
 
 func (s *shellState) boardTabBar(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	column := ui.Column(ctx).Grow(1).FillWidth().Height(bandHeight).Label("白板标题")
+	column := ui.Column(ctx).Grow(1).FillWidth().Height(titleBandHeight(ctx)).Label("白板标题")
 	column.Children(func() {
-		strip := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, th.Space(2.5)).
+		strip := ui.Row(ctx).FillWidth().Height(titleBandHeight(ctx)).Padding(0, th.Space(2.5)).
 			Gap(0).AlignItems(ui.Center)
 		strip.Children(func() {
 			previousActive, previousHovered := false, false

@@ -435,3 +435,34 @@ func TestTheChatTitleStaysEmptyWhileTheConversationLoads(t *testing.T) {
 		t.Fatalf("the loading title still shows something at %v, texts %q", title, tester.Texts())
 	}
 }
+
+func TestTheTitleBandLinesUpWithTheTrafficLightsAndPadsTheCardEvenly(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := ui.NewTester(state.view, 1440, 900)
+	tester.SetTitleBar(ui.TitleBar{Height: 42, Left: 68})
+	frames(tester)
+	title, ok := tester.Find("对话标题名")
+	if !ok {
+		t.Fatalf("the chat title never rendered, texts %q", tester.Texts())
+	}
+	tab, ok := tester.Find("标签页 白板")
+	if !ok {
+		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
+	}
+	center := float32(21)
+	if delta := (title.Y + title.H/2) - center; delta < -1 || delta > 1 {
+		t.Fatalf("the chat title centers at %v, the traffic lights at %v", title.Y+title.H/2, center)
+	}
+	if delta := (tab.Y + tab.H/2) - center; delta < -1 || delta > 1 {
+		t.Fatalf("the whiteboard tab centers at %v, the traffic lights at %v", tab.Y+tab.H/2, center)
+	}
+	card, ok := tester.Find("主区域卡片")
+	if !ok {
+		t.Fatalf("the card never rendered, texts %q", tester.Texts())
+	}
+	top := card.Y - 42
+	bottom := 900 - (card.Y + card.H)
+	if delta := top - bottom; delta < -1 || delta > 1 {
+		t.Fatalf("the card leaves %v above and %v below", top, bottom)
+	}
+}

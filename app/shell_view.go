@@ -8,16 +8,15 @@ import (
 
 func (s *shellState) view(ctx *ui.Context) {
 	applyTheme(ctx)
-	t, th := gwtheme.Of(ctx), ctx.Theme()
+	t := gwtheme.Of(ctx)
 	shell := ui.Row(ctx).Fill().Background(pageBackdrop(t))
 	shell.Children(func() {
 		s.rail(ctx)
 		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
 			s.titleBand(ctx)
-			ui.Box(ctx).FillWidth().Height(th.Space(1))
-			ui.Row(ctx).Grow(1).FillWidth().Padding(0, cardGap, cardGap, cardGap).Children(func() {
+			ui.Row(ctx).Grow(1).FillWidth().Padding(cardGap, cardGap, cardGap, cardGap).Children(func() {
 				card := ui.Row(ctx).Grow(1).FillHeight().Background(t.Background).
-					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
+					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip().Label("主区域卡片")
 				kit.Elevate(ctx, card, shellShadow)
 				card.Children(func() {
 					s.conversationPane(ctx)
@@ -31,9 +30,16 @@ func (s *shellState) view(ctx *ui.Context) {
 	})
 }
 
+func titleBandHeight(ctx *ui.Context) float32 {
+	if bar := ctx.TitleBar(); bar.Height > 0 {
+		return float32(bar.Height)
+	}
+	return bandHeight
+}
+
 func (s *shellState) titleBand(ctx *ui.Context) {
 	th := ctx.Theme()
-	band := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, cardGap, 0, cardGap).AlignItems(ui.Center)
+	band := ui.Row(ctx).FillWidth().Height(titleBandHeight(ctx)).Padding(0, cardGap, 0, cardGap).AlignItems(ui.Center)
 	band.Children(func() {
 		listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
 			AlignItems(ui.Center).Label("会话列表标题").DragWindow()
@@ -70,7 +76,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Width(railWidth).FillHeight().Children(func() {
 		ui.Box(ctx).FillWidth().Height(th.Space(11)).DragWindow()
-		ui.Column(ctx).Grow(1).Padding(th.Space(4.5), 0, th.Space(2), cardGap).Gap(th.Space(3)).
+		ui.Column(ctx).Grow(1).Padding(th.Space(5.5), 0, th.Space(2), cardGap).Gap(th.Space(3)).
 			AlignItems(ui.Center).Children(func() {
 			for _, item := range railItems {
 				spec := item
