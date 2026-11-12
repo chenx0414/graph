@@ -309,10 +309,10 @@ func countColor(img *image.RGBA, want ui.Color) int {
 func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if railWidth > 48 {
+	if railWidth > 40 {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
-	center := railWidth / 2
+	center := (railWidth + cardGap) / 2
 	for _, label := range []string{"轨迹", "洞察", "图谱", "能力", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {

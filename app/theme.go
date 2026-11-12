@@ -8,7 +8,7 @@ import (
 
 var (
 	cardGap         = float32(8)
-	railWidth       = float32(48)
+	railWidth       = float32(40)
 	listWidth       = float32(236)
 	bandHeight      = float32(44)
 	boardCardHeight = float32(224)
