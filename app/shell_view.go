@@ -136,7 +136,7 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 		octoLoader(ctx)
 		name := ui.Row(ctx).Label("main agent 名称").Focusable()
 		name.Children(func() {
-			kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
+			kit.Text(ctx, "Main Agent", t.Text.Lg).FontWeight(600).TextColor(t.Foreground)
 		})
 	})
 	kit.Elevate(ctx, row, gwtheme.ShadowSm)
