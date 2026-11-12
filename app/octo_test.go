@@ -50,6 +50,52 @@ func TestOctoAsksForTheNextFrameAtTheNextChange(t *testing.T) {
 	}
 }
 
+func TestTheOctopusFloatsOnItsBackground(t *testing.T) {
+	view := func(c *ui.Context) {
+		applyTheme(c)
+		ui.Box(c).Fill().Background(gwtheme.Light().Window).Children(func() {
+			ui.Row(c).Fill().Center().Children(func() {
+				octoLoader(c)
+			})
+		})
+	}
+	tester := frames(ui.NewTester(view, 120, 80))
+	img := tester.Image()
+	if tile := countColor(img, gwtheme.Light().Background); tile != 0 {
+		t.Fatalf("the octopus carries no tile, %d background pixels", tile)
+	}
+	minX, minY, maxX, maxY := -1, -1, -1, -1
+	ink := gwtheme.Light().Foreground
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			if ui.RGB(img.RGBAAt(x, y).R, img.RGBAAt(x, y).G, img.RGBAAt(x, y).B) != ink {
+				continue
+			}
+			if minX < 0 || x < minX {
+				minX = x
+			}
+			if maxX < x {
+				maxX = x
+			}
+			if minY < 0 || y < minY {
+				minY = y
+			}
+			if maxY < y {
+				maxY = y
+			}
+		}
+	}
+	if minX < 0 {
+		t.Fatal("the octopus must be drawn")
+	}
+	if center := float32(minX+maxX) / 2; center < 58 || center > 62 {
+		t.Fatalf("the octopus sits centered horizontally, got center %v", center)
+	}
+	if center := float32(minY+maxY) / 2; center < 38 || center > 42 {
+		t.Fatalf("the octopus sits centered vertically, got center %v", center)
+	}
+}
+
 func TestTheMainAgentOctopusAnimates(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))

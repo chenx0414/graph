@@ -23,22 +23,11 @@ const (
 
 	octoSpriteWidth  = 30
 	octoSpriteHeight = 24
-	octoViewHeight   = 33
-	octoBodyTop      = octoViewHeight - (octoSpriteHeight + 2)
+	octoViewHeight   = octoSpriteHeight + 2
 )
 
-type octoBubble struct {
-	x, y, size, rise int
-	period, delay    time.Duration
-}
-
 var (
-	octoLifts = [8]int{0, 0, 1, 1, 2, 1, 1, 0}
-	octoBubbles = []octoBubble{
-		{x: 2, y: 9, size: 2, rise: 14, period: 3200 * time.Millisecond},
-		{x: 0, y: 6, size: 1, rise: 11, period: 2600 * time.Millisecond, delay: 1100 * time.Millisecond},
-		{x: 3, y: 11, size: 1, rise: 16, period: 3800 * time.Millisecond, delay: 2000 * time.Millisecond},
-	}
+	octoLifts          = [8]int{0, 0, 1, 1, 2, 1, 1, 0}
 	octoBlinkPatch     = diffGrid(octoFrames[0], octoBlinkGrid)
 	octoLookLeftPatch  = diffGrid(octoFrames[0], octoLookLeftGrid)
 	octoLookRightPatch = diffGrid(octoFrames[0], octoLookRightGrid)
@@ -144,8 +133,7 @@ func patchGrid(base, patch []string) []string {
 
 func octoLoader(ctx *ui.Context) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	box := ui.Box(ctx).Size(th.Space(7.5), th.Space(8.25)).Radius(t.Radius.Md).
-		Background(t.Background).Border(gwtheme.Hairline, t.Border).Clip()
+	box := ui.Box(ctx).Size(th.Space(7.5), th.Space(6.5))
 	box.Draw(func(p *ui.Painter, r ui.Rect) {
 		now := p.Now()
 		elapsed := time.Duration(now.UnixMilli()) * time.Millisecond
@@ -164,22 +152,8 @@ func drawOcto(p *ui.Painter, area ui.Rect, elapsed time.Duration, ink ui.Color) 
 	pupil := ui.Hex("#1B1F24")
 	originX := area.X + (area.W-octoSpriteWidth*scale)/2
 	originY := area.Y + (area.H-octoViewHeight*scale)/2
-	for _, bubble := range octoBubbles {
-		if elapsed < bubble.delay {
-			continue
-		}
-		cycle := (elapsed - bubble.delay) % bubble.period
-		progress := float32(cycle) / float32(bubble.period)
-		step := int(progress * float32(bubble.rise))
-		p.Fill(ui.Rect{
-			X: originX + float32(bubble.x)*scale,
-			Y: originY + float32(octoBodyTop+bubble.y-step)*scale,
-			W: float32(bubble.size) * scale,
-			H: float32(bubble.size) * scale,
-		}, ink.Alpha(0.85*(1-progress)), 0)
-	}
 	grid, lift := octoGridAt(elapsed)
-	top := originY + float32(octoBodyTop+lift)*scale
+	top := originY + float32(lift)*scale
 	for row, line := range grid {
 		for x := 0; x < len(line); {
 			cell := line[x]
