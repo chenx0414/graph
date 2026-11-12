@@ -74,8 +74,8 @@ func TestTheAppOpensTheMainAgentConversation(t *testing.T) {
 	if !tester.HasText("主控在这里") {
 		t.Fatalf("the pane shows the main agent conversation, texts %q", tester.Texts())
 	}
-	if !tester.HasText("当前会话 · main agent") {
-		t.Fatalf("the board names the open main agent conversation, texts %q", tester.Texts())
+	if !tester.HasText("轨迹量化窗口") {
+		t.Fatalf("the board shows the trajectory card, texts %q", tester.Texts())
 	}
 }
 

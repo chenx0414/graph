@@ -41,7 +41,7 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 4
+const boardLayoutVersion = 5
 
 const boardDefaultTitle = "白板"
 
@@ -51,19 +51,23 @@ const boardMinPaneHeight = 90
 
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
-		{ID: "overview", Kind: "overview"},
 		{ID: "tasks", Kind: "tasks"},
 		{ID: "artifacts", Kind: "artifacts"},
+		{ID: "trajectory", Kind: "trajectory"},
+		{ID: "insights", Kind: "insights"},
 	}
 }
 
 func defaultBoardLayout() boardNode {
 	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
 		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "overview"}},
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "tasks"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
 		}}},
-		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
+		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "insights"}},
+		}}},
 	}}
 }
 
@@ -172,7 +176,7 @@ func (s *shellState) loadBoard(stateDir string) {
 	}
 	kept := make([]boardPage, 0, len(file.Pages))
 	for _, page := range file.Pages {
-		if page.Kind == "history" || page.Kind == "conversation" {
+		if page.Kind == "history" || page.Kind == "conversation" || page.Kind == "overview" {
 			continue
 		}
 		kept = append(kept, page)
@@ -187,11 +191,13 @@ func (s *shellState) loadBoard(stateDir string) {
 	}
 	for index := range s.board.pages {
 		page := &s.board.pages[index]
+		removedPanels := false
 		if page.Kind == "" {
 			kept := make([]boardPanel, 0, len(page.Panels))
 			for _, panel := range page.Panels {
-				if panel.Kind == "history" || panel.Kind == "conversation" {
+				if panel.Kind == "history" || panel.Kind == "conversation" || panel.Kind == "overview" {
 					removeBoardPanelFromLayout(&page.Layout, panel.ID)
+					removedPanels = true
 					continue
 				}
 				kept = append(kept, panel)
@@ -206,8 +212,52 @@ func (s *shellState) loadBoard(stateDir string) {
 		}
 		normalizeBoardLayout(&page.Layout)
 		pruneBoardPanels(page)
+		ensureBoardDashboardPanels(page)
+		if removedPanels || file.Version < boardLayoutVersion {
+			page.Layout = layoutFromPanels(page.Panels)
+			normalizeBoardLayout(&page.Layout)
+		}
 	}
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
+}
+
+func ensureBoardDashboardPanels(page *boardPage) {
+	if page.Kind != "" {
+		return
+	}
+	hasTrajectory, hasInsights := false, false
+	for _, panel := range page.Panels {
+		if panel.Kind == "trajectory" {
+			hasTrajectory = true
+		}
+		if panel.Kind == "insights" {
+			hasInsights = true
+		}
+	}
+	added := []boardPanel{}
+	if !hasTrajectory {
+		added = append(added, boardPanel{ID: "trajectory", Kind: "trajectory"})
+	}
+	if !hasInsights {
+		added = append(added, boardPanel{ID: "insights", Kind: "insights"})
+	}
+	if len(added) == 0 {
+		return
+	}
+	page.Panels = append(page.Panels, added...)
+	row := boardNode{Kind: "split", Axis: "row"}
+	for _, panel := range added {
+		row.Children = append(row.Children, boardSlot{Weight: 1, Node: boardNode{Kind: "panel", PanelID: panel.ID}})
+	}
+	if page.Layout.Kind == "split" && page.Layout.Axis == "column" {
+		page.Layout.Children = append(page.Layout.Children, boardSlot{Weight: 1, Node: row})
+	} else {
+		page.Layout = boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
+			{Weight: 1, Node: page.Layout},
+			{Weight: 1, Node: row},
+		}}
+	}
+	normalizeBoardLayout(&page.Layout)
 }
 
 func pruneBoardPanels(page *boardPage) {
@@ -427,126 +477,4 @@ func (s *shellState) ensureBoardPageData() {
 	case "insights":
 		s.ensureInsights()
 	}
-}
-
-func normalizeBoardLayout(node *boardNode) {
-	if node.Kind != "split" {
-		return
-	}
-	for index := range node.Children {
-		normalizeBoardLayout(&node.Children[index].Node)
-	}
-	kept := make([]boardSlot, 0, len(node.Children))
-	for _, slot := range node.Children {
-		child := slot.Node
-		if child.Kind == "split" {
-			switch {
-			case len(child.Children) == 0:
-				continue
-			case len(child.Children) == 1:
-				inner := child.Children[0]
-				slot.Node = inner.Node
-				slot.Weight *= inner.Weight
-				kept = append(kept, slot)
-				continue
-			case child.Axis == node.Axis:
-				for _, inner := range child.Children {
-					inner.Weight *= slot.Weight
-					kept = append(kept, inner)
-				}
-				continue
-			}
-		}
-		kept = append(kept, slot)
-	}
-	node.Children = kept
-	if len(node.Children) == 1 {
-		*node = node.Children[0].Node
-	}
-	if node.Kind == "split" {
-		for index := range node.Children {
-			if node.Children[index].Weight <= 0 {
-				node.Children[index].Weight = 1
-			}
-		}
-	}
-}
-
-func removeBoardPanelFromLayout(node *boardNode, panelID string) {
-	if node.Kind != "split" {
-		return
-	}
-	kept := make([]boardSlot, 0, len(node.Children))
-	for _, slot := range node.Children {
-		if slot.Node.Kind == "panel" && slot.Node.PanelID == panelID {
-			continue
-		}
-		removeBoardPanelFromLayout(&slot.Node, panelID)
-		kept = append(kept, slot)
-	}
-	node.Children = kept
-}
-
-func findBoardLeaf(node *boardNode, panelID string) *boardNode {
-	if node.Kind == "panel" {
-		if node.PanelID == panelID {
-			return node
-		}
-		return nil
-	}
-	for index := range node.Children {
-		if found := findBoardLeaf(&node.Children[index].Node, panelID); found != nil {
-			return found
-		}
-	}
-	return nil
-}
-
-func findBoardSplit(node *boardNode, axis string, panelID string) *boardNode {
-	if node.Kind != "split" {
-		return nil
-	}
-	for index := range node.Children {
-		if node.Children[index].Node.Kind == "panel" && node.Children[index].Node.PanelID == panelID && node.Axis == axis {
-			return node
-		}
-	}
-	for index := range node.Children {
-		if found := findBoardSplit(&node.Children[index].Node, axis, panelID); found != nil {
-			return found
-		}
-	}
-	return nil
-}
-
-func splitBoardPane(root *boardNode, targetID, sourceID, edge string) bool {
-	removeBoardPanelFromLayout(root, sourceID)
-	normalizeBoardLayout(root)
-	target := findBoardLeaf(root, targetID)
-	if target == nil {
-		return false
-	}
-	axis := "row"
-	before := edge == "left" || edge == "top"
-	if edge == "top" || edge == "bottom" {
-		axis = "column"
-	}
-	source := boardNode{Kind: "panel", PanelID: sourceID}
-	existing := *target
-	children := []boardSlot{{Weight: 1, Node: existing}, {Weight: 1, Node: source}}
-	if before {
-		children[0], children[1] = children[1], children[0]
-	}
-	*target = boardNode{Kind: "split", Axis: axis, Children: children}
-	normalizeBoardLayout(root)
-	return true
-}
-
-func swapBoardPanels(root *boardNode, first, second string) {
-	firstLeaf := findBoardLeaf(root, first)
-	secondLeaf := findBoardLeaf(root, second)
-	if firstLeaf == nil || secondLeaf == nil {
-		return
-	}
-	firstLeaf.PanelID, secondLeaf.PanelID = secondLeaf.PanelID, firstLeaf.PanelID
 }

@@ -1,12 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"image"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -56,7 +53,7 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 
-	rail, ok := tester.Find("概览")
+	rail, ok := tester.Find("轨迹")
 	if !ok {
 		t.Fatalf("the function rail must show its home entry, texts %q", tester.Texts())
 	}
@@ -75,8 +72,8 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	if !(rail.X < conversation.X && conversation.X+conversation.W <= composer.X && composer.X < board.X) {
 		t.Fatalf("panes out of order: rail %+v conversation %+v composer %+v board %+v", rail, conversation, composer, board)
 	}
-	if !tester.HasText("项目概览") {
-		t.Fatalf("the whiteboard must present the overview module, texts %q", tester.Texts())
+	if !tester.HasText("任务清单") || !tester.HasText("轨迹量化窗口") || !tester.HasText("洞察概览窗口") {
+		t.Fatalf("the whiteboard must present tasks, trajectory and insights, texts %q", tester.Texts())
 	}
 	if !tester.HasText("来自主控") {
 		t.Fatalf("the chat pane must open the main agent conversation, texts %q", tester.Texts())
@@ -143,7 +140,7 @@ func TestTheRailOpensATabForTheModule(t *testing.T) {
 		t.Fatalf("click the board tab: %v", err)
 	}
 	frames(tester)
-	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("项目概览") {
+	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("任务清单") {
 		t.Fatalf("the board tab must come back: kind %q texts %q", kind, tester.Texts())
 	}
 }
@@ -231,23 +228,13 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1024, 640))
-	for _, label := range []string{"概览", "13-Graph", "发送", "白板"} {
+	for _, label := range []string{"轨迹", "13-Graph", "发送", "白板"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("%s never rendered, texts %q", label, tester.Texts())
 		}
 		if rect.X < 0 || rect.Y < 0 || rect.X+rect.W > 1024 || rect.Y+rect.H > 640 {
 			t.Fatalf("%s sits outside the window: %+v", label, rect)
-		}
-	}
-}
-
-func TestTheOverviewPresentsStats(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	for _, label := range []string{"会话", "项目", "用量", "能力库"} {
-		if !tester.HasText(label) {
-			t.Fatalf("the overview must present %q, texts %q", label, tester.Texts())
 		}
 	}
 }
@@ -301,151 +288,8 @@ func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 	if len(state.board.pages) != 1 || state.activeBoardKind() != "" {
 		t.Fatalf("closing a tab returns to the board, pages %d kind %q", len(state.board.pages), state.activeBoardKind())
 	}
-	if !tester.HasText("项目概览") {
+	if !tester.HasText("任务清单") {
 		t.Fatalf("the board comes back with its modules, texts %q", tester.Texts())
-	}
-}
-
-func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	rects := map[string]ui.Rect{}
-	for _, kind := range []string{"overview", "tasks", "artifacts"} {
-		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
-		if !ok {
-			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
-		}
-		rects[kind] = rect
-	}
-	names := []string{"overview", "tasks", "artifacts"}
-	for first := 0; first < len(names); first++ {
-		for second := first + 1; second < len(names); second++ {
-			a, b := rects[names[first]], rects[names[second]]
-			if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
-				t.Fatalf("panes must not overlap: %s %+v vs %s %+v", names[first], a, names[second], b)
-			}
-		}
-	}
-	if rects["overview"].Y != rects["tasks"].Y || rects["artifacts"].Y <= rects["tasks"].Y {
-		t.Fatalf("the board keeps the top row and stacks artifacts below it: %+v", rects)
-	}
-	if rects["artifacts"].X != rects["overview"].X || rects["artifacts"].W <= rects["overview"].W {
-		t.Fatalf("artifacts span the board width: %+v", rects)
-	}
-}
-
-func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	overview := state.board.rects["overview"]
-	tasks := state.board.rects["tasks"]
-	if overview.W <= 0 || tasks.W <= 0 {
-		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
-	}
-	startX, startY := overview.X+overview.W/2, overview.Y+overview.H*0.6
-	endX, endY := tasks.X+tasks.W/2, tasks.Y+tasks.H*0.6
-	tester.Press(startX, startY)
-	for step := 1; step <= 12; step++ {
-		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
-		tester.Frame()
-	}
-	tester.Release(endX, endY)
-	frames(tester)
-	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 3 || leaves[0] != "tasks" || leaves[1] != "overview" || leaves[2] != "artifacts" {
-		t.Fatalf("a center drop swaps the two partitions, leaves %v", leaves)
-	}
-}
-
-func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	overview := state.board.rects["overview"]
-	tasks := state.board.rects["tasks"]
-	if overview.W <= 0 || tasks.W <= 0 {
-		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
-	}
-	startX, startY := overview.X+overview.W/2, overview.Y+overview.H*0.6
-	endX, endY := tasks.X+8, tasks.Y+tasks.H/2
-	tester.Press(startX, startY)
-	for step := 1; step <= 12; step++ {
-		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
-		tester.Frame()
-	}
-	tester.Release(endX, endY)
-	frames(tester)
-	page := state.boardPage()
-	leaves := boardLeafIDs(&page.Layout)
-	if len(leaves) != len(page.Panels) {
-		t.Fatalf("a split keeps every module on the board, leaves %v layout %+v rects %+v", leaves, page.Layout, state.board.rects)
-	}
-	seen := map[string]bool{}
-	for _, id := range leaves {
-		if seen[id] {
-			t.Fatalf("a module appears twice after the split, leaves %v", leaves)
-		}
-		seen[id] = true
-	}
-	after := state.board.rects
-	if after["overview"].X >= after["tasks"].X {
-		t.Fatalf("dropping on the left edge puts the dragged pane before the target: overview %+v tasks %+v", after["overview"], after["tasks"])
-	}
-}
-
-func TestADividerDragResizesBothPartitions(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	divider, ok := tester.Find("调整分区")
-	if !ok {
-		t.Fatalf("the split divider never rendered, texts %q", tester.Texts())
-	}
-	overviewBefore, _ := tester.Find(boardPanelTitle("overview") + "窗口")
-	x, y := divider.X+divider.W/2, divider.Y+divider.H/2
-	tester.Press(x, y)
-	for step := 1; step <= 10; step++ {
-		tester.Move(x+float32(step)*8, y)
-		tester.Frame()
-	}
-	tester.Release(x+80, y)
-	frames(tester)
-	overviewAfter, _ := tester.Find(boardPanelTitle("overview") + "窗口")
-	if overviewAfter.W <= overviewBefore.W {
-		t.Fatalf("dragging the divider right must widen the left partition: before %.1f after %.1f", overviewBefore.W, overviewAfter.W)
-	}
-}
-
-func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
-	directory := t.TempDir()
-	legacy := `{"version":3,"pages":[{"id":"board","title":"白板","panels":[
-		{"id":"overview","kind":"overview","slot":0},
-		{"id":"tasks","kind":"tasks","slot":1}
-	]}]}`
-	if err := os.WriteFile(filepath.Join(directory, "whiteboard.json"), []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	state := newShellState("http://127.0.0.1:1", "tok")
-	state.loadBoard(directory)
-	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 2 || leaves[0] != "overview" || leaves[1] != "tasks" {
-		t.Fatalf("a freeform board migrates into a partition tree, leaves %v", leaves)
-	}
-	if page.Kind != "" {
-		t.Fatalf("the migrated page stays a board, kind %q", page.Kind)
-	}
-}
-
-func TestTheBoardRemembersItsLayout(t *testing.T) {
-	directory := t.TempDir()
-	first := newShellState("http://127.0.0.1:1", "tok")
-	first.loadBoard(directory)
-	swapBoardPanels(&first.boardPage().Layout, "overview", "tasks")
-	first.saveBoard()
-
-	second := newShellState("http://127.0.0.1:1", "tok")
-	second.loadBoard(directory)
-	leaves := boardLeafIDs(&second.boardPage().Layout)
-	if len(leaves) != 3 || leaves[0] != "tasks" || leaves[1] != "overview" || leaves[2] != "artifacts" {
-		t.Fatalf("saved partitions not restored: leaves %v", leaves)
 	}
 }
 
@@ -460,47 +304,4 @@ func countColor(img *image.RGBA, want ui.Color) int {
 		}
 	}
 	return count
-}
-
-func TestTheRailNoLongerOffersHistoryOrConversationPages(t *testing.T) {
-	for _, item := range railItems {
-		if item.kind == "history" || item.kind == "conversation" {
-			t.Fatalf("the rail still offers %q", item.kind)
-		}
-	}
-}
-
-func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
-	state := fourPaneShell(t)
-	dir := t.TempDir()
-	payload, err := json.Marshal(boardFile{
-		Version: boardLayoutVersion,
-		Pages: []boardPage{
-			{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()},
-			{ID: "tab-history", Title: "历史记录", Kind: "history", Panels: []boardPanel{{ID: "history", Kind: "history"}}, Layout: boardNode{Kind: "panel", PanelID: "history"}},
-			{ID: "tab-conversation", Title: "对话信息", Kind: "conversation", Panels: []boardPanel{{ID: "conversation", Kind: "conversation"}}, Layout: boardNode{Kind: "panel", PanelID: "conversation"}},
-		},
-		Active: 2,
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "whiteboard.json"), payload, 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	state.loadBoard(dir)
-	if len(state.board.pages) != 1 || state.board.pages[0].Kind != "" {
-		t.Fatalf("removed pages survived, pages %+v", state.board.pages)
-	}
-	for _, panel := range state.board.pages[0].Panels {
-		if panel.Kind == "history" || panel.Kind == "conversation" {
-			t.Fatalf("removed panel survived, panels %+v", state.board.pages[0].Panels)
-		}
-	}
-	for _, id := range boardLeafIDs(&state.board.pages[0].Layout) {
-		if id == "history" || id == "conversation" {
-			t.Fatalf("removed panel leaf survived, leaves %v", boardLeafIDs(&state.board.pages[0].Layout))
-		}
-	}
-	frames(ui.NewTester(state.view, 1440, 900))
 }

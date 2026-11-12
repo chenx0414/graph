@@ -140,3 +140,54 @@ func (s *shellState) insightsSessionsCard(ctx *ui.Context) {
 		kit.Text(ctx, "另有 "+strconv.Itoa(len(data.Sessions)-len(sessions))+" 个会话", t.Text.Xs).TextColor(t.Muted)
 	}
 }
+
+func (s *shellState) panelInsights(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.insightsData(ctx)
+	if data == nil {
+		return
+	}
+	totals := data.Totals
+	trajectoryStatGrid(ctx, [][][2]string{
+		{{"总 tokens", formatTrajectoryTokens(totals.Tokens)}, {"成本", formatTrajectoryCost(totals.Cost)}, {"请求", strconv.Itoa(totals.Requests)}},
+		{{"缓存命中", formatTrajectoryPercent(totals.CacheHitRate)}, {"会话", strconv.Itoa(totals.Sessions)}, {"日均", formatTrajectoryCompactTokens(averageInsightTokens(data))}},
+	})
+	kit.Separator(ctx, false)
+	peak := int64(0)
+	for _, day := range data.Days {
+		if day.Tokens > peak {
+			peak = day.Tokens
+		}
+	}
+	chartHeight := th.Space(6)
+	chart := ui.Row(ctx).FillWidth().Height(chartHeight).Gap(th.Space(1)).AlignItems(ui.End).Clip()
+	chart.Children(func() {
+		for _, day := range data.Days {
+			ratio := float32(0)
+			if peak > 0 {
+				ratio = float32(day.Tokens) / float32(peak)
+			}
+			ui.Box(ctx).Grow(1).Height(2 + ratio*(chartHeight-4)).Radius(t.Radius.Xs).
+				Background(palette.Blue500.Color().Alpha(0.7))
+		}
+	})
+	if len(data.Sessions) > 0 {
+		kit.Separator(ctx, false)
+		for index, session := range data.Sessions {
+			if index >= 4 {
+				break
+			}
+			title := session.Title
+			if title == "" {
+				title = session.ConversationId
+			}
+			row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
+			row.Children(func() {
+				kit.Text(ctx, title, t.Text.Xs).Grow(1).SingleLine().Ellipsis("…")
+				kit.Text(ctx, strconv.Itoa(session.Requests)+" 次", t.Text.Xs).TextColor(t.Muted)
+				kit.Text(ctx, formatTrajectoryTokens(session.Tokens), t.Text.Xs).TextColor(t.Muted)
+				kit.Text(ctx, formatTrajectoryCost(session.Cost), t.Text.Xs).TextColor(t.Muted)
+			})
+		}
+	}
+}
