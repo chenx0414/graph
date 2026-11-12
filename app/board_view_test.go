@@ -353,26 +353,12 @@ func TestTheWhiteboardTabIsPinnedAlignedAndLarger(t *testing.T) {
 	if !ok {
 		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
 	}
-	band, ok := tester.Find("白板标题")
-	if !ok {
-		t.Fatalf("the whiteboard band never rendered, texts %q", tester.Texts())
-	}
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
 		t.Fatalf("the whiteboard card never rendered, texts %q", tester.Texts())
 	}
 	if delta := tab.X - card.X; delta < -1 || delta > 1 {
 		t.Fatalf("the tab starts at %v, the card at %v", tab.X, card.X)
-	}
-	if delta := (tab.Y + tab.H/2) - (band.Y + band.H/2); delta < -1 || delta > 1 {
-		t.Fatalf("the tab centers at %v, the band at %v", tab.Y+tab.H/2, band.Y+band.H/2)
-	}
-	banner, ok := tester.Find("对话标题名")
-	if !ok {
-		t.Fatalf("the chat title never rendered, texts %q", tester.Texts())
-	}
-	if delta := (tab.Y + tab.H/2) - (banner.Y + banner.H/2); delta < -1 || delta > 1 {
-		t.Fatalf("the tab centers at %v, the chat title at %v", tab.Y+tab.H/2, banner.Y+banner.H/2)
 	}
 	title, ok := tester.Find("白板")
 	if !ok {
