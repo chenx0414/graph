@@ -303,3 +303,30 @@ func TestAModulePageShowsItsCardHeaderWithoutHover(t *testing.T) {
 		t.Fatalf("the module page header sits at %v, card at %v", title.Y, card.Y)
 	}
 }
+
+func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	row, ok := tester.Find("mygo")
+	if !ok {
+		t.Fatalf("the conversation list never rendered, texts %q", tester.Texts())
+	}
+	image := tester.Image()
+	listBackground := image.RGBAAt(int(row.X+8), int(row.Y+row.H+8))
+	plus, ok := tester.Find("新建标签页")
+	if !ok {
+		t.Fatalf("the whiteboard tab bar never rendered, texts %q", tester.Texts())
+	}
+	canvas := image.RGBAAt(int(plus.X+plus.W+24), int(plus.Y+plus.H/2))
+	if canvas != listBackground {
+		t.Fatalf("the whiteboard background %v differs from the list background %v", canvas, listBackground)
+	}
+	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	if !ok {
+		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
+	}
+	gap := image.RGBAAt(int(card.X+card.W+5), int(card.Y+card.H/2))
+	if gap == listBackground {
+		t.Fatalf("the cards cast no shadow over the canvas %v", gap)
+	}
+}

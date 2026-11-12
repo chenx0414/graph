@@ -97,7 +97,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	if s.board.splits == nil {
 		s.board.splits = map[string]ui.Rect{}
 	}
-	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background)
+	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Sidebar)
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) == 1 {
 			s.boardPanelView(ctx, &page.Panels[0], false, false)
@@ -265,6 +265,9 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := kit.Panel(ctx, t.Radius.Xl)
 	card.Fill().Label(boardPanelTitle(panel.Kind) + "窗口")
+	if autoHide {
+		kit.Elevate(ctx, card, shellShadow)
+	}
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
 		if freeform {
 			s.board.rects[panel.ID] = r
