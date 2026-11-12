@@ -274,9 +274,9 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 		s.boardPanelHeader(ctx, panel, freeform)
 		body := ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
 		body.MaskRadialGradient(ui.RadialGradient{Stops: []ui.GradientStop{
-			{Color: ui.RGB(0, 0, 0), At: 0},
-			{Color: ui.RGB(0, 0, 0), At: 0.74},
-			{Color: ui.Transparent, At: 1},
+			{Color: ui.RGB(0, 0, 0), At: 0.45},
+			{Color: ui.RGB(0, 0, 0), At: 0.6},
+			{Color: ui.Transparent, At: 0.82},
 		}})
 		body.Children(func() {
 			ui.Column(ctx).Gap(th.Space(2)).Children(func() {
