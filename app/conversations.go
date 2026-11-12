@@ -195,9 +195,11 @@ func (c *chatState) open(id string) {
 	c.messages = messages
 	c.fingerprint = transcriptFingerprint(messages)
 	c.historyLoading = false
-	c.historyAnchorID = ""
-	c.pendingScrollID = ""
 	c.pagedHistory = false
+	c.runBoundaries = map[string]bool{}
+	if len(messages) > 0 {
+		c.runBoundaries[messages[0].ID] = true
+	}
 	raw, _ := parseConversationRaw(payload)
 	c.oldestSeq = oldestSeqOf(raw)
 	c.noMoreHistory = c.oldestSeq <= 0 || len(raw) < historyPageSize
@@ -263,19 +265,7 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	if c.historyLoading {
 		kit.Text(ctx, "正在加载更早的对话…", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(1), 0)
 	}
-	runs := groupRuns(c.messages)
-	anchored := false
-	if c.pendingScrollID != "" {
-		anchor := c.pendingScrollID
-		c.pendingScrollID = ""
-		for index := range runs {
-			if runContainsMessage(runs[index], anchor) {
-				c.list.ScrollTo(index, ui.Start)
-				anchored = true
-				break
-			}
-		}
-	}
+	runs := c.runs()
 	c.list.Key = func(row int) any { return runIdentity(runs[row]) }
 	list := ui.List(ctx, &c.list, len(runs), func(index int) {
 		run := runs[index]
@@ -287,11 +277,10 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	})
 	list.Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
 	first, last := c.list.Visible()
-	if !anchored && !c.historyLoading && first == 0 && last >= 0 && last < len(runs)-1 {
-		if id := firstMessageID(runs[0]); id != "" {
-			c.historyAnchorID = id
-			c.ensureHistory()
-		}
+	if c.historySettle > 0 {
+		c.historySettle--
+	} else if !c.historyLoading && first == 0 && last >= 0 && last < len(runs)-1 {
+		c.ensureHistory()
 	}
 }
 

@@ -29,9 +29,17 @@ type transcriptRun struct {
 }
 
 func groupRuns(messages []transcriptMessage) []transcriptRun {
+	return groupRunsAt(messages, nil)
+}
+
+func groupRunsAt(messages []transcriptMessage, boundaries map[string]bool) []transcriptRun {
 	runs := []transcriptRun{}
 	for _, message := range messages {
 		isTool := message.Role == "tool"
+		if boundaries[message.ID] {
+			runs = append(runs, transcriptRun{tools: isTool, messages: []transcriptMessage{message}})
+			continue
+		}
 		if isTool && len(runs) > 0 && runs[len(runs)-1].tools {
 			runs[len(runs)-1].messages = append(runs[len(runs)-1].messages, message)
 			continue
@@ -39,6 +47,10 @@ func groupRuns(messages []transcriptMessage) []transcriptRun {
 		runs = append(runs, transcriptRun{tools: isTool, messages: []transcriptMessage{message}})
 	}
 	return runs
+}
+
+func (c *chatState) runs() []transcriptRun {
+	return groupRunsAt(c.messages, c.runBoundaries)
 }
 
 func runSummary(run transcriptRun) string {
@@ -67,22 +79,6 @@ func runSummary(run transcriptRun) string {
 
 func messageStreaming(message transcriptMessage) bool {
 	return message.Role == "assistant" && message.State == "streaming"
-}
-
-func runContainsMessage(run transcriptRun, id string) bool {
-	for _, message := range run.messages {
-		if message.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-func firstMessageID(run transcriptRun) string {
-	if len(run.messages) == 0 {
-		return ""
-	}
-	return run.messages[0].ID
 }
 
 func runIdentity(run transcriptRun) any {
@@ -152,8 +148,8 @@ type chatState struct {
 	graphLoading    bool
 	graphError      string
 	oldestSeq       int64
-	historyAnchorID string
-	pendingScrollID string
+	runBoundaries   map[string]bool
+	historySettle   int
 	historyLoading  bool
 	noMoreHistory   bool
 	pagedHistory    bool
@@ -171,7 +167,7 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}}
+	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, runBoundaries: map[string]bool{}}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state

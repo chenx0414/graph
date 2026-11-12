@@ -42,6 +42,22 @@ func historyPagingServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	return server, requests
 }
 
+func TestHistoryPagesSplitToolRunsAtTheirBoundary(t *testing.T) {
+	messages := []transcriptMessage{
+		{ID: "new-a", Role: "tool"},
+		{ID: "new-b", Role: "tool"},
+		{ID: "old-a", Role: "tool"},
+		{ID: "old-b", Role: "tool"},
+	}
+	runs := groupRunsAt(messages, map[string]bool{"old-a": true})
+	if len(runs) != 2 {
+		t.Fatalf("a page boundary keeps its own run, got %d runs", len(runs))
+	}
+	if runs[1].messages[0].ID != "old-a" {
+		t.Fatalf("the page starts a run of its own, got %+v", runs[1].messages)
+	}
+}
+
 func TestReachingTheTopFetchesOlderHistory(t *testing.T) {
 	server, requests := historyPagingServer(t)
 	state := newChatState(server.URL, "tok")
