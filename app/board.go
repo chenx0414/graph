@@ -83,7 +83,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 						color = t.Foreground
 					}
 					kit.Text(ctx, page.Title, t.Text.Lg).TextColor(color).SingleLine().Translate(0, -0.6)
-					if index > 0 && len(s.board.pages) > 1 && (active || hovered) {
+					if index > 0 && len(s.board.pages) > 1 && (active || hovered) && boardPageClosable(page) {
 						iconAction(ctx, iconClose, "关闭 "+page.Title, false, 4.5, func() { s.closeBoardPage(pageIndex) })
 					}
 				})
@@ -106,6 +106,10 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) == 1 {
 			s.boardPanelView(ctx, &page.Panels[0], false, false)
+			return
+		}
+		if page.Kind == fleetPageID {
+			s.fleetPageView(ctx, page)
 			return
 		}
 		if page.Kind != "" {

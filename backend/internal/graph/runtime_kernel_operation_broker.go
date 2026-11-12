@@ -249,6 +249,7 @@ func ExecuteModuleOperation(options ModuleOperationInput) ModuleOperationRespons
 
 	queued := NowMillis()
 	WaitForKernelProgramExecutionSlot(kernel, id, cancellation)
+	defer ReleaseKernelProgramExecutionSlot(kernel, id)
 	started := NowMillis()
 	waitMs := started - queued
 	var programEnv map[string]string

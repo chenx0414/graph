@@ -97,9 +97,20 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 			credentials[id] = credential
 		}
 	}
-	limits := LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}}
+	limits := LimitsConfig{
+		Credentials:       map[string]int{},
+		SharedGroups:      map[string]int{},
+		AgentExecutions:   DefaultAgentExecutions,
+		ProgramExecutions: DefaultProgramExecutions,
+	}
 	if value, ok := root["limits"]; ok {
 		rawLimits := asObject(value, "limits")
+		if current, present := rawLimits["agentExecutions"]; present {
+			limits.AgentExecutions = configExecutionLimit(current, "limits.agentExecutions")
+		}
+		if current, present := rawLimits["programExecutions"]; present {
+			limits.ProgramExecutions = configExecutionLimit(current, "limits.programExecutions")
+		}
 		credentialLimits := map[string]any{}
 		if current, present := rawLimits["credentials"]; present {
 			credentialLimits = asObject(current, "limits.credentials")

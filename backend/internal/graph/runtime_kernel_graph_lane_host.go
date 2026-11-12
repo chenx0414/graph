@@ -302,6 +302,7 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 		})
 		nodeRequest := AgentSessionRequest{
 			ExecutionId:            workerConfig.ExecutionId,
+			SkipContextPreparation: true,
 			ExecutionConfiguration: workerConfig.NodeExecutionConfiguration,
 			CapabilityDescriptor:   workerConfig.CapabilityDescriptor,
 			CredentialReference:    workerConfig.CredentialReference,
@@ -338,6 +339,8 @@ func (state *kernelGraphLaneState) host(graphId, nodeId string, config any, revi
 			RuntimePolicyDigest:     runtimePolicyDigest,
 		}
 		host := NewPigNodeHost(PigNodeHostOptions{
+			GraphId:  graphId,
+			NodeId:   nodeId,
 			Database: state.options.Kernel.Store.Path,
 			Store:    state.options.Kernel.Store,
 			Request:  nodeRequest,

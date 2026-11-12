@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-const SCHEMA_VERSION = 59
+const SCHEMA_VERSION = 60
 
 const SchemaVersion = SCHEMA_VERSION
 
@@ -39,6 +39,8 @@ type TaskStore struct {
 	waiters   []chan struct{}
 	txDepth   int
 	txMu sync.Mutex
+	agentExecutions   *executionSlotPool
+	programExecutions *executionSlotPool
 }
 
 func NewTaskStore(db *sql.DB, path string) *TaskStore {
@@ -46,7 +48,10 @@ func NewTaskStore(db *sql.DB, path string) *TaskStore {
 		panic(err)
 	}
 	MigrateTaskSchema(db)
-	return &TaskStore{DB: db, Db: db, Path: path}
+	store := &TaskStore{DB: db, Db: db, Path: path}
+	store.agentExecutions = newExecutionSlotPool(DefaultAgentExecutions)
+	store.programExecutions = newExecutionSlotPool(DefaultProgramExecutions)
+	return store
 }
 
 func (s *TaskStore) Close() {

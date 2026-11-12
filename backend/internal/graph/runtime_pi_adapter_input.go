@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sync"
+
+	"github.com/chenx0414/graph/backend/internal/agentcore"
 )
 
 type piAdapterSlot struct {
@@ -28,7 +30,7 @@ type piAdapterRunInput struct {
 	ProjectRoot       string
 	DefinitionVersion string
 	FullAccess        bool
-	ActiveInstances   *map[string]AgentSession
+	ActiveInstances   *map[string]*agentcore.Agent
 	ActiveMu          *sync.Mutex
 	TurnOrdinals      *map[string]func() int
 	TurnOrdinalsMu    *sync.Mutex

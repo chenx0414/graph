@@ -136,7 +136,7 @@ func (runner *GraphRunner) Drain() RunResult {
 			if _, queued := graphDBRow(runner.kernelDB(), "SELECT 1 FROM kernel_queue WHERE task_id=? AND node_id=? AND state='queued' LIMIT 1", runner.options.GraphId, nodeId); !queued {
 				continue
 			}
-			if OccupiedSlots(kernel.Store, "agent") >= int64(ExecutionLimit("agent")) {
+			if kernel.Store.FreeExecutionSlots("agent") <= 0 {
 				break
 			}
 			done := make(chan struct{})

@@ -197,6 +197,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		}
 		result := live.Apply(saved.Config, saved.Revision)
 		if result.Applied {
+			server.Runtime.ApplyExecutionLimits(saved.Config.Limits)
 			syncProviders()
 			server.Runtime.Host.SyncProjects()
 			scheduler.Wake()
@@ -318,6 +319,9 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		StateDir: stateDir, Projects: config.Projects, Port: &port, AutoDrive: &autoDrive,
 		Codemode:      config.Codemode,
 		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},
+		Limits: &TaskRuntimeLimits{
+			AgentExecutions: config.Limits.AgentExecutions, ProgramExecutions: config.Limits.ProgramExecutions,
+		},
 		Models: &TaskRuntimeModels{
 			Entries: live.Entries(), ModelRuntime: modelRuntime, ModelScheduler: scheduler,
 			CredentialFor: func(entry ConfiguredModel) *ResolvedCredential { return live.CredentialFor(entry) },

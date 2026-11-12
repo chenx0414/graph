@@ -65,6 +65,18 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelCapabilities(ctx)
 	case "settings":
 		s.panelSettings(ctx)
+	case "fleet-kpi":
+		s.panelFleetKPI(ctx)
+	case "fleet-network":
+		s.panelFleetNetwork(ctx)
+	case "fleet-collaboration":
+		s.panelFleetCollaboration(ctx)
+	case "fleet-tasks":
+		s.panelFleetTasks(ctx)
+	case "fleet-events":
+		s.panelFleetEvents(ctx)
+	case "fleet-artifacts":
+		s.panelFleetArtifacts(ctx)
 	}
 }
 

@@ -194,6 +194,9 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 59 {
 		execMigration(db, schemaV59)
 	}
+	if version < 60 {
+		migrateV60(db)
+	}
 }
 
 func sqliteColumns(db *sql.DB, table string) map[string]bool {
@@ -398,4 +401,85 @@ func migrateV41(db *sql.DB) {
 	if _, err := db.Exec("COMMIT"); err != nil {
 		panic(err)
 	}
+}
+
+func migrateV60(db *sql.DB) {
+	if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
+		panic(err)
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			_, _ = db.Exec("ROLLBACK")
+			panic(rec)
+		}
+	}()
+	execSQL(db, schemaV60)
+	run := func(query string, args ...any) {
+		if _, err := db.Exec(query, args...); err != nil {
+			panic(err)
+		}
+	}
+	globalId := ""
+	var global sql.NullString
+	err := db.QueryRow("SELECT id FROM conversations WHERE role='global' ORDER BY created_seq LIMIT 1").Scan(&global)
+	if err == nil {
+		globalId = global.String
+	} else if err != sql.ErrNoRows {
+		panic(err)
+	}
+	run(`INSERT INTO agents(id,parent_id,kind,role,name,conversation_id,task_id,project_id,workspace,model,created_at,metadata)
+		SELECT c.id,
+		  CASE WHEN c.role='project' AND ?!='' THEN ? ELSE NULL END,
+		  c.role,c.role,c.title,c.id,c.anchor_task_id,c.project_id,
+		  COALESCE((SELECT p.root FROM projects p WHERE p.id=COALESCE(c.project_id,c.workspace_project_id)),''),
+		  COALESCE((SELECT json_extract(n.spec,'$.model') FROM nodes n WHERE n.task_id=c.anchor_task_id AND n.id='master'),
+		    (SELECT i.model FROM nodes n JOIN instances i ON i.id=n.instance_id
+		      WHERE n.task_id=c.anchor_task_id AND n.id='master'),''),
+		  c.created_at,'{}'
+		FROM conversations c
+		WHERE c.role IN ('global','project')
+		ON CONFLICT(id) DO NOTHING`, globalId, globalId)
+	now := NowMillis()
+	run(`INSERT INTO agents(id,parent_id,kind,role,name,conversation_id,task_id,node_id,project_id,workspace,model,created_at,metadata)
+		SELECT t.id||'/'||n.id,
+		  COALESCE((SELECT c.id FROM conversations c WHERE c.id=t.conversation_id
+		    AND c.role IN ('global','project')), NULLIF(?,'')),
+		  'node',
+		  COALESCE(NULLIF(json_extract(n.spec,'$.role'),''),'worker'),
+		  n.id,t.conversation_id,t.id,n.id,t.project_id,
+		  COALESCE((SELECT p.root FROM projects p WHERE p.id=t.project_id),''),
+		  COALESCE(NULLIF(json_extract(n.spec,'$.model'),''),
+		    (SELECT i.model FROM instances i WHERE i.id=n.instance_id),''),
+		  COALESCE((SELECT MIN(e.created_at) FROM node_entries e
+		    WHERE e.task_id=n.task_id AND e.node_id=n.id), ?),
+		  '{}'
+		FROM nodes n JOIN tasks t ON t.id=n.task_id
+		WHERE n.id!='master'
+		ON CONFLICT(id) DO NOTHING`, globalId, now)
+	if migrationTableExists(db, "kernel_nodes") {
+		run(`INSERT INTO agents(id,parent_id,kind,role,name,conversation_id,task_id,node_id,project_id,workspace,model,created_at,metadata)
+			SELECT t.id||'/'||k.node_id,
+			  COALESCE((SELECT c.id FROM conversations c WHERE c.id=t.conversation_id
+			    AND c.role IN ('global','project')), NULLIF(?,'')),
+			  'node',
+			  COALESCE(NULLIF(json_extract(k.spec,'$.role'),''),'worker'),
+			  k.node_id,t.conversation_id,k.task_id,k.node_id,t.project_id,
+			  COALESCE((SELECT p.root FROM projects p WHERE p.id=t.project_id),''),
+			  COALESCE(NULLIF(json_extract(k.spec,'$.model'),''),''),
+			  COALESCE((SELECT MIN(e.created_at) FROM node_entries e
+			    WHERE e.task_id=k.task_id AND e.node_id=k.node_id), ?),
+			  '{}'
+			FROM kernel_nodes k JOIN tasks t ON t.id=k.task_id
+			ON CONFLICT(id) DO NOTHING`, globalId, now)
+	}
+	execSQL(db, "PRAGMA user_version=60;")
+	if _, err := db.Exec("COMMIT"); err != nil {
+		panic(err)
+	}
+}
+
+func migrationTableExists(db *sql.DB, table string) bool {
+	var name string
+	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
+	return err == nil
 }

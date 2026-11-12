@@ -230,7 +230,7 @@ func (e *Execution) remainingSlots(kind string) int64 {
 	if kind == "agent" {
 		slot = "agent"
 	}
-	return int64(ExecutionLimit(slot)) - OccupiedSlots(e.store, slot)
+	return int64(e.store.FreeExecutionSlots(slot))
 }
 
 func (e *Execution) notifyWork() {

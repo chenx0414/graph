@@ -62,6 +62,11 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 	runtime.kernel = NewKernelStore(runtime.store)
 	RetireLegacyGraphs(runtime.store)
 	interruptedNodes := RecoverKernelExecutions(runtime.kernel)
+	runtime.ApplyExecutionLimits(LimitsConfig{
+		AgentExecutions:   runtime.limits.AgentExecutions,
+		ProgramExecutions: runtime.limits.ProgramExecutions,
+	})
+	runtime.store.RebuildExecutionSlots()
 
 	runtime.store.Transaction(func() any {
 		for _, project := range runtime.configuredProjects() {
@@ -145,4 +150,11 @@ func OpenTaskRuntime(options GraphServerOptions) *TaskRuntime {
 		go runtime.recoverTransferredGraphPreparations()
 	}
 	return runtime
+}
+
+func (runtime *TaskRuntime) ApplyExecutionLimits(limits LimitsConfig) {
+	if runtime == nil || runtime.store == nil {
+		return
+	}
+	runtime.store.SetExecutionLimits(limits.AgentExecutions, limits.ProgramExecutions)
 }

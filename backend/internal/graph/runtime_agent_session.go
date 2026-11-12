@@ -1,62 +1,20 @@
 package graph
 
-type AgentSessionBinding struct {
-	InstanceId        string `json:"instanceId"`
-	NodeId            string `json:"nodeId"`
-	DefinitionVersion string `json:"definitionVersion"`
-}
+import "github.com/chenx0414/graph/backend/internal/agentcore"
 
-type SessionContextInfo struct {
-	Mode                    string  `json:"mode"`
-	SourceSessionId         *string `json:"sourceSessionId,omitempty"`
-	SourceSessionFile       *string `json:"sourceSessionFile,omitempty"`
-	SourceLeafId            *string `json:"sourceLeafId,omitempty"`
-	SourceContextDigest     *string `json:"sourceContextDigest,omitempty"`
-	ReboundFromBundleDigest *string `json:"reboundFromBundleDigest,omitempty"`
-	ChildContextDigest      string  `json:"childContextDigest"`
-}
+type AgentSessionBinding = agentcore.Binding
 
-type AgentSessionContext = SessionContextInfo
+type SessionContextInfo = agentcore.ContextInfo
 
-type AgentSessionExtensionError struct {
-	Path  string `json:"path"`
-	Error any    `json:"error"`
-}
+type AgentSessionContext = agentcore.ContextInfo
 
-type AgentSessionInspect struct {
-	Binding              AgentSessionBinding          `json:"binding"`
-	SessionId            string                       `json:"sessionId"`
-	SessionFile          string                       `json:"sessionFile"`
-	Model                *string                      `json:"model,omitempty"`
-	Messages             []any                        `json:"messages"`
-	LeafId               *string                      `json:"leafId"`
-	BundleDigest         *string                      `json:"bundleDigest"`
-	ToolPolicyDigest     *string                      `json:"toolPolicyDigest"`
-	RuntimePolicyDigest  *string                      `json:"runtimePolicyDigest"`
-	PiVersion            *string                      `json:"piVersion"`
-	Context              *AgentSessionContext         `json:"context,omitempty"`
-	ActiveTools          []string                     `json:"activeTools,omitempty"`
-	RegisteredTools      []string                     `json:"registeredTools,omitempty"`
-	LoadedExtensions     []string                     `json:"loadedExtensions,omitempty"`
-	LoadedExtensionTools []string                     `json:"loadedExtensionTools,omitempty"`
-	ExtensionErrors      []AgentSessionExtensionError `json:"extensionErrors,omitempty"`
-}
+type AgentSessionExtensionError = agentcore.ExtensionError
 
-type AgentSessionUsage struct {
-	Input      int `json:"input"`
-	Output     int `json:"output"`
-	CacheRead  int `json:"cacheRead"`
-	CacheWrite int `json:"cacheWrite"`
-	Total      int `json:"total"`
-}
+type AgentSessionInspect = agentcore.Inspect
 
-type AgentSessionTurn struct {
-	Inspect            AgentSessionInspect `json:"inspect"`
-	FinalAssistantText string              `json:"finalAssistantText"`
-	StopReason         *string             `json:"stopReason,omitempty"`
-	ErrorMessage       *string             `json:"errorMessage,omitempty"`
-	Usage              *AgentSessionUsage  `json:"usage,omitempty"`
-}
+type AgentSessionUsage = agentcore.Usage
+
+type AgentSessionTurn = agentcore.Turn
 
 type AgentSessionRequest struct {
 	ExecutionId                string
@@ -105,20 +63,13 @@ type AgentSessionRequest struct {
 	ForkFrom *PiWorkerForkFrom
 	ReadOnly bool
 	Compaction *CompactionSettings
+	SkipContextPreparation bool
 	Retry *PiRetrySettings
 	Broker SendGate
 	OnEvent func(event map[string]any)
 }
 
-type AgentSession interface {
-	Prompt(text string, images []ImageContent) (AgentSessionTurn, error)
-	Compact(customInstructions string) error
-	Steer(text string) error
-	Interrupt(text *string) error
-	Stop() error
-	Inspect() AgentSessionInspect
-	Close() error
-}
+type AgentSession = agentcore.Session
 
 type AgentSessionTransport interface {
 	Open(request AgentSessionRequest) (AgentSession, error)

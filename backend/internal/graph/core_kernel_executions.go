@@ -84,6 +84,7 @@ func (k *KernelStore) AdmitNode(taskID string, revisionVersion int, nodeID strin
 		kind = "agent"
 	}
 	g5Exec(k.Db, "INSERT INTO kernel_nodes(task_id,revision_version,node_id,instance_id,kind,spec,status) VALUES(?,?,?,?,?,?,?)", taskID, revisionVersion, nodeID, input.instance(), kind, CanonicalJSON(node), "idle")
+	RegisterNodeAgent(k.Store, taskID, nodeID, "", "")
 	if _, paused := g5One(k.Db, "SELECT 1 FROM kernel_nodes WHERE task_id=? AND graph_paused=1", taskID); paused {
 		k.SetNativePause(taskID, true, "", 0)
 	}

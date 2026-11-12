@@ -225,7 +225,24 @@ _Avoid_：运行配置（还包含实例实际选择的模型）
 _Avoid_：纯画面分组（子 graph 本身具有复用与接口语义）
 
 **运行名额**：
-Agent 正在执行时占用的全局并发配额，覆盖 main 与其多个 graph 的内部 Agent；空闲的常驻节点不占执行名额。
+Agent 正在执行时占用的全局并发配额，覆盖 main 与其多个 graph 的内部 Agent；空闲的常驻节点不占执行名额。名额上限由 `limits.agentExecutions` 配置，默认按千级编队设置。
+
+**Agent 席位**：
+`agents` 登记表中的一行，是 Agent 的稳定身份与父子关系来源。global、project、graph node 与动态子 Agent 都拥有席位；席位不保存运行状态，状态与用量由编队投影从执行账本聚合。
+_Avoid_：用节点或会话充当唯一 Agent 身份（动态子 Agent 没有 graph 节点）
+
+**编队**：
+一棵以 global 主管为根、项目主管为枝、graph 节点与动态子 Agent 为叶的 Agent 树，以及跨席位的委派、投递、生成与协作关系。
+
+**编队投影**：
+从 `agents` 与执行账本实时聚合出的只读视图（`GET /api/fleet`），供编队页显示树、状态、用量、任务、事件与共享产物；不新增第二份可写状态。
+
+**子 Agent**：
+由 `spawn_agent` 动态生成的 Agent。它有自己的会话、anchor 任务、席位、工作区与 durable 历史，父级通过 `parent_id` 关联；完成后以结果消息与唤醒意图回报父级，可以继续生成自己的子 Agent。
+_Avoid_：把子 Agent 当成 graph 节点（节点由定义声明，子 Agent 由运行时生成）
+
+**生成深度**：
+从 global 到当前 Agent 的 `spawn` 层数；与单父级子数、项目 Agent 总数、全局执行名额一起约束动态编队的增长。
 
 **预算作用域**：
 持久累计额度所归属的身份，用于保证同一 Agent 复跑、重试、恢复和切换配置后延续已用量。

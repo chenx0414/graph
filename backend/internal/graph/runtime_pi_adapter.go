@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+
+	"github.com/chenx0414/graph/backend/internal/agentcore"
 )
 
 const PI_SESSION_RESERVE = 2_000_000
@@ -38,7 +40,7 @@ func CreatePiAdapter(options PiAdapterOptions) ActionAdapter {
 	if transport == nil {
 		transport = CreatePigAgentSessionTransport(options.Store, CodemodeSettings{})
 	}
-	activeInstances := map[string]AgentSession{}
+	activeInstances := map[string]*agentcore.Agent{}
 	activeInstancesMu := sync.Mutex{}
 	turnOrdinals := map[string]func() int{}
 	turnOrdinalsMu := sync.Mutex{}

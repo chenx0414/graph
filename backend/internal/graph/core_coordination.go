@@ -90,6 +90,11 @@ func (runtime *TaskRuntime) ensureSupervisorThread(projectID *string, requestID 
 		runtime.store.CreateConversationTask(taskID, workspace, title, "chatting", sequence, id)
 		runtime.store.CreateConversation(id, projectID, workspace, taskID, title, sequence, NowMillis())
 		runtime.store.AssignConversationRole(id, role)
+		masterModelId := ""
+		if model := runtime.masterModel(); model != nil {
+			masterModelId = *model
+		}
+		RegisterSupervisorAgent(runtime.store, id, role, title, taskID, workspace, projectID, masterModelId)
 		if runtime.master != nil && runtime.masterModel() != nil && runtime.masterDefinitionVersion() != nil {
 			runtime.createMasterNode(taskID)
 		}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/chenx0414/graph/backend/internal/agentcore"
 )
 
 func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport, input piAdapterRunInput, turn piAdapterTurnInput) OperationResult {
@@ -153,10 +155,15 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		}
 		panic(err)
 	}
+	agent, err := agentcore.Adopt(agentIdentityOfOperation(operation, turn.Conversation), session)
+	if err != nil {
+		_ = session.Close()
+		panic(err)
+	}
 	input.ActiveMu.Lock()
-	(*input.ActiveInstances)[operation.Id] = session
+	(*input.ActiveInstances)[operation.Id] = agent
 	input.ActiveMu.Unlock()
-	inspected := session.Inspect()
+	inspected := agent.Inspect()
 	raisePiExtensionLoadErrors(inspected.ExtensionErrors)
 	if turn.PersistEntries {
 		RecordNodeSession(store, instanceId, inspected.SessionId, inspected.SessionFile)
@@ -182,7 +189,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		input.ActiveMu.Lock()
 		delete(*input.ActiveInstances, operation.Id)
 		input.ActiveMu.Unlock()
-		if closeErr := session.Close(); closeErr != nil {
+		if closeErr := agent.Close(); closeErr != nil {
 			panic(closeErr)
 		}
 	}()
@@ -196,7 +203,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 	}
 	compacted := false
 	if compactRequested {
-		compactionErr := session.Compact(COMPACTION_INSTRUCTIONS)
+		compactionErr := agent.Compact(COMPACTION_INSTRUCTIONS)
 		if compactionErr == nil {
 			compacted = true
 			options.TaskSetups.Forget(instanceId)
@@ -279,7 +286,7 @@ func piAdapterRunTurn(options PiAdapterOptions, transport AgentSessionTransport,
 		}()
 	}
 	pigExtensionTurnStart(store, operation.TaskId, operation.Id, operation.NodeId, request.Workspace, skillInjection.Text)
-	result, err := session.Prompt(skillInjection.Text, userImages)
+	result, err := agent.Prompt(skillInjection.Text, userImages)
 	if err == nil && setupSent {
 		options.TaskSetups.Record(instanceId, inspected.SessionId, setupText)
 	}

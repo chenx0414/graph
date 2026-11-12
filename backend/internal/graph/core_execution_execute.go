@@ -100,7 +100,7 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 	if spec.Kind == "agent" {
 		slot = "agent"
 	}
-	if OccupiedSlots(e.store, slot) >= int64(ExecutionLimit(slot)) {
+	if e.store.FreeExecutionSlots(slot) <= 0 {
 		graphDatabaseMu.Unlock()
 		return false
 	}
@@ -125,6 +125,7 @@ func (e *Execution) execute(node ExecutionNodeRow) bool {
 		graphDatabaseMu.Unlock()
 		return false
 	}
+	defer ReleaseOperationExecutionSlots(e.store, operation.Id)
 	graphDatabaseMu.Unlock()
 
 	dispatch, prepareFailure := e.prepareDispatch(adapter, operation)

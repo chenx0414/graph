@@ -14,6 +14,14 @@ func configPositiveInt(value any, path string) int {
 	return n
 }
 
+func configExecutionLimit(value any, path string) int {
+	n, ok := configFiniteInt(value)
+	if !ok || n < 1 {
+		configInvalid(path + " must be a positive integer, got " + jsonStringify(value))
+	}
+	return n
+}
+
 func configAsCost(value any, path string) ModelCost {
 	raw := asObject(value, path)
 	field := func(name string) float64 {

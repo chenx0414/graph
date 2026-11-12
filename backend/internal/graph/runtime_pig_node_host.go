@@ -12,10 +12,14 @@ import (
 
 	"context"
 
+	"github.com/chenx0414/graph/backend/internal/agentcore"
 	"github.com/chenx0414/graph/backend/internal/pigkernel"
 )
 
 type PigNodeHostOptions struct {
+	GraphId  string
+	NodeId   string
+	Role     string
 	Database string
 	Store *TaskStore
 	Request AgentSessionRequest
@@ -36,7 +40,7 @@ type PigNodeHostOptions struct {
 type PigNodeHost struct {
 	options PigNodeHostOptions
 	mutex   sync.Mutex
-	current *pigkernel.Session
+	current *agentcore.Agent
 	closed  bool
 	attempt bool
 }
@@ -97,48 +101,61 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 	}
 	tools = append(tools, extensions...)
 	_ = pigExtensionTurnStarted(request.Workspace, text)
-	session, err := openPigSession(context.Background(), host.options.Database, request, host.options.Codemode,
-		pigProviderBridge(host.options.Stream, host.options.Request.Model, func(map[string]any) map[string]any { return host.providerOptions() }),
-		tools, host.options.OnEvent, host.options.OnToolCall)
+	preAdmission := []string{}
+	if host.options.PreAdmission != nil {
+		preAdmission = host.options.PreAdmission()
+	}
+	session, err := openAgentSession(host.options.Database, pigSessionOpenOptions{
+		Request:    request,
+		Stream:     host.options.Stream,
+		Codemode:   host.options.Codemode,
+		Tools:      tools,
+		OnEvent:    host.options.OnEvent,
+		OnToolCall: host.options.OnToolCall,
+		ProviderOptions: func(map[string]any) map[string]any {
+			return host.providerOptions()
+		},
+		Freeze: func() error {
+			return pigkernel.FreezeExecution(context.Background(), host.options.Database, request.Binding.InstanceId,
+				pigFrozenExecution(request, preAdmission))
+		},
+	})
 	if err != nil {
+		return pigNodeTurnError(err.Error())
+	}
+	agent, err := agentcore.Adopt(agentIdentityOfNode(host.options.GraphId, host.options.NodeId, host.options.Role, ""), &pigAgentSession{session: session, request: request})
+	if err != nil {
+		_ = session.Close()
 		return pigNodeTurnError(err.Error())
 	}
 	host.mutex.Lock()
 	if host.closed {
 		host.mutex.Unlock()
-		_ = session.Close()
+		_ = agent.Close()
 		return pigNodeTurnError("The PiG node binding is closed")
 	}
-	host.current = session
+	host.current = agent
 	host.mutex.Unlock()
 	defer func() {
 		host.mutex.Lock()
-		if host.current == session {
+		if host.current == agent {
 			host.current = nil
 		}
 		host.mutex.Unlock()
-		_ = session.Close()
+		_ = agent.Close()
 	}()
 
-	inspect := session.Inspect()
+	inspect := agent.Inspect()
 	if host.options.OnReady != nil {
 		host.options.OnReady(inspect.SessionId, inspect.SessionFile)
 	}
-	preAdmission := []string{}
-	if host.options.PreAdmission != nil {
-		preAdmission = host.options.PreAdmission()
-	}
-	if err := pigkernel.FreezeExecution(context.Background(), host.options.Database, request.Binding.InstanceId,
-		pigFrozenExecution(request, preAdmission)); err != nil {
-		return pigNodeTurnError(err.Error())
-	}
-	turn, err := session.Prompt(context.Background(), text)
+	turn, err := agent.Prompt(text, nil)
 	if err != nil {
 		return pigNodeTurnError(err.Error())
 	}
-	report := TurnReport{Done: true, Interrupted: turn.StopReason == "aborted"}
-	if turn.ErrorMessage != "" {
-		return pigNodeTurnError(turn.ErrorMessage)
+	report := TurnReport{Done: true, Interrupted: turn.StopReason != nil && *turn.StopReason == "aborted"}
+	if turn.ErrorMessage != nil && *turn.ErrorMessage != "" {
+		return pigNodeTurnError(*turn.ErrorMessage)
 	}
 	if host.options.Usage != nil {
 		if usage := host.options.Usage(); usage != nil {
@@ -150,44 +167,50 @@ func (host *PigNodeHost) Turn(text string) TurnReport {
 
 func (host *PigNodeHost) Steer(text, requestID string) error {
 	host.mutex.Lock()
-	session := host.current
+	agent := host.current
 	host.mutex.Unlock()
-	if session == nil {
+	if agent == nil {
 		return errors.New("The node is not accepting steering messages")
 	}
-	return session.InterruptWithRequestID(context.Background(), &text, requestID)
+	controller, ok := agent.Session().(interface {
+		InterruptWithRequestID(text *string, requestID string) error
+	})
+	if !ok {
+		return errors.New("The node session does not accept steering")
+	}
+	return controller.InterruptWithRequestID(&text, requestID)
 }
 
 func (host *PigNodeHost) StopActive() error {
 	host.mutex.Lock()
-	session := host.current
+	agent := host.current
 	host.mutex.Unlock()
-	if session == nil {
+	if agent == nil {
 		return errors.New("The node session is not yet available")
 	}
-	return session.Stop(context.Background())
+	return agent.Stop()
 }
 
 func (host *PigNodeHost) Stop() error {
 	host.mutex.Lock()
-	session := host.current
+	agent := host.current
 	host.mutex.Unlock()
-	if session == nil {
+	if agent == nil {
 		return nil
 	}
-	return session.Stop(context.Background())
+	return agent.Stop()
 }
 
 func (host *PigNodeHost) Dispose() error {
 	host.mutex.Lock()
 	host.closed = true
-	session := host.current
+	agent := host.current
 	host.current = nil
 	host.mutex.Unlock()
-	if session == nil {
+	if agent == nil {
 		return nil
 	}
-	return session.Close()
+	return agent.Close()
 }
 
 func (host *PigNodeHost) providerOptions() map[string]any {

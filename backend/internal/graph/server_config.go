@@ -20,6 +20,8 @@ type CredentialConfig struct {
 type LimitsConfig struct {
 	Credentials         map[string]int `json:"credentials"`
 	SharedGroups        map[string]int `json:"sharedGroups"`
+	AgentExecutions     int            `json:"agentExecutions"`
+	ProgramExecutions   int            `json:"programExecutions"`
 }
 
 type GraphModels struct {
@@ -74,8 +76,13 @@ func configInvalid(message string) {
 func EmptyGraphConfig() GraphConfig {
 	return GraphConfig{
 		Path: nil, Configured: false, Projects: []ProjectConfig{}, Models: nil,
-		Credentials:           map[string]CredentialConfig{},
-		Limits:                LimitsConfig{Credentials: map[string]int{}, SharedGroups: map[string]int{}},
+		Credentials: map[string]CredentialConfig{},
+		Limits: LimitsConfig{
+			Credentials:       map[string]int{},
+			SharedGroups:      map[string]int{},
+			AgentExecutions:   DefaultAgentExecutions,
+			ProgramExecutions: DefaultProgramExecutions,
+		},
 		PiExtensionAutoUpdate: true,
 	}
 }

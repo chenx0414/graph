@@ -194,7 +194,7 @@ func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	state.loadBoard(dir)
-	if len(state.board.pages) != 1 || state.board.pages[0].Kind != "" {
+	if len(state.board.pages) != 2 || state.board.pages[0].Kind != "" || state.board.pages[1].ID != "fleet" {
 		t.Fatalf("removed pages survived, pages %+v", state.board.pages)
 	}
 	for _, panel := range state.board.pages[0].Panels {
@@ -429,14 +429,17 @@ func TestLoadingPinsTheWhiteboardFirstAndDropsExtraOnes(t *testing.T) {
 	}
 	state := fourPaneShell(t)
 	state.loadBoard(directory)
-	if len(state.board.pages) != 2 {
+	if len(state.board.pages) != 3 {
 		t.Fatalf("the extra whiteboards stayed, pages %+v", state.board.pages)
 	}
 	first := state.board.pages[0]
 	if first.ID != "board" || first.Title != "白板" || first.Kind != "" {
 		t.Fatalf("the whiteboard is not pinned first, page %+v", first)
 	}
-	if state.board.active != 1 {
+	if state.board.pages[1].ID != "fleet" || state.board.pages[2].Kind != "models" {
+		t.Fatalf("the fleet page follows the whiteboard and modules keep their order, pages %+v", state.board.pages)
+	}
+	if state.board.active != 2 {
 		t.Fatalf("the active module page moved, active %d", state.board.active)
 	}
 }

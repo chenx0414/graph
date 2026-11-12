@@ -36,30 +36,69 @@ func (transport *pigAgentTransport) Open(request AgentSessionRequest) (AgentSess
 		return nil, err
 	}
 	tools = append(tools, extensions...)
-	session, err := openPigSession(context.Background(), transport.store.Path, request, transport.codemode, pigProviderBridge(request.Stream, request.Model, func(kernelOptions map[string]any) map[string]any {
-		effective := map[string]any{}
-		for key, value := range pigProviderOptions(request) {
-			effective[key] = value
-		}
-		for key, value := range kernelOptions {
-			effective[key] = value
-		}
-		return effective
-	}), tools, request.OnEvent, nil)
+	session, err := openAgentSession(transport.store.Path, pigSessionOpenOptions{
+		Request:  request,
+		Codemode: transport.codemode,
+		Tools:    tools,
+		OnEvent:  request.OnEvent,
+		ProviderOptions: func(kernelOptions map[string]any) map[string]any {
+			effective := map[string]any{}
+			for key, value := range pigProviderOptions(request) {
+				effective[key] = value
+			}
+			for key, value := range kernelOptions {
+				effective[key] = value
+			}
+			return effective
+		},
+		WaitIdle: !request.Recovering,
+		Freeze:   func() error { return transport.freeze(request) },
+	})
 	if err != nil {
 		return nil, err
 	}
-	if !request.Recovering {
-		if err := pigkernel.WaitConversationIdle(context.Background(), transport.store.Path, pigSessionIdentity(request)); err != nil {
+	return &pigAgentSession{session: session, request: request}, nil
+}
+
+type pigSessionOpenOptions struct {
+	Request         AgentSessionRequest
+	Stream          PromptStreamFunc
+	Codemode        CodemodeSettings
+	Tools           []pigkernel.ToolSpec
+	OnEvent         func(map[string]any)
+	OnToolCall      func(pigkernel.ToolCallRecord)
+	ProviderOptions func(map[string]any) map[string]any
+	WaitIdle        bool
+	Freeze          func() error
+}
+
+func pigSessionStream(options pigSessionOpenOptions) PromptStreamFunc {
+	if options.Stream != nil {
+		return options.Stream
+	}
+	return options.Request.Stream
+}
+
+func openAgentSession(database string, options pigSessionOpenOptions) (*pigkernel.Session, error) {
+	session, err := openPigSession(context.Background(), database, options.Request, options.Codemode,
+		pigProviderBridge(pigSessionStream(options), options.Request.Model, options.ProviderOptions),
+		options.Tools, options.OnEvent, options.OnToolCall)
+	if err != nil {
+		return nil, err
+	}
+	if options.WaitIdle && !options.Request.Recovering {
+		if err := pigkernel.WaitConversationIdle(context.Background(), database, pigSessionIdentity(options.Request)); err != nil {
 			_ = session.Close()
 			return nil, err
 		}
 	}
-	if err := transport.freeze(request); err != nil {
-		_ = session.Close()
-		return nil, err
+	if options.Freeze != nil {
+		if err := options.Freeze(); err != nil {
+			_ = session.Close()
+			return nil, err
+		}
 	}
-	return &pigAgentSession{session: session, request: request}, nil
+	return session, nil
 }
 
 func (transport *pigAgentTransport) freeze(request AgentSessionRequest) error {
@@ -272,35 +311,20 @@ func pigUserContent(text string, images []ImageContent) ai.UserContent {
 }
 
 func (session *pigAgentSession) Prompt(text string, images []ImageContent) (AgentSessionTurn, error) {
-	budget := pigSessionContextBudget(session.request)
-	compactAt := pigSessionCompactionTrigger(session.request)
-	if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, COMPACTION_INSTRUCTIONS, ""); err != nil {
-		return AgentSessionTurn{}, err
-	} else if reset {
-		session.emitContextReset(estimated, budget)
+	if !session.request.SkipContextPreparation {
+		budget := pigSessionContextBudget(session.request)
+		compactAt := pigSessionCompactionTrigger(session.request)
+		if reset, _, estimated, err := session.session.PrepareContext(context.Background(), budget, compactAt, text, COMPACTION_INSTRUCTIONS, ""); err != nil {
+			return AgentSessionTurn{}, err
+		} else if reset {
+			session.emitContextReset(estimated, budget)
+		}
 	}
 	turn, err := session.session.PromptContent(context.Background(), pigUserContent(text, images))
 	if err != nil {
 		return AgentSessionTurn{}, err
 	}
-	result := AgentSessionTurn{
-		Inspect:            session.Inspect(),
-		FinalAssistantText: turn.Text,
-	}
-	if turn.StopReason != "" {
-		result.StopReason = stringPointer(turn.StopReason)
-	}
-	if turn.ErrorMessage != "" {
-		result.ErrorMessage = stringPointer(turn.ErrorMessage)
-	}
-	if turn.Usage != nil {
-		result.Usage = &AgentSessionUsage{
-			Input: turn.Usage.Input, Output: turn.Usage.Output,
-			CacheRead: turn.Usage.CacheRead, CacheWrite: turn.Usage.CacheWrite,
-			Total: turn.Usage.Total,
-		}
-	}
-	return result, nil
+	return agentTurnFromPig(turn, session.Inspect()), nil
 }
 
 func pigSessionCompactionTrigger(request AgentSessionRequest) int {
@@ -354,6 +378,10 @@ func (session *pigAgentSession) Interrupt(text *string) error {
 	return session.session.Interrupt(context.Background(), text)
 }
 
+func (session *pigAgentSession) InterruptWithRequestID(text *string, requestID string) error {
+	return session.session.InterruptWithRequestID(context.Background(), text, requestID)
+}
+
 func (session *pigAgentSession) Stop() error {
 	return session.session.Stop(context.Background())
 }
@@ -362,16 +390,9 @@ func (session *pigAgentSession) Inspect() AgentSessionInspect {
 	view := session.session.Inspect()
 	session.mutex.Lock()
 	defer session.mutex.Unlock()
-	session.inspect = AgentSessionInspect{
-		Binding:          session.request.Binding,
-		SessionId:        view.SessionId,
-		SessionFile:      view.SessionFile,
-		ActiveTools:      view.ActiveTools,
-		RegisteredTools:  view.RegisteredTools,
-		LoadedExtensions: view.LoadedExtensions,
-		ExtensionErrors:  []AgentSessionExtensionError{},
-		Messages:         view.Messages,
-	}
+	session.inspect = agentInspectFromPig(view)
+	session.inspect.Binding = session.request.Binding
+	session.inspect.ExtensionErrors = []AgentSessionExtensionError{}
 	if session.request.BundleDigest != "" {
 		session.inspect.BundleDigest = stringPointer(session.request.BundleDigest)
 	}

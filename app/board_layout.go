@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 type boardPanel struct {
@@ -101,7 +99,7 @@ func layoutFromPanels(panels []boardPanel) boardNode {
 }
 
 func defaultBoardPages() []boardPage {
-	return []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()}}
+	return []boardPage{defaultBoardPage(), defaultFleetPage()}
 }
 
 func boardPanelTitle(kind string) string {
@@ -160,6 +158,18 @@ func boardPanelTitle(kind string) string {
 		return "模型配置"
 	case "questions":
 		return "待答问题"
+	case "fleet-kpi":
+		return "编队总览"
+	case "fleet-network":
+		return "Agent 网络"
+	case "fleet-collaboration":
+		return "跨 Agent 协作"
+	case "fleet-tasks":
+		return "协作任务"
+	case "fleet-events":
+		return "事件检查"
+	case "fleet-artifacts":
+		return "共享产物"
 	}
 	return kind
 }
@@ -223,58 +233,6 @@ func (s *shellState) loadBoard(stateDir string) {
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
 	s.pinBoardPages()
 	s.saveBoard()
-}
-
-func (s *shellState) pinBoardPages() {
-	activeID := ""
-	if s.board.active >= 0 && s.board.active < len(s.board.pages) {
-		activeID = s.board.pages[s.board.active].ID
-	}
-	pinnedIndex := -1
-	for index := range s.board.pages {
-		if s.board.pages[index].Kind == "" {
-			pinnedIndex = index
-			break
-		}
-	}
-	pinned := boardPage{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()}
-	if pinnedIndex >= 0 {
-		pinned = s.board.pages[pinnedIndex]
-	}
-	pinned.ID, pinned.Kind, pinned.Title = "board", "", boardDefaultTitle
-	pages := make([]boardPage, 0, len(s.board.pages))
-	pages = append(pages, pinned)
-	for _, page := range s.board.pages {
-		if page.Kind == "" {
-			continue
-		}
-		pages = append(pages, page)
-	}
-	s.board.pages = pages
-	active := 0
-	for index := range pages {
-		if activeID != "" && pages[index].ID == activeID {
-			active = index
-		}
-	}
-	s.board.active = active
-}
-
-func (s *shellState) resetBoardPage() {
-	if len(s.board.pages) == 0 {
-		return
-	}
-	s.board.pages[0].Kind = ""
-	s.board.pages[0].Title = boardDefaultTitle
-	s.board.pages[0].Panels = defaultBoardPanels()
-	s.board.pages[0].Layout = defaultBoardLayout()
-	s.board.rects = map[string]ui.Rect{}
-	s.board.splits = map[string]ui.Rect{}
-	s.board.active = 0
-	s.boardScrollTop = true
-	s.ensureBoardPageData()
-	s.saveBoard()
-	s.frame()
 }
 
 func ensureBoardDashboardPanels(page *boardPage) {
@@ -473,38 +431,6 @@ func (s *shellState) selectBoardPage(index int) {
 	s.frame()
 }
 
-func (s *shellState) addBoardPage() {
-	count := 1
-	for _, page := range s.board.pages {
-		if page.Kind == "" {
-			count++
-		}
-	}
-	s.board.pages = append(s.board.pages, boardPage{
-		ID:     "tab-" + strconv.FormatInt(time.Now().UnixNano(), 36),
-		Title:  boardDefaultTitle + " " + strconv.Itoa(count),
-		Panels: defaultBoardPanels(),
-		Layout: defaultBoardLayout(),
-	})
-	s.board.active = len(s.board.pages) - 1
-	s.saveBoard()
-	s.frame()
-}
-
-func (s *shellState) closeBoardPage(index int) {
-	if len(s.board.pages) <= 1 || index == 0 {
-		return
-	}
-	index = clampIndex(index, len(s.board.pages))
-	s.board.pages = append(s.board.pages[:index], s.board.pages[index+1:]...)
-	if s.board.active > index {
-		s.board.active--
-	}
-	s.board.active = clampIndex(s.board.active, len(s.board.pages))
-	s.saveBoard()
-	s.frame()
-}
-
 func (s *shellState) closeModule(id string) {
 	page := s.boardPage()
 	removeBoardPanelFromLayout(&page.Layout, id)
@@ -532,5 +458,7 @@ func (s *shellState) ensureBoardPageData() {
 		s.ensureTrajectory()
 	case "insights":
 		s.ensureInsights()
+	case "fleet":
+		s.ensureFleet()
 	}
 }

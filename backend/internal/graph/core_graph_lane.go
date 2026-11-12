@@ -75,7 +75,7 @@ func (lane *GraphLane) Runnable() []RunnableGraph {
 		if kernel.LatestRevision(taskId) == nil {
 			continue
 		}
-		if OccupiedSlots(kernel.Store, "agent") >= int64(ExecutionLimit("agent")) {
+		if kernel.Store.FreeExecutionSlots("agent") <= 0 {
 			_, queued := graphDBRow(db, "SELECT 1 FROM kernel_queue WHERE task_id=? AND state='queued' LIMIT 1", taskId)
 			_, inbox := graphDBRow(db, "SELECT 1 FROM kernel_module_inbox WHERE task_id=? AND processed=0 LIMIT 1", taskId)
 			_, outbox := graphDBRow(db, "SELECT 1 FROM kernel_transition_outbox o JOIN kernel_module_transitions t ON t.id=o.transition_id WHERE t.task_id=? AND o.routed=0 LIMIT 1", taskId)

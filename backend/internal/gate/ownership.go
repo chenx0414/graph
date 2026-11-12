@@ -59,6 +59,7 @@ var ownedTables = map[string]string{
 	"project_preparation":            "git_integration_prepare.go",
 	"kernel_acceptance_limitations":  "core_kernel_acceptance_limitations.go",
 	"deferred_tool_calls":            "core_deferred_tool_calls.go",
+	"agents":                         "core_agent_registry.go",
 }
 
 var schemaFiles = []string{

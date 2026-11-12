@@ -59,3 +59,25 @@ const schemaV57 = "\n        ALTER TABLE invocations ADD COLUMN dispatched_at IN
 const schemaV58 = "\n        CREATE TABLE IF NOT EXISTS trajectories(\n          conversation_id TEXT PRIMARY KEY,\n          task_id TEXT NOT NULL,\n          updated_at INTEGER NOT NULL,\n          payload TEXT NOT NULL);\n        CREATE INDEX IF NOT EXISTS trajectories_task ON trajectories(task_id, updated_at);\n        PRAGMA user_version=58;"
 
 const schemaV59 = "\n        ALTER TABLE invocations ADD COLUMN composition TEXT;\n        PRAGMA user_version=59;"
+
+const schemaV60 = `
+CREATE TABLE IF NOT EXISTS agents(
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  kind TEXT NOT NULL CHECK(kind IN ('global','project','node','child')),
+  role TEXT,
+  name TEXT,
+  conversation_id TEXT,
+  task_id TEXT,
+  node_id TEXT,
+  project_id TEXT,
+  workspace TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  created_at INTEGER,
+  closed_at INTEGER,
+  metadata TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS agents_parent ON agents(parent_id);
+CREATE INDEX IF NOT EXISTS agents_conversation ON agents(conversation_id);
+CREATE INDEX IF NOT EXISTS agents_task ON agents(task_id);
+CREATE INDEX IF NOT EXISTS agents_project ON agents(project_id);
+`

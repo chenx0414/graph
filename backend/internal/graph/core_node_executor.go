@@ -88,7 +88,7 @@ func (e *NodeExecutor) RunNode(nodeId string, run TurnRunner) NodeOutcome {
 		if task.Paused != 0 || phaseClosed(task.Phase) {
 			return last
 		}
-		if OccupiedSlots(e.kernel.Store, "agent") >= int64(ExecutionLimit("agent")) {
+		if e.kernel.Store.FreeExecutionSlots("agent") <= 0 {
 			return last
 		}
 		item := e.queue.Claim(nodeId)
@@ -118,6 +118,7 @@ func (e *NodeExecutor) runOne(nodeId string, item QueueRow, run TurnRunner) Node
 		suffix = fmt.Sprintf("-%d", generation)
 	}
 	executionId := fmt.Sprintf("exec-%s-%s-%d%s", e.graphId, nodeId, seq, suffix)
+	defer ReleaseKernelExecutionSlot(e.kernel, executionId)
 	previous := e.kernel.Execution(executionId)
 	tokenBudget := TokenBudget{Budget: 0, Unlimited: true}
 	if previous != nil && previous.TokenBudget != nil {

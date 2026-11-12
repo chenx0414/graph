@@ -1,6 +1,10 @@
 package graph
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/chenx0414/graph/backend/internal/agentcore"
+)
 
 const (
 	MAX_ATTACHMENTS                  = 5
@@ -12,11 +16,7 @@ const (
 
 var IMAGE_ATTACHMENT_TYPES = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
 
-type ImageContent struct {
-	Type     string `json:"type"`
-	Data     string `json:"data"`
-	MimeType string `json:"mimeType"`
-}
+type ImageContent = agentcore.Image
 
 func IsImageAttachmentType(mime string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(mime))

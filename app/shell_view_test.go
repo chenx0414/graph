@@ -216,8 +216,8 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 	if !tester.HasText("白板") || tester.HasText("新建标签页") {
 		t.Fatalf("the board keeps one tab and no plus, texts %q", tester.Texts())
 	}
-	if len(state.board.pages) != 1 || state.board.active != 0 || state.board.pages[0].Title != "白板" {
-		t.Fatalf("the whiteboard is the only pinned tab, pages %d active %d", len(state.board.pages), state.board.active)
+	if len(state.board.pages) != 2 || state.board.active != 0 || state.board.pages[0].Title != "白板" || state.board.pages[1].ID != "fleet" {
+		t.Fatalf("the whiteboard and the fleet page are the only fixed tabs, pages %d active %d", len(state.board.pages), state.board.active)
 	}
 }
 
@@ -274,14 +274,14 @@ func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 		t.Fatalf("reopen the graph tab: %v", err)
 	}
 	frames(tester)
-	if len(state.board.pages) != 2 {
+	if len(state.board.pages) != 3 {
 		t.Fatalf("one rail entry owns one tab, pages %d", len(state.board.pages))
 	}
 	if err := tester.Click("关闭 图谱画布"); err != nil {
 		t.Fatalf("close the graph tab: %v", err)
 	}
 	frames(tester)
-	if len(state.board.pages) != 1 || state.activeBoardKind() != "" {
+	if len(state.board.pages) != 2 || state.activeBoardKind() != "" {
 		t.Fatalf("closing a tab returns to the board, pages %d kind %q", len(state.board.pages), state.activeBoardKind())
 	}
 	if !tester.HasText("任务清单") {
