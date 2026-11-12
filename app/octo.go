@@ -133,7 +133,7 @@ func patchGrid(base, patch []string) []string {
 
 func octoLoader(ctx *ui.Context) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	box := ui.Box(ctx).Size(th.Space(7.5), th.Space(6.5))
+	box := ui.Box(ctx).Size(th.Space(7.5), th.Space(6.5)).Label("章鱼")
 	box.Draw(func(p *ui.Painter, r ui.Rect) {
 		now := p.Now()
 		elapsed := time.Duration(now.UnixMilli()) * time.Millisecond

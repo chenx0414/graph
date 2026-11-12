@@ -96,6 +96,34 @@ func TestTheOctopusFloatsOnItsBackground(t *testing.T) {
 	}
 }
 
+func TestTheMainAgentRowCentersItsContent(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	row, ok := tester.Find("main agent 会话")
+	if !ok {
+		t.Fatalf("the main agent row must be named, texts %q", tester.Texts())
+	}
+	octo, ok := tester.Find("章鱼")
+	if !ok {
+		t.Fatalf("the octopus must sit in the row, texts %q", tester.Texts())
+	}
+	text, ok := tester.Find("main agent")
+	if !ok {
+		t.Fatalf("the row must name its agent, texts %q", tester.Texts())
+	}
+	groupCenter := (octo.X + text.X + text.W) / 2
+	rowCenter := row.X + row.W/2
+	if diff := groupCenter - rowCenter; diff < -2 || diff > 2 {
+		t.Fatalf("the octopus and its name must center in the row, group %v row %v", groupCenter, rowCenter)
+	}
+	if margin := octo.X - row.X; margin < 16 {
+		t.Fatalf("the octopus must keep its distance from the row's left edge, %v", margin)
+	}
+	if center := octo.Y + octo.H/2; center < row.Y+row.H/2-2 || center > row.Y+row.H/2+2 {
+		t.Fatalf("the octopus centers vertically, center %v row %v", center, row.Y+row.H/2)
+	}
+}
+
 func TestTheMainAgentOctopusAnimates(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))

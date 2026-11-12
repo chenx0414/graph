@@ -71,9 +71,10 @@ func (s *shellState) conversationPane(ctx *ui.Context) {
 func (s *shellState) mainAgentCard(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	selected := s.supervisorID != "" && s.activeID == s.supervisorID
-	row := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(0, th.Space(2), 0, th.Space(0.25)).
-		Gap(th.Space(0.25)).AlignItems(ui.Center).Radius(t.Radius.Lg).
-		Border(gwtheme.Hairline, t.Border).Background(t.HoverTint).Focusable().Label("main agent")
+	row := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(0, th.Space(2), 0, th.Space(2)).
+		Gap(th.Space(2)).AlignItems(ui.Center).Radius(t.Radius.Lg).
+		Border(gwtheme.Hairline, t.Border).Background(t.HoverTint).Focusable().Label("main agent 会话")
+	row.Justify(ui.Center)
 	row.OnClick(func() {
 		if s.supervisorID != "" {
 			s.selectConversation(s.supervisorID)
@@ -88,7 +89,6 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 	row.Children(func() {
 		octoLoader(ctx)
 		kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
-		ui.Spacer(ctx)
 	})
 	row.Margin(0, 0, th.Space(1), 0)
 	kit.Separator(ctx, false).Margin(0, 0, th.Space(1.5), 0)
