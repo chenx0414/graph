@@ -158,6 +158,11 @@ func (s *shellState) boardDivider(ctx *ui.Context, node *boardNode, path string,
 		handle = ui.Box(ctx).Height(th.Space(2)).FillWidth()
 	}
 	handle.Label("调整分区").Focusable()
+	if node.Axis == "row" {
+		handle.Cursor(ui.CursorResizeEW)
+	} else {
+		handle.Cursor(ui.CursorResizeNS)
+	}
 	if handle.Hovered() {
 		handle.Background(t.HoverTint)
 	}
@@ -240,7 +245,10 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	card.Fill()
 	if freeform {
 		card.Draw(func(p *ui.Painter, r ui.Rect) { s.board.rects[panel.ID] = r })
-		card.Drag(panel.ID)
+		card.Drag(panel.ID).Cursor(ui.CursorGrab)
+		if s.board.drag != nil && s.board.drag.panelID == panel.ID {
+			card.Cursor(ui.CursorGrabbing)
+		}
 	}
 	card.Children(func() {
 		s.boardPanelHeader(ctx, panel, freeform)
@@ -267,7 +275,7 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 			if _, _, ended := card.DragEnded(); ended {
 				s.dropBoardPanel()
 			}
-			s.boardDropHint(ctx, panel)
+			s.boardDropPreview(ctx, panel)
 		}
 	})
 }
@@ -290,13 +298,39 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 	})
 }
 
-func (s *shellState) boardDropHint(ctx *ui.Context, panel *boardPanel) {
+func (s *shellState) boardDropPreview(ctx *ui.Context, panel *boardPanel) {
 	drag := s.board.drag
-	if drag == nil || drag.target != panel.ID || drag.target == "" {
+	if drag == nil || drag.target != panel.ID {
 		return
 	}
 	t := gwtheme.Of(ctx)
-	ui.Box(ctx).Fill().Radius(t.Radius.Xl).Border(2, t.Unread)
+	tint := t.Unread.Alpha(0.18)
+	switch drag.edge {
+	case "left", "right":
+		row := ui.Row(ctx).Fill().IgnoreInput(true)
+		row.Children(func() {
+			if drag.edge == "left" {
+				ui.Box(ctx).Grow(1).FillHeight().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
+				ui.Box(ctx).Grow(1).FillHeight()
+				return
+			}
+			ui.Box(ctx).Grow(1).FillHeight()
+			ui.Box(ctx).Grow(1).FillHeight().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
+		})
+	case "top", "bottom":
+		column := ui.Column(ctx).Fill().IgnoreInput(true)
+		column.Children(func() {
+			if drag.edge == "top" {
+				ui.Box(ctx).Grow(1).FillWidth().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
+				ui.Box(ctx).Grow(1).FillWidth()
+				return
+			}
+			ui.Box(ctx).Grow(1).FillWidth()
+			ui.Box(ctx).Grow(1).FillWidth().Background(tint).Border(2, t.Unread).Radius(t.Radius.Md)
+		})
+	default:
+		ui.Box(ctx).Fill().IgnoreInput(true).Background(tint).Border(2, t.Unread).Radius(t.Radius.Xl)
+	}
 }
 
 func (s *shellState) dragBoardPanel(panel *boardPanel, dx, dy float32) {
