@@ -338,38 +338,99 @@ func copyMessage(text string) {
 	_ = mygo.Clipboard.Write(transfer.TextData(text))
 }
 
+type composerMode int
+
+const (
+	composerSend composerMode = iota
+	composerPause
+	composerResume
+)
+
+func (c *chatState) composerMode() composerMode {
+	if c.busy() && !c.paused {
+		return composerPause
+	}
+	if c.paused && strings.TrimSpace(c.draft) == "" {
+		return composerResume
+	}
+	return composerSend
+}
+
 func (c *chatState) composer(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	ui.Row(ctx).Gap(th.Space(2)).Padding(th.Space(3), th.Space(4), th.Space(3.5), th.Space(4)).
-		AlignItems(ui.Center).Children(func() {
-		group := kit.InputGroup(ctx, kit.InputOpts{})
-		group.Height(th.Space(11)).Radius(t.Radius.Xl).Padding(0).Grow(1)
-		group.Children(func() {
-			field := kit.Input(ctx, &c.draft, kit.InputOpts{Placeholder: "输入消息…", Bare: true})
-			field.Label("消息").Grow(1).PaddingX(th.Space(3))
+	ui.Row(ctx).Padding(th.Space(3), th.Space(4), th.Space(3), th.Space(4)).Children(func() {
+		card := ui.Column(ctx).FillWidth().Padding(th.Space(3)).Gap(th.Space(2)).
+			Radius(t.Radius.X2l).Background(t.Background).Border(gwtheme.Stroke, t.Input).Clip()
+		kit.Elevate(ctx, card, gwtheme.ShadowXs)
+		card.Children(func() {
+			field := kit.Input(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
+			field.Label("消息").FillWidth().PaddingX(th.Space(0.5))
 			if c.focusComposer {
 				field.Focus()
 				c.focusComposer = false
 			}
-			send := ui.Box(ctx).Size(th.Space(9), th.Space(9)).Radius(t.Radius.Full).Background(t.Primary).Center().
-				Label("发送").Tooltip("发送").Focusable()
-			send.Margin(0, th.Space(1), th.Space(1), 0)
-			send.OnClick(func() { go c.send() })
-			send.Children(func() {
-				ui.Icon(ctx, iconSend).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.PrimaryText)
+			if field.Submitted() {
+				go c.send()
+			}
+			ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).Children(func() {
+				composerPlaceholder(ctx, iconClip, "附件")
+				ui.Spacer(ctx)
+				c.modelChip(ctx)
+				composerPlaceholder(ctx, iconMic, "语音")
+				c.composerButton(ctx)
 			})
 		})
-		if c.busy() && kit.Button(ctx, "打断这一轮", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-			go c.interrupt()
-		}
-		if c.paused {
-			if kit.Button(ctx, "继续", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-				go c.setPaused(false)
-			}
-			return
-		}
-		if kit.Button(ctx, "暂停", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+	})
+}
+
+func composerPlaceholder(ctx *ui.Context, icon *ui.SVG, label string) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Box(ctx).Size(th.Space(7), th.Space(7)).Radius(t.Radius.Md).Center().
+		Label(label).Tooltip(label + "（即将支持）").Children(func() {
+		ui.Icon(ctx, icon).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
+	})
+}
+
+func (c *chatState) modelChip(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	text := strings.TrimSpace(shortModel(c.currentModel) + " " + c.currentThinking)
+	if text == "" {
+		text = "模型"
+	}
+	ui.Row(ctx).Gap(th.Space(1)).PaddingX(th.Space(1)).AlignItems(ui.Center).Label("模型").Tooltip("模型切换在白板").Children(func() {
+		ui.Icon(ctx, iconSpark).Size(gwtheme.IconSm, gwtheme.IconSm).TextColor(t.Muted)
+		kit.Text(ctx, text, t.Text.Sm).FontWeight(500).TextColor(t.Muted)
+	})
+}
+
+func (c *chatState) composerButton(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	mode := c.composerMode()
+	icon, label := iconSend, "发送"
+	switch mode {
+	case composerPause:
+		icon, label = iconPause, "暂停"
+	case composerResume:
+		icon, label = iconPlay, "继续"
+	}
+	color := t.PrimaryText
+	button := ui.Box(ctx).Size(th.Space(9), th.Space(9)).Radius(t.Radius.Full).Center().
+		Label(label).Tooltip(label).Focusable().Background(t.Primary)
+	if mode == composerSend && strings.TrimSpace(c.draft) == "" {
+		color = t.Muted
+		button.Background(t.Hover)
+	}
+	button.OnClick(func() {
+		switch mode {
+		case composerPause:
 			go c.setPaused(true)
+		case composerResume:
+			go c.setPaused(false)
+		default:
+			go c.send()
 		}
+	})
+	button.Children(func() {
+		ui.Icon(ctx, icon).Size(gwtheme.Icon, gwtheme.Icon).TextColor(color)
 	})
 }

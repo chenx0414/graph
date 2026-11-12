@@ -5,19 +5,6 @@ import (
 	"strings"
 )
 
-func (c *chatState) interrupt() {
-	if c.active == "" {
-		return
-	}
-	if _, err := c.api.post("/api/conversations/"+c.active+"/interrupt", map[string]string{"requestId": requestID("native-interrupt")}); err != nil {
-		c.status = "打断失败：" + err.Error()
-		c.frame()
-		return
-	}
-	c.refresh()
-	c.status = "已请求打断这一轮"
-}
-
 func (c *chatState) cancelQueued(messageID string) {
 	if _, err := c.api.post("/api/conversations/"+c.active+"/messages/"+messageID+"/cancel", map[string]string{"requestId": requestID("native-cancel")}); err != nil {
 		c.status = "撤销失败：" + err.Error()
