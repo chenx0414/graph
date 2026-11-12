@@ -69,6 +69,22 @@ func messageStreaming(message transcriptMessage) bool {
 	return message.Role == "assistant" && message.State == "streaming"
 }
 
+func runContainsMessage(run transcriptRun, id string) bool {
+	for _, message := range run.messages {
+		if message.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func firstMessageID(run transcriptRun) string {
+	if len(run.messages) == 0 {
+		return ""
+	}
+	return run.messages[0].ID
+}
+
 func runIdentity(run transcriptRun) any {
 	if len(run.messages) == 0 {
 		return ""
@@ -136,6 +152,8 @@ type chatState struct {
 	graphLoading    bool
 	graphError      string
 	oldestSeq       int64
+	historyAnchorID string
+	pendingScrollID string
 	historyLoading  bool
 	noMoreHistory   bool
 	pagedHistory    bool

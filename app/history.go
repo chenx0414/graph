@@ -76,6 +76,9 @@ func (c *chatState) ensureHistory() {
 			if len(kept) > 0 {
 				c.messages = mergeMessages(kept, c.messages)
 				c.pagedHistory = true
+				if c.historyAnchorID != "" {
+					c.pendingScrollID = c.historyAnchorID
+				}
 			}
 			c.oldestSeq = oldestSeqOf(raw)
 			if len(raw) < historyPageSize {
