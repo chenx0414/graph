@@ -109,7 +109,7 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	selected := s.supervisorID != "" && s.activeID == s.supervisorID
 	row := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(0, th.Space(2), 0, th.Space(2)).
-		Gap(th.Space(2)).AlignItems(ui.Center).Radius(t.Radius.Lg).
+		Gap(th.Space(2)).AlignItems(ui.Center).Radius(t.Radius.Xl).
 		Border(gwtheme.Hairline, t.Border).Background(t.HoverTint).Focusable().Label("main agent 会话")
 	row.Justify(ui.Center)
 	row.OnClick(func() {
