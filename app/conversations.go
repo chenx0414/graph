@@ -291,15 +291,24 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	}
 	runs := c.runs()
 	c.list.Key = func(row int) any { return runIdentity(runs[row]) }
-	list := ui.List(ctx, &c.list, len(runs), func(index int) {
-		run := runs[index]
-		if run.tools {
-			c.toolRow(ctx, run)
-			return
-		}
-		c.messageRow(ctx, run.messages[0])
+	fade := ui.Box(ctx).Grow(1).FillWidth()
+	fade.Children(func() {
+		list := ui.List(ctx, &c.list, len(runs), func(index int) {
+			run := runs[index]
+			if run.tools {
+				c.toolRow(ctx, run)
+				return
+			}
+			c.messageRow(ctx, run.messages[0])
+		})
+		list.Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
+		list.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
+			{Color: ui.Transparent, At: 0},
+			{Color: ui.RGB(0, 0, 0), At: 0.06},
+			{Color: ui.RGB(0, 0, 0), At: 0.94},
+			{Color: ui.Transparent, At: 1},
+		}})
 	})
-	list.Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
 	first, last := c.list.Visible()
 	if c.historySettle > 0 {
 		c.historySettle--

@@ -400,7 +400,7 @@ func TestTheMainAgentCardLooksSelectedWhenItsConversationIsOpen(t *testing.T) {
 	}
 	luminance := func() int {
 		img := tester.Image()
-		at := img.PixOffset(int(card.X+card.W-12), int(card.Y+card.H/2))
+		at := img.PixOffset(int(card.X+12), int(card.Y+card.H/2))
 		return (int(img.Pix[at]) + int(img.Pix[at+1]) + int(img.Pix[at+2])) / 3
 	}
 	selected := luminance()

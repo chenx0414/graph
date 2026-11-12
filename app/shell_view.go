@@ -9,7 +9,8 @@ import (
 func (s *shellState) view(ctx *ui.Context) {
 	applyTheme(ctx)
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	ui.Row(ctx).Fill().Background(pageBackdrop(t)).Children(func() {
+	shell := ui.Row(ctx).Fill().Background(pageBackdrop(t))
+	shell.Children(func() {
 		s.rail(ctx)
 		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
 			s.titleBand(ctx)
@@ -147,26 +148,34 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 func (s *shellState) conversationList(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	s.list.Key = func(index int) any { return s.conversations[index].ID }
-	ui.List(ctx, &s.list, len(s.conversations), func(index int) {
-		conversation := s.conversations[index]
-		label := s.titleOf(conversation.ID)
-		selected := conversation.ID == s.activeID
-		opts := kit.SidebarItemOpts{Selected: selected}
-		if !selected {
-			id := conversation.ID
-			opts.OnClick = func() { go s.selectConversation(id) }
-		}
-		row := kit.SidebarItem(ctx, opts)
-		row.Label(label)
-		row.Children(func() {
-			ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
-			kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
-			if conversation.ArchivedAtPresent() {
-				kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
+	fade := ui.Box(ctx).Grow(1)
+	fade.Children(func() {
+		ui.List(ctx, &s.list, len(s.conversations), func(index int) {
+			conversation := s.conversations[index]
+			label := s.titleOf(conversation.ID)
+			selected := conversation.ID == s.activeID
+			opts := kit.SidebarItemOpts{Selected: selected}
+			if !selected {
+				id := conversation.ID
+				opts.OnClick = func() { go s.selectConversation(id) }
 			}
-		})
-		row.Margin(0, 0, th.Space(0.5), 0)
-	}).Grow(1)
+			row := kit.SidebarItem(ctx, opts)
+			row.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+				{Color: ui.RGB(0, 0, 0), At: 0},
+				{Color: ui.RGB(0, 0, 0), At: 0.9},
+				{Color: ui.Transparent, At: 1},
+			}}).Clip()
+			row.Label(label)
+			row.Children(func() {
+				ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
+				kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).NoWrap()
+				if conversation.ArchivedAtPresent() {
+					kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
+				}
+			})
+			row.Margin(0, 0, th.Space(0.5), 0)
+		}).Grow(1)
+	})
 }
 
 func (s *shellState) chatPane(ctx *ui.Context) {

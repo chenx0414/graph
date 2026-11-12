@@ -14,35 +14,52 @@ import (
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
 	t := gwtheme.Of(ctx)
 	key := runKey(run)
-	ui.Column(ctx).Gap(2).Children(func() {
-		label := workedLabel(run, c.expanded[key])
-		if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).TextColor(t.Muted).Justify(ui.Start).Clicked() {
-			c.expanded[key] = !c.expanded[key]
-		}
-		if !c.expanded[key] {
-			return
-		}
-		for _, message := range run.messages {
-			kit.Text(ctx, toolLine(message), t.Text.Xs).TextColor(t.Muted)
-		}
+	fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
+	fade.Children(func() {
+		ui.Column(ctx).Gap(2).Children(func() {
+			label := workedLabel(run, c.expanded[key])
+			if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).TextColor(t.Muted).Justify(ui.Start).Clicked() {
+				c.expanded[key] = !c.expanded[key]
+			}
+			if !c.expanded[key] {
+				return
+			}
+			for _, message := range run.messages {
+				kit.Text(ctx, toolLine(message), t.Text.Xs).TextColor(t.Muted)
+			}
+		})
 	})
+}
+
+func chatRightFade() ui.LinearGradient {
+	return ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+		{Color: ui.RGB(0, 0, 0), At: 0},
+		{Color: ui.RGB(0, 0, 0), At: 0.94},
+		{Color: ui.Transparent, At: 1},
+	}}
 }
 
 func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 	mine := message.Role == "user"
 	if !mine {
 		th := ctx.Theme()
-		ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
-			c.markdownMessage(ctx, message)
-			c.messageMeta(ctx, message, false)
+		fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
+		fade.Children(func() {
+			ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
+				c.markdownMessage(ctx, message)
+				c.messageMeta(ctx, message, false)
+			})
 		})
 		return
 	}
-	ui.Row(ctx).FillWidth().Children(func() {
-		ui.Spacer(ctx)
-		ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
-			c.bubble(ctx, message)
-			c.messageMeta(ctx, message, true)
+	fade := ui.Box(ctx).FillWidth().MaskLinearGradient(chatRightFade())
+	fade.Children(func() {
+		ui.Row(ctx).FillWidth().Children(func() {
+			ui.Spacer(ctx)
+			ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
+				c.bubble(ctx, message)
+				c.messageMeta(ctx, message, true)
+			})
 		})
 	})
 }
