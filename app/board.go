@@ -262,7 +262,7 @@ func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size
 func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform bool) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := kit.Panel(ctx, t.Radius.Xl)
-	card.Fill()
+	card.Fill().Label(boardPanelTitle(panel.Kind) + "窗口")
 	if freeform {
 		card.Draw(func(p *ui.Painter, r ui.Rect) { s.board.rects[panel.ID] = r })
 		card.Drag(panel.ID).Cursor(ui.CursorGrab)
@@ -271,15 +271,30 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 		}
 	}
 	card.Children(func() {
-		s.boardPanelHeader(ctx, panel, freeform)
+		showHeader := false
+		if px, py, over := card.PointerPosition(); over && py <= th.Space(7) {
+			showHeader = px > 0
+		}
+		if showHeader {
+			ui.Box(ctx).Absolute().Top(0).Left(0).Right(0).Height(th.Space(9)).Background(t.Background).IgnoreInput(true)
+			header := s.boardPanelHeader(ctx, panel, freeform)
+			header.Absolute().Top(0).Left(0).Right(0)
+		}
 		body := ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
-		body.MaskRadialGradient(ui.RadialGradient{Center: ui.Point{X: 0.2, Y: 0.5}, Stops: []ui.GradientStop{
-			{Color: ui.RGB(0, 0, 0), At: 0.45},
-			{Color: ui.RGB(0, 0, 0), At: 0.6},
-			{Color: ui.Transparent, At: 0.82},
+		body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
+			{Color: ui.Transparent, At: 0},
+			{Color: ui.RGB(0, 0, 0), At: 0.08},
+			{Color: ui.RGB(0, 0, 0), At: 0.92},
+			{Color: ui.Transparent, At: 1},
 		}})
 		body.Children(func() {
-			ui.Column(ctx).Gap(th.Space(2)).Children(func() {
+			content := ui.Column(ctx).FillWidth().Gap(th.Space(2))
+			content.MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{
+				{Color: ui.RGB(0, 0, 0), At: 0},
+				{Color: ui.RGB(0, 0, 0), At: 0.88},
+				{Color: ui.Transparent, At: 1},
+			}})
+			content.Children(func() {
 				s.boardPanelBody(ctx, panel)
 			})
 		})
@@ -306,12 +321,12 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	})
 }
 
-func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freeform bool) {
+func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freeform bool) ui.Element {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	header := ui.Row(ctx).FillWidth().Height(th.Space(9)).Padding(th.Space(2), th.Space(1)).
-		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口").Focusable()
+		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口")
 	header.Children(func() {
-		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine()
+		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine().IgnoreInput(true)
 		if !freeform {
 			return
 		}
@@ -322,6 +337,7 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 			s.closeModule(panel.ID)
 		})
 	})
+	return header
 }
 
 func (s *shellState) boardDropPreview(ctx *ui.Context, panel *boardPanel) {
