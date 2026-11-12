@@ -249,19 +249,21 @@ func (c *chatState) view(ctx *ui.Context) {
 		if c.status != "" {
 			ui.Text(ctx, c.status).FontSize(12).TextColor(th.TextMuted).Padding(16, 4, 16, 0)
 		}
-		if _, last := c.list.Visible(); last >= 0 && !c.list.AtEnd() {
-			ui.Row(ctx).FillWidth().Center().Padding(0, 0, th.Space(1), 0).Children(func() {
+		bottom := ui.Column(ctx).FillWidth()
+		bottom.Children(func() {
+			if _, last := c.list.Visible(); last >= 0 && !c.list.AtEnd() {
 				button := ui.Box(ctx).Size(th.Space(7), th.Space(7)).Radius(t.Radius.Full).
 					Background(t.Background).Border(gwtheme.Hairline, t.Input).Center().
 					Label("回到最新").Tooltip("回到最新").Focusable()
+				button.Attach(ui.AnchorTop, ui.AnchorBottom).Top(-th.Space(1.5))
 				kit.Elevate(ctx, button, gwtheme.ShadowXs)
 				button.OnClick(func() { c.list.ScrollToEnd() })
 				button.Children(func() {
 					ui.Icon(ctx, iconDown).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
 				})
-			})
-		}
-		c.composer(ctx)
+			}
+			c.composer(ctx)
+		})
 	})
 }
 
