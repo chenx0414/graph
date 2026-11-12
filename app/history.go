@@ -54,21 +54,31 @@ func (c *chatState) ensureHistory() {
 			c.frame()
 			return
 		}
-		older, err := parseConversationMessages(payload)
+		raw, err := parseConversationRaw(payload)
 		if err != nil {
 			c.status = "更早的对话不是预期的 JSON：" + err.Error()
 			c.historyLoading = false
 			c.frame()
 			return
 		}
-		older = olderBefore(older, before)
-		if len(older) == 0 {
+		raw = olderBefore(raw, before)
+		kept, err := parseConversationMessages(payload)
+		if err != nil {
+			c.status = "更早的对话不是预期的 JSON：" + err.Error()
+			c.historyLoading = false
+			c.frame()
+			return
+		}
+		kept = olderBefore(kept, before)
+		if len(raw) == 0 {
 			c.noMoreHistory = true
 		} else {
-			c.messages = mergeMessages(older, c.messages)
-			c.pagedHistory = true
-			c.oldestSeq = oldestSeqOf(older)
-			if len(older) < historyPageSize {
+			if len(kept) > 0 {
+				c.messages = mergeMessages(kept, c.messages)
+				c.pagedHistory = true
+			}
+			c.oldestSeq = oldestSeqOf(raw)
+			if len(raw) < historyPageSize {
 				c.noMoreHistory = true
 			}
 		}

@@ -64,6 +64,19 @@ func parseConversations(payload []byte) ([]conversationSummary, error) {
 	return list, nil
 }
 
+func parseConversationRaw(payload []byte) ([]transcriptMessage, error) {
+	var body struct {
+		Messages []transcriptMessage `json:"messages"`
+	}
+	if len(strings.TrimSpace(string(payload))) == 0 {
+		return nil, nil
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, err
+	}
+	return body.Messages, nil
+}
+
 func parseConversationMessages(payload []byte) ([]transcriptMessage, error) {
 	var body conversationBody
 	if err := json.Unmarshal(payload, &body); err != nil {
@@ -183,8 +196,9 @@ func (c *chatState) open(id string) {
 	c.fingerprint = transcriptFingerprint(messages)
 	c.historyLoading = false
 	c.pagedHistory = false
-	c.oldestSeq = oldestSeqOf(messages)
-	c.noMoreHistory = c.oldestSeq <= 0 || len(messages) < historyPageSize
+	raw, _ := parseConversationRaw(payload)
+	c.oldestSeq = oldestSeqOf(raw)
+	c.noMoreHistory = c.oldestSeq <= 0 || len(raw) < historyPageSize
 	c.active = id
 	c.questions = nil
 	if body, err := parseConversationBody(payload); err == nil {

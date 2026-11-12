@@ -397,6 +397,50 @@ func TestScrollingUpLoadsOlderHistory(t *testing.T) {
 	}
 }
 
+func TestFilteredMessagesDoNotEndTheHistory(t *testing.T) {
+	requests := &atomic.Int32{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/conversations/c1/history"):
+			requests.Add(1)
+			w.Write([]byte(conversationMessagesJSON(1, 60)))
+		case r.URL.Path == "/api/conversations/c1":
+			parts := make([]string, 0, 200)
+			for seq := 61; seq <= 260; seq++ {
+				role := "user"
+				if seq%4 == 0 {
+					role = "activity"
+				}
+				parts = append(parts, `{"id":"m`+strconv.Itoa(seq)+`","seq":`+strconv.Itoa(seq)+`,"role":"`+role+`","text":"第`+strconv.Itoa(seq)+`句"}`)
+			}
+			w.Write([]byte(`{"messages":[` + strings.Join(parts, ",") + `]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if len(state.messages) != 150 {
+		t.Fatalf("filtered roles are not chat messages, got %d", len(state.messages))
+	}
+	if state.noMoreHistory {
+		t.Fatal("a full raw page means there is older history, even if roles were filtered")
+	}
+	if state.oldestSeq != 61 {
+		t.Fatalf("the page cursor is the oldest raw message, got %d", state.oldestSeq)
+	}
+	state.ensureHistory()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.messages) < 210 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(state.messages) != 210 || requests.Load() != 1 {
+		t.Fatalf("the older page must load, messages %d requests %d", len(state.messages), requests.Load())
+	}
+}
+
 func TestRefreshingKeepsTheHistoryAlreadyLoaded(t *testing.T) {
 	server, _ := historyPagingServer(t)
 	state := newChatState(server.URL, "tok")
