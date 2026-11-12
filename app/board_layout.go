@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 type boardPanel struct {
@@ -219,6 +221,60 @@ func (s *shellState) loadBoard(stateDir string) {
 		}
 	}
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
+	s.pinBoardPages()
+	s.saveBoard()
+}
+
+func (s *shellState) pinBoardPages() {
+	activeID := ""
+	if s.board.active >= 0 && s.board.active < len(s.board.pages) {
+		activeID = s.board.pages[s.board.active].ID
+	}
+	pinnedIndex := -1
+	for index := range s.board.pages {
+		if s.board.pages[index].Kind == "" {
+			pinnedIndex = index
+			break
+		}
+	}
+	pinned := boardPage{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()}
+	if pinnedIndex >= 0 {
+		pinned = s.board.pages[pinnedIndex]
+	}
+	pinned.ID, pinned.Kind, pinned.Title = "board", "", boardDefaultTitle
+	pages := make([]boardPage, 0, len(s.board.pages))
+	pages = append(pages, pinned)
+	for _, page := range s.board.pages {
+		if page.Kind == "" {
+			continue
+		}
+		pages = append(pages, page)
+	}
+	s.board.pages = pages
+	active := 0
+	for index := range pages {
+		if activeID != "" && pages[index].ID == activeID {
+			active = index
+		}
+	}
+	s.board.active = active
+}
+
+func (s *shellState) resetBoardPage() {
+	if len(s.board.pages) == 0 {
+		return
+	}
+	s.board.pages[0].Kind = ""
+	s.board.pages[0].Title = boardDefaultTitle
+	s.board.pages[0].Panels = defaultBoardPanels()
+	s.board.pages[0].Layout = defaultBoardLayout()
+	s.board.rects = map[string]ui.Rect{}
+	s.board.splits = map[string]ui.Rect{}
+	s.board.active = 0
+	s.boardScrollTop = true
+	s.ensureBoardPageData()
+	s.saveBoard()
+	s.frame()
 }
 
 func ensureBoardDashboardPanels(page *boardPage) {
@@ -436,7 +492,7 @@ func (s *shellState) addBoardPage() {
 }
 
 func (s *shellState) closeBoardPage(index int) {
-	if len(s.board.pages) <= 1 {
+	if len(s.board.pages) <= 1 || index == 0 {
 		return
 	}
 	index = clampIndex(index, len(s.board.pages))

@@ -49,7 +49,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	column := ui.Column(ctx).Grow(1).FillWidth().Height(bandHeight).Label("白板标题")
 	column.Children(func() {
-		strip := ui.Row(ctx).FillWidth().Height(bandHeight-gwtheme.Stroke).Padding(0, th.Space(2)).
+		strip := ui.Row(ctx).FillWidth().Height(bandHeight-gwtheme.Stroke).Padding(0, th.Space(2.5)).
 			Gap(0).AlignItems(ui.Center)
 		strip.Children(func() {
 			previousActive, previousHovered := false, false
@@ -58,7 +58,14 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 				page := s.board.pages[index]
 				active := pageIndex == s.board.active
 				tab := ui.Row(ctx).Height(th.Space(7.5)).PaddingX(th.Space(2.5)).Gap(th.Space(1)).
-					Radius(t.Radius.Md).AlignItems(ui.Center).Focusable().Label("标签页 " + page.Title)
+					Radius(t.Radius.Xl).AlignItems(ui.Center).Focusable().Label("标签页 " + page.Title)
+				if index == 0 {
+					tab.ContextMenu(func(m *ui.Menu) {
+						if m.Item("重置白板为默认初始状态").Chosen() {
+							s.resetBoardPage()
+						}
+					})
+				}
 				hovered := tab.Hovered()
 				if !previousActive && !previousHovered && !active && !hovered && index > 0 {
 					ui.Box(ctx).Width(gwtheme.Stroke).Height(th.Space(3.5)).Background(columnLine(t))
@@ -75,14 +82,13 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 					if active {
 						color = t.Foreground
 					}
-					kit.Text(ctx, page.Title, t.Text.Sm).TextColor(color).SingleLine()
-					if len(s.board.pages) > 1 && (active || hovered) {
+					kit.Text(ctx, page.Title, t.Text.Lg).TextColor(color).SingleLine()
+					if index > 0 && len(s.board.pages) > 1 && (active || hovered) {
 						iconAction(ctx, iconClose, "关闭 "+page.Title, false, 4.5, func() { s.closeBoardPage(pageIndex) })
 					}
 				})
 				previousActive, previousHovered = active, hovered
 			}
-			iconAction(ctx, iconPlus, "新建标签页", false, 7, func() { s.addBoardPage() })
 		})
 		ui.Box(ctx).FillWidth().Height(gwtheme.Stroke).Background(columnLine(t))
 	})

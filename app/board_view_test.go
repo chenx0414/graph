@@ -317,9 +317,9 @@ func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
 	distance := func(a, b color.RGBA) int {
 		return absInt(int(a.R)-int(b.R)) + absInt(int(a.G)-int(b.G)) + absInt(int(a.B)-int(b.B))
 	}
-	plus, ok := tester.Find("新建标签页")
+	tab, ok := tester.Find("标签页 白板")
 	if !ok {
-		t.Fatalf("the whiteboard tab bar never rendered, texts %q", tester.Texts())
+		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
 	}
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
@@ -329,7 +329,7 @@ func TestTheWhiteboardTakesTheListBackgroundAndLiftsItsCards(t *testing.T) {
 	if distance(canvas, listBackground) > 4 {
 		t.Fatalf("the whiteboard background %v differs from the list background %v", canvas, listBackground)
 	}
-	tabBar := image.RGBAAt(int(plus.X+plus.W+24), int(plus.Y+plus.H/2))
+	tabBar := image.RGBAAt(int(tab.X+tab.W+24), int(tab.Y+tab.H/2))
 	if distance(tabBar, listBackground) < 4 {
 		t.Fatalf("the whiteboard tab bar took the list background %v", tabBar)
 	}
@@ -344,4 +344,99 @@ func absInt(v int) int {
 		return -v
 	}
 	return v
+}
+
+func TestTheWhiteboardTabIsPinnedAlignedAndLarger(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tab, ok := tester.Find("标签页 白板")
+	if !ok {
+		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
+	}
+	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	if !ok {
+		t.Fatalf("the whiteboard card never rendered, texts %q", tester.Texts())
+	}
+	if delta := tab.X - card.X; delta < -1 || delta > 1 {
+		t.Fatalf("the tab starts at %v, the card at %v", tab.X, card.X)
+	}
+	title, ok := tester.Find("白板")
+	if !ok {
+		t.Fatalf("the tab title never rendered, texts %q", tester.Texts())
+	}
+	body, ok := tester.Find("来自主控")
+	if !ok {
+		t.Fatalf("the chat text never rendered, texts %q", tester.Texts())
+	}
+	if title.H <= body.H {
+		t.Fatalf("the tab title is not larger: %v against %v", title.H, body.H)
+	}
+	if tester.HasText("关闭 白板") {
+		t.Fatalf("the pinned tab offers a close button, texts %q", tester.Texts())
+	}
+	state.openModule("models")
+	frames(tester)
+	if len(state.board.pages) < 2 || state.board.pages[0].Title != "白板" || state.board.pages[0].Kind != "" {
+		t.Fatalf("opening a module moved the pinned tab, pages %+v", state.board.pages)
+	}
+	state.closeBoardPage(0)
+	if state.board.pages[0].Title != "白板" {
+		t.Fatalf("the pinned tab closed, pages %+v", state.board.pages)
+	}
+}
+
+func TestTheWhiteboardResetsFromItsTabMenu(t *testing.T) {
+	state := fourPaneShell(t)
+	state.board.pages[0].Panels = state.board.pages[0].Panels[:1]
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if err := tester.RightClick("标签页 白板"); err != nil {
+		t.Fatalf("open the tab menu: %v", err)
+	}
+	menu := tester.Menu()
+	found := false
+	for _, item := range menu {
+		if item == "重置白板为默认初始状态" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the tab menu misses reset, menu %q", menu)
+	}
+	if err := tester.ChooseMenuItem("重置白板为默认初始状态"); err != nil {
+		t.Fatalf("choose reset: %v", err)
+	}
+	frames(tester)
+	if len(state.board.pages[0].Panels) != 4 {
+		t.Fatalf("the board kept its panels, %+v", state.board.pages[0].Panels)
+	}
+}
+
+func TestLoadingPinsTheWhiteboardFirstAndDropsExtraOnes(t *testing.T) {
+	directory := t.TempDir()
+	pages := []boardPage{
+		{ID: "tab-models", Title: "模型配置", Kind: "models",
+			Panels: []boardPanel{{ID: "models", Kind: "models"}},
+			Layout: boardNode{Kind: "panel", PanelID: "models"}},
+		{ID: "tab-two", Title: "白板 2", Panels: defaultBoardPanels(), Layout: defaultBoardLayout()},
+		{ID: "tab-one", Title: "白板 1", Panels: defaultBoardPanels(), Layout: defaultBoardLayout()},
+	}
+	payload, err := json.Marshal(boardFile{Version: boardLayoutVersion, Pages: pages, Active: 0})
+	if err != nil {
+		t.Fatalf("encode the board: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "whiteboard.json"), payload, 0o600); err != nil {
+		t.Fatalf("write the board: %v", err)
+	}
+	state := fourPaneShell(t)
+	state.loadBoard(directory)
+	if len(state.board.pages) != 2 {
+		t.Fatalf("the extra whiteboards stayed, pages %+v", state.board.pages)
+	}
+	first := state.board.pages[0]
+	if first.ID != "board" || first.Title != "白板" || first.Kind != "" {
+		t.Fatalf("the whiteboard is not pinned first, page %+v", first)
+	}
+	if state.board.active != 1 {
+		t.Fatalf("the active module page moved, active %d", state.board.active)
+	}
 }

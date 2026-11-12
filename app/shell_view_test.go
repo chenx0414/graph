@@ -213,15 +213,11 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 			t.Fatalf("the floating toolbar is gone, %q still shows, texts %q", gone, tester.Texts())
 		}
 	}
-	if !tester.HasText("白板") || !tester.HasText("新建标签页") {
-		t.Fatalf("the board offers its tab bar, texts %q", tester.Texts())
+	if !tester.HasText("白板") || tester.HasText("新建标签页") {
+		t.Fatalf("the board keeps one tab and no plus, texts %q", tester.Texts())
 	}
-	if err := tester.Click("新建标签页"); err != nil {
-		t.Fatalf("open a tab: %v", err)
-	}
-	frames(tester)
-	if len(state.board.pages) != 2 || state.board.active != 1 {
-		t.Fatalf("a new tab joins the bar, pages %d active %d", len(state.board.pages), state.board.active)
+	if len(state.board.pages) != 1 || state.board.active != 0 || state.board.pages[0].Title != "白板" {
+		t.Fatalf("the whiteboard is the only pinned tab, pages %d active %d", len(state.board.pages), state.board.active)
 	}
 }
 
