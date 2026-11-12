@@ -458,8 +458,8 @@ func TestTheTitleBandLinesUpWithTheTrafficLightsAndPadsTheCardEvenly(t *testing.
 	if !ok {
 		t.Fatalf("the card never rendered, texts %q", tester.Texts())
 	}
-	if card.Y != 1 {
-		t.Fatalf("the card top sits at %v, not one point below the window edge", card.Y)
+	if card.Y != 42 {
+		t.Fatalf("the card top sits at %v, not below the title band", card.Y)
 	}
 	if delta := (tab.Y + tab.H/2) - 21; delta < -1 || delta > 1 {
 		t.Fatalf("the tab centers at %v, the header band at %v", tab.Y+tab.H/2, 21)

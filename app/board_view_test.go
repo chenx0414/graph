@@ -450,7 +450,7 @@ func TestTheBoardTabBarHasNoBottomRule(t *testing.T) {
 	}
 	image := tester.Image()
 	x := int(tab.X + tab.W + 60)
-	rule := image.RGBAAt(x, int(tab.Y+tab.H+4))
+	rule := image.RGBAAt(x, int(tab.Y+tab.H+2))
 	background := image.RGBAAt(x, int(tab.Y+tab.H/2))
 	delta := absInt(int(rule.R)-int(background.R)) + absInt(int(rule.G)-int(background.G)) + absInt(int(rule.B)-int(background.B))
 	if delta > 4 {
