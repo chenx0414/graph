@@ -49,10 +49,10 @@ func trajectoryCardHeader(ctx *ui.Context, icon *ui.SVG, meta string) {
 
 func trajectoryStatCell(ctx *ui.Context, label, value string) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	cell := ui.Column(ctx).Grow(1).Padding(th.Space(1.5)).Gap(th.Space(0.5)).
+	cell := ui.Column(ctx).Grow(1).Padding(th.Space(1), th.Space(1.5)).Gap(th.Space(0.25)).
 		Radius(t.Radius.Lg).Background(t.Card).Border(gwtheme.Hairline, t.Border)
 	cell.Children(func() {
-		kit.Text(ctx, value, t.Text.Lg).FontWeight(600).SingleLine().Ellipsis("…")
+		kit.Text(ctx, value, t.Text.Sm).FontWeight(600).SingleLine().Ellipsis("…")
 		kit.Text(ctx, label, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 	})
 }
@@ -70,7 +70,7 @@ func trajectoryStatGrid(ctx *ui.Context, rows [][][2]string) {
 }
 
 func (s *shellState) trajectorySummaryCard(ctx *ui.Context) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
+	t := gwtheme.Of(ctx)
 	data := s.trajectoryData(ctx)
 	if data == nil {
 		return
@@ -85,26 +85,24 @@ func (s *shellState) trajectorySummaryCard(ctx *ui.Context) {
 	kit.Text(ctx, fmt.Sprintf("用户消息 %d · 助手消息 %d · 工具消息 %d · 压缩 %d",
 		totals.UserMessages, totals.ModelReplies, totals.ToolMessages, totals.Compactions), t.Text.Xs).TextColor(t.Muted)
 	if len(totals.ToolsByName) > 0 {
-		kit.Separator(ctx, false)
-		kit.Text(ctx, "工具调用", t.Text.Xs).TextColor(t.Muted)
 		limit := len(totals.ToolsByName)
 		if limit > 3 {
 			limit = 3
 		}
-		for _, tool := range totals.ToolsByName[:limit] {
-			row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
-			row.Children(func() {
-				kit.Text(ctx, tool.Name, t.Text.Xs).FontWeight(500).Grow(1).SingleLine().Ellipsis("…")
-				kit.Text(ctx, strconv.Itoa(tool.Count)+" 次", t.Text.Xs).TextColor(t.Muted)
-				kit.Text(ctx, formatTrajectoryDuration(tool.Ms), t.Text.Xs).TextColor(t.Muted)
-				if tool.Errors > 0 {
-					kit.Text(ctx, strconv.Itoa(tool.Errors)+" 失败", t.Text.Xs).TextColor(t.Danger)
-				}
-			})
+		line := "工具 "
+		for index, tool := range totals.ToolsByName[:limit] {
+			if index > 0 {
+				line += " · "
+			}
+			line += tool.Name + " " + strconv.Itoa(tool.Count)
+			if tool.Errors > 0 {
+				line += "/" + strconv.Itoa(tool.Errors) + " 失败"
+			}
 		}
 		if len(totals.ToolsByName) > limit {
-			kit.Text(ctx, "另有 "+strconv.Itoa(len(totals.ToolsByName)-limit)+" 种工具", t.Text.Xs).TextColor(t.Muted)
+			line += " · 另有 " + strconv.Itoa(len(totals.ToolsByName)-limit) + " 种"
 		}
+		kit.Text(ctx, line, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 	}
 }
 
@@ -127,7 +125,7 @@ func (s *shellState) trajectoryTokensCard(ctx *ui.Context) {
 		kit.Text(ctx, "还没有 token 数据。", t.Text.Sm).TextColor(t.Muted)
 		return
 	}
-	trajectoryDonutLegend(ctx, slices, formatTrajectoryTokens(int64(total)), "总 tokens")
+	trajectoryDonutLegend(ctx, slices, formatTrajectoryCompactTokens(int64(total)), "总 tokens")
 	kit.Text(ctx, "成本 "+formatTrajectoryCost(totals.Cost)+" · 缓存读取占 "+formatTrajectoryPercent(totals.CacheHitRate),
 		t.Text.Xs).TextColor(t.Muted)
 }
@@ -156,7 +154,7 @@ func (s *shellState) trajectoryTimingCard(ctx *ui.Context) {
 		kit.Text(ctx, "还没有耗时数据。", t.Text.Sm).TextColor(t.Muted)
 		return
 	}
-	trajectoryDonutLegend(ctx, slices, formatTrajectoryDuration(timing.WallMs), "活跃时长")
+	trajectoryDonutLegend(ctx, slices, formatTrajectoryCompactDuration(timing.WallMs), "活跃时长")
 	kit.Text(ctx, strconv.Itoa(totals.Requests)+" 次模型请求 · "+strconv.Itoa(totals.ToolCalls)+" 次工具调用",
 		t.Text.Xs).TextColor(t.Muted)
 }
@@ -170,19 +168,19 @@ func (s *shellState) trajectoryContextCard(ctx *ui.Context) {
 	totals := data.Totals
 	context := totals.Context
 	trajectoryCardHeader(ctx, iconDoc, strconv.Itoa(totals.Requests)+" 次请求")
-	big := ui.Row(ctx).FillWidth().AlignItems(ui.End).Gap(th.Space(1))
-	big.Children(func() {
-		kit.Text(ctx, formatTrajectoryTokens(context.LastTokens), t.Text.X2l).FontWeight(600)
-		kit.Text(ctx, "tokens · 最近一次请求", t.Text.Xs).TextColor(t.Muted)
+	value := ui.Row(ctx).FillWidth().AlignItems(ui.End).Gap(th.Space(1))
+	value.Children(func() {
+		kit.Text(ctx, formatTrajectoryTokens(context.LastTokens), t.Text.X2l).FontWeight(600).SingleLine().Ellipsis("…")
+		kit.Text(ctx, "tokens", t.Text.Xs).TextColor(t.Muted)
 	})
-	kit.Text(ctx, "峰值 "+formatTrajectoryTokens(context.PeakTokens)+" tokens · 累计 "+formatTrajectoryTokens(totals.TotalTokens)+" tokens",
+	kit.Text(ctx, "最近一次请求 · 峰值 "+formatTrajectoryTokens(context.PeakTokens)+" · 累计 "+formatTrajectoryCompactTokens(totals.TotalTokens),
 		t.Text.Xs).TextColor(t.Muted)
 	if context.PeakTokens > 0 {
 		ratio := float32(context.LastTokens) / float32(context.PeakTokens)
 		if ratio > 1 {
 			ratio = 1
 		}
-		bar := ui.Row(ctx).FillWidth().Height(th.Space(1.5)).Radius(t.Radius.Full).Background(t.Hover)
+		bar := ui.Row(ctx).FillWidth().Height(th.Space(1.5)).Radius(t.Radius.Full).Background(t.Hover).Clip()
 		bar.Children(func() {
 			ui.Box(ctx).Grow(ratio).FillHeight().Radius(t.Radius.Full).Background(palette.Blue500.Color())
 			if ratio < 1 {
@@ -191,25 +189,29 @@ func (s *shellState) trajectoryContextCard(ctx *ui.Context) {
 		})
 	}
 	kit.Separator(ctx, false)
-	kit.Text(ctx, "最近回合的上下文占用", t.Text.Xs).TextColor(t.Muted)
-	turns := data.Turns
-	if len(turns) > 12 {
-		turns = turns[len(turns)-12:]
+	recent := []trajectoryTurn{}
+	for _, turn := range data.Turns {
+		if turn.Usage.ContextTokens > 0 {
+			recent = append(recent, turn)
+		}
 	}
-	if len(turns) == 0 {
+	if len(recent) == 0 {
+		kit.Text(ctx, "还没有可用的上下文快照。", t.Text.Xs).TextColor(t.Muted)
 		return
 	}
-	chart := ui.Row(ctx).FillWidth().Height(th.Space(7)).Gap(th.Space(1)).AlignItems(ui.End)
+	if len(recent) > 12 {
+		recent = recent[len(recent)-12:]
+	}
+	kit.Text(ctx, "最近 "+strconv.Itoa(len(recent))+" 轮上下文占用", t.Text.Xs).TextColor(t.Muted)
+	chartHeight := th.Space(6)
+	chart := ui.Row(ctx).FillWidth().Height(chartHeight).Gap(th.Space(1)).AlignItems(ui.End).Clip()
 	chart.Children(func() {
-		for _, turn := range turns {
-			value := turn.Usage.ContextTokens
-			if value <= 0 {
-				value = turn.Usage.Total
+		for _, turn := range recent {
+			ratio := float32(turn.Usage.ContextTokens) / float32(context.PeakTokens)
+			if ratio > 1 {
+				ratio = 1
 			}
-			height := float32(4)
-			if context.PeakTokens > 0 {
-				height = 4 + float32(value)/float32(context.PeakTokens)*float32(th.Space(5))
-			}
+			height := float32(2) + ratio*(chartHeight-4)
 			ui.Box(ctx).Grow(1).Height(height).Radius(t.Radius.Xs).Background(palette.Blue500.Color().Alpha(0.65))
 		}
 	})
@@ -244,7 +246,8 @@ func trajectoryDonutLegend(ctx *ui.Context, slices []trajectorySlice, centerTop,
 		})
 		donut.Children(func() {
 			ui.Column(ctx).Fill().Center().Children(func() {
-				kit.Text(ctx, centerTop, t.Text.Lg).FontWeight(600).SingleLine()
+				kit.Text(ctx, centerTop, t.Text.Sm).FontWeight(600).SingleLine().
+					Width(th.Space(20)).Ellipsis("…")
 				kit.Text(ctx, centerSub, t.Text.Xs).TextColor(t.Muted)
 			})
 		})

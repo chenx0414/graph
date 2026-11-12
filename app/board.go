@@ -104,7 +104,11 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			return
 		}
 		if page.Kind != "" {
-			ui.Scroll(ctx).Fill().Children(func() {
+			if s.boardScrollTop {
+				s.boardScroll.Y = 0
+				s.boardScrollTop = false
+			}
+			ui.Scroll(ctx).Fill().TrackScroll(&s.boardScroll).Children(func() {
 				grid := ui.Column(ctx).FillWidth().Padding(10).Gap(10)
 				grid.Children(func() {
 					for row := 0; row*2 < len(page.Panels); row++ {

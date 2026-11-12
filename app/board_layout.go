@@ -284,6 +284,7 @@ func (s *shellState) openModule(kind string) {
 		Layout: boardNode{Kind: "panel", PanelID: kind},
 	}
 	if kind == "trajectory" {
+		s.boardScrollTop = true
 		kinds := []string{"trajectory-summary", "trajectory-tokens", "trajectory-timing", "trajectory-context",
 			"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files"}
 		panels := make([]boardPanel, 0, len(kinds))

@@ -152,6 +152,9 @@ func (s *shellState) ensureTrajectory() {
 		state.failed = "先打开一个会话"
 		return
 	}
+	if state.data == nil {
+		s.boardScrollTop = true
+	}
 	if state.loading || (state.data != nil && state.conversationID == id) {
 		return
 	}
@@ -205,6 +208,34 @@ func formatTrajectoryClock(at int64) string {
 		return "—"
 	}
 	return time.UnixMilli(at).Format("01-02 15:04")
+}
+
+func formatTrajectoryCompactTokens(tokens int64) string {
+	switch {
+	case tokens >= 1_000_000_000:
+		return fmt.Sprintf("%.1fB", float64(tokens)/1_000_000_000)
+	case tokens >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
+	case tokens >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(tokens)/1_000)
+	}
+	return strconv.FormatInt(tokens, 10)
+}
+
+func formatTrajectoryCompactDuration(ms int64) string {
+	if ms >= 24*3600_000 {
+		return fmt.Sprintf("%.1fd", float64(ms)/(24*3600_000))
+	}
+	if ms >= 3600_000 {
+		return fmt.Sprintf("%.1fh", float64(ms)/3600_000)
+	}
+	if ms >= 60_000 {
+		return fmt.Sprintf("%dm", ms/60_000)
+	}
+	if ms >= 1_000 {
+		return fmt.Sprintf("%.1fs", float64(ms)/1_000)
+	}
+	return strconv.FormatInt(ms, 10) + "ms"
 }
 
 func formatTrajectoryCost(cost float64) string {
