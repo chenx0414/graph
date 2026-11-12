@@ -160,7 +160,7 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 		row.Label(label)
 		row.Children(func() {
 			ui.Icon(ctx, iconFolder).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
-			kit.Text(ctx, label, t.Text.Base).FontWeight(500).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
+			kit.Text(ctx, label, t.Text.Lg).FontWeight(500).TextColor(t.Foreground).Grow(1).SingleLine().Ellipsis("…")
 			if conversation.ArchivedAtPresent() {
 				kit.Text(ctx, "已归档", t.Text.Xs).TextColor(t.Muted)
 			}
