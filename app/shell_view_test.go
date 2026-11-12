@@ -341,3 +341,21 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 		previousBottom = rect.Y + rect.H
 	}
 }
+
+func TestTheFirstRailIconSharesTheMainAgentCardCenter(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	icon, ok := tester.Find("轨迹")
+	if !ok {
+		t.Fatalf("the rail lost its first icon, texts %q", tester.Texts())
+	}
+	card, ok := tester.Find("main agent 会话")
+	if !ok {
+		t.Fatalf("the main agent card never rendered, texts %q", tester.Texts())
+	}
+	iconCenter := icon.Y + icon.H/2
+	cardCenter := card.Y + card.H/2
+	if delta := iconCenter - cardCenter; delta < -1 || delta > 1 {
+		t.Fatalf("the first rail icon center %.1f misses the card center %.1f", iconCenter, cardCenter)
+	}
+}
