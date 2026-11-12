@@ -58,8 +58,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 				page := s.board.pages[index]
 				active := pageIndex == s.board.active
 				tab := ui.Row(ctx).Height(th.Space(7.5)).PaddingX(th.Space(2.5)).Gap(th.Space(1)).
-					Radius(t.Radius.Xl).AlignItems(ui.Center).Focusable().Label("标签页 "+page.Title).
-					Translate(0, th.Space(0.4))
+					Radius(t.Radius.Xl).AlignItems(ui.Center).Focusable().Label("标签页 " + page.Title)
 				if index == 0 {
 					tab.ContextMenu(func(m *ui.Menu) {
 						if m.Item("重置白板为默认初始状态").Chosen() {
@@ -83,7 +82,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 					if active {
 						color = t.Foreground
 					}
-					kit.Text(ctx, page.Title, t.Text.Lg).TextColor(color).SingleLine().Translate(0, -2.2)
+					kit.Text(ctx, page.Title, t.Text.Lg).TextColor(color).SingleLine().Translate(0, -0.6)
 					if index > 0 && len(s.board.pages) > 1 && (active || hovered) {
 						iconAction(ctx, iconClose, "关闭 "+page.Title, false, 4.5, func() { s.closeBoardPage(pageIndex) })
 					}

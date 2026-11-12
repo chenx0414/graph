@@ -13,7 +13,7 @@ func (s *shellState) view(ctx *ui.Context) {
 	shell.Children(func() {
 		s.rail(ctx)
 		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
-			ui.Row(ctx).Grow(1).FillWidth().Padding(cardGap, cardGap, cardGap, cardGap).Children(func() {
+			ui.Row(ctx).Grow(1).FillWidth().Padding(0, cardGap, cardGap, cardGap).Children(func() {
 				card := ui.Row(ctx).Grow(1).FillHeight().Padding(titleBandHeight(ctx), 0, 0, 0).Background(t.Background).
 					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip().Label("主区域卡片")
 				kit.Elevate(ctx, card, shellShadow)
@@ -82,7 +82,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Width(railWidth).FillHeight().Children(func() {
 		ui.Box(ctx).FillWidth().Height(th.Space(11)).DragWindow()
-		ui.Column(ctx).Grow(1).Padding(th.Space(5.5), 0, th.Space(2), cardGap).Gap(th.Space(3)).
+		ui.Column(ctx).Grow(1).Padding(th.Space(3.5), 0, th.Space(2), cardGap).Gap(th.Space(3)).
 			AlignItems(ui.Center).Children(func() {
 			for _, item := range railItems {
 				spec := item
