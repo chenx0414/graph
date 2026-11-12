@@ -53,11 +53,6 @@ func (service *RsiService) rsiRecord(context RsiApplyContext, receipt RsiReceipt
 			OperationID: context.OperationId, Text: receipt.Report, Data: receipt, State: "done",
 		})
 		if receipt.RestartRequired {
-			AppendMessage(context.Store, MessageInput{
-				ConversationID: conversationID, Role: "assistant", Kind: "chat",
-				OperationID: context.OperationId, Text: RSI_RELOAD_RECEIPT,
-				Data: map[string]any{"reloadReceipt": true}, State: "done",
-			})
 			MarkOperationReplied(context.Store, context.OperationId)
 		}
 		return nil

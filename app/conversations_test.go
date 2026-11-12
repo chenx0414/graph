@@ -232,6 +232,19 @@ func TestToolCallsGroupIntoOneRowPerRun(t *testing.T) {
 	}
 }
 
+func TestLegacyReloadReceiptsStayOutOfTheChat(t *testing.T) {
+	messages, err := parseConversationMessages([]byte(`{"messages":[
+		{"role":"assistant","text":"RSI 改动已提交，等待重载。","data":{"reloadReceipt":true}},
+		{"role":"assistant","text":"真正的回答"}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Text != "真正的回答" {
+		t.Fatalf("a reload receipt is machinery, not chat: %+v", messages)
+	}
+}
+
 func TestToolMessagesSurviveParsingSoTheViewCanGroupThem(t *testing.T) {
 	messages, err := parseConversationMessages([]byte(`{"messages":[
 		{"role":"tool","kind":"tool","state":"done","text":"bash: ls","data":{"tool":"bash","toolCallId":"t1","ordinal":1}},
@@ -287,6 +300,48 @@ func TestToolLineShowsNameStateAndATrimmedCommand(t *testing.T) {
 	}
 	if toolLine(transcriptMessage{Role: "tool", State: "done"}) != "tool · 完成" {
 		t.Fatalf("an empty text keeps name and state only: %q", toolLine(transcriptMessage{Role: "tool", State: "done"}))
+	}
+}
+
+func TestToolRunsSummarizeTheirWorkAtAGlance(t *testing.T) {
+	now := time.Now().UnixMilli()
+	run := transcriptRun{tools: true, messages: []transcriptMessage{
+		{Role: "tool", State: "done", CreatedAt: now, Text: "bash: ls"},
+		{Role: "tool", State: "done", CreatedAt: now + 125_000, Text: "bash: pwd"},
+	}}
+	if worked := runWorked(run); worked != "2 分 5 秒" {
+		t.Fatalf("worked for %q", worked)
+	}
+	label := workedLabel(run, false)
+	if !contains(label, "已用时 2 分 5 秒") || !contains(label, "2 次调用") {
+		t.Fatalf("label %q", label)
+	}
+	for _, sample := range []struct {
+		elapsed time.Duration
+		want    string
+	}{
+		{500 * time.Millisecond, "<1 秒"},
+		{12 * time.Second, "12 秒"},
+		{time.Minute + 5*time.Second, "1 分 5 秒"},
+		{time.Hour + time.Minute + 5*time.Second, "1 小时 1 分 5 秒"},
+	} {
+		if got := workedFor(sample.elapsed); got != sample.want {
+			t.Fatalf("workedFor(%v) = %q, want %q", sample.elapsed, got, sample.want)
+		}
+	}
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	state.messages = run.messages
+	tester := frames(ui.NewTester(state.view, 700, 500))
+	joined := ""
+	for _, text := range tester.Texts() {
+		joined += text
+	}
+	if !contains(joined, "已用时 2 分 5 秒") {
+		t.Fatalf("the transcript shows the worked summary, texts %q", tester.Texts())
+	}
+	if tester.HasText("bash: ls") {
+		t.Fatalf("the detail stays folded until asked, texts %q", tester.Texts())
 	}
 }
 

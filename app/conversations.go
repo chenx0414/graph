@@ -9,7 +9,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown"
 	"graph/app/gwui/kit"
 	gwtheme "graph/app/gwui/theme"
 )
@@ -82,10 +81,21 @@ func parseConversationMessages(payload []byte) ([]transcriptMessage, error) {
 	if err := json.Unmarshal(payload, &body); err != nil {
 		return nil, err
 	}
+	var legacy struct {
+		Messages []struct {
+			Data map[string]any `json:"data"`
+		} `json:"messages"`
+	}
+	_ = json.Unmarshal(payload, &legacy)
 	spoken := []transcriptMessage{}
-	for _, message := range body.Messages {
+	for index, message := range body.Messages {
 		if strings.TrimSpace(message.Text) == "" {
 			continue
+		}
+		if index < len(legacy.Messages) {
+			if receipt, _ := legacy.Messages[index].Data["reloadReceipt"].(bool); receipt {
+				continue
+			}
 		}
 		if message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
 			continue
@@ -296,93 +306,6 @@ func (c *chatState) transcript(ctx *ui.Context) {
 	} else if !c.historyLoading && first == 0 && last >= 0 && last < len(runs)-1 {
 		c.ensureHistory()
 	}
-}
-
-func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
-	t := gwtheme.Of(ctx)
-	key := runKey(run)
-	ui.Column(ctx).Gap(2).Children(func() {
-		label := "工具 · " + runSummary(run) + " · " + countLabel(len(run.messages))
-		if kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-			c.expanded[key] = !c.expanded[key]
-		}
-		if !c.expanded[key] {
-			return
-		}
-		for _, message := range run.messages {
-			kit.Text(ctx, toolLine(message), t.Text.Xs).TextColor(t.Muted)
-		}
-	})
-}
-
-func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
-	mine := message.Role == "user"
-	if !mine {
-		th := ctx.Theme()
-		ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
-			c.markdownMessage(ctx, message)
-			c.messageMeta(ctx, message, false)
-		})
-		return
-	}
-	ui.Row(ctx).FillWidth().Children(func() {
-		ui.Spacer(ctx)
-		ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
-			c.bubble(ctx, message)
-			c.messageMeta(ctx, message, true)
-		})
-	})
-}
-
-func (c *chatState) markdownMessage(ctx *ui.Context, message transcriptMessage) {
-	if messageStreaming(message) {
-		markdown.Stream(ctx, message.Text, &c.md)
-		return
-	}
-	markdown.View(ctx, message.Text, &c.md)
-}
-
-func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	bubble := ui.Column(ctx).Padding(th.Space(2.5), th.Space(3.5)).Radius(t.Radius.Xl).Gap(th.Space(1)).Clip().
-		Border(gwtheme.Hairline, t.Border).Background(userBubble(t))
-	bubble.Children(func() {
-		if messageQueued(message) {
-			if kit.Button(ctx, "撤销这条排队消息", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
-				go c.cancelQueued(message.ID)
-			}
-		}
-		if messageStreaming(message) {
-			markdown.Stream(ctx, message.Text, &c.md)
-		} else {
-			markdown.View(ctx, message.Text, &c.md)
-		}
-	})
-}
-
-func (c *chatState) messageMeta(ctx *ui.Context, message transcriptMessage, mine bool) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
-	row := ui.Row(ctx).Gap(th.Space(1)).AlignItems(ui.Center)
-	if mine {
-		row.Justify(ui.End)
-	} else {
-		row.Justify(ui.Start)
-	}
-	row.Children(func() {
-		if message.CreatedAt > 0 {
-			kit.Text(ctx, messageClock(message.CreatedAt), t.Text.Xs).TextColor(t.Muted)
-		}
-		text := message.Text
-		if iconAction(ctx, iconCopy, "复制", false, 5, func() { copyMessage(text) }).Clicked() {
-		}
-		if mine {
-			return
-		}
-		iconAction(ctx, iconThumbUp, "赞", false, 5, nil)
-		iconAction(ctx, iconThumbDown, "踩", false, 5, nil)
-		iconAction(ctx, iconVolume, "朗读", false, 5, nil)
-		iconAction(ctx, iconMore, "更多", false, 5, nil)
-	})
 }
 
 func messageClock(millis int64) string {

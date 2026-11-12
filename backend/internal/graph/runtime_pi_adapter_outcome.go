@@ -6,7 +6,7 @@ import (
 
 func piAdapterTurnOutcome(options PiAdapterOptions, input piAdapterRunInput, turn piAdapterTurnInput, entry ModelEntry, reply string, store *TaskStore, operation Operation, instanceId string) OperationResult {
 	if turn.ReloadReceipt != nil && *turn.ReloadReceipt != nil {
-		output := map[string]any{"text": RSI_RELOAD_RECEIPT, "rsiRequestId": fmt.Sprintf("%v", (*turn.ReloadReceipt)["id"])}
+		output := map[string]any{"rsiRequestId": fmt.Sprintf("%v", (*turn.ReloadReceipt)["id"])}
 		if len(*turn.ToolActivity) > 0 {
 			output["toolActivity"] = *turn.ToolActivity
 		}
