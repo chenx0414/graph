@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 type trajectoryUsage struct {
@@ -88,13 +89,48 @@ type trajectoryTotals struct {
 	ToolsByName  []trajectoryToolStat `json:"toolsByName"`
 	Timing       trajectoryTiming     `json:"timing"`
 	Context      trajectoryContext    `json:"context"`
+	Commands     []trajectoryCommand  `json:"commands"`
+	Files        trajectoryFiles      `json:"files"`
+}
+
+type trajectoryRequest struct {
+	Id            string `json:"id"`
+	Model         string `json:"model"`
+	At            int64  `json:"at"`
+	ContextTokens int64  `json:"contextTokens"`
+	Input         int64  `json:"input"`
+	Output        int64  `json:"output"`
+	CacheRead     int64  `json:"cacheRead"`
+	CacheWrite    int64  `json:"cacheWrite"`
+	DurationMs    int64  `json:"durationMs"`
+}
+
+type trajectoryEvent struct {
+	At     int64  `json:"at"`
+	Type   string `json:"type"`
+	Text   string `json:"text"`
+	Tokens int64  `json:"tokens"`
+}
+
+type trajectoryCommand struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+type trajectoryFiles struct {
+	Read   int `json:"read"`
+	Write  int `json:"write"`
+	Search int `json:"search"`
+	Image  int `json:"image"`
 }
 
 type conversationTrajectory struct {
-	ConversationId string           `json:"conversationId"`
-	TaskId         string           `json:"taskId"`
-	Turns          []trajectoryTurn `json:"turns"`
-	Totals         trajectoryTotals `json:"totals"`
+	ConversationId string              `json:"conversationId"`
+	TaskId         string              `json:"taskId"`
+	Turns          []trajectoryTurn    `json:"turns"`
+	Requests       []trajectoryRequest `json:"requests"`
+	Events         []trajectoryEvent   `json:"events"`
+	Totals         trajectoryTotals    `json:"totals"`
 }
 
 type trajectoryState struct {
@@ -162,6 +198,13 @@ func formatTrajectoryDuration(ms int64) string {
 		return fmt.Sprintf("%.1fs", float64(ms)/1_000)
 	}
 	return strconv.FormatInt(ms, 10) + "ms"
+}
+
+func formatTrajectoryClock(at int64) string {
+	if at <= 0 {
+		return "—"
+	}
+	return time.UnixMilli(at).Format("01-02 15:04")
 }
 
 func formatTrajectoryCost(cost float64) string {

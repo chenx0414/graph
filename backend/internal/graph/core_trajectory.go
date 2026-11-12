@@ -2,6 +2,7 @@ package graph
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -69,6 +70,37 @@ type TrajectoryContext struct {
 	PeakTokens int64 `json:"peakTokens"`
 }
 
+type TrajectoryRequest struct {
+	Id            string `json:"id"`
+	Model         string `json:"model"`
+	At            int64  `json:"at"`
+	ContextTokens int64  `json:"contextTokens"`
+	Input         int64  `json:"input"`
+	Output        int64  `json:"output"`
+	CacheRead     int64  `json:"cacheRead"`
+	CacheWrite    int64  `json:"cacheWrite"`
+	DurationMs    int64  `json:"durationMs"`
+}
+
+type TrajectoryEvent struct {
+	At     int64  `json:"at"`
+	Type   string `json:"type"`
+	Text   string `json:"text"`
+	Tokens int64  `json:"tokens"`
+}
+
+type TrajectoryCommand struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+type TrajectoryFiles struct {
+	Read   int `json:"read"`
+	Write  int `json:"write"`
+	Search int `json:"search"`
+	Image  int `json:"image"`
+}
+
 type TrajectoryTotals struct {
 	Turns        int                  `json:"turns"`
 	Requests     int                  `json:"requests"`
@@ -89,13 +121,17 @@ type TrajectoryTotals struct {
 	ToolsByName  []TrajectoryToolStat `json:"toolsByName"`
 	Timing       TrajectoryTiming     `json:"timing"`
 	Context      TrajectoryContext    `json:"context"`
+	Commands     []TrajectoryCommand  `json:"commands"`
+	Files        TrajectoryFiles      `json:"files"`
 }
 
 type ConversationTrajectory struct {
-	ConversationId string           `json:"conversationId"`
-	TaskId         string           `json:"taskId"`
-	Turns          []TrajectoryTurn `json:"turns"`
-	Totals         TrajectoryTotals `json:"totals"`
+	ConversationId string              `json:"conversationId"`
+	TaskId         string              `json:"taskId"`
+	Turns          []TrajectoryTurn    `json:"turns"`
+	Requests       []TrajectoryRequest `json:"requests"`
+	Events         []TrajectoryEvent   `json:"events"`
+	Totals         TrajectoryTotals    `json:"totals"`
 }
 
 type trajectoryMessage struct {
@@ -231,6 +267,10 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 		trajectory.Totals.Timing.OtherMs = trajectory.Totals.Timing.WallMs - occupied
 	}
 	trajectory.Totals.Compactions = int(kernelInt(kernelRow(store.Db, "SELECT COUNT(*) AS count FROM events WHERE task_id=? AND type='session.compacted'", trajectory.TaskId)["count"]))
+	trajectory.Requests = trajectoryRequests(invocations)
+	trajectory.Events = trajectoryContextEvents(store, trajectory.TaskId)
+	trajectory.Totals.Commands = trajectoryCommands(store, conversationId)
+	trajectory.Totals.Files = trajectoryFiles(store, trajectory.TaskId)
 	return trajectory
 }
 
@@ -349,6 +389,121 @@ func trajectoryCacheHitRate(usage TrajectoryUsage) float64 {
 		return 0
 	}
 	return float64(usage.CacheRead) / float64(denominator)
+}
+
+func trajectoryRequests(invocations []trajectoryInvocation) []TrajectoryRequest {
+	requests := make([]TrajectoryRequest, 0, len(invocations))
+	for _, invocation := range invocations {
+		requests = append(requests, TrajectoryRequest{
+			Id:            invocation.Id,
+			Model:         invocation.Model,
+			At:            invocation.Dispatched,
+			ContextTokens: invocation.Usage.ContextTokens,
+			Input:         invocation.Usage.Input,
+			Output:        invocation.Usage.Output,
+			CacheRead:     invocation.Usage.CacheRead,
+			CacheWrite:    invocation.Usage.CacheWrite,
+			DurationMs:    invocation.DurationMs,
+		})
+	}
+	return requests
+}
+
+func trajectoryContextEvents(store *TaskStore, taskId string) []TrajectoryEvent {
+	rows := kernelRows(store.Db, `SELECT timestamp,type,data FROM events
+		WHERE task_id=? AND type IN ('session.compacted','session.compaction_started','session.compaction_failed','session.compaction_skipped','operation.usage_reconciled')
+		ORDER BY cursor DESC LIMIT 50`, taskId)
+	events := make([]TrajectoryEvent, 0, len(rows))
+	for _, row := range rows {
+		event := TrajectoryEvent{At: kernelInt(row["timestamp"]), Type: kernelString(row["type"])}
+		var data map[string]any
+		if json.Unmarshal([]byte(kernelString(row["data"])), &data) == nil {
+			if tokens, ok := data["tokensAfter"]; ok {
+				event.Tokens = kernelInt(tokens)
+			}
+			if tokens, ok := data["tokensBefore"]; ok && event.Tokens == 0 {
+				event.Tokens = kernelInt(tokens)
+			}
+			if reason, ok := data["reason"].(string); ok {
+				event.Text = reason
+			}
+			if failure, ok := data["error"].(string); ok {
+				event.Text = failure
+			}
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func trajectoryCommands(store *TaskStore, conversationId string) []TrajectoryCommand {
+	rows := kernelRows(store.Db, `SELECT text FROM messages WHERE conversation_id=? AND role='tool' AND kind='call' ORDER BY seq`, conversationId)
+	counts := map[string]int{}
+	order := []string{}
+	for _, row := range rows {
+		text := kernelString(row["text"])
+		if !strings.HasPrefix(text, "bash:") {
+			continue
+		}
+		for _, command := range trajectoryCommandSegments(strings.TrimSpace(strings.TrimPrefix(text, "bash:"))) {
+			if counts[command] == 0 {
+				order = append(order, command)
+			}
+			counts[command]++
+		}
+	}
+	commands := make([]TrajectoryCommand, 0, len(order))
+	for _, name := range order {
+		commands = append(commands, TrajectoryCommand{Name: name, Count: counts[name]})
+	}
+	sort.SliceStable(commands, func(first, second int) bool { return commands[first].Count > commands[second].Count })
+	if len(commands) > 12 {
+		commands = commands[:12]
+	}
+	return commands
+}
+
+func trajectoryCommandSegments(text string) []string {
+	replacer := strings.NewReplacer("&&", "\n", "||", "\n", "|", "\n", ";", "\n")
+	names := []string{}
+	for _, segment := range strings.Split(replacer.Replace(text), "\n") {
+		fields := strings.Fields(segment)
+		for len(fields) > 0 && (strings.Contains(fields[0], "=") || fields[0] == "sudo" || fields[0] == "env" || fields[0] == "time" || fields[0] == "command") {
+			fields = fields[1:]
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[0]
+		if slash := strings.LastIndex(name, "/"); slash >= 0 && slash+1 < len(name) {
+			name = name[slash+1:]
+		}
+		name = strings.TrimSuffix(name, ":")
+		if name == "" || strings.HasPrefix(name, "-") {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func trajectoryFiles(store *TaskStore, taskId string) TrajectoryFiles {
+	rows := kernelRows(store.Db, `SELECT tool,COUNT(*) AS count FROM tool_calls WHERE task_id=? GROUP BY tool`, taskId)
+	files := TrajectoryFiles{}
+	for _, row := range rows {
+		count := int(kernelInt(row["count"]))
+		switch strings.ToLower(kernelString(row["tool"])) {
+		case "read", "read_file", "view", "cat", "read_image":
+			files.Read += count
+		case "write", "edit", "apply_patch", "apply_rsi_change", "write_file":
+			files.Write += count
+		case "grep", "glob", "list", "find", "search", "ls":
+			files.Search += count
+		case "image", "screenshot", "view_image":
+			files.Image += count
+		}
+	}
+	return files
 }
 
 func trajectoryToolStats(tools []TrajectoryTool) []TrajectoryToolStat {

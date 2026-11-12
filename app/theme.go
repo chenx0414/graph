@@ -7,11 +7,12 @@ import (
 )
 
 var (
-	cardGap    = float32(8)
-	railWidth  = float32(56)
-	listWidth  = float32(236)
-	bandHeight = float32(44)
-	cardRadius = float32(12)
+	cardGap         = float32(8)
+	railWidth       = float32(56)
+	listWidth       = float32(236)
+	bandHeight      = float32(44)
+	boardCardHeight = float32(224)
+	cardRadius      = float32(12)
 )
 
 var shellShadow = gwtheme.Elevation{

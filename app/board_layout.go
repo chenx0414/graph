@@ -120,6 +120,14 @@ func boardPanelTitle(kind string) string {
 		return "耗时统计"
 	case "trajectory-context":
 		return "当前上下文"
+	case "trajectory-trend":
+		return "上下文趋势"
+	case "trajectory-events":
+		return "上下文事件"
+	case "trajectory-commands":
+		return "命令执行"
+	case "trajectory-files":
+		return "文件活动"
 	case "tasks":
 		return "任务清单"
 	case "graph":
@@ -276,23 +284,22 @@ func (s *shellState) openModule(kind string) {
 		Layout: boardNode{Kind: "panel", PanelID: kind},
 	}
 	if kind == "trajectory" {
-		panels := []boardPanel{
-			{ID: "trajectory-summary", Kind: "trajectory-summary"},
-			{ID: "trajectory-tokens", Kind: "trajectory-tokens"},
-			{ID: "trajectory-timing", Kind: "trajectory-timing"},
-			{ID: "trajectory-context", Kind: "trajectory-context"},
+		kinds := []string{"trajectory-summary", "trajectory-tokens", "trajectory-timing", "trajectory-context",
+			"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files"}
+		panels := make([]boardPanel, 0, len(kinds))
+		for _, panelKind := range kinds {
+			panels = append(panels, boardPanel{ID: panelKind, Kind: panelKind})
 		}
 		page.Panels = panels
-		page.Layout = boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
-			{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-summary"}},
-				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-tokens"}},
-			}}},
-			{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-timing"}},
-				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-context"}},
-			}}},
-		}}
+		rows := []boardSlot{}
+		for row := 0; row*2 < len(kinds); row++ {
+			cells := []boardSlot{}
+			for column := 0; column < 2 && row*2+column < len(kinds); column++ {
+				cells = append(cells, boardSlot{Weight: 1, Node: boardNode{Kind: "panel", PanelID: kinds[row*2+column]}})
+			}
+			rows = append(rows, boardSlot{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: cells}})
+		}
+		page.Layout = boardNode{Kind: "split", Axis: "column", Children: rows}
 	}
 	s.board.pages = append(s.board.pages, page)
 	s.board.active = len(s.board.pages) - 1

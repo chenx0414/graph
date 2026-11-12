@@ -88,8 +88,8 @@ func (s *shellState) trajectorySummaryCard(ctx *ui.Context) {
 		kit.Separator(ctx, false)
 		kit.Text(ctx, "工具调用", t.Text.Xs).TextColor(t.Muted)
 		limit := len(totals.ToolsByName)
-		if limit > 6 {
-			limit = 6
+		if limit > 3 {
+			limit = 3
 		}
 		for _, tool := range totals.ToolsByName[:limit] {
 			row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
@@ -101,6 +101,9 @@ func (s *shellState) trajectorySummaryCard(ctx *ui.Context) {
 					kit.Text(ctx, strconv.Itoa(tool.Errors)+" 失败", t.Text.Xs).TextColor(t.Danger)
 				}
 			})
+		}
+		if len(totals.ToolsByName) > limit {
+			kit.Text(ctx, "另有 "+strconv.Itoa(len(totals.ToolsByName)-limit)+" 种工具", t.Text.Xs).TextColor(t.Muted)
 		}
 	}
 }
@@ -114,10 +117,10 @@ func (s *shellState) trajectoryTokensCard(ctx *ui.Context) {
 	totals := data.Totals
 	total := float64(totals.Input + totals.CacheRead + totals.CacheWrite + totals.Output)
 	slices := []trajectorySlice{
-		{Label: "未缓存输入", Value: float64(totals.Input), Display: formatTrajectoryTokens(totals.Input) + " tokens", Color: palette.Blue500.Color()},
-		{Label: "缓存读取", Value: float64(totals.CacheRead), Display: formatTrajectoryTokens(totals.CacheRead) + " tokens", Color: palette.Violet500.Color()},
-		{Label: "缓存写入", Value: float64(totals.CacheWrite), Display: formatTrajectoryTokens(totals.CacheWrite) + " tokens", Color: palette.Amber500.Color()},
-		{Label: "输出", Value: float64(totals.Output), Display: formatTrajectoryTokens(totals.Output) + " tokens", Color: palette.Green500.Color()},
+		{Label: "未缓存输入", Value: float64(totals.Input), Display: formatTrajectoryTokens(totals.Input), Color: palette.Blue500.Color()},
+		{Label: "缓存读取", Value: float64(totals.CacheRead), Display: formatTrajectoryTokens(totals.CacheRead), Color: palette.Violet500.Color()},
+		{Label: "缓存写入", Value: float64(totals.CacheWrite), Display: formatTrajectoryTokens(totals.CacheWrite), Color: palette.Amber500.Color()},
+		{Label: "输出", Value: float64(totals.Output), Display: formatTrajectoryTokens(totals.Output), Color: palette.Green500.Color()},
 	}
 	trajectoryCardHeader(ctx, iconDatabase, "缓存命中 "+formatTrajectoryPercent(totals.CacheHitRate))
 	if total <= 0 {
@@ -125,6 +128,8 @@ func (s *shellState) trajectoryTokensCard(ctx *ui.Context) {
 		return
 	}
 	trajectoryDonutLegend(ctx, slices, formatTrajectoryTokens(int64(total)), "总 tokens")
+	kit.Text(ctx, "成本 "+formatTrajectoryCost(totals.Cost)+" · 缓存读取占 "+formatTrajectoryPercent(totals.CacheHitRate),
+		t.Text.Xs).TextColor(t.Muted)
 }
 
 func (s *shellState) trajectoryTimingCard(ctx *ui.Context) {
@@ -152,6 +157,8 @@ func (s *shellState) trajectoryTimingCard(ctx *ui.Context) {
 		return
 	}
 	trajectoryDonutLegend(ctx, slices, formatTrajectoryDuration(timing.WallMs), "活跃时长")
+	kit.Text(ctx, strconv.Itoa(totals.Requests)+" 次模型请求 · "+strconv.Itoa(totals.ToolCalls)+" 次工具调用",
+		t.Text.Xs).TextColor(t.Muted)
 }
 
 func (s *shellState) trajectoryContextCard(ctx *ui.Context) {
@@ -192,7 +199,7 @@ func (s *shellState) trajectoryContextCard(ctx *ui.Context) {
 	if len(turns) == 0 {
 		return
 	}
-	chart := ui.Row(ctx).FillWidth().Height(th.Space(10)).Gap(th.Space(1)).AlignItems(ui.End)
+	chart := ui.Row(ctx).FillWidth().Height(th.Space(7)).Gap(th.Space(1)).AlignItems(ui.End)
 	chart.Children(func() {
 		for _, turn := range turns {
 			value := turn.Usage.ContextTokens
@@ -201,7 +208,7 @@ func (s *shellState) trajectoryContextCard(ctx *ui.Context) {
 			}
 			height := float32(4)
 			if context.PeakTokens > 0 {
-				height = 4 + float32(value)/float32(context.PeakTokens)*float32(th.Space(8))
+				height = 4 + float32(value)/float32(context.PeakTokens)*float32(th.Space(5))
 			}
 			ui.Box(ctx).Grow(1).Height(height).Radius(t.Radius.Xs).Background(palette.Blue500.Color().Alpha(0.65))
 		}
@@ -218,7 +225,7 @@ func trajectoryDonutLegend(ctx *ui.Context, slices []trajectorySlice, centerTop,
 	}
 	row := ui.Row(ctx).FillWidth().Gap(th.Space(2)).AlignItems(ui.Center)
 	row.Children(func() {
-		donut := ui.Box(ctx).Size(th.Space(26), th.Space(26))
+		donut := ui.Box(ctx).Size(th.Space(22), th.Space(22))
 		donut.Draw(func(p *ui.Painter, r ui.Rect) {
 			cx, cy := r.X+r.W/2, r.Y+r.H/2
 			outer, inner := r.W/2, r.W/2*0.62
@@ -281,4 +288,178 @@ func trajectoryWedge(path *ui.Path, cx, cy, outer, inner, start, end float32) {
 		path.LineTo(x, y)
 	}
 	path.Close()
+}
+
+func (s *shellState) trajectoryTrendCard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.trajectoryData(ctx)
+	if data == nil {
+		return
+	}
+	requests := data.Requests
+	if len(requests) > 60 {
+		requests = requests[len(requests)-60:]
+	}
+	trajectoryCardHeader(ctx, iconActivity, strconv.Itoa(len(data.Requests))+" 次请求 · 峰值 "+formatTrajectoryTokens(data.Totals.Context.PeakTokens))
+	if len(requests) == 0 {
+		kit.Text(ctx, "还没有请求趋势。", t.Text.Sm).TextColor(t.Muted)
+		return
+	}
+	peak := data.Totals.Context.PeakTokens
+	if peak <= 0 {
+		for _, request := range requests {
+			if request.ContextTokens > peak {
+				peak = request.ContextTokens
+			}
+		}
+	}
+	chart := ui.Row(ctx).FillWidth().Height(th.Space(9)).Gap(1).AlignItems(ui.End)
+	chart.Children(func() {
+		for _, request := range requests {
+			height := float32(3)
+			if peak > 0 {
+				height = 3 + float32(request.ContextTokens)/float32(peak)*float32(th.Space(8))
+			}
+			ui.Box(ctx).Grow(1).Height(height).Radius(t.Radius.Xs).
+				Background(palette.Blue500.Color().Alpha(0.7))
+		}
+	})
+	kit.Text(ctx, "最近 "+strconv.Itoa(len(requests))+" 次请求 · 越靠右越新", t.Text.Xs).TextColor(t.Muted)
+}
+
+func trajectoryEventLabel(event trajectoryEvent) string {
+	switch event.Type {
+	case "session.compacted":
+		return "上下文压缩"
+	case "session.compaction_started":
+		return "压缩开始"
+	case "session.compaction_failed":
+		return "压缩失败"
+	case "session.compaction_skipped":
+		return "压缩跳过"
+	case "operation.usage_reconciled":
+		return "用量校准"
+	}
+	return event.Type
+}
+
+func (s *shellState) trajectoryEventsCard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.trajectoryData(ctx)
+	if data == nil {
+		return
+	}
+	trajectoryCardHeader(ctx, iconClock, strconv.Itoa(len(data.Events))+" 个事件")
+	if len(data.Events) == 0 {
+		kit.Text(ctx, "还没有上下文事件。", t.Text.Sm).TextColor(t.Muted)
+		return
+	}
+	limit := len(data.Events)
+	if limit > 4 {
+		limit = 4
+	}
+	for _, event := range data.Events[:limit] {
+		row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
+		row.Children(func() {
+			kit.Text(ctx, formatTrajectoryClock(event.At), t.Text.Xs).TextColor(t.Muted)
+			kit.Text(ctx, trajectoryEventLabel(event), t.Text.Xs).FontWeight(500).Grow(1).SingleLine().Ellipsis("…")
+			if event.Tokens > 0 {
+				kit.Text(ctx, formatTrajectoryTokens(event.Tokens)+" tokens", t.Text.Xs).TextColor(t.Muted)
+			}
+			if event.Text != "" {
+				kit.Text(ctx, event.Text, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
+			}
+		})
+	}
+	if len(data.Events) > limit {
+		kit.Text(ctx, "另有 "+strconv.Itoa(len(data.Events)-limit)+" 个事件", t.Text.Xs).TextColor(t.Muted)
+	}
+}
+
+func (s *shellState) trajectoryCommandsCard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.trajectoryData(ctx)
+	if data == nil {
+		return
+	}
+	total := 0
+	for _, command := range data.Totals.Commands {
+		total += command.Count
+	}
+	trajectoryCardHeader(ctx, iconDoc, strconv.Itoa(total)+" 次命令")
+	if len(data.Totals.Commands) == 0 {
+		kit.Text(ctx, "还没有命令记录。", t.Text.Sm).TextColor(t.Muted)
+		return
+	}
+	commands := data.Totals.Commands
+	if len(commands) > 4 {
+		commands = commands[:4]
+	}
+	for _, command := range commands {
+		share := 0.0
+		if total > 0 {
+			share = float64(command.Count) / float64(total)
+		}
+		row := ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).AlignItems(ui.Center)
+		row.Children(func() {
+			kit.Text(ctx, command.Name, t.Text.Xs).Grow(1).SingleLine().Ellipsis("…")
+			bar := ui.Row(ctx).Width(th.Space(18)).Height(th.Space(1)).Radius(t.Radius.Full).Background(t.Hover)
+			bar.Children(func() {
+				ratio := float32(share)
+				if ratio > 1 {
+					ratio = 1
+				}
+				ui.Box(ctx).Grow(ratio).FillHeight().Radius(t.Radius.Full).Background(palette.Teal500.Color())
+				if ratio < 1 {
+					ui.Box(ctx).Grow(1 - ratio).FillHeight()
+				}
+			})
+			kit.Text(ctx, strconv.Itoa(command.Count), t.Text.Xs).TextColor(t.Muted)
+		})
+	}
+	if len(data.Totals.Commands) > len(commands) {
+		kit.Text(ctx, "另有 "+strconv.Itoa(len(data.Totals.Commands)-len(commands))+" 个程序", t.Text.Xs).TextColor(t.Muted)
+	}
+}
+
+func (s *shellState) trajectoryFilesCard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.trajectoryData(ctx)
+	if data == nil {
+		return
+	}
+	files := data.Totals.Files
+	total := files.Read + files.Write + files.Search + files.Image
+	trajectoryCardHeader(ctx, iconFolder, strconv.Itoa(total)+" 次文件操作")
+	rows := [][3]any{
+		{"读取", files.Read, palette.Blue500.Color()},
+		{"写入", files.Write, palette.Violet500.Color()},
+		{"搜索", files.Search, palette.Teal500.Color()},
+		{"图片", files.Image, palette.Amber500.Color()},
+	}
+	for _, entry := range rows {
+		label := entry[0].(string)
+		count := entry[1].(int)
+		color := entry[2].(ui.Color)
+		share := float32(0)
+		if total > 0 {
+			share = float32(count) / float32(total)
+		}
+		row := ui.Row(ctx).FillWidth().Gap(th.Space(1.5)).AlignItems(ui.Center)
+		row.Children(func() {
+			kit.Text(ctx, label, t.Text.Xs).Width(th.Space(8))
+			bar := ui.Row(ctx).Grow(1).Height(th.Space(1)).Radius(t.Radius.Full).Background(t.Hover)
+			bar.Children(func() {
+				ui.Box(ctx).Grow(share).FillHeight().Radius(t.Radius.Full).Background(color)
+				if share < 1 {
+					ui.Box(ctx).Grow(1 - share).FillHeight()
+				}
+			})
+			kit.Text(ctx, strconv.Itoa(count), t.Text.Xs).TextColor(t.Muted).Width(th.Space(8))
+		})
+	}
+	if total > 0 {
+		kit.Text(ctx, "共 "+strconv.Itoa(total)+" 次文件操作 · 读取 "+strconv.Itoa(files.Read)+" 次",
+			t.Text.Xs).TextColor(t.Muted)
+	}
 }

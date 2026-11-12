@@ -103,6 +103,30 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 			s.boardPanelView(ctx, &page.Panels[0], false)
 			return
 		}
+		if page.Kind != "" {
+			ui.Scroll(ctx).Fill().Children(func() {
+				grid := ui.Column(ctx).FillWidth().Padding(10).Gap(10)
+				grid.Children(func() {
+					for row := 0; row*2 < len(page.Panels); row++ {
+						rowIndex := row
+						ui.Row(ctx).FillWidth().Height(boardCardHeight).Gap(10).Children(func() {
+							for column := 0; column < 2; column++ {
+								index := rowIndex*2 + column
+								if index >= len(page.Panels) {
+									break
+								}
+								panel := page.Panels[index]
+								cell := ui.Column(ctx).Grow(1).FillHeight()
+								cell.Children(func() {
+									s.boardPanelView(ctx, &panel, false)
+								})
+							}
+						})
+					}
+				})
+			})
+			return
+		}
 		if len(page.Panels) == 0 {
 			kit.Text(ctx, "这个标签页还没有模块，点左侧栏的图标打开一个模块。", t.Text.Sm).
 				TextColor(t.Muted).Padding(24, 24, 24, 24)

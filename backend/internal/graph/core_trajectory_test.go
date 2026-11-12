@@ -89,6 +89,12 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	if totals.Context.LastTokens != 400 || totals.Context.PeakTokens != 400 {
 		t.Fatalf("context %+v", totals.Context)
 	}
+	if len(trajectory.Requests) != 2 || trajectory.Requests[0].ContextTokens != 400 || trajectory.Requests[1].Id != "v2" {
+		t.Fatalf("requests %+v", trajectory.Requests)
+	}
+	if len(totals.Commands) != 1 || totals.Commands[0].Name != "ls" || totals.Commands[0].Count != 1 {
+		t.Fatalf("commands %+v", totals.Commands)
+	}
 
 	SaveConversationTrajectory(store, "c1")
 	row := kernelRow(store.DB, "SELECT conversation_id,task_id,payload FROM trajectories WHERE conversation_id='c1'")
