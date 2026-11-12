@@ -19,6 +19,7 @@ var (
 	iconFit     = svgIcon(`<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>`)
 	iconFocus   = svgIcon(`<path d="M3 4h18v12H3Z"/><path d="M8 20h8"/><path d="M12 16v4"/>`)
 	iconClose   = svgIcon(`<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`)
+	iconDown    = svgIcon(`<path d="M12 4v13"/><path d="m6 12 6 6 6-6"/><path d="M5 21h14"/>`)
 	iconSend    = svgIcon(`<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>`)
 	iconPause   = svgIcon(`<rect x="7" y="5" width="3.2" height="14" rx="1.4" fill="currentColor" stroke="none"/><rect x="13.8" y="5" width="3.2" height="14" rx="1.4" fill="currentColor" stroke="none"/>`)
 	iconPlay    = svgIcon(`<path d="M8.5 5.8v12.4L19 12Z" fill="currentColor" stroke="none"/>`)

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -399,6 +400,34 @@ func TestChatBubblesCarryATimeAndACopyButton(t *testing.T) {
 	}
 	if tester.HasText("agent") || tester.HasText("你") {
 		t.Fatalf("bubbles carry no author line, texts %q", tester.Texts())
+	}
+}
+
+func TestTheChatOffersABackToLatestButtonWhenScrolledUp(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	for index := 0; index < 40; index++ {
+		state.messages = append(state.messages, transcriptMessage{ID: "m" + strconv.Itoa(index), Role: "assistant", Text: "第" + strconv.Itoa(index) + "条"})
+	}
+	tester := frames(ui.NewTester(state.view, 700, 500))
+	if tester.HasText("回到最新") {
+		t.Fatalf("at the end no back-to-latest button shows, texts %q", tester.Texts())
+	}
+	state.list.ScrollTo(0, ui.Start)
+	frames(tester)
+	if !tester.HasText("回到最新") {
+		t.Fatalf("scrolled up, the chat offers the way back to the latest, texts %q", tester.Texts())
+	}
+	if err := tester.Click("回到最新"); err != nil {
+		t.Fatalf("click 回到最新: %v", err)
+	}
+	frames(tester)
+	if tester.HasText("回到最新") {
+		t.Fatalf("back at the end the button goes away, texts %q", tester.Texts())
+	}
+	first, last := state.list.Visible()
+	if !state.list.AtEnd() {
+		t.Fatalf("the click returns the chat to its end, visible %d..%d", first, last)
 	}
 }
 
