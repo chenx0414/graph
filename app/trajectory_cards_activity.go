@@ -134,6 +134,9 @@ func (s *shellState) trajectoryCommandsCard(ctx *ui.Context) {
 				}
 			})
 			kit.Text(ctx, strconv.Itoa(command.Count), t.Text.Xs).TextColor(t.Muted)
+			if command.Errors > 0 {
+				kit.Text(ctx, strconv.Itoa(command.Errors)+" 失败", t.Text.Xs).TextColor(t.Danger)
+			}
 		})
 	}
 	if len(data.Totals.Commands) > len(commands) {
@@ -180,6 +183,19 @@ func (s *shellState) trajectoryFilesCard(ctx *ui.Context) {
 	if total > 0 {
 		kit.Text(ctx, "共 "+strconv.Itoa(total)+" 次文件操作 · 读取 "+strconv.Itoa(files.Read)+" 次",
 			t.Text.Xs).TextColor(t.Muted)
+	}
+	if len(data.Totals.Paths) > 0 {
+		line := "路径 "
+		for index, path := range data.Totals.Paths {
+			if index >= 3 {
+				break
+			}
+			if index > 0 {
+				line += " · "
+			}
+			line += path.Name + "×" + strconv.Itoa(path.Count)
+		}
+		kit.Text(ctx, line, t.Text.Xs).TextColor(t.Muted).SingleLine().Ellipsis("…")
 	}
 }
 
@@ -236,7 +252,9 @@ func (s *shellState) trajectoryRequestsCard(ctx *ui.Context) {
 		return
 	}
 	peak := data.Totals.Context.PeakTokens
-	for _, request := range requests {
+	start := len(data.Requests) - len(requests)
+	for offset, request := range requests {
+		index := start + offset
 		ratio := float32(0)
 		if peak > 0 {
 			ratio = float32(request.ContextTokens) / float32(peak)
@@ -244,7 +262,13 @@ func (s *shellState) trajectoryRequestsCard(ctx *ui.Context) {
 		if ratio > 1 {
 			ratio = 1
 		}
-		row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
+		row := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Padding(0, th.Space(0.75))
+		if index == s.trajectory.selected {
+			row = row.Background(t.HoverTint).Radius(t.Radius.Sm)
+		}
+		row.OnClick(func() { s.trajectory.selected = index })
+		selectedRequest := request
+		_ = selectedRequest
 		row.Children(func() {
 			kit.Text(ctx, formatTrajectoryClock(request.At), t.Text.Xs).TextColor(t.Muted).Width(th.Space(11))
 			bar := ui.Row(ctx).Grow(1).Height(th.Space(1.5)).Radius(t.Radius.Full).Background(t.Hover)
@@ -264,6 +288,63 @@ func (s *shellState) trajectoryRequestsCard(ctx *ui.Context) {
 			kit.Text(ctx, formatTrajectoryTokens(request.Output)+" out", t.Text.Xs).TextColor(t.Muted).Width(th.Space(9))
 		})
 	}
+}
+
+func (s *shellState) trajectoryRequestDetailCard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	data := s.trajectoryData(ctx)
+	if data == nil {
+		return
+	}
+	if len(data.Requests) == 0 {
+		kit.Text(ctx, "还没有请求快照。", t.Text.Sm).TextColor(t.Muted)
+		return
+	}
+	index := s.trajectory.selected
+	if index < 0 || index >= len(data.Requests) {
+		index = len(data.Requests) - 1
+	}
+	request := data.Requests[index]
+	trajectoryCardHeader(ctx, iconDoc, "第 "+strconv.Itoa(index+1)+" 次 · "+formatTrajectoryClock(request.At))
+	values := ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center)
+	values.Children(func() {
+		kit.Text(ctx, formatTrajectoryTokens(request.ContextTokens), t.Text.Sm).FontWeight(600)
+		kit.Text(ctx, "上下文", t.Text.Xs).TextColor(t.Muted)
+		ui.Spacer(ctx)
+		kit.Text(ctx, formatTrajectoryTokens(request.Output)+" 输出", t.Text.Xs).TextColor(t.Muted)
+		kit.Text(ctx, formatTrajectoryDuration(request.DurationMs), t.Text.Xs).TextColor(t.Muted)
+	})
+	if request.Composition == nil {
+		kit.Text(ctx, "这次请求还没有组成快照。", t.Text.Xs).TextColor(t.Muted)
+		return
+	}
+	composition := *request.Composition
+	slices := []trajectorySlice{}
+	total := int64(0)
+	for _, entry := range []struct {
+		label string
+		value int64
+		color ui.Color
+	}{
+		{"系统提示词", composition.SystemPrompt, palette.Blue500.Color()},
+		{"工具定义", composition.ToolDefinitions, palette.Violet500.Color()},
+		{"用户消息", composition.UserMessages, palette.Green500.Color()},
+		{"助手回复", composition.AssistantReply, palette.Teal500.Color()},
+		{"工具调用", composition.ToolCalls, palette.Amber500.Color()},
+		{"注入内容", composition.Injected, palette.Pink500.Color()},
+	} {
+		if entry.value <= 0 {
+			continue
+		}
+		slices = append(slices, trajectorySlice{Label: entry.label, Value: float64(entry.value),
+			Display: formatTrajectoryTokens(entry.value), Color: entry.color})
+		total += entry.value
+	}
+	if total == 0 {
+		kit.Text(ctx, "这次请求还没有组成快照。", t.Text.Xs).TextColor(t.Muted)
+		return
+	}
+	trajectoryDonutLegend(ctx, slices, formatTrajectoryCompactTokens(total), "估算 tokens")
 }
 
 func (s *shellState) trajectoryAgentsCard(ctx *ui.Context) {

@@ -121,25 +121,89 @@ func trajectoryContextEvents(store *TaskStore, taskId string) []TrajectoryEvent 
 	return events
 }
 
-func trajectoryCommands(store *TaskStore, conversationId string) []TrajectoryCommand {
-	rows := kernelRows(store.Db, `SELECT text FROM messages WHERE conversation_id=? AND role='tool' AND text LIKE 'bash:%' ORDER BY seq`, conversationId)
+func trajectoryToolEvents(store *TaskStore, taskId string) (map[string]string, map[string]bool, map[string]int) {
+	rows := kernelRows(store.Db, `SELECT data FROM events WHERE task_id=? AND type='message.tool' ORDER BY cursor`, taskId)
+	targets := map[string]string{}
+	errors := map[string]bool{}
+	exitCodes := map[string]int{}
+	for _, row := range rows {
+		var data map[string]any
+		if json.Unmarshal([]byte(kernelString(row["data"])), &data) != nil {
+			continue
+		}
+		toolCallId, _ := data["toolCallId"].(string)
+		if toolCallId == "" {
+			continue
+		}
+		if target, ok := data["target"].(string); ok && target != "" {
+			targets[toolCallId] = target
+		}
+		if phase, _ := data["phase"].(string); phase == "end" {
+			if isError, ok := data["isError"].(bool); ok && isError {
+				errors[toolCallId] = true
+			}
+			if exitCode, ok := data["exitCode"].(float64); ok {
+				exitCodes[toolCallId] = int(exitCode)
+			}
+		}
+	}
+	return targets, errors, exitCodes
+}
+
+func trajectoryPaths(targets map[string]string) []TrajectoryPath {
 	counts := map[string]int{}
+	order := []string{}
+	for _, target := range targets {
+		full := target
+		if slash := strings.LastIndex(full, "/"); slash >= 0 && slash+1 < len(full) {
+			full = full[slash+1:]
+		}
+		if counts[full] == 0 {
+			order = append(order, full)
+		}
+		counts[full]++
+	}
+	paths := make([]TrajectoryPath, 0, len(order))
+	for _, name := range order {
+		paths = append(paths, TrajectoryPath{Name: name, Count: counts[name]})
+	}
+	sort.SliceStable(paths, func(first, second int) bool { return paths[first].Count > paths[second].Count })
+	if len(paths) > 8 {
+		paths = paths[:8]
+	}
+	return paths
+}
+
+func trajectoryCommands(store *TaskStore, conversationId string, toolErrors map[string]bool) []TrajectoryCommand {
+	rows := kernelRows(store.Db, `SELECT text,data FROM messages WHERE conversation_id=? AND role='tool' AND text LIKE 'bash:%' ORDER BY seq`, conversationId)
+	counts := map[string]int{}
+	errors := map[string]int{}
 	order := []string{}
 	for _, row := range rows {
 		text := kernelString(row["text"])
 		if !strings.HasPrefix(text, "bash:") {
 			continue
 		}
+		failed := false
+		var data map[string]any
+		if json.Unmarshal([]byte(kernelString(row["data"])), &data) == nil {
+			if toolCallId, ok := data["toolCallId"].(string); ok && toolErrors[toolCallId] {
+				failed = true
+			}
+		}
 		for _, command := range trajectoryCommandSegments(strings.TrimSpace(strings.TrimPrefix(text, "bash:"))) {
 			if counts[command] == 0 {
 				order = append(order, command)
 			}
 			counts[command]++
+			if failed {
+				errors[command]++
+			}
 		}
 	}
 	commands := make([]TrajectoryCommand, 0, len(order))
 	for _, name := range order {
-		commands = append(commands, TrajectoryCommand{Name: name, Count: counts[name]})
+		commands = append(commands, TrajectoryCommand{Name: name, Count: counts[name], Errors: errors[name]})
 	}
 	sort.SliceStable(commands, func(first, second int) bool { return commands[first].Count > commands[second].Count })
 	if len(commands) > 12 {
@@ -210,25 +274,28 @@ func trajectoryComposition(store *TaskStore, conversationId, taskId string) Traj
 	return composition
 }
 
-func trajectoryAgents(store *TaskStore, taskId string) []TrajectoryAgent {
-	rows := kernelRows(store.Db, `SELECT o.node_id,o.instance_id,i.model,i.usage,i.cost,
+func trajectoryAgents(store *TaskStore, conversationId, taskId string) []TrajectoryAgent {
+	rows := kernelRows(store.Db, `SELECT o.task_id,o.node_id,o.instance_id,i.model,i.usage,i.cost,
 		COALESCE(json_extract(n.spec,'$.role'),'') AS role
 		FROM invocations i JOIN operations o ON o.id=i.operation_id
+		LEFT JOIN tasks t ON t.id=o.task_id
 		LEFT JOIN nodes n ON n.task_id=o.task_id AND n.id=o.node_id
-		WHERE o.task_id=? ORDER BY i.rowid`, taskId)
+		WHERE t.conversation_id=? OR o.task_id=? ORDER BY i.rowid`, conversationId, taskId)
 	index := map[string]int{}
 	agents := []TrajectoryAgent{}
 	for _, row := range rows {
+		taskRowID := kernelString(row["task_id"])
 		nodeID := kernelString(row["node_id"])
 		instance := kernelString(row["instance_id"])
 		model := kernelString(row["model"])
-		key := nodeID + "\x00" + instance
+		key := taskRowID + "\x00" + nodeID + "\x00" + instance
 		position, ok := index[key]
 		if !ok {
 			index[key] = len(agents)
-			agents = append(agents, TrajectoryAgent{NodeId: nodeID, Instance: instance, Model: model, Role: kernelString(row["role"])})
+			agents = append(agents, TrajectoryAgent{TaskId: taskRowID, NodeId: nodeID, Instance: instance, Role: kernelString(row["role"])})
 			position = len(agents) - 1
 		}
+		agents[position].Model = model
 		agents[position].Requests++
 		tokens := int64(0)
 		if recorded, ok := row["usage"].(string); ok && recorded != "" {

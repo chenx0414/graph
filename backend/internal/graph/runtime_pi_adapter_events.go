@@ -148,7 +148,7 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 				TaskID: live.operation.TaskId, NodeID: live.operation.NodeId, InstanceID: live.instanceId,
 				ActivationID: live.operation.ActivationId, OperationID: live.operation.Id, Role: "tool", Kind: "call",
 				Text: summarizeToolCall(toolName, event["args"]),
-				Data: map[string]any{"toolCallId": toolCallId, "toolName": toolName},
+				Data: map[string]any{"toolCallId": toolCallId, "toolName": toolName, "target": toolEventTarget(event["args"])},
 			})
 		}
 		if live.conversation == nil {
@@ -169,10 +169,14 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if deferred != nil && !DeferredToolCallActive(deferred.State) {
 			SettleConversationToolCall(live.store, *deferred)
 		}
-		live.store.Event(live.operation.TaskId, "message.tool", map[string]any{
+		eventData := map[string]any{
 			"operationId": live.operation.Id, "phase": "start", "toolCallId": toolCallId, "toolName": toolName,
 			"summary": summary, "ordinal": callOrdinal,
-		})
+		}
+		if target := toolEventTarget(event["args"]); target != "" {
+			eventData["target"] = target
+		}
+		live.store.Event(live.operation.TaskId, "message.tool", eventData)
 	case "tool_execution_end":
 		toolName, _ := event["toolName"].(string)
 		toolCallId, _ := event["toolCallId"].(string)
@@ -228,10 +232,14 @@ func (live *piAdapterLiveTurn) handle(event map[string]any) {
 		if deferred != nil {
 			SettleConversationToolCall(live.store, *deferred)
 		}
-		live.store.Event(live.operation.TaskId, "message.tool", map[string]any{
+		endData := map[string]any{
 			"operationId": live.operation.Id, "phase": "end", "toolCallId": toolCallId, "toolName": toolName,
 			"summary": summary, "isError": isError, "ordinal": live.toolOrdinals[toolCallId],
-		})
+		}
+		if exitCode, ok := toolEventExitCode(event["result"]); ok {
+			endData["exitCode"] = exitCode
+		}
+		live.store.Event(live.operation.TaskId, "message.tool", endData)
 	case "compaction_start":
 		live.compacting = true
 		live.gate.SetPurpose("compaction")
@@ -330,4 +338,32 @@ func deferredRunningIds(call *DeferredToolCall) map[string]bool {
 		return nil
 	}
 	return map[string]bool{call.ToolCallId: true}
+}
+
+func toolEventTarget(args any) string {
+	fields, _ := args.(map[string]any)
+	for _, key := range []string{"path", "file_path", "filePath", "target", "command", "pattern", "query", "url"} {
+		value, ok := fields[key].(string)
+		if ok && strings.TrimSpace(value) != "" {
+			return truncateRunes(strings.TrimSpace(value), 200)
+		}
+	}
+	return ""
+}
+
+func toolEventExitCode(result any) (int, bool) {
+	fields, _ := result.(map[string]any)
+	for _, key := range []string{"exitCode", "exit_code"} {
+		switch value := fields[key].(type) {
+		case float64:
+			return int(value), true
+		case int:
+			return value, true
+		case string:
+			if parsed, err := strconv.Atoi(value); err == nil {
+				return parsed, true
+			}
+		}
+	}
+	return 0, false
 }

@@ -90,20 +90,21 @@ type trajectoryTotals struct {
 	Timing       trajectoryTiming     `json:"timing"`
 	Context      trajectoryContext    `json:"context"`
 	Commands     []trajectoryCommand  `json:"commands"`
+	Paths        []trajectoryPath     `json:"paths"`
 	Files        trajectoryFiles      `json:"files"`
 }
 
 type trajectoryRequest struct {
 	Id            string                 `json:"id"`
 	Composition   *trajectoryComposition `json:"composition,omitempty"`
-	Model         string `json:"model"`
-	At            int64  `json:"at"`
-	ContextTokens int64  `json:"contextTokens"`
-	Input         int64  `json:"input"`
-	Output        int64  `json:"output"`
-	CacheRead     int64  `json:"cacheRead"`
-	CacheWrite    int64  `json:"cacheWrite"`
-	DurationMs    int64  `json:"durationMs"`
+	Model         string                 `json:"model"`
+	At            int64                  `json:"at"`
+	ContextTokens int64                  `json:"contextTokens"`
+	Input         int64                  `json:"input"`
+	Output        int64                  `json:"output"`
+	CacheRead     int64                  `json:"cacheRead"`
+	CacheWrite    int64                  `json:"cacheWrite"`
+	DurationMs    int64                  `json:"durationMs"`
 }
 
 type trajectoryEvent struct {
@@ -114,6 +115,12 @@ type trajectoryEvent struct {
 }
 
 type trajectoryCommand struct {
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Errors int    `json:"errors"`
+}
+
+type trajectoryPath struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
@@ -126,6 +133,7 @@ type trajectoryFiles struct {
 }
 
 type trajectoryAgent struct {
+	TaskId   string  `json:"taskId"`
 	NodeId   string  `json:"nodeId"`
 	Role     string  `json:"role"`
 	Instance string  `json:"instance"`
@@ -161,6 +169,7 @@ type trajectoryState struct {
 	loading        bool
 	failed         string
 	data           *conversationTrajectory
+	selected       int
 }
 
 func (s *shellState) ensureTrajectory() {
@@ -200,6 +209,7 @@ func (s *shellState) ensureTrajectory() {
 			return
 		}
 		state.data = &data
+		state.selected = len(data.Requests) - 1
 		state.failed = ""
 		state.loading = false
 		s.frame()

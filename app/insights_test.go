@@ -42,7 +42,7 @@ func TestInsightsModuleSummarizesTheLastSevenDays(t *testing.T) {
 	}
 	shell.openModule("insights")
 	tester := frames(ui.NewTester(shell.view, 1440, 900))
-	for _, wanted := range []string{"洞察概览窗口", "用量趋势窗口", "会话排行窗口", "总 tokens", "11.2k", "$0.280", "112", "缓存命中", "主控会话", "100 次"} {
+	for _, wanted := range []string{"洞察概览窗口", "用量趋势窗口", "会话排行窗口", "总 tokens", "11.2k", "$0.280", "112", "缓存命中", "主控会话", "100 次", "● 7 天", "○ 30 天"} {
 		if !tester.HasText(wanted) {
 			t.Fatalf("the insights dashboard shows %q, texts %q", wanted, tester.Texts())
 		}

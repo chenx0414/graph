@@ -39,7 +39,25 @@ type trajectoryInsights struct {
 type insightsState struct {
 	loading bool
 	failed  string
+	days    int
 	data    *trajectoryInsights
+}
+
+func (s *shellState) insightsDays() int {
+	if s.insights.days == 0 {
+		return 7
+	}
+	return s.insights.days
+}
+
+func (s *shellState) setInsightsDays(days int) {
+	if s.insights.days == days {
+		return
+	}
+	s.insights.days = days
+	s.insights.data = nil
+	s.insights.loading = false
+	s.ensureInsights()
 }
 
 func (s *shellState) ensureInsights() {
@@ -47,10 +65,14 @@ func (s *shellState) ensureInsights() {
 	if state.loading || state.data != nil {
 		return
 	}
+	days := state.days
+	if days == 0 {
+		days = 7
+	}
 	state.loading = true
 	state.failed = ""
 	go func() {
-		payload, err := s.api.get("/api/trajectory/insights?days=7")
+		payload, err := s.api.get("/api/trajectory/insights?days=" + strconv.Itoa(days))
 		if err != nil {
 			state.failed = "读不到洞察：" + err.Error()
 			state.loading = false

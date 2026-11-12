@@ -89,6 +89,12 @@ type TrajectoryEvent struct {
 }
 
 type TrajectoryCommand struct {
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Errors int    `json:"errors"`
+}
+
+type TrajectoryPath struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
@@ -104,6 +110,7 @@ type TrajectoryComposition struct {
 }
 
 type TrajectoryAgent struct {
+	TaskId   string  `json:"taskId"`
 	NodeId   string  `json:"nodeId"`
 	Role     string  `json:"role"`
 	Instance string  `json:"instance"`
@@ -141,6 +148,7 @@ type TrajectoryTotals struct {
 	Timing       TrajectoryTiming     `json:"timing"`
 	Context      TrajectoryContext    `json:"context"`
 	Commands     []TrajectoryCommand  `json:"commands"`
+	Paths        []TrajectoryPath     `json:"paths"`
 	Files        TrajectoryFiles      `json:"files"`
 }
 
@@ -181,16 +189,21 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 	invocations := trajectoryInvocations(store, trajectory.TaskId)
 	tools := trajectoryTools(store, trajectory.TaskId)
 	turns := []TrajectoryTurn{}
+	turnOperations := []map[string]bool{}
 	current := -1
 	for _, message := range messages {
 		if message.Role == "user" && message.Kind == "chat" {
 			turns = append(turns, TrajectoryTurn{Id: message.Id, Index: len(turns) + 1, StartedAt: message.CreatedAt, Status: "done",
 				ToolCalls: []TrajectoryTool{}, Invocations: []TrajectoryInvocation{}})
+			turnOperations = append(turnOperations, map[string]bool{})
 			current = len(turns) - 1
 			continue
 		}
 		if current < 0 {
 			continue
+		}
+		if message.OperationId != "" {
+			turnOperations[current][message.OperationId] = true
 		}
 		if message.CreatedAt > turns[current].EndedAt {
 			turns[current].EndedAt = message.CreatedAt
@@ -199,32 +212,58 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 			turns[current].Status = "running"
 		}
 	}
+	operationTurn := map[string]int{}
+	for index, operations := range turnOperations {
+		for operationId := range operations {
+			if _, ok := operationTurn[operationId]; !ok {
+				operationTurn[operationId] = index
+			}
+		}
+	}
+	used := make([]bool, len(invocations))
+	addInvocation := func(index int, invocation trajectoryInvocation, extendEnd bool) {
+		turns[index].Invocations = append(turns[index].Invocations, invocation.TrajectoryInvocation)
+		turns[index].Usage = addTrajectoryUsage(turns[index].Usage, invocation.Usage)
+		if invocation.Usage.ContextTokens > 0 {
+			turns[index].Usage.ContextTokens = invocation.Usage.ContextTokens
+		}
+		if invocation.Usage.FirstTokenMs > 0 && turns[index].Usage.FirstTokenMs == 0 {
+			turns[index].Usage.FirstTokenMs = invocation.Usage.FirstTokenMs
+		}
+		turns[index].Cost += invocation.Cost
+		turns[index].Model = invocation.Model
+		if extendEnd && invocation.Settled > turns[index].EndedAt {
+			turns[index].EndedAt = invocation.Settled
+		}
+	}
 	for index := range turns {
-		end := turns[index].EndedAt
 		next := int64(0)
 		if index+1 < len(turns) {
 			next = turns[index+1].StartedAt
 		}
-		for _, invocation := range invocations {
+		for position := range invocations {
+			if used[position] {
+				continue
+			}
+			if owner, ok := operationTurn[invocations[position].OperationId]; !ok || owner != index {
+				continue
+			}
+			used[position] = true
+			addInvocation(index, invocations[position], true)
+		}
+		for position := range invocations {
+			if used[position] {
+				continue
+			}
+			invocation := invocations[position]
 			if invocation.Dispatched < turns[index].StartedAt {
 				continue
 			}
 			if next > 0 && invocation.Dispatched >= next {
 				continue
 			}
-			turns[index].Invocations = append(turns[index].Invocations, invocation.TrajectoryInvocation)
-			turns[index].Usage = addTrajectoryUsage(turns[index].Usage, invocation.Usage)
-			if invocation.Usage.ContextTokens > 0 {
-				turns[index].Usage.ContextTokens = invocation.Usage.ContextTokens
-			}
-			if invocation.Usage.FirstTokenMs > 0 && turns[index].Usage.FirstTokenMs == 0 {
-				turns[index].Usage.FirstTokenMs = invocation.Usage.FirstTokenMs
-			}
-			turns[index].Cost += invocation.Cost
-			turns[index].Model = invocation.Model
-			if invocation.Settled > end {
-				end = invocation.Settled
-			}
+			used[position] = true
+			addInvocation(index, invocation, true)
 		}
 		for _, tool := range tools {
 			if tool.At < turns[index].StartedAt {
@@ -235,13 +274,19 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 			}
 			turns[index].ToolCalls = append(turns[index].ToolCalls, tool)
 		}
-		if turns[index].Status == "done" && end > 0 {
-			turns[index].EndedAt = end
-		}
 		if turns[index].EndedAt > turns[index].StartedAt {
 			turns[index].DurationMs = turns[index].EndedAt - turns[index].StartedAt
 		}
 		turns[index].CacheHitRate = trajectoryCacheHitRate(turns[index].Usage)
+	}
+	if len(turns) > 0 {
+		last := len(turns) - 1
+		for position := range invocations {
+			if used[position] {
+				continue
+			}
+			addInvocation(last, invocations[position], false)
+		}
 	}
 	trajectory.Turns = turns
 	trajectory.Totals = trajectoryTotals(turns)
@@ -291,14 +336,16 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 	trajectory.Totals.Compactions = int(kernelInt(kernelRow(store.Db, "SELECT COUNT(*) AS count FROM events WHERE task_id=? AND type='session.compacted'", trajectory.TaskId)["count"]))
 	trajectory.Requests = trajectoryRequests(invocations)
 	trajectory.Events = trajectoryContextEvents(store, trajectory.TaskId)
-	trajectory.Totals.Commands = trajectoryCommands(store, conversationId)
+	targets, toolErrors, _ := trajectoryToolEvents(store, trajectory.TaskId)
+	trajectory.Totals.Commands = trajectoryCommands(store, conversationId, toolErrors)
+	trajectory.Totals.Paths = trajectoryPaths(targets)
 	trajectory.Totals.Files = trajectoryFiles(store, trajectory.TaskId)
 	trajectory.Composition = trajectoryComposition(store, conversationId, trajectory.TaskId)
 	if len(trajectory.Requests) > 0 && trajectory.Requests[len(trajectory.Requests)-1].Composition == nil {
 		composition := trajectory.Composition
 		trajectory.Requests[len(trajectory.Requests)-1].Composition = &composition
 	}
-	trajectory.Agents = trajectoryAgents(store, trajectory.TaskId)
+	trajectory.Agents = trajectoryAgents(store, conversationId, trajectory.TaskId)
 	return trajectory
 }
 

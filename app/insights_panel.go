@@ -37,7 +37,18 @@ func (s *shellState) insightsKPICard(ctx *ui.Context) {
 	ui.Row(ctx).FillWidth().Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
 		ui.Icon(ctx, iconTrend).Size(gwtheme.Icon, gwtheme.Icon).TextColor(t.Muted)
 		ui.Spacer(ctx)
-		kit.Text(ctx, "近 7 天", t.Text.Xs).TextColor(t.Muted)
+		label := func(days int) string {
+			if s.insightsDays() == days {
+				return "● " + strconv.Itoa(days) + " 天"
+			}
+			return "○ " + strconv.Itoa(days) + " 天"
+		}
+		if kit.Button(ctx, label(7), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+			s.setInsightsDays(7)
+		}
+		if kit.Button(ctx, label(30), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
+			s.setInsightsDays(30)
+		}
 	})
 	trajectoryStatGrid(ctx, [][][2]string{
 		{{"总 tokens", formatTrajectoryTokens(totals.Tokens)}, {"成本", formatTrajectoryCost(totals.Cost)}, {"请求", strconv.Itoa(totals.Requests)}},
@@ -78,9 +89,17 @@ func (s *shellState) insightsDaysCard(ctx *ui.Context) {
 		}
 	})
 	labels := ui.Row(ctx).FillWidth().Gap(th.Space(1))
+	step := 1
+	if len(data.Days) > 8 {
+		step = (len(data.Days) + 6) / 7
+	}
 	labels.Children(func() {
-		for _, day := range data.Days {
-			kit.Text(ctx, formatInsightDate(day.Date), t.Text.Xs).Grow(1).TextColor(t.Muted)
+		for index, day := range data.Days {
+			label := ""
+			if index%step == 0 || index == len(data.Days)-1 {
+				label = formatInsightDate(day.Date)
+			}
+			kit.Text(ctx, label, t.Text.Xs).Grow(1).TextColor(t.Muted).SingleLine()
 		}
 	})
 	if len(data.Days) > 0 {

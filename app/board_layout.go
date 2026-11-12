@@ -134,6 +134,8 @@ func boardPanelTitle(kind string) string {
 		return "请求浏览"
 	case "trajectory-agents":
 		return "Agent 网络"
+	case "trajectory-request-detail":
+		return "请求详情"
 	case "insights":
 		return "洞察概览"
 	case "insights-kpi":
@@ -315,7 +317,7 @@ func (s *shellState) openModule(kind string) {
 		s.boardScrollTop = true
 		kinds := []string{"trajectory-summary", "trajectory-tokens", "trajectory-timing", "trajectory-context",
 			"trajectory-trend", "trajectory-events", "trajectory-commands", "trajectory-files",
-			"trajectory-composition", "trajectory-requests", "trajectory-agents"}
+			"trajectory-composition", "trajectory-requests", "trajectory-agents", "trajectory-request-detail"}
 		panels := make([]boardPanel, 0, len(kinds))
 		for _, panelKind := range kinds {
 			panels = append(panels, boardPanel{ID: panelKind, Kind: panelKind})

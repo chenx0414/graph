@@ -41,6 +41,8 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.trajectoryRequestsCard(ctx)
 	case "trajectory-agents":
 		s.trajectoryAgentsCard(ctx)
+	case "trajectory-request-detail":
+		s.trajectoryRequestDetailCard(ctx)
 	case "insights-kpi":
 		s.insightsKPICard(ctx)
 	case "insights-days":

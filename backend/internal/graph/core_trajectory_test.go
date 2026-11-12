@@ -47,6 +47,9 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	invocation("v2", "op2", 40, 10, 30, 10, `{"total":0.01}`, 20000, 22000)
 	exec(`INSERT INTO tool_calls(instance_id,task_id,node_id,role,tool,ms,is_error,created_at)
 	      VALUES('i1','t1','n1','worker','bash',4000,0,4000)`)
+	exec(`UPDATE messages SET data='{"toolCallId":"c1","tool":"bash"}' WHERE id='t1'`)
+	exec(`INSERT INTO events(task_id,type,data,timestamp) VALUES('t1','message.tool','{"toolCallId":"c1","phase":"start","toolName":"bash","target":"src/main.go","ordinal":1}',4000)`)
+	exec(`INSERT INTO events(task_id,type,data,timestamp) VALUES('t1','message.tool','{"toolCallId":"c1","phase":"end","toolName":"bash","isError":true,"exitCode":1,"ordinal":1}',8000)`)
 	exec(`UPDATE operations SET system_prompt='you are an agent',tool_declarations='[{"name":"bash"}]' WHERE id='op2'`)
 
 	trajectory := BuildConversationTrajectory(store, "c1")
@@ -93,8 +96,11 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	if len(trajectory.Requests) != 2 || trajectory.Requests[0].ContextTokens != 400 || trajectory.Requests[1].Id != "v2" {
 		t.Fatalf("requests %+v", trajectory.Requests)
 	}
-	if len(totals.Commands) != 1 || totals.Commands[0].Name != "ls" || totals.Commands[0].Count != 1 {
+	if len(totals.Commands) != 1 || totals.Commands[0].Name != "ls" || totals.Commands[0].Count != 1 || totals.Commands[0].Errors != 1 {
 		t.Fatalf("commands %+v", totals.Commands)
+	}
+	if len(totals.Paths) != 1 || totals.Paths[0].Name != "main.go" || totals.Paths[0].Count != 1 {
+		t.Fatalf("paths %+v", totals.Paths)
 	}
 	composition := trajectory.Composition
 	if composition.SystemPrompt != 4 || composition.ToolDefinitions != 5 {
@@ -103,7 +109,7 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	if composition.UserMessages != 4 || composition.AssistantReply != 4 || composition.ToolCalls != 0 {
 		t.Fatalf("composition messages %+v", composition)
 	}
-	if len(trajectory.Agents) != 1 || trajectory.Agents[0].NodeId != "n1" || trajectory.Agents[0].Requests != 2 || trajectory.Agents[0].Tokens != 340 {
+	if len(trajectory.Agents) != 1 || trajectory.Agents[0].TaskId != "t1" || trajectory.Agents[0].NodeId != "n1" || trajectory.Agents[0].Requests != 2 || trajectory.Agents[0].Tokens != 340 {
 		t.Fatalf("agents %+v", trajectory.Agents)
 	}
 
