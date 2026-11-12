@@ -33,7 +33,6 @@ func (s *shellState) view(ctx *ui.Context) {
 
 func (s *shellState) titleBand(ctx *ui.Context) {
 	th := ctx.Theme()
-	muted := gwtheme.Of(ctx).Muted
 	band := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, cardGap, 0, cardGap).AlignItems(ui.Center)
 	band.Children(func() {
 		listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
@@ -49,8 +48,8 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			if active := s.active(); active != nil && active.active != "" {
 				title = s.titleOf(active.active)
 			}
-			ui.Icon(ctx, iconChat).Size(gwtheme.Icon, gwtheme.Icon).TextColor(muted)
-			kit.Text(ctx, title, gwtheme.Of(ctx).Text.Base).FontWeight(600).SingleLine().Ellipsis("…").Grow(1)
+			kit.Text(ctx, title, gwtheme.Of(ctx).Text.Lg).FontWeight(600).SingleLine().Ellipsis("…").Grow(1).
+				Label("对话标题名")
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
 		ui.Row(ctx).Grow(1.35).FillHeight().Children(func() {

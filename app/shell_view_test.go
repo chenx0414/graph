@@ -411,3 +411,22 @@ func TestTheMainAgentCardLooksSelectedWhenItsConversationIsOpen(t *testing.T) {
 		t.Fatalf("the open main agent card must darken: selected %d inactive %d", selected, inactive)
 	}
 }
+
+func TestTheMainAgentTitleAlignsWithTheChatAndIsLarger(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	title, ok := tester.Find("对话标题名")
+	if !ok {
+		t.Fatalf("the chat title never rendered, texts %q", tester.Texts())
+	}
+	body, ok := tester.Find("来自主控")
+	if !ok {
+		t.Fatalf("the chat body never rendered, texts %q", tester.Texts())
+	}
+	if delta := title.X - body.X; delta < -1 || delta > 1 {
+		t.Fatalf("the title starts at %v, the chat text at %v", title.X, body.X)
+	}
+	if title.H <= body.H {
+		t.Fatalf("the title is not larger: %v against %v", title.H, body.H)
+	}
+}

@@ -155,7 +155,7 @@ func (s *shellState) ensureResources() {
 
 func (s *shellState) titleOf(id string) string {
 	if id != "" && id == s.supervisorID {
-		return "main agent"
+		return "Main Agent"
 	}
 	for _, conversation := range s.conversations {
 		if conversation.ID == id {
