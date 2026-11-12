@@ -93,9 +93,19 @@ func (s *shellState) load() {
 	if !s.loadRows() {
 		return
 	}
-	if len(s.conversations) > 0 {
-		s.selectConversation(s.conversations[0].ID)
+	id := s.supervisorID
+	if id == "" && len(s.conversations) > 0 {
+		id = s.conversations[0].ID
 	}
+	if id == "" {
+		return
+	}
+	s.selectConversation(id)
+	s.chatMu.Lock()
+	if s.chat != nil {
+		s.chat.focusComposer = true
+	}
+	s.chatMu.Unlock()
 }
 
 func (s *shellState) projectNames() []string {
@@ -140,6 +150,9 @@ func (s *shellState) ensureResources() {
 }
 
 func (s *shellState) titleOf(id string) string {
+	if id != "" && id == s.supervisorID {
+		return "main agent"
+	}
 	for _, conversation := range s.conversations {
 		if conversation.ID == id {
 			if project := strings.TrimSpace(conversation.ProjectID); project != "" {

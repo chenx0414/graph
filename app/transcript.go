@@ -128,6 +128,7 @@ type chatState struct {
 	window          *mygo.Window
 	api             apiClient
 	draft           string
+	focusComposer   bool
 	active          string
 	status          string
 	messages        []transcriptMessage

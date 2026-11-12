@@ -347,6 +347,10 @@ func (c *chatState) composer(ctx *ui.Context) {
 		group.Children(func() {
 			field := kit.Input(ctx, &c.draft, kit.InputOpts{Placeholder: "输入消息…", Bare: true})
 			field.Label("消息").Grow(1).PaddingX(th.Space(3))
+			if c.focusComposer {
+				field.Focus()
+				c.focusComposer = false
+			}
 			send := ui.Box(ctx).Size(th.Space(9), th.Space(9)).Radius(t.Radius.Full).Background(t.Primary).Center().
 				Label("发送").Tooltip("发送").Focusable()
 			send.Margin(0, th.Space(1), th.Space(1), 0)

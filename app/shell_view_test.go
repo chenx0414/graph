@@ -23,6 +23,8 @@ func fourPaneShell(t *testing.T) *shellState {
 				{"id":"p2","title":"mygo","projectId":"mygo","role":"project","archivedAt":null},
 				{"id":"old1","title":"旧聊天","projectId":"13-Graph","role":"legacy","archivedAt":null}
 			]`))
+		case "/api/conversations/g1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自主控"}],"tasks":[{"id":"t1","request":"实现四栏页面","status":"running","phase":"executing","nodes":[{"id":"planner","role":"worker","kind":"agent","status":"succeeded"},{"id":"worker","role":"worker","kind":"agent","status":"running"}]}]}`))
 		case "/api/conversations/p1":
 			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话一"}],"tasks":[{"id":"t1","request":"实现四栏页面","status":"running","phase":"executing","nodes":[{"id":"planner","role":"worker","kind":"agent","status":"succeeded"},{"id":"worker","role":"worker","kind":"agent","status":"running"}]}]}`))
 		case "/api/conversations/p2":
@@ -72,8 +74,8 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	if !tester.HasText("项目概览") {
 		t.Fatalf("the whiteboard must present the overview module, texts %q", tester.Texts())
 	}
-	if !tester.HasText("来自会话一") {
-		t.Fatalf("the chat pane must show the active conversation, texts %q", tester.Texts())
+	if !tester.HasText("来自主控") {
+		t.Fatalf("the chat pane must open the main agent conversation, texts %q", tester.Texts())
 	}
 	if !tester.HasText("main agent") {
 		t.Fatalf("the conversation area must pin the main agent, texts %q", tester.Texts())
@@ -89,8 +91,10 @@ func TestTheMainAgentRowStandsOutFromTheProjects(t *testing.T) {
 	if !tester.HasText("main agent") {
 		t.Fatalf("the main agent row must read as the agent, texts %q", tester.Texts())
 	}
-	if tester.HasText("主控") || tester.HasText("常驻") {
-		t.Fatalf("the main agent row must carry no caption, texts %q", tester.Texts())
+	for _, text := range tester.Texts() {
+		if text == "主控 · 常驻" {
+			t.Fatalf("the main agent row must carry no caption, texts %q", tester.Texts())
+		}
 	}
 	if ink := countColor(tester.Image(), gwtheme.Light().Foreground); ink < 100 {
 		t.Fatalf("the octopus must be drawn in theme ink, %d ink pixels", ink)
@@ -100,6 +104,17 @@ func TestTheMainAgentRowStandsOutFromTheProjects(t *testing.T) {
 	}
 	if dot := countColor(tester.Image(), gwtheme.Light().Success); dot != 0 {
 		t.Fatalf("the main agent row carries no status dot, %d green pixels", dot)
+	}
+}
+
+func TestTheAppFocusesTheComposerOnOpen(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tester.Type("你好")
+	frames(tester)
+	active := state.active()
+	if active == nil || active.draft != "你好" {
+		t.Fatalf("the composer must be focused when the app opens, active %v", active)
 	}
 }
 

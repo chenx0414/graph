@@ -43,6 +43,42 @@ func TestTheConversationListShowsOneConversationPerProject(t *testing.T) {
 	}
 }
 
+func TestTheAppOpensTheMainAgentConversation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/conversations":
+			w.Write([]byte(`[
+				{"id":"g1","title":"Main","role":"global","archivedAt":null},
+				{"id":"p1","title":"13-Graph","projectId":"13-Graph","role":"project","archivedAt":null}
+			]`))
+		case "/api/conversations/g1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"主控在这里"}]}`))
+		case "/api/conversations/p1":
+			w.Write([]byte(`{"messages":[{"role":"assistant","text":"来自会话一"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	state := newShellState(server.URL, "tok")
+	state.load()
+	deadline := time.Now().Add(2 * time.Second)
+	for (state.activeID != "g1" || state.active() == nil) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if state.activeID != "g1" {
+		t.Fatalf("the app opens the main agent conversation, active %q", state.activeID)
+	}
+	tester := frames(ui.NewTester(state.view, 1000, 640))
+	if !tester.HasText("主控在这里") {
+		t.Fatalf("the pane shows the main agent conversation, texts %q", tester.Texts())
+	}
+	if !tester.HasText("当前会话 · main agent") {
+		t.Fatalf("the board names the open main agent conversation, texts %q", tester.Texts())
+	}
+}
+
 func TestShellSidebarSwitchesConversation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
