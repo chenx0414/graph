@@ -10,27 +10,59 @@ import (
 
 func (s *shellState) view(ctx *ui.Context) {
 	applyTheme(ctx)
-	t := gwtheme.Of(ctx)
-	ui.Row(ctx).Fill().Background(t.Window).Children(func() {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	ui.Row(ctx).Fill().Background(pageBackdrop(t)).Children(func() {
 		s.rail(ctx)
-		ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Children(func() {
-			card := ui.Row(ctx).Grow(1).FillHeight().Background(t.Background).
-				Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
-			kit.Elevate(ctx, card, shellShadow)
-			card.Children(func() {
-				s.conversationPane(ctx)
-				s.columnDivider(ctx)
-				s.chatPane(ctx)
-				s.columnDivider(ctx)
-				s.whiteboard(ctx)
+		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
+			s.titleBand(ctx)
+			ui.Box(ctx).FillWidth().Height(th.Space(1))
+			ui.Row(ctx).Grow(1).FillWidth().Padding(0, cardGap, cardGap, cardGap).Children(func() {
+				card := ui.Row(ctx).Grow(1).FillHeight().Background(t.Background).
+					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
+				kit.Elevate(ctx, card, shellShadow)
+				card.Children(func() {
+					s.conversationPane(ctx)
+					s.columnDivider(ctx)
+					s.chatPane(ctx)
+					s.columnDivider(ctx)
+					s.whiteboard(ctx)
+				})
 			})
+		})
+	})
+}
+
+func (s *shellState) titleBand(ctx *ui.Context) {
+	th := ctx.Theme()
+	muted := gwtheme.Of(ctx).Muted
+	band := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, cardGap, 0, cardGap).AlignItems(ui.Center)
+	band.Children(func() {
+		listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
+			AlignItems(ui.Center).Label("会话列表标题").DragWindow()
+		listTitle.Children(func() {
+			kit.Text(ctx, "Graph", gwtheme.Of(ctx).Text.Lg).FontWeight(600).Grow(1).SingleLine()
+			kit.Text(ctx, strconv.Itoa(len(s.conversations))+" 个会话", gwtheme.Of(ctx).Text.Xs).TextColor(muted)
+		})
+		ui.Box(ctx).Width(gwtheme.Stroke)
+		chatTitle := ui.Row(ctx).Grow(1).FillHeight().Padding(0, th.Space(4), 0, th.Space(4)).
+			AlignItems(ui.Center).Label("对话标题").DragWindow()
+		chatTitle.Children(func() {
+			title := "Graph"
+			if active := s.active(); active != nil && active.active != "" {
+				title = s.titleOf(active.active)
+			}
+			kit.Text(ctx, title, gwtheme.Of(ctx).Text.Base).FontWeight(600).SingleLine().Ellipsis("…").Grow(1)
+		})
+		ui.Box(ctx).Width(gwtheme.Stroke)
+		ui.Row(ctx).Grow(1.35).FillHeight().Children(func() {
+			s.boardTabBar(ctx)
 		})
 	})
 }
 
 func (s *shellState) columnDivider(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
-	ui.Box(ctx).Width(gwtheme.Hairline).FillHeight().Background(t.Border)
+	ui.Box(ctx).Width(gwtheme.Stroke).FillHeight().Background(columnLine(t))
 }
 
 func (s *shellState) rail(ctx *ui.Context) {
@@ -64,22 +96,14 @@ func (s *shellState) rail(ctx *ui.Context) {
 
 func (s *shellState) conversationPane(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	pane := ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Sidebar)
+	pane := ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Sidebar).
+		Padding(th.Space(1), th.Space(2), th.Space(2), th.Space(2)).Gap(th.Space(0.5))
 	pane.Children(func() {
-		header := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(th.Space(2), th.Space(3), 0, th.Space(3)).
-			Gap(th.Space(2)).AlignItems(ui.Center).Label("会话列表标题").DragWindow()
-		header.Children(func() {
-			kit.Text(ctx, "Graph", t.Text.Lg).FontWeight(600).Grow(1).SingleLine()
-			kit.Text(ctx, strconv.Itoa(len(s.conversations))+" 个会话", t.Text.Xs).TextColor(t.Muted)
-		})
-		body := ui.Column(ctx).Grow(1).Padding(th.Space(1), th.Space(2), th.Space(2), th.Space(2)).Gap(th.Space(0.5))
-		body.Children(func() {
-			s.mainAgentCard(ctx)
-			if s.status != "" && len(s.conversations) == 0 {
-				kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
-			}
-			s.conversationList(ctx)
-		})
+		s.mainAgentCard(ctx)
+		if s.status != "" && len(s.conversations) == 0 {
+			kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
+		}
+		s.conversationList(ctx)
 	})
 }
 
@@ -103,7 +127,10 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 	}
 	row.Children(func() {
 		octoLoader(ctx)
-		kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
+		name := ui.Row(ctx).Label("main agent 名称").Focusable()
+		name.Children(func() {
+			kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
+		})
 	})
 	row.Margin(0, 0, th.Space(1), 0)
 	kit.Separator(ctx, false).Margin(0, 0, th.Space(1.5), 0)
@@ -135,26 +162,28 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 }
 
 func (s *shellState) chatPane(ctx *ui.Context) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
+	t := gwtheme.Of(ctx)
 	pane := ui.Column(ctx).Grow(1).MinWidth(300).FillHeight().Background(t.Background)
 	pane.Children(func() {
 		active := s.active()
-		header := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(th.Space(2), th.Space(4), 0, th.Space(4)).
-			Gap(th.Space(2)).AlignItems(ui.Center).Label("对话标题").DragWindow()
-		header.Children(func() {
-			title := "Graph"
-			if active != nil && active.active != "" {
-				title = s.titleOf(active.active)
-			}
-			kit.Text(ctx, title, t.Text.Base).FontWeight(600).SingleLine().Ellipsis("…").Grow(1)
-		})
-		body := ui.Column(ctx).Grow(1)
-		body.Children(func() {
-			if active == nil {
-				kit.Text(ctx, "从左侧选择一个项目", t.Text.Base).TextColor(t.Muted).Padding(th.Space(5))
-				return
-			}
-			active.view(ctx)
+		if active == nil {
+			kit.Text(ctx, "从左侧选择一个项目", t.Text.Base).TextColor(t.Muted).Padding(ctx.Theme().Space(5))
+			return
+		}
+		active.view(ctx)
+	})
+}
+
+func (s *shellState) whiteboard(ctx *ui.Context) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	column := ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Background(t.Sidebar).
+		Padding(th.Space(1.5), th.Space(1.5), th.Space(1.5), th.Space(1.5))
+	column.Children(func() {
+		browser := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background).
+			Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
+		kit.Elevate(ctx, browser, browserShadow)
+		browser.Children(func() {
+			s.boardPageView(ctx)
 		})
 	})
 }

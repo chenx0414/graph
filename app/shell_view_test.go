@@ -154,10 +154,10 @@ func TestTheShellFloatsOnAShadow(t *testing.T) {
 		at := img.PixOffset(x, y)
 		return (int(img.Pix[at]) + int(img.Pix[at+1]) + int(img.Pix[at+2])) / 3
 	}
-	background := luminance(5, 450)
+	backdrop := luminance(4, 450)
 	belowCard := luminance(700, 894)
-	if belowCard >= background-4 {
-		t.Fatalf("the shell drops a shadow on the window, background %d below %d", background, belowCard)
+	if belowCard >= backdrop-4 {
+		t.Fatalf("the shell drops a shadow on the backdrop, backdrop %d below %d", backdrop, belowCard)
 	}
 	send, ok := tester.Find("发送")
 	if !ok {
@@ -165,7 +165,7 @@ func TestTheShellFloatsOnAShadow(t *testing.T) {
 	}
 	composerBottom := int(send.Y+send.H) + 15
 	composerShadow := luminance(int(send.X+send.W/2), composerBottom)
-	if composerShadow >= background-4 {
+	if composerShadow >= 250 {
 		t.Fatalf("the composer sits above the chat with its own shadow, %d at y %d", composerShadow, composerBottom)
 	}
 }
@@ -205,9 +205,6 @@ func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 	}
 	if !tester.HasText("白板") || !tester.HasText("新建标签页") {
 		t.Fatalf("the board offers its tab bar, texts %q", tester.Texts())
-	}
-	if dots := countColor(tester.Image(), boardDot); dots < 100 {
-		t.Fatalf("the dotted grid stays painted, %d dots", dots)
 	}
 	if err := tester.Click("新建标签页"); err != nil {
 		t.Fatalf("open a tab: %v", err)

@@ -7,9 +7,8 @@ import (
 )
 
 var (
-	boardDot   = gwtheme.Light().Grid
 	cardGap    = float32(8)
-	railWidth  = float32(72)
+	railWidth  = float32(56)
 	listWidth  = float32(236)
 	bandHeight = float32(44)
 	cardRadius = float32(12)
@@ -27,8 +26,25 @@ var composerShadow = gwtheme.Elevation{
 	{Y: 2, Blur: 5, Spread: 0, Alpha: 0x0d / 255.0},
 }
 
+var browserShadow = gwtheme.Elevation{
+	{Y: 0, Blur: 0, Spread: 1, Alpha: 0x11 / 255.0},
+	{Y: 6, Blur: 20, Spread: -2, Alpha: 0x14 / 255.0},
+	{Y: 1, Blur: 2, Spread: -1, Alpha: 0x14 / 255.0},
+}
+
 var chipShadow = gwtheme.Elevation{
 	{Y: 1, Blur: 2, Spread: -1, Alpha: 0x14 / 255.0},
+}
+
+func pageBackdrop(t gwtheme.Tokens) ui.Color {
+	if t.Dark {
+		return palette.Neutral950.Color()
+	}
+	return palette.Neutral200.Color().Mix(palette.White.Color(), 0.35)
+}
+
+func columnLine(t gwtheme.Tokens) ui.Color {
+	return t.Ring
 }
 
 func userBubble(t gwtheme.Tokens) ui.Color {

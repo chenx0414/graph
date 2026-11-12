@@ -100,7 +100,7 @@ func (s *shell) openNative() {
 		MinHeight:            640,
 		StateKey:             "native",
 		TitleBarStyle:        mygo.TitleBarHidden,
-		TrafficLightPosition: &mygo.Point{X: 14, Y: 14},
+		TrafficLightPosition: &mygo.Point{X: 10, Y: 14},
 		Content:              ui.View(state.view),
 	})
 	state.window = window

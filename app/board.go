@@ -44,13 +44,6 @@ type boardDrag struct {
 	dy      float32
 }
 
-func (s *shellState) whiteboard(ctx *ui.Context) {
-	ui.Column(ctx).Grow(1.35).MinWidth(320).FillHeight().Children(func() {
-		s.boardTabBar(ctx)
-		s.boardPageView(ctx)
-	})
-}
-
 func (s *shellState) boardTabBar(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	bar := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, th.Space(1)).
@@ -91,9 +84,6 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 		s.board.splits = map[string]ui.Rect{}
 	}
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background)
-	card.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawBoardGrid(p, r, t.Grid)
-	})
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) > 0 {
 			s.boardPanelView(ctx, &page.Panels[0], false)
@@ -204,15 +194,6 @@ func (s *shellState) resizeBoardSplit(node *boardNode, path string, gap int, dx,
 	}
 	node.Children[gap].Weight = proposed
 	node.Children[gap+1].Weight = left + right - proposed
-}
-
-func drawBoardGrid(p *ui.Painter, r ui.Rect, color ui.Color) {
-	const step, size = float32(26), float32(2)
-	for x := r.X + 13; x < r.X+r.W; x += step {
-		for y := r.Y + 13; y < r.Y+r.H; y += step {
-			p.Fill(ui.Rect{X: x - size/2, Y: y - size/2, W: size, H: size}, color, 0)
-		}
-	}
 }
 
 func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size float32, action func()) ui.Element {

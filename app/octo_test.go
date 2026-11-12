@@ -107,7 +107,7 @@ func TestTheMainAgentRowCentersItsContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("the octopus must sit in the row, texts %q", tester.Texts())
 	}
-	text, ok := tester.Find("main agent")
+	text, ok := tester.Find("main agent 名称")
 	if !ok {
 		t.Fatalf("the row must name its agent, texts %q", tester.Texts())
 	}
