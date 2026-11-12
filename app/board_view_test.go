@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -227,5 +228,23 @@ func TestLoadingAnOldBoardAddsTheTrajectoryAndInsightsCards(t *testing.T) {
 	}
 	if kinds["overview"] || !kinds["trajectory"] || !kinds["insights"] {
 		t.Fatalf("the old board must trade overview for trajectory and insights, panels %+v", page.Panels)
+	}
+}
+
+func TestACardRevealsItsHeaderAfterThePointerRestsOnIt(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	if !ok {
+		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
+	}
+	if tester.HasText("在新标签页打开") {
+		t.Fatalf("the card header shows before the pointer rests, texts %q", tester.Texts())
+	}
+	tester.Move(card.X+card.W/2, card.Y+card.H/2)
+	tester.Advance(400 * time.Millisecond)
+	frames(tester)
+	if !tester.HasText("在新标签页打开") {
+		t.Fatalf("the card header never appeared, texts %q", tester.Texts())
 	}
 }

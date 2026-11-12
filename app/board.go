@@ -2,6 +2,7 @@ package main
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
@@ -24,15 +25,16 @@ var railItems = []railItem{
 }
 
 type boardState struct {
-	pages  []boardPage
-	active int
-	path   string
-	drag   *boardDrag
-	rects  map[string]ui.Rect
-	splits map[string]ui.Rect
-	press  string
-	pressX float32
-	pressY float32
+	pages      []boardPage
+	active     int
+	path       string
+	drag       *boardDrag
+	rects      map[string]ui.Rect
+	splits     map[string]ui.Rect
+	press      string
+	pressX     float32
+	pressY     float32
+	hoverSince map[string]time.Time
 }
 
 type boardDrag struct {
@@ -263,22 +265,35 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := kit.Panel(ctx, t.Radius.Xl)
 	card.Fill().Label(boardPanelTitle(panel.Kind) + "窗口")
+	card.Draw(func(p *ui.Painter, r ui.Rect) {
+		if freeform {
+			s.board.rects[panel.ID] = r
+		}
+	})
+	card.OnClick(func() {})
+	showHeader := false
+	if card.Hovered() {
+		if s.board.hoverSince == nil {
+			s.board.hoverSince = map[string]time.Time{}
+		}
+		if _, seen := s.board.hoverSince[panel.ID]; !seen {
+			s.board.hoverSince[panel.ID] = ctx.Now()
+			ctx.After(250 * time.Millisecond)
+			s.scheduleFrame(260 * time.Millisecond)
+		}
+		showHeader = !ctx.Now().Before(s.board.hoverSince[panel.ID].Add(250 * time.Millisecond))
+	} else {
+		delete(s.board.hoverSince, panel.ID)
+	}
 	if freeform {
-		card.Draw(func(p *ui.Painter, r ui.Rect) { s.board.rects[panel.ID] = r })
 		card.Drag(panel.ID).Cursor(ui.CursorGrab)
 		if s.board.drag != nil && s.board.drag.panelID == panel.ID {
 			card.Cursor(ui.CursorGrabbing)
 		}
 	}
 	card.Children(func() {
-		showHeader := false
-		if px, py, over := card.PointerPosition(); over && py <= th.Space(7) {
-			showHeader = px > 0
-		}
 		if showHeader {
-			ui.Box(ctx).Absolute().Top(0).Left(0).Right(0).Height(th.Space(9)).Background(t.Background).IgnoreInput(true)
-			header := s.boardPanelHeader(ctx, panel, freeform)
-			header.Absolute().Top(0).Left(0).Right(0)
+			s.boardPanelHeader(ctx, panel, freeform)
 		}
 		body := ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
 		body.MaskLinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
