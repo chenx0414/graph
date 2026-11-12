@@ -53,7 +53,6 @@ func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
 		{ID: "overview", Kind: "overview"},
 		{ID: "tasks", Kind: "tasks"},
-		{ID: "history", Kind: "history"},
 		{ID: "artifacts", Kind: "artifacts"},
 	}
 }
@@ -64,10 +63,7 @@ func defaultBoardLayout() boardNode {
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "overview"}},
 			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "tasks"}},
 		}}},
-		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "history"}},
-			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
-		}}},
+		{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
 	}}
 }
 
@@ -191,6 +187,17 @@ func (s *shellState) loadBoard(stateDir string) {
 	}
 	for index := range s.board.pages {
 		page := &s.board.pages[index]
+		if page.Kind == "" {
+			kept := make([]boardPanel, 0, len(page.Panels))
+			for _, panel := range page.Panels {
+				if panel.Kind == "history" || panel.Kind == "conversation" {
+					removeBoardPanelFromLayout(&page.Layout, panel.ID)
+					continue
+				}
+				kept = append(kept, panel)
+			}
+			page.Panels = kept
+		}
 		if page.Kind == "" && len(page.Layout.Children) == 0 && page.Layout.Kind == "" {
 			page.Layout = layoutFromPanels(page.Panels)
 		}

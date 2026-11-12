@@ -310,14 +310,14 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	rects := map[string]ui.Rect{}
-	for _, kind := range []string{"overview", "tasks", "history", "artifacts"} {
+	for _, kind := range []string{"overview", "tasks", "artifacts"} {
 		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
 		if !ok {
 			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
 		}
 		rects[kind] = rect
 	}
-	names := []string{"overview", "tasks", "history", "artifacts"}
+	names := []string{"overview", "tasks", "artifacts"}
 	for first := 0; first < len(names); first++ {
 		for second := first + 1; second < len(names); second++ {
 			a, b := rects[names[first]], rects[names[second]]
@@ -326,11 +326,11 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 			}
 		}
 	}
-	if rects["overview"].X != rects["history"].X || rects["tasks"].X != rects["artifacts"].X {
-		t.Fatalf("the board keeps two fixed columns: %+v", rects)
+	if rects["overview"].Y != rects["tasks"].Y || rects["artifacts"].Y <= rects["tasks"].Y {
+		t.Fatalf("the board keeps the top row and stacks artifacts below it: %+v", rects)
 	}
-	if rects["overview"].Y != rects["tasks"].Y || rects["history"].Y != rects["artifacts"].Y {
-		t.Fatalf("the board keeps fixed rows: %+v", rects)
+	if rects["artifacts"].X != rects["overview"].X || rects["artifacts"].W <= rects["overview"].W {
+		t.Fatalf("artifacts span the board width: %+v", rects)
 	}
 }
 
@@ -352,7 +352,7 @@ func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	tester.Release(endX, endY)
 	frames(tester)
 	page := state.boardPage()
-	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "tasks" || leaves[1] != "overview" {
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 3 || leaves[0] != "tasks" || leaves[1] != "overview" || leaves[2] != "artifacts" {
 		t.Fatalf("a center drop swaps the two partitions, leaves %v", leaves)
 	}
 }
@@ -376,8 +376,8 @@ func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
 	frames(tester)
 	page := state.boardPage()
 	leaves := boardLeafIDs(&page.Layout)
-	if len(leaves) != 4 {
-		t.Fatalf("a split keeps every module on the board, leaves %v", leaves)
+	if len(leaves) != len(page.Panels) {
+		t.Fatalf("a split keeps every module on the board, leaves %v layout %+v rects %+v", leaves, page.Layout, state.board.rects)
 	}
 	seen := map[string]bool{}
 	for _, id := range leaves {
@@ -444,7 +444,7 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 	second := newShellState("http://127.0.0.1:1", "tok")
 	second.loadBoard(directory)
 	leaves := boardLeafIDs(&second.boardPage().Layout)
-	if len(leaves) != 4 || leaves[0] != "tasks" || leaves[1] != "overview" {
+	if len(leaves) != 3 || leaves[0] != "tasks" || leaves[1] != "overview" || leaves[2] != "artifacts" {
 		t.Fatalf("saved partitions not restored: leaves %v", leaves)
 	}
 }
@@ -491,6 +491,16 @@ func TestLoadingTheBoardDropsTheRemovedPages(t *testing.T) {
 	state.loadBoard(dir)
 	if len(state.board.pages) != 1 || state.board.pages[0].Kind != "" {
 		t.Fatalf("removed pages survived, pages %+v", state.board.pages)
+	}
+	for _, panel := range state.board.pages[0].Panels {
+		if panel.Kind == "history" || panel.Kind == "conversation" {
+			t.Fatalf("removed panel survived, panels %+v", state.board.pages[0].Panels)
+		}
+	}
+	for _, id := range boardLeafIDs(&state.board.pages[0].Layout) {
+		if id == "history" || id == "conversation" {
+			t.Fatalf("removed panel leaf survived, leaves %v", boardLeafIDs(&state.board.pages[0].Layout))
+		}
 	}
 	frames(ui.NewTester(state.view, 1440, 900))
 }
