@@ -16,7 +16,7 @@ type transcriptMessage struct {
 	Text      string `json:"text"`
 	State     string `json:"state"`
 	CreatedAt int64  `json:"createdAt"`
-	Data  struct {
+	Data      struct {
 		Tool       string `json:"tool"`
 		ToolCallID string `json:"toolCallId"`
 		Ordinal    int    `json:"ordinal"`
@@ -172,4 +172,3 @@ func newChatState(address, token string) *chatState {
 	state.list.FollowAnimation = &ui.Smooth
 	return state
 }
-

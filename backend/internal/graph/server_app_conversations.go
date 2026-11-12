@@ -146,6 +146,11 @@ func appAttachmentBytes(value any) []byte {
 	return nil
 }
 
+func (app *GraphApp) serveConversationTrajectory(w http.ResponseWriter, r *http.Request) {
+	conversationID := r.PathValue("conversationId")
+	writeJSON(w, http.StatusOK, app.runtime.Conversations().Trajectory(conversationID))
+}
+
 func (app *GraphApp) serveConversationHistory(w http.ResponseWriter, r *http.Request) {
 	conversationID := r.PathValue("conversationId")
 	query := NodeEntryQuery{}

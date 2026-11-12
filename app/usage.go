@@ -157,11 +157,11 @@ func planLabel(plan planRow) string {
 }
 
 type usageState struct {
-	api     apiClient
-	status  string
-	window  *mygo.Window
-	rows    usageSnapshot
-	list    ui.ListState
+	api    apiClient
+	status string
+	window *mygo.Window
+	rows   usageSnapshot
+	list   ui.ListState
 }
 
 func newUsageState(address, token string) *usageState {

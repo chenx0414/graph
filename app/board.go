@@ -18,6 +18,7 @@ var railItems = []railItem{
 	{"overview", "概览", iconHome},
 	{"conversation", "对话", iconChat},
 	{"history", "历史", iconClock},
+	{"trajectory", "轨迹", iconActivity},
 	{"tasks", "任务", iconDoc},
 	{"graph", "图谱", iconGraph},
 	{"capabilities", "能力", iconShare},

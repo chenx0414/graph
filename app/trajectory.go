@@ -1,0 +1,173 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+)
+
+type trajectoryUsage struct {
+	Input         int64 `json:"input"`
+	Output        int64 `json:"output"`
+	CacheRead     int64 `json:"cacheRead"`
+	CacheWrite    int64 `json:"cacheWrite"`
+	Total         int64 `json:"total"`
+	ContextTokens int64 `json:"contextTokens"`
+	FirstTokenMs  int64 `json:"firstTokenMs"`
+	DurationMs    int64 `json:"durationMs"`
+}
+
+type trajectoryTool struct {
+	Name    string `json:"name"`
+	Ms      int64  `json:"ms"`
+	IsError bool   `json:"isError"`
+	At      int64  `json:"at"`
+}
+
+type trajectoryInvocation struct {
+	Id         string          `json:"id"`
+	Model      string          `json:"model"`
+	Purpose    string          `json:"purpose"`
+	DurationMs int64           `json:"durationMs"`
+	Usage      trajectoryUsage `json:"usage"`
+	Cost       float64         `json:"cost"`
+}
+
+type trajectoryTurn struct {
+	Id           string                 `json:"id"`
+	Index        int                    `json:"index"`
+	StartedAt    int64                  `json:"startedAt"`
+	EndedAt      int64                  `json:"endedAt"`
+	DurationMs   int64                  `json:"durationMs"`
+	Status       string                 `json:"status"`
+	Model        string                 `json:"model"`
+	Usage        trajectoryUsage        `json:"usage"`
+	Cost         float64                `json:"cost"`
+	CacheHitRate float64                `json:"cacheHitRate"`
+	ToolCalls    []trajectoryTool       `json:"toolCalls"`
+	Invocations  []trajectoryInvocation `json:"invocations"`
+}
+
+type trajectoryTotals struct {
+	Turns        int     `json:"turns"`
+	ToolCalls    int     `json:"toolCalls"`
+	ToolErrors   int     `json:"toolErrors"`
+	Input        int64   `json:"input"`
+	Output       int64   `json:"output"`
+	CacheRead    int64   `json:"cacheRead"`
+	CacheWrite   int64   `json:"cacheWrite"`
+	TotalTokens  int64   `json:"totalTokens"`
+	Cost         float64 `json:"cost"`
+	DurationMs   int64   `json:"durationMs"`
+	CacheHitRate float64 `json:"cacheHitRate"`
+}
+
+type conversationTrajectory struct {
+	ConversationId string           `json:"conversationId"`
+	TaskId         string           `json:"taskId"`
+	Turns          []trajectoryTurn `json:"turns"`
+	Totals         trajectoryTotals `json:"totals"`
+}
+
+type trajectoryState struct {
+	conversationID string
+	loading        bool
+	failed         string
+	data           *conversationTrajectory
+}
+
+func (s *shellState) ensureTrajectory() {
+	id := s.activeID
+	if id == "" {
+		if active := s.active(); active != nil {
+			id = active.active
+		}
+	}
+	state := &s.trajectory
+	if id == "" {
+		state.failed = "先打开一个会话"
+		return
+	}
+	if state.loading || (state.data != nil && state.conversationID == id) {
+		return
+	}
+	state.loading = true
+	state.failed = ""
+	state.conversationID = id
+	go func() {
+		payload, err := s.api.get("/api/conversations/" + id + "/trajectory")
+		if err != nil {
+			state.failed = "读不到轨迹：" + err.Error()
+			state.loading = false
+			s.frame()
+			return
+		}
+		var data conversationTrajectory
+		if err := json.Unmarshal(payload, &data); err != nil {
+			state.failed = "轨迹格式不对"
+			state.loading = false
+			s.frame()
+			return
+		}
+		state.data = &data
+		state.failed = ""
+		state.loading = false
+		s.frame()
+	}()
+}
+
+func formatTrajectoryTokens(tokens int64) string {
+	switch {
+	case tokens >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
+	case tokens >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(tokens)/1_000)
+	}
+	return strconv.FormatInt(tokens, 10)
+}
+
+func formatTrajectoryDuration(ms int64) string {
+	switch {
+	case ms >= 60_000:
+		return fmt.Sprintf("%dm %02ds", ms/60_000, (ms%60_000)/1_000)
+	case ms >= 1_000:
+		return fmt.Sprintf("%.1fs", float64(ms)/1_000)
+	}
+	return strconv.FormatInt(ms, 10) + "ms"
+}
+
+func formatTrajectoryCost(cost float64) string {
+	if cost == 0 {
+		return "$0"
+	}
+	if cost < 0.01 {
+		return fmt.Sprintf("$%.4f", cost)
+	}
+	return fmt.Sprintf("$%.3f", cost)
+}
+
+func formatTrajectoryPercent(rate float64) string {
+	return strconv.FormatFloat(rate*100, 'f', 1, 64) + "%"
+}
+
+func trajectoryToolNames(tools []trajectoryTool) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return joinToolNames(names)
+}
+
+func joinToolNames(names []string) string {
+	out := ""
+	for index, name := range names {
+		if index > 0 {
+			out += " · "
+		}
+		out += name
+	}
+	return out
+}

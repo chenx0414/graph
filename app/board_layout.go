@@ -110,6 +110,8 @@ func boardPanelTitle(kind string) string {
 		return "对话信息"
 	case "history":
 		return "历史记录"
+	case "trajectory":
+		return "轨迹量化"
 	case "tasks":
 		return "任务清单"
 	case "graph":
@@ -338,6 +340,8 @@ func (s *shellState) ensureBoardPageData() {
 		}
 	case "graph":
 		s.ensureGraph()
+	case "trajectory":
+		s.ensureTrajectory()
 	}
 }
 

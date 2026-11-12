@@ -55,3 +55,5 @@ const schemaV54 = "\n        CREATE TABLE conversation_goals_next(\n          co
 const schemaV55 = "\n        ALTER TABLE conversation_goals ADD COLUMN acceptance TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_id TEXT NOT NULL DEFAULT '';\n        ALTER TABLE conversation_goals ADD COLUMN graph_owner_task TEXT NOT NULL DEFAULT '';\n        PRAGMA user_version=55;"
 
 const schemaV57 = "\n        ALTER TABLE invocations ADD COLUMN dispatched_at INTEGER NOT NULL DEFAULT 0;\n        ALTER TABLE invocations ADD COLUMN settled_at INTEGER NOT NULL DEFAULT 0;\n        PRAGMA user_version=57;"
+
+const schemaV58 = "\n        CREATE TABLE IF NOT EXISTS trajectories(\n          conversation_id TEXT PRIMARY KEY,\n          task_id TEXT NOT NULL,\n          updated_at INTEGER NOT NULL,\n          payload TEXT NOT NULL);\n        CREATE INDEX IF NOT EXISTS trajectories_task ON trajectories(task_id, updated_at);\n        PRAGMA user_version=58;"

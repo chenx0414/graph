@@ -99,4 +99,3 @@ func olderBefore(messages []transcriptMessage, before int64) []transcriptMessage
 	}
 	return filtered
 }
-

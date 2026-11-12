@@ -142,4 +142,3 @@ func workedFor(elapsed time.Duration) string {
 	}
 	return strconv.FormatInt(rest, 10) + " 秒"
 }
-

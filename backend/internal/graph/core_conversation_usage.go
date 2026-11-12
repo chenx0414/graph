@@ -127,6 +127,7 @@ func RecordConversationOutput(store *TaskStore, operation Operation, result Oper
 			Turn:           operation.Attempt,
 		})
 	}
+	SaveConversationTrajectory(store, conversation.Id)
 }
 
 func RecordConversationInterruption(store *TaskStore, operation Operation, reason string, kind ...TurnFailureKind) {

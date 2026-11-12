@@ -534,4 +534,3 @@ func TestAssistantMessagesAreFlatMarkdownWithActions(t *testing.T) {
 		t.Fatalf("the question keeps its bubble on the right, answer %v question %v", answer.X, question.X)
 	}
 }
-

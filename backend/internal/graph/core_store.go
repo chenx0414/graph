@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-const SCHEMA_VERSION = 57
+const SCHEMA_VERSION = 58
 
 const SchemaVersion = SCHEMA_VERSION
 
