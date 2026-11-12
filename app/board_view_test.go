@@ -346,7 +346,7 @@ func absInt(v int) int {
 	return v
 }
 
-func TestTheWhiteboardTabIsPinnedCenteredAndLarger(t *testing.T) {
+func TestTheWhiteboardTabIsPinnedAlignedAndLarger(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	tab, ok := tester.Find("标签页 白板")
@@ -357,10 +357,15 @@ func TestTheWhiteboardTabIsPinnedCenteredAndLarger(t *testing.T) {
 	if !ok {
 		t.Fatalf("the whiteboard band never rendered, texts %q", tester.Texts())
 	}
-	tabCenter := tab.X + tab.W/2
-	bandCenter := band.X + band.W/2
-	if delta := tabCenter - bandCenter; delta < -1 || delta > 1 {
-		t.Fatalf("the tab centers at %v, the band at %v", tabCenter, bandCenter)
+	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	if !ok {
+		t.Fatalf("the whiteboard card never rendered, texts %q", tester.Texts())
+	}
+	if delta := tab.X - card.X; delta < -1 || delta > 1 {
+		t.Fatalf("the tab starts at %v, the card at %v", tab.X, card.X)
+	}
+	if delta := (tab.Y + tab.H/2) - (band.Y + band.H/2); delta < -1 || delta > 1 {
+		t.Fatalf("the tab centers at %v, the band at %v", tab.Y+tab.H/2, band.Y+band.H/2)
 	}
 	banner, ok := tester.Find("对话标题名")
 	if !ok {
@@ -459,7 +464,7 @@ func TestTheBoardTabBarHasNoBottomRule(t *testing.T) {
 	}
 	image := tester.Image()
 	x := int(tab.X + tab.W + 60)
-	rule := image.RGBAAt(x, int(tab.Y+tab.H+7))
+	rule := image.RGBAAt(x, int(tab.Y+tab.H+6))
 	background := image.RGBAAt(x, int(tab.Y+tab.H/2))
 	delta := absInt(int(rule.R)-int(background.R)) + absInt(int(rule.G)-int(background.G)) + absInt(int(rule.B)-int(background.B))
 	if delta > 4 {
