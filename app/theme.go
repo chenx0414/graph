@@ -6,6 +6,8 @@ import (
 	gwtheme "graph/app/gwui/theme"
 )
 
+var octopusArt = []string{".-.", "(o o)", "/|_|\\", "^ ^"}
+
 var (
 	boardDot   = gwtheme.Light().Grid
 	cardGap    = float32(8)

@@ -86,14 +86,15 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 		row.Background(t.Hover)
 	}
 	row.Children(func() {
-		tile := ui.Box(ctx).Size(th.Space(7), th.Space(7)).Radius(t.Radius.Md).Background(octopusTile(t)).Center()
+		tile := ui.Box(ctx).Size(th.Space(7.5), th.Space(7.5)).Radius(t.Radius.Md).Background(octopusTile(t)).Center()
 		tile.Children(func() {
-			ui.Icon(ctx, iconOctopus).Size(gwtheme.IconLg, gwtheme.IconLg).TextColor(octopusInk(t))
+			ui.Column(ctx).Gap(0).AlignItems(ui.Center).Children(func() {
+				for _, line := range octopusArt {
+					ui.Text(ctx, line).Font(gwtheme.Mono).FontSize(7.2).LineHeight(1.02).TextColor(octopusInk(t))
+				}
+			})
 		})
-		ui.Column(ctx).Gap(0).Children(func() {
-			kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
-			kit.Text(ctx, "主控 · 常驻", t.Text.Xs).TextColor(t.Muted)
-		})
+		kit.Text(ctx, "main agent", t.Text.Base).FontWeight(600).TextColor(t.Foreground)
 		ui.Spacer(ctx)
 	})
 	row.Margin(0, 0, th.Space(1), 0)
