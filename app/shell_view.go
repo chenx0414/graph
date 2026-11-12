@@ -80,7 +80,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 					tip.AttachTo(button, ui.AnchorRight, ui.AnchorLeft).MarginStart(th.Space(1.5)).
 						Padding(th.Space(1), th.Space(2)).Radius(t.Radius.Md).Background(t.Foreground)
 					tip.Children(func() {
-						kit.Text(ctx, spec.label, t.Text.Xs).TextColor(t.Background).FontWeight(500)
+						kit.Text(ctx, spec.label, t.Text.Lg).TextColor(t.Background).FontWeight(600)
 					})
 				})
 				switch {
