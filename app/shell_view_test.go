@@ -464,3 +464,10 @@ func TestTheTitleBandLinesUpWithTheTrafficLightsAndPadsTheCardEvenly(t *testing.
 		t.Fatalf("the card leaves %v above and %v below", top, bottom)
 	}
 }
+
+func TestTheTrafficLightsUseTheCodexPosition(t *testing.T) {
+	position := trafficLightPosition()
+	if position.X != 16 || position.Y != 15 {
+		t.Fatalf("the traffic lights sit at %+v", position)
+	}
+}

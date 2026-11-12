@@ -100,7 +100,7 @@ func (s *shell) openNative() {
 		MinHeight:            640,
 		StateKey:             "native",
 		TitleBarStyle:        mygo.TitleBarHidden,
-		TrafficLightPosition: &mygo.Point{X: 10, Y: 14},
+		TrafficLightPosition: trafficLightPoint(),
 		Content:              ui.View(state.view),
 	})
 	state.window = window
@@ -129,6 +129,15 @@ func (s *shell) createTray() {
 	}); err != nil {
 		log.Printf("[app] tray: %v", err)
 	}
+}
+
+func trafficLightPoint() *mygo.Point {
+	position := trafficLightPosition()
+	return &position
+}
+
+func trafficLightPosition() mygo.Point {
+	return mygo.Point{X: 16, Y: 15}
 }
 
 func main() {
