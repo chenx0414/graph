@@ -74,8 +74,15 @@ func (s *shellState) rail(ctx *ui.Context) {
 				selected := s.activeBoardKind() == spec.kind
 				color := t.Muted
 				button := ui.Box(ctx).Size(th.Space(8), th.Space(8)).Radius(t.Radius.Lg).Center().
-					Label(spec.label).Tooltip(spec.label).Focusable()
+					Label(spec.label).Focusable()
 				button.OnClick(func() { s.openModule(spec.kind) })
+				ui.TooltipBase(ctx, button, func(tip ui.Element) {
+					tip.AttachTo(button, ui.AnchorRight, ui.AnchorLeft).MarginStart(th.Space(1.5)).
+						Padding(th.Space(1), th.Space(2)).Radius(t.Radius.Md).Background(t.Foreground)
+					tip.Children(func() {
+						kit.Text(ctx, spec.label, t.Text.Xs).TextColor(t.Background).FontWeight(500)
+					})
+				})
 				switch {
 				case selected:
 					button.Background(t.SidebarSelected)

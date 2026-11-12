@@ -359,3 +359,34 @@ func TestTheFirstRailIconSharesTheMainAgentCardCenter(t *testing.T) {
 		t.Fatalf("the first rail icon center %.1f misses the card center %.1f", iconCenter, cardCenter)
 	}
 }
+
+func TestTheRailTooltipSitsToTheRight(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	icon, ok := tester.Find("轨迹")
+	if !ok {
+		t.Fatalf("the rail lost its first icon, texts %q", tester.Texts())
+	}
+	darkIn := func(img *image.RGBA) int {
+		x0, x1 := int(icon.X+icon.W+8), int(icon.X+icon.W+88)
+		y0, y1 := int(icon.Y+icon.H/2-10), int(icon.Y+icon.H/2+10)
+		count := 0
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				at := img.PixOffset(x, y)
+				if int(img.Pix[at])+int(img.Pix[at+1])+int(img.Pix[at+2]) < 250 {
+					count++
+				}
+			}
+		}
+		return count
+	}
+	before := darkIn(tester.Image())
+	tester.Move(icon.X+icon.W/2, icon.Y+icon.H/2)
+	tester.Advance(700 * time.Millisecond)
+	tester.Frame()
+	after := darkIn(tester.Image())
+	if after < before+40 {
+		t.Fatalf("no tip appears right of the icon: dark %d before, %d after", before, after)
+	}
+}
