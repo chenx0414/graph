@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
 	gwtheme "graph/app/gwui/theme"
@@ -27,12 +29,17 @@ type boardState struct {
 	active int
 	path   string
 	drag   *boardDrag
+	rects  map[string]ui.Rect
+	splits map[string]ui.Rect
+	press  string
+	pressX float32
+	pressY float32
 }
 
 type boardDrag struct {
 	panelID string
-	from    int
-	target  int
+	target  string
+	edge    string
 	dx      float32
 	dy      float32
 }
@@ -74,8 +81,14 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 }
 
 func (s *shellState) boardPageView(ctx *ui.Context) {
-	t, th := gwtheme.Of(ctx), ctx.Theme()
+	t := gwtheme.Of(ctx)
 	page := s.boardPage()
+	if s.board.rects == nil {
+		s.board.rects = map[string]ui.Rect{}
+	}
+	if s.board.splits == nil {
+		s.board.splits = map[string]ui.Rect{}
+	}
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Window).
 		Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -93,31 +106,101 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 				TextColor(t.Muted).Padding(24, 24, 24, 24)
 			return
 		}
-		rows := (len(page.Panels) + boardColumns - 1) / boardColumns
-		ui.Column(ctx).Fill().Padding(th.Space(2)).Gap(th.Space(2)).Children(func() {
-			for row := 0; row < rows; row++ {
-				rowIndex := row
-				ui.Row(ctx).Grow(1).Gap(th.Space(2)).Children(func() {
-					for column := 0; column < boardColumns; column++ {
-						slot := rowIndex*boardColumns + column
-						cell := ui.Column(ctx).Grow(1).FillHeight()
-						cell.Children(func() {
-							if panel := pagePanelAt(page, slot); panel != nil {
-								s.boardPanelView(ctx, panel, true)
-							} else {
-								ui.Box(ctx).Fill().Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Center().Children(func() {
-									kit.Text(ctx, "空分区", t.Text.Sm).TextColor(t.Muted)
-								})
-							}
-							if s.board.drag != nil && s.board.drag.target == slot {
-								ui.Box(ctx).Fill().Radius(t.Radius.Xl).Border(2, t.Unread)
-							}
-						})
-					}
+		ui.Column(ctx).Fill().Padding(10).Children(func() {
+			s.boardNodeView(ctx, &page.Layout, "root")
+		})
+	})
+}
+
+func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string) {
+	switch node.Kind {
+	case "panel":
+		panel := s.panelByID(node.PanelID)
+		if panel == nil {
+			return
+		}
+		s.boardPanelView(ctx, panel, true)
+	case "split":
+		var container ui.Element
+		if node.Axis == "row" {
+			container = ui.Row(ctx).Fill()
+		} else {
+			container = ui.Column(ctx).Fill()
+		}
+		container.Draw(func(p *ui.Painter, r ui.Rect) { s.board.splits[path] = r })
+		container.Children(func() {
+			for index := range node.Children {
+				if index > 0 {
+					s.boardDivider(ctx, node, path, index-1)
+				}
+				slot := node.Children[index]
+				childPath := path + "/" + strconv.Itoa(index)
+				var cell ui.Element
+				if node.Axis == "row" {
+					cell = ui.Column(ctx).Grow(slot.Weight).FillHeight()
+				} else {
+					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth()
+				}
+				cell.Children(func() {
+					s.boardNodeView(ctx, &slot.Node, childPath)
 				})
 			}
 		})
-	})
+	}
+}
+
+func (s *shellState) boardDivider(ctx *ui.Context, node *boardNode, path string, gap int) {
+	t, th := gwtheme.Of(ctx), ctx.Theme()
+	var handle ui.Element
+	if node.Axis == "row" {
+		handle = ui.Box(ctx).Width(th.Space(2)).FillHeight()
+	} else {
+		handle = ui.Box(ctx).Height(th.Space(2)).FillWidth()
+	}
+	handle.Label("调整分区").Focusable()
+	if handle.Hovered() {
+		handle.Background(t.HoverTint)
+	}
+	if dx, dy, ok := handle.Dragged(); ok {
+		s.resizeBoardSplit(node, path, gap, dx, dy)
+	}
+	if _, _, ended := handle.DragEnded(); ended {
+		s.saveBoard()
+	}
+}
+
+func (s *shellState) resizeBoardSplit(node *boardNode, path string, gap int, dx, dy float32) {
+	if gap < 0 || gap+1 >= len(node.Children) {
+		return
+	}
+	rect, ok := s.board.splits[path]
+	if !ok {
+		return
+	}
+	available, delta, minWeight := rect.W, dx, float32(0)
+	if node.Axis == "column" {
+		available, delta = rect.H, dy
+	}
+	if available <= 0 {
+		return
+	}
+	total := float32(0)
+	for _, slot := range node.Children {
+		total += slot.Weight
+	}
+	if node.Axis == "row" {
+		minWeight = boardMinPaneWidth / available * total
+	} else {
+		minWeight = boardMinPaneHeight / available * total
+	}
+	left, right := node.Children[gap].Weight, node.Children[gap+1].Weight
+	proposed := left + delta/available*total
+	proposed = min(max(proposed, minWeight), left+right-minWeight)
+	if proposed <= 0 || left+right-proposed <= 0 {
+		return
+	}
+	node.Children[gap].Weight = proposed
+	node.Children[gap+1].Weight = left + right - proposed
 }
 
 func drawBoardGrid(p *ui.Painter, r ui.Rect, color ui.Color) {
@@ -155,6 +238,10 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := kit.Panel(ctx, t.Radius.Xl)
 	card.Fill()
+	if freeform {
+		card.Draw(func(p *ui.Painter, r ui.Rect) { s.board.rects[panel.ID] = r })
+		card.Drag(panel.ID)
+	}
 	card.Children(func() {
 		s.boardPanelHeader(ctx, panel, freeform)
 		ui.Scroll(ctx).Grow(1).Padding(th.Space(3)).Children(func() {
@@ -162,6 +249,26 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 				s.boardPanelBody(ctx, panel)
 			})
 		})
+		if freeform {
+			rect, hasRect := s.board.rects[panel.ID]
+			if card.Pressed() && hasRect && s.board.press != panel.ID {
+				if px, py, over := card.PointerPosition(); over {
+					s.board.press = panel.ID
+					s.board.pressX = rect.X + px
+					s.board.pressY = rect.Y + py
+				}
+			}
+			if dx, dy, ok := card.Dragged(); ok {
+				s.dragBoardPanel(panel, dx, dy)
+			}
+			if point, missed := card.DragMissed(); missed {
+				s.dropBoardPanelAt(panel.ID, point.X, point.Y)
+			}
+			if _, _, ended := card.DragEnded(); ended {
+				s.dropBoardPanel()
+			}
+			s.boardDropHint(ctx, panel)
+		}
 	})
 }
 
@@ -169,14 +276,6 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	header := ui.Row(ctx).FillWidth().Height(th.Space(9)).Padding(th.Space(2), th.Space(1)).
 		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口").Focusable()
-	if freeform {
-		if dx, dy, ok := header.Dragged(); ok {
-			s.dragBoardPanel(panel, dx, dy)
-		}
-		if _, _, ended := header.DragEnded(); ended {
-			s.dropBoardPanel()
-		}
-	}
 	header.Children(func() {
 		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine()
 		if !freeform {
@@ -191,3 +290,98 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freefo
 	})
 }
 
+func (s *shellState) boardDropHint(ctx *ui.Context, panel *boardPanel) {
+	drag := s.board.drag
+	if drag == nil || drag.target != panel.ID || drag.target == "" {
+		return
+	}
+	t := gwtheme.Of(ctx)
+	ui.Box(ctx).Fill().Radius(t.Radius.Xl).Border(2, t.Unread)
+}
+
+func (s *shellState) dragBoardPanel(panel *boardPanel, dx, dy float32) {
+	if s.board.drag == nil || s.board.drag.panelID != panel.ID {
+		s.board.drag = &boardDrag{panelID: panel.ID}
+	}
+	s.board.drag.dx += dx
+	s.board.drag.dy += dy
+	s.updateBoardDragTarget()
+}
+
+func (s *shellState) updateBoardDragTarget() {
+	drag := s.board.drag
+	if drag == nil {
+		return
+	}
+	rect, ok := s.board.rects[drag.panelID]
+	if !ok {
+		return
+	}
+	pointX := rect.X + rect.W/2 + drag.dx
+	pointY := rect.Y + rect.H/2 + drag.dy
+	if s.board.press == drag.panelID {
+		pointX = s.board.pressX + drag.dx
+		pointY = s.board.pressY + drag.dy
+	}
+	drag.target, drag.edge = s.boardDropTarget(drag.panelID, pointX, pointY)
+}
+
+func (s *shellState) boardDropTarget(sourceID string, pointX, pointY float32) (string, string) {
+	for id, target := range s.board.rects {
+		if id == sourceID || target.W <= 0 || target.H <= 0 {
+			continue
+		}
+		if pointX < target.X || pointX > target.X+target.W || pointY < target.Y || pointY > target.Y+target.H {
+			continue
+		}
+		return id, boardDropEdge((pointX-target.X)/target.W, (pointY-target.Y)/target.H)
+	}
+	return "", ""
+}
+
+func (s *shellState) dropBoardPanelAt(sourceID string, pointX, pointY float32) {
+	drag := s.board.drag
+	if drag == nil || drag.panelID != sourceID {
+		drag = &boardDrag{panelID: sourceID}
+	}
+	drag.target, drag.edge = s.boardDropTarget(sourceID, pointX, pointY)
+	s.board.drag = drag
+	s.dropBoardPanel()
+}
+
+func boardDropEdge(x, y float32) string {
+	if x > 0.25 && x < 0.75 && y > 0.25 && y < 0.75 {
+		return "center"
+	}
+	edge := "left"
+	distance := x
+	if 1-x < distance {
+		edge, distance = "right", 1-x
+	}
+	if y < distance {
+		edge, distance = "top", y
+	}
+	if 1-y < distance {
+		edge = "bottom"
+	}
+	return edge
+}
+
+func (s *shellState) dropBoardPanel() {
+	drag := s.board.drag
+	s.board.drag = nil
+	s.board.press = ""
+	if drag == nil || drag.target == "" {
+		return
+	}
+	page := s.boardPage()
+	if drag.edge == "center" {
+		swapBoardPanels(&page.Layout, drag.panelID, drag.target)
+	} else {
+		splitBoardPane(&page.Layout, drag.target, drag.panelID, drag.edge)
+	}
+	normalizeBoardLayout(&page.Layout)
+	pruneBoardPanels(page)
+	s.saveBoard()
+	s.frame()
+}

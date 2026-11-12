@@ -275,22 +275,91 @@ func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
 	}
 }
 
-func TestAnEmptyPartitionWaitsForAModule(t *testing.T) {
+func TestDraggingAPanelBodySwapsItsPartition(t *testing.T) {
 	state := fourPaneShell(t)
-	page := state.boardPage()
-	page.Panels = page.Panels[:3]
-	normalizeBoardSlots(page)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if !tester.HasText("空分区") {
-		t.Fatalf("a free partition shows its placeholder, texts %q", tester.Texts())
+	overview := state.board.rects["overview"]
+	tasks := state.board.rects["tasks"]
+	if overview.W <= 0 || tasks.W <= 0 {
+		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
+	}
+	startX, startY := overview.X+overview.W/2, overview.Y+overview.H*0.6
+	endX, endY := tasks.X+tasks.W/2, tasks.Y+tasks.H*0.6
+	tester.Press(startX, startY)
+	for step := 1; step <= 12; step++ {
+		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
+		tester.Frame()
+	}
+	tester.Release(endX, endY)
+	frames(tester)
+	page := state.boardPage()
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 4 || leaves[0] != "tasks" || leaves[1] != "overview" {
+		t.Fatalf("a center drop swaps the two partitions, leaves %v", leaves)
+	}
+}
+
+func TestDraggingToAPartitionEdgeSplitsIt(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	overview := state.board.rects["overview"]
+	tasks := state.board.rects["tasks"]
+	if overview.W <= 0 || tasks.W <= 0 {
+		t.Fatalf("the board must know its partitions, rects %+v", state.board.rects)
+	}
+	startX, startY := overview.X+overview.W/2, overview.Y+overview.H*0.6
+	endX, endY := tasks.X+8, tasks.Y+tasks.H/2
+	tester.Press(startX, startY)
+	for step := 1; step <= 12; step++ {
+		tester.Move(startX+(endX-startX)*float32(step)/12, startY+(endY-startY)*float32(step)/12)
+		tester.Frame()
+	}
+	tester.Release(endX, endY)
+	frames(tester)
+	page := state.boardPage()
+	leaves := boardLeafIDs(&page.Layout)
+	if len(leaves) != 4 {
+		t.Fatalf("a split keeps every module on the board, leaves %v", leaves)
+	}
+	seen := map[string]bool{}
+	for _, id := range leaves {
+		if seen[id] {
+			t.Fatalf("a module appears twice after the split, leaves %v", leaves)
+		}
+		seen[id] = true
+	}
+	after := state.board.rects
+	if after["overview"].X >= after["tasks"].X {
+		t.Fatalf("dropping on the left edge puts the dragged pane before the target: overview %+v tasks %+v", after["overview"], after["tasks"])
+	}
+}
+
+func TestADividerDragResizesBothPartitions(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	divider, ok := tester.Find("调整分区")
+	if !ok {
+		t.Fatalf("the split divider never rendered, texts %q", tester.Texts())
+	}
+	overviewBefore, _ := tester.Find(boardPanelTitle("overview") + "窗口")
+	x, y := divider.X+divider.W/2, divider.Y+divider.H/2
+	tester.Press(x, y)
+	for step := 1; step <= 10; step++ {
+		tester.Move(x+float32(step)*8, y)
+		tester.Frame()
+	}
+	tester.Release(x+80, y)
+	frames(tester)
+	overviewAfter, _ := tester.Find(boardPanelTitle("overview") + "窗口")
+	if overviewAfter.W <= overviewBefore.W {
+		t.Fatalf("dragging the divider right must widen the left partition: before %.1f after %.1f", overviewBefore.W, overviewAfter.W)
 	}
 }
 
 func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
 	directory := t.TempDir()
-	legacy := `{"version":2,"pages":[{"id":"board","title":"白板","panels":[
-		{"id":"overview","kind":"overview","x":20,"y":30},
-		{"id":"tasks","kind":"tasks","x":200,"y":30}
+	legacy := `{"version":3,"pages":[{"id":"board","title":"白板","panels":[
+		{"id":"overview","kind":"overview","slot":0},
+		{"id":"tasks","kind":"tasks","slot":1}
 	]}]}`
 	if err := os.WriteFile(filepath.Join(directory, "whiteboard.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
@@ -298,8 +367,11 @@ func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
 	state := newShellState("http://127.0.0.1:1", "tok")
 	state.loadBoard(directory)
 	page := state.boardPage()
-	if len(page.Panels) != 2 || page.Panels[0].Slot != 0 || page.Panels[1].Slot != 1 {
-		t.Fatalf("a freeform board migrates into partitions, panels %+v", page.Panels)
+	if leaves := boardLeafIDs(&page.Layout); len(leaves) != 2 || leaves[0] != "overview" || leaves[1] != "tasks" {
+		t.Fatalf("a freeform board migrates into a partition tree, leaves %v", leaves)
+	}
+	if page.Kind != "" {
+		t.Fatalf("the migrated page stays a board, kind %q", page.Kind)
 	}
 }
 
@@ -307,42 +379,14 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 	directory := t.TempDir()
 	first := newShellState("http://127.0.0.1:1", "tok")
 	first.loadBoard(directory)
-	first.boardPage().Panels[0].Slot = 2
-	first.boardPage().Panels[2].Slot = 0
+	swapBoardPanels(&first.boardPage().Layout, "overview", "tasks")
 	first.saveBoard()
 
 	second := newShellState("http://127.0.0.1:1", "tok")
 	second.loadBoard(directory)
-	panel := second.panelOf("overview")
-	if panel == nil || panel.Slot != 2 {
-		t.Fatalf("saved partitions not restored: panel %+v", panel)
-	}
-}
-
-func TestDraggingAPanelSwapsItsPartition(t *testing.T) {
-	state := fourPaneShell(t)
-	tester := frames(ui.NewTester(state.view, 1440, 900))
-	panel := state.panelOf("overview")
-	if panel == nil || panel.Slot != 0 {
-		t.Fatalf("the default board must hold the overview module first: %+v", panel)
-	}
-	header, ok := tester.Find(boardPanelTitle("overview") + "窗口")
-	if !ok {
-		t.Fatalf("the overview panel header never rendered, texts %q", tester.Texts())
-	}
-	x, y := header.X+30, header.Y+16
-	tester.Press(x, y)
-	for step := 1; step <= 12; step++ {
-		tester.Move(x+float32(step)*16, y)
-		tester.Frame()
-	}
-	tester.Release(x+200, y)
-	frames(tester)
-	if panel.Slot != 1 {
-		t.Fatalf("dragging right must snap the panel to the next partition, slot %d", panel.Slot)
-	}
-	if tasks := state.panelOf("tasks"); tasks == nil || tasks.Slot != 0 {
-		t.Fatalf("the partition swaps with its occupant, tasks %+v", tasks)
+	leaves := boardLeafIDs(&second.boardPage().Layout)
+	if len(leaves) != 4 || leaves[0] != "tasks" || leaves[1] != "overview" {
+		t.Fatalf("saved partitions not restored: leaves %v", leaves)
 	}
 }
 

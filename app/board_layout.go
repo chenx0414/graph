@@ -11,7 +11,19 @@ import (
 type boardPanel struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
-	Slot int    `json:"slot"`
+	Slot int    `json:"slot,omitempty"`
+}
+
+type boardSlot struct {
+	Weight float32   `json:"weight"`
+	Node   boardNode `json:"node"`
+}
+
+type boardNode struct {
+	Kind     string      `json:"kind"`
+	Axis     string      `json:"axis,omitempty"`
+	Children []boardSlot `json:"children,omitempty"`
+	PanelID  string      `json:"panelId,omitempty"`
 }
 
 type boardPage struct {
@@ -19,6 +31,7 @@ type boardPage struct {
 	Title  string       `json:"title"`
 	Kind   string       `json:"kind,omitempty"`
 	Panels []boardPanel `json:"panels"`
+	Layout boardNode    `json:"layout"`
 }
 
 type boardFile struct {
@@ -28,23 +41,65 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 3
-
-const boardColumns = 2
+const boardLayoutVersion = 4
 
 const boardDefaultTitle = "白板"
 
+const boardMinPaneWidth = 140
+
+const boardMinPaneHeight = 90
+
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
-		{ID: "overview", Kind: "overview", Slot: 0},
-		{ID: "tasks", Kind: "tasks", Slot: 1},
-		{ID: "history", Kind: "history", Slot: 2},
-		{ID: "artifacts", Kind: "artifacts", Slot: 3},
+		{ID: "overview", Kind: "overview"},
+		{ID: "tasks", Kind: "tasks"},
+		{ID: "history", Kind: "history"},
+		{ID: "artifacts", Kind: "artifacts"},
 	}
 }
 
+func defaultBoardLayout() boardNode {
+	return boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
+		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "overview"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "tasks"}},
+		}}},
+		{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "history"}},
+			{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "artifacts"}},
+		}}},
+	}}
+}
+
+func layoutFromPanels(panels []boardPanel) boardNode {
+	ordered := append([]boardPanel(nil), panels...)
+	for index := range ordered {
+		if ordered[index].Slot != index {
+			for swap := index + 1; swap < len(ordered); swap++ {
+				if ordered[swap].Slot == index {
+					ordered[index], ordered[swap] = ordered[swap], ordered[index]
+					break
+				}
+			}
+		}
+	}
+	layout := boardNode{Kind: "split", Axis: "column"}
+	for row := 0; row*2 < len(ordered); row++ {
+		line := boardNode{Kind: "split", Axis: "row"}
+		for column := 0; column < 2; column++ {
+			index := row*2 + column
+			if index >= len(ordered) {
+				break
+			}
+			line.Children = append(line.Children, boardSlot{Weight: 1, Node: boardNode{Kind: "panel", PanelID: ordered[index].ID}})
+		}
+		layout.Children = append(layout.Children, boardSlot{Weight: 1, Node: line})
+	}
+	return layout
+}
+
 func defaultBoardPages() []boardPage {
-	return []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels()}}
+	return []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels(), Layout: defaultBoardLayout()}}
 }
 
 func boardPanelTitle(kind string) string {
@@ -91,17 +146,49 @@ func (s *shellState) loadBoard(stateDir string) {
 	case len(file.Panels) > 0:
 		s.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: file.Panels}}
 	}
-	if file.Version < boardLayoutVersion {
-		for index := range s.board.pages {
-			for panel := range s.board.pages[index].Panels {
-				s.board.pages[index].Panels[panel].Slot = panel
-			}
-		}
-	}
 	for index := range s.board.pages {
-		normalizeBoardSlots(&s.board.pages[index])
+		page := &s.board.pages[index]
+		if page.Kind == "" && len(page.Layout.Children) == 0 && page.Layout.Kind == "" {
+			page.Layout = layoutFromPanels(page.Panels)
+		}
+		if page.Kind != "" && page.Layout.Kind == "" && len(page.Panels) > 0 {
+			page.Layout = boardNode{Kind: "panel", PanelID: page.Panels[0].ID}
+		}
+		normalizeBoardLayout(&page.Layout)
+		pruneBoardPanels(page)
 	}
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
+}
+
+func pruneBoardPanels(page *boardPage) {
+	live := map[string]bool{}
+	for _, id := range boardLeafIDs(&page.Layout) {
+		live[id] = true
+	}
+	if page.Kind != "" {
+		return
+	}
+	kept := make([]boardPanel, 0, len(page.Panels))
+	for _, panel := range page.Panels {
+		if live[panel.ID] {
+			kept = append(kept, panel)
+		}
+	}
+	page.Panels = kept
+}
+
+func boardLeafIDs(node *boardNode) []string {
+	if node.Kind == "panel" {
+		if node.PanelID == "" {
+			return nil
+		}
+		return []string{node.PanelID}
+	}
+	ids := []string{}
+	for index := range node.Children {
+		ids = append(ids, boardLeafIDs(&node.Children[index].Node)...)
+	}
+	return ids
 }
 
 func (s *shellState) saveBoard() {
@@ -119,40 +206,6 @@ func (s *shellState) saveBoard() {
 	if os.WriteFile(temp, append(payload, '\n'), 0o600) == nil {
 		_ = os.Rename(temp, s.board.path)
 	}
-}
-
-func normalizeBoardSlots(page *boardPage) {
-	used := map[int]bool{}
-	next := 0
-	for index := range page.Panels {
-		slot := page.Panels[index].Slot
-		if slot < 0 || slot >= len(page.Panels) || used[slot] {
-			for used[next] {
-				next++
-			}
-			slot = next
-		}
-		used[slot] = true
-		page.Panels[index].Slot = slot
-	}
-}
-
-func pagePanelAt(page *boardPage, slot int) *boardPanel {
-	for index := range page.Panels {
-		if page.Panels[index].Slot == slot {
-			return &page.Panels[index]
-		}
-	}
-	return nil
-}
-
-func pagePanelByID(page *boardPage, id string) *boardPanel {
-	for index := range page.Panels {
-		if page.Panels[index].ID == id {
-			return &page.Panels[index]
-		}
-	}
-	return nil
 }
 
 func clampIndex(index, length int) int {
@@ -185,6 +238,16 @@ func (s *shellState) panelOf(kind string) *boardPanel {
 	return nil
 }
 
+func (s *shellState) panelByID(id string) *boardPanel {
+	page := s.boardPage()
+	for index := range page.Panels {
+		if page.Panels[index].ID == id {
+			return &page.Panels[index]
+		}
+	}
+	return nil
+}
+
 func (s *shellState) openModule(kind string) {
 	for index := range s.board.pages {
 		if s.board.pages[index].Kind == kind {
@@ -193,14 +256,16 @@ func (s *shellState) openModule(kind string) {
 		}
 	}
 	title := boardPanelTitle(kind)
-	s.board.pages = append(s.board.pages, boardPage{
+	page := boardPage{
 		ID:    "tab-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 		Title: title,
 		Kind:  kind,
 		Panels: []boardPanel{
-			{ID: kind, Kind: kind, Slot: 0},
+			{ID: kind, Kind: kind},
 		},
-	})
+		Layout: boardNode{Kind: "panel", PanelID: kind},
+	}
+	s.board.pages = append(s.board.pages, page)
 	s.board.active = len(s.board.pages) - 1
 	s.ensureBoardPageData()
 	s.saveBoard()
@@ -229,6 +294,7 @@ func (s *shellState) addBoardPage() {
 		ID:     "tab-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 		Title:  boardDefaultTitle + " " + strconv.Itoa(count),
 		Panels: defaultBoardPanels(),
+		Layout: defaultBoardLayout(),
 	})
 	s.board.active = len(s.board.pages) - 1
 	s.saveBoard()
@@ -251,14 +317,9 @@ func (s *shellState) closeBoardPage(index int) {
 
 func (s *shellState) closeModule(id string) {
 	page := s.boardPage()
-	kept := make([]boardPanel, 0, len(page.Panels))
-	for _, panel := range page.Panels {
-		if panel.ID != id {
-			kept = append(kept, panel)
-		}
-	}
-	page.Panels = kept
-	normalizeBoardSlots(page)
+	removeBoardPanelFromLayout(&page.Layout, id)
+	normalizeBoardLayout(&page.Layout)
+	pruneBoardPanels(page)
 	s.saveBoard()
 	s.frame()
 }
@@ -280,54 +341,124 @@ func (s *shellState) ensureBoardPageData() {
 	}
 }
 
-func (s *shellState) dragBoardPanel(panel *boardPanel, dx, dy float32) {
-	if s.board.drag == nil || s.board.drag.panelID != panel.ID {
-		s.board.drag = &boardDrag{panelID: panel.ID, from: panel.Slot, target: panel.Slot}
+func normalizeBoardLayout(node *boardNode) {
+	if node.Kind != "split" {
+		return
 	}
-	drag := s.board.drag
-	drag.dx += dx
-	drag.dy += dy
-	const thresholdX, thresholdY = float32(90), float32(70)
-	column := drag.from % boardColumns
-	target := drag.from
-	switch {
-	case drag.dx > thresholdX && column == 0:
-		target = drag.from + 1
-	case drag.dx < -thresholdX && column == 1:
-		target = drag.from - 1
-	case drag.dy > thresholdY:
-		target = drag.from + boardColumns
-	case drag.dy < -thresholdY:
-		target = drag.from - boardColumns
+	for index := range node.Children {
+		normalizeBoardLayout(&node.Children[index].Node)
 	}
-	if target >= 0 && target < len(s.boardPage().Panels) {
-		drag.target = target
+	kept := make([]boardSlot, 0, len(node.Children))
+	for _, slot := range node.Children {
+		child := slot.Node
+		if child.Kind == "split" {
+			switch {
+			case len(child.Children) == 0:
+				continue
+			case len(child.Children) == 1:
+				inner := child.Children[0]
+				slot.Node = inner.Node
+				slot.Weight *= inner.Weight
+				kept = append(kept, slot)
+				continue
+			case child.Axis == node.Axis:
+				for _, inner := range child.Children {
+					inner.Weight *= slot.Weight
+					kept = append(kept, inner)
+				}
+				continue
+			}
+		}
+		kept = append(kept, slot)
+	}
+	node.Children = kept
+	if len(node.Children) == 1 {
+		*node = node.Children[0].Node
+	}
+	if node.Kind == "split" {
+		for index := range node.Children {
+			if node.Children[index].Weight <= 0 {
+				node.Children[index].Weight = 1
+			}
+		}
 	}
 }
 
-func (s *shellState) dropBoardPanel() {
-	drag := s.board.drag
-	s.board.drag = nil
-	if drag == nil {
+func removeBoardPanelFromLayout(node *boardNode, panelID string) {
+	if node.Kind != "split" {
 		return
 	}
-	page := s.boardPage()
-	dragged := pagePanelByID(page, drag.panelID)
-	if dragged == nil || drag.target == dragged.Slot {
-		return
+	kept := make([]boardSlot, 0, len(node.Children))
+	for _, slot := range node.Children {
+		if slot.Node.Kind == "panel" && slot.Node.PanelID == panelID {
+			continue
+		}
+		removeBoardPanelFromLayout(&slot.Node, panelID)
+		kept = append(kept, slot)
 	}
-	if occupant := pagePanelAt(page, drag.target); occupant != nil && occupant != dragged {
-		occupant.Slot, dragged.Slot = dragged.Slot, drag.target
-	} else {
-		dragged.Slot = drag.target
-	}
-	s.saveBoard()
-	s.frame()
+	node.Children = kept
 }
 
-func absFloat(value float32) float32 {
-	if value < 0 {
-		return -value
+func findBoardLeaf(node *boardNode, panelID string) *boardNode {
+	if node.Kind == "panel" {
+		if node.PanelID == panelID {
+			return node
+		}
+		return nil
 	}
-	return value
+	for index := range node.Children {
+		if found := findBoardLeaf(&node.Children[index].Node, panelID); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func findBoardSplit(node *boardNode, axis string, panelID string) *boardNode {
+	if node.Kind != "split" {
+		return nil
+	}
+	for index := range node.Children {
+		if node.Children[index].Node.Kind == "panel" && node.Children[index].Node.PanelID == panelID && node.Axis == axis {
+			return node
+		}
+	}
+	for index := range node.Children {
+		if found := findBoardSplit(&node.Children[index].Node, axis, panelID); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func splitBoardPane(root *boardNode, targetID, sourceID, edge string) bool {
+	removeBoardPanelFromLayout(root, sourceID)
+	normalizeBoardLayout(root)
+	target := findBoardLeaf(root, targetID)
+	if target == nil {
+		return false
+	}
+	axis := "row"
+	before := edge == "left" || edge == "top"
+	if edge == "top" || edge == "bottom" {
+		axis = "column"
+	}
+	source := boardNode{Kind: "panel", PanelID: sourceID}
+	existing := *target
+	children := []boardSlot{{Weight: 1, Node: existing}, {Weight: 1, Node: source}}
+	if before {
+		children[0], children[1] = children[1], children[0]
+	}
+	*target = boardNode{Kind: "split", Axis: axis, Children: children}
+	normalizeBoardLayout(root)
+	return true
+}
+
+func swapBoardPanels(root *boardNode, first, second string) {
+	firstLeaf := findBoardLeaf(root, first)
+	secondLeaf := findBoardLeaf(root, second)
+	if firstLeaf == nil || secondLeaf == nil {
+		return
+	}
+	firstLeaf.PanelID, secondLeaf.PanelID = secondLeaf.PanelID, firstLeaf.PanelID
 }

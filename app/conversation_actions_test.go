@@ -300,7 +300,7 @@ func TestTheModelModuleSwitchesTheConversationModel(t *testing.T) {
 	state := newShellState(server.URL, "tok")
 	state.chat = chat
 	state.activeID = "c1"
-	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "models", Kind: "models", Slot: 0}}}}
+	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "models", Kind: "models"}}, Layout: boardNode{Kind: "panel", PanelID: "models"}}}
 	tester := ui.NewTester(state.view, 1100, 760)
 	frames(tester)
 	if !tester.HasText("模型配置") || !tester.HasText("deepseek-v4.1-flash") || !tester.HasText("deepseek") {

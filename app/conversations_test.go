@@ -414,7 +414,7 @@ func TestTheQuestionModuleShowsTheQuestionAndAnswersIt(t *testing.T) {
 	state := newShellState(server.URL, "tok")
 	state.chat = chat
 	state.activeID = "c1"
-	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "questions", Kind: "questions", Slot: 0}}}}
+	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "questions", Kind: "questions"}}, Layout: boardNode{Kind: "panel", PanelID: "questions"}}}
 	tester := ui.NewTester(state.view, 1100, 760)
 	frames(tester)
 	if !tester.HasText("需要你决定 · recovery") || !tester.HasText("A 路线") {
