@@ -305,3 +305,21 @@ func countColor(img *image.RGBA, want ui.Color) int {
 	}
 	return count
 }
+
+func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if railWidth > 48 {
+		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
+	}
+	center := railWidth / 2
+	for _, label := range []string{"轨迹", "洞察", "图谱", "能力", "设置"} {
+		rect, ok := tester.Find(label)
+		if !ok {
+			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
+		}
+		if delta := rect.X + rect.W/2 - center; delta < -0.5 || delta > 0.5 {
+			t.Fatalf("%q sits off center: center %.1f rail center %.1f", label, rect.X+rect.W/2, center)
+		}
+	}
+}

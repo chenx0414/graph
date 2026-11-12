@@ -67,7 +67,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	ui.Column(ctx).Width(railWidth).FillHeight().Children(func() {
 		ui.Box(ctx).FillWidth().Height(th.Space(11)).DragWindow()
-		ui.Column(ctx).Grow(1).Padding(0, th.Space(1), th.Space(2), th.Space(1)).Gap(th.Space(0.5)).
+		ui.Column(ctx).Grow(1).Padding(0, 0, th.Space(2), 0).Gap(th.Space(0.5)).
 			AlignItems(ui.Center).Children(func() {
 			for _, item := range railItems {
 				spec := item
