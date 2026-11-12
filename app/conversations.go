@@ -277,30 +277,35 @@ func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {
 
 func (c *chatState) messageRow(ctx *ui.Context, message transcriptMessage) {
 	mine := message.Role == "user"
-	ui.Row(ctx).FillWidth().Children(func() {
-		if mine {
-			ui.Spacer(ctx)
-		}
-		ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
-			c.bubble(ctx, message, mine)
-			c.messageMeta(ctx, message, mine)
+	if !mine {
+		th := ctx.Theme()
+		ui.Column(ctx).FillWidth().Gap(th.Space(1)).Children(func() {
+			c.markdownMessage(ctx, message)
+			c.messageMeta(ctx, message, false)
 		})
-		if !mine {
-			ui.Spacer(ctx)
-		}
+		return
+	}
+	ui.Row(ctx).FillWidth().Children(func() {
+		ui.Spacer(ctx)
+		ui.Column(ctx).MaxWidthPercent(84).Gap(ctx.Theme().Space(1)).Children(func() {
+			c.bubble(ctx, message)
+			c.messageMeta(ctx, message, true)
+		})
 	})
 }
 
-func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage, mine bool) {
+func (c *chatState) markdownMessage(ctx *ui.Context, message transcriptMessage) {
+	if messageStreaming(message) {
+		markdown.Stream(ctx, message.Text, &c.md)
+		return
+	}
+	markdown.View(ctx, message.Text, &c.md)
+}
+
+func (c *chatState) bubble(ctx *ui.Context, message transcriptMessage) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	bubble := ui.Column(ctx).Padding(th.Space(2.5), th.Space(3.5)).Radius(t.Radius.Xl).Gap(th.Space(1)).Clip().
-		Border(gwtheme.Hairline, t.Border)
-	if mine {
-		bubble.Background(t.Hover)
-	} else {
-		bubble.Background(t.Background)
-		kit.Elevate(ctx, bubble, gwtheme.ShadowXs)
-	}
+		Border(gwtheme.Hairline, t.Border).Background(t.Hover)
 	bubble.Children(func() {
 		if messageQueued(message) {
 			if kit.Button(ctx, "撤销这条排队消息", kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm}).Clicked() {
@@ -330,6 +335,13 @@ func (c *chatState) messageMeta(ctx *ui.Context, message transcriptMessage, mine
 		text := message.Text
 		if iconAction(ctx, iconCopy, "复制", false, 5, func() { copyMessage(text) }).Clicked() {
 		}
+		if mine {
+			return
+		}
+		iconAction(ctx, iconThumbUp, "赞", false, 5, nil)
+		iconAction(ctx, iconThumbDown, "踩", false, 5, nil)
+		iconAction(ctx, iconVolume, "朗读", false, 5, nil)
+		iconAction(ctx, iconMore, "更多", false, 5, nil)
 	})
 }
 

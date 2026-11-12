@@ -443,6 +443,35 @@ func TestChatBubblesCarryATimeAndACopyButton(t *testing.T) {
 	}
 }
 
+func TestAssistantMessagesAreFlatMarkdownWithActions(t *testing.T) {
+	state := newChatState("http://127.0.0.1:1", "tok")
+	state.status = ""
+	state.messages = []transcriptMessage{
+		{Role: "assistant", Text: "一句回答", CreatedAt: time.Now().UnixMilli()},
+		{Role: "user", Text: "一句提问", CreatedAt: time.Now().UnixMilli()},
+	}
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	for _, label := range []string{"赞", "踩", "朗读", "更多"} {
+		if !tester.HasText(label) {
+			t.Fatalf("the assistant message carries the reference actions, missing %q, texts %q", label, tester.Texts())
+		}
+	}
+	answer, ok := tester.Find("一句回答")
+	if !ok {
+		t.Fatalf("the answer never rendered, texts %q", tester.Texts())
+	}
+	question, ok := tester.Find("一句提问")
+	if !ok {
+		t.Fatalf("the question never rendered, texts %q", tester.Texts())
+	}
+	if answer.X > 24 {
+		t.Fatalf("the answer lies flat on the pane, not in a bubble, left edge %v", answer.X)
+	}
+	if question.X <= answer.X+100 {
+		t.Fatalf("the question keeps its bubble on the right, answer %v question %v", answer.X, question.X)
+	}
+}
+
 func TestScrollingToTheTopLoadsOlderRuns(t *testing.T) {
 	state := newChatState("http://127.0.0.1:1", "tok")
 	state.status = ""
