@@ -35,6 +35,10 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.trajectoryCommandsCard(ctx)
 	case "trajectory-files":
 		s.trajectoryFilesCard(ctx)
+	case "trajectory-composition":
+		s.trajectoryCompositionCard(ctx)
+	case "trajectory-requests":
+		s.trajectoryRequestsCard(ctx)
 	case "tasks":
 		s.panelTasks(ctx)
 	case "graph":

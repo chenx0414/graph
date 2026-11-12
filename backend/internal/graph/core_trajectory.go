@@ -2,8 +2,6 @@ package graph
 
 import (
 	"encoding/json"
-	"sort"
-	"strings"
 )
 
 type TrajectoryUsage struct {
@@ -94,6 +92,16 @@ type TrajectoryCommand struct {
 	Count int    `json:"count"`
 }
 
+type TrajectoryComposition struct {
+	SystemPrompt    int64 `json:"systemPrompt"`
+	ToolDefinitions int64 `json:"toolDefinitions"`
+	UserMessages    int64 `json:"userMessages"`
+	AssistantReply  int64 `json:"assistantReply"`
+	ToolCalls       int64 `json:"toolCalls"`
+	Injected        int64 `json:"injected"`
+	Reasoning       int64 `json:"reasoning"`
+}
+
 type TrajectoryFiles struct {
 	Read   int `json:"read"`
 	Write  int `json:"write"`
@@ -126,12 +134,13 @@ type TrajectoryTotals struct {
 }
 
 type ConversationTrajectory struct {
-	ConversationId string              `json:"conversationId"`
-	TaskId         string              `json:"taskId"`
-	Turns          []TrajectoryTurn    `json:"turns"`
-	Requests       []TrajectoryRequest `json:"requests"`
-	Events         []TrajectoryEvent   `json:"events"`
-	Totals         TrajectoryTotals    `json:"totals"`
+	ConversationId string                `json:"conversationId"`
+	TaskId         string                `json:"taskId"`
+	Turns          []TrajectoryTurn      `json:"turns"`
+	Requests       []TrajectoryRequest   `json:"requests"`
+	Events         []TrajectoryEvent     `json:"events"`
+	Totals         TrajectoryTotals      `json:"totals"`
+	Composition    TrajectoryComposition `json:"composition"`
 }
 
 type trajectoryMessage struct {
@@ -271,6 +280,7 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 	trajectory.Events = trajectoryContextEvents(store, trajectory.TaskId)
 	trajectory.Totals.Commands = trajectoryCommands(store, conversationId)
 	trajectory.Totals.Files = trajectoryFiles(store, trajectory.TaskId)
+	trajectory.Composition = trajectoryComposition(store, conversationId, trajectory.TaskId)
 	return trajectory
 }
 
@@ -288,304 +298,4 @@ func SaveConversationTrajectory(store *TaskStore, conversationId string) {
 		conversationId, trajectory.TaskId, NowMillis(), string(payload)); err != nil {
 		panic(err)
 	}
-}
-
-func trajectoryMessages(store *TaskStore, conversationId string) []trajectoryMessage {
-	rows := kernelRows(store.Db, `SELECT id,role,kind,state,COALESCE(operation_id,'') AS operation_id,created_at
-		FROM messages WHERE conversation_id=? ORDER BY seq`, conversationId)
-	messages := make([]trajectoryMessage, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, trajectoryMessage{
-			Id:          kernelString(row["id"]),
-			Role:        kernelString(row["role"]),
-			Kind:        kernelString(row["kind"]),
-			State:       kernelString(row["state"]),
-			OperationId: kernelString(row["operation_id"]),
-			CreatedAt:   kernelInt(row["created_at"]),
-		})
-	}
-	return messages
-}
-
-func trajectoryInvocations(store *TaskStore, taskId string) []trajectoryInvocation {
-	rows := kernelRows(store.Db, `SELECT i.id,i.operation_id,i.model,i.purpose,i.usage,i.cost,
-		COALESCE(i.dispatched_at,0) AS dispatched_at,COALESCE(i.settled_at,0) AS settled_at
-		FROM invocations i JOIN operations o ON o.id=i.operation_id
-		WHERE o.task_id=? ORDER BY i.rowid`, taskId)
-	invocations := make([]trajectoryInvocation, 0, len(rows))
-	for _, row := range rows {
-		invocation := trajectoryInvocation{
-			OperationId: kernelString(row["operation_id"]),
-			TrajectoryInvocation: TrajectoryInvocation{
-				Id:         kernelString(row["id"]),
-				Model:      kernelString(row["model"]),
-				Purpose:    kernelString(row["purpose"]),
-				Dispatched: kernelInt(row["dispatched_at"]),
-				Settled:    kernelInt(row["settled_at"]),
-				Cost:       trajectoryCost(row["cost"]),
-			},
-		}
-		if invocation.Settled > invocation.Dispatched {
-			invocation.DurationMs = invocation.Settled - invocation.Dispatched
-		}
-		if recorded, ok := row["usage"].(string); ok && recorded != "" {
-			var usage TokenUsage
-			if json.Unmarshal([]byte(recorded), &usage) == nil {
-				invocation.Usage = trajectoryUsage(usage)
-			}
-		}
-		invocations = append(invocations, invocation)
-	}
-	return invocations
-}
-
-func trajectoryTools(store *TaskStore, taskId string) []TrajectoryTool {
-	rows := kernelRows(store.Db, `SELECT tool,ms,is_error,created_at FROM tool_calls WHERE task_id=? ORDER BY created_at`, taskId)
-	tools := make([]TrajectoryTool, 0, len(rows))
-	for _, row := range rows {
-		tools = append(tools, TrajectoryTool{
-			Name:    kernelString(row["tool"]),
-			Ms:      kernelInt(row["ms"]),
-			IsError: kernelInt(row["is_error"]) != 0,
-			At:      kernelInt(row["created_at"]),
-		})
-	}
-	return tools
-}
-
-func trajectoryUsage(usage TokenUsage) TrajectoryUsage {
-	value := TrajectoryUsage{
-		Input:      usage.Input,
-		Output:     usage.Output,
-		CacheRead:  usage.CacheRead,
-		CacheWrite: usage.CacheWrite,
-		Total:      usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite,
-	}
-	if usage.ContextTokens != nil {
-		value.ContextTokens = *usage.ContextTokens
-	}
-	if usage.FirstTokenMs != nil {
-		value.FirstTokenMs = *usage.FirstTokenMs
-	}
-	if usage.DurationMs != nil {
-		value.DurationMs = *usage.DurationMs
-	}
-	return value
-}
-
-func addTrajectoryUsage(base, extra TrajectoryUsage) TrajectoryUsage {
-	return TrajectoryUsage{
-		Input:      base.Input + extra.Input,
-		Output:     base.Output + extra.Output,
-		CacheRead:  base.CacheRead + extra.CacheRead,
-		CacheWrite: base.CacheWrite + extra.CacheWrite,
-		Total:      base.Total + extra.Total,
-	}
-}
-
-func trajectoryCacheHitRate(usage TrajectoryUsage) float64 {
-	denominator := usage.Input + usage.CacheRead
-	if denominator == 0 {
-		return 0
-	}
-	return float64(usage.CacheRead) / float64(denominator)
-}
-
-func trajectoryRequests(invocations []trajectoryInvocation) []TrajectoryRequest {
-	requests := make([]TrajectoryRequest, 0, len(invocations))
-	for _, invocation := range invocations {
-		requests = append(requests, TrajectoryRequest{
-			Id:            invocation.Id,
-			Model:         invocation.Model,
-			At:            invocation.Dispatched,
-			ContextTokens: invocation.Usage.ContextTokens,
-			Input:         invocation.Usage.Input,
-			Output:        invocation.Usage.Output,
-			CacheRead:     invocation.Usage.CacheRead,
-			CacheWrite:    invocation.Usage.CacheWrite,
-			DurationMs:    invocation.DurationMs,
-		})
-	}
-	return requests
-}
-
-func trajectoryContextEvents(store *TaskStore, taskId string) []TrajectoryEvent {
-	rows := kernelRows(store.Db, `SELECT timestamp,type,data FROM events
-		WHERE task_id=? AND type IN ('session.compacted','session.compaction_started','session.compaction_failed','session.compaction_skipped','operation.usage_reconciled')
-		ORDER BY cursor DESC LIMIT 50`, taskId)
-	events := make([]TrajectoryEvent, 0, len(rows))
-	for _, row := range rows {
-		event := TrajectoryEvent{At: kernelInt(row["timestamp"]), Type: kernelString(row["type"])}
-		var data map[string]any
-		if json.Unmarshal([]byte(kernelString(row["data"])), &data) == nil {
-			if tokens, ok := data["tokensAfter"]; ok {
-				event.Tokens = kernelInt(tokens)
-			}
-			if tokens, ok := data["tokensBefore"]; ok && event.Tokens == 0 {
-				event.Tokens = kernelInt(tokens)
-			}
-			if reason, ok := data["reason"].(string); ok {
-				event.Text = reason
-			}
-			if failure, ok := data["error"].(string); ok {
-				event.Text = failure
-			}
-		}
-		events = append(events, event)
-	}
-	return events
-}
-
-func trajectoryCommands(store *TaskStore, conversationId string) []TrajectoryCommand {
-	rows := kernelRows(store.Db, `SELECT text FROM messages WHERE conversation_id=? AND role='tool' AND text LIKE 'bash:%' ORDER BY seq`, conversationId)
-	counts := map[string]int{}
-	order := []string{}
-	for _, row := range rows {
-		text := kernelString(row["text"])
-		if !strings.HasPrefix(text, "bash:") {
-			continue
-		}
-		for _, command := range trajectoryCommandSegments(strings.TrimSpace(strings.TrimPrefix(text, "bash:"))) {
-			if counts[command] == 0 {
-				order = append(order, command)
-			}
-			counts[command]++
-		}
-	}
-	commands := make([]TrajectoryCommand, 0, len(order))
-	for _, name := range order {
-		commands = append(commands, TrajectoryCommand{Name: name, Count: counts[name]})
-	}
-	sort.SliceStable(commands, func(first, second int) bool { return commands[first].Count > commands[second].Count })
-	if len(commands) > 12 {
-		commands = commands[:12]
-	}
-	return commands
-}
-
-func trajectoryCommandSegments(text string) []string {
-	replacer := strings.NewReplacer("&&", "\n", "||", "\n", "|", "\n", ";", "\n")
-	names := []string{}
-	for _, segment := range strings.Split(replacer.Replace(text), "\n") {
-		fields := strings.Fields(segment)
-		for len(fields) > 0 && (strings.Contains(fields[0], "=") || fields[0] == "sudo" || fields[0] == "env" || fields[0] == "time" || fields[0] == "command") {
-			fields = fields[1:]
-		}
-		if len(fields) == 0 {
-			continue
-		}
-		name := fields[0]
-		if slash := strings.LastIndex(name, "/"); slash >= 0 && slash+1 < len(name) {
-			name = name[slash+1:]
-		}
-		name = strings.TrimSuffix(name, ":")
-		if name == "" || strings.HasPrefix(name, "-") {
-			continue
-		}
-		names = append(names, name)
-	}
-	return names
-}
-
-func trajectoryFiles(store *TaskStore, taskId string) TrajectoryFiles {
-	rows := kernelRows(store.Db, `SELECT tool,COUNT(*) AS count FROM tool_calls WHERE task_id=? GROUP BY tool`, taskId)
-	files := TrajectoryFiles{}
-	for _, row := range rows {
-		count := int(kernelInt(row["count"]))
-		switch strings.ToLower(kernelString(row["tool"])) {
-		case "read", "read_file", "view", "cat", "read_image":
-			files.Read += count
-		case "write", "edit", "apply_patch", "apply_rsi_change", "write_file":
-			files.Write += count
-		case "grep", "glob", "list", "find", "search", "ls":
-			files.Search += count
-		case "image", "screenshot", "view_image":
-			files.Image += count
-		}
-	}
-	return files
-}
-
-func trajectoryToolStats(tools []TrajectoryTool) []TrajectoryToolStat {
-	stats := []TrajectoryToolStat{}
-	index := map[string]int{}
-	for _, tool := range tools {
-		position, ok := index[tool.Name]
-		if !ok {
-			index[tool.Name] = len(stats)
-			stats = append(stats, TrajectoryToolStat{Name: tool.Name})
-			position = len(stats) - 1
-		}
-		stats[position].Count++
-		stats[position].Ms += tool.Ms
-		if tool.IsError {
-			stats[position].Errors++
-		}
-	}
-	return stats
-}
-
-func trajectoryTotals(turns []TrajectoryTurn) TrajectoryTotals {
-	totals := TrajectoryTotals{Turns: len(turns)}
-	for _, turn := range turns {
-		totals.ToolCalls += len(turn.ToolCalls)
-		for _, tool := range turn.ToolCalls {
-			if tool.IsError {
-				totals.ToolErrors++
-			}
-		}
-		totals.Input += turn.Usage.Input
-		totals.Output += turn.Usage.Output
-		totals.CacheRead += turn.Usage.CacheRead
-		totals.CacheWrite += turn.Usage.CacheWrite
-		totals.TotalTokens += turn.Usage.Total
-		totals.Cost += turn.Cost
-		totals.DurationMs += turn.DurationMs
-	}
-	totals.CacheHitRate = trajectoryCacheHitRate(TrajectoryUsage{Input: totals.Input, CacheRead: totals.CacheRead})
-	return totals
-}
-
-func trajectoryCost(value any) float64 {
-	switch typed := value.(type) {
-	case nil:
-		return 0
-	case float64:
-		return typed
-	case int64:
-		return float64(typed)
-	case string:
-		return trajectoryCostJSON([]byte(typed))
-	case []byte:
-		return trajectoryCostJSON(typed)
-	}
-	return 0
-}
-
-func trajectoryCostJSON(payload []byte) float64 {
-	var decoded any
-	if json.Unmarshal(payload, &decoded) != nil {
-		return 0
-	}
-	switch typed := decoded.(type) {
-	case float64:
-		return typed
-	case map[string]any:
-		for _, key := range []string{"total", "amount", "usd", "cost"} {
-			if value, ok := typed[key]; ok {
-				if amount := trajectoryCost(value); amount > 0 {
-					return amount
-				}
-			}
-		}
-		sum := 0.0
-		for key, value := range typed {
-			if strings.TrimSpace(key) == "" {
-				continue
-			}
-			sum += trajectoryCost(value)
-		}
-		return sum
-	}
-	return 0
 }

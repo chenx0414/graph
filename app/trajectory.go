@@ -124,13 +124,24 @@ type trajectoryFiles struct {
 	Image  int `json:"image"`
 }
 
+type trajectoryComposition struct {
+	SystemPrompt    int64 `json:"systemPrompt"`
+	ToolDefinitions int64 `json:"toolDefinitions"`
+	UserMessages    int64 `json:"userMessages"`
+	AssistantReply  int64 `json:"assistantReply"`
+	ToolCalls       int64 `json:"toolCalls"`
+	Injected        int64 `json:"injected"`
+	Reasoning       int64 `json:"reasoning"`
+}
+
 type conversationTrajectory struct {
-	ConversationId string              `json:"conversationId"`
-	TaskId         string              `json:"taskId"`
-	Turns          []trajectoryTurn    `json:"turns"`
-	Requests       []trajectoryRequest `json:"requests"`
-	Events         []trajectoryEvent   `json:"events"`
-	Totals         trajectoryTotals    `json:"totals"`
+	ConversationId string                `json:"conversationId"`
+	TaskId         string                `json:"taskId"`
+	Turns          []trajectoryTurn      `json:"turns"`
+	Requests       []trajectoryRequest   `json:"requests"`
+	Events         []trajectoryEvent     `json:"events"`
+	Totals         trajectoryTotals      `json:"totals"`
+	Composition    trajectoryComposition `json:"composition"`
 }
 
 type trajectoryState struct {

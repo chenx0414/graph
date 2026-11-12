@@ -47,6 +47,7 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	invocation("v2", "op2", 40, 10, 30, 10, `{"total":0.01}`, 20000, 22000)
 	exec(`INSERT INTO tool_calls(instance_id,task_id,node_id,role,tool,ms,is_error,created_at)
 	      VALUES('i1','t1','n1','worker','bash',4000,0,4000)`)
+	exec(`UPDATE operations SET system_prompt='you are an agent',tool_declarations='[{"name":"bash"}]' WHERE id='op2'`)
 
 	trajectory := BuildConversationTrajectory(store, "c1")
 	if len(trajectory.Turns) != 2 {
@@ -94,6 +95,13 @@ func TestConversationTrajectoryGroupsTurnsAndMetrics(t *testing.T) {
 	}
 	if len(totals.Commands) != 1 || totals.Commands[0].Name != "ls" || totals.Commands[0].Count != 1 {
 		t.Fatalf("commands %+v", totals.Commands)
+	}
+	composition := trajectory.Composition
+	if composition.SystemPrompt != 4 || composition.ToolDefinitions != 5 {
+		t.Fatalf("composition prompt %+v", composition)
+	}
+	if composition.UserMessages != 4 || composition.AssistantReply != 4 || composition.ToolCalls != 0 {
+		t.Fatalf("composition messages %+v", composition)
 	}
 
 	SaveConversationTrajectory(store, "c1")
