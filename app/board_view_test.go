@@ -440,3 +440,20 @@ func TestLoadingPinsTheWhiteboardFirstAndDropsExtraOnes(t *testing.T) {
 		t.Fatalf("the active module page moved, active %d", state.board.active)
 	}
 }
+
+func TestTheBoardTabBarHasNoBottomRule(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	tab, ok := tester.Find("标签页 白板")
+	if !ok {
+		t.Fatalf("the whiteboard tab never rendered, texts %q", tester.Texts())
+	}
+	image := tester.Image()
+	x := int(tab.X + tab.W + 60)
+	rule := image.RGBAAt(x, int(tab.Y+tab.H+7))
+	background := image.RGBAAt(x, int(tab.Y+tab.H/2))
+	delta := absInt(int(rule.R)-int(background.R)) + absInt(int(rule.G)-int(background.G)) + absInt(int(rule.B)-int(background.B))
+	if delta > 4 {
+		t.Fatalf("the tab bar keeps its bottom rule: %v against %v", rule, background)
+	}
+}

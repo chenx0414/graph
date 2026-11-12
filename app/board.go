@@ -90,7 +90,6 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 				previousActive, previousHovered = active, hovered
 			}
 		})
-		ui.Box(ctx).FillWidth().Height(gwtheme.Stroke).Background(columnLine(t))
 	})
 }
 
