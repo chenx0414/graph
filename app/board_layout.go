@@ -112,6 +112,14 @@ func boardPanelTitle(kind string) string {
 		return "历史记录"
 	case "trajectory":
 		return "轨迹量化"
+	case "trajectory-summary":
+		return "上下文统计"
+	case "trajectory-tokens":
+		return "Token 统计"
+	case "trajectory-timing":
+		return "耗时统计"
+	case "trajectory-context":
+		return "当前上下文"
 	case "tasks":
 		return "任务清单"
 	case "graph":
@@ -266,6 +274,25 @@ func (s *shellState) openModule(kind string) {
 			{ID: kind, Kind: kind},
 		},
 		Layout: boardNode{Kind: "panel", PanelID: kind},
+	}
+	if kind == "trajectory" {
+		panels := []boardPanel{
+			{ID: "trajectory-summary", Kind: "trajectory-summary"},
+			{ID: "trajectory-tokens", Kind: "trajectory-tokens"},
+			{ID: "trajectory-timing", Kind: "trajectory-timing"},
+			{ID: "trajectory-context", Kind: "trajectory-context"},
+		}
+		page.Panels = panels
+		page.Layout = boardNode{Kind: "split", Axis: "column", Children: []boardSlot{
+			{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-summary"}},
+				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-tokens"}},
+			}}},
+			{Weight: 1, Node: boardNode{Kind: "split", Axis: "row", Children: []boardSlot{
+				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-timing"}},
+				{Weight: 1, Node: boardNode{Kind: "panel", PanelID: "trajectory-context"}},
+			}}},
+		}}
 	}
 	s.board.pages = append(s.board.pages, page)
 	s.board.active = len(s.board.pages) - 1

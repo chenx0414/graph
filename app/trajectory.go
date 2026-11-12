@@ -48,18 +48,46 @@ type trajectoryTurn struct {
 	Invocations  []trajectoryInvocation `json:"invocations"`
 }
 
+type trajectoryToolStat struct {
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Ms     int64  `json:"ms"`
+	Errors int    `json:"errors"`
+}
+
+type trajectoryTiming struct {
+	WallMs  int64 `json:"wallMs"`
+	TtftMs  int64 `json:"ttftMs"`
+	GenMs   int64 `json:"genMs"`
+	ToolMs  int64 `json:"toolMs"`
+	OtherMs int64 `json:"otherMs"`
+}
+
+type trajectoryContext struct {
+	LastTokens int64 `json:"lastTokens"`
+	PeakTokens int64 `json:"peakTokens"`
+}
+
 type trajectoryTotals struct {
-	Turns        int     `json:"turns"`
-	ToolCalls    int     `json:"toolCalls"`
-	ToolErrors   int     `json:"toolErrors"`
-	Input        int64   `json:"input"`
-	Output       int64   `json:"output"`
-	CacheRead    int64   `json:"cacheRead"`
-	CacheWrite   int64   `json:"cacheWrite"`
-	TotalTokens  int64   `json:"totalTokens"`
-	Cost         float64 `json:"cost"`
-	DurationMs   int64   `json:"durationMs"`
-	CacheHitRate float64 `json:"cacheHitRate"`
+	Turns        int                  `json:"turns"`
+	Requests     int                  `json:"requests"`
+	ModelReplies int                  `json:"modelReplies"`
+	UserMessages int                  `json:"userMessages"`
+	ToolMessages int                  `json:"toolMessages"`
+	Compactions  int                  `json:"compactions"`
+	ToolCalls    int                  `json:"toolCalls"`
+	ToolErrors   int                  `json:"toolErrors"`
+	Input        int64                `json:"input"`
+	Output       int64                `json:"output"`
+	CacheRead    int64                `json:"cacheRead"`
+	CacheWrite   int64                `json:"cacheWrite"`
+	TotalTokens  int64                `json:"totalTokens"`
+	Cost         float64              `json:"cost"`
+	DurationMs   int64                `json:"durationMs"`
+	CacheHitRate float64              `json:"cacheHitRate"`
+	ToolsByName  []trajectoryToolStat `json:"toolsByName"`
+	Timing       trajectoryTiming     `json:"timing"`
+	Context      trajectoryContext    `json:"context"`
 }
 
 type conversationTrajectory struct {

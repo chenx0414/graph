@@ -15,8 +15,12 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 		 "usage":{"input":100,"output":50,"cacheRead":80,"cacheWrite":20,"total":250,"contextTokens":400,"firstTokenMs":250,"durationMs":1200},
 		 "cost":0.02,"cacheHitRate":0.4444,
 		 "toolCalls":[{"name":"bash","ms":4000,"isError":false,"at":4000}]}
-	],"totals":{"turns":1,"toolCalls":1,"toolErrors":0,"input":100,"output":50,"cacheRead":80,"cacheWrite":20,
-	 "totalTokens":250,"cost":0.02,"durationMs":7000,"cacheHitRate":0.4444}}`
+	],"totals":{"turns":1,"requests":2,"modelReplies":1,"userMessages":1,"toolMessages":2,"compactions":1,
+	 "toolCalls":1,"toolErrors":0,"input":100,"output":50,"cacheRead":80,"cacheWrite":20,
+	 "totalTokens":250,"cost":0.02,"durationMs":7000,"cacheHitRate":0.4444,
+	 "toolsByName":[{"name":"bash","count":1,"ms":4000,"errors":0}],
+	 "timing":{"wallMs":7000,"ttftMs":250,"genMs":950,"toolMs":4000,"otherMs":1800},
+	 "context":{"lastTokens":42000,"peakTokens":42000}}}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/conversations/c1/trajectory" {
 			w.Write([]byte(payload))
@@ -36,16 +40,16 @@ func TestTrajectoryModuleQuantifiesTheLatestConversation(t *testing.T) {
 	if shell.trajectory.data == nil {
 		t.Fatalf("trajectory never loaded: %q", shell.trajectory.failed)
 	}
-	shell.board.pages = []boardPage{{
-		ID: "tab-trajectory", Title: "轨迹量化", Kind: "trajectory",
-		Panels: []boardPanel{{ID: "trajectory", Kind: "trajectory"}},
-		Layout: boardNode{Kind: "panel", PanelID: "trajectory"},
-	}}
-	shell.board.active = 0
-	tester := frames(ui.NewTester(shell.view, 1200, 800))
-	for _, wanted := range []string{"轨迹量化窗口", "轮次", "工具调用", "Tokens", "缓存命中", "44.4%", "第 1 轮", "1 次工具", "bash", "首 token"} {
+	shell.openModule("trajectory")
+	tester := frames(ui.NewTester(shell.view, 1440, 900))
+	for _, wanted := range []string{"上下文统计窗口", "Token 统计窗口", "耗时统计窗口", "当前上下文窗口",
+		"轮次", "步数", "工具调用", "缓存命中", "44.4%", "bash", "未缓存输入", "首 token 等待", "峰值", "最近一次请求"} {
 		if !tester.HasText(wanted) {
-			t.Fatalf("the trajectory panel shows %q, texts %q", wanted, tester.Texts())
+			t.Fatalf("the trajectory dashboard shows %q, texts %q", wanted, tester.Texts())
 		}
+	}
+	page := shell.boardPage()
+	if page.Kind != "trajectory" || len(page.Panels) != 4 {
+		t.Fatalf("the trajectory tab opens four cards, page %+v", page)
 	}
 }

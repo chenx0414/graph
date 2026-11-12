@@ -99,7 +99,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	}
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background)
 	card.Children(func() {
-		if page.Kind != "" && len(page.Panels) > 0 {
+		if page.Kind != "" && len(page.Panels) == 1 {
 			s.boardPanelView(ctx, &page.Panels[0], false)
 			return
 		}
@@ -108,20 +108,21 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 				TextColor(t.Muted).Padding(24, 24, 24, 24)
 			return
 		}
+		freeform := page.Kind == ""
 		ui.Column(ctx).Fill().Padding(10).Children(func() {
-			s.boardNodeView(ctx, &page.Layout, "root")
+			s.boardNodeView(ctx, &page.Layout, "root", freeform)
 		})
 	})
 }
 
-func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string) {
+func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string, freeform bool) {
 	switch node.Kind {
 	case "panel":
 		panel := s.panelByID(node.PanelID)
 		if panel == nil {
 			return
 		}
-		s.boardPanelView(ctx, panel, true)
+		s.boardPanelView(ctx, panel, freeform)
 	case "split":
 		var container ui.Element
 		if node.Axis == "row" {
@@ -144,7 +145,7 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth()
 				}
 				cell.Children(func() {
-					s.boardNodeView(ctx, &slot.Node, childPath)
+					s.boardNodeView(ctx, &slot.Node, childPath, freeform)
 				})
 			}
 		})

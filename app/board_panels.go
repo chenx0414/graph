@@ -19,6 +19,14 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 		s.panelHistory(ctx)
 	case "trajectory":
 		s.panelTrajectory(ctx)
+	case "trajectory-summary":
+		s.trajectorySummaryCard(ctx)
+	case "trajectory-tokens":
+		s.trajectoryTokensCard(ctx)
+	case "trajectory-timing":
+		s.trajectoryTimingCard(ctx)
+	case "trajectory-context":
+		s.trajectoryContextCard(ctx)
 	case "tasks":
 		s.panelTasks(ctx)
 	case "graph":

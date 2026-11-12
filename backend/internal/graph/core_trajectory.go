@@ -49,18 +49,46 @@ type TrajectoryTurn struct {
 	Invocations  []TrajectoryInvocation `json:"invocations"`
 }
 
+type TrajectoryToolStat struct {
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	Ms     int64  `json:"ms"`
+	Errors int    `json:"errors"`
+}
+
+type TrajectoryTiming struct {
+	WallMs  int64 `json:"wallMs"`
+	TtftMs  int64 `json:"ttftMs"`
+	GenMs   int64 `json:"genMs"`
+	ToolMs  int64 `json:"toolMs"`
+	OtherMs int64 `json:"otherMs"`
+}
+
+type TrajectoryContext struct {
+	LastTokens int64 `json:"lastTokens"`
+	PeakTokens int64 `json:"peakTokens"`
+}
+
 type TrajectoryTotals struct {
-	Turns        int     `json:"turns"`
-	ToolCalls    int     `json:"toolCalls"`
-	ToolErrors   int     `json:"toolErrors"`
-	Input        int64   `json:"input"`
-	Output       int64   `json:"output"`
-	CacheRead    int64   `json:"cacheRead"`
-	CacheWrite   int64   `json:"cacheWrite"`
-	TotalTokens  int64   `json:"totalTokens"`
-	Cost         float64 `json:"cost"`
-	DurationMs   int64   `json:"durationMs"`
-	CacheHitRate float64 `json:"cacheHitRate"`
+	Turns        int                  `json:"turns"`
+	Requests     int                  `json:"requests"`
+	ModelReplies int                  `json:"modelReplies"`
+	UserMessages int                  `json:"userMessages"`
+	ToolMessages int                  `json:"toolMessages"`
+	Compactions  int                  `json:"compactions"`
+	ToolCalls    int                  `json:"toolCalls"`
+	ToolErrors   int                  `json:"toolErrors"`
+	Input        int64                `json:"input"`
+	Output       int64                `json:"output"`
+	CacheRead    int64                `json:"cacheRead"`
+	CacheWrite   int64                `json:"cacheWrite"`
+	TotalTokens  int64                `json:"totalTokens"`
+	Cost         float64              `json:"cost"`
+	DurationMs   int64                `json:"durationMs"`
+	CacheHitRate float64              `json:"cacheHitRate"`
+	ToolsByName  []TrajectoryToolStat `json:"toolsByName"`
+	Timing       TrajectoryTiming     `json:"timing"`
+	Context      TrajectoryContext    `json:"context"`
 }
 
 type ConversationTrajectory struct {
@@ -159,6 +187,50 @@ func BuildConversationTrajectory(store *TaskStore, conversationId string) *Conve
 	}
 	trajectory.Turns = turns
 	trajectory.Totals = trajectoryTotals(turns)
+	trajectory.Totals.Requests = len(invocations)
+	trajectory.Totals.ToolsByName = trajectoryToolStats(tools)
+	for _, message := range messages {
+		switch message.Role {
+		case "user":
+			if message.Kind == "chat" {
+				trajectory.Totals.UserMessages++
+			}
+		case "assistant":
+			if message.Kind == "chat" {
+				trajectory.Totals.ModelReplies++
+			}
+		case "tool":
+			trajectory.Totals.ToolMessages++
+		}
+	}
+	lastContext, peakContext := int64(0), int64(0)
+	for _, invocation := range invocations {
+		if invocation.Usage.ContextTokens > 0 {
+			lastContext = invocation.Usage.ContextTokens
+			if lastContext > peakContext {
+				peakContext = lastContext
+			}
+		}
+		if invocation.Usage.FirstTokenMs > 0 {
+			trajectory.Totals.Timing.TtftMs += invocation.Usage.FirstTokenMs
+		}
+		if invocation.DurationMs > 0 {
+			generation := invocation.DurationMs - invocation.Usage.FirstTokenMs
+			if generation > 0 {
+				trajectory.Totals.Timing.GenMs += generation
+			}
+		}
+	}
+	trajectory.Totals.Context = TrajectoryContext{LastTokens: lastContext, PeakTokens: peakContext}
+	trajectory.Totals.Timing.WallMs = trajectory.Totals.DurationMs
+	for _, tool := range tools {
+		trajectory.Totals.Timing.ToolMs += tool.Ms
+	}
+	occupied := trajectory.Totals.Timing.TtftMs + trajectory.Totals.Timing.GenMs + trajectory.Totals.Timing.ToolMs
+	if trajectory.Totals.Timing.WallMs > occupied {
+		trajectory.Totals.Timing.OtherMs = trajectory.Totals.Timing.WallMs - occupied
+	}
+	trajectory.Totals.Compactions = int(kernelInt(kernelRow(store.Db, "SELECT COUNT(*) AS count FROM events WHERE task_id=? AND type='session.compacted'", trajectory.TaskId)["count"]))
 	return trajectory
 }
 
@@ -277,6 +349,25 @@ func trajectoryCacheHitRate(usage TrajectoryUsage) float64 {
 		return 0
 	}
 	return float64(usage.CacheRead) / float64(denominator)
+}
+
+func trajectoryToolStats(tools []TrajectoryTool) []TrajectoryToolStat {
+	stats := []TrajectoryToolStat{}
+	index := map[string]int{}
+	for _, tool := range tools {
+		position, ok := index[tool.Name]
+		if !ok {
+			index[tool.Name] = len(stats)
+			stats = append(stats, TrajectoryToolStat{Name: tool.Name})
+			position = len(stats) - 1
+		}
+		stats[position].Count++
+		stats[position].Ms += tool.Ms
+		if tool.IsError {
+			stats[position].Errors++
+		}
+	}
+	return stats
 }
 
 func trajectoryTotals(turns []TrajectoryTurn) TrajectoryTotals {
