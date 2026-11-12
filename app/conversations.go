@@ -115,7 +115,10 @@ func (c *chatState) busy() bool {
 }
 
 func (c *chatState) send() {
-	text := strings.TrimSpace(c.draft)
+	c.sendText(strings.TrimSpace(c.draft))
+}
+
+func (c *chatState) sendText(text string) {
 	if text == "" || c.active == "" {
 		return
 	}
@@ -363,15 +366,24 @@ func (c *chatState) composer(ctx *ui.Context) {
 			Radius(t.Radius.X2l).Background(t.Background).Border(gwtheme.Stroke, t.Input).Clip()
 		kit.Elevate(ctx, card, gwtheme.ShadowXs)
 		card.Children(func() {
-			field := kit.Input(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
-			field.Label("消息").FillWidth().PaddingX(th.Space(0.5))
+			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
+			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(1, 6)
 			if c.focusComposer {
 				field.Focus()
 				c.focusComposer = false
 			}
-			if field.Submitted() {
-				go c.send()
-			}
+			field.OnTextKey(func(k ui.TextKey) bool {
+				if k.Key != ui.KeyEnter || k.Mods != 0 {
+					return false
+				}
+				text := strings.TrimSpace(k.Text())
+				if text == "" {
+					return true
+				}
+				go c.sendText(text)
+				k.SetText("")
+				return true
+			})
 			ui.Row(ctx).FillWidth().AlignItems(ui.Center).Gap(th.Space(1.5)).Children(func() {
 				composerPlaceholder(ctx, iconClip, "附件")
 				ui.Spacer(ctx)

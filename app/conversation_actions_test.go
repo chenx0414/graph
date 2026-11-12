@@ -208,6 +208,75 @@ func TestPausedStateComesFromTheConversation(t *testing.T) {
 	}
 }
 
+func TestTheComposerGrowsWithThePrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"messages":[{"role":"assistant","text":"你好"}]}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	short := frames(ui.NewTester(state.view, 760, 620))
+	one, ok := short.Find("消息")
+	if !ok {
+		t.Fatalf("the composer input never rendered, texts %q", short.Texts())
+	}
+	state.draft = strings.Repeat("这是一段很长的提示词，用来让输入框换行。", 12)
+	tall := frames(ui.NewTester(state.view, 760, 620))
+	many, ok := tall.Find("消息")
+	if !ok {
+		t.Fatalf("the grown composer input never rendered, texts %q", tall.Texts())
+	}
+	if many.H <= one.H {
+		t.Fatalf("a long prompt must grow the field, one %v many %v", one.H, many.H)
+	}
+	state.draft = ""
+	back := frames(ui.NewTester(state.view, 760, 620))
+	again, ok := back.Find("消息")
+	if !ok {
+		t.Fatalf("the shrunk composer input never rendered, texts %q", back.Texts())
+	}
+	if again.H != one.H {
+		t.Fatalf("clearing the prompt shrinks the field back, one %v again %v", one.H, again.H)
+	}
+}
+
+func TestTheComposerSendsOnEnterAndBreaksLinesWithShift(t *testing.T) {
+	posted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/api/conversations/c1/messages" {
+			payload := make([]byte, 2048)
+			read, _ := r.Body.Read(payload)
+			posted = string(payload[:read])
+			w.Write([]byte(`{}`))
+			return
+		}
+		w.Write([]byte(`{"messages":[{"role":"assistant","text":"你好"}]}`))
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	state.focusComposer = true
+	tester := frames(ui.NewTester(state.view, 760, 620))
+	tester.Type("你好")
+	tester.Key(0, ui.KeyEnter)
+	deadline := time.Now().Add(2 * time.Second)
+	for posted == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !contains(posted, "你好") {
+		t.Fatalf("Enter must send the prompt, body %q", posted)
+	}
+	tester.Type("第一行")
+	tester.Key(ui.Shift, ui.KeyEnter)
+	tester.Type("第二行")
+	frames(tester)
+	if !strings.Contains(state.draft, "\n") {
+		t.Fatalf("Shift+Enter must break the line, draft %q", state.draft)
+	}
+}
+
 func TestTheModelModuleSwitchesTheConversationModel(t *testing.T) {
 	posted := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
