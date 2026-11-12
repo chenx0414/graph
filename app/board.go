@@ -50,7 +50,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 	column := ui.Column(ctx).Grow(1).FillWidth().Height(bandHeight).Label("白板标题")
 	column.Children(func() {
 		strip := ui.Row(ctx).FillWidth().Height(bandHeight-gwtheme.Stroke).Padding(0, th.Space(2.5)).
-			Gap(0).AlignItems(ui.Center)
+			Gap(0).AlignItems(ui.Center).Justify(ui.Center)
 		strip.Children(func() {
 			previousActive, previousHovered := false, false
 			for index := range s.board.pages {
