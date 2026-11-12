@@ -56,7 +56,7 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 			}
 			if title != "" {
 				kit.Text(ctx, title, gwtheme.Of(ctx).Text.Lg).FontWeight(600).SingleLine().Ellipsis("…").Grow(1).
-					Translate(0, -1.6).Label("对话标题名")
+					Translate(0, -1.5).Label("对话标题名")
 			}
 			ui.Box(ctx).Width(th.Space(4))
 		})

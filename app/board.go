@@ -83,7 +83,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 					if active {
 						color = t.Foreground
 					}
-					kit.Text(ctx, page.Title, t.Text.Lg).TextColor(color).SingleLine().Translate(0, -2.4)
+					kit.Text(ctx, page.Title, t.Text.Lg).TextColor(color).SingleLine().Translate(0, -2.2)
 					if index > 0 && len(s.board.pages) > 1 && (active || hovered) {
 						iconAction(ctx, iconClose, "关闭 "+page.Title, false, 4.5, func() { s.closeBoardPage(pageIndex) })
 					}
