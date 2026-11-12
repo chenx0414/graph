@@ -334,8 +334,8 @@ func TestTheFunctionRailSpacesItsIconsApart(t *testing.T) {
 			t.Fatalf("the rail lost %q, texts %q", label, tester.Texts())
 		}
 		if previousBottom >= 0 {
-			if gap := rect.Y - previousBottom; gap < 6 {
-				t.Fatalf("rail icons sit %.1f apart, want at least 6", gap)
+			if gap := rect.Y - previousBottom; gap < 10 {
+				t.Fatalf("rail icons sit %.1f apart, want at least 10", gap)
 			}
 		}
 		previousBottom = rect.Y + rect.H
