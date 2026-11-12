@@ -48,6 +48,7 @@ type KernelGraphLaneOptions struct {
 	Artifacts *ArtifactWorkspace
 	GateFor func(graphId, nodeId string) *SendGate
 	OnMainMessage func(graphId, nodeId, text, requestId string) any
+	SpawnAgent func(parent AgentSpawnParent, input AgentSpawnInput) any
 	OnToolCall func(graphId, nodeId, name string, args any) PiToolAnswer
 }
 

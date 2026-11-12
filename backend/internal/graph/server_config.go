@@ -22,6 +22,9 @@ type LimitsConfig struct {
 	SharedGroups        map[string]int `json:"sharedGroups"`
 	AgentExecutions     int            `json:"agentExecutions"`
 	ProgramExecutions   int            `json:"programExecutions"`
+	MaxAgents           int            `json:"maxAgents"`
+	SpawnDepth          int            `json:"spawnDepth"`
+	ChildrenPerAgent    int            `json:"childrenPerAgent"`
 }
 
 type GraphModels struct {
@@ -73,6 +76,12 @@ func configInvalid(message string) {
 	RaiseField("invalid_config", message, field)
 }
 
+const (
+	DefaultMaxAgents        = 1024
+	DefaultSpawnDepth       = 4
+	DefaultChildrenPerAgent = 16
+)
+
 func EmptyGraphConfig() GraphConfig {
 	return GraphConfig{
 		Path: nil, Configured: false, Projects: []ProjectConfig{}, Models: nil,
@@ -82,6 +91,9 @@ func EmptyGraphConfig() GraphConfig {
 			SharedGroups:      map[string]int{},
 			AgentExecutions:   DefaultAgentExecutions,
 			ProgramExecutions: DefaultProgramExecutions,
+			MaxAgents:         DefaultMaxAgents,
+			SpawnDepth:        DefaultSpawnDepth,
+			ChildrenPerAgent:  DefaultChildrenPerAgent,
 		},
 		PiExtensionAutoUpdate: true,
 	}

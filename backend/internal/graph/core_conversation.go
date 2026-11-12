@@ -7,6 +7,7 @@ const (
 	ConversationProject ConversationRole = "project"
 	ConversationHistory ConversationRole = "history"
 	ConversationLegacy  ConversationRole = "legacy"
+	ConversationChild   ConversationRole = "child"
 )
 
 type ConversationRow struct {

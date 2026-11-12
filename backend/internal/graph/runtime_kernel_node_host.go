@@ -47,6 +47,7 @@ type NodeSessionOptions struct {
 	InstancesDir       string
 	Gate               *SendGate
 	Library            *AgentContextLibrary
+	SpawnAgent         func(parent AgentSpawnParent, input AgentSpawnInput) any
 	DaemonNativeTools bool
 }
 
@@ -222,6 +223,21 @@ func NodeSessionRequest(options NodeSessionOptions) NodeSession {
 			}
 			built := tools
 			nativeToolInput = &built
+			if options.SpawnAgent != nil {
+				parent := AgentSpawnParent{AgentId: options.GraphId + "/" + options.NodeId, TaskId: options.GraphId, NodeId: options.NodeId, Workspace: options.Workspace}
+				if task := options.Kernel.Store.Task(options.GraphId); task.ID != "" {
+					if task.ConversationID != nil {
+						parent.ConversationId = *task.ConversationID
+					}
+					parent.ProjectId = task.ProjectID
+				}
+				tools.Spawn = func(request AgentToolsSpawnInput) any {
+					return options.SpawnAgent(parent, AgentSpawnInput{
+						Objective: request.Objective, Name: request.Name, Model: request.Model,
+						Workspace: request.Workspace, RequestId: request.RequestId,
+					})
+				}
+			}
 			if options.Bindings != nil {
 				tools.Peers = options.Bindings.Peers
 				tools.OnAskSupervisor = options.Bindings.AskSupervisor

@@ -172,6 +172,7 @@ func (runtime *TaskRuntime) residentGraphLane() *GraphLane {
 		OnMainMessage: func(graphId, nodeId, text, requestId string) any {
 			return SendKernelMainMessage(runtime.kernel, graphId, nodeId, NodeMessageInput{Text: text, RequestID: requestId})
 		},
+		SpawnAgent: runtime.SpawnAgent,
 		OnToolCall: func(graphId, nodeId, name string, args any) PiToolAnswer {
 			if name != "submit" {
 				return PiToolAnswer{Ok: false, Text: "the host does not offer a tool named " + name}

@@ -183,7 +183,7 @@ func loadFleetLedger(store *TaskStore) *fleetLedger {
 func (ledger *fleetLedger) agentUsage(agent AgentRecord) fleetUsageAgg {
 	usage := fleetUsageAgg{}
 	switch agent.Kind {
-	case "global", "project":
+	case "global", "project", "child":
 		conversationId := agent.ConversationId
 		if conversationId == "" {
 			conversationId = agent.Id
@@ -222,7 +222,7 @@ func (ledger *fleetLedger) agentUsage(agent AgentRecord) fleetUsageAgg {
 
 func (ledger *fleetLedger) agentMessages(agent AgentRecord) int64 {
 	switch agent.Kind {
-	case "global", "project":
+	case "global", "project", "child":
 		conversationId := agent.ConversationId
 		if conversationId == "" {
 			conversationId = agent.Id
@@ -236,11 +236,6 @@ func (ledger *fleetLedger) agentMessages(agent AgentRecord) int64 {
 
 func (ledger *fleetLedger) agentStatus(agent AgentRecord) string {
 	switch agent.Kind {
-	case "child":
-		if agent.ClosedAt != nil {
-			return "done"
-		}
-		return "idle"
 	case "node":
 		key := fleetKey(agent.TaskId, agent.NodeId)
 		if ledger.activeNode[key].operationId != "" || ledger.kernelExecution[key] != "" {
@@ -302,7 +297,7 @@ func (ledger *fleetLedger) agentCurrentOperation(agent AgentRecord) (string, str
 		if execution := ledger.kernelExecution[key]; execution != "" {
 			return execution, ""
 		}
-	case "global", "project":
+	case "global", "project", "child":
 		conversationId := agent.ConversationId
 		if conversationId == "" {
 			conversationId = agent.Id

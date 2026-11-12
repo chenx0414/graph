@@ -114,6 +114,7 @@ type AgentToolsInput struct {
 	Rsi                *AgentToolsRsi
 	RsiContext         PiAdapterRsiContext
 	ControlTask        func(input AgentToolsControlTask) any
+	Spawn              func(input AgentToolsSpawnInput) any
 	Desktop            *AgentToolsDesktop
 	WriteLedger        *AgentToolsWriteLedger
 }
@@ -183,6 +184,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		agentToolsHarnessHandlers(input, root, readRoots, hostRead, hostWrite, pathOptions, artifacts, peers),
 		agentToolsConversationHandlers(input, root, readRoots, hostRead, hostWrite, pathOptions, artifacts, peers),
 		agentToolsDesktopHandlers(input),
+		agentToolsSpawnHandlers(input),
 	} {
 		for name, handler := range group {
 			handlers[name] = handler
@@ -200,6 +202,7 @@ func AgentTools(input AgentToolsInput) []ToolDefinition {
 		Fetch:           input.Fetch != nil,
 		Catalog:         input.Catalog != nil,
 		Harness:         input.GraphManagement.HarnessCompare != nil,
+		Spawn:           input.Spawn != nil,
 		Desktop:         input.Desktop != nil && input.Desktop.Bin != "",
 	}
 	if artifacts.present {

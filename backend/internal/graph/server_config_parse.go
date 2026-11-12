@@ -102,6 +102,9 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 		SharedGroups:      map[string]int{},
 		AgentExecutions:   DefaultAgentExecutions,
 		ProgramExecutions: DefaultProgramExecutions,
+		MaxAgents:         DefaultMaxAgents,
+		SpawnDepth:        DefaultSpawnDepth,
+		ChildrenPerAgent:  DefaultChildrenPerAgent,
 	}
 	if value, ok := root["limits"]; ok {
 		rawLimits := asObject(value, "limits")
@@ -110,6 +113,15 @@ func ParseGraphConfig(raw any, configPath string) GraphConfig {
 		}
 		if current, present := rawLimits["programExecutions"]; present {
 			limits.ProgramExecutions = configExecutionLimit(current, "limits.programExecutions")
+		}
+		if current, present := rawLimits["maxAgents"]; present {
+			limits.MaxAgents = configExecutionLimit(current, "limits.maxAgents")
+		}
+		if current, present := rawLimits["spawnDepth"]; present {
+			limits.SpawnDepth = configExecutionLimit(current, "limits.spawnDepth")
+		}
+		if current, present := rawLimits["childrenPerAgent"]; present {
+			limits.ChildrenPerAgent = configExecutionLimit(current, "limits.childrenPerAgent")
 		}
 		credentialLimits := map[string]any{}
 		if current, present := rawLimits["credentials"]; present {

@@ -31,6 +31,7 @@ func (runtime *TaskRuntime) mainAdapterOptions() PiAdapterOptions {
 		TaskSetups:   runtime.taskSetups,
 	}
 	options.Transport = CreatePigAgentSessionTransport(runtime.store, codemodeSettings(runtime.options.Codemode, runtime.stateDir))
+	options.SpawnAgent = runtime.SpawnAgent
 	options.DaemonNativeTools = true
 	return options
 }

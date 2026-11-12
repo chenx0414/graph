@@ -233,8 +233,8 @@ func TestMigrationV60RegistersAgentsFromConversationsNodesAndKernelNodes(t *test
 	if err := store.DB.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 60 || SCHEMA_VERSION != 60 {
-		t.Fatalf("version is %d / SCHEMA_VERSION %d, want 60", version, SCHEMA_VERSION)
+	if version != SCHEMA_VERSION {
+		t.Fatalf("version is %d / SCHEMA_VERSION %d", version, SCHEMA_VERSION)
 	}
 	if _, err := store.DB.Exec(`INSERT INTO agents(id,kind,parent_id) VALUES('child-1','child','c-global')`); err != nil {
 		t.Fatalf("the schema must accept a child agent: %v", err)

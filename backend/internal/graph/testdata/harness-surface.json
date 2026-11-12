@@ -7,8 +7,8 @@
   },
   "surface": {
     "backend/internal/graph/runtime_agent_context.go": "49491ca562fd989b481b5974d253ce1fecf871afea7d2511cac489b2d8a3a7fe",
-    "backend/internal/graph/runtime_agent_tool_definitions.go": "5bd5130514f7a4cb153a3df72d135b38a79f606bf956ce6f97beed415181152f",
-    "backend/internal/graph/runtime_agent_tools.go": "d23badeef399ed4c66f37e33326de62781a64fd1ed7e4ffdc90d7e0a2d98a0b9",
+    "backend/internal/graph/runtime_agent_tool_definitions.go": "a5bac94bf91a13fdfde3e6f0ae19e5e7eb6c3241211d769791ba768eeadc3cda",
+    "backend/internal/graph/runtime_agent_tools.go": "04798fb074ee03661eca1f5cb7f0459b9e61f2295f19ffa3777dfa44c76b0e01",
     "backend/internal/graph/runtime_pi_native_tools.go": "dc2e6afc230da7b142706cbf298cfbad4def273392318c3cd1bfae07a7e3f1db",
     "backend/internal/graph/runtime_pig_native_tools.go": "25f0d7e7b84575663de9dbecdfb39b91b76b94ad57eb02e8303f1dbbd806b2a5",
     "backend/internal/harness/cases.go": "a750a30e41060ba1a7ba0bd6cba914215ade52eb0a7cc95f9006998d852194b1",
@@ -16,5 +16,5 @@
     "backend/internal/harness/provider.go": "90778e9de704a1c41bb969a4a10c916804475479ad392eb5190d04493cd38c75",
     "backend/internal/harness/run.go": "6109c2b888158c6de16e665746350691f86299832a5c27b77e492096087757d8"
   },
-  "updatedAt": "2026-11-11T09:40:37.282262Z"
+  "updatedAt": "2026-11-12T14:44:35.818034Z"
 }

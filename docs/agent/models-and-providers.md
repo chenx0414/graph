@@ -128,7 +128,7 @@ curl -s -b /tmp/graph-cookie.txt -H 'content-type: application/json' \
 
 **一套词表**：配置解析、订阅目录与运行时分派共用这组三个字符串。未知值在配置层**硬拒**（错误串点名三个可用值），运行时也没有 `default` 兜底（返回 `Unsupported provider api "…"`，不会悄悄发到 `/chat/completions`）；目录的 `Supported` 看**平台**是否仍提供，不看传输。
 
-`limits`：`credentials.<id>` 逐凭据并发上限、`sharedGroups` 共享组并发上限、`agentExecutions` 全局 Agent 执行名额（默认 1024；未写时用默认值）、`programExecutions` 程序模块并发名额（默认 4）。`agentExecutions`/`programExecutions` 必须是正整数，非法值（0、负数、小数、字符串、布尔）在启动时硬拒，错误串点名键与取值；运行中保存配置时同样校验，合法值通过 `ApplyExecutionLimits` 立即生效。token 额度上限已移除，`defaultBudgetTokens` 即使写出也被忽略。
+`limits`：`credentials.<id>` 逐凭据并发上限、`sharedGroups` 共享组并发上限、`agentExecutions` 全局 Agent 执行名额（默认 1024；未写时用默认值）、`programExecutions` 程序模块并发名额（默认 4）、`maxAgents` 编队内 Agent 总数上限（默认 1024）、`spawnDepth` 动态子 Agent 最大生成深度（默认 4）、`childrenPerAgent` 单个 Agent 的直接子级上限（默认 16）。执行名额与生成上限都必须是正整数，非法值（0、负数、小数、字符串、布尔）在启动时硬拒，错误串点名键与取值；运行中保存配置时同样校验，合法值通过 `ApplyExecutionLimits` 立即生效。token 额度上限已移除，`defaultBudgetTokens` 即使写出也被忽略。
 
 ### 守卫（会拒绝你的保存）
 

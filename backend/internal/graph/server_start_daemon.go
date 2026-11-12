@@ -321,6 +321,7 @@ func StartGraphDaemon(options DaemonOptions) *GraphDaemon {
 		SystemContext: &TaskRuntimeSystemContext{SystemSummary: systemSummary},
 		Limits: &TaskRuntimeLimits{
 			AgentExecutions: config.Limits.AgentExecutions, ProgramExecutions: config.Limits.ProgramExecutions,
+			MaxAgents: config.Limits.MaxAgents, SpawnDepth: config.Limits.SpawnDepth, ChildrenPerAgent: config.Limits.ChildrenPerAgent,
 		},
 		Models: &TaskRuntimeModels{
 			Entries: live.Entries(), ModelRuntime: modelRuntime, ModelScheduler: scheduler,

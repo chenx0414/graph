@@ -75,3 +75,9 @@ spawn_agent({
 - 集成：真实 SQLite + 假 provider，证明 child 回合完成后父级被唤醒、父级读到结果、编队投影出现 child。
 - 1,000 并发：同一测试进程内创建 1,000 个 child 席位，验证 limiter 与编队查询，不调真实模型。
 - 真机：编队页打开 child 详情、点击打开会话、停止子 Agent。
+
+## 实施状态（2026-11-12）
+
+已落地：`agents.kind='child'`、`conversations.role='child'`（schema v61）、任意 Agent 的 `spawn_agent` 工具、子 Agent 的独立会话/anchor 任务/master 节点/工作区、父级模型继承、深度/子数/总数限额、子 Agent 完成后向父级投递 `agent_result` 消息并唤醒父级、子会话不进入用户会话列表、编队投影显示 child 及其用量与消息数。
+
+待做：`read_agent`、`list_children`、`message_agent`、`stop_agent`；父级归档时子级暂停；子级失败时的重试/接管策略；深色主题与真机 1,000 child 压测。

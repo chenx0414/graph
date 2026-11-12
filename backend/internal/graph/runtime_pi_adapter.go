@@ -31,6 +31,7 @@ type PiAdapterOptions struct {
 	CapabilitySecrets func() map[string]string
 	Channels *PiAdapterChannels
 	Transport AgentSessionTransport
+	SpawnAgent func(parent AgentSpawnParent, input AgentSpawnInput) any
 	DaemonNativeTools bool
 }
 

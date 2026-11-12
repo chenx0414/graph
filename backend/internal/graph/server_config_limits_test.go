@@ -96,3 +96,32 @@ func TestGraphConfigRejectsInvalidExecutionLimits(t *testing.T) {
 		}()
 	}
 }
+
+func TestGraphConfigReadsSpawnLimits(t *testing.T) {
+	config := ParseGraphConfig(map[string]any{
+		"version": float64(1),
+		"limits":  map[string]any{"maxAgents": float64(32), "spawnDepth": float64(3), "childrenPerAgent": float64(4)},
+	}, "graph.config.json")
+	if config.Limits.MaxAgents != 32 || config.Limits.SpawnDepth != 3 || config.Limits.ChildrenPerAgent != 4 {
+		t.Fatalf("spawn limits = %+v", config.Limits)
+	}
+	empty := EmptyGraphConfig()
+	if empty.Limits.MaxAgents != 1024 || empty.Limits.SpawnDepth != 4 || empty.Limits.ChildrenPerAgent != 16 {
+		t.Fatalf("spawn defaults = %+v", empty.Limits)
+	}
+}
+
+func TestGraphConfigRejectsInvalidSpawnLimits(t *testing.T) {
+	for _, key := range []string{"maxAgents", "spawnDepth", "childrenPerAgent"} {
+		func() {
+			defer func() {
+				recovered := recover()
+				failure, ok := recovered.(*RuntimeError)
+				if !ok || failure.Code != "invalid_config" || !strings.Contains(failure.Message, "limits."+key) {
+					t.Fatalf("limits.%s must report invalid_config with its key, recovered %v", key, recovered)
+				}
+			}()
+			ParseGraphConfig(map[string]any{"version": float64(1), "limits": map[string]any{key: float64(0)}}, "graph.config.json")
+		}()
+	}
+}

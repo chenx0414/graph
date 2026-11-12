@@ -193,6 +193,9 @@ func (l *OperationLifecycle) settle(operation Operation, result OperationResult,
 		conversation = nil
 	}
 	RecordConversationOutput(l.store, operation, result)
+	if conversation != nil && conversation.Role == ConversationChild {
+		DeliverChildResult(l.store, *conversation, operation, result)
+	}
 	queuedAfter := 0
 	if conversation != nil {
 		queuedAfter = len(PendingMessages(l.store, conversation.Id, 1))

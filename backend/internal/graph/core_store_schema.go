@@ -81,3 +81,34 @@ CREATE INDEX IF NOT EXISTS agents_conversation ON agents(conversation_id);
 CREATE INDEX IF NOT EXISTS agents_task ON agents(task_id);
 CREATE INDEX IF NOT EXISTS agents_project ON agents(project_id);
 `
+
+const schemaV61 = `
+CREATE TABLE conversations_next(
+  id TEXT PRIMARY KEY,
+  project_id TEXT,
+  workspace_project_id TEXT NOT NULL,
+  anchor_task_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  created_seq INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  binding_since_seq INTEGER NOT NULL DEFAULT 0,
+  archived_at INTEGER,
+  thinking_level TEXT NOT NULL DEFAULT 'off',
+  role TEXT NOT NULL DEFAULT 'legacy' CHECK(role IN ('legacy','global','project','history','child'))
+);
+INSERT INTO conversations_next(id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at,binding_since_seq,archived_at,thinking_level,role)
+  SELECT id,project_id,workspace_project_id,anchor_task_id,title,created_seq,created_at,binding_since_seq,archived_at,thinking_level,role FROM conversations;
+DROP TABLE conversations;
+ALTER TABLE conversations_next RENAME TO conversations;
+CREATE INDEX conversations_archived ON conversations(archived_at);
+CREATE UNIQUE INDEX conversations_one_global ON conversations(role) WHERE role='global';
+CREATE UNIQUE INDEX conversations_one_project ON conversations(project_id) WHERE role='project';
+CREATE TRIGGER conversations_role_insert BEFORE INSERT ON conversations
+WHEN (NEW.role='global' AND NEW.project_id IS NOT NULL)
+  OR (NEW.role='project' AND NEW.project_id IS NULL)
+BEGIN SELECT RAISE(ABORT,'Invalid supervisor project binding'); END;
+CREATE TRIGGER conversations_role_update BEFORE UPDATE OF role,project_id ON conversations
+WHEN (NEW.role='global' AND NEW.project_id IS NOT NULL)
+  OR (NEW.role='project' AND NEW.project_id IS NULL)
+BEGIN SELECT RAISE(ABORT,'Invalid supervisor project binding'); END;
+PRAGMA user_version=61;`

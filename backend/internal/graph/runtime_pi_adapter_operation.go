@@ -227,6 +227,25 @@ func piAdapterRunOperation(options PiAdapterOptions, transport AgentSessionTrans
 			if role != "" {
 				tools.Role = role
 			}
+			if options.SpawnAgent != nil {
+				parent := AgentSpawnParent{TaskId: operation.TaskId, NodeId: operation.NodeId, Workspace: workspace}
+				if conversation != nil {
+					parent.AgentId = conversation.Id
+					parent.ConversationId = conversation.Id
+					if conversation.ProjectId != nil {
+						parent.ProjectId = *conversation.ProjectId
+					}
+				}
+				if parent.AgentId == "" {
+					parent.AgentId = operation.TaskId + "/" + operation.NodeId
+				}
+				tools.Spawn = func(request AgentToolsSpawnInput) any {
+					return options.SpawnAgent(parent, AgentSpawnInput{
+						Objective: request.Objective, Name: request.Name, Model: request.Model,
+						Workspace: request.Workspace, RequestId: request.RequestId,
+					})
+				}
+			}
 			if conversation != nil && conversation.Role == ConversationProject && role == "master" && conversation.AnchorTaskId == operation.TaskId {
 				tools.OnAskSupervisor = func(request PiAdapterAskedQuestion) {
 					if askedQuestion == nil {

@@ -37,6 +37,9 @@ type TaskRuntimeCatalog struct {
 type TaskRuntimeLimits struct {
 	AgentExecutions   int
 	ProgramExecutions int
+	MaxAgents         int
+	SpawnDepth        int
+	ChildrenPerAgent  int
 }
 
 type TaskRuntimeSystemContext struct {

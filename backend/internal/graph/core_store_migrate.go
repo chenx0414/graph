@@ -197,6 +197,9 @@ func MigrateTaskSchema(db *sql.DB) {
 	if version < 60 {
 		migrateV60(db)
 	}
+	if version < 61 {
+		migrateV61(db)
+	}
 }
 
 func sqliteColumns(db *sql.DB, table string) map[string]bool {
@@ -482,4 +485,42 @@ func migrationTableExists(db *sql.DB, table string) bool {
 	var name string
 	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
 	return err == nil
+}
+
+func migrateV61(db *sql.DB) {
+	if _, err := db.Exec("PRAGMA foreign_keys=OFF"); err != nil {
+		panic(err)
+	}
+	defer func() {
+		if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+			panic(err)
+		}
+	}()
+	if _, err := db.Exec("BEGIN IMMEDIATE"); err != nil {
+		panic(err)
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			_, _ = db.Exec("ROLLBACK")
+			panic(rec)
+		}
+	}()
+	execSQL(db, schemaV61)
+	rows, err := db.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		panic(err)
+	}
+	violations := 0
+	for rows.Next() {
+		violations++
+	}
+	if err := rows.Close(); err != nil {
+		panic(err)
+	}
+	if violations > 0 {
+		panic("the conversations rebuild broke a foreign key")
+	}
+	if _, err := db.Exec("COMMIT"); err != nil {
+		panic(err)
+	}
 }
