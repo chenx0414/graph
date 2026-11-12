@@ -146,6 +146,55 @@ func TestTheRailOpensATabForTheModule(t *testing.T) {
 	}
 }
 
+func TestTheShellFloatsOnAShadow(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	img := tester.Image()
+	luminance := func(x, y int) int {
+		at := img.PixOffset(x, y)
+		return (int(img.Pix[at]) + int(img.Pix[at+1]) + int(img.Pix[at+2])) / 3
+	}
+	background := luminance(5, 450)
+	belowCard := luminance(700, 894)
+	if belowCard >= background-4 {
+		t.Fatalf("the shell drops a shadow on the window, background %d below %d", background, belowCard)
+	}
+	send, ok := tester.Find("发送")
+	if !ok {
+		t.Fatalf("the composer never rendered, texts %q", tester.Texts())
+	}
+	composerBottom := int(send.Y+send.H) + 15
+	composerShadow := luminance(int(send.X+send.W/2), composerBottom)
+	if composerShadow >= background-4 {
+		t.Fatalf("the composer sits above the chat with its own shadow, %d at y %d", composerShadow, composerBottom)
+	}
+}
+
+func TestTheThreeColumnsShareOneShellBand(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	listTitle, ok := tester.Find("会话列表标题")
+	if !ok {
+		t.Fatalf("the conversation list header never rendered, texts %q", tester.Texts())
+	}
+	chatTitle, ok := tester.Find("对话标题")
+	if !ok {
+		t.Fatalf("the chat header never rendered, texts %q", tester.Texts())
+	}
+	boardTitle, ok := tester.Find("白板标题")
+	if !ok {
+		t.Fatalf("the board header never rendered, texts %q", tester.Texts())
+	}
+	for name, rect := range map[string]ui.Rect{"list": listTitle, "chat": chatTitle, "board": boardTitle} {
+		if rect.Y != listTitle.Y || rect.H != listTitle.H {
+			t.Fatalf("every column header shares one band: %s %+v vs list %+v", name, rect, listTitle)
+		}
+	}
+	if !(listTitle.X < chatTitle.X && chatTitle.X < boardTitle.X) {
+		t.Fatalf("the columns line up left to right: list %+v chat %+v board %+v", listTitle, chatTitle, boardTitle)
+	}
+}
+
 func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))

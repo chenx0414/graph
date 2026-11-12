@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+
 	"github.com/egoist/mygo/ui"
 	"graph/app/gwui/kit"
 	gwtheme "graph/app/gwui/theme"
@@ -11,51 +13,73 @@ func (s *shellState) view(ctx *ui.Context) {
 	t := gwtheme.Of(ctx)
 	ui.Row(ctx).Fill().Background(t.Window).Children(func() {
 		s.rail(ctx)
-		ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Gap(cardGap).Children(func() {
-			s.conversationPane(ctx)
-			s.chatPane(ctx)
-			s.whiteboard(ctx)
+		ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Children(func() {
+			card := ui.Row(ctx).Grow(1).FillHeight().Background(t.Background).
+				Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
+			kit.Elevate(ctx, card, shellShadow)
+			card.Children(func() {
+				s.conversationPane(ctx)
+				s.columnDivider(ctx)
+				s.chatPane(ctx)
+				s.columnDivider(ctx)
+				s.whiteboard(ctx)
+			})
 		})
 	})
 }
 
+func (s *shellState) columnDivider(ctx *ui.Context) {
+	t := gwtheme.Of(ctx)
+	ui.Box(ctx).Width(gwtheme.Hairline).FillHeight().Background(t.Border)
+}
+
 func (s *shellState) rail(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	ui.Column(ctx).Width(railWidth).FillHeight().Padding(th.Space(2), th.Space(1)).Gap(th.Space(0.5)).
-		AlignItems(ui.Center).Children(func() {
-		for _, item := range railItems {
-			spec := item
-			selected := s.activeBoardKind() == spec.kind
-			color := t.Muted
-			button := ui.Box(ctx).Size(th.Space(10), th.Space(10)).Radius(t.Radius.Lg).Center().
-				Label(spec.label).Tooltip(spec.label).Focusable()
-			button.OnClick(func() { s.openModule(spec.kind) })
-			switch {
-			case selected:
-				button.Background(t.SidebarSelected)
-				color = t.Foreground
-			case button.Hovered():
-				button.Background(t.HoverTint)
-				color = t.Foreground
+	ui.Column(ctx).Width(railWidth).FillHeight().Children(func() {
+		ui.Box(ctx).FillWidth().Height(th.Space(11)).DragWindow()
+		ui.Column(ctx).Grow(1).Padding(0, th.Space(1), th.Space(2), th.Space(1)).Gap(th.Space(0.5)).
+			AlignItems(ui.Center).Children(func() {
+			for _, item := range railItems {
+				spec := item
+				selected := s.activeBoardKind() == spec.kind
+				color := t.Muted
+				button := ui.Box(ctx).Size(th.Space(10), th.Space(10)).Radius(t.Radius.Lg).Center().
+					Label(spec.label).Tooltip(spec.label).Focusable()
+				button.OnClick(func() { s.openModule(spec.kind) })
+				switch {
+				case selected:
+					button.Background(t.SidebarSelected)
+					color = t.Foreground
+				case button.Hovered():
+					button.Background(t.HoverTint)
+					color = t.Foreground
+				}
+				button.Children(func() {
+					ui.Icon(ctx, spec.icon).Size(th.Space(5), th.Space(5)).TextColor(color)
+				})
 			}
-			button.Children(func() {
-				ui.Icon(ctx, spec.icon).Size(th.Space(5), th.Space(5)).TextColor(color)
-			})
-		}
+		})
 	})
 }
 
 func (s *shellState) conversationPane(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	pane := ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Sidebar).Radius(t.Radius.Xl).
-		Border(gwtheme.Hairline, t.Border).Clip().Padding(th.Space(2)).Gap(th.Space(0.5))
-	kit.Elevate(ctx, pane, gwtheme.ShadowXs)
+	pane := ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Sidebar)
 	pane.Children(func() {
-		s.mainAgentCard(ctx)
-		if s.status != "" && len(s.conversations) == 0 {
-			kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
-		}
-		s.conversationList(ctx)
+		header := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(th.Space(2), th.Space(3), 0, th.Space(3)).
+			Gap(th.Space(2)).AlignItems(ui.Center).Label("会话列表标题").DragWindow()
+		header.Children(func() {
+			kit.Text(ctx, "Graph", t.Text.Lg).FontWeight(600).Grow(1).SingleLine()
+			kit.Text(ctx, strconv.Itoa(len(s.conversations))+" 个会话", t.Text.Xs).TextColor(t.Muted)
+		})
+		body := ui.Column(ctx).Grow(1).Padding(th.Space(1), th.Space(2), th.Space(2), th.Space(2)).Gap(th.Space(0.5))
+		body.Children(func() {
+			s.mainAgentCard(ctx)
+			if s.status != "" && len(s.conversations) == 0 {
+				kit.Text(ctx, s.status, t.Text.Sm).TextColor(t.Muted).Padding(th.Space(2), th.Space(1))
+			}
+			s.conversationList(ctx)
+		})
 	})
 }
 
@@ -112,13 +136,25 @@ func (s *shellState) conversationList(ctx *ui.Context) {
 
 func (s *shellState) chatPane(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	pane := kit.Panel(ctx, t.Radius.Xl).Grow(1).MinWidth(300).FillHeight()
+	pane := ui.Column(ctx).Grow(1).MinWidth(300).FillHeight().Background(t.Background)
 	pane.Children(func() {
 		active := s.active()
-		if active == nil {
-			kit.Text(ctx, "从左侧选择一个项目", t.Text.Base).TextColor(t.Muted).Padding(th.Space(5))
-			return
-		}
-		active.view(ctx)
+		header := ui.Row(ctx).FillWidth().Height(th.Space(11)).Padding(th.Space(2), th.Space(4), 0, th.Space(4)).
+			Gap(th.Space(2)).AlignItems(ui.Center).Label("对话标题").DragWindow()
+		header.Children(func() {
+			title := "Graph"
+			if active != nil && active.active != "" {
+				title = s.titleOf(active.active)
+			}
+			kit.Text(ctx, title, t.Text.Base).FontWeight(600).SingleLine().Ellipsis("…").Grow(1)
+		})
+		body := ui.Column(ctx).Grow(1)
+		body.Children(func() {
+			if active == nil {
+				kit.Text(ctx, "从左侧选择一个项目", t.Text.Base).TextColor(t.Muted).Padding(th.Space(5))
+				return
+			}
+			active.view(ctx)
+		})
 	})
 }

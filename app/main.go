@@ -93,13 +93,15 @@ func (s *shell) openNative() {
 	state := newShellState(s.console, s.paths.SessionToken())
 	state.loadBoard(s.paths.StateDir)
 	window := mygo.NewWindow(mygo.WindowOptions{
-		Title:     "Graph",
-		Width:     1440,
-		Height:    900,
-		MinWidth:  1024,
-		MinHeight: 640,
-		StateKey:  "native",
-		Content:   ui.View(state.view),
+		Title:                "Graph",
+		Width:                1440,
+		Height:               900,
+		MinWidth:             1024,
+		MinHeight:            640,
+		StateKey:             "native",
+		TitleBarStyle:        mygo.TitleBarHidden,
+		TrafficLightPosition: &mygo.Point{X: 14, Y: 14},
+		Content:              ui.View(state.view),
 	})
 	state.window = window
 	s.native = window

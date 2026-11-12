@@ -46,8 +46,8 @@ func (q openQuestion) open() bool {
 
 type conversationBody struct {
 	Messages  []transcriptMessage `json:"messages"`
-	Questions []openQuestion `json:"questions"`
-	Paused    bool           `json:"paused"`
+	Questions []openQuestion      `json:"questions"`
+	Paused    bool                `json:"paused"`
 }
 
 func (c conversationSummary) ArchivedAtPresent() bool { return c.ArchivedAt != nil }
@@ -339,7 +339,7 @@ func (c *chatState) composer(ctx *ui.Context) {
 	ui.Row(ctx).Padding(th.Space(3), th.Space(4), th.Space(3), th.Space(4)).Children(func() {
 		card := ui.Column(ctx).FillWidth().Padding(th.Space(3)).Gap(th.Space(2)).
 			Radius(t.Radius.X2l).Background(t.Background).Border(gwtheme.Stroke, t.Input).Clip()
-		kit.Elevate(ctx, card, gwtheme.ShadowXs)
+		kit.Elevate(ctx, card, composerShadow)
 		card.Children(func() {
 			field := kit.TextArea(ctx, &c.draft, kit.InputOpts{Placeholder: "想问什么？  @ 文件，$ 技能，/ 命令", Bare: true})
 			field.Label("消息").FillWidth().PaddingX(th.Space(0.5)).Lines(1, 6)

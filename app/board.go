@@ -53,8 +53,8 @@ func (s *shellState) whiteboard(ctx *ui.Context) {
 
 func (s *shellState) boardTabBar(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
-	bar := ui.Row(ctx).FillWidth().Height(th.Space(9)).Padding(th.Space(0.5), th.Space(1)).
-		Gap(th.Space(1)).AlignItems(ui.Center)
+	bar := ui.Row(ctx).FillWidth().Height(bandHeight).Padding(0, th.Space(1)).
+		Gap(th.Space(1)).AlignItems(ui.Center).Label("白板标题")
 	bar.Children(func() {
 		for index := range s.board.pages {
 			pageIndex := index
@@ -65,6 +65,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 			switch {
 			case active:
 				tab.Background(t.Background).Border(gwtheme.Hairline, t.Border)
+				kit.Elevate(ctx, tab, chipShadow)
 			case tab.Hovered():
 				tab.Background(t.HoverTint)
 			}
@@ -89,12 +90,9 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	if s.board.splits == nil {
 		s.board.splits = map[string]ui.Rect{}
 	}
-	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Window).
-		Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
+	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background)
 	card.Draw(func(p *ui.Painter, r ui.Rect) {
-		p.Clip(r, t.Radius.Xl, func() {
-			drawBoardGrid(p, r, t.Grid)
-		})
+		drawBoardGrid(p, r, t.Grid)
 	})
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) > 0 {
