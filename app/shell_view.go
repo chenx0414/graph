@@ -14,7 +14,7 @@ func (s *shellState) view(ctx *ui.Context) {
 		s.rail(ctx)
 		ui.Column(ctx).Grow(1).FillHeight().Children(func() {
 			s.titleBand(ctx)
-			ui.Row(ctx).Grow(1).FillWidth().Padding(0, cardGap, cardGap, cardGap).Children(func() {
+			ui.Row(ctx).Grow(1).FillWidth().Padding(0, cardGap, cardGap, ctx.Theme().Space(1.25)).Children(func() {
 				card := ui.Row(ctx).Grow(1).FillHeight().Background(t.Background).
 					Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip().Label("主区域卡片")
 				kit.Elevate(ctx, card, shellShadow)
@@ -39,7 +39,7 @@ func titleBandHeight(ctx *ui.Context) float32 {
 
 func (s *shellState) titleBand(ctx *ui.Context) {
 	th := ctx.Theme()
-	band := ui.Row(ctx).FillWidth().Height(titleBandHeight(ctx)).Padding(0, cardGap, 0, cardGap).AlignItems(ui.Center)
+	band := ui.Row(ctx).FillWidth().Height(titleBandHeight(ctx)).Padding(0, cardGap, 0, th.Space(1.25)).AlignItems(ui.Center)
 	band.Children(func() {
 		listTitle := ui.Row(ctx).Width(listWidth).FillHeight().Padding(0, th.Space(3), 0, th.Space(3)).
 			AlignItems(ui.Center).Label("会话列表标题").DragWindow()
@@ -77,7 +77,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 	ui.Column(ctx).Width(railWidth).FillHeight().Children(func() {
 		ui.Box(ctx).FillWidth().Height(th.Space(11)).DragWindow()
 		ui.Column(ctx).Grow(1).Padding(th.Space(3.5), 0, th.Space(2), cardGap).Gap(th.Space(3)).
-			AlignItems(ui.Center).Children(func() {
+			AlignItems(ui.Center).Translate(-1.5, 0).Children(func() {
 			for _, item := range railItems {
 				spec := item
 				selected := s.activeBoardKind() == spec.kind

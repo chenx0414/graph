@@ -308,7 +308,7 @@ func TestTheFunctionRailStaysCompactAndCentered(t *testing.T) {
 	if railWidth > 40 {
 		t.Fatalf("the rail must stay compact, width %.1f", railWidth)
 	}
-	center := (railWidth + cardGap) / 2
+	center := float32(trafficLightPosition().X) + 6.5
 	for _, label := range []string{"轨迹", "洞察", "图谱", "能力", "设置"} {
 		rect, ok := tester.Find(label)
 		if !ok {
@@ -473,5 +473,27 @@ func TestTheTrafficLightsUseTheCodexPosition(t *testing.T) {
 	position := trafficLightPosition()
 	if position.X != 16 || position.Y != 15 {
 		t.Fatalf("the traffic lights sit at %+v", position)
+	}
+}
+
+func TestTheFunctionRailCentersOnTheRedLightAndHasEvenGaps(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	icon, ok := tester.Find("轨迹")
+	if !ok {
+		t.Fatalf("the rail never rendered, texts %q", tester.Texts())
+	}
+	redCenter := float32(trafficLightPosition().X) + 6.5
+	if delta := (icon.X + icon.W/2) - redCenter; delta < -1 || delta > 1 {
+		t.Fatalf("the rail centers at %v, the red light at %v", icon.X+icon.W/2, redCenter)
+	}
+	card, ok := tester.Find("主区域卡片")
+	if !ok {
+		t.Fatalf("the card never rendered, texts %q", tester.Texts())
+	}
+	left := icon.X
+	right := card.X - (icon.X + icon.W)
+	if delta := left - right; delta < -1 || delta > 1 {
+		t.Fatalf("the rail leaves %v left and %v right", left, right)
 	}
 }
