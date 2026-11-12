@@ -23,7 +23,7 @@ func oldestSeqOf(messages []transcriptMessage) int64 {
 func mergeMessages(older, newer []transcriptMessage) []transcriptMessage {
 	merged := make([]transcriptMessage, 0, len(older)+len(newer))
 	seen := map[string]bool{}
-	for _, list := range [][]transcriptMessage{older, newer} {
+	for _, list := range [][]transcriptMessage{newer, older} {
 		for _, message := range list {
 			key := message.ID
 			if key == "" {

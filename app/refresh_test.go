@@ -47,6 +47,53 @@ func TestChatStatePollPicksUpAReplyThatArrivedLater(t *testing.T) {
 	}
 }
 
+func TestPollKeepsLoadedHistoryAndTakesTheNewestText(t *testing.T) {
+	var latest atomic.Value
+	latest.Store(conversationMessagesJSON(61, 260))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/conversations/c1/history"):
+			w.Write([]byte(conversationMessagesJSON(1, 60)))
+		default:
+			w.Write([]byte(latest.Load().(string)))
+		}
+	}))
+	defer server.Close()
+
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	state.ensureHistory()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(state.messages) != 260 {
+		t.Fatalf("history did not load, %d messages", len(state.messages))
+	}
+	latest.Store(`{"messages":[` + strings.TrimSuffix(strings.TrimPrefix(conversationMessagesJSON(62, 260), `{"messages":[`), `]}`) + `,{"id":"m261","seq":261,"role":"assistant","text":"流式新文本","state":"streaming"}]}`)
+	if !state.poll() {
+		t.Fatal("a streamed message must report a change")
+	}
+	if len(state.messages) != 261 {
+		t.Fatalf("a poll keeps the pages read and takes the new message, got %d", len(state.messages))
+	}
+	if state.messages[0].Seq != 1 {
+		t.Fatalf("the oldest page stays first, seq %d", state.messages[0].Seq)
+	}
+	found := false
+	for _, message := range state.messages {
+		if message.ID == "m261" && message.Text == "流式新文本" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the newest streamed text must win, messages %+v", state.messages[len(state.messages)-2:])
+	}
+	if state.poll() {
+		t.Fatal("the same page must not report a change again")
+	}
+}
+
 func TestChatStatePollReportsChangesInPausedAndQuestions(t *testing.T) {
 	var body atomic.Value
 	body.Store(`{"messages":[{"role":"user","text":"开始"}],"paused":false}`)

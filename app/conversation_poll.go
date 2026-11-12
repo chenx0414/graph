@@ -42,7 +42,11 @@ func (c *chatState) poll() bool {
 		return false
 	}
 	c.fingerprint = fingerprint
-	c.messages = messages
+	if c.pagedHistory {
+		c.messages = mergeMessages(c.messages, messages)
+	} else {
+		c.messages = messages
+	}
 	if bodyErr == nil {
 		c.paused = body.Paused
 		c.questions = nil
