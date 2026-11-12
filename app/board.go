@@ -272,7 +272,7 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 	})
 	card.OnClick(func() {})
 	showHeader := false
-	if card.Hovered() {
+	if _, _, over := card.PointerPosition(); over {
 		if s.board.hoverSince == nil {
 			s.board.hoverSince = map[string]time.Time{}
 		}
