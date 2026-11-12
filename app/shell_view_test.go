@@ -92,13 +92,11 @@ func TestTheMainAgentRowStandsOutFromTheProjects(t *testing.T) {
 	if tester.HasText("主控") || tester.HasText("常驻") {
 		t.Fatalf("the main agent row must carry no caption, texts %q", tester.Texts())
 	}
-	for _, line := range []string{".-.", "(o o)", "/|_|\\", "^ ^"} {
-		if !tester.HasText(line) {
-			t.Fatalf("the octopus is ascii art, missing %q, texts %q", line, tester.Texts())
-		}
+	if ink := countColor(tester.Image(), gwtheme.Light().Foreground); ink < 100 {
+		t.Fatalf("the octopus must be drawn in theme ink, %d ink pixels", ink)
 	}
-	if tile := countColor(tester.Image(), palette.Violet100.Color()); tile < 200 {
-		t.Fatalf("the main agent must carry its own octopus tile, %d tile pixels", tile)
+	if violet := countColor(tester.Image(), palette.Violet100.Color()); violet != 0 {
+		t.Fatalf("the octopus is monochrome now, %d violet pixels", violet)
 	}
 	if dot := countColor(tester.Image(), gwtheme.Light().Success); dot != 0 {
 		t.Fatalf("the main agent row carries no status dot, %d green pixels", dot)
