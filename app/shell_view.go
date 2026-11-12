@@ -95,7 +95,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 func (s *shellState) conversationPane(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	pane := ui.Column(ctx).Width(listWidth).FillHeight().Background(t.Sidebar).
-		Padding(th.Space(1), th.Space(2), th.Space(2), th.Space(2)).Gap(th.Space(0.5))
+		Padding(th.Space(2), th.Space(2), th.Space(2), th.Space(2)).Gap(th.Space(0.5))
 	pane.Children(func() {
 		s.mainAgentCard(ctx)
 		if s.status != "" && len(s.conversations) == 0 {
