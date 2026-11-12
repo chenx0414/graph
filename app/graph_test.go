@@ -42,7 +42,7 @@ func TestTheTaskModuleListsTasksAndNodes(t *testing.T) {
 	chat.tasks = rows
 	state.chat = chat
 	state.activeID = "c1"
-	state.board.panels = []boardPanel{{ID: "tasks", Kind: "tasks", X: 20, Y: 20, W: 420, H: 400}}
+	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "tasks", Kind: "tasks", X: 20, Y: 20, W: 420, H: 400}}}}
 	tester := ui.NewTester(state.view, 1100, 760)
 	frames(tester)
 	for _, wanted := range []string{

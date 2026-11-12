@@ -64,9 +64,9 @@ func TestTheWindowShowsFourPanesLeftToRight(t *testing.T) {
 	if !ok {
 		t.Fatalf("the chat pane must show its composer, texts %q", tester.Texts())
 	}
-	board, ok := tester.Find("网格")
+	board, ok := tester.Find("白板")
 	if !ok {
-		t.Fatalf("the whiteboard must show its toolbar, texts %q", tester.Texts())
+		t.Fatalf("the whiteboard must show its tabs, texts %q", tester.Texts())
 	}
 	if !(rail.X < conversation.X && conversation.X+conversation.W <= composer.X && composer.X < board.X) {
 		t.Fatalf("panes out of order: rail %+v conversation %+v composer %+v board %+v", rail, conversation, composer, board)
@@ -118,54 +118,59 @@ func TestTheAppFocusesTheComposerOnOpen(t *testing.T) {
 	}
 }
 
-func TestTheRailOpensAModule(t *testing.T) {
+func TestTheRailOpensATabForTheModule(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	if err := tester.Click("图谱"); err != nil {
 		t.Fatalf("click 图谱: %v", err)
 	}
 	frames(tester)
-	if state.board.lastKind != "graph" || !tester.HasText("图谱画布") {
-		t.Fatalf("the rail must open the graph module: last %q texts %q", state.board.lastKind, tester.Texts())
-	}
-	if panel := state.expandedPanel(); panel == nil || panel.Kind != "graph" {
-		t.Fatalf("the opened module expands into its own board page, panel %+v", panel)
+	if kind := state.activeBoardKind(); kind != "graph" || !tester.HasText("图谱画布") {
+		t.Fatalf("the rail must open the graph tab: kind %q texts %q", kind, tester.Texts())
 	}
 	if err := tester.Click("设置"); err != nil {
 		t.Fatalf("click 设置: %v", err)
 	}
 	frames(tester)
-	if state.board.lastKind != "settings" || !tester.HasText("运行设置") {
-		t.Fatalf("the rail must open the settings module: last %q texts %q", state.board.lastKind, tester.Texts())
+	if kind := state.activeBoardKind(); kind != "settings" || !tester.HasText("运行设置") {
+		t.Fatalf("the rail must open the settings tab: kind %q texts %q", kind, tester.Texts())
+	}
+	if err := tester.Click("白板"); err != nil {
+		t.Fatalf("click the board tab: %v", err)
+	}
+	frames(tester)
+	if kind := state.activeBoardKind(); kind != "" || !tester.HasText("项目概览") {
+		t.Fatalf("the board tab must come back: kind %q texts %q", kind, tester.Texts())
 	}
 }
 
-func TestTheBoardGridCanBeTurnedOff(t *testing.T) {
+func TestTheWhiteboardHasTabsAndNoFloatingToolbar(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
-	if !state.board.grid {
-		t.Fatal("the whiteboard shows its dotted grid by default")
+	for _, gone := range []string{"添加", "搜索", "网格", "聚焦", "重置"} {
+		if tester.HasText(gone) {
+			t.Fatalf("the floating toolbar is gone, %q still shows, texts %q", gone, tester.Texts())
+		}
 	}
-	on := countColor(tester.Image(), boardDot)
-	if on < 100 {
-		t.Fatalf("the dotted grid must show, %d dots painted", on)
+	if !tester.HasText("白板") || !tester.HasText("新建标签页") {
+		t.Fatalf("the board offers its tab bar, texts %q", tester.Texts())
 	}
-	if err := tester.Click("网格"); err != nil {
-		t.Fatalf("click 网格: %v", err)
+	if dots := countColor(tester.Image(), boardDot); dots < 100 {
+		t.Fatalf("the dotted grid stays painted, %d dots", dots)
+	}
+	if err := tester.Click("新建标签页"); err != nil {
+		t.Fatalf("open a tab: %v", err)
 	}
 	frames(tester)
-	if state.board.grid {
-		t.Fatal("the toolbar must turn the grid off")
-	}
-	if off := countColor(tester.Image(), boardDot); off > on/10 {
-		t.Fatalf("turning the grid off must remove the dots, %d of %d left", off, on)
+	if len(state.board.pages) != 2 || state.board.active != 1 {
+		t.Fatalf("a new tab joins the bar, pages %d active %d", len(state.board.pages), state.board.active)
 	}
 }
 
 func TestTheComposerFitsTheMinimumWindow(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1024, 640))
-	for _, label := range []string{"概览", "13-Graph", "发送", "网格"} {
+	for _, label := range []string{"概览", "13-Graph", "发送", "白板"} {
 		rect, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("%s never rendered, texts %q", label, tester.Texts())
@@ -214,14 +219,41 @@ func TestTheGraphPanelDrawsTheTaskGraph(t *testing.T) {
 	}
 }
 
+func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if err := tester.Click("图谱"); err != nil {
+		t.Fatalf("open the graph tab: %v", err)
+	}
+	frames(tester)
+	if err := tester.Click("图谱"); err != nil {
+		t.Fatalf("reopen the graph tab: %v", err)
+	}
+	frames(tester)
+	if len(state.board.pages) != 2 {
+		t.Fatalf("one rail entry owns one tab, pages %d", len(state.board.pages))
+	}
+	if err := tester.Click("关闭 图谱画布"); err != nil {
+		t.Fatalf("close the graph tab: %v", err)
+	}
+	frames(tester)
+	if len(state.board.pages) != 1 || state.activeBoardKind() != "" {
+		t.Fatalf("closing a tab returns to the board, pages %d kind %q", len(state.board.pages), state.activeBoardKind())
+	}
+	if !tester.HasText("项目概览") {
+		t.Fatalf("the board comes back with its modules, texts %q", tester.Texts())
+	}
+}
+
 func TestTheBoardRemembersItsLayout(t *testing.T) {
 	directory := t.TempDir()
 	first := newShellState("http://127.0.0.1:1", "tok")
 	first.loadBoard(directory)
-	for index := range first.board.panels {
-		if first.board.panels[index].Kind == "overview" {
-			first.board.panels[index].X = 240
-			first.board.panels[index].Y = 120
+	page := first.boardPage()
+	for index := range page.Panels {
+		if page.Panels[index].Kind == "overview" {
+			page.Panels[index].X = 240
+			page.Panels[index].Y = 120
 		}
 	}
 	first.saveBoard()
@@ -230,7 +262,7 @@ func TestTheBoardRemembersItsLayout(t *testing.T) {
 	second.loadBoard(directory)
 	panel := second.panelOf("overview")
 	if panel == nil || panel.X != 240 || panel.Y != 120 {
-		t.Fatalf("saved layout not restored: %+v", second.board.panels)
+		t.Fatalf("saved layout not restored: panel %+v", panel)
 	}
 }
 
@@ -239,7 +271,7 @@ func TestAPanelCanBeDragged(t *testing.T) {
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	panel := state.panelOf("overview")
 	if panel == nil {
-		t.Fatalf("the default board must hold the overview module: %+v", state.board.panels)
+		t.Fatalf("the default board must hold the overview module: %+v", state.boardPage().Panels)
 	}
 	before := panel.X
 	header, ok := tester.Find(boardPanelTitle("overview") + "窗口")

@@ -9,15 +9,6 @@ import (
 func (s *shellState) view(ctx *ui.Context) {
 	applyTheme(ctx)
 	t := gwtheme.Of(ctx)
-	if s.board.focus {
-		ui.Row(ctx).Fill().Background(t.Window).Children(func() {
-			s.rail(ctx)
-			ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Children(func() {
-				s.whiteboard(ctx)
-			})
-		})
-		return
-	}
 	ui.Row(ctx).Fill().Background(t.Window).Children(func() {
 		s.rail(ctx)
 		ui.Row(ctx).Grow(1).FillHeight().Padding(cardGap).Gap(cardGap).Children(func() {
@@ -34,7 +25,7 @@ func (s *shellState) rail(ctx *ui.Context) {
 		AlignItems(ui.Center).Children(func() {
 		for _, item := range railItems {
 			spec := item
-			selected := s.board.lastKind == spec.kind
+			selected := s.activeBoardKind() == spec.kind
 			color := t.Muted
 			button := ui.Box(ctx).Size(th.Space(10), th.Space(10)).Radius(t.Radius.Lg).Center().
 				Label(spec.label).Tooltip(spec.label).Focusable()

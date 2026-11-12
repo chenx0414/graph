@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 )
 
 type boardPanel struct {
@@ -16,12 +18,23 @@ type boardPanel struct {
 	Expanded bool    `json:"expanded"`
 }
 
-type boardFile struct {
-	Version int          `json:"version"`
-	Panels  []boardPanel `json:"panels"`
+type boardPage struct {
+	ID     string       `json:"id"`
+	Title  string       `json:"title"`
+	Kind   string       `json:"kind,omitempty"`
+	Panels []boardPanel `json:"panels"`
 }
 
-const boardLayoutVersion = 1
+type boardFile struct {
+	Version int          `json:"version"`
+	Panels  []boardPanel `json:"panels,omitempty"`
+	Pages   []boardPage  `json:"pages,omitempty"`
+	Active  int          `json:"active"`
+}
+
+const boardLayoutVersion = 2
+
+const boardDefaultTitle = "白板"
 
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
@@ -30,6 +43,10 @@ func defaultBoardPanels() []boardPanel {
 		{ID: "history", Kind: "history", X: 16, Y: 600, W: 276, H: 220},
 		{ID: "artifacts", Kind: "artifacts", X: 304, Y: 56, W: 276, H: 300},
 	}
+}
+
+func defaultBoardPages() []boardPage {
+	return []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: defaultBoardPanels()}}
 }
 
 func boardPanelTitle(kind string) string {
@@ -58,37 +75,32 @@ func boardPanelTitle(kind string) string {
 	return kind
 }
 
-func boardPanelSize(kind string) (float32, float32) {
-	switch kind {
-	case "graph":
-		return 440, 340
-	case "artifacts":
-		return 440, 300
-	case "capabilities", "settings":
-		return 460, 420
-	}
-	return 320, 250
-}
-
 func (s *shellState) loadBoard(stateDir string) {
 	s.board.path = filepath.Join(stateDir, "whiteboard.json")
-	s.board.panels = defaultBoardPanels()
+	s.board.pages = defaultBoardPages()
+	s.board.active = 0
 	payload, err := os.ReadFile(s.board.path)
 	if err != nil {
 		return
 	}
 	var file boardFile
-	if json.Unmarshal(payload, &file) != nil || len(file.Panels) == 0 {
+	if json.Unmarshal(payload, &file) != nil {
 		return
 	}
-	s.board.panels = file.Panels
+	switch {
+	case len(file.Pages) > 0:
+		s.board.pages = file.Pages
+	case len(file.Panels) > 0:
+		s.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: file.Panels}}
+	}
+	s.board.active = clampIndex(file.Active, len(s.board.pages))
 }
 
 func (s *shellState) saveBoard() {
 	if s.board.path == "" {
 		return
 	}
-	payload, err := json.MarshalIndent(boardFile{Version: boardLayoutVersion, Panels: s.board.panels}, "", "  ")
+	payload, err := json.MarshalIndent(boardFile{Version: boardLayoutVersion, Pages: s.board.pages, Active: s.board.active}, "", "  ")
 	if err != nil {
 		return
 	}
@@ -101,44 +113,115 @@ func (s *shellState) saveBoard() {
 	}
 }
 
-func (s *shellState) panelOf(kind string) *boardPanel {
-	for index := range s.board.panels {
-		if s.board.panels[index].Kind == kind {
-			return &s.board.panels[index]
-		}
+func clampIndex(index, length int) int {
+	if length <= 0 {
+		return 0
 	}
-	return nil
+	return min(max(index, 0), length-1)
 }
 
-func (s *shellState) expandedPanel() *boardPanel {
-	for index := range s.board.panels {
-		if s.board.panels[index].Expanded {
-			return &s.board.panels[index]
+func (s *shellState) boardPage() *boardPage {
+	if len(s.board.pages) == 0 {
+		s.board.pages = defaultBoardPages()
+		s.board.active = 0
+	}
+	s.board.active = clampIndex(s.board.active, len(s.board.pages))
+	return &s.board.pages[s.board.active]
+}
+
+func (s *shellState) activeBoardKind() string {
+	return s.boardPage().Kind
+}
+
+func (s *shellState) panelOf(kind string) *boardPanel {
+	page := s.boardPage()
+	for index := range page.Panels {
+		if page.Panels[index].Kind == kind {
+			return &page.Panels[index]
 		}
 	}
 	return nil
 }
 
 func (s *shellState) openModule(kind string) {
-	s.board.lastKind = kind
-	s.board.adding = false
-	panel := s.panelOf(kind)
-	if panel == nil {
-		width, height := boardPanelSize(kind)
-		count := len(s.board.panels)
-		s.board.panels = append(s.board.panels, boardPanel{
-			ID:   kind,
-			Kind: kind,
-			X:    16 + float32(count%2)*36,
-			Y:    56 + float32(count%4)*36,
-			W:    width,
-			H:    height,
-		})
+	for index := range s.board.pages {
+		if s.board.pages[index].Kind == kind {
+			s.selectBoardPage(index)
+			return
+		}
 	}
-	for index := range s.board.panels {
-		s.board.panels[index].Expanded = s.board.panels[index].Kind == kind
+	title := boardPanelTitle(kind)
+	s.board.pages = append(s.board.pages, boardPage{
+		ID:    "tab-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		Title: title,
+		Kind:  kind,
+		Panels: []boardPanel{
+			{ID: kind, Kind: kind, Expanded: true},
+		},
+	})
+	s.board.active = len(s.board.pages) - 1
+	s.ensureBoardPageData()
+	s.saveBoard()
+	s.frame()
+}
+
+func (s *shellState) selectBoardPage(index int) {
+	index = clampIndex(index, len(s.board.pages))
+	if index == s.board.active {
+		return
 	}
-	switch kind {
+	s.board.active = index
+	s.ensureBoardPageData()
+	s.saveBoard()
+	s.frame()
+}
+
+func (s *shellState) addBoardPage() {
+	count := 1
+	for _, page := range s.board.pages {
+		if page.Kind == "" {
+			count++
+		}
+	}
+	s.board.pages = append(s.board.pages, boardPage{
+		ID:     "tab-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		Title:  boardDefaultTitle + " " + strconv.Itoa(count),
+		Panels: defaultBoardPanels(),
+	})
+	s.board.active = len(s.board.pages) - 1
+	s.saveBoard()
+	s.frame()
+}
+
+func (s *shellState) closeBoardPage(index int) {
+	if len(s.board.pages) <= 1 {
+		return
+	}
+	index = clampIndex(index, len(s.board.pages))
+	s.board.pages = append(s.board.pages[:index], s.board.pages[index+1:]...)
+	if s.board.active > index {
+		s.board.active--
+	}
+	s.board.active = clampIndex(s.board.active, len(s.board.pages))
+	s.saveBoard()
+	s.frame()
+}
+
+func (s *shellState) closeModule(id string) {
+	page := s.boardPage()
+	kept := make([]boardPanel, 0, len(page.Panels))
+	for _, panel := range page.Panels {
+		if panel.ID != id {
+			kept = append(kept, panel)
+		}
+	}
+	page.Panels = kept
+	s.saveBoard()
+	s.frame()
+}
+
+func (s *shellState) ensureBoardPageData() {
+	switch s.activeBoardKind() {
 	case "overview":
 		s.ensureUsage()
 	case "capabilities":
@@ -152,32 +235,11 @@ func (s *shellState) openModule(kind string) {
 	case "graph":
 		s.ensureGraph()
 	}
-	s.saveBoard()
-	s.frame()
-}
-
-func (s *shellState) closeModule(id string) {
-	kept := make([]boardPanel, 0, len(s.board.panels))
-	for _, panel := range s.board.panels {
-		if panel.ID != id {
-			kept = append(kept, panel)
-		}
-	}
-	s.board.panels = kept
-	s.saveBoard()
-	s.frame()
-}
-
-func (s *shellState) resetBoard() {
-	s.board.panels = defaultBoardPanels()
-	s.board.lastKind = ""
-	s.saveBoard()
-	s.frame()
 }
 
 func (s *shellState) canvasSize() (float32, float32) {
 	width, height := float32(960), float32(900)
-	for _, panel := range s.board.panels {
+	for _, panel := range s.boardPage().Panels {
 		width = max(width, panel.X+panel.W+48)
 		height = max(height, panel.Y+panel.H+48)
 	}

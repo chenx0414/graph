@@ -118,8 +118,8 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if state.board.lastKind != "settings" || !tester.HasText("订阅凭据") {
-		t.Fatalf("the settings panel must render, last %q texts %q", state.board.lastKind, tester.Texts())
+	if state.activeBoardKind() != "settings" || !tester.HasText("订阅凭据") {
+		t.Fatalf("the settings panel must render, kind %q texts %q", state.activeBoardKind(), tester.Texts())
 	}
 	if err := tester.Click("概览"); err != nil {
 		t.Fatalf("click 概览: %v", err)
@@ -127,8 +127,8 @@ func TestShellSwitchesBetweenChatsAndSettings(t *testing.T) {
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	if state.board.lastKind != "overview" || tester.HasText("订阅凭据") {
-		t.Fatalf("the overview must come back, last %q texts %q", state.board.lastKind, tester.Texts())
+	if state.activeBoardKind() != "overview" || tester.HasText("订阅凭据") {
+		t.Fatalf("the overview must come back, kind %q texts %q", state.activeBoardKind(), tester.Texts())
 	}
 }
 

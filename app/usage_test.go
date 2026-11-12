@@ -72,8 +72,8 @@ func TestShellOpensTheUsagePane(t *testing.T) {
 
 	state := newShellState(server.URL, "tok")
 	state.openModule("overview")
-	if state.board.lastKind != "overview" || state.usage == nil {
-		t.Fatalf("last %q", state.board.lastKind)
+	if state.activeBoardKind() != "overview" || state.usage == nil {
+		t.Fatalf("kind %q", state.activeBoardKind())
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for state.usage.status != "" && time.Now().Before(deadline) {

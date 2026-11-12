@@ -31,7 +31,7 @@ func newShellState(address, token string) *shellState {
 	return &shellState{
 		api:    newAPIClient(address, token),
 		status: "正在读取会话…",
-		board:  boardState{grid: true, panels: defaultBoardPanels()},
+		board:  boardState{pages: defaultBoardPages()},
 	}
 }
 

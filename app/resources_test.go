@@ -87,8 +87,8 @@ func TestShellOpensTheResourcePane(t *testing.T) {
 
 	state := newShellState(server.URL, "tok")
 	state.openModule("capabilities")
-	if state.board.lastKind != "capabilities" || state.resources == nil {
-		t.Fatalf("last %q", state.board.lastKind)
+	if state.activeBoardKind() != "capabilities" || state.resources == nil {
+		t.Fatalf("kind %q", state.activeBoardKind())
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for state.resources.status != "" && time.Now().Before(deadline) {

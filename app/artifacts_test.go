@@ -18,7 +18,7 @@ func artifactsShell(t *testing.T, state *chatState) *shellState {
 	shell := newShellState("http://127.0.0.1:1", "tok")
 	shell.chat = state
 	shell.activeID = "c1"
-	shell.board.panels = []boardPanel{{ID: "artifacts", Kind: "artifacts", X: 20, Y: 20, W: 480, H: 420}}
+	shell.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: []boardPanel{{ID: "artifacts", Kind: "artifacts", X: 20, Y: 20, W: 480, H: 420}}}}
 	return shell
 }
 

@@ -39,14 +39,6 @@ func (s *shellState) boardNote(ctx *ui.Context, text string) {
 	kit.Text(ctx, text, t.Text.Sm).TextColor(t.Muted)
 }
 
-func (s *shellState) boardMatches(text string) bool {
-	query := strings.TrimSpace(s.board.query)
-	if query == "" {
-		return true
-	}
-	return strings.Contains(strings.ToLower(text), strings.ToLower(query))
-}
-
 func (s *shellState) statCard(ctx *ui.Context, label, value string) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := ui.Column(ctx).Width(th.Space(29)).Height(th.Space(15)).Radius(t.Radius.Lg).Background(t.Card).
@@ -112,9 +104,6 @@ func (s *shellState) panelHistory(ctx *ui.Context) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	shown := 0
 	for _, conversation := range s.conversations {
-		if !s.boardMatches(conversation.Title + " " + conversation.ProjectID) {
-			continue
-		}
 		label := strings.TrimSpace(conversation.Title)
 		if label == "" {
 			label = "（无标题）"
@@ -215,9 +204,6 @@ func (s *shellState) panelArtifacts(ctx *ui.Context) {
 	}
 	for _, artifact := range shown {
 		row := artifact
-		if !s.boardMatches(artifactLabel(row)) {
-			continue
-		}
 		button := kit.Button(ctx, artifactLabel(row), kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm})
 		button.Justify(ui.Start).FillWidth()
 		if button.Clicked() {
