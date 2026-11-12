@@ -231,20 +231,75 @@ func TestLoadingAnOldBoardAddsTheTrajectoryAndInsightsCards(t *testing.T) {
 	}
 }
 
-func TestACardRevealsItsHeaderAfterThePointerRestsOnIt(t *testing.T) {
+func TestTheWhiteboardHeaderSlidesOverItsContentWithoutMovingIt(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
 	if !ok {
 		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
 	}
-	if tester.HasText("在新标签页打开") {
-		t.Fatalf("the card header shows before the pointer rests, texts %q", tester.Texts())
+	content, ok := tester.Find("实现四栏页面 · running · executing")
+	if !ok {
+		t.Fatalf("the task row never rendered, texts %q", tester.Texts())
 	}
+	open, ok := tester.Find("在新标签页打开")
+	if !ok {
+		t.Fatalf("the card header never rendered, texts %q", tester.Texts())
+	}
+	_ = open
 	tester.Move(card.X+card.W/2, card.Y+card.H/2)
+	tester.Advance(300 * time.Millisecond)
+	frames(tester)
+	after, ok := tester.Find("实现四栏页面 · running · executing")
+	if !ok {
+		t.Fatalf("the task row left the card, texts %q", tester.Texts())
+	}
+	if after.Y != content.Y {
+		t.Fatalf("the content moved from %v to %v when the header showed", content.Y, after.Y)
+	}
+}
+
+func TestTheWhiteboardKeepsTheCardScrollWhenThePointerLeaves(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	card, ok := tester.Find(boardPanelTitle("tasks") + "窗口")
+	if !ok {
+		t.Fatalf("the tasks card never rendered, texts %q", tester.Texts())
+	}
+	tester.Wheel(card.X+card.W/2, card.Y+card.H/2, 0, -120)
+	frames(tester)
+	row, ok := tester.Find("实现四栏页面 · running · executing")
+	if !ok {
+		t.Fatalf("the task row never rendered, texts %q", tester.Texts())
+	}
+	tester.Move(10, 10)
 	tester.Advance(400 * time.Millisecond)
 	frames(tester)
-	if !tester.HasText("在新标签页打开") {
-		t.Fatalf("the card header never appeared, texts %q", tester.Texts())
+	after, ok := tester.Find("实现四栏页面 · running · executing")
+	if !ok {
+		t.Fatalf("the task row disappeared, texts %q", tester.Texts())
+	}
+	if after.Y != row.Y {
+		t.Fatalf("the card reset its scroll from %v to %v", row.Y, after.Y)
+	}
+}
+
+func TestAModulePageShowsItsCardHeaderWithoutHover(t *testing.T) {
+	state := fourPaneShell(t)
+	state.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Kind: "models",
+		Panels: []boardPanel{{ID: "models", Kind: "models"}},
+		Layout: boardNode{Kind: "panel", PanelID: "models"}}}
+
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	card, ok := tester.Find(boardPanelTitle("models") + "窗口")
+	if !ok {
+		t.Fatalf("the models card never rendered, texts %q", tester.Texts())
+	}
+	title, ok := tester.Find(boardPanelTitle("models"))
+	if !ok {
+		t.Fatalf("the module page hid its card header, texts %q", tester.Texts())
+	}
+	if title.Y < card.Y || title.Y >= card.Y+40 {
+		t.Fatalf("the module page header sits at %v, card at %v", title.Y, card.Y)
 	}
 }

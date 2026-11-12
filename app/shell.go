@@ -202,10 +202,6 @@ func (s *shellState) refresh() bool {
 	return changed
 }
 
-func (s *shellState) scheduleFrame(d time.Duration) {
-	time.AfterFunc(d, s.frame)
-}
-
 func (s *shellState) frame() {
 	if s.window != nil {
 		s.window.Update(func() {})

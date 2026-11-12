@@ -100,7 +100,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Background)
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) == 1 {
-			s.boardPanelView(ctx, &page.Panels[0], false)
+			s.boardPanelView(ctx, &page.Panels[0], false, false)
 			return
 		}
 		if page.Kind != "" {
@@ -122,7 +122,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 								panel := page.Panels[index]
 								cell := ui.Column(ctx).Grow(1).FillHeight()
 								cell.Children(func() {
-									s.boardPanelView(ctx, &panel, false)
+									s.boardPanelView(ctx, &panel, false, false)
 								})
 							}
 						})
@@ -138,19 +138,19 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 		}
 		freeform := page.Kind == ""
 		ui.Column(ctx).Fill().Padding(10).Children(func() {
-			s.boardNodeView(ctx, &page.Layout, "root", freeform)
+			s.boardNodeView(ctx, &page.Layout, "root", freeform, page.Kind == "")
 		})
 	})
 }
 
-func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string, freeform bool) {
+func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string, freeform, autoHide bool) {
 	switch node.Kind {
 	case "panel":
 		panel := s.panelByID(node.PanelID)
 		if panel == nil {
 			return
 		}
-		s.boardPanelView(ctx, panel, freeform)
+		s.boardPanelView(ctx, panel, freeform, autoHide)
 	case "split":
 		var container ui.Element
 		if node.Axis == "row" {
@@ -173,7 +173,7 @@ func (s *shellState) boardNodeView(ctx *ui.Context, node *boardNode, path string
 					cell = ui.Row(ctx).Grow(slot.Weight).FillWidth()
 				}
 				cell.Children(func() {
-					s.boardNodeView(ctx, &slot.Node, childPath, freeform)
+					s.boardNodeView(ctx, &slot.Node, childPath, freeform, autoHide)
 				})
 			}
 		})
@@ -261,7 +261,7 @@ func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size
 	return button
 }
 
-func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform bool) {
+func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform, autoHide bool) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := kit.Panel(ctx, t.Radius.Xl)
 	card.Fill().Label(boardPanelTitle(panel.Kind) + "窗口")
@@ -271,19 +271,13 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 		}
 	})
 	card.OnClick(func() {})
-	showHeader := false
-	if _, _, over := card.PointerPosition(); over {
-		if s.board.hoverSince == nil {
-			s.board.hoverSince = map[string]time.Time{}
+	headerProgress := float32(1)
+	if autoHide {
+		target := float32(0)
+		if _, _, over := card.PointerPosition(); over {
+			target = 1
 		}
-		if _, seen := s.board.hoverSince[panel.ID]; !seen {
-			s.board.hoverSince[panel.ID] = ctx.Now()
-			ctx.After(250 * time.Millisecond)
-			s.scheduleFrame(260 * time.Millisecond)
-		}
-		showHeader = !ctx.Now().Before(s.board.hoverSince[panel.ID].Add(250 * time.Millisecond))
-	} else {
-		delete(s.board.hoverSince, panel.ID)
+		headerProgress = card.Animate("card-header", target, 160*time.Millisecond)
 	}
 	if freeform {
 		card.Drag(panel.ID).Cursor(ui.CursorGrab)
@@ -292,7 +286,7 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 		}
 	}
 	card.Children(func() {
-		if showHeader {
+		if !autoHide {
 			s.boardPanelHeader(ctx, panel, freeform)
 		}
 		body := ui.Scroll(ctx).Grow(1).Padding(th.Space(3))
@@ -313,6 +307,12 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform
 				s.boardPanelBody(ctx, panel)
 			})
 		})
+		if autoHide {
+			header := s.boardPanelHeader(ctx, panel, freeform)
+			header.Absolute().Top(0).Left(0).Right(0).Background(t.Background).
+				Translate(0, -(1-headerProgress)*th.Space(9)).Opacity(headerProgress).
+				IgnoreInput(headerProgress < 0.5)
+		}
 		if freeform {
 			rect, hasRect := s.board.rects[panel.ID]
 			if card.Pressed() && hasRect && s.board.press != panel.ID {
