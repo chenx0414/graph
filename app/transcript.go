@@ -10,6 +10,7 @@ import (
 
 type transcriptMessage struct {
 	ID        string `json:"id"`
+	Seq       int64  `json:"seq"`
 	Role      string `json:"role"`
 	Kind      string `json:"kind"`
 	Text      string `json:"text"`
@@ -68,6 +69,19 @@ func messageStreaming(message transcriptMessage) bool {
 	return message.Role == "assistant" && message.State == "streaming"
 }
 
+func runIdentity(run transcriptRun) any {
+	if len(run.messages) == 0 {
+		return ""
+	}
+	if run.messages[0].ID != "" {
+		return run.messages[0].ID
+	}
+	if key := runKey(run); key != "" {
+		return key
+	}
+	return run.messages[0].Text
+}
+
 func runKey(run transcriptRun) string {
 	if len(run.messages) == 0 {
 		return ""
@@ -121,8 +135,10 @@ type chatState struct {
 	graphTaskID     string
 	graphLoading    bool
 	graphError      string
-	visible         int
-	loadedOlderFor  int
+	oldestSeq       int64
+	historyLoading  bool
+	noMoreHistory   bool
+	pagedHistory    bool
 	fingerprint     string
 	expanded        map[string]bool
 	window          *mygo.Window
@@ -137,31 +153,9 @@ type chatState struct {
 }
 
 func newChatState(address, token string) *chatState {
-	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}, visible: transcriptWindow}
+	state := &chatState{api: newAPIClient(address, token), status: "正在读取会话…", expanded: map[string]bool{}}
 	state.list.FollowEnd = true
 	state.list.FollowAnimation = &ui.Smooth
 	return state
 }
 
-func (c *chatState) loadOlderAtTop() bool {
-	first, last := c.list.Visible()
-	if last < 0 || first > 0 {
-		return false
-	}
-	if c.loadedOlderFor == c.visible {
-		return false
-	}
-	c.loadedOlderFor = c.visible
-	c.visible += transcriptWindow
-	return true
-}
-
-func windowStart(total, visible int) int {
-	if visible <= 0 {
-		visible = transcriptWindow
-	}
-	if total <= visible {
-		return 0
-	}
-	return total - visible
-}

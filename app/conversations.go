@@ -158,7 +158,11 @@ func (c *chatState) refresh() {
 		c.status = "会话内容不是预期的 JSON：" + err.Error()
 		return
 	}
-	c.messages = messages
+	if c.pagedHistory {
+		c.messages = mergeMessages(c.messages, messages)
+	} else {
+		c.messages = messages
+	}
 	if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
 		c.status = ""
 	}
@@ -177,6 +181,10 @@ func (c *chatState) open(id string) {
 	}
 	c.messages = messages
 	c.fingerprint = transcriptFingerprint(messages)
+	c.historyLoading = false
+	c.pagedHistory = false
+	c.oldestSeq = oldestSeqOf(messages)
+	c.noMoreHistory = c.oldestSeq <= 0 || len(messages) < historyPageSize
 	c.active = id
 	c.questions = nil
 	if body, err := parseConversationBody(payload); err == nil {
@@ -199,7 +207,6 @@ func (c *chatState) open(id string) {
 	if rows, err := parseGraphTasks(payload); err == nil {
 		c.tasks = rows
 	}
-	c.visible = transcriptWindow
 	if len(messages) == 0 {
 		c.status = "这个会话还没有可显示的对话。"
 		return
@@ -237,25 +244,24 @@ func (c *chatState) transcript(ctx *ui.Context) {
 		})
 		return
 	}
+	if c.historyLoading {
+		kit.Text(ctx, "正在加载更早的对话…", t.Text.Xs).TextColor(t.Muted).Padding(0, 0, th.Space(1), 0)
+	}
 	runs := groupRuns(c.messages)
-	start := windowStart(len(runs), c.visible)
-	if start > 0 && c.loadOlderAtTop() {
-		start = windowStart(len(runs), c.visible)
-	}
-	if start > 0 {
-		label := "加载更早的 " + strconv.Itoa(start) + " 段（往上翻）"
-		kit.Button(ctx, label, kit.ButtonOpts{Variant: kit.Ghost, Size: kit.SizeSm})
-	}
-	shown := runs[start:]
-	c.list.Key = func(row int) any { return start + row }
-	ui.List(ctx, &c.list, len(shown), func(index int) {
-		run := shown[index]
+	c.list.Key = func(row int) any { return runIdentity(runs[row]) }
+	list := ui.List(ctx, &c.list, len(runs), func(index int) {
+		run := runs[index]
 		if run.tools {
 			c.toolRow(ctx, run)
 			return
 		}
 		c.messageRow(ctx, run.messages[0])
-	}).Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
+	})
+	list.Grow(1).Padding(th.Space(4)).Gap(th.Space(3))
+	first, last := c.list.Visible()
+	if first == 0 && last >= 0 && last < len(runs)-1 {
+		c.ensureHistory()
+	}
 }
 
 func (c *chatState) toolRow(ctx *ui.Context, run transcriptRun) {

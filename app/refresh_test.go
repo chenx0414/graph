@@ -42,8 +42,8 @@ func TestChatStatePollPicksUpAReplyThatArrivedLater(t *testing.T) {
 	if len(state.messages) != 2 || state.messages[1].Text != "回答到了" {
 		t.Fatalf("the poll did not pick the reply up: %+v", state.messages)
 	}
-	if state.visible != transcriptWindow {
-		t.Fatalf("a poll must not throw away how much history the reader loaded: visible %d", state.visible)
+	if state.messages[0].Text != "开始" {
+		t.Fatalf("a poll must keep the earlier messages, messages %+v", state.messages)
 	}
 }
 

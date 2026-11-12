@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -316,43 +318,100 @@ func TestToolRunsExpandAndCollapse(t *testing.T) {
 	}
 }
 
-func TestWindowStartKeepsTheTailVisible(t *testing.T) {
-	if start := windowStart(10, 40); start != 0 {
-		t.Fatalf("a short transcript starts at 0, got %d", start)
+func conversationMessagesJSON(from, to int) string {
+	parts := make([]string, 0, to-from+1)
+	for seq := from; seq <= to; seq++ {
+		parts = append(parts, `{"id":"m`+strconv.Itoa(seq)+`","seq":`+strconv.Itoa(seq)+`,"role":"user","text":"第`+strconv.Itoa(seq)+`句"}`)
 	}
-	if start := windowStart(100, 40); start != 60 {
-		t.Fatalf("the window shows the last 40, got start %d", start)
+	return `{"messages":[` + strings.Join(parts, ",") + `]}`
+}
+
+func historyPagingServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	requests := &atomic.Int32{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/conversations/c1/history"):
+			requests.Add(1)
+			if r.URL.Query().Get("before") != "61" || r.URL.Query().Get("limit") != "200" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Write([]byte(conversationMessagesJSON(1, 60)))
+		case r.URL.Path == "/api/conversations/c1":
+			w.Write([]byte(conversationMessagesJSON(61, 260)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, requests
+}
+
+func TestReachingTheTopFetchesOlderHistory(t *testing.T) {
+	server, requests := historyPagingServer(t)
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	if len(state.messages) != 200 || state.oldestSeq != 61 || state.noMoreHistory {
+		t.Fatalf("opened %d messages oldest %d noMore %v", len(state.messages), state.oldestSeq, state.noMoreHistory)
 	}
-	if start := windowStart(0, 0); start != 0 {
-		t.Fatalf("an empty transcript starts at 0, got %d", start)
+	state.ensureHistory()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-	if start := windowStart(5, 0); start != 0 {
-		t.Fatalf("an unset window falls back to the default, got %d", start)
+	if len(state.messages) != 260 || state.oldestSeq != 1 || !state.noMoreHistory {
+		t.Fatalf("paged %d messages oldest %d noMore %v", len(state.messages), state.oldestSeq, state.noMoreHistory)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("one page means one history request, got %d", requests.Load())
+	}
+	state.ensureHistory()
+	time.Sleep(20 * time.Millisecond)
+	if requests.Load() != 1 {
+		t.Fatalf("the last page must stop the fetching, got %d requests", requests.Load())
 	}
 }
 
-func TestLongTranscriptsOfferOlderRunsOnDemand(t *testing.T) {
-	state := newChatState("http://127.0.0.1:1", "tok")
-	state.status = ""
-	for index := 0; index < 45; index++ {
-		state.messages = append(state.messages, transcriptMessage{Role: "user", Text: "第" + strconv.Itoa(index) + "句"})
-	}
+func TestScrollingUpLoadsOlderHistory(t *testing.T) {
+	server, _ := historyPagingServer(t)
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
 	tester := ui.NewTester(state.view, 700, 500)
 	for frame := 0; frame < 3; frame++ {
 		tester.Frame()
 	}
-	joined := ""
-	for _, text := range tester.Texts() {
-		joined += text
+	if len(state.messages) != 200 {
+		t.Fatalf("opened %d messages", len(state.messages))
 	}
-	if !contains(joined, "加载更早的 5 段") {
-		t.Fatalf("the window must offer the older runs, texts %q", tester.Texts())
+	state.list.ScrollTo(0, ui.Start)
+	for frame := 0; frame < 4; frame++ {
+		tester.Frame()
 	}
-	if !tester.HasText("第44句") {
-		t.Fatalf("the newest message must show, texts %q", tester.Texts())
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-	if start := windowStart(45, 45+transcriptWindow); start != 0 {
-		t.Fatalf("loading more must reach the first run, got start %d", start)
+	if len(state.messages) != 260 {
+		t.Fatalf("reaching the top must load the older page, got %d messages", len(state.messages))
+	}
+}
+
+func TestRefreshingKeepsTheHistoryAlreadyLoaded(t *testing.T) {
+	server, _ := historyPagingServer(t)
+	state := newChatState(server.URL, "tok")
+	state.open("c1")
+	state.ensureHistory()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(state.messages) < 260 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	state.refresh()
+	if len(state.messages) != 260 {
+		t.Fatalf("a refresh must keep the pages read before it, got %d messages", len(state.messages))
+	}
+	if state.messages[0].Seq != 1 {
+		t.Fatalf("the oldest message stays first, seq %d", state.messages[0].Seq)
 	}
 }
 
@@ -472,60 +531,3 @@ func TestAssistantMessagesAreFlatMarkdownWithActions(t *testing.T) {
 	}
 }
 
-func TestScrollingToTheTopLoadsOlderRuns(t *testing.T) {
-	state := newChatState("http://127.0.0.1:1", "tok")
-	state.status = ""
-	for index := 0; index < 120; index++ {
-		state.messages = append(state.messages, transcriptMessage{Role: "user", Text: "第" + strconv.Itoa(index) + "句"})
-	}
-	tester := ui.NewTester(state.view, 700, 500)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if state.visible != transcriptWindow {
-		t.Fatalf("a fresh transcript keeps one window, visible %d", state.visible)
-	}
-	state.list.ScrollTo(0, ui.Start)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if state.visible != 2*transcriptWindow {
-		t.Fatalf("reaching the top must load one more window, visible %d", state.visible)
-	}
-	loaded := state.visible
-	for frame := 0; frame < 5; frame++ {
-		tester.Frame()
-	}
-	if state.visible != loaded {
-		t.Fatalf("a frame that stays at the top must not load again, visible %d after %d", state.visible, loaded)
-	}
-}
-
-func TestOneScrollLoadsOneWindowAndNoMore(t *testing.T) {
-	state := newChatState("http://127.0.0.1:1", "tok")
-	state.status = ""
-	state.visible = transcriptWindow
-	state.loadedOlderFor = transcriptWindow
-	if state.loadOlderAtTop() {
-		t.Fatal("a list that was never laid out must not load")
-	}
-	fresh := newChatState("http://127.0.0.1:1", "tok")
-	fresh.status = ""
-	for index := 0; index < 120; index++ {
-		fresh.messages = append(fresh.messages, transcriptMessage{Role: "user", Text: "x"})
-	}
-	tester := ui.NewTester(fresh.view, 700, 500)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	fresh.list.ScrollTo(0, ui.Start)
-	for frame := 0; frame < 3; frame++ {
-		tester.Frame()
-	}
-	if fresh.visible != 2*transcriptWindow || fresh.loadedOlderFor != transcriptWindow {
-		t.Fatalf("one reach of the top loads one window, visible %d mark %d", fresh.visible, fresh.loadedOlderFor)
-	}
-	if fresh.loadOlderAtTop() {
-		t.Fatal("the same window must not load a second time")
-	}
-}

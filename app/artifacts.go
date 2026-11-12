@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	transcriptWindow     = 40
 	artifactListLimit    = 8
 	artifactPreviewLimit = 4000
 )
