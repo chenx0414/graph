@@ -430,3 +430,12 @@ func TestTheMainAgentTitleAlignsWithTheChatAndIsLarger(t *testing.T) {
 		t.Fatalf("the title is not larger: %v against %v", title.H, body.H)
 	}
 }
+
+func TestTheChatTitleStaysEmptyWhileTheConversationLoads(t *testing.T) {
+	state := fourPaneShell(t)
+	state.chat.active = ""
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if title, ok := tester.Find("对话标题名"); ok {
+		t.Fatalf("the loading title still shows something at %v, texts %q", title, tester.Texts())
+	}
+}

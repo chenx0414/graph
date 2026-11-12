@@ -44,12 +44,14 @@ func (s *shellState) titleBand(ctx *ui.Context) {
 		chatTitle := ui.Row(ctx).Grow(1).FillHeight().Padding(0, th.Space(4), 0, th.Space(4)).
 			AlignItems(ui.Center).Label("对话标题").DragWindow()
 		chatTitle.Children(func() {
-			title := "Graph"
+			title := ""
 			if active := s.active(); active != nil && active.active != "" {
 				title = s.titleOf(active.active)
 			}
-			kit.Text(ctx, title, gwtheme.Of(ctx).Text.Lg).FontWeight(600).SingleLine().Ellipsis("…").Grow(1).
-				Label("对话标题名")
+			if title != "" {
+				kit.Text(ctx, title, gwtheme.Of(ctx).Text.Lg).FontWeight(600).SingleLine().Ellipsis("…").Grow(1).
+					Label("对话标题名")
+			}
 		})
 		ui.Box(ctx).Width(gwtheme.Stroke)
 		ui.Row(ctx).Grow(1.35).FillHeight().Children(func() {
