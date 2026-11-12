@@ -125,8 +125,10 @@ func (s *shellState) mainAgentCard(ctx *ui.Context) {
 		}
 	})
 	switch {
+	case selected && row.Hovered():
+		row.Background(t.HoverTint.Alpha(2.25))
 	case selected:
-		row.Background(t.SidebarSelected)
+		row.Background(t.HoverTint.Alpha(1.75))
 	case row.Hovered():
 		row.Background(t.Hover)
 	}

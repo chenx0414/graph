@@ -390,3 +390,24 @@ func TestTheRailTooltipSitsToTheRight(t *testing.T) {
 		t.Fatalf("no tip appears right of the icon: dark %d before, %d after", before, after)
 	}
 }
+
+func TestTheMainAgentCardLooksSelectedWhenItsConversationIsOpen(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	card, ok := tester.Find("main agent 会话")
+	if !ok {
+		t.Fatalf("the main agent card never rendered, texts %q", tester.Texts())
+	}
+	luminance := func() int {
+		img := tester.Image()
+		at := img.PixOffset(int(card.X+card.W-12), int(card.Y+card.H/2))
+		return (int(img.Pix[at]) + int(img.Pix[at+1]) + int(img.Pix[at+2])) / 3
+	}
+	selected := luminance()
+	state.selectConversation("p1")
+	frames(tester)
+	inactive := luminance()
+	if selected >= inactive-6 {
+		t.Fatalf("the open main agent card must darken: selected %d inactive %d", selected, inactive)
+	}
+}
