@@ -9,13 +9,9 @@ import (
 )
 
 type boardPanel struct {
-	ID       string  `json:"id"`
-	Kind     string  `json:"kind"`
-	X        float32 `json:"x"`
-	Y        float32 `json:"y"`
-	W        float32 `json:"w"`
-	H        float32 `json:"h"`
-	Expanded bool    `json:"expanded"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	Slot int    `json:"slot"`
 }
 
 type boardPage struct {
@@ -32,16 +28,18 @@ type boardFile struct {
 	Active  int          `json:"active"`
 }
 
-const boardLayoutVersion = 2
+const boardLayoutVersion = 3
+
+const boardColumns = 2
 
 const boardDefaultTitle = "白板"
 
 func defaultBoardPanels() []boardPanel {
 	return []boardPanel{
-		{ID: "overview", Kind: "overview", X: 16, Y: 56, W: 276, H: 260},
-		{ID: "tasks", Kind: "tasks", X: 16, Y: 328, W: 276, H: 260},
-		{ID: "history", Kind: "history", X: 16, Y: 600, W: 276, H: 220},
-		{ID: "artifacts", Kind: "artifacts", X: 304, Y: 56, W: 276, H: 300},
+		{ID: "overview", Kind: "overview", Slot: 0},
+		{ID: "tasks", Kind: "tasks", Slot: 1},
+		{ID: "history", Kind: "history", Slot: 2},
+		{ID: "artifacts", Kind: "artifacts", Slot: 3},
 	}
 }
 
@@ -93,6 +91,16 @@ func (s *shellState) loadBoard(stateDir string) {
 	case len(file.Panels) > 0:
 		s.board.pages = []boardPage{{ID: "board", Title: boardDefaultTitle, Panels: file.Panels}}
 	}
+	if file.Version < boardLayoutVersion {
+		for index := range s.board.pages {
+			for panel := range s.board.pages[index].Panels {
+				s.board.pages[index].Panels[panel].Slot = panel
+			}
+		}
+	}
+	for index := range s.board.pages {
+		normalizeBoardSlots(&s.board.pages[index])
+	}
 	s.board.active = clampIndex(file.Active, len(s.board.pages))
 }
 
@@ -111,6 +119,40 @@ func (s *shellState) saveBoard() {
 	if os.WriteFile(temp, append(payload, '\n'), 0o600) == nil {
 		_ = os.Rename(temp, s.board.path)
 	}
+}
+
+func normalizeBoardSlots(page *boardPage) {
+	used := map[int]bool{}
+	next := 0
+	for index := range page.Panels {
+		slot := page.Panels[index].Slot
+		if slot < 0 || slot >= len(page.Panels) || used[slot] {
+			for used[next] {
+				next++
+			}
+			slot = next
+		}
+		used[slot] = true
+		page.Panels[index].Slot = slot
+	}
+}
+
+func pagePanelAt(page *boardPage, slot int) *boardPanel {
+	for index := range page.Panels {
+		if page.Panels[index].Slot == slot {
+			return &page.Panels[index]
+		}
+	}
+	return nil
+}
+
+func pagePanelByID(page *boardPage, id string) *boardPanel {
+	for index := range page.Panels {
+		if page.Panels[index].ID == id {
+			return &page.Panels[index]
+		}
+	}
+	return nil
 }
 
 func clampIndex(index, length int) int {
@@ -156,7 +198,7 @@ func (s *shellState) openModule(kind string) {
 		Title: title,
 		Kind:  kind,
 		Panels: []boardPanel{
-			{ID: kind, Kind: kind, Expanded: true},
+			{ID: kind, Kind: kind, Slot: 0},
 		},
 	})
 	s.board.active = len(s.board.pages) - 1
@@ -216,6 +258,7 @@ func (s *shellState) closeModule(id string) {
 		}
 	}
 	page.Panels = kept
+	normalizeBoardSlots(page)
 	s.saveBoard()
 	s.frame()
 }
@@ -237,11 +280,54 @@ func (s *shellState) ensureBoardPageData() {
 	}
 }
 
-func (s *shellState) canvasSize() (float32, float32) {
-	width, height := float32(960), float32(900)
-	for _, panel := range s.boardPage().Panels {
-		width = max(width, panel.X+panel.W+48)
-		height = max(height, panel.Y+panel.H+48)
+func (s *shellState) dragBoardPanel(panel *boardPanel, dx, dy float32) {
+	if s.board.drag == nil || s.board.drag.panelID != panel.ID {
+		s.board.drag = &boardDrag{panelID: panel.ID, from: panel.Slot, target: panel.Slot}
 	}
-	return width, height
+	drag := s.board.drag
+	drag.dx += dx
+	drag.dy += dy
+	const thresholdX, thresholdY = float32(90), float32(70)
+	column := drag.from % boardColumns
+	target := drag.from
+	switch {
+	case drag.dx > thresholdX && column == 0:
+		target = drag.from + 1
+	case drag.dx < -thresholdX && column == 1:
+		target = drag.from - 1
+	case drag.dy > thresholdY:
+		target = drag.from + boardColumns
+	case drag.dy < -thresholdY:
+		target = drag.from - boardColumns
+	}
+	if target >= 0 && target < len(s.boardPage().Panels) {
+		drag.target = target
+	}
+}
+
+func (s *shellState) dropBoardPanel() {
+	drag := s.board.drag
+	s.board.drag = nil
+	if drag == nil {
+		return
+	}
+	page := s.boardPage()
+	dragged := pagePanelByID(page, drag.panelID)
+	if dragged == nil || drag.target == dragged.Slot {
+		return
+	}
+	if occupant := pagePanelAt(page, drag.target); occupant != nil && occupant != dragged {
+		occupant.Slot, dragged.Slot = dragged.Slot, drag.target
+	} else {
+		dragged.Slot = drag.target
+	}
+	s.saveBoard()
+	s.frame()
+}
+
+func absFloat(value float32) float32 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

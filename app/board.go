@@ -26,6 +26,15 @@ type boardState struct {
 	pages  []boardPage
 	active int
 	path   string
+	drag   *boardDrag
+}
+
+type boardDrag struct {
+	panelID string
+	from    int
+	target  int
+	dx      float32
+	dy      float32
 }
 
 func (s *shellState) whiteboard(ctx *ui.Context) {
@@ -65,7 +74,7 @@ func (s *shellState) boardTabBar(ctx *ui.Context) {
 }
 
 func (s *shellState) boardPageView(ctx *ui.Context) {
-	t := gwtheme.Of(ctx)
+	t, th := gwtheme.Of(ctx), ctx.Theme()
 	page := s.boardPage()
 	card := ui.Column(ctx).Grow(1).FillWidth().Background(t.Window).
 		Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Clip()
@@ -76,7 +85,7 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 	})
 	card.Children(func() {
 		if page.Kind != "" && len(page.Panels) > 0 {
-			s.boardPanelView(ctx, &page.Panels[0], true)
+			s.boardPanelView(ctx, &page.Panels[0], false)
 			return
 		}
 		if len(page.Panels) == 0 {
@@ -84,13 +93,29 @@ func (s *shellState) boardPageView(ctx *ui.Context) {
 				TextColor(t.Muted).Padding(24, 24, 24, 24)
 			return
 		}
-		width, height := s.canvasSize()
-		ui.ScrollBoth(ctx).Fill().Children(func() {
-			ui.Box(ctx).Width(width).Height(height).Children(func() {
-				for index := range page.Panels {
-					s.boardPanelView(ctx, &page.Panels[index], false)
-				}
-			})
+		rows := (len(page.Panels) + boardColumns - 1) / boardColumns
+		ui.Column(ctx).Fill().Padding(th.Space(2)).Gap(th.Space(2)).Children(func() {
+			for row := 0; row < rows; row++ {
+				rowIndex := row
+				ui.Row(ctx).Grow(1).Gap(th.Space(2)).Children(func() {
+					for column := 0; column < boardColumns; column++ {
+						slot := rowIndex*boardColumns + column
+						cell := ui.Column(ctx).Grow(1).FillHeight()
+						cell.Children(func() {
+							if panel := pagePanelAt(page, slot); panel != nil {
+								s.boardPanelView(ctx, panel, true)
+							} else {
+								ui.Box(ctx).Fill().Radius(t.Radius.Xl).Border(gwtheme.Hairline, t.Border).Center().Children(func() {
+									kit.Text(ctx, "空分区", t.Text.Sm).TextColor(t.Muted)
+								})
+							}
+							if s.board.drag != nil && s.board.drag.target == slot {
+								ui.Box(ctx).Fill().Radius(t.Radius.Xl).Border(2, t.Unread)
+							}
+						})
+					}
+				})
+			}
 		})
 	})
 }
@@ -126,16 +151,12 @@ func iconAction(ctx *ui.Context, icon *ui.SVG, label string, selected bool, size
 	return button
 }
 
-func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, expanded bool) {
+func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, freeform bool) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	card := kit.Panel(ctx, t.Radius.Xl)
-	if expanded {
-		card.Fill()
-	} else {
-		card.Absolute().Left(panel.X).Top(panel.Y).Width(panel.W).Height(panel.H)
-	}
+	card.Fill()
 	card.Children(func() {
-		s.boardPanelHeader(ctx, panel, expanded)
+		s.boardPanelHeader(ctx, panel, freeform)
 		ui.Scroll(ctx).Grow(1).Padding(th.Space(3)).Children(func() {
 			ui.Column(ctx).Gap(th.Space(2)).Children(func() {
 				s.boardPanelBody(ctx, panel)
@@ -144,26 +165,21 @@ func (s *shellState) boardPanelView(ctx *ui.Context, panel *boardPanel, expanded
 	})
 }
 
-func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, expanded bool) {
+func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, freeform bool) {
 	t, th := gwtheme.Of(ctx), ctx.Theme()
 	header := ui.Row(ctx).FillWidth().Height(th.Space(9)).Padding(th.Space(2), th.Space(1)).
 		Gap(th.Space(0.5)).AlignItems(ui.Center).Label(boardPanelTitle(panel.Kind) + "窗口").Focusable()
-	if expanded {
-		header.Padding(th.Space(2), th.Space(12), th.Space(1), th.Space(2))
-	}
-	if !expanded {
+	if freeform {
 		if dx, dy, ok := header.Dragged(); ok {
-			width, height := s.canvasSize()
-			panel.X = clampFloat(panel.X+dx, 0, width-panel.W)
-			panel.Y = clampFloat(panel.Y+dy, 0, height-panel.H)
+			s.dragBoardPanel(panel, dx, dy)
 		}
 		if _, _, ended := header.DragEnded(); ended {
-			s.saveBoard()
+			s.dropBoardPanel()
 		}
 	}
 	header.Children(func() {
 		kit.Text(ctx, boardPanelTitle(panel.Kind), t.Text.Sm).TextColor(t.Muted).Grow(1).SingleLine()
-		if expanded {
+		if !freeform {
 			return
 		}
 		iconAction(ctx, iconFit, "在新标签页打开", false, 6, func() {
@@ -175,9 +191,3 @@ func (s *shellState) boardPanelHeader(ctx *ui.Context, panel *boardPanel, expand
 	})
 }
 
-func clampFloat(value, low, high float32) float32 {
-	if high < low {
-		return low
-	}
-	return min(max(value, low), high)
-}

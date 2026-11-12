@@ -20,7 +20,7 @@ func (s *shellState) boardPanelBody(ctx *ui.Context, panel *boardPanel) {
 	case "tasks":
 		s.panelTasks(ctx)
 	case "graph":
-		s.panelGraph(ctx, panel.Expanded)
+		s.panelGraph(ctx, s.boardPage().Kind != "")
 	case "artifacts":
 		s.panelArtifacts(ctx)
 	case "models":

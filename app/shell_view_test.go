@@ -4,6 +4,8 @@ import (
 	"image"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -245,49 +247,102 @@ func TestTabsSwitchAndCloseWithoutLosingTheBoard(t *testing.T) {
 	}
 }
 
+func TestTheBoardKeepsFixedNonOverlappingPartitions(t *testing.T) {
+	state := fourPaneShell(t)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	rects := map[string]ui.Rect{}
+	for _, kind := range []string{"overview", "tasks", "history", "artifacts"} {
+		rect, ok := tester.Find(boardPanelTitle(kind) + "窗口")
+		if !ok {
+			t.Fatalf("%s never rendered, texts %q", kind, tester.Texts())
+		}
+		rects[kind] = rect
+	}
+	names := []string{"overview", "tasks", "history", "artifacts"}
+	for first := 0; first < len(names); first++ {
+		for second := first + 1; second < len(names); second++ {
+			a, b := rects[names[first]], rects[names[second]]
+			if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
+				t.Fatalf("panes must not overlap: %s %+v vs %s %+v", names[first], a, names[second], b)
+			}
+		}
+	}
+	if rects["overview"].X != rects["history"].X || rects["tasks"].X != rects["artifacts"].X {
+		t.Fatalf("the board keeps two fixed columns: %+v", rects)
+	}
+	if rects["overview"].Y != rects["tasks"].Y || rects["history"].Y != rects["artifacts"].Y {
+		t.Fatalf("the board keeps fixed rows: %+v", rects)
+	}
+}
+
+func TestAnEmptyPartitionWaitsForAModule(t *testing.T) {
+	state := fourPaneShell(t)
+	page := state.boardPage()
+	page.Panels = page.Panels[:3]
+	normalizeBoardSlots(page)
+	tester := frames(ui.NewTester(state.view, 1440, 900))
+	if !tester.HasText("空分区") {
+		t.Fatalf("a free partition shows its placeholder, texts %q", tester.Texts())
+	}
+}
+
+func TestAnOldFreeformBoardMigratesIntoPartitions(t *testing.T) {
+	directory := t.TempDir()
+	legacy := `{"version":2,"pages":[{"id":"board","title":"白板","panels":[
+		{"id":"overview","kind":"overview","x":20,"y":30},
+		{"id":"tasks","kind":"tasks","x":200,"y":30}
+	]}]}`
+	if err := os.WriteFile(filepath.Join(directory, "whiteboard.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := newShellState("http://127.0.0.1:1", "tok")
+	state.loadBoard(directory)
+	page := state.boardPage()
+	if len(page.Panels) != 2 || page.Panels[0].Slot != 0 || page.Panels[1].Slot != 1 {
+		t.Fatalf("a freeform board migrates into partitions, panels %+v", page.Panels)
+	}
+}
+
 func TestTheBoardRemembersItsLayout(t *testing.T) {
 	directory := t.TempDir()
 	first := newShellState("http://127.0.0.1:1", "tok")
 	first.loadBoard(directory)
-	page := first.boardPage()
-	for index := range page.Panels {
-		if page.Panels[index].Kind == "overview" {
-			page.Panels[index].X = 240
-			page.Panels[index].Y = 120
-		}
-	}
+	first.boardPage().Panels[0].Slot = 2
+	first.boardPage().Panels[2].Slot = 0
 	first.saveBoard()
 
 	second := newShellState("http://127.0.0.1:1", "tok")
 	second.loadBoard(directory)
 	panel := second.panelOf("overview")
-	if panel == nil || panel.X != 240 || panel.Y != 120 {
-		t.Fatalf("saved layout not restored: panel %+v", panel)
+	if panel == nil || panel.Slot != 2 {
+		t.Fatalf("saved partitions not restored: panel %+v", panel)
 	}
 }
 
-func TestAPanelCanBeDragged(t *testing.T) {
+func TestDraggingAPanelSwapsItsPartition(t *testing.T) {
 	state := fourPaneShell(t)
 	tester := frames(ui.NewTester(state.view, 1440, 900))
 	panel := state.panelOf("overview")
-	if panel == nil {
-		t.Fatalf("the default board must hold the overview module: %+v", state.boardPage().Panels)
+	if panel == nil || panel.Slot != 0 {
+		t.Fatalf("the default board must hold the overview module first: %+v", panel)
 	}
-	before := panel.X
 	header, ok := tester.Find(boardPanelTitle("overview") + "窗口")
 	if !ok {
-		t.Fatalf("the graph panel header never rendered, texts %q", tester.Texts())
+		t.Fatalf("the overview panel header never rendered, texts %q", tester.Texts())
 	}
 	x, y := header.X+30, header.Y+16
 	tester.Press(x, y)
-	for step := 1; step <= 8; step++ {
-		tester.Move(x+float32(step)*10, y+float32(step)*6)
+	for step := 1; step <= 12; step++ {
+		tester.Move(x+float32(step)*16, y)
 		tester.Frame()
 	}
-	tester.Release(x+80, y+48)
+	tester.Release(x+200, y)
 	frames(tester)
-	if panel.X <= before {
-		t.Fatalf("dragging the header must move the panel: before %.1f after %.1f", before, panel.X)
+	if panel.Slot != 1 {
+		t.Fatalf("dragging right must snap the panel to the next partition, slot %d", panel.Slot)
+	}
+	if tasks := state.panelOf("tasks"); tasks == nil || tasks.Slot != 0 {
+		t.Fatalf("the partition swaps with its occupant, tasks %+v", tasks)
 	}
 }
 
